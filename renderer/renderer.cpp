@@ -992,7 +992,7 @@ namespace jkgm {
             {
                 auto const &fog = get_fog_settings();
                 ogs->game_opaque_pass_program.set_fog(
-                    make_point(fog.enabled ? 1.0f : 0.0f, fog.start, fog.end, fog.max_opacity),
+                    make_point(fog.enabled ? 1.0f : 0.0f, fog.start, fog.end, fog.opacity),
                     color_rgb(fog.color_r, fog.color_g, fog.color_b));
             }
 
@@ -1089,7 +1089,7 @@ namespace jkgm {
             {
                 auto const &fog = get_fog_settings();
                 ogs->game_transparency_pass_program.set_fog(
-                    make_point(fog.enabled ? 1.0f : 0.0f, fog.start, fog.end, fog.max_opacity),
+                    make_point(fog.enabled ? 1.0f : 0.0f, fog.start, fog.end, fog.opacity),
                     color_rgb(fog.color_r, fog.color_g, fog.color_b));
             }
             gl::set_active_texture_unit(0);

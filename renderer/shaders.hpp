@@ -78,7 +78,7 @@ namespace jkgm {
             void set_displacement_map_sampler(int sampler);
             void set_displacement_factor(float factor);
 
-            // params = (enabled 0/1, start, end, max opacity)
+            // params = (enabled 0/1, start, end, opacity)
             void set_fog(point<4, float> params, color_rgb color);
         };
 

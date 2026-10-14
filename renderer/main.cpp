@@ -309,39 +309,24 @@ namespace {
         cog_push_vector(ctx, rgb);
     }
 
-    // SetFogRange(float start, float end)
-    void __cdecl cog_set_fog_range(void *ctx)
+    // SetFogInfo(vector info)		start distance, end distance, opacity
+    void __cdecl cog_set_fog_info(void *ctx)
     {
-        float const end = cog_pop_float(ctx); // last argument comes off first
-        float const start = cog_pop_float(ctx);
+        float info[3] = {0.0f, 0.0f, 0.0f};
+        cog_pop_vector(ctx, info);
 
         auto &fog = jkgm::get_fog_settings();
-        fog.start = start < 0.0f ? 0.0f : start;
-        fog.end = end < fog.start + 0.001f ? fog.start + 0.001f : end;
+        fog.start = info[0] < 0.0f ? 0.0f : info[0];
+        fog.end = info[1] < fog.start + 0.001f ? fog.start + 0.001f : info[1];
+        fog.opacity = clamp_float(info[2], 0.0f, 1.0f);
     }
 
-    // float GetFogStart()
-    void __cdecl cog_get_fog_start(void *ctx)
+    // vector GetFogInfo()
+    void __cdecl cog_get_fog_info(void *ctx)
     {
-        cog_push_float(ctx, jkgm::get_fog_settings().start);
-    }
-
-    // float GetFogEnd()
-    void __cdecl cog_get_fog_end(void *ctx)
-    {
-        cog_push_float(ctx, jkgm::get_fog_settings().end);
-    }
-
-    // SetFogMaxOpacity(float opacity)    0.0 - 1.0
-    void __cdecl cog_set_fog_max_opacity(void *ctx)
-    {
-        jkgm::get_fog_settings().max_opacity = clamp_float(cog_pop_float(ctx), 0.0f, 1.0f);
-    }
-
-    // float GetFogMaxOpacity()
-    void __cdecl cog_get_fog_max_opacity(void *ctx)
-    {
-        cog_push_float(ctx, jkgm::get_fog_settings().max_opacity);
+        auto const &fog = jkgm::get_fog_settings();
+        float const info[3] = {fog.start, fog.end, fog.opacity};
+        cog_push_vector(ctx, rgb);
     }
 
     // ResetFog()    back to the defaults in fog.hpp (fog disabled)
@@ -360,11 +345,8 @@ namespace {
         {"getfogenabled", cog_get_fog_enabled},
         {"setfogcolor", cog_set_fog_color},
         {"getfogcolor", cog_get_fog_color},
-        {"setfogrange", cog_set_fog_range},
-        {"getfogstart", cog_get_fog_start},
-        {"getfogend", cog_get_fog_end},
-        {"setfogmaxopacity", cog_set_fog_max_opacity},
-        {"getfogmaxopacity", cog_get_fog_max_opacity},
+        {"setfoginfo", cog_set_fog_info},
+        {"getfoginfo", cog_get_fog_info},
         {"resetfog", cog_reset_fog},
     }};
 

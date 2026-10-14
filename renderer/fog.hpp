@@ -16,7 +16,7 @@ namespace jkgm {
         float color_b = 0.1f;
         float start = 40.0f;   // distance where fog begins
         float end = 1000.0f;    // distance where fog reaches full strength
-        float max_opacity = 0.25f; // 0.0 - 1.0, ceiling for the fog amount
+        float opacity = 0.25f; // 0.0 - 1.0, ceiling for the fog amount
     };
 
     inline fog_settings &get_fog_settings()
