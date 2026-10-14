@@ -54,6 +54,9 @@ namespace jkgm {
             gl::uniform_location_id displacement_map;
             gl::uniform_location_id displacement_factor;
 
+            gl::uniform_location_id fog_params;
+            gl::uniform_location_id fog_color;
+
         protected:
             game_pass_shader(std::string const &name,
                              fs::path const &vertex_part,
@@ -74,6 +77,9 @@ namespace jkgm {
 
             void set_displacement_map_sampler(int sampler);
             void set_displacement_factor(float factor);
+
+            // params = (enabled 0/1, start, end, max opacity)
+            void set_fog(point<4, float> params, color_rgb color);
         };
 
         class game_opaque_pass_shader : public game_pass_shader {

@@ -109,6 +109,8 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , alpha_cutoff(gl::get_uniform_location(the_program, "alpha_cutoff"))
     , displacement_map(gl::get_uniform_location(the_program, "displacement_map"))
     , displacement_factor(gl::get_uniform_location(the_program, "displacement_factor"))
+    , fog_params(gl::get_uniform_location(the_program, "fog_params"))
+    , fog_color(gl::get_uniform_location(the_program, "fog_color"))
 {
 }
 
@@ -152,6 +154,14 @@ void jkgm::shaders::game_pass_shader::set_emissive_factor(color_rgb factor)
 void jkgm::shaders::game_pass_shader::set_alpha_cutoff(float cutoff)
 {
     gl::set_uniform_float(alpha_cutoff, cutoff);
+}
+
+void jkgm::shaders::game_pass_shader::set_fog(point<4, float> params, color_rgb color)
+{
+    // If a shader does not declare these uniforms, the locations are -1 and OpenGL
+    // silently ignores the calls, so stock shaders keep working.
+    gl::set_uniform_vector(fog_params, params);
+    gl::set_uniform_vector(fog_color, color);
 }
 
 void jkgm::shaders::game_pass_shader::set_displacement_map_sampler(int sampler)

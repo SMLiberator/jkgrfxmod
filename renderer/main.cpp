@@ -3,8 +3,12 @@
 #include "base/span.hpp"
 #include "common/config.hpp"
 #include "common/error_reporter.hpp"
+#include "fog.hpp"
 #include "renderer.hpp"
 #include <Windows.h>
+#include <array>
+#include <cstdint>
+#include <cstring>
 #include <detours/detours.h>
 
 static std::unique_ptr<jkgm::renderer> the_renderer;
@@ -181,6 +185,209 @@ LONG WINAPI HookedChangeDisplaySettingsW(DEVMODEW *lpDevMode, DWORD dwFlags)
     return TrueChangeDisplaySettingsW(lpDevMode, dwFlags);
 }
 
+// COG verbs (distance fog)
+//
+// The community patch's JK.dll exports InitNewCogVerbs, which jk.exe calls at startup
+// with a function for registering COG verbs. We wrap that export: run the original,
+// then register our own verbs through the same function.
+//
+// Verb handlers talk to jk.exe's COG interpreter through a few helper functions inside
+// jk.exe, exactly like the handlers in JK.dll do. Those addresses belong to one specific
+// build of jk.exe, so before registering anything we compare the first bytes of every
+// helper against what we expect. If anything differs we register nothing, and the game
+// runs normally without the fog verbs.
+//
+// COG pushes verb arguments left to right, so a handler pops them in reverse order.
+
+namespace {
+    using cog_handler_type = void(__cdecl *)(void *ctx);
+    using cog_register_verb_type = void(__cdecl *)(void *ctx,
+                                                   cog_handler_type handler,
+                                                   char const *name);
+    using JkInitNewCogVerbs_type = void(__cdecl *)(cog_register_verb_type register_verb,
+                                                   void *ctx);
+
+    using cog_pop_float_type = float(__cdecl *)(void *ctx);
+    using cog_pop_int_type = int(__cdecl *)(void *ctx);
+    using cog_pop_vector_type = void(__cdecl *)(void *ctx, float *out_xyz);
+    using cog_push_float_type = void(__cdecl *)(void *ctx, float value);
+    using cog_push_int_type = void(__cdecl *)(void *ctx, int value);
+    using cog_push_vector_type = void(__cdecl *)(void *ctx, float const *xyz);
+
+    constexpr uintptr_t pop_float_address = 0x4E2780;
+    constexpr uintptr_t pop_int_address = 0x4E2850;
+    constexpr uintptr_t pop_vector_address = 0x4E2970;
+    constexpr uintptr_t push_float_address = 0x4E3650;
+    constexpr uintptr_t push_int_address = 0x4E35D0;
+    constexpr uintptr_t push_vector_address = 0x4E36E0;
+
+    cog_pop_float_type const cog_pop_float = reinterpret_cast<cog_pop_float_type>(pop_float_address);
+    cog_pop_int_type const cog_pop_int = reinterpret_cast<cog_pop_int_type>(pop_int_address);
+    cog_pop_vector_type const cog_pop_vector =
+        reinterpret_cast<cog_pop_vector_type>(pop_vector_address);
+    cog_push_float_type const cog_push_float =
+        reinterpret_cast<cog_push_float_type>(push_float_address);
+    cog_push_int_type const cog_push_int = reinterpret_cast<cog_push_int_type>(push_int_address);
+    cog_push_vector_type const cog_push_vector =
+        reinterpret_cast<cog_push_vector_type>(push_vector_address);
+
+    struct cog_helper_signature {
+        uintptr_t address;
+        std::array<uint8_t, 8> prologue;
+    };
+
+    constexpr std::array<cog_helper_signature, 6> cog_helper_signatures = {{
+        {pop_float_address, {0x8b, 0x4c, 0x24, 0x04, 0x83, 0xec, 0x20, 0x8b}},
+        {pop_int_address, {0x55, 0x8b, 0xec, 0x83, 0xec, 0x10, 0x8b, 0x4d}},
+        {pop_vector_address, {0x8b, 0x4c, 0x24, 0x04, 0x83, 0xec, 0x10, 0x8b}},
+        {push_float_address, {0x83, 0xec, 0x10, 0x8b, 0x44, 0x24, 0x18, 0x56}},
+        {push_int_address, {0x83, 0xec, 0x10, 0x53, 0x8b, 0x5c, 0x24, 0x1c}},
+        {push_vector_address, {0x83, 0xec, 0x10, 0x8b, 0x44, 0x24, 0x18, 0x53}},
+    }};
+
+    bool cog_helpers_match()
+    {
+        for(auto const &sig : cog_helper_signatures) {
+            MEMORY_BASIC_INFORMATION mbi{};
+            if(VirtualQuery(reinterpret_cast<void const *>(sig.address), &mbi, sizeof(mbi)) == 0) {
+                return false;
+            }
+
+            if(mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0) {
+                return false;
+            }
+
+            auto const region_end = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+            if(sig.address + sig.prologue.size() > region_end) {
+                return false;
+            }
+
+            if(std::memcmp(reinterpret_cast<void const *>(sig.address),
+                           sig.prologue.data(),
+                           sig.prologue.size()) != 0) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    float clamp_float(float v, float lo, float hi)
+    {
+        return v < lo ? lo : (v > hi ? hi : v);
+    }
+
+    // SetFogEnabled(int enabled)
+    void __cdecl cog_set_fog_enabled(void *ctx)
+    {
+        jkgm::get_fog_settings().enabled = cog_pop_int(ctx) != 0;
+    }
+
+    // int GetFogEnabled()
+    void __cdecl cog_get_fog_enabled(void *ctx)
+    {
+        cog_push_int(ctx, jkgm::get_fog_settings().enabled ? 1 : 0);
+    }
+
+    // SetFogColor(vector rgb)    components 0.0 - 1.0, e.g. '0.45 0.50 0.58'
+    void __cdecl cog_set_fog_color(void *ctx)
+    {
+        float rgb[3] = {0.0f, 0.0f, 0.0f};
+        cog_pop_vector(ctx, rgb);
+
+        auto &fog = jkgm::get_fog_settings();
+        fog.color_r = clamp_float(rgb[0], 0.0f, 1.0f);
+        fog.color_g = clamp_float(rgb[1], 0.0f, 1.0f);
+        fog.color_b = clamp_float(rgb[2], 0.0f, 1.0f);
+    }
+
+    // vector GetFogColor()
+    void __cdecl cog_get_fog_color(void *ctx)
+    {
+        auto const &fog = jkgm::get_fog_settings();
+        float const rgb[3] = {fog.color_r, fog.color_g, fog.color_b};
+        cog_push_vector(ctx, rgb);
+    }
+
+    // SetFogRange(float start, float end)
+    void __cdecl cog_set_fog_range(void *ctx)
+    {
+        float const end = cog_pop_float(ctx); // last argument comes off first
+        float const start = cog_pop_float(ctx);
+
+        auto &fog = jkgm::get_fog_settings();
+        fog.start = start < 0.0f ? 0.0f : start;
+        fog.end = end < fog.start + 0.001f ? fog.start + 0.001f : end;
+    }
+
+    // float GetFogStart()
+    void __cdecl cog_get_fog_start(void *ctx)
+    {
+        cog_push_float(ctx, jkgm::get_fog_settings().start);
+    }
+
+    // float GetFogEnd()
+    void __cdecl cog_get_fog_end(void *ctx)
+    {
+        cog_push_float(ctx, jkgm::get_fog_settings().end);
+    }
+
+    // SetFogMaxOpacity(float opacity)    0.0 - 1.0
+    void __cdecl cog_set_fog_max_opacity(void *ctx)
+    {
+        jkgm::get_fog_settings().max_opacity = clamp_float(cog_pop_float(ctx), 0.0f, 1.0f);
+    }
+
+    // float GetFogMaxOpacity()
+    void __cdecl cog_get_fog_max_opacity(void *ctx)
+    {
+        cog_push_float(ctx, jkgm::get_fog_settings().max_opacity);
+    }
+
+    // ResetFog()    back to the defaults in fog.hpp (fog disabled)
+    void __cdecl cog_reset_fog(void * /*ctx*/)
+    {
+        jkgm::get_fog_settings() = jkgm::fog_settings();
+    }
+
+    struct cog_verb_entry {
+        char const *name;
+        cog_handler_type handler;
+    };
+
+    constexpr std::array<cog_verb_entry, 10> fog_verbs = {{
+        {"setfogenabled", cog_set_fog_enabled},
+        {"getfogenabled", cog_get_fog_enabled},
+        {"setfogcolor", cog_set_fog_color},
+        {"getfogcolor", cog_get_fog_color},
+        {"setfogrange", cog_set_fog_range},
+        {"getfogstart", cog_get_fog_start},
+        {"getfogend", cog_get_fog_end},
+        {"setfogmaxopacity", cog_set_fog_max_opacity},
+        {"getfogmaxopacity", cog_get_fog_max_opacity},
+        {"resetfog", cog_reset_fog},
+    }};
+
+    JkInitNewCogVerbs_type TrueJkInitNewCogVerbs = nullptr;
+
+    void __cdecl HookedJkInitNewCogVerbs(cog_register_verb_type register_verb, void *ctx)
+    {
+        TrueJkInitNewCogVerbs(register_verb, ctx);
+
+        if(!cog_helpers_match()) {
+            LOG_ERROR("jk.exe does not match the build the fog COG verbs were written for; "
+                      "fog COG verbs not registered");
+            return;
+        }
+
+        for(auto const &verb : fog_verbs) {
+            register_verb(ctx, verb.handler, verb.name);
+        }
+
+        LOG_DEBUG("Registered fog COG verbs");
+    }
+}
+
 bool attach_hooks()
 {
     DetourRestoreAfterWith();
@@ -188,6 +395,21 @@ bool attach_hooks()
     DetourUpdateThread(GetCurrentThread());
 
     // Injected functions
+
+    // COG verbs, if the community patch's JK.dll is loaded (its export #1 is InitNewCogVerbs)
+    if(HMODULE jk_dll = GetModuleHandleA("JK.dll")) {
+        TrueJkInitNewCogVerbs =
+            (JkInitNewCogVerbs_type)GetProcAddress(jk_dll, MAKEINTRESOURCEA(1));
+        if(TrueJkInitNewCogVerbs != nullptr) {
+            DetourAttach(&(PVOID &)TrueJkInitNewCogVerbs, HookedJkInitNewCogVerbs);
+        }
+        else {
+            LOG_DEBUG("JK.dll does not export InitNewCogVerbs; fog COG verbs unavailable");
+        }
+    }
+    else {
+        LOG_DEBUG("JK.dll is not loaded; fog COG verbs unavailable");
+    }
 
     // DirectX
     TrueDirectDrawCreate =
@@ -237,6 +459,9 @@ bool detach_hooks()
     DetourUpdateThread(GetCurrentThread());
 
     // Detach injected functions
+    if(TrueJkInitNewCogVerbs != nullptr) {
+        DetourDetach(&(PVOID &)TrueJkInitNewCogVerbs, HookedJkInitNewCogVerbs);
+    }
     DetourDetach(&(PVOID &)TrueDirectDrawCreate, HookedDirectDrawCreate);
     DetourDetach(&(PVOID &)TrueDirectDrawEnumerateA, HookedDirectDrawEnumerateA);
     DetourDetach(&(PVOID &)TrueCreateWindowExA, HookedCreateWindowExA);

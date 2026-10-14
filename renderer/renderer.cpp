@@ -15,6 +15,7 @@
 #include "ddraw_impl.hpp"
 #include "ddrawpalette_impl.hpp"
 #include "execute_buffer.hpp"
+#include "fog.hpp"
 #include "glad/glad.h"
 #include "glutil/buffer.hpp"
 #include "glutil/framebuffer.hpp"
@@ -988,6 +989,13 @@ namespace jkgm {
             ogs->game_opaque_pass_program.set_emissive_map_sampler(1);
             ogs->game_opaque_pass_program.set_displacement_map_sampler(2);
 
+            {
+                auto const &fog = get_fog_settings();
+                ogs->game_opaque_pass_program.set_fog(
+                    make_point(fog.enabled ? 1.0f : 0.0f, fog.start, fog.end, fog.max_opacity),
+                    color_rgb(fog.color_r, fog.color_g, fog.color_b));
+            }
+
             // Draw first pass (opaque world geometry)
             draw_batch(&ogs->game_opaque_pass_program,
                        world_batch,
@@ -1077,6 +1085,13 @@ namespace jkgm {
             ogs->game_transparency_pass_program.set_albedo_map_sampler(0);
             ogs->game_transparency_pass_program.set_emissive_map_sampler(1);
             ogs->game_transparency_pass_program.set_displacement_map_sampler(2);
+
+            {
+                auto const &fog = get_fog_settings();
+                ogs->game_transparency_pass_program.set_fog(
+                    make_point(fog.enabled ? 1.0f : 0.0f, fog.start, fog.end, fog.max_opacity),
+                    color_rgb(fog.color_r, fog.color_g, fog.color_b));
+            }
             gl::set_active_texture_unit(0);
 
             // Draw third pass (transparent world geometry with alpha blending)
