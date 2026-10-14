@@ -17,8 +17,25 @@ in vec3 vp_pos;
 in vec2 vp_texcoords;
 in vec4 vp_color;
 in vec3 vp_normal;
+in float vp_z;
 
 layout(location = 0) out vec4 out_color;
+
+// ---------------------------------------------------------------------------
+// Dynamic fog: replaces the fixed FOG_START / FOG_END / color / opacity
+// constants in BOTH game_opaque_pass.frag and game_trns_pass.frag.
+// The values come from the renderer, set by the SetFog* COG verbs.
+// ---------------------------------------------------------------------------
+uniform vec4 fog_params;  // x = enabled (0 or 1), y = start, z = end, w = opacity
+uniform vec3 fog_color;   // 0..1 as written in the COG script (do the same
+                          // sRGB->linear conversion here that you do today)
+
+float fog_factor(float dist)
+{
+    float span = max(fog_params.z - fog_params.y, 0.0001);
+    float f = clamp((dist - fog_params.y) / span, 0.0, 1);
+    return fog_params.x * fog_params.w * f;
+}
 
 mat3 construct_tbn()
 {
@@ -101,5 +118,8 @@ void main()
     emissive_map_sample = mix(vec3(1.0), emissive_map_sample, features.y);
     vec3 emissive = emissive_map_sample * emissive_factor;
 
-    out_color = vec4(emissive + albedo.rgb, albedo.a);
+    vec3 lit = albedo.rgb;
+    lit = mix(lit, fog_color, fog_factor(vp_z));
+
+    out_color = vec4(emissive + lit * albedo.a, albedo.a);
 }
