@@ -14,6 +14,25 @@ uniform float brightness = 0.02; // [-1.0 to 1.0]
 uniform float contrast = 1.04;   // [0.0 to 2.0]
 uniform float saturation = 1.1; // [0.0 to 2.0]
 
+// Film grain, set by the renderer from the SetFilmGrain COG verb.
+// x = amount (0 turns grain off), y = grain size in pixels, z = frame seed (new noise per value)
+uniform vec4 grain_params;
+
+// PCG integer hash (O'Neill; see Jarzynski & Olano, "Hash Functions for GPU Rendering")
+uint pcg_hash(uint v)
+{
+    uint state = v * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+// Uniform noise in [0, 1], one value per grain cell and seed
+float grain_noise(ivec2 cell, int seed)
+{
+    uint h = pcg_hash(uint(cell.x) + pcg_hash(uint(cell.y) + pcg_hash(uint(seed))));
+    return float(h) * (1.0 / 4294967295.0);
+}
+
 void main()
 {
     ivec2 sc = ivec2(gl_FragCoord.xy);
@@ -43,5 +62,22 @@ void main()
     vec2 uv = vp_texcoords -0.5;
     float vignette = smoothstep(0.8, 0.4, length(uv));
 
-    out_color = vec4(color*vignette, samp.a);
+    color *= vignette;
+
+    // Apply film grain
+    if(grain_params.x > 0.0) {
+        ivec2 cell = ivec2(floor(gl_FragCoord.xy / max(grain_params.y, 1.0)));
+        float n = grain_noise(cell, int(grain_params.z)) - 0.5;
+
+        // Work in gamma space so the grain looks equally strong in dark and bright areas, and
+        // ease it off towards pure black and white where it would just clip.
+        vec3 g = pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));
+        float g_luma = clamp(dot(g, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+        float response = mix(0.6, 1.0, 4.0 * g_luma * (1.0 - g_luma));
+
+        g += n * grain_params.x * 0.5 * response;
+        color = pow(max(g, vec3(0.0)), vec3(2.2));
+    }
+
+    out_color = vec4(color, samp.a);
 }
