@@ -326,7 +326,7 @@ namespace {
     {
         auto const &fog = jkgm::get_fog_settings();
         float const info[3] = {fog.start, fog.end, fog.opacity};
-        cog_push_vector(ctx, rgb);
+        cog_push_vector(ctx, info);
     }
 
     // ResetFog()    back to the defaults in fog.hpp (fog disabled)
