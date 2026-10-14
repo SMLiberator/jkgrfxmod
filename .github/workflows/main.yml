@@ -5,12 +5,12 @@ on: [push]
 jobs:
   build:
 
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v1
+      uses: actions/checkout@v4
     - name: Enable Developer Command Prompt
-      uses: ilammy/msvc-dev-cmd@v1.4.1
+      uses: ilammy/msvc-dev-cmd@v1
     - name: Build
-      run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 jkgfxmod.sln
+      run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
