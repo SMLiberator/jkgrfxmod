@@ -380,6 +380,7 @@ jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(fs::path const &data_roo
                     data_root / "shaders/postprocess.vert",
                     data_root / "shaders/post_to_srgb.frag")
     , fbuf_image(gl::get_uniform_location(the_program, "fbuf_image"))
+    , grain_params(gl::get_uniform_location(the_program, "grain_params"))
 {
     bloom_fbuf.reserve(num_bloom_layers);
     bloom_weight.reserve(num_bloom_layers);
@@ -413,4 +414,9 @@ void jkgm::shaders::post_to_srgb_shader::set_bloom_weights(span<float const> wei
     for(auto const &em : weights) {
         gl::set_uniform_float(bloom_weight.at(i++), em);
     }
+}
+
+void jkgm::shaders::post_to_srgb_shader::set_film_grain(point<4, float> params)
+{
+    gl::set_uniform_vector(grain_params, params);
 }

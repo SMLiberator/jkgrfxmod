@@ -223,6 +223,7 @@ namespace jkgm {
 
         private:
             gl::uniform_location_id fbuf_image;
+            gl::uniform_location_id grain_params;
             std::vector<gl::uniform_location_id> bloom_fbuf;
             std::vector<gl::uniform_location_id> bloom_weight;
 
@@ -232,6 +233,9 @@ namespace jkgm {
             void set_fbuf_sampler(int sampler);
             void set_bloom_samplers(span<int const> samplers);
             void set_bloom_weights(span<float const> weights);
+
+            // params = (amount, size in pixels, frame seed, unused)
+            void set_film_grain(point<4, float> params);
         };
     }
 }

@@ -991,9 +991,14 @@ namespace jkgm {
 
             {
                 auto const &fog = get_fog_settings();
+                auto const current_color = fog.color.value();
+                auto const current_info = fog.info.value();
                 ogs->game_opaque_pass_program.set_fog(
-                    make_point(fog.enabled ? 1.0f : 0.0f, fog.start, fog.end, fog.opacity),
-                    color_rgb(fog.color_r, fog.color_g, fog.color_b));
+                    make_point(fog.enabled ? 1.0f : 0.0f,
+                               current_info[0],
+                               current_info[1],
+                               current_info[2]),
+                    color_rgb(current_color[0], current_color[1], current_color[2]));
             }
 
             // Draw first pass (opaque world geometry)
@@ -1088,9 +1093,14 @@ namespace jkgm {
 
             {
                 auto const &fog = get_fog_settings();
+                auto const current_color = fog.color.value();
+                auto const current_info = fog.info.value();
                 ogs->game_transparency_pass_program.set_fog(
-                    make_point(fog.enabled ? 1.0f : 0.0f, fog.start, fog.end, fog.opacity),
-                    color_rgb(fog.color_r, fog.color_g, fog.color_b));
+                    make_point(fog.enabled ? 1.0f : 0.0f,
+                               current_info[0],
+                               current_info[1],
+                               current_info[2]),
+                    color_rgb(current_color[0], current_color[1], current_color[2]));
             }
             gl::set_active_texture_unit(0);
 

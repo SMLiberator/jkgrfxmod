@@ -1,5 +1,8 @@
 #pragma once
 
+#include "animated.hpp"
+#include <array>
+
 namespace jkgm {
     // Distance fog state.
     //
@@ -9,14 +12,16 @@ namespace jkgm {
     //
     // The defaults below are what a level gets if its COG scripts never touch fog.
     // Fog starts disabled so that levels without fog scripts are unaffected.
+    //
+    // Color and info can be faded; call .value() to read what should be showing right now.
     struct fog_settings {
         bool enabled = false;
-        float color_r = 0.1f; // 0.0 - 1.0, handed to the shader unchanged
-        float color_g = 0.1f;
-        float color_b = 0.1f;
-        float start = 40.0f;   // distance where fog begins
-        float end = 1000.0f;    // distance where fog reaches full strength
-        float opacity = 0.25f; // 0.0 - 1.0, ceiling for the fog amount
+
+        // r, g, b: 0.0 - 1.0, handed to the shader unchanged
+        animated_floats<3> color{std::array<float, 3>{0.1f, 0.1f, 0.1f}};
+
+        // start distance, end distance (full strength), opacity (0.0 - 1.0 ceiling for the fog amount)
+        animated_floats<3> info{std::array<float, 3>{40.0f, 1000.0f, 0.25f}};
     };
 
     inline fog_settings &get_fog_settings()

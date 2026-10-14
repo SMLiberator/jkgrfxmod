@@ -4,6 +4,7 @@
 #include "common/config.hpp"
 #include "common/error_reporter.hpp"
 #include "fog.hpp"
+#include "postfx.hpp"
 #include "renderer.hpp"
 #include <Windows.h>
 #include <array>
@@ -289,50 +290,87 @@ namespace {
         cog_push_int(ctx, jkgm::get_fog_settings().enabled ? 1 : 0);
     }
 
-    // SetFogColor(vector rgb)    components 0.0 - 1.0, e.g. '0.45 0.50 0.58'
+    // SetFogColor(vector rgb, float fadeTime)
+    //   rgb components 0.0 - 1.0, e.g. '0.45 0.50 0.58'
+    //   fadeTime in seconds; 0.0 changes the color immediately
     void __cdecl cog_set_fog_color(void *ctx)
     {
+        float const fade_time = cog_pop_float(ctx); // last argument comes off first
         float rgb[3] = {0.0f, 0.0f, 0.0f};
         cog_pop_vector(ctx, rgb);
 
-        auto &fog = jkgm::get_fog_settings();
-        fog.color_r = clamp_float(rgb[0], 0.0f, 1.0f);
-        fog.color_g = clamp_float(rgb[1], 0.0f, 1.0f);
-        fog.color_b = clamp_float(rgb[2], 0.0f, 1.0f);
+        jkgm::get_fog_settings().color.fade_to({clamp_float(rgb[0], 0.0f, 1.0f),
+                                                clamp_float(rgb[1], 0.0f, 1.0f),
+                                                clamp_float(rgb[2], 0.0f, 1.0f)},
+                                               fade_time);
     }
 
-    // vector GetFogColor()
+    // vector GetFogColor()    the color showing right now (partway through a fade, if fading)
     void __cdecl cog_get_fog_color(void *ctx)
     {
-        auto const &fog = jkgm::get_fog_settings();
-        float const rgb[3] = {fog.color_r, fog.color_g, fog.color_b};
-        cog_push_vector(ctx, rgb);
+        auto const rgb = jkgm::get_fog_settings().color.value();
+        cog_push_vector(ctx, rgb.data());
     }
 
-    // SetFogInfo(vector info)		start distance, end distance, opacity
+    // SetFogInfo(vector info, float fadeTime)
+    //   info = 'start end opacity': start distance, end distance, opacity 0.0 - 1.0
+    //   fadeTime in seconds; 0.0 changes the values immediately
     void __cdecl cog_set_fog_info(void *ctx)
     {
+        float const fade_time = cog_pop_float(ctx);
         float info[3] = {0.0f, 0.0f, 0.0f};
         cog_pop_vector(ctx, info);
 
-        auto &fog = jkgm::get_fog_settings();
-        fog.start = info[0] < 0.0f ? 0.0f : info[0];
-        fog.end = info[1] < fog.start + 0.001f ? fog.start + 0.001f : info[1];
-        fog.opacity = clamp_float(info[2], 0.0f, 1.0f);
+        float const start = info[0] < 0.0f ? 0.0f : info[0];
+        float const end = info[1] < start + 0.001f ? start + 0.001f : info[1];
+        float const opacity = clamp_float(info[2], 0.0f, 1.0f);
+
+        jkgm::get_fog_settings().info.fade_to({start, end, opacity}, fade_time);
     }
 
-    // vector GetFogInfo()
+    // vector GetFogInfo()    'start end opacity' showing right now
     void __cdecl cog_get_fog_info(void *ctx)
     {
-        auto const &fog = jkgm::get_fog_settings();
-        float const info[3] = {fog.start, fog.end, fog.opacity};
-        cog_push_vector(ctx, info);
+        auto const info = jkgm::get_fog_settings().info.value();
+        cog_push_vector(ctx, info.data());
     }
 
-    // ResetFog()    back to the defaults in fog.hpp (fog disabled)
+    // ResetFog()    back to the defaults in fog.hpp (fog disabled), immediately
     void __cdecl cog_reset_fog(void * /*ctx*/)
     {
         jkgm::get_fog_settings() = jkgm::fog_settings();
+    }
+
+    // SetFilmGrain(vector params, float fadeTime)
+    //   params = 'amount size rate'
+    //     amount: 0.0 - 1.0, 0 turns grain off (0.05 - 0.15 is a typical range)
+    //     size:   grain size in screen pixels, 1.0 or more
+    //     rate:   grain pattern changes per second, 0 freezes it (24 looks filmic)
+    //   fadeTime in seconds; 0.0 changes the values immediately
+    void __cdecl cog_set_film_grain(void *ctx)
+    {
+        float const fade_time = cog_pop_float(ctx);
+        float params[3] = {0.0f, 1.0f, 24.0f};
+        cog_pop_vector(ctx, params);
+
+        jkgm::get_film_grain_settings().params.fade_to(
+            {clamp_float(params[0], 0.0f, 1.0f),
+             params[1] < 1.0f ? 1.0f : params[1],
+             params[2] < 0.0f ? 0.0f : params[2]},
+            fade_time);
+    }
+
+    // vector GetFilmGrain()    'amount size rate' showing right now
+    void __cdecl cog_get_film_grain(void *ctx)
+    {
+        auto const params = jkgm::get_film_grain_settings().params.value();
+        cog_push_vector(ctx, params.data());
+    }
+
+    // ResetFilmGrain()    grain off, immediately
+    void __cdecl cog_reset_film_grain(void * /*ctx*/)
+    {
+        jkgm::get_film_grain_settings() = jkgm::film_grain_settings();
     }
 
     struct cog_verb_entry {
@@ -340,15 +378,20 @@ namespace {
         cog_handler_type handler;
     };
 
-    constexpr std::array<cog_verb_entry, 10> fog_verbs = {{
-        {"setfogenabled", cog_set_fog_enabled},
-        {"getfogenabled", cog_get_fog_enabled},
-        {"setfogcolor", cog_set_fog_color},
-        {"getfogcolor", cog_get_fog_color},
-        {"setfoginfo", cog_set_fog_info},
-        {"getfoginfo", cog_get_fog_info},
-        {"resetfog", cog_reset_fog},
-    }};
+    // The array size is deduced from the list, so adding or removing a verb can never leave
+    // empty entries behind (those would be registered with a null name and handler).
+    constexpr std::array fx_verbs = {
+        cog_verb_entry{"setfogenabled", cog_set_fog_enabled},
+        cog_verb_entry{"getfogenabled", cog_get_fog_enabled},
+        cog_verb_entry{"setfogcolor", cog_set_fog_color},
+        cog_verb_entry{"getfogcolor", cog_get_fog_color},
+        cog_verb_entry{"setfoginfo", cog_set_fog_info},
+        cog_verb_entry{"getfoginfo", cog_get_fog_info},
+        cog_verb_entry{"resetfog", cog_reset_fog},
+        cog_verb_entry{"setfilmgrain", cog_set_film_grain},
+        cog_verb_entry{"getfilmgrain", cog_get_film_grain},
+        cog_verb_entry{"resetfilmgrain", cog_reset_film_grain},
+    };
 
     JkInitNewCogVerbs_type TrueJkInitNewCogVerbs = nullptr;
 
@@ -362,11 +405,11 @@ namespace {
             return;
         }
 
-        for(auto const &verb : fog_verbs) {
+        for(auto const &verb : fx_verbs) {
             register_verb(ctx, verb.handler, verb.name);
         }
 
-        LOG_DEBUG("Registered fog COG verbs");
+        LOG_DEBUG("Registered fog and post-processing COG verbs");
     }
 }
 
