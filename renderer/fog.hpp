@@ -11,12 +11,12 @@ namespace jkgm {
     // Fog starts disabled so that levels without fog scripts are unaffected.
     struct fog_settings {
         bool enabled = false;
-        float color_r = 0.45f; // 0.0 - 1.0, handed to the shader unchanged
-        float color_g = 0.50f;
-        float color_b = 0.58f;
-        float start = 32.0f;   // distance where fog begins
-        float end = 512.0f;    // distance where fog reaches full strength
-        float max_opacity = 1.0f; // 0.0 - 1.0, ceiling for the fog amount
+        float color_r = 0.1f; // 0.0 - 1.0, handed to the shader unchanged
+        float color_g = 0.1f;
+        float color_b = 0.1f;
+        float start = 40.0f;   // distance where fog begins
+        float end = 1000.0f;    // distance where fog reaches full strength
+        float max_opacity = 0.25f; // 0.0 - 1.0, ceiling for the fog amount
     };
 
     inline fog_settings &get_fog_settings()
