@@ -224,6 +224,10 @@ namespace jkgm {
         private:
             gl::uniform_location_id fbuf_image;
             gl::uniform_location_id grain_params;
+            gl::uniform_location_id vignette_params;
+            gl::uniform_location_id brightness;
+            gl::uniform_location_id contrast;
+            gl::uniform_location_id saturation;
             std::vector<gl::uniform_location_id> bloom_fbuf;
             std::vector<gl::uniform_location_id> bloom_weight;
 
@@ -236,6 +240,11 @@ namespace jkgm {
 
             // params = (amount, size in pixels, frame seed, unused)
             void set_film_grain(point<4, float> params);
+
+            // params = (red, green, blue, strength)
+            void set_vignette(point<4, float> params);
+
+            void set_color_filter(float brightness_value, float contrast_value, float saturation_value);
         };
     }
 }

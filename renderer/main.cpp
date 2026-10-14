@@ -373,6 +373,90 @@ namespace {
         jkgm::get_film_grain_settings() = jkgm::film_grain_settings();
     }
 
+    // SetVignette(vector rgb, float strength, float fadeTime)
+    //   rgb:      color the screen edges are pulled towards, 0.0 - 1.0 each
+    //             ('0 0 0' is the classic dark vignette, '1 0 0' a red damage flash)
+    //   strength: 0.0 - 1.0, 0 turns the vignette off
+    //   fadeTime: seconds; 0.0 changes the values immediately
+    void __cdecl cog_set_vignette(void *ctx)
+    {
+        // Arguments come off in reverse order: fadeTime, strength, then rgb.
+        float const fade_time = cog_pop_float(ctx);
+        float const strength = clamp_float(cog_pop_float(ctx), 0.0f, 1.0f);
+        float rgb[3] = {0.0f, 0.0f, 0.0f};
+        cog_pop_vector(ctx, rgb);
+
+        std::array<float, 4> const target = {clamp_float(rgb[0], 0.0f, 1.0f),
+                                             clamp_float(rgb[1], 0.0f, 1.0f),
+                                             clamp_float(rgb[2], 0.0f, 1.0f),
+                                             strength};
+
+        auto &params = jkgm::get_vignette_settings().params;
+
+        // If the vignette is invisible right now, take on the new color straight away and fade
+        // only the strength. Otherwise fading in from black to red would pass through dark red.
+        auto start = params.value();
+        if(start[3] <= 0.001f) {
+            start[0] = target[0];
+            start[1] = target[1];
+            start[2] = target[2];
+            params.set(start);
+        }
+
+        params.fade_to(target, fade_time);
+    }
+
+    // vector GetVignetteRGB()    the edge color right now
+    void __cdecl cog_get_vignette_rgb(void *ctx)
+    {
+        auto const params = jkgm::get_vignette_settings().params.value();
+        float const rgb[3] = {params[0], params[1], params[2]};
+        cog_push_vector(ctx, rgb);
+    }
+
+    // float GetVignetteStrength()    the strength right now
+    void __cdecl cog_get_vignette_strength(void *ctx)
+    {
+        cog_push_float(ctx, jkgm::get_vignette_settings().params.value()[3]);
+    }
+
+    // ResetVignette()    black edges at full strength (the original look), immediately
+    void __cdecl cog_reset_vignette(void * /*ctx*/)
+    {
+        jkgm::get_vignette_settings() = jkgm::vignette_settings();
+    }
+
+    // SetColorFilter(vector params, float fadeTime)
+    //   params = 'brightness contrast saturation'
+    //     brightness: -1.0 - 1.0 (0 = unchanged)
+    //     contrast:   0.0 - 4.0 (1 = unchanged)
+    //     saturation: 0.0 - 4.0 (1 = unchanged, 0 = black and white)
+    //   fadeTime in seconds; 0.0 changes the values immediately
+    void __cdecl cog_set_color_filter(void *ctx)
+    {
+        float const fade_time = cog_pop_float(ctx);
+        float params[3] = {0.0f, 1.0f, 1.0f};
+        cog_pop_vector(ctx, params);
+
+        jkgm::get_color_filter_settings().params.fade_to({clamp_float(params[0], -1.0f, 1.0f),
+                                                          clamp_float(params[1], 0.0f, 4.0f),
+                                                          clamp_float(params[2], 0.0f, 4.0f)},
+                                                         fade_time);
+    }
+
+    // vector GetColorFilter()    'brightness contrast saturation' right now
+    void __cdecl cog_get_color_filter(void *ctx)
+    {
+        auto const params = jkgm::get_color_filter_settings().params.value();
+        cog_push_vector(ctx, params.data());
+    }
+
+    // ResetColorFilter()    back to the defaults in postfx.hpp, immediately
+    void __cdecl cog_reset_color_filter(void * /*ctx*/)
+    {
+        jkgm::get_color_filter_settings() = jkgm::color_filter_settings();
+    }
+
     struct cog_verb_entry {
         char const *name;
         cog_handler_type handler;
@@ -391,6 +475,13 @@ namespace {
         cog_verb_entry{"setfilmgrain", cog_set_film_grain},
         cog_verb_entry{"getfilmgrain", cog_get_film_grain},
         cog_verb_entry{"resetfilmgrain", cog_reset_film_grain},
+        cog_verb_entry{"setvignette", cog_set_vignette},
+        cog_verb_entry{"getvignettergb", cog_get_vignette_rgb},
+        cog_verb_entry{"getvignettestrength", cog_get_vignette_strength},
+        cog_verb_entry{"resetvignette", cog_reset_vignette},
+        cog_verb_entry{"setcolorfilter", cog_set_color_filter},
+        cog_verb_entry{"getcolorfilter", cog_get_color_filter},
+        cog_verb_entry{"resetcolorfilter", cog_reset_color_filter},
     };
 
     JkInitNewCogVerbs_type TrueJkInitNewCogVerbs = nullptr;

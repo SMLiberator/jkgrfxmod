@@ -381,6 +381,10 @@ jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(fs::path const &data_roo
                     data_root / "shaders/post_to_srgb.frag")
     , fbuf_image(gl::get_uniform_location(the_program, "fbuf_image"))
     , grain_params(gl::get_uniform_location(the_program, "grain_params"))
+    , vignette_params(gl::get_uniform_location(the_program, "vignette_params"))
+    , brightness(gl::get_uniform_location(the_program, "brightness"))
+    , contrast(gl::get_uniform_location(the_program, "contrast"))
+    , saturation(gl::get_uniform_location(the_program, "saturation"))
 {
     bloom_fbuf.reserve(num_bloom_layers);
     bloom_weight.reserve(num_bloom_layers);
@@ -419,4 +423,18 @@ void jkgm::shaders::post_to_srgb_shader::set_bloom_weights(span<float const> wei
 void jkgm::shaders::post_to_srgb_shader::set_film_grain(point<4, float> params)
 {
     gl::set_uniform_vector(grain_params, params);
+}
+
+void jkgm::shaders::post_to_srgb_shader::set_vignette(point<4, float> params)
+{
+    gl::set_uniform_vector(vignette_params, params);
+}
+
+void jkgm::shaders::post_to_srgb_shader::set_color_filter(float brightness_value,
+                                                          float contrast_value,
+                                                          float saturation_value)
+{
+    gl::set_uniform_float(brightness, brightness_value);
+    gl::set_uniform_float(contrast, contrast_value);
+    gl::set_uniform_float(saturation, saturation_value);
 }

@@ -10,9 +10,16 @@ in vec2 vp_texcoords;
 
 layout(location = 0) out vec4 out_color;
 
+// Color filter, set by the renderer from the SetColorFilter COG verb (the values below are only
+// used if the renderer does not set them; the real defaults live in postfx.hpp).
 uniform float brightness = 0.02; // [-1.0 to 1.0]
-uniform float contrast = 1.04;   // [0.0 to 2.0]
-uniform float saturation = 1.1; // [0.0 to 2.0]
+uniform float contrast = 1.04;   // [0.0 to 4.0]
+uniform float saturation = 1.1;  // [0.0 to 4.0]
+
+// Vignette, set by the renderer from the SetVignette COG verb.
+// rgb = color the edges are pulled towards, w = strength (0 turns the vignette off).
+// Black at full strength is the classic darkening vignette.
+uniform vec4 vignette_params = vec4(0.0, 0.0, 0.0, 1.0);
 
 // Film grain, set by the renderer from the SetFilmGrain COG verb.
 // x = amount (0 turns grain off), y = grain size in pixels, z = frame seed (new noise per value)
@@ -60,9 +67,15 @@ void main()
     
     // Calculate distance from center (0.5, 0.5)
     vec2 uv = vp_texcoords -0.5;
-    float vignette = smoothstep(0.8, 0.4, length(uv));
+    // 0 in the centre, rising towards the edges
+    float edge = 1.0 - smoothstep(0.8, 0.4, length(uv));
 
-    color *= vignette;
+    // Pull the edges towards the vignette color. The color is given as the value you would see
+    // on screen, so convert it to linear like the rest of the pipeline.
+    if(vignette_params.w > 0.0) {
+        vec3 vignette_color = pow(clamp(vignette_params.rgb, 0.0, 1.0), vec3(2.2));
+        color = mix(color, vignette_color, clamp(edge * vignette_params.w, 0.0, 1.0));
+    }
 
     // Apply film grain
     if(grain_params.x > 0.0) {
