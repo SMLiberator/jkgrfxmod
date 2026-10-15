@@ -376,13 +376,14 @@ namespace {
     // SetVignette(vector rgb, float strength, float fadeTime)
     //   rgb:      color the screen edges are pulled towards, 0.0 - 1.0 each
     //             ('0 0 0' is the classic dark vignette, '1 0 0' a red damage flash)
-    //   strength: 0.0 - 1.0, 0 turns the vignette off
+    //   strength: 0.0 - 2.0; 0 = off, 1 = classic vignette, between 1 and 2 it closes in like an
+    //             iris until the whole screen is the vignette color at 2
     //   fadeTime: seconds; 0.0 changes the values immediately
     void __cdecl cog_set_vignette(void *ctx)
     {
         // Arguments come off in reverse order: fadeTime, strength, then rgb.
         float const fade_time = cog_pop_float(ctx);
-        float const strength = clamp_float(cog_pop_float(ctx), 0.0f, 1.0f);
+        float const strength = clamp_float(cog_pop_float(ctx), 0.0f, 2.0f);
         float rgb[3] = {0.0f, 0.0f, 0.0f};
         cog_pop_vector(ctx, rgb);
 

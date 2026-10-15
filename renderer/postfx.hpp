@@ -22,7 +22,10 @@ namespace jkgm {
 
     struct vignette_settings {
         // r, g, b: 0.0 - 1.0, the color the screen edges are pulled towards
-        // strength: 0.0 - 1.0 (0 = off)
+        // strength: 0.0 - 2.0
+        //   0 = off, 1 = the classic vignette
+        //   1 - 2 closes the vignette in like an iris, reaching a solid screen of the vignette
+        //   color at 2 (a fade to black, or to red, etc.)
         //
         // The defaults reproduce the original fixed vignette: black edges at full strength.
         animated_floats<4> params{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
@@ -77,7 +80,7 @@ namespace jkgm {
         shader.set_vignette(make_point(std::clamp(vig[0], 0.0f, 1.0f),
                                        std::clamp(vig[1], 0.0f, 1.0f),
                                        std::clamp(vig[2], 0.0f, 1.0f),
-                                       std::clamp(vig[3], 0.0f, 1.0f)));
+                                       std::clamp(vig[3], 0.0f, 2.0f)));
 
         // Brightness / contrast / saturation
         auto const cf = get_color_filter_settings().params.value(now);

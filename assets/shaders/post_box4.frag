@@ -8,8 +8,26 @@ in vec2 vp_texcoords;
 
 layout(location = 0) out vec4 out_color;
 
+// ---------------------------------------------------------------------------------------
+// SSAO blur tuning
+//
+// A neighbouring pixel is averaged in only if it looks like part of the same surface.
+// edge_depth_threshold:  neighbours whose depth differs by less than this count as the same surface
+// edge_normal_threshold: neighbours whose normal points the same way (dot product above this,
+//                        1.0 = identical) count as the same surface
+// edge_require_both:     0 = a neighbour passes if EITHER test passes (softer, keeps the blur on
+//                        sloped floors and walls), 1 = it must pass BOTH (sharper edges, but the
+//                        4x4 noise pattern can show on sloped surfaces)
+// ---------------------------------------------------------------------------------------
 const float edge_depth_threshold = 0.1;
 const float edge_normal_threshold = 0.9;
+const int edge_require_both = 0;
+
+vec3 safe_normal(vec3 v)
+{
+    float len = length(v);
+    return len > 0.0001 ? v / len : vec3(0.0);
+}
 
 void main()
 {
@@ -51,22 +69,22 @@ void main()
     dsamps[14] = textureOffset(depth_image, vp_texcoords, ivec2( 0,  1)).r;
     dsamps[15] = textureOffset(depth_image, vp_texcoords, ivec2( 1,  1)).r;
 
-    nsamps[0]  = normalize(textureOffset(depth_image, vp_texcoords, ivec2(-2, -2)).rgb);
-    nsamps[1]  = normalize(textureOffset(depth_image, vp_texcoords, ivec2(-1, -2)).rgb);
-    nsamps[2]  = normalize(textureOffset(depth_image, vp_texcoords, ivec2( 0, -2)).rgb);
-    nsamps[3]  = normalize(textureOffset(depth_image, vp_texcoords, ivec2( 1, -2)).rgb);
-    nsamps[4]  = normalize(textureOffset(depth_image, vp_texcoords, ivec2(-2, -1)).rgb);
-    nsamps[5]  = normalize(textureOffset(depth_image, vp_texcoords, ivec2(-1, -1)).rgb);
-    nsamps[6]  = normalize(textureOffset(depth_image, vp_texcoords, ivec2( 0, -1)).rgb);
-    nsamps[7]  = normalize(textureOffset(depth_image, vp_texcoords, ivec2( 1, -1)).rgb);
-    nsamps[8]  = normalize(textureOffset(depth_image, vp_texcoords, ivec2(-2,  0)).rgb);
-    nsamps[9]  = normalize(textureOffset(depth_image, vp_texcoords, ivec2(-1,  0)).rgb);
-    nsamps[10] = normalize(textureOffset(depth_image, vp_texcoords, ivec2( 0,  0)).rgb);
-    nsamps[11] = normalize(textureOffset(depth_image, vp_texcoords, ivec2( 1,  0)).rgb);
-    nsamps[12] = normalize(textureOffset(depth_image, vp_texcoords, ivec2(-2,  1)).rgb);
-    nsamps[13] = normalize(textureOffset(depth_image, vp_texcoords, ivec2(-1,  1)).rgb);
-    nsamps[14] = normalize(textureOffset(depth_image, vp_texcoords, ivec2( 0,  1)).rgb);
-    nsamps[15] = normalize(textureOffset(depth_image, vp_texcoords, ivec2( 1,  1)).rgb);
+    nsamps[0]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-2, -2)).rgb);
+    nsamps[1]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-1, -2)).rgb);
+    nsamps[2]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 0, -2)).rgb);
+    nsamps[3]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 1, -2)).rgb);
+    nsamps[4]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-2, -1)).rgb);
+    nsamps[5]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-1, -1)).rgb);
+    nsamps[6]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 0, -1)).rgb);
+    nsamps[7]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 1, -1)).rgb);
+    nsamps[8]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-2,  0)).rgb);
+    nsamps[9]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-1,  0)).rgb);
+    nsamps[10] = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 0,  0)).rgb);
+    nsamps[11] = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 1,  0)).rgb);
+    nsamps[12] = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-2,  1)).rgb);
+    nsamps[13] = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-1,  1)).rgb);
+    nsamps[14] = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 0,  1)).rgb);
+    nsamps[15] = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 1,  1)).rgb);
 
     float base_samp = samps[10];
     float base_dsamp = dsamps[10];
@@ -75,8 +93,10 @@ void main()
     float occlusion = 0.0;
     float occ_weights = 0.0;
     for(int i = 0; i < 16; ++i) {
-        float weight = float(abs(dsamps[i] - base_dsamp) < edge_depth_threshold ||
-                             dot(nsamps[i], base_nsamp) > edge_normal_threshold);
+        bool depth_ok = abs(dsamps[i] - base_dsamp) < edge_depth_threshold;
+        bool normal_ok = dot(nsamps[i], base_nsamp) > edge_normal_threshold;
+        float weight = float(edge_require_both != 0 ? (depth_ok && normal_ok)
+                                                    : (depth_ok || normal_ok));
         occlusion += weight * samps[i];
         occ_weights += weight;
     }
