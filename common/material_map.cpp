@@ -23,6 +23,10 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
               metadata_file.generic_string(),
               ")");
 
+    if(doc.contains("environment_map")) {
+        default_env_map = data_dir / std::string(doc["environment_map"]);
+    }
+
     for(auto const &em : doc["materials"]) {
         auto mat = std::make_unique<material>();
 
@@ -54,6 +58,25 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
 
         if(em.contains("displacement_factor")) {
             mat->displacement_factor = em["displacement_factor"];
+        }
+
+        // Reflections. With a surface map the factors default to 1 (so the map alone decides);
+        // without one, reflections are off unless a strength is given.
+        bool const has_surface_map = em.contains("surface_map");
+        if(has_surface_map) {
+            mat->surface_map = data_dir / std::string(em["surface_map"]);
+        }
+
+        mat->reflection_strength =
+            em.contains("reflection_strength") ? static_cast<float>(em["reflection_strength"])
+                                                : (has_surface_map ? 1.0f : 0.0f);
+        mat->roughness = em.contains("roughness") ? static_cast<float>(em["roughness"])
+                                                   : (has_surface_map ? 1.0f : 0.5f);
+        mat->metalness = em.contains("metalness") ? static_cast<float>(em["metalness"])
+                                                   : (has_surface_map ? 1.0f : 0.0f);
+
+        if(em.contains("env_map")) {
+            mat->env_map = data_dir / std::string(em["env_map"]);
         }
 
         if(em.contains("alpha_mode")) {
@@ -114,6 +137,11 @@ std::optional<jkgm::material const *> jkgm::material_map::get_material(md5 const
     }
 
     return std::nullopt;
+}
+
+std::optional<fs::path> jkgm::material_map::get_default_env_map() const
+{
+    return default_env_map;
 }
 
 std::vector<std::unique_ptr<jkgm::material>> const &jkgm::material_map::get_materials() const

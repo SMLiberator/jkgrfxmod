@@ -10,6 +10,7 @@ namespace jkgm {
     private:
         std::vector<std::unique_ptr<material>> materials;
         std::unordered_map<md5, size_t> signature_map;
+        std::optional<fs::path> default_env_map;
 
         void add_metadata(fs::path const &metadata_file);
 
@@ -17,6 +18,7 @@ namespace jkgm {
         void create_map(fs::path const &materials_dir);
 
         std::optional<material const *> get_material(md5 const &sig) const;
+        std::optional<fs::path> get_default_env_map() const;
         std::vector<std::unique_ptr<material>> const &get_materials() const;
     };
 }

@@ -88,6 +88,14 @@ namespace jkgm {
                     if(mat->displacement_map.has_value()) {
                         get_linear_texture_from_filename(*mat->displacement_map);
                     }
+
+                    if(mat->surface_map.has_value()) {
+                        get_linear_texture_from_filename(*mat->surface_map);
+                    }
+
+                    if(mat->env_map.has_value()) {
+                        get_srgb_texture_from_filename(*mat->env_map);
+                    }
                 }
 
                 // Reset reference counts from preloaded textures
@@ -103,6 +111,11 @@ namespace jkgm {
             std::optional<material const *> get_replacement_material(md5 const &sig) override
             {
                 return materials.get_material(sig);
+            }
+
+            std::optional<fs::path> get_default_env_map() override
+            {
+                return materials.get_default_env_map();
             }
 
             std::optional<srgb_texture_id> get_existing_free_srgb_texture(size<2, int> const &dims)

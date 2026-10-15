@@ -48,6 +48,12 @@ namespace jkgm {
         std::optional<std::string> displacement_map;
         std::optional<float> displacement_factor;
 
+        std::optional<std::string> surface_map;
+        std::optional<float> reflection_strength;
+        std::optional<float> roughness;
+        std::optional<float> metalness;
+        std::optional<std::string> env_map;
+
         std::optional<out_material_alpha_mode> alpha_mode;
         std::optional<float> alpha_cutoff;
     };
@@ -57,6 +63,7 @@ namespace jkgm {
         std::string name;
         std::string description;
         std::optional<std::string> comment;
+        std::optional<std::string> environment_map;
 
         std::vector<std::unique_ptr<out_material>> materials;
     };
@@ -342,6 +349,58 @@ namespace jkgm {
             rv->displacement_factor = static_cast<float>(ef);
         }
 
+        if(doc.contains("surface_map")) {
+            auto map_filename = str(fmt(rv->name, ".surface.png"));
+            auto real_map_filename =
+                get_convert_linear_image(img_map,
+                                         /*input path*/ script_path.parent_path() /
+                                             static_cast<std::string>(doc["surface_map"]),
+                                         /*desired name*/ map_filename,
+                                         /*desired out path*/ output_path / map_filename);
+            rv->surface_map = real_map_filename;
+        }
+
+        if(doc.contains("reflection_strength")) {
+            auto const &v = doc["reflection_strength"];
+            if(!v.is_number() || static_cast<float>(v) < 0.0f) {
+                LOG_ERROR("Material '", rv->name, "' reflection strength must be a number >= 0");
+                throw std::runtime_error("Invalid script");
+            }
+
+            rv->reflection_strength = static_cast<float>(v);
+        }
+
+        if(doc.contains("roughness")) {
+            auto const &v = doc["roughness"];
+            if(!v.is_number() || static_cast<float>(v) < 0.0f || static_cast<float>(v) > 1.0f) {
+                LOG_ERROR("Material '", rv->name, "' roughness must be a number from 0 to 1");
+                throw std::runtime_error("Invalid script");
+            }
+
+            rv->roughness = static_cast<float>(v);
+        }
+
+        if(doc.contains("metalness")) {
+            auto const &v = doc["metalness"];
+            if(!v.is_number() || static_cast<float>(v) < 0.0f || static_cast<float>(v) > 1.0f) {
+                LOG_ERROR("Material '", rv->name, "' metalness must be a number from 0 to 1");
+                throw std::runtime_error("Invalid script");
+            }
+
+            rv->metalness = static_cast<float>(v);
+        }
+
+        if(doc.contains("env_map")) {
+            auto map_filename = str(fmt(rv->name, ".env.png"));
+            auto real_map_filename =
+                get_convert_image(img_map,
+                                  /*input path*/ script_path.parent_path() /
+                                      static_cast<std::string>(doc["env_map"]),
+                                  /*desired name*/ map_filename,
+                                  /*desired out path*/ output_path / map_filename);
+            rv->env_map = real_map_filename;
+        }
+
         if(doc.contains("alpha_mode")) {
             auto const &am = doc["alpha_mode"];
             if(am == "mask") {
@@ -458,6 +517,26 @@ namespace jkgm {
             rv["displacement_factor"] = *mat.displacement_factor;
         }
 
+        if(mat.surface_map.has_value()) {
+            rv["surface_map"] = *mat.surface_map;
+        }
+
+        if(mat.reflection_strength.has_value()) {
+            rv["reflection_strength"] = *mat.reflection_strength;
+        }
+
+        if(mat.roughness.has_value()) {
+            rv["roughness"] = *mat.roughness;
+        }
+
+        if(mat.metalness.has_value()) {
+            rv["metalness"] = *mat.metalness;
+        }
+
+        if(mat.env_map.has_value()) {
+            rv["env_map"] = *mat.env_map;
+        }
+
         if(mat.alpha_mode.has_value()) {
             switch(*mat.alpha_mode) {
             default:
@@ -488,6 +567,10 @@ namespace jkgm {
 
         if(pack.comment.has_value()) {
             doc["comment"] = *pack.comment;
+        }
+
+        if(pack.environment_map.has_value()) {
+            doc["environment_map"] = *pack.environment_map;
         }
 
         // Add material mappings
@@ -605,8 +688,25 @@ namespace jkgm {
                 return EXIT_FAILURE;
             }
 
-            LOG_INFO("Compiling materials...");
             processed_names_map img_map;
+
+            if(script_doc.contains("environment_map")) {
+                LOG_INFO("Processing default environment map...");
+                try {
+                    pack.environment_map = get_convert_image(
+                        &img_map,
+                        /*input path*/ script_path.parent_path() /
+                            static_cast<std::string>(script_doc["environment_map"]),
+                        /*desired name*/ "environment.png",
+                        /*desired out path*/ output_path / "environment.png");
+                }
+                catch(std::exception const &e) {
+                    LOG_ERROR("Failed to process the environment map: ", e.what());
+                    return EXIT_FAILURE;
+                }
+            }
+
+            LOG_INFO("Compiling materials...");
             for(auto const &em : script_doc["materials"]) {
                 try {
                     pack.materials.push_back(process_material(

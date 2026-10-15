@@ -47,6 +47,12 @@ namespace jkgm {
         std::optional<linear_texture_id> displacement_map;
         float displacement_factor = 0.0f;
 
+        std::optional<linear_texture_id> surface_map;
+        float reflection_strength = 0.0f;
+        float roughness = 0.5f;
+        float metalness = 0.0f;
+        std::optional<srgb_texture_id> env_map;
+
         material_alpha_mode alpha_mode = material_alpha_mode::blend;
         float alpha_cutoff = 0.5f;
 

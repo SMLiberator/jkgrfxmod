@@ -109,6 +109,12 @@ The `comment` field is optional. This field is intended for arbitrary long-form 
 
 This field is not currently displayed to the user. Future material pack management software could make use if this field to display detailed information about installed material packs to the user, if such software becomes necessary.
 
+### Environment map
+
+The `environment_map` field is optional.
+
+The `environment_map` field references an image used as the default environment for reflective materials. It must be an equirectangular (latitude/longitude) panorama: a 2:1 image where the top row is straight up, the bottom row is straight down, and the left and right edges meet behind the viewer. Image dimensions must be powers of two (for example 2048x1024). Materials that do not specify their own `env_map` reflect this image. If no environment image is available, materials do not reflect anything.
+
 ### Materials
 
 The `materials` field lists the materials that will be included in this material pack.
@@ -219,6 +225,36 @@ The `displacement_factor` field contains a single floating point value. If a dis
 If `displacement_factor` is unspecified or is set to `0`, parallax mapping is disabled.
 
 Note that parallax mapping is a user-configurable option. Since users may choose to disable parallax mapping, either for performance or aesthetic reasons, your materials should be designed to look acceptable without parallax mapping.
+
+##### surface_map
+
+The `surface_map` field is optional.
+
+The `surface_map` field references a texture that controls reflections across the surface of the material, in a linear colorspace. The R channel is reflectivity, the G channel is roughness, and the B channel is metalness. Image dimensions must be powers of two.
+
+##### reflection_strength
+
+The `reflection_strength` field is optional.
+
+The `reflection_strength` field contains a single floating point value of 0 or more that scales how strongly the material reflects its environment. If a surface map has been specified it is multiplied with the reflectivity channel, and defaults to 1. If there is no surface map it defaults to 0, so materials only reflect when a strength is given.
+
+##### roughness
+
+The `roughness` field is optional.
+
+The `roughness` field contains a single floating point value from 0 (mirror-like) to 1 (very blurry). If a surface map has been specified it is multiplied with the roughness channel, and defaults to 1. If there is no surface map it defaults to 0.5.
+
+##### metalness
+
+The `metalness` field is optional.
+
+The `metalness` field contains a single floating point value from 0 to 1. Metallic materials tint their reflections with their albedo color and lose their diffuse color. If a surface map has been specified it is multiplied with the metalness channel, and defaults to 1. If there is no surface map it defaults to 0.
+
+##### env_map
+
+The `env_map` field is optional.
+
+The `env_map` field references an equirectangular environment image (see Environment map above) that this material reflects instead of the default environment.
 
 ##### alpha_mode
 

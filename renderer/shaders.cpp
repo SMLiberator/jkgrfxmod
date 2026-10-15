@@ -111,6 +111,10 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , displacement_factor(gl::get_uniform_location(the_program, "displacement_factor"))
     , fog_params(gl::get_uniform_location(the_program, "fog_params"))
     , fog_color(gl::get_uniform_location(the_program, "fog_color"))
+    , surface_map(gl::get_uniform_location(the_program, "surface_map"))
+    , env_map(gl::get_uniform_location(the_program, "env_map"))
+    , reflection_params(gl::get_uniform_location(the_program, "reflection_params"))
+    , env_params(gl::get_uniform_location(the_program, "env_params"))
 {
 }
 
@@ -167,6 +171,24 @@ void jkgm::shaders::game_pass_shader::set_fog(point<4, float> params, color_rgb 
 void jkgm::shaders::game_pass_shader::set_displacement_map_sampler(int sampler)
 {
     gl::set_uniform_integer(displacement_map, sampler);
+}
+
+void jkgm::shaders::game_pass_shader::set_surface_map_sampler(int sampler)
+{
+    gl::set_uniform_integer(surface_map, sampler);
+}
+
+void jkgm::shaders::game_pass_shader::set_env_map_sampler(int sampler)
+{
+    gl::set_uniform_integer(env_map, sampler);
+}
+
+void jkgm::shaders::game_pass_shader::set_reflection(point<4, float> reflection,
+                                                      point<4, float> env)
+{
+    // Shaders that do not declare these uniforms get location -1, which OpenGL ignores.
+    gl::set_uniform_vector(reflection_params, reflection);
+    gl::set_uniform_vector(env_params, env);
 }
 
 void jkgm::shaders::game_pass_shader::set_displacement_factor(float factor)

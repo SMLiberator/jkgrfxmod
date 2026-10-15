@@ -75,6 +75,20 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
                 *(*repl_map)->displacement_map);
         }
 
+        if((*repl_map)->surface_map.has_value()) {
+            surf->surface_map = surf->r->texture_cache->get_linear_texture_from_filename(
+                *(*repl_map)->surface_map);
+        }
+
+        if((*repl_map)->env_map.has_value()) {
+            surf->env_map =
+                surf->r->texture_cache->get_srgb_texture_from_filename(*(*repl_map)->env_map);
+        }
+
+        surf->reflection_strength = (*repl_map)->reflection_strength;
+        surf->roughness = (*repl_map)->roughness;
+        surf->metalness = (*repl_map)->metalness;
+
         surf->albedo_factor = (*repl_map)->albedo_factor;
         surf->emissive_factor = (*repl_map)->emissive_factor;
 
@@ -139,6 +153,20 @@ void jkgm::vidmem_texture_surface::clear()
         r->texture_cache->release_linear_texture(*displacement_map);
         displacement_map.reset();
     }
+
+    if(surface_map.has_value()) {
+        r->texture_cache->release_linear_texture(*surface_map);
+        surface_map.reset();
+    }
+
+    if(env_map.has_value()) {
+        r->texture_cache->release_srgb_texture(*env_map);
+        env_map.reset();
+    }
+
+    reflection_strength = 0.0f;
+    roughness = 0.5f;
+    metalness = 0.0f;
 
     albedo_factor = color::fill(1.0f);
     emissive_factor = color_rgb::fill(0.0f);

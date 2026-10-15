@@ -40,6 +40,110 @@ float fog_factor(float dist)
     return fog_params.x * fog_params.w * f;
 }
 
+// ---------------------------------------------------------------------------
+// Reflections (environment mapping). Keep this block identical in BOTH
+// game_opaque_pass.frag and game_trns_pass.frag.
+//
+// Materials from a material pack can reflect an equirectangular environment image. How strongly
+// is set per material (reflection_strength, plus the optional surface map: R = reflectivity,
+// G = roughness, B = metalness). The result is added like emissive light, so SSAO does not
+// darken it and it fades into fog.
+//
+// Stage 1 limitations: the environment is attached to the camera (it turns with you), and the
+// field of view is assumed to be REFLECTION_HFOV_DEGREES.
+// ---------------------------------------------------------------------------
+uniform sampler2D surface_map;   // R = reflectivity, G = roughness, B = metalness (linear)
+uniform sampler2D env_map;       // equirectangular environment image
+uniform vec4 reflection_params;  // x = strength, y = roughness, z = metalness, w = has surface map
+uniform vec4 env_params;         // x = has an environment image
+uniform vec2 screen_resolution;
+
+// Horizontal field of view the game is rendering with (the game's default is 90). Used to turn
+// the renderer's screen-space positions and normals back into true view space.
+const float REFLECTION_HFOV_DEGREES = 90.0;
+
+// Brightness of the environment image as seen in reflections
+const float ENV_INTENSITY = 1.0;
+
+// Fresnel look: how much of the reflection is visible looking straight at a surface (0.25 = a
+// quarter), rising to full strength at glancing angles. FRESNEL_POWER = how fast it ramps up.
+const float FRESNEL_BIAS = 0.25;
+const float FRESNEL_POWER = 4.0;
+
+// Tuning aid for reflective materials (those with a strength above 0):
+//   0  off
+//   1  show the reflection direction as a color
+//   2  show the surface normal as a color
+//   3  show the environment at full strength, ignoring strength, fresnel and tint
+const int REFLECTION_DEBUG = 0;
+
+const float REFLECTION_PI = 3.14159265359;
+
+// Returns the reflection to add, and the material's metalness (used to remove diffuse color)
+vec3 compute_reflection(vec3 albedo_rgb, vec2 texcoords, out float metalness)
+{
+    // Sampled before any early-out so the texture lookup stays in uniform control flow
+    vec3 surface = texture(surface_map, texcoords).rgb;
+
+    metalness = 0.0;
+
+    float strength = reflection_params.x;
+    if(env_params.x < 0.5 || strength <= 0.0) {
+        return vec3(0.0);
+    }
+
+    float roughness = reflection_params.y;
+    metalness = reflection_params.z;
+    if(reflection_params.w > 0.5) {
+        strength *= surface.r;
+        roughness *= surface.g;
+        metalness *= surface.b;
+    }
+
+    metalness = clamp(metalness, 0.0, 1.0);
+
+    // Undo the projection scale: positions and normals arrive as (clip x, clip y, depth)
+    float h_scale = tan(radians(REFLECTION_HFOV_DEGREES) * 0.5);
+    float aspect = screen_resolution.x / max(screen_resolution.y, 1.0);
+    vec2 view_scale = vec2(h_scale, h_scale / aspect);
+
+    vec3 v = normalize(vec3(vp_pos.xy * view_scale, vp_pos.z));      // eye -> surface
+    vec3 n = normalize(vec3(vp_normal.xy / view_scale, vp_normal.z));
+    if(dot(n, v) > 0.0) {
+        n = -n; // face the viewer
+    }
+
+    vec3 r = reflect(v, n);
+
+    if(REFLECTION_DEBUG == 1) {
+        return r * 0.5 + 0.5;
+    }
+    else if(REFLECTION_DEBUG == 2) {
+        return n * 0.5 + 0.5;
+    }
+
+    // Direction -> equirectangular image coordinates (top row of the image = straight up)
+    vec2 uv = vec2(atan(r.x, r.z) / (2.0 * REFLECTION_PI) + 0.5,
+                   0.5 - asin(clamp(r.y, -1.0, 1.0)) / REFLECTION_PI);
+
+    // Rough surfaces look at blurrier (smaller) versions of the image
+    vec2 env_size = vec2(textureSize(env_map, 0));
+    float lod = clamp(roughness, 0.0, 1.0) * log2(max(env_size.x, env_size.y));
+    vec3 env = textureLod(env_map, uv, lod).rgb * ENV_INTENSITY;
+
+    if(REFLECTION_DEBUG == 3) {
+        return env;
+    }
+
+    float cos_theta = clamp(dot(n, -v), 0.0, 1.0);
+    float fresnel = mix(FRESNEL_BIAS, 1.0, pow(1.0 - cos_theta, FRESNEL_POWER));
+
+    // Metals tint their reflections with their own color
+    vec3 tint = mix(vec3(1.0), albedo_rgb, metalness);
+
+    return env * tint * (strength * fresnel);
+}
+
 mat3 construct_tbn()
 {
     vec3 n = normalize(vp_normal);
@@ -132,12 +236,24 @@ void main()
     emissive_map_sample = mix(vec3(1.0), emissive_map_sample, features.y);
     vec3 emissive = emissive_map_sample * emissive_factor;
 
-    vec3 fogged_albedo = mix(albedo.rgb, fog_color, fog_factor(vp_z));
-    //vec3 fogged_emissive = emissive * (1.0 - fog_factor(vp_z));
+    float fog_amount = fog_factor(vp_z);
+
+    float metalness;
+    vec3 reflection = compute_reflection(albedo.rgb, adj_texcoords, metalness);
+
+    // Metals have no diffuse color of their own; it all comes from the reflection
+    albedo.rgb *= (1.0 - metalness);
+
+    if(REFLECTION_DEBUG != 0 && reflection_params.x > 0.0) {
+        albedo.rgb = vec3(0.0);
+    }
+
+    vec3 fogged_albedo = mix(albedo.rgb, fog_color, fog_amount);
+    //vec3 fogged_emissive = emissive * (1.0 - fog_amount);
 
     out_color = vec4(fogged_albedo, albedo.a);
     //out_emissive = vec4(fogged_emissive, albedo.a);
-    out_emissive = vec4(emissive, albedo.a);
+    out_emissive = vec4(emissive + reflection * (1.0 - fog_amount), albedo.a);
     out_normal = vec4(normalize(vp_normal), 1.0);
     out_depth = vec4(adj_vp_z, 0.0, 0.0, 1.0);
 }

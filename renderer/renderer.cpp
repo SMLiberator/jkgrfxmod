@@ -327,6 +327,9 @@ namespace jkgm {
     private:
         config const *the_config;
 
+        // The material pack's default environment image, kept loaded for the whole session
+        std::optional<srgb_texture_id> global_env_map;
+
         renderer_mode mode = renderer_mode::menu;
         size<2, int> conf_scr_res;
 
@@ -572,6 +575,16 @@ namespace jkgm {
             ogs = std::make_unique<opengl_state>(
                 conf_scr_res, internal_scr_res, actual_display_area, actual_menu_area, the_config);
             texture_cache = create_texture_cache(the_config);
+
+            if(auto env_path = texture_cache->get_default_env_map(); env_path.has_value()) {
+                try {
+                    global_env_map = texture_cache->get_srgb_texture_from_filename(*env_path);
+                }
+                catch(std::exception const &e) {
+                    LOG_WARNING("Failed to load the default environment map: ", e.what());
+                }
+            }
+
             frame_compositor = create_renderer_compositor(the_config);
             frame_ao = create_renderer_ao(the_config, conf_scr_res);
             frame_screen = create_renderer_screen(the_config, conf_scr_res);
@@ -834,6 +847,10 @@ namespace jkgm {
         {
             if(id.get() == 0U) {
                 // This is the default (untextured) material
+                gl::set_active_texture_unit(4);
+                gl::bind_texture(gl::texture_bind_target::texture_2d, gl::default_texture);
+                gl::set_active_texture_unit(3);
+                gl::bind_texture(gl::texture_bind_target::texture_2d, gl::default_texture);
                 gl::set_active_texture_unit(2);
                 gl::bind_texture(gl::texture_bind_target::texture_2d, gl::default_texture);
                 gl::set_active_texture_unit(1);
@@ -858,6 +875,10 @@ namespace jkgm {
 
                 // Alpha cutoff
                 prog->set_alpha_cutoff(0.0f);
+
+                // No reflections
+                prog->set_reflection(make_point(0.0f, 0.5f, 0.0f, 0.0f),
+                                     make_point(0.0f, 0.0f, 0.0f, 0.0f));
             }
             else {
                 auto const &mat = vidmem_texture_surfaces.at(id.get() - 1);
@@ -877,6 +898,27 @@ namespace jkgm {
                     displacement_map = texture_cache->get_texture_handle(*mat->displacement_map);
                 }
 
+                gl::texture_view surface_map = gl::default_texture;
+                if(mat->surface_map.has_value()) {
+                    surface_map = texture_cache->get_texture_handle(*mat->surface_map);
+                }
+
+                // The material's own environment image wins over the pack's default
+                gl::texture_view env_map = gl::default_texture;
+                bool has_env_map = false;
+                if(mat->env_map.has_value()) {
+                    env_map = texture_cache->get_texture_handle(*mat->env_map);
+                    has_env_map = true;
+                }
+                else if(global_env_map.has_value()) {
+                    env_map = texture_cache->get_texture_handle(*global_env_map);
+                    has_env_map = true;
+                }
+
+                gl::set_active_texture_unit(4);
+                gl::bind_texture(gl::texture_bind_target::texture_2d, env_map);
+                gl::set_active_texture_unit(3);
+                gl::bind_texture(gl::texture_bind_target::texture_2d, surface_map);
                 gl::set_active_texture_unit(2);
                 gl::bind_texture(gl::texture_bind_target::texture_2d, displacement_map);
                 gl::set_active_texture_unit(1);
@@ -896,6 +938,12 @@ namespace jkgm {
                 prog->set_emissive_factor(mat->emissive_factor);
                 prog->set_displacement_factor(mat->displacement_factor);
                 prog->set_alpha_cutoff(mat->alpha_cutoff);
+
+                prog->set_reflection(make_point(mat->reflection_strength,
+                                                mat->roughness,
+                                                mat->metalness,
+                                                mat->surface_map.has_value() ? 1.0f : 0.0f),
+                                     make_point(has_env_map ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f));
             }
 
             current_material = id;
@@ -988,6 +1036,8 @@ namespace jkgm {
             ogs->game_opaque_pass_program.set_albedo_map_sampler(0);
             ogs->game_opaque_pass_program.set_emissive_map_sampler(1);
             ogs->game_opaque_pass_program.set_displacement_map_sampler(2);
+            ogs->game_opaque_pass_program.set_surface_map_sampler(3);
+            ogs->game_opaque_pass_program.set_env_map_sampler(4);
 
             {
                 auto const &fog = get_fog_settings();
@@ -1090,6 +1140,8 @@ namespace jkgm {
             ogs->game_transparency_pass_program.set_albedo_map_sampler(0);
             ogs->game_transparency_pass_program.set_emissive_map_sampler(1);
             ogs->game_transparency_pass_program.set_displacement_map_sampler(2);
+            ogs->game_transparency_pass_program.set_surface_map_sampler(3);
+            ogs->game_transparency_pass_program.set_env_map_sampler(4);
 
             {
                 auto const &fog = get_fog_settings();

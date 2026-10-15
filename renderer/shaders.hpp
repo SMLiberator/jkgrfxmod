@@ -57,6 +57,11 @@ namespace jkgm {
             gl::uniform_location_id fog_params;
             gl::uniform_location_id fog_color;
 
+            gl::uniform_location_id surface_map;
+            gl::uniform_location_id env_map;
+            gl::uniform_location_id reflection_params;
+            gl::uniform_location_id env_params;
+
         protected:
             game_pass_shader(std::string const &name,
                              fs::path const &vertex_part,
@@ -76,6 +81,12 @@ namespace jkgm {
             void set_alpha_cutoff(float cutoff);
 
             void set_displacement_map_sampler(int sampler);
+            void set_surface_map_sampler(int sampler);
+            void set_env_map_sampler(int sampler);
+
+            // reflection = (strength, roughness, metalness, has surface map)
+            // env        = (has environment image, unused, unused, unused)
+            void set_reflection(point<4, float> reflection, point<4, float> env);
             void set_displacement_factor(float factor);
 
             // params = (enabled 0/1, start, end, opacity)
