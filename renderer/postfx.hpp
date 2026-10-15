@@ -17,7 +17,7 @@ namespace jkgm {
         // amount: 0.0 - 1.0 (0 = off; 0.05 - 0.15 is a typical range)
         // size:   grain size in screen pixels (1 = finest)
         // rate:   how many times per second the grain pattern changes (0 = frozen)
-        animated_floats<3> params{std::array<float, 3>{0.0f, 1.0f, 24.0f}};
+        animated_floats<3> params{std::array<float, 3>{0.0f, 2.0f, 24.0f}};
     };
 
     struct vignette_settings {
@@ -33,7 +33,7 @@ namespace jkgm {
         //
         // The defaults are the values that used to be hard-coded in post_to_srgb.frag. Because
         // the renderer now sets these every frame, change them here rather than in the shader.
-        animated_floats<3> params{std::array<float, 3>{0.02f, 1.04f, 1.1f}};
+        animated_floats<3> params{std::array<float, 3>{0.07f, 1.16f, 0.9f}};
     };
 
     inline film_grain_settings &get_film_grain_settings()
