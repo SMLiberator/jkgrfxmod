@@ -17,8 +17,10 @@ uniform float contrast = 1.16;   // [0.0 to 4.0]
 uniform float saturation = 0.9;  // [0.0 to 4.0]
 
 // Vignette, set by the renderer from the SetVignette COG verb.
-// rgb = color the edges are pulled towards, w = strength (0 turns the vignette off).
-// Black at full strength is the classic darkening vignette.
+// rgb = color the edges are pulled towards, w = strength:
+//   0       off
+//   0 - 1   fades in the classic vignette (black rgb = the usual darkening vignette)
+//   1 - 2   closes the vignette in like an iris until the whole screen is the vignette color
 uniform vec4 vignette_params = vec4(0.0, 0.0, 0.0, 1.0);
 
 // Film grain, set by the renderer from the SetFilmGrain COG verb.
@@ -67,18 +69,29 @@ void main()
     
     // Calculate distance from center (0.5, 0.5)
     vec2 uv = vp_texcoords -0.5;
-    // 0 in the centre, rising towards the edges
-    float edge = 1.0 - smoothstep(0.8, 0.4, length(uv));
+    // How far the vignette has closed in: 1 = classic size, 0 = fully closed (strength 2)
+    float vignette_strength = vignette_params.w;
+    float iris = 1.0 - clamp(vignette_strength - 1.0, 0.0, 1.0);
+
+    // 0 in the centre, rising towards the edges. At iris = 1 this is the same curve as the
+    // original 1.0 - smoothstep(0.8, 0.4, length(uv)), written with the edges in valid order.
+    float edge = smoothstep(0.4 * iris, max(0.8 * iris, 0.0001), length(uv));
 
     // Pull the edges towards the vignette color. The color is given as the value you would see
     // on screen, so convert it to linear like the rest of the pipeline.
-    if(vignette_params.w > 0.0) {
+    if(vignette_strength > 0.0) {
         vec3 vignette_color = pow(clamp(vignette_params.rgb, 0.0, 1.0), vec3(2.2));
-        color = mix(color, vignette_color, clamp(edge * vignette_params.w, 0.0, 1.0));
+
+        float cover = clamp(edge * min(vignette_strength, 1.0), 0.0, 1.0);
+        cover = mix(cover, 1.0, step(1.0, vignette_strength - 1.0)); // strength 2: everything
+
+        color = mix(color, vignette_color, cover);
     }
 
-    // Apply film grain
-    if(grain_params.x > 0.0) {
+    // Apply film grain, fading it out as the vignette takes over the whole screen so a
+    // fade to black ends in real black
+    float grain_amount = grain_params.x * (1.0 - clamp(vignette_strength - 1.0, 0.0, 1.0));
+    if(grain_amount > 0.0) {
         ivec2 cell = ivec2(floor(gl_FragCoord.xy / max(grain_params.y, 1.0)));
         float n = grain_noise(cell, int(grain_params.z)) - 0.5;
 
@@ -88,7 +101,7 @@ void main()
         float g_luma = clamp(dot(g, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
         float response = mix(0.6, 1.0, 4.0 * g_luma * (1.0 - g_luma));
 
-        g += n * grain_params.x * 0.5 * response;
+        g += n * grain_amount * 0.5 * response;
         color = pow(max(g, vec3(0.0)), vec3(2.2));
     }
 
