@@ -1332,6 +1332,29 @@ namespace jkgm {
                         auto c3 =
                             gamma18_to_linear(extend(get<rgb>(sc3) * get<a>(sc3), get<a>(sc3)));
 
+                        // The patched JK executable stores optional 3DO RGB multipliers in
+                        // D3DTLVERTEX.specular. Vanilla output uses specular=0, so treat zero
+                        // as neutral white to preserve compatibility with an unpatched engine.
+                        auto unpack_vertex_tint = [](DWORD packed) {
+                            if(packed == 0U) {
+                                return color::fill(1.0f);
+                            }
+                            return to_float_color(color_rgba8((uint8_t)RGBA_GETRED(packed),
+                                                              (uint8_t)RGBA_GETGREEN(packed),
+                                                              (uint8_t)RGBA_GETBLUE(packed),
+                                                              (uint8_t)RGBA_GETALPHA(packed)));
+                        };
+                        auto tint1 = unpack_vertex_tint(v1.specular);
+                        auto tint2 = unpack_vertex_tint(v2.specular);
+                        auto tint3 = unpack_vertex_tint(v3.specular);
+
+                        // JK's vertex colors have already been linearized above. Apply the RGB
+                        // multipliers in linear space, leaving existing baked/dynamic lighting
+                        // intact and preserving the original alpha channel.
+                        c1 = extend(get<rgb>(c1) * get<rgb>(tint1), get<a>(c1));
+                        c2 = extend(get<rgb>(c2) * get<rgb>(tint2), get<a>(c2));
+                        c3 = extend(get<rgb>(c3) * get<rgb>(tint3), get<a>(c3));
+
                         // Check if the current triangle is part of an overlay
                         if(is_gun &&
                            almost_equal(make_point(v1.sx, v1.sy, v1.sz), point<3, float>::zero()) &&
