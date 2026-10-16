@@ -10,3 +10,7 @@ jkgm::gl::texture_view jkgm::renderer_ao_basic::get_ssao_texture() const
 {
     return gl::default_texture;
 }
+jkgm::gl::texture_view jkgm::renderer_ao_basic::get_raw_ssao_texture() const
+{
+    return gl::default_texture;
+}
