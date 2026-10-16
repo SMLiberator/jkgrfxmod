@@ -52,6 +52,8 @@ namespace jkgm {
         float roughness = 0.5f;
         float metalness = 0.0f;
         std::optional<srgb_texture_id> env_map;
+        material_reflection_mode reflection_mode = material_reflection_mode::envmap;
+        std::optional<bool> texture_filtering;
 
         material_alpha_mode alpha_mode = material_alpha_mode::blend;
         float alpha_cutoff = 0.5f;
