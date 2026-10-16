@@ -29,5 +29,6 @@ namespace jkgm {
                                  gl::texture_view normal_tex,
                                  gl::texture_view depth_tex) override;
         gl::texture_view get_ssao_texture() const override;
+        gl::texture_view get_raw_ssao_texture() const override;
     };
 }
