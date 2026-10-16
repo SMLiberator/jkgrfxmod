@@ -54,6 +54,8 @@ namespace jkgm {
         std::optional<float> roughness;
         std::optional<float> metalness;
         std::optional<std::string> env_map;
+        std::optional<std::string> reflection_mode;
+        std::optional<bool> texture_filtering;
 
         std::optional<out_material_alpha_mode> alpha_mode;
         std::optional<float> alpha_cutoff;
@@ -408,6 +410,26 @@ namespace jkgm {
             rv->metalness = static_cast<float>(v);
         }
 
+        if(doc.contains("reflection_mode")) {
+            auto const &v = doc["reflection_mode"];
+            if(!v.is_string() ||
+               (v != "envmap" && v != "screen" && v != "fixed" && v != "matcap")) {
+                LOG_ERROR("Material '", rv->name,
+                          "' reflection_mode must be envmap, screen, fixed, or matcap");
+                throw std::runtime_error("Invalid script");
+            }
+            rv->reflection_mode = static_cast<std::string>(v);
+        }
+
+        if(doc.contains("texture_filtering")) {
+            auto const &v = doc["texture_filtering"];
+            if(!v.is_boolean()) {
+                LOG_ERROR("Material '", rv->name, "' texture_filtering must be true or false");
+                throw std::runtime_error("Invalid script");
+            }
+            rv->texture_filtering = static_cast<bool>(v);
+        }
+
         if(doc.contains("environment_map")) {
             auto map_filename = str(fmt(rv->name, ".env.png"));
             auto real_map_filename =
@@ -557,6 +579,14 @@ namespace jkgm {
 
         if(mat.env_map.has_value()) {
             rv["environment_map"] = *mat.env_map;
+        }
+
+        if(mat.reflection_mode.has_value()) {
+            rv["reflection_mode"] = *mat.reflection_mode;
+        }
+
+        if(mat.texture_filtering.has_value()) {
+            rv["texture_filtering"] = *mat.texture_filtering;
         }
 
         if(mat.alpha_mode.has_value()) {
@@ -747,6 +777,8 @@ namespace jkgm {
                     "reflection_strength",
                     "roughness",
                     "metalness",
+                    "reflection_mode",
+                    "texture_filtering",
                     "alpha_mode",
                     "alpha_cutoff",
                     }) {

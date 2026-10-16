@@ -88,6 +88,26 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             mat->env_map = pack_env_map;
         }
 
+        if(em.contains("reflection_mode")) {
+            auto const &v = em["reflection_mode"];
+            if(v == "screen") {
+                mat->reflection_mode = material_reflection_mode::screen;
+            }
+            else if(v == "fixed") {
+                mat->reflection_mode = material_reflection_mode::fixed;
+            }
+            else if(v == "matcap") {
+                mat->reflection_mode = material_reflection_mode::matcap;
+            }
+            else if(v != "envmap") {
+                throw std::runtime_error("Unknown reflection_mode in metadata.json");
+            }
+        }
+
+        if(em.contains("texture_filtering")) {
+            mat->texture_filtering = static_cast<bool>(em["texture_filtering"]);
+        }
+
         if(em.contains("alpha_mode")) {
             auto const &am = em["alpha_mode"];
             if(am == "mask") {
