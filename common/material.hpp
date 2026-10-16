@@ -6,6 +6,9 @@
 
 namespace jkgm {
     enum class material_alpha_mode { blend, mask };
+    // Screen mode initially falls back to the world-aligned EnvMap; an SSR pass will
+    // consume this choice in the next stage.
+    enum class material_reflection_mode { envmap, screen, fixed, matcap };
 
     class material {
     public:
@@ -34,6 +37,9 @@ namespace jkgm {
         // Equirectangular environment image this material reflects. A material that does not set
         // one gets its own pack's default environment image (if the pack has one).
         std::optional<fs::path> env_map;
+        material_reflection_mode reflection_mode = material_reflection_mode::envmap;
+        // nullopt follows the global enable_texture_filtering setting.
+        std::optional<bool> texture_filtering;
 
         material_alpha_mode alpha_mode = material_alpha_mode::blend;
         float alpha_cutoff = 0.5f;
