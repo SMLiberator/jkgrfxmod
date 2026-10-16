@@ -36,8 +36,8 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             mat->albedo_map = data_dir / std::string(em["albedo_map"]);
         }
 
-        if(em.contains("use_original_albedo")) {
-            mat->use_original_albedo = static_cast<bool>(em["use_original_albedo"]);
+        if(em.contains("keep_albedo")) {
+            mat->use_original_albedo = static_cast<bool>(em["keep_albedo"]);
         }
 
         if(em.contains("albedo_factor")) {
@@ -81,8 +81,8 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
         mat->metalness = em.contains("metalness") ? static_cast<float>(em["metalness"])
                                                    : (has_surface_map ? 1.0f : 0.0f);
 
-        if(em.contains("env_map")) {
-            mat->env_map = data_dir / std::string(em["env_map"]);
+        if(em.contains("environment_map")) {
+            mat->env_map = data_dir / std::string(em["environment_map"]);
         }
         else if(pack_env_map.has_value()) {
             mat->env_map = pack_env_map;

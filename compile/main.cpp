@@ -40,7 +40,7 @@ namespace jkgm {
         std::vector<md5> replaces_signatures;
 
         std::optional<std::string> albedo_map;
-        bool use_original_albedo = false;
+        bool keep_albedo = false;
         std::optional<color> albedo_factor;
 
         std::optional<std::string> emissive_map;
@@ -294,20 +294,20 @@ namespace jkgm {
             rv->albedo_map = real_map_filename;
         }
 
-        if(doc.contains("use_original_albedo")) {
-            auto const &v = doc["use_original_albedo"];
+        if(doc.contains("keep_albedo")) {
+            auto const &v = doc["keep_albedo"];
             if(!v.is_boolean()) {
-                LOG_ERROR("Material '", rv->name, "' use_original_albedo must be true or false");
+                LOG_ERROR("Material '", rv->name, "' keep_albedo must be true or false");
                 throw std::runtime_error("Invalid script");
             }
 
-            rv->use_original_albedo = static_cast<bool>(v);
+            rv->keep_albedo = static_cast<bool>(v);
         }
 
-        if(rv->use_original_albedo && rv->albedo_map.has_value()) {
+        if(rv->keep_albedo && rv->albedo_map.has_value()) {
             LOG_ERROR("Material '",
                       rv->name,
-                      "' cannot have both an albedo map and use_original_albedo");
+                      "' cannot have both an albedo map and keep_albedo");
             throw std::runtime_error("Invalid script");
         }
 
@@ -408,12 +408,12 @@ namespace jkgm {
             rv->metalness = static_cast<float>(v);
         }
 
-        if(doc.contains("env_map")) {
+        if(doc.contains("environment_map")) {
             auto map_filename = str(fmt(rv->name, ".env.png"));
             auto real_map_filename =
                 get_convert_image(img_map,
                                   /*input path*/ script_path.parent_path() /
-                                      static_cast<std::string>(doc["env_map"]),
+                                      static_cast<std::string>(doc["environment_map"]),
                                   /*desired name*/ map_filename,
                                   /*desired out path*/ output_path / map_filename);
             rv->env_map = real_map_filename;
@@ -513,8 +513,8 @@ namespace jkgm {
             rv["albedo_map"] = *mat.albedo_map;
         }
 
-        if(mat.use_original_albedo) {
-            rv["use_original_albedo"] = true;
+        if(mat.keep_albedo) {
+            rv["keep_albedo"] = true;
         }
 
         if(mat.albedo_factor.has_value()) {
@@ -556,7 +556,7 @@ namespace jkgm {
         }
 
         if(mat.env_map.has_value()) {
-            rv["env_map"] = *mat.env_map;
+            rv["environment_map"] = *mat.env_map;
         }
 
         if(mat.alpha_mode.has_value()) {
@@ -731,8 +731,56 @@ namespace jkgm {
             LOG_INFO("Compiling materials...");
             for(auto const &em : script_doc["materials"]) {
                 try {
+                    // Resolve per-pack defaults *before* importing textures or validating
+                    // material parameters. The generated metadata.json stores resolved
+                    // materials, so the runtime doesn't need a separate inheritance layer.
+                    json::json effective = em;
+                    for(char const *property : {
+                    "albedo_map",
+                    "keep_albedo",
+                    "albedo_factor",
+                    "emissive_map",
+                    "emissive_factor",
+                    "displacement_map",
+                    "displacement_factor",
+                    "surface_map",
+                    "reflection_strength",
+                    "roughness",
+                    "metalness",
+                    "alpha_mode",
+                    "alpha_cutoff",
+                    }) {
+                        if(!effective.contains(property) && script_doc.contains(property)) {
+                            effective[property] = script_doc[property];
+                        }
+                    }
+
+                    // A material-specific albedo map replaces pack-wide keep_albedo.
+                    // Likewise, keep_albedo=true replaces a pack-wide albedo map.
+                    // If *both* are specified on one material, keep the existing
+                    // compiler error rather than silently choosing between them.
+                    if(em.contains("albedo_map") && !em.contains("keep_albedo")) {
+                        effective["keep_albedo"] = false;
+                    }
+                    if(em.contains("keep_albedo") && em["keep_albedo"] == true &&
+                       !em.contains("albedo_map")) {
+                        // A pack-level albedo map is inherited only if the material
+                        // doesn't explicitly elect to retain its original JK texture.
+                        if(script_doc.contains("albedo_map")) {
+                            effective.erase("albedo_map");
+                        }
+                    }
+
+                    // An inherited alpha cutoff only applies in mask mode. A material
+                    // that overrides a pack's mode to 'blend' shouldn't be rejected.
+                    if(!em.contains("alpha_cutoff") && effective.contains("alpha_cutoff") &&
+                       (!effective.contains("alpha_mode") ||
+                        effective["alpha_mode"] != "mask")) {
+                        effective.erase("alpha_cutoff");
+                    }
+
                     pack.materials.push_back(process_material(
-                        em, &img_map, vfs.get(), colormaps, script_path, output_path));
+                        effective, &img_map, vfs.get(), colormaps, script_path, output_path));
                 }
                 catch(std::exception const &e) {
                     LOG_ERROR("Failed to process script: ", e.what());
