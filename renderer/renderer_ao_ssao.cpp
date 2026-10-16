@@ -133,3 +133,8 @@ jkgm::gl::texture_view jkgm::renderer_ao_ssao::get_ssao_texture() const
 {
     return ssao_occlusionbuffer.tex;
 }
+// Before the edge-aware box filter; shown by debug_render_mode=ssao_raw.
+jkgm::gl::texture_view jkgm::renderer_ao_ssao::get_raw_ssao_texture() const
+{
+    return ssao_occlusionbuffer2.tex;
+}
