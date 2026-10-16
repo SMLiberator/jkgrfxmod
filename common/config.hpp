@@ -28,6 +28,8 @@ namespace jkgm {
         bool enable_post = true;
         bool enable_reflections = true;
         bool enable_ssao = true;
+        // none, normals, depth, ssao, ssao_raw
+        std::string debug_render_mode = "none";
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
         bool enable_posterized_lighting = false;
