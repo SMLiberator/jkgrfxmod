@@ -44,7 +44,7 @@ float fog_factor(float dist)
 uniform sampler2D surface_map;   // R=reflectivity, G=roughness, B=metalness (linear)
 uniform sampler2D env_map;       // equirectangular environment image
 uniform vec4 reflection_params; // x=strength, y=roughness, z=metalness, w=has surface map
-uniform vec4 env_params;        // x=has environment image
+uniform vec4 env_params;        // x=has environment image, y=reflection mode (0 envmap, 1 screen fallback, 2 fixed, 3 matcap)
 uniform vec4 camera_right;      // xyz=camera right in world space, w=1 if available
 uniform vec4 camera_forward;    // xyz=camera forward in world space
 uniform vec4 camera_up;         // xyz=camera up in world space
@@ -113,23 +113,35 @@ vec3 compute_reflection(vec3 base_color, vec2 texcoords, out float metalness)
         return have_camera ? vec3(0.0, 0.6, 0.0) : vec3(0.6, 0.0, 0.0);
     }
 
+    // envmap = world-aligned, screen = world-aligned fallback until SSR is ready.
+    // fixed = camera-aligned equirectangular, matcap = view-normal UV on a square image.
+    int mode = int(env_params.y + 0.5);
     vec3 env_dir = r;
-    if(have_camera) {
+    if(mode <= 1 && have_camera) {
         vec3 world_r = camera_right.xyz * r.x + camera_forward.xyz * r.z + camera_up.xyz * r.y;
         env_dir = vec3(world_r.x, world_r.z, world_r.y);
+    }
 
-        if(REFLECTION_DEBUG == 5) {
+    if(REFLECTION_DEBUG == 5) {
+        if(have_camera) {
             vec3 world_n = camera_right.xyz * n.x + camera_forward.xyz * n.z + camera_up.xyz * n.y;
             return world_n * 0.5 + 0.5;
         }
-    }
-    else if(REFLECTION_DEBUG == 5) {
         return vec3(0.6, 0.0, 0.0);
     }
 
-    vec2 uv = vec2(fract(atan(env_dir.x, env_dir.z) / (2.0 * REFLECTION_PI) + 0.5 +
-                         ENV_YAW_DEGREES / 360.0),
-                   0.5 - asin(clamp(env_dir.y, -1.0, 1.0)) / REFLECTION_PI);
+    vec2 uv;
+    if(mode == 3) {
+        // Standard sphere-normal MatCap projection, fixed relative to the screen.
+        // Positive view-space Y is up; top of texture is v=0.
+        uv = vec2(0.5 + 0.5 * n.x, 0.5 - 0.5 * n.y);
+        uv = clamp(uv, vec2(0.001), vec2(0.999));
+    }
+    else {
+        uv = vec2(fract(atan(env_dir.x, env_dir.z) / (2.0 * REFLECTION_PI) + 0.5 +
+                            ENV_YAW_DEGREES / 360.0),
+                  0.5 - asin(clamp(env_dir.y, -1.0, 1.0)) / REFLECTION_PI);
+    }
 
     // Preserve existing roughness->mip blur approximation.
     vec2 env_size = vec2(textureSize(env_map, 0));
