@@ -831,6 +831,25 @@ namespace jkgm {
             }
         }
 
+        // Filter overrides are set at bind time, so materials sharing a cached image
+        // can independently request a pixelated appearance.
+        void bind_color_texture(gl::texture_view tex, int unit, bool filtered)
+        {
+            gl::set_active_texture_unit(unit);
+            gl::bind_texture(gl::texture_bind_target::texture_2d, tex);
+            if(tex == gl::default_texture) {
+                return;
+            }
+            gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d,
+                                       filtered ? gl::mag_filter::linear : gl::mag_filter::nearest);
+            gl::set_texture_min_filter(gl::texture_bind_target::texture_2d,
+                                       filtered ? gl::min_filter::linear_mipmap_linear
+                                                : gl::min_filter::nearest_mipmap_nearest);
+            gl::set_texture_max_anisotropy(gl::texture_bind_target::texture_2d,
+                                           filtered ? std::max(1.0f, the_config->max_anisotropy)
+                                                    : 1.0f);
+        }
+
         void bind_material(shaders::game_pass_shader *prog,
                            material_instance_id id,
                            bool force_opaque,
@@ -909,10 +928,11 @@ namespace jkgm {
                 gl::bind_texture(gl::texture_bind_target::texture_2d, surface_map);
                 gl::set_active_texture_unit(2);
                 gl::bind_texture(gl::texture_bind_target::texture_2d, displacement_map);
-                gl::set_active_texture_unit(1);
-                gl::bind_texture(gl::texture_bind_target::texture_2d, emissive_map);
-                gl::set_active_texture_unit(0);
-                gl::bind_texture(gl::texture_bind_target::texture_2d, albedo_map);
+                // Filter selection is per material, not per cached image. Keep
+                // surface/displacement/EnvMap sampling unchanged for reflection roughness.
+                bool filtered = mat->texture_filtering.value_or(the_config->enable_texture_filtering);
+                bind_color_texture(emissive_map, 1, filtered);
+                bind_color_texture(albedo_map, 0, filtered);
 
                 // Enable features
                 prog->set_features(make_point(
@@ -931,7 +951,9 @@ namespace jkgm {
                                                 mat->roughness,
                                                 mat->metalness,
                                                 mat->surface_map.has_value() ? 1.0f : 0.0f),
-                                     make_point(has_env_map ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f));
+                                     make_point(has_env_map ? 1.0f : 0.0f,
+                                                static_cast<float>(static_cast<int>(mat->reflection_mode)),
+                                                0.0f, 0.0f));
             }
 
             current_material = id;
