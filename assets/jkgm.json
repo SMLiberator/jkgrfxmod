@@ -10,6 +10,10 @@
         "samples": 2
     },
     "enable_bloom": true,
+    "enable_blur": true,
+    "enable_fog": true,
+    "enable_post": true,
+    "enable_reflections": true,
     "enable_ssao": true,
     "enable_parallax": true,
     "enable_texture_filtering": true,
