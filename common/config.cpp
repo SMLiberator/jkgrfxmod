@@ -64,6 +64,22 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("enable_bloom").get_to(rv->enable_bloom);
         }
 
+        if(j.contains("enable_blur")) {
+            j.at("enable_blur").get_to(rv->enable_blur);
+        }
+
+        if(j.contains("enable_fog")) {
+            j.at("enable_fog").get_to(rv->enable_fog);
+        }
+
+        if(j.contains("enable_post")) {
+            j.at("enable_post").get_to(rv->enable_post);
+        }
+
+        if(j.contains("enable_reflections")) {
+            j.at("enable_reflections").get_to(rv->enable_reflections);
+        }
+
         if(j.contains("enable_ssao")) {
             j.at("enable_ssao").get_to(rv->enable_ssao);
         }
