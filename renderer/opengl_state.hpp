@@ -122,6 +122,8 @@ namespace jkgm {
 
     struct opengl_state {
         fs::path data_root;
+        // Master optional post-processing switch (color-space conversion stays active).
+        bool enable_post = true;
 
         shaders::menu_shader menu_program;
 
