@@ -88,6 +88,8 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
         surf->reflection_strength = (*repl_map)->reflection_strength;
         surf->roughness = (*repl_map)->roughness;
         surf->metalness = (*repl_map)->metalness;
+        surf->reflection_mode = (*repl_map)->reflection_mode;
+        surf->texture_filtering = (*repl_map)->texture_filtering;
 
         surf->albedo_factor = (*repl_map)->albedo_factor;
         surf->emissive_factor = (*repl_map)->emissive_factor;
@@ -178,6 +180,8 @@ void jkgm::vidmem_texture_surface::clear()
     reflection_strength = 0.0f;
     roughness = 0.5f;
     metalness = 0.0f;
+    reflection_mode = material_reflection_mode::envmap;
+    texture_filtering.reset();
 
     albedo_factor = color::fill(1.0f);
     emissive_factor = color_rgb::fill(0.0f);
