@@ -113,11 +113,6 @@ namespace jkgm {
                 return materials.get_material(sig);
             }
 
-            std::optional<fs::path> get_default_env_map() override
-            {
-                return materials.get_default_env_map();
-            }
-
             std::optional<srgb_texture_id> get_existing_free_srgb_texture(size<2, int> const &dims)
             {
                 for(size_t i = 0; i < srgb_textures.size(); ++i) {

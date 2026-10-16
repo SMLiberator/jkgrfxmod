@@ -49,7 +49,13 @@ jkgm::colormap::colormap(jkgm::input_stream *is)
     is->read(jkgm::make_span(&trns_bits, 1).as_bytes());
     transparency = (trns_bits != 0);
 
-    is->read(jkgm::make_span(&tint, 1).as_bytes());
+    // The file stores the tint as three 32-bit floats. Read them as plain floats: the color_rgb
+    // type itself has been padded to 16 bytes since the math library was rewritten for SIMD, so
+    // reading it directly consumed four bytes too many and threw off every field after it
+    // ("input_stream::read size exceeds bounds").
+    std::array<float, 3> tint_values;
+    is->read(jkgm::make_span(tint_values).as_bytes());
+    tint = jkgm::color_rgb(tint_values[0], tint_values[1], tint_values[2]);
 
     // Read padding/unknowns
     is->read(jkgm::make_span(unknown).as_bytes());

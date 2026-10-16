@@ -115,6 +115,10 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , env_map(gl::get_uniform_location(the_program, "env_map"))
     , reflection_params(gl::get_uniform_location(the_program, "reflection_params"))
     , env_params(gl::get_uniform_location(the_program, "env_params"))
+    , camera_right(gl::get_uniform_location(the_program, "camera_right"))
+    , camera_forward(gl::get_uniform_location(the_program, "camera_forward"))
+    , camera_up(gl::get_uniform_location(the_program, "camera_up"))
+    , view_params(gl::get_uniform_location(the_program, "view_params"))
 {
 }
 
@@ -189,6 +193,17 @@ void jkgm::shaders::game_pass_shader::set_reflection(point<4, float> reflection,
     // Shaders that do not declare these uniforms get location -1, which OpenGL ignores.
     gl::set_uniform_vector(reflection_params, reflection);
     gl::set_uniform_vector(env_params, env);
+}
+
+void jkgm::shaders::game_pass_shader::set_camera(point<4, float> right,
+                                                  point<4, float> forward,
+                                                  point<4, float> up,
+                                                  point<4, float> view)
+{
+    gl::set_uniform_vector(camera_right, right);
+    gl::set_uniform_vector(camera_forward, forward);
+    gl::set_uniform_vector(camera_up, up);
+    gl::set_uniform_vector(view_params, view);
 }
 
 void jkgm::shaders::game_pass_shader::set_displacement_factor(float factor)

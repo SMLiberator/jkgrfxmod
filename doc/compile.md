@@ -113,7 +113,7 @@ This field is not currently displayed to the user. Future material pack manageme
 
 The `environment_map` field is optional.
 
-The `environment_map` field references an image used as the default environment for reflective materials. It must be an equirectangular (latitude/longitude) panorama: a 2:1 image where the top row is straight up, the bottom row is straight down, and the left and right edges meet behind the viewer. Image dimensions must be powers of two (for example 2048x1024). Materials that do not specify their own `env_map` reflect this image. If no environment image is available, materials do not reflect anything.
+The `environment_map` field references an image used as the default environment for reflective materials. It must be an equirectangular (latitude/longitude) panorama: a 2:1 image where the top row is straight up, the bottom row is straight down, and the left and right edges meet behind the viewer. Image dimensions must be powers of two (for example 2048x1024). Materials in this pack that do not specify their own `env_map` reflect this image. It applies only to the materials of the pack it is declared in, so different packs can use different environments. If a material has no environment image, it does not reflect anything.
 
 ### Materials
 
@@ -191,6 +191,12 @@ The `albedo_factor` field is optional.
 The `albedo_factor` field contains a floating point RGBA vector (array of 4 JSON numbers). If an albedo map has been specified, this vector is component-wise multiplied with the value of the albedo map. If an albedo map has not been specified, the material diffuse reflectance is equal to the albedo factor.
 
 If `albedo_factor` is unspecified, the material behaves as if `albedo_factor` were solid white (RGBA all 1.0).
+
+##### use_original_albedo
+
+The `use_original_albedo` field is optional.
+
+The `use_original_albedo` field is `true` or `false` (the default). If `true`, the material keeps the game's own texture as its albedo instead of replacing it, so a material can add emissive, displacement or reflection maps, or change its alpha mode, without shipping a copy of the original image. It cannot be combined with `albedo_map`. The `albedo_factor` still applies.
 
 ##### emissive_map
 

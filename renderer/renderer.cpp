@@ -14,6 +14,7 @@
 #include "ddraw2_impl.hpp"
 #include "ddraw_impl.hpp"
 #include "ddrawpalette_impl.hpp"
+#include "engine_camera.hpp"
 #include "execute_buffer.hpp"
 #include "fog.hpp"
 #include "glad/glad.h"
@@ -327,9 +328,6 @@ namespace jkgm {
     private:
         config const *the_config;
 
-        // The material pack's default environment image, kept loaded for the whole session
-        std::optional<srgb_texture_id> global_env_map;
-
         renderer_mode mode = renderer_mode::menu;
         size<2, int> conf_scr_res;
 
@@ -575,15 +573,6 @@ namespace jkgm {
             ogs = std::make_unique<opengl_state>(
                 conf_scr_res, internal_scr_res, actual_display_area, actual_menu_area, the_config);
             texture_cache = create_texture_cache(the_config);
-
-            if(auto env_path = texture_cache->get_default_env_map(); env_path.has_value()) {
-                try {
-                    global_env_map = texture_cache->get_srgb_texture_from_filename(*env_path);
-                }
-                catch(std::exception const &e) {
-                    LOG_WARNING("Failed to load the default environment map: ", e.what());
-                }
-            }
 
             frame_compositor = create_renderer_compositor(the_config);
             frame_ao = create_renderer_ao(the_config, conf_scr_res);
@@ -903,15 +892,12 @@ namespace jkgm {
                     surface_map = texture_cache->get_texture_handle(*mat->surface_map);
                 }
 
-                // The material's own environment image wins over the pack's default
+                // Each material carries its own environment image: its own env_map, or else its
+                // pack's default
                 gl::texture_view env_map = gl::default_texture;
                 bool has_env_map = false;
                 if(mat->env_map.has_value()) {
                     env_map = texture_cache->get_texture_handle(*mat->env_map);
-                    has_env_map = true;
-                }
-                else if(global_env_map.has_value()) {
-                    env_map = texture_cache->get_texture_handle(*global_env_map);
                     has_env_map = true;
                 }
 
@@ -1038,6 +1024,7 @@ namespace jkgm {
             ogs->game_opaque_pass_program.set_displacement_map_sampler(2);
             ogs->game_opaque_pass_program.set_surface_map_sampler(3);
             ogs->game_opaque_pass_program.set_env_map_sampler(4);
+            apply_engine_camera(ogs->game_opaque_pass_program);
 
             {
                 auto const &fog = get_fog_settings();
@@ -1142,6 +1129,7 @@ namespace jkgm {
             ogs->game_transparency_pass_program.set_displacement_map_sampler(2);
             ogs->game_transparency_pass_program.set_surface_map_sampler(3);
             ogs->game_transparency_pass_program.set_env_map_sampler(4);
+            apply_engine_camera(ogs->game_transparency_pass_program);
 
             {
                 auto const &fog = get_fog_settings();

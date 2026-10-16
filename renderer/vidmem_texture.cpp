@@ -101,10 +101,15 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
 
         surf->alpha_mode = (*repl_map)->alpha_mode;
         surf->alpha_cutoff = (*repl_map)->alpha_cutoff;
-        return D3D_OK;
+
+        if(!(*repl_map)->use_original_albedo || (*repl_map)->albedo_map.has_value()) {
+            return D3D_OK;
+        }
+
+        // This material keeps the game's own texture as its albedo: carry on below to convert it.
     }
 
-    // No replacements found. Create standard material.
+    // No replacements found (or one that keeps the original albedo). Create standard material.
     uint16_t const *in_em = (uint16_t const *)src->buffer.data();
 
     for(auto &out_em : src->conv_buffer) {
@@ -125,6 +130,12 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
     surf->albedo_map = surf->r->texture_cache->create_srgb_texture_from_buffer(
         make_size((int)src->desc.dwWidth, (int)src->desc.dwHeight),
         make_span(src->conv_buffer).as_const_bytes());
+
+    if(repl_map.has_value()) {
+        // The conversion above resets the alpha mode; put the material's own settings back
+        surf->alpha_mode = (*repl_map)->alpha_mode;
+        surf->alpha_cutoff = (*repl_map)->alpha_cutoff;
+    }
 
     return D3D_OK;
 }

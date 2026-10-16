@@ -23,8 +23,10 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
               metadata_file.generic_string(),
               ")");
 
+    // The pack's default environment image applies to this pack's materials only
+    std::optional<fs::path> pack_env_map;
     if(doc.contains("environment_map")) {
-        default_env_map = data_dir / std::string(doc["environment_map"]);
+        pack_env_map = data_dir / std::string(doc["environment_map"]);
     }
 
     for(auto const &em : doc["materials"]) {
@@ -32,6 +34,10 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
 
         if(em.contains("albedo_map")) {
             mat->albedo_map = data_dir / std::string(em["albedo_map"]);
+        }
+
+        if(em.contains("use_original_albedo")) {
+            mat->use_original_albedo = static_cast<bool>(em["use_original_albedo"]);
         }
 
         if(em.contains("albedo_factor")) {
@@ -77,6 +83,9 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
 
         if(em.contains("env_map")) {
             mat->env_map = data_dir / std::string(em["env_map"]);
+        }
+        else if(pack_env_map.has_value()) {
+            mat->env_map = pack_env_map;
         }
 
         if(em.contains("alpha_mode")) {
@@ -137,11 +146,6 @@ std::optional<jkgm::material const *> jkgm::material_map::get_material(md5 const
     }
 
     return std::nullopt;
-}
-
-std::optional<fs::path> jkgm::material_map::get_default_env_map() const
-{
-    return default_env_map;
 }
 
 std::vector<std::unique_ptr<jkgm::material>> const &jkgm::material_map::get_materials() const

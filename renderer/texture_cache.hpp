@@ -16,7 +16,6 @@ namespace jkgm {
         virtual ~texture_cache() = default;
 
         virtual std::optional<material const *> get_replacement_material(md5 const &sig) = 0;
-        virtual std::optional<fs::path> get_default_env_map() = 0;
 
         virtual srgb_texture_id create_srgb_texture_from_buffer(size<2, int> const &dims,
                                                                 span<char const> data) = 0;

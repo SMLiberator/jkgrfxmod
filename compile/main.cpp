@@ -40,6 +40,7 @@ namespace jkgm {
         std::vector<md5> replaces_signatures;
 
         std::optional<std::string> albedo_map;
+        bool use_original_albedo = false;
         std::optional<color> albedo_factor;
 
         std::optional<std::string> emissive_map;
@@ -293,6 +294,23 @@ namespace jkgm {
             rv->albedo_map = real_map_filename;
         }
 
+        if(doc.contains("use_original_albedo")) {
+            auto const &v = doc["use_original_albedo"];
+            if(!v.is_boolean()) {
+                LOG_ERROR("Material '", rv->name, "' use_original_albedo must be true or false");
+                throw std::runtime_error("Invalid script");
+            }
+
+            rv->use_original_albedo = static_cast<bool>(v);
+        }
+
+        if(rv->use_original_albedo && rv->albedo_map.has_value()) {
+            LOG_ERROR("Material '",
+                      rv->name,
+                      "' cannot have both an albedo map and use_original_albedo");
+            throw std::runtime_error("Invalid script");
+        }
+
         if(doc.contains("albedo_factor")) {
             auto const &af = doc["albedo_factor"];
             if(!af.is_array() || af.size() != 4) {
@@ -493,6 +511,10 @@ namespace jkgm {
 
         if(mat.albedo_map.has_value()) {
             rv["albedo_map"] = *mat.albedo_map;
+        }
+
+        if(mat.use_original_albedo) {
+            rv["use_original_albedo"] = true;
         }
 
         if(mat.albedo_factor.has_value()) {

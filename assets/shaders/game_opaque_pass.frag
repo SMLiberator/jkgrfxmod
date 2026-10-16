@@ -49,18 +49,26 @@ float fog_factor(float dist)
 // G = roughness, B = metalness). The result is added like emissive light, so SSAO does not
 // darken it and it fades into fog.
 //
-// Stage 1 limitations: the environment is attached to the camera (it turns with you), and the
-// field of view is assumed to be REFLECTION_HFOV_DEGREES.
+// The renderer reads the engine's current camera every frame, so the environment stays fixed in
+// the world as you turn, and the field of view follows zoom and other changes made by scripts.
+// If the camera cannot be read, the environment turns with the view and the field of view is
+// assumed to be REFLECTION_HFOV_DEGREES.
 // ---------------------------------------------------------------------------
 uniform sampler2D surface_map;   // R = reflectivity, G = roughness, B = metalness (linear)
 uniform sampler2D env_map;       // equirectangular environment image
 uniform vec4 reflection_params;  // x = strength, y = roughness, z = metalness, w = has surface map
 uniform vec4 env_params;         // x = has an environment image
+uniform vec4 camera_right;       // xyz = camera right axis in world space, w = 1 if the camera was read
+uniform vec4 camera_forward;     // xyz = camera forward axis in world space
+uniform vec4 camera_up;          // xyz = camera up axis in world space
+uniform vec4 view_params;        // x = tan(half the horizontal field of view)
 uniform vec2 screen_resolution;
 
-// Horizontal field of view the game is rendering with (the game's default is 90). Used to turn
-// the renderer's screen-space positions and normals back into true view space.
+// Only used if the engine camera could not be read: the horizontal field of view to assume
 const float REFLECTION_HFOV_DEGREES = 90.0;
+
+// Turns the environment image around the vertical axis (degrees), to line up the sun, a skyline...
+const float ENV_YAW_DEGREES = 0.0;
 
 // Brightness of the environment image as seen in reflections
 const float ENV_INTENSITY = 1.0;
@@ -72,9 +80,12 @@ const float FRESNEL_POWER = 4.0;
 
 // Tuning aid for reflective materials (those with a strength above 0):
 //   0  off
-//   1  show the reflection direction as a color
-//   2  show the surface normal as a color
+//   1  show the reflection direction (relative to the view) as a color
+//   2  show the surface normal (relative to the view) as a color
 //   3  show the environment at full strength, ignoring strength, fresnel and tint
+//   4  show whether the engine camera was read: green = yes, red = no (fallback in use)
+//   5  show the surface normal in world space as a color. On any given wall this should NOT
+//      change as you turn or move; if it does, the camera orientation is being applied wrongly.
 const int REFLECTION_DEBUG = 0;
 
 const float REFLECTION_PI = 3.14159265359;
@@ -102,11 +113,14 @@ vec3 compute_reflection(vec3 albedo_rgb, vec2 texcoords, out float metalness)
 
     metalness = clamp(metalness, 0.0, 1.0);
 
+    bool have_camera = camera_right.w > 0.5;
+
     // Undo the projection scale: positions and normals arrive as (clip x, clip y, depth)
-    float h_scale = tan(radians(REFLECTION_HFOV_DEGREES) * 0.5);
+    float h_scale = have_camera ? view_params.x : tan(radians(REFLECTION_HFOV_DEGREES) * 0.5);
     float aspect = screen_resolution.x / max(screen_resolution.y, 1.0);
     vec2 view_scale = vec2(h_scale, h_scale / aspect);
 
+    // View space: x right, y up, z forward
     vec3 v = normalize(vec3(vp_pos.xy * view_scale, vp_pos.z));      // eye -> surface
     vec3 n = normalize(vec3(vp_normal.xy / view_scale, vp_normal.z));
     if(dot(n, v) > 0.0) {
@@ -121,10 +135,31 @@ vec3 compute_reflection(vec3 albedo_rgb, vec2 texcoords, out float metalness)
     else if(REFLECTION_DEBUG == 2) {
         return n * 0.5 + 0.5;
     }
+    else if(REFLECTION_DEBUG == 4) {
+        return have_camera ? vec3(0.0, 0.6, 0.0) : vec3(0.6, 0.0, 0.0);
+    }
+
+    // The direction the environment is looked up in: x right, y up, z forward, where "forward"
+    // is a fixed direction in the world once the engine camera is known
+    vec3 env_dir = r;
+    if(have_camera) {
+        // The camera axes are world-space directions; JK's world has x and y horizontal, z up
+        vec3 world_r = camera_right.xyz * r.x + camera_forward.xyz * r.z + camera_up.xyz * r.y;
+        env_dir = vec3(world_r.x, world_r.z, world_r.y);
+
+        if(REFLECTION_DEBUG == 5) {
+            vec3 world_n = camera_right.xyz * n.x + camera_forward.xyz * n.z + camera_up.xyz * n.y;
+            return world_n * 0.5 + 0.5;
+        }
+    }
+    else if(REFLECTION_DEBUG == 5) {
+        return vec3(0.6, 0.0, 0.0);
+    }
 
     // Direction -> equirectangular image coordinates (top row of the image = straight up)
-    vec2 uv = vec2(atan(r.x, r.z) / (2.0 * REFLECTION_PI) + 0.5,
-                   0.5 - asin(clamp(r.y, -1.0, 1.0)) / REFLECTION_PI);
+    vec2 uv = vec2(fract(atan(env_dir.x, env_dir.z) / (2.0 * REFLECTION_PI) + 0.5 +
+                         ENV_YAW_DEGREES / 360.0),
+                   0.5 - asin(clamp(env_dir.y, -1.0, 1.0)) / REFLECTION_PI);
 
     // Rough surfaces look at blurrier (smaller) versions of the image
     vec2 env_size = vec2(textureSize(env_map, 0));

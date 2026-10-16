@@ -62,6 +62,11 @@ namespace jkgm {
             gl::uniform_location_id reflection_params;
             gl::uniform_location_id env_params;
 
+            gl::uniform_location_id camera_right;
+            gl::uniform_location_id camera_forward;
+            gl::uniform_location_id camera_up;
+            gl::uniform_location_id view_params;
+
         protected:
             game_pass_shader(std::string const &name,
                              fs::path const &vertex_part,
@@ -87,6 +92,13 @@ namespace jkgm {
             // reflection = (strength, roughness, metalness, has surface map)
             // env        = (has environment image, unused, unused, unused)
             void set_reflection(point<4, float> reflection, point<4, float> env);
+
+            // The engine's camera: its axes in world space (w = 1 if available, 0 if not), and
+            // view = (tan of half the horizontal field of view, unused, unused, unused)
+            void set_camera(point<4, float> right,
+                            point<4, float> forward,
+                            point<4, float> up,
+                            point<4, float> view);
             void set_displacement_factor(float factor);
 
             // params = (enabled 0/1, start, end, opacity)
