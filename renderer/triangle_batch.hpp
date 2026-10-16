@@ -4,6 +4,7 @@
 #include "math/direction.hpp"
 #include "math/point.hpp"
 #include "renderer_fwd.hpp"
+#include <cstdint>
 #include <vector>
 
 namespace jkgm {
@@ -11,9 +12,11 @@ namespace jkgm {
         point<4, float> pos;
         point<2, float> texcoords;
         jkgm::color color;
+        uint32_t nativeNormal = 0U;  // packed JK per-vertex view normal (0 = unavailable)
 
         triangle_vertex();
-        triangle_vertex(point<4, float> pos, point<2, float> texcoords, jkgm::color color);
+        triangle_vertex(point<4, float> pos, point<2, float> texcoords,
+                        jkgm::color color, uint32_t normalPacked = 0U);
     };
 
     struct triangle {

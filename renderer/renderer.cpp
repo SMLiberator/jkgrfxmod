@@ -42,6 +42,8 @@
 #include "zbuffer_surface.hpp"
 #include <Windows.h>
 #include <chrono>
+#include <cmath>
+#include <cstdint>
 
 namespace jkgm {
     static WNDPROC original_wkernel_wndproc = nullptr;
@@ -972,30 +974,59 @@ namespace jkgm {
             }
         }
 
+        // Engine sideband normal is stored in view axes x=right, y=forward, z=up.
+        // Convert a normal using the inverse-transpose of the projection scale:
+        // our shader later reverses this same scale to recover view-space normals.
+        static direction<3, float> unpack_model_normal(uint32_t packed,
+                                                        float hscale, float vscale)
+        {
+            float nx = (float)( packed        & 0x3ffU) / 511.5f - 1.0f;
+            float nf = (float)((packed >> 10) & 0x3ffU) / 511.5f - 1.0f;
+            float nu = (float)((packed >> 20) & 0x3ffU) / 511.5f - 1.0f;
+            return normalize(make_direction(nx * hscale, nu * vscale, nf));
+        }
+
         void fill_buffer(triangle_batch const &tb, triangle_buffer_model *mdl)
         {
             mdl->maybe_grow_buffers(tb.capacity() * 3);
 
             auto *vx = mdl->mmio.data();
+            auto const cam = read_engine_camera();
+            float hscale = 1.0f; // 90 degree horizontal-FOV fallback
+            if(cam.valid) {
+                float half_fov = cam.fov * 0.5f * 3.14159265358979f / 180.0f;
+                hscale = std::tan(half_fov);
+            }
+            float aspect = get<x>(internal_scr_res_f) / get<y>(internal_scr_res_f);
+            float vscale = hscale / aspect;
             for(auto const &tri : tb) {
+                bool use_native_normals = (tri.v0.nativeNormal & 0x80000000u) &&
+                                          (tri.v1.nativeNormal & 0x80000000u) &&
+                                          (tri.v2.nativeNormal & 0x80000000u);
                 vx->pos = tri.v0.pos;
                 vx->texcoords = tri.v0.texcoords;
                 vx->col = tri.v0.color;
-                vx->normal = tri.normal;
+                vx->normal = use_native_normals
+                                 ? unpack_model_normal(tri.v0.nativeNormal, hscale, vscale)
+                                 : tri.normal;
 
                 ++vx;
 
                 vx->pos = tri.v1.pos;
                 vx->texcoords = tri.v1.texcoords;
                 vx->col = tri.v1.color;
-                vx->normal = tri.normal;
+                vx->normal = use_native_normals
+                                 ? unpack_model_normal(tri.v1.nativeNormal, hscale, vscale)
+                                 : tri.normal;
 
                 ++vx;
 
                 vx->pos = tri.v2.pos;
                 vx->texcoords = tri.v2.texcoords;
                 vx->col = tri.v2.color;
-                vx->normal = tri.normal;
+                vx->normal = use_native_normals
+                                 ? unpack_model_normal(tri.v2.nativeNormal, hscale, vscale)
+                                 : tri.normal;
 
                 ++vx;
             }
@@ -1225,6 +1256,19 @@ namespace jkgm {
                 make_span((D3DTLVERTEX const *)((char const *)ebd.lpData + ed.dwVertexOffset),
                           ed.dwVertexCount);
 
+            // JK experimental RGB+smooth-normal build: parallel transformed normals.
+            // Keep this separate from specular, which carries full-quality vertex RGB tint.
+            constexpr uintptr_t normal_magic_address = 0x00900f00U;
+            constexpr uintptr_t normal_slots_address = 0x00900f20U;
+            constexpr size_t normal_slot_count = 32768U;
+            auto native_normals = (uint32_t const *)nullptr;
+            if(engine_camera_detail::readable(normal_magic_address, sizeof(uint32_t)) &&
+               engine_camera_detail::readable(normal_slots_address,
+                                             normal_slot_count * sizeof(uint32_t)) &&
+               *reinterpret_cast<uint32_t const *>(normal_magic_address) == 0x314D524EU) {
+                native_normals = reinterpret_cast<uint32_t const *>(normal_slots_address);
+            }
+
             auto cmd_span = make_span((char const *)ebd.lpData + ed.dwInstructionOffset,
                                       ed.dwInstructionLength);
 
@@ -1311,6 +1355,12 @@ namespace jkgm {
                         auto const &v1 = vertex_span.data()[payload->v1];
                         auto const &v2 = vertex_span.data()[payload->v2];
                         auto const &v3 = vertex_span.data()[payload->v3];
+                        auto native1 = native_normals && payload->v1 < normal_slot_count
+                                           ? native_normals[payload->v1] : 0U;
+                        auto native2 = native_normals && payload->v2 < normal_slot_count
+                                           ? native_normals[payload->v2] : 0U;
+                        auto native3 = native_normals && payload->v3 < normal_slot_count
+                                           ? native_normals[payload->v3] : 0U;
 
                         auto sc1 = to_float_color(color_rgba8((uint8_t)RGBA_GETRED(v1.color),
                                                               (uint8_t)RGBA_GETGREEN(v1.color),
@@ -1372,17 +1422,17 @@ namespace jkgm {
                                                                         internal_scr_offset_f,
                                                                         v1),
                                                          make_point(v1.tu, v1.tv),
-                                                         c1),
+                                                         c1, native1),
                                          triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
                                                                         internal_scr_offset_f,
                                                                         v2),
                                                          make_point(v2.tu, v2.tv),
-                                                         c2),
+                                                         c2, native2),
                                          triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
                                                                         internal_scr_offset_f,
                                                                         v3),
                                                          make_point(v3.tu, v3.tv),
-                                                         c3),
+                                                         c3, native3),
                                          current_material));
                         }
                         else {
@@ -1391,17 +1441,17 @@ namespace jkgm {
                                                                         internal_scr_offset_f,
                                                                         v1),
                                                          make_point(v1.tu, v1.tv),
-                                                         c1),
+                                                         c1, native1),
                                          triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
                                                                         internal_scr_offset_f,
                                                                         v2),
                                                          make_point(v2.tu, v2.tv),
-                                                         c2),
+                                                         c2, native2),
                                          triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
                                                                         internal_scr_offset_f,
                                                                         v3),
                                                          make_point(v3.tu, v3.tv),
-                                                         c3),
+                                                         c3, native3),
                                          current_material));
                         }
                     } break;

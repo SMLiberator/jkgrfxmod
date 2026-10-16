@@ -10,10 +10,12 @@ jkgm::triangle_vertex::triangle_vertex()
 
 jkgm::triangle_vertex::triangle_vertex(point<4, float> pos,
                                        point<2, float> texcoords,
-                                       jkgm::color color)
+                                       jkgm::color color,
+                                       uint32_t normalPacked)
     : pos(pos)
     , texcoords(texcoords)
     , color(color)
+    , nativeNormal(normalPacked)
 {
 }
 
