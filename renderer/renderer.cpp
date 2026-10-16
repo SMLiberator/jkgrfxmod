@@ -1128,6 +1128,27 @@ namespace jkgm {
             ogs->game_post_opaque_composite_program.set_color_sampler(0);
             ogs->game_post_opaque_composite_program.set_emissive_sampler(1);
             ogs->game_post_opaque_composite_program.set_occlusion_sampler(2);
+            ogs->game_post_opaque_composite_program.set_normal_sampler(3);
+            ogs->game_post_opaque_composite_program.set_depth_sampler(4);
+            ogs->game_post_opaque_composite_program.set_raw_occlusion_sampler(5);
+
+            auto const &debug_view = the_config->debug_render_mode;
+            int debug_mode = debug_view == "normals" ? 1 :
+                             debug_view == "depth" ? 2 :
+                             debug_view == "ssao" ? 3 :
+                             debug_view == "ssao_raw" ? 4 : 0;
+            ogs->game_post_opaque_composite_program.set_debug_mode(debug_mode);
+
+            gl::set_active_texture_unit(5);
+            gl::bind_texture(gl::texture_bind_target::texture_2d, frame_ao->get_raw_ssao_texture());
+
+            gl::set_active_texture_unit(4);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             frame_screen->get_resolved_depth_texture());
+
+            gl::set_active_texture_unit(3);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             frame_screen->get_resolved_normal_texture());
 
             gl::set_active_texture_unit(2);
             gl::bind_texture(gl::texture_bind_target::texture_2d, frame_ao->get_ssao_texture());
@@ -1512,9 +1533,12 @@ namespace jkgm {
 
             bool posterize_lighting = the_config->enable_posterized_lighting;
             draw_game_gbuffer_pass(trimdl, posterize_lighting);
-            draw_game_transparency_pass(trimdl, posterize_lighting);
-
-            draw_hud();
+            if(the_config->debug_render_mode == "none") {
+                draw_game_transparency_pass(trimdl, posterize_lighting);
+                draw_hud();
+            }
+            // Debug views show only opaque G-buffer content, without HUD or
+            // transparent overlays, so they cannot hide the source of an AO artifact.
 
             // Reset state:
             is_gun = false;
