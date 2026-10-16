@@ -837,7 +837,7 @@ namespace jkgm {
         {
             gl::set_active_texture_unit(unit);
             gl::bind_texture(gl::texture_bind_target::texture_2d, tex);
-            if(tex == gl::default_texture) {
+            if(tex.value() == 0U) {
                 return;
             }
             gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d,
