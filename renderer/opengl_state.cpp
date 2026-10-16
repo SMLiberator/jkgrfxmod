@@ -378,7 +378,8 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
                                                box<2, int> actual_menu_area,
                                                config const *the_config)
     : data_root(the_config->data_path)
-    , enable_post(the_config->enable_post)
+    , enable_post(the_config->enable_post && the_config->debug_render_mode == "none")
+    , debug_rendering(the_config->debug_render_mode != "none")
     , menu_program(data_root)
     , game_opaque_pass_program(data_root)
     , game_post_ssao_program(data_root)
