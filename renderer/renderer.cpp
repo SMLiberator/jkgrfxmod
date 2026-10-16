@@ -917,7 +917,7 @@ namespace jkgm {
                 // pack's default
                 gl::texture_view env_map = gl::default_texture;
                 bool has_env_map = false;
-                if(mat->env_map.has_value()) {
+                if(the_config->enable_reflections && mat->env_map.has_value()) {
                     env_map = texture_cache->get_texture_handle(*mat->env_map);
                     has_env_map = true;
                 }
@@ -1084,10 +1084,10 @@ namespace jkgm {
                 auto const current_color = fog.color.value();
                 auto const current_info = fog.info.value();
                 ogs->game_opaque_pass_program.set_fog(
-                    make_point(fog.enabled ? 1.0f : 0.0f,
-                               current_info[0],
+                    make_point(current_info[0],
                                current_info[1],
-                               current_info[2]),
+                               the_config->enable_fog ? current_info[2] : 0.0f,
+                               0.0f),
                     color_rgb(current_color[0], current_color[1], current_color[2]));
             }
 
@@ -1189,10 +1189,10 @@ namespace jkgm {
                 auto const current_color = fog.color.value();
                 auto const current_info = fog.info.value();
                 ogs->game_transparency_pass_program.set_fog(
-                    make_point(fog.enabled ? 1.0f : 0.0f,
-                               current_info[0],
+                    make_point(current_info[0],
                                current_info[1],
-                               current_info[2]),
+                               the_config->enable_fog ? current_info[2] : 0.0f,
+                               0.0f),
                     color_rgb(current_color[0], current_color[1], current_color[2]));
             }
             gl::set_active_texture_unit(0);

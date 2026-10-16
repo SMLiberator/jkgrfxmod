@@ -24,17 +24,7 @@ const float ssao_fade_end = 256.0;
 
 float sample_depth_direct(vec2 pos)
 {
-    float depth_samp = texture(depth_image, pos).r;
-    return depth_samp;
-
-    const float z_near = 0.1;
-    const float z_far = 100.0;
-
-    float z_n = 2.0 * depth_samp;
-    float z_e = (2.0 * z_near * z_far) /
-        (z_far + z_near - z_n * (z_far - z_near));
-
-    return z_e;
+    return texture(depth_image, pos).r;
 }
 
 // Returns 1 if the sample is occluded, 0 otherwise
@@ -45,25 +35,35 @@ float sample_depth(vec3 origin, vec3 offset)
     vec2 sample_tc = origin.xy + (offset.xy * depth_radius);
     float sample_z = origin.z + (offset.z * kernel_thickness);
 
+    // Offscreen pixels and empty background must not count as occluders.
+    if(any(lessThan(sample_tc, vec2(0.0))) ||
+       any(greaterThanEqual(sample_tc, vec2(1.0)))) {
+        return 0.0;
+    }
     float occ_depth = sample_depth_direct(sample_tc);
+    if(occ_depth <= 0.0 || occ_depth >= ssao_fade_end) {
+        return 0.0;
+    }
 
     float range_check =
         smoothstep(0.0, 1.0,
-                   kernel_cutoff / abs(origin.z - occ_depth));
+                   kernel_cutoff / max(abs(origin.z - occ_depth), 0.0001));
 
     return float(occ_depth < (sample_z - kernel_bias)) * range_check;
 }
 
 void main()
 {
-    vec3 rndnrm = normalize(texture(normal_image, vp_texcoords).rgb);
-    float origin_depth = texture(depth_image, vp_texcoords).r;
+    vec3 normal_sample = texture(normal_image, vp_texcoords).rgb;
+    float origin_depth = sample_depth_direct(vp_texcoords);
 
-    // No SSAO beyond the fade distance.
-    if (origin_depth >= ssao_fade_end) {
+    // Skip unrendered pixels and degenerate normals.
+    if(origin_depth <= 0.0 || origin_depth >= ssao_fade_end ||
+       dot(normal_sample, normal_sample) < 0.0001) {
         out_color = vec4(0.0);
         return;
     }
+    vec3 rndnrm = normalize(normal_sample);
 
     vec3 rndvec = texture(noise_image, gl_FragCoord.xy / 4.0).xyz;
 
