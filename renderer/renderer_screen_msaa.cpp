@@ -214,6 +214,15 @@ jkgm::renderer_screen_msaa::renderer_screen_msaa(size<2, int> screen_res,
                      gl::texture_pixel_format::rgba,
                      gl::texture_pixel_type::float32)
 {
+    // Resolve textures are sampled as point values by SSAO; interpolating across
+    // foreground/background silhouettes can create false occlusion.
+    for(gl::texture_view tex : {gl::texture_view(gbuffer_normal_resolve.tex),
+                                gl::texture_view(gbuffer_depth_resolve.tex)}) {
+        gl::bind_texture(gl::texture_bind_target::texture_2d, tex);
+        gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d, gl::mag_filter::nearest);
+        gl::set_texture_min_filter(gl::texture_bind_target::texture_2d, gl::min_filter::nearest);
+    }
+
     if(min_sample_factor.has_value()) {
         gl::enable(gl::capability::sample_shading);
         gl::set_min_sample_shading_factor(*min_sample_factor);
@@ -235,7 +244,8 @@ void jkgm::renderer_screen_msaa::begin_opaque_pass()
     gl::clear_buffer_color(0, color::zero());
     gl::clear_buffer_color(1, color::zero());
     gl::clear_buffer_color(2, color::zero());
-    gl::clear_buffer_color(3, color::fill(1.0f));
+    // R16F linear view depth: 65504 marks pixels with no opaque geometry.
+    gl::clear_buffer_color(3, color(65504.0f, 0.0f, 0.0f, 0.0f));
     gl::clear_buffer_depth(1.0f);
 }
 
