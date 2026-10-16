@@ -278,18 +278,6 @@ namespace {
         return v < lo ? lo : (v > hi ? hi : v);
     }
 
-    // SetFogEnabled(int enabled)
-    void __cdecl cog_set_fog_enabled(void *ctx)
-    {
-        jkgm::get_fog_settings().enabled = cog_pop_int(ctx) != 0;
-    }
-
-    // int GetFogEnabled()
-    void __cdecl cog_get_fog_enabled(void *ctx)
-    {
-        cog_push_int(ctx, jkgm::get_fog_settings().enabled ? 1 : 0);
-    }
-
     // SetFogColor(vector rgb, float fadeTime)
     //   rgb components 0.0 - 1.0, e.g. '0.45 0.50 0.58'
     //   fadeTime in seconds; 0.0 changes the color immediately
@@ -466,8 +454,6 @@ namespace {
     // The array size is deduced from the list, so adding or removing a verb can never leave
     // empty entries behind (those would be registered with a null name and handler).
     constexpr std::array fx_verbs = {
-        cog_verb_entry{"setfogenabled", cog_set_fog_enabled},
-        cog_verb_entry{"getfogenabled", cog_get_fog_enabled},
         cog_verb_entry{"setfogcolor", cog_set_fog_color},
         cog_verb_entry{"getfogcolor", cog_get_fog_color},
         cog_verb_entry{"setfoginfo", cog_set_fog_info},
