@@ -22,79 +22,59 @@ in float vp_z;
 layout(location = 0) out vec4 out_color;
 
 // ---------------------------------------------------------------------------
-// Dynamic fog: replaces the fixed FOG_START / FOG_END / color / opacity
-// constants in BOTH game_opaque_pass.frag and game_trns_pass.frag.
-// The values come from the renderer, set by the SetFog* COG verbs.
+// Dynamic fog: values are supplied by the runtime SetFog* COG verbs.
+// Keep this definition identical in opaque and transparent game passes.
 // ---------------------------------------------------------------------------
-uniform vec4 fog_params;  // x = enabled (0 or 1), y = start, z = end, w = opacity
-uniform vec3 fog_color;   // 0..1 as written in the COG script (do the same
-                          // sRGB->linear conversion here that you do today)
+uniform vec4 fog_params;  // x=enabled, y=start, z=end, w=opacity
+uniform vec3 fog_color;
 
 float fog_factor(float dist)
 {
     float span = max(fog_params.z - fog_params.y, 0.0001);
-    float f = clamp((dist - fog_params.y) / span, 0.0, 1);
+    float f = clamp((dist - fog_params.y) / span, 0.0, 1.0);
     return fog_params.x * fog_params.w * f;
 }
 
 // ---------------------------------------------------------------------------
-// Reflections (environment mapping). Keep this block identical in BOTH
-// game_opaque_pass.frag and game_trns_pass.frag.
-//
-// Materials from a material pack can reflect an equirectangular environment image. How strongly
-// is set per material (reflection_strength, plus the optional surface map: R = reflectivity,
-// G = roughness, B = metalness). The result is added like emissive light, so SSAO does not
-// darken it and it fades into fog.
-//
-// The renderer reads the engine's current camera every frame, so the environment stays fixed in
-// the world as you turn, and the field of view follows zoom and other changes made by scripts.
-// If the camera cannot be read, the environment turns with the view and the field of view is
-// assumed to be REFLECTION_HFOV_DEGREES.
+// Reflections (environment mapping). Keep this block identical in the opaque
+// and transparent passes. Material factors x R/G/B surface map remain intact.
+// Metalness now uses a Schlick Fresnel F0, and is colored by the UNLIT material
+// base color instead of the already vertex-lit diffuse color.
 // ---------------------------------------------------------------------------
-uniform sampler2D surface_map;   // R = reflectivity, G = roughness, B = metalness (linear)
+uniform sampler2D surface_map;   // R=reflectivity, G=roughness, B=metalness (linear)
 uniform sampler2D env_map;       // equirectangular environment image
-uniform vec4 reflection_params;  // x = strength, y = roughness, z = metalness, w = has surface map
-uniform vec4 env_params;         // x = has an environment image
-uniform vec4 camera_right;       // xyz = camera right axis in world space, w = 1 if the camera was read
-uniform vec4 camera_forward;     // xyz = camera forward axis in world space
-uniform vec4 camera_up;          // xyz = camera up axis in world space
-uniform vec4 view_params;        // x = tan(half the horizontal field of view)
+uniform vec4 reflection_params; // x=strength, y=roughness, z=metalness, w=has surface map
+uniform vec4 env_params;        // x=has environment image
+uniform vec4 camera_right;      // xyz=camera right in world space, w=1 if available
+uniform vec4 camera_forward;    // xyz=camera forward in world space
+uniform vec4 camera_up;         // xyz=camera up in world space
+uniform vec4 view_params;       // x=tan(horizontal FOV / 2)
 uniform vec2 screen_resolution;
 
-// Only used if the engine camera could not be read: the horizontal field of view to assume
 const float REFLECTION_HFOV_DEGREES = 90.0;
-
-// Turns the environment image around the vertical axis (degrees), to line up the sun, a skyline...
 const float ENV_YAW_DEGREES = 0.0;
-
-// Brightness of the environment image as seen in reflections
 const float ENV_INTENSITY = 1.0;
 
-// Fresnel look: how much of the reflection is visible looking straight at a surface (0.25 = a
-// quarter), rising to full strength at glancing angles. FRESNEL_POWER = how fast it ramps up.
-const float FRESNEL_BIAS = 0.25;
-const float FRESNEL_POWER = 4.0;
+// Ordinary nonmetals reflect about 4% at normal incidence in a PBR model.
+// Increase this artistically (e.g. 0.08) if glass/clear-coat looks too weak.
+const float DIELECTRIC_F0 = 0.04;
 
-// Tuning aid for reflective materials (those with a strength above 0):
-//   0  off
-//   1  show the reflection direction (relative to the view) as a color
-//   2  show the surface normal (relative to the view) as a color
-//   3  show the environment at full strength, ignoring strength, fresnel and tint
-//   4  show whether the engine camera was read: green = yes, red = no (fallback in use)
-//   5  show the surface normal in world space as a color. On any given wall this should NOT
-//      change as you turn or move; if it does, the camera orientation is being applied wrongly.
+// Debug 0=off; 1=view reflection direction; 2=view normal; 3=raw environment;
+// 4=camera validity; 5=world-space normal.
 const int REFLECTION_DEBUG = 0;
-
 const float REFLECTION_PI = 3.14159265359;
 
-// Returns the reflection to add, and the material's metalness (used to remove diffuse color)
-vec3 compute_reflection(vec3 albedo_rgb, vec2 texcoords, out float metalness)
+// Returns added EnvMap radiance and effective metalness (used to remove diffuse).
+// The base_color is BEFORE JK's vertex light intensity / vertex RGB multiplier:
+// painted metal should not lose environmental reflections in dark lighting.
+vec3 compute_reflection(vec3 base_color, vec2 texcoords, out float metalness)
 {
-    // Sampled before any early-out so the texture lookup stays in uniform control flow
+    // Kept before early-out to preserve uniform texture sampling behavior.
     vec3 surface = texture(surface_map, texcoords).rgb;
 
+    // Preserve previous behavior: no EnvMap / no reflection strength means that
+    // this effect doesn't suppress the material's regular diffuse component.
     metalness = 0.0;
-
     float strength = reflection_params.x;
     if(env_params.x < 0.5 || strength <= 0.0) {
         return vec3(0.0);
@@ -107,23 +87,20 @@ vec3 compute_reflection(vec3 albedo_rgb, vec2 texcoords, out float metalness)
         roughness *= surface.g;
         metalness *= surface.b;
     }
-
     metalness = clamp(metalness, 0.0, 1.0);
 
     bool have_camera = camera_right.w > 0.5;
-
-    // Undo the projection scale: positions and normals arrive as (clip x, clip y, depth)
     float h_scale = have_camera ? view_params.x : tan(radians(REFLECTION_HFOV_DEGREES) * 0.5);
     float aspect = screen_resolution.x / max(screen_resolution.y, 1.0);
     vec2 view_scale = vec2(h_scale, h_scale / aspect);
 
-    // View space: x right, y up, z forward
-    vec3 v = normalize(vec3(vp_pos.xy * view_scale, vp_pos.z));      // eye -> surface
+    // View space: x right, y up, z forward. Normals are passed with a projection
+    // scale, which we remove here so the reflection uses genuine geometry.
+    vec3 v = normalize(vec3(vp_pos.xy * view_scale, vp_pos.z)); // eye -> surface
     vec3 n = normalize(vec3(vp_normal.xy / view_scale, vp_normal.z));
     if(dot(n, v) > 0.0) {
-        n = -n; // face the viewer
+        n = -n;
     }
-
     vec3 r = reflect(v, n);
 
     if(REFLECTION_DEBUG == 1) {
@@ -136,11 +113,8 @@ vec3 compute_reflection(vec3 albedo_rgb, vec2 texcoords, out float metalness)
         return have_camera ? vec3(0.0, 0.6, 0.0) : vec3(0.6, 0.0, 0.0);
     }
 
-    // The direction the environment is looked up in: x right, y up, z forward, where "forward"
-    // is a fixed direction in the world once the engine camera is known
     vec3 env_dir = r;
     if(have_camera) {
-        // The camera axes are world-space directions; JK's world has x and y horizontal, z up
         vec3 world_r = camera_right.xyz * r.x + camera_forward.xyz * r.z + camera_up.xyz * r.y;
         env_dir = vec3(world_r.x, world_r.z, world_r.y);
 
@@ -153,12 +127,11 @@ vec3 compute_reflection(vec3 albedo_rgb, vec2 texcoords, out float metalness)
         return vec3(0.6, 0.0, 0.0);
     }
 
-    // Direction -> equirectangular image coordinates (top row of the image = straight up)
     vec2 uv = vec2(fract(atan(env_dir.x, env_dir.z) / (2.0 * REFLECTION_PI) + 0.5 +
                          ENV_YAW_DEGREES / 360.0),
                    0.5 - asin(clamp(env_dir.y, -1.0, 1.0)) / REFLECTION_PI);
 
-    // Rough surfaces look at blurrier (smaller) versions of the image
+    // Preserve existing roughness->mip blur approximation.
     vec2 env_size = vec2(textureSize(env_map, 0));
     float lod = clamp(roughness, 0.0, 1.0) * log2(max(env_size.x, env_size.y));
     vec3 env = textureLod(env_map, uv, lod).rgb * ENV_INTENSITY;
@@ -167,13 +140,13 @@ vec3 compute_reflection(vec3 albedo_rgb, vec2 texcoords, out float metalness)
         return env;
     }
 
+    // Schlick Fresnel. Dielectrics use a neutral F0; metals use their UNLIT
+    // base-color spectrum as specular reflectance, not vertex-lighted albedo.
+    vec3 f0 = mix(vec3(DIELECTRIC_F0), clamp(base_color, 0.0, 1.0), metalness);
     float cos_theta = clamp(dot(n, -v), 0.0, 1.0);
-    float fresnel = mix(FRESNEL_BIAS, 1.0, pow(1.0 - cos_theta, FRESNEL_POWER));
+    vec3 fresnel = f0 + (vec3(1.0) - f0) * pow(1.0 - cos_theta, 5.0);
 
-    // Metals tint their reflections with their own color
-    vec3 tint = mix(vec3(1.0), albedo_rgb, metalness);
-
-    return env * tint * (strength * fresnel);
+    return env * fresnel * strength;
 }
 
 mat3 construct_tbn()
@@ -232,7 +205,6 @@ vec2 parallax_mapping(vec2 tc)
 void main()
 {
     vec2 adj_texcoords = vp_texcoords;
-
     if(displacement_factor != 0.0) {
         adj_texcoords = parallax_mapping(vp_texcoords);
     }
@@ -244,37 +216,28 @@ void main()
         if(albedo_map_sample.a < alpha_cutoff) {
             discard;
         }
-
         albedo_map_sample.a = 1.0;
     }
 
     vec4 posterized_vertex_color = vec4(ceil(vp_color * 64.0)) / 64.0;
     vec4 vertex_color = mix(vp_color, posterized_vertex_color, features.w);
-
     vec4 albedo = albedo_map_sample * vertex_color * albedo_factor;
 
     vec3 emissive_map_sample = texture(emissive_map, adj_texcoords).rgb;
     emissive_map_sample = mix(vec3(1.0), emissive_map_sample, features.y);
     vec3 emissive = emissive_map_sample * emissive_factor;
-
     float fog_amount = fog_factor(vp_z);
 
+    vec3 unlit_base_color = albedo_map_sample.rgb * albedo_factor.rgb;
     float metalness;
-    vec3 reflection = compute_reflection(albedo.rgb, adj_texcoords, metalness);
+    vec3 reflection = compute_reflection(unlit_base_color, adj_texcoords, metalness);
 
-    // The blend is (ONE, ONE_MINUS_SRC_ALPHA). The surface color is output the way the stock
-    // shader did, which keeps rain, smoke and similar effects at their original strength.
-    // (Material pack textures already have alpha multiplied into their color, so multiplying it
-    // in again made effects far too faint.)
-    //   0.0 = stock look, 1.0 = standard alpha blend (fainter effects)
+    // Preserve the original transparency blending convention:
+    // (ONE, ONE_MINUS_SRC_ALPHA), not premultiplied color twice.
     const float TRANSLUCENT_COLOR_ALPHA_WEIGHT = 0.0;
     vec3 surface_color = albedo.rgb * (1.0 - metalness) *
                          mix(1.0, albedo.a, TRANSLUCENT_COLOR_ALPHA_WEIGHT);
-
-    // Fog is the exception: it is weighted by alpha, so fully transparent texels add no fog-colored
-    // glow and partly transparent edges do not turn black.
     vec3 lit = surface_color * (1.0 - fog_amount) + fog_color * (fog_amount * albedo.a);
 
-    // Reflections are added like emissive light, so they show on glass whatever its transparency
     out_color = vec4(emissive + reflection * (1.0 - fog_amount) + lit, albedo.a);
 }
