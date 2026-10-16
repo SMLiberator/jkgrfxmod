@@ -58,8 +58,16 @@ namespace jkgm {
     }
 
     // Call after post_to_srgb.use_program() and before drawing the final pass.
-    inline void apply_post_fx(shaders::post_to_srgb_shader &shader)
+    inline void apply_post_fx(shaders::post_to_srgb_shader &shader, bool enable_post)
     {
+        if(!enable_post) {
+            // Preserve mandatory linear->sRGB presentation but bypass optional effects.
+            shader.set_film_grain(make_point(0.0f, 1.0f, 0.0f, 0.0f));
+            shader.set_vignette(make_point(0.0f, 0.0f, 0.0f, 0.0f));
+            shader.set_color_filter(0.0f, 1.0f, 1.0f);
+            return;
+        }
+
         double const now = effect_clock_now();
 
         // Film grain

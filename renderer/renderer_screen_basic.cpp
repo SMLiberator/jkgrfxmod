@@ -85,8 +85,9 @@ jkgm::render_gbuffer::render_gbuffer(size<2, int> dims, render_depthbuffer *rbo)
                      gl::texture_pixel_type::float32,
                      make_span((char const *)nullptr, 0U));
     gl::set_texture_max_level(gl::texture_bind_target::texture_2d, 0U);
-    gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d, gl::mag_filter::linear);
-    gl::set_texture_min_filter(gl::texture_bind_target::texture_2d, gl::min_filter::linear);
+    // Sample normals and linear depth without mixing foreground and background.
+    gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d, gl::mag_filter::nearest);
+    gl::set_texture_min_filter(gl::texture_bind_target::texture_2d, gl::min_filter::nearest);
     gl::set_texture_wrap_mode(gl::texture_bind_target::texture_2d,
                               gl::texture_direction::s,
                               gl::texture_wrap_mode::clamp_to_border);
@@ -110,8 +111,9 @@ jkgm::render_gbuffer::render_gbuffer(size<2, int> dims, render_depthbuffer *rbo)
                      gl::texture_pixel_type::float32,
                      make_span((char const *)nullptr, 0U));
     gl::set_texture_max_level(gl::texture_bind_target::texture_2d, 0U);
-    gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d, gl::mag_filter::linear);
-    gl::set_texture_min_filter(gl::texture_bind_target::texture_2d, gl::min_filter::linear);
+    // Sample normals and linear depth without mixing foreground and background.
+    gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d, gl::mag_filter::nearest);
+    gl::set_texture_min_filter(gl::texture_bind_target::texture_2d, gl::min_filter::nearest);
     gl::set_texture_wrap_mode(gl::texture_bind_target::texture_2d,
                               gl::texture_direction::s,
                               gl::texture_wrap_mode::clamp_to_border);
@@ -167,7 +169,8 @@ void jkgm::renderer_screen_basic::begin_opaque_pass()
     gl::clear_buffer_color(0, color::zero());
     gl::clear_buffer_color(1, color::zero());
     gl::clear_buffer_color(2, color::zero());
-    gl::clear_buffer_color(3, color::fill(1.0f));
+    // Linear R16F view depth: empty pixels are far, not a surface one unit away.
+    gl::clear_buffer_color(3, color(65504.0f, 0.0f, 0.0f, 0.0f));
     gl::clear_buffer_depth(1.0f);
 }
 

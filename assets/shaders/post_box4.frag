@@ -15,13 +15,12 @@ layout(location = 0) out vec4 out_color;
 // edge_depth_threshold:  neighbours whose depth differs by less than this count as the same surface
 // edge_normal_threshold: neighbours whose normal points the same way (dot product above this,
 //                        1.0 = identical) count as the same surface
-// edge_require_both:     0 = a neighbour passes if EITHER test passes (softer, keeps the blur on
-//                        sloped floors and walls), 1 = it must pass BOTH (sharper edges, but the
-//                        4x4 noise pattern can show on sloped surfaces)
+// Both depth and normal must agree to keep AO from bleeding over silhouettes.
+// A relative depth tolerance also helps gradual slopes remain smooth.
 // ---------------------------------------------------------------------------------------
-const float edge_depth_threshold = 0.1;
-const float edge_normal_threshold = 0.9;
-const int edge_require_both = 0;
+const float edge_depth_threshold = 0.2;
+const float edge_normal_threshold = 0.75;
+const float ssao_fade_end = 256.0;
 
 vec3 safe_normal(vec3 v)
 {
@@ -86,21 +85,26 @@ void main()
     nsamps[14] = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 0,  1)).rgb);
     nsamps[15] = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 1,  1)).rgb);
 
-    float base_samp = samps[10];
     float base_dsamp = dsamps[10];
     vec3 base_nsamp = nsamps[10];
+    if(base_dsamp <= 0.0 || base_dsamp >= ssao_fade_end ||
+       length(base_nsamp) < 0.0001) {
+        out_color = vec4(0.0);
+        return;
+    }
 
+    float depth_tolerance = max(edge_depth_threshold, base_dsamp * 0.0125);
     float occlusion = 0.0;
     float occ_weights = 0.0;
     for(int i = 0; i < 16; ++i) {
-        bool depth_ok = abs(dsamps[i] - base_dsamp) < edge_depth_threshold;
+        bool depth_ok = dsamps[i] > 0.0 && dsamps[i] < ssao_fade_end &&
+                        abs(dsamps[i] - base_dsamp) < depth_tolerance;
         bool normal_ok = dot(nsamps[i], base_nsamp) > edge_normal_threshold;
-        float weight = float(edge_require_both != 0 ? (depth_ok && normal_ok)
-                                                    : (depth_ok || normal_ok));
+        float weight = float(depth_ok && normal_ok);
         occlusion += weight * samps[i];
         occ_weights += weight;
     }
 
-    occlusion /= occ_weights;
+    occlusion /= max(occ_weights, 1.0);
     out_color = vec4(occlusion, 0.0, 0.0, 0.0);
 }

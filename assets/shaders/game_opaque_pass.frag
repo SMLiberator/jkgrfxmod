@@ -28,14 +28,14 @@ layout(location = 3) out vec4 out_depth;
 // Dynamic fog: values are supplied by the runtime SetFog* COG verbs.
 // Keep this definition identical in opaque and transparent game passes.
 // ---------------------------------------------------------------------------
-uniform vec4 fog_params;  // x=enabled, y=start, z=end, w=opacity
+uniform vec4 fog_params;  // x=start, y=end, z=opacity, w=reserved
 uniform vec3 fog_color;
 
 float fog_factor(float dist)
 {
-    float span = max(fog_params.z - fog_params.y, 0.0001);
-    float f = clamp((dist - fog_params.y) / span, 0.0, 1.0);
-    return fog_params.x * fog_params.w * f;
+    float span = max(fog_params.y - fog_params.x, 0.0001);
+    float f = clamp((dist - fog_params.x) / span, 0.0, 1.0);
+    return fog_params.z * f;
 }
 
 // ---------------------------------------------------------------------------

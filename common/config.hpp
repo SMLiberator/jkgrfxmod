@@ -22,6 +22,11 @@ namespace jkgm {
         float max_anisotropy = 2.0f;
         std::optional<antialiasing_config> antialiasing;
         bool enable_bloom = true;
+        // Master switches for optional effects. Blur gates upcoming frame/spatial blur effects.
+        bool enable_blur = true;
+        bool enable_fog = true;
+        bool enable_post = true;
+        bool enable_reflections = true;
         bool enable_ssao = true;
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
