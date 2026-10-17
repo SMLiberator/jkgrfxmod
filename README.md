@@ -44,3 +44,25 @@ For clean comparisons, debug views automatically bypass bloom, vignette, film gr
 For each mode, take a screenshot from the **same camera position**, especially at a spot where unwanted dark patches appear. Compare `ssao_raw` with `ssao` to distinguish sampling errors from blur bleeding. The diagnostic requires `"enable_ssao":true`. Compare `antialiasing` MSAA enabled/disabled independently.
 
 The diagnostic build is not intended for normal play; set `"debug_render_mode":"none"` to return to normal operation.
+
+
+### Native versus geometric normal isolation
+
+Set `"debug_force_face_normals":true` to bypass the smooth vertex normals
+supplied by the patched JK executable and use a per-triangle normal computed
+from the rendered triangle positions instead. It affects all drawn meshes,
+independently of whether they have textures or vertex colors.
+
+Try this on the two imported levels where `debug_render_mode="normals"`
+and `"ssao_raw"` show discontinuities:
+
+1. `"debug_force_face_normals":false` uses the usual native normal source.
+2. `"debug_force_face_normals":true` forces geometric face normals.
+3. Compare the same stationary camera views in `"normals"` and `"ssao_raw"`.
+4. Expect visible hard triangle edges with face normals; that's normal. Look
+   instead for **unexpected** changes *within planar surfaces* or stray AO patches.
+
+If unexpected artifacts disappear, investigate the source 3DO normals or the
+patched executable's native-normal validity/packing. If both modes look broken,
+investigate surface triangulation, winding, degeneracy and geometric normal
+reconstruction. The setting is off by default and is diagnostic only.
