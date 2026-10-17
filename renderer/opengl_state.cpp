@@ -379,6 +379,7 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
                                                config const *the_config)
     : data_root(the_config->data_path)
     , enable_post(the_config->enable_post)
+    , enable_blur(the_config->enable_blur)
     , menu_program(data_root)
     , game_opaque_pass_program(data_root)
     , game_post_ssao_program(data_root)
@@ -392,12 +393,15 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , post_low_pass(data_root)
     , post_scale(data_root)
     , post_to_srgb(data_root)
+    , post_frame_blend(data_root)
     , menumdl(screen_res, actual_menu_area)
     , hudmdl(screen_res, internal_screen_res, actual_scr_area, the_config->hud_scale)
     , hud_texture_front(hud_texture_a)
     , hud_texture_back(hud_texture_b)
     , screen_postbuffer1(screen_res)
     , screen_postbuffer2(screen_res)
+    , frame_blend_history_a(screen_res)
+    , frame_blend_history_b(screen_res)
     , bloom_layers(screen_res)
 {
     LOG_DEBUG("Loading OpenGL assets");
