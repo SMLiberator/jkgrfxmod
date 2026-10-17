@@ -126,9 +126,7 @@ namespace jkgm {
         // Master optional post-processing switch (color-space conversion stays active).
         bool enable_post = true;
         bool enable_blur = true;
-        bool enable_frame_blend = true;
-        bool enable_distance_blur = true;
-        bool enable_peripheral_blur = true;
+        bool enable_trails = true;
 
         shaders::menu_shader menu_program;
 
