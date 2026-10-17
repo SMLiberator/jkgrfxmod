@@ -126,6 +126,8 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , env_map(gl::get_uniform_location(the_program, "env_map"))
     , reflection_params(gl::get_uniform_location(the_program, "reflection_params"))
     , env_params(gl::get_uniform_location(the_program, "env_params"))
+    , sun_direction(gl::get_uniform_location(the_program, "sun_direction"))
+    , sun_color_intensity(gl::get_uniform_location(the_program, "sun_color_intensity"))
     , camera_right(gl::get_uniform_location(the_program, "camera_right"))
     , camera_forward(gl::get_uniform_location(the_program, "camera_forward"))
     , camera_up(gl::get_uniform_location(the_program, "camera_up"))
@@ -246,6 +248,13 @@ void jkgm::shaders::game_pass_shader::set_reflection(point<4, float> reflection,
     // Shaders that do not declare these uniforms get location -1, which OpenGL ignores.
     gl::set_uniform_vector(reflection_params, reflection);
     gl::set_uniform_vector(env_params, env);
+}
+
+void jkgm::shaders::game_pass_shader::set_sun(
+    point<4, float> direction, point<4, float> color_intensity)
+{
+    gl::set_uniform_vector(sun_direction, direction);
+    gl::set_uniform_vector(sun_color_intensity, color_intensity);
 }
 
 void jkgm::shaders::game_pass_shader::set_camera(point<4, float> right,

@@ -23,6 +23,46 @@ Optional boolean master switches, all `true` by default:
 
 The existing `enable_ssao` switch remains independent of `enable_post`, making it useful for testing SSAO artifacts. `enable_bloom` independently disables bloom even when `enable_post` is true.
 
+## COG-controlled directional sun and specular highlights
+
+Set a single directional sun per level through COG:
+
+```c
+// Direction points TOWARD the sun in WORLD space (JK: X/Y horizontal, Z up).
+SetSunInfo('0.4 0.2 1', '1 0.85 0.65', 2.0, 1.5);
+vector dir = GetSunDirection();
+vector rgb = GetSunColor();
+flex intensity = GetSunIntensity();
+ResetSun();
+```
+
+`SetSunInfo(direction, color, intensity, animTime)` uses independent
+wall-clock interpolations for direction, color, and intensity. The
+direction is normalized on input and when evaluated; color is clamped
+to [0,1], intensity to [0,16]. `animTime` is seconds, with 0 giving an
+immediate update. `ResetSun()` disables sunlight immediately, restoring
+white light and a direction of `'0 0 1'`. Default intensity is **0**, so
+existing levels look unchanged until `SetSunInfo` is called.
+
+Sunlight is world-space, converted to view space from the JK camera's
+orientation (camera position is irrelevant). It does not require an
+environment map. If the camera orientation cannot be read safely,
+the sun contribution is disabled for that frame.
+
+Sun highlights use a GGX/Schlick microfacet approximation and the
+material's existing `reflection_strength`, `roughness`, `metalness`,
+`surface_map` and normal maps. The new sunlight term is added to
+reflections in both the opaque and transparent passes, including fluid
+blending, and respects distance fog. It uses the same HDR path as reflections
+so bloom can accentuate bright glints. This is SPECULAR ONLY: JK's
+vertex-baked diffuse lighting remains unchanged. No shadowing is applied,
+so the sun can illuminate surfaces obscured from the sun by other geometry.
+
+These custom verbs require the existing JK.dll `InitNewCogVerbs` hook.
+Test rotating the camera without changing the sun position, changing sun
+color/intensity over time, normal-mapped water ripples, rough/dull surfaces,
+and reflections with no environment image.
+
 ### Fog COG changes
 
 Fog no longer has separate enabled state. `SetFogInfo(vector(start, end, opacity), fadeTime)` uses opacity alone, where `0` disables fog. `GetFogInfo()`, `SetFogColor()`, `GetFogColor()`, and `ResetFog()` remain. The old `SetFogEnabled` and `GetFogEnabled` verbs have been removed; existing COGs using those verbs must be updated.
