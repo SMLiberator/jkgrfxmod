@@ -134,3 +134,53 @@ even if COG has set nonzero distance/peripheral strengths; temporal trails still
 work. With `enable_trails:false`, history continues updating from the live
 frame without making a contribution, so re-enabling it does not revive an
 old image. The matching COG verbs remain available regardless of either switch.
+
+
+## Material blend modes
+
+Material packs now support an optional `blend_mode`, independent of the
+existing `alpha_mode` (blend/mask). Valid choices:
+- `normal` (default): exactly the existing renderer blending behavior
+- `additive`: add colored light to the scene, useful for flares/fire/glows
+- `multiply`: multiply underlying scene color by a texture-dependent
+  factor, useful for blood/dirt/stains
+
+These can be specified on an individual material **or** as a pack-wide
+default. The compiler validates each mode and writes it to the generated
+`metadata.json`, which the runtime reads when loading replacement materials.
+
+Example input script material:
+
+```json
+{
+  "name": "blood_pool",
+  "albedo_map": "blood.png",
+  "alpha_mode": "blend",
+  "blend_mode": "multiply",
+  "replaces": [{"name": "blood.mat", "cel": 0}]
+}
+```
+
+The alpha channel controls the strength of the new modes. **Additive** adds
+the lit material's color, scaled by texture/material alpha; an alpha-zero
+texel contributes nothing. **Multiply** uses the opacity-weighted factor
+`mix(white, material_tint, alpha)`, so transparent pixels leave the background
+untouched. Both preserve the existing framebuffer alpha.
+
+Special-blend materials always render in the transparency stage and do not
+write to the opaque color, depth, normal, or SSAO buffers, **even if their
+original JK material was opaque**. That means they can still be occluded by
+the scene depth, without corrupting subsequent post effects.
+
+This stage adds blend modes **only**, not depth-clipped/volume decals. Their
+geometry must still be placed against the target surface. Since the renderer
+cannot perfectly depth-sort the additive/multiply geometry originally submitted
+as opaque triangles against arbitrary transparent world geometry, overlapping
+transparent objects may exhibit order-dependent composition. There is no
+extra full-screen rendering pass for these effects.
+
+**Test cases:** a partially transparent PNG with a black-ish multiply
+tint over a brightly lit floor, alpha-zero regions against several backgrounds,
+an additive glow overlapping opaque scenery, and an originally opaque JK face
+overridden with a special blend mode. Confirm that `normal` materials and
+existing alpha-masked glass remain unaffected, and check with MSAA on/off.
