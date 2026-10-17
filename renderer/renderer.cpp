@@ -1320,6 +1320,10 @@ namespace jkgm {
                        posterize_lighting,
                        batch_blend_filter::all);
 
+            // HUD and menu draw calls assume the original alpha blend state.
+            // Restore it after any special additive/multiply draw.
+            gl::set_blend_function(gl::blend_function::one,
+                                   gl::blend_function::one_minus_source_alpha);
             gl::enable(gl::capability::depth_test);
             gl::enable(gl::capability::blend);
             gl::set_depth_mask(true);
