@@ -118,6 +118,22 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             }
         }
 
+        if(em.contains("blend_mode")) {
+            auto const &mode = em["blend_mode"];
+            if(mode == "normal") {
+                mat->blend_mode = material_blend_mode::normal;
+            }
+            else if(mode == "additive") {
+                mat->blend_mode = material_blend_mode::additive;
+            }
+            else if(mode == "multiply") {
+                mat->blend_mode = material_blend_mode::multiply;
+            }
+            else {
+                throw std::runtime_error("Unknown blend_mode in metadata.json");
+            }
+        }
+
         if(em.contains("alpha_cutoff")) {
             mat->alpha_cutoff = em["alpha_cutoff"];
         }
