@@ -412,6 +412,32 @@ void jkgm::shaders::post_scale_shader::set_fbuf_sampler(int sampler)
     gl::set_uniform_integer(fbuf_image, sampler);
 }
 
+jkgm::shaders::post_frame_blend_shader::post_frame_blend_shader(
+    fs::path const &data_root)
+    : opengl_shader("post_frame_blend",
+                    data_root / "shaders/postprocess.vert",
+                    data_root / "shaders/post_frame_blend.frag")
+    , current_image(gl::get_uniform_location(the_program, "current_image"))
+    , history_image(gl::get_uniform_location(the_program, "history_image"))
+    , blend_strength(gl::get_uniform_location(the_program, "blend_strength"))
+{
+}
+
+void jkgm::shaders::post_frame_blend_shader::set_current_sampler(int sampler)
+{
+    gl::set_uniform_integer(current_image, sampler);
+}
+
+void jkgm::shaders::post_frame_blend_shader::set_history_sampler(int sampler)
+{
+    gl::set_uniform_integer(history_image, sampler);
+}
+
+void jkgm::shaders::post_frame_blend_shader::set_blend_strength(float strength)
+{
+    gl::set_uniform_float(blend_strength, strength);
+}
+
 jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(fs::path const &data_root)
     : opengl_shader("post_to_srgb",
                     data_root / "shaders/postprocess.vert",
