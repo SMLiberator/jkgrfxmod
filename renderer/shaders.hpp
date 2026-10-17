@@ -240,6 +240,25 @@ namespace jkgm {
             void set_fbuf_sampler(int sampler);
         };
 
+        class post_spatial_blur_shader : public opengl_shader {
+        private:
+            gl::uniform_location_id source_image;
+            gl::uniform_location_id depth_image;
+            gl::uniform_location_id blur_axis;
+            gl::uniform_location_id screen_size;
+            gl::uniform_location_id distance_params;
+            gl::uniform_location_id peripheral_params;
+
+        public:
+            explicit post_spatial_blur_shader(fs::path const &data_root);
+            void set_source_sampler(int sampler);
+            void set_depth_sampler(int sampler);
+            void set_blur_axis(int axis);
+            void set_screen_size(size<2, float> dims);
+            void set_distance_params(point<4, float> params);
+            void set_peripheral_params(point<4, float> params);
+        };
+
         class post_frame_blend_shader : public opengl_shader {
         private:
             gl::uniform_location_id current_image;
