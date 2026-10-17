@@ -28,7 +28,7 @@ namespace jkgm {
         bool enable_post = true;
         bool enable_reflections = true;
         bool enable_ssao = true;
-        // none, normals, depth, ssao, ssao_raw
+        // none, normals, depth, ssao, ssao_raw, normal_source, normal_alignment
         std::string debug_render_mode = "none";
         // Diagnostic: bypass the patched jk.exe native normals and derive normals
         // from projected triangle geometry, as the old renderer did.
