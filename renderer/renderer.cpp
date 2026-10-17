@@ -426,6 +426,11 @@ namespace jkgm {
 
         void set_renderer_mode(renderer_mode mode) override
         {
+            if(this->mode != mode) {
+                // A scene transition cannot reuse old frame history.
+                // Do not do this in begin_game/end_game (called each frame).
+                get_frame_blend_settings().reset();
+            }
             this->mode = mode;
         }
 
