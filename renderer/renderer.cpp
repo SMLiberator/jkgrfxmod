@@ -1293,13 +1293,21 @@ namespace jkgm {
                        /*force opaque*/ true,
                        posterize_lighting);
 
-            // Draw gun transparency
+            // Preserve the original gun transparency behavior for normal
+            // materials; special blend materials must NEVER write depth.
             draw_batch(&ogs->game_transparency_pass_program,
                        gun_transparent_batch,
                        &trimdl->gun_transparent_trimdl, /*force opaque*/
                        false,
+                       posterize_lighting);
+
+            gl::set_depth_mask(false);
+            draw_batch(&ogs->game_transparency_pass_program,
+                       gun_transparent_batch,
+                       &trimdl->gun_transparent_trimdl,
+                       /*force opaque*/ false,
                        posterize_lighting,
-                       batch_blend_filter::all);
+                       batch_blend_filter::special);
 
             // Gun materials whose native JK geometry was opaque but whose
             // replacement requests additive/multiply should also be blended.
