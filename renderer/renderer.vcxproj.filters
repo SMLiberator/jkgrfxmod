@@ -182,6 +182,9 @@
     <ClInclude Include="opengl_state.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="frameblend.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="triangle_batch.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
