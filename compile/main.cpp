@@ -59,6 +59,7 @@ namespace jkgm {
 
         std::optional<out_material_alpha_mode> alpha_mode;
         std::optional<std::string> blend_mode;
+        std::optional<bool> depth_clip;
         std::optional<float> alpha_cutoff;
     };
 
@@ -471,6 +472,15 @@ namespace jkgm {
             rv->blend_mode = static_cast<std::string>(mode);
         }
 
+        if(doc.contains("depth_clip")) {
+            auto const &v = doc["depth_clip"];
+            if(!v.is_boolean()) {
+                LOG_ERROR("Material '", rv->name, "' depth_clip must be true or false");
+                throw std::runtime_error("Invalid script");
+            }
+            rv->depth_clip = static_cast<bool>(v);
+        }
+
         if(doc.contains("alpha_cutoff")) {
             if(rv->alpha_mode != out_material_alpha_mode::mask) {
                 LOG_ERROR(
@@ -616,6 +626,10 @@ namespace jkgm {
 
         if(mat.blend_mode.has_value()) {
             rv["blend_mode"] = *mat.blend_mode;
+        }
+
+        if(mat.depth_clip.has_value()) {
+            rv["depth_clip"] = *mat.depth_clip;
         }
 
         if(mat.alpha_mode.has_value() && mat.alpha_cutoff.has_value()) {
@@ -797,6 +811,7 @@ namespace jkgm {
                     "texture_filtering",
                     "alpha_mode",
                     "blend_mode",
+                    "depth_clip",
                     "alpha_cutoff",
                     }) {
                         if(!effective.contains(property) && script_doc.contains(property)) {

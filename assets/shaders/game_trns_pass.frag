@@ -10,6 +10,8 @@ uniform vec3 emissive_factor;
 
 uniform float alpha_cutoff;
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply
+uniform int depth_clip;
+uniform sampler2D scene_depth; // Resolved opaque linear view depth (R16F)
 
 uniform sampler2D displacement_map;
 uniform float displacement_factor;
@@ -217,6 +219,16 @@ vec2 parallax_mapping(vec2 tc)
 
 void main()
 {
+    if(depth_clip != 0) {
+        // Decals need an actual opaque receiving surface at nearly the same
+        // view-space depth. Empty R16F pixels contain the 65504 sentinel.
+        const float DECAL_MAX_DEPTH_GAP = 0.15;
+        float surface_depth = texelFetch(scene_depth, ivec2(gl_FragCoord.xy), 0).r;
+        if(surface_depth >= 65500.0 || abs(surface_depth - vp_z) > DECAL_MAX_DEPTH_GAP) {
+            discard;
+        }
+    }
+
     vec2 adj_texcoords = vp_texcoords;
     if(displacement_factor != 0.0) {
         adj_texcoords = parallax_mapping(vp_texcoords);
@@ -280,7 +292,12 @@ void main()
         out_color = vec4(mix(vec3(1.0), tint, opacity), 0.0);
     }
     else {
-        // Preserve the original JK transparency convention unchanged.
-        out_color = vec4(color, albedo.a);
+        // Preserve the existing JK convention for regular geometry.
+        // Depth-clipped decals also premultiply texture/material coverage
+        // to avoid overbright fringes at translucent PNG edges.
+        float coverage = depth_clip != 0
+                             ? clamp(albedo_map_sample.a * albedo_factor.a, 0.0, 1.0)
+                             : 1.0;
+        out_color = vec4(color * coverage, albedo.a);
     }
 }

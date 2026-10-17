@@ -874,6 +874,17 @@ namespace jkgm {
             return vidmem_texture_surfaces.at(id.get() - 1)->blend_mode;
         }
 
+        // Depth-clipped polygons count as special even with normal blending:
+        // they must never enter the opaque pass or modify the G-buffer depth.
+        bool is_special_material(material_instance_id id) const
+        {
+            if(id.get() == 0U) {
+                return false;
+            }
+            auto const &mat = vidmem_texture_surfaces.at(id.get() - 1);
+            return mat->blend_mode != material_blend_mode::normal || mat->depth_clip;
+        }
+
         enum class batch_blend_filter { regular, all, special };
 
         void bind_material(shaders::game_pass_shader *prog,
@@ -885,6 +896,8 @@ namespace jkgm {
             // it on the opaque shader is ignored (uniform location -1).
             auto const blend_mode = get_material_blend_mode(id);
             prog->set_blend_mode(static_cast<int>(blend_mode));
+            prog->set_depth_clip(id.get() != 0U &&
+                                 vidmem_texture_surfaces.at(id.get() - 1)->depth_clip);
 
             if(prog == &ogs->game_transparency_pass_program) {
                 // Normal uses JK's existing premultiplied blend convention.
@@ -1028,8 +1041,7 @@ namespace jkgm {
             bind_material(prog, material_instance_id(0U), force_opaque, posterize_lighting);
 
             for(auto const &tri : tb) {
-                bool special = get_material_blend_mode(tri.material) !=
-                               material_blend_mode::normal;
+                bool special = is_special_material(tri.material);
                 bool selected = filter == batch_blend_filter::all ||
                                 (filter == batch_blend_filter::special ? special : !special);
                 if(!selected) {
@@ -1244,6 +1256,13 @@ namespace jkgm {
             ogs->game_transparency_pass_program.set_displacement_map_sampler(2);
             ogs->game_transparency_pass_program.set_surface_map_sampler(3);
             ogs->game_transparency_pass_program.set_env_map_sampler(4);
+            ogs->game_transparency_pass_program.set_scene_depth_sampler(5);
+            // Sample the completed opaque pass; this is a different texture
+            // from the framebuffer receiving the transparency draw.
+            gl::set_active_texture_unit(5);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             frame_screen->get_resolved_depth_texture());
+            gl::set_active_texture_unit(0);
             apply_engine_camera(ogs->game_transparency_pass_program);
 
             {
@@ -1269,8 +1288,8 @@ namespace jkgm {
                        posterize_lighting,
                        batch_blend_filter::all);
 
-            // Special modes on originally opaque world geometry still belong
-            // in the transparency pass: they must never write G-buffer depth.
+            // Blended and depth-clipped materials from originally opaque
+            // world geometry render here, without writing G-buffer depth.
             draw_batch(&ogs->game_transparency_pass_program,
                        world_batch,
                        &trimdl->world_trimdl,

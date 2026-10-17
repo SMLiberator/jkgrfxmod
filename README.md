@@ -167,13 +167,41 @@ texel contributes nothing. **Multiply** uses the opacity-weighted factor
 `mix(white, material_tint, alpha)`, so transparent pixels leave the background
 untouched. Both preserve the existing framebuffer alpha.
 
-Special-blend materials always render in the transparency stage and do not
-write to the opaque color, depth, normal, or SSAO buffers, **even if their
-original JK material was opaque**. That means they can still be occluded by
-the scene depth, without corrupting subsequent post effects.
+Special-blend and depth-clipped materials always render in the transparency
+stage and do not write to the opaque color, depth, normal, or SSAO buffers,
+**even if their original JK material was opaque**. They are still occluded by
+the scene depth without corrupting post effects.
 
-This stage adds blend modes **only**, not depth-clipped/volume decals. Their
-geometry must still be placed against the target surface. Since the renderer
+### Depth-clipped polygon decals
+
+Set `"depth_clip": true` on a material (or as a pack-wide default) to clip it
+against nearby opaque scene geometry. This is independent of `blend_mode` and
+`alpha_mode`, defaults to `false`, and is validated by the compiler:
+
+```json
+{
+  "name": "floor_stain",
+  "albedo_map": "stain.png",
+  "alpha_mode": "blend",
+  "blend_mode": "multiply",
+  "depth_clip": true,
+  "replaces": ["stain.mat"]
+}
+```
+
+Place the polygon slightly in front of the receiving geometry. Fragments with
+no opaque scene depth, or a depth gap over a **hardcoded 0.15 game units**, are
+discarded. Both the opaque scene depth and polygon depth are in view units.
+The shader reuses the existing resolved depth texture (also with MSAA) and adds
+no new fullscreen passes. Even `blend_mode: normal` depth-clipped materials
+are rendered in the transparency stage. For these normal clipped decals,
+texture/material alpha is premultiplied to prevent bright fringes.
+
+This is **not** a projector or volume decal: the polygon UVs remain unchanged,
+and it does not wrap around curved objects. Transparent-only geometry cannot
+receive decals. The fixed gap may need retuning after visual testing.
+
+Their geometry must still be placed against the target surface. Since the renderer
 cannot perfectly depth-sort the additive/multiply geometry originally submitted
 as opaque triangles against arbitrary transparent world geometry, overlapping
 transparent objects may exhibit order-dependent composition. There is no
@@ -184,3 +212,6 @@ tint over a brightly lit floor, alpha-zero regions against several backgrounds,
 an additive glow overlapping opaque scenery, and an originally opaque JK face
 overridden with a special blend mode. Confirm that `normal` materials and
 existing alpha-masked glass remain unaffected, and check with MSAA on/off.
+For depth clipping, test a slightly offset stain crossing a floor edge,
+an originally opaque JK polygon with `blend_mode: normal`, a floating decal
+beyond the fixed gap, empty-background pixels and MSAA silhouettes.

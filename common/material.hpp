@@ -46,6 +46,8 @@ namespace jkgm {
 
         material_alpha_mode alpha_mode = material_alpha_mode::blend;
         material_blend_mode blend_mode = material_blend_mode::normal;
+        // Restrict decal polygons to nearby opaque scene geometry.
+        bool depth_clip = false;
         float alpha_cutoff = 0.5f;
     };
 }

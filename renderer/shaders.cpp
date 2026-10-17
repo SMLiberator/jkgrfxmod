@@ -103,6 +103,8 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , screen_resolution(gl::get_uniform_location(the_program, "screen_resolution"))
     , features(gl::get_uniform_location(the_program, "features"))
     , blend_mode(gl::get_uniform_location(the_program, "blend_mode"))
+    , depth_clip(gl::get_uniform_location(the_program, "depth_clip"))
+    , scene_depth(gl::get_uniform_location(the_program, "scene_depth"))
     , albedo_map(gl::get_uniform_location(the_program, "albedo_map"))
     , albedo_factor(gl::get_uniform_location(the_program, "albedo_factor"))
     , emissive_map(gl::get_uniform_location(the_program, "emissive_map"))
@@ -143,6 +145,16 @@ void jkgm::shaders::game_pass_shader::set_features(point<4, float> value)
 void jkgm::shaders::game_pass_shader::set_blend_mode(int mode)
 {
     gl::set_uniform_integer(blend_mode, mode);
+}
+
+void jkgm::shaders::game_pass_shader::set_depth_clip(bool enabled)
+{
+    gl::set_uniform_integer(depth_clip, enabled ? 1 : 0);
+}
+
+void jkgm::shaders::game_pass_shader::set_scene_depth_sampler(int sampler)
+{
+    gl::set_uniform_integer(scene_depth, sampler);
 }
 
 void jkgm::shaders::game_pass_shader::set_albedo_map_sampler(int sampler)
