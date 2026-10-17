@@ -109,6 +109,8 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , albedo_factor(gl::get_uniform_location(the_program, "albedo_factor"))
     , emissive_map(gl::get_uniform_location(the_program, "emissive_map"))
     , emissive_factor(gl::get_uniform_location(the_program, "emissive_factor"))
+    , albedo_uv_offset(gl::get_uniform_location(the_program, "albedo_uv_offset"))
+    , emissive_uv_offset(gl::get_uniform_location(the_program, "emissive_uv_offset"))
     , alpha_cutoff(gl::get_uniform_location(the_program, "alpha_cutoff"))
     , displacement_map(gl::get_uniform_location(the_program, "displacement_map"))
     , displacement_factor(gl::get_uniform_location(the_program, "displacement_factor"))
@@ -175,6 +177,13 @@ void jkgm::shaders::game_pass_shader::set_emissive_map_sampler(int sampler)
 void jkgm::shaders::game_pass_shader::set_emissive_factor(color_rgb factor)
 {
     gl::set_uniform_vector(emissive_factor, factor);
+}
+
+void jkgm::shaders::game_pass_shader::set_uv_offsets(point<2, float> albedo,
+                                                     point<2, float> emissive)
+{
+    gl::set_uniform_vector(albedo_uv_offset, albedo);
+    gl::set_uniform_vector(emissive_uv_offset, emissive);
 }
 
 void jkgm::shaders::game_pass_shader::set_alpha_cutoff(float cutoff)

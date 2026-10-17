@@ -8,6 +8,10 @@ uniform vec4 albedo_factor;
 uniform sampler2D emissive_map;
 uniform vec3 emissive_factor;
 
+// Independent per-material UV animation offsets, in texture repetitions.
+uniform vec2 albedo_uv_offset;
+uniform vec2 emissive_uv_offset;
+
 uniform float alpha_cutoff;
 
 uniform sampler2D displacement_map;
@@ -232,7 +236,7 @@ void main()
         adj_vp_z += pmapv.z;
     }
 
-    vec4 albedo_map_sample = texture(albedo_map, adj_texcoords);
+    vec4 albedo_map_sample = texture(albedo_map, adj_texcoords + albedo_uv_offset);
     albedo_map_sample = mix(vec4(1.0), albedo_map_sample, features.x);
 
     if(features.z > 0.5) {
@@ -249,7 +253,7 @@ void main()
         discard;
     }
 
-    vec3 emissive_map_sample = texture(emissive_map, adj_texcoords).rgb;
+    vec3 emissive_map_sample = texture(emissive_map, adj_texcoords + emissive_uv_offset).rgb;
     emissive_map_sample = mix(vec3(1.0), emissive_map_sample, features.y);
     vec3 emissive = emissive_map_sample * emissive_factor;
 

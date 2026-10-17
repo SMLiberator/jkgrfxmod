@@ -8,6 +8,10 @@ uniform vec4 albedo_factor;
 uniform sampler2D emissive_map;
 uniform vec3 emissive_factor;
 
+// Independent per-material UV animation offsets, in texture repetitions.
+uniform vec2 albedo_uv_offset;
+uniform vec2 emissive_uv_offset;
+
 uniform float alpha_cutoff;
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply
 uniform int depth_clip;
@@ -264,7 +268,7 @@ void main()
         adj_texcoords = parallax_mapping(vp_texcoords);
     }
 
-    vec4 albedo_map_sample = texture(albedo_map, adj_texcoords);
+    vec4 albedo_map_sample = texture(albedo_map, adj_texcoords + albedo_uv_offset);
     albedo_map_sample = mix(vec4(1.0), albedo_map_sample, features.x);
 
     if(features.z > 0.5) {
@@ -278,7 +282,7 @@ void main()
     vec4 vertex_color = mix(vp_color, posterized_vertex_color, features.w);
     vec4 albedo = albedo_map_sample * vertex_color * albedo_factor;
 
-    vec3 emissive_map_sample = texture(emissive_map, adj_texcoords).rgb;
+    vec3 emissive_map_sample = texture(emissive_map, adj_texcoords + emissive_uv_offset).rgb;
     emissive_map_sample = mix(vec3(1.0), emissive_map_sample, features.y);
     vec3 emissive = emissive_map_sample * emissive_factor;
     float fog_amount = fog_factor(vp_z);

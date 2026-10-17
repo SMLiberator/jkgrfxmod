@@ -136,6 +136,60 @@ frame without making a contribution, so re-enabling it does not revive an
 old image. The matching COG verbs remain available regardless of either switch.
 
 
+## Animated materials
+
+Animations use the renderer's own monotonic clock, not JK's simulation clock.
+They continue advancing while gameplay is paused, provided frames are drawn.
+No video frames or texture reuploads are needed: the renderer applies per-material
+UV offsets and an emissive multiplier at material-bind time. Both opaque and
+transparent render paths support them.
+
+All properties are optional, can be provided as pack-wide defaults, and can
+be overridden per material:
+
+```json
+{
+  "name": "energy_strip",
+  "albedo_map": "base.png",
+  "emissive_map": "glow.png",
+  "emissive_factor": [1.0, 0.5, 0.2],
+  "albedo_scroll": [0.0, 0.05],
+  "emissive_scroll": [0.0, -0.1],
+  "emissive_pulse": {
+    "wave": "random",
+    "rate": 2.0,
+    "min": 0.2,
+    "max": 1.0,
+    "phase": 0.0
+  },
+  "replaces": ["strip.mat"]
+}
+```
+
+- `albedo_scroll` and `emissive_scroll`: UV repeats per second in U and V.
+  Texture coordinates wrap by repetition, and positive/negative values scroll
+  in opposite directions. Albedo and emissive scroll independently; the
+  displacement, reflection/surface, and environment maps are not scrolled.
+- `emissive_pulse` multiplies the complete `emissive_factor` vector, and works
+  even without an emissive map. `rate` is in seconds; `min` defaults to 0,
+  `max` to 1, and optional `phase` is a fraction of a cycle (default 0).
+  Multipliers above 1 are allowed for intense emissive flashes.
+- `sine`: one smooth full cycle per `rate` seconds.
+- `square`: alternating high/low, with a full on/off cycle lasting `rate` seconds.
+- `flicker`: one randomly selected on/off state every `rate` seconds.
+- `random`: smoothly interpolates between new pseudorandom targets every
+  `rate` seconds, without visible jumps at interval boundaries.
+
+Randomness is deterministic per material instance and interval, not per frame,
+so the pattern is independent of framerate and draw order. Animations do not
+modify emissive/albedo opacity handling, blend modes or depth clipping.
+
+**Animation test cases:** scroll each layer separately and together, test
+negative U/V speeds, ensure UVs wrap, verify `sine`/`square` timing and
+`flicker`/`random` stability at different FPS, check blinking with
+`emissive_factor` only (no `emissive_map`), and test both opaque and
+depth-clipped surfaces.
+
 ## Material blend modes
 
 Material packs now support an optional `blend_mode`, independent of the

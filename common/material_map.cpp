@@ -58,6 +58,39 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
                 static_cast<float>(af[0]), static_cast<float>(af[1]), static_cast<float>(af[2]));
         }
 
+        if(em.contains("albedo_scroll")) {
+            auto const &s = em["albedo_scroll"];
+            mat->albedo_scroll = make_point(static_cast<float>(s[0]),
+                                            static_cast<float>(s[1]));
+        }
+        if(em.contains("emissive_scroll")) {
+            auto const &s = em["emissive_scroll"];
+            mat->emissive_scroll = make_point(static_cast<float>(s[0]),
+                                              static_cast<float>(s[1]));
+        }
+        if(em.contains("emissive_pulse")) {
+            auto const &p = em["emissive_pulse"];
+            material_emissive_pulse pulse;
+            auto const wave = static_cast<std::string>(p.at("wave"));
+            if(wave == "square") {
+                pulse.wave = material_pulse_wave::square;
+            }
+            else if(wave == "flicker") {
+                pulse.wave = material_pulse_wave::flicker;
+            }
+            else if(wave == "random") {
+                pulse.wave = material_pulse_wave::random;
+            }
+            else if(wave != "sine") {
+                throw std::runtime_error("Unknown emissive_pulse wave in metadata.json");
+            }
+            pulse.rate = static_cast<float>(p.at("rate"));
+            pulse.min = p.contains("min") ? static_cast<float>(p["min"]) : 0.0f;
+            pulse.max = p.contains("max") ? static_cast<float>(p["max"]) : 1.0f;
+            pulse.phase = p.contains("phase") ? static_cast<float>(p["phase"]) : 0.0f;
+            mat->emissive_pulse = pulse;
+        }
+
         if(em.contains("displacement_map")) {
             mat->displacement_map = data_dir / std::string(em["displacement_map"]);
         }

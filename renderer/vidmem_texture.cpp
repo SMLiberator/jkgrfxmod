@@ -93,6 +93,9 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
 
         surf->albedo_factor = (*repl_map)->albedo_factor;
         surf->emissive_factor = (*repl_map)->emissive_factor;
+        surf->albedo_scroll = (*repl_map)->albedo_scroll;
+        surf->emissive_scroll = (*repl_map)->emissive_scroll;
+        surf->emissive_pulse = (*repl_map)->emissive_pulse;
 
         if(surf->r->is_parallax_enabled()) {
             surf->displacement_factor = (*repl_map)->displacement_factor;
@@ -187,6 +190,9 @@ void jkgm::vidmem_texture_surface::clear()
 
     albedo_factor = color::fill(1.0f);
     emissive_factor = color_rgb::fill(0.0f);
+    albedo_scroll = point<2, float>::zero();
+    emissive_scroll = point<2, float>::zero();
+    emissive_pulse.reset();
     displacement_factor = 0.0f;
     alpha_mode = material_alpha_mode::blend;
     blend_mode = material_blend_mode::normal;

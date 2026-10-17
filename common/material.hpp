@@ -2,6 +2,7 @@
 
 #include "base/filesystem.hpp"
 #include "math/color.hpp"
+#include "math/point.hpp"
 #include <optional>
 
 namespace jkgm {
@@ -12,6 +13,16 @@ namespace jkgm {
     // Screen mode initially falls back to the world-aligned EnvMap; an SSR pass will
     // consume this choice in the next stage.
     enum class material_reflection_mode { envmap, screen, fixed, matcap };
+
+    enum class material_pulse_wave { sine, square, flicker, random };
+
+    struct material_emissive_pulse {
+        material_pulse_wave wave = material_pulse_wave::sine;
+        float rate = 1.0f;  // seconds per cycle / new random target
+        float min = 0.0f;
+        float max = 1.0f;
+        float phase = 0.0f; // fraction of a cycle (also shifts random intervals)
+    };
 
     class material {
     public:
@@ -25,6 +36,12 @@ namespace jkgm {
 
         std::optional<fs::path> emissive_map;
         color_rgb emissive_factor = color_rgb::zero();
+
+        // Animation is optional and uses the renderer's independent clock.
+        // UV speeds are texture repetitions per second (U,V).
+        point<2, float> albedo_scroll = point<2, float>::zero();
+        point<2, float> emissive_scroll = point<2, float>::zero();
+        std::optional<material_emissive_pulse> emissive_pulse;
 
         std::optional<fs::path> displacement_map;
         float displacement_factor = 0.0f;

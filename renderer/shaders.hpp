@@ -51,6 +51,8 @@ namespace jkgm {
 
             gl::uniform_location_id emissive_map;
             gl::uniform_location_id emissive_factor;
+            gl::uniform_location_id albedo_uv_offset;
+            gl::uniform_location_id emissive_uv_offset;
 
             gl::uniform_location_id alpha_cutoff;
 
@@ -89,6 +91,7 @@ namespace jkgm {
 
             void set_emissive_map_sampler(int sampler);
             void set_emissive_factor(color_rgb factor);
+            void set_uv_offsets(point<2, float> albedo, point<2, float> emissive);
 
             void set_alpha_cutoff(float cutoff);
 

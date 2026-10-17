@@ -379,6 +379,11 @@ namespace jkgm {
 
         double menu_accumulator = 0.0;
 
+        // Independent renderer clock, unaffected by JK's simulation/pause state.
+        std::chrono::steady_clock::time_point animation_epoch =
+            std::chrono::steady_clock::now();
+        double animation_seconds = 0.0;
+
         using timestamp_t = std::chrono::high_resolution_clock::time_point;
         timestamp_t menu_prev_ticks;
         timestamp_t menu_curr_ticks;
@@ -885,6 +890,62 @@ namespace jkgm {
             return mat->blend_mode != material_blend_mode::normal || mat->depth_clip;
         }
 
+        // Compute UV offsets in double precision before reducing them to
+        // one texture repeat. This avoids large shader-time precision loss
+        // during long game sessions (and supports negative scroll speeds).
+        point<2, float> scroll_offset(point<2, float> speed) const
+        {
+            return make_point(
+                static_cast<float>(std::fmod(static_cast<double>(get<0>(speed)) *
+                                             animation_seconds, 1.0)),
+                static_cast<float>(std::fmod(static_cast<double>(get<1>(speed)) *
+                                             animation_seconds, 1.0)));
+        }
+
+        // Stateless hash: the same material and step produce the same random
+        // value regardless of FPS, rendering order, or number of draw calls.
+        static float pulse_random(size_t material_id, int64_t step)
+        {
+            uint64_t x = static_cast<uint64_t>(material_id) * 0x9E3779B97F4A7C15ULL +
+                         static_cast<uint64_t>(step) * 0xD1B54A32D192ED03ULL;
+            x ^= x >> 30;
+            x *= 0xBF58476D1CE4E5B9ULL;
+            x ^= x >> 27;
+            x *= 0x94D049BB133111EBULL;
+            x ^= x >> 31;
+            return static_cast<float>(x >> 40) / 16777216.0f;
+        }
+
+        float pulse_multiplier(material_emissive_pulse const &pulse,
+                               material_instance_id id) const
+        {
+            double const cycles = animation_seconds / pulse.rate + pulse.phase;
+            double const step_d = std::floor(cycles);
+            auto const step = static_cast<int64_t>(step_d);
+            float const fraction = static_cast<float>(cycles - step_d);
+            float level = 1.0f;
+            switch(pulse.wave) {
+            case material_pulse_wave::sine:
+                // One full smooth brightness cycle every 'rate' seconds.
+                level = 0.5f - 0.5f * std::cos(fraction * 6.283185307179586f);
+                break;
+            case material_pulse_wave::square:
+                level = fraction < 0.5f ? 1.0f : 0.0f;
+                break;
+            case material_pulse_wave::flicker:
+                level = pulse_random(id.get(), step) < 0.5f ? 0.0f : 1.0f;
+                break;
+            case material_pulse_wave::random: {
+                float const a = pulse_random(id.get(), step);
+                float const b = pulse_random(id.get(), step + 1);
+                float const smooth = fraction * fraction * (3.0f - 2.0f * fraction);
+                level = a + (b - a) * smooth;
+                break;
+            }
+            }
+            return pulse.min + (pulse.max - pulse.min) * level;
+        }
+
         enum class batch_blend_filter { regular, all, special };
 
         void bind_material(shaders::game_pass_shader *prog,
@@ -943,8 +1004,10 @@ namespace jkgm {
                 // Albedo factor
                 prog->set_albedo_factor(color::fill(1.0f));
 
-                // Emissive factor
+                // Emissive factor; default material has no animation.
                 prog->set_emissive_factor(color_rgb::zero());
+                prog->set_uv_offsets(point<2, float>::zero(),
+                                     point<2, float>::zero());
 
                 // Displacement factor
                 prog->set_displacement_factor(0.0f);
@@ -1009,7 +1072,18 @@ namespace jkgm {
                     (posterize_lighting ? 1.0f : 0.0f)));
 
                 prog->set_albedo_factor(mat->albedo_factor);
-                prog->set_emissive_factor(mat->emissive_factor);
+                prog->set_uv_offsets(scroll_offset(mat->albedo_scroll),
+                                     scroll_offset(mat->emissive_scroll));
+
+                // Pulse affects emissive_factor whether or not there is an
+                // emissive_map. Nonemissive terms are never animated here.
+                float const emissive_intensity = mat->emissive_pulse.has_value()
+                    ? pulse_multiplier(*mat->emissive_pulse, id) : 1.0f;
+                auto const &ef = mat->emissive_factor;
+                prog->set_emissive_factor(color_rgb(
+                    get<0>(ef) * emissive_intensity,
+                    get<1>(ef) * emissive_intensity,
+                    get<2>(ef) * emissive_intensity));
                 prog->set_displacement_factor(mat->displacement_factor);
                 prog->set_alpha_cutoff(mat->alpha_cutoff);
 
@@ -1606,6 +1680,8 @@ namespace jkgm {
 
         void present_game() override
         {
+            animation_seconds = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - animation_epoch).count();
             end_frame();
             update_hud_texture();
 

@@ -15,6 +15,7 @@
 #include "program/program.hpp"
 #include "raw_material.hpp"
 #include <bitset>
+#include <cmath>
 #include <set>
 
 namespace jkgm {
@@ -45,6 +46,9 @@ namespace jkgm {
 
         std::optional<std::string> emissive_map;
         std::optional<color_rgb> emissive_factor;
+        std::optional<point<2, float>> albedo_scroll;
+        std::optional<point<2, float>> emissive_scroll;
+        std::optional<json::json> emissive_pulse;
 
         std::optional<std::string> displacement_map;
         std::optional<float> displacement_factor;
@@ -443,6 +447,64 @@ namespace jkgm {
             rv->env_map = real_map_filename;
         }
 
+        // Animated texture speeds (UV repeats per second).
+        auto parse_scroll = [&](char const *key) -> std::optional<point<2, float>> {
+            if(!doc.contains(key)) {
+                return std::nullopt;
+            }
+            auto const &v = doc[key];
+            if(!v.is_array() || v.size() != 2 ||
+               !v[0].is_number() || !v[1].is_number() ||
+               !std::isfinite(static_cast<double>(v[0])) ||
+               !std::isfinite(static_cast<double>(v[1])) ||
+               !std::isfinite(static_cast<float>(v[0])) ||
+               !std::isfinite(static_cast<float>(v[1]))) {
+                LOG_ERROR("Material '", rv->name, "' ", key,
+                          " must be two finite UV speeds [u, v]");
+                throw std::runtime_error("Invalid script");
+            }
+            return make_point(static_cast<float>(v[0]), static_cast<float>(v[1]));
+        };
+        rv->albedo_scroll = parse_scroll("albedo_scroll");
+        rv->emissive_scroll = parse_scroll("emissive_scroll");
+
+        if(doc.contains("emissive_pulse")) {
+            auto const &v = doc["emissive_pulse"];
+            if(!v.is_object() || !v.contains("wave") || !v["wave"].is_string() ||
+               (v["wave"] != "sine" && v["wave"] != "square" &&
+                v["wave"] != "flicker" && v["wave"] != "random") ||
+               !v.contains("rate") || !v["rate"].is_number()) {
+                LOG_ERROR("Material '", rv->name,
+                          "' emissive_pulse needs wave (sine/square/flicker/random) "
+                          "and positive rate (seconds)");
+                throw std::runtime_error("Invalid script");
+            }
+
+            for(char const *key : {"rate", "min", "max", "phase"}) {
+                if(!v.contains(key)) {
+                    continue;
+                }
+                if(!v[key].is_number() ||
+                   !std::isfinite(static_cast<double>(v[key])) ||
+                   !std::isfinite(static_cast<float>(v[key]))) {
+                    LOG_ERROR("Material '", rv->name,
+                              "' emissive_pulse.", key, " must be a finite number");
+                    throw std::runtime_error("Invalid script");
+                }
+            }
+
+            float const rate = static_cast<float>(v["rate"]);
+            float const min_value = v.contains("min") ? static_cast<float>(v["min"]) : 0.0f;
+            float const max_value = v.contains("max") ? static_cast<float>(v["max"]) : 1.0f;
+            if(rate <= 0.0f || min_value < 0.0f || max_value < min_value) {
+                LOG_ERROR("Material '", rv->name,
+                          "' emissive_pulse requires rate > 0 and 0 <= min <= max");
+                throw std::runtime_error("Invalid script");
+            }
+
+            rv->emissive_pulse = v;
+        }
+
         if(doc.contains("alpha_mode")) {
             auto const &am = doc["alpha_mode"];
             if(am == "mask") {
@@ -573,6 +635,18 @@ namespace jkgm {
         if(mat.emissive_factor.has_value()) {
             auto c = *mat.emissive_factor;
             rv["emissive_factor"] = {get<0>(c), get<1>(c), get<2>(c)};
+        }
+
+        if(mat.albedo_scroll.has_value()) {
+            auto s = *mat.albedo_scroll;
+            rv["albedo_scroll"] = {get<0>(s), get<1>(s)};
+        }
+        if(mat.emissive_scroll.has_value()) {
+            auto s = *mat.emissive_scroll;
+            rv["emissive_scroll"] = {get<0>(s), get<1>(s)};
+        }
+        if(mat.emissive_pulse.has_value()) {
+            rv["emissive_pulse"] = *mat.emissive_pulse;
         }
 
         if(mat.displacement_map.has_value()) {
@@ -801,6 +875,9 @@ namespace jkgm {
                     "albedo_factor",
                     "emissive_map",
                     "emissive_factor",
+                    "albedo_scroll",
+                    "emissive_scroll",
+                    "emissive_pulse",
                     "displacement_map",
                     "displacement_factor",
                     "surface_map",

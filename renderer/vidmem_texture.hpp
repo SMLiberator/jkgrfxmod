@@ -44,6 +44,10 @@ namespace jkgm {
         std::optional<srgb_texture_id> emissive_map;
         color_rgb emissive_factor = color_rgb::fill(0.0f);
 
+        point<2, float> albedo_scroll = point<2, float>::zero();
+        point<2, float> emissive_scroll = point<2, float>::zero();
+        std::optional<material_emissive_pulse> emissive_pulse;
+
         std::optional<linear_texture_id> displacement_map;
         float displacement_factor = 0.0f;
 
