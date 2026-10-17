@@ -220,11 +220,41 @@ vec2 parallax_mapping(vec2 tc)
 void main()
 {
     if(depth_clip != 0) {
-        // Decals need an actual opaque receiving surface at nearly the same
-        // view-space depth. Empty R16F pixels contain the 65504 sentinel.
-        const float DECAL_MAX_DEPTH_GAP = 0.15;
+        // Compare perpendicular separation from the DECAL PLANE, not raw
+        // camera-forward depth: the latter grows at grazing angles even when
+        // a polygon remains a fixed distance above its receiving surface.
+        // The resolved R16F opaque depth uses 65504 to mark empty pixels.
+        const float DECAL_MAX_PLANE_GAP = 0.15;
         float surface_depth = texelFetch(scene_depth, ivec2(gl_FragCoord.xy), 0).r;
-        if(surface_depth >= 65500.0 || abs(surface_depth - vp_z) > DECAL_MAX_DEPTH_GAP) {
+        if(surface_depth >= 65500.0) {
+            discard;
+        }
+
+        // Reconstruct metric view-space positions from the same coordinates
+        // used by the reflection shader. The supplied vertex_position.xy
+        // contains clip XY, while vertex_position.w contains linear view Z.
+        float h_scale = camera_right.w > 0.5
+                            ? view_params.x
+                            : tan(radians(REFLECTION_HFOV_DEGREES) * 0.5);
+        float aspect = screen_resolution.x / max(screen_resolution.y, 1.0);
+        vec3 decal_pos = vec3(vp_pos.xy * vec2(h_scale, h_scale / aspect), vp_z);
+
+        // Use the actual triangle plane, not interpolated smooth normals,
+        // which can differ substantially from the polygon orientation.
+        vec3 plane_normal = cross(dFdx(decal_pos), dFdy(decal_pos));
+        float plane_len = length(plane_normal);
+        if(plane_len < 1e-10 || vp_z <= 0.0) {
+            discard;
+        }
+        plane_normal /= plane_len;
+
+        // Both depth values describe points along the same screen-space ray.
+        // Their displacement along that ray, projected onto the decal plane
+        // normal, is the true perpendicular gap in view-space game units.
+        vec3 ray_per_view_z = decal_pos / vp_z;
+        float plane_gap = abs((surface_depth - vp_z) *
+                              dot(plane_normal, ray_per_view_z));
+        if(plane_gap > DECAL_MAX_PLANE_GAP) {
             discard;
         }
     }

@@ -189,13 +189,16 @@ against nearby opaque scene geometry. This is independent of `blend_mode` and
 }
 ```
 
-Place the polygon slightly in front of the receiving geometry. Fragments with
-no opaque scene depth, or a depth gap over a **hardcoded 0.15 game units**, are
-discarded. Both the opaque scene depth and polygon depth are in view units.
-The shader reuses the existing resolved depth texture (also with MSAA) and adds
-no new fullscreen passes. Even `blend_mode: normal` depth-clipped materials
-are rendered in the transparency stage. For these normal clipped decals,
-texture/material alpha is premultiplied to prevent bright fringes.
+Place the polygon slightly in front of the receiving geometry. Fragments
+without opaque scene depth, or with more than **0.15 game units of perpendicular
+separation from the decal's polygon plane**, are discarded. Unlike comparing raw
+view-depth differences, this remains stable at oblique/grazing camera angles.
+The shader reconstructs view-space positions using the existing resolved depth
+texture (also with MSAA), derives the decal's geometric normal with screen-space
+derivatives, and adds no new fullscreen passes. Even `blend_mode: normal`
+depth-clipped materials are rendered in the transparency stage. For these
+normal clipped decals, texture/material alpha is premultiplied to prevent
+bright fringes.
 
 This is **not** a projector or volume decal: the polygon UVs remain unchanged,
 and it does not wrap around curved objects. Transparent-only geometry cannot
@@ -214,4 +217,5 @@ overridden with a special blend mode. Confirm that `normal` materials and
 existing alpha-masked glass remain unaffected, and check with MSAA on/off.
 For depth clipping, test a slightly offset stain crossing a floor edge,
 an originally opaque JK polygon with `blend_mode: normal`, a floating decal
-beyond the fixed gap, empty-background pixels and MSAA silhouettes.
+beyond the fixed gap, empty-background pixels, grazing-angle views,
+and MSAA silhouettes. Also test decals with smoothed vertex normals.
