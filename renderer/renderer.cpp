@@ -1030,10 +1030,46 @@ namespace jkgm {
                                           (tri.v0.nativeNormal & 0x80000000u) &&
                                           (tri.v1.nativeNormal & 0x80000000u) &&
                                           (tri.v2.nativeNormal & 0x80000000u);
+
+                // Diagnostic: classify whether the triangle actually used the native
+                // smooth-normal path, or fell back to the geometric face normal.
+                // In alignment mode compare all three native normals to the
+                // geometric normal using ABS(dot), because JK can show backfaces.
+                // Encoded vectors are classification markers, not real normals;
+                // the composite shader displays them as discrete colors.
+                bool debug_source = the_config->debug_render_mode == "normal_source";
+                bool debug_alignment = the_config->debug_render_mode == "normal_alignment";
+                auto diagnostic_normal = tri.normal;
+                if(debug_source) {
+                    diagnostic_normal = use_native_normals
+                        ? make_direction(-1.0f, 1.0f, -1.0f)  // green = native
+                        : make_direction(1.0f, -1.0f, -1.0f); // red = fallback
+                }
+                else if(debug_alignment) {
+                    if(!use_native_normals) {
+                        diagnostic_normal = make_direction(-1.0f, -1.0f, 1.0f); // blue
+                    }
+                    else {
+                        auto n0 = unpack_model_normal(tri.v0.nativeNormal, hscale, vscale);
+                        auto n1 = unpack_model_normal(tri.v1.nativeNormal, hscale, vscale);
+                        auto n2 = unpack_model_normal(tri.v2.nativeNormal, hscale, vscale);
+                        float d0 = std::fabs(dot(tri.normal, n0));
+                        float d1 = std::fabs(dot(tri.normal, n1));
+                        float d2 = std::fabs(dot(tri.normal, n2));
+                        float worst = std::min(d0, std::min(d1, d2));
+                        diagnostic_normal = worst < 0.25f
+                            ? make_direction(1.0f, -1.0f, -1.0f) // red: severe mismatch
+                            : worst < 0.7f
+                                ? make_direction(1.0f, 1.0f, -1.0f) // yellow: moderate
+                                : make_direction(-1.0f, 1.0f, -1.0f); // green: aligned
+                    }
+                }
+
                 vx->pos = tri.v0.pos;
                 vx->texcoords = tri.v0.texcoords;
                 vx->col = tri.v0.color;
-                vx->normal = use_native_normals
+                vx->normal = (debug_source || debug_alignment) ? diagnostic_normal :
+                             use_native_normals
                                  ? unpack_model_normal(tri.v0.nativeNormal, hscale, vscale)
                                  : tri.normal;
 
@@ -1042,7 +1078,8 @@ namespace jkgm {
                 vx->pos = tri.v1.pos;
                 vx->texcoords = tri.v1.texcoords;
                 vx->col = tri.v1.color;
-                vx->normal = use_native_normals
+                vx->normal = (debug_source || debug_alignment) ? diagnostic_normal :
+                             use_native_normals
                                  ? unpack_model_normal(tri.v1.nativeNormal, hscale, vscale)
                                  : tri.normal;
 
@@ -1051,7 +1088,8 @@ namespace jkgm {
                 vx->pos = tri.v2.pos;
                 vx->texcoords = tri.v2.texcoords;
                 vx->col = tri.v2.color;
-                vx->normal = use_native_normals
+                vx->normal = (debug_source || debug_alignment) ? diagnostic_normal :
+                             use_native_normals
                                  ? unpack_model_normal(tri.v2.nativeNormal, hscale, vscale)
                                  : tri.normal;
 
@@ -1141,7 +1179,9 @@ namespace jkgm {
             int debug_mode = debug_view == "normals" ? 1 :
                              debug_view == "depth" ? 2 :
                              debug_view == "ssao" ? 3 :
-                             debug_view == "ssao_raw" ? 4 : 0;
+                             debug_view == "ssao_raw" ? 4 :
+                             debug_view == "normal_source" ? 5 :
+                             debug_view == "normal_alignment" ? 6 : 0;
             ogs->game_post_opaque_composite_program.set_debug_mode(debug_mode);
 
             gl::set_active_texture_unit(5);
