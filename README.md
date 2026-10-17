@@ -157,7 +157,7 @@ Example input script material:
   "albedo_map": "blood.png",
   "alpha_mode": "blend",
   "blend_mode": "multiply",
-  "replaces": [{"name": "blood.mat", "cel": 0}]
+  "replaces": ["blood.mat"]
 }
 ```
 
