@@ -85,3 +85,35 @@ If flicker disappears, native-normal entries from prior execute buffers were bei
 mistaken for current normals. If it remains, inspect native normal writes and
 index correspondence inside the patched executable (including Solid and
 clipping paths) rather than assuming the source 3DO normals are wrong.
+
+
+### Isolate mixed normal sources in imported geometry
+
+The two modes below are meant to identify whether imported-level discontinuities
+are caused by triangles falling back to flat normals, or by inconsistent *valid*
+native normals. They only change the temporary diagnostic display, not the
+underlying source 3DO or the normal-producing executable.
+
+- `"debug_render_mode":"normal_source"`: **green** = all three triangle vertices
+  have a valid native normal and native shading was selected; **red** = one or
+  more native-normal flags missing, so the entire triangle used the geometric
+  flat face normal; **magenta** = no geometry.
+- `"debug_render_mode":"normal_alignment"`: compare the three valid native
+  normals with the renderer's reconstructed face normal, using the smallest
+  absolute dot product. **Green** = reasonable agreement (absolute dot >= 0.7);
+  **yellow** = moderate disagreement (0.25–0.7); **red** = strong disagreement
+  (< 0.25); **blue** = no complete native-normal set (flat fallback);
+  **magenta** = no geometry.
+
+Test with `"debug_force_face_normals":false`, first with
+`"debug_consume_native_normals":false`, then with it `true`. The latter
+helps reveal stale validity flags for Solid geometry but is not an assumed fix
+for malformed current-batch data.
+
+**Important:** Large divergence is not automatically an error: backfacing or
+deliberately smooth-shaded, sharply bent surfaces may have legitimate normals
+different from a triangle's geometric normal. Look for abrupt differences
+*inside a broad flat surface* where the expected normal is constant. These
+modes do not prove whether the producer wrote an incorrect vector versus used
+the wrong vertex index, but isolate the problem to source selection or value
+interpretation.
