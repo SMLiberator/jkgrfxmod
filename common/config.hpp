@@ -30,6 +30,9 @@ namespace jkgm {
         bool enable_ssao = true;
         // none, normals, depth, ssao, ssao_raw
         std::string debug_render_mode = "none";
+        // Diagnostic: bypass the patched jk.exe native normals and derive normals
+        // from projected triangle geometry, as the old renderer did.
+        bool debug_force_face_normals = false;
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
         bool enable_posterized_lighting = false;
