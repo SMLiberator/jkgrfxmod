@@ -5,6 +5,7 @@
 #include "base/string_search.hpp"
 #include "error_reporter.hpp"
 #include "json_incl.hpp"
+#include <cmath>
 
 void jkgm::material_map::add_metadata(fs::path const &metadata_file)
 {
@@ -185,9 +186,20 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             else if(mode == "multiply") {
                 mat->blend_mode = material_blend_mode::multiply;
             }
+            else if(mode == "fluid") {
+                mat->blend_mode = material_blend_mode::fluid;
+            }
             else {
                 throw std::runtime_error("Unknown blend_mode in metadata.json");
             }
+        }
+
+        if(em.contains("fluid_thickness")) {
+            float const value = static_cast<float>(em["fluid_thickness"]);
+            if(!std::isfinite(value) || value < 0.0f) {
+                throw std::runtime_error("Invalid fluid_thickness in metadata.json");
+            }
+            mat->fluid_thickness = value;
         }
 
         if(em.contains("depth_clip")) {

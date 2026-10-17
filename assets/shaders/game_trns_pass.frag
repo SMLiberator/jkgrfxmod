@@ -13,7 +13,8 @@ uniform vec2 albedo_uv_offset;
 uniform vec2 emissive_uv_offset;
 
 uniform float alpha_cutoff;
-uniform int blend_mode; // 0 normal, 1 additive, 2 multiply
+uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
+uniform float fluid_thickness; // Beer-Lambert absorption per game unit
 uniform int depth_clip;
 uniform sampler2D scene_depth; // Resolved opaque linear view depth (R16F)
 
@@ -379,6 +380,41 @@ void main()
                           reflection * (1.0 - fog_amount), 0.0, 1.0);
         float opacity = clamp(albedo.a, 0.0, 1.0);
         out_color = vec4(mix(vec3(1.0), tint, opacity), 0.0);
+    }
+    else if(blend_mode == 3) {
+        // Fluid: progressively replace the underlying terrain with the
+        // liquid's albedo as the opaque scene behind it gets deeper.
+        // Measure the separation ALONG THE VIEW RAY, so a grazing view
+        // traverses more water than a perpendicular view. The depth buffer
+        // stores camera-forward linear Z, not radial distance.
+        float opaque_depth = texelFetch(scene_depth, ivec2(gl_FragCoord.xy), 0).r;
+        float absorption = 1.0;
+        if(opaque_depth < 65500.0) {
+            float h_scale = camera_right.w > 0.5
+                                ? view_params.x
+                                : tan(radians(REFLECTION_HFOV_DEGREES) * 0.5);
+            float aspect = screen_resolution.x / max(screen_resolution.y, 1.0);
+            vec3 view_ray = vec3(vp_pos.xy *
+                                 vec2(h_scale, h_scale / aspect), vp_z);
+            float ray_ratio = length(view_ray) / max(vp_z, 0.0001);
+            float thickness = max(opaque_depth - vp_z, 0.0) * ray_ratio;
+            absorption = 1.0 - exp(-fluid_thickness * thickness);
+        }
+        // With no opaque surface behind the fluid, treat it as infinitely
+        // deep. The shader does not discard those pixels like a decal.
+        //
+        // Albedo texture and JK vertex colors are already premultiplied
+        // by their respective alpha values. Scale only their contribution
+        // by the fluid absorption, retaining existing mask/coverage.
+        float opacity = clamp(albedo.a * absorption, 0.0, 1.0);
+        vec3 diffuse = (surface_color * (1.0 - fog_amount) +
+                        fog_color * (fog_amount * albedo.a)) * absorption;
+
+        // Reflection and emission deliberately do NOT fade with depth.
+        // ONE / ONE_MINUS_SRC_ALPHA blending preserves them over shallow
+        // liquid where the albedo itself becomes almost transparent.
+        vec3 specular = emissive + reflection * (1.0 - fog_amount);
+        out_color = vec4(diffuse + specular, opacity);
     }
     else {
         // Preserve the existing JK convention for regular geometry.

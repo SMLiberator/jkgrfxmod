@@ -252,6 +252,9 @@ existing `alpha_mode` (blend/mask). Valid choices:
 - `additive`: add colored light to the scene, useful for flares/fire/glows
 - `multiply`: multiply underlying scene color by a texture-dependent
   factor, useful for blood/dirt/stains
+- `fluid`: depth-aware absorption of opaque geometry behind a liquid, with
+  reflected environment and emission remaining visible even over shallow
+  transparent portions
 
 These can be specified on an individual material **or** as a pack-wide
 default. The compiler validates each mode and writes it to the generated
@@ -279,6 +282,71 @@ Special-blend and depth-clipped materials always render in the transparency
 stage and do not write to the opaque color, depth, normal, or SSAO buffers,
 **even if their original JK material was opaque**. They are still occluded by
 the scene depth without corrupting post effects.
+
+
+### Fluid blending and absorption
+
+Set `"blend_mode": "fluid"` to treat a textured polygon as a liquid surface.
+This reuses the existing resolved opaque linear depth buffer, works with
+MSAA, and uses the transparency pass even when replacing an opaque JK MAT.
+
+```json
+{
+  "name": "lake_water",
+  "blend_mode": "fluid",
+  "fluid_thickness": 0.08,
+  "albedo_map": "lake_color.png",
+  "normal_map": "waves.png",
+  "normal_map2": "waves.png",
+  "normal_strength": 0.25,
+  "normal_strength2": 0.15,
+  "normal_scroll": [0.012, 0.005],
+  "normal_scroll2": [-0.008, 0.015],
+  "environment_map": "sky_environment.png",
+  "reflection_strength": 1.0,
+  "roughness": 0.08,
+  "metalness": 0.0,
+  "replaces": ["water.mat"]
+}
+```
+
+`fluid_thickness` is **absorption per game unit**, not the distance at
+which water becomes opaque. Higher numbers make water murkier over the same
+depth. The default is `0.25`, and 0 disables albedo absorption altogether
+(only reflections/emission remain). For example, at an underwater view-path
+length of 5 units:
+
+| fluid_thickness | Albedo opacity from absorption |
+| --- | --- |
+| 0.05 | 22% |
+| 0.25 | 71% |
+| 1.0 | 99% |
+
+The opacity approximation is `1 - exp(-fluid_thickness * thickness)`.
+`thickness` is measured along the eye-to-scene ray, using the depth
+difference between the visible liquid polygon and the **first opaque surface
+behind it**. Texture/material/vertex alpha continue to cap final coverage,
+so use an opaque albedo for fully opaque deep water. If there is no opaque
+receiver, the fluid is treated as fully deep. Nearby opaque geometry still
+occludes the fluid using the regular hardware depth test.
+
+The alpha-blended albedo fades out in the shallows, while Fresnel environment
+reflections and emission retain their independent contributions. This is an
+artistic single-pass approximation, not physically complete transmission,
+refraction or volumetric scattering. It cannot see through several layers
+of transparent geometry, and multiple overlapping fluid polygons are still
+subject to the existing transparent draw-order limitations.
+
+`fluid` and `depth_clip: true` cannot be combined: the former regards
+empty depth as deep liquid while the latter intentionally discards it.
+As with other materials, `fluid_thickness` can be a pack-wide default
+overridden per material.
+
+**Testing:** shallow/deep slopes and gaps with no underlying opaque
+geometry; grazing angles; strongly reflecting normal-mapped water; opaque
+versus alpha-masked albedo; fog on/off; MSAA; foreground occluders; very
+high/low `fluid_thickness` and no `fluid_thickness` field. Check that
+`normal`, `additive`, and `multiply` blend modes remain unchanged.
 
 ### Depth-clipped polygon decals
 

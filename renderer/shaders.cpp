@@ -105,6 +105,7 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , blend_mode(gl::get_uniform_location(the_program, "blend_mode"))
     , depth_clip(gl::get_uniform_location(the_program, "depth_clip"))
     , scene_depth(gl::get_uniform_location(the_program, "scene_depth"))
+    , fluid_thickness(gl::get_uniform_location(the_program, "fluid_thickness"))
     , albedo_map(gl::get_uniform_location(the_program, "albedo_map"))
     , albedo_factor(gl::get_uniform_location(the_program, "albedo_factor"))
     , emissive_map(gl::get_uniform_location(the_program, "emissive_map"))
@@ -152,6 +153,11 @@ void jkgm::shaders::game_pass_shader::set_features(point<4, float> value)
 void jkgm::shaders::game_pass_shader::set_blend_mode(int mode)
 {
     gl::set_uniform_integer(blend_mode, mode);
+}
+
+void jkgm::shaders::game_pass_shader::set_fluid_thickness(float absorption)
+{
+    gl::set_uniform_float(fluid_thickness, absorption);
 }
 
 void jkgm::shaders::game_pass_shader::set_depth_clip(bool enabled)

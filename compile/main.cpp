@@ -71,6 +71,7 @@ namespace jkgm {
 
         std::optional<out_material_alpha_mode> alpha_mode;
         std::optional<std::string> blend_mode;
+        std::optional<float> fluid_thickness;
         std::optional<bool> depth_clip;
         std::optional<float> alpha_cutoff;
     };
@@ -581,12 +582,25 @@ namespace jkgm {
         if(doc.contains("blend_mode")) {
             auto const &mode = doc["blend_mode"];
             if(!mode.is_string() ||
-               (mode != "normal" && mode != "additive" && mode != "multiply")) {
+               (mode != "normal" && mode != "additive" &&
+                mode != "multiply" && mode != "fluid")) {
                 LOG_ERROR("Material '", rv->name,
-                          "' blend_mode must be normal, additive, or multiply");
+                          "' blend_mode must be normal, additive, multiply, or fluid");
                 throw std::runtime_error("Invalid script");
             }
             rv->blend_mode = static_cast<std::string>(mode);
+        }
+
+        if(doc.contains("fluid_thickness")) {
+            auto const &v = doc["fluid_thickness"];
+            if(!v.is_number() || !std::isfinite(static_cast<double>(v)) ||
+               !std::isfinite(static_cast<float>(v)) ||
+               static_cast<float>(v) < 0.0f) {
+                LOG_ERROR("Material '", rv->name,
+                          "' fluid_thickness must be a finite, nonnegative number");
+                throw std::runtime_error("Invalid script");
+            }
+            rv->fluid_thickness = static_cast<float>(v);
         }
 
         if(doc.contains("depth_clip")) {
@@ -596,6 +610,15 @@ namespace jkgm {
                 throw std::runtime_error("Invalid script");
             }
             rv->depth_clip = static_cast<bool>(v);
+        }
+
+        // Fluid absorption and decal plane clipping are different modes:
+        // fluid uses empty opaque-depth pixels as fully deep, while decals
+        // discard them. Reject ambiguous combinations.
+        if(rv->blend_mode == "fluid" && rv->depth_clip.value_or(false)) {
+            LOG_ERROR("Material '", rv->name,
+                      "' cannot combine fluid blend_mode with depth_clip");
+            throw std::runtime_error("Invalid script");
         }
 
         if(doc.contains("alpha_cutoff")) {
@@ -776,6 +799,9 @@ namespace jkgm {
 
         if(mat.blend_mode.has_value()) {
             rv["blend_mode"] = *mat.blend_mode;
+        }
+        if(mat.fluid_thickness.has_value()) {
+            rv["fluid_thickness"] = *mat.fluid_thickness;
         }
 
         if(mat.depth_clip.has_value()) {
@@ -970,6 +996,7 @@ namespace jkgm {
                     "texture_filtering",
                     "alpha_mode",
                     "blend_mode",
+                    "fluid_thickness",
                     "depth_clip",
                     "alpha_cutoff",
                     }) {

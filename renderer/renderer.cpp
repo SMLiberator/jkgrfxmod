@@ -957,11 +957,14 @@ namespace jkgm {
             // it on the opaque shader is ignored (uniform location -1).
             auto const blend_mode = get_material_blend_mode(id);
             prog->set_blend_mode(static_cast<int>(blend_mode));
+            prog->set_fluid_thickness(
+                id.get() != 0U ? vidmem_texture_surfaces.at(id.get() - 1)->fluid_thickness
+                               : 0.25f);
             prog->set_depth_clip(id.get() != 0U &&
                                  vidmem_texture_surfaces.at(id.get() - 1)->depth_clip);
 
             if(prog == &ogs->game_transparency_pass_program) {
-                // Normal uses JK's existing premultiplied blend convention.
+                // Normal/fluid use premultiplied alpha (ONE, 1-SRC_ALPHA).
                 // Additive/multiply preserve framebuffer alpha independently.
                 switch(blend_mode) {
                 case material_blend_mode::additive:

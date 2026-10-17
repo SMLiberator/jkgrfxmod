@@ -7,9 +7,9 @@
 
 namespace jkgm {
     enum class material_alpha_mode { blend, mask };
-    // Distinct from alpha testing. Additive/multiply materials always render
-    // in the transparency pass, even when the original JK face was opaque.
-    enum class material_blend_mode { normal, additive, multiply };
+    // Distinct from alpha testing. Special modes always render in the
+    // transparency pass, even when the original JK face was opaque.
+    enum class material_blend_mode { normal, additive, multiply, fluid };
     // Screen mode initially falls back to the world-aligned EnvMap; an SSR pass will
     // consume this choice in the next stage.
     enum class material_reflection_mode { envmap, screen, fixed, matcap };
@@ -72,6 +72,9 @@ namespace jkgm {
 
         material_alpha_mode alpha_mode = material_alpha_mode::blend;
         material_blend_mode blend_mode = material_blend_mode::normal;
+        // Beer-Lambert absorption per game unit of thickness through a fluid.
+        // Higher values make the albedo opaque at shorter viewing distances.
+        float fluid_thickness = 0.25f;
         // Restrict decal polygons to nearby opaque scene geometry.
         bool depth_clip = false;
         float alpha_cutoff = 0.5f;

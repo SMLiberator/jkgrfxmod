@@ -45,6 +45,7 @@ namespace jkgm {
             gl::uniform_location_id blend_mode;
             gl::uniform_location_id depth_clip;
             gl::uniform_location_id scene_depth;
+            gl::uniform_location_id fluid_thickness;
 
             gl::uniform_location_id albedo_map;
             gl::uniform_location_id albedo_factor;
@@ -86,8 +87,9 @@ namespace jkgm {
             void set_screen_resolution(size<2, float> res);
 
             void set_features(point<4, float> value);
-            // 0 normal, 1 additive, 2 multiply. Absent in the opaque shader.
+            // 0 normal, 1 additive, 2 multiply, 3 fluid. Absent in opaque.
             void set_blend_mode(int mode);
+            void set_fluid_thickness(float absorption);
             void set_depth_clip(bool enabled);
             void set_scene_depth_sampler(int sampler);
 
