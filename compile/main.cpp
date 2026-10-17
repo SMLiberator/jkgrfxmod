@@ -58,6 +58,7 @@ namespace jkgm {
         std::optional<bool> texture_filtering;
 
         std::optional<out_material_alpha_mode> alpha_mode;
+        std::optional<std::string> blend_mode;
         std::optional<float> alpha_cutoff;
     };
 
@@ -459,6 +460,17 @@ namespace jkgm {
             }
         }
 
+        if(doc.contains("blend_mode")) {
+            auto const &mode = doc["blend_mode"];
+            if(!mode.is_string() ||
+               (mode != "normal" && mode != "additive" && mode != "multiply")) {
+                LOG_ERROR("Material '", rv->name,
+                          "' blend_mode must be normal, additive, or multiply");
+                throw std::runtime_error("Invalid script");
+            }
+            rv->blend_mode = static_cast<std::string>(mode);
+        }
+
         if(doc.contains("alpha_cutoff")) {
             if(rv->alpha_mode != out_material_alpha_mode::mask) {
                 LOG_ERROR(
@@ -600,6 +612,10 @@ namespace jkgm {
                 rv["alpha_mode"] = "mask";
                 break;
             }
+        }
+
+        if(mat.blend_mode.has_value()) {
+            rv["blend_mode"] = *mat.blend_mode;
         }
 
         if(mat.alpha_mode.has_value() && mat.alpha_cutoff.has_value()) {
@@ -780,6 +796,7 @@ namespace jkgm {
                     "reflection_mode",
                     "texture_filtering",
                     "alpha_mode",
+                    "blend_mode",
                     "alpha_cutoff",
                     }) {
                         if(!effective.contains(property) && script_doc.contains(property)) {
