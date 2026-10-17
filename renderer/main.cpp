@@ -7,6 +7,7 @@
 #include "postfx.hpp"
 #include "renderer.hpp"
 #include <Windows.h>
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -468,6 +469,60 @@ namespace {
         jkgm::get_frame_blend_settings().reset();
     }
 
+    // SetDistanceBlur(vector(start,end,strength), float fadeTime)
+    // Distances in JK units, strength 0..1.
+    void __cdecl cog_set_distance_blur(void *ctx)
+    {
+        float const fade_time = cog_pop_float(ctx);
+        float params[3] = {0.0f, 0.0f, 0.0f};
+        cog_pop_vector(ctx, params);
+
+        float const start = std::max(params[0], 0.0f);
+        float const end = std::max(params[1], start + 0.001f);
+        jkgm::get_distance_blur_settings().params.fade_to(
+            {start, end, clamp_float(params[2], 0.0f, 1.0f)}, fade_time);
+    }
+
+    // vector GetDistanceBlur()
+    void __cdecl cog_get_distance_blur(void *ctx)
+    {
+        auto const params = jkgm::get_distance_blur_settings().params.value();
+        cog_push_vector(ctx, params.data());
+    }
+
+    // ResetDistanceBlur()
+    void __cdecl cog_reset_distance_blur(void * /*ctx*/)
+    {
+        jkgm::get_distance_blur_settings() = jkgm::distance_blur_settings();
+    }
+
+    // SetPeripheralBlur(vector(inner,outer,strength), float fadeTime)
+    // Radii are normalized screen-center-to-corner distances, 0..1.
+    void __cdecl cog_set_peripheral_blur(void *ctx)
+    {
+        float const fade_time = cog_pop_float(ctx);
+        float params[3] = {0.0f, 0.0f, 0.0f};
+        cog_pop_vector(ctx, params);
+
+        float const inner = clamp_float(params[0], 0.0f, 1.0f);
+        float const outer = clamp_float(params[1], inner + 0.001f, 1.001f);
+        jkgm::get_peripheral_blur_settings().params.fade_to(
+            {inner, outer, clamp_float(params[2], 0.0f, 1.0f)}, fade_time);
+    }
+
+    // vector GetPeripheralBlur()
+    void __cdecl cog_get_peripheral_blur(void *ctx)
+    {
+        auto const params = jkgm::get_peripheral_blur_settings().params.value();
+        cog_push_vector(ctx, params.data());
+    }
+
+    // ResetPeripheralBlur()
+    void __cdecl cog_reset_peripheral_blur(void * /*ctx*/)
+    {
+        jkgm::get_peripheral_blur_settings() = jkgm::peripheral_blur_settings();
+    }
+
     struct cog_verb_entry {
         char const *name;
         cog_handler_type handler;
@@ -494,6 +549,12 @@ namespace {
         cog_verb_entry{"setframeblend", cog_set_frame_blend},
         cog_verb_entry{"getframeblend", cog_get_frame_blend},
         cog_verb_entry{"resetframeblend", cog_reset_frame_blend},
+        cog_verb_entry{"setdistanceblur", cog_set_distance_blur},
+        cog_verb_entry{"getdistanceblur", cog_get_distance_blur},
+        cog_verb_entry{"resetdistanceblur", cog_reset_distance_blur},
+        cog_verb_entry{"setperipheralblur", cog_set_peripheral_blur},
+        cog_verb_entry{"getperipheralblur", cog_get_peripheral_blur},
+        cog_verb_entry{"resetperipheralblur", cog_reset_peripheral_blur},
     };
 
     JkInitNewCogVerbs_type TrueJkInitNewCogVerbs = nullptr;

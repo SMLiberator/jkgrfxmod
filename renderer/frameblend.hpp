@@ -22,7 +22,7 @@ namespace jkgm {
                                            : ogs->frame_blend_history_a;
 
         float strength = std::clamp(settings.strength.value()[0], 0.0f, 1.0f);
-        if(!ogs->enable_blur || !ogs->frame_blend_history_valid) {
+        if(!ogs->enable_trails || !ogs->frame_blend_history_valid) {
             strength = 0.0f;
         }
 

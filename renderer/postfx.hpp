@@ -42,6 +42,30 @@ namespace jkgm {
 
     // Recursive temporal accumulation. 0 = no trails, 1 = hold the previous
     // output indefinitely. The history must be invalidated on reset or scene changes.
+    // Screen-space depth blur: distances are JK's world/view units.
+    // x=start, y=end, z=strength (0..1). No blur at zero strength.
+    struct distance_blur_settings {
+        animated_floats<3> params{std::array<float, 3>{64.0f, 256.0f, 0.0f}};
+    };
+
+    // Radius from screen center normalized to 0=center, 1=corner.
+    // x=inner, y=outer, z=strength (0..1).
+    struct peripheral_blur_settings {
+        animated_floats<3> params{std::array<float, 3>{0.55f, 1.0f, 0.0f}};
+    };
+
+    inline distance_blur_settings &get_distance_blur_settings()
+    {
+        static distance_blur_settings settings;
+        return settings;
+    }
+
+    inline peripheral_blur_settings &get_peripheral_blur_settings()
+    {
+        static peripheral_blur_settings settings;
+        return settings;
+    }
+
     struct frame_blend_settings {
         animated_floats<1> strength{std::array<float, 1>{0.0f}};
         uint64_t reset_generation = 0;

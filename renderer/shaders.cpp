@@ -412,6 +412,50 @@ void jkgm::shaders::post_scale_shader::set_fbuf_sampler(int sampler)
     gl::set_uniform_integer(fbuf_image, sampler);
 }
 
+jkgm::shaders::post_spatial_blur_shader::post_spatial_blur_shader(
+    fs::path const &data_root)
+    : opengl_shader("post_spatial_blur",
+                    data_root / "shaders/postprocess.vert",
+                    data_root / "shaders/post_spatial_blur.frag")
+    , source_image(gl::get_uniform_location(the_program, "source_image"))
+    , depth_image(gl::get_uniform_location(the_program, "depth_image"))
+    , blur_axis(gl::get_uniform_location(the_program, "blur_axis"))
+    , screen_size(gl::get_uniform_location(the_program, "screen_size"))
+    , distance_params(gl::get_uniform_location(the_program, "distance_params"))
+    , peripheral_params(gl::get_uniform_location(the_program, "peripheral_params"))
+{
+}
+
+void jkgm::shaders::post_spatial_blur_shader::set_source_sampler(int sampler)
+{
+    gl::set_uniform_integer(source_image, sampler);
+}
+
+void jkgm::shaders::post_spatial_blur_shader::set_depth_sampler(int sampler)
+{
+    gl::set_uniform_integer(depth_image, sampler);
+}
+
+void jkgm::shaders::post_spatial_blur_shader::set_blur_axis(int axis)
+{
+    gl::set_uniform_integer(blur_axis, axis);
+}
+
+void jkgm::shaders::post_spatial_blur_shader::set_screen_size(size<2, float> dims)
+{
+    gl::set_uniform_vector(screen_size, dims);
+}
+
+void jkgm::shaders::post_spatial_blur_shader::set_distance_params(point<4, float> params)
+{
+    gl::set_uniform_vector(distance_params, params);
+}
+
+void jkgm::shaders::post_spatial_blur_shader::set_peripheral_params(point<4, float> params)
+{
+    gl::set_uniform_vector(peripheral_params, params);
+}
+
 jkgm::shaders::post_frame_blend_shader::post_frame_blend_shader(
     fs::path const &data_root)
     : opengl_shader("post_frame_blend",

@@ -11,6 +11,7 @@
     },
     "enable_bloom": true,
     "enable_blur": true,
+    "enable_trails": true,
     "enable_fog": true,
     "enable_post": true,
     "enable_reflections": true,
