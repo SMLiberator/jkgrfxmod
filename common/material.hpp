@@ -6,6 +6,9 @@
 
 namespace jkgm {
     enum class material_alpha_mode { blend, mask };
+    // Distinct from alpha testing. Additive/multiply materials always render
+    // in the transparency pass, even when the original JK face was opaque.
+    enum class material_blend_mode { normal, additive, multiply };
     // Screen mode initially falls back to the world-aligned EnvMap; an SSR pass will
     // consume this choice in the next stage.
     enum class material_reflection_mode { envmap, screen, fixed, matcap };
@@ -42,6 +45,7 @@ namespace jkgm {
         std::optional<bool> texture_filtering;
 
         material_alpha_mode alpha_mode = material_alpha_mode::blend;
+        material_blend_mode blend_mode = material_blend_mode::normal;
         float alpha_cutoff = 0.5f;
     };
 }
