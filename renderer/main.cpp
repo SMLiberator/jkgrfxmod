@@ -504,24 +504,24 @@ namespace {
         jkgm::get_color_filter_settings() = jkgm::color_filter_settings();
     }
 
-    // SetFrameBlend(float strength, float fadeTime)
+    // SetFrameTrail(float strength, float fadeTime)
     //   strength: 0 = no history; 1 = freeze the last composited frame
     //   fadeTime: interpolation time in seconds (0 = immediate)
-    void __cdecl cog_set_frame_blend(void *ctx)
+    void __cdecl cog_set_frame_trail(void *ctx)
     {
         float const fade_time = cog_pop_float(ctx);
         float const strength = clamp_float(cog_pop_float(ctx), 0.0f, 1.0f);
         jkgm::get_frame_blend_settings().strength.fade_to({strength}, fade_time);
     }
 
-    // float GetFrameBlend()
-    void __cdecl cog_get_frame_blend(void *ctx)
+    // float GetFrameTrail()
+    void __cdecl cog_get_frame_trail(void *ctx)
     {
         cog_push_float(ctx, jkgm::get_frame_blend_settings().strength.value()[0]);
     }
 
-    // ResetFrameBlend() = disable temporal blending and discard old frame history.
-    void __cdecl cog_reset_frame_blend(void * /*ctx*/)
+    // ResetFrameTrail() = disable temporal blending and discard old frame history.
+    void __cdecl cog_reset_frame_trail(void * /*ctx*/)
     {
         jkgm::get_frame_blend_settings().reset();
     }
@@ -608,9 +608,9 @@ namespace {
         cog_verb_entry{"setcolorfilter", cog_set_color_filter},
         cog_verb_entry{"getcolorfilter", cog_get_color_filter},
         cog_verb_entry{"resetcolorfilter", cog_reset_color_filter},
-        cog_verb_entry{"setframeblend", cog_set_frame_blend},
-        cog_verb_entry{"getframeblend", cog_get_frame_blend},
-        cog_verb_entry{"resetframeblend", cog_reset_frame_blend},
+        cog_verb_entry{"setframetrail", cog_set_frame_trail},
+        cog_verb_entry{"getframetrail", cog_get_frame_trail},
+        cog_verb_entry{"resetframetrail", cog_reset_frame_trail},
         cog_verb_entry{"setdistanceblur", cog_set_distance_blur},
         cog_verb_entry{"getdistanceblur", cog_get_distance_blur},
         cog_verb_entry{"resetdistanceblur", cog_reset_distance_blur},
