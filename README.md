@@ -143,7 +143,9 @@ must be tangent-space **OpenGL +Y** normal textures (RGB, neutral
 approximately `[128,128,255]`). They are imported and sampled as **linear
 data**, without sRGB conversion or alpha premultiplication. Only the surface
 reflection direction changes; JK vertex lighting and SSAO continue to use
-geometry normals.
+geometry normals. A material must have an `environment_map` (or inherit the
+pack's default environment map), plus nonzero `reflection_strength`, for
+the normal perturbations to produce a visible reflection.
 
 Two layers are blended by adding their tangent-space slopes and converting the
 result into a new per-pixel view normal. Both layers can scroll independently
@@ -153,6 +155,7 @@ using the renderer clock without animating the albedo or emissive textures:
 {
   "name": "lake_water",
   "albedo_map": "lake_color.png",
+  "environment_map": "sky_environment.png",
   "normal_map": "waves.png",
   "normal_map2": "detail_waves.png",
   "normal_strength": 0.35,
