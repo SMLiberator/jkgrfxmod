@@ -33,6 +33,8 @@ namespace jkgm {
         // Diagnostic: bypass the patched jk.exe native normals and derive normals
         // from projected triangle geometry, as the old renderer did.
         bool debug_force_face_normals = false;
+        // Diagnostic: clear native-normal validity bits after each D3D execute pass.
+        bool debug_consume_native_normals = false;
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
         bool enable_posterized_lighting = false;
