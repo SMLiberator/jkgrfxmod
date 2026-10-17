@@ -388,7 +388,9 @@ void main()
         // traverses more water than a perpendicular view. The depth buffer
         // stores camera-forward linear Z, not radial distance.
         float opaque_depth = texelFetch(scene_depth, ivec2(gl_FragCoord.xy), 0).r;
-        float absorption = 1.0;
+        // Zero density means an optically clear fluid, even when no
+        // opaque receiving surface exists behind it.
+        float absorption = fluid_thickness > 0.0 ? 1.0 : 0.0;
         if(opaque_depth < 65500.0) {
             float h_scale = camera_right.w > 0.5
                                 ? view_params.x
