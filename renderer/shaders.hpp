@@ -42,6 +42,7 @@ namespace jkgm {
             gl::uniform_location_id screen_resolution;
 
             gl::uniform_location_id features;
+            gl::uniform_location_id blend_mode;
 
             gl::uniform_location_id albedo_map;
             gl::uniform_location_id albedo_factor;
@@ -76,6 +77,8 @@ namespace jkgm {
             void set_screen_resolution(size<2, float> res);
 
             void set_features(point<4, float> value);
+            // 0 normal, 1 additive, 2 multiply. Absent in the opaque shader.
+            void set_blend_mode(int mode);
 
             void set_albedo_map_sampler(int sampler);
             void set_albedo_factor(color factor);
