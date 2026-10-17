@@ -15,8 +15,14 @@ namespace jkgm {
             return source;
         }
 
-        auto const distance = get_distance_blur_settings().params.value();
-        auto const peripheral = get_peripheral_blur_settings().params.value();
+        auto distance = get_distance_blur_settings().params.value();
+        auto peripheral = get_peripheral_blur_settings().params.value();
+        if(!ogs->enable_distance_blur) {
+            distance[2] = 0.0f;
+        }
+        if(!ogs->enable_peripheral_blur) {
+            peripheral[2] = 0.0f;
+        }
         if(distance[2] <= 0.0001f && peripheral[2] <= 0.0001f) {
             return source;
         }
