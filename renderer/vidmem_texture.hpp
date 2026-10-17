@@ -56,6 +56,7 @@ namespace jkgm {
         std::optional<bool> texture_filtering;
 
         material_alpha_mode alpha_mode = material_alpha_mode::blend;
+        material_blend_mode blend_mode = material_blend_mode::normal;
         float alpha_cutoff = 0.5f;
 
         vidmem_texture_surface(renderer *r, material_instance_id material_id);
