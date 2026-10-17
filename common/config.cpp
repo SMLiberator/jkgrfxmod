@@ -67,14 +67,8 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_blur")) {
             j.at("enable_blur").get_to(rv->enable_blur);
         }
-        if(j.contains("enable_frame_blend")) {
-            j.at("enable_frame_blend").get_to(rv->enable_frame_blend);
-        }
-        if(j.contains("enable_distance_blur")) {
-            j.at("enable_distance_blur").get_to(rv->enable_distance_blur);
-        }
-        if(j.contains("enable_peripheral_blur")) {
-            j.at("enable_peripheral_blur").get_to(rv->enable_peripheral_blur);
+        if(j.contains("enable_trails")) {
+            j.at("enable_trails").get_to(rv->enable_trails);
         }
 
         if(j.contains("enable_fog")) {
