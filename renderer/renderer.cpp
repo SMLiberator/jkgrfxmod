@@ -1022,7 +1022,12 @@ namespace jkgm {
             float aspect = get<x>(internal_scr_res_f) / get<y>(internal_scr_res_f);
             float vscale = hscale / aspect;
             for(auto const &tri : tb) {
-                bool use_native_normals = (tri.v0.nativeNormal & 0x80000000u) &&
+                // Diagnostic switch: force the pre-smooth-normal geometric
+                // triangle normal. Compare identical camera views on imported
+                // levels to distinguish broken JK native normals from renderer
+                // triangle reconstruction / SSAO errors.
+                bool use_native_normals = !the_config->debug_force_face_normals &&
+                                          (tri.v0.nativeNormal & 0x80000000u) &&
                                           (tri.v1.nativeNormal & 0x80000000u) &&
                                           (tri.v2.nativeNormal & 0x80000000u);
                 vx->pos = tri.v0.pos;
