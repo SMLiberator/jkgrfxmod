@@ -10,6 +10,7 @@
 #include "glutil/texture.hpp"
 #include "glutil/vertex_array.hpp"
 #include "shaders.hpp"
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <vector>
@@ -124,6 +125,7 @@ namespace jkgm {
         fs::path data_root;
         // Master optional post-processing switch (color-space conversion stays active).
         bool enable_post = true;
+        bool enable_blur = true;
 
         shaders::menu_shader menu_program;
 
@@ -141,6 +143,7 @@ namespace jkgm {
         shaders::post_low_pass_shader post_low_pass;
         shaders::post_scale_shader post_scale;
         shaders::post_to_srgb_shader post_to_srgb;
+        shaders::post_frame_blend_shader post_frame_blend;
 
         post_model postmdl;
         overlay_model menumdl;
@@ -158,6 +161,14 @@ namespace jkgm {
 
         post_buffer screen_postbuffer1;
         post_buffer screen_postbuffer2;
+
+        // Final post-processed frame is staged in screen_postbuffer1. These two
+        // buffers alternate to preserve the accumulated previous output.
+        post_buffer frame_blend_history_a;
+        post_buffer frame_blend_history_b;
+        bool frame_blend_use_a = true;
+        bool frame_blend_history_valid = false;
+        uint64_t frame_blend_generation = 0;
 
         hdr_stack bloom_layers;
 

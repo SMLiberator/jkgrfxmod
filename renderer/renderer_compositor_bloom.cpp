@@ -1,6 +1,7 @@
 #include "renderer_compositor_bloom.hpp"
 #include "math/colors.hpp"
 #include "opengl_state.hpp"
+#include "frameblend.hpp"
 #include "postfx.hpp"
 
 void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
@@ -98,15 +99,18 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
             gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
     }
 
-    gl::bind_framebuffer(gl::framebuffer_bind_target::any, gl::default_framebuffer);
+    gl::bind_framebuffer(gl::framebuffer_bind_target::any, ogs->screen_postbuffer1.fbo);
     gl::set_viewport(make_box(make_point(0, 0), screen_size));
 
     gl::set_clear_color(solid(colors::black));
     gl::clear({gl::clear_flag::color, gl::clear_flag::depth});
     gl::disable(gl::capability::depth_test);
     gl::disable(gl::capability::cull_face);
+    gl::disable(gl::capability::blend);
 
-    // Copy to front buffer while converting to srgb
+    // Render the finished post-processed presentation (including bloom and
+    // optional effects) into linear HDR staging. Frame blending/presentation
+    // happens in the shared final pass after this shader completes.
     ogs->post_to_srgb.use_program();
     ogs->post_to_srgb.set_fbuf_sampler(0);
 
@@ -134,4 +138,6 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
 
     gl::draw_elements(
         gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
+
+    present_frame_blend(ogs, screen_size);
 }

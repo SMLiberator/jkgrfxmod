@@ -240,6 +240,19 @@ namespace jkgm {
             void set_fbuf_sampler(int sampler);
         };
 
+        class post_frame_blend_shader : public opengl_shader {
+        private:
+            gl::uniform_location_id current_image;
+            gl::uniform_location_id history_image;
+            gl::uniform_location_id blend_strength;
+
+        public:
+            explicit post_frame_blend_shader(fs::path const &data_root);
+            void set_current_sampler(int sampler);
+            void set_history_sampler(int sampler);
+            void set_blend_strength(float strength);
+        };
+
         class post_to_srgb_shader : public opengl_shader {
         public:
             static constexpr int num_bloom_layers = 5;
