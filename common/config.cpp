@@ -88,6 +88,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("debug_force_face_normals").get_to(rv->debug_force_face_normals);
         }
 
+        if(j.contains("debug_consume_native_normals")) {
+            j.at("debug_consume_native_normals").get_to(rv->debug_consume_native_normals);
+        }
+
         if(j.contains("enable_ssao")) {
             j.at("enable_ssao").get_to(rv->enable_ssao);
         }
