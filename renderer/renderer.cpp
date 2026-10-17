@@ -1514,6 +1514,37 @@ namespace jkgm {
             }
 
             cmdbuf->Unlock();
+
+            // Experimental freshness check: the native normal sideband is indexed
+            // by the current D3D execute buffer's transformed-vertex slots, but its
+            // validity bits can survive when those slots are reused by another
+            // geometry path (notably the engine's Solid graphics mode).
+            //
+            // Consume validity only after ALL triangles in this execute buffer
+            // have been read, since several triangles may share a vertex index.
+            // Only the validity bit is cleared; the packed normals remain intact.
+            // This is diagnostic, OFF by default, until producer-side behavior
+            // can be verified and a per-buffer generation protocol is available.
+            if(the_config->debug_consume_native_normals && native_normals) {
+                MEMORY_BASIC_INFORMATION mbi{};
+                if(VirtualQuery(reinterpret_cast<void const *>(normal_slots_address),
+                                &mbi, sizeof(mbi)) != 0) {
+                    DWORD protection = mbi.Protect & 0xffU;
+                    bool writable = protection == PAGE_READWRITE ||
+                                    protection == PAGE_EXECUTE_READWRITE ||
+                                    protection == PAGE_WRITECOPY ||
+                                    protection == PAGE_EXECUTE_WRITECOPY;
+                    if(writable) {
+                        auto *normal_slots =
+                            reinterpret_cast<uint32_t *>(normal_slots_address);
+                        size_t limit = std::min(static_cast<size_t>(ed.dwVertexCount),
+                                                normal_slot_count);
+                        for(size_t i = 0; i < limit; ++i) {
+                            normal_slots[i] &= 0x7fffffffU;
+                        }
+                    }
+                }
+            }
         }
 
         void present_game() override
