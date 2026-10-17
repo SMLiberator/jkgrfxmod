@@ -267,7 +267,14 @@ void main()
         // A fully transparent pixel is neutral white, NOT black.
         // Use the material-lit pigment without the fog term: a dark decal
         // should not brighten the framebuffer by mixing fog into its tint.
-        vec3 tint = clamp(albedo.rgb * (1.0 - metalness) + emissive +
+        // JK's vertex RGB is already premultiplied by vertex alpha.
+        // Recover the actual pigment for a multiply factor, otherwise a
+        // white semi-transparent texel would incorrectly darken the scene.
+        vec3 unpremultiplied_vertex = vertex_color.rgb /
+                                      max(vertex_color.a, 0.00001);
+        vec3 pigment = albedo_map_sample.rgb * albedo_factor.rgb *
+                       unpremultiplied_vertex;
+        vec3 tint = clamp(pigment * (1.0 - metalness) + emissive +
                           reflection * (1.0 - fog_amount), 0.0, 1.0);
         float opacity = clamp(albedo.a, 0.0, 1.0);
         out_color = vec4(mix(vec3(1.0), tint, opacity), 0.0);
