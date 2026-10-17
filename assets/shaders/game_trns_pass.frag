@@ -104,10 +104,6 @@ vec3 surface_view_normal(vec2 uv)
         vec3 layer = texture(normal_map2, uv + normal_uv_offset2).xyz * 2.0 - 1.0;
         slope += normal_params.y * layer.xy / max(layer.z, 0.05);
     }
-    if(dot(slope, slope) < 0.00000001) {
-        return n;
-    }
-
     // Cotangent frame from geometric position and original UV derivatives.
     // All quantities are in metric view space, avoiding the projection
     // scaling distortion present in raw clip-space vertex coordinates.
