@@ -444,7 +444,8 @@ inherited from the pack. A Direct3D texture instance retains a non-owning link
 to its resolved replacement definition; the link is reset whenever the instance
 is cleared/reused. This does not change material rendering.
 
-With DEBUG logging enabled (`log_path` or `JKGM_LOG_FILE`), texture uploads
+With file logging enabled via `"log_path": "jkgm-test.log"` in `jkgm.json`
+(or `JKGM_LOG_FILE`), texture uploads
 produce messages such as:
 
 ```text

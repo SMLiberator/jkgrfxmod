@@ -14,3 +14,25 @@ jobs:
       uses: ilammy/msvc-dev-cmd@v1
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
+
+    - name: Package diagnostic binaries
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Path test-build -Force | Out-Null
+        foreach ($fileName in @('renderer.dll', 'inject.exe')) {
+          $candidate = Get-ChildItem -Path . -Recurse -File -Filter $fileName |
+            Where-Object { $_.FullName -match '[\\/](Release|release)[\\/]' } |
+            Select-Object -First 1
+          if ($candidate) {
+            Copy-Item $candidate.FullName (Join-Path 'test-build' $fileName) -Force
+          }
+        }
+        if (-not (Test-Path 'test-build/renderer.dll')) {
+          throw "Could not find the built renderer.dll"
+        }
+    - name: Upload diagnostic build
+      uses: actions/upload-artifact@v4
+      with:
+        name: jkgfxmod-material-link-test
+        path: test-build/*
+        if-no-files-found: error
