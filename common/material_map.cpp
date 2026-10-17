@@ -32,6 +32,8 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
 
     for(auto const &em : doc["materials"]) {
         auto mat = std::make_unique<material>();
+        mat->pack_root = data_dir;
+        mat->source_name = em.value("name", std::string());
 
         if(em.contains("albedo_map")) {
             mat->albedo_map = data_dir / std::string(em["albedo_map"]);
@@ -139,6 +141,7 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
                                                    : (has_surface_map ? 1.0f : 0.0f);
 
         if(em.contains("environment_map")) {
+            mat->has_explicit_env_map = true;
             mat->env_map = data_dir / std::string(em["environment_map"]);
         }
         else if(pack_env_map.has_value()) {

@@ -435,3 +435,26 @@ For depth clipping, test a slightly offset stain crossing a floor edge,
 an originally opaque JK polygon with `blend_mode: normal`, a floating decal
 beyond the fixed gap, empty-background pixels, grazing-angle views,
 and MSAA silhouettes. Also test decals with smoothed vertex normals.
+
+## Experimental material link diagnostics
+
+A replacement material now retains its original **pack directory**, compiled
+material **name**, and whether its environment map was explicitly assigned or
+inherited from the pack. A Direct3D texture instance retains a non-owning link
+to its resolved replacement definition; the link is reset whenever the instance
+is cleared/reused. This does not change material rendering.
+
+With DEBUG logging enabled (`log_path` or `JKGM_LOG_FILE`), texture uploads
+produce messages such as:
+
+```text
+Texture instance 83 (signature <md5>) maps to pack <pack path> / material <name>
+```
+
+The numeric **texture instance** in these lines is a renderer Direct3D texture
+handle, **not** a JK MAT resource index. This logging proves the second half
+of the planned JK-MAT-to-pack link but does **not** establish the first half
+(JK material index and cel to Direct3D handle). That will require a separate
+engine-side investigation. Identical textures may share a replacement definition;
+per-instance identity is deliberately not lost. Original jkGfxMod metadata is
+accepted unchanged, without mandatory new keys.

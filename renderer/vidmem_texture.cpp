@@ -59,7 +59,11 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
     auto repl_map = surf->r->texture_cache->get_replacement_material(sig);
 
     if(repl_map.has_value()) {
-        LOG_DEBUG("Found replacement");
+        surf->replacement_material = *repl_map;
+        LOG_DEBUG("Texture instance ", surf->material_id.get(),
+                  " (signature ", static_cast<std::string>(sig), ") maps to pack ",
+                  (*repl_map)->pack_root.generic_string(), " / material ",
+                  (*repl_map)->source_name);
         if((*repl_map)->albedo_map.has_value()) {
             surf->albedo_map =
                 surf->r->texture_cache->get_srgb_texture_from_filename(*(*repl_map)->albedo_map);
@@ -171,6 +175,7 @@ jkgm::vidmem_texture_surface::vidmem_texture_surface(renderer *r, material_insta
 
 void jkgm::vidmem_texture_surface::clear()
 {
+    replacement_material = nullptr;
     if(albedo_map.has_value()) {
         r->texture_cache->release_srgb_texture(*albedo_map);
         albedo_map.reset();
