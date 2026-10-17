@@ -453,7 +453,7 @@ namespace jkgm {
             else {
                 LOG_ERROR("Material '",
                           rv->name,
-                          "' unknown blend mode '",
+                          "' unknown alpha_mode '",
                           static_cast<std::string>(am),
                           "'");
                 throw std::runtime_error("Invalid script");
