@@ -9,6 +9,7 @@ uniform sampler2D emissive_map;
 uniform vec3 emissive_factor;
 
 uniform float alpha_cutoff;
+uniform int blend_mode; // 0 normal, 1 additive, 2 multiply
 
 uniform sampler2D displacement_map;
 uniform float displacement_factor;
@@ -251,5 +252,28 @@ void main()
                          mix(1.0, albedo.a, TRANSLUCENT_COLOR_ALPHA_WEIGHT);
     vec3 lit = surface_color * (1.0 - fog_amount) + fog_color * (fog_amount * albedo.a);
 
-    out_color = vec4(emissive + reflection * (1.0 - fog_amount) + lit, albedo.a);
+    vec3 color = emissive + reflection * (1.0 - fog_amount) + lit;
+
+    if(blend_mode == 1) {
+        // Additive: RGB is the emitted contribution. The engine already
+        // premultiplies its vertex colors by vertex alpha, so only the
+        // replacement texture and material-factor opacity remain to apply.
+        // Alpha in the color target is preserved by glBlendFuncSeparate.
+        float texture_opacity = clamp(albedo_map_sample.a * albedo_factor.a, 0.0, 1.0);
+        out_color = vec4(color * texture_opacity, 0.0);
+    }
+    else if(blend_mode == 2) {
+        // Multiply with alpha: result = dst * mix(1, tint, opacity).
+        // A fully transparent pixel is neutral white, NOT black.
+        // Use the material-lit pigment without the fog term: a dark decal
+        // should not brighten the framebuffer by mixing fog into its tint.
+        vec3 tint = clamp(albedo.rgb * (1.0 - metalness) + emissive +
+                          reflection * (1.0 - fog_amount), 0.0, 1.0);
+        float opacity = clamp(albedo.a, 0.0, 1.0);
+        out_color = vec4(mix(vec3(1.0), tint, opacity), 0.0);
+    }
+    else {
+        // Preserve the original JK transparency convention unchanged.
+        out_color = vec4(color, albedo.a);
+    }
 }
