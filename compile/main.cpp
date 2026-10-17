@@ -51,6 +51,13 @@ namespace jkgm {
         std::optional<point<2, float>> emissive_scroll;
         std::optional<json::json> emissive_pulse;
 
+        std::optional<std::string> normal_map;
+        std::optional<std::string> normal_map2;
+        std::optional<float> normal_strength;
+        std::optional<float> normal_strength2;
+        std::optional<point<2, float>> normal_scroll;
+        std::optional<point<2, float>> normal_scroll2;
+
         std::optional<std::string> displacement_map;
         std::optional<float> displacement_factor;
 
@@ -355,6 +362,51 @@ namespace jkgm {
                 static_cast<float>(ef[0]), static_cast<float>(ef[1]), static_cast<float>(ef[2]));
         }
 
+        // Normal maps are DATA, never sRGB color: keep encoded XYZ intact.
+        auto import_normal_map = [&](char const *key, char const *suffix)
+            -> std::optional<std::string> {
+            if(!doc.contains(key)) {
+                return std::nullopt;
+            }
+            if(!doc[key].is_string()) {
+                LOG_ERROR("Material '", rv->name, "' ", key, " must be a filename");
+                throw std::runtime_error("Invalid script");
+            }
+            auto map_filename = str(fmt(rv->name, suffix));
+            return get_convert_linear_image(img_map,
+                                            script_path.parent_path() /
+                                                static_cast<std::string>(doc[key]),
+                                            map_filename,
+                                            output_path / map_filename);
+        };
+        rv->normal_map = import_normal_map("normal_map", ".normal.png");
+        rv->normal_map2 = import_normal_map("normal_map2", ".normal2.png");
+
+        if(doc.contains("normal_map2") && !doc.contains("normal_map")) {
+            LOG_ERROR("Material '", rv->name,
+                      "' normal_map2 requires normal_map as the first layer");
+            throw std::runtime_error("Invalid script");
+        }
+
+        auto parse_normal_strength = [&](char const *key) -> std::optional<float> {
+            if(!doc.contains(key)) {
+                return std::nullopt;
+            }
+            if(!doc[key].is_number() ||
+               !std::isfinite(static_cast<double>(doc[key]))) {
+                LOG_ERROR("Material '", rv->name, "' ", key, " must be finite");
+                throw std::runtime_error("Invalid script");
+            }
+            float s = static_cast<float>(doc[key]);
+            if(!std::isfinite(s) || s < 0.0f || s > 4.0f) {
+                LOG_ERROR("Material '", rv->name, "' ", key, " must be in [0, 4]");
+                throw std::runtime_error("Invalid script");
+            }
+            return s;
+        };
+        rv->normal_strength = parse_normal_strength("normal_strength");
+        rv->normal_strength2 = parse_normal_strength("normal_strength2");
+
         if(doc.contains("displacement_map")) {
             auto map_filename = str(fmt(rv->name, ".displacement.png"));
             auto real_map_filename =
@@ -468,6 +520,8 @@ namespace jkgm {
         };
         rv->albedo_scroll = parse_scroll("albedo_scroll");
         rv->emissive_scroll = parse_scroll("emissive_scroll");
+        rv->normal_scroll = parse_scroll("normal_scroll");
+        rv->normal_scroll2 = parse_scroll("normal_scroll2");
 
         if(doc.contains("emissive_pulse")) {
             auto const &v = doc["emissive_pulse"];
@@ -648,6 +702,27 @@ namespace jkgm {
         }
         if(mat.emissive_pulse.has_value()) {
             rv["emissive_pulse"] = *mat.emissive_pulse;
+        }
+
+        if(mat.normal_map.has_value()) {
+            rv["normal_map"] = *mat.normal_map;
+        }
+        if(mat.normal_map2.has_value()) {
+            rv["normal_map2"] = *mat.normal_map2;
+        }
+        if(mat.normal_strength.has_value()) {
+            rv["normal_strength"] = *mat.normal_strength;
+        }
+        if(mat.normal_strength2.has_value()) {
+            rv["normal_strength2"] = *mat.normal_strength2;
+        }
+        if(mat.normal_scroll.has_value()) {
+            auto s = *mat.normal_scroll;
+            rv["normal_scroll"] = {get<0>(s), get<1>(s)};
+        }
+        if(mat.normal_scroll2.has_value()) {
+            auto s = *mat.normal_scroll2;
+            rv["normal_scroll2"] = {get<0>(s), get<1>(s)};
         }
 
         if(mat.displacement_map.has_value()) {
@@ -879,6 +954,12 @@ namespace jkgm {
                     "albedo_scroll",
                     "emissive_scroll",
                     "emissive_pulse",
+                    "normal_map",
+                    "normal_map2",
+                    "normal_strength",
+                    "normal_strength2",
+                    "normal_scroll",
+                    "normal_scroll2",
                     "displacement_map",
                     "displacement_factor",
                     "surface_map",

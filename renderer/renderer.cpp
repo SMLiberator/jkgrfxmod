@@ -1015,7 +1015,10 @@ namespace jkgm {
                 // Alpha cutoff
                 prog->set_alpha_cutoff(0.0f);
 
-                // No reflections
+                // No normal maps or reflections.
+                prog->set_normal_params(make_point(0.0f, 0.0f, 0.0f, 0.0f),
+                                        point<2, float>::zero(),
+                                        point<2, float>::zero());
                 prog->set_reflection(make_point(0.0f, 0.5f, 0.0f, 0.0f),
                                      make_point(0.0f, 0.0f, 0.0f, 0.0f));
             }
@@ -1030,6 +1033,15 @@ namespace jkgm {
                 gl::texture_view emissive_map = gl::default_texture;
                 if(mat->emissive_map.has_value()) {
                     emissive_map = texture_cache->get_texture_handle(*mat->emissive_map);
+                }
+
+                gl::texture_view normal_map = gl::default_texture;
+                if(mat->normal_map.has_value()) {
+                    normal_map = texture_cache->get_texture_handle(*mat->normal_map);
+                }
+                gl::texture_view normal_map2 = gl::default_texture;
+                if(mat->normal_map2.has_value()) {
+                    normal_map2 = texture_cache->get_texture_handle(*mat->normal_map2);
                 }
 
                 gl::texture_view displacement_map = gl::default_texture;
@@ -1051,6 +1063,11 @@ namespace jkgm {
                     has_env_map = true;
                 }
 
+                // Units 6/7 are for linear normal textures; unit 5 is the
+                // already established opaque scene-depth sampler for decals.
+                bool filtered = mat->texture_filtering.value_or(the_config->enable_texture_filtering);
+                bind_color_texture(normal_map, 6, filtered);
+                bind_color_texture(normal_map2, 7, filtered);
                 gl::set_active_texture_unit(4);
                 gl::bind_texture(gl::texture_bind_target::texture_2d, env_map);
                 gl::set_active_texture_unit(3);
@@ -1059,7 +1076,6 @@ namespace jkgm {
                 gl::bind_texture(gl::texture_bind_target::texture_2d, displacement_map);
                 // Filter selection is per material, not per cached image. Keep
                 // surface/displacement/EnvMap sampling unchanged for reflection roughness.
-                bool filtered = mat->texture_filtering.value_or(the_config->enable_texture_filtering);
                 bind_color_texture(emissive_map, 1, filtered);
                 bind_color_texture(albedo_map, 0, filtered);
 
@@ -1074,6 +1090,12 @@ namespace jkgm {
                 prog->set_albedo_factor(mat->albedo_factor);
                 prog->set_uv_offsets(scroll_offset(mat->albedo_scroll),
                                      scroll_offset(mat->emissive_scroll));
+                prog->set_normal_params(
+                    make_point(mat->normal_strength, mat->normal_strength2,
+                               mat->normal_map.has_value() ? 1.0f : 0.0f,
+                               mat->normal_map2.has_value() ? 1.0f : 0.0f),
+                    scroll_offset(mat->normal_scroll),
+                    scroll_offset(mat->normal_scroll2));
 
                 // Pulse affects emissive_factor whether or not there is an
                 // emissive_map. Nonemissive terms are never animated here.
@@ -1225,6 +1247,7 @@ namespace jkgm {
             ogs->game_opaque_pass_program.set_displacement_map_sampler(2);
             ogs->game_opaque_pass_program.set_surface_map_sampler(3);
             ogs->game_opaque_pass_program.set_env_map_sampler(4);
+            ogs->game_opaque_pass_program.set_normal_map_samplers(6, 7);
             apply_engine_camera(ogs->game_opaque_pass_program);
 
             {
@@ -1330,6 +1353,7 @@ namespace jkgm {
             ogs->game_transparency_pass_program.set_displacement_map_sampler(2);
             ogs->game_transparency_pass_program.set_surface_map_sampler(3);
             ogs->game_transparency_pass_program.set_env_map_sampler(4);
+            ogs->game_transparency_pass_program.set_normal_map_samplers(6, 7);
             ogs->game_transparency_pass_program.set_scene_depth_sampler(5);
             // Sample the completed opaque pass; this is a different texture
             // from the framebuffer receiving the transparency draw.

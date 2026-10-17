@@ -136,6 +136,57 @@ frame without making a contribution, so re-enabling it does not revive an
 old image. The matching COG verbs remain available regardless of either switch.
 
 
+## Normal maps and two-layer water ripples
+
+Normal mapping is supported in both opaque and transparent materials. Maps
+must be tangent-space **OpenGL +Y** normal textures (RGB, neutral
+approximately `[128,128,255]`). They are imported and sampled as **linear
+data**, without sRGB conversion or alpha premultiplication. Only the surface
+reflection direction changes; JK vertex lighting and SSAO continue to use
+geometry normals.
+
+Two layers are blended by adding their tangent-space slopes and converting the
+result into a new per-pixel view normal. Both layers can scroll independently
+using the renderer clock without animating the albedo or emissive textures:
+
+```json
+{
+  "name": "lake_water",
+  "albedo_map": "lake_color.png",
+  "normal_map": "waves.png",
+  "normal_map2": "detail_waves.png",
+  "normal_strength": 0.35,
+  "normal_strength2": 0.15,
+  "normal_scroll": [0.012, 0.005],
+  "normal_scroll2": [-0.008, 0.015],
+  "reflection_strength": 1.0,
+  "roughness": 0.08,
+  "metalness": 0.0,
+  "alpha_mode": "blend",
+  "replaces": ["water.mat"]
+}
+```
+
+- `normal_map` enables the first layer; `normal_map2` enables a second
+  layer and requires `normal_map`. Using the same file for both layers works.
+- `normal_strength` and `normal_strength2` are slope multipliers, default
+  1.0, valid range 0–4; values 0 disable that layer's effect.
+- `normal_scroll` and `normal_scroll2` are UV repeats per second,
+  default `[0, 0]`, independent of `albedo_scroll` and `emissive_scroll`.
+- The normal maps' UVs are still derived from the model's own base UV layout,
+  but the *scroll offsets* are independent. `albedo_scroll` moves **only**
+  the albedo sampler, not surface, displacement, emissive, or normal maps.
+- Normal layers do not add new framebuffers or render passes; they cost up to
+  two more texture samples and one per-fragment tangent-basis computation.
+- They do not automatically make flat water transparent, refractive, or
+  depth-absorbing; those are separate water shading features.
+
+For water, start with a stationary water-color albedo and two differently
+scrolling normal layers. Confirm diffuse color remains stationary, the
+reflection ripples move even with `albedo_scroll` omitted, and no effect
+occurs with either normal strength at zero. Test on tilted/mirrored-UV meshes,
+with MSAA, and on opaque and transparent surfaces.
+
 ## Animated materials
 
 Animations use the renderer's own monotonic clock, not JK's simulation clock.

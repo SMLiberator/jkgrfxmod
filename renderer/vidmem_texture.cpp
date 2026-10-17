@@ -70,6 +70,15 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
                 surf->r->texture_cache->get_srgb_texture_from_filename(*(*repl_map)->emissive_map);
         }
 
+        if((*repl_map)->normal_map.has_value()) {
+            surf->normal_map = surf->r->texture_cache->get_linear_texture_from_filename(
+                *(*repl_map)->normal_map);
+        }
+        if((*repl_map)->normal_map2.has_value()) {
+            surf->normal_map2 = surf->r->texture_cache->get_linear_texture_from_filename(
+                *(*repl_map)->normal_map2);
+        }
+
         if((*repl_map)->displacement_map.has_value()) {
             surf->displacement_map = surf->r->texture_cache->get_linear_texture_from_filename(
                 *(*repl_map)->displacement_map);
@@ -96,6 +105,10 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
         surf->albedo_scroll = (*repl_map)->albedo_scroll;
         surf->emissive_scroll = (*repl_map)->emissive_scroll;
         surf->emissive_pulse = (*repl_map)->emissive_pulse;
+        surf->normal_strength = (*repl_map)->normal_strength;
+        surf->normal_strength2 = (*repl_map)->normal_strength2;
+        surf->normal_scroll = (*repl_map)->normal_scroll;
+        surf->normal_scroll2 = (*repl_map)->normal_scroll2;
 
         if(surf->r->is_parallax_enabled()) {
             surf->displacement_factor = (*repl_map)->displacement_factor;
@@ -167,6 +180,15 @@ void jkgm::vidmem_texture_surface::clear()
         emissive_map.reset();
     }
 
+    if(normal_map.has_value()) {
+        r->texture_cache->release_linear_texture(*normal_map);
+        normal_map.reset();
+    }
+    if(normal_map2.has_value()) {
+        r->texture_cache->release_linear_texture(*normal_map2);
+        normal_map2.reset();
+    }
+
     if(displacement_map.has_value()) {
         r->texture_cache->release_linear_texture(*displacement_map);
         displacement_map.reset();
@@ -193,6 +215,10 @@ void jkgm::vidmem_texture_surface::clear()
     albedo_scroll = point<2, float>::zero();
     emissive_scroll = point<2, float>::zero();
     emissive_pulse.reset();
+    normal_strength = 1.0f;
+    normal_strength2 = 1.0f;
+    normal_scroll = point<2, float>::zero();
+    normal_scroll2 = point<2, float>::zero();
     displacement_factor = 0.0f;
     alpha_mode = material_alpha_mode::blend;
     blend_mode = material_blend_mode::normal;

@@ -53,6 +53,11 @@ namespace jkgm {
             gl::uniform_location_id emissive_factor;
             gl::uniform_location_id albedo_uv_offset;
             gl::uniform_location_id emissive_uv_offset;
+            gl::uniform_location_id normal_map;
+            gl::uniform_location_id normal_map2;
+            gl::uniform_location_id normal_uv_offset;
+            gl::uniform_location_id normal_uv_offset2;
+            gl::uniform_location_id normal_params;
 
             gl::uniform_location_id alpha_cutoff;
 
@@ -92,6 +97,11 @@ namespace jkgm {
             void set_emissive_map_sampler(int sampler);
             void set_emissive_factor(color_rgb factor);
             void set_uv_offsets(point<2, float> albedo, point<2, float> emissive);
+            void set_normal_map_samplers(int first, int second);
+            // x/y = strengths, z/w = has first/second layer.
+            void set_normal_params(point<4, float> params,
+                                   point<2, float> scroll1,
+                                   point<2, float> scroll2);
 
             void set_alpha_cutoff(float cutoff);
 

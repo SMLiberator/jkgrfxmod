@@ -48,6 +48,13 @@ namespace jkgm {
         point<2, float> emissive_scroll = point<2, float>::zero();
         std::optional<material_emissive_pulse> emissive_pulse;
 
+        std::optional<linear_texture_id> normal_map;
+        std::optional<linear_texture_id> normal_map2;
+        float normal_strength = 1.0f;
+        float normal_strength2 = 1.0f;
+        point<2, float> normal_scroll = point<2, float>::zero();
+        point<2, float> normal_scroll2 = point<2, float>::zero();
+
         std::optional<linear_texture_id> displacement_map;
         float displacement_factor = 0.0f;
 

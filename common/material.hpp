@@ -43,6 +43,15 @@ namespace jkgm {
         point<2, float> emissive_scroll = point<2, float>::zero();
         std::optional<material_emissive_pulse> emissive_pulse;
 
+        // Two optional linear (non-sRGB) tangent-space normal layers.
+        // Normal strengths scale slope before layer combination.
+        std::optional<fs::path> normal_map;
+        std::optional<fs::path> normal_map2;
+        float normal_strength = 1.0f;
+        float normal_strength2 = 1.0f;
+        point<2, float> normal_scroll = point<2, float>::zero();
+        point<2, float> normal_scroll2 = point<2, float>::zero();
+
         std::optional<fs::path> displacement_map;
         float displacement_factor = 0.0f;
 

@@ -91,6 +91,29 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             mat->emissive_pulse = pulse;
         }
 
+        if(em.contains("normal_map")) {
+            mat->normal_map = data_dir / std::string(em["normal_map"]);
+        }
+        if(em.contains("normal_map2")) {
+            mat->normal_map2 = data_dir / std::string(em["normal_map2"]);
+        }
+        if(em.contains("normal_strength")) {
+            mat->normal_strength = static_cast<float>(em["normal_strength"]);
+        }
+        if(em.contains("normal_strength2")) {
+            mat->normal_strength2 = static_cast<float>(em["normal_strength2"]);
+        }
+        if(em.contains("normal_scroll")) {
+            auto const &s = em["normal_scroll"];
+            mat->normal_scroll = make_point(static_cast<float>(s[0]),
+                                             static_cast<float>(s[1]));
+        }
+        if(em.contains("normal_scroll2")) {
+            auto const &s = em["normal_scroll2"];
+            mat->normal_scroll2 = make_point(static_cast<float>(s[0]),
+                                              static_cast<float>(s[1]));
+        }
+
         if(em.contains("displacement_map")) {
             mat->displacement_map = data_dir / std::string(em["displacement_map"]);
         }
