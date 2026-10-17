@@ -6,7 +6,8 @@
 std::unique_ptr<jkgm::renderer_compositor>
     jkgm::create_renderer_compositor(config const *the_config)
 {
-    if(the_config->enable_post && the_config->enable_bloom) {
+    if(the_config->enable_post && the_config->enable_bloom &&
+       the_config->debug_render_mode == "none") {
         return std::make_unique<renderer_compositor_bloom>();
     }
 

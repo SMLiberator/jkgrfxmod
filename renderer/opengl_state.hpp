@@ -124,6 +124,7 @@ namespace jkgm {
         fs::path data_root;
         // Master optional post-processing switch (color-space conversion stays active).
         bool enable_post = true;
+        bool debug_rendering = false;
 
         shaders::menu_shader menu_program;
 

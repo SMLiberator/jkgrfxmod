@@ -1022,13 +1022,54 @@ namespace jkgm {
             float aspect = get<x>(internal_scr_res_f) / get<y>(internal_scr_res_f);
             float vscale = hscale / aspect;
             for(auto const &tri : tb) {
-                bool use_native_normals = (tri.v0.nativeNormal & 0x80000000u) &&
+                // Diagnostic switch: force the pre-smooth-normal geometric
+                // triangle normal. Compare identical camera views on imported
+                // levels to distinguish broken JK native normals from renderer
+                // triangle reconstruction / SSAO errors.
+                bool use_native_normals = !the_config->debug_force_face_normals &&
+                                          (tri.v0.nativeNormal & 0x80000000u) &&
                                           (tri.v1.nativeNormal & 0x80000000u) &&
                                           (tri.v2.nativeNormal & 0x80000000u);
+
+                // Diagnostic: classify whether the triangle actually used the native
+                // smooth-normal path, or fell back to the geometric face normal.
+                // In alignment mode compare all three native normals to the
+                // geometric normal using ABS(dot), because JK can show backfaces.
+                // Encoded vectors are classification markers, not real normals;
+                // the composite shader displays them as discrete colors.
+                bool debug_source = the_config->debug_render_mode == "normal_source";
+                bool debug_alignment = the_config->debug_render_mode == "normal_alignment";
+                auto diagnostic_normal = tri.normal;
+                if(debug_source) {
+                    diagnostic_normal = use_native_normals
+                        ? make_direction(-1.0f, 1.0f, -1.0f)  // green = native
+                        : make_direction(1.0f, -1.0f, -1.0f); // red = fallback
+                }
+                else if(debug_alignment) {
+                    if(!use_native_normals) {
+                        diagnostic_normal = make_direction(-1.0f, -1.0f, 1.0f); // blue
+                    }
+                    else {
+                        auto n0 = unpack_model_normal(tri.v0.nativeNormal, hscale, vscale);
+                        auto n1 = unpack_model_normal(tri.v1.nativeNormal, hscale, vscale);
+                        auto n2 = unpack_model_normal(tri.v2.nativeNormal, hscale, vscale);
+                        float d0 = std::fabs(dot(tri.normal, n0));
+                        float d1 = std::fabs(dot(tri.normal, n1));
+                        float d2 = std::fabs(dot(tri.normal, n2));
+                        float worst = std::min(d0, std::min(d1, d2));
+                        diagnostic_normal = worst < 0.25f
+                            ? make_direction(1.0f, -1.0f, -1.0f) // red: severe mismatch
+                            : worst < 0.7f
+                                ? make_direction(1.0f, 1.0f, -1.0f) // yellow: moderate
+                                : make_direction(-1.0f, 1.0f, -1.0f); // green: aligned
+                    }
+                }
+
                 vx->pos = tri.v0.pos;
                 vx->texcoords = tri.v0.texcoords;
                 vx->col = tri.v0.color;
-                vx->normal = use_native_normals
+                vx->normal = (debug_source || debug_alignment) ? diagnostic_normal :
+                             use_native_normals
                                  ? unpack_model_normal(tri.v0.nativeNormal, hscale, vscale)
                                  : tri.normal;
 
@@ -1037,7 +1078,8 @@ namespace jkgm {
                 vx->pos = tri.v1.pos;
                 vx->texcoords = tri.v1.texcoords;
                 vx->col = tri.v1.color;
-                vx->normal = use_native_normals
+                vx->normal = (debug_source || debug_alignment) ? diagnostic_normal :
+                             use_native_normals
                                  ? unpack_model_normal(tri.v1.nativeNormal, hscale, vscale)
                                  : tri.normal;
 
@@ -1046,7 +1088,8 @@ namespace jkgm {
                 vx->pos = tri.v2.pos;
                 vx->texcoords = tri.v2.texcoords;
                 vx->col = tri.v2.color;
-                vx->normal = use_native_normals
+                vx->normal = (debug_source || debug_alignment) ? diagnostic_normal :
+                             use_native_normals
                                  ? unpack_model_normal(tri.v2.nativeNormal, hscale, vscale)
                                  : tri.normal;
 
@@ -1128,6 +1171,29 @@ namespace jkgm {
             ogs->game_post_opaque_composite_program.set_color_sampler(0);
             ogs->game_post_opaque_composite_program.set_emissive_sampler(1);
             ogs->game_post_opaque_composite_program.set_occlusion_sampler(2);
+            ogs->game_post_opaque_composite_program.set_normal_sampler(3);
+            ogs->game_post_opaque_composite_program.set_depth_sampler(4);
+            ogs->game_post_opaque_composite_program.set_raw_occlusion_sampler(5);
+
+            auto const &debug_view = the_config->debug_render_mode;
+            int debug_mode = debug_view == "normals" ? 1 :
+                             debug_view == "depth" ? 2 :
+                             debug_view == "ssao" ? 3 :
+                             debug_view == "ssao_raw" ? 4 :
+                             debug_view == "normal_source" ? 5 :
+                             debug_view == "normal_alignment" ? 6 : 0;
+            ogs->game_post_opaque_composite_program.set_debug_mode(debug_mode);
+
+            gl::set_active_texture_unit(5);
+            gl::bind_texture(gl::texture_bind_target::texture_2d, frame_ao->get_raw_ssao_texture());
+
+            gl::set_active_texture_unit(4);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             frame_screen->get_resolved_depth_texture());
+
+            gl::set_active_texture_unit(3);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             frame_screen->get_resolved_normal_texture());
 
             gl::set_active_texture_unit(2);
             gl::bind_texture(gl::texture_bind_target::texture_2d, frame_ao->get_ssao_texture());
@@ -1488,6 +1554,37 @@ namespace jkgm {
             }
 
             cmdbuf->Unlock();
+
+            // Experimental freshness check: the native normal sideband is indexed
+            // by the current D3D execute buffer's transformed-vertex slots, but its
+            // validity bits can survive when those slots are reused by another
+            // geometry path (notably the engine's Solid graphics mode).
+            //
+            // Consume validity only after ALL triangles in this execute buffer
+            // have been read, since several triangles may share a vertex index.
+            // Only the validity bit is cleared; the packed normals remain intact.
+            // This is diagnostic, OFF by default, until producer-side behavior
+            // can be verified and a per-buffer generation protocol is available.
+            if(the_config->debug_consume_native_normals && native_normals) {
+                MEMORY_BASIC_INFORMATION mbi{};
+                if(VirtualQuery(reinterpret_cast<void const *>(normal_slots_address),
+                                &mbi, sizeof(mbi)) != 0) {
+                    DWORD protection = mbi.Protect & 0xffU;
+                    bool writable = protection == PAGE_READWRITE ||
+                                    protection == PAGE_EXECUTE_READWRITE ||
+                                    protection == PAGE_WRITECOPY ||
+                                    protection == PAGE_EXECUTE_WRITECOPY;
+                    if(writable) {
+                        auto *normal_slots =
+                            reinterpret_cast<uint32_t *>(normal_slots_address);
+                        size_t limit = std::min(static_cast<size_t>(ed.dwVertexCount),
+                                                normal_slot_count);
+                        for(size_t i = 0; i < limit; ++i) {
+                            normal_slots[i] &= 0x7fffffffU;
+                        }
+                    }
+                }
+            }
         }
 
         void present_game() override
@@ -1512,9 +1609,12 @@ namespace jkgm {
 
             bool posterize_lighting = the_config->enable_posterized_lighting;
             draw_game_gbuffer_pass(trimdl, posterize_lighting);
-            draw_game_transparency_pass(trimdl, posterize_lighting);
-
-            draw_hud();
+            if(the_config->debug_render_mode == "none") {
+                draw_game_transparency_pass(trimdl, posterize_lighting);
+                draw_hud();
+            }
+            // Debug views show only opaque G-buffer content, without HUD or
+            // transparent overlays, so they cannot hide the source of an AO artifact.
 
             // Reset state:
             is_gun = false;

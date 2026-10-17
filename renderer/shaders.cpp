@@ -259,6 +259,10 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , color_image(gl::get_uniform_location(the_program, "color_image"))
     , emissive_image(gl::get_uniform_location(the_program, "emissive_image"))
     , occlusion_image(gl::get_uniform_location(the_program, "occlusion_image"))
+    , normal_image(gl::get_uniform_location(the_program, "normal_image"))
+    , depth_image(gl::get_uniform_location(the_program, "depth_image"))
+    , raw_occlusion_image(gl::get_uniform_location(the_program, "raw_occlusion_image"))
+    , debug_mode(gl::get_uniform_location(the_program, "debug_mode"))
 {
 }
 
@@ -275,6 +279,26 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_emissive_sampler(int 
 void jkgm::shaders::game_post_opaque_composite_shader::set_occlusion_sampler(int sampler)
 {
     gl::set_uniform_integer(occlusion_image, sampler);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_normal_sampler(int sampler)
+{
+    gl::set_uniform_integer(normal_image, sampler);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_depth_sampler(int sampler)
+{
+    gl::set_uniform_integer(depth_image, sampler);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_raw_occlusion_sampler(int sampler)
+{
+    gl::set_uniform_integer(raw_occlusion_image, sampler);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_debug_mode(int mode)
+{
+    gl::set_uniform_integer(debug_mode, mode);
 }
 
 jkgm::shaders::game_transparency_pass_shader::game_transparency_pass_shader(

@@ -136,6 +136,10 @@ namespace jkgm {
             gl::uniform_location_id color_image;
             gl::uniform_location_id emissive_image;
             gl::uniform_location_id occlusion_image;
+            gl::uniform_location_id normal_image;
+            gl::uniform_location_id depth_image;
+            gl::uniform_location_id raw_occlusion_image;
+            gl::uniform_location_id debug_mode;
 
         public:
             explicit game_post_opaque_composite_shader(fs::path const &data_root);
@@ -143,6 +147,10 @@ namespace jkgm {
             void set_color_sampler(int sampler);
             void set_emissive_sampler(int sampler);
             void set_occlusion_sampler(int sampler);
+            void set_normal_sampler(int sampler);
+            void set_depth_sampler(int sampler);
+            void set_raw_occlusion_sampler(int sampler);
+            void set_debug_mode(int mode);
         };
 
         class game_transparency_pass_shader : public game_pass_shader {
