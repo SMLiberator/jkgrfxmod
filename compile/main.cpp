@@ -12,6 +12,7 @@
 #include "jk_virtual_file_system.hpp"
 #include "math/color.hpp"
 #include "math/color_conv.hpp"
+#include "math/point.hpp"
 #include "program/program.hpp"
 #include "raw_material.hpp"
 #include <bitset>
