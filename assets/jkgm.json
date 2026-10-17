@@ -16,6 +16,7 @@
     "enable_reflections": true,
     "enable_ssao": true,
     "debug_render_mode": "none",
+    "debug_force_face_normals": false,
     "enable_parallax": true,
     "enable_texture_filtering": true,
     "enable_posterized_lighting": false,
