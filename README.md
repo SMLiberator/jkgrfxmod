@@ -18,7 +18,7 @@ Optional boolean master switches, all `true` by default:
 | `enable_fog` | Renders COG-controlled distance fog; COG parameters are still stored if disabled |
 | `enable_reflections` | Enables material environment reflections (including fixed/MatCap and the planned SSR); disabling restores the unreflected diffuse appearance |
 | `enable_post` | Enables optional presentation effects (bloom, film grain, vignette, brightness/contrast/saturation); sRGB output remains active when disabled |
-| `enable_blur` | Enables recursive frame blending and future spatial blur effects; independent of `enable_post` |
+| `enable_blur` | Enables recursive frame blending and depth/peripheral spatial blur, independent of `enable_post` |
 
 The existing `enable_ssao` switch remains independent of `enable_post`, making it useful for testing SSAO artifacts. `enable_bloom` independently disables bloom even when `enable_post` is true.
 
@@ -66,3 +66,48 @@ only gates bloom, grain, vignette and color filtering.
 enters menu rendering does not currently trigger an automatic reset. Such
 transitions should call `ResetFrameBlend()` from a shutdown/startup COG.
 The explicit history reset is also useful before cutscene camera teleports.
+
+
+## COG-controlled distance and peripheral blur
+
+These spatial effects are **disabled by default**. They are evaluated on
+the full-resolution game scene in linear HDR before bloom, presentation
+color processing, and recursive frame blending. Both are independently
+fadeable and can be combined; `enable_blur:false` bypasses both, as
+well as frame blending, without changing their stored COG parameters.
+
+```c
+// Vector = startDistance endDistance strength, fadeTime in seconds.
+SetDistanceBlur(VectorSet(40, 100, 0.8), 1.0);
+vector currentDistance = GetDistanceBlur();
+ResetDistanceBlur();
+
+// Vector = innerRadius outerRadius strength, fadeTime in seconds.
+// Radii 0..1 are measured from screen center to the corners.
+SetPeripheralBlur(VectorSet(0.45, 0.9, 0.7), 0.5);
+vector currentPeripheral = GetPeripheralBlur();
+ResetPeripheralBlur();
+```
+
+Both strengths are clamped to `[0,1]`. Zero disables that effect.
+Distance thresholds are JK engine units (not pixels). The distance
+intensity ramps from 0 at the start to full strength at the end;
+pixels without valid depth do not receive *distance* blur. Peripheral
+blur is radial, with 0 at the center and 1 at the far corners.
+All values animate over the requested `fadeTime`, using the same
+wall-clock mechanism as the other COG effects.
+
+The implementation uses horizontal and vertical 9-tap Gaussian passes.
+Maximum blur extends about 12 screen pixels per axis at strength 1;
+the radius grows smoothly as the amount grows. Distance blur prefers
+samples of similar depth to reduce foreground/background bleed.
+Peripheral blur deliberately can cross depth boundaries.
+
+These effects use the existing opaque G-buffer depth. Consequently,
+they operate on the finished scene image and can also blur HUD and
+transparent objects lying over distant geometry; blur deliberately
+remains in screen space. They do not alter the source 3DOs, skybox
+geometry, or SSAO. The currently displayed parameters reset to off
+when switching between menu and gameplay. For a direct game-to-game
+level change without a menu transition, call both Reset* verbs from a COG
+if level-specific effects must not persist.
