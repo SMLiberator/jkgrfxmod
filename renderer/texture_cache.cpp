@@ -85,6 +85,13 @@ namespace jkgm {
                         get_srgb_texture_from_filename(*mat->emissive_map);
                     }
 
+                    if(mat->normal_map.has_value()) {
+                        get_linear_texture_from_filename(*mat->normal_map);
+                    }
+                    if(mat->normal_map2.has_value()) {
+                        get_linear_texture_from_filename(*mat->normal_map2);
+                    }
+
                     if(mat->displacement_map.has_value()) {
                         get_linear_texture_from_filename(*mat->displacement_map);
                     }
