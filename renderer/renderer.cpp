@@ -431,6 +431,8 @@ namespace jkgm {
                 // A scene transition cannot reuse old frame history.
                 // Do not do this in begin_game/end_game (called each frame).
                 get_frame_blend_settings().reset();
+                get_distance_blur_settings() = distance_blur_settings();
+                get_peripheral_blur_settings() = peripheral_blur_settings();
             }
             this->mode = mode;
         }
