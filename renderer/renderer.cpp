@@ -866,11 +866,48 @@ namespace jkgm {
                                                     : 1.0f);
         }
 
+        material_blend_mode get_material_blend_mode(material_instance_id id) const
+        {
+            if(id.get() == 0U) {
+                return material_blend_mode::normal;
+            }
+            return vidmem_texture_surfaces.at(id.get() - 1)->blend_mode;
+        }
+
+        enum class batch_blend_filter { regular, all, special };
+
         void bind_material(shaders::game_pass_shader *prog,
                            material_instance_id id,
                            bool force_opaque,
                            bool posterize_lighting)
         {
+            // Only the transparent shader actually declares blend_mode; setting
+            // it on the opaque shader is ignored (uniform location -1).
+            auto const blend_mode = get_material_blend_mode(id);
+            prog->set_blend_mode(static_cast<int>(blend_mode));
+
+            if(prog == &ogs->game_transparency_pass_program) {
+                // Normal uses JK's existing premultiplied blend convention.
+                // Additive/multiply preserve framebuffer alpha independently.
+                switch(blend_mode) {
+                case material_blend_mode::additive:
+                    gl::set_blend_function_separate(
+                        gl::blend_function::one, gl::blend_function::one,
+                        gl::blend_function::zero, gl::blend_function::one);
+                    break;
+                case material_blend_mode::multiply:
+                    gl::set_blend_function_separate(
+                        gl::blend_function::destination_color, gl::blend_function::zero,
+                        gl::blend_function::zero, gl::blend_function::one);
+                    break;
+                default:
+                    gl::set_blend_function(
+                        gl::blend_function::one,
+                        gl::blend_function::one_minus_source_alpha);
+                    break;
+                }
+            }
+
             if(id.get() == 0U) {
                 // This is the default (untextured) material
                 gl::set_active_texture_unit(4);
@@ -979,36 +1016,45 @@ namespace jkgm {
                         triangle_batch const &tb,
                         triangle_buffer_model *trimdl,
                         bool force_opaque,
-                        bool posterize_lighting)
+                        bool posterize_lighting,
+                        batch_blend_filter filter = batch_blend_filter::regular)
         {
             gl::bind_vertex_array(trimdl->vao);
 
+            // Preserve the offsets of the original per-batch vertex buffer
+            // even when a blend material is deliberately skipped.
             size_t curr_offset = 0U;
             size_t num_verts = 0U;
-
             bind_material(prog, material_instance_id(0U), force_opaque, posterize_lighting);
 
             for(auto const &tri : tb) {
-                if(current_material != tri.material) {
-                    // Draw pending elements from previous material
+                bool special = get_material_blend_mode(tri.material) !=
+                               material_blend_mode::normal;
+                bool selected = filter == batch_blend_filter::all ||
+                                (filter == batch_blend_filter::special ? special : !special);
+                if(!selected) {
                     if(num_verts > 0) {
                         gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
-
                         curr_offset += num_verts;
                         num_verts = 0U;
                     }
-
-                    bind_material(prog, tri.material, force_opaque, posterize_lighting);
+                    curr_offset += 3U;
+                    continue;
                 }
 
-                num_verts += 3;
+                if(num_verts == 0U || current_material != tri.material) {
+                    if(num_verts > 0) {
+                        gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
+                        curr_offset += num_verts;
+                        num_verts = 0U;
+                    }
+                    bind_material(prog, tri.material, force_opaque, posterize_lighting);
+                }
+                num_verts += 3U;
             }
 
             if(num_verts > 0) {
                 gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
-
-                curr_offset += num_verts;
-                num_verts = 0U;
             }
         }
 
@@ -1220,7 +1266,17 @@ namespace jkgm {
                        world_transparent_batch,
                        &trimdl->world_transparent_trimdl,
                        /*force opaque*/ false,
-                       posterize_lighting);
+                       posterize_lighting,
+                       batch_blend_filter::all);
+
+            // Special modes on originally opaque world geometry still belong
+            // in the transparency pass: they must never write G-buffer depth.
+            draw_batch(&ogs->game_transparency_pass_program,
+                       world_batch,
+                       &trimdl->world_trimdl,
+                       /*force opaque*/ false,
+                       posterize_lighting,
+                       batch_blend_filter::special);
 
             // Redraw gun overlay after z-clear
             gl::set_depth_mask(true);
@@ -1242,7 +1298,17 @@ namespace jkgm {
                        gun_transparent_batch,
                        &trimdl->gun_transparent_trimdl, /*force opaque*/
                        false,
-                       posterize_lighting);
+                       posterize_lighting,
+                       batch_blend_filter::all);
+
+            // Gun materials whose native JK geometry was opaque but whose
+            // replacement requests additive/multiply should also be blended.
+            draw_batch(&ogs->game_transparency_pass_program,
+                       gun_batch,
+                       &trimdl->gun_trimdl,
+                       /*force opaque*/ false,
+                       posterize_lighting,
+                       batch_blend_filter::special);
 
             // Draw overlay
             gl::disable(gl::capability::depth_test);
@@ -1251,7 +1317,8 @@ namespace jkgm {
                        overlay_batch,
                        &trimdl->overlay_trimdl,
                        /*force opaque*/ false,
-                       posterize_lighting);
+                       posterize_lighting,
+                       batch_blend_filter::all);
 
             gl::enable(gl::capability::depth_test);
             gl::enable(gl::capability::blend);
