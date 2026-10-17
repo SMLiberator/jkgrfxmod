@@ -459,3 +459,32 @@ of the planned JK-MAT-to-pack link but does **not** establish the first half
 engine-side investigation. Identical textures may share a replacement definition;
 per-instance identity is deliberately not lost. Original jkGfxMod metadata is
 accepted unchanged, without mandatory new keys.
+
+## Preserving the original JK albedo
+
+A replacement that only adds surface maps, reflections, or other effects can
+preserve the original JK texture. In a **source-pack script** either
+`"keep_albedo": true` (existing syntax) or
+`"use_original_albedo": true` (alias) works:
+
+```json
+{
+  "name": "original_with_reflections",
+  "use_original_albedo": true,
+  "reflection_strength": 0.5,
+  "replaces": ["example.mat"]
+}
+```
+
+Both spellings are also accepted at the source-pack root for inherited defaults
+and in precompiled `metadata.json`. The compiler still writes `keep_albedo` in
+its output. Never specify both synonyms at the same level, and don't provide an
+`albedo_map` alongside a true original-albedo flag.
+
+The original 8-bit JK MAT goes through the game's Direct3D 16-bit upload format
+before this renderer sees it, so the original-albedo conversion handles both
+original 8- and 16-bit MATs through that same path.
+
+To verify the original upload, set `"log_path": "jkgm-matlink.log"` in
+`jkgm.json` and look for
+`Keeping original albedo for texture instance ... (D3D source bit depth 16)`.

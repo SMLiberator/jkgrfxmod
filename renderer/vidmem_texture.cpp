@@ -132,6 +132,8 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
         }
 
         // This material keeps the game's own texture as its albedo: carry on below to convert it.
+        LOG_DEBUG("Keeping original albedo for texture instance ", surf->material_id.get(),
+                  " (D3D source bit depth ", src->desc.ddpfPixelFormat.dwRGBBitCount, ")");
     }
 
     // No replacements found (or one that keeps the original albedo). Create standard material.

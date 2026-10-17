@@ -39,8 +39,17 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             mat->albedo_map = data_dir / std::string(em["albedo_map"]);
         }
 
-        if(em.contains("keep_albedo")) {
-            mat->use_original_albedo = static_cast<bool>(em["keep_albedo"]);
+        if(em.contains("keep_albedo") && em.contains("use_original_albedo")) {
+            throw std::runtime_error("Material cannot specify both keep_albedo and "
+                                     "use_original_albedo in metadata.json");
+        }
+        char const *keep_key = em.contains("keep_albedo")
+            ? "keep_albedo" : "use_original_albedo";
+        if(em.contains(keep_key)) {
+            if(!em[keep_key].is_boolean()) {
+                throw std::runtime_error("Original albedo flag must be boolean");
+            }
+            mat->use_original_albedo = static_cast<bool>(em[keep_key]);
         }
 
         if(em.contains("albedo_factor")) {
