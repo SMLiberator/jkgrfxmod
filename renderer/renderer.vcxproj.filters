@@ -185,6 +185,9 @@
     <ClInclude Include="frameblend.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="spatialblur.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="triangle_batch.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
