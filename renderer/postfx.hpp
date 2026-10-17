@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 
 namespace jkgm {
     // Post-processing state, controlled by COG verbs (see main.cpp) and pushed into the final
@@ -38,6 +39,25 @@ namespace jkgm {
         // the renderer now sets these every frame, change them here rather than in the shader.
         animated_floats<3> params{std::array<float, 3>{0.07f, 1.16f, 0.9f}};
     };
+
+    // Recursive temporal accumulation. 0 = no trails, 1 = hold the previous
+    // output indefinitely. The history must be invalidated on reset or scene changes.
+    struct frame_blend_settings {
+        animated_floats<1> strength{std::array<float, 1>{0.0f}};
+        uint64_t reset_generation = 0;
+
+        void reset()
+        {
+            strength.set({0.0f});
+            ++reset_generation;
+        }
+    };
+
+    inline frame_blend_settings &get_frame_blend_settings()
+    {
+        static frame_blend_settings settings;
+        return settings;
+    }
 
     inline film_grain_settings &get_film_grain_settings()
     {
