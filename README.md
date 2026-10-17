@@ -18,7 +18,10 @@ Optional boolean master switches, all `true` by default:
 | `enable_fog` | Renders COG-controlled distance fog; COG parameters are still stored if disabled |
 | `enable_reflections` | Enables material environment reflections (including fixed/MatCap and the planned SSR); disabling restores the unreflected diffuse appearance |
 | `enable_post` | Enables optional presentation effects (bloom, film grain, vignette, brightness/contrast/saturation); sRGB output remains active when disabled |
-| `enable_blur` | Enables recursive frame blending and depth/peripheral spatial blur, independent of `enable_post` |
+| `enable_blur` | Legacy master switch for all three blur effects |
+| `enable_frame_blend` | Enable/disable lightweight temporal feedback independently |
+| `enable_distance_blur` | Enable/disable distance-based spatial blur independently |
+| `enable_peripheral_blur` | Enable/disable peripheral spatial blur independently |
 
 The existing `enable_ssao` switch remains independent of `enable_post`, making it useful for testing SSAO artifacts. `enable_bloom` independently disables bloom even when `enable_post` is true.
 
@@ -111,3 +114,23 @@ geometry, or SSAO. The currently displayed parameters reset to off
 when switching between menu and gameplay. For a direct game-to-game
 level change without a menu transition, call both Reset* verbs from a COG
 if level-specific effects must not persist.
+
+
+### Blur performance switches
+
+The three blur effects can now be independently disabled in `jkgm.json`:
+
+```json
+"enable_blur": true,
+"enable_frame_blend": true,
+"enable_distance_blur": false,
+"enable_peripheral_blur": true
+```
+
+All switches default to `true` for compatibility. `enable_blur:false`
+still overrides all three. Disabled distance/peripheral effects are ignored
+when computing the spatial kernel; **when both are disabled, the entire pair
+of expensive full-screen spatial passes is skipped**. Disabling frame blending
+removes its history contribution without clearing the COG parameters, so
+turning it on again resumes from fresh frame history. You can continue
+using the matching `Set*()` verbs regardless of the switches.
