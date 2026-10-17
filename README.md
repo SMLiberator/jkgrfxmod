@@ -66,3 +66,22 @@ If unexpected artifacts disappear, investigate the source 3DO normals or the
 patched executable's native-normal validity/packing. If both modes look broken,
 investigate surface triangulation, winding, degeneracy and geometric normal
 reconstruction. The setting is off by default and is diagnostic only.
+
+
+### Test native-normal slot reuse (experimental)
+
+The JK patch publishes view normals in a sideband array indexed by D3D transformed
+vertex slots. With `"debug_consume_native_normals":true`, the renderer clears
+**only the validity bit** of each entry in the execute buffer's vertex range
+AFTER consuming all triangles in that buffer. The setting is diagnostic, not
+a permanent solution, and is off by default.
+
+In a level that flickers in **Solid** graphics mode, test:
+- `"debug_render_mode":"normals"`
+- `"debug_force_face_normals":false`
+- Compare `"debug_consume_native_normals":false` vs `true`
+
+If flicker disappears, native-normal entries from prior execute buffers were being
+mistaken for current normals. If it remains, inspect native normal writes and
+index correspondence inside the patched executable (including Solid and
+clipping paths) rather than assuming the source 3DO normals are wrong.
