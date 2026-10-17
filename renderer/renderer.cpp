@@ -30,6 +30,7 @@
 #include "offscreen_menu_surface.hpp"
 #include "offscreen_surface.hpp"
 #include "opengl_state.hpp"
+#include "postfx.hpp"
 #include "primary_menu_surface.hpp"
 #include "primary_surface.hpp"
 #include "renderer_ao.hpp"
