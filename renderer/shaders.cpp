@@ -102,6 +102,7 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     : opengl_shader(name, vertex_part, fragment_part)
     , screen_resolution(gl::get_uniform_location(the_program, "screen_resolution"))
     , features(gl::get_uniform_location(the_program, "features"))
+    , blend_mode(gl::get_uniform_location(the_program, "blend_mode"))
     , albedo_map(gl::get_uniform_location(the_program, "albedo_map"))
     , albedo_factor(gl::get_uniform_location(the_program, "albedo_factor"))
     , emissive_map(gl::get_uniform_location(the_program, "emissive_map"))
@@ -137,6 +138,11 @@ void jkgm::shaders::game_pass_shader::set_screen_resolution(size<2, float> res)
 void jkgm::shaders::game_pass_shader::set_features(point<4, float> value)
 {
     gl::set_uniform_vector(features, value);
+}
+
+void jkgm::shaders::game_pass_shader::set_blend_mode(int mode)
+{
+    gl::set_uniform_integer(blend_mode, mode);
 }
 
 void jkgm::shaders::game_pass_shader::set_albedo_map_sampler(int sampler)
