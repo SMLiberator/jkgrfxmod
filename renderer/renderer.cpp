@@ -379,6 +379,11 @@ namespace jkgm {
 
         double menu_accumulator = 0.0;
 
+        // Independent renderer clock, unaffected by JK's simulation/pause state.
+        std::chrono::steady_clock::time_point animation_epoch =
+            std::chrono::steady_clock::now();
+        double animation_seconds = 0.0;
+
         using timestamp_t = std::chrono::high_resolution_clock::time_point;
         timestamp_t menu_prev_ticks;
         timestamp_t menu_curr_ticks;
@@ -866,11 +871,120 @@ namespace jkgm {
                                                     : 1.0f);
         }
 
+        material_blend_mode get_material_blend_mode(material_instance_id id) const
+        {
+            if(id.get() == 0U) {
+                return material_blend_mode::normal;
+            }
+            return vidmem_texture_surfaces.at(id.get() - 1)->blend_mode;
+        }
+
+        // Depth-clipped polygons count as special even with normal blending:
+        // they must never enter the opaque pass or modify the G-buffer depth.
+        bool is_special_material(material_instance_id id) const
+        {
+            if(id.get() == 0U) {
+                return false;
+            }
+            auto const &mat = vidmem_texture_surfaces.at(id.get() - 1);
+            return mat->blend_mode != material_blend_mode::normal || mat->depth_clip;
+        }
+
+        // Compute UV offsets in double precision before reducing them to
+        // one texture repeat. This avoids large shader-time precision loss
+        // during long game sessions (and supports negative scroll speeds).
+        point<2, float> scroll_offset(point<2, float> speed) const
+        {
+            return make_point(
+                static_cast<float>(std::fmod(static_cast<double>(get<0>(speed)) *
+                                             animation_seconds, 1.0)),
+                static_cast<float>(std::fmod(static_cast<double>(get<1>(speed)) *
+                                             animation_seconds, 1.0)));
+        }
+
+        // Stateless hash: the same material and step produce the same random
+        // value regardless of FPS, rendering order, or number of draw calls.
+        static float pulse_random(size_t material_id, int64_t step)
+        {
+            uint64_t x = static_cast<uint64_t>(material_id) * 0x9E3779B97F4A7C15ULL +
+                         static_cast<uint64_t>(step) * 0xD1B54A32D192ED03ULL;
+            x ^= x >> 30;
+            x *= 0xBF58476D1CE4E5B9ULL;
+            x ^= x >> 27;
+            x *= 0x94D049BB133111EBULL;
+            x ^= x >> 31;
+            return static_cast<float>(x >> 40) / 16777216.0f;
+        }
+
+        float pulse_multiplier(material_emissive_pulse const &pulse,
+                               material_instance_id id) const
+        {
+            double const cycles = animation_seconds / pulse.rate + pulse.phase;
+            double const step_d = std::floor(cycles);
+            auto const step = static_cast<int64_t>(step_d);
+            float const fraction = static_cast<float>(cycles - step_d);
+            float level = 1.0f;
+            switch(pulse.wave) {
+            case material_pulse_wave::sine:
+                // One full smooth brightness cycle every 'rate' seconds.
+                level = 0.5f - 0.5f * std::cos(fraction * 6.283185307179586f);
+                break;
+            case material_pulse_wave::square:
+                level = fraction < 0.5f ? 1.0f : 0.0f;
+                break;
+            case material_pulse_wave::flicker:
+                level = pulse_random(id.get(), step) < 0.5f ? 0.0f : 1.0f;
+                break;
+            case material_pulse_wave::random: {
+                float const a = pulse_random(id.get(), step);
+                float const b = pulse_random(id.get(), step + 1);
+                float const smooth = fraction * fraction * (3.0f - 2.0f * fraction);
+                level = a + (b - a) * smooth;
+                break;
+            }
+            }
+            return pulse.min + (pulse.max - pulse.min) * level;
+        }
+
+        enum class batch_blend_filter { regular, all, special };
+
         void bind_material(shaders::game_pass_shader *prog,
                            material_instance_id id,
                            bool force_opaque,
                            bool posterize_lighting)
         {
+            // Only the transparent shader actually declares blend_mode; setting
+            // it on the opaque shader is ignored (uniform location -1).
+            auto const blend_mode = get_material_blend_mode(id);
+            prog->set_blend_mode(static_cast<int>(blend_mode));
+            prog->set_fluid_thickness(
+                id.get() != 0U ? vidmem_texture_surfaces.at(id.get() - 1)->fluid_thickness
+                               : 0.25f);
+            prog->set_depth_clip(id.get() != 0U &&
+                                 vidmem_texture_surfaces.at(id.get() - 1)->depth_clip);
+
+            if(prog == &ogs->game_transparency_pass_program) {
+                // Normal/fluid use premultiplied alpha (ONE, 1-SRC_ALPHA).
+                // Additive/multiply preserve framebuffer alpha independently.
+                switch(blend_mode) {
+                case material_blend_mode::additive:
+                    gl::set_blend_function_separate(
+                        gl::blend_function::one, gl::blend_function::one,
+                        gl::blend_function::zero, gl::blend_function::one);
+                    break;
+                case material_blend_mode::multiply:
+                    gl::set_blend_function_separate(
+                        gl::blend_function::destination_color, gl::blend_function::zero,
+                        gl::blend_function::zero, gl::blend_function::one);
+                    break;
+                default:
+                    gl::set_blend_function(
+                        gl::blend_function::one,
+                        gl::blend_function::one_minus_source_alpha);
+                    break;
+                }
+            }
+
             if(id.get() == 0U) {
                 // This is the default (untextured) material
                 gl::set_active_texture_unit(4);
@@ -893,8 +1007,10 @@ namespace jkgm {
                 // Albedo factor
                 prog->set_albedo_factor(color::fill(1.0f));
 
-                // Emissive factor
+                // Emissive factor; default material has no animation.
                 prog->set_emissive_factor(color_rgb::zero());
+                prog->set_uv_offsets(point<2, float>::zero(),
+                                     point<2, float>::zero());
 
                 // Displacement factor
                 prog->set_displacement_factor(0.0f);
@@ -902,7 +1018,10 @@ namespace jkgm {
                 // Alpha cutoff
                 prog->set_alpha_cutoff(0.0f);
 
-                // No reflections
+                // No normal maps or reflections.
+                prog->set_normal_params(make_point(0.0f, 0.0f, 0.0f, 0.0f),
+                                        point<2, float>::zero(),
+                                        point<2, float>::zero());
                 prog->set_reflection(make_point(0.0f, 0.5f, 0.0f, 0.0f),
                                      make_point(0.0f, 0.0f, 0.0f, 0.0f));
             }
@@ -917,6 +1036,15 @@ namespace jkgm {
                 gl::texture_view emissive_map = gl::default_texture;
                 if(mat->emissive_map.has_value()) {
                     emissive_map = texture_cache->get_texture_handle(*mat->emissive_map);
+                }
+
+                gl::texture_view normal_map = gl::default_texture;
+                if(mat->normal_map.has_value()) {
+                    normal_map = texture_cache->get_texture_handle(*mat->normal_map);
+                }
+                gl::texture_view normal_map2 = gl::default_texture;
+                if(mat->normal_map2.has_value()) {
+                    normal_map2 = texture_cache->get_texture_handle(*mat->normal_map2);
                 }
 
                 gl::texture_view displacement_map = gl::default_texture;
@@ -938,6 +1066,11 @@ namespace jkgm {
                     has_env_map = true;
                 }
 
+                // Units 6/7 are for linear normal textures; unit 5 is the
+                // already established opaque scene-depth sampler for decals.
+                bool filtered = mat->texture_filtering.value_or(the_config->enable_texture_filtering);
+                bind_color_texture(normal_map, 6, filtered);
+                bind_color_texture(normal_map2, 7, filtered);
                 gl::set_active_texture_unit(4);
                 gl::bind_texture(gl::texture_bind_target::texture_2d, env_map);
                 gl::set_active_texture_unit(3);
@@ -946,7 +1079,6 @@ namespace jkgm {
                 gl::bind_texture(gl::texture_bind_target::texture_2d, displacement_map);
                 // Filter selection is per material, not per cached image. Keep
                 // surface/displacement/EnvMap sampling unchanged for reflection roughness.
-                bool filtered = mat->texture_filtering.value_or(the_config->enable_texture_filtering);
                 bind_color_texture(emissive_map, 1, filtered);
                 bind_color_texture(albedo_map, 0, filtered);
 
@@ -959,7 +1091,24 @@ namespace jkgm {
                     (posterize_lighting ? 1.0f : 0.0f)));
 
                 prog->set_albedo_factor(mat->albedo_factor);
-                prog->set_emissive_factor(mat->emissive_factor);
+                prog->set_uv_offsets(scroll_offset(mat->albedo_scroll),
+                                     scroll_offset(mat->emissive_scroll));
+                prog->set_normal_params(
+                    make_point(mat->normal_strength, mat->normal_strength2,
+                               mat->normal_map.has_value() ? 1.0f : 0.0f,
+                               mat->normal_map2.has_value() ? 1.0f : 0.0f),
+                    scroll_offset(mat->normal_scroll),
+                    scroll_offset(mat->normal_scroll2));
+
+                // Pulse affects emissive_factor whether or not there is an
+                // emissive_map. Nonemissive terms are never animated here.
+                float const emissive_intensity = mat->emissive_pulse.has_value()
+                    ? pulse_multiplier(*mat->emissive_pulse, id) : 1.0f;
+                auto const &ef = mat->emissive_factor;
+                prog->set_emissive_factor(color_rgb(
+                    get<0>(ef) * emissive_intensity,
+                    get<1>(ef) * emissive_intensity,
+                    get<2>(ef) * emissive_intensity));
                 prog->set_displacement_factor(mat->displacement_factor);
                 prog->set_alpha_cutoff(mat->alpha_cutoff);
 
@@ -979,36 +1128,44 @@ namespace jkgm {
                         triangle_batch const &tb,
                         triangle_buffer_model *trimdl,
                         bool force_opaque,
-                        bool posterize_lighting)
+                        bool posterize_lighting,
+                        batch_blend_filter filter = batch_blend_filter::regular)
         {
             gl::bind_vertex_array(trimdl->vao);
 
+            // Preserve the offsets of the original per-batch vertex buffer
+            // even when a blend material is deliberately skipped.
             size_t curr_offset = 0U;
             size_t num_verts = 0U;
-
             bind_material(prog, material_instance_id(0U), force_opaque, posterize_lighting);
 
             for(auto const &tri : tb) {
-                if(current_material != tri.material) {
-                    // Draw pending elements from previous material
+                bool special = is_special_material(tri.material);
+                bool selected = filter == batch_blend_filter::all ||
+                                (filter == batch_blend_filter::special ? special : !special);
+                if(!selected) {
                     if(num_verts > 0) {
                         gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
-
                         curr_offset += num_verts;
                         num_verts = 0U;
                     }
-
-                    bind_material(prog, tri.material, force_opaque, posterize_lighting);
+                    curr_offset += 3U;
+                    continue;
                 }
 
-                num_verts += 3;
+                if(num_verts == 0U || current_material != tri.material) {
+                    if(num_verts > 0) {
+                        gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
+                        curr_offset += num_verts;
+                        num_verts = 0U;
+                    }
+                    bind_material(prog, tri.material, force_opaque, posterize_lighting);
+                }
+                num_verts += 3U;
             }
 
             if(num_verts > 0) {
                 gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
-
-                curr_offset += num_verts;
-                num_verts = 0U;
             }
         }
 
@@ -1093,6 +1250,7 @@ namespace jkgm {
             ogs->game_opaque_pass_program.set_displacement_map_sampler(2);
             ogs->game_opaque_pass_program.set_surface_map_sampler(3);
             ogs->game_opaque_pass_program.set_env_map_sampler(4);
+            ogs->game_opaque_pass_program.set_normal_map_samplers(6, 7);
             apply_engine_camera(ogs->game_opaque_pass_program);
 
             {
@@ -1198,6 +1356,14 @@ namespace jkgm {
             ogs->game_transparency_pass_program.set_displacement_map_sampler(2);
             ogs->game_transparency_pass_program.set_surface_map_sampler(3);
             ogs->game_transparency_pass_program.set_env_map_sampler(4);
+            ogs->game_transparency_pass_program.set_normal_map_samplers(6, 7);
+            ogs->game_transparency_pass_program.set_scene_depth_sampler(5);
+            // Sample the completed opaque pass; this is a different texture
+            // from the framebuffer receiving the transparency draw.
+            gl::set_active_texture_unit(5);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             frame_screen->get_resolved_depth_texture());
+            gl::set_active_texture_unit(0);
             apply_engine_camera(ogs->game_transparency_pass_program);
 
             {
@@ -1220,7 +1386,17 @@ namespace jkgm {
                        world_transparent_batch,
                        &trimdl->world_transparent_trimdl,
                        /*force opaque*/ false,
-                       posterize_lighting);
+                       posterize_lighting,
+                       batch_blend_filter::all);
+
+            // Blended and depth-clipped materials from originally opaque
+            // world geometry render here, without writing G-buffer depth.
+            draw_batch(&ogs->game_transparency_pass_program,
+                       world_batch,
+                       &trimdl->world_trimdl,
+                       /*force opaque*/ false,
+                       posterize_lighting,
+                       batch_blend_filter::special);
 
             // Redraw gun overlay after z-clear
             gl::set_depth_mask(true);
@@ -1237,12 +1413,30 @@ namespace jkgm {
                        /*force opaque*/ true,
                        posterize_lighting);
 
-            // Draw gun transparency
+            // Preserve the original gun transparency behavior for normal
+            // materials; special blend materials must NEVER write depth.
             draw_batch(&ogs->game_transparency_pass_program,
                        gun_transparent_batch,
                        &trimdl->gun_transparent_trimdl, /*force opaque*/
                        false,
                        posterize_lighting);
+
+            gl::set_depth_mask(false);
+            draw_batch(&ogs->game_transparency_pass_program,
+                       gun_transparent_batch,
+                       &trimdl->gun_transparent_trimdl,
+                       /*force opaque*/ false,
+                       posterize_lighting,
+                       batch_blend_filter::special);
+
+            // Gun materials whose native JK geometry was opaque but whose
+            // replacement requests additive/multiply should also be blended.
+            draw_batch(&ogs->game_transparency_pass_program,
+                       gun_batch,
+                       &trimdl->gun_trimdl,
+                       /*force opaque*/ false,
+                       posterize_lighting,
+                       batch_blend_filter::special);
 
             // Draw overlay
             gl::disable(gl::capability::depth_test);
@@ -1251,8 +1445,13 @@ namespace jkgm {
                        overlay_batch,
                        &trimdl->overlay_trimdl,
                        /*force opaque*/ false,
-                       posterize_lighting);
+                       posterize_lighting,
+                       batch_blend_filter::all);
 
+            // HUD and menu draw calls assume the original alpha blend state.
+            // Restore it after any special additive/multiply draw.
+            gl::set_blend_function(gl::blend_function::one,
+                                   gl::blend_function::one_minus_source_alpha);
             gl::enable(gl::capability::depth_test);
             gl::enable(gl::capability::blend);
             gl::set_depth_mask(true);
@@ -1508,6 +1707,8 @@ namespace jkgm {
 
         void present_game() override
         {
+            animation_seconds = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - animation_epoch).count();
             end_frame();
             update_hud_texture();
 

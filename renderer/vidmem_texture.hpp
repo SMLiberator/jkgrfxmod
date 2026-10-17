@@ -44,6 +44,17 @@ namespace jkgm {
         std::optional<srgb_texture_id> emissive_map;
         color_rgb emissive_factor = color_rgb::fill(0.0f);
 
+        point<2, float> albedo_scroll = point<2, float>::zero();
+        point<2, float> emissive_scroll = point<2, float>::zero();
+        std::optional<material_emissive_pulse> emissive_pulse;
+
+        std::optional<linear_texture_id> normal_map;
+        std::optional<linear_texture_id> normal_map2;
+        float normal_strength = 1.0f;
+        float normal_strength2 = 1.0f;
+        point<2, float> normal_scroll = point<2, float>::zero();
+        point<2, float> normal_scroll2 = point<2, float>::zero();
+
         std::optional<linear_texture_id> displacement_map;
         float displacement_factor = 0.0f;
 
@@ -56,6 +67,9 @@ namespace jkgm {
         std::optional<bool> texture_filtering;
 
         material_alpha_mode alpha_mode = material_alpha_mode::blend;
+        material_blend_mode blend_mode = material_blend_mode::normal;
+        float fluid_thickness = 0.25f;
+        bool depth_clip = false;
         float alpha_cutoff = 0.5f;
 
         vidmem_texture_surface(renderer *r, material_instance_id material_id);

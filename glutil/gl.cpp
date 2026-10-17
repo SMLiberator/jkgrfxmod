@@ -22,6 +22,17 @@ void jkgm::gl::set_blend_function(blend_function sfactor, blend_function dfactor
     glBlendFunc(static_cast<GLenum>(sfactor), static_cast<GLenum>(dfactor));
 }
 
+void jkgm::gl::set_blend_function_separate(blend_function src_rgb,
+                                           blend_function dst_rgb,
+                                           blend_function src_alpha,
+                                           blend_function dst_alpha)
+{
+    glBlendFuncSeparate(static_cast<GLenum>(src_rgb),
+                        static_cast<GLenum>(dst_rgb),
+                        static_cast<GLenum>(src_alpha),
+                        static_cast<GLenum>(dst_alpha));
+}
+
 void jkgm::gl::set_clear_color(color c)
 {
     glClearColor(get<r>(c), get<g>(c), get<b>(c), get<a>(c));
@@ -73,6 +84,7 @@ void jkgm::gl::log_errors()
 namespace jkgm::gl {
     static_assert(blend_function::zero == blend_function(GL_ZERO));
     static_assert(blend_function::one == blend_function(GL_ONE));
+    static_assert(blend_function::destination_color == blend_function(GL_DST_COLOR));
     static_assert(blend_function::one_minus_source_alpha == blend_function(GL_ONE_MINUS_SRC_ALPHA));
 
     static_assert(capability::blend == capability(GL_BLEND));

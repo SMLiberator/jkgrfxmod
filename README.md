@@ -134,3 +134,264 @@ even if COG has set nonzero distance/peripheral strengths; temporal trails still
 work. With `enable_trails:false`, history continues updating from the live
 frame without making a contribution, so re-enabling it does not revive an
 old image. The matching COG verbs remain available regardless of either switch.
+
+
+## Normal maps and two-layer water ripples
+
+Normal mapping is supported in both opaque and transparent materials. Maps
+must be tangent-space **OpenGL +Y** normal textures (RGB, neutral
+approximately `[128,128,255]`). They are imported and sampled as **linear
+data**, without sRGB conversion or alpha premultiplication. Only the surface
+reflection direction changes; JK vertex lighting and SSAO continue to use
+geometry normals. A material must have an `environment_map` (or inherit the
+pack's default environment map), plus nonzero `reflection_strength`, for
+the normal perturbations to produce a visible reflection.
+
+Two layers are blended by adding their tangent-space slopes and converting the
+result into a new per-pixel view normal. Both layers can scroll independently
+using the renderer clock without animating the albedo or emissive textures:
+
+```json
+{
+  "name": "lake_water",
+  "albedo_map": "lake_color.png",
+  "environment_map": "sky_environment.png",
+  "normal_map": "waves.png",
+  "normal_map2": "detail_waves.png",
+  "normal_strength": 0.35,
+  "normal_strength2": 0.15,
+  "normal_scroll": [0.012, 0.005],
+  "normal_scroll2": [-0.008, 0.015],
+  "reflection_strength": 1.0,
+  "roughness": 0.08,
+  "metalness": 0.0,
+  "alpha_mode": "blend",
+  "replaces": ["water.mat"]
+}
+```
+
+- `normal_map` enables the first layer; `normal_map2` enables a second
+  layer and requires `normal_map`. Using the same file for both layers works.
+- `normal_strength` and `normal_strength2` are slope multipliers, default
+  1.0, valid range 0–4; values 0 disable that layer's effect.
+- `normal_scroll` and `normal_scroll2` are UV repeats per second,
+  default `[0, 0]`, independent of `albedo_scroll` and `emissive_scroll`.
+- The normal maps' UVs are still derived from the model's own base UV layout,
+  but the *scroll offsets* are independent. `albedo_scroll` moves **only**
+  the albedo sampler, not surface, displacement, emissive, or normal maps.
+- Normal layers do not add new framebuffers or render passes; they cost up to
+  two more texture samples and one per-fragment tangent-basis computation.
+- They do not automatically make flat water transparent, refractive, or
+  depth-absorbing; those are separate water shading features.
+
+For water, start with a stationary water-color albedo and two differently
+scrolling normal layers. Confirm diffuse color remains stationary, the
+reflection ripples move even with `albedo_scroll` omitted, and no effect
+occurs with either normal strength at zero. Test on tilted/mirrored-UV meshes,
+with MSAA, and on opaque and transparent surfaces.
+
+## Animated materials
+
+Animations use the renderer's own monotonic clock, not JK's simulation clock.
+They continue advancing while gameplay is paused, provided frames are drawn.
+No video frames or texture reuploads are needed: the renderer applies per-material
+UV offsets and an emissive multiplier at material-bind time. Both opaque and
+transparent render paths support them.
+
+All properties are optional, can be provided as pack-wide defaults, and can
+be overridden per material:
+
+```json
+{
+  "name": "energy_strip",
+  "albedo_map": "base.png",
+  "emissive_map": "glow.png",
+  "emissive_factor": [1.0, 0.5, 0.2],
+  "albedo_scroll": [0.0, 0.05],
+  "emissive_scroll": [0.0, -0.1],
+  "emissive_pulse": {
+    "wave": "random",
+    "rate": 2.0,
+    "min": 0.2,
+    "max": 1.0,
+    "phase": 0.0
+  },
+  "replaces": ["strip.mat"]
+}
+```
+
+- `albedo_scroll` and `emissive_scroll`: UV repeats per second in U and V.
+  Texture coordinates wrap by repetition, and positive/negative values scroll
+  in opposite directions. Albedo and emissive scroll independently; the
+  displacement, reflection/surface, and environment maps are not scrolled.
+- `emissive_pulse` multiplies the complete `emissive_factor` vector, and works
+  even without an emissive map. `rate` is in seconds; `min` defaults to 0,
+  `max` to 1, and optional `phase` is a fraction of a cycle (default 0).
+  Multipliers above 1 are allowed for intense emissive flashes.
+- `sine`: one smooth full cycle per `rate` seconds.
+- `square`: alternating high/low, with a full on/off cycle lasting `rate` seconds.
+- `flicker`: one randomly selected on/off state every `rate` seconds.
+- `random`: smoothly interpolates between new pseudorandom targets every
+  `rate` seconds, without visible jumps at interval boundaries.
+
+Randomness is deterministic per material instance and interval, not per frame,
+so the pattern is independent of framerate and draw order. Animations do not
+modify emissive/albedo opacity handling, blend modes or depth clipping.
+
+**Animation test cases:** scroll each layer separately and together, test
+negative U/V speeds, ensure UVs wrap, verify `sine`/`square` timing and
+`flicker`/`random` stability at different FPS, check blinking with
+`emissive_factor` only (no `emissive_map`), and test both opaque and
+depth-clipped surfaces.
+
+## Material blend modes
+
+Material packs now support an optional `blend_mode`, independent of the
+existing `alpha_mode` (blend/mask). Valid choices:
+- `normal` (default): exactly the existing renderer blending behavior
+- `additive`: add colored light to the scene, useful for flares/fire/glows
+- `multiply`: multiply underlying scene color by a texture-dependent
+  factor, useful for blood/dirt/stains
+- `fluid`: depth-aware absorption of opaque geometry behind a liquid, with
+  reflected environment and emission remaining visible even over shallow
+  transparent portions
+
+These can be specified on an individual material **or** as a pack-wide
+default. The compiler validates each mode and writes it to the generated
+`metadata.json`, which the runtime reads when loading replacement materials.
+
+Example input script material:
+
+```json
+{
+  "name": "blood_pool",
+  "albedo_map": "blood.png",
+  "alpha_mode": "blend",
+  "blend_mode": "multiply",
+  "replaces": ["blood.mat"]
+}
+```
+
+The alpha channel controls the strength of the new modes. **Additive** adds
+the lit material's color, scaled by texture/material alpha; an alpha-zero
+texel contributes nothing. **Multiply** uses the opacity-weighted factor
+`mix(white, material_tint, alpha)`, so transparent pixels leave the background
+untouched. Both preserve the existing framebuffer alpha.
+
+Special-blend and depth-clipped materials always render in the transparency
+stage and do not write to the opaque color, depth, normal, or SSAO buffers,
+**even if their original JK material was opaque**. They are still occluded by
+the scene depth without corrupting post effects.
+
+
+### Fluid blending and absorption
+
+Set `"blend_mode": "fluid"` to treat a textured polygon as a liquid surface.
+This reuses the existing resolved opaque linear depth buffer, works with
+MSAA, and uses the transparency pass even when replacing an opaque JK MAT.
+
+```json
+{
+  "name": "lake_water",
+  "blend_mode": "fluid",
+  "fluid_thickness": 0.08,
+  "albedo_map": "lake_color.png",
+  "normal_map": "waves.png",
+  "normal_map2": "waves.png",
+  "normal_strength": 0.25,
+  "normal_strength2": 0.15,
+  "normal_scroll": [0.012, 0.005],
+  "normal_scroll2": [-0.008, 0.015],
+  "environment_map": "sky_environment.png",
+  "reflection_strength": 1.0,
+  "roughness": 0.08,
+  "metalness": 0.0,
+  "replaces": ["water.mat"]
+}
+```
+
+`fluid_thickness` is **absorption per game unit**, not the distance at
+which water becomes opaque. Higher numbers make water murkier over the same
+depth. The default is `0.25`, and 0 disables albedo absorption altogether
+(only reflections/emission remain). For example, at an underwater view-path
+length of 5 units:
+
+| fluid_thickness | Albedo opacity from absorption |
+| --- | --- |
+| 0.05 | 22% |
+| 0.25 | 71% |
+| 1.0 | 99% |
+
+The opacity approximation is `1 - exp(-fluid_thickness * thickness)`.
+`thickness` is measured along the eye-to-scene ray, using the depth
+difference between the visible liquid polygon and the **first opaque surface
+behind it**. Texture/material/vertex alpha continue to cap final coverage,
+so use an opaque albedo for fully opaque deep water. If there is no opaque
+receiver, the fluid is treated as fully deep. Nearby opaque geometry still
+occludes the fluid using the regular hardware depth test.
+
+The alpha-blended albedo fades out in the shallows, while Fresnel environment
+reflections and emission retain their independent contributions. This is an
+artistic single-pass approximation, not physically complete transmission,
+refraction or volumetric scattering. It cannot see through several layers
+of transparent geometry, and multiple overlapping fluid polygons are still
+subject to the existing transparent draw-order limitations.
+
+`fluid` and `depth_clip: true` cannot be combined: the former regards
+empty depth as deep liquid while the latter intentionally discards it.
+As with other materials, `fluid_thickness` can be a pack-wide default
+overridden per material.
+
+**Testing:** shallow/deep slopes and gaps with no underlying opaque
+geometry; grazing angles; strongly reflecting normal-mapped water; opaque
+versus alpha-masked albedo; fog on/off; MSAA; foreground occluders; very
+high/low `fluid_thickness` and no `fluid_thickness` field. Check that
+`normal`, `additive`, and `multiply` blend modes remain unchanged.
+
+### Depth-clipped polygon decals
+
+Set `"depth_clip": true` on a material (or as a pack-wide default) to clip it
+against nearby opaque scene geometry. This is independent of `blend_mode` and
+`alpha_mode`, defaults to `false`, and is validated by the compiler:
+
+```json
+{
+  "name": "floor_stain",
+  "albedo_map": "stain.png",
+  "alpha_mode": "blend",
+  "blend_mode": "multiply",
+  "depth_clip": true,
+  "replaces": ["stain.mat"]
+}
+```
+
+Place the polygon slightly in front of the receiving geometry. Fragments
+without opaque scene depth, or with more than **0.15 game units of perpendicular
+separation from the decal's polygon plane**, are discarded. Unlike comparing raw
+view-depth differences, this remains stable at oblique/grazing camera angles.
+The shader reconstructs view-space positions using the existing resolved depth
+texture (also with MSAA), derives the decal's geometric normal with screen-space
+derivatives, and adds no new fullscreen passes. Even `blend_mode: normal`
+depth-clipped materials are rendered in the transparency stage. For these
+normal clipped decals, texture/material alpha is premultiplied to prevent
+bright fringes.
+
+This is **not** a projector or volume decal: the polygon UVs remain unchanged,
+and it does not wrap around curved objects. Transparent-only geometry cannot
+receive decals. The fixed gap may need retuning after visual testing.
+
+Their geometry must still be placed against the target surface. Since the renderer
+cannot perfectly depth-sort the additive/multiply geometry originally submitted
+as opaque triangles against arbitrary transparent world geometry, overlapping
+transparent objects may exhibit order-dependent composition. There is no
+extra full-screen rendering pass for these effects.
+
+**Test cases:** a partially transparent PNG with a black-ish multiply
+tint over a brightly lit floor, alpha-zero regions against several backgrounds,
+an additive glow overlapping opaque scenery, and an originally opaque JK face
+overridden with a special blend mode. Confirm that `normal` materials and
+existing alpha-masked glass remain unaffected, and check with MSAA on/off.
+For depth clipping, test a slightly offset stain crossing a floor edge,
+an originally opaque JK polygon with `blend_mode: normal`, a floating decal
+beyond the fixed gap, empty-background pixels, grazing-angle views,
+and MSAA silhouettes. Also test decals with smoothed vertex normals.

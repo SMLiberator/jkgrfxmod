@@ -9,6 +9,7 @@ namespace jkgm::gl {
     enum class blend_function : enum_type {
         zero = 0x0,
         one = 0x1,
+        destination_color = 0x0306,
         one_minus_source_alpha = 0x0303
     };
 
@@ -45,6 +46,10 @@ namespace jkgm::gl {
     void clear(clear_flags cf);
 
     void set_blend_function(blend_function sfactor, blend_function dfactor);
+    void set_blend_function_separate(blend_function src_rgb,
+                                     blend_function dst_rgb,
+                                     blend_function src_alpha,
+                                     blend_function dst_alpha);
     void set_clear_color(color c);
     void set_depth_function(comparison_function func);
     void set_depth_mask(bool enable);

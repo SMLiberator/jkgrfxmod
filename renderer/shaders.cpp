@@ -102,10 +102,21 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     : opengl_shader(name, vertex_part, fragment_part)
     , screen_resolution(gl::get_uniform_location(the_program, "screen_resolution"))
     , features(gl::get_uniform_location(the_program, "features"))
+    , blend_mode(gl::get_uniform_location(the_program, "blend_mode"))
+    , depth_clip(gl::get_uniform_location(the_program, "depth_clip"))
+    , scene_depth(gl::get_uniform_location(the_program, "scene_depth"))
+    , fluid_thickness(gl::get_uniform_location(the_program, "fluid_thickness"))
     , albedo_map(gl::get_uniform_location(the_program, "albedo_map"))
     , albedo_factor(gl::get_uniform_location(the_program, "albedo_factor"))
     , emissive_map(gl::get_uniform_location(the_program, "emissive_map"))
     , emissive_factor(gl::get_uniform_location(the_program, "emissive_factor"))
+    , albedo_uv_offset(gl::get_uniform_location(the_program, "albedo_uv_offset"))
+    , emissive_uv_offset(gl::get_uniform_location(the_program, "emissive_uv_offset"))
+    , normal_map(gl::get_uniform_location(the_program, "normal_map"))
+    , normal_map2(gl::get_uniform_location(the_program, "normal_map2"))
+    , normal_uv_offset(gl::get_uniform_location(the_program, "normal_uv_offset"))
+    , normal_uv_offset2(gl::get_uniform_location(the_program, "normal_uv_offset2"))
+    , normal_params(gl::get_uniform_location(the_program, "normal_params"))
     , alpha_cutoff(gl::get_uniform_location(the_program, "alpha_cutoff"))
     , displacement_map(gl::get_uniform_location(the_program, "displacement_map"))
     , displacement_factor(gl::get_uniform_location(the_program, "displacement_factor"))
@@ -139,6 +150,26 @@ void jkgm::shaders::game_pass_shader::set_features(point<4, float> value)
     gl::set_uniform_vector(features, value);
 }
 
+void jkgm::shaders::game_pass_shader::set_blend_mode(int mode)
+{
+    gl::set_uniform_integer(blend_mode, mode);
+}
+
+void jkgm::shaders::game_pass_shader::set_fluid_thickness(float absorption)
+{
+    gl::set_uniform_float(fluid_thickness, absorption);
+}
+
+void jkgm::shaders::game_pass_shader::set_depth_clip(bool enabled)
+{
+    gl::set_uniform_integer(depth_clip, enabled ? 1 : 0);
+}
+
+void jkgm::shaders::game_pass_shader::set_scene_depth_sampler(int sampler)
+{
+    gl::set_uniform_integer(scene_depth, sampler);
+}
+
 void jkgm::shaders::game_pass_shader::set_albedo_map_sampler(int sampler)
 {
     gl::set_uniform_integer(albedo_map, sampler);
@@ -149,6 +180,21 @@ void jkgm::shaders::game_pass_shader::set_albedo_factor(color factor)
     gl::set_uniform_vector(albedo_factor, factor);
 }
 
+void jkgm::shaders::game_pass_shader::set_normal_map_samplers(int first, int second)
+{
+    gl::set_uniform_integer(normal_map, first);
+    gl::set_uniform_integer(normal_map2, second);
+}
+
+void jkgm::shaders::game_pass_shader::set_normal_params(point<4, float> params,
+                                                         point<2, float> scroll1,
+                                                         point<2, float> scroll2)
+{
+    gl::set_uniform_vector(normal_params, params);
+    gl::set_uniform_vector(normal_uv_offset, scroll1);
+    gl::set_uniform_vector(normal_uv_offset2, scroll2);
+}
+
 void jkgm::shaders::game_pass_shader::set_emissive_map_sampler(int sampler)
 {
     gl::set_uniform_integer(emissive_map, sampler);
@@ -157,6 +203,13 @@ void jkgm::shaders::game_pass_shader::set_emissive_map_sampler(int sampler)
 void jkgm::shaders::game_pass_shader::set_emissive_factor(color_rgb factor)
 {
     gl::set_uniform_vector(emissive_factor, factor);
+}
+
+void jkgm::shaders::game_pass_shader::set_uv_offsets(point<2, float> albedo,
+                                                     point<2, float> emissive)
+{
+    gl::set_uniform_vector(albedo_uv_offset, albedo);
+    gl::set_uniform_vector(emissive_uv_offset, emissive);
 }
 
 void jkgm::shaders::game_pass_shader::set_alpha_cutoff(float cutoff)

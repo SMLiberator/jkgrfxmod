@@ -8,6 +8,10 @@ uniform vec4 albedo_factor;
 uniform sampler2D emissive_map;
 uniform vec3 emissive_factor;
 
+// Independent per-material UV animation offsets, in texture repetitions.
+uniform vec2 albedo_uv_offset;
+uniform vec2 emissive_uv_offset;
+
 uniform float alpha_cutoff;
 
 uniform sampler2D displacement_map;
@@ -67,10 +71,63 @@ const float DIELECTRIC_F0 = 0.04;
 const int REFLECTION_DEBUG = 0;
 const float REFLECTION_PI = 3.14159265359;
 
+// Optional linear normal maps (OpenGL tangent +Y).
+// Each layer contributes a tangent-space surface slope; summing the slopes
+// preserves the neutral (0,0,1) normal and avoids averaging away ripples.
+uniform sampler2D normal_map;
+uniform sampler2D normal_map2;
+uniform vec2 normal_uv_offset;
+uniform vec2 normal_uv_offset2;
+uniform vec4 normal_params; // x/y strength, z/w layer enabled
+
+vec3 surface_view_normal(vec2 uv)
+{
+    float h_scale = camera_right.w > 0.5
+                        ? view_params.x
+                        : tan(radians(REFLECTION_HFOV_DEGREES) * 0.5);
+    float aspect = screen_resolution.x / max(screen_resolution.y, 1.0);
+    vec2 xy_scale = vec2(h_scale, h_scale / aspect);
+    vec3 n = normalize(vec3(vp_normal.xy / xy_scale, vp_normal.z));
+
+    // No replacement map: bit-for-bit same geometric view normal used
+    // by the previous reflection implementation.
+    if(normal_params.z < 0.5 && normal_params.w < 0.5) {
+        return n;
+    }
+
+    vec2 slope = vec2(0.0);
+    if(normal_params.z > 0.5 && normal_params.x > 0.0) {
+        vec3 layer = texture(normal_map, uv + normal_uv_offset).xyz * 2.0 - 1.0;
+        slope += normal_params.x * layer.xy / max(layer.z, 0.05);
+    }
+    if(normal_params.w > 0.5 && normal_params.y > 0.0) {
+        vec3 layer = texture(normal_map2, uv + normal_uv_offset2).xyz * 2.0 - 1.0;
+        slope += normal_params.y * layer.xy / max(layer.z, 0.05);
+    }
+    // Cotangent frame from geometric position and original UV derivatives.
+    // All quantities are in metric view space, avoiding the projection
+    // scaling distortion present in raw clip-space vertex coordinates.
+    vec3 pos = vec3(vp_pos.xy * xy_scale, vp_pos.z);
+    vec3 dp1 = dFdx(pos);
+    vec3 dp2 = dFdy(pos);
+    vec2 duv1 = dFdx(vp_texcoords);
+    vec2 duv2 = dFdy(vp_texcoords);
+    vec3 t = cross(dp2, n) * duv1.x + cross(n, dp1) * duv2.x;
+    vec3 b = cross(dp2, n) * duv1.y + cross(n, dp1) * duv2.y;
+    float basis_len = max(dot(t, t), dot(b, b));
+    if(basis_len < 1e-16) {
+        return n;
+    }
+    float inv_basis = inversesqrt(basis_len);
+    mat3 tbn = mat3(t * inv_basis, b * inv_basis, n);
+    return normalize(tbn * normalize(vec3(slope, 1.0)));
+}
+
 // Returns added EnvMap radiance and effective metalness (used to remove diffuse).
 // The base_color is BEFORE JK's vertex light intensity / vertex RGB multiplier:
 // painted metal should not lose environmental reflections in dark lighting.
-vec3 compute_reflection(vec3 base_color, vec2 texcoords, out float metalness)
+vec3 compute_reflection(vec3 base_color, vec2 texcoords, vec3 view_normal,
+                        out float metalness)
 {
     // Kept before early-out to preserve uniform texture sampling behavior.
     vec3 surface = texture(surface_map, texcoords).rgb;
@@ -100,7 +157,7 @@ vec3 compute_reflection(vec3 base_color, vec2 texcoords, out float metalness)
     // View space: x right, y up, z forward. Normals are passed with a projection
     // scale, which we remove here so the reflection uses genuine geometry.
     vec3 v = normalize(vec3(vp_pos.xy * view_scale, vp_pos.z)); // eye -> surface
-    vec3 n = normalize(vec3(vp_normal.xy / view_scale, vp_normal.z));
+    vec3 n = view_normal;
     if(dot(n, v) > 0.0) {
         n = -n;
     }
@@ -232,7 +289,7 @@ void main()
         adj_vp_z += pmapv.z;
     }
 
-    vec4 albedo_map_sample = texture(albedo_map, adj_texcoords);
+    vec4 albedo_map_sample = texture(albedo_map, adj_texcoords + albedo_uv_offset);
     albedo_map_sample = mix(vec4(1.0), albedo_map_sample, features.x);
 
     if(features.z > 0.5) {
@@ -249,7 +306,7 @@ void main()
         discard;
     }
 
-    vec3 emissive_map_sample = texture(emissive_map, adj_texcoords).rgb;
+    vec3 emissive_map_sample = texture(emissive_map, adj_texcoords + emissive_uv_offset).rgb;
     emissive_map_sample = mix(vec3(1.0), emissive_map_sample, features.y);
     vec3 emissive = emissive_map_sample * emissive_factor;
 
@@ -259,7 +316,9 @@ void main()
     // JK's grayscale and RGB per-vertex illumination.
     vec3 unlit_base_color = albedo_map_sample.rgb * albedo_factor.rgb;
     float metalness;
-    vec3 reflection = compute_reflection(unlit_base_color, adj_texcoords, metalness);
+    vec3 mapped_normal = surface_view_normal(adj_texcoords);
+    vec3 reflection = compute_reflection(unlit_base_color, adj_texcoords,
+                                         mapped_normal, metalness);
 
     // Metal suppresses the diffuse term (as in the original implementation).
     // The unlit base color only changes its SPECULAR response.

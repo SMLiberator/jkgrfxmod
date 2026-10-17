@@ -5,6 +5,7 @@
 #include "base/string_search.hpp"
 #include "error_reporter.hpp"
 #include "json_incl.hpp"
+#include <cmath>
 
 void jkgm::material_map::add_metadata(fs::path const &metadata_file)
 {
@@ -56,6 +57,62 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             auto const &af = em["emissive_factor"];
             mat->emissive_factor = color_rgb(
                 static_cast<float>(af[0]), static_cast<float>(af[1]), static_cast<float>(af[2]));
+        }
+
+        if(em.contains("albedo_scroll")) {
+            auto const &s = em["albedo_scroll"];
+            mat->albedo_scroll = make_point(static_cast<float>(s[0]),
+                                            static_cast<float>(s[1]));
+        }
+        if(em.contains("emissive_scroll")) {
+            auto const &s = em["emissive_scroll"];
+            mat->emissive_scroll = make_point(static_cast<float>(s[0]),
+                                              static_cast<float>(s[1]));
+        }
+        if(em.contains("emissive_pulse")) {
+            auto const &p = em["emissive_pulse"];
+            material_emissive_pulse pulse;
+            auto const wave = static_cast<std::string>(p.at("wave"));
+            if(wave == "square") {
+                pulse.wave = material_pulse_wave::square;
+            }
+            else if(wave == "flicker") {
+                pulse.wave = material_pulse_wave::flicker;
+            }
+            else if(wave == "random") {
+                pulse.wave = material_pulse_wave::random;
+            }
+            else if(wave != "sine") {
+                throw std::runtime_error("Unknown emissive_pulse wave in metadata.json");
+            }
+            pulse.rate = static_cast<float>(p.at("rate"));
+            pulse.min = p.contains("min") ? static_cast<float>(p["min"]) : 0.0f;
+            pulse.max = p.contains("max") ? static_cast<float>(p["max"]) : 1.0f;
+            pulse.phase = p.contains("phase") ? static_cast<float>(p["phase"]) : 0.0f;
+            mat->emissive_pulse = pulse;
+        }
+
+        if(em.contains("normal_map")) {
+            mat->normal_map = data_dir / std::string(em["normal_map"]);
+        }
+        if(em.contains("normal_map2")) {
+            mat->normal_map2 = data_dir / std::string(em["normal_map2"]);
+        }
+        if(em.contains("normal_strength")) {
+            mat->normal_strength = static_cast<float>(em["normal_strength"]);
+        }
+        if(em.contains("normal_strength2")) {
+            mat->normal_strength2 = static_cast<float>(em["normal_strength2"]);
+        }
+        if(em.contains("normal_scroll")) {
+            auto const &s = em["normal_scroll"];
+            mat->normal_scroll = make_point(static_cast<float>(s[0]),
+                                             static_cast<float>(s[1]));
+        }
+        if(em.contains("normal_scroll2")) {
+            auto const &s = em["normal_scroll2"];
+            mat->normal_scroll2 = make_point(static_cast<float>(s[0]),
+                                              static_cast<float>(s[1]));
         }
 
         if(em.contains("displacement_map")) {
@@ -116,6 +173,40 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             else if(am == "blend") {
                 mat->alpha_mode = material_alpha_mode::blend;
             }
+        }
+
+        if(em.contains("blend_mode")) {
+            auto const &mode = em["blend_mode"];
+            if(mode == "normal") {
+                mat->blend_mode = material_blend_mode::normal;
+            }
+            else if(mode == "additive") {
+                mat->blend_mode = material_blend_mode::additive;
+            }
+            else if(mode == "multiply") {
+                mat->blend_mode = material_blend_mode::multiply;
+            }
+            else if(mode == "fluid") {
+                mat->blend_mode = material_blend_mode::fluid;
+            }
+            else {
+                throw std::runtime_error("Unknown blend_mode in metadata.json");
+            }
+        }
+
+        if(em.contains("fluid_thickness")) {
+            float const value = static_cast<float>(em["fluid_thickness"]);
+            if(!std::isfinite(value) || value < 0.0f) {
+                throw std::runtime_error("Invalid fluid_thickness in metadata.json");
+            }
+            mat->fluid_thickness = value;
+        }
+
+        if(em.contains("depth_clip")) {
+            if(!em["depth_clip"].is_boolean()) {
+                throw std::runtime_error("depth_clip in metadata.json must be a boolean");
+            }
+            mat->depth_clip = static_cast<bool>(em["depth_clip"]);
         }
 
         if(em.contains("alpha_cutoff")) {

@@ -12,9 +12,11 @@
 #include "jk_virtual_file_system.hpp"
 #include "math/color.hpp"
 #include "math/color_conv.hpp"
+#include "math/point.hpp"
 #include "program/program.hpp"
 #include "raw_material.hpp"
 #include <bitset>
+#include <cmath>
 #include <set>
 
 namespace jkgm {
@@ -45,6 +47,16 @@ namespace jkgm {
 
         std::optional<std::string> emissive_map;
         std::optional<color_rgb> emissive_factor;
+        std::optional<point<2, float>> albedo_scroll;
+        std::optional<point<2, float>> emissive_scroll;
+        std::optional<json::json> emissive_pulse;
+
+        std::optional<std::string> normal_map;
+        std::optional<std::string> normal_map2;
+        std::optional<float> normal_strength;
+        std::optional<float> normal_strength2;
+        std::optional<point<2, float>> normal_scroll;
+        std::optional<point<2, float>> normal_scroll2;
 
         std::optional<std::string> displacement_map;
         std::optional<float> displacement_factor;
@@ -58,6 +70,9 @@ namespace jkgm {
         std::optional<bool> texture_filtering;
 
         std::optional<out_material_alpha_mode> alpha_mode;
+        std::optional<std::string> blend_mode;
+        std::optional<float> fluid_thickness;
+        std::optional<bool> depth_clip;
         std::optional<float> alpha_cutoff;
     };
 
@@ -348,6 +363,51 @@ namespace jkgm {
                 static_cast<float>(ef[0]), static_cast<float>(ef[1]), static_cast<float>(ef[2]));
         }
 
+        // Normal maps are DATA, never sRGB color: keep encoded XYZ intact.
+        auto import_normal_map = [&](char const *key, char const *suffix)
+            -> std::optional<std::string> {
+            if(!doc.contains(key)) {
+                return std::nullopt;
+            }
+            if(!doc[key].is_string()) {
+                LOG_ERROR("Material '", rv->name, "' ", key, " must be a filename");
+                throw std::runtime_error("Invalid script");
+            }
+            auto map_filename = str(fmt(rv->name, suffix));
+            return get_convert_linear_image(img_map,
+                                            script_path.parent_path() /
+                                                static_cast<std::string>(doc[key]),
+                                            map_filename,
+                                            output_path / map_filename);
+        };
+        rv->normal_map = import_normal_map("normal_map", ".normal.png");
+        rv->normal_map2 = import_normal_map("normal_map2", ".normal2.png");
+
+        if(doc.contains("normal_map2") && !doc.contains("normal_map")) {
+            LOG_ERROR("Material '", rv->name,
+                      "' normal_map2 requires normal_map as the first layer");
+            throw std::runtime_error("Invalid script");
+        }
+
+        auto parse_normal_strength = [&](char const *key) -> std::optional<float> {
+            if(!doc.contains(key)) {
+                return std::nullopt;
+            }
+            if(!doc[key].is_number() ||
+               !std::isfinite(static_cast<double>(doc[key]))) {
+                LOG_ERROR("Material '", rv->name, "' ", key, " must be finite");
+                throw std::runtime_error("Invalid script");
+            }
+            float s = static_cast<float>(doc[key]);
+            if(!std::isfinite(s) || s < 0.0f || s > 4.0f) {
+                LOG_ERROR("Material '", rv->name, "' ", key, " must be in [0, 4]");
+                throw std::runtime_error("Invalid script");
+            }
+            return s;
+        };
+        rv->normal_strength = parse_normal_strength("normal_strength");
+        rv->normal_strength2 = parse_normal_strength("normal_strength2");
+
         if(doc.contains("displacement_map")) {
             auto map_filename = str(fmt(rv->name, ".displacement.png"));
             auto real_map_filename =
@@ -441,6 +501,66 @@ namespace jkgm {
             rv->env_map = real_map_filename;
         }
 
+        // Animated texture speeds (UV repeats per second).
+        auto parse_scroll = [&](char const *key) -> std::optional<point<2, float>> {
+            if(!doc.contains(key)) {
+                return std::nullopt;
+            }
+            auto const &v = doc[key];
+            if(!v.is_array() || v.size() != 2 ||
+               !v[0].is_number() || !v[1].is_number() ||
+               !std::isfinite(static_cast<double>(v[0])) ||
+               !std::isfinite(static_cast<double>(v[1])) ||
+               !std::isfinite(static_cast<float>(v[0])) ||
+               !std::isfinite(static_cast<float>(v[1]))) {
+                LOG_ERROR("Material '", rv->name, "' ", key,
+                          " must be two finite UV speeds [u, v]");
+                throw std::runtime_error("Invalid script");
+            }
+            return make_point(static_cast<float>(v[0]), static_cast<float>(v[1]));
+        };
+        rv->albedo_scroll = parse_scroll("albedo_scroll");
+        rv->emissive_scroll = parse_scroll("emissive_scroll");
+        rv->normal_scroll = parse_scroll("normal_scroll");
+        rv->normal_scroll2 = parse_scroll("normal_scroll2");
+
+        if(doc.contains("emissive_pulse")) {
+            auto const &v = doc["emissive_pulse"];
+            if(!v.is_object() || !v.contains("wave") || !v["wave"].is_string() ||
+               (v["wave"] != "sine" && v["wave"] != "square" &&
+                v["wave"] != "flicker" && v["wave"] != "random") ||
+               !v.contains("rate") || !v["rate"].is_number()) {
+                LOG_ERROR("Material '", rv->name,
+                          "' emissive_pulse needs wave (sine/square/flicker/random) "
+                          "and positive rate (seconds)");
+                throw std::runtime_error("Invalid script");
+            }
+
+            for(char const *key : {"rate", "min", "max", "phase"}) {
+                if(!v.contains(key)) {
+                    continue;
+                }
+                if(!v[key].is_number() ||
+                   !std::isfinite(static_cast<double>(v[key])) ||
+                   !std::isfinite(static_cast<float>(v[key]))) {
+                    LOG_ERROR("Material '", rv->name,
+                              "' emissive_pulse.", key, " must be a finite number");
+                    throw std::runtime_error("Invalid script");
+                }
+            }
+
+            float const rate = static_cast<float>(v["rate"]);
+            float const min_value = v.contains("min") ? static_cast<float>(v["min"]) : 0.0f;
+            float const max_value = v.contains("max") ? static_cast<float>(v["max"]) : 1.0f;
+            if(rate <= 0.0f || min_value < 0.0f || max_value < min_value) {
+                LOG_ERROR("Material '", rv->name,
+                          "' emissive_pulse requires rate > 0 and 0 <= min <= max");
+                throw std::runtime_error("Invalid script");
+            }
+
+            rv->emissive_pulse = v;
+        }
+
         if(doc.contains("alpha_mode")) {
             auto const &am = doc["alpha_mode"];
             if(am == "mask") {
@@ -452,11 +572,53 @@ namespace jkgm {
             else {
                 LOG_ERROR("Material '",
                           rv->name,
-                          "' unknown blend mode '",
+                          "' unknown alpha_mode '",
                           static_cast<std::string>(am),
                           "'");
                 throw std::runtime_error("Invalid script");
             }
+        }
+
+        if(doc.contains("blend_mode")) {
+            auto const &mode = doc["blend_mode"];
+            if(!mode.is_string() ||
+               (mode != "normal" && mode != "additive" &&
+                mode != "multiply" && mode != "fluid")) {
+                LOG_ERROR("Material '", rv->name,
+                          "' blend_mode must be normal, additive, multiply, or fluid");
+                throw std::runtime_error("Invalid script");
+            }
+            rv->blend_mode = static_cast<std::string>(mode);
+        }
+
+        if(doc.contains("fluid_thickness")) {
+            auto const &v = doc["fluid_thickness"];
+            if(!v.is_number() || !std::isfinite(static_cast<double>(v)) ||
+               !std::isfinite(static_cast<float>(v)) ||
+               static_cast<float>(v) < 0.0f) {
+                LOG_ERROR("Material '", rv->name,
+                          "' fluid_thickness must be a finite, nonnegative number");
+                throw std::runtime_error("Invalid script");
+            }
+            rv->fluid_thickness = static_cast<float>(v);
+        }
+
+        if(doc.contains("depth_clip")) {
+            auto const &v = doc["depth_clip"];
+            if(!v.is_boolean()) {
+                LOG_ERROR("Material '", rv->name, "' depth_clip must be true or false");
+                throw std::runtime_error("Invalid script");
+            }
+            rv->depth_clip = static_cast<bool>(v);
+        }
+
+        // Fluid absorption and decal plane clipping are different modes:
+        // fluid uses empty opaque-depth pixels as fully deep, while decals
+        // discard them. Reject ambiguous combinations.
+        if(rv->blend_mode == "fluid" && rv->depth_clip.value_or(false)) {
+            LOG_ERROR("Material '", rv->name,
+                      "' cannot combine fluid blend_mode with depth_clip");
+            throw std::runtime_error("Invalid script");
         }
 
         if(doc.contains("alpha_cutoff")) {
@@ -553,6 +715,39 @@ namespace jkgm {
             rv["emissive_factor"] = {get<0>(c), get<1>(c), get<2>(c)};
         }
 
+        if(mat.albedo_scroll.has_value()) {
+            auto s = *mat.albedo_scroll;
+            rv["albedo_scroll"] = {get<0>(s), get<1>(s)};
+        }
+        if(mat.emissive_scroll.has_value()) {
+            auto s = *mat.emissive_scroll;
+            rv["emissive_scroll"] = {get<0>(s), get<1>(s)};
+        }
+        if(mat.emissive_pulse.has_value()) {
+            rv["emissive_pulse"] = *mat.emissive_pulse;
+        }
+
+        if(mat.normal_map.has_value()) {
+            rv["normal_map"] = *mat.normal_map;
+        }
+        if(mat.normal_map2.has_value()) {
+            rv["normal_map2"] = *mat.normal_map2;
+        }
+        if(mat.normal_strength.has_value()) {
+            rv["normal_strength"] = *mat.normal_strength;
+        }
+        if(mat.normal_strength2.has_value()) {
+            rv["normal_strength2"] = *mat.normal_strength2;
+        }
+        if(mat.normal_scroll.has_value()) {
+            auto s = *mat.normal_scroll;
+            rv["normal_scroll"] = {get<0>(s), get<1>(s)};
+        }
+        if(mat.normal_scroll2.has_value()) {
+            auto s = *mat.normal_scroll2;
+            rv["normal_scroll2"] = {get<0>(s), get<1>(s)};
+        }
+
         if(mat.displacement_map.has_value()) {
             rv["displacement_map"] = *mat.displacement_map;
         }
@@ -600,6 +795,17 @@ namespace jkgm {
                 rv["alpha_mode"] = "mask";
                 break;
             }
+        }
+
+        if(mat.blend_mode.has_value()) {
+            rv["blend_mode"] = *mat.blend_mode;
+        }
+        if(mat.fluid_thickness.has_value()) {
+            rv["fluid_thickness"] = *mat.fluid_thickness;
+        }
+
+        if(mat.depth_clip.has_value()) {
+            rv["depth_clip"] = *mat.depth_clip;
         }
 
         if(mat.alpha_mode.has_value() && mat.alpha_cutoff.has_value()) {
@@ -771,6 +977,15 @@ namespace jkgm {
                     "albedo_factor",
                     "emissive_map",
                     "emissive_factor",
+                    "albedo_scroll",
+                    "emissive_scroll",
+                    "emissive_pulse",
+                    "normal_map",
+                    "normal_map2",
+                    "normal_strength",
+                    "normal_strength2",
+                    "normal_scroll",
+                    "normal_scroll2",
                     "displacement_map",
                     "displacement_factor",
                     "surface_map",
@@ -780,6 +995,9 @@ namespace jkgm {
                     "reflection_mode",
                     "texture_filtering",
                     "alpha_mode",
+                    "blend_mode",
+                    "fluid_thickness",
+                    "depth_clip",
                     "alpha_cutoff",
                     }) {
                         if(!effective.contains(property) && script_doc.contains(property)) {
