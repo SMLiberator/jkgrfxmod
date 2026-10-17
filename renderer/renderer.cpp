@@ -31,6 +31,7 @@
 #include "offscreen_surface.hpp"
 #include "opengl_state.hpp"
 #include "postfx.hpp"
+#include "spatialblur.hpp"
 #include "primary_menu_surface.hpp"
 #include "primary_surface.hpp"
 #include "renderer_ao.hpp"
@@ -600,8 +601,15 @@ namespace jkgm {
         {
             // Compose renderbuffer onto window:
             frame_screen->end_frame();
-            frame_compositor->end_frame(
-                ogs.get(), conf_scr_res, frame_screen->get_resolved_final_texture());
+            // Optional depth/peripheral blur occurs before bloom, color processing
+            // and frame blending. Keep the source texture untouched for no-blur mode.
+            gl::texture_view scene = frame_screen->get_resolved_final_texture();
+            if(mode == renderer_mode::ingame) {
+                scene = apply_spatial_blur(
+                    ogs.get(), conf_scr_res, scene,
+                    frame_screen->get_resolved_depth_texture());
+            }
+            frame_compositor->end_frame(ogs.get(), conf_scr_res, scene);
 
             SwapBuffers(hDC);
 
