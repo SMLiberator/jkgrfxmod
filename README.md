@@ -18,10 +18,8 @@ Optional boolean master switches, all `true` by default:
 | `enable_fog` | Renders COG-controlled distance fog; COG parameters are still stored if disabled |
 | `enable_reflections` | Enables material environment reflections (including fixed/MatCap and the planned SSR); disabling restores the unreflected diffuse appearance |
 | `enable_post` | Enables optional presentation effects (bloom, film grain, vignette, brightness/contrast/saturation); sRGB output remains active when disabled |
-| `enable_blur` | Legacy master switch for all three blur effects |
-| `enable_frame_blend` | Enable/disable lightweight temporal feedback independently |
-| `enable_distance_blur` | Enable/disable distance-based spatial blur independently |
-| `enable_peripheral_blur` | Enable/disable peripheral spatial blur independently |
+| `enable_blur` | Enables distance and peripheral spatial blur (more GPU-intensive) |
+| `enable_trails` | Enables lightweight temporal feedback / frame blending |
 
 The existing `enable_ssao` switch remains independent of `enable_post`, making it useful for testing SSAO artifacts. `enable_bloom` independently disables bloom even when `enable_post` is true.
 
@@ -60,7 +58,7 @@ transitions and when `ResetFrameBlend()` is called. These transitions also reset
 the effect's strength to zero to avoid carrying a level effect into the menus.
 The engine's per-frame `BeginScene`/`EndScene` hooks do not reset it.
 
-`"enable_blur":false` prevents the history contribution while keeping the
+`"enable_trails":false` prevents the history contribution while keeping the
 COG-controlled parameters intact; use this for debugging. It does not turn
 off bloom or SSAO. Frame blending is also independent of `enable_post`, which
 only gates bloom, grain, vignette and color filtering.
@@ -76,8 +74,8 @@ The explicit history reset is also useful before cutscene camera teleports.
 These spatial effects are **disabled by default**. They are evaluated on
 the full-resolution game scene in linear HDR before bloom, presentation
 color processing, and recursive frame blending. Both are independently
-fadeable and can be combined; `enable_blur:false` bypasses both, as
-well as frame blending, without changing their stored COG parameters.
+fadeable and can be combined; `enable_blur:false` bypasses both
+spatial effects without disabling frame blending.
 
 ```c
 // Vector = startDistance endDistance strength, fadeTime in seconds.
@@ -118,19 +116,21 @@ if level-specific effects must not persist.
 
 ### Blur performance switches
 
-The three blur effects can now be independently disabled in `jkgm.json`:
+Only two independent configuration switches are needed:
 
 ```json
-"enable_blur": true,
-"enable_frame_blend": true,
-"enable_distance_blur": false,
-"enable_peripheral_blur": true
+{
+  "enable_blur": false,
+  "enable_trails": true
+}
 ```
 
-All switches default to `true` for compatibility. `enable_blur:false`
-still overrides all three. Disabled distance/peripheral effects are ignored
-when computing the spatial kernel; **when both are disabled, the entire pair
-of expensive full-screen spatial passes is skipped**. Disabling frame blending
-removes its history contribution without clearing the COG parameters, so
-turning it on again resumes from fresh frame history. You can continue
-using the matching `Set*()` verbs regardless of the switches.
+`enable_blur` controls both spatial blur types (distance and peripheral).
+`enable_trails` controls recursive temporal feedback from `SetFrameBlend`.
+Both default to `true`, but all individual effect strengths default to zero.
+
+With `enable_blur:false`, the expensive spatial sampling passes are skipped
+even if COG has set nonzero distance/peripheral strengths; temporal trails still
+work. With `enable_trails:false`, history continues updating from the live
+frame without making a contribution, so re-enabling it does not revive an
+old image. The matching COG verbs remain available regardless of either switch.
