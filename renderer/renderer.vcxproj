@@ -75,6 +75,7 @@
     <ClInclude Include="offscreen_menu_surface.hpp" />
     <ClInclude Include="offscreen_surface.hpp" />
     <ClInclude Include="opengl_state.hpp" />
+    <ClInclude Include="frameblend.hpp" />
     <ClInclude Include="primary_menu_surface.hpp" />
     <ClInclude Include="primary_surface.hpp" />
     <ClInclude Include="dxguids.hpp" />
