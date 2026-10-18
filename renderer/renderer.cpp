@@ -15,6 +15,7 @@
 #include "ddraw_impl.hpp"
 #include "ddrawpalette_impl.hpp"
 #include "engine_camera.hpp"
+#include "engine_material_debug.hpp"
 #include "execute_buffer.hpp"
 #include "fog.hpp"
 #include "glad/glad.h"
@@ -46,6 +47,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <map>
+#include <set>
+#include <string>
 
 namespace jkgm {
     static WNDPROC original_wkernel_wndproc = nullptr;
@@ -384,6 +388,15 @@ namespace jkgm {
             std::chrono::steady_clock::now();
         double animation_seconds = 0.0;
 
+        std::chrono::steady_clock::time_point last_matlink_scan{};
+        uint32_t last_matlink_world = 0;
+        uint32_t last_matlink_materials = 0;
+        uint32_t last_matlink_static_materials = 0;
+        std::string last_matlink_level;
+        bool matlink_first_scan = true;
+        std::map<uint64_t, std::string> reported_mat_links;
+        bool matlink_build_warning_logged = false;
+
         using timestamp_t = std::chrono::high_resolution_clock::time_point;
         timestamp_t menu_prev_ticks;
         timestamp_t menu_curr_ticks;
@@ -602,8 +615,96 @@ namespace jkgm {
             frame_screen->begin_frame();
         }
 
+        // Diagnostic only: correlate JK material cels to live D3D texture
+        // instances already mapped to replacement packs. Logs changed links,
+        // and never writes to engine memory or creates an engine hook.
+        void log_mat_links()
+        {
+            if(!the_config->log_path.has_value()) {
+                return;
+            }
+            auto const now = std::chrono::steady_clock::now();
+            if(now - last_matlink_scan < std::chrono::seconds(3)) {
+                return;
+            }
+            last_matlink_scan = now;
+
+            auto const snapshot = engine_material_debug::scan();
+            if(!snapshot.supported_build) {
+                if(!matlink_build_warning_logged) {
+                    LOG_WARNING("JK MAT link diagnostic disabled: unknown engine build");
+                    matlink_build_warning_logged = true;
+                }
+                return;
+            }
+            bool const new_world = matlink_first_scan ||
+                snapshot.current_world != last_matlink_world ||
+                snapshot.current_materials != last_matlink_materials ||
+                snapshot.static_materials != last_matlink_static_materials ||
+                snapshot.level_name != last_matlink_level;
+            if(new_world) {
+                matlink_first_scan = false;
+                reported_mat_links.clear();
+                last_matlink_world = snapshot.current_world;
+                last_matlink_materials = snapshot.current_materials;
+                last_matlink_static_materials = snapshot.static_materials;
+                last_matlink_level = snapshot.level_name;
+                LOG_DEBUG("JK MAT diagnostic: level=", snapshot.level_name,
+                          " world=", snapshot.current_world,
+                          " materials=", snapshot.current_count,
+                          " static materials=", snapshot.static_count,
+                          " validated=", snapshot.visited_materials,
+                          " rejected=", snapshot.rejected_materials);
+            }
+
+            size_t matched = 0;
+            std::map<uint32_t, std::set<std::string>> packs_per_mat;
+            for(auto const &link : snapshot.textures) {
+                if(link.handle == 0 || link.handle > vidmem_texture_surfaces.size()) {
+                    continue; // Not a live renderer texture handle.
+                }
+                auto const &surface = vidmem_texture_surfaces[link.handle - 1];
+                if(!surface || !surface->replacement_material) {
+                    continue;
+                }
+                auto const *replacement = surface->replacement_material;
+                std::string const pack = replacement->pack_root.generic_string();
+                packs_per_mat[link.mat_id].insert(pack);
+                ++matched;
+
+                uint64_t const key = (uint64_t(link.mat_id) << 16) |
+                    (uint64_t(link.cel) << 8) |
+                    (uint64_t(link.mip) << 1) | uint64_t(link.alpha);
+                std::string const identity = std::to_string(link.handle) + ":" +
+                                             pack + ":" + replacement->source_name;
+                auto const it = reported_mat_links.find(key);
+                if(it == reported_mat_links.end() || it->second != identity) {
+                    reported_mat_links[key] = identity;
+                    LOG_DEBUG("JK MAT link: id=", link.mat_id,
+                              " name=", link.name, " cel=", link.cel,
+                              " mip=", link.mip, " alpha=", link.alpha,
+                              " D3D=", link.handle, " pack=", pack,
+                              " material=", replacement->source_name);
+                }
+            }
+            for(auto const &entry : packs_per_mat) {
+                if(entry.second.size() > 1) {
+                    // The image-ID source for this MAT would be ambiguous.
+                    LOG_WARNING("JK MAT ", entry.first,
+                                " has replacement cels in multiple packs");
+                }
+            }
+            if(new_world) {
+                LOG_DEBUG("JK MAT diagnostic: native cache links=", snapshot.textures.size(),
+                          " live replacement links=", matched);
+            }
+        }
+
         void end_frame()
         {
+            if(mode == renderer_mode::ingame) {
+                log_mat_links();
+            }
             // Compose renderbuffer onto window:
             frame_screen->end_frame();
             // Optional depth/peripheral blur occurs before bloom, color processing
