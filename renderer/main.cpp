@@ -8,6 +8,7 @@
 #include "renderer.hpp"
 #include "runtime_material.hpp"
 #include "native_3do_profile.hpp"
+#include "mesh_bounds_culling.hpp"
 #include "engine_material_debug.hpp"
 #include "sun.hpp"
 #include <Windows.h>
@@ -17,6 +18,8 @@
 #include <cstring>
 #include <cmath>
 #include <chrono>
+#include <unordered_map>
+#include <limits>
 #include <string>
 #include <detours/detours.h>
 
@@ -25,6 +28,8 @@ static std::unique_ptr<jkgm::config> the_config;
 static bool renderer_hooks_active = false;
 
 static bool native_3do_hooks_active = false;
+static bool native_3do_timing_active = false;
+static bool mesh_bounds_culling_active = false;
 
 // Function boundaries and prologues independently verified in both the
 // user's SHA-locked jk23.exe and standalone jkgm.exe. Not portable to other JKs.
@@ -49,6 +54,97 @@ namespace {
         reinterpret_cast<native_face_func>(native_face_addr);
     jkgm::native_3do_sample native_totals;
 
+    struct bounds_cache_entry {
+        float const *vertices;
+        int count;
+        jkgm::mesh_bounds::bounds box;
+    };
+    std::unordered_map<void const *, bounds_cache_entry> mesh_bounds_cache;
+
+    using matrix_multiply_func = void (__cdecl *)(void *, void const *, void const *);
+    constexpr uintptr_t multiply_addr = 0x00440E00U;
+    constexpr unsigned char multiply_bytes[] =
+        {0x8b,0x44,0x24,0x08,0x8b,0x4c,0x24,0x0c};
+    matrix_multiply_func NativeMultiply =
+        reinterpret_cast<matrix_multiply_func>(multiply_addr);
+
+    bool read_mesh_bounds(void const *mesh, jkgm::mesh_bounds::bounds &out,
+                          int &count, int &face_count)
+    {
+        auto const *base = reinterpret_cast<uint8_t const *>(mesh);
+        // Offsets verified in the patched EXE's rdModel3_DrawMesh disassembly.
+        int const mode = *reinterpret_cast<int32_t const *>(base + 0x24);
+        float const *vertices = *reinterpret_cast<float const *const *>(base + 0x30);
+        count = *reinterpret_cast<int32_t const *>(base + 0x48);
+        face_count = *reinterpret_cast<int32_t const *>(base + 0x50);
+        if(mode == 0 || !vertices || count <= 0 || count > 65536) return false;
+
+        auto cached = mesh_bounds_cache.find(mesh);
+        if(cached != mesh_bounds_cache.end() &&
+           cached->second.vertices == vertices && cached->second.count == count) {
+            out = cached->second.box;
+            return true;
+        }
+
+        // A malformed, noncontiguous or newly freed buffer falls back to JK.
+        MEMORY_BASIC_INFORMATION mbi{};
+        auto const bytes = static_cast<size_t>(count) * 3 * sizeof(float);
+        if(VirtualQuery(vertices, &mbi, sizeof(mbi)) == 0 ||
+           mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) ||
+           reinterpret_cast<uintptr_t>(vertices) + bytes >
+             reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize) {
+            return false;
+        }
+        using jkgm::mesh_bounds::vec3;
+        vec3 mn{vertices[0],vertices[1],vertices[2]};
+        vec3 mx=mn;
+        for(int i=1;i<count;i++) {
+            float const x=vertices[i*3], y=vertices[i*3+1], z=vertices[i*3+2];
+            if(!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
+                return false;
+            mn.x=std::min(mn.x,x); mn.y=std::min(mn.y,y); mn.z=std::min(mn.z,z);
+            mx.x=std::max(mx.x,x); mx.y=std::max(mx.y,y); mx.z=std::max(mx.z,z);
+        }
+        if(!std::isfinite(mn.x) || !std::isfinite(mn.y) || !std::isfinite(mn.z))
+            return false;
+        out.center={(mn.x+mx.x)*0.5f,(mn.y+mx.y)*0.5f,(mn.z+mx.z)*0.5f};
+        out.extent={(mx.x-mn.x)*0.5f,(mx.y-mn.y)*0.5f,(mx.z-mn.z)*0.5f};
+        if(!jkgm::mesh_bounds::valid(out)) return false;
+
+        // Cache is per-level; scene/renderer mode changes invalidate it.
+        if(mesh_bounds_cache.size() > 16384) mesh_bounds_cache.clear();
+        mesh_bounds_cache[mesh]={vertices,count,out};
+        return true;
+    }
+
+    bool reject_mesh_frustum(void *mesh, void *placement)
+    {
+        if(!placement) return false;
+        auto const cam_addr = *reinterpret_cast<uintptr_t const *>(0x0073A418U);
+        if(cam_addr < 0x10000U) return false;
+        auto const *cam = reinterpret_cast<uint8_t const *>(cam_addr);
+        int const project = *reinterpret_cast<int const *>(cam);
+        if(project != 1) return false;  // perspective only
+        auto const *frustum = *reinterpret_cast<jkgm::mesh_bounds::frustum const *const *>(cam+0x48);
+        if(!frustum) return false;
+        jkgm::mesh_bounds::bounds b{};
+        int count=0, faces=0;
+        if(!read_mesh_bounds(mesh,b,count,faces)) return false;
+        if(native_3do_timing_active) ++native_totals.bounds_tested;
+        jkgm::mesh_bounds::matrix34 combined{};
+        NativeMultiply(&combined, cam+8, placement);
+        if(jkgm::mesh_bounds::definitely_outside(b,combined,*frustum,project)) {
+            if(native_3do_timing_active) {
+                ++native_totals.bounds_rejected;
+                native_totals.bounds_vertices_saved += static_cast<uint64_t>(count);
+                if(faces>0) native_totals.bounds_faces_saved += static_cast<uint64_t>(faces);
+            }
+            return true;
+        }
+        return false;
+    }
+
+
     uint64_t elapsed_native_ns(std::chrono::steady_clock::time_point start)
     {
         return static_cast<uint64_t>(
@@ -57,30 +153,48 @@ namespace {
     }
     int __cdecl HookedNativeModel(void *thing, void *placement)
     {
-        auto const start = std::chrono::steady_clock::now();
+        auto const start = native_3do_timing_active
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
         int result = RealNativeModel(thing, placement);
-        native_totals.model_ns += elapsed_native_ns(start);
-        ++native_totals.model_calls;
-        if(result != 0) ++native_totals.model_drawn;
+        if(native_3do_timing_active) {
+            native_totals.model_ns += elapsed_native_ns(start);
+            ++native_totals.model_calls;
+            if(result != 0) ++native_totals.model_drawn;
+        }
         return result;
     }
     void __cdecl HookedNativeMesh(void *mesh, void *placement)
     {
-        auto const start = std::chrono::steady_clock::now();
-        RealNativeMesh(mesh, placement);
-        native_totals.mesh_ns += elapsed_native_ns(start);
-        ++native_totals.mesh_calls;
+        auto const start = native_3do_timing_active
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
+        if(mesh_bounds_culling_active && reject_mesh_frustum(mesh, placement)) {
+            // Preserve the current-mesh pointer side effect of the native routine.
+            *reinterpret_cast<void **>(0x0073C1E8U) = mesh;
+        }
+        else {
+            RealNativeMesh(mesh, placement);
+        }
+        if(native_3do_timing_active) {
+            native_totals.mesh_ns += elapsed_native_ns(start);
+            ++native_totals.mesh_calls;
+        }
     }
     int __cdecl HookedNativeFace(void *face, int lightFlags)
     {
-        auto const start = std::chrono::steady_clock::now();
+        auto const start = native_3do_timing_active
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
         int const result = RealNativeFace(face, lightFlags);
-        native_totals.face_ns += elapsed_native_ns(start);
-        ++native_totals.face_calls;
-        if(result != 0) ++native_totals.face_emitted;
+        if(native_3do_timing_active) {
+            native_totals.face_ns += elapsed_native_ns(start);
+            ++native_totals.face_calls;
+            if(result != 0) ++native_totals.face_emitted;
+        }
         return result;
     }
-    bool attach_native_3do_hooks()
+    bool attach_native_3do_hooks(bool profiling, bool culling)
     {
         if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr)) != 0x00400000U ||
            std::memcmp(reinterpret_cast<void const *>(native_model_addr),
@@ -88,18 +202,20 @@ namespace {
            std::memcmp(reinterpret_cast<void const *>(native_mesh_addr),
                        native_mesh_bytes, sizeof(native_mesh_bytes)) != 0 ||
            std::memcmp(reinterpret_cast<void const *>(native_face_addr),
-                       native_face_bytes, sizeof(native_face_bytes)) != 0) {
+                       native_face_bytes, sizeof(native_face_bytes)) != 0 ||
+           (culling && std::memcmp(reinterpret_cast<void const *>(multiply_addr),
+                                  multiply_bytes, sizeof(multiply_bytes)) != 0)) {
             LOG_WARNING("Native 3DO profiler skipped: unrecognized executable");
             return false;
         }
         LONG error = DetourTransactionBegin();
         if(error != NO_ERROR) return false;
         error = DetourUpdateThread(GetCurrentThread());
-        if(error == NO_ERROR)
+        if(error == NO_ERROR && profiling)
             error = DetourAttach(&(PVOID &)RealNativeModel, HookedNativeModel);
         if(error == NO_ERROR)
             error = DetourAttach(&(PVOID &)RealNativeMesh, HookedNativeMesh);
-        if(error == NO_ERROR)
+        if(error == NO_ERROR && profiling)
             error = DetourAttach(&(PVOID &)RealNativeFace, HookedNativeFace);
         if(error != NO_ERROR) {
             DetourTransactionAbort();
@@ -111,16 +227,21 @@ namespace {
             LOG_WARNING("Native 3DO profiler commit failed: ", error);
             return false;
         }
-        LOG_INFO("Native 3DO model/mesh/face CPU profiler attached (per-face clocks add diagnostic overhead)");
+        native_3do_timing_active = profiling;
+        mesh_bounds_culling_active = culling;
+        LOG_INFO("Native 3DO hooks attached; profiling=", profiling,
+                 " mesh_bounds_culling=", culling);
         return true;
     }
     void detach_native_3do_hooks()
     {
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
-        DetourDetach(&(PVOID &)RealNativeFace, HookedNativeFace);
+        if(native_3do_timing_active)
+            DetourDetach(&(PVOID &)RealNativeFace, HookedNativeFace);
         DetourDetach(&(PVOID &)RealNativeMesh, HookedNativeMesh);
-        DetourDetach(&(PVOID &)RealNativeModel, HookedNativeModel);
+        if(native_3do_timing_active)
+            DetourDetach(&(PVOID &)RealNativeModel, HookedNativeModel);
         DetourTransactionCommit();
     }
 } // namespace
@@ -133,7 +254,11 @@ jkgm::native_3do_sample jkgm::consume_native_3do_sample()
 }
 bool jkgm::native_3do_available()
 {
-    return native_3do_hooks_active;
+    return native_3do_hooks_active && native_3do_timing_active;
+}
+void jkgm::reset_mesh_bounds_cache()
+{
+    mesh_bounds_cache.clear();
 }
 
 
@@ -1041,8 +1166,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         }
 
         renderer_hooks_active = true;
-        if(the_config->profile_renderer) {
-            native_3do_hooks_active = attach_native_3do_hooks();
+        if(the_config->profile_renderer || the_config->enable_mesh_bounds_culling) {
+            native_3do_hooks_active = attach_native_3do_hooks(
+                the_config->profile_renderer, the_config->enable_mesh_bounds_culling);
         }
         LOG_DEBUG("Finished attaching renderer to process");
     }

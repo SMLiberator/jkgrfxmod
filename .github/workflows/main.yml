@@ -25,6 +25,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\fast_vertex_colors.cpp /Fe:fast_vertex_colors_test.exe
         fast_vertex_colors_test.exe
+    - name: Conservative mesh bounds regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\mesh_bounds_culling.cpp /Fe:mesh_bounds_culling_test.exe
+        mesh_bounds_culling_test.exe
     - name: Native 3DO profiler counter regression tests
       shell: cmd
       run: |

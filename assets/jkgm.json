@@ -21,5 +21,6 @@
     "enable_posterized_lighting": false,
     "enable_vsync": false,
     "profile_renderer": false,
+    "enable_mesh_bounds_culling": false,
     "use_vanilla_renderer": false
 }

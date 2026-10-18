@@ -12,6 +12,7 @@
 | **enable_vsync** | Enable vsync. Due to *Jedi Knight*'s low internal framerate, enabling this option may cause stuttering and dropped frames. | boolean | `false` |
 | **use_vanilla_renderer** | At process startup, load the DLL but do not install JkGRfxMod rendering or COG hooks. The native Direct3D renderer must work on your system. This is not a live toggle. | boolean | `false` |
 | **profile_renderer** | Log CPU frame timings and geometry counters (requires `log_path`). Disable for normal gameplay. | boolean | `false` |
+| **enable_mesh_bounds_culling** | Experimental early rejection of 3DO meshes fully outside the camera frustum using tighter cached vertex bounds. It does **not** hide occluded meshes behind walls or terrain. Requires this build of patched JKGM and a restart. | boolean | `false` |
 | **enable_bloom** | Use [bloom](https://en.wikipedia.org/wiki/Bloom_(shader_effect)) effect for brighter lights. Requires compatible texture pack. | boolean | Default: `true` |
 | **enable_ssao** | Use [screen-space ambient occlusion](https://en.wikipedia.org/wiki/Screen_space_ambient_occlusion) to subtly increase perceived depth in the image. | boolean | `true` |
 | **enable_parallax** | Use [parallax occlusion mapping](https://en.wikipedia.org/wiki/Parallax_occlusion_mapping) to add depth to individual textures. Requires compatible texture pack. | boolean | `true` |

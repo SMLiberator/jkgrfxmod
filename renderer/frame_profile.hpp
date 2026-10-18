@@ -23,6 +23,8 @@ struct profile_sample {
   uint64_t native_model_calls=0, native_model_drawn=0, native_mesh_calls=0;
   uint64_t native_face_calls=0, native_face_emitted=0;
   uint64_t native_model_ns=0, native_mesh_ns=0, native_face_ns=0;
+  uint64_t bounds_tested=0, bounds_rejected=0;
+  uint64_t bounds_vertices_saved=0, bounds_faces_saved=0;
   void add(profile_sample const &o) {
     for(size_t i=0;i<timings.size();++i) timings[i]+=o.timings[i];
     period_us+=o.period_us; present_us+=o.present_us; tris+=o.tris;
@@ -42,6 +44,10 @@ struct profile_sample {
     native_model_ns+=o.native_model_ns;
     native_mesh_ns+=o.native_mesh_ns;
     native_face_ns+=o.native_face_ns;
+    bounds_tested+=o.bounds_tested;
+    bounds_rejected+=o.bounds_rejected;
+    bounds_vertices_saved+=o.bounds_vertices_saved;
+    bounds_faces_saved+=o.bounds_faces_saved;
   }
 };
 class profile_scope {
