@@ -70,7 +70,26 @@ public:
     runtime_material_snapshot snapshot() const
     {
         std::lock_guard<std::mutex> guard(lock_);
-        return state_;
+        auto result = state_;
+        double const now = effect_clock_now();
+        if(result.global_env && !result.global_env->to &&
+           result.global_env->progress(now) >= 1.0f) {
+            result.global_env.reset();
+        }
+        for(auto it = result.per_mat.begin(); it != result.per_mat.end();) {
+            auto &em = it->second;
+            if(em.env && !em.env->to && em.env->progress(now) >= 1.0f) em.env.reset();
+            if(em.albedo && !em.albedo->to && em.albedo->progress(now) >= 1.0f) {
+                em.albedo.reset();
+            }
+            if(em.color && !em.color->is_fading(now) &&
+               em.color->target() == std::array<float, 3>{{1.0f, 1.0f, 1.0f}}) {
+                em.color.reset();
+            }
+            if(!em.env && !em.albedo && !em.color) it = result.per_mat.erase(it);
+            else ++it;
+        }
+        return result;
     }
 
     void reset_all()

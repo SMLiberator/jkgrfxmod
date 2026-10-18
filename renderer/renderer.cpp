@@ -1332,13 +1332,15 @@ namespace jkgm {
                 bool env_command = false;
                 bool const global_allowed = mat->replacement_material &&
                     !mat->replacement_material->has_explicit_env_map;
-                if(global_allowed && runtime_controls.global_env) {
+                if(the_config->enable_reflections &&
+                   global_allowed && runtime_controls.global_env) {
                     resolve_runtime_transition(*runtime_controls.global_env,
                                                mat->env_map, env_from, env_to, env_weight);
                     env_command = runtime_controls.global_env->to.has_value() ||
                                   runtime_controls.global_env->from.has_value();
                 }
-                if(override_mat && override_mat->env) {
+                if(the_config->enable_reflections &&
+                   override_mat && override_mat->env) {
                     // A material reset returns to the ordinary/global target.
                     auto const global_target = env_weight >= 1.0f ? env_to :
                                                (env_weight > 0.0f ? env_to : env_from);
