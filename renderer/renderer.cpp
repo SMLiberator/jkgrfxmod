@@ -2,6 +2,7 @@
 #include "frame_profile.hpp"
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
+#include "gpu_3do_alpha.hpp"
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
 #include "backbuffer_menu_surface.hpp"
@@ -1826,8 +1827,18 @@ namespace jkgm {
 
         struct gpu_3do_texture {
             gl::texture_view texture = gl::default_texture;
+            gl::texture_view emission = gl::default_texture;
             float width=1.0f, height=1.0f;
-            bool has_image=false, alpha=false;
+            float alpha_cutoff=0.5f;
+            float opacity=1.0f;
+            bool has_image=false, alpha=false, masked=false, special=false;
+            bool has_emission=false;
+            bool filtered=true;
+            material_blend_mode blend=material_blend_mode::normal;
+            point<4,float> tint=make_point(1.0f,1.0f,1.0f,1.0f);
+            point<4,float> emission_factor=make_point(0.0f,0.0f,0.0f,0.0f);
+            point<2,float> albedo_scroll=make_point(0.0f,0.0f);
+            point<2,float> emissive_scroll=make_point(0.0f,0.0f);
         };
 
         gpu_3do_texture resolve_gpu_3do_material(gpu_3do_group const &group)
@@ -1871,6 +1882,30 @@ namespace jkgm {
             auto const &surface=vidmem_texture_surfaces[id-1];
             if(!surface || !surface->albedo_map) return out;
             out.texture=texture_cache->get_texture_handle(*surface->albedo_map);
+            out.masked=surface->alpha_mode==material_alpha_mode::mask;
+            out.blend=surface->blend_mode;
+            out.special=surface->depth_clip ||
+                        surface->blend_mode!=material_blend_mode::normal;
+            out.filtered=surface->texture_filtering.value_or(
+                the_config->enable_texture_filtering);
+            out.alpha_cutoff=surface->alpha_cutoff;
+            auto const &tint=surface->albedo_factor;
+            out.tint=make_point(get<0>(tint),get<1>(tint),
+                                get<2>(tint),get<3>(tint));
+            out.opacity=get<3>(tint);
+            out.albedo_scroll=scroll_offset(surface->albedo_scroll);
+            out.emissive_scroll=scroll_offset(surface->emissive_scroll);
+            if(surface->emissive_map) {
+                out.emission=texture_cache->get_texture_handle(*surface->emissive_map);
+                out.has_emission=true;
+            }
+            float emission_strength=surface->emissive_pulse
+                ? pulse_multiplier(*surface->emissive_pulse,surface->material_id)
+                : 1.0f;
+            auto const &em=surface->emissive_factor;
+            out.emission_factor=make_point(get<0>(em)*emission_strength,
+                                           get<1>(em)*emission_strength,
+                                           get<2>(em)*emission_strength,0.0f);
             // JK stores local 3DO UVs in first-mipmap pixel units.
             // Normalize them against the equivalent original mip-0 size.
             out.width=static_cast<float>(chosen->width << mip);
@@ -1913,10 +1948,19 @@ namespace jkgm {
             prog.set_camera(axes(cam.right),axes(cam.forward),axes(cam.up),
                             axes(cam.position),
                             make_point(tan_half_fov,aspect,1.0f/far_plane,0.0f));
+            // Same animated fog state used by JK's existing scene passes.
+            {
+                auto const &fog=get_fog_settings();
+                auto const info=fog.info.value(),color=fog.color.value();
+                prog.set_fog(make_point(info[0],info[1],
+                                        the_config->enable_fog?info[2]:0.0f,0.0f),
+                             make_point(color[0],color[1],color[2],0.0f));
+            }
             struct pending_draw {
                 gpu_3do_instance const *instance;
                 gpu_3do_group const *group;
                 gpu_3do_texture texture;
+                gpu_3do_alpha_mode policy;
                 float depth;
             };
             std::vector<pending_draw> draws;
@@ -1924,8 +1968,10 @@ namespace jkgm {
                 if(!inst.geometry) continue;
                 for(auto const &group:inst.geometry->groups) {
                     auto const tex=resolve_gpu_3do_material(group);
-                    bool const group_alpha=(group.face_type&0x2U)!=0 || tex.alpha;
-                    if(group_alpha!=transparent) continue;
+                    auto const policy=choose_gpu_3do_alpha_mode(
+                        (group.face_type&0x2U)!=0,tex.alpha,tex.masked,
+                        tex.special,tex.opacity);
+                    if(!gpu_3do_draws_in_pass(policy,transparent)) continue;
                     float depth=0.0f;
                     if(transparent) {
                         auto const &m=inst.transform;
@@ -1937,7 +1983,7 @@ namespace jkgm {
                               (wy-cam.position[1])*cam.forward[1]+
                               (wz-cam.position[2])*cam.forward[2];
                     }
-                    draws.push_back({&inst,&group,tex,depth});
+                    draws.push_back({&inst,&group,tex,policy,depth});
                 }
             }
             if(transparent) {
@@ -1978,16 +2024,50 @@ namespace jkgm {
                     gl::enable(gl::capability::cull_face);
                     gl::set_face_cull_mode(gl::face_mode::back);
                 }
-                gl::set_active_texture_unit(0);
-                gl::bind_texture(gl::texture_bind_target::texture_2d,draw.texture.texture);
+                // The native translucent face flag forces alpha even when
+                // its MAT texture is fully opaque (JK uses alpha=90/255).
+                float const face_opacity=(group.face_type&0x2U)!=0
+                    ? 90.0f/255.0f : 1.0f;
+                if(transparent) {
+                    switch(draw.texture.blend) {
+                    case material_blend_mode::additive:
+                        gl::set_blend_function_separate(
+                            gl::blend_function::one,gl::blend_function::one,
+                            gl::blend_function::zero,gl::blend_function::one);
+                        break;
+                    case material_blend_mode::multiply:
+                        gl::set_blend_function_separate(
+                            gl::blend_function::destination_color,
+                            gl::blend_function::zero,
+                            gl::blend_function::zero,gl::blend_function::one);
+                        break;
+                    default:
+                        gl::set_blend_function(gl::blend_function::one,
+                            gl::blend_function::one_minus_source_alpha);
+                        break;
+                    }
+                }
+                bind_color_texture(draw.texture.texture,0,draw.texture.filtered);
+                bind_color_texture(draw.texture.emission,1,draw.texture.filtered);
                 prog.set_surface(draw.texture.has_image,draw.texture.width,
-                                 draw.texture.height,transparent);
+                                 draw.texture.height,transparent,
+                                 static_cast<int>(draw.policy),
+                                 draw.texture.alpha_cutoff,face_opacity,
+                                 draw.texture.tint,draw.texture.albedo_scroll);
+                prog.set_emissive(draw.texture.has_emission,
+                                  draw.texture.emission_factor,
+                                  draw.texture.emissive_scroll);
                 gl::draw_elements(gl::element_type::triangles,group.count,
                                   gl::index_type::uint32,
                                   static_cast<ptrdiff_t>(group.offset*sizeof(uint32_t)));
             }
-            // Native renderer expects face culling disabled between batches.
+            // The transparency pass's following JK batches assume normal
+            // premultiplied alpha blending, unit 0 and disabled face culling.
             gl::disable(gl::capability::cull_face);
+            if(transparent)
+                gl::set_blend_function(gl::blend_function::one,
+                    gl::blend_function::one_minus_source_alpha);
+            gl::set_active_texture_unit(0);
         }
 
         void draw_game_opaque_into_gbuffer(triangle_buffer_models *trimdl, bool posterize_lighting)
