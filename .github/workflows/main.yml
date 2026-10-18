@@ -15,6 +15,11 @@ jobs:
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
 
+    - name: Material transition regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\runtime_material_state.cpp /Fe:runtime_material_state_test.exe
+        runtime_material_state_test.exe
     - name: Package diagnostic binaries
       shell: pwsh
       run: |
