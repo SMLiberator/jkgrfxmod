@@ -2116,21 +2116,15 @@ namespace jkgm {
                         auto native3 = native_normals && payload->v3 < normal_slot_count
                                            ? native_normals[payload->v3] : 0U;
 
-                        // Experimental fast path uses the same premultiply-then-gamma
-                        // ordering as the legacy float calculation.
-                        auto unpack_diffuse = [&](D3DTLVERTEX const &v) {
-                            uint8_t red = (uint8_t)RGBA_GETRED(v.color);
-                            uint8_t green = (uint8_t)RGBA_GETGREEN(v.color);
-                            uint8_t blue = (uint8_t)RGBA_GETBLUE(v.color);
-                            uint8_t alpha = (uint8_t)RGBA_GETALPHA(v.color);
-                            if(the_config->fast_vertex_colors) {
-                                return gamma18_premultiplied_rgba8_lut(
-                                    red, green, blue, alpha);
-                            }
-                            auto sc = to_float_color(color_rgba8(
-                                red, green, blue, alpha));
-                            return gamma18_to_linear(
-                                extend(get<rgb>(sc) * get<a>(sc), get<a>(sc)));
+                        // Preserve the legacy 8-bit premultiply-then-gamma
+                        // result using precomputed values instead of powf()
+                        // nine times per submitted triangle.
+                        auto unpack_diffuse = [](D3DTLVERTEX const &v) {
+                            return gamma18_premultiplied_rgba8_lut(
+                                (uint8_t)RGBA_GETRED(v.color),
+                                (uint8_t)RGBA_GETGREEN(v.color),
+                                (uint8_t)RGBA_GETBLUE(v.color),
+                                (uint8_t)RGBA_GETALPHA(v.color));
                         };
                         auto c1 = unpack_diffuse(v1);
                         auto c2 = unpack_diffuse(v2);
