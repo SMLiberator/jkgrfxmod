@@ -39,7 +39,8 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
         report_unimplemented_function("Direct3DTexture(vidmem)::Load with a non-sysmem texture");
     }
 
-    // Reset material to default state
+    // Reset material to default state. Invalidates cached native MAT link.
+    ++surf->texture_generation;
     surf->clear();
 
     auto *src = cast_tex->surf;
