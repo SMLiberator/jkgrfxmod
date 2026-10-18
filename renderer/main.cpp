@@ -20,6 +20,7 @@
 
 static std::unique_ptr<jkgm::renderer> the_renderer;
 static std::unique_ptr<jkgm::config> the_config;
+static bool renderer_hooks_active = false;
 
 // DirectX hooks
 
@@ -905,6 +906,14 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
             jkgm::add_file_logging(*the_config->log_path);
         }
 
+        // The dedicated JKGM executable can load renderer.dll before the
+        // original game entrypoint. Keep the built-in Direct3D renderer fully
+        // untouched when explicitly requested, including COG/Win32 hooks.
+        if(the_config->use_vanilla_renderer) {
+            LOG_INFO("use_vanilla_renderer=true: native JK Direct3D path selected");
+            return TRUE;
+        }
+
         the_renderer = jkgm::create_renderer(hModule, the_config.get());
 
         LOG_DEBUG("Attaching renderer to process");
@@ -916,10 +925,12 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
             return FALSE;
         }
 
+        renderer_hooks_active = true;
         LOG_DEBUG("Finished attaching renderer to process");
     }
-    else if(ul_reason_for_call == DLL_PROCESS_DETACH) {
+    else if(ul_reason_for_call == DLL_PROCESS_DETACH && renderer_hooks_active) {
         detach_hooks();
+        renderer_hooks_active = false;
     }
 
     return TRUE;
