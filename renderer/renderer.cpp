@@ -478,8 +478,12 @@ namespace jkgm {
                 LOG_INFO("PERF native_3do inclusive_us model=",
                          (profile_window.native_model_ns / 1000) / frames,
                          " mesh=", (profile_window.native_mesh_ns / 1000) / frames,
+                         " face=", (profile_window.native_face_ns / 1000) / frames,
                          " model_calls_avg=", profile_window.native_model_calls / frames,
-                         " mesh_calls_avg=", profile_window.native_mesh_calls / frames);
+                         " model_drawn_avg=", profile_window.native_model_drawn / frames,
+                         " mesh_calls_avg=", profile_window.native_mesh_calls / frames,
+                         " face_calls_avg=", profile_window.native_face_calls / frames,
+                         " face_emitted_avg=", profile_window.native_face_emitted / frames);
             }
             LOG_INFO("PERF sorting_us opaque=", avg(profile_stage::sort_opaque),
                      " transparent=", avg(profile_stage::sort_transparent),
@@ -2363,9 +2367,13 @@ namespace jkgm {
             if(profiling) {
                 auto const native = consume_native_3do_sample();
                 profile_frame.native_model_calls += native.model_calls;
+                profile_frame.native_model_drawn += native.model_drawn;
                 profile_frame.native_mesh_calls += native.mesh_calls;
+                profile_frame.native_face_calls += native.face_calls;
+                profile_frame.native_face_emitted += native.face_emitted;
                 profile_frame.native_model_ns += native.model_ns;
                 profile_frame.native_mesh_ns += native.mesh_ns;
+                profile_frame.native_face_ns += native.face_ns;
             }
             record_profile(started, profile_clock::now());
             if(profiling) {

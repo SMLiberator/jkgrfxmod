@@ -653,7 +653,14 @@ It emits four `PERF` log lines about every two seconds, reporting:
 When profiling is enabled, exact-signature hooks on this project's patched
 JK23 executable also report native_3do inclusive_us model/mesh plus call counts.
 Model timings INCLUDE nested mesh timings, and mesh timings include faces,
-lighting and clipping: do not add the two timings. These are only 3DO model
+lighting and clipping: do not add the timings together. The optional
+face timer covers per-face clipping, lighting, projection, and cache
+submission, but NOT the parent mesh's vertex transformations or
+backface tests. `model_drawn_avg` counts non-culled model calls,
+`face_calls_avg` counts faces reaching rdModel3_DrawFace, and
+`face_emitted_avg` counts successful face processing after clipping.
+Per-face clock reads add some profiling overhead; compare the timings
+from separate profiling versions before using absolute FPS as a benchmark. These are only 3DO model
 calls; static level geometry is a separate engine path. An unrecognized EXE
 simply skips native hooks and logs a warning. No native hooks are installed
 when profile_renderer is false.

@@ -31,16 +31,22 @@ static bool native_3do_hooks_active = false;
 namespace {
     using native_model_func = int (__cdecl *)(void *, void *);
     using native_mesh_func = void (__cdecl *)(void *, void *);
+    using native_face_func = int (__cdecl *)(void *, int);
     constexpr uintptr_t native_model_addr = 0x00446060U;
     constexpr uintptr_t native_mesh_addr = 0x00446360U;
+    constexpr uintptr_t native_face_addr = 0x004467D0U;
     constexpr unsigned char native_model_bytes[] =
         {0x83,0xec,0x18,0x8b,0x0d,0x18,0xa4,0x73,0x00};
     constexpr unsigned char native_mesh_bytes[] =
         {0x81,0xec,0x90,0x00,0x00,0x00,0x53,0x55};
+    constexpr unsigned char native_face_bytes[] =
+        {0x83,0xec,0x0c,0x53,0x55,0x56,0x57,0xe8};
     native_model_func RealNativeModel =
         reinterpret_cast<native_model_func>(native_model_addr);
     native_mesh_func RealNativeMesh =
         reinterpret_cast<native_mesh_func>(native_mesh_addr);
+    native_face_func RealNativeFace =
+        reinterpret_cast<native_face_func>(native_face_addr);
     jkgm::native_3do_sample native_totals;
 
     uint64_t elapsed_native_ns(std::chrono::steady_clock::time_point start)
@@ -55,6 +61,7 @@ namespace {
         int result = RealNativeModel(thing, placement);
         native_totals.model_ns += elapsed_native_ns(start);
         ++native_totals.model_calls;
+        if(result != 0) ++native_totals.model_drawn;
         return result;
     }
     void __cdecl HookedNativeMesh(void *mesh, void *placement)
@@ -64,13 +71,24 @@ namespace {
         native_totals.mesh_ns += elapsed_native_ns(start);
         ++native_totals.mesh_calls;
     }
+    int __cdecl HookedNativeFace(void *face, int lightFlags)
+    {
+        auto const start = std::chrono::steady_clock::now();
+        int const result = RealNativeFace(face, lightFlags);
+        native_totals.face_ns += elapsed_native_ns(start);
+        ++native_totals.face_calls;
+        if(result != 0) ++native_totals.face_emitted;
+        return result;
+    }
     bool attach_native_3do_hooks()
     {
         if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr)) != 0x00400000U ||
            std::memcmp(reinterpret_cast<void const *>(native_model_addr),
                        native_model_bytes, sizeof(native_model_bytes)) != 0 ||
            std::memcmp(reinterpret_cast<void const *>(native_mesh_addr),
-                       native_mesh_bytes, sizeof(native_mesh_bytes)) != 0) {
+                       native_mesh_bytes, sizeof(native_mesh_bytes)) != 0 ||
+           std::memcmp(reinterpret_cast<void const *>(native_face_addr),
+                       native_face_bytes, sizeof(native_face_bytes)) != 0) {
             LOG_WARNING("Native 3DO profiler skipped: unrecognized executable");
             return false;
         }
@@ -81,6 +99,8 @@ namespace {
             error = DetourAttach(&(PVOID &)RealNativeModel, HookedNativeModel);
         if(error == NO_ERROR)
             error = DetourAttach(&(PVOID &)RealNativeMesh, HookedNativeMesh);
+        if(error == NO_ERROR)
+            error = DetourAttach(&(PVOID &)RealNativeFace, HookedNativeFace);
         if(error != NO_ERROR) {
             DetourTransactionAbort();
             LOG_WARNING("Native 3DO profiler attach failed: ", error);
@@ -91,13 +111,14 @@ namespace {
             LOG_WARNING("Native 3DO profiler commit failed: ", error);
             return false;
         }
-        LOG_INFO("Native 3DO model/mesh CPU profiler attached");
+        LOG_INFO("Native 3DO model/mesh/face CPU profiler attached (per-face clocks add diagnostic overhead)");
         return true;
     }
     void detach_native_3do_hooks()
     {
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
+        DetourDetach(&(PVOID &)RealNativeFace, HookedNativeFace);
         DetourDetach(&(PVOID &)RealNativeMesh, HookedNativeMesh);
         DetourDetach(&(PVOID &)RealNativeModel, HookedNativeModel);
         DetourTransactionCommit();
