@@ -676,58 +676,41 @@ less than the decoder itself. The next optimization stage targets JK's
 native model traversal and geometry preparation.
 
 
-## Direct EXE startup (no inject.exe) — experimental
+## Direct executable startup (development)
 
-This branch adds an optional bootstrap for the specific tested
-\`jk23_rgb_smoothnormals_fixed_v2.exe\` build. It is **not** a generic patch for
-unknown JK executables. Run, from the game installation directory:
+JkGRfxMod no longer builds or ships an injection launcher. The standalone
+`jkgm.exe` is created by patching the **known compatible** 32-bit
+`jk23.exe` with `tools/patch_jkgm_bootstrap.py`:
 
-\`\`\`sh
-python patch_jkgm_bootstrap.py jk23_rgb_smoothnormals_fixed_v2.exe jkgm.exe
-\`\`\`
+```sh
+python3 tools/patch_jkgm_bootstrap.py /path/to/jk23.exe /path/to/jkgm.exe
+```
 
-Then launch \`jkgm.exe\` directly with your usual JK command-line arguments.
-Place the *matching* \`renderer.dll\`, \`jkgm.json\` and \`jkgm/\` assets beside
-\`jkgm.exe\`. **Do not start the patched EXE through \`inject.exe\`**, which would
-inject the DLL a second time.
+The patcher checks the full SHA-256 of the user's original EXE
+(`1610d070112b7f3a78668ede5deab9aeebc758e83ec4c69aa705c2e91f64a0da`);
+unknown executables are rejected, and no game executable is included in CI or
+release archives. A preexisting `jkgm.exe` from this method does not need to be
+repatched unless you are regenerating it from the original input.
 
-The patch appends a small executable PE section and changes the entrypoint
-to call JK's *existing* kernel32 \`LoadLibraryA\` import for \`renderer.dll\`,
-then resumes the exact original entrypoint. No original code or engine
-functions are overwritten. Missing \`renderer.dll\` currently falls back to
-native Direct3D instead of blocking startup. Only the known EXE SHA256 is
-accepted; keep the original binary for rollback. This build already imports
-JK.dll, so it is initialized before the early load.
+The loader adds a new PE section that calls the game's existing
+`LoadLibraryA` import on `renderer.dll` before continuing to the original
+entry point. The DLL and shader/material assets remain separate. It is
+"standalone" only with respect to the old launcher: you still need
+`renderer.dll`, `jkgm.json` and `jkgm/` alongside the game.
 
-To use the unmodified Direct3D renderer while keeping this modified EXE:
+Start `jkgm.exe` directly and pass any desired JK switches yourself (for
+example `-path gunrunner`). The legacy launcher previously managed some
+options, including `-windowgui`, but the new executable does not do that.
+The obsolete `command` JSON option has been removed.
 
-\`\`\`json
-"use_vanilla_renderer": true
-\`\`\`
+Set `"use_vanilla_renderer": true` in `jkgm.json` to load the DLL without
+installing the renderer or COG hooks. With `false` (default), JkGRfxMod hooks
+are installed at process startup. The choice requires restarting the game.
+Without `renderer.dll`, the bootstrap still runs the original JK startup,
+which means it may use the native renderer instead.
 
-Otherwise the default is:
+The existing mesh-limit, RGB vertex tint and normal sideband patches are
+preserved. Native engine geometry profiling and culling remain separate work.
 
-\`\`\`json
-"use_vanilla_renderer": false
-\`\`\`
-
-The DLL parses the JSON **at process startup**. With \`true\`, it installs
-no Detours/DirectDraw/COG hooks; with \`false\`, the ordinary JKGM hooks are
-attached. This is a startup choice, not a runtime toggle. A missing DLL
-means vanilla rendering regardless of the JSON setting. If the DLL fails
-during its own startup, the game may fail to start: preserve a vanilla test
-EXE/config for troubleshooting.
-
-### Important notes
-
-- The patched EXE still includes all preexisting user patches, such as mesh
-  limits, RGB tints and normal sideband. Renderer selection does not undo them.
-- Only the DLL bootstrap is new; **native 3DO profiling/culling is a separate
-  task** that needs identifying and verifying engine-specific render routines.
-- The old \`inject.exe\` remains built for comparisons and older workflows; it
-  is simply unnecessary when starting \`jkgm.exe\` directly.
-- Windows x86 compilation and binary-header checks do not replace an in-game
-  startup/COG verb test under Wine and Windows. Test normal and vanilla modes
-  independently. The old launcher adjusted \`-windowgui\` according to
-  fullscreen settings; with direct startup, pass your desired JK switches
-  to \`jkgm.exe\` yourself.
+For exact install paths, compatibility limits, and test commands, see
+[doc/install.md](doc/install.md).

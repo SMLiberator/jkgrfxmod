@@ -19,6 +19,9 @@ jobs:
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
       
+    - name: Check standalone PE bootstrap patcher
+      run: python tests/test_bootstrap_patcher.py
+
     - name: Assemble JkGfxMod
       shell: bash
       run: |
@@ -30,7 +33,9 @@ jobs:
         cp doc/config.md ${MOD_DIR}/doc/config.md
         cp doc/install.md ${MOD_DIR}/doc/install.md
         cp assets/jkgm.json ${MOD_DIR}
-        cp Release/inject.exe ${MOD_DIR}
+        # The game's executable is not redistributed. The user patches their own
+        # known compatible jk23.exe to create jkgm.exe.
+        cp tools/patch_jkgm_bootstrap.py ${MOD_DIR}/patch_jkgm_bootstrap.py
         cp Release/renderer.dll ${MOD_DIR}
         cp README.md ${MOD_DIR}
         cp LICENSE.md ${MOD_DIR}

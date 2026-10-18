@@ -1,135 +1,62 @@
-# Installing JkGfxMod
+# Installing JkGRfxMod (standalone development build)
 
-Installation instructions vary depending on the game version. Please follow the instructions in the correct section, below.
+JkGRfxMod now starts from `jkgm.exe` **directly**. The old injection launcher
+is not built or packaged. The renderer still lives in `renderer.dll`; the
+executable loads that DLL on startup. "Standalone" means no separate launcher
+or injection executable, **not** a single file with the DLL embedded.
 
-## Table of Contents
+## Requirements
 
-* [Jedi Knight: Dark Forces II](#jedi-knight-dark-forces-ii)
-    * [Original CD-ROM](#jedi-knight-cd-rom)
-    * [Steam](#jedi-knight-steam)
-    * [GOG Galaxy](#jedi-knight-gog-galaxy)
-* [Jedi Knight: Mysteries of the Sith](#jedi-knight-mysteries-of-the-sith)
-    * [Original CD-ROM](#mysteries-of-the-sith-cd-rom)
-    * [Steam](#mysteries-of-the-sith-steam)
-    * [GOG Galaxy](#mysteries-of-the-sith-gog-galaxy)
-    
-## Jedi Knight: Dark Forces II
+- Your own copy of the **specific patched** 32-bit `jk23.exe` validated by
+  `tools/patch_jkgm_bootstrap.py` (SHA-256
+  `1610d070112b7f3a78668ede5deab9aeebc758e83ec4c69aa705c2e91f64a0da`).
+  Other JK/MotS/Steam/GOG builds are **not** supported by this particular patcher.
+- Python 3 (only needed to create `jkgm.exe`).
+- The matching x86 `renderer.dll`, `jkgm.json`, and `jkgm/` assets
+  from the same JkGRfxMod build.
 
-### Jedi Knight (CD-ROM)
+## Setup
 
-* Extract the distribution package into your Jedi Knight directory
-* Edit the config file: `jkgm.json`
-    * You must specify your desired resolution in this file
-    * Your desktop color depth is used automatically and does not need to be configured
-    * See the [configuration guide](config.md) for more information
-* Run `inject.exe` from your Jedi Knight directory
-* Enable hardware acceleration in the display options
-    * The Jedi Knight display options screen is hard-coded to say 16-bit color. Ignore this. JkGfxMod will always use your desktop color depth.
+1. Back up your game EXE. Put `jk23.exe` in your Jedi Knight installation
+   directory alongside the game data.
+2. Copy `renderer.dll`, `jkgm.json` and the `jkgm/` assets to that
+   directory. Use the current shaders from the same build as the DLL.
+3. In a terminal opened in the **game directory**, run:
 
-Installation is now complete. You can run Jedi Knight with JkGfxMod by running `inject.exe` from your Jedi Knight directory.
+   ```sh
+   python3 patch_jkgm_bootstrap.py jk23.exe jkgm.exe
+   ```
 
-### Jedi Knight (Steam)
+   On Windows, use `py -3` or `python` if `python3` is unavailable.
+   The script is included in development/release artifacts and lives at
+   `tools/patch_jkgm_bootstrap.py` in the repository.
+4. Launch `jkgm.exe` directly, passing your usual Jedi Knight command-line
+   switches (such as `-path gunrunner` if your mod requires it).
+   Do **not** use `inject.exe` or patch `jkgm.exe` a second time.
 
-This installation method will allow you to use JkGfxMod with the Steam overlay and soundtrack fix.
+   ```sh
+   wine jkgm.exe -path gunrunner
+   ```
 
-* Obtain the original CD-ROM version 1.0 `jk.exe`
-    * This is required; the Steam executable does not work with JkGfxMod
-* Rename the above `jk.exe` file `jkoriginal.exe`
-* Put `jkoriginal.exe` in your Steam `Star Wars Jedi Knight` app directory
-* Extract the distribution package into your Steam `Star Wars Jedi Knight` app directory
-* Rename `inject.exe` to `JediKnight.exe`
-* Edit the config file: `jkgm.json`
-    * Change the `command` configuration option to `jkoriginal.exe`
-    * You must also specify your desired resolution in this file
-    * Your desktop color depth is used automatically and does not need to be configured
-    * See the [configuration guide](config.md) for more information
-* Run Jedi Knight from Steam
-* Enable hardware acceleration in the display options
-    * The Jedi Knight display options screen is hard-coded to say 16-bit color. Ignore this. JkGfxMod will always use your desktop color depth.
+   The example uses Wine; on Windows you can run `jkgm.exe` directly.
 
-Installation is now complete. You can run Jedi Knight with JkGfxMod by running Jedi Knight from Steam.
+## Renderer selection
 
-### Jedi Knight (GOG Galaxy)
+In `jkgm.json`, use `"use_vanilla_renderer": false` for JkGRfxMod (default).
+Set it to `true` **before launching** to skip the renderer/COG hooks and use
+JK's original rendering path. The game must be restarted for this setting to
+take effect. If the DLL cannot be loaded, the bootstrap falls back to the
+original startup path; it does not show an error dialog.
 
-This installation method will allow you to use JkGfxMod from GOG Galaxy.
+The JSON `command` field belonged to the old launcher and is no longer used.
+See [config.md](config.md) for all current settings.
 
-* Obtain the original CD-ROM version 1.0 `jk.exe`
-    * This is required; the GoG Galaxy executable (1.0.1) does not work with JkGfxMod
-* Rename the above `jk.exe` file `jkoriginal.exe`
-* Put `jkoriginal.exe` in your `Star Wars Jedi Knight - Dark Forces 2` app directory
-* Extract the distribution package into your `Star Wars Jedi Knight - Dark Forces 2` app directory
-* Rename `JKStart.exe` to `JKStartOld.exe`
-* Rename `inject.exe` to `JKStart.exe`
-* Edit the config file: `jkgm.json`
-    * Change the `command` configuration option to `jkoriginal.exe`
-    * You must also specify your desired resolution in this file
-    * Your desktop color depth is used automatically and does not need to be configured
-    * See the [configuration guide](config.md) for more information
-* Run Jedi Knight from GOG Galaxy
-* Enable hardware acceleration in the display options
-    * The Jedi Knight display options screen is hard-coded to say 16-bit color. Ignore this. JkGfxMod will always use your desktop color depth.
+## Distribution and limitations
 
-Installation is now complete. You can run Jedi Knight with JkGfxMod by running Jedi Knight from GOG Galaxy.
-
-## Jedi Knight: Mysteries of the Sith
-
-### Mysteries of the Sith (CD-ROM)
-
-* Extract the distribution package into your Mysteries of the Sith directory
-* Edit the config file: `jkgm.json`
-    * Change the `command` configuration option to `jkm.exe`
-    * You must also specify your desired resolution in this file
-    * Your desktop color depth is used automatically and does not need to be configured
-    * See the [configuration guide](config.md) for more information
-* Run `inject.exe` from your Mysteries of the Sith directory
-* Enable hardware acceleration in the display options
-    * The Mysteries of the Sith display options screen is hard-coded to say 16-bit color. Ignore this. JkGfxMod will always use your desktop color depth.
-
-Installation is now complete. You can run Mysteries of the Sith with JkGfxMod by running `inject.exe` from your Mysteries of the Sith directory.
-
-### Mysteries of the Sith (Steam)
-
-This installation method will allow you to use JkGfxMod with the Steam overlay and soundtrack fix.
-
-* Obtain the original CD-ROM version 1.0 `jkm.exe`
-    * This is required; the Steam executable does not work with JkGfxMod
-* Apply a no-CD patch to `jkm.exe`
-    * This is required unless you have a CD-ROM drive and the original games
-* Rename the above `jkm.exe` file `jkmoriginal.exe`
-* Put `jkmoriginal.exe` in your Steam `Jedi Knight Mysteries of the Sith` app directory
-* Extract the distribution package into your Steam `Jedi Knight Mysteries of the Sith` app directory
-* Rename `inject.exe` to `JediKnightM.exe`
-* Edit the config file: `jkgm.json`
-    * Change the `command` configuration option to `jkmoriginal.exe`
-    * You must also specify your desired resolution in this file
-    * Your desktop color depth is used automatically and does not need to be configured
-    * See the [configuration guide](config.md) for more information
-* Run Mysteries of the Sith from Steam
-* Enable hardware acceleration in the display options
-    * The Mysteries of the Sith display options screen is hard-coded to say 16-bit color. Ignore this. JkGfxMod will always use your desktop color depth.
-
-Installation is now complete. You can run Mysteries of the Sith with JkGfxMod by running Mysteries of the Sith from Steam.
-
-### Mysteries of the Sith (GOG Galaxy)
-
-This installation method will allow you to use JkGfxMod from GOG Galaxy.
-
-* Obtain the original CD-ROM version 1.0 `jkm.exe`
-    * This is required; the GoG Galaxy executable (1.0) does not work with JkGfxMod
-* Apply a no-CD patch to `jkm.exe`
-    * This is required unless you have a CD-ROM drive and the original games
-* Rename the above `jkm.exe` file `jkmoriginal.exe`
-* Put `jkmoriginal.exe` in your `Star Wars Jedi Knight - Mysteries of the Sith` app directory
-* Extract the distribution package into your `Star Wars Jedi Knight - Mysteries of the Sith` app directory
-* Rename `JKMStart.exe` to `JKMStartOld.exe`
-* Rename `inject.exe` to `JKMStart.exe`
-* Edit the config file: `jkgm.json`
-    * Change the `command` configuration option to `jkmoriginal.exe`
-    * You must also specify your desired resolution in this file
-    * Your desktop color depth is used automatically and does not need to be configured
-    * See the [configuration guide](config.md) for more information
-* Run Mysteries of the Sith from GOG Galaxy
-* Enable hardware acceleration in the display options
-    * The Mysteries of the Sith display options screen is hard-coded to say 16-bit color. Ignore this. JkGfxMod will always use your desktop color depth.
-
-Installation is now complete. You can run Mysteries of the Sith with JkGfxMod by running Mysteries of the Sith from GOG Galaxy.
+- GitHub builds intentionally **do not include** a patched Jedi Knight game EXE.
+  Users generate their own `jkgm.exe` from the validated game binary.
+- The bootstrap patcher refuses unknown input hashes and will not patch an
+  already-patched EXE. Keep `jk23.exe` for regeneration and rollback.
+- The current standalone bootstrap has been tested with the specified user's
+  executable, not generalized to all games. Native Direct3D rendering may
+  independently fail on particular Wine/driver configurations.

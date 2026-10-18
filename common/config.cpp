@@ -109,10 +109,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("use_vanilla_renderer").get_to(rv->use_vanilla_renderer);
         }
 
-        if(j.contains("command")) {
-            j.at("command").get_to(rv->command);
-        }
-
         if(j.contains("data_path")) {
             j.at("data_path").get_to(rv->data_path);
         }

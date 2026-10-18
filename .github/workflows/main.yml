@@ -27,11 +27,11 @@ jobs:
         fast_vertex_colors_test.exe
     - name: Native JKGM EXE bootstrap PE regression tests
       run: python tests/test_bootstrap_patcher.py
-    - name: Package diagnostic binaries
+    - name: Package standalone development binaries
       shell: pwsh
       run: |
         New-Item -ItemType Directory -Path test-build -Force | Out-Null
-        foreach ($fileName in @('renderer.dll', 'inject.exe', 'compile.exe')) {
+        foreach ($fileName in @('renderer.dll', 'compile.exe')) {
           $candidate = Get-ChildItem -Path . -Recurse -File -Filter $fileName |
             Where-Object { $_.FullName -match '[\\/](Release|release)[\\/]' } |
             Select-Object -First 1
@@ -46,14 +46,16 @@ jobs:
           throw "Could not find the rebuilt material pack compiler"
         }
         Copy-Item 'tools/patch_jkgm_bootstrap.py' 'test-build/patch_jkgm_bootstrap.py' -Force
+        Copy-Item 'assets/jkgm.json' 'test-build/jkgm.json' -Force
+        Copy-Item 'doc/install.md' 'test-build/install.md' -Force
         # Runtime GLSL is loaded from data_path/shaders. The test must ship
         # changed shaders alongside the DLL or the new fast path will not run.
         New-Item -ItemType Directory -Path 'test-build/jkgm/shaders' -Force | Out-Null
         Copy-Item 'assets/shaders/game_opaque_pass.frag' 'test-build/jkgm/shaders/' -Force
         Copy-Item 'assets/shaders/game_trns_pass.frag' 'test-build/jkgm/shaders/' -Force
-    - name: Upload vertex color optimization test build
+    - name: Upload standalone development test build
       uses: actions/upload-artifact@v4
       with:
-        name: jkgrfxmod-native-bootstrap-test
+        name: jkgrfxmod-standalone-development
         path: test-build/*
         if-no-files-found: error

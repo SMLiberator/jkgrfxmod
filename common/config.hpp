@@ -35,7 +35,6 @@ namespace jkgm {
         bool enable_vsync = false;
         bool profile_renderer = false; // opt-in CPU frame timings
         bool use_vanilla_renderer = false; // native EXE bootstrap: skip JKGM hooks
-        std::string command = "jk.exe";
         std::string data_path = "jkgm";
         std::optional<std::string> log_path;
         uint64_t vram_texture_preload_size = 0U;
