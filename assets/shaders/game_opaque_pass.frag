@@ -3,6 +3,8 @@
 uniform vec4 features;
 
 uniform sampler2D albedo_map;
+uniform sampler2D albedo_map2;
+uniform vec4 albedo_transition; // x=second map present, y=blend, z=active, w=unused
 uniform vec4 albedo_factor;
 
 uniform sampler2D emissive_map;
@@ -50,6 +52,8 @@ float fog_factor(float dist)
 // ---------------------------------------------------------------------------
 uniform sampler2D surface_map;   // R=reflectivity, G=roughness, B=metalness (linear)
 uniform sampler2D env_map;       // equirectangular environment image
+uniform sampler2D env_map2;      // replacement target for crossfade
+uniform vec4 env_transition;     // x=from present, y=to present, z=blend, w=unused
 uniform vec4 reflection_params; // x=strength, y=roughness, z=metalness, w=has surface map
 uniform vec4 env_params;        // x=has environment image, y=reflection mode (0 envmap, 1 screen fallback, 2 fixed, 3 matcap)
 uniform vec4 camera_right;      // xyz=camera right in world space, w=1 if available
@@ -129,11 +133,8 @@ vec3 surface_view_normal(vec2 uv)
 vec3 compute_reflection(vec3 base_color, vec2 texcoords, vec3 view_normal,
                         out float metalness)
 {
-    // Kept before early-out to preserve uniform texture sampling behavior.
-    vec3 surface = texture(surface_map, texcoords).rgb;
-
-    // Preserve previous behavior: no EnvMap / no reflection strength means that
-    // this effect doesn't suppress the material's regular diffuse component.
+    // Without an active envmap, do not touch the surface/specular texture.
+    // In particular this makes enable_reflections=false a zero-sample path.
     metalness = 0.0;
     float strength = reflection_params.x;
     if(env_params.x < 0.5 || strength <= 0.0) {
@@ -143,11 +144,15 @@ vec3 compute_reflection(vec3 base_color, vec2 texcoords, vec3 view_normal,
     float roughness = reflection_params.y;
     metalness = reflection_params.z;
     if(reflection_params.w > 0.5) {
+        vec3 surface = texture(surface_map, texcoords).rgb;
         strength *= surface.r;
         roughness *= surface.g;
         metalness *= surface.b;
     }
-    metalness = clamp(metalness, 0.0, 1.0);
+    // Avoid suppressing diffuse instantly when an EnvMap is faded in from black,
+    // or keeping metal suppression after its EnvMap has faded out.
+    metalness = clamp(metalness, 0.0, 1.0) *
+                mix(env_transition.x, env_transition.y, env_transition.z);
 
     bool have_camera = camera_right.w > 0.5;
     float h_scale = have_camera ? view_params.x : tan(radians(REFLECTION_HFOV_DEGREES) * 0.5);
@@ -204,9 +209,18 @@ vec3 compute_reflection(vec3 base_color, vec2 texcoords, vec3 view_normal,
     }
 
     // Preserve existing roughness->mip blur approximation.
-    vec2 env_size = vec2(textureSize(env_map, 0));
-    float lod = clamp(roughness, 0.0, 1.0) * log2(max(env_size.x, env_size.y));
-    vec3 env = textureLod(env_map, uv, lod).rgb * ENV_INTENSITY;
+    vec2 env_size = env_transition.x > 0.5
+        ? vec2(textureSize(env_map, 0)) : vec2(textureSize(env_map2, 0));
+    float lod = clamp(roughness, 0.0, 1.0) * log2(max(max(env_size.x, env_size.y), 1.0));
+    vec3 env_from = vec3(0.0);
+    vec3 env_to = vec3(0.0);
+    if(env_transition.z < 1.0 && env_transition.x > 0.5) {
+        env_from = textureLod(env_map, uv, lod).rgb;
+    }
+    if(env_transition.z > 0.0 && env_transition.y > 0.5) {
+        env_to = textureLod(env_map2, uv, lod).rgb;
+    }
+    vec3 env = mix(env_from, env_to, env_transition.z) * ENV_INTENSITY;
 
     if(REFLECTION_DEBUG == 3) {
         return env;
@@ -349,8 +363,13 @@ void main()
         adj_vp_z += pmapv.z;
     }
 
-    vec4 albedo_map_sample = texture(albedo_map, adj_texcoords + albedo_uv_offset);
-    albedo_map_sample = mix(vec4(1.0), albedo_map_sample, features.x);
+    vec4 albedo_map_sample = features.x > 0.5
+        ? texture(albedo_map, adj_texcoords + albedo_uv_offset) : vec4(1.0);
+    if(albedo_transition.z > 0.5) {
+        vec4 target = albedo_transition.x > 0.5
+            ? texture(albedo_map2, adj_texcoords + albedo_uv_offset) : vec4(1.0);
+        albedo_map_sample = mix(albedo_map_sample, target, albedo_transition.y);
+    }
 
     if(features.z > 0.5) {
         if(albedo_map_sample.a < alpha_cutoff) {
@@ -375,12 +394,26 @@ void main()
     // Material color without baked lighting: separate metallic pigment from
     // JK's grayscale and RGB per-vertex illumination.
     vec3 unlit_base_color = albedo_map_sample.rgb * albedo_factor.rgb;
-    float metalness;
-    vec3 mapped_normal = surface_view_normal(adj_texcoords);
-    vec3 reflection = compute_reflection(unlit_base_color, adj_texcoords,
-                                         mapped_normal, metalness);
-    vec3 sun_specular = compute_sun_specular(unlit_base_color, adj_texcoords,
-                                             mapped_normal);
+    // Uniform branch: skip normal-map sampling and derivative-based TBN
+    // construction unless a material actually has envmap or sun specularity.
+    // The reflection master toggle sends reflection_params.x = 0.
+    float metalness = 0.0;
+    vec3 reflection = vec3(0.0);
+    vec3 sun_specular = vec3(0.0);
+    bool has_env_reflection = env_params.x > 0.5;
+    bool has_sun_specular =
+        sun_direction.w > 0.5 && sun_color_intensity.w > 0.0;
+    if(reflection_params.x > 0.0 && (has_env_reflection || has_sun_specular)) {
+        vec3 mapped_normal = surface_view_normal(adj_texcoords);
+        if(has_env_reflection) {
+            reflection = compute_reflection(unlit_base_color, adj_texcoords,
+                                            mapped_normal, metalness);
+        }
+        if(has_sun_specular) {
+            sun_specular = compute_sun_specular(unlit_base_color, adj_texcoords,
+                                               mapped_normal);
+        }
+    }
 
     // Metal suppresses the diffuse term (as in the original implementation).
     // The unlit base color only changes its SPECULAR response.

@@ -85,23 +85,24 @@ namespace jkgm {
                         get_srgb_texture_from_filename(*mat->emissive_map);
                     }
 
-                    if(mat->normal_map.has_value()) {
-                        get_linear_texture_from_filename(*mat->normal_map);
-                    }
-                    if(mat->normal_map2.has_value()) {
-                        get_linear_texture_from_filename(*mat->normal_map2);
+                    if(the_config->enable_reflections && mat->reflection_strength > 0.0f) {
+                        if(mat->normal_map.has_value()) {
+                            get_linear_texture_from_filename(*mat->normal_map);
+                        }
+                        if(mat->normal_map2.has_value()) {
+                            get_linear_texture_from_filename(*mat->normal_map2);
+                        }
+                        if(mat->surface_map.has_value()) {
+                            get_linear_texture_from_filename(*mat->surface_map);
+                        }
+                        if(mat->env_map.has_value()) {
+                            get_srgb_texture_from_filename(*mat->env_map);
+                        }
                     }
 
-                    if(mat->displacement_map.has_value()) {
+                    if(the_config->enable_parallax && mat->displacement_factor != 0.0f &&
+                       mat->displacement_map.has_value()) {
                         get_linear_texture_from_filename(*mat->displacement_map);
-                    }
-
-                    if(mat->surface_map.has_value()) {
-                        get_linear_texture_from_filename(*mat->surface_map);
-                    }
-
-                    if(mat->env_map.has_value()) {
-                        get_srgb_texture_from_filename(*mat->env_map);
                     }
                 }
 
@@ -118,6 +119,12 @@ namespace jkgm {
             std::optional<material const *> get_replacement_material(md5 const &sig) override
             {
                 return materials.get_material(sig);
+            }
+
+            std::optional<fs::path> get_pack_image(fs::path const &pack,
+                                                   int image_id) const override
+            {
+                return materials.get_pack_image(pack, image_id);
             }
 
             std::optional<srgb_texture_id> get_existing_free_srgb_texture(size<2, int> const &dims)

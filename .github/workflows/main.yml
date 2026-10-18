@@ -19,7 +19,7 @@ jobs:
       shell: pwsh
       run: |
         New-Item -ItemType Directory -Path test-build -Force | Out-Null
-        foreach ($fileName in @('renderer.dll', 'inject.exe')) {
+        foreach ($fileName in @('renderer.dll', 'inject.exe', 'compile.exe')) {
           $candidate = Get-ChildItem -Path . -Recurse -File -Filter $fileName |
             Where-Object { $_.FullName -match '[\\/](Release|release)[\\/]' } |
             Select-Object -First 1
@@ -30,9 +30,17 @@ jobs:
         if (-not (Test-Path 'test-build/renderer.dll')) {
           throw "Could not find the built renderer.dll"
         }
-    - name: Upload diagnostic build
+        if (-not (Test-Path 'test-build/compile.exe')) {
+          throw "Could not find the rebuilt material pack compiler"
+        }
+        # Runtime GLSL is loaded from data_path/shaders. The test must ship
+        # changed shaders alongside the DLL or the new fast path will not run.
+        New-Item -ItemType Directory -Path 'test-build/jkgm/shaders' -Force | Out-Null
+        Copy-Item 'assets/shaders/game_opaque_pass.frag' 'test-build/jkgm/shaders/' -Force
+        Copy-Item 'assets/shaders/game_trns_pass.frag' 'test-build/jkgm/shaders/' -Force
+    - name: Upload material runtime test build
       uses: actions/upload-artifact@v4
       with:
-        name: jkgfxmod-material-link-test
+        name: jkgrfxmod-material-runtime-test
         path: test-build/*
         if-no-files-found: error

@@ -107,6 +107,8 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , scene_depth(gl::get_uniform_location(the_program, "scene_depth"))
     , fluid_thickness(gl::get_uniform_location(the_program, "fluid_thickness"))
     , albedo_map(gl::get_uniform_location(the_program, "albedo_map"))
+    , albedo_map2(gl::get_uniform_location(the_program, "albedo_map2"))
+    , albedo_transition(gl::get_uniform_location(the_program, "albedo_transition"))
     , albedo_factor(gl::get_uniform_location(the_program, "albedo_factor"))
     , emissive_map(gl::get_uniform_location(the_program, "emissive_map"))
     , emissive_factor(gl::get_uniform_location(the_program, "emissive_factor"))
@@ -124,6 +126,8 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , fog_color(gl::get_uniform_location(the_program, "fog_color"))
     , surface_map(gl::get_uniform_location(the_program, "surface_map"))
     , env_map(gl::get_uniform_location(the_program, "env_map"))
+    , env_map2(gl::get_uniform_location(the_program, "env_map2"))
+    , env_transition(gl::get_uniform_location(the_program, "env_transition"))
     , reflection_params(gl::get_uniform_location(the_program, "reflection_params"))
     , env_params(gl::get_uniform_location(the_program, "env_params"))
     , sun_direction(gl::get_uniform_location(the_program, "sun_direction"))
@@ -175,6 +179,13 @@ void jkgm::shaders::game_pass_shader::set_scene_depth_sampler(int sampler)
 void jkgm::shaders::game_pass_shader::set_albedo_map_sampler(int sampler)
 {
     gl::set_uniform_integer(albedo_map, sampler);
+}
+
+void jkgm::shaders::game_pass_shader::set_albedo_transition(
+    int sampler, point<4, float> params)
+{
+    gl::set_uniform_integer(albedo_map2, sampler);
+    gl::set_uniform_vector(albedo_transition, params);
 }
 
 void jkgm::shaders::game_pass_shader::set_albedo_factor(color factor)
@@ -240,6 +251,13 @@ void jkgm::shaders::game_pass_shader::set_surface_map_sampler(int sampler)
 void jkgm::shaders::game_pass_shader::set_env_map_sampler(int sampler)
 {
     gl::set_uniform_integer(env_map, sampler);
+}
+
+void jkgm::shaders::game_pass_shader::set_env_transition(
+    int sampler, point<4, float> params)
+{
+    gl::set_uniform_integer(env_map2, sampler);
+    gl::set_uniform_vector(env_transition, params);
 }
 
 void jkgm::shaders::game_pass_shader::set_reflection(point<4, float> reflection,

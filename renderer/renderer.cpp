@@ -1,4 +1,5 @@
 #include "renderer.hpp"
+#include "runtime_material.hpp"
 #include "backbuffer_menu_surface.hpp"
 #include "backbuffer_surface.hpp"
 #include "base/file_block.hpp"
@@ -397,6 +398,15 @@ namespace jkgm {
         std::map<uint64_t, std::string> reported_mat_links;
         bool matlink_build_warning_logged = false;
 
+        // Stage 3: sampled only when COG material overrides are present.
+        runtime_material_snapshot runtime_controls;
+        std::chrono::steady_clock::time_point last_runtime_scan{};
+        uint32_t runtime_current_world = 0;
+        std::map<uint32_t, uint32_t> runtime_mat_by_handle;
+        std::map<uint32_t, fs::path> runtime_pack_by_mat;
+        std::map<fs::path, srgb_texture_id> runtime_images;
+        std::set<std::pair<uint32_t, int>> runtime_missing_images;
+
         using timestamp_t = std::chrono::high_resolution_clock::time_point;
         timestamp_t menu_prev_ticks;
         timestamp_t menu_curr_ticks;
@@ -464,6 +474,11 @@ namespace jkgm {
         bool is_parallax_enabled() override
         {
             return the_config->enable_parallax;
+        }
+
+        bool is_reflections_enabled() override
+        {
+            return the_config->enable_reflections;
         }
 
         point<2, int> get_cursor_pos(point<2, int> real_pos) override
@@ -613,6 +628,123 @@ namespace jkgm {
         {
             gl::set_active_texture_unit(0);
             frame_screen->begin_frame();
+        }
+
+        // Refresh native JK MAT-to-D3D associations only while a COG script
+        // has active material controls. Never keep D3D handles across worlds:
+        // the renderer reuses those small integer IDs after level changes.
+        void refresh_runtime_mat_links()
+        {
+            runtime_controls = get_runtime_material_controls().snapshot();
+            if(runtime_controls.empty()) {
+                runtime_mat_by_handle.clear();
+                runtime_pack_by_mat.clear();
+                return;
+            }
+            auto now = std::chrono::steady_clock::now();
+            if(now - last_runtime_scan < std::chrono::seconds(1)) {
+                return;
+            }
+            last_runtime_scan = now;
+            auto state = engine_material_debug::scan();
+            if(!state.supported_build) {
+                return;
+            }
+            if(state.current_world && runtime_current_world &&
+               state.current_world != runtime_current_world) {
+                // Stale commands are cleared by prepare_world. A startup COG
+                // may already have queued *new-world* commands; preserve them.
+                get_runtime_material_controls().prepare_world(state.current_world);
+                runtime_controls = get_runtime_material_controls().snapshot();
+                LOG_DEBUG("JK material image cache cleared on level change");
+                for(auto const &image : runtime_images) {
+                    texture_cache->release_srgb_texture(image.second);
+                }
+                runtime_images.clear();
+                runtime_missing_images.clear();
+            }
+            if(state.current_world) {
+                runtime_current_world = state.current_world;
+                get_runtime_material_controls().prepare_world(state.current_world);
+                runtime_controls = get_runtime_material_controls().snapshot();
+            }
+
+            runtime_mat_by_handle.clear();
+            runtime_pack_by_mat.clear();
+            if(runtime_controls.empty()) {
+                return;
+            }
+            for(auto const &link : state.textures) {
+                if(link.handle == 0 || link.handle > vidmem_texture_surfaces.size()) {
+                    continue;
+                }
+                auto const &surface = vidmem_texture_surfaces[link.handle - 1];
+                if(!surface) continue;
+                runtime_mat_by_handle.emplace(link.handle, link.mat_id);
+                if(surface->replacement_material) {
+                    auto pack = surface->replacement_material->pack_root;
+                    auto inserted = runtime_pack_by_mat.emplace(link.mat_id, pack);
+                    if(!inserted.second && inserted.first->second != pack) {
+                        LOG_WARNING("JK MAT ", link.mat_id,
+                                    " has multiple source packs; first pack is used for image IDs");
+                    }
+                }
+            }
+        }
+
+        std::optional<srgb_texture_id> resolve_runtime_image(runtime_image_key const &image)
+        {
+            auto pack = runtime_pack_by_mat.find(image.source_mat);
+            if(pack == runtime_pack_by_mat.end()) {
+                return std::nullopt; // Native source material not uploaded yet.
+            }
+            auto path = texture_cache->get_pack_image(pack->second, image.image_id);
+            if(!path) {
+                if(runtime_missing_images.emplace(image.source_mat, image.image_id).second) {
+                    LOG_WARNING("Unregistered image ID ", image.image_id,
+                                " in source MAT ", image.source_mat, " pack ",
+                                pack->second.generic_string());
+                }
+                return std::nullopt;
+            }
+            auto found = runtime_images.find(*path);
+            if(found != runtime_images.end()) {
+                return found->second;
+            }
+            auto texture = texture_cache->get_srgb_texture_from_filename(*path);
+            runtime_images.emplace(*path, texture); // Keep one owning reference per image.
+            return texture;
+        }
+
+        // "base" is the compiled-pack image (or the original JK albedo).
+        // The FROM/TO keys are resolved in their own originating MAT's pack.
+        // Missing source files never silently replace the original image.
+        void resolve_runtime_transition(runtime_image_transition const &transition,
+                                        std::optional<srgb_texture_id> base,
+                                        std::optional<srgb_texture_id> &from,
+                                        std::optional<srgb_texture_id> &to,
+                                        float &weight)
+        {
+            from = base;
+            to = base;
+            weight = 0.0f;
+            if(transition.from) {
+                from = resolve_runtime_image(*transition.from);
+                if(!from) return;
+            }
+            if(transition.to) {
+                to = resolve_runtime_image(*transition.to);
+                if(!to) {
+                    from = base;
+                    to = base;
+                    return;
+                }
+            }
+            weight = transition.progress();
+            if(weight >= 1.0f) {
+                from = to;
+                weight = 0.0f;
+            }
         }
 
         // Diagnostic only: correlate JK material cels to live D3D texture
@@ -1125,57 +1257,137 @@ namespace jkgm {
                                         point<2, float>::zero());
                 prog->set_reflection(make_point(0.0f, 0.5f, 0.0f, 0.0f),
                                      make_point(0.0f, 0.0f, 0.0f, 0.0f));
+                prog->set_albedo_transition(8, make_point(0.0f, 0.0f, 0.0f, 0.0f));
+                prog->set_env_transition(9, make_point(0.0f, 0.0f, 0.0f, 0.0f));
             }
             else {
                 auto const &mat = vidmem_texture_surfaces.at(id.get() - 1);
 
-                gl::texture_view albedo_map = gl::default_texture;
-                if(mat->albedo_map.has_value()) {
-                    albedo_map = texture_cache->get_texture_handle(*mat->albedo_map);
+                // Translate this D3D handle to the *native* JK MAT ID. One
+                // material can span many cels/D3D surfaces.
+                runtime_mat_override const *override_mat = nullptr;
+                auto native_it = runtime_mat_by_handle.find(id.get());
+                if(native_it != runtime_mat_by_handle.end()) {
+                    auto ctl_it = runtime_controls.per_mat.find(native_it->second);
+                    if(ctl_it != runtime_controls.per_mat.end()) {
+                        override_mat = &ctl_it->second;
+                    }
                 }
+
+                auto base_albedo = mat->albedo_map;
+                auto from_albedo = base_albedo;
+                auto to_albedo = base_albedo;
+                float albedo_weight = 0.0f;
+                if(override_mat && override_mat->albedo) {
+                    resolve_runtime_transition(*override_mat->albedo, base_albedo,
+                                               from_albedo, to_albedo, albedo_weight);
+                }
+                gl::texture_view albedo_map = from_albedo
+                    ? texture_cache->get_texture_handle(*from_albedo)
+                    : gl::default_texture;
+                if(albedo_weight > 0.0f) {
+                    gl::texture_view second = to_albedo
+                        ? texture_cache->get_texture_handle(*to_albedo)
+                        : gl::default_texture;
+                    bind_color_texture(second, 8, mat->texture_filtering.value_or(
+                        the_config->enable_texture_filtering));
+                }
+                prog->set_albedo_transition(
+                    8, make_point(to_albedo ? 1.0f : 0.0f, albedo_weight,
+                                  albedo_weight > 0.0f ? 1.0f : 0.0f, 0.0f));
 
                 gl::texture_view emissive_map = gl::default_texture;
                 if(mat->emissive_map.has_value()) {
                     emissive_map = texture_cache->get_texture_handle(*mat->emissive_map);
                 }
 
+                // A reflection/lighting master switch: normal maps currently
+                // only affect environment and directional-sun specularity.
+                // Do not fetch or bind these resources when they cannot contribute.
+                bool const reflections_enabled =
+                    the_config->enable_reflections && mat->reflection_strength > 0.0f;
                 gl::texture_view normal_map = gl::default_texture;
-                if(mat->normal_map.has_value()) {
+                if(reflections_enabled && mat->normal_map.has_value()) {
                     normal_map = texture_cache->get_texture_handle(*mat->normal_map);
                 }
                 gl::texture_view normal_map2 = gl::default_texture;
-                if(mat->normal_map2.has_value()) {
+                if(reflections_enabled && mat->normal_map2.has_value()) {
                     normal_map2 = texture_cache->get_texture_handle(*mat->normal_map2);
                 }
 
                 gl::texture_view displacement_map = gl::default_texture;
-                if(mat->displacement_map.has_value()) {
+                if(mat->displacement_factor != 0.0f && mat->displacement_map.has_value()) {
                     displacement_map = texture_cache->get_texture_handle(*mat->displacement_map);
                 }
 
+                // Surface/specular maps are shared by envmap and sun GGX, and
+                // have no purpose when the reflection master switch is off.
                 gl::texture_view surface_map = gl::default_texture;
-                if(mat->surface_map.has_value()) {
+                if(reflections_enabled && mat->surface_map.has_value()) {
                     surface_map = texture_cache->get_texture_handle(*mat->surface_map);
                 }
 
-                // Each material carries its own environment image: its own env_map, or else its
-                // pack's default
-                gl::texture_view env_map = gl::default_texture;
-                bool has_env_map = false;
-                if(the_config->enable_reflections && mat->env_map.has_value()) {
-                    env_map = texture_cache->get_texture_handle(*mat->env_map);
-                    has_env_map = true;
+                // EnvMap precedence: explicit material map > runtime global
+                // map > inherited pack default, with per-MAT COG override at
+                // the top. Explicit maps are unaffected by a global command.
+                auto env_from = mat->env_map;
+                auto env_to = mat->env_map;
+                float env_weight = 0.0f;
+                bool env_command = false;
+                bool const global_allowed = mat->replacement_material &&
+                    !mat->replacement_material->has_explicit_env_map;
+                if(the_config->enable_reflections &&
+                   global_allowed && runtime_controls.global_env) {
+                    resolve_runtime_transition(*runtime_controls.global_env,
+                                               mat->env_map, env_from, env_to, env_weight);
+                    env_command = runtime_controls.global_env->to.has_value() ||
+                                  runtime_controls.global_env->from.has_value();
                 }
+                if(the_config->enable_reflections &&
+                   override_mat && override_mat->env) {
+                    // A material reset returns to the ordinary/global target.
+                    auto const global_target = env_weight >= 1.0f ? env_to :
+                                               (env_weight > 0.0f ? env_to : env_from);
+                    resolve_runtime_transition(*override_mat->env, global_target,
+                                               env_from, env_to, env_weight);
+                    env_command = override_mat->env->from.has_value() ||
+                                  override_mat->env->to.has_value();
+                }
+                bool const has_env_map = env_from.has_value() || env_to.has_value();
+                // Runtime reflection commands can activate previously matte
+                // materials (neutral dielectric Fresnel, not metallic).
+                float const reflection_strength =
+                    mat->reflection_strength > 0.0f ? mat->reflection_strength :
+                    (env_command && has_env_map ? 1.0f : 0.0f);
+                bool const runtime_reflections = the_config->enable_reflections &&
+                    reflection_strength > 0.0f;
+                gl::texture_view env_map = gl::default_texture;
+                if(runtime_reflections && env_from) {
+                    env_map = texture_cache->get_texture_handle(*env_from);
+                }
+                if(runtime_reflections && env_weight > 0.0f && env_to) {
+                    gl::set_active_texture_unit(9);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     texture_cache->get_texture_handle(*env_to));
+                }
+                prog->set_env_transition(
+                    9, make_point(env_from ? 1.0f : 0.0f,
+                                  env_to ? 1.0f : 0.0f, env_weight, 0.0f));
 
                 // Units 6/7 are for linear normal textures; unit 5 is the
                 // already established opaque scene-depth sampler for decals.
                 bool filtered = mat->texture_filtering.value_or(the_config->enable_texture_filtering);
-                bind_color_texture(normal_map, 6, filtered);
-                bind_color_texture(normal_map2, 7, filtered);
-                gl::set_active_texture_unit(4);
-                gl::bind_texture(gl::texture_bind_target::texture_2d, env_map);
-                gl::set_active_texture_unit(3);
-                gl::bind_texture(gl::texture_bind_target::texture_2d, surface_map);
+                // Inactive sampler units can retain old bindings: their feature
+                // uniforms are zero, so GLSL never accesses those units.
+                // Avoid OpenGL state changes for entirely unreflective materials.
+                if(runtime_reflections) {
+                    bind_color_texture(normal_map, 6, filtered);
+                    bind_color_texture(normal_map2, 7, filtered);
+                    gl::set_active_texture_unit(4);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d, env_map);
+                    gl::set_active_texture_unit(3);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d, surface_map);
+                }
                 gl::set_active_texture_unit(2);
                 gl::bind_texture(gl::texture_bind_target::texture_2d, displacement_map);
                 // Filter selection is per material, not per cached image. Keep
@@ -1185,19 +1397,27 @@ namespace jkgm {
 
                 // Enable features
                 prog->set_features(make_point(
-                    mat->albedo_map.has_value() ? 1.0f : 0.0f,
+                    from_albedo.has_value() ? 1.0f : 0.0f,
                     mat->emissive_map.has_value() ? 1.0f : 0.0f,
                     ((mat->alpha_mode == material_alpha_mode::mask) && (!force_opaque)) ? 1.0f
                                                                                         : 0.0f,
                     (posterize_lighting ? 1.0f : 0.0f)));
 
-                prog->set_albedo_factor(mat->albedo_factor);
+                auto material_color = mat->albedo_factor;
+                if(override_mat && override_mat->color) {
+                    auto rgb = override_mat->color->value();
+                    material_color = color(get<0>(material_color) * rgb[0],
+                                           get<1>(material_color) * rgb[1],
+                                           get<2>(material_color) * rgb[2],
+                                           get<3>(material_color));
+                }
+                prog->set_albedo_factor(material_color);
                 prog->set_uv_offsets(scroll_offset(mat->albedo_scroll),
                                      scroll_offset(mat->emissive_scroll));
                 prog->set_normal_params(
                     make_point(mat->normal_strength, mat->normal_strength2,
-                               mat->normal_map.has_value() ? 1.0f : 0.0f,
-                               mat->normal_map2.has_value() ? 1.0f : 0.0f),
+                               (reflections_enabled && mat->normal_map.has_value()) ? 1.0f : 0.0f,
+                               (reflections_enabled && mat->normal_map2.has_value()) ? 1.0f : 0.0f),
                     scroll_offset(mat->normal_scroll),
                     scroll_offset(mat->normal_scroll2));
 
@@ -1210,14 +1430,18 @@ namespace jkgm {
                     get<0>(ef) * emissive_intensity,
                     get<1>(ef) * emissive_intensity,
                     get<2>(ef) * emissive_intensity));
-                prog->set_displacement_factor(mat->displacement_factor);
+                // A factor without a displacement image must never enter the 32–128-sample parallax loop.
+                prog->set_displacement_factor(mat->displacement_map.has_value()
+                                                  ? mat->displacement_factor : 0.0f);
                 prog->set_alpha_cutoff(mat->alpha_cutoff);
 
-                prog->set_reflection(make_point(mat->reflection_strength,
+                // Zero reflection strength also suppresses directional sunlight
+                // GGX highlights (previously unaffected by enable_reflections).
+                prog->set_reflection(make_point(runtime_reflections ? reflection_strength : 0.0f,
                                                 mat->roughness,
                                                 mat->metalness,
-                                                mat->surface_map.has_value() ? 1.0f : 0.0f),
-                                     make_point(has_env_map ? 1.0f : 0.0f,
+                                                (reflections_enabled && mat->surface_map.has_value()) ? 1.0f : 0.0f),
+                                     make_point((runtime_reflections && has_env_map) ? 1.0f : 0.0f,
                                                 static_cast<float>(static_cast<int>(mat->reflection_mode)),
                                                 0.0f, 0.0f));
             }
@@ -1810,6 +2034,7 @@ namespace jkgm {
         {
             animation_seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - animation_epoch).count();
+            refresh_runtime_mat_links();
             end_frame();
             update_hud_texture();
 
