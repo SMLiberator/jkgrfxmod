@@ -300,7 +300,7 @@ std::vector<std::unique_ptr<jkgm::material>> const &jkgm::material_map::get_mate
 {
     return materials;
 }
-std::optional<jkgm::fs::path> jkgm::material_map::get_pack_image(
+std::optional<fs::path> jkgm::material_map::get_pack_image(
     fs::path const &pack, int image_id) const
 {
     auto const p = pack_images.find(pack);

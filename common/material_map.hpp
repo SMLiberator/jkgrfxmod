@@ -4,6 +4,7 @@
 #include "json.hpp"
 #include "material.hpp"
 #include <unordered_map>
+#include <map>
 
 namespace jkgm {
     class material_map {

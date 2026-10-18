@@ -18,6 +18,7 @@
 #include <bitset>
 #include <cmath>
 #include <set>
+#include <map>
 
 namespace jkgm {
     enum class out_material_alpha_mode { blend, mask };
