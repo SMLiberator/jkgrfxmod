@@ -138,6 +138,20 @@ namespace jkgm {
             void set_fog(point<4, float> params, color_rgb color);
         };
 
+        // Isolated first GPU 3DO mesh test: independent of old D3D vertex format.
+        class gpu_3do_preview_shader : public opengl_shader {
+            gl::uniform_location_id model_right,model_forward,model_up,model_origin;
+            gl::uniform_location_id camera_right,camera_forward,camera_up,camera_origin;
+            gl::uniform_location_id projection;
+        public:
+            explicit gpu_3do_preview_shader(fs::path const &data_root);
+            void set_model(point<4,float> right, point<4,float> forward,
+                           point<4,float> up, point<4,float> origin);
+            void set_camera(point<4,float> right, point<4,float> forward,
+                            point<4,float> up, point<4,float> origin,
+                            point<4,float> projection_params);
+        };
+
         class game_opaque_pass_shader : public game_pass_shader {
         public:
             explicit game_opaque_pass_shader(fs::path const &data_root);

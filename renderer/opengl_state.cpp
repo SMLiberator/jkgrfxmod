@@ -409,6 +409,12 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , bloom_layers(screen_res)
 {
     LOG_DEBUG("Loading OpenGL assets");
+    // This shader isn't loaded for normal play; older asset packs still work
+    // when gpu_3do_test_mesh is empty.
+    if(!the_config->gpu_3do_test_mesh.empty()) {
+        gpu_3do_preview_program =
+            std::make_unique<shaders::gpu_3do_preview_shader>(data_root);
+    }
 
     gl::bind_texture(gl::texture_bind_target::texture_2d, menu_texture);
     gl::tex_image_2d(gl::texture_bind_target::texture_2d,

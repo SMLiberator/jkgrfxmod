@@ -12,6 +12,7 @@
 #include "shaders.hpp"
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -131,6 +132,7 @@ namespace jkgm {
         shaders::menu_shader menu_program;
 
         shaders::game_opaque_pass_shader game_opaque_pass_program;
+        std::unique_ptr<shaders::gpu_3do_preview_shader> gpu_3do_preview_program;
         shaders::game_post_ssao_shader game_post_ssao_program;
         shaders::game_post_opaque_composite_shader game_post_opaque_composite_program;
 
