@@ -1,5 +1,6 @@
 #include "renderer/gpu_3do_alpha.hpp"
 #include <cassert>
+#include <initializer_list>
 using namespace jkgm;
 int main() {
     auto solid=choose_gpu_3do_alpha_mode(false,false,false,false,1.f);

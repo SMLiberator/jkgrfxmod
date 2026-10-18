@@ -756,13 +756,21 @@ selected MAT has not been uploaded to the engine's D3D texture cache yet,
 that instance temporarily renders normally through JK until its surface is
 ready.
 
-The GPU path currently samples **base albedo textures** via native MAT cels
-and JkGRfxMod's existing texture cache. It draws solid faces in the G-buffer
-and translucent/alpha-textured faces during the normal transparency stage.
-The temporary material shader has no equivalent for native dynamic vertex
-lighting, vertex RGB tint, emissive/reflection/normal maps, special blend
-modes, exact JK alpha flags, surface fog, and all material override effects
-yet. GPU translucent faces are sorted back-to-front across selected 3DO instances using native face centroids; this does not yet interleave them with JK's separately submitted world transparency. Ordinary faces use backface culling; only 0x1 faces are double-sided. The GPU camera follows the current native rdCamera view matrix, including idle orbit views. Magenta means the original
+The GPU path resolves the original MAT albedo via native cels and JkGRfxMod's
+existing texture cache. A mixed-alpha face participates in **both passes**:
+only its fully opaque texels (alpha >= 0.999) draw into the opaque G-buffer,
+with depth writes and SSAO; only fractional-alpha texels draw in the sorted
+transparency pass. No texel is blended twice. Masked materials use their
+configured cutoff; explicitly translucent 0x2 faces, reduced-opacity
+materials and special blend modes remain entirely translucent.
+
+The prototype additionally forwards albedo tint and UV scroll, emissive maps,
+emissive factors/pulses, and the existing distance fog. This still isn't
+full JK vertex-lighting or material parity.
+The temporary material shader still lacks equivalent native dynamic
+lighting, per-vertex RGB tint, reflection/normal maps, full fluid/decal
+behavior and runtime MAT transition overrides. Additive/multiply use the
+existing blend functions but are not yet guaranteed pixel-identical. GPU translucent faces are sorted back-to-front across selected 3DO instances using native face centroids; this does not yet interleave them with JK's separately submitted world transparency. Ordinary faces use backface culling; only 0x1 faces are double-sided. The GPU camera follows the current native rdCamera view matrix, including idle orbit views. Magenta means the original
 albedo/handle could not be resolved in the prototype. Check detailed level
 logs when diagnosing such surfaces.
 
