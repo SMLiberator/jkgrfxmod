@@ -172,6 +172,40 @@ namespace {
                                   : g;
     }
 
+    // Calling the native mesh renderer on the first frames is essential:
+    // rdCache normally causes MAT cels to be resident and D3D surfaces to
+    // receive texture handles. Never bypass it before that work has happened.
+    bool gpu_mesh_materials_ready(jkgm::gpu_3do_geometry const &g)
+    {
+        using namespace jkgm::engine_material_debug;
+        if(!matches_tested_executable()) return false;
+        for(auto const &group:g.groups) {
+            if(group.material==0) continue;
+            native_material mat{};
+            if(!read_object(group.material,mat)) return false;
+            if((mat.tex_type&2U)==0) continue; // pure solid color
+            if(mat.num_texinfo==0 || mat.num_texinfo>16) return false;
+            int32_t cel=group.cel<0
+                ? static_cast<int32_t>(mat.current_cel) : group.cel;
+            cel=std::max(0,std::min(cel,static_cast<int32_t>(mat.num_texinfo)-1));
+            native_texinfo info{};
+            if(!read_object(mat.texinfo[cel],info)) return false;
+            if((info.header[0]&8U)==0) continue; // no texture for this cel
+            native_texture tex{};
+            if(!read_object(info.texture,tex)) return false;
+            unsigned const mips=std::min(tex.header[6],4U);
+            if(mips==0) return false;
+            bool present=false;
+            for(unsigned i=0;i<mips;i++) {
+                auto const &a=tex.alpha_mips[i],&o=tex.opaque_mips[i];
+                present|=(a.texture_loaded && a.texture_handle>0) ||
+                         (o.texture_loaded && o.texture_handle>0);
+            }
+            if(!present) return false;
+        }
+        return true;
+    }
+
     uint64_t elapsed_native_ns(std::chrono::steady_clock::time_point start)
     {
         return static_cast<uint64_t>(
@@ -291,6 +325,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
                  " vertices=",m.num_vertices," faces=",m.num_faces,
                  " triangles=",it->second.geometry->indices.size()/3);
     }
+    // If a cel has never been encountered, let JK handle this call to warm
+    // its native material cache. We can switch to GPU rendering next frame.
+    if(!gpu_mesh_materials_ready(*it->second.geometry)) return false;
     gpu_3do_instance inst;
     inst.id=it->second.id;
     inst.geometry=it->second.geometry;
