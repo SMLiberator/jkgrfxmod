@@ -36,6 +36,9 @@ namespace jkgm {
         DDSURFACEDESC desc;
 
         material_instance_id material_id;
+        // Incremented whenever this D3D surface receives a new texture, so
+        // cached MAT associations cannot migrate to a reused handle.
+        uint64_t texture_generation = 0;
 
         // Non-owning link to the compiled replacement definition and its pack.
         // Kept per Direct3D texture instance, NOT per shared signature.

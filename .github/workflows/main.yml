@@ -15,6 +15,18 @@ jobs:
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
 
+    - name: Material transition regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\runtime_material_state.cpp /Fe:runtime_material_state_test.exe
+        runtime_material_state_test.exe
+    - name: Vertex color lookup regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\fast_vertex_colors.cpp /Fe:fast_vertex_colors_test.exe
+        fast_vertex_colors_test.exe
+    - name: Native JKGM EXE bootstrap PE regression tests
+      run: python tests/test_bootstrap_patcher.py
     - name: Package diagnostic binaries
       shell: pwsh
       run: |
@@ -33,14 +45,15 @@ jobs:
         if (-not (Test-Path 'test-build/compile.exe')) {
           throw "Could not find the rebuilt material pack compiler"
         }
+        Copy-Item 'tools/patch_jkgm_bootstrap.py' 'test-build/patch_jkgm_bootstrap.py' -Force
         # Runtime GLSL is loaded from data_path/shaders. The test must ship
         # changed shaders alongside the DLL or the new fast path will not run.
         New-Item -ItemType Directory -Path 'test-build/jkgm/shaders' -Force | Out-Null
         Copy-Item 'assets/shaders/game_opaque_pass.frag' 'test-build/jkgm/shaders/' -Force
         Copy-Item 'assets/shaders/game_trns_pass.frag' 'test-build/jkgm/shaders/' -Force
-    - name: Upload material runtime test build
+    - name: Upload vertex color optimization test build
       uses: actions/upload-artifact@v4
       with:
-        name: jkgrfxmod-material-runtime-test
+        name: jkgrfxmod-native-bootstrap-test
         path: test-build/*
         if-no-files-found: error

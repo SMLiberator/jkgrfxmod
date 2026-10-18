@@ -590,3 +590,144 @@ The CI artifact `jkgrfxmod-material-runtime-test` includes `renderer.dll`,
 Install the two shader files along with the DLL; otherwise the new image
 transition uniforms are unavailable. The test remains experimental until
 the shader paths and COG semantics are verified in game.
+
+### Runtime material refresh/regression diagnostics
+
+The MAT resolver now refreshes immediately when any COG material command
+changes, or after returning from the game menu, instead of waiting up to
+one second. The renderer verifies that a cached native MAT association
+belongs to the same D3D texture object **and upload generation**, protecting
+against recycled Direct3D IDs.
+
+While debugging, enable `log_path` and look for:
+- `COG SetMaterialAlbedo: MAT=... image=... fade=...`, or the matching reset
+- `Runtime MAT resolver: revision=... cached handles=... pending=...`
+- `Runtime image ... native source MAT ... has no replacement pack mapping yet`
+- `Unregistered image ID ... in source MAT ... pack ...`
+- `Runtime EnvMap requested but enable_reflections=false`
+
+Each material image ID is relative to the *recompiled source pack containing
+the supplied MAT*. A vanilla JK MAT can receive `SetMaterialColor`, but
+`SetMaterialAlbedo` and `SetMatEnvMap` need a matching **replacement
+material/pack** from which to resolve the image ID.
+
+For a reliable EnvMap test, use `enable_reflections: true`, a material
+with `reflection_strength: 1.0` (or higher for obvious test reflections),
+low roughness, and an equirectangular image with strong light/dark contrast.
+`SetGlobalEnvMap` deliberately skips materials with an explicit
+per-material environment image. Passing a nonzero fade time is mandatory
+for the material and reset COG verbs, even if it is `0.0`.
+
+Repeated set/reset sequences are exercised by the lightweight native
+`tests/runtime_material_state.cpp` regression test in Windows CI.
+
+## Optional CPU/geometry frame profiler
+
+Set `"profile_renderer": true` in `jkgm.json` and configure `log_path`.
+It emits four `PERF` log lines about every two seconds, reporting:
+
+- **frame_period_us**: CPU wall-clock interval between consecutive game
+  presentations (includes JK simulation, synchronization and other uninstrumented work)
+- **submit_us**: wall-clock time inside the mod's `present_game`
+- **execute_us**: summed CPU time decoding all Direct3D execute buffers
+- **sorting_us**: independent opaque/material and transparent/spatial sorting;
+  the log also records maximum sort time in the window
+- **upload_us**: preparing and uploading geometry vertex buffers
+- **passes_us**: the opaque/SSAO/compositing render pass and transparency pass
+- **post_swap**: postprocessing and `SwapBuffers` (may include GPU synchronization)
+- **triangles**, **transparent_avg**, **draw_batches_avg**, **material_binds_avg**:
+  submitted triangles, GL triangle draw calls and renderer material binding calls
+
+All times are **microseconds per frame, CPU-side**, unless explicitly marked peak.
+For example, 10000 us = 10 ms. These timers do **not** measure GPU execution
+time and their stage totals need not sum to the full frame period. The post/swap
+and draw pass timings can include driver waits. When profiling is enabled, the
+old periodic native MAT diagnostic scan is suppressed to reduce noise.
+
+For comparative measurements: set `enable_vsync: false`; compare the exact
+same camera position and resolution in (1) a small enclosed scene, (2) a large
+open scene, (3) the same large scene with reflections/parallax/SSAO disabled.
+Then repeat at half render resolution. Keep both shader versions and game
+position identical. Compare the averages and peak values, not a single FPS
+sample. Setting `profile_renderer: false` returns the normal low-overhead
+path. If `log_path` is unset, the measurements will not be persisted to disk.
+
+## Faster JK vertex-color decoding (default)
+
+The original execute-buffer decoder calculated nine 1.8-gamma power functions
+for each submitted triangle: three RGB channels per vertex across three
+vertices. For JK's 8-bit vertex colors, each premultiplied RGB channel has
+only 256 possible values and each vertex alpha has 256 possible values.
+
+The renderer now **always** uses a shared 256 × 256 float lookup table
+(256 KiB) indexed by input color channel and alpha, preserving the
+premultiply-before-gamma order. It also preserves per-vertex RGB tinting.
+
+This replaces the tested `fast_vertex_colors` experiment. The JSON setting
+is no longer needed; it is ignored if present in an older configuration.
+The lookup table is initialized on first use. The C++ regression test
+compares table values with the previous floating-point calculation.
+
+The high-triangle stress test (~21,200 triangles) reduced
+`execute_us` from approximately 18.4 ms to 3.0 ms, with no
+noticeable lighting differences reported in game. Because the original
+engine's 3DO preparation remains outside the decoder, overall FPS improved
+less than the decoder itself. The next optimization stage targets JK's
+native model traversal and geometry preparation.
+
+
+## Direct EXE startup (no inject.exe) — experimental
+
+This branch adds an optional bootstrap for the specific tested
+\`jk23_rgb_smoothnormals_fixed_v2.exe\` build. It is **not** a generic patch for
+unknown JK executables. Run, from the game installation directory:
+
+\`\`\`sh
+python patch_jkgm_bootstrap.py jk23_rgb_smoothnormals_fixed_v2.exe jkgm.exe
+\`\`\`
+
+Then launch \`jkgm.exe\` directly with your usual JK command-line arguments.
+Place the *matching* \`renderer.dll\`, \`jkgm.json\` and \`jkgm/\` assets beside
+\`jkgm.exe\`. **Do not start the patched EXE through \`inject.exe\`**, which would
+inject the DLL a second time.
+
+The patch appends a small executable PE section and changes the entrypoint
+to call JK's *existing* kernel32 \`LoadLibraryA\` import for \`renderer.dll\`,
+then resumes the exact original entrypoint. No original code or engine
+functions are overwritten. Missing \`renderer.dll\` currently falls back to
+native Direct3D instead of blocking startup. Only the known EXE SHA256 is
+accepted; keep the original binary for rollback. This build already imports
+JK.dll, so it is initialized before the early load.
+
+To use the unmodified Direct3D renderer while keeping this modified EXE:
+
+\`\`\`json
+"use_vanilla_renderer": true
+\`\`\`
+
+Otherwise the default is:
+
+\`\`\`json
+"use_vanilla_renderer": false
+\`\`\`
+
+The DLL parses the JSON **at process startup**. With \`true\`, it installs
+no Detours/DirectDraw/COG hooks; with \`false\`, the ordinary JKGM hooks are
+attached. This is a startup choice, not a runtime toggle. A missing DLL
+means vanilla rendering regardless of the JSON setting. If the DLL fails
+during its own startup, the game may fail to start: preserve a vanilla test
+EXE/config for troubleshooting.
+
+### Important notes
+
+- The patched EXE still includes all preexisting user patches, such as mesh
+  limits, RGB tints and normal sideband. Renderer selection does not undo them.
+- Only the DLL bootstrap is new; **native 3DO profiling/culling is a separate
+  task** that needs identifying and verifying engine-specific render routines.
+- The old \`inject.exe\` remains built for comparisons and older workflows; it
+  is simply unnecessary when starting \`jkgm.exe\` directly.
+- Windows x86 compilation and binary-header checks do not replace an in-game
+  startup/COG verb test under Wine and Windows. Test normal and vanilla modes
+  independently. The old launcher adjusted \`-windowgui\` according to
+  fullscreen settings; with direct startup, pass your desired JK switches
+  to \`jkgm.exe\` yourself.

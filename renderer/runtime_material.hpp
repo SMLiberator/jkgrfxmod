@@ -58,6 +58,7 @@ struct runtime_mat_override {
 struct runtime_material_snapshot {
     std::optional<runtime_image_transition> global_env;
     std::map<uint32_t, runtime_mat_override> per_mat;
+    uint64_t revision = 0; // increments on COG changes, independent of scan cadence
 
     bool empty() const { return !global_env && per_mat.empty(); }
 };
@@ -66,6 +67,7 @@ class runtime_material_controls {
     mutable std::mutex lock_;
     runtime_material_snapshot state_;
     uint32_t observed_world_ = 0;
+    uint64_t revision_ = 0;
 
 public:
     void prepare_world(uint32_t current_world)
@@ -74,21 +76,25 @@ public:
         std::lock_guard<std::mutex> guard(lock_);
         if(observed_world_ && observed_world_ != current_world) {
             state_ = {};
+            ++revision_;
         }
         observed_world_ = current_world;
     }
-    runtime_material_snapshot snapshot() const
+    runtime_material_snapshot snapshot()
     {
         std::lock_guard<std::mutex> guard(lock_);
-        auto result = state_;
         double const now = effect_clock_now();
-        if(result.global_env && !result.global_env->to &&
-           result.global_env->progress(now) >= 1.0f) {
-            result.global_env.reset();
+        // Apply completed resets to the authoritative state, not just a
+        // temporary copy. Otherwise a later setter revives stale transitions.
+        if(state_.global_env && !state_.global_env->to &&
+           state_.global_env->progress(now) >= 1.0f) {
+            state_.global_env.reset();
         }
-        for(auto it = result.per_mat.begin(); it != result.per_mat.end();) {
+        for(auto it = state_.per_mat.begin(); it != state_.per_mat.end();) {
             auto &em = it->second;
-            if(em.env && !em.env->to && em.env->progress(now) >= 1.0f) em.env.reset();
+            if(em.env && !em.env->to && em.env->progress(now) >= 1.0f) {
+                em.env.reset();
+            }
             if(em.albedo && !em.albedo->to && em.albedo->progress(now) >= 1.0f) {
                 em.albedo.reset();
             }
@@ -96,9 +102,11 @@ public:
                em.color->target() == std::array<float, 3>{{1.0f, 1.0f, 1.0f}}) {
                 em.color.reset();
             }
-            if(!em.env && !em.albedo && !em.color) it = result.per_mat.erase(it);
+            if(!em.env && !em.albedo && !em.color) it = state_.per_mat.erase(it);
             else ++it;
         }
+        auto result = state_;
+        result.revision = revision_;
         return result;
     }
 
@@ -106,6 +114,7 @@ public:
     {
         std::lock_guard<std::mutex> guard(lock_);
         state_ = {};
+        ++revision_;
     }
 
     void set_global_env(uint32_t source_mat, int image_id, float fade)
@@ -113,12 +122,16 @@ public:
         std::lock_guard<std::mutex> guard(lock_);
         if(!state_.global_env) state_.global_env.emplace();
         state_.global_env->set(runtime_image_key{source_mat, image_id}, fade);
+        ++revision_;
     }
 
     void reset_global_env(float fade)
     {
         std::lock_guard<std::mutex> guard(lock_);
-        if(state_.global_env) state_.global_env->set(std::nullopt, fade);
+        if(state_.global_env) {
+            state_.global_env->set(std::nullopt, fade);
+            ++revision_;
+        }
     }
 
     void set_mat_env(uint32_t mat, uint32_t source_mat, int image_id, float fade)
@@ -127,6 +140,7 @@ public:
         auto &em = state_.per_mat[mat].env;
         if(!em) em.emplace();
         em->set(runtime_image_key{source_mat, image_id}, fade);
+        ++revision_;
     }
 
     void reset_mat_env(uint32_t mat, float fade)
@@ -135,6 +149,7 @@ public:
         auto it = state_.per_mat.find(mat);
         if(it != state_.per_mat.end() && it->second.env) {
             it->second.env->set(std::nullopt, fade);
+            ++revision_;
         }
     }
 
@@ -144,6 +159,7 @@ public:
         auto &em = state_.per_mat[mat].albedo;
         if(!em) em.emplace();
         em->set(runtime_image_key{mat, image_id}, fade);
+        ++revision_;
     }
 
     void reset_mat_albedo(uint32_t mat, float fade)
@@ -152,6 +168,7 @@ public:
         auto it = state_.per_mat.find(mat);
         if(it != state_.per_mat.end() && it->second.albedo) {
             it->second.albedo->set(std::nullopt, fade);
+            ++revision_;
         }
     }
 
@@ -161,6 +178,7 @@ public:
         auto &em = state_.per_mat[mat].color;
         if(!em) em.emplace(std::array<float, 3>{{1.0f, 1.0f, 1.0f}});
         em->fade_to(rgb, std::isfinite(fade) ? std::max(fade, 0.0f) : 0.0f);
+        ++revision_;
     }
 
     void reset_mat_color(uint32_t mat, float fade)

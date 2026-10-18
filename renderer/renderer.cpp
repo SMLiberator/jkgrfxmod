@@ -1,4 +1,6 @@
 #include "renderer.hpp"
+#include "frame_profile.hpp"
+#include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
 #include "backbuffer_menu_surface.hpp"
 #include "backbuffer_surface.hpp"
@@ -402,10 +404,79 @@ namespace jkgm {
         runtime_material_snapshot runtime_controls;
         std::chrono::steady_clock::time_point last_runtime_scan{};
         uint32_t runtime_current_world = 0;
-        std::map<uint32_t, uint32_t> runtime_mat_by_handle;
+        uint64_t last_runtime_revision = 0;
+        bool force_runtime_refresh = true;
+        unsigned runtime_fast_retries = 0;
+        struct native_handle_link {
+            uint32_t mat_id;
+            vidmem_texture_surface const *surface;
+            uint64_t generation;
+        };
+        std::map<uint32_t, native_handle_link> runtime_mat_by_handle;
         std::map<uint32_t, fs::path> runtime_pack_by_mat;
         std::map<fs::path, srgb_texture_id> runtime_images;
         std::set<std::pair<uint32_t, int>> runtime_missing_images;
+        std::set<uint32_t> runtime_missing_sources;
+        bool warned_reflections_disabled = false;
+
+        profile_sample profile_frame;
+        profile_sample profile_window;
+        uint64_t profile_frames = 0, peak_period = 0, peak_present = 0;
+        uint64_t peak_sort_opaque = 0, peak_sort_trans = 0, peak_triangles = 0;
+        profile_clock::time_point last_profile_frame{};
+        profile_clock::time_point profile_window_start{};
+
+        void record_profile(profile_clock::time_point started,
+                            profile_clock::time_point finished)
+        {
+            if(!the_config->profile_renderer) return;
+            profile_frame.present_us = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(finished-started).count());
+            profile_window.add(profile_frame);
+            ++profile_frames;
+            peak_period = std::max(peak_period, profile_frame.period_us);
+            peak_present = std::max(peak_present, profile_frame.present_us);
+            peak_triangles = std::max(peak_triangles, profile_frame.tris);
+            peak_sort_opaque = std::max(peak_sort_opaque,
+                profile_frame.timings[profile_idx(profile_stage::sort_opaque)]);
+            peak_sort_trans = std::max(peak_sort_trans,
+                profile_frame.timings[profile_idx(profile_stage::sort_transparent)]);
+            profile_frame = {};
+            if(profile_window_start == profile_clock::time_point{}) {
+                profile_window_start = finished;
+                return;
+            }
+            if(finished-profile_window_start < std::chrono::seconds(2)) return;
+            const uint64_t frames = std::max<uint64_t>(profile_frames,1);
+            auto avg = [&](profile_stage stage)->uint64_t {
+                return profile_window.timings[profile_idx(stage)] / frames;
+            };
+            LOG_INFO("PERF frames=", frames,
+                     " period_us avg/peak=", profile_window.period_us / frames,
+                     "/", peak_period, " submit_us avg/peak=",
+                     profile_window.present_us / frames, "/", peak_present,
+                     " execute_us=", avg(profile_stage::execute));
+            LOG_INFO("PERF sorting_us opaque=", avg(profile_stage::sort_opaque),
+                     " transparent=", avg(profile_stage::sort_transparent),
+                     " peaks=", peak_sort_opaque, "/", peak_sort_trans,
+                     " upload_us=", avg(profile_stage::upload),
+                     " nativeMAT_us=", avg(profile_stage::mat_resolve));
+            LOG_INFO("PERF passes_us opaque=", avg(profile_stage::opaque_pass),
+                     " transparent=", avg(profile_stage::transparent_pass),
+                     " post_swap=", avg(profile_stage::present_swap),
+                     " HUDupload=", avg(profile_stage::hud_upload),
+                     " HUDdraw=", avg(profile_stage::hud_draw));
+            LOG_INFO("PERF geometry tris avg/max=", profile_window.tris / frames,
+                     "/", peak_triangles,
+                     " transparent_avg=", profile_window.trans_tris / frames,
+                     " draw_batches_avg=", profile_window.draw_batches / frames,
+                     " material_binds_avg=", profile_window.binds / frames);
+            profile_window = {};
+            profile_frames = peak_period = peak_present = 0;
+            peak_sort_opaque = peak_sort_trans = peak_triangles = 0;
+            profile_window_start = finished;
+        }
+
 
         using timestamp_t = std::chrono::high_resolution_clock::time_point;
         timestamp_t menu_prev_ticks;
@@ -457,6 +528,18 @@ namespace jkgm {
         void set_renderer_mode(renderer_mode mode) override
         {
             if(this->mode != mode) {
+                if(the_config->profile_renderer) {
+                    last_profile_frame = {};
+                    profile_window_start = {};
+                    profile_window = {};
+                    profile_frame = {};
+                    profile_frames = 0;
+                }
+                // Pausing/menu transitions may evict and reload D3D textures.
+                // Refresh the native MAT resolver on the next game frame,
+                // instead of letting the previous one-second timer cause a flash.
+                force_runtime_refresh = true;
+                runtime_fast_retries = 0;
                 // A scene transition cannot reuse old frame history.
                 // Do not do this in begin_game/end_game (called each frame).
                 get_frame_blend_settings().reset();
@@ -479,6 +562,12 @@ namespace jkgm {
         bool is_reflections_enabled() override
         {
             return the_config->enable_reflections;
+        }
+
+        void notify_texture_uploaded() override
+        {
+            force_runtime_refresh = true;
+            runtime_fast_retries = 0;
         }
 
         point<2, int> get_cursor_pos(point<2, int> real_pos) override
@@ -630,64 +719,154 @@ namespace jkgm {
             frame_screen->begin_frame();
         }
 
-        // Refresh native JK MAT-to-D3D associations only while a COG script
-        // has active material controls. Never keep D3D handles across worlds:
-        // the renderer reuses those small integer IDs after level changes.
+        // Refresh immediately for a COG command or menu return; otherwise
+        // perform the established safe native scan at most once a second.
+        // During D3D reuploads, retry briefly without a one-second visual gap.
         void refresh_runtime_mat_links()
         {
             runtime_controls = get_runtime_material_controls().snapshot();
             if(runtime_controls.empty()) {
                 runtime_mat_by_handle.clear();
                 runtime_pack_by_mat.clear();
+                last_runtime_revision = runtime_controls.revision;
                 return;
             }
-            auto now = std::chrono::steady_clock::now();
-            if(now - last_runtime_scan < std::chrono::seconds(1)) {
+
+            bool const new_command = last_runtime_revision != runtime_controls.revision;
+            if(new_command || force_runtime_refresh) {
+                // The first few cache probes after an upload, new command or
+                // unpause run at 100 ms intervals, not the normal one second.
+                runtime_fast_retries = 0;
+            }
+            auto const now = std::chrono::steady_clock::now();
+            auto const retry_interval = runtime_fast_retries < 10
+                ? std::chrono::milliseconds(100) : std::chrono::milliseconds(1000);
+            // Frequent animated HUD uploads must not force a native-table
+            // scan every single frame. Keep a short minimum interval while
+            // still reacting far sooner than the original one-second timer.
+            auto const min_interval = force_runtime_refresh
+                ? std::chrono::milliseconds(80) : retry_interval;
+            if(!new_command && now - last_runtime_scan < min_interval) {
                 return;
             }
+            last_runtime_revision = runtime_controls.revision;
             last_runtime_scan = now;
+            force_runtime_refresh = false;
+
             auto state = engine_material_debug::scan();
             if(!state.supported_build) {
+                LOG_WARNING("Runtime MAT override unavailable: unknown JK executable build");
                 return;
             }
             if(state.current_world && runtime_current_world &&
                state.current_world != runtime_current_world) {
-                // Stale commands are cleared by prepare_world. A startup COG
-                // may already have queued *new-world* commands; preserve them.
+                // The COG layer may already have accepted commands from the
+                // *new* world's startup scripts; don't clear those commands.
                 get_runtime_material_controls().prepare_world(state.current_world);
                 runtime_controls = get_runtime_material_controls().snapshot();
+                last_runtime_revision = runtime_controls.revision;
                 LOG_DEBUG("JK material image cache cleared on level change");
                 for(auto const &image : runtime_images) {
                     texture_cache->release_srgb_texture(image.second);
                 }
                 runtime_images.clear();
                 runtime_missing_images.clear();
+                runtime_missing_sources.clear();
+                runtime_mat_by_handle.clear();
+                runtime_pack_by_mat.clear();
+                runtime_fast_retries = 0;
             }
             if(state.current_world) {
                 runtime_current_world = state.current_world;
                 get_runtime_material_controls().prepare_world(state.current_world);
                 runtime_controls = get_runtime_material_controls().snapshot();
+                last_runtime_revision = runtime_controls.revision;
             }
-
-            runtime_mat_by_handle.clear();
-            runtime_pack_by_mat.clear();
             if(runtime_controls.empty()) {
                 return;
             }
+
+            std::map<uint32_t, native_handle_link> new_handles;
+            std::map<uint32_t, fs::path> new_packs;
             for(auto const &link : state.textures) {
                 if(link.handle == 0 || link.handle > vidmem_texture_surfaces.size()) {
                     continue;
                 }
                 auto const &surface = vidmem_texture_surfaces[link.handle - 1];
                 if(!surface) continue;
-                runtime_mat_by_handle.emplace(link.handle, link.mat_id);
+                new_handles.emplace(link.handle, native_handle_link{
+                    link.mat_id, surface.get(), surface->texture_generation});
                 if(surface->replacement_material) {
                     auto pack = surface->replacement_material->pack_root;
-                    auto inserted = runtime_pack_by_mat.emplace(link.mat_id, pack);
+                    auto inserted = new_packs.emplace(link.mat_id, pack);
                     if(!inserted.second && inserted.first->second != pack) {
                         LOG_WARNING("JK MAT ", link.mat_id,
                                     " has multiple source packs; first pack is used for image IDs");
                     }
+                }
+            }
+
+            if(!new_handles.empty()) {
+                // Preserve known source-pack identities for MATs whose D3D
+                // surfaces were temporarily evicted, within the same world.
+                for(auto const &item : new_packs) {
+                    runtime_pack_by_mat[item.first] = item.second;
+                }
+                runtime_mat_by_handle = std::move(new_handles);
+            }
+            else {
+                // Do not discard existing identities on an incomplete pause/
+                // resume cache scan. A reused handle is rejected by generation
+                // and surface-pointer checks in bind_material().
+                for(auto it = runtime_mat_by_handle.begin();
+                    it != runtime_mat_by_handle.end();) {
+                    uint32_t handle = it->first;
+                    if(!handle || handle > vidmem_texture_surfaces.size() ||
+                       !vidmem_texture_surfaces[handle - 1] ||
+                       vidmem_texture_surfaces[handle - 1].get() != it->second.surface ||
+                       vidmem_texture_surfaces[handle - 1]->texture_generation !=
+                           it->second.generation) {
+                        it = runtime_mat_by_handle.erase(it);
+                    }
+                    else ++it;
+                }
+            }
+
+            bool unresolved = runtime_mat_by_handle.empty();
+            for(auto const &mat : runtime_controls.per_mat) {
+                bool found = false;
+                for(auto const &link : runtime_mat_by_handle) {
+                    if(link.second.mat_id == mat.first) {
+                        found = true;
+                        break;
+                    }
+                }
+                if(!found) unresolved = true;
+            }
+            if(runtime_controls.global_env && runtime_controls.global_env->to &&
+               runtime_pack_by_mat.count(runtime_controls.global_env->to->source_mat) == 0) {
+                unresolved = true;
+            }
+            if(unresolved) {
+                if(runtime_fast_retries < 10) ++runtime_fast_retries;
+            }
+            else runtime_fast_retries = 10;
+
+            if(new_command || runtime_fast_retries < 2) {
+                LOG_DEBUG("Runtime MAT resolver: revision=", runtime_controls.revision,
+                          " cached handles=", runtime_mat_by_handle.size(),
+                          " source packs=", runtime_pack_by_mat.size(),
+                          " pending=", unresolved);
+            }
+            if(!the_config->enable_reflections && !warned_reflections_disabled) {
+                bool env_requested = runtime_controls.global_env.has_value();
+                for(auto const &mat : runtime_controls.per_mat) {
+                    env_requested |= mat.second.env.has_value();
+                }
+                if(env_requested) {
+                    LOG_WARNING("Runtime EnvMap requested but enable_reflections=false; "
+                                "environment effects are disabled by the master switch");
+                    warned_reflections_disabled = true;
                 }
             }
         }
@@ -696,8 +875,13 @@ namespace jkgm {
         {
             auto pack = runtime_pack_by_mat.find(image.source_mat);
             if(pack == runtime_pack_by_mat.end()) {
-                return std::nullopt; // Native source material not uploaded yet.
+                if(runtime_missing_sources.emplace(image.source_mat).second) {
+                    LOG_WARNING("Runtime image ", image.image_id, ": native source MAT ",
+                                image.source_mat, " has no replacement pack mapping yet");
+                }
+                return std::nullopt;
             }
+            runtime_missing_sources.erase(image.source_mat);
             auto path = texture_cache->get_pack_image(pack->second, image.image_id);
             if(!path) {
                 if(runtime_missing_images.emplace(image.source_mat, image.image_id).second) {
@@ -834,8 +1018,8 @@ namespace jkgm {
 
         void end_frame()
         {
-            if(mode == renderer_mode::ingame) {
-                log_mat_links();
+            if(mode == renderer_mode::ingame && !the_config->profile_renderer) {
+                log_mat_links(); // Don't add diagnostic scans to profiling overhead.
             }
             // Compose renderbuffer onto window:
             frame_screen->end_frame();
@@ -1186,6 +1370,7 @@ namespace jkgm {
                            bool force_opaque,
                            bool posterize_lighting)
         {
+            if(the_config->profile_renderer) ++profile_frame.binds;
             // Only the transparent shader actually declares blend_mode; setting
             // it on the opaque shader is ignored (uniform location -1).
             auto const blend_mode = get_material_blend_mode(id);
@@ -1267,8 +1452,10 @@ namespace jkgm {
                 // material can span many cels/D3D surfaces.
                 runtime_mat_override const *override_mat = nullptr;
                 auto native_it = runtime_mat_by_handle.find(id.get());
-                if(native_it != runtime_mat_by_handle.end()) {
-                    auto ctl_it = runtime_controls.per_mat.find(native_it->second);
+                if(native_it != runtime_mat_by_handle.end() &&
+                   native_it->second.surface == mat.get() &&
+                   native_it->second.generation == mat->texture_generation) {
+                    auto ctl_it = runtime_controls.per_mat.find(native_it->second.mat_id);
                     if(ctl_it != runtime_controls.per_mat.end()) {
                         override_mat = &ctl_it->second;
                     }
@@ -1470,7 +1657,8 @@ namespace jkgm {
                                 (filter == batch_blend_filter::special ? special : !special);
                 if(!selected) {
                     if(num_verts > 0) {
-                        gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
+                        if(the_config->profile_renderer) ++profile_frame.draw_batches;
+                gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
                         curr_offset += num_verts;
                         num_verts = 0U;
                     }
@@ -1480,7 +1668,8 @@ namespace jkgm {
 
                 if(num_verts == 0U || current_material != tri.material) {
                     if(num_verts > 0) {
-                        gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
+                        if(the_config->profile_renderer) ++profile_frame.draw_batches;
+                gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
                         curr_offset += num_verts;
                         num_verts = 0U;
                     }
@@ -1490,6 +1679,7 @@ namespace jkgm {
             }
 
             if(num_verts > 0) {
+                if(the_config->profile_renderer) ++profile_frame.draw_batches;
                 gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
             }
         }
@@ -1805,6 +1995,8 @@ namespace jkgm {
 
         void execute_game(IDirect3DExecuteBuffer *cmdbuf, IDirect3DViewport *vp) override
         {
+            profile_scope timer(the_config->profile_renderer,
+                profile_frame.timings[profile_idx(profile_stage::execute)]);
             D3DEXECUTEDATA ed;
             cmdbuf->GetExecuteData(&ed);
 
@@ -1924,25 +2116,19 @@ namespace jkgm {
                         auto native3 = native_normals && payload->v3 < normal_slot_count
                                            ? native_normals[payload->v3] : 0U;
 
-                        auto sc1 = to_float_color(color_rgba8((uint8_t)RGBA_GETRED(v1.color),
-                                                              (uint8_t)RGBA_GETGREEN(v1.color),
-                                                              (uint8_t)RGBA_GETBLUE(v1.color),
-                                                              (uint8_t)RGBA_GETALPHA(v1.color)));
-                        auto sc2 = to_float_color(color_rgba8((uint8_t)RGBA_GETRED(v2.color),
-                                                              (uint8_t)RGBA_GETGREEN(v2.color),
-                                                              (uint8_t)RGBA_GETBLUE(v2.color),
-                                                              (uint8_t)RGBA_GETALPHA(v2.color)));
-                        auto sc3 = to_float_color(color_rgba8((uint8_t)RGBA_GETRED(v3.color),
-                                                              (uint8_t)RGBA_GETGREEN(v3.color),
-                                                              (uint8_t)RGBA_GETBLUE(v3.color),
-                                                              (uint8_t)RGBA_GETALPHA(v3.color)));
-
-                        auto c1 =
-                            gamma18_to_linear(extend(get<rgb>(sc1) * get<a>(sc1), get<a>(sc1)));
-                        auto c2 =
-                            gamma18_to_linear(extend(get<rgb>(sc2) * get<a>(sc2), get<a>(sc2)));
-                        auto c3 =
-                            gamma18_to_linear(extend(get<rgb>(sc3) * get<a>(sc3), get<a>(sc3)));
+                        // Preserve the legacy 8-bit premultiply-then-gamma
+                        // result using precomputed values instead of powf()
+                        // nine times per submitted triangle.
+                        auto unpack_diffuse = [](D3DTLVERTEX const &v) {
+                            return gamma18_premultiplied_rgba8_lut(
+                                (uint8_t)RGBA_GETRED(v.color),
+                                (uint8_t)RGBA_GETGREEN(v.color),
+                                (uint8_t)RGBA_GETBLUE(v.color),
+                                (uint8_t)RGBA_GETALPHA(v.color));
+                        };
+                        auto c1 = unpack_diffuse(v1);
+                        auto c2 = unpack_diffuse(v2);
+                        auto c3 = unpack_diffuse(v3);
 
                         // The patched JK executable stores optional 3DO RGB multipliers in
                         // D3DTLVERTEX.specular. Vanilla output uses specular=0, so treat zero
@@ -2032,44 +2218,93 @@ namespace jkgm {
 
         void present_game() override
         {
+            bool const profiling = the_config->profile_renderer;
+            auto const started = profile_clock::now();
+            if(profiling) {
+                if(last_profile_frame != profile_clock::time_point{}) {
+                    profile_frame.period_us = static_cast<uint64_t>(
+                        std::chrono::duration_cast<std::chrono::microseconds>(
+                            started - last_profile_frame).count());
+                }
+                last_profile_frame = started;
+                profile_frame.tris = world_batch.size() + world_transparent_batch.size() +
+                                     gun_batch.size() + gun_transparent_batch.size() +
+                                     overlay_batch.size();
+                profile_frame.trans_tris =
+                    world_transparent_batch.size() + gun_transparent_batch.size();
+            }
+
             animation_seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - animation_epoch).count();
-            refresh_runtime_mat_links();
-            end_frame();
-            update_hud_texture();
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::mat_resolve)]);
+                refresh_runtime_mat_links();
+            }
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::present_swap)]);
+                end_frame();
+            }
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::hud_upload)]);
+                update_hud_texture();
+            }
 
             ogs->tribuf.swap_next();
             auto *trimdl = ogs->tribuf.get_current();
-
-            world_batch.sort();
-            world_transparent_batch.sort();
-            gun_batch.sort();
-            gun_transparent_batch.sort();
-            overlay_batch.sort();
-
-            fill_buffer(world_batch, &trimdl->world_trimdl);
-            fill_buffer(world_transparent_batch, &trimdl->world_transparent_trimdl);
-            fill_buffer(gun_batch, &trimdl->gun_trimdl);
-            fill_buffer(gun_transparent_batch, &trimdl->gun_transparent_trimdl);
-            fill_buffer(overlay_batch, &trimdl->overlay_trimdl);
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::sort_opaque)]);
+                world_batch.sort();
+                gun_batch.sort();
+                overlay_batch.sort();
+            }
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::sort_transparent)]);
+                world_transparent_batch.sort();
+                gun_transparent_batch.sort();
+            }
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::upload)]);
+                fill_buffer(world_batch, &trimdl->world_trimdl);
+                fill_buffer(world_transparent_batch, &trimdl->world_transparent_trimdl);
+                fill_buffer(gun_batch, &trimdl->gun_trimdl);
+                fill_buffer(gun_transparent_batch, &trimdl->gun_transparent_trimdl);
+                fill_buffer(overlay_batch, &trimdl->overlay_trimdl);
+            }
 
             bool posterize_lighting = the_config->enable_posterized_lighting;
-            draw_game_gbuffer_pass(trimdl, posterize_lighting);
-            draw_game_transparency_pass(trimdl, posterize_lighting);
-
-            draw_hud();
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::opaque_pass)]);
+                draw_game_gbuffer_pass(trimdl, posterize_lighting);
+            }
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::transparent_pass)]);
+                draw_game_transparency_pass(trimdl, posterize_lighting);
+            }
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::hud_draw)]);
+                draw_hud();
+            }
 
             // Reset state:
             is_gun = false;
             is_transparent = false;
             current_triangle_batch = &world_batch;
             current_material = material_instance_id(0U);
-
             world_batch.clear();
             world_transparent_batch.clear();
             gun_batch.clear();
             gun_transparent_batch.clear();
             overlay_batch.clear();
+            record_profile(started, profile_clock::now());
         }
 
         void depth_clear_game() override

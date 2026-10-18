@@ -31,6 +31,9 @@ namespace jkgm {
 
         virtual bool is_parallax_enabled() = 0;
         virtual bool is_reflections_enabled() = 0;
+        // A D3D texture upload can invalidate native MAT-to-handle associations
+        // even when JK's pause screen doesn't change renderer mode.
+        virtual void notify_texture_uploaded() = 0;
 
         virtual void initialize(HINSTANCE hInstance, HWND parentWnd) = 0;
 
