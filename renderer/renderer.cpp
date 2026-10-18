@@ -1,5 +1,6 @@
 #include "renderer.hpp"
 #include "frame_profile.hpp"
+#include "native_3do_profile.hpp"
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
 #include "backbuffer_menu_surface.hpp"
@@ -473,6 +474,13 @@ namespace jkgm {
             LOG_INFO("PERF execute_buffers calls_avg=", profile_window.execute_calls / frames,
                      " vertices_avg=", profile_window.execute_vertices / frames,
                      " instruction_bytes_avg=", profile_window.execute_instruction_bytes / frames);
+            if(native_3do_available()) {
+                LOG_INFO("PERF native_3do inclusive_us model=",
+                         (profile_window.native_model_ns / 1000) / frames,
+                         " mesh=", (profile_window.native_mesh_ns / 1000) / frames,
+                         " model_calls_avg=", profile_window.native_model_calls / frames,
+                         " mesh_calls_avg=", profile_window.native_mesh_calls / frames);
+            }
             LOG_INFO("PERF sorting_us opaque=", avg(profile_stage::sort_opaque),
                      " transparent=", avg(profile_stage::sort_transparent),
                      " peaks=", peak_sort_opaque, "/", peak_sort_trans,
@@ -2352,6 +2360,13 @@ namespace jkgm {
             gun_batch.clear();
             gun_transparent_batch.clear();
             overlay_batch.clear();
+            if(profiling) {
+                auto const native = consume_native_3do_sample();
+                profile_frame.native_model_calls += native.model_calls;
+                profile_frame.native_mesh_calls += native.mesh_calls;
+                profile_frame.native_model_ns += native.model_ns;
+                profile_frame.native_mesh_ns += native.mesh_ns;
+            }
             record_profile(started, profile_clock::now());
             if(profiling) {
                 // Recorded *after* logging so the log cost does not count as JK work.

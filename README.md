@@ -650,6 +650,14 @@ It emits four `PERF` log lines about every two seconds, reporting:
   multiple times or resubmitted in several buffers; these aren't distinct
   model vertices.
 
+When profiling is enabled, exact-signature hooks on this project's patched
+JK23 executable also report native_3do inclusive_us model/mesh plus call counts.
+Model timings INCLUDE nested mesh timings, and mesh timings include faces,
+lighting and clipping: do not add the two timings. These are only 3DO model
+calls; static level geometry is a separate engine path. An unrecognized EXE
+simply skips native hooks and logs a warning. No native hooks are installed
+when profile_renderer is false.
+
 All times are **microseconds per frame, CPU-side**, unless explicitly marked peak.
 For example, 10000 us = 10 ms. These timers do **not** measure GPU execution
 time and their stage totals need not sum to the full frame period. The post/swap

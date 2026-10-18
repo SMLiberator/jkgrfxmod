@@ -7,6 +7,7 @@
 #include "postfx.hpp"
 #include "renderer.hpp"
 #include "runtime_material.hpp"
+#include "native_3do_profile.hpp"
 #include "engine_material_debug.hpp"
 #include "sun.hpp"
 #include <Windows.h>
@@ -15,12 +16,105 @@
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <chrono>
 #include <string>
 #include <detours/detours.h>
 
 static std::unique_ptr<jkgm::renderer> the_renderer;
 static std::unique_ptr<jkgm::config> the_config;
 static bool renderer_hooks_active = false;
+
+static bool native_3do_hooks_active = false;
+
+// Function boundaries and prologues independently verified in both the
+// user's SHA-locked jk23.exe and standalone jkgm.exe. Not portable to other JKs.
+namespace {
+    using native_model_func = int (__cdecl *)(void *, void *);
+    using native_mesh_func = void (__cdecl *)(void *, void *);
+    constexpr uintptr_t native_model_addr = 0x00446060U;
+    constexpr uintptr_t native_mesh_addr = 0x00446360U;
+    constexpr unsigned char native_model_bytes[] =
+        {0x83,0xec,0x18,0x8b,0x0d,0x18,0xa4,0x73,0x00};
+    constexpr unsigned char native_mesh_bytes[] =
+        {0x81,0xec,0x90,0x00,0x00,0x00,0x53,0x55};
+    native_model_func RealNativeModel =
+        reinterpret_cast<native_model_func>(native_model_addr);
+    native_mesh_func RealNativeMesh =
+        reinterpret_cast<native_mesh_func>(native_mesh_addr);
+    jkgm::native_3do_sample native_totals;
+
+    uint64_t elapsed_native_ns(std::chrono::steady_clock::time_point start)
+    {
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now()-start).count());
+    }
+    int __cdecl HookedNativeModel(void *thing, void *placement)
+    {
+        auto const start = std::chrono::steady_clock::now();
+        int result = RealNativeModel(thing, placement);
+        native_totals.model_ns += elapsed_native_ns(start);
+        ++native_totals.model_calls;
+        return result;
+    }
+    void __cdecl HookedNativeMesh(void *mesh, void *placement)
+    {
+        auto const start = std::chrono::steady_clock::now();
+        RealNativeMesh(mesh, placement);
+        native_totals.mesh_ns += elapsed_native_ns(start);
+        ++native_totals.mesh_calls;
+    }
+    bool attach_native_3do_hooks()
+    {
+        if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr)) != 0x00400000U ||
+           std::memcmp(reinterpret_cast<void const *>(native_model_addr),
+                       native_model_bytes, sizeof(native_model_bytes)) != 0 ||
+           std::memcmp(reinterpret_cast<void const *>(native_mesh_addr),
+                       native_mesh_bytes, sizeof(native_mesh_bytes)) != 0) {
+            LOG_WARNING("Native 3DO profiler skipped: unrecognized executable");
+            return false;
+        }
+        LONG error = DetourTransactionBegin();
+        if(error != NO_ERROR) return false;
+        error = DetourUpdateThread(GetCurrentThread());
+        if(error == NO_ERROR)
+            error = DetourAttach(&(PVOID &)RealNativeModel, HookedNativeModel);
+        if(error == NO_ERROR)
+            error = DetourAttach(&(PVOID &)RealNativeMesh, HookedNativeMesh);
+        if(error != NO_ERROR) {
+            DetourTransactionAbort();
+            LOG_WARNING("Native 3DO profiler attach failed: ", error);
+            return false;
+        }
+        error = DetourTransactionCommit();
+        if(error != NO_ERROR) {
+            LOG_WARNING("Native 3DO profiler commit failed: ", error);
+            return false;
+        }
+        LOG_INFO("Native 3DO model/mesh CPU profiler attached");
+        return true;
+    }
+    void detach_native_3do_hooks()
+    {
+        DetourTransactionBegin();
+        DetourUpdateThread(GetCurrentThread());
+        DetourDetach(&(PVOID &)RealNativeMesh, HookedNativeMesh);
+        DetourDetach(&(PVOID &)RealNativeModel, HookedNativeModel);
+        DetourTransactionCommit();
+    }
+} // namespace
+
+jkgm::native_3do_sample jkgm::consume_native_3do_sample()
+{
+    auto result = native_totals;
+    native_totals = {};
+    return result;
+}
+bool jkgm::native_3do_available()
+{
+    return native_3do_hooks_active;
+}
+
 
 // DirectX hooks
 
@@ -926,9 +1020,16 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         }
 
         renderer_hooks_active = true;
+        if(the_config->profile_renderer) {
+            native_3do_hooks_active = attach_native_3do_hooks();
+        }
         LOG_DEBUG("Finished attaching renderer to process");
     }
     else if(ul_reason_for_call == DLL_PROCESS_DETACH && renderer_hooks_active) {
+        if(native_3do_hooks_active) {
+            detach_native_3do_hooks();
+            native_3do_hooks_active = false;
+        }
         detach_hooks();
         renderer_hooks_active = false;
     }
