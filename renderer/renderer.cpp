@@ -466,6 +466,11 @@ namespace jkgm {
             return the_config->enable_parallax;
         }
 
+        bool is_reflections_enabled() override
+        {
+            return the_config->enable_reflections;
+        }
+
         point<2, int> get_cursor_pos(point<2, int> real_pos) override
         {
             if(mode == renderer_mode::menu) {
@@ -1154,7 +1159,7 @@ namespace jkgm {
                 }
 
                 gl::texture_view displacement_map = gl::default_texture;
-                if(mat->displacement_map.has_value()) {
+                if(mat->displacement_factor != 0.0f && mat->displacement_map.has_value()) {
                     displacement_map = texture_cache->get_texture_handle(*mat->displacement_map);
                 }
 
@@ -1177,12 +1182,17 @@ namespace jkgm {
                 // Units 6/7 are for linear normal textures; unit 5 is the
                 // already established opaque scene-depth sampler for decals.
                 bool filtered = mat->texture_filtering.value_or(the_config->enable_texture_filtering);
-                bind_color_texture(normal_map, 6, filtered);
-                bind_color_texture(normal_map2, 7, filtered);
-                gl::set_active_texture_unit(4);
-                gl::bind_texture(gl::texture_bind_target::texture_2d, env_map);
-                gl::set_active_texture_unit(3);
-                gl::bind_texture(gl::texture_bind_target::texture_2d, surface_map);
+                // Inactive sampler units can retain old bindings: their feature
+                // uniforms are zero, so GLSL never accesses those units.
+                // Avoid OpenGL state changes for entirely unreflective materials.
+                if(reflections_enabled) {
+                    bind_color_texture(normal_map, 6, filtered);
+                    bind_color_texture(normal_map2, 7, filtered);
+                    gl::set_active_texture_unit(4);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d, env_map);
+                    gl::set_active_texture_unit(3);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d, surface_map);
+                }
                 gl::set_active_texture_unit(2);
                 gl::bind_texture(gl::texture_bind_target::texture_2d, displacement_map);
                 // Filter selection is per material, not per cached image. Keep

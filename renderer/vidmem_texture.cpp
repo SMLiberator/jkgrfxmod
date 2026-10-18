@@ -74,28 +74,36 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
                 surf->r->texture_cache->get_srgb_texture_from_filename(*(*repl_map)->emissive_map);
         }
 
-        if((*repl_map)->normal_map.has_value()) {
-            surf->normal_map = surf->r->texture_cache->get_linear_texture_from_filename(
-                *(*repl_map)->normal_map);
-        }
-        if((*repl_map)->normal_map2.has_value()) {
-            surf->normal_map2 = surf->r->texture_cache->get_linear_texture_from_filename(
-                *(*repl_map)->normal_map2);
+        // Load reflection-only resources only when the master switch and
+        // the material's reflection strength allow their use. This saves GPU
+        // texture allocations as well as draw-time work.
+        bool const reflections_enabled =
+            surf->r->is_reflections_enabled() && (*repl_map)->reflection_strength > 0.0f;
+        if(reflections_enabled) {
+            if((*repl_map)->normal_map.has_value()) {
+                surf->normal_map = surf->r->texture_cache->get_linear_texture_from_filename(
+                    *(*repl_map)->normal_map);
+            }
+            if((*repl_map)->normal_map2.has_value()) {
+                surf->normal_map2 = surf->r->texture_cache->get_linear_texture_from_filename(
+                    *(*repl_map)->normal_map2);
+            }
+            if((*repl_map)->surface_map.has_value()) {
+                surf->surface_map = surf->r->texture_cache->get_linear_texture_from_filename(
+                    *(*repl_map)->surface_map);
+            }
+            if((*repl_map)->env_map.has_value()) {
+                surf->env_map =
+                    surf->r->texture_cache->get_srgb_texture_from_filename(*(*repl_map)->env_map);
+            }
         }
 
-        if((*repl_map)->displacement_map.has_value()) {
+        // A disabled or zero-strength parallax effect does not need its
+        // displacement map uploaded at all.
+        if(surf->r->is_parallax_enabled() && (*repl_map)->displacement_factor != 0.0f &&
+           (*repl_map)->displacement_map.has_value()) {
             surf->displacement_map = surf->r->texture_cache->get_linear_texture_from_filename(
                 *(*repl_map)->displacement_map);
-        }
-
-        if((*repl_map)->surface_map.has_value()) {
-            surf->surface_map = surf->r->texture_cache->get_linear_texture_from_filename(
-                *(*repl_map)->surface_map);
-        }
-
-        if((*repl_map)->env_map.has_value()) {
-            surf->env_map =
-                surf->r->texture_cache->get_srgb_texture_from_filename(*(*repl_map)->env_map);
         }
 
         surf->reflection_strength = (*repl_map)->reflection_strength;

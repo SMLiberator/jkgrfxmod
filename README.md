@@ -509,9 +509,9 @@ are registered and no material pack needs recompilation for this diagnostic.
 
 The material reflection master switch applies to **both** environment maps and
 COG-controlled directional-sun specularity. With
-`"enable_reflections": false`, these effects return zero, and normal and
-surface/specular maps are neither fetched for binding nor sampled by the
-material shaders. The same shader fast path also applies to materials without
+`"enable_reflections": false`, these effects return zero, and normal, environment, and
+surface/specular maps are not loaded from files, acquired for binding, or
+sampled by the material shaders (for those materials). The same shader fast path also applies to materials without
 reflection strength or with neither an environment map nor active sun.
 
 `enable_parallax` is independent: displacement/parallax sampling can still
