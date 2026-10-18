@@ -673,8 +673,12 @@ namespace jkgm {
             auto const now = std::chrono::steady_clock::now();
             auto const retry_interval = runtime_fast_retries < 10
                 ? std::chrono::milliseconds(100) : std::chrono::milliseconds(1000);
-            if(!new_command && !force_runtime_refresh &&
-               now - last_runtime_scan < retry_interval) {
+            // Frequent animated HUD uploads must not force a native-table
+            // scan every single frame. Keep a short minimum interval while
+            // still reacting far sooner than the original one-second timer.
+            auto const min_interval = force_runtime_refresh
+                ? std::chrono::milliseconds(80) : retry_interval;
+            if(!new_command && now - last_runtime_scan < min_interval) {
                 return;
             }
             last_runtime_revision = runtime_controls.revision;
