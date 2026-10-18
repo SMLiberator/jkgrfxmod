@@ -98,6 +98,29 @@ namespace {
         return start+len>=start && start+len<=end;
     }
 
+    // An unflagged 3DO face can still have translucency in its MAT cel.
+    // Build a separate draw range for those faces so alpha ordering can be
+    // corrected later without ever changing the persistent index buffer.
+    bool gpu_3do_face_may_have_alpha(native_face const &face)
+    {
+        if((face.type&0x2U)!=0) return true;
+        if(!face.material) return false;
+        using namespace jkgm::engine_material_debug;
+        native_material mat{};
+        if(!read_object(reinterpret_cast<uintptr_t>(face.material),mat) ||
+           mat.num_texinfo==0 || mat.num_texinfo>16)
+            return true; // uncertain: don't join its faces
+        int32_t cel=static_cast<int32_t>(face.cel);
+        if(cel<0) cel=static_cast<int32_t>(mat.current_cel);
+        cel=std::max(0,std::min(cel,static_cast<int32_t>(mat.num_texinfo)-1));
+        native_texinfo info{};
+        if(!read_object(mat.texinfo[cel],info) || !info.texture)
+            return true;
+        native_texture tex{};
+        if(!read_object(info.texture,tex)) return true;
+        return (tex.header[0]&1U)!=0;
+    }
+
     std::shared_ptr<jkgm::gpu_3do_geometry const>
     snapshot_gpu_mesh(native_mesh const &m) {
         if(m.num_vertices<3 || m.num_vertices>65536 || m.num_faces<1 ||
@@ -178,7 +201,7 @@ namespace {
             auto const ptr=reinterpret_cast<uintptr_t>(face.material);
             int32_t const cel=static_cast<int32_t>(face.cel);
             uint32_t const flags=face.type&0x3U;
-            bool const translucent=(flags&0x2U)!=0;
+            bool const translucent=gpu_3do_face_may_have_alpha(face);
             if(!translucent && !g->groups.empty() &&
                g->groups.back().material==ptr &&
                g->groups.back().cel==cel &&
