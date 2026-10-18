@@ -105,27 +105,72 @@ namespace {
            !gpu_span_readable(m.vertices,size_t(m.num_vertices)*12) ||
            !gpu_span_readable(m.faces,size_t(m.num_faces)*sizeof(native_face)))
             return {};
+        // Sith stores positions and UVs in separate arrays. Faces index them
+        // independently, so split each face corner rather than indexing
+        // positions directly: otherwise textured seams get corrupted.
+        bool const has_uvs=m.uvs && m.num_uvs>0 &&
+            m.num_uvs<=65536 &&
+            gpu_span_readable(m.uvs,size_t(m.num_uvs)*2*sizeof(float));
+        float const *uv_src=has_uvs
+            ? static_cast<float const *>(m.uvs) : nullptr;
         auto g=std::make_shared<jkgm::gpu_3do_geometry>();
-        g->vertices.assign(m.vertices,m.vertices+size_t(m.num_vertices)*3);
-        for(float v:g->vertices) if(!std::isfinite(v)) return {};
         for(int f=0;f<m.num_faces;f++) {
             native_face face{};
             std::memcpy(&face,m.faces+size_t(f)*sizeof(face),sizeof(face));
             if(face.count<3 || face.count>128 ||
-               !gpu_span_readable(face.pos_indices,size_t(face.count)*4))
+               !gpu_span_readable(face.pos_indices,size_t(face.count)*4) ||
+               !std::isfinite(face.uv_x) || !std::isfinite(face.uv_y))
                 return {};
-            for(uint32_t v=0;v<face.count;v++)
-                if(face.pos_indices[v]<0 || face.pos_indices[v]>=m.num_vertices)
-                    return {};
+            bool const face_uv=uv_src && face.uv_indices &&
+                gpu_span_readable(face.uv_indices,size_t(face.count)*4);
+            // Fail open when a textured polygon lacks readable UVs.
+            // Avoid suppressing JK geometry that we cannot reproduce.
+            if(face.material && face.geo>=4 && !face_uv) return {};
+            uint32_t const base=static_cast<uint32_t>(g->vertices.size());
+            for(uint32_t v=0;v<face.count;v++) {
+                int const pi=face.pos_indices[v];
+                if(pi<0 || pi>=m.num_vertices) return {};
+                auto const i=size_t(pi)*3;
+                float u=0,vtex=0;
+                if(face_uv) {
+                    int const uv_idx=face.uv_indices[v];
+                    if(uv_idx<0 || uv_idx>=m.num_uvs) return {};
+                    u=uv_src[size_t(uv_idx)*2]+face.uv_x;
+                    vtex=uv_src[size_t(uv_idx)*2+1]+face.uv_y;
+                }
+                jkgm::gpu_3do_vertex out{
+                    m.vertices[i],m.vertices[i+1],m.vertices[i+2],
+                    u,vtex,face.normal[0],face.normal[1],face.normal[2]
+                };
+                for(float vcheck : {out.x,out.y,out.z,out.u,out.v,
+                                    out.nx,out.ny,out.nz})
+                    if(!std::isfinite(vcheck)) return {};
+                g->vertices.push_back(out);
+            }
+            uint32_t const first=static_cast<uint32_t>(g->indices.size());
             for(uint32_t v=1;v+1<face.count;v++) {
-                g->indices.push_back(uint32_t(face.pos_indices[0]));
-                g->indices.push_back(uint32_t(face.pos_indices[v]));
-                g->indices.push_back(uint32_t(face.pos_indices[v+1]));
+                g->indices.push_back(base);
+                g->indices.push_back(base+v);
+                g->indices.push_back(base+v+1);
+            }
+            uint32_t const added=static_cast<uint32_t>(g->indices.size())-first;
+            // Keep adjacent faces with the same material/cel/alpha together;
+            // no CPU face processing is required after this first snapshot.
+            auto const ptr=reinterpret_cast<uintptr_t>(face.material);
+            int32_t const cel=static_cast<int32_t>(face.cel);
+            uint32_t const alpha=face.type & 0x2U; // RD_FF_TEX_TRANSLUCENT
+            if(!g->groups.empty() &&
+               g->groups.back().material==ptr &&
+               g->groups.back().cel==cel &&
+               (g->groups.back().face_type&0x2U)==alpha) {
+                g->groups.back().count+=added;
+            } else {
+                g->groups.push_back({first,added,ptr,cel,alpha});
             }
         }
-        return g->indices.empty() ? std::shared_ptr<jkgm::gpu_3do_geometry const>{} : g;
+        return g->indices.empty() ? std::shared_ptr<jkgm::gpu_3do_geometry const>{}
+                                  : g;
     }
-
 
     uint64_t elapsed_native_ns(std::chrono::steady_clock::time_point start)
     {
