@@ -561,6 +561,11 @@ namespace jkgm {
         void set_renderer_mode(renderer_mode mode) override
         {
             if(this->mode != mode) {
+                // Mesh pointers can be recycled when a level is unloaded.
+                // Cached local AABBs are valid only for the current scene.
+                if(the_config->enable_mesh_bounds_culling) {
+                    reset_mesh_bounds_cache();
+                }
                 if(the_config->profile_renderer) {
                     last_profile_frame = {};
                     profile_window_start = {};
