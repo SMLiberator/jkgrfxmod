@@ -63,6 +63,8 @@ jobs:
         New-Item -ItemType Directory -Path 'test-build/jkgm/shaders' -Force | Out-Null
         Copy-Item 'assets/shaders/game_opaque_pass.frag' 'test-build/jkgm/shaders/' -Force
         Copy-Item 'assets/shaders/game_trns_pass.frag' 'test-build/jkgm/shaders/' -Force
+        Copy-Item 'assets/shaders/gpu_3do_preview.vert' 'test-build/jkgm/shaders/' -Force
+        Copy-Item 'assets/shaders/gpu_3do_preview.frag' 'test-build/jkgm/shaders/' -Force
     - name: Upload standalone development test build
       uses: actions/upload-artifact@v4
       with:

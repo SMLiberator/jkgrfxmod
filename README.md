@@ -741,3 +741,33 @@ preserved. Native engine geometry profiling and culling remain separate work.
 
 For exact install paths, compatibility limits, and test commands, see
 [doc/install.md](doc/install.md).
+
+
+## First GPU-resident 3DO experiment (development-only)
+
+This proof of concept bypasses JK's entire native \`rdModel3_DrawMesh\`
+transform/face/Direct3D preparation path **for meshes with one chosen exact
+mesh name**. It uploads a copy of their original local vertices and face
+indices into static OpenGL VBO/EBO buffers once, and draws with the live JK
+camera and joint/world transform each frame. All other meshes continue through
+JK unchanged. There is **no** new EXE patch or injector.
+
+To activate, set \`"gpu_3do_test_mesh": "MESHNAME"\` in \`jkgm.json\`, using the
+exact \`MESH NAME\` from a 3DO's MESH section (case-sensitive, max 31 bytes).
+Empty string (default) switches the entire path off. This may match multiple
+meshes sharing a name; only use with an isolated test model. Replace
+\`renderer.dll\` and copy the two new \`gpu_3do_preview\` shaders into
+\`jkgm/shaders/\`.
+
+**This is a geometry-pipeline proof, NOT material parity yet**: matching
+meshes render **solid magenta** with simplified depth and normal output,
+ignoring original textures, per-vertex colors, transparency, lighting,
+UV animation and backface flags. Do not enable for normal racing/gameplay.
+It is a test of the native bypass and persistent GPU buffers, not an FPS
+benchmark of final quality. A malformed/nonmatching mesh falls back to JK.
+Turn the option off to restore identical pre-experiment rendering.
+
+Known limits: selecting a mesh used by moving/animated actors is not yet a
+correctness test. Selected opaque rigid scenery is ideal. Multiple instances
+of the same cached mesh share GPU geometry but use their own transforms.
+World-sector geometry and all unselected meshes remain on the old path.

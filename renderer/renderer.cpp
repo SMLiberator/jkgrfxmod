@@ -1,6 +1,7 @@
 #include "renderer.hpp"
 #include "frame_profile.hpp"
 #include "native_3do_profile.hpp"
+#include "gpu_3do_preview.hpp"
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
 #include "backbuffer_menu_surface.hpp"
@@ -54,6 +55,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <unordered_map>
 
 namespace jkgm {
     static WNDPROC original_wkernel_wndproc = nullptr;
@@ -336,6 +338,32 @@ namespace jkgm {
         return make_direction(xoff, yoff);
     }
 
+
+    // Persistent per-mesh buffers. Allocated/uploaded exactly once per cached
+    // source geometry, never rebuilt when the camera moves.
+    struct gpu_3do_gl_mesh {
+        gl::vertex_array vao;
+        gl::buffer vertices;
+        gl::buffer indices;
+        unsigned num_indices = 0;
+        explicit gpu_3do_gl_mesh(gpu_3do_geometry const &source)
+        {
+            num_indices=static_cast<unsigned>(source.indices.size());
+            gl::bind_vertex_array(vao);
+            gl::bind_buffer(gl::buffer_bind_target::array,vertices);
+            gl::buffer_data(gl::buffer_bind_target::array,
+                            make_span(source.vertices).as_const_bytes(),
+                            gl::buffer_usage::static_draw);
+            gl::enable_vertex_attrib_array(0U);
+            gl::vertex_attrib_pointer(0U,3U,gl::vertex_element_type::float32,
+                                      false,sizeof(float)*3,0U);
+            gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
+            gl::buffer_data(gl::buffer_bind_target::element_array,
+                            make_span(source.indices).as_const_bytes(),
+                            gl::buffer_usage::static_draw);
+        }
+    };
+
     class renderer_impl : public renderer {
     private:
         config const *the_config;
@@ -377,6 +405,7 @@ namespace jkgm {
         HGLRC hGLRC = NULL;
 
         std::unique_ptr<opengl_state> ogs;
+        std::unordered_map<uint64_t,std::unique_ptr<gpu_3do_gl_mesh>> gpu_3do_gl_cache;
         std::unique_ptr<renderer_compositor> frame_compositor;
         std::unique_ptr<renderer_ao> frame_ao;
         std::unique_ptr<renderer_screen> frame_screen;
@@ -557,6 +586,11 @@ namespace jkgm {
         void set_renderer_mode(renderer_mode mode) override
         {
             if(this->mode != mode) {
+                if(!the_config->gpu_3do_test_mesh.empty()) {
+                    // Levels recycle native mesh pointers; discard both copies.
+                    reset_gpu_3do_instances();
+                    gpu_3do_gl_cache.clear();
+                }
                 if(the_config->profile_renderer) {
                     last_profile_frame = {};
                     profile_window_start = {};
@@ -1777,6 +1811,68 @@ namespace jkgm {
             mdl->update_buffers();
         }
 
+
+        void draw_gpu_3do_preview()
+        {
+            if(!ogs->gpu_3do_preview_program) return;
+            auto const instances=consume_gpu_3do_instances();
+            if(instances.empty()) return;
+
+            auto const cam=read_engine_camera();
+            if(!cam.valid) {
+                LOG_WARNING("GPU 3DO preview: camera unavailable during present");
+                return;
+            }
+
+            float far_plane=1000.0f;
+            // rdCamera::pClipFrustum is +0x48 on the supported patched exe.
+            // The near/far pair starts at offsets 4 and 8 in rdClipFrustum.
+            constexpr uintptr_t current_camera=0x0073A418U;
+            if(engine_camera_detail::readable(current_camera,sizeof(uintptr_t))) {
+                auto const camera_ptr=*reinterpret_cast<uintptr_t const *>(current_camera);
+                if(camera_ptr>=0x10000U &&
+                   engine_camera_detail::readable(camera_ptr+0x48,sizeof(uintptr_t))) {
+                    auto const frustum_ptr=*reinterpret_cast<uintptr_t const *>(camera_ptr+0x48);
+                    if(frustum_ptr>=0x10000U &&
+                       engine_camera_detail::readable(frustum_ptr+8,sizeof(float))) {
+                        float const native_far=*reinterpret_cast<float const *>(frustum_ptr+8);
+                        if(std::isfinite(native_far) && native_far>0.1f)
+                            far_plane=native_far;
+                    }
+                }
+            }
+
+            auto &prog=*ogs->gpu_3do_preview_program;
+            prog.use_program();
+            auto const axes=[](std::array<float,3> const &v) {
+                return make_point(v[0],v[1],v[2],0.0f);
+            };
+            float const aspect=get<x>(internal_scr_res_f)/get<y>(internal_scr_res_f);
+            float const tan_half_fov=std::tan(cam.fov*0.008726646259971648f);
+            prog.set_camera(axes(cam.right),axes(cam.forward),axes(cam.up),
+                            axes(cam.position),
+                            make_point(tan_half_fov,aspect,1.0f/far_plane,0.0f));
+            for(auto const &inst:instances) {
+                auto it=gpu_3do_gl_cache.find(inst.id);
+                if(it==gpu_3do_gl_cache.end()) {
+                    if(!inst.geometry) continue;
+                    // GL buffers outlive per-frame instances and camera motion.
+                    auto ptr=std::make_unique<gpu_3do_gl_mesh>(*inst.geometry);
+                    it=gpu_3do_gl_cache.emplace(inst.id,std::move(ptr)).first;
+                    LOG_INFO("GPU 3DO prototype: uploaded mesh id=",inst.id,
+                             " triangles=",it->second->num_indices/3);
+                }
+                auto const &m=inst.transform;
+                prog.set_model(make_point(m[0],m[1],m[2],0.0f),
+                               make_point(m[3],m[4],m[5],0.0f),
+                               make_point(m[6],m[7],m[8],0.0f),
+                               make_point(m[9],m[10],m[11],1.0f));
+                gl::bind_vertex_array(it->second->vao);
+                gl::draw_elements(gl::element_type::triangles,
+                                  it->second->num_indices,gl::index_type::uint32);
+            }
+        }
+
         void draw_game_opaque_into_gbuffer(triangle_buffer_models *trimdl, bool posterize_lighting)
         {
             // Draw batches
@@ -1825,6 +1921,10 @@ namespace jkgm {
                        &trimdl->world_transparent_trimdl,
                        /*force opaque*/ true,
                        posterize_lighting);
+
+            // GPU-local 3DO vertices, alongside JK's ordinary opaque geometry.
+            // The prototype's material is intentionally obvious magenta.
+            draw_gpu_3do_preview();
 
             // Draw fourth pass (opaque gun geometry)
             draw_batch(&ogs->game_opaque_pass_program,
