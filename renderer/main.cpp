@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <string>
 #include <detours/detours.h>
 
 static std::unique_ptr<jkgm::renderer> the_renderer;
@@ -617,7 +618,7 @@ namespace {
             cog_material_controls().set_global_env(
                 static_cast<uint32_t>(source), image, fade);
             LOG_DEBUG("COG SetGlobalEnvMap: source MAT=", source,
-                      " image=", image, " fade=", fade);
+                      " image=", image, " fade=", std::to_string(fade));
         }
         else LOG_WARNING("COG SetGlobalEnvMap rejected: source MAT=", source,
                          " image=", image);
@@ -638,7 +639,7 @@ namespace {
         if(valid_mat_index(mat) && valid_image_id(image)) {
             cog_material_controls().set_mat_env(
                 static_cast<uint32_t>(mat), static_cast<uint32_t>(mat), image, fade);
-            LOG_DEBUG("COG SetMatEnvMap: MAT=", mat, " image=", image, " fade=", fade);
+            LOG_DEBUG("COG SetMatEnvMap: MAT=", mat, " image=", image, " fade=", std::to_string(fade));
         }
         else LOG_WARNING("COG SetMatEnvMap rejected: MAT=", mat, " image=", image);
     }
@@ -654,7 +655,7 @@ namespace {
             cog_material_controls().set_mat_env(
                 static_cast<uint32_t>(target), static_cast<uint32_t>(source), image, fade);
             LOG_DEBUG("COG SetMatEnvMapFrom: target=", target, " source=", source,
-                      " image=", image, " fade=", fade);
+                      " image=", image, " fade=", std::to_string(fade));
         }
         else LOG_WARNING("COG SetMatEnvMapFrom rejected: target=", target,
                          " source=", source, " image=", image);
@@ -667,7 +668,7 @@ namespace {
         if(valid_mat_index(mat)) {
             cog_material_controls().reset_mat_env(
                 static_cast<uint32_t>(mat), fade);
-            LOG_DEBUG("COG ResetMatEnvMap: MAT=", mat, " fade=", fade);
+            LOG_DEBUG("COG ResetMatEnvMap: MAT=", mat, " fade=", std::to_string(fade));
         }
         else LOG_WARNING("COG ResetMatEnvMap rejected: MAT=", mat);
     }
@@ -681,7 +682,7 @@ namespace {
             cog_material_controls().set_mat_albedo(
                 static_cast<uint32_t>(mat), image, fade);
             LOG_DEBUG("COG SetMaterialAlbedo: MAT=", mat,
-                      " image=", image, " fade=", fade);
+                      " image=", image, " fade=", std::to_string(fade));
         }
         else LOG_WARNING("COG SetMaterialAlbedo rejected: MAT=", mat,
                          " image=", image);
@@ -694,7 +695,7 @@ namespace {
         if(valid_mat_index(mat)) {
             cog_material_controls().reset_mat_albedo(
                 static_cast<uint32_t>(mat), fade);
-            LOG_DEBUG("COG ResetMaterialAlbedo: MAT=", mat, " fade=", fade);
+            LOG_DEBUG("COG ResetMaterialAlbedo: MAT=", mat, " fade=", std::to_string(fade));
         }
         else LOG_WARNING("COG ResetMaterialAlbedo rejected: MAT=", mat);
     }
@@ -708,7 +709,7 @@ namespace {
         if(!valid_mat_index(mat) ||
            !std::isfinite(rgb[0]) || !std::isfinite(rgb[1]) || !std::isfinite(rgb[2])) {
             LOG_WARNING("COG SetMaterialColor rejected: MAT=", mat,
-                        " rgb=", rgb[0], ",", rgb[1], ",", rgb[2]);
+                        " rgb=", std::to_string(rgb[0]), ",", std::to_string(rgb[1]), ",", std::to_string(rgb[2]));
             return;
         }
         cog_material_controls().set_mat_color(
@@ -718,7 +719,7 @@ namespace {
               clamp_float(rgb[2], 0.0f, 4.0f)}},
             fade);
         LOG_DEBUG("COG SetMaterialColor: MAT=", mat,
-                  " rgb=", rgb[0], ",", rgb[1], ",", rgb[2], " fade=", fade);
+                  " rgb=", std::to_string(rgb[0]), ",", std::to_string(rgb[1]), ",", std::to_string(rgb[2]), " fade=", std::to_string(fade));
     }
 
     void __cdecl cog_reset_material_color(void *ctx)
@@ -728,7 +729,7 @@ namespace {
         if(valid_mat_index(mat)) {
             cog_material_controls().reset_mat_color(
                 static_cast<uint32_t>(mat), fade);
-            LOG_DEBUG("COG ResetMaterialColor: MAT=", mat, " fade=", fade);
+            LOG_DEBUG("COG ResetMaterialColor: MAT=", mat, " fade=", std::to_string(fade));
         }
         else LOG_WARNING("COG ResetMaterialColor rejected: MAT=", mat);
     }
