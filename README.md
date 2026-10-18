@@ -651,3 +651,37 @@ Then repeat at half render resolution. Keep both shader versions and game
 position identical. Compare the averages and peak values, not a single FPS
 sample. Setting `profile_renderer: false` returns the normal low-overhead
 path. If `log_path` is unset, the measurements will not be persisted to disk.
+
+## Experimental faster JK vertex-color decoding
+
+The CPU profiler identified `execute_game()` as the largest measured stage
+in the worst unculled 3DO area. Every Direct3D triangle in the original path
+performs **nine** `powf()` calls (three color channels per vertex, three
+vertices), after multiplying diffuse RGB by its 8-bit alpha. The experimental
+`fast_vertex_colors` option replaces those repeated calls with a shared
+256 x 256 LUT keyed by channel and alpha (256 KiB). The lookup retains
+premultiply-before-gamma ordering and all independent per-vertex RGB tinting.
+
+To test the precise effect, use the **same DLL and same viewpoint** with
+`profile_renderer: true`, `enable_vsync: false`, and toggle:
+
+```json
+"fast_vertex_colors": false
+```
+
+versus
+
+```json
+"fast_vertex_colors": true
+```
+
+The option defaults to **false**. Compare `execute_us` and
+`frame_period_us` in the demanding ~20,000+ triangle location, then check
+for identical lighting/color. The separate CI unit test compares the lookup
+against `powf((channel/255)*(alpha/255),1.8)` across sampled RGBA values.
+The LUT is initialized once on its first use. Do not infer a speedup until
+both scenarios are measured in game.
+
+This optimization affects CPU D3D execute-buffer *decoding*, not the native
+JK engine's own model culling/transform work. It is stacked on the separate
+frame profiler diagnostic branch to allow A/B testing.
