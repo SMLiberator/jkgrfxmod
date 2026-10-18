@@ -16,7 +16,7 @@ Optional boolean master switches, all `true` by default:
 | Setting | Effect |
 | --- | --- |
 | `enable_fog` | Renders COG-controlled distance fog; COG parameters are still stored if disabled |
-| `enable_reflections` | Enables material environment reflections (including fixed/MatCap and the planned SSR); disabling restores the unreflected diffuse appearance |
+| `enable_reflections` | Master switch for environment reflections **and directional-sun GGX specularity**; disabling them also skips reflection-only normal/surface map sampling and restores the unreflected diffuse appearance |
 | `enable_post` | Enables optional presentation effects (bloom, film grain, vignette, brightness/contrast/saturation); sRGB output remains active when disabled |
 | `enable_blur` | Enables distance and peripheral spatial blur (more GPU-intensive) |
 | `enable_trails` | Enables lightweight temporal feedback / frame blending |
@@ -504,3 +504,25 @@ address, function signatures, array stride, and native memory availability
 must validate before the scan proceeds. The remaining native texture offsets
 are experimental and must be confirmed by the runtime log. No new COG verbs
 are registered and no material pack needs recompilation for this diagnostic.
+
+## Reflection fast path and performance checks
+
+The material reflection master switch applies to **both** environment maps and
+COG-controlled directional-sun specularity. With
+`"enable_reflections": false`, these effects return zero, and normal and
+surface/specular maps are neither fetched for binding nor sampled by the
+material shaders. The same shader fast path also applies to materials without
+reflection strength or with neither an environment map nor active sun.
+
+`enable_parallax` is independent: displacement/parallax sampling can still
+cost a great deal (the existing parallax shader takes **32–128 heightmap
+steps per fragment** for displaced materials). Emissive and fog calculations
+are unaffected by `enable_reflections`.
+
+To compare performance, use the same view and resolution in a large level,
+and toggle `enable_reflections`, `enable_parallax`, `enable_ssao`,
+`enable_bloom`, `enable_blur`, and `enable_trails` one at a time. The
+Stage 2 MAT-link diagnostic scans every three seconds only when logging is
+enabled; disable `log_path` for performance benchmarking. Scene complexity,
+triangle sorting and uploads, transparency overdraw, and state-change
+frequency remain possible CPU/GPU bottlenecks that require measurements.

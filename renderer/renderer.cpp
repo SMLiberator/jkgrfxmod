@@ -1139,12 +1139,17 @@ namespace jkgm {
                     emissive_map = texture_cache->get_texture_handle(*mat->emissive_map);
                 }
 
+                // A reflection/lighting master switch: normal maps currently
+                // only affect environment and directional-sun specularity.
+                // Do not fetch or bind these resources when they cannot contribute.
+                bool const reflections_enabled =
+                    the_config->enable_reflections && mat->reflection_strength > 0.0f;
                 gl::texture_view normal_map = gl::default_texture;
-                if(mat->normal_map.has_value()) {
+                if(reflections_enabled && mat->normal_map.has_value()) {
                     normal_map = texture_cache->get_texture_handle(*mat->normal_map);
                 }
                 gl::texture_view normal_map2 = gl::default_texture;
-                if(mat->normal_map2.has_value()) {
+                if(reflections_enabled && mat->normal_map2.has_value()) {
                     normal_map2 = texture_cache->get_texture_handle(*mat->normal_map2);
                 }
 
@@ -1153,8 +1158,10 @@ namespace jkgm {
                     displacement_map = texture_cache->get_texture_handle(*mat->displacement_map);
                 }
 
+                // Surface/specular maps are shared by envmap and sun GGX, and
+                // have no purpose when the reflection master switch is off.
                 gl::texture_view surface_map = gl::default_texture;
-                if(mat->surface_map.has_value()) {
+                if(reflections_enabled && mat->surface_map.has_value()) {
                     surface_map = texture_cache->get_texture_handle(*mat->surface_map);
                 }
 
@@ -1162,7 +1169,7 @@ namespace jkgm {
                 // pack's default
                 gl::texture_view env_map = gl::default_texture;
                 bool has_env_map = false;
-                if(the_config->enable_reflections && mat->env_map.has_value()) {
+                if(reflections_enabled && mat->env_map.has_value()) {
                     env_map = texture_cache->get_texture_handle(*mat->env_map);
                     has_env_map = true;
                 }
@@ -1196,8 +1203,8 @@ namespace jkgm {
                                      scroll_offset(mat->emissive_scroll));
                 prog->set_normal_params(
                     make_point(mat->normal_strength, mat->normal_strength2,
-                               mat->normal_map.has_value() ? 1.0f : 0.0f,
-                               mat->normal_map2.has_value() ? 1.0f : 0.0f),
+                               (reflections_enabled && mat->normal_map.has_value()) ? 1.0f : 0.0f,
+                               (reflections_enabled && mat->normal_map2.has_value()) ? 1.0f : 0.0f),
                     scroll_offset(mat->normal_scroll),
                     scroll_offset(mat->normal_scroll2));
 
@@ -1213,10 +1220,12 @@ namespace jkgm {
                 prog->set_displacement_factor(mat->displacement_factor);
                 prog->set_alpha_cutoff(mat->alpha_cutoff);
 
-                prog->set_reflection(make_point(mat->reflection_strength,
+                // Zero reflection strength also suppresses directional sunlight
+                // GGX highlights (previously unaffected by enable_reflections).
+                prog->set_reflection(make_point(reflections_enabled ? mat->reflection_strength : 0.0f,
                                                 mat->roughness,
                                                 mat->metalness,
-                                                mat->surface_map.has_value() ? 1.0f : 0.0f),
+                                                (reflections_enabled && mat->surface_map.has_value()) ? 1.0f : 0.0f),
                                      make_point(has_env_map ? 1.0f : 0.0f,
                                                 static_cast<float>(static_cast<int>(mat->reflection_mode)),
                                                 0.0f, 0.0f));
