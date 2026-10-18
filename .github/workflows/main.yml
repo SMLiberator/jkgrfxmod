@@ -20,6 +20,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\runtime_material_state.cpp /Fe:runtime_material_state_test.exe
         runtime_material_state_test.exe
+    - name: Vertex color lookup regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\fast_vertex_colors.cpp /Fe:fast_vertex_colors_test.exe
+        fast_vertex_colors_test.exe
     - name: Package diagnostic binaries
       shell: pwsh
       run: |
@@ -43,9 +48,9 @@ jobs:
         New-Item -ItemType Directory -Path 'test-build/jkgm/shaders' -Force | Out-Null
         Copy-Item 'assets/shaders/game_opaque_pass.frag' 'test-build/jkgm/shaders/' -Force
         Copy-Item 'assets/shaders/game_trns_pass.frag' 'test-build/jkgm/shaders/' -Force
-    - name: Upload frame profiler test build
+    - name: Upload vertex color optimization test build
       uses: actions/upload-artifact@v4
       with:
-        name: jkgrfxmod-frame-profile-test
+        name: jkgrfxmod-fast-vertex-colors-test
         path: test-build/*
         if-no-files-found: error

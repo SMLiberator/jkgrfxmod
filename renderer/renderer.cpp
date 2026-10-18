@@ -1,5 +1,6 @@
 #include "renderer.hpp"
 #include "frame_profile.hpp"
+#include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
 #include "backbuffer_menu_surface.hpp"
 #include "backbuffer_surface.hpp"
@@ -2115,25 +2116,25 @@ namespace jkgm {
                         auto native3 = native_normals && payload->v3 < normal_slot_count
                                            ? native_normals[payload->v3] : 0U;
 
-                        auto sc1 = to_float_color(color_rgba8((uint8_t)RGBA_GETRED(v1.color),
-                                                              (uint8_t)RGBA_GETGREEN(v1.color),
-                                                              (uint8_t)RGBA_GETBLUE(v1.color),
-                                                              (uint8_t)RGBA_GETALPHA(v1.color)));
-                        auto sc2 = to_float_color(color_rgba8((uint8_t)RGBA_GETRED(v2.color),
-                                                              (uint8_t)RGBA_GETGREEN(v2.color),
-                                                              (uint8_t)RGBA_GETBLUE(v2.color),
-                                                              (uint8_t)RGBA_GETALPHA(v2.color)));
-                        auto sc3 = to_float_color(color_rgba8((uint8_t)RGBA_GETRED(v3.color),
-                                                              (uint8_t)RGBA_GETGREEN(v3.color),
-                                                              (uint8_t)RGBA_GETBLUE(v3.color),
-                                                              (uint8_t)RGBA_GETALPHA(v3.color)));
-
-                        auto c1 =
-                            gamma18_to_linear(extend(get<rgb>(sc1) * get<a>(sc1), get<a>(sc1)));
-                        auto c2 =
-                            gamma18_to_linear(extend(get<rgb>(sc2) * get<a>(sc2), get<a>(sc2)));
-                        auto c3 =
-                            gamma18_to_linear(extend(get<rgb>(sc3) * get<a>(sc3), get<a>(sc3)));
+                        // Experimental fast path uses the same premultiply-then-gamma
+                        // ordering as the legacy float calculation.
+                        auto unpack_diffuse = [&](D3DTLVERTEX const &v) {
+                            uint8_t red = (uint8_t)RGBA_GETRED(v.color);
+                            uint8_t green = (uint8_t)RGBA_GETGREEN(v.color);
+                            uint8_t blue = (uint8_t)RGBA_GETBLUE(v.color);
+                            uint8_t alpha = (uint8_t)RGBA_GETALPHA(v.color);
+                            if(the_config->fast_vertex_colors) {
+                                return gamma18_premultiplied_rgba8_lut(
+                                    red, green, blue, alpha);
+                            }
+                            auto sc = to_float_color(color_rgba8(
+                                red, green, blue, alpha));
+                            return gamma18_to_linear(
+                                extend(get<rgb>(sc) * get<a>(sc), get<a>(sc)));
+                        };
+                        auto c1 = unpack_diffuse(v1);
+                        auto c2 = unpack_diffuse(v2);
+                        auto c3 = unpack_diffuse(v3);
 
                         // The patched JK executable stores optional 3DO RGB multipliers in
                         // D3DTLVERTEX.specular. Vanilla output uses specular=0, so treat zero
