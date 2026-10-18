@@ -102,6 +102,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_vsync")) {
             j.at("enable_vsync").get_to(rv->enable_vsync);
         }
+        if(j.contains("profile_renderer")) {
+            j.at("profile_renderer").get_to(rv->profile_renderer);
+        }
 
         if(j.contains("command")) {
             j.at("command").get_to(rv->command);
