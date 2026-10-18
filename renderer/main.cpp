@@ -616,12 +616,18 @@ namespace {
         if(valid_mat_index(source) && valid_image_id(image)) {
             cog_material_controls().set_global_env(
                 static_cast<uint32_t>(source), image, fade);
+            LOG_DEBUG("COG SetGlobalEnvMap: source MAT=", source,
+                      " image=", image, " fade=", fade);
         }
+        else LOG_WARNING("COG SetGlobalEnvMap rejected: source MAT=", source,
+                         " image=", image);
     }
 
     void __cdecl cog_reset_global_env_map(void *ctx)
     {
-        cog_material_controls().reset_global_env(cog_pop_float(ctx));
+        float fade = cog_pop_float(ctx);
+        cog_material_controls().reset_global_env(fade);
+        LOG_DEBUG("COG ResetGlobalEnvMap: fade=", fade);
     }
 
     void __cdecl cog_set_mat_env_map(void *ctx)
@@ -632,7 +638,9 @@ namespace {
         if(valid_mat_index(mat) && valid_image_id(image)) {
             cog_material_controls().set_mat_env(
                 static_cast<uint32_t>(mat), static_cast<uint32_t>(mat), image, fade);
+            LOG_DEBUG("COG SetMatEnvMap: MAT=", mat, " image=", image, " fade=", fade);
         }
+        else LOG_WARNING("COG SetMatEnvMap rejected: MAT=", mat, " image=", image);
     }
 
     // Resolve image in sourceMat's pack, apply to targetMat.
@@ -645,7 +653,11 @@ namespace {
         if(valid_mat_index(target) && valid_mat_index(source) && valid_image_id(image)) {
             cog_material_controls().set_mat_env(
                 static_cast<uint32_t>(target), static_cast<uint32_t>(source), image, fade);
+            LOG_DEBUG("COG SetMatEnvMapFrom: target=", target, " source=", source,
+                      " image=", image, " fade=", fade);
         }
+        else LOG_WARNING("COG SetMatEnvMapFrom rejected: target=", target,
+                         " source=", source, " image=", image);
     }
 
     void __cdecl cog_reset_mat_env_map(void *ctx)
@@ -655,7 +667,9 @@ namespace {
         if(valid_mat_index(mat)) {
             cog_material_controls().reset_mat_env(
                 static_cast<uint32_t>(mat), fade);
+            LOG_DEBUG("COG ResetMatEnvMap: MAT=", mat, " fade=", fade);
         }
+        else LOG_WARNING("COG ResetMatEnvMap rejected: MAT=", mat);
     }
 
     void __cdecl cog_set_material_albedo(void *ctx)
@@ -666,7 +680,11 @@ namespace {
         if(valid_mat_index(mat) && valid_image_id(image)) {
             cog_material_controls().set_mat_albedo(
                 static_cast<uint32_t>(mat), image, fade);
+            LOG_DEBUG("COG SetMaterialAlbedo: MAT=", mat,
+                      " image=", image, " fade=", fade);
         }
+        else LOG_WARNING("COG SetMaterialAlbedo rejected: MAT=", mat,
+                         " image=", image);
     }
 
     void __cdecl cog_reset_material_albedo(void *ctx)
@@ -676,7 +694,9 @@ namespace {
         if(valid_mat_index(mat)) {
             cog_material_controls().reset_mat_albedo(
                 static_cast<uint32_t>(mat), fade);
+            LOG_DEBUG("COG ResetMaterialAlbedo: MAT=", mat, " fade=", fade);
         }
+        else LOG_WARNING("COG ResetMaterialAlbedo rejected: MAT=", mat);
     }
 
     void __cdecl cog_set_material_color(void *ctx)
@@ -687,6 +707,8 @@ namespace {
         int mat = cog_pop_int(ctx);
         if(!valid_mat_index(mat) ||
            !std::isfinite(rgb[0]) || !std::isfinite(rgb[1]) || !std::isfinite(rgb[2])) {
+            LOG_WARNING("COG SetMaterialColor rejected: MAT=", mat,
+                        " rgb=", rgb[0], ",", rgb[1], ",", rgb[2]);
             return;
         }
         cog_material_controls().set_mat_color(
@@ -695,6 +717,8 @@ namespace {
               clamp_float(rgb[1], 0.0f, 4.0f),
               clamp_float(rgb[2], 0.0f, 4.0f)}},
             fade);
+        LOG_DEBUG("COG SetMaterialColor: MAT=", mat,
+                  " rgb=", rgb[0], ",", rgb[1], ",", rgb[2], " fade=", fade);
     }
 
     void __cdecl cog_reset_material_color(void *ctx)
@@ -704,7 +728,9 @@ namespace {
         if(valid_mat_index(mat)) {
             cog_material_controls().reset_mat_color(
                 static_cast<uint32_t>(mat), fade);
+            LOG_DEBUG("COG ResetMaterialColor: MAT=", mat, " fade=", fade);
         }
+        else LOG_WARNING("COG ResetMaterialColor rejected: MAT=", mat);
     }
 
     struct cog_verb_entry {
