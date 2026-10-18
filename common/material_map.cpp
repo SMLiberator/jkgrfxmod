@@ -32,13 +32,24 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
 
     for(auto const &em : doc["materials"]) {
         auto mat = std::make_unique<material>();
+        mat->pack_root = data_dir;
+        mat->source_name = em.value("name", std::string());
 
         if(em.contains("albedo_map")) {
             mat->albedo_map = data_dir / std::string(em["albedo_map"]);
         }
 
-        if(em.contains("keep_albedo")) {
-            mat->use_original_albedo = static_cast<bool>(em["keep_albedo"]);
+        if(em.contains("keep_albedo") && em.contains("use_original_albedo")) {
+            throw std::runtime_error("Material cannot specify both keep_albedo and "
+                                     "use_original_albedo in metadata.json");
+        }
+        char const *keep_key = em.contains("keep_albedo")
+            ? "keep_albedo" : "use_original_albedo";
+        if(em.contains(keep_key)) {
+            if(!em[keep_key].is_boolean()) {
+                throw std::runtime_error("Original albedo flag must be boolean");
+            }
+            mat->use_original_albedo = static_cast<bool>(em[keep_key]);
         }
 
         if(em.contains("albedo_factor")) {
@@ -139,6 +150,7 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
                                                    : (has_surface_map ? 1.0f : 0.0f);
 
         if(em.contains("environment_map")) {
+            mat->has_explicit_env_map = true;
             mat->env_map = data_dir / std::string(em["environment_map"]);
         }
         else if(pack_env_map.has_value()) {

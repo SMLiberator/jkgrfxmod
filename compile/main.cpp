@@ -311,13 +311,22 @@ namespace jkgm {
             rv->albedo_map = real_map_filename;
         }
 
-        if(doc.contains("keep_albedo")) {
-            auto const &v = doc["keep_albedo"];
+        // "use_original_albedo" is a descriptive synonym of the original
+        // "keep_albedo" option. Compiled metadata continues to write keep_albedo
+        // so older packs and renderers retain their existing behavior.
+        if(doc.contains("keep_albedo") && doc.contains("use_original_albedo")) {
+            LOG_ERROR("Material '", rv->name, "' specifies both keep_albedo and "
+                      "use_original_albedo");
+            throw std::runtime_error("Invalid script");
+        }
+        char const *keep_key = doc.contains("keep_albedo")
+            ? "keep_albedo" : "use_original_albedo";
+        if(doc.contains(keep_key)) {
+            auto const &v = doc[keep_key];
             if(!v.is_boolean()) {
-                LOG_ERROR("Material '", rv->name, "' keep_albedo must be true or false");
+                LOG_ERROR("Material '", rv->name, "' ", keep_key, " must be true or false");
                 throw std::runtime_error("Invalid script");
             }
-
             rv->keep_albedo = static_cast<bool>(v);
         }
 
@@ -971,6 +980,17 @@ namespace jkgm {
                     // material parameters. The generated metadata.json stores resolved
                     // materials, so the runtime doesn't need a separate inheritance layer.
                     json::json effective = em;
+                    // Normalize the two accepted spellings before applying
+                    // pack-wide defaults and material-level overrides.
+                    if(effective.contains("use_original_albedo") &&
+                       !effective.contains("keep_albedo")) {
+                        effective["keep_albedo"] = effective["use_original_albedo"];
+                    }
+                    if(!effective.contains("keep_albedo") &&
+                       !script_doc.contains("keep_albedo") &&
+                       script_doc.contains("use_original_albedo")) {
+                        effective["keep_albedo"] = script_doc["use_original_albedo"];
+                    }
                     for(char const *property : {
                     "albedo_map",
                     "keep_albedo",
@@ -1009,10 +1029,12 @@ namespace jkgm {
                     // Likewise, keep_albedo=true replaces a pack-wide albedo map.
                     // If *both* are specified on one material, keep the existing
                     // compiler error rather than silently choosing between them.
-                    if(em.contains("albedo_map") && !em.contains("keep_albedo")) {
+                    bool const explicit_keep = em.contains("keep_albedo") ||
+                                               em.contains("use_original_albedo");
+                    if(em.contains("albedo_map") && !explicit_keep) {
                         effective["keep_albedo"] = false;
                     }
-                    if(em.contains("keep_albedo") && em["keep_albedo"] == true &&
+                    if(explicit_keep && effective["keep_albedo"] == true &&
                        !em.contains("albedo_map")) {
                         // A pack-level albedo map is inherited only if the material
                         // doesn't explicitly elect to retain its original JK texture.

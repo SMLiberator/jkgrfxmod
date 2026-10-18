@@ -4,6 +4,7 @@
 #include "math/color.hpp"
 #include "math/point.hpp"
 #include <optional>
+#include <string>
 
 namespace jkgm {
     enum class material_alpha_mode { blend, mask };
@@ -26,6 +27,11 @@ namespace jkgm {
 
     class material {
     public:
+        // The original compiled pack and material definition. These identities
+        // are retained even when multiple JK textures share one replacement.
+        fs::path pack_root;
+        std::string source_name;
+
         std::optional<fs::path> albedo_map;
         color albedo_factor = color::fill(1.0f);
 
@@ -66,6 +72,8 @@ namespace jkgm {
         // Equirectangular environment image this material reflects. A material that does not set
         // one gets its own pack's default environment image (if the pack has one).
         std::optional<fs::path> env_map;
+        // Distinguishes an explicit material envmap from a pack default.
+        bool has_explicit_env_map = false;
         material_reflection_mode reflection_mode = material_reflection_mode::envmap;
         // nullopt follows the global enable_texture_filtering setting.
         std::optional<bool> texture_filtering;

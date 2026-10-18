@@ -37,6 +37,10 @@ namespace jkgm {
 
         material_instance_id material_id;
 
+        // Non-owning link to the compiled replacement definition and its pack.
+        // Kept per Direct3D texture instance, NOT per shared signature.
+        material const *replacement_material = nullptr;
+
         // Vidmem textures embody a material instance:
         std::optional<srgb_texture_id> albedo_map;
         color albedo_factor = color::fill(1.0f);

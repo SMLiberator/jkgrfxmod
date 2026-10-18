@@ -70,7 +70,7 @@ Fog no longer has separate enabled state. `SetFogInfo(vector(start, end, opacity
 The default fog parameters are `40 1000 0` (off). Setting opacity nonzero fades fog in according to `fadeTime`.
 
 
-## COG-controlled frame blending
+## COG-controlled frame trails
 
 Temporal accumulation is applied to the **finished composited frame** (including
 gameplay, HUD, bloom, film grain and color adjustments) in linear color space,
@@ -79,11 +79,11 @@ with hardware sRGB output conversion preserved. It needs no changes to
 hook.
 
 ```c
-SetFrameBlend(0.75, 0.5); // Fade to 75% previous accumulated output over 0.5 seconds.
-flex amount = GetFrameBlend(); // Current interpolated strength, 0.0..1.0.
-SetFrameBlend(1.0, 0.0); // Freeze the last completed frame.
-SetFrameBlend(0.0, 0.5); // Fade back to live gameplay.
-ResetFrameBlend();       // Disable blending AND discard history immediately.
+SetFrameTrail(0.75, 0.5); // Fade to 75% previous accumulated output over 0.5 seconds.
+flex amount = GetFrameTrail(); // Current interpolated strength, 0.0..1.0.
+SetFrameTrail(1.0, 0.0); // Freeze the last completed frame.
+SetFrameTrail(0.0, 0.5); // Fade back to live gameplay.
+ResetFrameTrail();       // Disable blending AND discard history immediately.
 ```
 
 The accumulation formula is `output = current * (1 - strength) + previous * strength`,
@@ -94,7 +94,7 @@ at the presently interpolated value; `fadeTime <= 0` updates immediately.
 
 History is continuously refreshed even at strength 0, so turning on blending
 does not show a stale old frame. It is invalidated on menu/game rendering-mode
-transitions and when `ResetFrameBlend()` is called. These transitions also reset
+transitions and when `ResetFrameTrail()` is called. These transitions also reset
 the effect's strength to zero to avoid carrying a level effect into the menus.
 The engine's per-frame `BeginScene`/`EndScene` hooks do not reset it.
 
@@ -105,7 +105,7 @@ only gates bloom, grain, vignette and color filtering.
 
 **Known limitation:** A direct in-game level-to-level transition that never
 enters menu rendering does not currently trigger an automatic reset. Such
-transitions should call `ResetFrameBlend()` from a shutdown/startup COG.
+transitions should call `ResetFrameTrail()` from a shutdown/startup COG.
 The explicit history reset is also useful before cutscene camera teleports.
 
 
@@ -166,7 +166,7 @@ Only two independent configuration switches are needed:
 ```
 
 `enable_blur` controls both spatial blur types (distance and peripheral).
-`enable_trails` controls recursive temporal feedback from `SetFrameBlend`.
+`enable_trails` controls recursive temporal feedback from `SetFrameTrail`.
 Both default to `true`, but all individual effect strengths default to zero.
 
 With `enable_blur:false`, the expensive spatial sampling passes are skipped
@@ -435,3 +435,56 @@ For depth clipping, test a slightly offset stain crossing a floor edge,
 an originally opaque JK polygon with `blend_mode: normal`, a floating decal
 beyond the fixed gap, empty-background pixels, grazing-angle views,
 and MSAA silhouettes. Also test decals with smoothed vertex normals.
+
+## Experimental material link diagnostics
+
+A replacement material now retains its original **pack directory**, compiled
+material **name**, and whether its environment map was explicitly assigned or
+inherited from the pack. A Direct3D texture instance retains a non-owning link
+to its resolved replacement definition; the link is reset whenever the instance
+is cleared/reused. This does not change material rendering.
+
+With file logging enabled via `"log_path": "jkgm-test.log"` in `jkgm.json`
+(or `JKGM_LOG_FILE`), texture uploads
+produce messages such as:
+
+```text
+Texture instance 83 (signature <md5>) maps to pack <pack path> / material <name>
+```
+
+The numeric **texture instance** in these lines is a renderer Direct3D texture
+handle, **not** a JK MAT resource index. This logging proves the second half
+of the planned JK-MAT-to-pack link but does **not** establish the first half
+(JK material index and cel to Direct3D handle). That will require a separate
+engine-side investigation. Identical textures may share a replacement definition;
+per-instance identity is deliberately not lost. Original jkGfxMod metadata is
+accepted unchanged, without mandatory new keys.
+
+## Preserving the original JK albedo
+
+A replacement that only adds surface maps, reflections, or other effects can
+preserve the original JK texture. In a **source-pack script** either
+`"keep_albedo": true` (existing syntax) or
+`"use_original_albedo": true` (alias) works:
+
+```json
+{
+  "name": "original_with_reflections",
+  "use_original_albedo": true,
+  "reflection_strength": 0.5,
+  "replaces": ["example.mat"]
+}
+```
+
+Both spellings are also accepted at the source-pack root for inherited defaults
+and in precompiled `metadata.json`. The compiler still writes `keep_albedo` in
+its output. Never specify both synonyms at the same level, and don't provide an
+`albedo_map` alongside a true original-albedo flag.
+
+The original 8-bit JK MAT goes through the game's Direct3D 16-bit upload format
+before this renderer sees it, so the original-albedo conversion handles both
+original 8- and 16-bit MATs through that same path.
+
+To verify the original upload, set `"log_path": "jkgm-matlink.log"` in
+`jkgm.json` and look for
+`Keeping original albedo for texture instance ... (D3D source bit depth 16)`.
