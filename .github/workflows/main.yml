@@ -25,6 +25,8 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\fast_vertex_colors.cpp /Fe:fast_vertex_colors_test.exe
         fast_vertex_colors_test.exe
+    - name: Native JKGM EXE bootstrap PE regression tests
+      run: python tests/test_bootstrap_patcher.py
     - name: Package diagnostic binaries
       shell: pwsh
       run: |
@@ -43,6 +45,7 @@ jobs:
         if (-not (Test-Path 'test-build/compile.exe')) {
           throw "Could not find the rebuilt material pack compiler"
         }
+        Copy-Item 'tools/patch_jkgm_bootstrap.py' 'test-build/patch_jkgm_bootstrap.py' -Force
         # Runtime GLSL is loaded from data_path/shaders. The test must ship
         # changed shaders alongside the DLL or the new fast path will not run.
         New-Item -ItemType Directory -Path 'test-build/jkgm/shaders' -Force | Out-Null
@@ -51,6 +54,6 @@ jobs:
     - name: Upload vertex color optimization test build
       uses: actions/upload-artifact@v4
       with:
-        name: jkgrfxmod-fast-vertex-colors-test
+        name: jkgrfxmod-native-bootstrap-test
         path: test-build/*
         if-no-files-found: error
