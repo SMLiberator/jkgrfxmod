@@ -143,6 +143,7 @@ namespace jkgm {
             gl::uniform_location_id model_right,model_forward,model_up,model_origin;
             gl::uniform_location_id camera_right,camera_forward,camera_up,camera_origin;
             gl::uniform_location_id projection;
+            gl::uniform_location_id albedo_sampler,uv_scale,has_texture,transparent_pass;
         public:
             explicit gpu_3do_preview_shader(fs::path const &data_root);
             void set_model(point<4,float> right, point<4,float> forward,
@@ -150,6 +151,7 @@ namespace jkgm {
             void set_camera(point<4,float> right, point<4,float> forward,
                             point<4,float> up, point<4,float> origin,
                             point<4,float> projection_params);
+            void set_surface(bool textured,float width,float height,bool transparent);
         };
 
         class game_opaque_pass_shader : public game_pass_shader {

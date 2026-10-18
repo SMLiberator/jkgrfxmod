@@ -151,6 +151,10 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , camera_up(gl::get_uniform_location(the_program,"camera_up"))
     , camera_origin(gl::get_uniform_location(the_program,"camera_origin"))
     , projection(gl::get_uniform_location(the_program,"projection"))
+    , albedo_sampler(gl::get_uniform_location(the_program,"albedo_map"))
+    , uv_scale(gl::get_uniform_location(the_program,"uv_scale"))
+    , has_texture(gl::get_uniform_location(the_program,"has_texture"))
+    , transparent_pass(gl::get_uniform_location(the_program,"transparent_pass"))
 {
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_model(
@@ -170,6 +174,15 @@ void jkgm::shaders::gpu_3do_preview_shader::set_camera(
     gl::set_uniform_vector(camera_up,u);
     gl::set_uniform_vector(camera_origin,t);
     gl::set_uniform_vector(projection,p);
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_surface(
+    bool textured,float width,float height,bool transparent)
+{
+    gl::set_uniform_integer(albedo_sampler,0);
+    gl::set_uniform_integer(has_texture,textured?1:0);
+    gl::set_uniform_integer(transparent_pass,transparent?1:0);
+    gl::set_uniform_vector(uv_scale,make_point(1.0f/width,1.0f/height));
 }
 
 jkgm::shaders::game_opaque_pass_shader::game_opaque_pass_shader(fs::path const &data_root)
