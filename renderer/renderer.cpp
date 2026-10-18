@@ -1962,6 +1962,7 @@ namespace jkgm {
                 gpu_3do_texture texture;
                 gpu_3do_alpha_mode policy;
                 float depth;
+                size_t order;
             };
             std::vector<pending_draw> draws;
             for(auto const &inst:frame_gpu_3do_instances) {
@@ -1983,15 +1984,19 @@ namespace jkgm {
                               (wy-cam.position[1])*cam.forward[1]+
                               (wz-cam.position[2])*cam.forward[2];
                     }
-                    draws.push_back({&inst,&group,tex,policy,depth});
+                    draws.push_back({&inst,&group,tex,policy,depth,draws.size()});
                 }
             }
             if(transparent) {
                 // JK's own translucent polygons are depth-sorted. Our faces
                 // need a GPU-path equivalent. Sorting index *ranges* does not
                 // modify/re-upload any cached mesh vertices or indices.
-                std::stable_sort(draws.begin(),draws.end(),
+                // In-place sort: MSVC x86 std::stable_sort uses an internal
+                // aligned_storage buffer incompatible with our SIMD-aligned
+                // point<> members. Preserve exact tie order explicitly.
+                std::sort(draws.begin(),draws.end(),
                     [](pending_draw const &a,pending_draw const &b) {
+                        if(a.depth==b.depth) return a.order<b.order;
                         return a.depth>b.depth; // back to front
                     });
             }
