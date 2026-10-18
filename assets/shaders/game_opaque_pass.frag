@@ -149,7 +149,10 @@ vec3 compute_reflection(vec3 base_color, vec2 texcoords, vec3 view_normal,
         roughness *= surface.g;
         metalness *= surface.b;
     }
-    metalness = clamp(metalness, 0.0, 1.0);
+    // Avoid suppressing diffuse instantly when an EnvMap is faded in from black,
+    // or keeping metal suppression after its EnvMap has faded out.
+    metalness = clamp(metalness, 0.0, 1.0) *
+                mix(env_transition.x, env_transition.y, env_transition.z);
 
     bool have_camera = camera_right.w > 0.5;
     float h_scale = have_camera ? view_params.x : tan(radians(REFLECTION_HFOV_DEGREES) * 0.5);

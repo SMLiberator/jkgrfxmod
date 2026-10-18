@@ -1374,7 +1374,7 @@ namespace jkgm {
                 // Inactive sampler units can retain old bindings: their feature
                 // uniforms are zero, so GLSL never accesses those units.
                 // Avoid OpenGL state changes for entirely unreflective materials.
-                if(reflections_enabled) {
+                if(runtime_reflections) {
                     bind_color_texture(normal_map, 6, filtered);
                     bind_color_texture(normal_map2, 7, filtered);
                     gl::set_active_texture_unit(4);
