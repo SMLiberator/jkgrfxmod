@@ -741,24 +741,3 @@ preserved. Native engine geometry profiling and culling remain separate work.
 
 For exact install paths, compatibility limits, and test commands, see
 [doc/install.md](doc/install.md).
-
-
-### Experimental tight mesh-bounds culling
-
-Set \`"enable_mesh_bounds_culling": true\` in \`jkgm.json\` and restart the game.
-This is an opt-in **conservative frustum optimization**, not occlusion culling:
-an entire 3DO mesh is skipped before vertex transforms only if its vertex
-bounding box is wholly outside the view frustum. Unlike JK's existing origin-
-centered bounding sphere, this test is tight for long or offset geometry.
-
-Per-mesh vertex bounds are cached for the duration of a level; the cache is
-reset on renderer-mode changes. This assumes a mesh's source vertex buffer
-is immutable while a level is loaded (as usual for rigid 3DOs). Do not enable
-this experiment for mods that modify mesh vertex-array positions in place.
-The optimization defaults to OFF, fails open on invalid camera/bounds, and
-does not change the EXE or apply to JK's world-sector surfaces.
-
-With \`profile_renderer=true\`, \`PERF mesh_bounds\` reports average meshes
-tested/rejected and vertex/face counts avoided per frame. The model/mesh/face
-timers in the same log add profiling overhead; for FPS comparisons use an
-additional run with \`profile_renderer=false\` in both A/B configurations.

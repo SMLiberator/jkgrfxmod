@@ -105,9 +105,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("profile_renderer")) {
             j.at("profile_renderer").get_to(rv->profile_renderer);
         }
-        if(j.contains("enable_mesh_bounds_culling")) {
-            j.at("enable_mesh_bounds_culling").get_to(rv->enable_mesh_bounds_culling);
-        }
         if(j.contains("use_vanilla_renderer")) {
             j.at("use_vanilla_renderer").get_to(rv->use_vanilla_renderer);
         }

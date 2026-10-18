@@ -484,10 +484,6 @@ namespace jkgm {
                          " mesh_calls_avg=", profile_window.native_mesh_calls / frames,
                          " face_calls_avg=", profile_window.native_face_calls / frames,
                          " face_emitted_avg=", profile_window.native_face_emitted / frames);
-                LOG_INFO("PERF mesh_bounds tested_avg=", profile_window.bounds_tested / frames,
-                         " rejected_avg=", profile_window.bounds_rejected / frames,
-                         " skipped_vertices_avg=", profile_window.bounds_vertices_saved / frames,
-                         " skipped_faces_avg=", profile_window.bounds_faces_saved / frames);
             }
             LOG_INFO("PERF sorting_us opaque=", avg(profile_stage::sort_opaque),
                      " transparent=", avg(profile_stage::sort_transparent),
@@ -561,11 +557,6 @@ namespace jkgm {
         void set_renderer_mode(renderer_mode mode) override
         {
             if(this->mode != mode) {
-                // Mesh pointers can be recycled when a level is unloaded.
-                // Cached local AABBs are valid only for the current scene.
-                if(the_config->enable_mesh_bounds_culling) {
-                    reset_mesh_bounds_cache();
-                }
                 if(the_config->profile_renderer) {
                     last_profile_frame = {};
                     profile_window_start = {};
@@ -2383,10 +2374,6 @@ namespace jkgm {
                 profile_frame.native_model_ns += native.model_ns;
                 profile_frame.native_mesh_ns += native.mesh_ns;
                 profile_frame.native_face_ns += native.face_ns;
-                profile_frame.bounds_tested += native.bounds_tested;
-                profile_frame.bounds_rejected += native.bounds_rejected;
-                profile_frame.bounds_vertices_saved += native.bounds_vertices_saved;
-                profile_frame.bounds_faces_saved += native.bounds_faces_saved;
             }
             record_profile(started, profile_clock::now());
             if(profiling) {

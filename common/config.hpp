@@ -34,7 +34,6 @@ namespace jkgm {
         bool enable_posterized_lighting = false;
         bool enable_vsync = false;
         bool profile_renderer = false; // opt-in CPU frame timings
-        bool enable_mesh_bounds_culling = false; // experimental tight mesh-frustum rejection
         bool use_vanilla_renderer = false; // native EXE bootstrap: skip JKGM hooks
         std::string data_path = "jkgm";
         std::optional<std::string> log_path;
