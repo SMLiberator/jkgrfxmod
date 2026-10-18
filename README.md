@@ -762,7 +762,7 @@ and translucent/alpha-textured faces during the normal transparency stage.
 The temporary material shader has no equivalent for native dynamic vertex
 lighting, vertex RGB tint, emissive/reflection/normal maps, special blend
 modes, exact JK alpha flags, surface fog, and all material override effects
-yet. Transparent face ordering is not optimized. Magenta means the original
+yet. GPU translucent faces are sorted back-to-front across selected 3DO instances using native face centroids; this does not yet interleave them with JK's separately submitted world transparency. Ordinary faces use backface culling; only 0x1 faces are double-sided. The GPU camera follows the current native rdCamera view matrix, including idle orbit views. Magenta means the original
 albedo/handle could not be resolved in the prototype. Check detailed level
 logs when diagnosing such surfaces.
 
