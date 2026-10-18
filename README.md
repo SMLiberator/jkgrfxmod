@@ -488,3 +488,19 @@ original 8- and 16-bit MATs through that same path.
 To verify the original upload, set `"log_path": "jkgm-matlink.log"` in
 `jkgm.json` and look for
 `Keeping original albedo for texture instance ... (D3D source bit depth 16)`.
+
+## Stage 2: JK MAT-index diagnostic
+
+In the experimental `feature/jk-mat-link-diagnostic` build, keep the
+patched `jk23.exe` unchanged and enable `"log_path": "jkgm-matlink.log"`
+in `jkgm.json`. Load a level with replaced materials (including a multi-cel
+MAT), then inspect/upload the log. Every three seconds while in game, the
+renderer checks the native JK material tables **without writing to them**.
+
+Look for `JK MAT diagnostic: level=... materials=... validated=...` and
+`JK MAT link: id=... name=... cel=... mip=... D3D=... pack=... material=...`.
+Only new or changed live replacement links are printed. Original `jk23.exe`
+address, function signatures, array stride, and native memory availability
+must validate before the scan proceeds. The remaining native texture offsets
+are experimental and must be confirmed by the runtime log. No new COG verbs
+are registered and no material pack needs recompilation for this diagnostic.

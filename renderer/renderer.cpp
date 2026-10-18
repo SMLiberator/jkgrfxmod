@@ -393,6 +393,7 @@ namespace jkgm {
         uint32_t last_matlink_materials = 0;
         uint32_t last_matlink_static_materials = 0;
         std::string last_matlink_level;
+        bool matlink_first_scan = true;
         std::map<uint64_t, std::string> reported_mat_links;
         bool matlink_build_warning_logged = false;
 
@@ -636,12 +637,13 @@ namespace jkgm {
                 }
                 return;
             }
-            bool const new_world =
+            bool const new_world = matlink_first_scan ||
                 snapshot.current_world != last_matlink_world ||
                 snapshot.current_materials != last_matlink_materials ||
                 snapshot.static_materials != last_matlink_static_materials ||
                 snapshot.level_name != last_matlink_level;
             if(new_world) {
+                matlink_first_scan = false;
                 reported_mat_links.clear();
                 last_matlink_world = snapshot.current_world;
                 last_matlink_materials = snapshot.current_materials;
