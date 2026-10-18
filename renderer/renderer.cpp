@@ -356,7 +356,16 @@ namespace jkgm {
                             gl::buffer_usage::static_draw);
             gl::enable_vertex_attrib_array(0U);
             gl::vertex_attrib_pointer(0U,3U,gl::vertex_element_type::float32,
-                                      false,sizeof(float)*3,0U);
+                                      false,sizeof(gpu_3do_vertex),
+                                      offsetof(gpu_3do_vertex,x));
+            gl::enable_vertex_attrib_array(1U);
+            gl::vertex_attrib_pointer(1U,2U,gl::vertex_element_type::float32,
+                                      false,sizeof(gpu_3do_vertex),
+                                      offsetof(gpu_3do_vertex,u));
+            gl::enable_vertex_attrib_array(2U);
+            gl::vertex_attrib_pointer(2U,3U,gl::vertex_element_type::float32,
+                                      false,sizeof(gpu_3do_vertex),
+                                      offsetof(gpu_3do_vertex,nx));
             gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
             gl::buffer_data(gl::buffer_bind_target::element_array,
                             make_span(source.indices).as_const_bytes(),
@@ -406,6 +415,7 @@ namespace jkgm {
 
         std::unique_ptr<opengl_state> ogs;
         std::unordered_map<uint64_t,std::unique_ptr<gpu_3do_gl_mesh>> gpu_3do_gl_cache;
+        std::vector<gpu_3do_instance> frame_gpu_3do_instances;
         std::unique_ptr<renderer_compositor> frame_compositor;
         std::unique_ptr<renderer_ao> frame_ao;
         std::unique_ptr<renderer_screen> frame_screen;
@@ -590,6 +600,7 @@ namespace jkgm {
                     // Levels recycle native mesh pointers; discard both copies.
                     reset_gpu_3do_instances();
                     gpu_3do_gl_cache.clear();
+                    frame_gpu_3do_instances.clear();
                 }
                 if(the_config->profile_renderer) {
                     last_profile_frame = {};
@@ -1812,21 +1823,65 @@ namespace jkgm {
         }
 
 
-        void draw_gpu_3do_preview()
-        {
-            if(!ogs->gpu_3do_preview_program) return;
-            auto const instances=consume_gpu_3do_instances();
-            if(instances.empty()) return;
+        struct gpu_3do_texture {
+            gl::texture_view texture = gl::default_texture;
+            float width=1.0f, height=1.0f;
+            bool has_image=false, alpha=false;
+        };
 
-            auto const cam=read_engine_camera();
-            if(!cam.valid) {
-                LOG_WARNING("GPU 3DO preview: camera unavailable during present");
+        gpu_3do_texture resolve_gpu_3do_material(gpu_3do_group const &group)
+        {
+            gpu_3do_texture out;
+            if(group.material==0 ||
+               !engine_material_debug::matches_tested_executable())
+                return out;
+
+            using namespace engine_material_debug;
+            native_material mat{};
+            if(!read_object(group.material,mat) || mat.num_texinfo==0 ||
+               mat.num_texinfo>16) return out;
+
+            int32_t cel = group.cel < 0
+                ? static_cast<int32_t>(mat.current_cel) : group.cel;
+            cel = std::max(0,std::min(cel,static_cast<int32_t>(mat.num_texinfo)-1));
+            native_texinfo info{};
+            if(!read_object(mat.texinfo[cel],info) || !info.texture) return out;
+            native_texture tex{};
+            if(!read_object(info.texture,tex)) return out;
+            out.alpha=(tex.header[0]&1U)!=0;
+            auto const &alpha=tex.alpha_mips[0];
+            auto const &opaque=tex.opaque_mips[0];
+            auto const valid_surface=[](native_surface const &sf) {
+                return sf.texture_loaded!=0 && sf.texture_handle>0 &&
+                       sf.width>0 && sf.height>0 &&
+                       sf.width<=8192 && sf.height<=8192;
+            };
+            native_surface const *chosen=nullptr;
+            if(out.alpha && valid_surface(alpha)) chosen=&alpha;
+            else if(valid_surface(opaque)) chosen=&opaque;
+            else if(valid_surface(alpha)) chosen=&alpha;
+            if(!chosen) return out;
+            auto const id=static_cast<size_t>(chosen->texture_handle);
+            if(id==0 || id>vidmem_texture_surfaces.size()) return out;
+            auto const &surface=vidmem_texture_surfaces[id-1];
+            if(!surface || !surface->albedo_map) return out;
+            out.texture=texture_cache->get_texture_handle(*surface->albedo_map);
+            out.width=static_cast<float>(chosen->width);
+            out.height=static_cast<float>(chosen->height);
+            out.has_image=true;
+            return out;
+        }
+
+        // Separate opaque and alpha passes. Native JK no longer processes
+        // individual faces in either path: only GPU indexed ranges remain.
+        void draw_gpu_3do_preview(bool transparent)
+        {
+            if(!ogs->gpu_3do_preview_program || frame_gpu_3do_instances.empty())
                 return;
-            }
+            auto const cam=read_engine_camera();
+            if(!cam.valid) return;
 
             float far_plane=1000.0f;
-            // rdCamera::pClipFrustum is +0x48 on the supported patched exe.
-            // The near/far pair starts at offsets 4 and 8 in rdClipFrustum.
             constexpr uintptr_t current_camera=0x0073A418U;
             if(engine_camera_detail::readable(current_camera,sizeof(uintptr_t))) {
                 auto const camera_ptr=*reinterpret_cast<uintptr_t const *>(current_camera);
@@ -1841,7 +1896,6 @@ namespace jkgm {
                     }
                 }
             }
-
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
             auto const axes=[](std::array<float,3> const &v) {
@@ -1852,15 +1906,15 @@ namespace jkgm {
             prog.set_camera(axes(cam.right),axes(cam.forward),axes(cam.up),
                             axes(cam.position),
                             make_point(tan_half_fov,aspect,1.0f/far_plane,0.0f));
-            for(auto const &inst:instances) {
+            for(auto const &inst:frame_gpu_3do_instances) {
                 auto it=gpu_3do_gl_cache.find(inst.id);
                 if(it==gpu_3do_gl_cache.end()) {
                     if(!inst.geometry) continue;
-                    // GL buffers outlive per-frame instances and camera motion.
                     auto ptr=std::make_unique<gpu_3do_gl_mesh>(*inst.geometry);
                     it=gpu_3do_gl_cache.emplace(inst.id,std::move(ptr)).first;
-                    LOG_INFO("GPU 3DO prototype: uploaded mesh id=",inst.id,
-                             " triangles=",it->second->num_indices/3);
+                    LOG_INFO("GPU 3DO: uploaded face-corner mesh id=",inst.id,
+                             " triangles=",it->second->num_indices/3,
+                             " MAT groups=",inst.geometry->groups.size());
                 }
                 auto const &m=inst.transform;
                 prog.set_model(make_point(m[0],m[1],m[2],0.0f),
@@ -1868,8 +1922,17 @@ namespace jkgm {
                                make_point(m[6],m[7],m[8],0.0f),
                                make_point(m[9],m[10],m[11],1.0f));
                 gl::bind_vertex_array(it->second->vao);
-                gl::draw_elements(gl::element_type::triangles,
-                                  it->second->num_indices,gl::index_type::uint32);
+                for(auto const &group:inst.geometry->groups) {
+                    auto const tex=resolve_gpu_3do_material(group);
+                    bool const group_alpha=(group.face_type&0x2U)!=0 || tex.alpha;
+                    if(group_alpha!=transparent) continue;
+                    gl::set_active_texture_unit(0);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,tex.texture);
+                    prog.set_surface(tex.has_image,tex.width,tex.height,transparent);
+                    gl::draw_elements(gl::element_type::triangles,group.count,
+                                      gl::index_type::uint32,
+                                      static_cast<ptrdiff_t>(group.offset*sizeof(uint32_t)));
+                }
             }
         }
 
@@ -1938,7 +2001,7 @@ namespace jkgm {
 
             // GPU preview changes the active GL shader. Render it LAST within
             // the opaque pass, after all batches that expect game_opaque_pass.
-            draw_gpu_3do_preview();
+            draw_gpu_3do_preview(false);
         }
 
         void draw_game_opaque_composite()
@@ -2044,6 +2107,10 @@ namespace jkgm {
                        /*force opaque*/ false,
                        posterize_lighting,
                        batch_blend_filter::special);
+
+            // GPU-resident 3DO translucent faces join the existing alpha pass.
+            draw_gpu_3do_preview(true);
+            ogs->game_transparency_pass_program.use_program();
 
             // Redraw gun overlay after z-clear
             gl::set_depth_mask(true);
@@ -2394,6 +2461,9 @@ namespace jkgm {
                     world_transparent_batch.size() + gun_transparent_batch.size();
             }
 
+            // Consume once, then render both opaque and translucent subsets.
+            // Keeping one frame snapshot avoids losing the second pass.
+            frame_gpu_3do_instances=consume_gpu_3do_instances();
             animation_seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - animation_epoch).count();
             {
@@ -2455,6 +2525,7 @@ namespace jkgm {
             }
 
             // Reset state:
+            frame_gpu_3do_instances.clear();
             is_gun = false;
             is_transparent = false;
             current_triangle_batch = &world_batch;
