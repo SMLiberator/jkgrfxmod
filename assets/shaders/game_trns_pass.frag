@@ -207,7 +207,8 @@ vec3 compute_reflection(vec3 base_color, vec2 texcoords, vec3 view_normal,
     }
 
     // Preserve existing roughness->mip blur approximation.
-    vec2 env_size = vec2(textureSize(env_transition.x > 0.5 ? env_map : env_map2, 0));
+    vec2 env_size = env_transition.x > 0.5
+        ? vec2(textureSize(env_map, 0)) : vec2(textureSize(env_map2, 0));
     float lod = clamp(roughness, 0.0, 1.0) * log2(max(max(env_size.x, env_size.y), 1.0));
     vec3 env_from = vec3(0.0);
     vec3 env_to = vec3(0.0);
