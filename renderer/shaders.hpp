@@ -48,6 +48,8 @@ namespace jkgm {
             gl::uniform_location_id fluid_thickness;
 
             gl::uniform_location_id albedo_map;
+            gl::uniform_location_id albedo_map2;
+            gl::uniform_location_id albedo_transition;
             gl::uniform_location_id albedo_factor;
 
             gl::uniform_location_id emissive_map;
@@ -70,6 +72,8 @@ namespace jkgm {
 
             gl::uniform_location_id surface_map;
             gl::uniform_location_id env_map;
+            gl::uniform_location_id env_map2;
+            gl::uniform_location_id env_transition;
             gl::uniform_location_id reflection_params;
             gl::uniform_location_id env_params;
             gl::uniform_location_id sun_direction;
@@ -96,6 +100,7 @@ namespace jkgm {
             void set_scene_depth_sampler(int sampler);
 
             void set_albedo_map_sampler(int sampler);
+            void set_albedo_transition(int sampler, point<4, float> params);
             void set_albedo_factor(color factor);
 
             void set_emissive_map_sampler(int sampler);
@@ -112,6 +117,7 @@ namespace jkgm {
             void set_displacement_map_sampler(int sampler);
             void set_surface_map_sampler(int sampler);
             void set_env_map_sampler(int sampler);
+            void set_env_transition(int sampler, point<4, float> params);
 
             // reflection = (strength, roughness, metalness, has surface map)
             // env        = (has environment image, unused, unused, unused)
