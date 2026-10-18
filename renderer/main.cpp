@@ -7,6 +7,7 @@
 #include "postfx.hpp"
 #include "renderer.hpp"
 #include "runtime_material.hpp"
+#include "engine_material_debug.hpp"
 #include "sun.hpp"
 #include <Windows.h>
 #include <algorithm>
@@ -581,6 +582,19 @@ namespace {
         jkgm::get_peripheral_blur_settings() = jkgm::peripheral_blur_settings();
     }
 
+    // Associate commands issued from a level's startup COG with that world
+    // *before* the renderer's next frame notices the level transition.
+    jkgm::runtime_material_controls &cog_material_controls()
+    {
+        uint32_t world = 0;
+        if(jkgm::engine_material_debug::matches_tested_executable() &&
+           jkgm::engine_material_debug::read_object(
+               jkgm::engine_material_debug::current_world_global, world)) {
+            jkgm::get_runtime_material_controls().prepare_world(world);
+        }
+        return jkgm::get_runtime_material_controls();
+    }
+
     // Runtime material effects use packed JK MAT indices. This is the same
     // integer embedded in a COG material variable; PopMaterial in the engine
     // returns its native pointer, but PopInt returns its stable numeric index.
@@ -600,14 +614,14 @@ namespace {
         int image = cog_pop_int(ctx);
         int source = cog_pop_int(ctx);
         if(valid_mat_index(source) && valid_image_id(image)) {
-            jkgm::get_runtime_material_controls().set_global_env(
+            cog_material_controls().set_global_env(
                 static_cast<uint32_t>(source), image, fade);
         }
     }
 
     void __cdecl cog_reset_global_env_map(void *ctx)
     {
-        jkgm::get_runtime_material_controls().reset_global_env(cog_pop_float(ctx));
+        cog_material_controls().reset_global_env(cog_pop_float(ctx));
     }
 
     void __cdecl cog_set_mat_env_map(void *ctx)
@@ -616,7 +630,7 @@ namespace {
         int image = cog_pop_int(ctx);
         int mat = cog_pop_int(ctx);
         if(valid_mat_index(mat) && valid_image_id(image)) {
-            jkgm::get_runtime_material_controls().set_mat_env(
+            cog_material_controls().set_mat_env(
                 static_cast<uint32_t>(mat), static_cast<uint32_t>(mat), image, fade);
         }
     }
@@ -629,7 +643,7 @@ namespace {
         int source = cog_pop_int(ctx);
         int target = cog_pop_int(ctx);
         if(valid_mat_index(target) && valid_mat_index(source) && valid_image_id(image)) {
-            jkgm::get_runtime_material_controls().set_mat_env(
+            cog_material_controls().set_mat_env(
                 static_cast<uint32_t>(target), static_cast<uint32_t>(source), image, fade);
         }
     }
@@ -639,7 +653,7 @@ namespace {
         float fade = cog_pop_float(ctx);
         int mat = cog_pop_int(ctx);
         if(valid_mat_index(mat)) {
-            jkgm::get_runtime_material_controls().reset_mat_env(
+            cog_material_controls().reset_mat_env(
                 static_cast<uint32_t>(mat), fade);
         }
     }
@@ -650,7 +664,7 @@ namespace {
         int image = cog_pop_int(ctx);
         int mat = cog_pop_int(ctx);
         if(valid_mat_index(mat) && valid_image_id(image)) {
-            jkgm::get_runtime_material_controls().set_mat_albedo(
+            cog_material_controls().set_mat_albedo(
                 static_cast<uint32_t>(mat), image, fade);
         }
     }
@@ -660,7 +674,7 @@ namespace {
         float fade = cog_pop_float(ctx);
         int mat = cog_pop_int(ctx);
         if(valid_mat_index(mat)) {
-            jkgm::get_runtime_material_controls().reset_mat_albedo(
+            cog_material_controls().reset_mat_albedo(
                 static_cast<uint32_t>(mat), fade);
         }
     }
@@ -675,7 +689,7 @@ namespace {
            !std::isfinite(rgb[0]) || !std::isfinite(rgb[1]) || !std::isfinite(rgb[2])) {
             return;
         }
-        jkgm::get_runtime_material_controls().set_mat_color(
+        cog_material_controls().set_mat_color(
             static_cast<uint32_t>(mat),
             {{clamp_float(rgb[0], 0.0f, 4.0f),
               clamp_float(rgb[1], 0.0f, 4.0f),
@@ -688,7 +702,7 @@ namespace {
         float fade = cog_pop_float(ctx);
         int mat = cog_pop_int(ctx);
         if(valid_mat_index(mat)) {
-            jkgm::get_runtime_material_controls().reset_mat_color(
+            cog_material_controls().reset_mat_color(
                 static_cast<uint32_t>(mat), fade);
         }
     }

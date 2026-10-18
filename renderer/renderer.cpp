@@ -652,9 +652,11 @@ namespace jkgm {
             }
             if(state.current_world && runtime_current_world &&
                state.current_world != runtime_current_world) {
-                LOG_DEBUG("JK material overrides cleared on level change");
-                get_runtime_material_controls().reset_all();
-                runtime_controls = {};
+                // Stale commands are cleared by prepare_world. A startup COG
+                // may already have queued *new-world* commands; preserve them.
+                get_runtime_material_controls().prepare_world(state.current_world);
+                runtime_controls = get_runtime_material_controls().snapshot();
+                LOG_DEBUG("JK material image cache cleared on level change");
                 for(auto const &image : runtime_images) {
                     texture_cache->release_srgb_texture(image.second);
                 }
@@ -663,6 +665,8 @@ namespace jkgm {
             }
             if(state.current_world) {
                 runtime_current_world = state.current_world;
+                get_runtime_material_controls().prepare_world(state.current_world);
+                runtime_controls = get_runtime_material_controls().snapshot();
             }
 
             runtime_mat_by_handle.clear();

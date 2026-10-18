@@ -65,8 +65,18 @@ struct runtime_material_snapshot {
 class runtime_material_controls {
     mutable std::mutex lock_;
     runtime_material_snapshot state_;
+    uint32_t observed_world_ = 0;
 
 public:
+    void prepare_world(uint32_t current_world)
+    {
+        if(!current_world) return;
+        std::lock_guard<std::mutex> guard(lock_);
+        if(observed_world_ && observed_world_ != current_world) {
+            state_ = {};
+        }
+        observed_world_ = current_world;
+    }
     runtime_material_snapshot snapshot() const
     {
         std::lock_guard<std::mutex> guard(lock_);
