@@ -659,6 +659,11 @@ namespace jkgm {
             }
 
             bool const new_command = last_runtime_revision != runtime_controls.revision;
+            if(new_command || force_runtime_refresh) {
+                // The first few cache probes after an upload, new command or
+                // unpause run at 100 ms intervals, not the normal one second.
+                runtime_fast_retries = 0;
+            }
             auto const now = std::chrono::steady_clock::now();
             auto const retry_interval = runtime_fast_retries < 10
                 ? std::chrono::milliseconds(100) : std::chrono::milliseconds(1000);
