@@ -18,6 +18,7 @@
 #include <bitset>
 #include <cmath>
 #include <set>
+#include <map>
 
 namespace jkgm {
     enum class out_material_alpha_mode { blend, mask };
@@ -83,6 +84,9 @@ namespace jkgm {
         std::optional<std::string> comment;
         std::optional<std::string> environment_map;
 
+        // Images remain addressable by pack-local COG integer IDs even if no
+        // compiled material refers to them.
+        std::map<int, std::string> images;
         std::vector<std::unique_ptr<out_material>> materials;
     };
 
@@ -840,6 +844,14 @@ namespace jkgm {
             doc["environment_map"] = *pack.environment_map;
         }
 
+        // Optional: absent in legacy packs, whose metadata stays valid.
+        if(!pack.images.empty()) {
+            doc["images"] = json::json::array();
+            for(auto const &entry : pack.images) {
+                doc["images"].push_back({{"id", entry.first}, {"file", entry.second}});
+            }
+        }
+
         // Add material mappings
         for(auto const &em : pack.materials) {
             doc["materials"].push_back(write_packfile_material(*em));
@@ -970,6 +982,41 @@ namespace jkgm {
                 catch(std::exception const &e) {
                     LOG_ERROR("Failed to process the environment map: ", e.what());
                     return EXIT_FAILURE;
+                }
+            }
+
+            // Pack-local image registry for runtime COG material overrides.
+            // Images use the standard color pipeline (sRGB + premultiplied
+            // alpha); they need not appear in any compiled material.
+            if(script_doc.contains("images")) {
+                if(!script_doc["images"].is_array()) {
+                    LOG_ERROR("Pack images must be an array of {id, file} entries");
+                    return EXIT_FAILURE;
+                }
+                for(auto const &img : script_doc["images"]) {
+                    if(!img.is_object() || !img.contains("id") ||
+                       !img["id"].is_number_integer() ||
+                       !img.contains("file") || !img["file"].is_string()) {
+                        LOG_ERROR("Invalid pack image; expected {id: integer, file: filename}");
+                        return EXIT_FAILURE;
+                    }
+                    int id = img["id"].get<int>();
+                    if(id < 0 || id > 65535 || pack.images.count(id)) {
+                        LOG_ERROR("Duplicate or out-of-range pack image ID ", id);
+                        return EXIT_FAILURE;
+                    }
+                    auto const filename = img["file"].get<std::string>();
+                    try {
+                        std::string const outname = str(fmt("image_", id, ".png"));
+                        auto converted = get_convert_image(
+                            &img_map, script_path.parent_path() / filename,
+                            outname, output_path / outname);
+                        pack.images.emplace(id, std::move(converted));
+                    }
+                    catch(std::exception const &e) {
+                        LOG_ERROR("Cannot compile pack image ", id, ": ", e.what());
+                        return EXIT_FAILURE;
+                    }
                 }
             }
 

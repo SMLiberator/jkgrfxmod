@@ -121,6 +121,12 @@ namespace jkgm {
                 return materials.get_material(sig);
             }
 
+            std::optional<fs::path> get_pack_image(fs::path const &pack,
+                                                   int image_id) const override
+            {
+                return materials.get_pack_image(pack, image_id);
+            }
+
             std::optional<srgb_texture_id> get_existing_free_srgb_texture(size<2, int> const &dims)
             {
                 for(size_t i = 0; i < srgb_textures.size(); ++i) {

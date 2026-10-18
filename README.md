@@ -536,3 +536,57 @@ The Windows CI artifact `jkgrfxmod-reflection-fastpath-test` contains
 Install them in the corresponding game directories after backing up the
 existing files. A DLL-only swap does **not** activate the shader fast path.
 Keep using your patched JK executable; this PR does not change it.
+
+## Experimental runtime MAT material controls
+
+Material packs may now declare optional **pack-local** numeric image IDs in their
+source script. These images are copied and converted with the regular sRGB
+premultiplied-alpha pipeline even when they are not referenced by any material.
+Old compiled packs with no `images` field remain valid.
+
+```json
+{ "name":"Example", "description":"COG-controlled material images",
+  "images":[{"id":1,"file":"sky.png"},{"id":2,"file":"paint_blue.png"}],
+  "materials":[{"name":"paint","replaces":["carpaint.mat"],"reflection_strength":1.0}] }
+```
+
+Recompile the pack with the `compile.exe` from this experimental build. Its
+compiled `metadata.json` includes `images` and the packaged image files.
+IDs range from 0 to 65535 and are unique within each material pack.
+
+| COG verb | Effect |
+| --- | --- |
+| `SetGlobalEnvMap(sourceMat, imageID, fadeTime)` | EnvMap from source MAT's pack on all replacement materials without an explicit EnvMap, across packs |
+| `ResetGlobalEnvMap(fadeTime)` | Return to pack defaults |
+| `SetMatEnvMap(mat, imageID, fadeTime)` | Per-native-MAT EnvMap override |
+| `SetMatEnvMapFrom(mat, sourceMat, imageID, fadeTime)` | Per-MAT EnvMap from another MAT's pack |
+| `ResetMatEnvMap(mat, fadeTime)` | Return to global or pack default |
+| `SetMaterialAlbedo(mat, imageID, fadeTime)` | Change all cels' albedo using the MAT's own pack IDs |
+| `ResetMaterialAlbedo(mat, fadeTime)` | Restore original/replacement albedo |
+| `SetMaterialColor(mat, rgb, fadeTime)` | Multiply base albedo RGB by a vector with components from 0 to 4 |
+| `ResetMaterialColor(mat, fadeTime)` | Fade the RGB multiplier back to (1,1,1) |
+
+```c
+// Example COG calls, using a material symbol `carpaint`:
+SetMatEnvMap(carpaint, 1, 1.5);
+SetMaterialAlbedo(carpaint, 2, 0.75);
+SetMaterialColor(carpaint, '0.8 1.0 1.0', 0.75);
+ResetMaterialAlbedo(carpaint, 1.0);
+```
+
+MATs and all cels are resolved through the validated native JK material
+tables. Source MATs need at least one mapped replacement texture to identify
+their originating pack. A command remains pending if the relevant texture
+has not yet been uploaded. World changes clear commands to avoid handle reuse.
+An image fade samples two 2D images; interrupting a fade currently starts
+the new transition from the prior target instead of a three-way composite.
+EnvMaps in this renderer are equirectangular 2D images, not cubemap arrays.
+`enable_reflections=false` continues to disable runtime reflections.
+
+### Testing installation
+
+The CI artifact `jkgrfxmod-material-runtime-test` includes `renderer.dll`,
+`compile.exe`, and both updated GLSL shaders under `jkgm/shaders`.
+Install the two shader files along with the DLL; otherwise the new image
+transition uniforms are unavailable. The test remains experimental until
+the shader paths and COG semantics are verified in game.

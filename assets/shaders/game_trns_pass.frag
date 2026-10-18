@@ -3,6 +3,8 @@
 uniform vec4 features;
 
 uniform sampler2D albedo_map;
+uniform sampler2D albedo_map2;
+uniform vec4 albedo_transition; // x=second map present, y=blend, z=active, w=unused
 uniform vec4 albedo_factor;
 
 uniform sampler2D emissive_map;
@@ -51,6 +53,8 @@ float fog_factor(float dist)
 // ---------------------------------------------------------------------------
 uniform sampler2D surface_map;   // R=reflectivity, G=roughness, B=metalness (linear)
 uniform sampler2D env_map;       // equirectangular environment image
+uniform sampler2D env_map2;      // replacement target for crossfade
+uniform vec4 env_transition;     // x=from present, y=to present, z=blend, w=unused
 uniform vec4 reflection_params; // x=strength, y=roughness, z=metalness, w=has surface map
 uniform vec4 env_params;        // x=has environment image, y=reflection mode (0 envmap, 1 screen fallback, 2 fixed, 3 matcap)
 uniform vec4 camera_right;      // xyz=camera right in world space, w=1 if available
@@ -146,7 +150,10 @@ vec3 compute_reflection(vec3 base_color, vec2 texcoords, vec3 view_normal,
         roughness *= surface.g;
         metalness *= surface.b;
     }
-    metalness = clamp(metalness, 0.0, 1.0);
+    // Avoid suppressing diffuse instantly when an EnvMap is faded in from black,
+    // or keeping metal suppression after its EnvMap has faded out.
+    metalness = clamp(metalness, 0.0, 1.0) *
+                mix(env_transition.x, env_transition.y, env_transition.z);
 
     bool have_camera = camera_right.w > 0.5;
     float h_scale = have_camera ? view_params.x : tan(radians(REFLECTION_HFOV_DEGREES) * 0.5);
@@ -203,9 +210,18 @@ vec3 compute_reflection(vec3 base_color, vec2 texcoords, vec3 view_normal,
     }
 
     // Preserve existing roughness->mip blur approximation.
-    vec2 env_size = vec2(textureSize(env_map, 0));
-    float lod = clamp(roughness, 0.0, 1.0) * log2(max(env_size.x, env_size.y));
-    vec3 env = textureLod(env_map, uv, lod).rgb * ENV_INTENSITY;
+    vec2 env_size = env_transition.x > 0.5
+        ? vec2(textureSize(env_map, 0)) : vec2(textureSize(env_map2, 0));
+    float lod = clamp(roughness, 0.0, 1.0) * log2(max(max(env_size.x, env_size.y), 1.0));
+    vec3 env_from = vec3(0.0);
+    vec3 env_to = vec3(0.0);
+    if(env_transition.z < 1.0 && env_transition.x > 0.5) {
+        env_from = textureLod(env_map, uv, lod).rgb;
+    }
+    if(env_transition.z > 0.0 && env_transition.y > 0.5) {
+        env_to = textureLod(env_map2, uv, lod).rgb;
+    }
+    vec3 env = mix(env_from, env_to, env_transition.z) * ENV_INTENSITY;
 
     if(REFLECTION_DEBUG == 3) {
         return env;
@@ -380,8 +396,13 @@ void main()
         adj_texcoords = parallax_mapping(vp_texcoords);
     }
 
-    vec4 albedo_map_sample = texture(albedo_map, adj_texcoords + albedo_uv_offset);
-    albedo_map_sample = mix(vec4(1.0), albedo_map_sample, features.x);
+    vec4 albedo_map_sample = features.x > 0.5
+        ? texture(albedo_map, adj_texcoords + albedo_uv_offset) : vec4(1.0);
+    if(albedo_transition.z > 0.5) {
+        vec4 target = albedo_transition.x > 0.5
+            ? texture(albedo_map2, adj_texcoords + albedo_uv_offset) : vec4(1.0);
+        albedo_map_sample = mix(albedo_map_sample, target, albedo_transition.y);
+    }
 
     if(features.z > 0.5) {
         if(albedo_map_sample.a < alpha_cutoff) {
