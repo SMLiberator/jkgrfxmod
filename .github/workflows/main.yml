@@ -43,9 +43,9 @@ jobs:
         New-Item -ItemType Directory -Path 'test-build/jkgm/shaders' -Force | Out-Null
         Copy-Item 'assets/shaders/game_opaque_pass.frag' 'test-build/jkgm/shaders/' -Force
         Copy-Item 'assets/shaders/game_trns_pass.frag' 'test-build/jkgm/shaders/' -Force
-    - name: Upload material runtime test build
+    - name: Upload frame profiler test build
       uses: actions/upload-artifact@v4
       with:
-        name: jkgrfxmod-material-runtime-test
+        name: jkgrfxmod-frame-profile-test
         path: test-build/*
         if-no-files-found: error

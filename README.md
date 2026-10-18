@@ -620,3 +620,34 @@ for the material and reset COG verbs, even if it is `0.0`.
 
 Repeated set/reset sequences are exercised by the lightweight native
 `tests/runtime_material_state.cpp` regression test in Windows CI.
+
+## Optional CPU/geometry frame profiler
+
+Set `"profile_renderer": true` in `jkgm.json` and configure `log_path`.
+It emits four `PERF` log lines about every two seconds, reporting:
+
+- **frame_period_us**: CPU wall-clock interval between consecutive game
+  presentations (includes JK simulation, synchronization and other uninstrumented work)
+- **submit_us**: wall-clock time inside the mod's `present_game`
+- **execute_us**: summed CPU time decoding all Direct3D execute buffers
+- **sorting_us**: independent opaque/material and transparent/spatial sorting;
+  the log also records maximum sort time in the window
+- **upload_us**: preparing and uploading geometry vertex buffers
+- **passes_us**: the opaque/SSAO/compositing render pass and transparency pass
+- **post_swap**: postprocessing and `SwapBuffers` (may include GPU synchronization)
+- **triangles**, **transparent_avg**, **draw_batches_avg**, **material_binds_avg**:
+  submitted triangles, GL triangle draw calls and renderer material binding calls
+
+All times are **microseconds per frame, CPU-side**, unless explicitly marked peak.
+For example, 10000 us = 10 ms. These timers do **not** measure GPU execution
+time and their stage totals need not sum to the full frame period. The post/swap
+and draw pass timings can include driver waits. When profiling is enabled, the
+old periodic native MAT diagnostic scan is suppressed to reduce noise.
+
+For comparative measurements: set `enable_vsync: false`; compare the exact
+same camera position and resolution in (1) a small enclosed scene, (2) a large
+open scene, (3) the same large scene with reflections/parallax/SSAO disabled.
+Then repeat at half render resolution. Keep both shader versions and game
+position identical. Compare the averages and peak values, not a single FPS
+sample. Setting `profile_renderer: false` returns the normal low-overhead
+path. If `log_path` is unset, the measurements will not be persisted to disk.

@@ -1,6 +1,7 @@
 #pragma once
 // Optional CPU submission timings: NOT GPU elapsed time.
 #include <array>
+#include <cstddef>
 #include <chrono>
 #include <cstdint>
 namespace jkgm {
