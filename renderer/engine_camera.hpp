@@ -3,6 +3,7 @@
 #include "base/log.hpp"
 #include "engine_camera_data.hpp"
 #include "shaders.hpp"
+#include "sun.hpp"
 #include <Windows.h>
 #include <cmath>
 #include <cstdint>
@@ -129,7 +130,11 @@ namespace jkgm {
     inline void apply_engine_camera(shaders::game_pass_shader &shader)
     {
         auto const cam = read_engine_camera();
+        auto const &sun = get_sun_settings();
         if(!cam.valid) {
+            // Without camera orientation we cannot apply a world-space sun.
+            shader.set_sun(make_point(0.0f, 0.0f, 1.0f, 0.0f),
+                           make_point(0.0f, 0.0f, 0.0f, 0.0f));
             // w = 0 tells the shader that no camera is available
             shader.set_camera(make_point(1.0f, 0.0f, 0.0f, 0.0f),
                               make_point(0.0f, 1.0f, 0.0f, 0.0f),
@@ -141,6 +146,17 @@ namespace jkgm {
         // The engine's FOV is horizontal, so tan(fov / 2) is how far to the screen's side edge
         // a view ray reaches per unit of depth
         float const half_fov = cam.fov * 0.5f * 3.14159265358979f / 180.0f;
+
+        // Convert world X/Y/Z to view right/up/forward using camera axes.
+        auto const dir = normalized_sun_direction(sun.direction.value());
+        auto const project = [&](std::array<float, 3> const &axis) {
+            return dir[0]*axis[0] + dir[1]*axis[1] + dir[2]*axis[2];
+        };
+        auto const rgb = sun.color.value();
+        shader.set_sun(make_point(project(cam.right), project(cam.up),
+                                  project(cam.forward), 1.0f),
+                       make_point(rgb[0], rgb[1], rgb[2],
+                                  sun.intensity.value()[0]));
 
         shader.set_camera(make_point(cam.right[0], cam.right[1], cam.right[2], 1.0f),
                           make_point(cam.forward[0], cam.forward[1], cam.forward[2], 1.0f),

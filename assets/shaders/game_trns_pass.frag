@@ -222,6 +222,66 @@ vec3 compute_reflection(vec3 base_color, vec2 texcoords, vec3 view_normal,
     return env * fresnel * strength;
 }
 
+// One global COG-controlled directional sun. Only the specular term is
+// affected: the original Jedi Knight vertex lighting stays unchanged.
+uniform vec4 sun_direction;       // xyz unit view-space direction, w camera valid
+uniform vec4 sun_color_intensity; // RGB linear color, w intensity
+
+vec3 compute_sun_specular(vec3 base_color, vec2 texcoords, vec3 mapped_normal)
+{
+    if(sun_direction.w < 0.5 || sun_color_intensity.w <= 0.0 ||
+       reflection_params.x <= 0.0) {
+        return vec3(0.0);
+    }
+
+    float strength = reflection_params.x;
+    float roughness = reflection_params.y;
+    float metalness = reflection_params.z;
+    if(reflection_params.w > 0.5) {
+        vec3 surface = texture(surface_map, texcoords).rgb;
+        strength *= surface.r;
+        roughness *= surface.g;
+        metalness *= surface.b;
+    }
+    if(strength <= 0.0) {
+        return vec3(0.0);
+    }
+    metalness = clamp(metalness, 0.0, 1.0);
+
+    // Engine vertex XY is scaled by projection; restore metric view axes.
+    float hscale = view_params.x;
+    float aspect = screen_resolution.x / max(screen_resolution.y, 1.0);
+    vec3 view_pos = vec3(vp_pos.xy * vec2(hscale, hscale / aspect), vp_pos.z);
+    vec3 V = -normalize(view_pos);
+    vec3 N = normalize(mapped_normal);
+    if(dot(N, V) < 0.0) N = -N;
+    vec3 L = normalize(sun_direction.xyz);
+    float NdotL = max(dot(N,L), 0.0);
+    float NdotV = max(dot(N,V), 0.0);
+    if(NdotL <= 0.0 || NdotV <= 0.0) return vec3(0.0);
+
+    vec3 H = normalize(L + V);
+    float NdotH = max(dot(N,H), 0.0);
+    float VdotH = max(dot(V,H), 0.0);
+
+    // GGX normal distribution + Schlick/Smith geometry.
+    float r = clamp(roughness, 0.08, 1.0);
+    float a = r*r;
+    float a2 = a*a;
+    float d = NdotH*NdotH*(a2 - 1.0) + 1.0;
+    float D = a2 / (REFLECTION_PI * d * d);
+    float k = (r+1.0)*(r+1.0) / 8.0;
+    float Gv = NdotV / (NdotV*(1.0-k) + k);
+    float Gl = NdotL / (NdotL*(1.0-k) + k);
+
+    vec3 F0 = mix(vec3(DIELECTRIC_F0), clamp(base_color,0.0,1.0), metalness);
+    vec3 F = F0 + (vec3(1.0)-F0)*pow(1.0-VdotH, 5.0);
+    vec3 spec = F * (D*Gv*Gl / max(4.0*NdotV,0.0001));
+    // NdotL is already cancelled out from BRDF*incoming radiance.
+    return min(spec * sun_color_intensity.rgb *
+               sun_color_intensity.w * strength, vec3(32.0));
+}
+
 mat3 construct_tbn()
 {
     vec3 n = normalize(vp_normal);
@@ -346,6 +406,8 @@ void main()
     vec3 mapped_normal = surface_view_normal(adj_texcoords);
     vec3 reflection = compute_reflection(unlit_base_color, adj_texcoords,
                                          mapped_normal, metalness);
+    vec3 sun_specular = compute_sun_specular(unlit_base_color, adj_texcoords,
+                                             mapped_normal);
 
     // Preserve the original transparency blending convention:
     // (ONE, ONE_MINUS_SRC_ALPHA), not premultiplied color twice.
@@ -354,7 +416,7 @@ void main()
                          mix(1.0, albedo.a, TRANSLUCENT_COLOR_ALPHA_WEIGHT);
     vec3 lit = surface_color * (1.0 - fog_amount) + fog_color * (fog_amount * albedo.a);
 
-    vec3 color = emissive + reflection * (1.0 - fog_amount) + lit;
+    vec3 color = emissive + (reflection + sun_specular) * (1.0 - fog_amount) + lit;
 
     if(blend_mode == 1) {
         // Additive: RGB is the emitted contribution. The engine already
@@ -377,7 +439,7 @@ void main()
         vec3 pigment = albedo_map_sample.rgb * albedo_factor.rgb *
                        unpremultiplied_vertex;
         vec3 tint = clamp(pigment * (1.0 - metalness) + emissive +
-                          reflection * (1.0 - fog_amount), 0.0, 1.0);
+                          (reflection + sun_specular) * (1.0 - fog_amount), 0.0, 1.0);
         float opacity = clamp(albedo.a, 0.0, 1.0);
         out_color = vec4(mix(vec3(1.0), tint, opacity), 0.0);
     }
@@ -415,7 +477,7 @@ void main()
         // Reflection and emission deliberately do NOT fade with depth.
         // ONE / ONE_MINUS_SRC_ALPHA blending preserves them over shallow
         // liquid where the albedo itself becomes almost transparent.
-        vec3 specular = emissive + reflection * (1.0 - fog_amount);
+        vec3 specular = emissive + (reflection + sun_specular) * (1.0 - fog_amount);
         out_color = vec4(diffuse + specular, opacity);
     }
     else {

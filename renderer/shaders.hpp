@@ -72,6 +72,8 @@ namespace jkgm {
             gl::uniform_location_id env_map;
             gl::uniform_location_id reflection_params;
             gl::uniform_location_id env_params;
+            gl::uniform_location_id sun_direction;
+            gl::uniform_location_id sun_color_intensity;
 
             gl::uniform_location_id camera_right;
             gl::uniform_location_id camera_forward;
@@ -117,6 +119,9 @@ namespace jkgm {
 
             // The engine's camera: its axes in world space (w = 1 if available, 0 if not), and
             // view = (tan of half the horizontal field of view, unused, unused, unused)
+            // Direction in view-space (toward sun), with w=0 when camera invalid.
+            // Color intensity is linear RGB plus brightness in w.
+            void set_sun(point<4, float> direction, point<4, float> color_intensity);
             void set_camera(point<4, float> right,
                             point<4, float> forward,
                             point<4, float> up,

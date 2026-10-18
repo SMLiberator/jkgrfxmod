@@ -6,11 +6,13 @@
 #include "fog.hpp"
 #include "postfx.hpp"
 #include "renderer.hpp"
+#include "sun.hpp"
 #include <Windows.h>
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
 #include <detours/detours.h>
 
 static std::unique_ptr<jkgm::renderer> the_renderer;
@@ -330,6 +332,61 @@ namespace {
         jkgm::get_fog_settings() = jkgm::fog_settings();
     }
 
+    // SetSunInfo(vector direction, vector color, float intensity, float animTime)
+    // Direction points TOWARD the sun in world space; color is normalized RGB.
+    void __cdecl cog_set_sun_info(void *ctx)
+    {
+        float const duration = cog_pop_float(ctx);
+        float const intensity = cog_pop_float(ctx);
+        float rgb[3] = {1.0f, 1.0f, 1.0f};
+        float dir[3] = {0.0f, 0.0f, 1.0f};
+        cog_pop_vector(ctx, rgb);
+        cog_pop_vector(ctx, dir);
+
+        if(!std::isfinite(intensity) || !std::isfinite(rgb[0]) ||
+           !std::isfinite(rgb[1]) || !std::isfinite(rgb[2]) ||
+           !std::isfinite(dir[0]) || !std::isfinite(dir[1]) ||
+           !std::isfinite(dir[2])) {
+            LOG_WARNING("SetSunInfo received non-finite arguments");
+            return;
+        }
+        float const sq = dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2];
+        if(!(sq > 1.0e-10f) || !std::isfinite(sq)) {
+            LOG_WARNING("SetSunInfo requires a nonzero finite direction");
+            return;
+        }
+
+        auto const unit = jkgm::normalized_sun_direction({dir[0],dir[1],dir[2]});
+        auto const now = jkgm::effect_clock_now();
+        float const time = std::isfinite(duration) ? std::max(duration, 0.0f) : 0.0f;
+        auto &sun = jkgm::get_sun_settings();
+        sun.direction.fade_to(unit, time, now);
+        sun.color.fade_to({clamp_float(rgb[0], 0.0f, 1.0f),
+                           clamp_float(rgb[1], 0.0f, 1.0f),
+                           clamp_float(rgb[2], 0.0f, 1.0f)}, time, now);
+        sun.intensity.fade_to({clamp_float(intensity, 0.0f, 16.0f)}, time, now);
+    }
+
+    void __cdecl cog_get_sun_direction(void *ctx)
+    {
+        auto const dir = jkgm::normalized_sun_direction(
+            jkgm::get_sun_settings().direction.value());
+        cog_push_vector(ctx, dir.data());
+    }
+    void __cdecl cog_get_sun_color(void *ctx)
+    {
+        auto const rgb = jkgm::get_sun_settings().color.value();
+        cog_push_vector(ctx, rgb.data());
+    }
+    void __cdecl cog_get_sun_intensity(void *ctx)
+    {
+        cog_push_float(ctx, jkgm::get_sun_settings().intensity.value()[0]);
+    }
+    void __cdecl cog_reset_sun(void * /*ctx*/)
+    {
+        jkgm::get_sun_settings() = jkgm::sun_settings();
+    }
+
     // SetFilmGrain(vector params, float fadeTime)
     //   params = 'amount size rate'
     //     amount: 0.0 - 1.0, 0 turns grain off (0.05 - 0.15 is a typical range)
@@ -536,6 +593,11 @@ namespace {
         cog_verb_entry{"setfoginfo", cog_set_fog_info},
         cog_verb_entry{"getfoginfo", cog_get_fog_info},
         cog_verb_entry{"resetfog", cog_reset_fog},
+        cog_verb_entry{"setsuninfo", cog_set_sun_info},
+        cog_verb_entry{"getsundirection", cog_get_sun_direction},
+        cog_verb_entry{"getsuncolor", cog_get_sun_color},
+        cog_verb_entry{"getsunintensity", cog_get_sun_intensity},
+        cog_verb_entry{"resetsun", cog_reset_sun},
         cog_verb_entry{"setfilmgrain", cog_set_film_grain},
         cog_verb_entry{"getfilmgrain", cog_get_film_grain},
         cog_verb_entry{"resetfilmgrain", cog_reset_film_grain},
@@ -573,7 +635,7 @@ namespace {
             register_verb(ctx, verb.handler, verb.name);
         }
 
-        LOG_DEBUG("Registered fog and post-processing COG verbs");
+        LOG_DEBUG("Registered fog, sunlight, and post-processing COG verbs");
     }
 }
 
