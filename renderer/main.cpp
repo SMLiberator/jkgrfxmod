@@ -628,7 +628,7 @@ namespace {
     {
         float fade = cog_pop_float(ctx);
         cog_material_controls().reset_global_env(fade);
-        LOG_DEBUG("COG ResetGlobalEnvMap: fade=", fade);
+        LOG_DEBUG("COG ResetGlobalEnvMap: fade=", std::to_string(fade));
     }
 
     void __cdecl cog_set_mat_env_map(void *ctx)
