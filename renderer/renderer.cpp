@@ -1,4 +1,5 @@
 #include "renderer.hpp"
+#include "frame_profile.hpp"
 #include "runtime_material.hpp"
 #include "backbuffer_menu_surface.hpp"
 #include "backbuffer_surface.hpp"
@@ -417,6 +418,65 @@ namespace jkgm {
         std::set<uint32_t> runtime_missing_sources;
         bool warned_reflections_disabled = false;
 
+        profile_sample profile_frame;
+        profile_sample profile_window;
+        uint64_t profile_frames = 0, peak_period = 0, peak_present = 0;
+        uint64_t peak_sort_opaque = 0, peak_sort_trans = 0, peak_triangles = 0;
+        profile_clock::time_point last_profile_frame{};
+        profile_clock::time_point profile_window_start{};
+
+        void record_profile(profile_clock::time_point started,
+                            profile_clock::time_point finished)
+        {
+            if(!the_config->profile_renderer) return;
+            profile_frame.present_us = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(finished-started).count());
+            profile_window.add(profile_frame);
+            ++profile_frames;
+            peak_period = std::max(peak_period, profile_frame.period_us);
+            peak_present = std::max(peak_present, profile_frame.present_us);
+            peak_triangles = std::max(peak_triangles, profile_frame.tris);
+            peak_sort_opaque = std::max(peak_sort_opaque,
+                profile_frame.timings[profile_idx(profile_stage::sort_opaque)]);
+            peak_sort_trans = std::max(peak_sort_trans,
+                profile_frame.timings[profile_idx(profile_stage::sort_transparent)]);
+            profile_frame = {};
+            if(profile_window_start == profile_clock::time_point{}) {
+                profile_window_start = finished;
+                return;
+            }
+            if(finished-profile_window_start < std::chrono::seconds(2)) return;
+            const uint64_t frames = std::max<uint64_t>(profile_frames,1);
+            auto avg = [&](profile_stage stage)->uint64_t {
+                return profile_window.timings[profile_idx(stage)] / frames;
+            };
+            LOG_INFO("PERF frames=", frames,
+                     " period_us avg/peak=", profile_window.period_us / frames,
+                     "/", peak_period, " submit_us avg/peak=",
+                     profile_window.present_us / frames, "/", peak_present,
+                     " execute_us=", avg(profile_stage::execute));
+            LOG_INFO("PERF sorting_us opaque=", avg(profile_stage::sort_opaque),
+                     " transparent=", avg(profile_stage::sort_transparent),
+                     " peaks=", peak_sort_opaque, "/", peak_sort_trans,
+                     " upload_us=", avg(profile_stage::upload),
+                     " nativeMAT_us=", avg(profile_stage::mat_resolve));
+            LOG_INFO("PERF passes_us opaque=", avg(profile_stage::opaque_pass),
+                     " transparent=", avg(profile_stage::transparent_pass),
+                     " post_swap=", avg(profile_stage::present_swap),
+                     " HUDupload=", avg(profile_stage::hud_upload),
+                     " HUDdraw=", avg(profile_stage::hud_draw));
+            LOG_INFO("PERF geometry tris avg/max=", profile_window.tris / frames,
+                     "/", peak_triangles,
+                     " transparent_avg=", profile_window.trans_tris / frames,
+                     " draw_batches_avg=", profile_window.draw_batches / frames,
+                     " material_binds_avg=", profile_window.binds / frames);
+            profile_window = {};
+            profile_frames = peak_period = peak_present = 0;
+            peak_sort_opaque = peak_sort_trans = peak_triangles = 0;
+            profile_window_start = finished;
+        }
+
+
         using timestamp_t = std::chrono::high_resolution_clock::time_point;
         timestamp_t menu_prev_ticks;
         timestamp_t menu_curr_ticks;
@@ -467,6 +527,13 @@ namespace jkgm {
         void set_renderer_mode(renderer_mode mode) override
         {
             if(this->mode != mode) {
+                if(the_config->profile_renderer) {
+                    last_profile_frame = {};
+                    profile_window_start = {};
+                    profile_window = {};
+                    profile_frame = {};
+                    profile_frames = 0;
+                }
                 // Pausing/menu transitions may evict and reload D3D textures.
                 // Refresh the native MAT resolver on the next game frame,
                 // instead of letting the previous one-second timer cause a flash.
@@ -950,8 +1017,8 @@ namespace jkgm {
 
         void end_frame()
         {
-            if(mode == renderer_mode::ingame) {
-                log_mat_links();
+            if(mode == renderer_mode::ingame && !the_config->profile_renderer) {
+                log_mat_links(); // Don't add diagnostic scans to profiling overhead.
             }
             // Compose renderbuffer onto window:
             frame_screen->end_frame();
@@ -1302,6 +1369,7 @@ namespace jkgm {
                            bool force_opaque,
                            bool posterize_lighting)
         {
+            if(the_config->profile_renderer) ++profile_frame.binds;
             // Only the transparent shader actually declares blend_mode; setting
             // it on the opaque shader is ignored (uniform location -1).
             auto const blend_mode = get_material_blend_mode(id);
@@ -1588,7 +1656,8 @@ namespace jkgm {
                                 (filter == batch_blend_filter::special ? special : !special);
                 if(!selected) {
                     if(num_verts > 0) {
-                        gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
+                        if(the_config->profile_renderer) ++profile_frame.draw_batches;
+                gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
                         curr_offset += num_verts;
                         num_verts = 0U;
                     }
@@ -1598,7 +1667,8 @@ namespace jkgm {
 
                 if(num_verts == 0U || current_material != tri.material) {
                     if(num_verts > 0) {
-                        gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
+                        if(the_config->profile_renderer) ++profile_frame.draw_batches;
+                gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
                         curr_offset += num_verts;
                         num_verts = 0U;
                     }
@@ -1608,6 +1678,7 @@ namespace jkgm {
             }
 
             if(num_verts > 0) {
+                if(the_config->profile_renderer) ++profile_frame.draw_batches;
                 gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
             }
         }
@@ -1923,6 +1994,8 @@ namespace jkgm {
 
         void execute_game(IDirect3DExecuteBuffer *cmdbuf, IDirect3DViewport *vp) override
         {
+            profile_scope timer(the_config->profile_renderer,
+                profile_frame.timings[profile_idx(profile_stage::execute)]);
             D3DEXECUTEDATA ed;
             cmdbuf->GetExecuteData(&ed);
 
