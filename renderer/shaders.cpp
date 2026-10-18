@@ -152,9 +152,20 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , camera_origin(gl::get_uniform_location(the_program,"camera_origin"))
     , projection(gl::get_uniform_location(the_program,"projection"))
     , albedo_sampler(gl::get_uniform_location(the_program,"albedo_map"))
+    , emissive_sampler(gl::get_uniform_location(the_program,"emissive_map"))
     , uv_scale(gl::get_uniform_location(the_program,"uv_scale"))
     , has_texture(gl::get_uniform_location(the_program,"has_texture"))
+    , has_emissive(gl::get_uniform_location(the_program,"has_emissive"))
     , transparent_pass(gl::get_uniform_location(the_program,"transparent_pass"))
+    , alpha_mode(gl::get_uniform_location(the_program,"alpha_mode"))
+    , alpha_cutoff(gl::get_uniform_location(the_program,"alpha_cutoff"))
+    , native_face_opacity(gl::get_uniform_location(the_program,"native_face_opacity"))
+    , albedo_factor(gl::get_uniform_location(the_program,"albedo_factor"))
+    , emissive_factor(gl::get_uniform_location(the_program,"emissive_factor"))
+    , albedo_scroll(gl::get_uniform_location(the_program,"albedo_scroll"))
+    , emissive_scroll(gl::get_uniform_location(the_program,"emissive_scroll"))
+    , fog_params(gl::get_uniform_location(the_program,"fog_params"))
+    , fog_color(gl::get_uniform_location(the_program,"fog_color"))
 {
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_model(
@@ -177,12 +188,35 @@ void jkgm::shaders::gpu_3do_preview_shader::set_camera(
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_surface(
-    bool textured,float width,float height,bool transparent)
+    bool textured,float width,float height,bool transparent,
+    int policy,float cutoff,float face_opacity,point<4,float> tint,point<2,float> scroll)
 {
     gl::set_uniform_integer(albedo_sampler,0);
     gl::set_uniform_integer(has_texture,textured?1:0);
     gl::set_uniform_integer(transparent_pass,transparent?1:0);
+    gl::set_uniform_integer(alpha_mode,policy);
+    gl::set_uniform_float(alpha_cutoff,cutoff);
+    gl::set_uniform_float(native_face_opacity,face_opacity);
+    gl::set_uniform_vector(albedo_factor,tint);
+    gl::set_uniform_vector(albedo_scroll,scroll);
     gl::set_uniform_vector(uv_scale,make_point(1.0f/width,1.0f/height));
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_emissive(
+    bool textured,point<4,float> intensity,point<2,float> scroll)
+{
+    gl::set_uniform_integer(emissive_sampler,1);
+    gl::set_uniform_integer(has_emissive,textured?1:0);
+    gl::set_uniform_vector(emissive_factor,make_point(get<0>(intensity),
+                                                      get<1>(intensity),
+                                                      get<2>(intensity)));
+    gl::set_uniform_vector(emissive_scroll,scroll);
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_fog(
+    point<4,float> params,point<4,float> color)
+{
+    gl::set_uniform_vector(fog_params,params);
+    gl::set_uniform_vector(fog_color,
+        make_point(get<0>(color),get<1>(color),get<2>(color)));
 }
 
 jkgm::shaders::game_opaque_pass_shader::game_opaque_pass_shader(fs::path const &data_root)
