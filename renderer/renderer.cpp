@@ -49,6 +49,7 @@
 #include "vidmem_texture.hpp"
 #include "zbuffer_surface.hpp"
 #include <Windows.h>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -1912,39 +1913,76 @@ namespace jkgm {
             prog.set_camera(axes(cam.right),axes(cam.forward),axes(cam.up),
                             axes(cam.position),
                             make_point(tan_half_fov,aspect,1.0f/far_plane,0.0f));
+            struct pending_draw {
+                gpu_3do_instance const *instance;
+                gpu_3do_group const *group;
+                gpu_3do_texture texture;
+                float depth;
+            };
+            std::vector<pending_draw> draws;
             for(auto const &inst:frame_gpu_3do_instances) {
+                if(!inst.geometry) continue;
+                for(auto const &group:inst.geometry->groups) {
+                    auto const tex=resolve_gpu_3do_material(group);
+                    bool const group_alpha=(group.face_type&0x2U)!=0 || tex.alpha;
+                    if(group_alpha!=transparent) continue;
+                    float depth=0.0f;
+                    if(transparent) {
+                        auto const &m=inst.transform;
+                        auto const &c=group.centroid;
+                        float const wx=m[9]+m[0]*c[0]+m[3]*c[1]+m[6]*c[2];
+                        float const wy=m[10]+m[1]*c[0]+m[4]*c[1]+m[7]*c[2];
+                        float const wz=m[11]+m[2]*c[0]+m[5]*c[1]+m[8]*c[2];
+                        depth=(wx-cam.position[0])*cam.forward[0]+
+                              (wy-cam.position[1])*cam.forward[1]+
+                              (wz-cam.position[2])*cam.forward[2];
+                    }
+                    draws.push_back({&inst,&group,tex,depth});
+                }
+            }
+            if(transparent) {
+                // JK's own translucent polygons are depth-sorted. Our faces
+                // need a GPU-path equivalent. Sorting index *ranges* does not
+                // modify/re-upload any cached mesh vertices or indices.
+                std::stable_sort(draws.begin(),draws.end(),
+                    [](pending_draw const &a,pending_draw const &b) {
+                        return a.depth>b.depth; // back to front
+                    });
+            }
+            uint64_t active_id=0;
+            for(auto const &draw:draws) {
+                auto const &inst=*draw.instance;
+                auto const &group=*draw.group;
                 auto it=gpu_3do_gl_cache.find(inst.id);
                 if(it==gpu_3do_gl_cache.end()) {
-                    if(!inst.geometry) continue;
                     auto ptr=std::make_unique<gpu_3do_gl_mesh>(*inst.geometry);
                     it=gpu_3do_gl_cache.emplace(inst.id,std::move(ptr)).first;
                     LOG_INFO("GPU 3DO: uploaded face-corner mesh id=",inst.id,
                              " triangles=",it->second->num_indices/3,
                              " MAT groups=",inst.geometry->groups.size());
                 }
-                auto const &m=inst.transform;
-                prog.set_model(make_point(m[0],m[1],m[2],0.0f),
-                               make_point(m[3],m[4],m[5],0.0f),
-                               make_point(m[6],m[7],m[8],0.0f),
-                               make_point(m[9],m[10],m[11],1.0f));
-                gl::bind_vertex_array(it->second->vao);
-                for(auto const &group:inst.geometry->groups) {
-                    auto const tex=resolve_gpu_3do_material(group);
-                    bool const group_alpha=(group.face_type&0x2U)!=0 || tex.alpha;
-                    if(group_alpha!=transparent) continue;
-                    if((group.face_type&0x1U)!=0) {
-                        gl::disable(gl::capability::cull_face);
-                    } else {
-                        gl::enable(gl::capability::cull_face);
-                        gl::set_face_cull_mode(gl::face_mode::back);
-                    }
-                    gl::set_active_texture_unit(0);
-                    gl::bind_texture(gl::texture_bind_target::texture_2d,tex.texture);
-                    prog.set_surface(tex.has_image,tex.width,tex.height,transparent);
-                    gl::draw_elements(gl::element_type::triangles,group.count,
-                                      gl::index_type::uint32,
-                                      static_cast<ptrdiff_t>(group.offset*sizeof(uint32_t)));
+                if(active_id!=inst.id) {
+                    auto const &m=inst.transform;
+                    prog.set_model(make_point(m[0],m[1],m[2],0.0f),
+                                   make_point(m[3],m[4],m[5],0.0f),
+                                   make_point(m[6],m[7],m[8],0.0f),
+                                   make_point(m[9],m[10],m[11],1.0f));
+                    gl::bind_vertex_array(it->second->vao);
+                    active_id=inst.id;
                 }
+                if((group.face_type&0x1U)!=0) {
+                    gl::disable(gl::capability::cull_face);
+                } else {
+                    gl::enable(gl::capability::cull_face);
+                    gl::set_face_cull_mode(gl::face_mode::back);
+                }
+                gl::set_active_texture_unit(0);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,draw.texture.texture);
+                prog.set_surface(draw.texture.has_image,draw.texture.width,
+                                 draw.texture.height,transparent);
+                gl::draw_elements(gl::element_type::triangles,group.count,
+                                  gl::index_type::uint32,
+                                  static_cast<ptrdiff_t>(group.offset*sizeof(uint32_t)));
             }
             // Native renderer expects face culling disabled between batches.
             gl::disable(gl::capability::cull_face);
