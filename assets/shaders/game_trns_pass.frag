@@ -130,11 +130,8 @@ vec3 surface_view_normal(vec2 uv)
 vec3 compute_reflection(vec3 base_color, vec2 texcoords, vec3 view_normal,
                         out float metalness)
 {
-    // Kept before early-out to preserve uniform texture sampling behavior.
-    vec3 surface = texture(surface_map, texcoords).rgb;
-
-    // Preserve previous behavior: no EnvMap / no reflection strength means that
-    // this effect doesn't suppress the material's regular diffuse component.
+    // Without an active envmap, do not touch the surface/specular texture.
+    // In particular this makes enable_reflections=false a zero-sample path.
     metalness = 0.0;
     float strength = reflection_params.x;
     if(env_params.x < 0.5 || strength <= 0.0) {
@@ -144,6 +141,7 @@ vec3 compute_reflection(vec3 base_color, vec2 texcoords, vec3 view_normal,
     float roughness = reflection_params.y;
     metalness = reflection_params.z;
     if(reflection_params.w > 0.5) {
+        vec3 surface = texture(surface_map, texcoords).rgb;
         strength *= surface.r;
         roughness *= surface.g;
         metalness *= surface.b;
@@ -402,12 +400,26 @@ void main()
     float fog_amount = fog_factor(vp_z);
 
     vec3 unlit_base_color = albedo_map_sample.rgb * albedo_factor.rgb;
-    float metalness;
-    vec3 mapped_normal = surface_view_normal(adj_texcoords);
-    vec3 reflection = compute_reflection(unlit_base_color, adj_texcoords,
-                                         mapped_normal, metalness);
-    vec3 sun_specular = compute_sun_specular(unlit_base_color, adj_texcoords,
-                                             mapped_normal);
+    // Uniform branch: skip normal-map sampling and derivative-based TBN
+    // construction unless a material actually has envmap or sun specularity.
+    // The reflection master toggle sends reflection_params.x = 0.
+    float metalness = 0.0;
+    vec3 reflection = vec3(0.0);
+    vec3 sun_specular = vec3(0.0);
+    bool has_env_reflection = env_params.x > 0.5;
+    bool has_sun_specular =
+        sun_direction.w > 0.5 && sun_color_intensity.w > 0.0;
+    if(reflection_params.x > 0.0 && (has_env_reflection || has_sun_specular)) {
+        vec3 mapped_normal = surface_view_normal(adj_texcoords);
+        if(has_env_reflection) {
+            reflection = compute_reflection(unlit_base_color, adj_texcoords,
+                                            mapped_normal, metalness);
+        }
+        if(has_sun_specular) {
+            sun_specular = compute_sun_specular(unlit_base_color, adj_texcoords,
+                                               mapped_normal);
+        }
+    }
 
     // Preserve the original transparency blending convention:
     // (ONE, ONE_MINUS_SRC_ALPHA), not premultiplied color twice.

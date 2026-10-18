@@ -30,6 +30,7 @@ namespace jkgm {
         virtual point<2, int> get_cursor_pos(point<2, int> real_pos) = 0;
 
         virtual bool is_parallax_enabled() = 0;
+        virtual bool is_reflections_enabled() = 0;
 
         virtual void initialize(HINSTANCE hInstance, HWND parentWnd) = 0;
 
