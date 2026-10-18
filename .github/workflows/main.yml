@@ -30,9 +30,14 @@ jobs:
         if (-not (Test-Path 'test-build/renderer.dll')) {
           throw "Could not find the built renderer.dll"
         }
-    - name: Upload diagnostic build
+        # Runtime GLSL is loaded from data_path/shaders. The test must ship
+        # changed shaders alongside the DLL or the new fast path will not run.
+        New-Item -ItemType Directory -Path 'test-build/jkgm/shaders' -Force | Out-Null
+        Copy-Item 'assets/shaders/game_opaque_pass.frag' 'test-build/jkgm/shaders/' -Force
+        Copy-Item 'assets/shaders/game_trns_pass.frag' 'test-build/jkgm/shaders/' -Force
+    - name: Upload reflection test build
       uses: actions/upload-artifact@v4
       with:
-        name: jkgfxmod-material-link-test
+        name: jkgrfxmod-reflection-fastpath-test
         path: test-build/*
         if-no-files-found: error

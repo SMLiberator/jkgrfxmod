@@ -526,3 +526,13 @@ Stage 2 MAT-link diagnostic scans every three seconds only when logging is
 enabled; disable `log_path` for performance benchmarking. Scene complexity,
 triangle sorting and uploads, transparency overdraw, and state-change
 frequency remain possible CPU/GPU bottlenecks that require measurements.
+
+### Installing the reflection fast-path test build
+
+The Windows CI artifact `jkgrfxmod-reflection-fastpath-test` contains
+`renderer.dll` **and** two updated fragment shaders:
+`jkgm/shaders/game_opaque_pass.frag` and
+`jkgm/shaders/game_trns_pass.frag`.
+Install them in the corresponding game directories after backing up the
+existing files. A DLL-only swap does **not** activate the shader fast path.
+Keep using your patched JK executable; this PR does not change it.
