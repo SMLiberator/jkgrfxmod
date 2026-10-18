@@ -1922,10 +1922,6 @@ namespace jkgm {
                        /*force opaque*/ true,
                        posterize_lighting);
 
-            // GPU-local 3DO vertices, alongside JK's ordinary opaque geometry.
-            // The prototype's material is intentionally obvious magenta.
-            draw_gpu_3do_preview();
-
             // Draw fourth pass (opaque gun geometry)
             draw_batch(&ogs->game_opaque_pass_program,
                        gun_batch,
@@ -1939,6 +1935,10 @@ namespace jkgm {
                        &trimdl->gun_transparent_trimdl,
                        /*force opaque*/ true,
                        posterize_lighting);
+
+            // GPU preview changes the active GL shader. Render it LAST within
+            // the opaque pass, after all batches that expect game_opaque_pass.
+            draw_gpu_3do_preview();
         }
 
         void draw_game_opaque_composite()
