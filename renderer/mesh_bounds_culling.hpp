@@ -60,10 +60,10 @@ namespace mesh_bounds {
         float const s = 0.05f; // conservative near-boundary tolerance in JK units
         if(max_plane(b,m,0, 1,0,-f.near_plane) < -s) return true;
         if(f.clip_far && max_plane(b,m,0,-1,0, f.far_plane) < -s) return true;
-        if(max_plane(b,m,-1, f.left,0,0) < -s) return true;   // x < left*y
-        if(max_plane(b,m, 1,-f.right,0,0) < -s) return true; // x > right*y
-        if(max_plane(b,m,0, f.bottom,-1,0) < -s) return true; // z < bottom*y
-        if(max_plane(b,m,0,-f.top,1,0) < -s) return true;    // z > top*y
+        if(max_plane(b,m, 1,-f.left,0,0) < -s) return true;  // all x < left*y
+        if(max_plane(b,m,-1, f.right,0,0) < -s) return true; // all x > right*y
+        if(max_plane(b,m,0,-f.bottom, 1,0) < -s) return true; // all z < bottom*y
+        if(max_plane(b,m,0, f.top,-1,0) < -s) return true;    // all z > top*y
         return false;
     }
 }
