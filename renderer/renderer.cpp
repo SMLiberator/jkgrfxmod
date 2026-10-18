@@ -1949,7 +1949,7 @@ namespace jkgm {
                         return a.depth>b.depth; // back to front
                     });
             }
-            uint64_t active_id=0;
+            gpu_3do_instance const *active_instance=nullptr;
             for(auto const &draw:draws) {
                 auto const &inst=*draw.instance;
                 auto const &group=*draw.group;
@@ -1961,14 +1961,16 @@ namespace jkgm {
                              " triangles=",it->second->num_indices/3,
                              " MAT groups=",inst.geometry->groups.size());
                 }
-                if(active_id!=inst.id) {
+                if(active_instance!=draw.instance) {
+                    // Multiple cars can instance the same cached mesh ID with
+                    // different world matrices. Compare instances, not IDs.
                     auto const &m=inst.transform;
                     prog.set_model(make_point(m[0],m[1],m[2],0.0f),
                                    make_point(m[3],m[4],m[5],0.0f),
                                    make_point(m[6],m[7],m[8],0.0f),
                                    make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(it->second->vao);
-                    active_id=inst.id;
+                    active_instance=draw.instance;
                 }
                 if((group.face_type&0x1U)!=0) {
                     gl::disable(gl::capability::cull_face);
