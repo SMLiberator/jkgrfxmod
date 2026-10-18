@@ -1424,7 +1424,9 @@ namespace jkgm {
                     get<0>(ef) * emissive_intensity,
                     get<1>(ef) * emissive_intensity,
                     get<2>(ef) * emissive_intensity));
-                prog->set_displacement_factor(mat->displacement_factor);
+                // A factor without a displacement image must never enter the 32–128-sample parallax loop.
+                prog->set_displacement_factor(mat->displacement_map.has_value()
+                                                  ? mat->displacement_factor : 0.0f);
                 prog->set_alpha_cutoff(mat->alpha_cutoff);
 
                 // Zero reflection strength also suppresses directional sunlight
