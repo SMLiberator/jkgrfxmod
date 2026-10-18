@@ -674,3 +674,60 @@ noticeable lighting differences reported in game. Because the original
 engine's 3DO preparation remains outside the decoder, overall FPS improved
 less than the decoder itself. The next optimization stage targets JK's
 native model traversal and geometry preparation.
+
+
+## Direct EXE startup (no inject.exe) — experimental
+
+This branch adds an optional bootstrap for the specific tested
+\`jk23_rgb_smoothnormals_fixed_v2.exe\` build. It is **not** a generic patch for
+unknown JK executables. Run, from the game installation directory:
+
+\`\`\`sh
+python patch_jkgm_bootstrap.py jk23_rgb_smoothnormals_fixed_v2.exe jkgm.exe
+\`\`\`
+
+Then launch \`jkgm.exe\` directly with your usual JK command-line arguments.
+Place the *matching* \`renderer.dll\`, \`jkgm.json\` and \`jkgm/\` assets beside
+\`jkgm.exe\`. **Do not start the patched EXE through \`inject.exe\`**, which would
+inject the DLL a second time.
+
+The patch appends a small executable PE section and changes the entrypoint
+to call JK's *existing* kernel32 \`LoadLibraryA\` import for \`renderer.dll\`,
+then resumes the exact original entrypoint. No original code or engine
+functions are overwritten. Missing \`renderer.dll\` currently falls back to
+native Direct3D instead of blocking startup. Only the known EXE SHA256 is
+accepted; keep the original binary for rollback. This build already imports
+JK.dll, so it is initialized before the early load.
+
+To use the unmodified Direct3D renderer while keeping this modified EXE:
+
+\`\`\`json
+"use_vanilla_renderer": true
+\`\`\`
+
+Otherwise the default is:
+
+\`\`\`json
+"use_vanilla_renderer": false
+\`\`\`
+
+The DLL parses the JSON **at process startup**. With \`true\`, it installs
+no Detours/DirectDraw/COG hooks; with \`false\`, the ordinary JKGM hooks are
+attached. This is a startup choice, not a runtime toggle. A missing DLL
+means vanilla rendering regardless of the JSON setting. If the DLL fails
+during its own startup, the game may fail to start: preserve a vanilla test
+EXE/config for troubleshooting.
+
+### Important notes
+
+- The patched EXE still includes all preexisting user patches, such as mesh
+  limits, RGB tints and normal sideband. Renderer selection does not undo them.
+- Only the DLL bootstrap is new; **native 3DO profiling/culling is a separate
+  task** that needs identifying and verifying engine-specific render routines.
+- The old \`inject.exe\` remains built for comparisons and older workflows; it
+  is simply unnecessary when starting \`jkgm.exe\` directly.
+- Windows x86 compilation and binary-header checks do not replace an in-game
+  startup/COG verb test under Wine and Windows. Test normal and vanilla modes
+  independently. The old launcher adjusted \`-windowgui\` according to
+  fullscreen settings; with direct startup, pass your desired JK switches
+  to \`jkgm.exe\` yourself.
