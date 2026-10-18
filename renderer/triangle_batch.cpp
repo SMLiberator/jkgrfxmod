@@ -276,7 +276,7 @@ namespace jkgm {
                 auto z2 = get<w>(em.v2.pos);
 
                 space_start = std::min(space_start, std::min(z0, std::min(z1, z2)));
-                space_end = std::max(space_start, std::max(z0, std::max(z1, z2)));
+                space_end = std::max(space_end, std::max(z0, std::max(z1, z2)));
             }
 
             float space_midpoint = (space_start + space_end) * 0.5f;
