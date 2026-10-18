@@ -406,8 +406,8 @@ void main()
     float metalness = 0.0;
     vec3 reflection = vec3(0.0);
     vec3 sun_specular = vec3(0.0);
-    bool const has_env_reflection = env_params.x > 0.5;
-    bool const has_sun_specular =
+    bool has_env_reflection = env_params.x > 0.5;
+    bool has_sun_specular =
         sun_direction.w > 0.5 && sun_color_intensity.w > 0.0;
     if(reflection_params.x > 0.0 && (has_env_reflection || has_sun_specular)) {
         vec3 mapped_normal = surface_view_normal(adj_texcoords);
