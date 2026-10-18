@@ -496,6 +496,12 @@ namespace jkgm {
             return the_config->enable_reflections;
         }
 
+        void notify_texture_uploaded() override
+        {
+            force_runtime_refresh = true;
+            runtime_fast_retries = 0;
+        }
+
         point<2, int> get_cursor_pos(point<2, int> real_pos) override
         {
             if(mode == renderer_mode::menu) {

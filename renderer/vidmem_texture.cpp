@@ -42,6 +42,7 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
     // Reset material to default state. Invalidates cached native MAT link.
     ++surf->texture_generation;
     surf->clear();
+    surf->r->notify_texture_uploaded();
 
     auto *src = cast_tex->surf;
 
