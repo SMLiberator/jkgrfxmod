@@ -8,6 +8,7 @@
 #include "renderer.hpp"
 #include "runtime_material.hpp"
 #include "native_3do_profile.hpp"
+#include "gpu_3do_preview.hpp"
 #include "engine_material_debug.hpp"
 #include "sun.hpp"
 #include <Windows.h>
@@ -17,6 +18,10 @@
 #include <cstring>
 #include <cmath>
 #include <chrono>
+#include <unordered_map>
+#include <vector>
+#include <memory>
+#include <cstddef>
 #include <string>
 #include <detours/detours.h>
 
@@ -49,6 +54,79 @@ namespace {
         reinterpret_cast<native_face_func>(native_face_addr);
     jkgm::native_3do_sample native_totals;
 
+    // Match the current patched JK23 executable at rdModel3_DrawMesh (0x446360).
+    struct native_mesh {
+        char name[32];
+        int mesh_index, geometry_mode, lighting_mode, texture_mode;
+        float const *vertices;
+        void const *uvs, *vertex_lights, *dynamic_lights;
+        uint8_t const *faces;
+        void const *normals;
+        int num_vertices, num_uvs, num_faces;
+    };
+    struct native_face {
+        uint32_t num, type, geo, light, tex, count;
+        int const *pos_indices, *uv_indices;
+        void const *material;
+        uint32_t cel;
+        float uv_x, uv_y, extra_light, normal[3];
+    };
+    static_assert(sizeof(native_mesh)==0x54 && offsetof(native_mesh,vertices)==0x30 &&
+                  offsetof(native_mesh,faces)==0x40 && offsetof(native_mesh,num_faces)==0x50,
+                  "Wrong patched JK 3DO mesh layout");
+    static_assert(sizeof(native_face)==0x40,"Wrong JK 3DO face stride");
+
+    struct cached_gpu_mesh {
+        float const *vertices = nullptr;
+        uint8_t const *faces = nullptr;
+        int num_vertices=0, num_faces=0;
+        uint64_t id=0;
+        std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
+    };
+    std::unordered_map<void const *,cached_gpu_mesh> gpu_mesh_cache;
+    std::vector<jkgm::gpu_3do_instance> pending_gpu_instances;
+    uint64_t next_gpu_id=1;
+
+    bool gpu_span_readable(void const *p,size_t len) {
+        if(!p || len==0 || len>4*1024*1024) return false;
+        uintptr_t const start=reinterpret_cast<uintptr_t>(p);
+        if(start<0x10000U || start>0x7fffffffU) return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if(VirtualQuery(p,&mbi,sizeof(mbi))==0 || mbi.State!=MEM_COMMIT ||
+           (mbi.Protect&(PAGE_GUARD|PAGE_NOACCESS))) return false;
+        auto const end=reinterpret_cast<uintptr_t>(mbi.BaseAddress)+mbi.RegionSize;
+        return start+len>=start && start+len<=end;
+    }
+
+    std::shared_ptr<jkgm::gpu_3do_geometry const>
+    snapshot_gpu_mesh(native_mesh const &m) {
+        if(m.num_vertices<3 || m.num_vertices>65536 || m.num_faces<1 ||
+           m.num_faces>65536 ||
+           !gpu_span_readable(m.vertices,size_t(m.num_vertices)*12) ||
+           !gpu_span_readable(m.faces,size_t(m.num_faces)*sizeof(native_face)))
+            return {};
+        auto g=std::make_shared<jkgm::gpu_3do_geometry>();
+        g->vertices.assign(m.vertices,m.vertices+size_t(m.num_vertices)*3);
+        for(float v:g->vertices) if(!std::isfinite(v)) return {};
+        for(int f=0;f<m.num_faces;f++) {
+            native_face face{};
+            std::memcpy(&face,m.faces+size_t(f)*sizeof(face),sizeof(face));
+            if(face.count<3 || face.count>128 ||
+               !gpu_span_readable(face.pos_indices,size_t(face.count)*4))
+                return {};
+            for(uint32_t v=0;v<face.count;v++)
+                if(face.pos_indices[v]<0 || face.pos_indices[v]>=m.num_vertices)
+                    return {};
+            for(uint32_t v=1;v+1<face.count;v++) {
+                g->indices.push_back(uint32_t(face.pos_indices[0]));
+                g->indices.push_back(uint32_t(face.pos_indices[v]));
+                g->indices.push_back(uint32_t(face.pos_indices[v+1]));
+            }
+        }
+        return g->indices.empty() ? std::shared_ptr<jkgm::gpu_3do_geometry const>{} : g;
+    }
+
+
     uint64_t elapsed_native_ns(std::chrono::steady_clock::time_point start)
     {
         return static_cast<uint64_t>(
@@ -66,10 +144,20 @@ namespace {
     }
     void __cdecl HookedNativeMesh(void *mesh, void *placement)
     {
-        auto const start = std::chrono::steady_clock::now();
-        RealNativeMesh(mesh, placement);
-        native_totals.mesh_ns += elapsed_native_ns(start);
-        ++native_totals.mesh_calls;
+        auto const profiling=the_config->profile_renderer;
+        auto const start=profiling ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
+        if(!jkgm::queue_gpu_3do_mesh(mesh,placement)) {
+            RealNativeMesh(mesh, placement);
+        }
+        else {
+            // First side effect of rdModel3_DrawMesh, normally set at 0x446371.
+            *reinterpret_cast<void **>(0x0073C1E8U)=mesh;
+        }
+        if(profiling) {
+            native_totals.mesh_ns+=elapsed_native_ns(start);
+            ++native_totals.mesh_calls;
+        }
     }
     int __cdecl HookedNativeFace(void *face, int lightFlags)
     {
@@ -80,7 +168,7 @@ namespace {
         if(result != 0) ++native_totals.face_emitted;
         return result;
     }
-    bool attach_native_3do_hooks()
+    bool attach_native_3do_hooks(bool profiling)
     {
         if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr)) != 0x00400000U ||
            std::memcmp(reinterpret_cast<void const *>(native_model_addr),
@@ -95,11 +183,11 @@ namespace {
         LONG error = DetourTransactionBegin();
         if(error != NO_ERROR) return false;
         error = DetourUpdateThread(GetCurrentThread());
-        if(error == NO_ERROR)
+        if(error == NO_ERROR && profiling)
             error = DetourAttach(&(PVOID &)RealNativeModel, HookedNativeModel);
         if(error == NO_ERROR)
             error = DetourAttach(&(PVOID &)RealNativeMesh, HookedNativeMesh);
-        if(error == NO_ERROR)
+        if(error == NO_ERROR && profiling)
             error = DetourAttach(&(PVOID &)RealNativeFace, HookedNativeFace);
         if(error != NO_ERROR) {
             DetourTransactionAbort();
@@ -118,12 +206,65 @@ namespace {
     {
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
-        DetourDetach(&(PVOID &)RealNativeFace, HookedNativeFace);
+        if(the_config->profile_renderer)
+            DetourDetach(&(PVOID &)RealNativeFace, HookedNativeFace);
         DetourDetach(&(PVOID &)RealNativeMesh, HookedNativeMesh);
-        DetourDetach(&(PVOID &)RealNativeModel, HookedNativeModel);
+        if(the_config->profile_renderer)
+            DetourDetach(&(PVOID &)RealNativeModel, HookedNativeModel);
         DetourTransactionCommit();
     }
 } // namespace
+
+
+bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
+{
+    if(!the_config || the_config->gpu_3do_test_mesh.empty() ||
+       the_config->gpu_3do_test_mesh.size()>31 || !mesh || !matrix ||
+       pending_gpu_instances.size()>=256 ||
+       !gpu_span_readable(mesh,sizeof(native_mesh)) ||
+       !gpu_span_readable(matrix,sizeof(float)*12)) return false;
+    native_mesh m{};
+    std::memcpy(&m,mesh,sizeof(m));
+    auto const &name=the_config->gpu_3do_test_mesh;
+    auto const null_char=std::memchr(m.name,'\0',sizeof(m.name));
+    size_t const len=null_char
+        ? size_t(static_cast<char const *>(null_char)-m.name) : sizeof(m.name);
+    if(len!=name.size() || std::memcmp(m.name,name.data(),len)!=0 ||
+       m.geometry_mode==0 || !jkgm::read_engine_camera().valid)
+        return false;
+    auto it=gpu_mesh_cache.find(mesh);
+    if(it==gpu_mesh_cache.end() || it->second.vertices!=m.vertices ||
+       it->second.faces!=m.faces || it->second.num_vertices!=m.num_vertices ||
+       it->second.num_faces!=m.num_faces) {
+        auto geom=snapshot_gpu_mesh(m);
+        if(!geom) return false;
+        if(gpu_mesh_cache.size()>4096) gpu_mesh_cache.clear();
+        auto &c=gpu_mesh_cache[mesh];
+        c={m.vertices,m.faces,m.num_vertices,m.num_faces,next_gpu_id++,std::move(geom)};
+        it=gpu_mesh_cache.find(mesh);
+        LOG_INFO("GPU 3DO prototype: captured mesh ",name,
+                 " vertices=",m.num_vertices," faces=",m.num_faces,
+                 " triangles=",it->second.geometry->indices.size()/3);
+    }
+    gpu_3do_instance inst;
+    inst.id=it->second.id;
+    inst.geometry=it->second.geometry;
+    std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
+    for(float f:inst.transform) if(!std::isfinite(f)) return false;
+    pending_gpu_instances.emplace_back(std::move(inst));
+    return true;
+}
+std::vector<jkgm::gpu_3do_instance> jkgm::consume_gpu_3do_instances()
+{
+    std::vector<gpu_3do_instance> out;
+    out.swap(pending_gpu_instances);
+    return out;
+}
+void jkgm::reset_gpu_3do_instances()
+{
+    pending_gpu_instances.clear();
+    gpu_mesh_cache.clear();
+}
 
 jkgm::native_3do_sample jkgm::consume_native_3do_sample()
 {
@@ -133,7 +274,7 @@ jkgm::native_3do_sample jkgm::consume_native_3do_sample()
 }
 bool jkgm::native_3do_available()
 {
-    return native_3do_hooks_active;
+    return native_3do_hooks_active && the_config->profile_renderer;
 }
 
 
@@ -1041,8 +1182,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         }
 
         renderer_hooks_active = true;
-        if(the_config->profile_renderer) {
-            native_3do_hooks_active = attach_native_3do_hooks();
+        if(the_config->profile_renderer || !the_config->gpu_3do_test_mesh.empty()) {
+            native_3do_hooks_active = attach_native_3do_hooks(the_config->profile_renderer);
         }
         LOG_DEBUG("Finished attaching renderer to process");
     }

@@ -34,6 +34,7 @@ namespace jkgm {
         bool enable_posterized_lighting = false;
         bool enable_vsync = false;
         bool profile_renderer = false; // opt-in CPU frame timings
+        std::string gpu_3do_test_mesh; // opt-in exact native 3DO mesh name
         bool use_vanilla_renderer = false; // native EXE bootstrap: skip JKGM hooks
         std::string data_path = "jkgm";
         std::optional<std::string> log_path;
