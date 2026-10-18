@@ -24,6 +24,31 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
               metadata_file.generic_string(),
               ")");
 
+    // Older compiled packs have no images property; runtime IDs are optional.
+    // Validate paths relative to this pack, never allow an ID to address files
+    // outside of its originating pack.
+    if(doc.contains("images")) {
+        if(!doc["images"].is_array()) {
+            throw std::runtime_error("Compiled pack images must be an array");
+        }
+        auto &registered = pack_images[data_dir];
+        for(auto const &img : doc["images"]) {
+            if(!img.is_object() || !img.contains("id") ||
+               !img["id"].is_number_integer() || !img.contains("file") ||
+               !img["file"].is_string()) {
+                throw std::runtime_error("Invalid compiled pack image entry");
+            }
+            int const id = img["id"].get<int>();
+            fs::path const rel(img["file"].get<std::string>());
+            if(id < 0 || id > 65535 || rel.empty() || rel.is_absolute() ||
+               rel.has_parent_path() || !registered.emplace(id, data_dir / rel).second) {
+                throw std::runtime_error("Invalid or duplicate compiled pack image ID/path");
+            }
+        }
+        LOG_DEBUG("Registered ", registered.size(), " pack-local images from ",
+                  data_dir.generic_string());
+    }
+
     // The pack's default environment image applies to this pack's materials only
     std::optional<fs::path> pack_env_map;
     if(doc.contains("environment_map")) {
@@ -274,4 +299,14 @@ std::optional<jkgm::material const *> jkgm::material_map::get_material(md5 const
 std::vector<std::unique_ptr<jkgm::material>> const &jkgm::material_map::get_materials() const
 {
     return materials;
+}
+std::optional<jkgm::fs::path> jkgm::material_map::get_pack_image(
+    fs::path const &pack, int image_id) const
+{
+    auto const p = pack_images.find(pack);
+    if(p == pack_images.end()) {
+        return std::nullopt;
+    }
+    auto const i = p->second.find(image_id);
+    return i != p->second.end() ? std::optional<fs::path>(i->second) : std::nullopt;
 }
