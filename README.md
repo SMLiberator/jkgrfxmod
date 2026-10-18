@@ -590,3 +590,33 @@ The CI artifact `jkgrfxmod-material-runtime-test` includes `renderer.dll`,
 Install the two shader files along with the DLL; otherwise the new image
 transition uniforms are unavailable. The test remains experimental until
 the shader paths and COG semantics are verified in game.
+
+### Runtime material refresh/regression diagnostics
+
+The MAT resolver now refreshes immediately when any COG material command
+changes, or after returning from the game menu, instead of waiting up to
+one second. The renderer verifies that a cached native MAT association
+belongs to the same D3D texture object **and upload generation**, protecting
+against recycled Direct3D IDs.
+
+While debugging, enable `log_path` and look for:
+- `COG SetMaterialAlbedo: MAT=... image=... fade=...`, or the matching reset
+- `Runtime MAT resolver: revision=... cached handles=... pending=...`
+- `Runtime image ... native source MAT ... has no replacement pack mapping yet`
+- `Unregistered image ID ... in source MAT ... pack ...`
+- `Runtime EnvMap requested but enable_reflections=false`
+
+Each material image ID is relative to the *recompiled source pack containing
+the supplied MAT*. A vanilla JK MAT can receive `SetMaterialColor`, but
+`SetMaterialAlbedo` and `SetMatEnvMap` need a matching **replacement
+material/pack** from which to resolve the image ID.
+
+For a reliable EnvMap test, use `enable_reflections: true`, a material
+with `reflection_strength: 1.0` (or higher for obvious test reflections),
+low roughness, and an equirectangular image with strong light/dark contrast.
+`SetGlobalEnvMap` deliberately skips materials with an explicit
+per-material environment image. Passing a nonzero fade time is mandatory
+for the material and reset COG verbs, even if it is `0.0`.
+
+Repeated set/reset sequences are exercised by the lightweight native
+`tests/runtime_material_state.cpp` regression test in Windows CI.
