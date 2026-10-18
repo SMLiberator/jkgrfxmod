@@ -309,7 +309,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     size_t const len=null_char
         ? size_t(static_cast<char const *>(null_char)-m.name) : sizeof(m.name);
     if(len!=name.size() || std::memcmp(m.name,name.data(),len)!=0 ||
-       m.geometry_mode==0 || !jkgm::read_engine_camera().valid)
+       m.geometry_mode==0 || !jkgm::read_active_render_camera().valid)
         return false;
     auto it=gpu_mesh_cache.find(mesh);
     if(it==gpu_mesh_cache.end() || it->second.vertices!=m.vertices ||

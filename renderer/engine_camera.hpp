@@ -126,6 +126,28 @@ namespace jkgm {
         return cam;
     }
 
+
+    // The current native rdCamera pointer at 0x73A418 is the renderer's
+    // source of truth. SithCamera's indexed logical camera may differ during
+    // JK's automatic idle-orbit camera (the eighth/temporary camera).
+    inline engine_camera read_active_render_camera()
+    {
+        using namespace engine_camera_detail;
+        constexpr uintptr_t active_camera_address=0x0073A418U;
+        if(!build_matches() ||
+           !readable(active_camera_address,sizeof(uintptr_t)))
+            return engine_camera{};
+        uintptr_t address=0;
+        std::memcpy(&address,reinterpret_cast<void const *>(active_camera_address),
+                    sizeof(address));
+        constexpr size_t raw_size=0x3C;
+        if(address<0x10000 || !readable(address,raw_size))
+            return engine_camera{};
+        uint8_t raw[raw_size]{};
+        std::memcpy(raw,reinterpret_cast<void const *>(address),sizeof(raw));
+        return parse_active_rd_camera(raw);
+    }
+
     // Hands the engine camera to a game pass shader. Call once per pass, before drawing.
     inline void apply_engine_camera(shaders::game_pass_shader &shader)
     {

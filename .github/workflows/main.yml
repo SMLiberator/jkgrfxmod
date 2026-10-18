@@ -25,6 +25,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\fast_vertex_colors.cpp /Fe:fast_vertex_colors_test.exe
         fast_vertex_colors_test.exe
+    - name: Active render camera inversion regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\active_rd_camera.cpp /Fe:active_rd_camera_test.exe
+        active_rd_camera_test.exe
     - name: Native 3DO profiler counter regression tests
       shell: cmd
       run: |

@@ -120,4 +120,38 @@ namespace jkgm {
 
         return cam;
     }
+    // rdCamera::orient is the actual world-to-view matrix JK used for
+    // drawing this frame, including idle/orbit or temporary render cameras.
+    // Raw rdCamera (x86): project=0, canvas=4, view orient=8, fov=0x38.
+    inline engine_camera parse_active_rd_camera(uint8_t const *raw)
+    {
+        using namespace engine_camera_detail;
+        engine_camera out;
+        auto const r=read_vec3(raw,8);
+        auto const f=read_vec3(raw,20);
+        auto const u=read_vec3(raw,32);
+        auto const t=read_vec3(raw,44);
+        out.right={r[0],f[0],u[0]};
+        out.forward={r[1],f[1],u[1]};
+        out.up={r[2],f[2],u[2]};
+        out.fov=read_float(raw,0x38);
+        for(int i=0;i<3;i++)
+            out.position[i]=-(out.right[i]*t[0]+
+                              out.forward[i]*t[1]+out.up[i]*t[2]);
+        if(!finite(out.right)||!finite(out.forward)||!finite(out.up)||
+           !finite(out.position)||!std::isfinite(out.fov)||
+           out.fov<5.0f||out.fov>179.0f)
+            return engine_camera{};
+        for(auto const *axis:{&out.right,&out.forward,&out.up}) {
+            float const len=std::sqrt(dot(*axis,*axis));
+            if(len<0.98f||len>1.02f) return engine_camera{};
+        }
+        if(std::fabs(dot(out.right,out.forward))>0.02f||
+           std::fabs(dot(out.right,out.up))>0.02f||
+           std::fabs(dot(out.forward,out.up))>0.02f)
+            return engine_camera{};
+        out.valid=true;
+        return out;
+    }
+
 }
