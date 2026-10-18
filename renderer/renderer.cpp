@@ -1884,7 +1884,7 @@ namespace jkgm {
         {
             if(!ogs->gpu_3do_preview_program || frame_gpu_3do_instances.empty())
                 return;
-            auto const cam=read_engine_camera();
+            auto const cam=read_active_render_camera();
             if(!cam.valid) return;
 
             float far_plane=1000.0f;
@@ -1932,6 +1932,12 @@ namespace jkgm {
                     auto const tex=resolve_gpu_3do_material(group);
                     bool const group_alpha=(group.face_type&0x2U)!=0 || tex.alpha;
                     if(group_alpha!=transparent) continue;
+                    if((group.face_type&0x1U)!=0) {
+                        gl::disable(gl::capability::cull_face);
+                    } else {
+                        gl::enable(gl::capability::cull_face);
+                        gl::set_face_cull_mode(gl::face_mode::back);
+                    }
                     gl::set_active_texture_unit(0);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,tex.texture);
                     prog.set_surface(tex.has_image,tex.width,tex.height,transparent);
@@ -1940,6 +1946,8 @@ namespace jkgm {
                                       static_cast<ptrdiff_t>(group.offset*sizeof(uint32_t)));
                 }
             }
+            // Native renderer expects face culling disabled between batches.
+            gl::disable(gl::capability::cull_face);
         }
 
         void draw_game_opaque_into_gbuffer(triangle_buffer_models *trimdl, bool posterize_lighting)

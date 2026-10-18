@@ -148,24 +148,44 @@ namespace {
                 g->vertices.push_back(out);
             }
             uint32_t const first=static_cast<uint32_t>(g->indices.size());
+            // Ensure the fan winding agrees with the native face normal.
+            // JK's backface criterion is dot(normal,camera-face)>0.
+            // Once aligned, OpenGL's ordinary CCW backface culling agrees.
+            auto const &a=g->vertices[base];
+            auto const &b=g->vertices[base+1];
+            auto const &c=g->vertices[base+2];
+            float const ex=b.x-a.x, ey=b.y-a.y, ez=b.z-a.z;
+            float const fx=c.x-a.x, fy=c.y-a.y, fz=c.z-a.z;
+            float const winding=(ey*fz-ez*fy)*face.normal[0]+
+                                (ez*fx-ex*fz)*face.normal[1]+
+                                (ex*fy-ey*fx)*face.normal[2];
+            bool const reverse_winding=winding<0.0f;
             for(uint32_t v=1;v+1<face.count;v++) {
                 g->indices.push_back(base);
-                g->indices.push_back(base+v);
-                g->indices.push_back(base+v+1);
+                g->indices.push_back(base+(reverse_winding?v+1:v));
+                g->indices.push_back(base+(reverse_winding?v:v+1));
             }
             uint32_t const added=static_cast<uint32_t>(g->indices.size())-first;
-            // Keep adjacent faces with the same material/cel/alpha together;
-            // no CPU face processing is required after this first snapshot.
+            std::array<float,3> center{};
+            for(uint32_t v=0;v<face.count;v++) {
+                auto const &point=g->vertices[base+v];
+                center[0]+=point.x/float(face.count);
+                center[1]+=point.y/float(face.count);
+                center[2]+=point.z/float(face.count);
+            }
+            // 0x1 means JK must draw both sides. 0x2 enables translucency.
+            // Keep translucent faces separately to sort them back-to-front.
             auto const ptr=reinterpret_cast<uintptr_t>(face.material);
             int32_t const cel=static_cast<int32_t>(face.cel);
-            uint32_t const alpha=face.type & 0x2U; // RD_FF_TEX_TRANSLUCENT
-            if(!g->groups.empty() &&
+            uint32_t const flags=face.type&0x3U;
+            bool const translucent=(flags&0x2U)!=0;
+            if(!translucent && !g->groups.empty() &&
                g->groups.back().material==ptr &&
                g->groups.back().cel==cel &&
-               (g->groups.back().face_type&0x2U)==alpha) {
+               g->groups.back().face_type==flags) {
                 g->groups.back().count+=added;
             } else {
-                g->groups.push_back({first,added,ptr,cel,alpha});
+                g->groups.push_back({first,added,ptr,cel,flags,center});
             }
         }
         return g->indices.empty() ? std::shared_ptr<jkgm::gpu_3do_geometry const>{}

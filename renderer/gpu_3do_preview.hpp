@@ -18,7 +18,8 @@ namespace jkgm {
         uint32_t offset=0, count=0; // index-buffer range
         uintptr_t material=0;       // native JK rdMaterial pointer
         int32_t cel=-1;             // -1 means follow current material cel
-        uint32_t face_type=0;
+        uint32_t face_type=0; // RD_FF_DOUBLE_SIDED=0x1, translucent=0x2
+        std::array<float,3> centroid{}; // face-local center for transparency sorting
     };
     struct gpu_3do_geometry {
         std::vector<gpu_3do_vertex> vertices;
