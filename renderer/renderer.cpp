@@ -2223,44 +2223,93 @@ namespace jkgm {
 
         void present_game() override
         {
+            bool const profiling = the_config->profile_renderer;
+            auto const started = profile_clock::now();
+            if(profiling) {
+                if(last_profile_frame != profile_clock::time_point{}) {
+                    profile_frame.period_us = static_cast<uint64_t>(
+                        std::chrono::duration_cast<std::chrono::microseconds>(
+                            started - last_profile_frame).count());
+                }
+                last_profile_frame = started;
+                profile_frame.tris = world_batch.size() + world_transparent_batch.size() +
+                                     gun_batch.size() + gun_transparent_batch.size() +
+                                     overlay_batch.size();
+                profile_frame.trans_tris =
+                    world_transparent_batch.size() + gun_transparent_batch.size();
+            }
+
             animation_seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - animation_epoch).count();
-            refresh_runtime_mat_links();
-            end_frame();
-            update_hud_texture();
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::mat_resolve)]);
+                refresh_runtime_mat_links();
+            }
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::present_swap)]);
+                end_frame();
+            }
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::hud_upload)]);
+                update_hud_texture();
+            }
 
             ogs->tribuf.swap_next();
             auto *trimdl = ogs->tribuf.get_current();
-
-            world_batch.sort();
-            world_transparent_batch.sort();
-            gun_batch.sort();
-            gun_transparent_batch.sort();
-            overlay_batch.sort();
-
-            fill_buffer(world_batch, &trimdl->world_trimdl);
-            fill_buffer(world_transparent_batch, &trimdl->world_transparent_trimdl);
-            fill_buffer(gun_batch, &trimdl->gun_trimdl);
-            fill_buffer(gun_transparent_batch, &trimdl->gun_transparent_trimdl);
-            fill_buffer(overlay_batch, &trimdl->overlay_trimdl);
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::sort_opaque)]);
+                world_batch.sort();
+                gun_batch.sort();
+                overlay_batch.sort();
+            }
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::sort_transparent)]);
+                world_transparent_batch.sort();
+                gun_transparent_batch.sort();
+            }
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::upload)]);
+                fill_buffer(world_batch, &trimdl->world_trimdl);
+                fill_buffer(world_transparent_batch, &trimdl->world_transparent_trimdl);
+                fill_buffer(gun_batch, &trimdl->gun_trimdl);
+                fill_buffer(gun_transparent_batch, &trimdl->gun_transparent_trimdl);
+                fill_buffer(overlay_batch, &trimdl->overlay_trimdl);
+            }
 
             bool posterize_lighting = the_config->enable_posterized_lighting;
-            draw_game_gbuffer_pass(trimdl, posterize_lighting);
-            draw_game_transparency_pass(trimdl, posterize_lighting);
-
-            draw_hud();
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::opaque_pass)]);
+                draw_game_gbuffer_pass(trimdl, posterize_lighting);
+            }
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::transparent_pass)]);
+                draw_game_transparency_pass(trimdl, posterize_lighting);
+            }
+            {
+                profile_scope timer(profiling,
+                    profile_frame.timings[profile_idx(profile_stage::hud_draw)]);
+                draw_hud();
+            }
 
             // Reset state:
             is_gun = false;
             is_transparent = false;
             current_triangle_batch = &world_batch;
             current_material = material_instance_id(0U);
-
             world_batch.clear();
             world_transparent_batch.clear();
             gun_batch.clear();
             gun_transparent_batch.clear();
             overlay_batch.clear();
+            record_profile(started, profile_clock::now());
         }
 
         void depth_clear_game() override
