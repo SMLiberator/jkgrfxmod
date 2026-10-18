@@ -27,6 +27,11 @@ jobs:
         fast_vertex_colors_test.exe
     - name: Native JKGM EXE bootstrap PE regression tests
       run: python tests/test_bootstrap_patcher.py
+    - name: Frame profiler counter regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\frame_profile_gaps.cpp /Fe:frame_profile_gaps_test.exe
+        frame_profile_gaps_test.exe
     - name: Package standalone development binaries
       shell: pwsh
       run: |

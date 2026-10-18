@@ -637,6 +637,18 @@ It emits four `PERF` log lines about every two seconds, reporting:
 - **post_swap**: postprocessing and `SwapBuffers` (may include GPU synchronization)
 - **triangles**, **transparent_avg**, **draw_batches_avg**, **material_binds_avg**:
   submitted triangles, GL triangle draw calls and renderer material binding calls
+- **JK-side gaps_us before_first / between / after_last**: CPU wall time
+  outside the replacement renderer, divided by all frames. `before_first`
+  spans the end of the previous present to the first Direct3D execute-buffer
+  call. `between` sums the gaps between execute-buffer calls; `after_last`
+  spans the last execute-buffer return through the start of game presentation.
+  These are **not pure native 3DO timings**: they can include gameplay, COG,
+  driver waits, or other engine operations. A frame with no execute buffers
+  records no gap samples, hence the accompanying `frames_with_execute` count.
+- **execute_buffers**: mean Direct3D execute-buffer calls, submitted vertex
+  entries, and execute-instruction bytes per frame. A vertex may be referenced
+  multiple times or resubmitted in several buffers; these aren't distinct
+  model vertices.
 
 All times are **microseconds per frame, CPU-side**, unless explicitly marked peak.
 For example, 10000 us = 10 ms. These timers do **not** measure GPU execution

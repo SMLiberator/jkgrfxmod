@@ -425,6 +425,16 @@ namespace jkgm {
         uint64_t peak_sort_opaque = 0, peak_sort_trans = 0, peak_triangles = 0;
         profile_clock::time_point last_profile_frame{};
         profile_clock::time_point profile_window_start{};
+        profile_clock::time_point last_present_end{};
+        profile_clock::time_point last_execute_end{};
+        bool frame_had_execute = false;
+
+        static uint64_t elapsed_profile_us(profile_clock::time_point a,
+                                           profile_clock::time_point b)
+        {
+            return static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(b - a).count());
+        }
 
         void record_profile(profile_clock::time_point started,
                             profile_clock::time_point finished)
@@ -456,6 +466,13 @@ namespace jkgm {
                      "/", peak_period, " submit_us avg/peak=",
                      profile_window.present_us / frames, "/", peak_present,
                      " execute_us=", avg(profile_stage::execute));
+            LOG_INFO("PERF JK-side gaps_us before_first=", profile_window.before_first_execute_us / frames,
+                     " between=", profile_window.between_executes_us / frames,
+                     " after_last=", profile_window.after_last_execute_us / frames,
+                     " frames_with_execute=", profile_window.frames_with_execute, "/", frames);
+            LOG_INFO("PERF execute_buffers calls_avg=", profile_window.execute_calls / frames,
+                     " vertices_avg=", profile_window.execute_vertices / frames,
+                     " instruction_bytes_avg=", profile_window.execute_instruction_bytes / frames);
             LOG_INFO("PERF sorting_us opaque=", avg(profile_stage::sort_opaque),
                      " transparent=", avg(profile_stage::sort_transparent),
                      " peaks=", peak_sort_opaque, "/", peak_sort_trans,
@@ -534,6 +551,9 @@ namespace jkgm {
                     profile_window = {};
                     profile_frame = {};
                     profile_frames = 0;
+                    last_present_end = {};
+                    last_execute_end = {};
+                    frame_had_execute = false;
                 }
                 // Pausing/menu transitions may evict and reload D3D textures.
                 // Refresh the native MAT resolver on the next game frame,
@@ -1995,10 +2015,30 @@ namespace jkgm {
 
         void execute_game(IDirect3DExecuteBuffer *cmdbuf, IDirect3DViewport *vp) override
         {
-            profile_scope timer(the_config->profile_renderer,
+            bool const profiling = the_config->profile_renderer;
+            if(profiling) {
+                auto const entered = profile_clock::now();
+                if(!frame_had_execute) {
+                    if(last_present_end != profile_clock::time_point{}) {
+                        profile_frame.before_first_execute_us +=
+                            elapsed_profile_us(last_present_end, entered);
+                    }
+                    frame_had_execute = true;
+                }
+                else {
+                    profile_frame.between_executes_us +=
+                        elapsed_profile_us(last_execute_end, entered);
+                }
+                ++profile_frame.execute_calls;
+            }
+            profile_scope timer(profiling,
                 profile_frame.timings[profile_idx(profile_stage::execute)]);
             D3DEXECUTEDATA ed;
             cmdbuf->GetExecuteData(&ed);
+            if(profiling) {
+                profile_frame.execute_vertices += ed.dwVertexCount;
+                profile_frame.execute_instruction_bytes += ed.dwInstructionLength;
+            }
 
             D3DEXECUTEBUFFERDESC ebd;
             cmdbuf->Lock(&ebd);
@@ -2214,6 +2254,9 @@ namespace jkgm {
             }
 
             cmdbuf->Unlock();
+            if(profiling) {
+                last_execute_end = profile_clock::now();
+            }
         }
 
         void present_game() override
@@ -2221,6 +2264,11 @@ namespace jkgm {
             bool const profiling = the_config->profile_renderer;
             auto const started = profile_clock::now();
             if(profiling) {
+                if(frame_had_execute) {
+                    profile_frame.after_last_execute_us +=
+                        elapsed_profile_us(last_execute_end, started);
+                    ++profile_frame.frames_with_execute;
+                }
                 if(last_profile_frame != profile_clock::time_point{}) {
                     profile_frame.period_us = static_cast<uint64_t>(
                         std::chrono::duration_cast<std::chrono::microseconds>(
@@ -2305,6 +2353,12 @@ namespace jkgm {
             gun_transparent_batch.clear();
             overlay_batch.clear();
             record_profile(started, profile_clock::now());
+            if(profiling) {
+                // Recorded *after* logging so the log cost does not count as JK work.
+                last_present_end = profile_clock::now();
+                last_execute_end = {};
+                frame_had_execute = false;
+            }
         }
 
         void depth_clear_game() override
