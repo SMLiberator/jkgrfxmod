@@ -1849,25 +1849,31 @@ namespace jkgm {
             native_texture tex{};
             if(!read_object(info.texture,tex)) return out;
             out.alpha=(tex.header[0]&1U)!=0;
-            auto const &alpha=tex.alpha_mips[0];
-            auto const &opaque=tex.opaque_mips[0];
             auto const valid_surface=[](native_surface const &sf) {
                 return sf.texture_loaded!=0 && sf.texture_handle>0 &&
                        sf.width>0 && sf.height>0 &&
                        sf.width<=8192 && sf.height<=8192;
             };
             native_surface const *chosen=nullptr;
-            if(out.alpha && valid_surface(alpha)) chosen=&alpha;
-            else if(valid_surface(opaque)) chosen=&opaque;
-            else if(valid_surface(alpha)) chosen=&alpha;
+            unsigned mip=0;
+            for(unsigned i=0;i<std::min(tex.header[6],4U);i++) {
+                auto const &alpha=tex.alpha_mips[i];
+                auto const &opaque=tex.opaque_mips[i];
+                if(out.alpha && valid_surface(alpha)) chosen=&alpha;
+                else if(valid_surface(opaque)) chosen=&opaque;
+                else if(valid_surface(alpha)) chosen=&alpha;
+                if(chosen) { mip=i; break; }
+            }
             if(!chosen) return out;
             auto const id=static_cast<size_t>(chosen->texture_handle);
             if(id==0 || id>vidmem_texture_surfaces.size()) return out;
             auto const &surface=vidmem_texture_surfaces[id-1];
             if(!surface || !surface->albedo_map) return out;
             out.texture=texture_cache->get_texture_handle(*surface->albedo_map);
-            out.width=static_cast<float>(chosen->width);
-            out.height=static_cast<float>(chosen->height);
+            // JK stores local 3DO UVs in first-mipmap pixel units.
+            // Normalize them against the equivalent original mip-0 size.
+            out.width=static_cast<float>(chosen->width << mip);
+            out.height=static_cast<float>(chosen->height << mip);
             out.has_image=true;
             return out;
         }

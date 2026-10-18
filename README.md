@@ -743,31 +743,34 @@ For exact install paths, compatibility limits, and test commands, see
 [doc/install.md](doc/install.md).
 
 
-## First GPU-resident 3DO experiment (development-only)
+## Experimental GPU-resident 3DO mesh path
 
-This proof of concept bypasses JK's entire native \`rdModel3_DrawMesh\`
-transform/face/Direct3D preparation path **for meshes with one chosen exact
-mesh name**. It uploads a copy of their original local vertices and face
-indices into static OpenGL VBO/EBO buffers once, and draws with the live JK
-camera and joint/world transform each frame. All other meshes continue through
-JK unchanged. There is **no** new EXE patch or injector.
+Set \`"gpu_3do_test_mesh": "BODY"\` in \`jkgm.json\` to bypass the
+native JK 3DO mesh renderer for meshes named \`BODY\` (case-sensitive).
+Leave it empty (default) for the original renderer.
 
-To activate, set \`"gpu_3do_test_mesh": "MESHNAME"\` in \`jkgm.json\`, using the
-exact \`MESH NAME\` from a 3DO's MESH section (case-sensitive, max 31 bytes).
-Empty string (default) switches the entire path off. This may match multiple
-meshes sharing a name; only use with an isolated test model. Replace
-\`renderer.dll\` and copy the two new \`gpu_3do_preview\` shaders into
-\`jkgm/shaders/\`.
+JkGRfxMod now snapshots independent 3DO position/UV indices, face normals,
+material pointers, cels and alpha flags once, then draws cached static VBO
+and index buffers using each frame's live joint/world transformation. If a
+selected MAT has not been uploaded to the engine's D3D texture cache yet,
+that instance temporarily renders normally through JK until its surface is
+ready.
 
-**This is a geometry-pipeline proof, NOT material parity yet**: matching
-meshes render **solid magenta** with simplified depth and normal output,
-ignoring original textures, per-vertex colors, transparency, lighting,
-UV animation and backface flags. Do not enable for normal racing/gameplay.
-It is a test of the native bypass and persistent GPU buffers, not an FPS
-benchmark of final quality. A malformed/nonmatching mesh falls back to JK.
-Turn the option off to restore identical pre-experiment rendering.
+The GPU path currently samples **base albedo textures** via native MAT cels
+and JkGRfxMod's existing texture cache. It draws solid faces in the G-buffer
+and translucent/alpha-textured faces during the normal transparency stage.
+The temporary material shader has no equivalent for native dynamic vertex
+lighting, vertex RGB tint, emissive/reflection/normal maps, special blend
+modes, exact JK alpha flags, surface fog, and all material override effects
+yet. Transparent face ordering is not optimized. Magenta means the original
+albedo/handle could not be resolved in the prototype. Check detailed level
+logs when diagnosing such surfaces.
 
-Known limits: selecting a mesh used by moving/animated actors is not yet a
-correctness test. Selected opaque rigid scenery is ideal. Multiple instances
-of the same cached mesh share GPU geometry but use their own transforms.
-World-sector geometry and all unselected meshes remain on the old path.
+For tests, replace only \`renderer.dll\` (keep the existing \`jkgm.exe\`)
+and install both \`gpu_3do_preview.vert\` and \`gpu_3do_preview.frag\` in
+\`jkgm/shaders/\`. Switch off the config flag for ordinary play. Avoid using
+this as a final-quality or final-speed benchmark until material parity.
+
+Native models/world-sector faces not selected by name continue through JK,
+as do unsupported/malformed selected meshes. Per-level GPU buffers and
+native snapshot caches are cleared on renderer mode transitions.
