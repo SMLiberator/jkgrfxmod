@@ -809,7 +809,8 @@ python tools/verify_retro_cmp.py misc/cmp/first.cmp jkgm-retro.log
 
 That script reports exact mismatches by palette index. It correctly
 reads the on-disk CMP's RGB table at offset `0x40` (the loaded engine
-structure keeps those same 768 bytes at offset `0x10`). A matching
+structure keeps those same 768 bytes at offset `0x30` due to its
+32-byte debug-name prefix). A matching
 palette proves the acquisition step and points to a downstream problem
 such as quantization or color processing. For a clean visual test,
 temporarily set `"enable_post": false` to disable color grading.
