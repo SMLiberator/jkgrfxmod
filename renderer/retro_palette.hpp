@@ -6,10 +6,38 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <string>
 #include <vector>
 namespace jkgm {
 constexpr int retro_lut_steps=64,retro_lut_width=512,retro_lut_height=512;
 using retro_palette_rgb=std::array<uint8_t,768>;
+
+// Stable byte-for-byte signature of JK's in-memory 256xRGB8 palette.
+inline uint32_t retro_palette_fnv1a(retro_palette_rgb const &palette) {
+    uint32_t hash=2166136261U;
+    for(uint8_t byte:palette) {
+        hash^=byte;
+        hash*=16777619U;
+    }
+    return hash;
+}
+
+// Exactly 16 sequential RGB888 entries, 96 uppercase hexadecimal digits.
+// Dumped to the log once per loaded/changed palette for comparison with the
+// 0x40..0x33F RGB888 bytes of the original CMP file.
+inline std::string retro_palette_hex_row(retro_palette_rgb const &palette,
+                                        int first_index) {
+    if(first_index<0 || first_index>240 || (first_index%16)!=0) return {};
+    char const *digits="0123456789ABCDEF";
+    std::string result;
+    result.reserve(96);
+    for(int i=first_index*3;i<(first_index+16)*3;i++) {
+        uint8_t v=palette[size_t(i)];
+        result.push_back(digits[v>>4]);
+        result.push_back(digits[v&15]);
+    }
+    return result;
+}
 struct retro_kd_tree {
     struct node { std::array<int,3> rgb{}; int left=-1,right=-1; };
     std::array<node,256> nodes{};
