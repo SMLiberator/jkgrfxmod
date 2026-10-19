@@ -821,7 +821,10 @@ guessing from JK's original MAT alpha flag. Fully opaque textures are
 single-pass; textures with transparent pixels use the per-pixel mixed-alpha
 split. GPU MAT resolution is cached once per unique material/cel per frame
 and native residency is tested once per mesh per frame, even for multiple
-instances.
+instances. With `profile_renderer` enabled, the log also reports the first
+80 distinct mesh-name/fallback-reason combinations, and separates opaque and
+transparent GPU GL submissions. These identify meshes which intentionally
+continue through JK, and whether alpha sorting prevents further batching.
 
 The development CI workflow is manually triggered with **Actions → CI →
 Run workflow** on the `development` branch, not automatically on each push.

@@ -625,6 +625,14 @@ namespace jkgm {
                          " multi_calls_avg=",
                          profile_window.gpu_multidraw_calls/frames,
                          " NOTE=only_opaque_ranges_combined");
+                LOG_INFO("PERF gpu_3do passes opaque_GL_calls_avg=",
+                         profile_window.gpu_opaque_draw_calls/frames,
+                         " opaque_ranges_avg=",
+                         profile_window.gpu_opaque_draw_ranges/frames,
+                         " transparent_GL_calls_avg=",
+                         profile_window.gpu_transparent_draw_calls/frames,
+                         " transparent_ranges_avg=",
+                         profile_window.gpu_transparent_draw_ranges/frames);
                 LOG_INFO("PERF gpu_3do groups_checked_avg=",
                          profile_window.gpu_groups_considered/frames,
                          " frustum_culled_avg=",
@@ -2324,6 +2332,13 @@ namespace jkgm {
                 if(the_config->profile_renderer) {
                     ++profile_frame.gpu_draw_calls;
                     profile_frame.gpu_draw_ranges+=draw_end-draw_start;
+                    if(transparent) {
+                        ++profile_frame.gpu_transparent_draw_calls;
+                        profile_frame.gpu_transparent_draw_ranges+=draw_end-draw_start;
+                    } else {
+                        ++profile_frame.gpu_opaque_draw_calls;
+                        profile_frame.gpu_opaque_draw_ranges+=draw_end-draw_start;
+                    }
                     if(draw_end>draw_start+1)
                         ++profile_frame.gpu_multidraw_calls;
                     for(size_t n=draw_start;n<draw_end;n++)

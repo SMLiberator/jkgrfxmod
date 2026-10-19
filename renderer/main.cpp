@@ -22,6 +22,7 @@
 #include <cmath>
 #include <chrono>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <memory>
 #include <cstddef>
@@ -122,6 +123,20 @@ namespace {
     uint64_t next_gpu_id=1;
     uint64_t gpu_frame_serial=1;
     jkgm::gpu_3do_native_stats gpu_native_stats;
+    // Debug-only fallback names, capped to avoid filling the performance log
+    // with transient meshes. This never runs in normal gameplay.
+    std::unordered_set<std::string> gpu_logged_fallbacks;
+    void gpu_log_fallback(native_mesh const &m,std::string const &reason)
+    {
+        if(!the_config || !the_config->profile_renderer ||
+           gpu_logged_fallbacks.size()>=80) return;
+        auto const end=std::find(m.name,m.name+sizeof(m.name),'\0');
+        std::string const name(m.name,end);
+        if(name.empty()) return;
+        if(gpu_logged_fallbacks.insert(name+"|"+reason).second)
+            LOG_INFO("GPU 3DO fallback mesh=",name," reason=",reason,
+                     " vertices=",m.num_vertices," faces=",m.num_faces);
+    }
 
     bool gpu_span_readable(void const *p,size_t len) {
         if(!p || len==0 || len>4*1024*1024) return false;
@@ -300,14 +315,20 @@ namespace {
     }
 
     std::shared_ptr<jkgm::gpu_3do_geometry const>
-    snapshot_gpu_mesh(native_mesh const &m, float const *vertex_rgb) {
+    snapshot_gpu_mesh(native_mesh const &m, float const *vertex_rgb,
+                      char const **failure) {
+        auto const reject=[&](char const *reason)
+            ->std::shared_ptr<jkgm::gpu_3do_geometry const> {
+            if(failure) *failure=reason;
+            return {};
+        };
         if(m.num_vertices<3 || m.num_vertices>65536 || m.num_faces<1 ||
            m.num_faces>65536 ||
            !gpu_span_readable(m.vertices,size_t(m.num_vertices)*12) ||
            !gpu_span_readable(m.faces,size_t(m.num_faces)*sizeof(native_face)) ||
            (vertex_rgb &&
             !gpu_span_readable(vertex_rgb,size_t(m.num_vertices)*3*sizeof(float))))
-            return {};
+            return reject("invalid_mesh_counts_or_memory");
         // Sith stores positions and UVs in separate arrays. Faces index them
         // independently, so split each face corner rather than indexing
         // positions directly: otherwise textured seams get corrupted.
@@ -330,36 +351,40 @@ namespace {
                !jkgm::gpu_3do_supports_face_mode(static_cast<int>(face.geo)) ||
                !gpu_span_readable(face.pos_indices,size_t(face.count)*4) ||
                !std::isfinite(face.uv_x) || !std::isfinite(face.uv_y))
-                return {};
+                return reject("invalid_face_mode_or_face_indices");
             bool const face_uv=uv_src && face.uv_indices &&
                 gpu_span_readable(face.uv_indices,size_t(face.count)*4);
             // Fail open when a textured polygon lacks readable UVs.
             // Avoid suppressing JK geometry that we cannot reproduce.
-            if(face.material && face.geo>=4 && !face_uv) return {};
+            if(face.material && face.geo>=4 && !face_uv)
+                return reject("textured_face_missing_uv");
             // The native engine's per-face mode is capped by the mesh mode.
             // Faces with unknown modes fall back instead of rendering unlit.
             if(m.lighting_mode<0 || m.lighting_mode>3 ||
                face.light>3 || !std::isfinite(face.extra_light))
-                return {};
+                return reject("invalid_mesh_or_face_light_mode");
             // Preserve force-unlit faces as a shader sentinel (4), since
             // they override even a FullyLit per-Thing lighting cap.
             int const mode=(face.type&0x10U)!=0 ? 4
                             : std::min(m.lighting_mode,static_cast<int>(face.light));
             if(mode==3 && (!m.vertex_lights || !has_smooth_normals ||
                !gpu_span_readable(m.vertex_lights,size_t(m.num_vertices)*4)))
-                return {};
+                return reject("missing_gouraud_normals_or_lights");
             uint32_t const base=static_cast<uint32_t>(g->vertices.size());
             int const anchor_index=face.pos_indices[0];
-            if(anchor_index<0 || anchor_index>=m.num_vertices) return {};
+            if(anchor_index<0 || anchor_index>=m.num_vertices)
+                return reject("invalid_anchor_index");
             auto const anchor=m.vertices+size_t(anchor_index)*3;
             for(uint32_t v=0;v<face.count;v++) {
                 int const pi=face.pos_indices[v];
-                if(pi<0 || pi>=m.num_vertices) return {};
+                if(pi<0 || pi>=m.num_vertices)
+                    return reject("invalid_position_index");
                 auto const i=size_t(pi)*3;
                 float u=0,vtex=0;
                 if(face_uv) {
                     int const uv_idx=face.uv_indices[v];
-                    if(uv_idx<0 || uv_idx>=m.num_uvs) return {};
+                    if(uv_idx<0 || uv_idx>=m.num_uvs)
+                        return reject("invalid_uv_index");
                     u=uv_src[size_t(uv_idx)*2]+face.uv_x;
                     vtex=uv_src[size_t(uv_idx)*2+1]+face.uv_y;
                 }
@@ -377,7 +402,8 @@ namespace {
                 if(vertex_rgb) {
                     for(int channel=0;channel<3;channel++) {
                         float const value=vertex_rgb[i+size_t(channel)];
-                        if(!std::isfinite(value)) return {};
+                        if(!std::isfinite(value))
+                            return reject("nonfinite_vertex_rgb");
                         rgb[channel]=std::floor(
                             std::clamp(value,0.0f,1.0f)*255.0f+0.5f)/255.0f;
                     }
@@ -394,7 +420,8 @@ namespace {
                                     out.lnx,out.lny,out.lnz,
                                     out.fax,out.fay,out.faz,out.face_extra,
                                     out.cr,out.cg,out.cb})
-                    if(!std::isfinite(vcheck)) return {};
+                    if(!std::isfinite(vcheck))
+                        return reject("nonfinite_vertex_attribute");
                 g->vertices.push_back(out);
             }
             uint32_t const first=static_cast<uint32_t>(g->indices.size());
@@ -471,7 +498,7 @@ namespace {
         g->material_refs.erase(
             std::unique(g->material_refs.begin(),g->material_refs.end()),
             g->material_refs.end());
-        return g->indices.empty() ? std::shared_ptr<jkgm::gpu_3do_geometry const>{}
+        return g->indices.empty() ? reject("no_drawable_indices")
                                   : g;
     }
 
@@ -648,11 +675,13 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
                 sizeof(current_geo_mode));
     if(!jkgm::gpu_3do_supports_geo_mode(current_geo_mode,m.geometry_mode)) {
         if(the_config->profile_renderer) ++gpu_native_stats.geometry_native;
+        gpu_log_fallback(m,"geometry_mode_not_full");
         return false; // Preserve JK vertex/wire/solid/invisible rendering.
     }
     auto const camera=jkgm::read_active_render_camera();
     if(!camera.valid) {
         if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
+        gpu_log_fallback(m,"camera_unavailable");
         return false;
     }
     if(gpu_mesh_outside_native_frustum(m,matrix,camera)) {
@@ -664,9 +693,11 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
        it->second.faces!=m.faces || it->second.rgb!=vertex_rgb ||
        it->second.num_vertices!=m.num_vertices ||
        it->second.num_faces!=m.num_faces) {
-        auto geom=snapshot_gpu_mesh(m,vertex_rgb);
+        char const *failure="unknown_snapshot_error";
+        auto geom=snapshot_gpu_mesh(m,vertex_rgb,&failure);
         if(!geom) {
             if(the_config->profile_renderer) ++gpu_native_stats.snapshot_native;
+            gpu_log_fallback(m,failure);
             return false;
         }
         if(gpu_mesh_cache.size()>4096) gpu_mesh_cache.clear();
@@ -698,6 +729,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     }
     if(!it->second.ready_for_frame) {
         if(the_config->profile_renderer) ++gpu_native_stats.material_native;
+        gpu_log_fallback(m,"native_MAT_cel_not_yet_resident");
         return false;
     }
     gpu_3do_instance inst;
@@ -714,6 +746,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
                 reinterpret_cast<void const *>(effective_light_mode_addr),4);
     if(lighting_cap<0 || lighting_cap>3) {
         if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
+        gpu_log_fallback(m,"unsupported_thing_lighting_mode");
         return false;
     }
     inst.effective_light_mode=static_cast<float>(lighting_cap);
@@ -721,6 +754,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     for(float f:inst.transform) if(!std::isfinite(f)) return false;
     if(!snapshot_gpu_3do_lighting(m,inst.transform.data(),inst)) {
         if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
+        gpu_log_fallback(m,"unsupported_dynamic_lighting_or_light_count");
         return false;
     }
     pending_gpu_instances.emplace_back(std::move(inst));

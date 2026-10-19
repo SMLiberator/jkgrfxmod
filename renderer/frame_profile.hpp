@@ -28,6 +28,8 @@ struct profile_sample {
   uint64_t gpu_material_native=0,gpu_lighting_native=0;
   uint64_t gpu_ready_material_refs=0,gpu_ready_ns=0;
   uint64_t gpu_draw_calls=0,gpu_draw_ranges=0,gpu_multidraw_calls=0;
+  uint64_t gpu_opaque_draw_calls=0,gpu_transparent_draw_calls=0;
+  uint64_t gpu_opaque_draw_ranges=0,gpu_transparent_draw_ranges=0;
   uint64_t gpu_draw_triangles=0,gpu_material_resolves=0,gpu_uploads=0;
   uint64_t gpu_groups_considered=0,gpu_groups_frustum_culled=0,gpu_groups_backface_culled=0;
   uint64_t gpu_preview_cpu_us=0;
@@ -62,6 +64,10 @@ struct profile_sample {
     gpu_ready_checks+=o.gpu_ready_checks; gpu_draw_calls+=o.gpu_draw_calls;
     gpu_draw_ranges+=o.gpu_draw_ranges;
     gpu_multidraw_calls+=o.gpu_multidraw_calls;
+    gpu_opaque_draw_calls+=o.gpu_opaque_draw_calls;
+    gpu_transparent_draw_calls+=o.gpu_transparent_draw_calls;
+    gpu_opaque_draw_ranges+=o.gpu_opaque_draw_ranges;
+    gpu_transparent_draw_ranges+=o.gpu_transparent_draw_ranges;
     gpu_draw_triangles+=o.gpu_draw_triangles;
     gpu_material_resolves+=o.gpu_material_resolves;
     gpu_uploads+=o.gpu_uploads;
