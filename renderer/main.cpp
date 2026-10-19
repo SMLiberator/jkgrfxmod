@@ -84,10 +84,13 @@ namespace {
         int num_vertices=0, num_faces=0;
         uint64_t id=0;
         std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
+        uint64_t ready_checked_frame=0;
+        bool ready_for_frame=false;
     };
     std::unordered_map<void const *,cached_gpu_mesh> gpu_mesh_cache;
     std::vector<jkgm::gpu_3do_instance> pending_gpu_instances;
     uint64_t next_gpu_id=1;
+    uint64_t gpu_frame_serial=1;
 
     bool gpu_span_readable(void const *p,size_t len) {
         if(!p || len==0 || len>4*1024*1024) return false;
@@ -126,7 +129,8 @@ namespace {
     // When bypassing rdModel3_DrawMesh, its built-in sphere/frustum cull
     // would otherwise disappear: this previously queued *every* mesh,
     // including thousands well outside the camera view.
-    bool gpu_mesh_outside_native_frustum(native_mesh const &m,void const *matrix)
+    bool gpu_mesh_outside_native_frustum(native_mesh const &m,void const *matrix,
+                                         jkgm::engine_camera const &camera)
     {
         if(!gpu_span_readable(matrix,12*sizeof(float))) return false;
         constexpr uintptr_t camera_global=0x0073A418U;
@@ -149,8 +153,6 @@ namespace {
             return false;
         jkgm::gpu_3do_native_frustum f{};
         std::memcpy(&f,reinterpret_cast<void const *>(frustum_ptr),sizeof(f));
-        auto const camera=jkgm::read_active_render_camera();
-        if(!camera.valid) return false;
         float world[12];
         std::memcpy(world,matrix,sizeof(world));
         float const dx=world[9]-camera.position[0];
@@ -400,11 +402,10 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     std::memcpy(&m,mesh,sizeof(m));
     // The GPU prototype only draws filled triangle fans. Leave points and
     // wireframe meshes to JK rather than changing their geometry semantics.
-    if(m.geometry_mode<3 || !jkgm::read_active_render_camera().valid)
-        return false;
-    // This is the normal JK mesh-sphere visibility test, not additional
-    // "tighter bounds" work. A rejected mesh needs no snapshot/UV/MAT/GL.
-    if(gpu_mesh_outside_native_frustum(m,matrix)) return true;
+    if(m.geometry_mode<3) return false;
+    auto const camera=jkgm::read_active_render_camera();
+    if(!camera.valid) return false;
+    if(gpu_mesh_outside_native_frustum(m,matrix,camera)) return true;
     auto it=gpu_mesh_cache.find(mesh);
     if(it==gpu_mesh_cache.end() || it->second.vertices!=m.vertices ||
        it->second.faces!=m.faces || it->second.num_vertices!=m.num_vertices ||
@@ -425,7 +426,13 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     }
     // If a cel has never been encountered, let JK handle this call to warm
     // its native material cache. We can switch to GPU rendering next frame.
-    if(!gpu_mesh_materials_ready(*it->second.geometry)) return false;
+    // Many instances share this mesh. Check MAT handles once per mesh per
+    // frame, refreshing next frame so animated cels still get a warm-up.
+    if(it->second.ready_checked_frame!=gpu_frame_serial) {
+        it->second.ready_for_frame=gpu_mesh_materials_ready(*it->second.geometry);
+        it->second.ready_checked_frame=gpu_frame_serial;
+    }
+    if(!it->second.ready_for_frame) return false;
     gpu_3do_instance inst;
     inst.id=it->second.id;
     inst.geometry=it->second.geometry;
@@ -438,12 +445,14 @@ std::vector<jkgm::gpu_3do_instance> jkgm::consume_gpu_3do_instances()
 {
     std::vector<gpu_3do_instance> out;
     out.swap(pending_gpu_instances);
+    ++gpu_frame_serial;
     return out;
 }
 void jkgm::reset_gpu_3do_instances()
 {
     pending_gpu_instances.clear();
     gpu_mesh_cache.clear();
+    ++gpu_frame_serial;
 }
 
 jkgm::native_3do_sample jkgm::consume_native_3do_sample()
