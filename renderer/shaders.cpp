@@ -553,6 +553,18 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , depth_image(gl::get_uniform_location(the_program, "depth_image"))
     , fog_params(gl::get_uniform_location(the_program, "fog_params"))
     , fog_color(gl::get_uniform_location(the_program, "fog_color"))
+    , decal_active(gl::get_uniform_location(the_program, "decal_active"))
+    , decal_image(gl::get_uniform_location(the_program, "decal_image"))
+    , normal_image(gl::get_uniform_location(the_program, "normal_image"))
+    , decal_origin(gl::get_uniform_location(the_program, "decal_origin"))
+    , decal_right(gl::get_uniform_location(the_program, "decal_right"))
+    , decal_up(gl::get_uniform_location(the_program, "decal_up"))
+    , decal_forward(gl::get_uniform_location(the_program, "decal_forward"))
+    , decal_options(gl::get_uniform_location(the_program, "decal_options"))
+    , camera_origin(gl::get_uniform_location(the_program, "camera_origin"))
+    , camera_right(gl::get_uniform_location(the_program, "camera_right"))
+    , camera_forward(gl::get_uniform_location(the_program, "camera_forward"))
+    , camera_up(gl::get_uniform_location(the_program, "camera_up"))
 {
 }
 
@@ -581,6 +593,30 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_fog(point<4,float> pa
 {
     gl::set_uniform_vector(fog_params,params);
     gl::set_uniform_vector(fog_color,fog);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::disable_projected_decal()
+{
+    gl::set_uniform_integer(decal_active,0);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_projected_decal(
+    point<4,float> origin,point<4,float> right,point<4,float> up,
+    point<4,float> forward,point<4,float> options,point<4,float> cam_origin,
+    point<4,float> cam_right,point<4,float> cam_forward,point<4,float> cam_up)
+{
+    gl::set_uniform_integer(decal_active,1);
+    gl::set_uniform_integer(decal_image,4);
+    gl::set_uniform_integer(normal_image,5);
+    gl::set_uniform_vector(decal_origin,origin);
+    gl::set_uniform_vector(decal_right,right);
+    gl::set_uniform_vector(decal_up,up);
+    gl::set_uniform_vector(decal_forward,forward);
+    gl::set_uniform_vector(decal_options,options);
+    gl::set_uniform_vector(camera_origin,cam_origin);
+    gl::set_uniform_vector(camera_right,cam_right);
+    gl::set_uniform_vector(camera_forward,cam_forward);
+    gl::set_uniform_vector(camera_up,cam_up);
 }
 
 jkgm::shaders::game_transparency_pass_shader::game_transparency_pass_shader(
