@@ -432,15 +432,34 @@ namespace {
             uint32_t const plane_start=static_cast<uint32_t>(g->face_planes.size());
             g->face_planes.push_back({{anchor[0],anchor[1],anchor[2]},
                                       {face.normal[0],face.normal[1],face.normal[2]}});
+            std::array<float,3> bounds_lo{{g->vertices[base].x,
+                                            g->vertices[base].y,
+                                            g->vertices[base].z}};
+            auto bounds_hi=bounds_lo;
+            for(uint32_t v=1;v<face.count;v++) {
+                auto const &p=g->vertices[base+v];
+                for(int axis=0;axis<3;axis++) {
+                    float const value=axis==0?p.x:(axis==1?p.y:p.z);
+                    bounds_lo[axis]=std::min(bounds_lo[axis],value);
+                    bounds_hi[axis]=std::max(bounds_hi[axis],value);
+                }
+            }
             if(!translucent && !g->groups.empty() &&
                g->groups.back().material==ptr &&
                g->groups.back().cel==cel &&
                g->groups.back().face_type==flags) {
-                g->groups.back().count+=added;
-                ++g->groups.back().plane_count;
+                auto &group=g->groups.back();
+                group.count+=added;
+                ++group.plane_count;
+                for(int axis=0;axis<3;axis++) {
+                    group.bounds_min[axis]=std::min(group.bounds_min[axis],
+                                                    bounds_lo[axis]);
+                    group.bounds_max[axis]=std::max(group.bounds_max[axis],
+                                                    bounds_hi[axis]);
+                }
             } else {
                 g->groups.push_back({first,added,ptr,cel,flags,center,
-                                     plane_start,1});
+                                     plane_start,1,bounds_lo,bounds_hi});
             }
         }
         return g->indices.empty() ? std::shared_ptr<jkgm::gpu_3do_geometry const>{}

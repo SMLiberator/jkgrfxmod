@@ -4,6 +4,7 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_alpha.hpp"
+#include "gpu_3do_frustum.hpp"
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
 #include "backbuffer_menu_surface.hpp"
@@ -613,6 +614,13 @@ namespace jkgm {
                          " material_resolves_avg=",profile_window.gpu_material_resolves/frames,
                          " uploads_total=",profile_window.gpu_uploads,
                          " NOTE=CPU_submission_not_GPU_time");
+                LOG_INFO("PERF gpu_3do groups_checked_avg=",
+                         profile_window.gpu_groups_considered/frames,
+                         " frustum_culled_avg=",
+                         profile_window.gpu_groups_frustum_culled/frames,
+                         " backface_culled_avg=",
+                         profile_window.gpu_groups_backface_culled/frames,
+                         " NOTE=counts_include_opaque_and_alpha_passes");
             }
             LOG_INFO("PERF geometry tris avg/max=", profile_window.tris / frames,
                      "/", peak_triangles,
@@ -2022,6 +2030,8 @@ namespace jkgm {
             if(!read_active_rd_camera_view(native_view)) return;
 
             float far_plane=1000.0f;
+            gpu_3do_native_frustum native_frustum{};
+            bool have_perspective_frustum=false;
             constexpr uintptr_t current_camera=0x0073A418U;
             if(engine_camera_detail::readable(current_camera,sizeof(uintptr_t))) {
                 auto const camera_ptr=*reinterpret_cast<uintptr_t const *>(current_camera);
@@ -2029,10 +2039,21 @@ namespace jkgm {
                    engine_camera_detail::readable(camera_ptr+0x48,sizeof(uintptr_t))) {
                     auto const frustum_ptr=*reinterpret_cast<uintptr_t const *>(camera_ptr+0x48);
                     if(frustum_ptr>=0x10000U &&
-                       engine_camera_detail::readable(frustum_ptr+8,sizeof(float))) {
-                        float const native_far=*reinterpret_cast<float const *>(frustum_ptr+8);
-                        if(std::isfinite(native_far) && native_far>0.1f)
-                            far_plane=native_far;
+                       engine_camera_detail::readable(
+                           frustum_ptr,sizeof(native_frustum))) {
+                        std::memcpy(&native_frustum,
+                                    reinterpret_cast<void const *>(frustum_ptr),
+                                    sizeof(native_frustum));
+                        if(std::isfinite(native_frustum.far_plane) &&
+                           native_frustum.far_plane>0.1f)
+                            far_plane=native_frustum.far_plane;
+                        if(engine_camera_detail::readable(camera_ptr,sizeof(int32_t))) {
+                            int32_t project_type=0;
+                            std::memcpy(&project_type,
+                                        reinterpret_cast<void const *>(camera_ptr),
+                                        sizeof(project_type));
+                            have_perspective_frustum=project_type==1;
+                        }
                     }
                 }
             }
@@ -2068,6 +2089,20 @@ namespace jkgm {
                 std::array<float,3> local_eye{};
                 bool const can_cpu_cull=gpu_3do_local_eye(modelviews.back(),local_eye);
                 for(auto const &group:inst.geometry->groups) {
+                    if(the_config->profile_renderer)
+                        ++profile_frame.gpu_groups_considered;
+                    // Native JK clips individual faces; test the bounds of
+                    // whole cached draw ranges to avoid GL state work for
+                    // entirely offscreen geometry. This is conservative:
+                    // partially visible groups still reach OpenGL.
+                    if(have_perspective_frustum &&
+                       gpu_3do_batch_outside_frustum(
+                           native_frustum,modelviews.back(),
+                           group.bounds_min,group.bounds_max)) {
+                        if(the_config->profile_renderer)
+                            ++profile_frame.gpu_groups_frustum_culled;
+                        continue;
+                    }
                     // JK skips a face if dot(camera-local - anchor,normal)<=0,
                     // unless it is double-sided. Since opaque faces are batched
                     // by MAT, only skip a group when ALL its faces face away.
@@ -2086,7 +2121,11 @@ namespace jkgm {
                                 break;
                             }
                         }
-                        if(!any_visible) continue;
+                        if(!any_visible) {
+                            if(the_config->profile_renderer)
+                                ++profile_frame.gpu_groups_backface_culled;
+                            continue;
+                        }
                     }
                     // Cache MAT resolution per material/cel for the complete
                     // frame. Multiple cars using the same MAT no longer

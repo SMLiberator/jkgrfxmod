@@ -796,6 +796,13 @@ zero-alpha base and composite their glow directly in the transparency pass,
 without writing opaque depth or turning their base solid black. Other
 emissive materials participate in the normal opaque G-buffer/composition.
 
+The GPU path additionally rejects entire material-group draw ranges using
+conservative transformed AABBs against the native frustum. This can save
+GPU submissions for large visible meshes whose material groups are offscreen;
+it does NOT yet match native per-face frustum clipping inside a partially
+visible group. New PERF gpu_3do group counters expose frustum rejects and
+backface rejects (both counted across opaque and alpha passes).
+
 The GPU path now preserves JK's own per-mesh radius/sphere-frustum rejection;
 the initial all-mesh bypass omitted it and drew offscreen geometry. This is
 the existing sphere test, not the discarded mesh-AABB system. JK also filters

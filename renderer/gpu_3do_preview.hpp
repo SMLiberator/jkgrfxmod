@@ -38,6 +38,9 @@ namespace jkgm {
         uint32_t face_type=0; // RD_FF_DOUBLE_SIDED=0x1, translucent=0x2
         std::array<float,3> centroid{}; // face-local center for transparency sorting
         uint32_t plane_start=0, plane_count=0; // planes used for CPU backface rejection
+        // Conservative local-space bounds of all faces in this draw range.
+        // Used to reject entirely offscreen material groups before GL calls.
+        std::array<float,3> bounds_min{},bounds_max{};
     };
     struct gpu_3do_geometry {
         std::vector<gpu_3do_face_plane> face_planes;
