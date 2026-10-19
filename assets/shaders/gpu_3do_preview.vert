@@ -65,8 +65,11 @@ void main() {
     float bright=mode<0.5 ? 1.0
         : max(clamp(l+local_extra_light,0.0,1.0),ambient_light);
     jk_light=pow(clamp(bright,0.0,1.0),1.8);
-    vec3 vn=view_right.xyz*local_normal.x+
-            view_forward.xyz*local_normal.y+
-            view_up.xyz*local_normal.z;
+    // Match the patched native 3DO normal sideband. Non-Gouraud faces can
+    // still carry smooth vertex normals for SSAO; lighting-mode selection
+    // must not force the AO G-buffer back to flat polygon normals.
+    vec3 vn=view_right.xyz*local_light_normal.x+
+            view_forward.xyz*local_light_normal.y+
+            view_up.xyz*local_light_normal.z;
     view_normal=normalize(vec3(vn.x*h,vn.z*v,vn.y));
 }

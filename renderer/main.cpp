@@ -311,6 +311,12 @@ namespace {
         bool const has_uvs=m.uvs && m.num_uvs>0 &&
             m.num_uvs<=65536 &&
             gpu_span_readable(m.uvs,size_t(m.num_uvs)*2*sizeof(float));
+        // The patched JK pipeline forwards per-vertex smooth normals to its
+        // G-buffer even when a face does not use Gouraud lighting. The GPU
+        // path should use those same normals for SSAO; face normals make AO
+        // artificially dark along low-poly boundaries.
+        bool const has_smooth_normals=m.normals &&
+            gpu_span_readable(m.normals,size_t(m.num_vertices)*12);
         float const *uv_src=has_uvs
             ? static_cast<float const *>(m.uvs) : nullptr;
         auto g=std::make_shared<jkgm::gpu_3do_geometry>();
@@ -336,9 +342,8 @@ namespace {
             // they override even a FullyLit per-Thing lighting cap.
             int const mode=(face.type&0x10U)!=0 ? 4
                             : std::min(m.lighting_mode,static_cast<int>(face.light));
-            if(mode==3 && (!m.vertex_lights || !m.normals ||
-               !gpu_span_readable(m.vertex_lights,size_t(m.num_vertices)*4) ||
-               !gpu_span_readable(m.normals,size_t(m.num_vertices)*12)))
+            if(mode==3 && (!m.vertex_lights || !has_smooth_normals ||
+               !gpu_span_readable(m.vertex_lights,size_t(m.num_vertices)*4)))
                 return {};
             uint32_t const base=static_cast<uint32_t>(g->vertices.size());
             int const anchor_index=face.pos_indices[0];
@@ -355,7 +360,10 @@ namespace {
                     u=uv_src[size_t(uv_idx)*2]+face.uv_x;
                     vtex=uv_src[size_t(uv_idx)*2+1]+face.uv_y;
                 }
-                auto const light_normal=mode==3
+                // Reuse the saved smooth normal for the AO G-buffer in
+                // every lighting mode, while the lighting shader continues
+                // to use the flat face normal for diffuse/non-Gouraud modes.
+                auto const light_normal=has_smooth_normals
                     ? static_cast<float const *>(m.normals)+i : face.normal;
                 float const static_light=mode==3 ? static_cast<float const *>(m.vertex_lights)[pi] : 0.0f;
                 jkgm::gpu_3do_vertex out{
