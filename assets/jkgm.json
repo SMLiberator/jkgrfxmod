@@ -21,6 +21,6 @@
     "enable_posterized_lighting": false,
     "enable_vsync": false,
     "profile_renderer": false,
-    "gpu_3do_test_mesh": "",
+    "use_gpu_renderer": false,
     "use_vanilla_renderer": false
 }

@@ -409,9 +409,8 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , bloom_layers(screen_res)
 {
     LOG_DEBUG("Loading OpenGL assets");
-    // This shader isn't loaded for normal play; older asset packs still work
-    // when gpu_3do_test_mesh is empty.
-    if(!the_config->gpu_3do_test_mesh.empty()) {
+    // Load the experimental 3DO GPU path only when explicitly enabled.
+    if(the_config->use_gpu_renderer) {
         gpu_3do_preview_program =
             std::make_unique<shaders::gpu_3do_preview_shader>(data_root);
     }

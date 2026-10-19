@@ -745,45 +745,32 @@ For exact install paths, compatibility limits, and test commands, see
 
 ## Experimental GPU-resident 3DO mesh path
 
-Set \`"gpu_3do_test_mesh": "BODY"\` in \`jkgm.json\` to bypass the
-native JK 3DO mesh renderer for meshes named \`BODY\` (case-sensitive).
-Leave it empty (default) for the original renderer.
+Set \`"use_gpu_renderer": true\` in \`jkgm.json\` to draw **all supported
+filled 3DO meshes** from cached GPU vertex/index buffers. Set \`false\`
+(default) to use the previous JK-assisted 3DO renderer, while retaining
+JkGRfxMod's normal OpenGL world/sector rendering. This is not
+\`use_vanilla_renderer\`, which disables JkGRfxMod entirely.
 
-JkGRfxMod now snapshots independent 3DO position/UV indices, face normals,
-material pointers, cels and alpha flags once, then draws cached static VBO
-and index buffers using each frame's live joint/world transformation. If a
-selected MAT has not been uploaded to the engine's D3D texture cache yet,
-that instance temporarily renders normally through JK until its surface is
-ready.
+The GPU renderer snapshots 3DO face-corner positions, UVs and face normals
+once and updates only world/joint matrices per frame. Texture surfaces are
+warmed using a fallback native draw when needed. Unsupported 3DO geometry
+(such as wireframe or invalid/missing data) also falls back to native JK.
+The engine still renders world-sector geometry through the original path.
+The GPU vertex path does not yet reproduce every material, dynamic vertex
+light, custom vertex RGB or reflection effect.
 
-The GPU path resolves the original MAT albedo via native cels and JkGRfxMod's
-existing texture cache. A mixed-alpha face participates in **both passes**:
-only its fully opaque texels (alpha >= 0.999) draw into the opaque G-buffer,
-with depth writes and SSAO; only fractional-alpha texels draw in the sorted
-transparency pass. No texel is blended twice. Masked materials use their
-configured cutoff; explicitly translucent 0x2 faces, reduced-opacity
-materials and special blend modes remain entirely translucent.
+Alpha MATs with mixed opacity use disjoint fragments in two passes: fully
+opaque texels enter the opaque depth-writing G-buffer and SSAO; partially
+transparent texels are blended back-to-front. Alpha masks use the configured
+cutoff. Faces marked 0x1 are two-sided; 0x2 forces translucency. Transparent
+GPU face batches sort against other GPU 3DOs, but not yet against all native
+sector polygons.
 
-The prototype treats intentional no-albedo replacements as a neutral base,
-not a missing-texture error. Emissive-only materials with albedo factor
-`0 0 0 0` retain their black color but are not discarded merely due to
-zero base alpha. Unresolved MATs still show diagnostic magenta.
+Emissive-only replacements with albedo factor \`0 0 0 0\` preserve the
+zero-alpha base and composite their glow directly in the transparency pass,
+without writing opaque depth or turning their base solid black. Other
+emissive materials participate in the normal opaque G-buffer/composition.
 
-The prototype additionally forwards albedo tint and UV scroll, emissive maps,
-emissive factors/pulses, and the existing distance fog. This still isn't
-full JK vertex-lighting or material parity.
-The temporary material shader still lacks equivalent native dynamic
-lighting, per-vertex RGB tint, reflection/normal maps, full fluid/decal
-behavior and runtime MAT transition overrides. Additive/multiply use the
-existing blend functions but are not yet guaranteed pixel-identical. GPU translucent faces are sorted back-to-front across selected 3DO instances using native face centroids; this does not yet interleave them with JK's separately submitted world transparency. Ordinary faces use backface culling; only 0x1 faces are double-sided. The GPU camera follows the current native rdCamera view matrix, including idle orbit views. Magenta means the original
-albedo/handle could not be resolved in the prototype. Check detailed level
-logs when diagnosing such surfaces.
-
-For tests, replace only \`renderer.dll\` (keep the existing \`jkgm.exe\`)
-and install both \`gpu_3do_preview.vert\` and \`gpu_3do_preview.frag\` in
-\`jkgm/shaders/\`. Switch off the config flag for ordinary play. Avoid using
-this as a final-quality or final-speed benchmark until material parity.
-
-Native models/world-sector faces not selected by name continue through JK,
-as do unsupported/malformed selected meshes. Per-level GPU buffers and
-native snapshot caches are cleared on renderer mode transitions.
+The new path requires the updated \`renderer.dll\`, plus
+\`gpu_3do_preview.vert\` and \`gpu_3do_preview.frag\` from the same
+build in \`jkgm/shaders/\`. Keep the native \`jkgm.exe\` bootstrap.

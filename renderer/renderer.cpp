@@ -598,7 +598,7 @@ namespace jkgm {
         void set_renderer_mode(renderer_mode mode) override
         {
             if(this->mode != mode) {
-                if(!the_config->gpu_3do_test_mesh.empty()) {
+                if(the_config->use_gpu_renderer) {
                     // Levels recycle native mesh pointers; discard both copies.
                     reset_gpu_3do_instances();
                     gpu_3do_gl_cache.clear();

@@ -299,7 +299,7 @@ namespace {
                        native_mesh_bytes, sizeof(native_mesh_bytes)) != 0 ||
            std::memcmp(reinterpret_cast<void const *>(native_face_addr),
                        native_face_bytes, sizeof(native_face_bytes)) != 0) {
-            LOG_WARNING("Native 3DO profiler skipped: unrecognized executable");
+            LOG_WARNING("Native 3DO mesh hook skipped: unrecognized executable");
             return false;
         }
         LONG error = DetourTransactionBegin();
@@ -313,15 +313,15 @@ namespace {
             error = DetourAttach(&(PVOID &)RealNativeFace, HookedNativeFace);
         if(error != NO_ERROR) {
             DetourTransactionAbort();
-            LOG_WARNING("Native 3DO profiler attach failed: ", error);
+            LOG_WARNING("Native 3DO mesh hook attach failed: ", error);
             return false;
         }
         error = DetourTransactionCommit();
         if(error != NO_ERROR) {
-            LOG_WARNING("Native 3DO profiler commit failed: ", error);
+            LOG_WARNING("Native 3DO mesh hook commit failed: ", error);
             return false;
         }
-        LOG_INFO("Native 3DO model/mesh/face CPU profiler attached (per-face clocks add diagnostic overhead)");
+        LOG_INFO("Native 3DO mesh interception attached; profiling=", profiling);
         return true;
     }
     void detach_native_3do_hooks()
@@ -340,19 +340,15 @@ namespace {
 
 bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
 {
-    if(!the_config || the_config->gpu_3do_test_mesh.empty() ||
-       the_config->gpu_3do_test_mesh.size()>31 || !mesh || !matrix ||
-       pending_gpu_instances.size()>=256 ||
+    if(!the_config || !the_config->use_gpu_renderer || !mesh || !matrix ||
+       pending_gpu_instances.size()>=16384 ||
        !gpu_span_readable(mesh,sizeof(native_mesh)) ||
        !gpu_span_readable(matrix,sizeof(float)*12)) return false;
     native_mesh m{};
     std::memcpy(&m,mesh,sizeof(m));
-    auto const &name=the_config->gpu_3do_test_mesh;
-    auto const null_char=std::memchr(m.name,'\0',sizeof(m.name));
-    size_t const len=null_char
-        ? size_t(static_cast<char const *>(null_char)-m.name) : sizeof(m.name);
-    if(len!=name.size() || std::memcmp(m.name,name.data(),len)!=0 ||
-       m.geometry_mode==0 || !jkgm::read_active_render_camera().valid)
+    // The GPU prototype only draws filled triangle fans. Leave points and
+    // wireframe meshes to JK rather than changing their geometry semantics.
+    if(m.geometry_mode<3 || !jkgm::read_active_render_camera().valid)
         return false;
     auto it=gpu_mesh_cache.find(mesh);
     if(it==gpu_mesh_cache.end() || it->second.vertices!=m.vertices ||
@@ -364,7 +360,10 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
         auto &c=gpu_mesh_cache[mesh];
         c={m.vertices,m.faces,m.num_vertices,m.num_faces,next_gpu_id++,std::move(geom)};
         it=gpu_mesh_cache.find(mesh);
-        LOG_INFO("GPU 3DO prototype: captured mesh ",name,
+        auto const null_char=std::memchr(m.name,'\0',sizeof(m.name));
+        std::string const name(m.name,
+            null_char ? static_cast<char const *>(null_char) : m.name+sizeof(m.name));
+        LOG_INFO("GPU 3DO: cached mesh ",name,
                  " vertices=",m.num_vertices," faces=",m.num_faces,
                  " triangles=",it->second.geometry->indices.size()/3);
     }
@@ -1307,7 +1306,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         }
 
         renderer_hooks_active = true;
-        if(the_config->profile_renderer || !the_config->gpu_3do_test_mesh.empty()) {
+        if(the_config->profile_renderer || the_config->use_gpu_renderer) {
             native_3do_hooks_active = attach_native_3do_hooks(the_config->profile_renderer);
         }
         LOG_DEBUG("Finished attaching renderer to process");

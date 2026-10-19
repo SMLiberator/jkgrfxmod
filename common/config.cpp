@@ -105,8 +105,8 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("profile_renderer")) {
             j.at("profile_renderer").get_to(rv->profile_renderer);
         }
-        if(j.contains("gpu_3do_test_mesh")) {
-            j.at("gpu_3do_test_mesh").get_to(rv->gpu_3do_test_mesh);
+        if(j.contains("use_gpu_renderer")) {
+            j.at("use_gpu_renderer").get_to(rv->use_gpu_renderer);
         }
         if(j.contains("use_vanilla_renderer")) {
             j.at("use_vanilla_renderer").get_to(rv->use_vanilla_renderer);
