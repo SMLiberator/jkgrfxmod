@@ -425,6 +425,8 @@ namespace jkgm {
             point<2,float> normal_scroll2=make_point(0.0f,0.0f);
             float alpha_cutoff=0.5f;
             float opacity=1.0f;
+            float fluid_thickness=0.25f;
+            bool depth_clip=false;
             // 0=invalid/unresolved MAT (diagnostic magenta), 1=texture,
             // 2=intentionally no albedo map (neutral white).
             int albedo_source=0;
@@ -2099,6 +2101,8 @@ namespace jkgm {
             out.masked=surface->alpha_mode==material_alpha_mode::mask;
             out.dithered=surface->alpha_mode==material_alpha_mode::dithered;
             out.blend=surface->blend_mode;
+            out.depth_clip=surface->depth_clip;
+            out.fluid_thickness=surface->fluid_thickness;
             out.special=surface->depth_clip ||
                         surface->blend_mode!=material_blend_mode::normal;
             out.filtered=surface->texture_filtering.value_or(
@@ -2241,6 +2245,15 @@ namespace jkgm {
             }
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
+            prog.set_scene_depth(8);
+            prog.set_advanced_material(false,0.25f);
+            if(transparent) {
+                // The GPU alpha pass samples the already completed opaque
+                // R16F depth image, never the framebuffer being written.
+                gl::set_active_texture_unit(8);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 frame_screen->get_resolved_depth_texture());
+            }
             // No overhead from per-material GGX state for nonreflective maps.
             // Each pass resets shader state once; individual draws only
             // update the extra uniforms when actually reflective.
@@ -2415,6 +2428,7 @@ namespace jkgm {
             gpu_3do_instance const *active_instance=nullptr;
             bool prev_specular_active=false;
             bool prev_albedo_transition=false;
+            bool prev_advanced_material=false;
             std::vector<GLsizei> multidraw_counts;
             std::vector<void const *> multidraw_offsets;
             for(size_t draw_start=0;draw_start<draws.size();) {
@@ -2509,6 +2523,15 @@ namespace jkgm {
                     prog.set_albedo_transition(2,0.0f);
                 }
                 prev_albedo_transition=has_albedo_transition;
+                bool const advanced=transparent &&
+                    (draw.texture.depth_clip ||
+                     draw.texture.blend==material_blend_mode::fluid);
+                if(advanced)
+                    prog.set_advanced_material(draw.texture.depth_clip,
+                                               draw.texture.fluid_thickness);
+                else if(prev_advanced_material)
+                    prog.set_advanced_material(false,0.25f);
+                prev_advanced_material=advanced;
                 bool const spec_active=draw.texture.reflection_strength>0 &&
                     (inst.num_lights>0 || draw.texture.has_environment ||
                      draw.texture.has_environment2 || sun_active);

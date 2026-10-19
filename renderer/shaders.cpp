@@ -176,6 +176,8 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , specular_environment2_sampler(gl::get_uniform_location(the_program,"env_map2"))
     , albedo2_sampler(gl::get_uniform_location(the_program,"albedo_map2"))
     , albedo_transition_info(gl::get_uniform_location(the_program,"albedo_transition"))
+    , scene_depth_sampler(gl::get_uniform_location(the_program,"scene_depth"))
+    , advanced_material_params(gl::get_uniform_location(the_program,"advanced_material_params"))
     , environment_info(gl::get_uniform_location(the_program,"environment_info"))
     , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
     , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
@@ -295,6 +297,17 @@ void jkgm::shaders::gpu_3do_preview_shader::set_albedo_transition(
     gl::set_uniform_integer(albedo2_sampler,6);
     gl::set_uniform_vector(albedo_transition_info,
         make_point(source2==1?1.0f:0.0f,weight,weight>0.0f?1.0f:0.0f,0.0f));
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_scene_depth(int sampler)
+{
+    gl::set_uniform_integer(scene_depth_sampler,sampler);
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_advanced_material(
+    bool clipped,float thickness)
+{
+    gl::set_uniform_vector(advanced_material_params,
+                           make_point(clipped?1.0f:0.0f,thickness));
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_sun(

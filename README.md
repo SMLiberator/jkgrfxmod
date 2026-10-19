@@ -825,6 +825,15 @@ replacement-pack images. EnvMap commands may enable reflection on an
 otherwise matte replacement just as in the native path. The old geometry
 cache is not rebuilt when these shader-only material values change.
 
+### GPU-resident fluid and depth-clipped polygon decals
+
+GPU 3DO materials now use the same opaque-depth-based Beer-Lambert fluid
+absorption and the same 0.15-JK-unit perpendicular-plane-gap rejection
+for depth-clipped decals as the native material shader. Both run only in
+the GPU transparency pass and sample the resolved R16F opaque depth.
+Thin water loses pigment while preserving reflection/emission.
+This is not volumetric projector decal rendering.
+
 ## Native JK hardware color effects and sector-screen tint
 
 JK hardware acceleration copies the accumulated stdPalEffects via

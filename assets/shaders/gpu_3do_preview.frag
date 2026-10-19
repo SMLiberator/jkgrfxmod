@@ -13,6 +13,8 @@ uniform vec4 albedo_factor;
 uniform vec3 emissive_factor;
 uniform vec4 fog_params;   // start, end, opacity, unused
 uniform vec3 fog_color;
+uniform sampler2D scene_depth; // completed opaque depth, native units 32*Y
+uniform vec2 advanced_material_params; // depth_clip, fluid thickness
 uniform float alpha_cutoff;
 uniform float native_face_opacity;
 uniform int has_texture; // 0=unresolved diagnostic, 1=albedo map, 2=intentionally no albedo
@@ -212,6 +214,41 @@ vec3 gpu_sun_specular(vec3 base_color,vec2 uv)
                vec3(32.0));
 }
 
+
+// View position in JK units: X right, Y up, Z forward.
+vec3 gpu_view_position()
+{
+    vec3 p=view_origin.xyz+view_right.xyz*local_fragment_position.x+
+           view_forward.xyz*local_fragment_position.y+
+           view_up.xyz*local_fragment_position.z;
+    return vec3(p.x,p.z,p.y);
+}
+bool depth_clip_rejected(float fragment_depth)
+{
+    float opaque_depth=texelFetch(scene_depth,ivec2(gl_FragCoord.xy),0).r;
+    if(opaque_depth>=65500.0) return true;
+    vec3 pos=gpu_view_position();
+    vec3 plane=cross(dFdx(pos),dFdy(pos));
+    float magnitude=length(plane);
+    if(magnitude<1e-10 || pos.z<=0.0) return true;
+    // Perpendicular plane separation is independent of camera angle.
+    float gap=abs(((opaque_depth-fragment_depth)/32.0)*
+                  dot(plane/magnitude,pos/max(pos.z,0.0001)));
+    return gap>0.15;
+}
+float fluid_absorption(float fragment_depth)
+{
+    float opacity=advanced_material_params.y>0.0?1.0:0.0;
+    float opaque_depth=texelFetch(scene_depth,ivec2(gl_FragCoord.xy),0).r;
+    if(opaque_depth<65500.0) {
+        vec3 pos=gpu_view_position();
+        float ray_ratio=length(pos)/max(pos.z,0.0001);
+        float thickness=max((opaque_depth-fragment_depth)/32.0,0.0)*ray_ratio;
+        opacity=1.0-exp(-advanced_material_params.y*thickness);
+    }
+    return clamp(opacity,0.0,1.0);
+}
+
 layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
@@ -231,6 +268,8 @@ void main() {
     // This is the exact native 1/rhw linear depth (32*Y) even on large
     // triangles crossing the camera near plane; no vertex-depth clamping.
     float view_depth=32.0/max(gl_FragCoord.w,0.00000001);
+    if(transparent_pass!=0 && advanced_material_params.x>0.5 &&
+       depth_clip_rejected(view_depth)) discard;
     vec2 uv=pixel_uv*uv_scale;
     vec4 texel=has_texture==1
         ? texture(albedo_map,uv+albedo_scroll)
@@ -275,7 +314,13 @@ void main() {
     // therefore be added directly to premultiplied RGB, never multiplied
     // by albedo alpha. With alpha=0 this acts as emission-only additive.
     float a=transparent_pass!=0 ? albedo.a : 1.0;
-    if(transparent_pass!=0 && blend_mode==2) {
+    if(transparent_pass!=0 && blend_mode==3) {
+        // Beer-Lambert absorption: pigment fades in shallow water,
+        // while specular highlights/emission remain independently visible.
+        float absorption=fluid_absorption(view_depth);
+        float opacity=albedo.a*absorption;
+        out_color=vec4(rgb*opacity+emission+specular,opacity);
+    } else if(transparent_pass!=0 && blend_mode==2) {
         // With (DST_COLOR, ZERO) the RGB output is a multiplier, not
         // premultiplied color. Alpha zero must multiply by WHITE (identity).
         // Match the native triangle path: emission biases the multiplier
