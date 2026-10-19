@@ -23,5 +23,6 @@
     "enable_vsync": false,
     "profile_renderer": false,
     "use_model_cache": false,
-    "use_vanilla_renderer": false
+    "use_vanilla_renderer": false,
+    "projected_decal": null
 }
