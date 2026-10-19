@@ -31,6 +31,7 @@ namespace jkgm {
         bool enable_ssao = true;
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
+        bool retro_mode = false; // CMP #0 RGB8 post-quantization, no dithering
         bool enable_posterized_lighting = false;
         bool enable_vsync = false;
         bool profile_renderer = false; // opt-in CPU frame timings

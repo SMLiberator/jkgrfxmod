@@ -774,6 +774,25 @@ For exact install paths, compatibility limits, and test commands, see
 [doc/install.md](doc/install.md).
 
 
+## Retro Mode: first-CMP 256-color presentation
+
+Set `"retro_mode": true` in `jkgm.json` (default `false`) to quantize
+the **final displayed frame**, including HUD, bloom and accumulated trails,
+to the 256 RGB entries of the FIRST loaded CMP (index 0), never the active
+sector CMP. No dithering is performed: the original software-rendered
+color-band look is intentional. The normal hardware geometry path remains
+enabled; JK's software-mode indexed lighting tables and resolution limits
+are not simulated.
+
+The palette is read from the JK23 identity CMP in game memory when entering
+a level, and a 64x64x64 nearest-RGB lookup is generated only if its contents
+change. CPU kd-tree construction makes lookup generation efficient, while
+the final presentation shader performs just one atlas fetch per pixel.
+Menus do not use this effect. If the known JK23 identity CMP pointer is
+unavailable the renderer automatically falls back to full-color output.
+This works with either the native or GPU-resident 3DO renderer and does not
+depend on `enable_post`.
+
 ## GPU 3DO point-light specular (experimental)
 
 Opt-in reflective replacement materials on GPU-resident 3DOs now use

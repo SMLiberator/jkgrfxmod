@@ -40,6 +40,7 @@ namespace jkgm {
         ogs->post_frame_blend.set_current_sampler(0);
         ogs->post_frame_blend.set_history_sampler(1);
         ogs->post_frame_blend.set_blend_strength(strength);
+        ogs->post_frame_blend.set_retro_palette(2,false);
 
         gl::set_active_texture_unit(1);
         gl::bind_texture(gl::texture_bind_target::texture_2d, previous.tex);
@@ -55,6 +56,12 @@ namespace jkgm {
         gl::bind_framebuffer(gl::framebuffer_bind_target::any, gl::default_framebuffer);
         gl::set_viewport(make_box(make_point(0, 0), screen_size));
         ogs->post_frame_blend.set_blend_strength(0.0f);
+        ogs->post_frame_blend.set_retro_palette(2,ogs->retro_mode_active);
+        if(ogs->retro_mode_active) {
+            gl::set_active_texture_unit(2);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,ogs->retro_lut_texture);
+            gl::set_active_texture_unit(0);
+        }
         gl::bind_texture(gl::texture_bind_target::texture_2d, next.tex);
         gl::draw_elements(
             gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);

@@ -10,6 +10,7 @@
 #include "glutil/texture.hpp"
 #include "glutil/vertex_array.hpp"
 #include "shaders.hpp"
+#include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -153,6 +154,10 @@ namespace jkgm {
         overlay_model menumdl;
         hud_model hudmdl;
         triangle_buffer_sequence tribuf;
+
+        gl::texture retro_lut_texture;
+        std::array<uint8_t,768> retro_source_palette{};
+        bool retro_lut_valid=false,retro_mode_active=false;
 
         gl::texture menu_texture;
         std::vector<color_rgba8> menu_texture_data;

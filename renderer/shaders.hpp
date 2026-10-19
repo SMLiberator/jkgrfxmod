@@ -350,12 +350,14 @@ namespace jkgm {
             gl::uniform_location_id current_image;
             gl::uniform_location_id history_image;
             gl::uniform_location_id blend_strength;
+            gl::uniform_location_id retro_palette_sampler,retro_palette_enabled;
 
         public:
             explicit post_frame_blend_shader(fs::path const &data_root);
             void set_current_sampler(int sampler);
             void set_history_sampler(int sampler);
             void set_blend_strength(float strength);
+            void set_retro_palette(int sampler,bool enabled);
         };
 
         class post_to_srgb_shader : public opengl_shader {

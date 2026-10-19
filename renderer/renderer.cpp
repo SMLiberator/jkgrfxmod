@@ -5,6 +5,7 @@
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_alpha.hpp"
 #include "native_jk_palette_effects.hpp"
+#include "retro_palette.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
@@ -1228,6 +1229,42 @@ namespace jkgm {
                 scene = apply_spatial_blur(
                     ogs.get(), conf_scr_res, scene,
                     frame_screen->get_resolved_depth_texture());
+            }
+            // Use only JK's first/identity CMP palette (not sector palettes).
+            // rdColormap::colors[256] starts at offset 0x10, after flags
+            // and its three header tint floats.
+            ogs->retro_mode_active=false;
+            if(mode==renderer_mode::ingame && the_config->retro_mode &&
+               engine_material_debug::matches_tested_executable()) {
+                uint32_t identity_cmp=0;
+                retro_palette_rgb palette{};
+                if(engine_material_debug::read_object(0x0073A414U,identity_cmp) &&
+                   identity_cmp>=0x10000U &&
+                   engine_material_debug::read_bytes(
+                       uintptr_t(identity_cmp)+0x10U,palette.data(),palette.size())) {
+                    if(!ogs->retro_lut_valid ||
+                       ogs->retro_source_palette!=palette) {
+                        auto pixels=build_retro_palette_atlas(palette);
+                        gl::set_active_texture_unit(2);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         ogs->retro_lut_texture);
+                        gl::tex_image_2d(gl::texture_bind_target::texture_2d,0,
+                            gl::texture_internal_format::rgba,
+                            make_size(retro_lut_width,retro_lut_height),
+                            gl::texture_pixel_format::rgba,
+                            gl::texture_pixel_type::uint8,
+                            make_span(pixels).as_const_bytes());
+                        gl::set_texture_min_filter(gl::texture_bind_target::texture_2d,
+                                                   gl::min_filter::nearest);
+                        gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d,
+                                                   gl::mag_filter::nearest);
+                        gl::set_texture_max_level(gl::texture_bind_target::texture_2d,0);
+                        ogs->retro_source_palette=palette;
+                        ogs->retro_lut_valid=true;
+                        LOG_INFO("Retro CMP #0 palette lookup refreshed");
+                    }
+                    ogs->retro_mode_active=ogs->retro_lut_valid;
+                }
             }
             frame_compositor->end_frame(ogs.get(), conf_scr_res, scene);
 

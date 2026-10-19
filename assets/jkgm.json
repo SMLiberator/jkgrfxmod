@@ -18,6 +18,7 @@
     "enable_ssao": true,
     "enable_parallax": true,
     "enable_texture_filtering": true,
+    "retro_mode": false,
     "enable_posterized_lighting": false,
     "enable_vsync": false,
     "profile_renderer": false,

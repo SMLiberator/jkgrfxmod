@@ -58,6 +58,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\texture_alpha.cpp /Fe:texture_alpha_test.exe
         texture_alpha_test.exe
+    - name: Retro CMP palette quantization regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /O2 /I. tests\retro_palette.cpp /Fe:retro_palette_test.exe
+        retro_palette_test.exe
     - name: GPU 3DO colormap tint regression tests
       shell: cmd
       run: |
@@ -113,6 +118,7 @@ jobs:
         Copy-Item 'assets/shaders/game_trns_pass.frag' 'test-build/jkgm/shaders/' -Force
         Copy-Item 'assets/shaders/post_opaque_composite.frag' 'test-build/jkgm/shaders/' -Force
         Copy-Item 'assets/shaders/post_to_srgb.frag' 'test-build/jkgm/shaders/' -Force
+        Copy-Item 'assets/shaders/post_frame_blend.frag' 'test-build/jkgm/shaders/' -Force
         Copy-Item 'assets/shaders/gpu_3do_preview.vert' 'test-build/jkgm/shaders/' -Force
         Copy-Item 'assets/shaders/gpu_3do_preview.frag' 'test-build/jkgm/shaders/' -Force
     - name: Upload standalone development test build

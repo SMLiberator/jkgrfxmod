@@ -727,6 +727,8 @@ jkgm::shaders::post_frame_blend_shader::post_frame_blend_shader(
     , current_image(gl::get_uniform_location(the_program, "current_image"))
     , history_image(gl::get_uniform_location(the_program, "history_image"))
     , blend_strength(gl::get_uniform_location(the_program, "blend_strength"))
+    , retro_palette_sampler(gl::get_uniform_location(the_program, "retro_palette_lut"))
+    , retro_palette_enabled(gl::get_uniform_location(the_program, "retro_palette_enabled"))
 {
 }
 
@@ -738,6 +740,12 @@ void jkgm::shaders::post_frame_blend_shader::set_current_sampler(int sampler)
 void jkgm::shaders::post_frame_blend_shader::set_history_sampler(int sampler)
 {
     gl::set_uniform_integer(history_image, sampler);
+}
+
+void jkgm::shaders::post_frame_blend_shader::set_retro_palette(int sampler,bool enabled)
+{
+    gl::set_uniform_integer(retro_palette_sampler,sampler);
+    gl::set_uniform_integer(retro_palette_enabled,enabled?1:0);
 }
 
 void jkgm::shaders::post_frame_blend_shader::set_blend_strength(float strength)
