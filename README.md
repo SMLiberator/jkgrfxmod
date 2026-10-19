@@ -774,6 +774,22 @@ For exact install paths, compatibility limits, and test commands, see
 [doc/install.md](doc/install.md).
 
 
+## GPU 3DO point-light specular (experimental)
+
+Opt-in reflective replacement materials on GPU-resident 3DOs now use
+JK's already-captured nearby point lights for per-pixel GGX highlights.
+The existing `reflection_strength`, `roughness`, `metalness`,
+`surface_map` (R/G/B reflectivity/roughness/metalness) and first
+`normal_map`/`normal_strength` parameters control the response.
+The material is completely unaffected if reflection strength is zero,
+`enable_reflections` is false, or there are no nearby JK lights.
+Existing Gouraud diffuse lighting remains unchanged. Specular is
+composited after SSAO and participates in fog for transparent materials.
+This is not yet an area-light approximation, SSR, shadow mapping,
+an environment reflection for GPU 3DOs, or dual normal-map support.
+Benchmark scenes with strong reflections and many nearby lights: these
+are per-fragment GGX loops, which can be expensive on large polygons.
+
 ## Native JK hardware color effects and sector-screen tint
 
 JK hardware acceleration copies the accumulated stdPalEffects via

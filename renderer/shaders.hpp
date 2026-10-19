@@ -150,6 +150,8 @@ namespace jkgm {
                                     emissive_only;
             gl::uniform_location_id jk_color_filter,jk_color_tint,jk_color_add_fade;
             gl::uniform_location_id colormap_tint;
+            gl::uniform_location_id specular_params,normal_specular_params;
+            gl::uniform_location_id normal_specular_scroll,local_eye;
             gl::uniform_location_id ambient_light,attenuation_min,num_lights,
                                     effective_light_mode;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity;
@@ -167,6 +169,10 @@ namespace jkgm {
             void set_fog(point<4,float> params,point<4,float> color);
             void set_lighting(gpu_3do_instance const &instance);
             void set_colormap_tint(std::array<float,3> const &tint);
+            void set_local_eye(std::array<float,3> const &eye);
+            void set_point_specular(point<4,float> material,
+                                    point<4,float> normal,
+                                    point<2,float> normal_scroll);
             void set_jk_color_effects(point<4,float> filter,point<4,float> tint,
                                       point<4,float> add_fade);
         };

@@ -168,6 +168,10 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , jk_color_tint(gl::get_uniform_location(the_program,"jk_color_tint"))
     , jk_color_add_fade(gl::get_uniform_location(the_program,"jk_color_add_fade"))
     , colormap_tint(gl::get_uniform_location(the_program,"colormap_tint"))
+    , specular_params(gl::get_uniform_location(the_program,"specular_params"))
+    , normal_specular_params(gl::get_uniform_location(the_program,"normal_specular_params"))
+    , normal_specular_scroll(gl::get_uniform_location(the_program,"normal_specular_scroll"))
+    , local_eye(gl::get_uniform_location(the_program,"local_eye"))
     , ambient_light(gl::get_uniform_location(the_program,"ambient_light"))
     , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
@@ -241,6 +245,24 @@ void jkgm::shaders::gpu_3do_preview_shader::set_colormap_tint(
     std::array<float,3> const &tint)
 {
     gl::set_uniform_vector(colormap_tint,make_point(tint[0],tint[1],tint[2]));
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_local_eye(
+    std::array<float,3> const &eye)
+{
+    gl::set_uniform_vector(local_eye,make_point(eye[0],eye[1],eye[2]));
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_point_specular(
+    point<4,float> material,point<4,float> normal,point<2,float> scroll)
+{
+    gl::set_uniform_integer(
+        gl::get_uniform_location(the_program,"surface_map"),2);
+    gl::set_uniform_integer(
+        gl::get_uniform_location(the_program,"normal_map"),3);
+    gl::set_uniform_vector(specular_params,material);
+    gl::set_uniform_vector(normal_specular_params,normal);
+    gl::set_uniform_vector(normal_specular_scroll,scroll);
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_lighting(

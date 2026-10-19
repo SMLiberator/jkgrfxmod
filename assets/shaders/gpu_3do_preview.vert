@@ -26,6 +26,8 @@ uniform float light_intensity[16];
 // conversion, then rasterization interpolates the combined RGB. Multiplying
 // separately interpolated light and tint per pixel gives incorrect gradients.
 out vec3 jk_lit_rgb;
+out vec3 local_fragment_position;
+out vec3 local_fragment_normal;
 uniform vec4 view_right, view_forward, view_up, view_origin;
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 out vec2 pixel_uv;
@@ -48,6 +50,8 @@ void main() {
     // Never clamp depth here: vertices of huge faces can lie behind the
     // camera, and clamping before interpolation distorts nearby fog.
     pixel_uv=local_uv;
+    local_fragment_position=local_position;
+    local_fragment_normal=local_light_normal;
     // JK: FullyLit=0, NotLit=1, Diffuse=2, Gouraud=3.
     // Per-face ExtraLight and the camera's ambient floor are evaluated
     // before the gamma-1.8 vertex conversion (like the native D3D path).

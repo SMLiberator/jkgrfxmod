@@ -22,6 +22,82 @@ uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blend only, 4 dithered
 in vec2 pixel_uv;
 in vec3 view_normal;
 in vec3 jk_lit_rgb;
+
+uniform sampler2D surface_map; // linear RGB: reflectivity, roughness, metalness
+uniform sampler2D normal_map;  // tangent-space RGB
+uniform vec4 specular_params; // strength, roughness, metalness, has surface map
+uniform vec4 normal_specular_params; // has normal map, strength, unused, unused
+uniform vec2 normal_specular_scroll;
+uniform vec3 local_eye;
+uniform int num_lights;
+uniform vec4 light_position_radius[16];
+uniform float light_intensity[16];
+uniform float attenuation_min;
+in vec3 local_fragment_position;
+in vec3 local_fragment_normal;
+
+vec3 mapped_local_normal(vec2 uv)
+{
+    vec3 n=normalize(local_fragment_normal);
+    if(normal_specular_params.x<0.5) return n;
+    vec3 texn=texture(normal_map,uv+normal_specular_scroll).xyz*2.0-1.0;
+    vec2 slope=texn.xy/max(texn.z,0.05)*normal_specular_params.y;
+    vec3 dp1=dFdx(local_fragment_position);
+    vec3 dp2=dFdy(local_fragment_position);
+    vec2 du1=dFdx(pixel_uv*uv_scale);
+    vec2 du2=dFdy(pixel_uv*uv_scale);
+    vec3 t=cross(dp2,n)*du1.x+cross(n,dp1)*du2.x;
+    vec3 b=cross(dp2,n)*du1.y+cross(n,dp1)*du2.y;
+    float basis=max(dot(t,t),dot(b,b));
+    if(basis<1e-16) return n;
+    float inv_basis=inversesqrt(basis);
+    return normalize(mat3(t*inv_basis,b*inv_basis,n)*
+                     normalize(vec3(slope,1.0)));
+}
+
+// Local-space analytic point-light specular, with optional normal/surface
+// maps. Uses the same GGX microfacet form as the native sector sun shader.
+// Does not modify JK's diffuse Gouraud lighting.
+vec3 point_light_specular(vec3 base_color,vec2 uv)
+{
+    if(specular_params.x<=0.0 || num_lights==0) return vec3(0.0);
+    vec3 N=mapped_local_normal(uv);
+    vec3 V=normalize(local_eye-local_fragment_position);
+    if(dot(N,V)<0.0) N=-N;
+    float NdotV=max(dot(N,V),0.0001);
+    vec3 map_value=specular_params.w>0.5
+        ? texture(surface_map,uv).rgb : vec3(1.0);
+    float strength=max(specular_params.x*map_value.r,0.0);
+    if(strength<=0.0) return vec3(0.0);
+    float roughness=clamp(specular_params.y*map_value.g,0.08,1.0);
+    float metalness=clamp(specular_params.z*map_value.b,0.0,1.0);
+    vec3 F0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
+    float a=roughness*roughness;
+    float a2=a*a;
+    float k=(roughness+1.0)*(roughness+1.0)/8.0;
+    float Gv=NdotV/(NdotV*(1.0-k)+k);
+    vec3 sum=vec3(0.0);
+    for(int i=0;i<num_lights;i++) {
+        vec3 delta=light_position_radius[i].xyz-local_fragment_position;
+        float dist=length(delta);
+        if(dist>=light_position_radius[i].w || dist<0.00001) continue;
+        vec3 L=delta/dist;
+        float NdotL=max(dot(N,L),0.0);
+        if(NdotL<=0.0) continue;
+        float radiance=max(light_intensity[i]-dist*attenuation_min,0.0);
+        if(radiance<=0.0) continue;
+        vec3 H=normalize(L+V);
+        float Nh=max(dot(N,H),0.0);
+        float Vh=max(dot(V,H),0.0);
+        float d=Nh*Nh*(a2-1.0)+1.0;
+        float D=a2/(3.14159265*d*d);
+        float Gl=NdotL/(NdotL*(1.0-k)+k);
+        vec3 F=F0+(vec3(1.0)-F0)*pow(1.0-Vh,5.0);
+        sum+=F*(D*Gv*Gl/max(4.0*NdotV,0.0001))*radiance;
+    }
+    return min(sum*strength,vec3(32.0));
+}
+
 layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
@@ -66,6 +142,9 @@ void main() {
     vec3 emission=emissive_factor;
     if(has_emissive!=0)
         emission*=texture(emissive_map,uv+emissive_scroll).rgb;
+    // Only reflective materials with nearby JK point-light Things enter
+    // this branch. Highlights bypass SSAO, as with the existing sun term.
+    vec3 specular=point_light_specular(albedo.rgb,uv);
     // The opaque pass composites this separate emissive attachment after
     // SSAO. The translucent pass has only the color target: emission must
     // therefore be added directly to premultiplied RGB, never multiplied
@@ -76,16 +155,19 @@ void main() {
         // premultiplied color. Alpha zero must multiply by WHITE (identity).
         // Match the native triangle path: emission biases the multiplier
         // toward white, but never adds light independently in Multiply mode.
-        vec3 tint=clamp(albedo.rgb*jk_lit_rgb+emission,0.0,1.0);
+        vec3 tint=clamp(albedo.rgb*jk_lit_rgb+emission+specular*albedo.a,
+                        0.0,1.0);
         out_color=vec4(mix(vec3(1.0),tint,albedo.a),0.0);
     } else {
         // Additive and normal pass use premultiplied pigment; alpha for the
         // additive framebuffer itself is preserved by glBlendFuncSeparate.
         // Opaque fog is applied after SSAO in the shared composite.
-        out_color=vec4(transparent_pass!=0 ? rgb*a+emission : lit_rgb,
+        out_color=vec4(transparent_pass!=0
+                           ? rgb*a+emission+specular*a : lit_rgb,
                        (transparent_pass!=0 && blend_mode==1) ? 0.0 : a);
     }
-    out_emissive=vec4(transparent_pass!=0 ? vec3(0.0) : emission,a);
+    out_emissive=vec4(transparent_pass!=0
+                          ? vec3(0.0) : emission+specular,a);
     out_normal=vec4(normalize(view_normal),1.0);
     out_depth=vec4(view_depth,0.0,0.0,1.0);
 }

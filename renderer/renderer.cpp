@@ -405,7 +405,13 @@ namespace jkgm {
         struct gpu_3do_texture {
             gl::texture_view texture = gl::default_texture;
             gl::texture_view emission = gl::default_texture;
+            gl::texture_view normal = gl::default_texture;
+            gl::texture_view surface = gl::default_texture;
             float width=1.0f, height=1.0f;
+            float reflection_strength=0.0f,roughness=0.5f,metalness=0.0f;
+            float normal_strength=1.0f;
+            bool has_normal=false,has_surface=false;
+            point<2,float> normal_scroll=make_point(0.0f,0.0f);
             float alpha_cutoff=0.5f;
             float opacity=1.0f;
             // 0=invalid/unresolved MAT (diagnostic magenta), 1=texture,
@@ -2051,6 +2057,23 @@ namespace jkgm {
             out.emissive_only=gpu_3do_emissive_only(
                 out.opacity,get<0>(out.emission_factor),
                 get<1>(out.emission_factor),get<2>(out.emission_factor));
+            // Opt-in GPU 3DO material specularity: compute only for
+            // reflective replacements and active native Thing lights.
+            if(the_config->enable_reflections && surface->reflection_strength>0) {
+                out.reflection_strength=surface->reflection_strength;
+                out.roughness=surface->roughness;
+                out.metalness=surface->metalness;
+                out.normal_strength=surface->normal_strength;
+                out.normal_scroll=scroll_offset(surface->normal_scroll);
+                if(surface->surface_map) {
+                    out.surface=texture_cache->get_texture_handle(*surface->surface_map);
+                    out.has_surface=true;
+                }
+                if(surface->normal_map) {
+                    out.normal=texture_cache->get_texture_handle(*surface->normal_map);
+                    out.has_normal=true;
+                }
+            }
             // JK stores local 3DO UVs in first-mipmap pixel units.
             // Normalize them against the equivalent original mip-0 size.
             out.width=static_cast<float>(chosen->width << mip);
@@ -2290,6 +2313,10 @@ namespace jkgm {
                     gl::bind_vertex_array(it->second->vao);
                     prog.set_lighting(inst);
                     prog.set_colormap_tint(inst.colormap_tint);
+                    std::array<float,3> local_eye{};
+                    bool const has_eye=gpu_3do_local_eye(m,local_eye);
+                    prog.set_local_eye(has_eye?local_eye:
+                                       std::array<float,3>{{0,0,0}});
                     active_instance=draw.instance;
                 }
                 if((group.face_type&0x1U)!=0) {
@@ -2328,6 +2355,23 @@ namespace jkgm {
                 }
                 bind_color_texture(draw.texture.texture,0,draw.texture.filtered);
                 bind_color_texture(draw.texture.emission,1,draw.texture.filtered);
+                bool const spec_active=inst.num_lights>0 &&
+                    draw.texture.reflection_strength>0;
+                if(spec_active) {
+                    gl::set_active_texture_unit(2);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     draw.texture.surface);
+                    gl::set_active_texture_unit(3);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     draw.texture.normal);
+                }
+                prog.set_point_specular(
+                    make_point(spec_active?draw.texture.reflection_strength:0.0f,
+                               draw.texture.roughness,draw.texture.metalness,
+                               draw.texture.has_surface?1.0f:0.0f),
+                    make_point(draw.texture.has_normal?1.0f:0.0f,
+                               draw.texture.normal_strength,0.0f,0.0f),
+                    draw.texture.normal_scroll);
                 prog.set_surface(draw.texture.albedo_source,draw.texture.width,
                                  draw.texture.height,transparent,
                                  static_cast<int>(draw.texture.blend),
