@@ -485,6 +485,9 @@ namespace jkgm {
         HGLRC hGLRC = NULL;
 
         std::unique_ptr<opengl_state> ogs;
+        // One opt-in, level/world-space projector for initial decal parity tests.
+        std::optional<srgb_texture_id> projected_decal_texture;
+        projected_decal_basis projected_decal_axes{};
         std::unordered_map<uint64_t,std::unique_ptr<gpu_3do_gl_mesh>> gpu_3do_gl_cache;
         std::unordered_map<uint64_t,uint64_t> gpu_3do_last_drawn;
         uint64_t gpu_3do_present_serial=0;
@@ -923,6 +926,14 @@ namespace jkgm {
             ogs = std::make_unique<opengl_state>(
                 conf_scr_res, internal_scr_res, actual_display_area, actual_menu_area, the_config);
             texture_cache = create_texture_cache(the_config);
+            if(the_config->projected_decal &&
+               prepare_projected_decal(*the_config->projected_decal,projected_decal_axes)) {
+                // Keep one owning SRGB texture reference for the game's lifetime.
+                // The decal is dormant until a valid active render camera exists.
+                projected_decal_texture=texture_cache->get_srgb_texture_from_filename(
+                    fs::path(the_config->projected_decal->image));
+                LOG_INFO("Projected decal ready: ",the_config->projected_decal->image);
+            }
 
             frame_compositor = create_renderer_compositor(the_config);
             frame_ao = create_renderer_ao(the_config, conf_scr_res);
