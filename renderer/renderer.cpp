@@ -2249,6 +2249,7 @@ namespace jkgm {
                 make_point(0.0f,1.0f,0.0f,0.0f),
                 make_point(0.0f,0.0f),make_point(0.0f,0.0f));
             prog.set_environment(false,false,0.0f,0);
+            prog.set_albedo_transition(2,0.0f);
             prog.set_camera_axes(cam.right,cam.forward,cam.up);
             auto const &sun=get_sun_settings();
             auto const sun_direction=normalized_sun_direction(sun.direction.value());
@@ -2413,6 +2414,7 @@ namespace jkgm {
             }
             gpu_3do_instance const *active_instance=nullptr;
             bool prev_specular_active=false;
+            bool prev_albedo_transition=false;
             std::vector<GLsizei> multidraw_counts;
             std::vector<void const *> multidraw_offsets;
             for(size_t draw_start=0;draw_start<draws.size();) {
@@ -2497,10 +2499,16 @@ namespace jkgm {
                 }
                 bind_color_texture(draw.texture.texture,0,draw.texture.filtered);
                 bind_color_texture(draw.texture.emission,1,draw.texture.filtered);
-                if(draw.texture.albedo_transition>0.0f)
+                bool const has_albedo_transition=
+                    draw.texture.albedo_transition>0.0f;
+                if(has_albedo_transition) {
                     bind_color_texture(draw.texture.texture2,6,draw.texture.filtered);
-                prog.set_albedo_transition(draw.texture.albedo_source2,
-                                           draw.texture.albedo_transition);
+                    prog.set_albedo_transition(draw.texture.albedo_source2,
+                                               draw.texture.albedo_transition);
+                } else if(prev_albedo_transition) {
+                    prog.set_albedo_transition(2,0.0f);
+                }
+                prev_albedo_transition=has_albedo_transition;
                 bool const spec_active=draw.texture.reflection_strength>0 &&
                     (inst.num_lights>0 || draw.texture.has_environment ||
                      draw.texture.has_environment2 || sun_active);
