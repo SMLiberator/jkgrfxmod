@@ -825,6 +825,16 @@ replacement-pack images. EnvMap commands may enable reflection on an
 otherwise matte replacement just as in the native path. The old geometry
 cache is not rebuilt when these shader-only material values change.
 
+### GPU-resident parallax material parity
+
+GPU 3DO replacements with a `displacement_map` and nonzero
+`displacement_factor` now perform the same opt-in parallax-occlusion
+UV offset used by native materials. The tangent frame uses original
+mesh-local positions and normal/UV derivatives. The adjusted coordinates
+feed the albedo, emission, normal, and reflection samplers. With
+`enable_parallax:false` or no displacement map, there are no height
+samples. Very large displacement factors may require further tuning.
+
 ### GPU-resident fluid and depth-clipped polygon decals
 
 GPU 3DO materials now use the same opaque-depth-based Beer-Lambert fluid

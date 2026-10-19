@@ -178,6 +178,8 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , albedo_transition_info(gl::get_uniform_location(the_program,"albedo_transition"))
     , scene_depth_sampler(gl::get_uniform_location(the_program,"scene_depth"))
     , advanced_material_params(gl::get_uniform_location(the_program,"advanced_material_params"))
+    , displacement_sampler(gl::get_uniform_location(the_program,"displacement_map"))
+    , displacement_factor(gl::get_uniform_location(the_program,"displacement_factor"))
     , environment_info(gl::get_uniform_location(the_program,"environment_info"))
     , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
     , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
@@ -308,6 +310,12 @@ void jkgm::shaders::gpu_3do_preview_shader::set_advanced_material(
 {
     gl::set_uniform_vector(advanced_material_params,
                            make_point(clipped?1.0f:0.0f,thickness));
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_parallax(float factor)
+{
+    gl::set_uniform_integer(displacement_sampler,9);
+    gl::set_uniform_float(displacement_factor,factor);
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_sun(

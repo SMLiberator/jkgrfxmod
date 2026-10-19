@@ -15,6 +15,8 @@ uniform vec4 fog_params;   // start, end, opacity, unused
 uniform vec3 fog_color;
 uniform sampler2D scene_depth; // completed opaque depth, native units 32*Y
 uniform vec2 advanced_material_params; // depth_clip, fluid thickness
+uniform sampler2D displacement_map;
+uniform float displacement_factor;
 uniform float alpha_cutoff;
 uniform float native_face_opacity;
 uniform int has_texture; // 0=unresolved diagnostic, 1=albedo map, 2=intentionally no albedo
@@ -249,6 +251,44 @@ float fluid_absorption(float fragment_depth)
     return clamp(opacity,0.0,1.0);
 }
 
+
+// Parallax-occlusion sampling in the original mesh's tangent space.
+// This is opt-in and uses the same 32-128 layer budget as native materials.
+vec2 gpu_parallax_uv(vec2 tc)
+{
+    if(displacement_factor==0.0) return tc;
+    vec3 N=normalize(local_fragment_normal);
+    vec3 dp1=dFdx(local_fragment_position);
+    vec3 dp2=dFdy(local_fragment_position);
+    vec2 du1=dFdx(pixel_uv*uv_scale);
+    vec2 du2=dFdy(pixel_uv*uv_scale);
+    vec3 T=cross(dp2,N)*du1.x+cross(N,dp1)*du2.x;
+    vec3 B=cross(dp2,N)*du1.y+cross(N,dp1)*du2.y;
+    float basis=max(dot(T,T),dot(B,B));
+    if(basis<1e-16) return tc;
+    mat3 tbn=mat3(T/sqrt(basis),B/sqrt(basis),N);
+    vec3 view_dir=normalize(transpose(tbn)*
+                            (local_eye-local_fragment_position));
+    if(view_dir.z<=0.05) return tc;
+    float steps=mix(128.0,32.0,abs(view_dir.z));
+    float step_depth=1.0/steps;
+    vec2 uv_step=(view_dir.xy/view_dir.z)*displacement_factor/steps;
+    vec2 current=tc;
+    float layer=0.0;
+    float h=texture(displacement_map,current).r;
+    for(int i=0;i<128 && layer<h;i++) {
+        current-=uv_step;
+        layer+=step_depth;
+        h=texture(displacement_map,current).r;
+    }
+    vec2 previous=current+uv_step;
+    float after=h-layer;
+    float before=texture(displacement_map,previous).r-layer+step_depth;
+    float denom=after-before;
+    if(abs(denom)<1e-6) return current;
+    return mix(current,previous,clamp(after/denom,0.0,1.0));
+}
+
 layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
@@ -270,7 +310,7 @@ void main() {
     float view_depth=32.0/max(gl_FragCoord.w,0.00000001);
     if(transparent_pass!=0 && advanced_material_params.x>0.5 &&
        depth_clip_rejected(view_depth)) discard;
-    vec2 uv=pixel_uv*uv_scale;
+    vec2 uv=gpu_parallax_uv(pixel_uv*uv_scale);
     vec4 texel=has_texture==1
         ? texture(albedo_map,uv+albedo_scroll)
         : (has_texture==2 ? vec4(1.0) : vec4(1.0,0.05,0.65,1.0));

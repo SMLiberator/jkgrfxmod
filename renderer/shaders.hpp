@@ -156,6 +156,7 @@ namespace jkgm {
             gl::uniform_location_id specular_environment2_sampler;
             gl::uniform_location_id albedo2_sampler,albedo_transition_info;
             gl::uniform_location_id scene_depth_sampler,advanced_material_params;
+            gl::uniform_location_id displacement_sampler,displacement_factor;
             gl::uniform_location_id environment_info;
             gl::uniform_location_id camera_right_axis,camera_forward_axis,camera_up_axis;
             gl::uniform_location_id sun_direction,sun_color_intensity;
@@ -186,6 +187,7 @@ namespace jkgm {
             void set_albedo_transition(int source2,float weight);
             void set_scene_depth(int sampler);
             void set_advanced_material(bool clipped,float fluid_thickness);
+            void set_parallax(float factor);
             void set_sun(point<4,float> direction,point<4,float> color_intensity);
             void set_camera_axes(std::array<float,3> const &right,
                                  std::array<float,3> const &forward,

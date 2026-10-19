@@ -412,6 +412,8 @@ namespace jkgm {
             gl::texture_view normal = gl::default_texture;
             gl::texture_view normal2 = gl::default_texture;
             gl::texture_view surface = gl::default_texture;
+            gl::texture_view displacement = gl::default_texture;
+            float displacement_factor=0.0f;
             gl::texture_view environment = gl::default_texture;
             gl::texture_view environment2 = gl::default_texture;
             bool has_environment2=false;
@@ -2103,6 +2105,12 @@ namespace jkgm {
             out.blend=surface->blend_mode;
             out.depth_clip=surface->depth_clip;
             out.fluid_thickness=surface->fluid_thickness;
+            if(the_config->enable_parallax && surface->displacement_map &&
+               surface->displacement_factor!=0.0f) {
+                out.displacement=texture_cache->get_texture_handle(
+                    *surface->displacement_map);
+                out.displacement_factor=surface->displacement_factor;
+            }
             out.special=surface->depth_clip ||
                         surface->blend_mode!=material_blend_mode::normal;
             out.filtered=surface->texture_filtering.value_or(
@@ -2247,6 +2255,7 @@ namespace jkgm {
             prog.use_program();
             prog.set_scene_depth(8);
             prog.set_advanced_material(false,0.25f);
+            prog.set_parallax(0.0f);
             if(transparent) {
                 // The GPU alpha pass samples the already completed opaque
                 // R16F depth image, never the framebuffer being written.
@@ -2429,6 +2438,7 @@ namespace jkgm {
             bool prev_specular_active=false;
             bool prev_albedo_transition=false;
             bool prev_advanced_material=false;
+            bool prev_parallax=false;
             std::vector<GLsizei> multidraw_counts;
             std::vector<void const *> multidraw_offsets;
             for(size_t draw_start=0;draw_start<draws.size();) {
@@ -2532,6 +2542,16 @@ namespace jkgm {
                 else if(prev_advanced_material)
                     prog.set_advanced_material(false,0.25f);
                 prev_advanced_material=advanced;
+                bool const parallax=draw.texture.displacement_factor!=0.0f;
+                if(parallax) {
+                    gl::set_active_texture_unit(9);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     draw.texture.displacement);
+                    prog.set_parallax(draw.texture.displacement_factor);
+                } else if(prev_parallax) {
+                    prog.set_parallax(0.0f);
+                }
+                prev_parallax=parallax;
                 bool const spec_active=draw.texture.reflection_strength>0 &&
                     (inst.num_lights>0 || draw.texture.has_environment ||
                      draw.texture.has_environment2 || sun_active);
