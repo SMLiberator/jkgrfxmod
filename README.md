@@ -1071,8 +1071,10 @@ specular/emissive highlights. Retro 256-color quantization applies normally.
 
 **Prototype limitations:** This first version is static and holds exactly one
 projector in `jkgm.json`. It affects **opaque surfaces** only; transparent
-water/glass, the later gun/HUD pass and moving Thing-attached projectors need
-a separate extension. Alpha/color decals currently do not automatically
+water/glass, and moving Thing-attached projectors need a separate extension.
+Opaque viewmodel/gun geometry currently shares the G-buffer, so it is not yet
+explicitly excluded from receiving a projector. HUD/menu elements drawn later
+are unaffected. Alpha/color decals currently do not automatically
 inherit the receiver's per-vertex lighting intensity; `multiply` respects the
 underlying shading best for dark marks. No runtime COG verbs or pooling/expiry
 for tire marks yet. The compositing shader skips all projection work when
