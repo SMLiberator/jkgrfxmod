@@ -2,7 +2,8 @@
 """Compare JkGRfxMod's logged Retro Mode palette against the level's first CMP.
 
 The on-disk CMP RGB888 table starts at offset 0x40, while JK's in-memory
-rdColormap::colors[256] starts at offset 0x10. This tool checks the exact
+rdColormap::colors[256] starts at offset 0x30 in the tested patched JK23
+executable (it has an extra 32-byte name prefix). This tool checks the exact
 768 bytes, not a screenshot or a color-corrected approximation.
 """
 import argparse
