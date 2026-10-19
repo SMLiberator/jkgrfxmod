@@ -361,9 +361,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
         c={m.vertices,m.faces,m.num_vertices,m.num_faces,next_gpu_id++,std::move(geom)};
         it=gpu_mesh_cache.find(mesh);
         auto const null_char=std::memchr(m.name,'\0',sizeof(m.name));
-        std::string const name(m.name,
-            null_char ? static_cast<char const *>(null_char)
-                      : m.name+sizeof(m.name));
+        auto const end_name = null_char
+            ? static_cast<char const *>(null_char) : m.name+sizeof(m.name);
+        std::string const name(m.name, static_cast<size_t>(end_name-m.name));
         LOG_INFO("GPU 3DO: cached mesh ",name,
                  " vertices=",m.num_vertices," faces=",m.num_faces,
                  " triangles=",it->second.geometry->indices.size()/3);
