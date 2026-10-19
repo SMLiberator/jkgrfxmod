@@ -1,4 +1,6 @@
 #include "renderer/retro_palette.hpp"
+#include "renderer/jk_colormap_layout.hpp"
+#include <cstring>
 #include <cassert>
 int main() {
     jkgm::retro_palette_rgb palette{};
@@ -36,4 +38,21 @@ int main() {
     assert(jkgm::retro_palette_fnv1a(changed)==jkgm::retro_palette_fnv1a(palette));
     changed[12]=1;
     assert(jkgm::retro_palette_fnv1a(changed)!=jkgm::retro_palette_fnv1a(palette));
+    // Regression for the tested JK23 rdColormap debug-name field. Retail
+    // builds may place colors at +0x10; this game executable uses +0x30.
+    jkgm::jk_rd_colormap_palette_prefix colormap{};
+    colormap.flags=1;
+    colormap.tint[0]=colormap.tint[1]=colormap.tint[2]=1.0f;
+    colormap.colors[0]=colormap.colors[1]=colormap.colors[2]=0;
+    colormap.colors[3]=0;colormap.colors[4]=255;colormap.colors[5]=0;
+    colormap.colors[6]=0;colormap.colors[7]=203;colormap.colors[8]=0;
+    auto const *memory=reinterpret_cast<uint8_t const *>(&colormap);
+    uint32_t flags=0;
+    std::memcpy(&flags,memory+jkgm::jk_cmp_flags_offset,sizeof(flags));
+    assert(flags==1);
+    std::array<float,3> tint{};
+    std::memcpy(tint.data(),memory+jkgm::jk_cmp_tint_offset,sizeof(tint));
+    assert(tint[0]==1.0f && tint[1]==1.0f && tint[2]==1.0f);
+    assert(memory[jkgm::jk_cmp_colors_offset+4]==255);
+    assert(memory[jkgm::jk_cmp_colors_offset+7]==203);
 }
