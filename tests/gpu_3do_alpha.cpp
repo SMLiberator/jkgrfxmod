@@ -25,10 +25,13 @@ int main() {
     assert(gpu_3do_fragment_visible(masked,false,0.6f,0.5f));
     assert(!gpu_3do_fragment_visible(masked,false,0.4f,0.5f));
     assert(!gpu_3do_fragment_visible(masked,true,0.6f,0.5f));
-    assert(gpu_3do_needs_emissive_coverage(false,0.f,1.f,0.f,0.f));
-    assert(!gpu_3do_needs_emissive_coverage(true,0.f,1.f,0.f,0.f));
-    assert(!gpu_3do_needs_emissive_coverage(false,0.f,0.f,0.f,0.f));
-    assert(!gpu_3do_needs_emissive_coverage(false,1.f,1.f,0.f,0.f));
+    // Transparent base must not suppress independent emission, even when
+    // the material still has a texture image.
+    assert(gpu_3do_emissive_only(0.f,1.f,0.f,0.f));
+    assert(gpu_3do_emissive_only(0.f,0.f,0.f,1.f));
+    assert(!gpu_3do_emissive_only(0.f,0.f,0.f,0.f));
+    assert(!gpu_3do_emissive_only(0.5f,1.f,0.f,0.f));
+    assert(!gpu_3do_emissive_only(1.f,1.f,0.f,0.f));
     assert(!gpu_3do_fragment_visible(forced,false,1.f,0.5f));
     assert(gpu_3do_fragment_visible(forced,true,1.f,0.5f));
     return 0;

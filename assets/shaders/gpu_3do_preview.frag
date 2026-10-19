@@ -16,6 +16,7 @@ uniform float native_face_opacity;
 uniform int has_texture; // 0=unresolved diagnostic, 1=albedo map, 2=intentionally no albedo
 uniform int has_emissive;
 uniform int transparent_pass;
+uniform int emissive_only; // zero-alpha base, independently blended emission
 uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blend only
 in float view_depth;
 in vec2 pixel_uv;
@@ -37,7 +38,7 @@ void main() {
         if(alpha_mode==2 && albedo.a<alpha_cutoff) discard;
     } else {
         if(alpha_mode==0 || alpha_mode==2) discard;
-        if(albedo.a<=0.001) discard;
+        if(albedo.a<=0.001 && emissive_only==0) discard;
         if(alpha_mode==1 && albedo.a>=0.999) discard;
     }
     float fog=clamp((view_depth-fog_params.x)/
@@ -46,10 +47,13 @@ void main() {
     vec3 emission=emissive_factor;
     if(has_emissive!=0)
         emission*=texture(emissive_map,uv+emissive_scroll).rgb;
-    emission*=(1.0-fog);
+    // The opaque pass composites this separate emissive attachment after
+    // SSAO. The translucent pass has only the color target: emission must
+    // therefore be added directly to premultiplied RGB, never multiplied
+    // by albedo alpha. With alpha=0 this acts as emission-only additive.
     float a=transparent_pass!=0 ? albedo.a : 1.0;
-    out_color=vec4(transparent_pass!=0 ? rgb*a : rgb,a);
-    out_emissive=vec4(transparent_pass!=0 ? emission*a : emission,a);
+    out_color=vec4(transparent_pass!=0 ? rgb*a+emission : rgb,a);
+    out_emissive=vec4(transparent_pass!=0 ? vec3(0.0) : emission,a);
     out_normal=vec4(normalize(view_normal),1.0);
     out_depth=vec4(view_depth,0.0,0.0,1.0);
 }

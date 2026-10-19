@@ -18,12 +18,12 @@ namespace jkgm {
         if(texture_has_alpha) return gpu_3do_alpha_mode::mixed;
         return gpu_3do_alpha_mode::solid;
     }
-    // A replacement with no base image can deliberately use RGBA(0,0,0,0)
-    // while emitting light. Its zero base alpha should not suppress emission.
-    inline bool gpu_3do_needs_emissive_coverage(bool has_albedo,float alpha,
-                                                 float r,float g,float b)
+    // Emissive-only material coverage is independent of albedo alpha:
+    // emission must blend additively even when the base is fully invisible.
+    // This works with or without a texture image.
+    inline bool gpu_3do_emissive_only(float alpha,float r,float g,float b)
     {
-        return !has_albedo && std::isfinite(alpha) && alpha<=0.001f &&
+        return std::isfinite(alpha) && alpha<=0.001f &&
                (r>0.0f || g>0.0f || b>0.0f);
     }
     inline bool gpu_3do_draws_in_pass(gpu_3do_alpha_mode mode, bool transparent)

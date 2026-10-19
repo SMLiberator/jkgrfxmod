@@ -1835,7 +1835,7 @@ namespace jkgm {
             // 2=intentionally no albedo map (neutral white).
             int albedo_source=0;
             bool has_image=false, alpha=false, masked=false, special=false;
-            bool has_emission=false;
+            bool has_emission=false, emissive_only=false;
             bool filtered=true;
             material_blend_mode blend=material_blend_mode::normal;
             point<4,float> tint=make_point(1.0f,1.0f,1.0f,1.0f);
@@ -1919,18 +1919,12 @@ namespace jkgm {
             out.emission_factor=make_point(get<0>(em)*emission_strength,
                                            get<1>(em)*emission_strength,
                                            get<2>(em)*emission_strength,0.0f);
-            // Emissive-only materials often specify (0,0,0,0) as their
-            // albedo factor. For this case alpha=0 means "no base color",
-            // not "hide the emissive fragment". Keep the dark base but allow
-            // emission to participate in depth and color composition.
-            if(gpu_3do_needs_emissive_coverage(
-                   out.albedo_source==1,out.opacity,
-                   get<0>(out.emission_factor),get<1>(out.emission_factor),
-                   get<2>(out.emission_factor)) &&
-               out.albedo_source==2) {
-                out.tint=make_point(get<0>(tint),get<1>(tint),get<2>(tint),1.0f);
-                out.opacity=1.0f;
-            }
+            // An emissive-only face contributes light but *no opaque base*.
+            // Route it through the blended pass with alpha=0 and independent
+            // emissive RGB, so the background remains visible behind it.
+            out.emissive_only=gpu_3do_emissive_only(
+                out.opacity,get<0>(out.emission_factor),
+                get<1>(out.emission_factor),get<2>(out.emission_factor));
             // JK stores local 3DO UVs in first-mipmap pixel units.
             // Normalize them against the equivalent original mip-0 size.
             out.width=static_cast<float>(chosen->width << mip);
@@ -1994,8 +1988,8 @@ namespace jkgm {
                 for(auto const &group:inst.geometry->groups) {
                     auto const tex=resolve_gpu_3do_material(group);
                     auto const policy=choose_gpu_3do_alpha_mode(
-                        (group.face_type&0x2U)!=0,tex.alpha,tex.masked,
-                        tex.special,tex.opacity);
+                        (group.face_type&0x2U)!=0 || tex.emissive_only,
+                        tex.alpha,tex.masked,tex.special,tex.opacity);
                     if(!gpu_3do_draws_in_pass(policy,transparent)) continue;
                     float depth=0.0f;
                     if(transparent) {
@@ -2082,7 +2076,8 @@ namespace jkgm {
                                  draw.texture.height,transparent,
                                  static_cast<int>(draw.policy),
                                  draw.texture.alpha_cutoff,face_opacity,
-                                 draw.texture.tint,draw.texture.albedo_scroll);
+                                 draw.texture.tint,draw.texture.albedo_scroll,
+                                 draw.texture.emissive_only);
                 prog.set_emissive(draw.texture.has_emission,
                                   draw.texture.emission_factor,
                                   draw.texture.emissive_scroll);

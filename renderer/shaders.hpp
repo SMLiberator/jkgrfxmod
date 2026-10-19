@@ -146,7 +146,8 @@ namespace jkgm {
             gl::uniform_location_id albedo_sampler,emissive_sampler,uv_scale,has_texture,
                                     has_emissive,transparent_pass,alpha_mode,alpha_cutoff,
                                     native_face_opacity,albedo_factor,emissive_factor,
-                                    albedo_scroll,emissive_scroll,fog_params,fog_color;
+                                    albedo_scroll,emissive_scroll,fog_params,fog_color,
+                                    emissive_only;
         public:
             explicit gpu_3do_preview_shader(fs::path const &data_root);
             void set_model(point<4,float> right, point<4,float> forward,
@@ -156,7 +157,8 @@ namespace jkgm {
                             point<4,float> projection_params);
             void set_surface(int albedo_source,float width,float height,bool transparent,
                              int alpha_policy,float cutoff,float face_opacity,
-                             point<4,float> tint,point<2,float> scroll);
+                             point<4,float> tint,point<2,float> scroll,
+                             bool emissive_only);
             void set_emissive(bool textured,point<4,float> intensity,
                               point<2,float> scroll);
             void set_fog(point<4,float> params,point<4,float> color);
