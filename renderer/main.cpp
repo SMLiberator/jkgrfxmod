@@ -33,6 +33,7 @@
 #include <memory>
 #include <cstddef>
 #include <string>
+#include <sstream>
 #include <detours/detours.h>
 
 static std::unique_ptr<jkgm::renderer> the_renderer;
@@ -1035,15 +1036,23 @@ namespace {
         std::string key(name);
         int &seen=sprite_trace_counts[key];
         if(seen++>=3) return;
-        LOG_INFO("SPR pose name=",key," type=",type,
-                 " bits=",type&jkgm::sprite_extended_mask,
-                 " applied=",updated?"yes":"no");
-        LOG_INFO("SPR thingUp=",thing_axes.up[0],",",thing_axes.up[1],",",
-                 thing_axes.up[2]," cameraLook=",camera_axes.look[0],",",
-                 camera_axes.look[1],",",camera_axes.look[2]);
-        LOG_INFO("SPR finalRight=",final_axes.right[0],",",final_axes.right[1],
-                 ",",final_axes.right[2]," finalUp=",final_axes.up[0],",",
-                 final_axes.up[1],",",final_axes.up[2]);
+        std::ostringstream entry;
+        entry << "SPR pose name=" << key << " type=" << type
+              << " bits=" << (type & jkgm::sprite_extended_mask)
+              << " applied=" << (updated ? "yes" : "no")
+              << " thingUp=(" << thing_axes.up[0] << ","
+                                  << thing_axes.up[1] << ","
+                                  << thing_axes.up[2] << ")"
+              << " cameraLook=(" << camera_axes.look[0] << ","
+                                     << camera_axes.look[1] << ","
+                                     << camera_axes.look[2] << ")"
+              << " finalRight=(" << final_axes.right[0] << ","
+                                     << final_axes.right[1] << ","
+                                     << final_axes.right[2] << ")"
+              << " finalUp=(" << final_axes.up[0] << ","
+                                  << final_axes.up[1] << ","
+                                  << final_axes.up[2] << ")";
+        LOG_INFO(entry.str());
     }
     struct sprite_draw_context {
         void const *thing=nullptr;
