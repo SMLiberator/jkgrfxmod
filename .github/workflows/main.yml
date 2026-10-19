@@ -30,6 +30,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\active_rd_camera.cpp /Fe:active_rd_camera_test.exe
         active_rd_camera_test.exe
+    - name: GPU 3DO native model-view precision tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_modelview.cpp /Fe:gpu_3do_modelview_test.exe
+        gpu_3do_modelview_test.exe
     - name: GPU 3DO GeoMode and mirror compatibility tests
       shell: cmd
       run: |

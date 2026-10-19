@@ -142,14 +142,10 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
 jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &root)
     : opengl_shader("gpu_3do_preview",root/"shaders/gpu_3do_preview.vert",
                    root/"shaders/gpu_3do_preview.frag")
-    , model_right(gl::get_uniform_location(the_program,"model_right"))
-    , model_forward(gl::get_uniform_location(the_program,"model_forward"))
-    , model_up(gl::get_uniform_location(the_program,"model_up"))
-    , model_origin(gl::get_uniform_location(the_program,"model_origin"))
-    , camera_right(gl::get_uniform_location(the_program,"camera_right"))
-    , camera_forward(gl::get_uniform_location(the_program,"camera_forward"))
-    , camera_up(gl::get_uniform_location(the_program,"camera_up"))
-    , camera_origin(gl::get_uniform_location(the_program,"camera_origin"))
+    , view_right(gl::get_uniform_location(the_program,"view_right"))
+    , view_forward(gl::get_uniform_location(the_program,"view_forward"))
+    , view_up(gl::get_uniform_location(the_program,"view_up"))
+    , view_origin(gl::get_uniform_location(the_program,"view_origin"))
     , projection(gl::get_uniform_location(the_program,"projection"))
     , albedo_sampler(gl::get_uniform_location(the_program,"albedo_map"))
     , emissive_sampler(gl::get_uniform_location(the_program,"emissive_map"))
@@ -169,22 +165,17 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , fog_color(gl::get_uniform_location(the_program,"fog_color"))
 {
 }
-void jkgm::shaders::gpu_3do_preview_shader::set_model(
+void jkgm::shaders::gpu_3do_preview_shader::set_view_matrix(
     point<4,float> r,point<4,float> f,point<4,float> u,point<4,float> t)
 {
-    gl::set_uniform_vector(model_right,r);
-    gl::set_uniform_vector(model_forward,f);
-    gl::set_uniform_vector(model_up,u);
-    gl::set_uniform_vector(model_origin,t);
+    gl::set_uniform_vector(view_right,r);
+    gl::set_uniform_vector(view_forward,f);
+    gl::set_uniform_vector(view_up,u);
+    gl::set_uniform_vector(view_origin,t);
 }
-void jkgm::shaders::gpu_3do_preview_shader::set_camera(
-    point<4,float> r,point<4,float> f,point<4,float> u,point<4,float> t,
+void jkgm::shaders::gpu_3do_preview_shader::set_projection(
     point<4,float> p)
 {
-    gl::set_uniform_vector(camera_right,r);
-    gl::set_uniform_vector(camera_forward,f);
-    gl::set_uniform_vector(camera_up,u);
-    gl::set_uniform_vector(camera_origin,t);
     gl::set_uniform_vector(projection,p);
 }
 

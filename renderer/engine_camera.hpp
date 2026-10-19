@@ -2,6 +2,7 @@
 
 #include "base/log.hpp"
 #include "engine_camera_data.hpp"
+#include "gpu_3do_modelview.hpp"
 #include "shaders.hpp"
 #include "sun.hpp"
 #include <Windows.h>
@@ -146,6 +147,35 @@ namespace jkgm {
         uint8_t raw[raw_size]{};
         std::memcpy(raw,reinterpret_cast<void const *>(address),sizeof(raw));
         return parse_active_rd_camera(raw);
+    }
+
+    // Preserve the engine's actual world-to-view rdMatrix34 bit-for-bit.
+    // read_active_render_camera() reconstructs camera world coordinates,
+    // which loses precision and is unnecessary for geometry projection.
+    // Use the native view matrix directly for camera*mesh composition.
+    inline bool read_active_rd_camera_view(gpu_3do_matrix34 &view)
+    {
+        using namespace engine_camera_detail;
+        constexpr uintptr_t active_camera_address=0x0073A418U;
+        if(!build_matches() ||
+           !readable(active_camera_address,sizeof(uintptr_t)))
+            return false;
+        uintptr_t address=0;
+        std::memcpy(&address,reinterpret_cast<void const *>(active_camera_address),
+                    sizeof(address));
+        if(address<0x10000U || !readable(address+8U,12*sizeof(float)))
+            return false;
+        std::memcpy(view.data(),reinterpret_cast<void const *>(address+8U),
+                    sizeof(float)*view.size());
+        // Only camera translation may be large. Basis must be a valid
+        // orthogonal rotation, not uninitialized/recycled object data.
+        if(!gpu_3do_matrix_finite(view)) return false;
+        for(int axis=0;axis<3;axis++) {
+            float const x=view[axis*3],y=view[axis*3+1],z=view[axis*3+2];
+            float const len=std::sqrt(x*x+y*y+z*z);
+            if(len<0.98f || len>1.02f) return false;
+        }
+        return true;
     }
 
     // Hands the engine camera to a game pass shader. Call once per pass, before drawing.

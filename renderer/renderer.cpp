@@ -1975,6 +1975,8 @@ namespace jkgm {
                                        profile_frame.gpu_preview_cpu_us);
             auto const cam=read_active_render_camera();
             if(!cam.valid) return;
+            gpu_3do_matrix34 native_view{};
+            if(!read_active_rd_camera_view(native_view)) return;
 
             float far_plane=1000.0f;
             constexpr uintptr_t current_camera=0x0073A418U;
@@ -1993,14 +1995,9 @@ namespace jkgm {
             }
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
-            auto const axes=[](std::array<float,3> const &v) {
-                return make_point(v[0],v[1],v[2],0.0f);
-            };
             float const aspect=get<x>(internal_scr_res_f)/get<y>(internal_scr_res_f);
             float const tan_half_fov=std::tan(cam.fov*0.008726646259971648f);
-            prog.set_camera(axes(cam.right),axes(cam.forward),axes(cam.up),
-                            axes(cam.position),
-                            make_point(tan_half_fov,aspect,1.0f/far_plane,0.0f));
+            prog.set_projection(make_point(tan_half_fov,aspect,1.0f/far_plane,0.0f));
             // Same animated fog state used by JK's existing scene passes.
             {
                 auto const &fog=get_fog_settings();
@@ -2082,11 +2079,14 @@ namespace jkgm {
                 if(active_instance!=draw.instance) {
                     // Multiple cars can instance the same cached mesh ID with
                     // different world matrices. Compare instances, not IDs.
-                    auto const &m=inst.transform;
-                    prog.set_model(make_point(m[0],m[1],m[2],0.0f),
-                                   make_point(m[3],m[4],m[5],0.0f),
-                                   make_point(m[6],m[7],m[8],0.0f),
-                                   make_point(m[9],m[10],m[11],1.0f));
+                    // Match JK rdModel3_DrawMesh: combine the original
+                    // rdCamera::orient and joint/world placement on CPU,
+                    // then transform static local mesh vertices on the GPU.
+                    auto const m=gpu_3do_native_modelview(native_view,inst.transform);
+                    prog.set_view_matrix(make_point(m[0],m[1],m[2],0.0f),
+                                         make_point(m[3],m[4],m[5],0.0f),
+                                         make_point(m[6],m[7],m[8],0.0f),
+                                         make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(it->second->vao);
                     active_instance=draw.instance;
                 }

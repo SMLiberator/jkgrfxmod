@@ -140,8 +140,7 @@ namespace jkgm {
 
         // Isolated first GPU 3DO mesh test: independent of old D3D vertex format.
         class gpu_3do_preview_shader : public opengl_shader {
-            gl::uniform_location_id model_right,model_forward,model_up,model_origin;
-            gl::uniform_location_id camera_right,camera_forward,camera_up,camera_origin;
+            gl::uniform_location_id view_right,view_forward,view_up,view_origin;
             gl::uniform_location_id projection;
             gl::uniform_location_id albedo_sampler,emissive_sampler,uv_scale,has_texture,
                                     has_emissive,transparent_pass,alpha_mode,alpha_cutoff,
@@ -150,11 +149,9 @@ namespace jkgm {
                                     emissive_only;
         public:
             explicit gpu_3do_preview_shader(fs::path const &data_root);
-            void set_model(point<4,float> right, point<4,float> forward,
-                           point<4,float> up, point<4,float> origin);
-            void set_camera(point<4,float> right, point<4,float> forward,
-                            point<4,float> up, point<4,float> origin,
-                            point<4,float> projection_params);
+            void set_view_matrix(point<4,float> right,point<4,float> forward,
+                                 point<4,float> up,point<4,float> origin);
+            void set_projection(point<4,float> projection_params);
             void set_surface(int albedo_source,float width,float height,bool transparent,
                              int alpha_policy,float cutoff,float face_opacity,
                              point<4,float> tint,point<2,float> scroll,
