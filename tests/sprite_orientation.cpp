@@ -41,6 +41,21 @@ int main() {
     camera.look={{0,0,1}};
     assert(compute_sprite_axes(sprite_preserve_up,thing,camera,out));
     assert(eq(out.up,thing.up));
+    // Upholding Thing Up must not choose a random yaw when the camera looks
+    // nearly straight down. Camera Right remains a stable tangent.
+    camera.right={{0.0f,1.0f,0.0f}};
+    camera.look={{0.00001f,0.0f,1.0f}};
+    camera.up={{1.0f,0.0f,0.0f}};
+    assert(compute_sprite_axes(sprite_preserve_up,thing,camera,out));
+    assert(eq(out.up,thing.up));
+    assert(eq(out.right,camera.right));
+    // A Thing with sideways Up exercises the fallback path when camera
+    // Right and the preserved axis are parallel.
+    sprite_axes sideways=thing;
+    sideways.up={{0.0f,1.0f,0.0f}};
+    assert(compute_sprite_axes(sprite_preserve_up,sideways,camera,out));
+    assert(eq(out.up,sideways.up));
+    assert(std::fabs(sprite_dot(out.right,out.up))<0.001f);
     sprite_axes bad=thing;
     bad.up={{0,0,0}};
     assert(!compute_sprite_axes(sprite_project_decal,bad,camera,out));
