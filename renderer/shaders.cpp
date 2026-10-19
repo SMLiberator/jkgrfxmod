@@ -188,11 +188,11 @@ void jkgm::shaders::gpu_3do_preview_shader::set_camera(
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_surface(
-    bool textured,float width,float height,bool transparent,
+    int albedo_source,float width,float height,bool transparent,
     int policy,float cutoff,float face_opacity,point<4,float> tint,point<2,float> scroll)
 {
     gl::set_uniform_integer(albedo_sampler,0);
-    gl::set_uniform_integer(has_texture,textured?1:0);
+    gl::set_uniform_integer(has_texture,albedo_source);
     gl::set_uniform_integer(transparent_pass,transparent?1:0);
     gl::set_uniform_integer(alpha_mode,policy);
     gl::set_uniform_float(alpha_cutoff,cutoff);

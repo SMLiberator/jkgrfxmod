@@ -764,6 +764,11 @@ transparency pass. No texel is blended twice. Masked materials use their
 configured cutoff; explicitly translucent 0x2 faces, reduced-opacity
 materials and special blend modes remain entirely translucent.
 
+The prototype treats intentional no-albedo replacements as a neutral base,
+not a missing-texture error. Emissive-only materials with albedo factor
+`0 0 0 0` retain their black color but are not discarded merely due to
+zero base alpha. Unresolved MATs still show diagnostic magenta.
+
 The prototype additionally forwards albedo tint and UV scroll, emissive maps,
 emissive factors/pulses, and the existing distance fog. This still isn't
 full JK vertex-lighting or material parity.

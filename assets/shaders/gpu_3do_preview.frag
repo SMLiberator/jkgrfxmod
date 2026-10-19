@@ -13,7 +13,7 @@ uniform vec4 fog_params;   // start, end, opacity, unused
 uniform vec3 fog_color;
 uniform float alpha_cutoff;
 uniform float native_face_opacity;
-uniform int has_texture;
+uniform int has_texture; // 0=unresolved diagnostic, 1=albedo map, 2=intentionally no albedo
 uniform int has_emissive;
 uniform int transparent_pass;
 uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blend only
@@ -26,9 +26,9 @@ layout(location=2) out vec4 out_normal;
 layout(location=3) out vec4 out_depth;
 void main() {
     vec2 uv=pixel_uv*uv_scale;
-    vec4 texel=has_texture!=0
+    vec4 texel=has_texture==1
         ? texture(albedo_map,uv+albedo_scroll)
-        : vec4(1.0,0.05,0.65,1.0);
+        : (has_texture==2 ? vec4(1.0) : vec4(1.0,0.05,0.65,1.0));
     vec4 albedo=texel*albedo_factor;
     albedo.a*=native_face_opacity;
     if(transparent_pass==0) {

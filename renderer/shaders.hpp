@@ -154,7 +154,7 @@ namespace jkgm {
             void set_camera(point<4,float> right, point<4,float> forward,
                             point<4,float> up, point<4,float> origin,
                             point<4,float> projection_params);
-            void set_surface(bool textured,float width,float height,bool transparent,
+            void set_surface(int albedo_source,float width,float height,bool transparent,
                              int alpha_policy,float cutoff,float face_opacity,
                              point<4,float> tint,point<2,float> scroll);
             void set_emissive(bool textured,point<4,float> intensity,

@@ -1831,6 +1831,9 @@ namespace jkgm {
             float width=1.0f, height=1.0f;
             float alpha_cutoff=0.5f;
             float opacity=1.0f;
+            // 0=invalid/unresolved MAT (diagnostic magenta), 1=texture,
+            // 2=intentionally no albedo map (neutral white).
+            int albedo_source=0;
             bool has_image=false, alpha=false, masked=false, special=false;
             bool has_emission=false;
             bool filtered=true;
@@ -1880,8 +1883,18 @@ namespace jkgm {
             auto const id=static_cast<size_t>(chosen->texture_handle);
             if(id==0 || id>vidmem_texture_surfaces.size()) return out;
             auto const &surface=vidmem_texture_surfaces[id-1];
-            if(!surface || !surface->albedo_map) return out;
-            out.texture=texture_cache->get_texture_handle(*surface->albedo_map);
+            if(!surface) return out;
+            // A replacement can deliberately have no albedo map, e.g.
+            // emissive-only brake lights with albedo_factor 0 0 0 0.
+            // Do not discard the *entire* material and its emissive map.
+            if(surface->albedo_map) {
+                out.texture=texture_cache->get_texture_handle(*surface->albedo_map);
+                out.albedo_source=1;
+                out.has_image=true;
+            } else {
+                out.albedo_source=2; // neutral texture; tint controls base color
+                out.alpha=false; // no actual alpha texture to split
+            }
             out.masked=surface->alpha_mode==material_alpha_mode::mask;
             out.blend=surface->blend_mode;
             out.special=surface->depth_clip ||
@@ -1906,11 +1919,21 @@ namespace jkgm {
             out.emission_factor=make_point(get<0>(em)*emission_strength,
                                            get<1>(em)*emission_strength,
                                            get<2>(em)*emission_strength,0.0f);
+            // Emissive-only materials often specify (0,0,0,0) as their
+            // albedo factor. For this case alpha=0 means "no base color",
+            // not "hide the emissive fragment". Keep the dark base but allow
+            // emission to participate in depth and color composition.
+            bool const emits=get<0>(out.emission_factor)>0.0f ||
+                             get<1>(out.emission_factor)>0.0f ||
+                             get<2>(out.emission_factor)>0.0f;
+            if(out.albedo_source==2 && emits && out.opacity<=0.001f) {
+                out.tint=make_point(get<0>(tint),get<1>(tint),get<2>(tint),1.0f);
+                out.opacity=1.0f;
+            }
             // JK stores local 3DO UVs in first-mipmap pixel units.
             // Normalize them against the equivalent original mip-0 size.
             out.width=static_cast<float>(chosen->width << mip);
             out.height=static_cast<float>(chosen->height << mip);
-            out.has_image=true;
             return out;
         }
 
@@ -2054,7 +2077,7 @@ namespace jkgm {
                 }
                 bind_color_texture(draw.texture.texture,0,draw.texture.filtered);
                 bind_color_texture(draw.texture.emission,1,draw.texture.filtered);
-                prog.set_surface(draw.texture.has_image,draw.texture.width,
+                prog.set_surface(draw.texture.albedo_source,draw.texture.width,
                                  draw.texture.height,transparent,
                                  static_cast<int>(draw.policy),
                                  draw.texture.alpha_cutoff,face_opacity,
