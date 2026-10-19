@@ -1037,16 +1037,23 @@ input. Example (run on a copy of your executable):
 python tools/patch_jkgm_sprite_types.py jkgm.exe jkgm-spr.exe
 ```
 
-**This is a staging patch, not an activated SPR renderer.** Currently JK23's
-native draw routine still renders every sprite as a camera-facing billboard.
-The pure, unit-tested orientation helper `renderer/sprite_orientation.hpp`
-defines the proposed *new* bits: `0x04` preserve Up, `0x08` preserve Look,
-`0x10` preserve Right and `0x20` project a decal (which implies fixed
-orientation). Existing SPR types 0, 1, 2 remain untouched. These extended
-bits will only affect actual rendering after the forthcoming sprite draw hook
-and projector pass are implemented; there is no `SetSpriteInfo` COG verb yet.
-The patch script is included with CI test builds, but no EXE is distributed
-with the repository.
+The experimental SPR draw hook now honors the additional orientation bits:
+`0x04` preserves the Thing Up vector, `0x08` its Look vector,
+`0x10` its Right vector; combining two preserves the complete plane.
+`0x20` reserves decal projection and *currently only produces an oriented
+flat quad*, **not yet a depth-projected decal**. For testing an upright
+billboard, set the SPR's decimal type to `4` and use an unmodified sprite
+material. For a fixed-orientation flat sprite, use type `12`
+(`0x04 | 0x08`). Types 0, 1, and 2 stay on the original unmodified
+native renderer path. The hook modifies only the four camera-space vertex
+positions before JK's original primitive clipping; MAT sampling, UVs and
+lighting stay native. It uses signature checks for both hook addresses
+and stays disabled with `use_vanilla_renderer=true`.
+
+The SPR loader patch is necessary before types higher than 2 can load.
+`SetSpriteInfo` (per-Thing scaling/opacity/fading), true projected decals,
+and textured particle rendering remain to be implemented and tested in-game.
+The patch script ships with CI test builds; the repository distributes no EXE.
 
 ## Experimental depth-projected decal (first prototype)
 
