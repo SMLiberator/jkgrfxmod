@@ -1011,6 +1011,33 @@ namespace {
     native_sprite_mid_fn RealSpritePreclip=
         reinterpret_cast<native_sprite_mid_fn>(sprite_preclip_addr);
     bool native_sprite_hook_active=false;
+    // Level-global resources can be shared by many Things. In profiling mode,
+    // report a few actual rendered instances per .SPR, not just definitions:
+    // this distinguishes a type parsed as zero from Things with differing axes.
+    std::unordered_map<std::string,int> sprite_trace_counts;
+    void trace_native_sprite(char const *name,uint32_t type,
+                             jkgm::sprite_axes const &thing_axes,
+                             jkgm::sprite_axes const &camera_axes,
+                             jkgm::sprite_axes const &final_axes,
+                             bool updated)
+    {
+        if(!the_config || !the_config->profile_renderer ||
+           sprite_trace_counts.size()>=128U) return;
+        std::string key(name);
+        int &seen=sprite_trace_counts[key];
+        if(seen++>=3) return;
+        LOG_INFO("SPR pose name=",key,
+                 " type=",type," (",uint32_t(type&jkgm::sprite_extended_mask),
+                 " new bits) applied=",updated?"yes":"no",
+                 " thingUp=(",thing_axes.up[0],",",thing_axes.up[1],",",
+                                thing_axes.up[2],")",
+                 " cameraLook=(",camera_axes.look[0],",",camera_axes.look[1],",",
+                                     camera_axes.look[2],")",
+                 " finalRight=(",final_axes.right[0],",",final_axes.right[1],",",
+                                     final_axes.right[2],")",
+                 " finalUp=(",final_axes.up[0],",",final_axes.up[1],",",
+                                  final_axes.up[2],")");
+    }
     struct sprite_draw_context {
         void const *thing=nullptr;
         void const *orientation=nullptr;
@@ -1033,7 +1060,23 @@ namespace {
         auto const *p=static_cast<uint8_t const *>(sprite);
         uint32_t type=0;
         std::memcpy(&type,p+0x20,sizeof(type));
-        if((type&jkgm::sprite_extended_mask)==0) return;
+        // This is the actual loaded rdSprite.type. It is written by
+        // rdSprite_NewEntry at +0x20, not the Thing's type or flags.
+        // Preserve the name for one-shot runtime diagnostics below.
+        char sprite_name[33]{};
+        std::memcpy(sprite_name,p,32);
+        sprite_name[32]=0;
+        if((type&jkgm::sprite_extended_mask)==0) {
+            if(the_config && the_config->profile_renderer &&
+               sprite_trace_counts.size()<128U) {
+                auto const key=std::string(sprite_name);
+                int &seen=sprite_trace_counts[key];
+                if(seen++==0) LOG_INFO("SPR pose name=",key,
+                    " loaded_type=",type,
+                    " (no extended orientation; did the SPR use decimal 4 rather than 0x4?)");
+            }
+            return;
+        }
 
         float size[4]{}; // width, height, widthHalf, heightHalf
         float offset[3]{};
@@ -1100,6 +1143,7 @@ namespace {
         }
         std::memcpy(reinterpret_cast<void *>(native_quad_addr),transformed,
                     sizeof(transformed));
+        trace_native_sprite(sprite_name,type,thing_axes,camera_axes,final_axes,true);
     }
 
     // Detours preserves the displaced mid-function instructions in the
