@@ -16,8 +16,9 @@ namespace jkgm {
         float fax,fay,faz; // face's first vertex: JK diffuse light anchor
         float face_extra; // .3DO per-face extra light
         float light_mode; // 0=fully lit, 1=not lit, 2=diffuse, 3=Gouraud
+        float cr,cg,cb; // immutable RGB vertex tint from patched JK .rgbx mesh
     };
-    static_assert(sizeof(gpu_3do_vertex)==68,"Unexpected GPU vertex stride");
+    static_assert(sizeof(gpu_3do_vertex)==80,"Unexpected GPU vertex stride");
 
     constexpr unsigned gpu_3do_max_lights=16;
     struct gpu_3do_light {

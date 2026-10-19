@@ -772,8 +772,11 @@ transparent pixels produce a neutral white factor, while Additive preserves
 the target framebuffer alpha. These are independent of standard blend/mask
 alpha routing.
 
-The GPU vertex path still lacks RGB vertex-color extensions, exotic dynamic
-light types (including spotlights), normal maps and reflection effects.
+The GPU vertex path snapshots the optional 3DO RGB vertex tints from the
+patched executable's extra per-mesh color array once per mesh (falling back
+to white when absent) and multiplies them with native-style Gouraud/diffuse
+lighting in the vertex and fragment shaders. Exotic dynamic light types
+(including spotlights), normal maps and reflection effects remain unsupported.
 GPU fog is already calculated by its shader, but its reported absence in
 gameplay needs a separate runtime investigation.
 

@@ -23,6 +23,7 @@ in float view_depth;
 in vec2 pixel_uv;
 in vec3 view_normal;
 in float jk_light;
+in vec3 vertex_rgb;
 layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
@@ -45,7 +46,10 @@ void main() {
     }
     float fog=clamp((view_depth-fog_params.x)/
                     max(fog_params.y-fog_params.x,0.0001),0.0,1.0)*fog_params.z;
-    vec3 rgb=mix(albedo.rgb*jk_light,fog_color,fog);
+    // The native OpenGL D3D path applies the per-vertex specular RGB
+    // multiplier in linear space, after gamma-1.8 JK diffuse lighting.
+    // Keep tint separate from alpha and from emissive output.
+    vec3 rgb=mix(albedo.rgb*jk_light*vertex_rgb,fog_color,fog);
     vec3 emission=emissive_factor;
     if(has_emissive!=0)
         emission*=texture(emissive_map,uv+emissive_scroll).rgb;
@@ -59,7 +63,7 @@ void main() {
         // premultiplied color. Alpha zero must multiply by WHITE (identity).
         // Match the native triangle path: emission biases the multiplier
         // toward white, but never adds light independently in Multiply mode.
-        vec3 tint=clamp(albedo.rgb*jk_light+emission,0.0,1.0);
+        vec3 tint=clamp(albedo.rgb*jk_light*vertex_rgb+emission,0.0,1.0);
         out_color=vec4(mix(vec3(1.0),tint,albedo.a),0.0);
     } else {
         // Additive and normal pass use premultiplied pigment; alpha for the

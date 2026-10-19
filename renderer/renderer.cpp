@@ -389,6 +389,10 @@ namespace jkgm {
             gl::vertex_attrib_pointer(7U,1U,gl::vertex_element_type::float32,
                                       false,sizeof(gpu_3do_vertex),
                                       offsetof(gpu_3do_vertex,light_mode));
+            gl::enable_vertex_attrib_array(8U);
+            gl::vertex_attrib_pointer(8U,3U,gl::vertex_element_type::float32,
+                                      false,sizeof(gpu_3do_vertex),
+                                      offsetof(gpu_3do_vertex,cr));
             gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
             gl::buffer_data(gl::buffer_bind_target::element_array,
                             make_span(source.indices).as_const_bytes(),

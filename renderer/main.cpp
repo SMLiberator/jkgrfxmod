@@ -110,6 +110,7 @@ namespace {
     struct cached_gpu_mesh {
         float const *vertices = nullptr;
         uint8_t const *faces = nullptr;
+        float const *rgb = nullptr;
         int num_vertices=0, num_faces=0;
         uint64_t id=0;
         std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
@@ -299,11 +300,13 @@ namespace {
     }
 
     std::shared_ptr<jkgm::gpu_3do_geometry const>
-    snapshot_gpu_mesh(native_mesh const &m) {
+    snapshot_gpu_mesh(native_mesh const &m, float const *vertex_rgb) {
         if(m.num_vertices<3 || m.num_vertices>65536 || m.num_faces<1 ||
            m.num_faces>65536 ||
            !gpu_span_readable(m.vertices,size_t(m.num_vertices)*12) ||
-           !gpu_span_readable(m.faces,size_t(m.num_faces)*sizeof(native_face)))
+           !gpu_span_readable(m.faces,size_t(m.num_faces)*sizeof(native_face)) ||
+           (vertex_rgb &&
+            !gpu_span_readable(vertex_rgb,size_t(m.num_vertices)*3*sizeof(float))))
             return {};
         // Sith stores positions and UVs in separate arrays. Faces index them
         // independently, so split each face corner rather than indexing
@@ -366,16 +369,31 @@ namespace {
                 auto const light_normal=has_smooth_normals
                     ? static_cast<float const *>(m.normals)+i : face.normal;
                 float const static_light=mode==3 ? static_cast<float const *>(m.vertex_lights)[pi] : 0.0f;
+                // jkgm.exe's .rgbx extension stores one immutable float3
+                // per source vertex at mesh+0x6c. Native D3D packs each
+                // channel as floor(clamp(x,0,1)*255+0.5). Match that
+                // rounding before shader interpolation and multiplication.
+                float rgb[3]={1.0f,1.0f,1.0f};
+                if(vertex_rgb) {
+                    for(int channel=0;channel<3;channel++) {
+                        float const value=vertex_rgb[i+size_t(channel)];
+                        if(!std::isfinite(value)) return {};
+                        rgb[channel]=std::floor(
+                            std::clamp(value,0.0f,1.0f)*255.0f+0.5f)/255.0f;
+                    }
+                }
                 jkgm::gpu_3do_vertex out{
                     m.vertices[i],m.vertices[i+1],m.vertices[i+2],
                     u,vtex,face.normal[0],face.normal[1],face.normal[2],
                     static_light,light_normal[0],light_normal[1],light_normal[2],
-                    anchor[0],anchor[1],anchor[2],face.extra_light,float(mode)
+                    anchor[0],anchor[1],anchor[2],face.extra_light,float(mode),
+                    rgb[0],rgb[1],rgb[2]
                 };
                 for(float vcheck : {out.x,out.y,out.z,out.u,out.v,
                                     out.nx,out.ny,out.nz,out.static_light,
                                     out.lnx,out.lny,out.lnz,
-                                    out.fax,out.fay,out.faz,out.face_extra})
+                                    out.fax,out.fay,out.faz,out.face_extra,
+                                    out.cr,out.cg,out.cb})
                     if(!std::isfinite(vcheck)) return {};
                 g->vertices.push_back(out);
             }
@@ -555,6 +573,25 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
        !gpu_span_readable(matrix,sizeof(float)*12)) return false;
     native_mesh m{};
     std::memcpy(&m,mesh,sizeof(m));
+    // The exact RGB/smooth-normal JK patch has an additional float3*
+    // at rdMesh+0x6c, beyond the original 0x58-byte layout. Its loader
+    // at 0x9001c0 explicitly zeroes that field before allocating 12 bytes
+    // per source vertex (initially white). Check the patched instruction
+    // signature and bounds before reading outside the vanilla structure.
+    static bool const has_rgb_mesh_extension=[] {
+        constexpr uintptr_t code=0x009001C0U;
+        constexpr uint8_t init_bytes[]={0xc7,0x43,0x6c,0,0,0,0};
+        return gpu_span_readable(reinterpret_cast<void const *>(code),
+                                 sizeof(init_bytes)) &&
+               std::memcmp(reinterpret_cast<void const *>(code),init_bytes,
+                           sizeof(init_bytes))==0;
+    }();
+    float const *vertex_rgb=nullptr;
+    if(has_rgb_mesh_extension) {
+        auto const *bytes=static_cast<uint8_t const *>(mesh);
+        if(!gpu_span_readable(bytes,0x70U)) return false;
+        std::memcpy(&vertex_rgb,bytes+0x6cU,sizeof(vertex_rgb));
+    }
     // The GPU prototype only draws filled triangle fans. Leave points and
     // wireframe meshes to JK rather than changing their geometry semantics.
     if(the_config->profile_renderer) ++gpu_native_stats.attempted;
@@ -592,9 +629,10 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     }
     auto it=gpu_mesh_cache.find(mesh);
     if(it==gpu_mesh_cache.end() || it->second.vertices!=m.vertices ||
-       it->second.faces!=m.faces || it->second.num_vertices!=m.num_vertices ||
+       it->second.faces!=m.faces || it->second.rgb!=vertex_rgb ||
+       it->second.num_vertices!=m.num_vertices ||
        it->second.num_faces!=m.num_faces) {
-        auto geom=snapshot_gpu_mesh(m);
+        auto geom=snapshot_gpu_mesh(m,vertex_rgb);
         if(!geom) {
             if(the_config->profile_renderer) ++gpu_native_stats.snapshot_native;
             return false;
@@ -602,7 +640,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
         if(gpu_mesh_cache.size()>4096) gpu_mesh_cache.clear();
         if(the_config->profile_renderer) ++gpu_native_stats.snapshots;
         auto &c=gpu_mesh_cache[mesh];
-        c={m.vertices,m.faces,m.num_vertices,m.num_faces,next_gpu_id++,std::move(geom)};
+        c={m.vertices,m.faces,vertex_rgb,m.num_vertices,m.num_faces,
+           next_gpu_id++,std::move(geom)};
         it=gpu_mesh_cache.find(mesh);
         // Per-mesh INFO logging caused tens of thousands of synchronous log
         // writes during dynamic HUD/text and short-lived model construction.

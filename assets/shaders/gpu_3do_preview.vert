@@ -10,6 +10,7 @@ layout(location=4) in vec3 local_light_normal;
 layout(location=5) in vec3 local_face_anchor;
 layout(location=6) in float local_extra_light;
 layout(location=7) in float local_light_mode;
+layout(location=8) in vec3 local_vertex_rgb;
 uniform float ambient_light;
 uniform float effective_light_mode; // captured per Thing
 uniform float attenuation_min;
@@ -17,6 +18,7 @@ uniform int num_lights;
 uniform vec4 light_position_radius[16]; // local XYZ and JK light radius
 uniform float light_intensity[16];
 out float jk_light;
+out vec3 vertex_rgb;
 uniform vec4 view_right, view_forward, view_up, view_origin;
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 out float view_depth;
@@ -43,6 +45,7 @@ void main() {
     // hardware Z coordinate above intentionally remains unscaled.
     view_depth=32.0*max(y,0.0);
     pixel_uv=local_uv;
+    vertex_rgb=local_vertex_rgb;
     // JK: FullyLit=0, NotLit=1, Diffuse=2, Gouraud=3.
     // Per-face ExtraLight and the camera's ambient floor are evaluated
     // before the gamma-1.8 vertex conversion (like the native D3D path).
