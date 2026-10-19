@@ -796,3 +796,26 @@ GPU instancing and cross-mesh material batching remain unfinished.
 The new path requires the updated \`renderer.dll\`, plus
 \`gpu_3do_preview.vert\` and \`gpu_3do_preview.frag\` from the same
 build in \`jkgm/shaders/\`. Keep the native \`jkgm.exe\` bootstrap.
+
+
+## Native MAT mip selection
+
+The original Sith renderer chooses a particular mip level from a MAT before
+uploading its DirectDraw texture. If an object is first encountered from far
+away, that may leave JkGRfxMod with only a reduced-resolution source image.
+OpenGL cannot reconstruct the original detail by generating additional mips.
+
+For the supported, verified JK23/jkgm executable builds, JkGRfxMod now
+intercepts the native mip-distance setter and forces JK to request **native
+MAT mip 0** (full original resolution) at ordinary viewing distances. This
+applies to both native sector surfaces and GPU-rendered 3DOs; level/video
+mode updates cannot silently restore JK's low-resolution selection.
+MATs without a level-0 image still use the engine's nearest-available-mip
+fallback.
+
+**OpenGL mipmapping is not disabled.** JkGRfxMod generates GPU mipmaps
+from the highest-resolution source through its existing texture cache and
+selects them dynamically using normal filtering/LOD, including anisotropy.
+No additional config option or EXE patch is needed. Unsupported executables
+keep their original native mip behavior. The override does not run with
+`"use_vanilla_renderer": true`.
