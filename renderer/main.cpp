@@ -669,7 +669,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
                std::memcmp(reinterpret_cast<void const *>(code),init_bytes,
                            sizeof(init_bytes))==0;
     }();
-    if(!the_config || !the_config->use_gpu_renderer || !mesh || !matrix ||
+    if(!the_config || !the_config->use_model_cache || !mesh || !matrix ||
        pending_gpu_instances.size()>=16384 ||
        // Single VirtualQuery per candidate, including the optional RGB
        // field; thousands of calls happen on busy scenes.
@@ -1755,7 +1755,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         }
 
         renderer_hooks_active = true;
-        if(the_config->profile_renderer || the_config->use_gpu_renderer) {
+        if(the_config->profile_renderer || the_config->use_model_cache) {
             native_3do_hooks_active = attach_native_3do_hooks(the_config->profile_renderer);
         }
         LOG_DEBUG("Finished attaching renderer to process");
