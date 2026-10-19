@@ -2830,6 +2830,40 @@ namespace jkgm {
             ogs->game_post_opaque_composite_program.set_emissive_sampler(1);
             ogs->game_post_opaque_composite_program.set_occlusion_sampler(2);
             ogs->game_post_opaque_composite_program.set_depth_sampler(3);
+            ogs->game_post_opaque_composite_program.disable_projected_decal();
+            if(projected_decal_texture && the_config->projected_decal) {
+                // The active native rdCamera tracks temporary/idle cameras,
+                // unlike Sith's logical camera array. Use its exact placement.
+                auto const cam=read_active_render_camera();
+                if(cam.valid) {
+                    auto const &d=*the_config->projected_decal;
+                    float const h=std::tan(cam.fov*(3.14159265358979323846f/360.0f));
+                    float const v=h*float(get<y>(conf_scr_res))/
+                                      float(get<x>(conf_scr_res));
+                    auto point_axis=[](std::array<float,3> const &a,float w) {
+                        return make_point(a[0],a[1],a[2],w);
+                    };
+                    auto &prog=ogs->game_post_opaque_composite_program;
+                    prog.set_projected_decal(
+                        point_axis(d.position,0.0f),
+                        point_axis(projected_decal_axes.right,1.0f/d.size[0]),
+                        point_axis(projected_decal_axes.up,1.0f/d.size[1]),
+                        point_axis(projected_decal_axes.forward,1.0f/d.size[2]),
+                        make_point(d.opacity,d.normal_threshold,
+                                   float(static_cast<int>(d.blend)),0.0f),
+                        point_axis(cam.position,0.0f),
+                        point_axis(cam.right,h),
+                        point_axis(cam.forward,0.0f),
+                        point_axis(cam.up,v));
+                    gl::set_active_texture_unit(5);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     frame_screen->get_resolved_normal_texture());
+                    gl::set_active_texture_unit(4);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     texture_cache->get_texture_handle(
+                                         *projected_decal_texture));
+                }
+            }
             {
                 auto const &fog=get_fog_settings();
                 auto const info=fog.info.value(), rgb=fog.color.value();
