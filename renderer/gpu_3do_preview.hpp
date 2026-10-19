@@ -51,6 +51,8 @@ namespace jkgm {
     };
     struct gpu_3do_native_stats {
         uint64_t attempted=0,culled=0,queued=0,snapshots=0,ready_checks=0;
+        uint64_t text_native=0,geometry_native=0,snapshot_native=0;
+        uint64_t material_native=0,lighting_native=0;
     };
     gpu_3do_native_stats consume_gpu_3do_native_stats();
     bool queue_gpu_3do_mesh(void const *mesh,void const *matrix);

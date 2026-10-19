@@ -550,6 +550,14 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     // The GPU prototype only draws filled triangle fans. Leave points and
     // wireframe meshes to JK rather than changing their geometry semantics.
     if(the_config->profile_renderer) ++gpu_native_stats.attempted;
+    // Each JK text character is a distinct ephemeral 3DO, often one quad.
+    // Uploading a new VAO/VBO/EBO for each glyph is costlier than native
+    // rendering, and the persistent cache otherwise retains every glyph.
+    if(m.name[0]=='c' && m.name[1]=='\0' &&
+       m.num_faces==1 && m.num_vertices<=8) {
+        if(the_config->profile_renderer) ++gpu_native_stats.text_native;
+        return false;
+    }
     // rdModel3_Draw at 0x44612c-0x446144 stores the *effective* Thing/
     // global GeoMode in this JK23-specific native global before it visits
     // any hierarchy meshes. Our hook otherwise ignores COG GeoMode changes.
@@ -561,10 +569,15 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     std::memcpy(&current_geo_mode,
                 reinterpret_cast<void const *>(effective_geo_mode),
                 sizeof(current_geo_mode));
-    if(!jkgm::gpu_3do_supports_geo_mode(current_geo_mode,m.geometry_mode))
+    if(!jkgm::gpu_3do_supports_geo_mode(current_geo_mode,m.geometry_mode)) {
+        if(the_config->profile_renderer) ++gpu_native_stats.geometry_native;
         return false; // Preserve JK vertex/wire/solid/invisible rendering.
+    }
     auto const camera=jkgm::read_active_render_camera();
-    if(!camera.valid) return false;
+    if(!camera.valid) {
+        if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
+        return false;
+    }
     if(gpu_mesh_outside_native_frustum(m,matrix,camera)) {
         if(the_config->profile_renderer) ++gpu_native_stats.culled;
         return true;
@@ -574,19 +587,18 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
        it->second.faces!=m.faces || it->second.num_vertices!=m.num_vertices ||
        it->second.num_faces!=m.num_faces) {
         auto geom=snapshot_gpu_mesh(m);
-        if(!geom) return false;
+        if(!geom) {
+            if(the_config->profile_renderer) ++gpu_native_stats.snapshot_native;
+            return false;
+        }
         if(gpu_mesh_cache.size()>4096) gpu_mesh_cache.clear();
         if(the_config->profile_renderer) ++gpu_native_stats.snapshots;
         auto &c=gpu_mesh_cache[mesh];
         c={m.vertices,m.faces,m.num_vertices,m.num_faces,next_gpu_id++,std::move(geom)};
         it=gpu_mesh_cache.find(mesh);
-        auto const null_char=std::memchr(m.name,'\0',sizeof(m.name));
-        auto const end_name = null_char
-            ? static_cast<char const *>(null_char) : m.name+sizeof(m.name);
-        std::string const name(m.name, static_cast<size_t>(end_name-m.name));
-        LOG_INFO("GPU 3DO: cached mesh ",name,
-                 " vertices=",m.num_vertices," faces=",m.num_faces,
-                 " triangles=",it->second.geometry->indices.size()/3);
+        // Per-mesh INFO logging caused tens of thousands of synchronous log
+        // writes during dynamic HUD/text and short-lived model construction.
+        // The aggregated PERF snapshots counter is the useful diagnostic.
     }
     // If a cel has never been encountered, let JK handle this call to warm
     // its native material cache. We can switch to GPU rendering next frame.
@@ -597,7 +609,10 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
         it->second.ready_for_frame=gpu_mesh_materials_ready(*it->second.geometry);
         it->second.ready_checked_frame=gpu_frame_serial;
     }
-    if(!it->second.ready_for_frame) return false;
+    if(!it->second.ready_for_frame) {
+        if(the_config->profile_renderer) ++gpu_native_stats.material_native;
+        return false;
+    }
     gpu_3do_instance inst;
     inst.id=it->second.id;
     inst.geometry=it->second.geometry;
@@ -610,12 +625,17 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     int32_t lighting_cap=0;
     std::memcpy(&lighting_cap,
                 reinterpret_cast<void const *>(effective_light_mode_addr),4);
-    if(lighting_cap<0 || lighting_cap>3) return false;
+    if(lighting_cap<0 || lighting_cap>3) {
+        if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
+        return false;
+    }
     inst.effective_light_mode=static_cast<float>(lighting_cap);
     std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
     for(float f:inst.transform) if(!std::isfinite(f)) return false;
-    if(!snapshot_gpu_3do_lighting(m,inst.transform.data(),inst))
+    if(!snapshot_gpu_3do_lighting(m,inst.transform.data(),inst)) {
+        if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
         return false;
+    }
     pending_gpu_instances.emplace_back(std::move(inst));
     if(the_config->profile_renderer) ++gpu_native_stats.queued;
     return true;

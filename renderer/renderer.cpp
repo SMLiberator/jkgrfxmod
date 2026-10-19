@@ -458,6 +458,8 @@ namespace jkgm {
 
         std::unique_ptr<opengl_state> ogs;
         std::unordered_map<uint64_t,std::unique_ptr<gpu_3do_gl_mesh>> gpu_3do_gl_cache;
+        std::unordered_map<uint64_t,uint64_t> gpu_3do_last_drawn;
+        uint64_t gpu_3do_present_serial=0;
         // Resolved MAT surfaces are identical for all instances within one
         // frame; share costly native memory reads across both GPU passes.
         std::unordered_map<uint64_t,gpu_3do_texture> gpu_frame_material_cache;
@@ -581,6 +583,17 @@ namespace jkgm {
                      " HUDupload=", avg(profile_stage::hud_upload),
                      " HUDdraw=", avg(profile_stage::hud_draw));
             if(the_config->use_gpu_renderer) {
+                LOG_INFO("PERF gpu_3do fallback_native_per_frame text=",
+                         profile_window.gpu_text_native/frames,
+                         " geometry=",profile_window.gpu_geometry_native/frames,
+                         " snapshot=",profile_window.gpu_snapshot_native/frames,
+                         " material=",profile_window.gpu_material_native/frames,
+                         " lighting_or_camera=",profile_window.gpu_lighting_native/frames);
+                auto const &current_fog=get_fog_settings();
+                auto const fog_params=current_fog.info.value();
+                LOG_INFO("PERF gpu_3do fog start=",fog_params[0],
+                         " end=",fog_params[1],
+                         " opacity=",the_config->enable_fog?fog_params[2]:0.0f);
                 LOG_INFO("PERF gpu_3do candidates_avg=",profile_window.gpu_candidates/frames,
                          " sphere_culled_avg=",profile_window.gpu_culled/frames,
                          " instances_avg=",profile_window.gpu_queued/frames,
@@ -659,6 +672,8 @@ namespace jkgm {
                     // Levels recycle native mesh pointers; discard both copies.
                     reset_gpu_3do_instances();
                     gpu_3do_gl_cache.clear();
+                    gpu_3do_last_drawn.clear();
+                    gpu_3do_present_serial=0;
                     gpu_frame_material_cache.clear();
                     frame_gpu_3do_instances.clear();
                 }
@@ -2092,10 +2107,10 @@ namespace jkgm {
                     auto ptr=std::make_unique<gpu_3do_gl_mesh>(*inst.geometry);
                     if(the_config->profile_renderer) ++profile_frame.gpu_uploads;
                     it=gpu_3do_gl_cache.emplace(inst.id,std::move(ptr)).first;
-                    LOG_INFO("GPU 3DO: uploaded face-corner mesh id=",inst.id,
-                             " triangles=",it->second->num_indices/3,
-                             " MAT groups=",inst.geometry->groups.size());
+                    // Count uploads through PERF; do not log every temporary
+                    // mesh allocation in this frequently called draw path.
                 }
+                gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                 if(active_instance!=draw.instance) {
                     // Multiple cars can instance the same cached mesh ID with
                     // different world matrices. Compare instances, not IDs.
@@ -2703,6 +2718,7 @@ namespace jkgm {
             // Keeping one frame snapshot avoids losing the second pass.
             gpu_frame_material_cache.clear();
             frame_gpu_3do_instances=consume_gpu_3do_instances();
+            ++gpu_3do_present_serial;
             animation_seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - animation_epoch).count();
             {
@@ -2763,6 +2779,24 @@ namespace jkgm {
                 draw_hud();
             }
 
+            // Transient 3DOs (text, HUD, effects) may have already been freed
+            // by JK. Expire their GPU resources, keeping recently reused meshes
+            // without retaining every allocation for the entire level.
+            // Sweep periodically to avoid iterating the cache on every frame.
+            if(the_config->use_gpu_renderer && (gpu_3do_present_serial%16U)==0U) {
+                for(auto it=gpu_3do_gl_cache.begin();it!=gpu_3do_gl_cache.end();) {
+                    auto const used=gpu_3do_last_drawn.find(it->first);
+                    if(used==gpu_3do_last_drawn.end() ||
+                       gpu_3do_present_serial-used->second>64U) {
+                        if(used!=gpu_3do_last_drawn.end())
+                            gpu_3do_last_drawn.erase(used);
+                        it=gpu_3do_gl_cache.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
+            }
+
             // Reset state:
             frame_gpu_3do_instances.clear();
             is_gun = false;
@@ -2781,6 +2815,11 @@ namespace jkgm {
                 profile_frame.gpu_queued+=stats.queued;
                 profile_frame.gpu_snapshots+=stats.snapshots;
                 profile_frame.gpu_ready_checks+=stats.ready_checks;
+                profile_frame.gpu_text_native+=stats.text_native;
+                profile_frame.gpu_geometry_native+=stats.geometry_native;
+                profile_frame.gpu_snapshot_native+=stats.snapshot_native;
+                profile_frame.gpu_material_native+=stats.material_native;
+                profile_frame.gpu_lighting_native+=stats.lighting_native;
                 auto const native = consume_native_3do_sample();
                 profile_frame.native_model_calls += native.model_calls;
                 profile_frame.native_model_drawn += native.model_drawn;

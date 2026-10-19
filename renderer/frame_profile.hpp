@@ -24,6 +24,8 @@ struct profile_sample {
   uint64_t native_face_calls=0, native_face_emitted=0;
   uint64_t native_model_ns=0, native_mesh_ns=0, native_face_ns=0;
   uint64_t gpu_candidates=0,gpu_culled=0,gpu_queued=0,gpu_snapshots=0,gpu_ready_checks=0;
+  uint64_t gpu_text_native=0,gpu_geometry_native=0,gpu_snapshot_native=0;
+  uint64_t gpu_material_native=0,gpu_lighting_native=0;
   uint64_t gpu_draw_calls=0,gpu_draw_triangles=0,gpu_material_resolves=0,gpu_uploads=0;
   uint64_t gpu_preview_cpu_us=0;
   void add(profile_sample const &o) {
@@ -47,6 +49,11 @@ struct profile_sample {
     native_face_ns+=o.native_face_ns;
     gpu_candidates+=o.gpu_candidates; gpu_culled+=o.gpu_culled;
     gpu_queued+=o.gpu_queued; gpu_snapshots+=o.gpu_snapshots;
+    gpu_text_native+=o.gpu_text_native;
+    gpu_geometry_native+=o.gpu_geometry_native;
+    gpu_snapshot_native+=o.gpu_snapshot_native;
+    gpu_material_native+=o.gpu_material_native;
+    gpu_lighting_native+=o.gpu_lighting_native;
     gpu_ready_checks+=o.gpu_ready_checks; gpu_draw_calls+=o.gpu_draw_calls;
     gpu_draw_triangles+=o.gpu_draw_triangles;
     gpu_material_resolves+=o.gpu_material_resolves;
