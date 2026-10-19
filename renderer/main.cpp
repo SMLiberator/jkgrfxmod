@@ -11,6 +11,7 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
+#include "gpu_3do_triangulation.hpp"
 #include "gpu_3do_colormap.hpp"
 #include "jk_colormap_layout.hpp"
 #include "native_mat_mips.hpp"
@@ -456,22 +457,28 @@ namespace {
                 g->vertices.push_back(out);
             }
             uint32_t const first=static_cast<uint32_t>(g->indices.size());
-            // Ensure the fan winding agrees with the native face normal.
-            // JK's backface criterion is dot(normal,camera-face)>0.
-            // Once aligned, OpenGL's ordinary CCW backface culling agrees.
-            auto const &a=g->vertices[base];
-            auto const &b=g->vertices[base+1];
-            auto const &c=g->vertices[base+2];
-            float const ex=b.x-a.x, ey=b.y-a.y, ez=b.z-a.z;
-            float const fx=c.x-a.x, fy=c.y-a.y, fz=c.z-a.z;
-            float const winding=(ey*fz-ez*fy)*face.normal[0]+
-                                (ez*fx-ex*fz)*face.normal[1]+
-                                (ex*fy-ey*fx)*face.normal[2];
-            bool const reverse_winding=winding<0.0f;
-            for(uint32_t v=1;v+1<face.count;v++) {
-                g->indices.push_back(base);
-                g->indices.push_back(base+(reverse_winding?v+1:v));
-                g->indices.push_back(base+(reverse_winding?v:v+1));
+            // Native rdModel3 can handle outlines that are not convex (and
+            // sometimes not perfectly planar). A triangle fan loses those
+            // faces. Clip ears in a stable 2D projection instead, preserving
+            // each corner's original material UV and native vertex lighting.
+            // For invalid outlines use the entire native mesh draw, rather
+            // than silently losing geometry from the cached GPU path.
+            std::vector<std::array<float,3>> outline;
+            outline.reserve(face.count);
+            for(uint32_t v=0;v<face.count;v++) {
+                auto const &p=g->vertices[base+v];
+                outline.push_back({p.x,p.y,p.z});
+            }
+            std::vector<std::array<uint32_t,3>> face_triangles;
+            bool nonplanar=false;
+            if(!jkgm::gpu_3do_triangulate_face(
+                   outline,{{face.normal[0],face.normal[1],face.normal[2]}},
+                   face_triangles,nonplanar))
+                return reject("non_simple_or_degenerate_face");
+            for(auto const &tri:face_triangles) {
+                g->indices.push_back(base+tri[0]);
+                g->indices.push_back(base+tri[1]);
+                g->indices.push_back(base+tri[2]);
             }
             uint32_t const added=static_cast<uint32_t>(g->indices.size())-first;
             std::array<float,3> center{};
@@ -505,7 +512,8 @@ namespace {
             if(!translucent && !g->groups.empty() &&
                g->groups.back().material==ptr &&
                g->groups.back().cel==cel &&
-               g->groups.back().face_type==flags) {
+               g->groups.back().face_type==flags &&
+               g->groups.back().nonplanar==nonplanar) {
                 auto &group=g->groups.back();
                 group.count+=added;
                 ++group.plane_count;
@@ -517,7 +525,7 @@ namespace {
                 }
             } else {
                 g->groups.push_back({first,added,ptr,cel,flags,center,
-                                     plane_start,1,bounds_lo,bounds_hi});
+                                     plane_start,1,bounds_lo,bounds_hi,nonplanar});
             }
         }
         // Avoid revalidating the same native MAT thousands of times in one
@@ -682,8 +690,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
         auto const *bytes=static_cast<uint8_t const *>(mesh);
         std::memcpy(&vertex_rgb,bytes+0x6cU,sizeof(vertex_rgb));
     }
-    // The GPU prototype only draws filled triangle fans. Leave points and
-    // wireframe meshes to JK rather than changing their geometry semantics.
+    // Only filled geometry is eligible for caching. Preserve native handling
+    // for points, wireframe, or faces with ambiguous polygon outlines.
     if(the_config->profile_renderer) ++gpu_native_stats.attempted;
     // Each JK text character is a distinct ephemeral 3DO, often one quad.
     // Uploading a new VAO/VBO/EBO for each glyph is costlier than native
