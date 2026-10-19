@@ -897,10 +897,19 @@ JkGRfxMod's normal OpenGL world/sector rendering. This is not
 \`use_vanilla_renderer\`, which disables JkGRfxMod entirely.
 
 The GPU renderer snapshots 3DO face-corner positions, UVs and face normals
-once and updates only world/joint matrices per frame. Texture surfaces are
-warmed using a fallback native draw when needed. Unsupported 3DO geometry
-(such as wireframe/point faces or invalid/missing data) also falls back
-to native JK. Legitimately untextured faces use a neutral color for now;
+once and updates only world/joint matrices per frame. Simple concave face
+outlines now use projected ear clipping instead of the incorrect triangle
+fan. Convex faces preserve their original fan diagonals and UV interpolation.
+Mildly warped/nonplanar polygons keep JK's per-face backface criterion rather
+than losing triangles through OpenGL culling. Self-intersecting or degenerate
+outlines fall back for the **whole mesh** to native JK.
+Texture surfaces are warmed using a fallback native draw when needed.
+Unsupported 3DO geometry (such as wireframe/point faces or invalid/missing
+data) also falls back to native JK. Cache identity currently tracks mesh
+pointers and counts; JK.dll verbs that rewrite existing vertex/face buffers
+in place may not yet invalidate a cached mesh. This remains an experimental
+parity limitation to address separately.
+Legitimately untextured faces use a neutral color for now;
 their exact JK flat colors still require lighting/material parity.
 The engine still renders world-sector geometry through the original path.
 The GPU path now reconstructs JK's ambient floor, per-face extra light,
