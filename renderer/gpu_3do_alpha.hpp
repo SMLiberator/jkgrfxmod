@@ -43,13 +43,12 @@ namespace jkgm {
     // transparent blending. Opaque SSAO/depth are preserved on kept pixels.
     inline float gpu_3do_dither_threshold(unsigned x,unsigned y)
     {
-        constexpr unsigned char bayer[16]={
-             0, 8, 2,10,
-            12, 4,14, 6,
-             3,11, 1, 9,
-            15, 7,13, 5
-        };
-        return (float(bayer[(x&3U)+4U*(y&3U)])+0.5f)/16.0f;
+        x&=3U; y&=3U;
+        // Equivalent to the 4x4 Bayer matrix, but avoids a lookup
+        // table and dynamic indexing in every fragment shader.
+        unsigned const lo=(((x^y)&1U)<<1U)|(y&1U);
+        unsigned const hi=((((x>>1U)^(y>>1U))&1U)<<1U)|((y>>1U)&1U);
+        return (float(lo*4U+hi)+0.5f)/16.0f;
     }
     // Mirrors the discard branches in gpu_3do_preview.frag.
     // Source alpha already includes the material and face alpha multipliers.

@@ -353,13 +353,10 @@ vec2 parallax_mapping(vec2 tc)
 // opaque and write ordinary depth/SSAO; no blend or per-face sort needed.
 float dither_threshold()
 {
-    const int bayer[16]=int[16](
-         0, 8, 2,10,
-        12, 4,14, 6,
-         3,11, 1, 9,
-        15, 7,13, 5);
-    ivec2 p=ivec2(gl_FragCoord.xy)&3;
-    return (float(bayer[p.x+4*p.y])+0.5)/16.0;
+    ivec2 p=ivec2(gl_FragCoord.xy) & ivec2(3);
+    int lo=(((p.x^p.y)&1)<<1)|(p.y&1);
+    int hi=((((p.x>>1)^(p.y>>1))&1)<<1)|((p.y>>1)&1);
+    return (float(4*lo+hi)+0.5)/16.0;
 }
 
 void main()

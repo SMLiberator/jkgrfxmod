@@ -28,6 +28,10 @@ int main() {
         assert(!gpu_3do_fragment_visible(dither,false,0.f,0.5f,x,y));
         assert(gpu_3do_fragment_visible(dither,false,1.f,0.5f,x,y));
     }
+    const int bayer[16]={0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5};
+    for(unsigned y=0;y<4;y++) for(unsigned x=0;x<4;x++)
+        assert(gpu_3do_dither_threshold(x,y)==
+               (float(bayer[x+4*y])+0.5f)/16.0f);
     int half_covered=0;
     for(unsigned y=0;y<4;y++) for(unsigned x=0;x<4;x++)
         half_covered+=gpu_3do_fragment_visible(dither,false,0.5f,0.5f,x,y)?1:0;
