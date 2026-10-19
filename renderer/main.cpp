@@ -567,17 +567,10 @@ namespace {
 
 bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
 {
-    if(!the_config || !the_config->use_gpu_renderer || !mesh || !matrix ||
-       pending_gpu_instances.size()>=16384 ||
-       !gpu_span_readable(mesh,sizeof(native_mesh)) ||
-       !gpu_span_readable(matrix,sizeof(float)*12)) return false;
-    native_mesh m{};
-    std::memcpy(&m,mesh,sizeof(m));
     // The exact RGB/smooth-normal JK patch has an additional float3*
     // at rdMesh+0x6c, beyond the original 0x58-byte layout. Its loader
     // at 0x9001c0 explicitly zeroes that field before allocating 12 bytes
-    // per source vertex (initially white). Check the patched instruction
-    // signature and bounds before reading outside the vanilla structure.
+    // per source vertex (initially white). Verify the patch once.
     static bool const has_rgb_mesh_extension=[] {
         constexpr uintptr_t code=0x009001C0U;
         constexpr uint8_t init_bytes[]={0xc7,0x43,0x6c,0,0,0,0};
@@ -586,10 +579,17 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
                std::memcmp(reinterpret_cast<void const *>(code),init_bytes,
                            sizeof(init_bytes))==0;
     }();
+    if(!the_config || !the_config->use_gpu_renderer || !mesh || !matrix ||
+       pending_gpu_instances.size()>=16384 ||
+       // Single VirtualQuery per candidate, including the optional RGB
+       // field; thousands of calls happen on busy scenes.
+       !gpu_span_readable(mesh,has_rgb_mesh_extension?0x70U:sizeof(native_mesh)) ||
+       !gpu_span_readable(matrix,sizeof(float)*12)) return false;
+    native_mesh m{};
+    std::memcpy(&m,mesh,sizeof(m));
     float const *vertex_rgb=nullptr;
     if(has_rgb_mesh_extension) {
         auto const *bytes=static_cast<uint8_t const *>(mesh);
-        if(!gpu_span_readable(bytes,0x70U)) return false;
         std::memcpy(&vertex_rgb,bytes+0x6cU,sizeof(vertex_rgb));
     }
     // The GPU prototype only draws filled triangle fans. Leave points and
