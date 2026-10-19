@@ -800,18 +800,19 @@ JK's already-captured nearby point lights for per-pixel GGX highlights.
 The existing `reflection_strength`, `roughness`, `metalness`,
 `surface_map` (R/G/B reflectivity/roughness/metalness) and first
 `normal_map`/`normal_strength` parameters control the response.
-The material is completely unaffected if reflection strength is zero,
-`enable_reflections` is false, or there are no nearby JK lights.
+Point-light highlights require nearby JK lights; environment and
+directional-sun highlights can work without nearby point lights. All of
+these are disabled when `enable_reflections` is false.
 Existing Gouraud diffuse lighting remains unchanged. Specular is
 composited after SSAO and participates in fog for transparent materials.
 GPU 3DOs now also support static/per-material and pack-default EnvMaps
 (equirectangular world/screen/fixed/matcap modes) plus a second normal-map
 layer, with normal scroll and mip-based roughness blur. These use the native
 material properties. Directional-sun GGX specular now also follows `SetSunInfo` on GPU 3DOs,
-using the same shader model as native material rendering. Animated COG
-EnvMap transitions, displacement, depth-clipped polygon decals, and
-complete fluid parity still need a separate GPU 3DO implementation. This is not SSR, shadow mapping,
-or a true area-light approximation.
+using the same shader model as native material rendering. The sections
+below document the additional COG image-transition, displacement,
+fluid, and depth-clipping parity work. This is not SSR, shadow mapping,
+a true projected decal system, or an area-light approximation.
 Benchmark scenes with strong reflections and many nearby lights: these
 are per-fragment GGX loops, which can be expensive on large polygons.
 
