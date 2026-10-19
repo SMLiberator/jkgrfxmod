@@ -462,6 +462,15 @@ namespace {
                                      plane_start,1,bounds_lo,bounds_hi});
             }
         }
+        // Avoid revalidating the same native MAT thousands of times in one
+        // frame merely because its faces form many distinct draw groups.
+        g->material_refs.reserve(g->groups.size());
+        for(auto const &group:g->groups)
+            if(group.material) g->material_refs.emplace_back(group.material,group.cel);
+        std::sort(g->material_refs.begin(),g->material_refs.end());
+        g->material_refs.erase(
+            std::unique(g->material_refs.begin(),g->material_refs.end()),
+            g->material_refs.end());
         return g->indices.empty() ? std::shared_ptr<jkgm::gpu_3do_geometry const>{}
                                   : g;
     }
@@ -473,14 +482,13 @@ namespace {
     {
         using namespace jkgm::engine_material_debug;
         if(!matches_tested_executable()) return false;
-        for(auto const &group:g.groups) {
-            if(group.material==0) continue;
+        for(auto const &ref:g.material_refs) {
             native_material mat{};
-            if(!read_object(group.material,mat)) return false;
+            if(!read_object(ref.first,mat)) return false;
             if((mat.tex_type&2U)==0) continue; // pure solid color
             if(mat.num_texinfo==0 || mat.num_texinfo>16) return false;
-            int32_t cel=group.cel<0
-                ? static_cast<int32_t>(mat.current_cel) : group.cel;
+            int32_t cel=ref.second<0
+                ? static_cast<int32_t>(mat.current_cel) : ref.second;
             cel=std::max(0,std::min(cel,static_cast<int32_t>(mat.num_texinfo)-1));
             native_texinfo info{};
             if(!read_object(mat.texinfo[cel],info)) return false;
@@ -676,8 +684,16 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     // Many instances share this mesh. Check MAT handles once per mesh per
     // frame, refreshing next frame so animated cels still get a warm-up.
     if(it->second.ready_checked_frame!=gpu_frame_serial) {
-        if(the_config->profile_renderer) ++gpu_native_stats.ready_checks;
+        bool const profiling=the_config->profile_renderer;
+        auto const start=profiling ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
+        if(profiling) {
+            ++gpu_native_stats.ready_checks;
+            gpu_native_stats.ready_material_refs+=
+                it->second.geometry->material_refs.size();
+        }
         it->second.ready_for_frame=gpu_mesh_materials_ready(*it->second.geometry);
+        if(profiling) gpu_native_stats.ready_ns+=elapsed_native_ns(start);
         it->second.ready_checked_frame=gpu_frame_serial;
     }
     if(!it->second.ready_for_frame) {

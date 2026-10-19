@@ -608,6 +608,10 @@ namespace jkgm {
                          " instances_avg=",profile_window.gpu_queued/frames,
                          " snapshots_total=",profile_window.gpu_snapshots,
                          " ready_checks_avg=",profile_window.gpu_ready_checks/frames);
+                LOG_INFO("PERF gpu_3do readiness_us_avg=",
+                         (profile_window.gpu_ready_ns/1000)/frames,
+                         " unique_mat_cel_checks_avg=",
+                         profile_window.gpu_ready_material_refs/frames);
                 LOG_INFO("PERF gpu_3do CPU_us_avg=",profile_window.gpu_preview_cpu_us/frames,
                          " draws_avg=",profile_window.gpu_draw_calls/frames,
                          " triangles_avg=",profile_window.gpu_draw_triangles/frames,
@@ -2903,6 +2907,8 @@ namespace jkgm {
                 profile_frame.gpu_queued+=stats.queued;
                 profile_frame.gpu_snapshots+=stats.snapshots;
                 profile_frame.gpu_ready_checks+=stats.ready_checks;
+                profile_frame.gpu_ready_material_refs+=stats.ready_material_refs;
+                profile_frame.gpu_ready_ns+=stats.ready_ns;
                 profile_frame.gpu_text_native+=stats.text_native;
                 profile_frame.gpu_geometry_native+=stats.geometry_native;
                 profile_frame.gpu_snapshot_native+=stats.snapshot_native;

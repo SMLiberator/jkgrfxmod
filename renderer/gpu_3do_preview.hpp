@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace jkgm {
@@ -47,6 +48,8 @@ namespace jkgm {
         std::vector<gpu_3do_vertex> vertices;
         std::vector<uint32_t> indices;
         std::vector<gpu_3do_group> groups;
+        // Unique material/cel pairs: checked once per mesh per frame.
+        std::vector<std::pair<uintptr_t,int32_t>> material_refs;
     };
     struct gpu_3do_instance {
         uint64_t id=0;
@@ -63,6 +66,7 @@ namespace jkgm {
         uint64_t attempted=0,culled=0,queued=0,snapshots=0,ready_checks=0;
         uint64_t text_native=0,geometry_native=0,snapshot_native=0;
         uint64_t material_native=0,lighting_native=0;
+        uint64_t ready_material_refs=0,ready_ns=0;
     };
     gpu_3do_native_stats consume_gpu_3do_native_stats();
     bool queue_gpu_3do_mesh(void const *mesh,void const *matrix);
