@@ -167,6 +167,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , ambient_light(gl::get_uniform_location(the_program,"ambient_light"))
     , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
+    , effective_light_mode(gl::get_uniform_location(the_program,"effective_light_mode"))
 {
     for(unsigned i=0;i<gpu_3do_max_lights;i++) {
         light_position_radius.push_back(gl::get_uniform_location(
@@ -230,6 +231,7 @@ void jkgm::shaders::gpu_3do_preview_shader::set_lighting(
     gl::set_uniform_float(ambient_light,instance.ambient);
     gl::set_uniform_float(attenuation_min,instance.attenuation);
     gl::set_uniform_integer(num_lights,static_cast<int>(instance.num_lights));
+    gl::set_uniform_float(effective_light_mode,instance.effective_light_mode);
     for(unsigned i=0;i<instance.num_lights;i++) {
         auto const &light=instance.lights[i];
         gl::set_uniform_vector(light_position_radius[i],

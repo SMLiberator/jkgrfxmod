@@ -11,6 +11,7 @@ layout(location=5) in vec3 local_face_anchor;
 layout(location=6) in float local_extra_light;
 layout(location=7) in float local_light_mode;
 uniform float ambient_light;
+uniform float effective_light_mode; // captured per Thing
 uniform float attenuation_min;
 uniform int num_lights;
 uniform vec4 light_position_radius[16]; // local XYZ and JK light radius
@@ -40,17 +41,19 @@ void main() {
     // JK: FullyLit=0, NotLit=1, Diffuse=2, Gouraud=3.
     // Per-face ExtraLight and the camera's ambient floor are evaluated
     // before the gamma-1.8 vertex conversion (like the native D3D path).
-    float l=local_light_mode>=2.5 ? local_static_light : 0.0;
-    if(local_light_mode>=1.5) {
+    float mode=local_light_mode>3.5 ? 1.0
+        : min(local_light_mode,effective_light_mode);
+    float l=mode>=2.5 ? local_static_light : 0.0;
+    if(mode>=1.5) {
         for(int i=0;i<num_lights;i++) {
-            vec3 anchor=local_light_mode>=2.5
+            vec3 anchor=mode>=2.5
                 ? local_position : local_face_anchor;
-            vec3 normal=local_light_mode>=2.5
+            vec3 normal=mode>=2.5
                 ? local_light_normal : local_normal;
             vec3 delta=light_position_radius[i].xyz-anchor;
             float dist=length(delta);
             float along=dot(normal,delta/max(dist,0.00001));
-            float range_distance=local_light_mode>=2.5
+            float range_distance=mode>=2.5
                 ? dist : abs(dot(normal,delta));
             if(range_distance<light_position_radius[i].w && along>0.0) {
                 l+=(light_intensity[i]-
@@ -59,7 +62,7 @@ void main() {
             if(l>=1.0) break;
         }
     }
-    float bright=local_light_mode<0.5 ? 1.0
+    float bright=mode<0.5 ? 1.0
         : max(clamp(l+local_extra_light,0.0,1.0),ambient_light);
     jk_light=pow(clamp(bright,0.0,1.0),1.8);
     vec3 vn=view_right.xyz*local_normal.x+

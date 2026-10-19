@@ -148,7 +148,8 @@ namespace jkgm {
                                     native_face_opacity,albedo_factor,emissive_factor,
                                     albedo_scroll,emissive_scroll,fog_params,fog_color,
                                     emissive_only;
-            gl::uniform_location_id ambient_light,attenuation_min,num_lights;
+            gl::uniform_location_id ambient_light,attenuation_min,num_lights,
+                                    effective_light_mode;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity;
         public:
             explicit gpu_3do_preview_shader(fs::path const &data_root);

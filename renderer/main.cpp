@@ -260,8 +260,10 @@ namespace {
                !gpu_span_readable(reinterpret_cast<void const *>(light),0x30))
                 return false;
             uint32_t id=0,enabled=0;
+            int32_t type=0;
             float strength=0.0f,radius=0.0f;
             std::memcpy(&id,reinterpret_cast<void const *>(light),4);
+            std::memcpy(&type,reinterpret_cast<void const *>(light+4),4);
             std::memcpy(&enabled,reinterpret_cast<void const *>(light+8),4);
             std::memcpy(&strength,reinterpret_cast<void const *>(light+0x18),4);
             std::memcpy(&radius,reinterpret_cast<void const *>(light+0x28),4);
@@ -277,6 +279,9 @@ namespace {
             float const dz=pos[2]-placement[11];
             float const reach=radius+std::max(0.0f,m.radius);
             if(dx*dx+dy*dy+dz*dz>reach*reach) continue;
+            // Spot/other light types need the original cone/angle logic.
+            // Do not misrender them as omnidirectional point lights.
+            if(type<0 || type>2) return false;
             if(instance.num_lights==instance.lights.size())
                 return false; // Native path for light-heavy scenes; never drop lights.
             auto &out=instance.lights[instance.num_lights++];
@@ -327,7 +332,9 @@ namespace {
             if(m.lighting_mode<0 || m.lighting_mode>3 ||
                face.light>3 || !std::isfinite(face.extra_light))
                 return {};
-            int const mode=(face.type&0x10U)!=0 ? 1
+            // Preserve force-unlit faces as a shader sentinel (4), since
+            // they override even a FullyLit per-Thing lighting cap.
+            int const mode=(face.type&0x10U)!=0 ? 4
                             : std::min(m.lighting_mode,static_cast<int>(face.light));
             if(mode==3 && (!m.vertex_lights || !m.normals ||
                !gpu_span_readable(m.vertex_lights,size_t(m.num_vertices)*4) ||
@@ -594,6 +601,17 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     gpu_3do_instance inst;
     inst.id=it->second.id;
     inst.geometry=it->second.geometry;
+    // curLightingMode (rdModel3_Draw's effective Thing/global cap):
+    // the verified rdModel3 global block is +0x48 from original JK.
+    // This is sampled per instance because COG can change it each frame.
+    constexpr uintptr_t effective_light_mode_addr=0x0073C218U;
+    if(!gpu_span_readable(reinterpret_cast<void const *>(effective_light_mode_addr),4))
+        return false;
+    int32_t lighting_cap=0;
+    std::memcpy(&lighting_cap,
+                reinterpret_cast<void const *>(effective_light_mode_addr),4);
+    if(lighting_cap<0 || lighting_cap>3) return false;
+    inst.effective_light_mode=static_cast<float>(lighting_cap);
     std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
     for(float f:inst.transform) if(!std::isfinite(f)) return false;
     if(!snapshot_gpu_3do_lighting(m,inst.transform.data(),inst))

@@ -758,8 +758,24 @@ warmed using a fallback native draw when needed. Unsupported 3DO geometry
 to native JK. Legitimately untextured faces use a neutral color for now;
 their exact JK flat colors still require lighting/material parity.
 The engine still renders world-sector geometry through the original path.
-The GPU vertex path does not yet reproduce every material, dynamic vertex
-light, custom vertex RGB or reflection effect.
+The GPU path now reconstructs JK's ambient floor, per-face extra light,
+per-vertex static intensity, diffuse/Gouraud lighting and ordinary dynamic
+point lights in its vertex shader. Ambient and light positions are captured
+per Thing at mesh-interception time, so cached 3DO geometry stays resident
+even as lighting and COG light-mode overrides change. The shader applies
+JK's gamma-1.8 vertex-light conversion. Up to 16 nearby point lights are
+supported; unsupported lighting state or additional nearby lights retain
+the native fallback rather than silently omitting illumination.
+
+Multiply and Additive materials use their own GPU blend outputs: Multiply's
+transparent pixels produce a neutral white factor, while Additive preserves
+the target framebuffer alpha. These are independent of standard blend/mask
+alpha routing.
+
+The GPU vertex path still lacks RGB vertex-color extensions, exotic dynamic
+light types (including spotlights), normal maps and reflection effects.
+GPU fog is already calculated by its shader, but its reported absence in
+gameplay needs a separate runtime investigation.
 
 Alpha MATs with mixed opacity use disjoint fragments in two passes: fully
 opaque texels enter the opaque depth-writing G-buffer and SSAO; partially
