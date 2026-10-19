@@ -108,8 +108,8 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("profile_renderer")) {
             j.at("profile_renderer").get_to(rv->profile_renderer);
         }
-        if(j.contains("use_gpu_renderer")) {
-            j.at("use_gpu_renderer").get_to(rv->use_gpu_renderer);
+        if(j.contains("use_model_cache")) {
+            j.at("use_model_cache").get_to(rv->use_model_cache);
         }
         if(j.contains("use_vanilla_renderer")) {
             j.at("use_vanilla_renderer").get_to(rv->use_vanilla_renderer);
