@@ -773,6 +773,26 @@ zero-alpha base and composite their glow directly in the transparency pass,
 without writing opaque depth or turning their base solid black. Other
 emissive materials participate in the normal opaque G-buffer/composition.
 
+The GPU path now preserves JK's own per-mesh radius/sphere-frustum rejection;
+the initial all-mesh bypass omitted it and drew offscreen geometry. This is
+the existing sphere test, not the discarded mesh-AABB system. JK also filters
+Thing Flags (including 0x10, not rendered) before calling our mesh hook.
+
+Replacement RGBA albedo alpha is now inspected once at upload, rather than
+guessing from JK's original MAT alpha flag. Fully opaque textures are
+single-pass; textures with transparent pixels use the per-pixel mixed-alpha
+split. GPU MAT resolution is cached once per unique material/cel per frame
+and native residency is tested once per mesh per frame, even for multiple
+instances.
+
+For performance diagnosis, compare `"use_gpu_renderer": true` and `false`
+with `"profile_renderer": true`, `"enable_vsync": false`, and a `log_path`.
+The new `PERF gpu_3do` lines report candidate meshes, sphere rejections,
+instances, MAT residency checks, draw calls, triangle counts, texture
+resolutions and CPU-side GPU submission cost. These are CPU timings, *not*
+actual GPU execution time. Disable profiling for final FPS measurements.
+GPU instancing and cross-mesh material batching remain unfinished.
+
 The new path requires the updated \`renderer.dll\`, plus
 \`gpu_3do_preview.vert\` and \`gpu_3do_preview.frag\` from the same
 build in \`jkgm/shaders/\`. Keep the native \`jkgm.exe\` bootstrap.
