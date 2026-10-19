@@ -57,7 +57,9 @@ void main() {
     if(transparent_pass!=0 && blend_mode==2) {
         // With (DST_COLOR, ZERO) the RGB output is a multiplier, not
         // premultiplied color. Alpha zero must multiply by WHITE (identity).
-        vec3 tint=clamp(albedo.rgb*jk_light,0.0,1.0);
+        // Match the native triangle path: emission biases the multiplier
+        // toward white, but never adds light independently in Multiply mode.
+        vec3 tint=clamp(albedo.rgb*jk_light+emission,0.0,1.0);
         out_color=vec4(mix(vec3(1.0),tint,albedo.a),0.0);
     } else {
         // Additive and normal pass use premultiplied pigment; alpha for the
