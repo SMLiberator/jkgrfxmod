@@ -63,6 +63,8 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /O2 /I. tests\retro_palette.cpp /Fe:retro_palette_test.exe
         retro_palette_test.exe
+    - name: Retro CMP log/file comparison self-test
+      run: python tools/verify_retro_cmp.py --self-test
     - name: GPU 3DO colormap tint regression tests
       shell: cmd
       run: |
@@ -109,6 +111,7 @@ jobs:
           throw "Could not find the rebuilt material pack compiler"
         }
         Copy-Item 'tools/patch_jkgm_bootstrap.py' 'test-build/patch_jkgm_bootstrap.py' -Force
+        Copy-Item 'tools/verify_retro_cmp.py' 'test-build/verify_retro_cmp.py' -Force
         Copy-Item 'assets/jkgm.json' 'test-build/jkgm.json' -Force
         Copy-Item 'doc/install.md' 'test-build/install.md' -Force
         # Runtime GLSL is loaded from data_path/shaders. The test must ship
