@@ -116,7 +116,11 @@ namespace {
         float const *vertices = nullptr;
         uint8_t const *faces = nullptr;
         float const *rgb = nullptr;
-        int num_vertices=0, num_faces=0;
+        void const *uvs=nullptr,*normals=nullptr,*vertex_lights=nullptr;
+        int num_vertices=0,num_faces=0,num_uvs=0;
+        int lighting_mode=0,texture_mode=0;
+        uint64_t source_signature=0,source_checked_frame=0;
+        char const *snapshot_failure=nullptr; // memoized failed snapshots
         uint64_t id=0;
         std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
         uint64_t ready_checked_frame=0;
@@ -818,26 +822,82 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
         return true;
     }
     auto it=gpu_mesh_cache.find(mesh);
-    if(it==gpu_mesh_cache.end() || it->second.vertices!=m.vertices ||
-       it->second.faces!=m.faces || it->second.rgb!=vertex_rgb ||
-       it->second.num_vertices!=m.num_vertices ||
-       it->second.num_faces!=m.num_faces) {
-        char const *failure="unknown_snapshot_error";
-        auto geom=snapshot_gpu_mesh(m,vertex_rgb,&failure);
-        if(!geom) {
-            if(the_config->profile_renderer) ++gpu_native_stats.snapshot_native;
-            gpu_log_fallback(m,failure);
+    // Read immutable-looking header fields on each instance, but hash all
+    // underlying vertex/UV/face content at most once per mesh per frame.
+    // This catches COG writes that keep the same allocation and counts.
+    bool const header_unchanged=it!=gpu_mesh_cache.end() &&
+        it->second.vertices==m.vertices && it->second.faces==m.faces &&
+        it->second.rgb==vertex_rgb && it->second.uvs==m.uvs &&
+        it->second.normals==m.normals &&
+        it->second.vertex_lights==m.vertex_lights &&
+        it->second.num_vertices==m.num_vertices &&
+        it->second.num_faces==m.num_faces &&
+        it->second.num_uvs==m.num_uvs &&
+        it->second.lighting_mode==m.lighting_mode &&
+        it->second.texture_mode==m.texture_mode;
+    if(!header_unchanged ||
+       it->second.source_checked_frame!=gpu_frame_serial) {
+        bool const profiling=the_config->profile_renderer;
+        auto const start=profiling ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
+        uint64_t signature=0;
+        bool const readable=gpu_mesh_source_signature(m,vertex_rgb,signature);
+        if(profiling) {
+            ++gpu_native_stats.source_checks;
+            gpu_native_stats.source_ns+=elapsed_native_ns(start);
+        }
+        if(!readable) {
+            if(profiling) ++gpu_native_stats.snapshot_native;
+            gpu_log_fallback(m,"invalid_mesh_source_memory");
             return false;
         }
-        if(gpu_mesh_cache.size()>4096) gpu_mesh_cache.clear();
-        if(the_config->profile_renderer) ++gpu_native_stats.snapshots;
-        auto &c=gpu_mesh_cache[mesh];
-        c={m.vertices,m.faces,vertex_rgb,m.num_vertices,m.num_faces,
-           next_gpu_id++,std::move(geom)};
-        it=gpu_mesh_cache.find(mesh);
-        // Per-mesh INFO logging caused tens of thousands of synchronous log
-        // writes during dynamic HUD/text and short-lived model construction.
-        // The aggregated PERF snapshots counter is the useful diagnostic.
+        if(!header_unchanged || it->second.source_signature!=signature) {
+            char const *failure="unknown_snapshot_error";
+            auto geom=snapshot_gpu_mesh(m,vertex_rgb,&failure);
+            if(gpu_mesh_cache.size()>4096) gpu_mesh_cache.clear();
+            if(profiling && header_unchanged)
+                ++gpu_native_stats.source_invalidations;
+            cached_gpu_mesh updated{};
+            updated.vertices=m.vertices;
+            updated.faces=m.faces;
+            updated.rgb=vertex_rgb;
+            updated.uvs=m.uvs;
+            updated.normals=m.normals;
+            updated.vertex_lights=m.vertex_lights;
+            updated.num_vertices=m.num_vertices;
+            updated.num_faces=m.num_faces;
+            updated.num_uvs=m.num_uvs;
+            updated.lighting_mode=m.lighting_mode;
+            updated.texture_mode=m.texture_mode;
+            updated.source_signature=signature;
+            updated.source_checked_frame=gpu_frame_serial;
+            if(geom) {
+                updated.id=next_gpu_id++;
+                updated.geometry=std::move(geom);
+                if(profiling) ++gpu_native_stats.snapshots;
+            }
+            else {
+                // Avoid repeating expensive failed triangulation/validation
+                // on every Thing instance and every subsequent frame.
+                updated.snapshot_failure=failure;
+                if(profiling) ++gpu_native_stats.snapshot_native;
+                gpu_log_fallback(m,failure);
+            }
+            gpu_mesh_cache[mesh]=std::move(updated);
+            it=gpu_mesh_cache.find(mesh);
+        }
+        else {
+            it->second.source_checked_frame=gpu_frame_serial;
+        }
+    }
+    if(!it->second.geometry) {
+        if(the_config->profile_renderer) {
+            ++gpu_native_stats.snapshot_native;
+            ++gpu_native_stats.failed_snapshot_reuses;
+        }
+        gpu_log_fallback(m,it->second.snapshot_failure ?
+                         it->second.snapshot_failure : "unknown_snapshot_error");
+        return false;
     }
     // If a cel has never been encountered, let JK handle this call to warm
     // its native material cache. We can switch to GPU rendering next frame.
