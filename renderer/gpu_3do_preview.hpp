@@ -31,6 +31,10 @@ namespace jkgm {
         std::shared_ptr<gpu_3do_geometry const> geometry;
         std::array<float,12> transform{}; // 3DO node matrix
     };
+    struct gpu_3do_native_stats {
+        uint64_t attempted=0,culled=0,queued=0,snapshots=0,ready_checks=0;
+    };
+    gpu_3do_native_stats consume_gpu_3do_native_stats();
     bool queue_gpu_3do_mesh(void const *mesh,void const *matrix);
     std::vector<gpu_3do_instance> consume_gpu_3do_instances();
     void reset_gpu_3do_instances();

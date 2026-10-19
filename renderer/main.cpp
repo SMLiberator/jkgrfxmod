@@ -91,6 +91,7 @@ namespace {
     std::vector<jkgm::gpu_3do_instance> pending_gpu_instances;
     uint64_t next_gpu_id=1;
     uint64_t gpu_frame_serial=1;
+    jkgm::gpu_3do_native_stats gpu_native_stats;
 
     bool gpu_span_readable(void const *p,size_t len) {
         if(!p || len==0 || len>4*1024*1024) return false;
@@ -402,10 +403,14 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     std::memcpy(&m,mesh,sizeof(m));
     // The GPU prototype only draws filled triangle fans. Leave points and
     // wireframe meshes to JK rather than changing their geometry semantics.
+    if(the_config->profile_renderer) ++gpu_native_stats.attempted;
     if(m.geometry_mode<3) return false;
     auto const camera=jkgm::read_active_render_camera();
     if(!camera.valid) return false;
-    if(gpu_mesh_outside_native_frustum(m,matrix,camera)) return true;
+    if(gpu_mesh_outside_native_frustum(m,matrix,camera)) {
+        if(the_config->profile_renderer) ++gpu_native_stats.culled;
+        return true;
+    }
     auto it=gpu_mesh_cache.find(mesh);
     if(it==gpu_mesh_cache.end() || it->second.vertices!=m.vertices ||
        it->second.faces!=m.faces || it->second.num_vertices!=m.num_vertices ||
@@ -413,6 +418,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
         auto geom=snapshot_gpu_mesh(m);
         if(!geom) return false;
         if(gpu_mesh_cache.size()>4096) gpu_mesh_cache.clear();
+        if(the_config->profile_renderer) ++gpu_native_stats.snapshots;
         auto &c=gpu_mesh_cache[mesh];
         c={m.vertices,m.faces,m.num_vertices,m.num_faces,next_gpu_id++,std::move(geom)};
         it=gpu_mesh_cache.find(mesh);
@@ -429,6 +435,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     // Many instances share this mesh. Check MAT handles once per mesh per
     // frame, refreshing next frame so animated cels still get a warm-up.
     if(it->second.ready_checked_frame!=gpu_frame_serial) {
+        if(the_config->profile_renderer) ++gpu_native_stats.ready_checks;
         it->second.ready_for_frame=gpu_mesh_materials_ready(*it->second.geometry);
         it->second.ready_checked_frame=gpu_frame_serial;
     }
@@ -439,7 +446,14 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
     for(float f:inst.transform) if(!std::isfinite(f)) return false;
     pending_gpu_instances.emplace_back(std::move(inst));
+    if(the_config->profile_renderer) ++gpu_native_stats.queued;
     return true;
+}
+jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
+{
+    auto const sample=gpu_native_stats;
+    gpu_native_stats={};
+    return sample;
 }
 std::vector<jkgm::gpu_3do_instance> jkgm::consume_gpu_3do_instances()
 {
@@ -453,6 +467,7 @@ void jkgm::reset_gpu_3do_instances()
     pending_gpu_instances.clear();
     gpu_mesh_cache.clear();
     ++gpu_frame_serial;
+    gpu_native_stats={};
 }
 
 jkgm::native_3do_sample jkgm::consume_native_3do_sample()

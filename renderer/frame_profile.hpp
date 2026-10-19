@@ -23,6 +23,9 @@ struct profile_sample {
   uint64_t native_model_calls=0, native_model_drawn=0, native_mesh_calls=0;
   uint64_t native_face_calls=0, native_face_emitted=0;
   uint64_t native_model_ns=0, native_mesh_ns=0, native_face_ns=0;
+  uint64_t gpu_candidates=0,gpu_culled=0,gpu_queued=0,gpu_snapshots=0,gpu_ready_checks=0;
+  uint64_t gpu_draw_calls=0,gpu_draw_triangles=0,gpu_material_resolves=0,gpu_uploads=0;
+  uint64_t gpu_preview_cpu_us=0;
   void add(profile_sample const &o) {
     for(size_t i=0;i<timings.size();++i) timings[i]+=o.timings[i];
     period_us+=o.period_us; present_us+=o.present_us; tris+=o.tris;
@@ -42,6 +45,13 @@ struct profile_sample {
     native_model_ns+=o.native_model_ns;
     native_mesh_ns+=o.native_mesh_ns;
     native_face_ns+=o.native_face_ns;
+    gpu_candidates+=o.gpu_candidates; gpu_culled+=o.gpu_culled;
+    gpu_queued+=o.gpu_queued; gpu_snapshots+=o.gpu_snapshots;
+    gpu_ready_checks+=o.gpu_ready_checks; gpu_draw_calls+=o.gpu_draw_calls;
+    gpu_draw_triangles+=o.gpu_draw_triangles;
+    gpu_material_resolves+=o.gpu_material_resolves;
+    gpu_uploads+=o.gpu_uploads;
+    gpu_preview_cpu_us+=o.gpu_preview_cpu_us;
   }
 };
 class profile_scope {

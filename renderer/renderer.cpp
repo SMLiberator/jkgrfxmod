@@ -536,6 +536,19 @@ namespace jkgm {
                      " post_swap=", avg(profile_stage::present_swap),
                      " HUDupload=", avg(profile_stage::hud_upload),
                      " HUDdraw=", avg(profile_stage::hud_draw));
+            if(the_config->use_gpu_renderer) {
+                LOG_INFO("PERF gpu_3do candidates_avg=",profile_window.gpu_candidates/frames,
+                         " sphere_culled_avg=",profile_window.gpu_culled/frames,
+                         " instances_avg=",profile_window.gpu_queued/frames,
+                         " snapshots_total=",profile_window.gpu_snapshots,
+                         " ready_checks_avg=",profile_window.gpu_ready_checks/frames);
+                LOG_INFO("PERF gpu_3do CPU_us_avg=",profile_window.gpu_preview_cpu_us/frames,
+                         " draws_avg=",profile_window.gpu_draw_calls/frames,
+                         " triangles_avg=",profile_window.gpu_draw_triangles/frames,
+                         " material_resolves_avg=",profile_window.gpu_material_resolves/frames,
+                         " uploads_total=",profile_window.gpu_uploads,
+                         " NOTE=CPU_submission_not_GPU_time");
+            }
             LOG_INFO("PERF geometry tris avg/max=", profile_window.tris / frames,
                      "/", peak_triangles,
                      " transparent_avg=", profile_window.trans_tris / frames,
@@ -1951,6 +1964,8 @@ namespace jkgm {
         {
             if(!ogs->gpu_3do_preview_program || frame_gpu_3do_instances.empty())
                 return;
+            profile_scope gpu_profiler(the_config->profile_renderer,
+                                       profile_frame.gpu_preview_cpu_us);
             auto const cam=read_active_render_camera();
             if(!cam.valid) return;
 
@@ -1999,6 +2014,7 @@ namespace jkgm {
             for(auto const &inst:frame_gpu_3do_instances) {
                 if(!inst.geometry) continue;
                 for(auto const &group:inst.geometry->groups) {
+                    if(the_config->profile_renderer) ++profile_frame.gpu_material_resolves;
                     auto const tex=resolve_gpu_3do_material(group);
                     auto const policy=choose_gpu_3do_alpha_mode(
                         (group.face_type&0x2U)!=0 || tex.emissive_only,
@@ -2038,6 +2054,7 @@ namespace jkgm {
                 auto it=gpu_3do_gl_cache.find(inst.id);
                 if(it==gpu_3do_gl_cache.end()) {
                     auto ptr=std::make_unique<gpu_3do_gl_mesh>(*inst.geometry);
+                    if(the_config->profile_renderer) ++profile_frame.gpu_uploads;
                     it=gpu_3do_gl_cache.emplace(inst.id,std::move(ptr)).first;
                     LOG_INFO("GPU 3DO: uploaded face-corner mesh id=",inst.id,
                              " triangles=",it->second->num_indices/3,
@@ -2094,6 +2111,10 @@ namespace jkgm {
                 prog.set_emissive(draw.texture.has_emission,
                                   draw.texture.emission_factor,
                                   draw.texture.emissive_scroll);
+                if(the_config->profile_renderer) {
+                    ++profile_frame.gpu_draw_calls;
+                    profile_frame.gpu_draw_triangles+=group.count/3;
+                }
                 gl::draw_elements(gl::element_type::triangles,group.count,
                                   gl::index_type::uint32,
                                   static_cast<ptrdiff_t>(group.offset*sizeof(uint32_t)));
@@ -2707,6 +2728,12 @@ namespace jkgm {
             gun_transparent_batch.clear();
             overlay_batch.clear();
             if(profiling) {
+                auto const stats=consume_gpu_3do_native_stats();
+                profile_frame.gpu_candidates+=stats.attempted;
+                profile_frame.gpu_culled+=stats.culled;
+                profile_frame.gpu_queued+=stats.queued;
+                profile_frame.gpu_snapshots+=stats.snapshots;
+                profile_frame.gpu_ready_checks+=stats.ready_checks;
                 auto const native = consume_native_3do_sample();
                 profile_frame.native_model_calls += native.model_calls;
                 profile_frame.native_model_drawn += native.model_drawn;
