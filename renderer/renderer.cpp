@@ -375,6 +375,26 @@ namespace jkgm {
         }
     };
 
+        struct gpu_3do_texture {
+            gl::texture_view texture = gl::default_texture;
+            gl::texture_view emission = gl::default_texture;
+            float width=1.0f, height=1.0f;
+            float alpha_cutoff=0.5f;
+            float opacity=1.0f;
+            // 0=invalid/unresolved MAT (diagnostic magenta), 1=texture,
+            // 2=intentionally no albedo map (neutral white).
+            int albedo_source=0;
+            bool has_image=false, alpha=false, masked=false, special=false;
+            bool has_emission=false, emissive_only=false;
+            bool filtered=true;
+            material_blend_mode blend=material_blend_mode::normal;
+            point<4,float> tint=make_point(1.0f,1.0f,1.0f,1.0f);
+            point<4,float> emission_factor=make_point(0.0f,0.0f,0.0f,0.0f);
+            point<2,float> albedo_scroll=make_point(0.0f,0.0f);
+            point<2,float> emissive_scroll=make_point(0.0f,0.0f);
+        };
+
+
     class renderer_impl : public renderer {
     private:
         config const *the_config;
@@ -417,6 +437,9 @@ namespace jkgm {
 
         std::unique_ptr<opengl_state> ogs;
         std::unordered_map<uint64_t,std::unique_ptr<gpu_3do_gl_mesh>> gpu_3do_gl_cache;
+        // Resolved MAT surfaces are identical for all instances within one
+        // frame; share costly native memory reads across both GPU passes.
+        std::unordered_map<uint64_t,gpu_3do_texture> gpu_frame_material_cache;
         std::vector<gpu_3do_instance> frame_gpu_3do_instances;
         std::unique_ptr<renderer_compositor> frame_compositor;
         std::unique_ptr<renderer_ao> frame_ao;
@@ -615,6 +638,7 @@ namespace jkgm {
                     // Levels recycle native mesh pointers; discard both copies.
                     reset_gpu_3do_instances();
                     gpu_3do_gl_cache.clear();
+                    gpu_frame_material_cache.clear();
                     frame_gpu_3do_instances.clear();
                 }
                 if(the_config->profile_renderer) {
@@ -1838,24 +1862,6 @@ namespace jkgm {
         }
 
 
-        struct gpu_3do_texture {
-            gl::texture_view texture = gl::default_texture;
-            gl::texture_view emission = gl::default_texture;
-            float width=1.0f, height=1.0f;
-            float alpha_cutoff=0.5f;
-            float opacity=1.0f;
-            // 0=invalid/unresolved MAT (diagnostic magenta), 1=texture,
-            // 2=intentionally no albedo map (neutral white).
-            int albedo_source=0;
-            bool has_image=false, alpha=false, masked=false, special=false;
-            bool has_emission=false, emissive_only=false;
-            bool filtered=true;
-            material_blend_mode blend=material_blend_mode::normal;
-            point<4,float> tint=make_point(1.0f,1.0f,1.0f,1.0f);
-            point<4,float> emission_factor=make_point(0.0f,0.0f,0.0f,0.0f);
-            point<2,float> albedo_scroll=make_point(0.0f,0.0f);
-            point<2,float> emissive_scroll=make_point(0.0f,0.0f);
-        };
 
         gpu_3do_texture resolve_gpu_3do_material(gpu_3do_group const &group)
         {
@@ -2014,8 +2020,20 @@ namespace jkgm {
             for(auto const &inst:frame_gpu_3do_instances) {
                 if(!inst.geometry) continue;
                 for(auto const &group:inst.geometry->groups) {
-                    if(the_config->profile_renderer) ++profile_frame.gpu_material_resolves;
-                    auto const tex=resolve_gpu_3do_material(group);
+                    // Cache MAT resolution per material/cel for the complete
+                    // frame. Multiple cars using the same MAT no longer
+                    // trigger thousands of redundant VirtualQuery lookups.
+                    uint64_t const mat_key=
+                        (uint64_t(group.material)<<32) |
+                        uint32_t(group.cel);
+                    auto found=gpu_frame_material_cache.find(mat_key);
+                    if(found==gpu_frame_material_cache.end()) {
+                        auto item=resolve_gpu_3do_material(group);
+                        found=gpu_frame_material_cache.emplace(mat_key,std::move(item)).first;
+                        if(the_config->profile_renderer)
+                            ++profile_frame.gpu_material_resolves;
+                    }
+                    auto const &tex=found->second;
                     auto const policy=choose_gpu_3do_alpha_mode(
                         (group.face_type&0x2U)!=0 || tex.emissive_only,
                         tex.alpha,tex.masked,tex.special,tex.opacity);
@@ -2655,6 +2673,7 @@ namespace jkgm {
 
             // Consume once, then render both opaque and translucent subsets.
             // Keeping one frame snapshot avoids losing the second pass.
+            gpu_frame_material_cache.clear();
             frame_gpu_3do_instances=consume_gpu_3do_instances();
             animation_seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - animation_epoch).count();
