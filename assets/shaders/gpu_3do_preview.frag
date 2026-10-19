@@ -16,6 +16,7 @@ uniform float native_face_opacity;
 uniform int has_texture; // 0=unresolved diagnostic, 1=albedo map, 2=intentionally no albedo
 uniform int has_emissive;
 uniform int transparent_pass;
+uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
 uniform int emissive_only; // zero-alpha base, independently blended emission
 uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blend only
 in float view_depth;
@@ -52,7 +53,17 @@ void main() {
     // therefore be added directly to premultiplied RGB, never multiplied
     // by albedo alpha. With alpha=0 this acts as emission-only additive.
     float a=transparent_pass!=0 ? albedo.a : 1.0;
-    out_color=vec4(transparent_pass!=0 ? rgb*a+emission : rgb,a);
+    if(transparent_pass!=0 && blend_mode==2) {
+        // With (DST_COLOR, ZERO) the RGB output is a multiplier, not
+        // premultiplied color. Alpha zero must multiply by WHITE (identity).
+        vec3 tint=clamp(albedo.rgb,0.0,1.0);
+        out_color=vec4(mix(vec3(1.0),tint,albedo.a),0.0);
+    } else {
+        // Additive and normal pass use premultiplied pigment; alpha for the
+        // additive framebuffer itself is preserved by glBlendFuncSeparate.
+        out_color=vec4(transparent_pass!=0 ? rgb*a+emission : rgb,
+                       (transparent_pass!=0 && blend_mode==1) ? 0.0 : a);
+    }
     out_emissive=vec4(transparent_pass!=0 ? vec3(0.0) : emission,a);
     out_normal=vec4(normalize(view_normal),1.0);
     out_depth=vec4(view_depth,0.0,0.0,1.0);

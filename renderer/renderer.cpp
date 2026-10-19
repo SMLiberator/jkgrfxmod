@@ -2128,6 +2128,7 @@ namespace jkgm {
                 bind_color_texture(draw.texture.emission,1,draw.texture.filtered);
                 prog.set_surface(draw.texture.albedo_source,draw.texture.width,
                                  draw.texture.height,transparent,
+                                 static_cast<int>(draw.texture.blend),
                                  static_cast<int>(draw.policy),
                                  draw.texture.alpha_cutoff,face_opacity,
                                  draw.texture.tint,draw.texture.albedo_scroll,

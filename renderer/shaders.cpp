@@ -153,6 +153,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , has_texture(gl::get_uniform_location(the_program,"has_texture"))
     , has_emissive(gl::get_uniform_location(the_program,"has_emissive"))
     , transparent_pass(gl::get_uniform_location(the_program,"transparent_pass"))
+    , blend_mode(gl::get_uniform_location(the_program,"blend_mode"))
     , emissive_only(gl::get_uniform_location(the_program,"emissive_only"))
     , alpha_mode(gl::get_uniform_location(the_program,"alpha_mode"))
     , alpha_cutoff(gl::get_uniform_location(the_program,"alpha_cutoff"))
@@ -181,13 +182,14 @@ void jkgm::shaders::gpu_3do_preview_shader::set_projection(
 
 void jkgm::shaders::gpu_3do_preview_shader::set_surface(
     int albedo_source,float width,float height,bool transparent,
-    int policy,float cutoff,float face_opacity,point<4,float> tint,
+    int blend,int policy,float cutoff,float face_opacity,point<4,float> tint,
     point<2,float> scroll,bool emission_only)
 {
     gl::set_uniform_integer(emissive_only,emission_only?1:0);
     gl::set_uniform_integer(albedo_sampler,0);
     gl::set_uniform_integer(has_texture,albedo_source);
     gl::set_uniform_integer(transparent_pass,transparent?1:0);
+    gl::set_uniform_integer(blend_mode,blend);
     gl::set_uniform_integer(alpha_mode,policy);
     gl::set_uniform_float(alpha_cutoff,cutoff);
     gl::set_uniform_float(native_face_opacity,face_opacity);
