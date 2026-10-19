@@ -12,7 +12,7 @@
 | **enable_vsync** | Enable vsync. Due to *Jedi Knight*'s low internal framerate, enabling this option may cause stuttering and dropped frames. | boolean | `false` |
 | **use_vanilla_renderer** | At process startup, load the DLL but do not install JkGRfxMod rendering or COG hooks. The native Direct3D renderer must work on your system. This is not a live toggle. | boolean | `false` |
 | **profile_renderer** | Log CPU frame timings and geometry counters (requires `log_path`). Disable for normal gameplay. | boolean | `false` |
-| **use_gpu_renderer** | EXPERIMENTAL: bypass native CPU face processing for all supported filled 3DO meshes, using persistent OpenGL geometry. Unsupported or not-yet-loaded meshes fall back to JK; world-sector geometry still uses the existing renderer. Dynamic lighting/reflections are not yet equivalent. | boolean | `false` |
+| **use_model_cache** | EXPERIMENTAL: bypass native CPU face processing for all supported filled 3DO meshes, using persistent OpenGL geometry. Unsupported or not-yet-loaded meshes fall back to JK; world-sector geometry still uses the existing renderer. Dynamic lighting/reflections are not yet equivalent. | boolean | `false` |
 | **enable_bloom** | Use [bloom](https://en.wikipedia.org/wiki/Bloom_(shader_effect)) effect for brighter lights. Requires compatible texture pack. | boolean | Default: `true` |
 | **enable_ssao** | Use [screen-space ambient occlusion](https://en.wikipedia.org/wiki/Screen_space_ambient_occlusion) to subtly increase perceived depth in the image. | boolean | `true` |
 | **enable_parallax** | Use [parallax occlusion mapping](https://en.wikipedia.org/wiki/Parallax_occlusion_mapping) to add depth to individual textures. Requires compatible texture pack. | boolean | `true` |
