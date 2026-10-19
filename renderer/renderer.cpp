@@ -591,9 +591,13 @@ namespace jkgm {
                          " lighting_or_camera=",profile_window.gpu_lighting_native/frames);
                 auto const &current_fog=get_fog_settings();
                 auto const fog_params=current_fog.info.value();
-                LOG_INFO("PERF gpu_3do fog start=",fog_params[0],
-                         " end=",fog_params[1],
-                         " opacity=",the_config->enable_fog?fog_params[2]:0.0f);
+                // The lightweight logger only formats integral values and
+                // strings. Convert the animated floating-point fog settings
+                // explicitly instead of passing unsupported float types.
+                LOG_INFO("PERF gpu_3do fog start=",std::to_string(fog_params[0]),
+                         " end=",std::to_string(fog_params[1]),
+                         " opacity=",std::to_string(
+                             the_config->enable_fog?fog_params[2]:0.0f));
                 LOG_INFO("PERF gpu_3do candidates_avg=",profile_window.gpu_candidates/frames,
                          " sphere_culled_avg=",profile_window.gpu_culled/frames,
                          " instances_avg=",profile_window.gpu_queued/frames,
