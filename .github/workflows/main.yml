@@ -43,6 +43,13 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_modelview.cpp /Fe:gpu_3do_modelview_test.exe
         gpu_3do_modelview_test.exe
+    - name: SPR extended orientation modes
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
+        sprite_orientation_test.exe
+    - name: Sprite type patcher PE regression tests
+      run: python tests/test_sprite_type_patcher.py
     - name: Projected decal basis and configuration tests
       shell: cmd
       run: |
@@ -126,6 +133,7 @@ jobs:
           throw "Could not find the rebuilt material pack compiler"
         }
         Copy-Item 'tools/patch_jkgm_bootstrap.py' 'test-build/patch_jkgm_bootstrap.py' -Force
+        Copy-Item 'tools/patch_jkgm_sprite_types.py' 'test-build/patch_jkgm_sprite_types.py' -Force
         Copy-Item 'tools/verify_retro_cmp.py' 'test-build/verify_retro_cmp.py' -Force
         Copy-Item 'assets/jkgm.json' 'test-build/jkgm.json' -Force
         Copy-Item 'doc/install.md' 'test-build/install.md' -Force
