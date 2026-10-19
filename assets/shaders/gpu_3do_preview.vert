@@ -17,8 +17,10 @@ uniform float attenuation_min;
 uniform int num_lights;
 uniform vec4 light_position_radius[16]; // local XYZ and JK light radius
 uniform float light_intensity[16];
-out float jk_light;
-out vec3 vertex_rgb;
+// Native D3D applies the RGB multiplier to each *vertex* after gamma
+// conversion, then rasterization interpolates the combined RGB. Multiplying
+// separately interpolated light and tint per pixel gives incorrect gradients.
+out vec3 jk_lit_rgb;
 uniform vec4 view_right, view_forward, view_up, view_origin;
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 out float view_depth;
@@ -45,7 +47,6 @@ void main() {
     // hardware Z coordinate above intentionally remains unscaled.
     view_depth=32.0*max(y,0.0);
     pixel_uv=local_uv;
-    vertex_rgb=local_vertex_rgb;
     // JK: FullyLit=0, NotLit=1, Diffuse=2, Gouraud=3.
     // Per-face ExtraLight and the camera's ambient floor are evaluated
     // before the gamma-1.8 vertex conversion (like the native D3D path).
@@ -72,7 +73,7 @@ void main() {
     }
     float bright=mode<0.5 ? 1.0
         : max(clamp(l+local_extra_light,0.0,1.0),ambient_light);
-    jk_light=pow(clamp(bright,0.0,1.0),1.8);
+    jk_lit_rgb=vec3(pow(clamp(bright,0.0,1.0),1.8))*local_vertex_rgb;
     // Match the patched native 3DO normal sideband. Non-Gouraud faces can
     // still carry smooth vertex normals for SSAO; lighting-mode selection
     // must not force the AO G-buffer back to flat polygon normals.
