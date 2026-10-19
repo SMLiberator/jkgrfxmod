@@ -12,6 +12,7 @@
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_colormap.hpp"
+#include "jk_colormap_layout.hpp"
 #include "native_mat_mips.hpp"
 #include "engine_material_debug.hpp"
 #include "sun.hpp"
@@ -175,7 +176,7 @@ namespace {
 
     // JK23 rdColormap_SetCurrent (0x442760) stores current/identity CMP
     // pointers in 0x73A410/0x73A414. A non-identity CMP uses the three
-    // float header tint values at rdColormap+4. Capture once per instance.
+    // float header tint values at rdColormap+0x24 (32-byte name prefix).
     std::array<float,3> read_gpu_3do_colormap_tint()
     {
         constexpr std::array<float,3> white{{1.0f,1.0f,1.0f}};
@@ -192,11 +193,13 @@ namespace {
         std::memcpy(&current,reinterpret_cast<void const *>(0x0073A410U),4);
         std::memcpy(&identity,reinterpret_cast<void const *>(0x0073A414U),4);
         if(!current || current==identity) return white;
-        if(!gpu_span_readable(reinterpret_cast<void const *>(uintptr_t(current)),16))
+        if(!gpu_span_readable(reinterpret_cast<void const *>(uintptr_t(current)),
+                              jkgm::jk_cmp_colors_offset))
             return white;
         std::array<float,3> tint{};
         std::memcpy(tint.data(),
-                    reinterpret_cast<uint8_t const *>(uintptr_t(current))+4,12);
+                    reinterpret_cast<uint8_t const *>(uintptr_t(current))+
+                        jkgm::jk_cmp_tint_offset,12);
         return jkgm::gpu_3do_cmp_tint(false,tint);
     }
 
