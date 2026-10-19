@@ -344,10 +344,10 @@ void main() {
     vec3 emission=emissive_factor;
     if(has_emissive!=0)
         emission*=texture(emissive_map,uv+emissive_scroll).rgb;
-    // Only reflective materials with nearby JK point-light Things enter
-    // this branch. Highlights bypass SSAO, as with the existing sun term.
-    vec3 specular=(point_light_specular(albedo.rgb,uv)+
-                   gpu_sun_specular(albedo.rgb,uv)+env_reflection)*
+    // Dynamic JK point-light -> GGX specular association is suspended until
+    // native point-light RGB and independent specular intensity are supported.
+    // Keep native point-light diffuse lighting, the COG sun and EnvMaps.
+    vec3 specular=(gpu_sun_specular(albedo.rgb,uv)+env_reflection)*
                   (1.0-fog);
     // The opaque pass composites this separate emissive attachment after
     // SSAO. The translucent pass has only the color target: emission must
