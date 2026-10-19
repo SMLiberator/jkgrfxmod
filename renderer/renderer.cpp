@@ -1923,10 +1923,11 @@ namespace jkgm {
             // albedo factor. For this case alpha=0 means "no base color",
             // not "hide the emissive fragment". Keep the dark base but allow
             // emission to participate in depth and color composition.
-            bool const emits=get<0>(out.emission_factor)>0.0f ||
-                             get<1>(out.emission_factor)>0.0f ||
-                             get<2>(out.emission_factor)>0.0f;
-            if(out.albedo_source==2 && emits && out.opacity<=0.001f) {
+            if(gpu_3do_needs_emissive_coverage(
+                   out.albedo_source==1,out.opacity,
+                   get<0>(out.emission_factor),get<1>(out.emission_factor),
+                   get<2>(out.emission_factor)) &&
+               out.albedo_source==2) {
                 out.tint=make_point(get<0>(tint),get<1>(tint),get<2>(tint),1.0f);
                 out.opacity=1.0f;
             }
