@@ -618,6 +618,13 @@ namespace jkgm {
                          " material_resolves_avg=",profile_window.gpu_material_resolves/frames,
                          " uploads_total=",profile_window.gpu_uploads,
                          " NOTE=CPU_submission_not_GPU_time");
+                LOG_INFO("PERF gpu_3do batch GL_calls_avg=",
+                         profile_window.gpu_draw_calls/frames,
+                         " source_ranges_avg=",
+                         profile_window.gpu_draw_ranges/frames,
+                         " multi_calls_avg=",
+                         profile_window.gpu_multidraw_calls/frames,
+                         " NOTE=only_opaque_ranges_combined");
                 LOG_INFO("PERF gpu_3do groups_checked_avg=",
                          profile_window.gpu_groups_considered/frames,
                          " frustum_culled_avg=",
@@ -2164,6 +2171,28 @@ namespace jkgm {
                                      depth,draws.size()});
                 }
             }
+            if(!transparent) {
+                // Opaque GPU 3DO draw ranges have no painter-order dependency.
+                // Native JK batches faces by material before D3D submission;
+                // our face-order grouping generated thousands of 1-2-triangle
+                // GL calls on complex models. Reorder only the opaque pass
+                // so nonadjacent ranges with identical material and face state
+                // can be dispatched together in one glMultiDrawElements call.
+                // Transparent/mixed-alpha fragments retain their existing
+                // back-to-front path below.
+                std::sort(draws.begin(),draws.end(),
+                    [](pending_draw const &a,pending_draw const &b) {
+                        if(a.instance!=b.instance)
+                            return a.instance<b.instance;
+                        if(a.group->material!=b.group->material)
+                            return a.group->material<b.group->material;
+                        if(a.group->cel!=b.group->cel)
+                            return a.group->cel<b.group->cel;
+                        if(a.group->face_type!=b.group->face_type)
+                            return a.group->face_type<b.group->face_type;
+                        return a.order<b.order;
+                    });
+            }
             if(transparent) {
                 // JK's own translucent polygons are depth-sorted. Our faces
                 // need a GPU-path equivalent. Sorting index *ranges* does not
@@ -2178,9 +2207,25 @@ namespace jkgm {
                     });
             }
             gpu_3do_instance const *active_instance=nullptr;
-            for(auto const &draw:draws) {
+            std::vector<GLsizei> multidraw_counts;
+            std::vector<void const *> multidraw_offsets;
+            for(size_t draw_start=0;draw_start<draws.size();) {
+                auto const &draw=draws[draw_start];
                 auto const &inst=*draw.instance;
                 auto const &group=*draw.group;
+                size_t draw_end=draw_start+1;
+                if(!transparent) {
+                    while(draw_end<draws.size()) {
+                        auto const &other=draws[draw_end];
+                        if(other.instance!=draw.instance ||
+                           other.group->material!=group.material ||
+                           other.group->cel!=group.cel ||
+                           other.group->face_type!=group.face_type ||
+                           other.policy!=draw.policy)
+                            break;
+                        ++draw_end;
+                    }
+                }
                 auto it=gpu_3do_gl_cache.find(inst.id);
                 if(it==gpu_3do_gl_cache.end()) {
                     auto ptr=std::make_unique<gpu_3do_gl_mesh>(*inst.geometry);
@@ -2251,13 +2296,41 @@ namespace jkgm {
                 prog.set_emissive(draw.texture.has_emission,
                                   draw.texture.emission_factor,
                                   draw.texture.emissive_scroll);
+                if(draw_end==draw_start+1) {
+                    gl::draw_elements(gl::element_type::triangles,group.count,
+                                      gl::index_type::uint32,
+                                      static_cast<ptrdiff_t>(
+                                          group.offset*sizeof(uint32_t)));
+                } else {
+                    // Indexed EBO offsets belong to the same cached VAO.
+                    // MultiDraw keeps all per-face attributes and depth
+                    // tests, without repeated uniforms, texture binding,
+                    // state changes, or individual GL dispatches.
+                    multidraw_counts.clear();
+                    multidraw_offsets.clear();
+                    multidraw_counts.reserve(draw_end-draw_start);
+                    multidraw_offsets.reserve(draw_end-draw_start);
+                    for(size_t n=draw_start;n<draw_end;n++) {
+                        auto const &g=*draws[n].group;
+                        multidraw_counts.push_back(static_cast<GLsizei>(g.count));
+                        multidraw_offsets.push_back(
+                            reinterpret_cast<void const *>(
+                                static_cast<uintptr_t>(g.offset)*sizeof(uint32_t)));
+                    }
+                    glMultiDrawElements(GL_TRIANGLES,multidraw_counts.data(),
+                                        GL_UNSIGNED_INT,multidraw_offsets.data(),
+                                        static_cast<GLsizei>(multidraw_counts.size()));
+                }
                 if(the_config->profile_renderer) {
                     ++profile_frame.gpu_draw_calls;
-                    profile_frame.gpu_draw_triangles+=group.count/3;
+                    profile_frame.gpu_draw_ranges+=draw_end-draw_start;
+                    if(draw_end>draw_start+1)
+                        ++profile_frame.gpu_multidraw_calls;
+                    for(size_t n=draw_start;n<draw_end;n++)
+                        profile_frame.gpu_draw_triangles+=
+                            draws[n].group->count/3;
                 }
-                gl::draw_elements(gl::element_type::triangles,group.count,
-                                  gl::index_type::uint32,
-                                  static_cast<ptrdiff_t>(group.offset*sizeof(uint32_t)));
+                draw_start=draw_end;
             }
             // The transparency pass's following JK batches assume normal
             // premultiplied alpha blending, unit 0 and disabled face culling.

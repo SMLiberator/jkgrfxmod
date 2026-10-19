@@ -796,6 +796,14 @@ zero-alpha base and composite their glow directly in the transparency pass,
 without writing opaque depth or turning their base solid black. Other
 emissive materials participate in the normal opaque G-buffer/composition.
 
+Opaque GPU draw ranges are now sorted per instance by material/cel/face flags
+and dispatched through glMultiDrawElements when compatible, reducing tens of
+thousands of per-face GL submissions. The transparency pass remains sorted
+per face for blend correctness. PERF gpu_3do batch reports the actual GL call
+count, source index ranges, and multi-draw calls; draws_avg now means GL
+submissions rather than original source ranges. This is an initial benchmark
+for driver submission overhead, not final static index-buffer compaction.
+
 The GPU path additionally rejects entire material-group draw ranges using
 conservative transformed AABBs against the native frustum. This can save
 GPU submissions for large visible meshes whose material groups are offscreen;
