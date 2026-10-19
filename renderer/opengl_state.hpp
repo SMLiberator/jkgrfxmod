@@ -158,6 +158,9 @@ namespace jkgm {
         gl::texture retro_lut_texture;
         std::array<uint8_t,768> retro_source_palette{};
         bool retro_lut_valid=false,retro_mode_active=false;
+        bool retro_diagnostic_logged=false,retro_read_failure_logged=false;
+        uint32_t retro_logged_identity_cmp=0,retro_logged_world_cmp=0;
+        uint32_t retro_logged_world_address=0;
 
         gl::texture menu_texture;
         std::vector<color_rgba8> menu_texture_data;
