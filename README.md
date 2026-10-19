@@ -777,8 +777,12 @@ patched executable's extra per-mesh color array once per mesh (falling back
 to white when absent) and multiplies them with native-style Gouraud/diffuse
 lighting in the vertex and fragment shaders. Exotic dynamic light types
 (including spotlights), normal maps and reflection effects remain unsupported.
-GPU fog is already calculated by its shader, but its reported absence in
-gameplay needs a separate runtime investigation.
+GPU fog and SSAO use the native 32x linear view-depth scale. GPU depth
+is now reconstructed per fragment from reciprocal clip W, avoiding clamped
+vertex-depth interpolation on large faces crossing the camera plane.
+Opaque fog is applied in the composite after SSAO, so fog itself is not
+darkened by occlusion. The GPU path uses CPU backface rejection for wholly
+back-facing material groups, in addition to ordinary OpenGL face culling.
 
 Alpha MATs with mixed opacity use disjoint fragments in two passes: fully
 opaque texels enter the opaque depth-writing G-buffer and SSAO; partially
@@ -803,6 +807,11 @@ single-pass; textures with transparent pixels use the per-pixel mixed-alpha
 split. GPU MAT resolution is cached once per unique material/cel per frame
 and native residency is tested once per mesh per frame, even for multiple
 instances.
+
+The development CI workflow is manually triggered with **Actions → CI →
+Run workflow** on the `development` branch, not automatically on each push.
+The test artifact includes `post_opaque_composite.frag` along with the updated
+GPU and opaque-pass shaders. Always install the supplied shaders with the DLL.
 
 For performance diagnosis, compare `"use_gpu_renderer": true` and `false`
 with `"profile_renderer": true`, `"enable_vsync": false`, and a `log_path`.
