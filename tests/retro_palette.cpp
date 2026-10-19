@@ -26,4 +26,14 @@ int main() {
     auto red=jkgm::retro_atlas_position(63,0,0);
     int k=4*(red[1]*512+red[0]);
     assert(lut[k]==255 && lut[k+1]==0 && lut[k+2]==0);
+    auto const row=jkgm::retro_palette_hex_row(palette,0);
+    assert(row.size()==96);
+    assert(row.substr(0,30)=="000000FFFFFF""FF0000""00FF00""0000FF");
+    assert(jkgm::retro_palette_hex_row(palette,16).size()==96);
+    assert(jkgm::retro_palette_hex_row(palette,1).empty());
+    assert(jkgm::retro_palette_hex_row(palette,256).empty());
+    auto changed=palette;
+    assert(jkgm::retro_palette_fnv1a(changed)==jkgm::retro_palette_fnv1a(palette));
+    changed[12]=1;
+    assert(jkgm::retro_palette_fnv1a(changed)!=jkgm::retro_palette_fnv1a(palette));
 }
