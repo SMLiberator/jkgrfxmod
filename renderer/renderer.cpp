@@ -2124,6 +2124,13 @@ namespace jkgm {
             }
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
+            // No overhead from per-material GGX state for nonreflective maps.
+            // Each pass resets shader state once; individual draws only
+            // update the extra uniforms when actually reflective.
+            prog.set_point_specular(
+                make_point(0.0f,0.5f,0.0f,0.0f),
+                make_point(0.0f,1.0f,0.0f,0.0f),
+                make_point(0.0f,0.0f));
             float const aspect=get<x>(internal_scr_res_f)/get<y>(internal_scr_res_f);
             float const tan_half_fov=std::tan(cam.fov*0.008726646259971648f);
             prog.set_projection(make_point(tan_half_fov,aspect,1.0f/far_plane,0.0f));
@@ -2271,6 +2278,7 @@ namespace jkgm {
                     });
             }
             gpu_3do_instance const *active_instance=nullptr;
+            bool prev_specular_active=false;
             std::vector<GLsizei> multidraw_counts;
             std::vector<void const *> multidraw_offsets;
             for(size_t draw_start=0;draw_start<draws.size();) {
@@ -2364,14 +2372,20 @@ namespace jkgm {
                     gl::set_active_texture_unit(3);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
                                      draw.texture.normal);
+                    prog.set_point_specular(
+                        make_point(draw.texture.reflection_strength,
+                                   draw.texture.roughness,draw.texture.metalness,
+                                   draw.texture.has_surface?1.0f:0.0f),
+                        make_point(draw.texture.has_normal?1.0f:0.0f,
+                                   draw.texture.normal_strength,0.0f,0.0f),
+                        draw.texture.normal_scroll);
+                } else if(prev_specular_active) {
+                    prog.set_point_specular(
+                        make_point(0.0f,0.5f,0.0f,0.0f),
+                        make_point(0.0f,1.0f,0.0f,0.0f),
+                        make_point(0.0f,0.0f));
                 }
-                prog.set_point_specular(
-                    make_point(spec_active?draw.texture.reflection_strength:0.0f,
-                               draw.texture.roughness,draw.texture.metalness,
-                               draw.texture.has_surface?1.0f:0.0f),
-                    make_point(draw.texture.has_normal?1.0f:0.0f,
-                               draw.texture.normal_strength,0.0f,0.0f),
-                    draw.texture.normal_scroll);
+                prev_specular_active=spec_active;
                 prog.set_surface(draw.texture.albedo_source,draw.texture.width,
                                  draw.texture.height,transparent,
                                  static_cast<int>(draw.texture.blend),

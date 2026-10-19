@@ -144,7 +144,7 @@ void main() {
         emission*=texture(emissive_map,uv+emissive_scroll).rgb;
     // Only reflective materials with nearby JK point-light Things enter
     // this branch. Highlights bypass SSAO, as with the existing sun term.
-    vec3 specular=point_light_specular(albedo.rgb,uv);
+    vec3 specular=point_light_specular(albedo.rgb,uv)*(1.0-fog);
     // The opaque pass composites this separate emissive attachment after
     // SSAO. The translucent pass has only the color target: emission must
     // therefore be added directly to premultiplied RGB, never multiplied
