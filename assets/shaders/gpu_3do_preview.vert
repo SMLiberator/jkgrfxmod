@@ -36,7 +36,12 @@ void main() {
     float h=max(projection.x,0.0001);
     float v=h/max(projection.y,0.0001);
     gl_Position=vec4(x/h,z/v,-projection.z,y);
-    view_depth=max(y,0.0);
+    // Native JK's rdCache stores reciprocal view depth as rhw=1/(32*y).
+    // The native OpenGL path reconstructs vp_z=1/rhw=32*y, then writes
+    // that value to its linear-depth G-buffer and uses it for fog.
+    // SSAO and fog must use exactly the same units for GPU 3DOs; the
+    // hardware Z coordinate above intentionally remains unscaled.
+    view_depth=32.0*max(y,0.0);
     pixel_uv=local_uv;
     // JK: FullyLit=0, NotLit=1, Diffuse=2, Gouraud=3.
     // Per-face ExtraLight and the camera's ambient floor are evaluated
