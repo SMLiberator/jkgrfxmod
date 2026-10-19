@@ -635,6 +635,13 @@ namespace jkgm {
                          (profile_window.gpu_ready_ns/1000)/frames,
                          " unique_mat_cel_checks_avg=",
                          profile_window.gpu_ready_material_refs/frames);
+                LOG_INFO("PERF gpu_3do source_check_us_avg=",
+                         (profile_window.gpu_source_ns/1000)/frames,
+                         " checks_avg=",profile_window.gpu_source_checks/frames,
+                         " invalidations_total=",
+                         profile_window.gpu_source_invalidations,
+                         " failed_snapshot_reuses_total=",
+                         profile_window.gpu_failed_snapshot_reuses);
                 LOG_INFO("PERF gpu_3do CPU_us_avg=",profile_window.gpu_preview_cpu_us/frames,
                          " draws_avg=",profile_window.gpu_draw_calls/frames,
                          " triangles_avg=",profile_window.gpu_draw_triangles/frames,
@@ -3368,6 +3375,10 @@ namespace jkgm {
                 profile_frame.gpu_culled+=stats.culled;
                 profile_frame.gpu_queued+=stats.queued;
                 profile_frame.gpu_snapshots+=stats.snapshots;
+                profile_frame.gpu_source_checks+=stats.source_checks;
+                profile_frame.gpu_source_ns+=stats.source_ns;
+                profile_frame.gpu_source_invalidations+=stats.source_invalidations;
+                profile_frame.gpu_failed_snapshot_reuses+=stats.failed_snapshot_reuses;
                 profile_frame.gpu_ready_checks+=stats.ready_checks;
                 profile_frame.gpu_ready_material_refs+=stats.ready_material_refs;
                 profile_frame.gpu_ready_ns+=stats.ready_ns;
