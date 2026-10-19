@@ -42,6 +42,7 @@ namespace jkgm {
         // Conservative local-space bounds of all faces in this draw range.
         // Used to reject entirely offscreen material groups before GL calls.
         std::array<float,3> bounds_min{},bounds_max{};
+        bool nonplanar=false; // keep per-face JK culling, bypass GL triangle culling
     };
     struct gpu_3do_geometry {
         std::vector<gpu_3do_face_plane> face_planes;
