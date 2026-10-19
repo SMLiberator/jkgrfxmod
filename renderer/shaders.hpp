@@ -148,6 +148,7 @@ namespace jkgm {
                                     native_face_opacity,albedo_factor,emissive_factor,
                                     albedo_scroll,emissive_scroll,fog_params,fog_color,
                                     emissive_only;
+            gl::uniform_location_id jk_color_filter,jk_color_tint,jk_color_add_fade;
             gl::uniform_location_id ambient_light,attenuation_min,num_lights,
                                     effective_light_mode;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity;
@@ -164,6 +165,8 @@ namespace jkgm {
                               point<2,float> scroll);
             void set_fog(point<4,float> params,point<4,float> color);
             void set_lighting(gpu_3do_instance const &instance);
+            void set_jk_color_effects(point<4,float> filter,point<4,float> tint,
+                                      point<4,float> add_fade);
         };
 
         class game_opaque_pass_shader : public game_pass_shader {
@@ -349,9 +352,6 @@ namespace jkgm {
             gl::uniform_location_id brightness;
             gl::uniform_location_id contrast;
             gl::uniform_location_id saturation;
-            gl::uniform_location_id jk_palette_filter;
-            gl::uniform_location_id jk_palette_tint;
-            gl::uniform_location_id jk_palette_add_fade;
             std::vector<gl::uniform_location_id> bloom_fbuf;
             std::vector<gl::uniform_location_id> bloom_weight;
 
@@ -369,9 +369,6 @@ namespace jkgm {
             void set_vignette(point<4, float> params);
 
             void set_color_filter(float brightness_value, float contrast_value, float saturation_value);
-            void set_jk_palette_effects(point<4,float> filter,
-                                        point<4,float> tint,
-                                        point<4,float> add_fade);
         };
     }
 }

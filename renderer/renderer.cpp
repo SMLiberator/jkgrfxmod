@@ -4,6 +4,7 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_alpha.hpp"
+#include "native_jk_palette_effects.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
@@ -1218,7 +1219,6 @@ namespace jkgm {
                     ogs.get(), conf_scr_res, scene,
                     frame_screen->get_resolved_depth_texture());
             }
-            jk_palette_gameplay_active()=(mode==renderer_mode::ingame);
             frame_compositor->end_frame(ogs.get(), conf_scr_res, scene);
 
             SwapBuffers(hDC);
@@ -2104,6 +2104,15 @@ namespace jkgm {
             float const aspect=get<x>(internal_scr_res_f)/get<y>(internal_scr_res_f);
             float const tan_half_fov=std::tan(cam.fov*0.008726646259971648f);
             prog.set_projection(make_point(tan_half_fov,aspect,1.0f/far_plane,0.0f));
+            // Native D3D has already applied this to per-vertex colors.
+            // Apply only to the GPU-bypassed 3DO vertex shader.
+            auto const effect=read_native_jk_hardware_color_effects();
+            prog.set_jk_color_effects(
+                make_point(float(effect.filter[0]),float(effect.filter[1]),
+                           float(effect.filter[2]),effect.active?1.0f:0.0f),
+                make_point(effect.tint[0],effect.tint[1],effect.tint[2],0.0f),
+                make_point(effect.add[0]/255.0f,effect.add[1]/255.0f,
+                           effect.add[2]/255.0f,effect.fade));
             // Same animated fog state used by JK's existing scene passes.
             {
                 auto const &fog=get_fog_settings();

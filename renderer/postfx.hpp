@@ -2,7 +2,6 @@
 
 #include "animated.hpp"
 #include "shaders.hpp"
-#include "native_jk_palette_effects.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -102,32 +101,9 @@ namespace jkgm {
         return settings;
     }
 
-    // Only sample native game palette slots while actually in a 3D level.
-    // Menu UI has its own DirectDraw palette; never tint it with stale effects.
-    inline bool &jk_palette_gameplay_active()
-    {
-        static bool value=false;
-        return value;
-    }
-    inline void set_jk_palette_shader(shaders::post_to_srgb_shader &shader)
-    {
-        auto const effect=jk_palette_gameplay_active()
-                            ? read_native_jk_palette_effects()
-                            : jk_palette_effect{};
-        shader.set_jk_palette_effects(
-            make_point(float(effect.filter[0]),float(effect.filter[1]),
-                       float(effect.filter[2]),effect.active?1.0f:0.0f),
-            make_point(effect.tint[0],effect.tint[1],effect.tint[2],0.0f),
-            make_point(effect.add[0]/255.0f,effect.add[1]/255.0f,
-                       effect.add[2]/255.0f,effect.fade));
-    }
-
     // Call after post_to_srgb.use_program() and before drawing the final pass.
     inline void apply_post_fx(shaders::post_to_srgb_shader &shader, bool enable_post)
     {
-        // JK's native COG palette effects are not optional post effects.
-        // They must still work when JkGRfxMod enable_post is false.
-        set_jk_palette_shader(shader);
         if(!enable_post) {
             // Preserve mandatory linear->sRGB presentation but bypass optional effects.
             shader.set_film_grain(make_point(0.0f, 1.0f, 0.0f, 0.0f));

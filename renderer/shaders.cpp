@@ -164,6 +164,9 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , emissive_scroll(gl::get_uniform_location(the_program,"emissive_scroll"))
     , fog_params(gl::get_uniform_location(the_program,"fog_params"))
     , fog_color(gl::get_uniform_location(the_program,"fog_color"))
+    , jk_color_filter(gl::get_uniform_location(the_program,"jk_color_filter"))
+    , jk_color_tint(gl::get_uniform_location(the_program,"jk_color_tint"))
+    , jk_color_add_fade(gl::get_uniform_location(the_program,"jk_color_add_fade"))
     , ambient_light(gl::get_uniform_location(the_program,"ambient_light"))
     , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
@@ -223,6 +226,14 @@ void jkgm::shaders::gpu_3do_preview_shader::set_fog(
     gl::set_uniform_vector(fog_params,params);
     gl::set_uniform_vector(fog_color,
         make_point(get<0>(color),get<1>(color),get<2>(color)));
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_jk_color_effects(
+    point<4,float> filter,point<4,float> tint,point<4,float> add_fade)
+{
+    gl::set_uniform_vector(jk_color_filter,filter);
+    gl::set_uniform_vector(jk_color_tint,tint);
+    gl::set_uniform_vector(jk_color_add_fade,add_fade);
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_lighting(
@@ -689,9 +700,6 @@ jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(fs::path const &data_roo
     , brightness(gl::get_uniform_location(the_program, "brightness"))
     , contrast(gl::get_uniform_location(the_program, "contrast"))
     , saturation(gl::get_uniform_location(the_program, "saturation"))
-    , jk_palette_filter(gl::get_uniform_location(the_program,"jk_palette_filter"))
-    , jk_palette_tint(gl::get_uniform_location(the_program,"jk_palette_tint"))
-    , jk_palette_add_fade(gl::get_uniform_location(the_program,"jk_palette_add_fade"))
 {
     bloom_fbuf.reserve(num_bloom_layers);
     bloom_weight.reserve(num_bloom_layers);
@@ -746,10 +754,3 @@ void jkgm::shaders::post_to_srgb_shader::set_color_filter(float brightness_value
     gl::set_uniform_float(saturation, saturation_value);
 }
 
-void jkgm::shaders::post_to_srgb_shader::set_jk_palette_effects(
-    point<4,float> filter,point<4,float> tint,point<4,float> add_fade)
-{
-    gl::set_uniform_vector(jk_palette_filter,filter);
-    gl::set_uniform_vector(jk_palette_tint,tint);
-    gl::set_uniform_vector(jk_palette_add_fade,add_fade);
-}

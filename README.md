@@ -774,28 +774,25 @@ For exact install paths, compatibility limits, and test commands, see
 [doc/install.md](doc/install.md).
 
 
-## Native JK palette effects and sector-screen tint
+## Native JK hardware color effects and sector-screen tint
 
-The JK23 executable's stdPalEffects request table is now read once per
-presented gameplay frame and applied after scene rendering. This covers
-`NewColorEffect` / `ModifyColorEffect`, `AddDynamicTint`,
-`AddDynamicAdd`, fades, channel filters, and screen tint inherited from
-the current sector (`SetSectorTint`), without separate COG hooks or mesh
-uploads. The ordering mirrors JK's palette pipeline: filter, tint, additive,
-fade. It is independent of `enable_post` and disabled on menus.
+JK hardware acceleration copies the accumulated stdPalEffects via
+`rdSetColorEffects` (0x0043AE60) into `rdroid_curColorEffects` (0x00889E00).
+It modifies RGB vertex colors **before** material texturing, not the final
+screen image. Native D3D triangles already carry the color correction; applying
+it again to the final composite would double-tint native geometry and tint
+the UI incorrectly.
 
-The compatibility reader is limited to the tested 32-bit JK23-based executable
-by a verified native instruction signature. A mismatched executable
-automatically retains neutral color (no unsafe arbitrary memory reads).
-JK's original effects operate on RGB8 palette entries; the replacement
-approximates them in sRGB screen color and can differ in 8-bit rounding.
-`SetSectorColormap` is a separate per-sector texture/colormap mapping feature
-and is **not** implemented by this screen-wide correction.
+GPU-bypassed 3DO vertices now read and approximate the *hardware* color-effect
+state once per scene pass. This supports sector-screen tint (`SetSectorTint`),
+`NewColorEffect`, `AddDynamicTint`, `AddDynamicAdd`, filter and fade,
+without modifying JK.dll. Exact 8-bit rounding still requires comparison.
+Software mode instead modifies 8-bit palette entries and remains unsupported.
+`SetSectorColormap` is a separate per-sector geometry/colormap effect.
 
-Dynamic 3DO/model changes in JK.dll remain under investigation. The GPU
-cache detects pointer and mesh-count changes but does not yet recognize
-in-place edits to face material/vertex/index data; no blanket geometry
-re-upload has been added.
+The reader verifies the 32-bit JK23 instruction signature and defaults to
+neutral coloring if unsupported. Dynamic JK.dll model mutations remain to be
+tracked with targeted GPU mesh-cache invalidation.
 
 ## Experimental GPU-resident 3DO mesh path
 

@@ -13,6 +13,10 @@ layout(location=7) in float local_light_mode;
 layout(location=8) in vec3 local_vertex_rgb;
 uniform float ambient_light;
 uniform float effective_light_mode; // captured per Thing
+// Native JK applies these to RGB8 *vertex colors* before texturing.
+uniform vec4 jk_color_filter; // XYZ selected channel mask, W active
+uniform vec4 jk_color_tint;
+uniform vec4 jk_color_add_fade; // RGB additive/255, A fade
 uniform float attenuation_min;
 uniform int num_lights;
 uniform vec4 light_position_radius[16]; // local XYZ and JK light radius
@@ -70,6 +74,18 @@ void main() {
     float bright=mode<0.5 ? 1.0
         : max(clamp(l+local_extra_light,0.0,1.0),ambient_light);
     jk_lit_rgb=vec3(pow(clamp(bright,0.0,1.0),1.8))*local_vertex_rgb;
+    if(jk_color_filter.w>0.5) {
+        // Approximate the hardware rdCache per-vertex RGB8 color operation.
+        vec3 v=pow(clamp(jk_lit_rgb,0.0,1.0),vec3(1.0/1.8));
+        if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
+            v*=step(vec3(0.5),jk_color_filter.xyz);
+        vec3 t=jk_color_tint.xyz;
+        vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
+        v=clamp(v*scale,0.0,1.0);
+        v=clamp(v+jk_color_add_fade.xyz,0.0,1.0);
+        v*=jk_color_add_fade.w;
+        jk_lit_rgb=pow(clamp(v,0.0,1.0),vec3(1.8));
+    }
     // Match the patched native 3DO normal sideband. Non-Gouraud faces can
     // still carry smooth vertex normals for SSAO; lighting-mode selection
     // must not force the AO G-buffer back to flat polygon normals.
