@@ -9,6 +9,8 @@
 #include "runtime_material.hpp"
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
+#include "gpu_3do_modelview.hpp"
+#include "sprite_orientation.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_triangulation.hpp"
@@ -989,6 +991,169 @@ bool jkgm::native_3do_available()
 }
 
 
+// Extended JK23 SPR orientation: intercept only the native sprite draw routine,
+// then adjust the already constructed 4 camera-space vertices immediately before
+// clipping. This retains JK's existing MAT/UV/lighting/cel handling and does
+// not intercept primitives belonging to level surfaces, models, or particles.
+namespace {
+    using native_sprite_fn = int (__cdecl *)(void *,void *);
+    using native_sprite_mid_fn = void (__cdecl *)();
+    constexpr uintptr_t sprite_draw_addr=0x0046CF40U;
+    constexpr uintptr_t sprite_preclip_addr=0x0046D182U;
+    constexpr uint8_t sprite_draw_bytes[]={
+        0xa1,0x18,0xa4,0x73,0x00,0x8b,0x4c,0x24,0x08
+    };
+    constexpr uint8_t sprite_preclip_bytes[]={
+        0x8b,0x4c,0x24,0x10,0x89,0x46,0x10,0x85,0xc9
+    };
+    native_sprite_fn RealNativeSprite=
+        reinterpret_cast<native_sprite_fn>(sprite_draw_addr);
+    native_sprite_mid_fn RealSpritePreclip=
+        reinterpret_cast<native_sprite_mid_fn>(sprite_preclip_addr);
+    bool native_sprite_hook_active=false;
+    struct sprite_draw_context {
+        void const *thing=nullptr;
+        void const *orientation=nullptr;
+    };
+    // JK renders on its main thread. Recursion still preserves the outer call.
+    thread_local sprite_draw_context sprite_draw_active{};
+
+    // Called from a naked, register/FPU-preserving mid-function Detours thunk.
+    // The original native quad is in this JK23-specific fixed buffer.
+    void __cdecl update_native_sprite_vertices()
+    {
+        auto const *rd_thing=static_cast<uint8_t const *>(sprite_draw_active.thing);
+        if(!rd_thing || !sprite_draw_active.orientation ||
+           !gpu_span_readable(rd_thing,8) ||
+           !gpu_span_readable(sprite_draw_active.orientation,12*sizeof(float)))
+            return;
+        void const *sprite=nullptr;
+        std::memcpy(&sprite,rd_thing+4,sizeof(sprite));
+        if(!gpu_span_readable(sprite,0xACU)) return;
+        auto const *p=static_cast<uint8_t const *>(sprite);
+        uint32_t type=0;
+        std::memcpy(&type,p+0x20,sizeof(type));
+        if((type&jkgm::sprite_extended_mask)==0) return;
+
+        float size[4]{}; // width, height, widthHalf, heightHalf
+        float offset[3]{};
+        std::memcpy(size,p+0x4CU,sizeof(size));
+        std::memcpy(offset,p+0xA0U,sizeof(offset));
+        if(!std::isfinite(size[2])||!std::isfinite(size[3]) ||
+           size[2]<=0.0f||size[3]<=0.0f ||
+           size[2]>8192.0f||size[3]>8192.0f)
+            return;
+        for(float v:offset) if(!std::isfinite(v)) return;
+
+        jkgm::gpu_3do_matrix34 thing{},view{};
+        std::memcpy(thing.data(),sprite_draw_active.orientation,
+                    thing.size()*sizeof(float));
+        if(!jkgm::gpu_3do_matrix_finite(thing)) return;
+        constexpr uintptr_t native_camera_ptr_addr=0x0073A418U;
+        if(!gpu_span_readable(reinterpret_cast<void const *>(
+                    native_camera_ptr_addr),sizeof(void *))) return;
+        void const *camera=nullptr;
+        std::memcpy(&camera,reinterpret_cast<void const *>(
+                    native_camera_ptr_addr),sizeof(camera));
+        if(!gpu_span_readable(camera,8+view.size()*sizeof(float))) return;
+        std::memcpy(view.data(),static_cast<uint8_t const *>(camera)+8,
+                    view.size()*sizeof(float));
+        if(!jkgm::gpu_3do_matrix_finite(view)) return;
+
+        // Invert only the orthogonal camera basis to recover WORLD axes.
+        // Sith rdMatrix34 is {Right,Look,Up,Translation}, each a vec3.
+        jkgm::sprite_axes thing_axes{
+            {{thing[0],thing[1],thing[2]}},
+            {{thing[3],thing[4],thing[5]}},
+            {{thing[6],thing[7],thing[8]}}
+        };
+        jkgm::sprite_axes camera_axes{
+            {{view[0],view[3],view[6]}},
+            {{view[1],view[4],view[7]}},
+            {{view[2],view[5],view[8]}}
+        };
+        jkgm::sprite_axes final_axes{};
+        if(!jkgm::compute_sprite_axes(type,thing_axes,camera_axes,final_axes))
+            return;
+
+        for(int axis=0;axis<3;axis++) {
+            thing[axis]=final_axes.right[axis];
+            thing[axis+3]=final_axes.look[axis];
+            thing[axis+6]=final_axes.up[axis];
+        }
+        auto const modelview=jkgm::gpu_3do_native_modelview(view,thing);
+        if(!jkgm::gpu_3do_matrix_finite(modelview)) return;
+        // Native sprite buffer at 0x82EA00: four float3s, camera-space.
+        constexpr uintptr_t native_quad_addr=0x0082EA00U;
+        if(!gpu_span_readable(reinterpret_cast<void const *>(native_quad_addr),
+                              12*sizeof(float))) return;
+        float transformed[12]{};
+        for(int i=0;i<4;i++) {
+            float const x=offset[0]+((i==1||i==2)?size[2]:-size[2]);
+            float const z=offset[2]+((i>=2)?size[3]:-size[3]);
+            auto const v=jkgm::gpu_3do_native_transform_point(
+                modelview,{{x,offset[1],z}});
+            for(int j=0;j<3;j++) {
+                if(!std::isfinite(v[j])) return;
+                transformed[i*3+j]=v[j];
+            }
+        }
+        std::memcpy(reinterpret_cast<void *>(native_quad_addr),transformed,
+                    sizeof(transformed));
+    }
+
+    // Detours preserves the displaced mid-function instructions in the
+    // trampoline. Do not return: jump back with the original register state.
+    __declspec(naked) void __cdecl SpritePreclipThunk()
+    {
+        __asm {
+            pushfd
+            pushad
+            call update_native_sprite_vertices
+            popad
+            popfd
+            jmp dword ptr [RealSpritePreclip]
+        }
+    }
+
+    int __cdecl HookedNativeSprite(void *thing,void *orientation)
+    {
+        auto const previous=sprite_draw_active;
+        sprite_draw_active={thing,orientation};
+        int const result=RealNativeSprite(thing,orientation);
+        sprite_draw_active=previous;
+        return result;
+    }
+
+    bool request_native_sprite_hooks()
+    {
+        if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=0x00400000U ||
+           !gpu_span_readable(reinterpret_cast<void const *>(sprite_draw_addr),
+                              sizeof(sprite_draw_bytes)) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(sprite_preclip_addr),
+                              sizeof(sprite_preclip_bytes)) ||
+           std::memcmp(reinterpret_cast<void const *>(sprite_draw_addr),
+                       sprite_draw_bytes,sizeof(sprite_draw_bytes))!=0 ||
+           std::memcmp(reinterpret_cast<void const *>(sprite_preclip_addr),
+                       sprite_preclip_bytes,sizeof(sprite_preclip_bytes))!=0) {
+            LOG_WARNING("Extended SPR orientation disabled: unrecognized JK23 executable");
+            return false;
+        }
+        LONG error=DetourAttach(&(PVOID &)RealNativeSprite,HookedNativeSprite);
+        if(error!=NO_ERROR) {
+            LOG_WARNING("SPR entry hook unavailable: ",error);
+            return false;
+        }
+        error=DetourAttach(&(PVOID &)RealSpritePreclip,SpritePreclipThunk);
+        if(error!=NO_ERROR) {
+            DetourDetach(&(PVOID &)RealNativeSprite,HookedNativeSprite);
+            LOG_WARNING("SPR preclip hook unavailable: ",error);
+            return false;
+        }
+        return true;
+    }
+}
+
 // DirectX hooks
 
 using DirectDrawCreate_type = HRESULT(WINAPI *)(GUID *lpGUID,
@@ -1847,7 +2012,10 @@ bool attach_hooks()
         LOG_WARNING("Native MAT mip override disabled: unsupported executable");
     }
 
+    bool const sprite_hooks_requested=request_native_sprite_hooks();
+
     LONG error = DetourTransactionCommit();
+    if(error==NO_ERROR) native_sprite_hook_active=sprite_hooks_requested;
     if(error==NO_ERROR && mip_hook_requested) {
         native_mat_mips_hook_active=true;
         force_native_mat_mip_zero();
@@ -1861,6 +2029,12 @@ bool detach_hooks()
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
 
+    // Revert both SPR detours before releasing the DLL.
+    if(native_sprite_hook_active) {
+        DetourDetach(&(PVOID &)RealSpritePreclip,SpritePreclipThunk);
+        DetourDetach(&(PVOID &)RealNativeSprite,HookedNativeSprite);
+        native_sprite_hook_active=false;
+    }
     // Detach injected functions
     if(native_mat_mips_hook_active) {
         DetourDetach(&(PVOID &)RealNativeSetMipDistances,HookedNativeSetMipDistances);
