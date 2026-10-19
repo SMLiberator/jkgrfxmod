@@ -25,9 +25,15 @@ in vec3 jk_lit_rgb;
 
 uniform sampler2D surface_map; // linear RGB: reflectivity, roughness, metalness
 uniform sampler2D normal_map;  // tangent-space RGB
+uniform sampler2D normal_map2; // second slope layer
+uniform sampler2D env_map;     // equirectangular / matcap
+uniform vec4 view_right, view_forward, view_up, view_origin;
+uniform vec3 camera_right_axis,camera_forward_axis,camera_up_axis;
+uniform vec2 environment_info; // enabled, reflection_mode
 uniform vec4 specular_params; // strength, roughness, metalness, has surface map
 uniform vec4 normal_specular_params; // has normal map, strength, unused, unused
 uniform vec2 normal_specular_scroll;
+uniform vec2 normal_specular_scroll2;
 uniform vec3 local_eye;
 uniform int num_lights;
 uniform vec4 light_position_radius[16];
@@ -39,9 +45,17 @@ in vec3 local_fragment_normal;
 vec3 mapped_local_normal(vec2 uv)
 {
     vec3 n=normalize(local_fragment_normal);
-    if(normal_specular_params.x<0.5) return n;
-    vec3 texn=texture(normal_map,uv+normal_specular_scroll).xyz*2.0-1.0;
-    vec2 slope=texn.xy/max(texn.z,0.05)*normal_specular_params.y;
+    if(normal_specular_params.x<0.5 && normal_specular_params.z<0.5)
+        return n;
+    vec2 slope=vec2(0.0);
+    if(normal_specular_params.x>0.5) {
+        vec3 texn=texture(normal_map,uv+normal_specular_scroll).xyz*2.0-1.0;
+        slope+=texn.xy/max(texn.z,0.05)*normal_specular_params.y;
+    }
+    if(normal_specular_params.z>0.5) {
+        vec3 texn2=texture(normal_map2,uv+normal_specular_scroll2).xyz*2.0-1.0;
+        slope+=texn2.xy/max(texn2.z,0.05)*normal_specular_params.w;
+    }
     vec3 dp1=dFdx(local_fragment_position);
     vec3 dp2=dFdy(local_fragment_position);
     vec2 du1=dFdx(pixel_uv*uv_scale);
@@ -98,6 +112,52 @@ vec3 point_light_specular(vec3 base_color,vec2 uv)
     return min(sum*strength,vec3(32.0));
 }
 
+
+// PS2-era style environment mapping, sharing the native material's
+// reflectivity/roughness/metalness and optional dual-layer mapped normal.
+// The sun/dynamic-COG EnvMap crossfade is a separate parity feature.
+vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
+{
+    metalness=0.0;
+    if(environment_info.x<0.5 || specular_params.x<=0.0)
+        return vec3(0.0);
+    vec3 surf=specular_params.w>0.5 ? texture(surface_map,uv).rgb:vec3(1.0);
+    float strength=max(specular_params.x*surf.r,0.0);
+    if(strength<=0.0) return vec3(0.0);
+    float roughness=clamp(specular_params.y*surf.g,0.0,1.0);
+    metalness=clamp(specular_params.z*surf.b,0.0,1.0);
+    vec3 n_local=mapped_local_normal(uv);
+    vec3 nv=view_right.xyz*n_local.x+
+            view_forward.xyz*n_local.y+view_up.xyz*n_local.z;
+    vec3 n=normalize(vec3(nv.x,nv.z,nv.y));
+    vec3 vp=view_origin.xyz+
+            view_right.xyz*local_fragment_position.x+
+            view_forward.xyz*local_fragment_position.y+
+            view_up.xyz*local_fragment_position.z;
+    vec3 v=normalize(vec3(vp.x,vp.z,vp.y)); // camera -> surface
+    if(dot(n,v)>0.0) n=-n;
+    vec3 reflection=reflect(v,n);
+    int mode=int(environment_info.y+0.5);
+    vec3 dir=reflection;
+    if(mode<=1) {
+        vec3 world=camera_right_axis*reflection.x+
+                   camera_forward_axis*reflection.z+
+                   camera_up_axis*reflection.y;
+        dir=vec3(world.x,world.z,world.y);
+    }
+    vec2 env_uv=mode==3
+        ? clamp(vec2(0.5+0.5*n.x,0.5-0.5*n.y),vec2(0.001),vec2(0.999))
+        : vec2(fract(atan(dir.x,dir.z)/6.28318530718+0.5),
+               0.5-asin(clamp(dir.y,-1.0,1.0))/3.14159265359);
+    ivec2 dims=textureSize(env_map,0);
+    float lod=roughness*log2(max(float(max(dims.x,dims.y)),1.0));
+    vec3 env=textureLod(env_map,env_uv,lod).rgb;
+    vec3 f0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
+    float cos_theta=clamp(dot(n,-v),0.0,1.0);
+    vec3 fresnel=f0+(vec3(1.0)-f0)*pow(1.0-cos_theta,5.0);
+    return env*fresnel*strength;
+}
+
 layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
@@ -137,14 +197,19 @@ void main() {
                     max(fog_params.y-fog_params.x,0.0001),0.0,1.0)*fog_params.z;
     // Match the native vertex-by-vertex tint and lighting interpolation.
     // Keep it separate from alpha and from emissive output.
-    vec3 lit_rgb=albedo.rgb*jk_lit_rgb;
+    float env_metalness=0.0;
+    vec3 env_reflection=gpu_environment_reflection(albedo.rgb,uv,env_metalness);
+    // Metal suppresses diffuse only when its environment contribution
+    // actually exists; follows the native replacement shader.
+    vec3 lit_rgb=albedo.rgb*jk_lit_rgb*(1.0-env_metalness);
     vec3 rgb=mix(lit_rgb,fog_color,fog);
     vec3 emission=emissive_factor;
     if(has_emissive!=0)
         emission*=texture(emissive_map,uv+emissive_scroll).rgb;
     // Only reflective materials with nearby JK point-light Things enter
     // this branch. Highlights bypass SSAO, as with the existing sun term.
-    vec3 specular=point_light_specular(albedo.rgb,uv)*(1.0-fog);
+    vec3 specular=(point_light_specular(albedo.rgb,uv)+env_reflection)*
+                  (1.0-fog);
     // The opaque pass composites this separate emissive attachment after
     // SSAO. The translucent pass has only the color target: emission must
     // therefore be added directly to premultiplied RGB, never multiplied

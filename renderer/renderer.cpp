@@ -406,12 +406,16 @@ namespace jkgm {
             gl::texture_view texture = gl::default_texture;
             gl::texture_view emission = gl::default_texture;
             gl::texture_view normal = gl::default_texture;
+            gl::texture_view normal2 = gl::default_texture;
             gl::texture_view surface = gl::default_texture;
+            gl::texture_view environment = gl::default_texture;
             float width=1.0f, height=1.0f;
             float reflection_strength=0.0f,roughness=0.5f,metalness=0.0f;
-            float normal_strength=1.0f;
-            bool has_normal=false,has_surface=false;
+            float normal_strength=1.0f,normal_strength2=1.0f;
+            bool has_normal=false,has_normal2=false,has_surface=false,has_environment=false;
+            int reflection_mode=0;
             point<2,float> normal_scroll=make_point(0.0f,0.0f);
+            point<2,float> normal_scroll2=make_point(0.0f,0.0f);
             float alpha_cutoff=0.5f;
             float opacity=1.0f;
             // 0=invalid/unresolved MAT (diagnostic magenta), 1=texture,
@@ -2064,7 +2068,18 @@ namespace jkgm {
                 out.roughness=surface->roughness;
                 out.metalness=surface->metalness;
                 out.normal_strength=surface->normal_strength;
+                out.normal_strength2=surface->normal_strength2;
                 out.normal_scroll=scroll_offset(surface->normal_scroll);
+                out.normal_scroll2=scroll_offset(surface->normal_scroll2);
+                out.reflection_mode=static_cast<int>(surface->reflection_mode);
+                if(surface->env_map) {
+                    out.environment=texture_cache->get_texture_handle(*surface->env_map);
+                    out.has_environment=true;
+                }
+                if(surface->normal_map2) {
+                    out.normal2=texture_cache->get_texture_handle(*surface->normal_map2);
+                    out.has_normal2=true;
+                }
                 if(surface->surface_map) {
                     out.surface=texture_cache->get_texture_handle(*surface->surface_map);
                     out.has_surface=true;
@@ -2130,7 +2145,9 @@ namespace jkgm {
             prog.set_point_specular(
                 make_point(0.0f,0.5f,0.0f,0.0f),
                 make_point(0.0f,1.0f,0.0f,0.0f),
-                make_point(0.0f,0.0f));
+                make_point(0.0f,0.0f),make_point(0.0f,0.0f));
+            prog.set_environment(false,0);
+            prog.set_camera_axes(cam.right,cam.forward,cam.up);
             float const aspect=get<x>(internal_scr_res_f)/get<y>(internal_scr_res_f);
             float const tan_half_fov=std::tan(cam.fov*0.008726646259971648f);
             prog.set_projection(make_point(tan_half_fov,aspect,1.0f/far_plane,0.0f));
@@ -2363,8 +2380,8 @@ namespace jkgm {
                 }
                 bind_color_texture(draw.texture.texture,0,draw.texture.filtered);
                 bind_color_texture(draw.texture.emission,1,draw.texture.filtered);
-                bool const spec_active=inst.num_lights>0 &&
-                    draw.texture.reflection_strength>0;
+                bool const spec_active=draw.texture.reflection_strength>0 &&
+                    (inst.num_lights>0 || draw.texture.has_environment);
                 if(spec_active) {
                     gl::set_active_texture_unit(2);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
@@ -2372,18 +2389,34 @@ namespace jkgm {
                     gl::set_active_texture_unit(3);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
                                      draw.texture.normal);
+                    if(draw.texture.has_normal2) {
+                        gl::set_active_texture_unit(5);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         draw.texture.normal2);
+                    }
+                    if(draw.texture.has_environment) {
+                        gl::set_active_texture_unit(4);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         draw.texture.environment);
+                    }
+                    prog.set_environment(draw.texture.has_environment,
+                                         draw.texture.reflection_mode);
                     prog.set_point_specular(
                         make_point(draw.texture.reflection_strength,
                                    draw.texture.roughness,draw.texture.metalness,
                                    draw.texture.has_surface?1.0f:0.0f),
                         make_point(draw.texture.has_normal?1.0f:0.0f,
-                                   draw.texture.normal_strength,0.0f,0.0f),
-                        draw.texture.normal_scroll);
+                                   draw.texture.normal_strength,
+                                   draw.texture.has_normal2?1.0f:0.0f,
+                                   draw.texture.normal_strength2),
+                        draw.texture.normal_scroll,
+                        draw.texture.normal_scroll2);
                 } else if(prev_specular_active) {
                     prog.set_point_specular(
                         make_point(0.0f,0.5f,0.0f,0.0f),
                         make_point(0.0f,1.0f,0.0f,0.0f),
-                        make_point(0.0f,0.0f));
+                        make_point(0.0f,0.0f),make_point(0.0f,0.0f));
+                    prog.set_environment(false,0);
                 }
                 prev_specular_active=spec_active;
                 prog.set_surface(draw.texture.albedo_source,draw.texture.width,

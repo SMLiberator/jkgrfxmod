@@ -171,8 +171,15 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , specular_params(gl::get_uniform_location(the_program,"specular_params"))
     , specular_surface_sampler(gl::get_uniform_location(the_program,"surface_map"))
     , specular_normal_sampler(gl::get_uniform_location(the_program,"normal_map"))
+    , specular_normal2_sampler(gl::get_uniform_location(the_program,"normal_map2"))
+    , specular_environment_sampler(gl::get_uniform_location(the_program,"env_map"))
+    , environment_info(gl::get_uniform_location(the_program,"environment_info"))
+    , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
+    , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
+    , camera_up_axis(gl::get_uniform_location(the_program,"camera_up_axis"))
     , normal_specular_params(gl::get_uniform_location(the_program,"normal_specular_params"))
     , normal_specular_scroll(gl::get_uniform_location(the_program,"normal_specular_scroll"))
+    , normal_specular_scroll2(gl::get_uniform_location(the_program,"normal_specular_scroll2"))
     , local_eye(gl::get_uniform_location(the_program,"local_eye"))
     , ambient_light(gl::get_uniform_location(the_program,"ambient_light"))
     , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
@@ -256,13 +263,32 @@ void jkgm::shaders::gpu_3do_preview_shader::set_local_eye(
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_point_specular(
-    point<4,float> material,point<4,float> normal,point<2,float> scroll)
+    point<4,float> material,point<4,float> normal,point<2,float> scroll,
+    point<2,float> scroll2)
 {
     gl::set_uniform_integer(specular_surface_sampler,2);
     gl::set_uniform_integer(specular_normal_sampler,3);
+    gl::set_uniform_integer(specular_normal2_sampler,5);
     gl::set_uniform_vector(specular_params,material);
     gl::set_uniform_vector(normal_specular_params,normal);
     gl::set_uniform_vector(normal_specular_scroll,scroll);
+    gl::set_uniform_vector(normal_specular_scroll2,scroll2);
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_environment(bool present,int mode)
+{
+    gl::set_uniform_integer(specular_environment_sampler,4);
+    gl::set_uniform_vector(environment_info,
+        make_point(present?1.0f:0.0f,static_cast<float>(mode)));
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_camera_axes(
+    std::array<float,3> const &r,std::array<float,3> const &f,
+    std::array<float,3> const &u)
+{
+    gl::set_uniform_vector(camera_right_axis,make_point(r[0],r[1],r[2]));
+    gl::set_uniform_vector(camera_forward_axis,make_point(f[0],f[1],f[2]));
+    gl::set_uniform_vector(camera_up_axis,make_point(u[0],u[1],u[2]));
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_lighting(

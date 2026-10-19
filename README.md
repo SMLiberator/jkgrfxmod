@@ -785,8 +785,13 @@ The material is completely unaffected if reflection strength is zero,
 `enable_reflections` is false, or there are no nearby JK lights.
 Existing Gouraud diffuse lighting remains unchanged. Specular is
 composited after SSAO and participates in fog for transparent materials.
-This is not yet an area-light approximation, SSR, shadow mapping,
-an environment reflection for GPU 3DOs, or dual normal-map support.
+GPU 3DOs now also support static/per-material and pack-default EnvMaps
+(equirectangular world/screen/fixed/matcap modes) plus a second normal-map
+layer, with normal scroll and mip-based roughness blur. These use the native
+material properties. Animated COG EnvMap transitions, sun specularity,
+displacement, depth-clipped polygon decals, and complete fluid parity still
+need a separate GPU 3DO implementation. This is not SSR, shadow mapping,
+or a true area-light approximation.
 Benchmark scenes with strong reflections and many nearby lights: these
 are per-fragment GGX loops, which can be expensive on large polygons.
 
