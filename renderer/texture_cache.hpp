@@ -27,6 +27,7 @@ namespace jkgm {
         virtual void release_linear_texture(linear_texture_id id) = 0;
 
         virtual gl::texture_view get_texture_handle(srgb_texture_id id) const = 0;
+        virtual bool has_nonopaque_alpha(srgb_texture_id id) const = 0;
         virtual gl::texture_view get_texture_handle(linear_texture_id id) const = 0;
     };
 

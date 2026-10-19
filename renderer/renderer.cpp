@@ -1873,7 +1873,9 @@ namespace jkgm {
             if(!read_object(mat.texinfo[cel],info) || !info.texture) return out;
             native_texture tex{};
             if(!read_object(info.texture,tex)) return out;
-            out.alpha=(tex.header[0]&1U)!=0;
+            // Original MAT alpha bits do not tell us whether a replacement
+            // PNG has translucent texels; sample uploaded image metadata.
+            out.alpha=false;
             auto const valid_surface=[](native_surface const &sf) {
                 return sf.texture_loaded!=0 && sf.texture_handle>0 &&
                        sf.width>0 && sf.height>0 &&
@@ -1884,7 +1886,7 @@ namespace jkgm {
             for(unsigned i=0;i<std::min(tex.header[6],4U);i++) {
                 auto const &alpha=tex.alpha_mips[i];
                 auto const &opaque=tex.opaque_mips[i];
-                if(out.alpha && valid_surface(alpha)) chosen=&alpha;
+                if((tex.header[0]&1U)!=0 && valid_surface(alpha)) chosen=&alpha;
                 else if(valid_surface(opaque)) chosen=&opaque;
                 else if(valid_surface(alpha)) chosen=&alpha;
                 if(chosen) { mip=i; break; }
@@ -1899,6 +1901,7 @@ namespace jkgm {
             // Do not discard the *entire* material and its emissive map.
             if(surface->albedo_map) {
                 out.texture=texture_cache->get_texture_handle(*surface->albedo_map);
+                out.alpha=texture_cache->has_nonopaque_alpha(*surface->albedo_map);
                 out.albedo_source=1;
                 out.has_image=true;
             } else {

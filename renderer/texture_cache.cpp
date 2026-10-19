@@ -4,6 +4,7 @@
 #include "common/config.hpp"
 #include "common/image.hpp"
 #include "common/material_map.hpp"
+#include "texture_alpha.hpp"
 #include <algorithm>
 #include <numeric>
 #include <random>
@@ -14,6 +15,7 @@ namespace jkgm {
             size<2, int> dims;
             gl::texture handle;
             int refct = 0;
+            bool nonopaque_alpha = false;
             std::optional<fs::path> origin_filename;
 
             explicit srgb_texture(size<2, int> dims)
@@ -153,6 +155,7 @@ namespace jkgm {
                 if(existing_buf.has_value()) {
                     // Matching texture already exists. Refill it.
                     auto &em = at(srgb_textures, *existing_buf);
+                    em.nonopaque_alpha = texture_has_nonopaque_alpha(data);
                     gl::bind_texture(gl::texture_bind_target::texture_2d, em.handle);
                     gl::tex_sub_image_2d(gl::texture_bind_target::texture_2d,
                                          0,
@@ -173,6 +176,7 @@ namespace jkgm {
 
                 auto &em = srgb_textures.back();
                 em.refct = 1;
+                em.nonopaque_alpha = texture_has_nonopaque_alpha(data);
 
                 gl::bind_texture(gl::texture_bind_target::texture_2d, em.handle);
                 gl::tex_image_2d(gl::texture_bind_target::texture_2d,
@@ -335,6 +339,10 @@ namespace jkgm {
             gl::texture_view get_texture_handle(srgb_texture_id id) const override
             {
                 return at(srgb_textures, id).handle;
+            }
+            bool has_nonopaque_alpha(srgb_texture_id id) const override
+            {
+                return at(srgb_textures, id).nonopaque_alpha;
             }
 
             gl::texture_view get_texture_handle(linear_texture_id id) const override
