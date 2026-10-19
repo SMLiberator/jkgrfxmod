@@ -9,6 +9,7 @@
 #include "runtime_material.hpp"
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
+#include "gpu_3do_frustum.hpp"
 #include "engine_material_debug.hpp"
 #include "sun.hpp"
 #include <Windows.h>
@@ -63,6 +64,7 @@ namespace {
         uint8_t const *faces;
         void const *normals;
         int num_vertices, num_uvs, num_faces;
+        float radius;
     };
     struct native_face {
         uint32_t num, type, geo, light, tex, count;
@@ -71,7 +73,7 @@ namespace {
         uint32_t cel;
         float uv_x, uv_y, extra_light, normal[3];
     };
-    static_assert(sizeof(native_mesh)==0x54 && offsetof(native_mesh,vertices)==0x30 &&
+    static_assert(sizeof(native_mesh)==0x58 && offsetof(native_mesh,vertices)==0x30 &&
                   offsetof(native_mesh,faces)==0x40 && offsetof(native_mesh,num_faces)==0x50,
                   "Wrong patched JK 3DO mesh layout");
     static_assert(sizeof(native_face)==0x40,"Wrong JK 3DO face stride");
@@ -119,6 +121,56 @@ namespace {
         native_texture tex{};
         if(!read_object(info.texture,tex)) return true;
         return (tex.header[0]&1U)!=0;
+    }
+
+    // When bypassing rdModel3_DrawMesh, its built-in sphere/frustum cull
+    // would otherwise disappear: this previously queued *every* mesh,
+    // including thousands well outside the camera view.
+    bool gpu_mesh_outside_native_frustum(native_mesh const &m,void const *matrix)
+    {
+        if(!gpu_span_readable(matrix,12*sizeof(float))) return false;
+        constexpr uintptr_t camera_global=0x0073A418U;
+        if(!gpu_span_readable(reinterpret_cast<void const *>(camera_global),
+                              sizeof(uintptr_t))) return false;
+        uintptr_t cam_ptr=0;
+        std::memcpy(&cam_ptr,reinterpret_cast<void const *>(camera_global),
+                    sizeof(cam_ptr));
+        if(cam_ptr<0x10000U ||
+           !gpu_span_readable(reinterpret_cast<void const *>(cam_ptr),0x4c))
+            return false;
+        uintptr_t frustum_ptr=0;
+        int32_t project_type=0;
+        std::memcpy(&project_type,reinterpret_cast<void const *>(cam_ptr),4);
+        std::memcpy(&frustum_ptr,
+                    reinterpret_cast<void const *>(cam_ptr+0x48U),sizeof(frustum_ptr));
+        if(frustum_ptr<0x10000U ||
+           !gpu_span_readable(reinterpret_cast<void const *>(frustum_ptr),
+                              sizeof(jkgm::gpu_3do_native_frustum)))
+            return false;
+        jkgm::gpu_3do_native_frustum f{};
+        std::memcpy(&f,reinterpret_cast<void const *>(frustum_ptr),sizeof(f));
+        auto const camera=jkgm::read_active_render_camera();
+        if(!camera.valid) return false;
+        float world[12];
+        std::memcpy(world,matrix,sizeof(world));
+        float const dx=world[9]-camera.position[0];
+        float const dy=world[10]-camera.position[1];
+        float const dz=world[11]-camera.position[2];
+        float const x=dx*camera.right[0]+dy*camera.right[1]+dz*camera.right[2];
+        float const y=dx*camera.forward[0]+dy*camera.forward[1]+dz*camera.forward[2];
+        float const z=dx*camera.up[0]+dy*camera.up[1]+dz*camera.up[2];
+        // JK's mesh radius is in local units. Account conservatively for
+        // scaled placement matrices and avoid rejecting borderline meshes.
+        float max_axis_scale=1.0f;
+        for(int axis=0;axis<3;axis++) {
+            int const i=axis*3;
+            float const scale=std::sqrt(world[i]*world[i]+
+                                        world[i+1]*world[i+1]+
+                                        world[i+2]*world[i+2]);
+            if(std::isfinite(scale)) max_axis_scale=std::max(max_axis_scale,scale);
+        }
+        return jkgm::gpu_3do_sphere_outside(
+            f,project_type==1,x,y,z,m.radius*max_axis_scale+0.02f);
     }
 
     std::shared_ptr<jkgm::gpu_3do_geometry const>
@@ -350,6 +402,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     // wireframe meshes to JK rather than changing their geometry semantics.
     if(m.geometry_mode<3 || !jkgm::read_active_render_camera().valid)
         return false;
+    // This is the normal JK mesh-sphere visibility test, not additional
+    // "tighter bounds" work. A rejected mesh needs no snapshot/UV/MAT/GL.
+    if(gpu_mesh_outside_native_frustum(m,matrix)) return true;
     auto it=gpu_mesh_cache.find(mesh);
     if(it==gpu_mesh_cache.end() || it->second.vertices!=m.vertices ||
        it->second.faces!=m.faces || it->second.num_vertices!=m.num_vertices ||

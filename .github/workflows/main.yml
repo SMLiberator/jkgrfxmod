@@ -30,6 +30,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\active_rd_camera.cpp /Fe:active_rd_camera_test.exe
         active_rd_camera_test.exe
+    - name: GPU 3DO native sphere visibility regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_frustum.cpp /Fe:gpu_3do_frustum_test.exe
+        gpu_3do_frustum_test.exe
     - name: GPU 3DO uploaded texture alpha regression tests
       shell: cmd
       run: |
