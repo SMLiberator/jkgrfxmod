@@ -66,6 +66,8 @@ namespace jkgm {
     };
     struct gpu_3do_native_stats {
         uint64_t attempted=0,culled=0,queued=0,snapshots=0,ready_checks=0;
+        uint64_t source_checks=0,source_ns=0,source_invalidations=0;
+        uint64_t failed_snapshot_reuses=0;
         uint64_t text_native=0,geometry_native=0,snapshot_native=0;
         uint64_t material_native=0,lighting_native=0;
         uint64_t ready_material_refs=0,ready_ns=0;
