@@ -2,6 +2,7 @@
 
 #include "base/filesystem.hpp"
 #include "base/span.hpp"
+#include "gpu_3do_preview.hpp"
 #include "glutil/program.hpp"
 #include <vector>
 
@@ -147,6 +148,8 @@ namespace jkgm {
                                     native_face_opacity,albedo_factor,emissive_factor,
                                     albedo_scroll,emissive_scroll,fog_params,fog_color,
                                     emissive_only;
+            gl::uniform_location_id ambient_light,attenuation_min,num_lights;
+            std::vector<gl::uniform_location_id> light_position_radius,light_intensity;
         public:
             explicit gpu_3do_preview_shader(fs::path const &data_root);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
@@ -159,6 +162,7 @@ namespace jkgm {
             void set_emissive(bool textured,point<4,float> intensity,
                               point<2,float> scroll);
             void set_fog(point<4,float> params,point<4,float> color);
+            void set_lighting(gpu_3do_instance const &instance);
         };
 
         class game_opaque_pass_shader : public game_pass_shader {

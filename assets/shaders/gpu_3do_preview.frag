@@ -22,6 +22,7 @@ uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blend only
 in float view_depth;
 in vec2 pixel_uv;
 in vec3 view_normal;
+in float jk_light;
 layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
@@ -44,7 +45,7 @@ void main() {
     }
     float fog=clamp((view_depth-fog_params.x)/
                     max(fog_params.y-fog_params.x,0.0001),0.0,1.0)*fog_params.z;
-    vec3 rgb=mix(albedo.rgb,fog_color,fog);
+    vec3 rgb=mix(albedo.rgb*jk_light,fog_color,fog);
     vec3 emission=emissive_factor;
     if(has_emissive!=0)
         emission*=texture(emissive_map,uv+emissive_scroll).rgb;
@@ -56,7 +57,7 @@ void main() {
     if(transparent_pass!=0 && blend_mode==2) {
         // With (DST_COLOR, ZERO) the RGB output is a multiplier, not
         // premultiplied color. Alpha zero must multiply by WHITE (identity).
-        vec3 tint=clamp(albedo.rgb,0.0,1.0);
+        vec3 tint=clamp(albedo.rgb*jk_light,0.0,1.0);
         out_color=vec4(mix(vec3(1.0),tint,albedo.a),0.0);
     } else {
         // Additive and normal pass use premultiplied pigment; alpha for the

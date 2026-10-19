@@ -164,7 +164,16 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , emissive_scroll(gl::get_uniform_location(the_program,"emissive_scroll"))
     , fog_params(gl::get_uniform_location(the_program,"fog_params"))
     , fog_color(gl::get_uniform_location(the_program,"fog_color"))
+    , ambient_light(gl::get_uniform_location(the_program,"ambient_light"))
+    , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
+    , num_lights(gl::get_uniform_location(the_program,"num_lights"))
 {
+    for(unsigned i=0;i<gpu_3do_max_lights;i++) {
+        light_position_radius.push_back(gl::get_uniform_location(
+            the_program,std::string("light_position_radius[")+std::to_string(i)+"]"));
+        light_intensity.push_back(gl::get_uniform_location(
+            the_program,std::string("light_intensity[")+std::to_string(i)+"]"));
+    }
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_view_matrix(
     point<4,float> r,point<4,float> f,point<4,float> u,point<4,float> t)
@@ -213,6 +222,21 @@ void jkgm::shaders::gpu_3do_preview_shader::set_fog(
     gl::set_uniform_vector(fog_params,params);
     gl::set_uniform_vector(fog_color,
         make_point(get<0>(color),get<1>(color),get<2>(color)));
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_lighting(
+    gpu_3do_instance const &instance)
+{
+    gl::set_uniform_float(ambient_light,instance.ambient);
+    gl::set_uniform_float(attenuation_min,instance.attenuation);
+    gl::set_uniform_integer(num_lights,static_cast<int>(instance.num_lights));
+    for(unsigned i=0;i<instance.num_lights;i++) {
+        auto const &light=instance.lights[i];
+        gl::set_uniform_vector(light_position_radius[i],
+            make_point(light.local_position[0],light.local_position[1],
+                       light.local_position[2],light.radius));
+        gl::set_uniform_float(light_intensity[i],light.intensity);
+    }
 }
 
 jkgm::shaders::game_opaque_pass_shader::game_opaque_pass_shader(fs::path const &data_root)

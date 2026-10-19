@@ -350,7 +350,7 @@ namespace {
                 }
                 auto const light_normal=mode==3
                     ? static_cast<float const *>(m.normals)+i : face.normal;
-                float const static_light=mode==3 ? m.vertex_lights[pi] : 0.0f;
+                float const static_light=mode==3 ? static_cast<float const *>(m.vertex_lights)[pi] : 0.0f;
                 jkgm::gpu_3do_vertex out{
                     m.vertices[i],m.vertices[i+1],m.vertices[i+2],
                     u,vtex,face.normal[0],face.normal[1],face.normal[2],

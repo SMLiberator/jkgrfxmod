@@ -5,6 +5,17 @@
 layout(location=0) in vec3 local_position;
 layout(location=1) in vec2 local_uv;
 layout(location=2) in vec3 local_normal;
+layout(location=3) in float local_static_light;
+layout(location=4) in vec3 local_light_normal;
+layout(location=5) in vec3 local_face_anchor;
+layout(location=6) in float local_extra_light;
+layout(location=7) in float local_light_mode;
+uniform float ambient_light;
+uniform float attenuation_min;
+uniform int num_lights;
+uniform vec4 light_position_radius[16]; // local XYZ and JK light radius
+uniform float light_intensity[16];
+out float jk_light;
 uniform vec4 view_right, view_forward, view_up, view_origin;
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 out float view_depth;
@@ -26,6 +37,31 @@ void main() {
     gl_Position=vec4(x/h,z/v,-projection.z,y);
     view_depth=max(y,0.0);
     pixel_uv=local_uv;
+    // JK: FullyLit=0, NotLit=1, Diffuse=2, Gouraud=3.
+    // Per-face ExtraLight and the camera's ambient floor are evaluated
+    // before the gamma-1.8 vertex conversion (like the native D3D path).
+    float l=local_light_mode>=2.5 ? local_static_light : 0.0;
+    if(local_light_mode>=1.5) {
+        for(int i=0;i<num_lights;i++) {
+            vec3 anchor=local_light_mode>=2.5
+                ? local_position : local_face_anchor;
+            vec3 normal=local_light_mode>=2.5
+                ? local_light_normal : local_normal;
+            vec3 delta=light_position_radius[i].xyz-anchor;
+            float dist=length(delta);
+            float along=dot(normal,delta/max(dist,0.00001));
+            float range_distance=local_light_mode>=2.5
+                ? dist : abs(dot(normal,delta));
+            if(range_distance<light_position_radius[i].w && along>0.0) {
+                l+=(light_intensity[i]-
+                    range_distance*attenuation_min)*along;
+            }
+            if(l>=1.0) break;
+        }
+    }
+    float bright=local_light_mode<0.5 ? 1.0
+        : max(clamp(l+local_extra_light,0.0,1.0),ambient_light);
+    jk_light=pow(clamp(bright,0.0,1.0),1.8);
     vec3 vn=view_right.xyz*local_normal.x+
             view_forward.xyz*local_normal.y+
             view_up.xyz*local_normal.z;

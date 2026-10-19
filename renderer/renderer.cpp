@@ -369,6 +369,26 @@ namespace jkgm {
             gl::vertex_attrib_pointer(2U,3U,gl::vertex_element_type::float32,
                                       false,sizeof(gpu_3do_vertex),
                                       offsetof(gpu_3do_vertex,nx));
+            gl::enable_vertex_attrib_array(3U);
+            gl::vertex_attrib_pointer(3U,1U,gl::vertex_element_type::float32,
+                                      false,sizeof(gpu_3do_vertex),
+                                      offsetof(gpu_3do_vertex,static_light));
+            gl::enable_vertex_attrib_array(4U);
+            gl::vertex_attrib_pointer(4U,3U,gl::vertex_element_type::float32,
+                                      false,sizeof(gpu_3do_vertex),
+                                      offsetof(gpu_3do_vertex,lnx));
+            gl::enable_vertex_attrib_array(5U);
+            gl::vertex_attrib_pointer(5U,3U,gl::vertex_element_type::float32,
+                                      false,sizeof(gpu_3do_vertex),
+                                      offsetof(gpu_3do_vertex,fax));
+            gl::enable_vertex_attrib_array(6U);
+            gl::vertex_attrib_pointer(6U,1U,gl::vertex_element_type::float32,
+                                      false,sizeof(gpu_3do_vertex),
+                                      offsetof(gpu_3do_vertex,face_extra));
+            gl::enable_vertex_attrib_array(7U);
+            gl::vertex_attrib_pointer(7U,1U,gl::vertex_element_type::float32,
+                                      false,sizeof(gpu_3do_vertex),
+                                      offsetof(gpu_3do_vertex,light_mode));
             gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
             gl::buffer_data(gl::buffer_bind_target::element_array,
                             make_span(source.indices).as_const_bytes(),
@@ -2088,6 +2108,7 @@ namespace jkgm {
                                          make_point(m[6],m[7],m[8],0.0f),
                                          make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(it->second->vao);
+                    prog.set_lighting(inst);
                     active_instance=draw.instance;
                 }
                 if((group.face_type&0x1U)!=0) {
