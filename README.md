@@ -1026,6 +1026,28 @@ No additional config option or EXE patch is needed. Unsupported executables
 keep their original native mip behavior. The override does not run with
 `"use_vanilla_renderer": true`.
 
+## Experimental extended SPR type foundation (JK23 only)
+
+The checked-in `tools/patch_jkgm_sprite_types.py` verifies the exact
+development JK23 executable SHA-256 and changes *only* the `sithSprite_Load`
+maximum type from 2 to 63. It refuses unknown EXEs and never overwrites the
+input. Example (run on a copy of your executable):
+
+```sh
+python tools/patch_jkgm_sprite_types.py jkgm.exe jkgm-spr.exe
+```
+
+**This is a staging patch, not an activated SPR renderer.** Currently JK23's
+native draw routine still renders every sprite as a camera-facing billboard.
+The pure, unit-tested orientation helper `renderer/sprite_orientation.hpp`
+defines the proposed *new* bits: `0x04` preserve Up, `0x08` preserve Look,
+`0x10` preserve Right and `0x20` project a decal (which implies fixed
+orientation). Existing SPR types 0, 1, 2 remain untouched. These extended
+bits will only affect actual rendering after the forthcoming sprite draw hook
+and projector pass are implemented; there is no `SetSpriteInfo` COG verb yet.
+The patch script is included with CI test builds, but no EXE is distributed
+with the repository.
+
 ## Experimental depth-projected decal (first prototype)
 
 A projected decal is **not** a MAT material alpha mode. The renderer uses the
