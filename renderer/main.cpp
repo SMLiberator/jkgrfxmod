@@ -205,6 +205,94 @@ namespace {
             f,project_type==1,x,y,z,m.radius*max_axis_scale+0.02f);
     }
 
+    // Local positions are used for per-vertex illumination, so they travel
+    // with the cached mesh while the current Thing's lights are uniforms.
+    // The inverse works for the reflected/mirrored R/F/U bases JK permits.
+    bool snapshot_gpu_3do_lighting(native_mesh const &m,
+                                   float const *placement,
+                                   jkgm::gpu_3do_instance &instance)
+    {
+        constexpr uintptr_t camera_global=0x0073A418U;
+        if(!gpu_span_readable(reinterpret_cast<void const *>(camera_global),4))
+            return false;
+        uintptr_t camera=0;
+        std::memcpy(&camera,reinterpret_cast<void const *>(camera_global),4);
+        // Original x86 rdCamera: ambient=0x54, count=0x58,
+        // 64 light pointers=0x5c, 64 world positions=0x15c,
+        // attenuationMin=0x45c.
+        if(camera<0x10000U ||
+           !gpu_span_readable(reinterpret_cast<void const *>(camera),0x464U))
+            return false;
+        float ambient=0.0f, attenuation=0.0f;
+        int32_t count=0;
+        std::memcpy(&ambient,reinterpret_cast<void const *>(camera+0x54),4);
+        std::memcpy(&count,reinterpret_cast<void const *>(camera+0x58),4);
+        std::memcpy(&attenuation,reinterpret_cast<void const *>(camera+0x45c),4);
+        if(!std::isfinite(ambient) || !std::isfinite(attenuation) ||
+           count<0 || count>64 || attenuation<0.0f || attenuation>100.0f)
+            return false;
+        instance.ambient=std::max(0.0f,std::min(ambient,1.0f));
+        instance.attenuation=attenuation;
+
+        float const rx=placement[0],ry=placement[1],rz=placement[2];
+        float const fx=placement[3],fy=placement[4],fz=placement[5];
+        float const ux=placement[6],uy=placement[7],uz=placement[8];
+        float const cfx=fy*uz-fz*uy, cfy=fz*ux-fx*uz, cfz=fx*uy-fy*ux;
+        float const determinant=rx*cfx+ry*cfy+rz*cfz;
+        // Native lights use Euclidean world distances. For non-unit scaling
+        // local-space evaluation would change attenuation; let JK handle it.
+        if(!std::isfinite(determinant) ||
+           std::fabs(std::fabs(determinant)-1.0f)>0.05f)
+            return false;
+        for(int axis=0;axis<3;axis++) {
+            int const i=axis*3;
+            float const len=placement[i]*placement[i]+
+                            placement[i+1]*placement[i+1]+
+                            placement[i+2]*placement[i+2];
+            if(!std::isfinite(len) || std::fabs(len-1.0f)>0.05f)
+                return false;
+        }
+
+        for(int i=0;i<count;i++) {
+            uintptr_t light=0;
+            std::memcpy(&light,reinterpret_cast<void const *>(camera+0x5c+4*i),4);
+            if(light<0x10000U ||
+               !gpu_span_readable(reinterpret_cast<void const *>(light),0x30))
+                return false;
+            uint32_t id=0,enabled=0;
+            float strength=0.0f,radius=0.0f;
+            std::memcpy(&id,reinterpret_cast<void const *>(light),4);
+            std::memcpy(&enabled,reinterpret_cast<void const *>(light+8),4);
+            std::memcpy(&strength,reinterpret_cast<void const *>(light+0x18),4);
+            std::memcpy(&radius,reinterpret_cast<void const *>(light+0x28),4);
+            if(id>=64 || !std::isfinite(strength) || !std::isfinite(radius))
+                return false;
+            if(!enabled || strength<=0.0f || radius<=0.0f) continue;
+            float pos[3];
+            std::memcpy(pos,reinterpret_cast<void const *>(camera+0x15c+id*12),12);
+            if(!std::isfinite(pos[0]) || !std::isfinite(pos[1]) ||
+               !std::isfinite(pos[2])) return false;
+            float const dx=pos[0]-placement[9];
+            float const dy=pos[1]-placement[10];
+            float const dz=pos[2]-placement[11];
+            float const reach=radius+std::max(0.0f,m.radius);
+            if(dx*dx+dy*dy+dz*dz>reach*reach) continue;
+            if(instance.num_lights==instance.lights.size())
+                return false; // Native path for light-heavy scenes; never drop lights.
+            auto &out=instance.lights[instance.num_lights++];
+            out.local_position={
+                (dx*cfx+dy*cfy+dz*cfz)/determinant,
+                (rx*(dy*uz-dz*uy)+ry*(dz*ux-dx*uz)+
+                 rz*(dx*uy-dy*ux))/determinant,
+                (rx*(fy*dz-fz*dy)+ry*(fz*dx-fx*dz)+
+                 rz*(fx*dy-fy*dx))/determinant
+            };
+            out.radius=radius;
+            out.intensity=strength;
+        }
+        return true;
+    }
+
     std::shared_ptr<jkgm::gpu_3do_geometry const>
     snapshot_gpu_mesh(native_mesh const &m) {
         if(m.num_vertices<3 || m.num_vertices>65536 || m.num_faces<1 ||
@@ -234,7 +322,21 @@ namespace {
             // Fail open when a textured polygon lacks readable UVs.
             // Avoid suppressing JK geometry that we cannot reproduce.
             if(face.material && face.geo>=4 && !face_uv) return {};
+            // The native engine's per-face mode is capped by the mesh mode.
+            // Faces with unknown modes fall back instead of rendering unlit.
+            if(m.lighting_mode<0 || m.lighting_mode>3 ||
+               face.light>3 || !std::isfinite(face.extra_light))
+                return {};
+            int const mode=(face.type&0x10U)!=0 ? 1
+                            : std::min(m.lighting_mode,static_cast<int>(face.light));
+            if(mode==3 && (!m.vertex_lights || !m.normals ||
+               !gpu_span_readable(m.vertex_lights,size_t(m.num_vertices)*4) ||
+               !gpu_span_readable(m.normals,size_t(m.num_vertices)*12)))
+                return {};
             uint32_t const base=static_cast<uint32_t>(g->vertices.size());
+            int const anchor_index=face.pos_indices[0];
+            if(anchor_index<0 || anchor_index>=m.num_vertices) return {};
+            auto const anchor=m.vertices+size_t(anchor_index)*3;
             for(uint32_t v=0;v<face.count;v++) {
                 int const pi=face.pos_indices[v];
                 if(pi<0 || pi>=m.num_vertices) return {};
@@ -246,12 +348,19 @@ namespace {
                     u=uv_src[size_t(uv_idx)*2]+face.uv_x;
                     vtex=uv_src[size_t(uv_idx)*2+1]+face.uv_y;
                 }
+                auto const light_normal=mode==3
+                    ? static_cast<float const *>(m.normals)+i : face.normal;
+                float const static_light=mode==3 ? m.vertex_lights[pi] : 0.0f;
                 jkgm::gpu_3do_vertex out{
                     m.vertices[i],m.vertices[i+1],m.vertices[i+2],
-                    u,vtex,face.normal[0],face.normal[1],face.normal[2]
+                    u,vtex,face.normal[0],face.normal[1],face.normal[2],
+                    static_light,light_normal[0],light_normal[1],light_normal[2],
+                    anchor[0],anchor[1],anchor[2],face.extra_light,float(mode)
                 };
                 for(float vcheck : {out.x,out.y,out.z,out.u,out.v,
-                                    out.nx,out.ny,out.nz})
+                                    out.nx,out.ny,out.nz,out.static_light,
+                                    out.lnx,out.lny,out.lnz,
+                                    out.fax,out.fay,out.faz,out.face_extra})
                     if(!std::isfinite(vcheck)) return {};
                 g->vertices.push_back(out);
             }
@@ -487,6 +596,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     inst.geometry=it->second.geometry;
     std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
     for(float f:inst.transform) if(!std::isfinite(f)) return false;
+    if(!snapshot_gpu_3do_lighting(m,inst.transform.data(),inst))
+        return false;
     pending_gpu_instances.emplace_back(std::move(inst));
     if(the_config->profile_renderer) ++gpu_native_stats.queued;
     return true;

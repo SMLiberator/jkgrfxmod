@@ -10,9 +10,21 @@ namespace jkgm {
     struct gpu_3do_vertex {
         float x,y,z;
         float u,v; // source MAT UVs, in original texture pixels
-        float nx,ny,nz; // mesh-local face normal
+        float nx,ny,nz; // mesh-local face normal (G-buffer)
+        float static_light; // immutable .3DO vertex intensity
+        float lnx,lny,lnz; // mesh-local vertex normal for Gouraud illumination
+        float fax,fay,faz; // face's first vertex: JK diffuse light anchor
+        float face_extra; // .3DO per-face extra light
+        float light_mode; // 0=fully lit, 1=not lit, 2=diffuse, 3=Gouraud
     };
-    static_assert(sizeof(gpu_3do_vertex)==32,"Unexpected GPU vertex stride");
+    static_assert(sizeof(gpu_3do_vertex)==68,"Unexpected GPU vertex stride");
+
+    constexpr unsigned gpu_3do_max_lights=16;
+    struct gpu_3do_light {
+        std::array<float,3> local_position{};
+        float radius=0.0f;
+        float intensity=0.0f;
+    };
 
     struct gpu_3do_group {
         uint32_t offset=0, count=0; // index-buffer range
@@ -30,6 +42,11 @@ namespace jkgm {
         uint64_t id=0;
         std::shared_ptr<gpu_3do_geometry const> geometry;
         std::array<float,12> transform{}; // 3DO node matrix
+        // JK's rdCamera light list is Thing-dependent: snapshot when the mesh
+        // hook runs, NOT at present(), after another Thing changes it.
+        float ambient=1.0f, attenuation=0.0f;
+        unsigned num_lights=0;
+        std::array<gpu_3do_light,gpu_3do_max_lights> lights{};
     };
     struct gpu_3do_native_stats {
         uint64_t attempted=0,culled=0,queued=0,snapshots=0,ready_checks=0;
