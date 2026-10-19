@@ -410,7 +410,7 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
 {
     LOG_DEBUG("Loading OpenGL assets");
     // Load the experimental 3DO GPU path only when explicitly enabled.
-    if(the_config->use_gpu_renderer) {
+    if(the_config->use_model_cache) {
         gpu_3do_preview_program =
             std::make_unique<shaders::gpu_3do_preview_shader>(data_root);
     }
