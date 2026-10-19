@@ -151,6 +151,7 @@ namespace jkgm {
             gl::uniform_location_id jk_color_filter,jk_color_tint,jk_color_add_fade;
             gl::uniform_location_id colormap_tint;
             gl::uniform_location_id specular_params,normal_specular_params;
+            gl::uniform_location_id specular_surface_sampler,specular_normal_sampler;
             gl::uniform_location_id normal_specular_scroll,local_eye;
             gl::uniform_location_id ambient_light,attenuation_min,num_lights,
                                     effective_light_mode;
