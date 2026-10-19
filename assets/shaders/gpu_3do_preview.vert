@@ -14,6 +14,7 @@ layout(location=8) in vec3 local_vertex_rgb;
 uniform float ambient_light;
 uniform float effective_light_mode; // captured per Thing
 // Native JK applies these to RGB8 *vertex colors* before texturing.
+uniform vec3 colormap_tint; // nonidentity CMP header RGB multiplier
 uniform vec4 jk_color_filter; // XYZ selected channel mask, W active
 uniform vec4 jk_color_tint;
 uniform vec4 jk_color_add_fade; // RGB additive/255, A fade
@@ -74,6 +75,7 @@ void main() {
     float bright=mode<0.5 ? 1.0
         : max(clamp(l+local_extra_light,0.0,1.0),ambient_light);
     jk_lit_rgb=vec3(pow(clamp(bright,0.0,1.0),1.8))*local_vertex_rgb;
+    jk_lit_rgb*=colormap_tint; // before native hardware color effects
     if(jk_color_filter.w>0.5) {
         // Approximate the hardware rdCache per-vertex RGB8 color operation.
         vec3 v=pow(clamp(jk_lit_rgb,0.0,1.0),vec3(1.0/1.8));

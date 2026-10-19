@@ -58,6 +58,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\texture_alpha.cpp /Fe:texture_alpha_test.exe
         texture_alpha_test.exe
+    - name: GPU 3DO colormap tint regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_colormap.cpp /Fe:gpu_3do_colormap_test.exe
+        gpu_3do_colormap_test.exe
     - name: GPU 3DO alpha partition tests
       shell: cmd
       run: |

@@ -11,6 +11,7 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
+#include "gpu_3do_colormap.hpp"
 #include "native_mat_mips.hpp"
 #include "engine_material_debug.hpp"
 #include "sun.hpp"
@@ -170,6 +171,33 @@ namespace {
         native_texture tex{};
         if(!read_object(info.texture,tex)) return true;
         return (tex.header[0]&1U)!=0;
+    }
+
+    // JK23 rdColormap_SetCurrent (0x442760) stores current/identity CMP
+    // pointers in 0x73A410/0x73A414. A non-identity CMP uses the three
+    // float header tint values at rdColormap+4. Capture once per instance.
+    std::array<float,3> read_gpu_3do_colormap_tint()
+    {
+        constexpr std::array<float,3> white{{1.0f,1.0f,1.0f}};
+        static bool const supported=[] {
+            constexpr uint8_t bytes[]{0x8b,0x44,0x24,0x04,0x8b,0x0d,
+                0x10,0xa4,0x73,0x00,0x3b,0xc8,0x74,0x05};
+            auto const *p=reinterpret_cast<void const *>(0x00442760U);
+            return reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))==
+                       0x00400000U && gpu_span_readable(p,sizeof(bytes)) &&
+                   std::memcmp(p,bytes,sizeof(bytes))==0;
+        }();
+        if(!supported) return white;
+        uint32_t current=0,identity=0;
+        std::memcpy(&current,reinterpret_cast<void const *>(0x0073A410U),4);
+        std::memcpy(&identity,reinterpret_cast<void const *>(0x0073A414U),4);
+        if(!current || current==identity) return white;
+        if(!gpu_span_readable(reinterpret_cast<void const *>(uintptr_t(current)),16))
+            return white;
+        std::array<float,3> tint{};
+        std::memcpy(tint.data(),
+                    reinterpret_cast<uint8_t const *>(uintptr_t(current))+4,12);
+        return jkgm::gpu_3do_cmp_tint(false,tint);
     }
 
     // When bypassing rdModel3_DrawMesh, its built-in sphere/frustum cull
@@ -735,6 +763,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     gpu_3do_instance inst;
     inst.id=it->second.id;
     inst.geometry=it->second.geometry;
+    inst.colormap_tint=read_gpu_3do_colormap_tint();
     // curLightingMode (rdModel3_Draw's effective Thing/global cap):
     // the verified rdModel3 global block is +0x48 from original JK.
     // This is sampled per instance because COG can change it each frame.

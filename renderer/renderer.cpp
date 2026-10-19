@@ -2289,6 +2289,7 @@ namespace jkgm {
                                          make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(it->second->vao);
                     prog.set_lighting(inst);
+                    prog.set_colormap_tint(inst.colormap_tint);
                     active_instance=draw.instance;
                 }
                 if((group.face_type&0x1U)!=0) {

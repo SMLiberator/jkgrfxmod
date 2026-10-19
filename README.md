@@ -788,7 +788,11 @@ state once per scene pass. This supports sector-screen tint (`SetSectorTint`),
 `NewColorEffect`, `AddDynamicTint`, `AddDynamicAdd`, filter and fade,
 without modifying JK.dll. Exact 8-bit rounding still requires comparison.
 Software mode instead modifies 8-bit palette entries and remains unsupported.
-`SetSectorColormap` is a separate per-sector geometry/colormap effect.
+GPU 3DOs now support `SetSectorColormap`: the native rdColormap
+current/identity pointers select the CMP, and its RGB header tint is
+sampled per mesh instance. This follows the native hardware vertex-color
+path, with no mesh re-upload when a COG changes colormaps. Software CMP
+light tables are intentionally not used.
 
 The reader verifies the 32-bit JK23 instruction signature and defaults to
 neutral coloring if unsupported. Dynamic JK.dll model mutations remain to be

@@ -149,6 +149,7 @@ namespace jkgm {
                                     albedo_scroll,emissive_scroll,fog_params,fog_color,
                                     emissive_only;
             gl::uniform_location_id jk_color_filter,jk_color_tint,jk_color_add_fade;
+            gl::uniform_location_id colormap_tint;
             gl::uniform_location_id ambient_light,attenuation_min,num_lights,
                                     effective_light_mode;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity;
@@ -165,6 +166,7 @@ namespace jkgm {
                               point<2,float> scroll);
             void set_fog(point<4,float> params,point<4,float> color);
             void set_lighting(gpu_3do_instance const &instance);
+            void set_colormap_tint(std::array<float,3> const &tint);
             void set_jk_color_effects(point<4,float> filter,point<4,float> tint,
                                       point<4,float> add_fade);
         };

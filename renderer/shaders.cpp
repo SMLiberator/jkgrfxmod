@@ -167,6 +167,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , jk_color_filter(gl::get_uniform_location(the_program,"jk_color_filter"))
     , jk_color_tint(gl::get_uniform_location(the_program,"jk_color_tint"))
     , jk_color_add_fade(gl::get_uniform_location(the_program,"jk_color_add_fade"))
+    , colormap_tint(gl::get_uniform_location(the_program,"colormap_tint"))
     , ambient_light(gl::get_uniform_location(the_program,"ambient_light"))
     , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
@@ -234,6 +235,12 @@ void jkgm::shaders::gpu_3do_preview_shader::set_jk_color_effects(
     gl::set_uniform_vector(jk_color_filter,filter);
     gl::set_uniform_vector(jk_color_tint,tint);
     gl::set_uniform_vector(jk_color_add_fade,add_fade);
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_colormap_tint(
+    std::array<float,3> const &tint)
+{
+    gl::set_uniform_vector(colormap_tint,make_point(tint[0],tint[1],tint[2]));
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_lighting(
