@@ -1015,6 +1015,15 @@ namespace {
     // report a few actual rendered instances per .SPR, not just definitions:
     // this distinguishes a type parsed as zero from Things with differing axes.
     std::unordered_map<std::string,int> sprite_trace_counts;
+    void trace_sprite_skip(char const *name,uint32_t type,char const *reason)
+    {
+        if(!the_config || !the_config->profile_renderer ||
+           sprite_trace_counts.size()>=128U) return;
+        std::string const key(name);
+        int &seen=sprite_trace_counts[key];
+        if(seen++<3) LOG_WARNING("SPR pose name=",key," type=",type,
+                                  " applied=no reason=",reason);
+    }
     void trace_native_sprite(char const *name,uint32_t type,
                              jkgm::sprite_axes const &thing_axes,
                              jkgm::sprite_axes const &camera_axes,
@@ -1085,23 +1094,41 @@ namespace {
         if(!std::isfinite(size[2])||!std::isfinite(size[3]) ||
            size[2]<=0.0f||size[3]<=0.0f ||
            size[2]>8192.0f||size[3]>8192.0f)
+        {
+            trace_sprite_skip(sprite_name,type,"invalid width or height");
             return;
-        for(float v:offset) if(!std::isfinite(v)) return;
+        }
+        for(float v:offset) if(!std::isfinite(v)) {
+            trace_sprite_skip(sprite_name,type,"invalid local offset");
+            return;
+        }
 
         jkgm::gpu_3do_matrix34 thing{},view{};
         std::memcpy(thing.data(),sprite_draw_active.orientation,
                     thing.size()*sizeof(float));
-        if(!jkgm::gpu_3do_matrix_finite(thing)) return;
+        if(!jkgm::gpu_3do_matrix_finite(thing)) {
+            trace_sprite_skip(sprite_name,type,"nonfinite Thing matrix");
+            return;
+        }
         constexpr uintptr_t native_camera_ptr_addr=0x0073A418U;
         if(!gpu_span_readable(reinterpret_cast<void const *>(
-                    native_camera_ptr_addr),sizeof(void *))) return;
+                    native_camera_ptr_addr),sizeof(void *))) {
+            trace_sprite_skip(sprite_name,type,"native camera pointer unreadable");
+            return;
+        }
         void const *camera=nullptr;
         std::memcpy(&camera,reinterpret_cast<void const *>(
                     native_camera_ptr_addr),sizeof(camera));
-        if(!gpu_span_readable(camera,8+view.size()*sizeof(float))) return;
+        if(!gpu_span_readable(camera,8+view.size()*sizeof(float))) {
+            trace_sprite_skip(sprite_name,type,"camera matrix unreadable");
+            return;
+        }
         std::memcpy(view.data(),static_cast<uint8_t const *>(camera)+8,
                     view.size()*sizeof(float));
-        if(!jkgm::gpu_3do_matrix_finite(view)) return;
+        if(!jkgm::gpu_3do_matrix_finite(view)) {
+            trace_sprite_skip(sprite_name,type,"nonfinite camera matrix");
+            return;
+        }
 
         // Invert only the orthogonal camera basis to recover WORLD axes.
         // Sith rdMatrix34 is {Right,Look,Up,Translation}, each a vec3.
@@ -1116,8 +1143,10 @@ namespace {
             {{view[2],view[5],view[8]}}
         };
         jkgm::sprite_axes final_axes{};
-        if(!jkgm::compute_sprite_axes(type,thing_axes,camera_axes,final_axes))
+        if(!jkgm::compute_sprite_axes(type,thing_axes,camera_axes,final_axes)) {
+            trace_sprite_skip(sprite_name,type,"degenerate Thing orientation axes");
             return;
+        }
 
         for(int axis=0;axis<3;axis++) {
             thing[axis]=final_axes.right[axis];
@@ -1125,11 +1154,17 @@ namespace {
             thing[axis+6]=final_axes.up[axis];
         }
         auto const modelview=jkgm::gpu_3do_native_modelview(view,thing);
-        if(!jkgm::gpu_3do_matrix_finite(modelview)) return;
+        if(!jkgm::gpu_3do_matrix_finite(modelview)) {
+            trace_sprite_skip(sprite_name,type,"nonfinite modelview");
+            return;
+        }
         // Native sprite buffer at 0x82EA00: four float3s, camera-space.
         constexpr uintptr_t native_quad_addr=0x0082EA00U;
         if(!gpu_span_readable(reinterpret_cast<void const *>(native_quad_addr),
-                              12*sizeof(float))) return;
+                              12*sizeof(float))) {
+            trace_sprite_skip(sprite_name,type,"quad buffer unreadable");
+            return;
+        }
         float transformed[12]{};
         for(int i=0;i<4;i++) {
             float const x=offset[0]+((i==1||i==2)?size[2]:-size[2]);
