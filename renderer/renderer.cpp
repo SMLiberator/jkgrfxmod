@@ -1218,6 +1218,7 @@ namespace jkgm {
                     ogs.get(), conf_scr_res, scene,
                     frame_screen->get_resolved_depth_texture());
             }
+            jk_palette_gameplay_active()=(mode==renderer_mode::ingame);
             frame_compositor->end_frame(ogs.get(), conf_scr_res, scene);
 
             SwapBuffers(hDC);

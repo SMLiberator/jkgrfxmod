@@ -774,6 +774,29 @@ For exact install paths, compatibility limits, and test commands, see
 [doc/install.md](doc/install.md).
 
 
+## Native JK palette effects and sector-screen tint
+
+The JK23 executable's stdPalEffects request table is now read once per
+presented gameplay frame and applied after scene rendering. This covers
+`NewColorEffect` / `ModifyColorEffect`, `AddDynamicTint`,
+`AddDynamicAdd`, fades, channel filters, and screen tint inherited from
+the current sector (`SetSectorTint`), without separate COG hooks or mesh
+uploads. The ordering mirrors JK's palette pipeline: filter, tint, additive,
+fade. It is independent of `enable_post` and disabled on menus.
+
+The compatibility reader is limited to the tested 32-bit JK23-based executable
+by a verified native instruction signature. A mismatched executable
+automatically retains neutral color (no unsafe arbitrary memory reads).
+JK's original effects operate on RGB8 palette entries; the replacement
+approximates them in sRGB screen color and can differ in 8-bit rounding.
+`SetSectorColormap` is a separate per-sector texture/colormap mapping feature
+and is **not** implemented by this screen-wide correction.
+
+Dynamic 3DO/model changes in JK.dll remain under investigation. The GPU
+cache detects pointer and mesh-count changes but does not yet recognize
+in-place edits to face material/vertex/index data; no blanket geometry
+re-upload has been added.
+
 ## Experimental GPU-resident 3DO mesh path
 
 Set \`"use_gpu_renderer": true\` in \`jkgm.json\` to draw **all supported

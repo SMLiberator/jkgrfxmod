@@ -27,6 +27,14 @@ uniform vec4 vignette_params = vec4(0.0, 0.0, 0.0, 1.0);
 // x = amount (0 turns grain off), y = grain size in pixels, z = frame seed (new noise per value)
 uniform vec4 grain_params;
 
+// Native JK stdPalEffects. filter.w enables the branch, other components
+// are the merged 32 requests from the patched executable. The filter dims
+// *unselected* channels to 25%; tint is JK's channel-specific matrix;
+// additive is in 8-bit gamma-space RGB and fade is applied last.
+uniform vec4 jk_palette_filter;
+uniform vec4 jk_palette_tint;
+uniform vec4 jk_palette_add_fade;
+
 // PCG integer hash (O'Neill; see Jarzynski & Olano, "Hash Functions for GPU Rendering")
 uint pcg_hash(uint v)
 {
@@ -105,5 +113,25 @@ void main()
         color = pow(max(g, vec3(0.0)), vec3(2.2));
     }
 
+    if(jk_palette_filter.w > 0.5) {
+        // JK transforms RGB8 palette entries, not lighting-linear RGB.
+        // Operate in perceptual/sRGB space, then return linear HDR values
+        // for our shared presentation pipeline.
+        vec3 rgb=pow(clamp(color,0.0,1.0),vec3(1.0/2.2));
+        if(any(greaterThan(jk_palette_filter.rgb,vec3(0.5))))
+            rgb*=mix(vec3(0.25),vec3(1.0),
+                     step(vec3(0.5),jk_palette_filter.rgb));
+        float tr=jk_palette_tint.x;
+        float tg=jk_palette_tint.y;
+        float tb=jk_palette_tint.z;
+        vec3 tint_scale=vec3(
+            1.0+tr-0.5*(tg+tb),
+            1.0+tg-0.5*(tr+tb),
+            1.0+tb-0.5*(tr+tg));
+        rgb=clamp(rgb*tint_scale,0.0,1.0);
+        rgb=clamp(rgb+jk_palette_add_fade.rgb,0.0,1.0);
+        rgb*=jk_palette_add_fade.w;
+        color=pow(max(rgb,vec3(0.0)),vec3(2.2));
+    }
     out_color = vec4(color, samp.a);
 }

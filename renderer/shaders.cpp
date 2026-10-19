@@ -689,6 +689,9 @@ jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(fs::path const &data_roo
     , brightness(gl::get_uniform_location(the_program, "brightness"))
     , contrast(gl::get_uniform_location(the_program, "contrast"))
     , saturation(gl::get_uniform_location(the_program, "saturation"))
+    , jk_palette_filter(gl::get_uniform_location(the_program,"jk_palette_filter"))
+    , jk_palette_tint(gl::get_uniform_location(the_program,"jk_palette_tint"))
+    , jk_palette_add_fade(gl::get_uniform_location(the_program,"jk_palette_add_fade"))
 {
     bloom_fbuf.reserve(num_bloom_layers);
     bloom_weight.reserve(num_bloom_layers);
@@ -741,4 +744,12 @@ void jkgm::shaders::post_to_srgb_shader::set_color_filter(float brightness_value
     gl::set_uniform_float(brightness, brightness_value);
     gl::set_uniform_float(contrast, contrast_value);
     gl::set_uniform_float(saturation, saturation_value);
+}
+
+void jkgm::shaders::post_to_srgb_shader::set_jk_palette_effects(
+    point<4,float> filter,point<4,float> tint,point<4,float> add_fade)
+{
+    gl::set_uniform_vector(jk_palette_filter,filter);
+    gl::set_uniform_vector(jk_palette_tint,tint);
+    gl::set_uniform_vector(jk_palette_add_fade,add_fade);
 }
