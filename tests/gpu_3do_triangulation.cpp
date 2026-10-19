@@ -33,6 +33,16 @@ int main() {
     assert(triangles.size()==1 && !nonplanar);
     assert(std::abs(triangles_area(triangle,triangles)-4.5)<1e-6);
 
+    // Native convex quads already work with the original diagonal; keep
+    // their winding, triangulation and UV interpolation unchanged.
+    std::vector<point3> const square{{
+        {{0,0,0}},{{4,0,0}},{{4,4,0}},{{0,4,0}}
+    }};
+    assert(gpu_3do_triangulate_face(square,normal,triangles,nonplanar));
+    assert(!nonplanar && triangles.size()==2);
+    assert((triangles[0]==triangle3{{0,1,2}}));
+    assert((triangles[1]==triangle3{{0,2,3}}));
+
     // A fan from corner zero crosses the concavity: it is not a correct
     // tessellation, whereas the new ear clipping preserves area.
     std::vector<point3> const concave{{
