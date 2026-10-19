@@ -7,7 +7,7 @@ namespace jkgm {
     inline bool texture_has_nonopaque_alpha(span<char const> rgba)
     {
         for(size_t i=3;i<rgba.size();i+=4)
-            if(static_cast<unsigned char>(rgba[i])!=255U) return true;
+            if(static_cast<unsigned char>(rgba.data()[i])!=255U) return true;
         return false;
     }
 }
