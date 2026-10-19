@@ -2552,7 +2552,10 @@ namespace jkgm {
                                        std::array<float,3>{{0,0,0}});
                     active_instance=draw.instance;
                 }
-                if((group.face_type&0x1U)!=0) {
+                if((group.face_type&0x1U)!=0 || group.nonplanar) {
+                    // Warped polygons may have triangles that face away even
+                    // when JK's single stored face normal faces the camera.
+                    // Use the original CPU face-normal test above instead.
                     gl::disable(gl::capability::cull_face);
                 } else {
                     gl::enable(gl::capability::cull_face);
