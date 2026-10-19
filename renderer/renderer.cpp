@@ -2490,6 +2490,8 @@ namespace jkgm {
                             return a.group->cel<b.group->cel;
                         if(a.group->face_type!=b.group->face_type)
                             return a.group->face_type<b.group->face_type;
+                        if(a.group->nonplanar!=b.group->nonplanar)
+                            return a.group->nonplanar<b.group->nonplanar;
                         return a.order<b.order;
                     });
             }
@@ -2525,6 +2527,7 @@ namespace jkgm {
                            other.group->material!=group.material ||
                            other.group->cel!=group.cel ||
                            other.group->face_type!=group.face_type ||
+                           other.group->nonplanar!=group.nonplanar ||
                            other.policy!=draw.policy)
                             break;
                         ++draw_end;
@@ -2627,8 +2630,10 @@ namespace jkgm {
                     prog.set_parallax(0.0f);
                 }
                 prev_parallax=parallax;
+                // Point-light GGX was intentionally suspended. Do not set up
+                // reflection-only textures unless an EnvMap or sun can use them.
                 bool const spec_active=draw.texture.reflection_strength>0 &&
-                    (inst.num_lights>0 || draw.texture.has_environment ||
+                    (draw.texture.has_environment ||
                      draw.texture.has_environment2 || sun_active);
                 if(spec_active) {
                     gl::set_active_texture_unit(2);
