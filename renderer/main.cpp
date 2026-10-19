@@ -822,6 +822,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
         return true;
     }
     auto it=gpu_mesh_cache.find(mesh);
+    bool snapshot_attempted_this_call=false;
     // Read immutable-looking header fields on each instance, but hash all
     // underlying vertex/UV/face content at most once per mesh per frame.
     // This catches COG writes that keep the same allocation and counts.
@@ -853,6 +854,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
         }
         if(!header_unchanged || it->second.source_signature!=signature) {
             char const *failure="unknown_snapshot_error";
+            snapshot_attempted_this_call=true;
             auto geom=snapshot_gpu_mesh(m,vertex_rgb,&failure);
             if(gpu_mesh_cache.size()>4096) gpu_mesh_cache.clear();
             if(profiling && header_unchanged)
@@ -880,7 +882,6 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
                 // Avoid repeating expensive failed triangulation/validation
                 // on every Thing instance and every subsequent frame.
                 updated.snapshot_failure=failure;
-                if(profiling) ++gpu_native_stats.snapshot_native;
                 gpu_log_fallback(m,failure);
             }
             gpu_mesh_cache[mesh]=std::move(updated);
@@ -893,7 +894,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     if(!it->second.geometry) {
         if(the_config->profile_renderer) {
             ++gpu_native_stats.snapshot_native;
-            ++gpu_native_stats.failed_snapshot_reuses;
+            if(!snapshot_attempted_this_call)
+                ++gpu_native_stats.failed_snapshot_reuses;
         }
         gpu_log_fallback(m,it->second.snapshot_failure ?
                          it->second.snapshot_failure : "unknown_snapshot_error");
