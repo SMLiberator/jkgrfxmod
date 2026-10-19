@@ -1240,20 +1240,78 @@ namespace jkgm {
                     ogs.get(), conf_scr_res, scene,
                     frame_screen->get_resolved_depth_texture());
             }
-            // Use only JK's first/identity CMP palette (not sector palettes).
-            // rdColormap::colors[256] starts at offset 0x10, after flags
-            // and its three header tint floats.
+            // Retro Mode consumes the exact in-memory RGB888 entries from JK's
+            // identity CMP (+0x10, NOT the file's +0x40 palette offset).
+            // Compare this pointer against SithWorld::colormaps[0] and dump
+            // every RGB byte on first load/change; log rows can be compared to
+            // the original CMP with tools/verify_retro_cmp.py.
             ogs->retro_mode_active=false;
-            if(mode==renderer_mode::ingame && the_config->retro_mode &&
-               engine_material_debug::matches_tested_executable()) {
+            if(mode==renderer_mode::ingame && the_config->retro_mode) {
+                if(!engine_material_debug::matches_tested_executable()) {
+                    if(!ogs->retro_read_failure_logged)
+                        LOG_WARNING("Retro CMP verify: unsupported EXE; palette read disabled");
+                    ogs->retro_read_failure_logged=true;
+                }
+                else {
                 uint32_t identity_cmp=0;
                 retro_palette_rgb palette{};
                 if(engine_material_debug::read_object(0x0073A414U,identity_cmp) &&
                    identity_cmp>=0x10000U &&
                    engine_material_debug::read_bytes(
                        uintptr_t(identity_cmp)+0x10U,palette.data(),palette.size())) {
-                    if(!ogs->retro_lut_valid ||
-                       ogs->retro_source_palette!=palette) {
+                    ogs->retro_read_failure_logged=false;
+                    uint32_t world_addr=0,world_cmp0=0;
+                    engine_material_debug::world_header world{};
+                    bool const world_readable=
+                        engine_material_debug::read_object(
+                            engine_material_debug::current_world_global,world_addr) &&
+                        world_addr>=0x10000U &&
+                        engine_material_debug::read_object(world_addr,world) &&
+                        world.num_colormaps>0 && world.num_colormaps<=256 &&
+                        world.colormaps>=0x10000U;
+                    if(world_readable) world_cmp0=world.colormaps;
+                    bool const palette_changed=!ogs->retro_lut_valid ||
+                        ogs->retro_source_palette!=palette;
+                    if(!ogs->retro_diagnostic_logged || palette_changed ||
+                       ogs->retro_logged_identity_cmp!=identity_cmp ||
+                       ogs->retro_logged_world_cmp!=world_cmp0 ||
+                       ogs->retro_logged_world_address!=world_addr) {
+                        LOG_INFO("Retro CMP verify: identity_addr=",identity_cmp,
+                                 " current_world_addr=",world_addr,
+                                 " world_cmp0_addr=",world_cmp0);
+                        LOG_INFO("Retro CMP verify: identity_FNV1a32=",
+                                 retro_palette_fnv1a(palette));
+                        retro_palette_rgb world_palette{};
+                        bool const world_palette_readable=world_readable &&
+                            engine_material_debug::read_bytes(
+                                uintptr_t(world_cmp0)+0x10U,
+                                world_palette.data(),world_palette.size());
+                        if(world_palette_readable) {
+                            unsigned mismatches=0;
+                            for(size_t k=0;k<palette.size();k++)
+                                if(palette[k]!=world_palette[k]) ++mismatches;
+                            LOG_INFO("Retro CMP verify: world=",
+                                     engine_material_debug::printable_name(
+                                         world.level_name,sizeof(world.level_name)),
+                                     " colormaps=",world.num_colormaps,
+                                     " same_pointer=",identity_cmp==world_cmp0,
+                                     " different_RGB_bytes=",mismatches,
+                                     " world_FNV1a32=",retro_palette_fnv1a(world_palette));
+                        }
+                        else {
+                            LOG_WARNING("Retro CMP verify: current world's first CMP cannot be read");
+                        }
+                        // 16 x 16 RGB entries, 48 bytes per line, in original
+                        // palette order. Emitted only on load/change, not per frame.
+                        for(int first=0;first<256;first+=16)
+                            LOG_INFO("Retro CMP #0 RGB[",first,"]:",
+                                     retro_palette_hex_row(palette,first));
+                        ogs->retro_diagnostic_logged=true;
+                        ogs->retro_logged_identity_cmp=identity_cmp;
+                        ogs->retro_logged_world_cmp=world_cmp0;
+                        ogs->retro_logged_world_address=world_addr;
+                    }
+                    if(palette_changed) {
                         auto pixels=build_retro_palette_atlas(palette);
                         gl::set_active_texture_unit(2);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
@@ -1274,6 +1332,11 @@ namespace jkgm {
                         LOG_INFO("Retro CMP #0 palette lookup refreshed");
                     }
                     ogs->retro_mode_active=ogs->retro_lut_valid;
+                }
+                else if(!ogs->retro_read_failure_logged) {
+                    LOG_WARNING("Retro CMP verify: identity CMP pointer/palette unreadable; full-color fallback");
+                    ogs->retro_read_failure_logged=true;
+                }
                 }
             }
             frame_compositor->end_frame(ogs.get(), conf_scr_res, scene);
