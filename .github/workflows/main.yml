@@ -30,6 +30,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\active_rd_camera.cpp /Fe:active_rd_camera_test.exe
         active_rd_camera_test.exe
+    - name: GPU 3DO GeoMode and mirror compatibility tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_compat.cpp /Fe:gpu_3do_compat_test.exe
+        gpu_3do_compat_test.exe
     - name: GPU 3DO native sphere visibility regression tests
       shell: cmd
       run: |

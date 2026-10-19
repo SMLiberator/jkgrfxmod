@@ -10,6 +10,7 @@
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_frustum.hpp"
+#include "gpu_3do_compat.hpp"
 #include "engine_material_debug.hpp"
 #include "sun.hpp"
 #include <Windows.h>
@@ -195,7 +196,8 @@ namespace {
         for(int f=0;f<m.num_faces;f++) {
             native_face face{};
             std::memcpy(&face,m.faces+size_t(f)*sizeof(face),sizeof(face));
-            if(face.count<3 || face.count>128 || face.geo<3 ||
+            if(face.count<3 || face.count>128 ||
+               !jkgm::gpu_3do_supports_face_mode(static_cast<int>(face.geo)) ||
                !gpu_span_readable(face.pos_indices,size_t(face.count)*4) ||
                !std::isfinite(face.uv_x) || !std::isfinite(face.uv_y))
                 return {};
@@ -404,7 +406,19 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     // The GPU prototype only draws filled triangle fans. Leave points and
     // wireframe meshes to JK rather than changing their geometry semantics.
     if(the_config->profile_renderer) ++gpu_native_stats.attempted;
-    if(m.geometry_mode<3) return false;
+    // rdModel3_Draw at 0x44612c-0x446144 stores the *effective* Thing/
+    // global GeoMode in this JK23-specific native global before it visits
+    // any hierarchy meshes. Our hook otherwise ignores COG GeoMode changes.
+    constexpr uintptr_t effective_geo_mode=0x0073A5D8U;
+    if(!gpu_span_readable(reinterpret_cast<void const *>(effective_geo_mode),
+                          sizeof(int32_t)))
+        return false;
+    int32_t current_geo_mode=0;
+    std::memcpy(&current_geo_mode,
+                reinterpret_cast<void const *>(effective_geo_mode),
+                sizeof(current_geo_mode));
+    if(!jkgm::gpu_3do_supports_geo_mode(current_geo_mode,m.geometry_mode))
+        return false; // Preserve JK vertex/wire/solid/invisible rendering.
     auto const camera=jkgm::read_active_render_camera();
     if(!camera.valid) return false;
     if(gpu_mesh_outside_native_frustum(m,matrix,camera)) {

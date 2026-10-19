@@ -2,6 +2,7 @@
 #include "frame_profile.hpp"
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
+#include "gpu_3do_compat.hpp"
 #include "gpu_3do_alpha.hpp"
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
@@ -2093,7 +2094,12 @@ namespace jkgm {
                     gl::disable(gl::capability::cull_face);
                 } else {
                     gl::enable(gl::capability::cull_face);
-                    gl::set_face_cull_mode(gl::face_mode::back);
+                    // A mirrored R/F/U basis flips triangle winding, but
+                    // JK still treats the object's outside as the front.
+                    // Cull the opposite side rather than showing its inside.
+                    gl::set_face_cull_mode(
+                        gpu_3do_reversed_winding(inst.transform)
+                            ? gl::face_mode::front : gl::face_mode::back);
                 }
                 // The native translucent face flag forces alpha even when
                 // its MAT texture is fully opaque (JK uses alpha=90/255).
