@@ -11,6 +11,7 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
+#include "native_mat_mips.hpp"
 #include "engine_material_debug.hpp"
 #include "sun.hpp"
 #include <Windows.h>
@@ -32,6 +33,7 @@ static std::unique_ptr<jkgm::config> the_config;
 static bool renderer_hooks_active = false;
 
 static bool native_3do_hooks_active = false;
+static bool native_mat_mips_hook_active = false;
 
 // Function boundaries and prologues independently verified in both the
 // user's SHA-locked jk23.exe and standalone jkgm.exe. Not portable to other JKs.
@@ -55,6 +57,32 @@ namespace {
     native_face_func RealNativeFace =
         reinterpret_cast<native_face_func>(native_face_addr);
     jkgm::native_3do_sample native_totals;
+
+    // Verified native jk23.exe and jkgm.exe rdroid_SetMipDistances.
+    // Four floats at 0x548258 control native MAT mip selection in rdCache.
+    using native_set_mip_distances_fn=int (__cdecl *)(float const *);
+    constexpr uintptr_t native_set_mip_distances_addr=0x0043AE30U;
+    constexpr uintptr_t native_mip_distances_addr=0x00548258U;
+    constexpr unsigned char native_set_mip_distances_bytes[]={
+        0x8b,0x44,0x24,0x04, 0x8b,0x08,0x89,0x0d,0x58,0x82,0x54,0x00
+    };
+    native_set_mip_distances_fn RealNativeSetMipDistances=
+        reinterpret_cast<native_set_mip_distances_fn>(native_set_mip_distances_addr);
+
+    void force_native_mat_mip_zero()
+    {
+        jkgm::prefer_native_mat_mip_zero(
+            reinterpret_cast<float *>(native_mip_distances_addr));
+    }
+
+    int __cdecl HookedNativeSetMipDistances(float const *requested)
+    {
+        int const result=RealNativeSetMipDistances(requested);
+        // Engine level/video changes may reset the mip thresholds.
+        force_native_mat_mip_zero();
+        return result;
+    }
+
 
     // Match the current patched JK23 executable at rdModel3_DrawMesh (0x446360).
     struct native_mesh {
@@ -1338,7 +1366,28 @@ bool attach_hooks()
         (ChangeDisplaySettingsW_type)DetourFindFunction("user32.dll", "ChangeDisplaySettingsW");
     DetourAttach(&(PVOID &)TrueChangeDisplaySettingsW, HookedChangeDisplaySettingsW);
 
+    // Unlike the GPU-only mesh intercept, forcing native MAT mip 0 applies
+    // equally to JK-rendered sectors. JkGRfxMod generates OpenGL mipmaps.
+    bool mip_hook_requested=false;
+    if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))==0x00400000U &&
+       std::memcmp(reinterpret_cast<void const *>(native_set_mip_distances_addr),
+                   native_set_mip_distances_bytes,
+                   sizeof(native_set_mip_distances_bytes))==0) {
+        LONG const mip_error=DetourAttach(
+            &(PVOID &)RealNativeSetMipDistances,HookedNativeSetMipDistances);
+        if(mip_error==NO_ERROR) mip_hook_requested=true;
+        else LOG_WARNING("Could not hook native MAT mip-distance setter: ",mip_error);
+    }
+    else {
+        LOG_WARNING("Native MAT mip override disabled: unsupported executable");
+    }
+
     LONG error = DetourTransactionCommit();
+    if(error==NO_ERROR && mip_hook_requested) {
+        native_mat_mips_hook_active=true;
+        force_native_mat_mip_zero();
+        LOG_INFO("Native MAT mip selection forced to level 0; OpenGL mipmaps remain active");
+    }
     return error == NO_ERROR;
 }
 
@@ -1348,6 +1397,10 @@ bool detach_hooks()
     DetourUpdateThread(GetCurrentThread());
 
     // Detach injected functions
+    if(native_mat_mips_hook_active) {
+        DetourDetach(&(PVOID &)RealNativeSetMipDistances,HookedNativeSetMipDistances);
+        native_mat_mips_hook_active=false;
+    }
     if(TrueJkInitNewCogVerbs != nullptr) {
         DetourDetach(&(PVOID &)TrueJkInitNewCogVerbs, HookedJkInitNewCogVerbs);
     }
