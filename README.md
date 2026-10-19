@@ -1025,3 +1025,56 @@ selects them dynamically using normal filtering/LOD, including anisotropy.
 No additional config option or EXE patch is needed. Unsupported executables
 keep their original native mip behavior. The override does not run with
 `"use_vanilla_renderer": true`.
+
+## Experimental depth-projected decal (first prototype)
+
+A projected decal is **not** a MAT material alpha mode. The renderer uses the
+shared opaque G-buffer's linear depth, normals and the active JK render camera
+to reconstruct the receiving surface's world position. It projects an RGBA
+image through an oriented rectangular volume, rejecting geometry outside
+its width/height/depth or facing away from the projector. This makes the same
+decal work on **native and cached GPU 3DOs, as well as level sectors**, without
+editing any existing polygons.
+
+Add an optional **single** projector to `jkgm.json`:
+
+```json
+"projected_decal": {
+    "image": "jkgm/decals/test.png",
+    "position": [0, 0, 2],
+    "direction": [0, 0, -1],
+    "up": [0, 1, 0],
+    "size": [4, 4, 2],
+    "opacity": 0.8,
+    "normal_threshold": 0.25,
+    "blend": "multiply"
+}
+```
+
+Here `position` is the projector's **world-space origin**, `direction`
+points **into** the receiving surface, and `up` rotates the image around
+the projection axis. `size` is `[width, height, projection_depth]` in
+native JK world units. The image is centered on the projector's origin,
+with the depth extending forward along its direction. Position and image
+are intentionally test values: change them for your level. The referenced
+PNG must exist; no example image is shipped. Remove `projected_decal` or
+set it to `null` to disable projection completely.
+
+The optional `blend` can be `multiply` (default; dark tire marks and dirt),
+`alpha` (colored decals), or `additive` (a first step toward projected lights).
+It is **specific to the projector** and does not change MAT blend behavior.
+`opacity` multiplies the PNG alpha; `normal_threshold` requires a receiving
+normal to face back toward the projector (0 is permissive; 1 restricts it to
+fully facing surfaces). Projector bounds fade slightly to prevent hard depth
+cutoffs. Sampling occurs after SSAO, before distance fog and under existing
+specular/emissive highlights. Retro 256-color quantization applies normally.
+
+**Prototype limitations:** This first version is static and holds exactly one
+projector in `jkgm.json`. It affects **opaque surfaces** only; transparent
+water/glass, the later gun/HUD pass and moving Thing-attached projectors need
+a separate extension. Alpha/color decals currently do not automatically
+inherit the receiver's per-vertex lighting intensity; `multiply` respects the
+underlying shading best for dark marks. No runtime COG verbs or pooling/expiry
+for tire marks yet. The compositing shader skips all projection work when
+the setting is absent.
+
