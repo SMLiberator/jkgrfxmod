@@ -76,14 +76,22 @@ namespace jkgm {
             return sprite_normalize(out.right);
         }
         if(up) {
-            out.up=thing.up;out.look=camera.look;
+            // Retain camera horizontal orientation through steep pitch.
+            // Projecting camera Look was ill-conditioned near top-down
+            // views and could suddenly select an unrelated Thing axis.
+            out.up=thing.up;out.right=camera.right;
             if(!sprite_normalize(out.up)) return false;
-            if(!sprite_project_orthogonal(out.look,out.up)) {
-                out.look=thing.look;
-                if(!sprite_project_orthogonal(out.look,out.up)) return false;
+            if(!sprite_project_orthogonal(out.right,out.up)) {
+                out.look=camera.look;
+                if(!sprite_project_orthogonal(out.look,out.up)) {
+                    out.look=thing.look;
+                    if(!sprite_project_orthogonal(out.look,out.up)) return false;
+                }
+                out.right=sprite_cross(out.look,out.up);
+                if(!sprite_normalize(out.right)) return false;
             }
-            out.right=sprite_cross(out.look,out.up);
-            return sprite_normalize(out.right);
+            out.look=sprite_cross(out.up,out.right);
+            return sprite_normalize(out.look);
         }
         if(look) {
             out.look=thing.look;out.up=camera.up;
