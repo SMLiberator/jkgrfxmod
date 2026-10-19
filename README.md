@@ -793,18 +793,36 @@ unavailable the renderer automatically falls back to full-color output.
 This works with either the native or GPU-resident 3DO renderer and does not
 depend on `enable_post`.
 
-## GPU 3DO point-light specular (experimental)
+**Exact CMP verification:** Enable `"retro_mode": true` and
+`"log_path": "jkgm-retro.log"`, then enter a level. The `Retro CMP verify:`
+lines identify the engine identity-CMP pointer and the current world's
+`colormaps[0]` pointer, compare their RGB bytes and print stable checksums.
+Sixteen `Retro CMP #0 RGB[N]:...` lines dump the actual 768 RGB8 bytes
+read by Retro Mode, emitted only on palette/world changes.
 
-Opt-in reflective replacement materials on GPU-resident 3DOs now use
-JK's already-captured nearby point lights for per-pixel GGX highlights.
-The existing `reflection_strength`, `roughness`, `metalness`,
-`surface_map` (R/G/B reflectivity/roughness/metalness) and first
-`normal_map`/`normal_strength` parameters control the response.
-Point-light highlights require nearby JK lights; environment and
-directional-sun highlights can work without nearby point lights. All of
-these are disabled when `enable_reflections` is false.
-Existing Gouraud diffuse lighting remains unchanged. Specular is
-composited after SSAO and participates in fog for transparent materials.
+Extract the FIRST CMP in the JKL's `World Colormaps` section, normally
+from `misc/cmp` in the level's GOB, and compare:
+
+```sh
+python tools/verify_retro_cmp.py misc/cmp/first.cmp jkgm-retro.log
+```
+
+That script reports exact mismatches by palette index. It correctly
+reads the on-disk CMP's RGB table at offset `0x40` (the loaded engine
+structure keeps those same 768 bytes at offset `0x10`). A matching
+palette proves the acquisition step and points to a downstream problem
+such as quantization or color processing. For a clean visual test,
+temporarily set `"enable_post": false` to disable color grading.
+
+## GPU 3DO point-light specular (currently suspended)
+
+Native JK dynamic point lights currently affect only the original
+diffuse/Gouraud illumination of GPU 3DOs. Their additional GGX
+point-light specular term is deliberately disabled until there are
+separate dynamic-light RGB and specular-intensity controls. The shader
+implementation remains available for future work. Environment maps
+and COG-controlled directional sun specular are **unaffected** and
+continue to follow `enable_reflections`.
 GPU 3DOs now also support static/per-material and pack-default EnvMaps
 (equirectangular world/screen/fixed/matcap modes) plus a second normal-map
 layer, with normal scroll and mip-based roughness blur. These use the native
