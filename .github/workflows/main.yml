@@ -43,6 +43,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_modelview.cpp /Fe:gpu_3do_modelview_test.exe
         gpu_3do_modelview_test.exe
+    - name: GPU 3DO cached polygon triangulation regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_triangulation.cpp /Fe:gpu_3do_triangulation_test.exe
+        gpu_3do_triangulation_test.exe
     - name: GPU 3DO GeoMode and mirror compatibility tests
       shell: cmd
       run: |
