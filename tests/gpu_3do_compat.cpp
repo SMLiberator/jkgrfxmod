@@ -23,4 +23,22 @@ int main() {
     assert(!gpu_3do_reversed_winding(nonuniform));
     auto swap=id; swap[0]=0;swap[1]=1;swap[3]=1;swap[4]=0;
     assert(gpu_3do_reversed_winding(swap));
+    // JK's native criterion uses a mesh-local camera and face normal;
+    // our early rejection must agree even for mirrored/scaled meshes.
+    std::array<float,3> eye{};
+    assert(gpu_3do_local_eye(id,eye));
+    assert(eye[0]==0 && eye[1]==0 && eye[2]==0);
+    auto moved=id; moved[11]=-5;
+    assert(gpu_3do_local_eye(moved,eye));
+    assert(eye[2]==5.0f);
+    assert(gpu_3do_face_facing_camera(eye,{{0,0,0}},{{0,0,1}}));
+    assert(!gpu_3do_face_facing_camera(eye,{{0,0,0}},{{0,0,-1}}));
+    auto mirrored=moved; mirrored[0]=-2;
+    assert(gpu_3do_local_eye(mirrored,eye));
+    assert(eye[0]==0 && eye[2]==5.0f);
+    auto scaled=moved;scaled[0]=2;scaled[4]=3;scaled[8]=0.5f;
+    assert(gpu_3do_local_eye(scaled,eye));
+    assert(eye[2]==10.0f);
+    auto degenerate=scaled;degenerate[8]=0;
+    assert(!gpu_3do_local_eye(degenerate,eye));
 }

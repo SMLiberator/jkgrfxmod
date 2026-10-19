@@ -429,13 +429,18 @@ namespace {
             int32_t const cel=static_cast<int32_t>(face.cel);
             uint32_t const flags=face.type&0x3U;
             bool const translucent=gpu_3do_face_may_have_alpha(face);
+            uint32_t const plane_start=static_cast<uint32_t>(g->face_planes.size());
+            g->face_planes.push_back({{anchor[0],anchor[1],anchor[2]},
+                                      {face.normal[0],face.normal[1],face.normal[2]}});
             if(!translucent && !g->groups.empty() &&
                g->groups.back().material==ptr &&
                g->groups.back().cel==cel &&
                g->groups.back().face_type==flags) {
                 g->groups.back().count+=added;
+                ++g->groups.back().plane_count;
             } else {
-                g->groups.push_back({first,added,ptr,cel,flags,center});
+                g->groups.push_back({first,added,ptr,cel,flags,center,
+                                     plane_start,1});
             }
         }
         return g->indices.empty() ? std::shared_ptr<jkgm::gpu_3do_geometry const>{}

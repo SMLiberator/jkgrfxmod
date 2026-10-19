@@ -27,14 +27,20 @@ namespace jkgm {
         float intensity=0.0f;
     };
 
+    struct gpu_3do_face_plane {
+        std::array<float,3> anchor{};
+        std::array<float,3> normal{};
+    };
     struct gpu_3do_group {
         uint32_t offset=0, count=0; // index-buffer range
         uintptr_t material=0;       // native JK rdMaterial pointer
         int32_t cel=-1;             // -1 means follow current material cel
         uint32_t face_type=0; // RD_FF_DOUBLE_SIDED=0x1, translucent=0x2
         std::array<float,3> centroid{}; // face-local center for transparency sorting
+        uint32_t plane_start=0, plane_count=0; // planes used for CPU backface rejection
     };
     struct gpu_3do_geometry {
+        std::vector<gpu_3do_face_plane> face_planes;
         std::vector<gpu_3do_vertex> vertices;
         std::vector<uint32_t> indices;
         std::vector<gpu_3do_group> groups;

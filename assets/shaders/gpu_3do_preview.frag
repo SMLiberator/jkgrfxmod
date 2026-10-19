@@ -19,7 +19,6 @@ uniform int transparent_pass;
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
 uniform int emissive_only; // zero-alpha base, independently blended emission
 uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blend only
-in float view_depth;
 in vec2 pixel_uv;
 in vec3 view_normal;
 in vec3 jk_lit_rgb;
@@ -28,6 +27,10 @@ layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
 layout(location=3) out vec4 out_depth;
 void main() {
+    // gl_FragCoord.w is 1/clip.w, and clip.w is camera-forward Y.
+    // This is the exact native 1/rhw linear depth (32*Y) even on large
+    // triangles crossing the camera near plane; no vertex-depth clamping.
+    float view_depth=32.0/max(gl_FragCoord.w,0.00000001);
     vec2 uv=pixel_uv*uv_scale;
     vec4 texel=has_texture==1
         ? texture(albedo_map,uv+albedo_scroll)
@@ -47,7 +50,8 @@ void main() {
                     max(fog_params.y-fog_params.x,0.0001),0.0,1.0)*fog_params.z;
     // Match the native vertex-by-vertex tint and lighting interpolation.
     // Keep it separate from alpha and from emissive output.
-    vec3 rgb=mix(albedo.rgb*jk_lit_rgb,fog_color,fog);
+    vec3 lit_rgb=albedo.rgb*jk_lit_rgb;
+    vec3 rgb=mix(lit_rgb,fog_color,fog);
     vec3 emission=emissive_factor;
     if(has_emissive!=0)
         emission*=texture(emissive_map,uv+emissive_scroll).rgb;
@@ -66,7 +70,8 @@ void main() {
     } else {
         // Additive and normal pass use premultiplied pigment; alpha for the
         // additive framebuffer itself is preserved by glBlendFuncSeparate.
-        out_color=vec4(transparent_pass!=0 ? rgb*a+emission : rgb,
+        // Opaque fog is applied after SSAO in the shared composite.
+        out_color=vec4(transparent_pass!=0 ? rgb*a+emission : lit_rgb,
                        (transparent_pass!=0 && blend_mode==1) ? 0.0 : a);
     }
     out_emissive=vec4(transparent_pass!=0 ? vec3(0.0) : emission,a);

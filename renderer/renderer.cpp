@@ -2054,13 +2054,40 @@ namespace jkgm {
                 gpu_3do_group const *group;
                 gpu_3do_texture texture;
                 gpu_3do_alpha_mode policy;
+                gpu_3do_matrix34 const *modelview;
                 float depth;
                 size_t order;
             };
             std::vector<pending_draw> draws;
+            // Keep composed matrices stable across sorting and draw submission.
+            std::vector<gpu_3do_matrix34> modelviews;
+            modelviews.reserve(frame_gpu_3do_instances.size());
             for(auto const &inst:frame_gpu_3do_instances) {
                 if(!inst.geometry) continue;
+                modelviews.push_back(gpu_3do_native_modelview(native_view,inst.transform));
+                std::array<float,3> local_eye{};
+                bool const can_cpu_cull=gpu_3do_local_eye(modelviews.back(),local_eye);
                 for(auto const &group:inst.geometry->groups) {
+                    // JK skips a face if dot(camera-local - anchor,normal)<=0,
+                    // unless it is double-sided. Since opaque faces are batched
+                    // by MAT, only skip a group when ALL its faces face away.
+                    // This saves CPU-side GL draw calls, not just GPU fragments.
+                    if(can_cpu_cull && !(group.face_type&0x1U) &&
+                       group.plane_count>0 &&
+                       group.plane_start+group.plane_count<=
+                           inst.geometry->face_planes.size()) {
+                        bool any_visible=false;
+                        for(uint32_t p=group.plane_start;
+                            p<group.plane_start+group.plane_count;p++) {
+                            auto const &plane=inst.geometry->face_planes[p];
+                            if(gpu_3do_face_facing_camera(
+                                   local_eye,plane.anchor,plane.normal)) {
+                                any_visible=true;
+                                break;
+                            }
+                        }
+                        if(!any_visible) continue;
+                    }
                     // Cache MAT resolution per material/cel for the complete
                     // frame. Multiple cars using the same MAT no longer
                     // trigger thousands of redundant VirtualQuery lookups.
@@ -2090,7 +2117,8 @@ namespace jkgm {
                               (wy-cam.position[1])*cam.forward[1]+
                               (wz-cam.position[2])*cam.forward[2];
                     }
-                    draws.push_back({&inst,&group,tex,policy,depth,draws.size()});
+                    draws.push_back({&inst,&group,tex,policy,&modelviews.back(),
+                                     depth,draws.size()});
                 }
             }
             if(transparent) {
@@ -2125,7 +2153,7 @@ namespace jkgm {
                     // Match JK rdModel3_DrawMesh: combine the original
                     // rdCamera::orient and joint/world placement on CPU,
                     // then transform static local mesh vertices on the GPU.
-                    auto const m=gpu_3do_native_modelview(native_view,inst.transform);
+                    auto const &m=*draw.modelview;
                     prog.set_view_matrix(make_point(m[0],m[1],m[2],0.0f),
                                          make_point(m[3],m[4],m[5],0.0f),
                                          make_point(m[6],m[7],m[8],0.0f),
@@ -2273,6 +2301,19 @@ namespace jkgm {
             ogs->game_post_opaque_composite_program.set_color_sampler(0);
             ogs->game_post_opaque_composite_program.set_emissive_sampler(1);
             ogs->game_post_opaque_composite_program.set_occlusion_sampler(2);
+            ogs->game_post_opaque_composite_program.set_depth_sampler(3);
+            {
+                auto const &fog=get_fog_settings();
+                auto const info=fog.info.value(), rgb=fog.color.value();
+                ogs->game_post_opaque_composite_program.set_fog(
+                    make_point(info[0],info[1],
+                               the_config->enable_fog?info[2]:0.0f,0.0f),
+                    color_rgb(rgb[0],rgb[1],rgb[2]));
+            }
+
+            gl::set_active_texture_unit(3);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             frame_screen->get_resolved_depth_texture());
 
             gl::set_active_texture_unit(2);
             gl::bind_texture(gl::texture_bind_target::texture_2d, frame_ao->get_ssao_texture());

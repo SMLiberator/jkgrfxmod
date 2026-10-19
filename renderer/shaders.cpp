@@ -441,6 +441,9 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , color_image(gl::get_uniform_location(the_program, "color_image"))
     , emissive_image(gl::get_uniform_location(the_program, "emissive_image"))
     , occlusion_image(gl::get_uniform_location(the_program, "occlusion_image"))
+    , depth_image(gl::get_uniform_location(the_program, "depth_image"))
+    , fog_params(gl::get_uniform_location(the_program, "fog_params"))
+    , fog_color(gl::get_uniform_location(the_program, "fog_color"))
 {
 }
 
@@ -457,6 +460,18 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_emissive_sampler(int 
 void jkgm::shaders::game_post_opaque_composite_shader::set_occlusion_sampler(int sampler)
 {
     gl::set_uniform_integer(occlusion_image, sampler);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_depth_sampler(int sampler)
+{
+    gl::set_uniform_integer(depth_image, sampler);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_fog(point<4,float> params,
+                                                                color_rgb fog)
+{
+    gl::set_uniform_vector(fog_params,params);
+    gl::set_uniform_vector(fog_color,fog);
 }
 
 jkgm::shaders::game_transparency_pass_shader::game_transparency_pass_shader(

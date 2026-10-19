@@ -35,4 +35,41 @@ namespace jkgm {
         float const det=gpu_3do_transform_determinant(m);
         return std::isfinite(det) && det<0.0f;
     }
+
+    // Camera origin in the mesh's own coordinates. Solving the affine
+    // view*placement matrix avoids a separate world-space camera transform
+    // and matches JK's rdModel3_DrawMesh local-camera/face-normal test.
+    // Works with nonuniform and negative (mirrored) mesh scales.
+    inline bool gpu_3do_local_eye(std::array<float,12> const &m,
+                                   std::array<float,3> &eye)
+    {
+        float const det=gpu_3do_transform_determinant(m);
+        if(!std::isfinite(det) || std::fabs(det)<1e-8f) return false;
+        auto const cross=[](std::array<float,3> a,std::array<float,3> b) {
+            return std::array<float,3>{{a[1]*b[2]-a[2]*b[1],
+                                         a[2]*b[0]-a[0]*b[2],
+                                         a[0]*b[1]-a[1]*b[0]}};
+        };
+        auto const dot=[](std::array<float,3> a,std::array<float,3> b) {
+            return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+        };
+        std::array<float,3> const r{{m[0],m[1],m[2]}};
+        std::array<float,3> const f{{m[3],m[4],m[5]}};
+        std::array<float,3> const u{{m[6],m[7],m[8]}};
+        std::array<float,3> const minus_t{{-m[9],-m[10],-m[11]}};
+        eye={{dot(minus_t,cross(f,u))/det,
+              dot(r,cross(minus_t,u))/det,
+              dot(r,cross(f,minus_t))/det}};
+        return std::isfinite(eye[0]) && std::isfinite(eye[1]) &&
+               std::isfinite(eye[2]);
+    }
+    inline bool gpu_3do_face_facing_camera(
+        std::array<float,3> const &eye,
+        std::array<float,3> const &anchor,
+        std::array<float,3> const &normal)
+    {
+        return (eye[0]-anchor[0])*normal[0] +
+               (eye[1]-anchor[1])*normal[1] +
+               (eye[2]-anchor[2])*normal[2] > 0.0f;
+    }
 }

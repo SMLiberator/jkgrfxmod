@@ -23,7 +23,6 @@ uniform float light_intensity[16];
 out vec3 jk_lit_rgb;
 uniform vec4 view_right, view_forward, view_up, view_origin;
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
-out float view_depth;
 out vec2 pixel_uv;
 out vec3 view_normal;
 void main() {
@@ -40,12 +39,9 @@ void main() {
     float h=max(projection.x,0.0001);
     float v=h/max(projection.y,0.0001);
     gl_Position=vec4(x/h,z/v,-projection.z,y);
-    // Native JK's rdCache stores reciprocal view depth as rhw=1/(32*y).
-    // The native OpenGL path reconstructs vp_z=1/rhw=32*y, then writes
-    // that value to its linear-depth G-buffer and uses it for fog.
-    // SSAO and fog must use exactly the same units for GPU 3DOs; the
-    // hardware Z coordinate above intentionally remains unscaled.
-    view_depth=32.0*max(y,0.0);
+    // GPU fog/SSAO depth is recovered per-fragment from gl_FragCoord.w.
+    // Never clamp depth here: vertices of huge faces can lie behind the
+    // camera, and clamping before interpolation distorts nearby fog.
     pixel_uv=local_uv;
     // JK: FullyLit=0, NotLit=1, Diffuse=2, Gouraud=3.
     // Per-face ExtraLight and the camera's ambient floor are evaluated

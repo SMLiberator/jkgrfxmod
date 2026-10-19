@@ -423,8 +423,9 @@ void main()
         albedo.rgb = vec3(0.0);
     }
 
-    vec3 fogged_albedo = mix(albedo.rgb, fog_color, fog_amount);
-    out_color = vec4(fogged_albedo, albedo.a);
+    // Defer fog to the opaque composite, AFTER SSAO has shaded the
+    // surface. Otherwise SSAO multiplies/darkens the fog color itself.
+    out_color = vec4(albedo.rgb, albedo.a);
     out_emissive = vec4(emissive + (reflection + sun_specular) * (1.0 - fog_amount),
                         albedo.a);
     out_normal = vec4(normalize(vp_normal), 1.0);
