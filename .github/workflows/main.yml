@@ -43,6 +43,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_modelview.cpp /Fe:gpu_3do_modelview_test.exe
         gpu_3do_modelview_test.exe
+    - name: Projected decal basis and configuration tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\projected_decal.cpp /Fe:projected_decal_test.exe
+        projected_decal_test.exe
     - name: Mutable cached 3DO source signature regression tests
       shell: cmd
       run: |
