@@ -140,7 +140,7 @@ namespace {
         for(int f=0;f<m.num_faces;f++) {
             native_face face{};
             std::memcpy(&face,m.faces+size_t(f)*sizeof(face),sizeof(face));
-            if(face.count<3 || face.count>128 ||
+            if(face.count<3 || face.count>128 || face.geo<3 ||
                !gpu_span_readable(face.pos_indices,size_t(face.count)*4) ||
                !std::isfinite(face.uv_x) || !std::isfinite(face.uv_y))
                 return {};

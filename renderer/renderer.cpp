@@ -1847,14 +1847,24 @@ namespace jkgm {
         gpu_3do_texture resolve_gpu_3do_material(gpu_3do_group const &group)
         {
             gpu_3do_texture out;
-            if(group.material==0 ||
-               !engine_material_debug::matches_tested_executable())
+            // Material-less 3DO faces are legitimate: they are untextured,
+            // not a missing or failed texture lookup. Their exact flat/vertex
+            // colors will be handled with the upcoming GPU lighting path.
+            if(group.material==0) {
+                out.albedo_source=2;
                 return out;
+            }
+            if(!engine_material_debug::matches_tested_executable()) return out;
 
             using namespace engine_material_debug;
             native_material mat{};
-            if(!read_object(group.material,mat) || mat.num_texinfo==0 ||
-               mat.num_texinfo>16) return out;
+            if(!read_object(group.material,mat)) return out;
+            // The native MAT may explicitly select flat, untextured geometry.
+            if((mat.tex_type&2U)==0) {
+                out.albedo_source=2;
+                return out;
+            }
+            if(mat.num_texinfo==0 || mat.num_texinfo>16) return out;
 
             int32_t cel = group.cel < 0
                 ? static_cast<int32_t>(mat.current_cel) : group.cel;

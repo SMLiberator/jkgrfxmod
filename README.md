@@ -754,7 +754,9 @@ JkGRfxMod's normal OpenGL world/sector rendering. This is not
 The GPU renderer snapshots 3DO face-corner positions, UVs and face normals
 once and updates only world/joint matrices per frame. Texture surfaces are
 warmed using a fallback native draw when needed. Unsupported 3DO geometry
-(such as wireframe or invalid/missing data) also falls back to native JK.
+(such as wireframe/point faces or invalid/missing data) also falls back
+to native JK. Legitimately untextured faces use a neutral color for now;
+their exact JK flat colors still require lighting/material parity.
 The engine still renders world-sector geometry through the original path.
 The GPU vertex path does not yet reproduce every material, dynamic vertex
 light, custom vertex RGB or reflection effect.
