@@ -1,8 +1,9 @@
 #version 330 core
 
 // Both textures contain finished linear-light presentation frames, including
-// HUD, bloom, grain, vignette, and color grading. Hardware sRGB conversion
-// happens later, when the result is drawn into the default framebuffer.
+// HUD, bloom, grain, vignette, and color grading. Non-Retro output relies on
+// hardware framebuffer sRGB conversion; Retro output uses the CMP's exact
+// sRGB bytes with framebuffer conversion disabled.
 uniform sampler2D current_image;
 uniform sampler2D history_image;
 uniform float blend_strength;
@@ -15,14 +16,12 @@ vec3 to_srgb(vec3 x) {
     return mix(x*12.92,1.055*pow(x,vec3(1.0/2.4))-0.055,
                step(vec3(0.0031308),x));
 }
-vec3 to_linear(vec3 x) {
-    return mix(x/12.92,pow((x+0.055)/1.055,vec3(2.4)),
-               step(vec3(0.04045),x));
-}
 vec3 palette_quantize(vec3 c) {
     ivec3 rgb=ivec3(floor(to_srgb(c)*63.0+0.5));
     ivec2 uv=ivec2(rgb.x+64*(rgb.y&7),rgb.z*8+(rgb.y>>3));
-    return to_linear(texelFetch(retro_palette_lut,uv,0).rgb);
+    // The LUT stores the original CMP RGB8 values. Keep them encoded for
+    // byte-exact presentation; GL_FRAMEBUFFER_SRGB is disabled for Retro.
+    return texelFetch(retro_palette_lut,uv,0).rgb;
 }
 
 layout(location = 0) out vec4 out_color;

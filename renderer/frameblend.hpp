@@ -50,9 +50,10 @@ namespace jkgm {
         gl::draw_elements(
             gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
 
-        // Present the completed accumulated image. This is the only pass that
-        // renders into the default framebuffer, where GL_FRAMEBUFFER_SRGB
-        // converts the linear fragment output to sRGB as before.
+        // Present the completed accumulated image. Normal mode uses hardware
+        // GL_FRAMEBUFFER_SRGB to encode the linear output. Retro Mode instead
+        // writes the CMP's RGB8 sRGB values directly, since a window pixel
+        // format is not guaranteed to support hardware sRGB conversion.
         gl::bind_framebuffer(gl::framebuffer_bind_target::any, gl::default_framebuffer);
         gl::set_viewport(make_box(make_point(0, 0), screen_size));
         ogs->post_frame_blend.set_blend_strength(0.0f);
@@ -63,8 +64,14 @@ namespace jkgm {
             gl::set_active_texture_unit(0);
         }
         gl::bind_texture(gl::texture_bind_target::texture_2d, next.tex);
+        if(ogs->retro_mode_active) {
+            gl::disable(gl::capability::framebuffer_srgb);
+        }
         gl::draw_elements(
             gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
+        if(ogs->retro_mode_active) {
+            gl::enable(gl::capability::framebuffer_srgb);
+        }
 
         ogs->frame_blend_history_valid = true;
         ogs->frame_blend_use_a = !ogs->frame_blend_use_a;
