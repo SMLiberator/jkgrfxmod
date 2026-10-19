@@ -890,7 +890,7 @@ tracked with targeted GPU mesh-cache invalidation.
 
 ## Experimental GPU-resident 3DO mesh path
 
-Set \`"use_gpu_renderer": true\` in \`jkgm.json\` to draw **all supported
+Set \`"use_model_cache": true\` in \`jkgm.json\` to draw **all supported
 filled 3DO meshes** from cached GPU vertex/index buffers. Set \`false\`
 (default) to use the previous JK-assisted 3DO renderer, while retaining
 JkGRfxMod's normal OpenGL world/sector rendering. This is not
@@ -976,7 +976,7 @@ Run workflow** on the `development` branch, not automatically on each push.
 The test artifact includes `post_opaque_composite.frag` along with the updated
 GPU and opaque-pass shaders. Always install the supplied shaders with the DLL.
 
-For performance diagnosis, compare `"use_gpu_renderer": true` and `false`
+For performance diagnosis, compare `"use_model_cache": true` and `false`
 with `"profile_renderer": true`, `"enable_vsync": false`, and a `log_path`.
 The new `PERF gpu_3do` lines report candidate meshes, sphere rejections,
 instances, MAT residency checks, draw calls, triangle counts, texture
