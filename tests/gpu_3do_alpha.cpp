@@ -15,6 +15,23 @@ int main() {
     assert(forced==gpu_3do_alpha_mode::blend_only);
     assert(special==gpu_3do_alpha_mode::blend_only);
     assert(faded==gpu_3do_alpha_mode::blend_only);
+    auto dither=choose_gpu_3do_alpha_mode(false,true,false,false,0.45f,true);
+    auto native_face_dither=choose_gpu_3do_alpha_mode(true,false,false,false,1.f,true);
+    auto special_dither=choose_gpu_3do_alpha_mode(true,true,false,true,1.f,true);
+    assert(dither==gpu_3do_alpha_mode::dithered);
+    assert(native_face_dither==gpu_3do_alpha_mode::dithered);
+    assert(special_dither==gpu_3do_alpha_mode::blend_only);
+    assert(gpu_3do_draws_in_pass(dither,false));
+    assert(!gpu_3do_draws_in_pass(dither,true));
+    for(unsigned y=0;y<4;y++) for(unsigned x=0;x<4;x++) {
+        assert(!gpu_3do_fragment_visible(dither,true,1.f,0.5f,x,y));
+        assert(!gpu_3do_fragment_visible(dither,false,0.f,0.5f,x,y));
+        assert(gpu_3do_fragment_visible(dither,false,1.f,0.5f,x,y));
+    }
+    int half_covered=0;
+    for(unsigned y=0;y<4;y++) for(unsigned x=0;x<4;x++)
+        half_covered+=gpu_3do_fragment_visible(dither,false,0.5f,0.5f,x,y)?1:0;
+    assert(half_covered==8);
     for(float alpha : {0.f,0.3f,0.998f,0.999f,1.f}) {
         bool o=gpu_3do_fragment_visible(mixed,false,alpha,0.5f);
         bool t=gpu_3do_fragment_visible(mixed,true,alpha,0.5f);

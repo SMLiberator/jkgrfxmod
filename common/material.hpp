@@ -7,7 +7,7 @@
 #include <string>
 
 namespace jkgm {
-    enum class material_alpha_mode { blend, mask };
+    enum class material_alpha_mode { blend, mask, dithered };
     // Distinct from alpha testing. Special modes always render in the
     // transparency pass, even when the original JK face was opaque.
     enum class material_blend_mode { normal, additive, multiply, fluid };

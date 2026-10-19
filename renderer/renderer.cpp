@@ -410,7 +410,7 @@ namespace jkgm {
             // 0=invalid/unresolved MAT (diagnostic magenta), 1=texture,
             // 2=intentionally no albedo map (neutral white).
             int albedo_source=0;
-            bool has_image=false, alpha=false, masked=false, special=false;
+            bool has_image=false, alpha=false, masked=false, dithered=false, special=false;
             bool has_emission=false, emissive_only=false;
             bool filtered=true;
             material_blend_mode blend=material_blend_mode::normal;
@@ -1552,6 +1552,18 @@ namespace jkgm {
 
         enum class batch_blend_filter { regular, all, special };
 
+        // Opaque screen-door coverage is meaningful only for ordinary
+        // over/under compositing. Special blends and depth-clipped decals
+        // must keep their existing translucent behavior.
+        bool is_dithered_material(material_instance_id id) const
+        {
+            if(id.get()==0U) return false;
+            auto const &mat=vidmem_texture_surfaces.at(id.get()-1);
+            return mat && mat->alpha_mode==material_alpha_mode::dithered &&
+                   mat->blend_mode==material_blend_mode::normal &&
+                   !mat->depth_clip;
+        }
+
         void bind_material(shaders::game_pass_shader *prog,
                            material_instance_id id,
                            bool force_opaque,
@@ -1773,8 +1785,9 @@ namespace jkgm {
                 prog->set_features(make_point(
                     from_albedo.has_value() ? 1.0f : 0.0f,
                     mat->emissive_map.has_value() ? 1.0f : 0.0f,
-                    ((mat->alpha_mode == material_alpha_mode::mask) && (!force_opaque)) ? 1.0f
-                                                                                        : 0.0f,
+                    is_dithered_material(id) ? 2.0f
+                    : ((mat->alpha_mode==material_alpha_mode::mask) && !force_opaque)
+                        ? 1.0f : 0.0f,
                     (posterize_lighting ? 1.0f : 0.0f)));
 
                 auto material_color = mat->albedo_factor;
@@ -1842,6 +1855,14 @@ namespace jkgm {
                 bool special = is_special_material(tri.material);
                 bool selected = filter == batch_blend_filter::all ||
                                 (filter == batch_blend_filter::special ? special : !special);
+                // All native world/gun transparent batches are initially
+                // classified by JK, not by replacement metadata. A dithered
+                // replacement was already drawn depth-writing in the opaque
+                // world pass, or during the gun's force-opaque pass after
+                // its depth clear. Never draw it a second time as alpha blend.
+                if(prog==&ogs->game_transparency_pass_program &&
+                   !force_opaque && is_dithered_material(tri.material))
+                    selected=false;
                 if(!selected) {
                     if(num_verts > 0) {
                         if(the_config->profile_renderer) ++profile_frame.draw_batches;
@@ -1999,6 +2020,7 @@ namespace jkgm {
                 out.alpha=false; // no actual alpha texture to split
             }
             out.masked=surface->alpha_mode==material_alpha_mode::mask;
+            out.dithered=surface->alpha_mode==material_alpha_mode::dithered;
             out.blend=surface->blend_mode;
             out.special=surface->depth_clip ||
                         surface->blend_mode!=material_blend_mode::normal;
@@ -2161,8 +2183,9 @@ namespace jkgm {
                     }
                     auto const &tex=found->second;
                     auto const policy=choose_gpu_3do_alpha_mode(
-                        (group.face_type&0x2U)!=0 || tex.emissive_only,
-                        tex.alpha,tex.masked,tex.special,tex.opacity);
+                        (group.face_type&0x2U)!=0,
+                        tex.alpha,tex.masked,tex.special||tex.emissive_only,
+                        tex.opacity,tex.dithered);
                     if(!gpu_3do_draws_in_pass(policy,transparent)) continue;
                     float depth=0.0f;
                     if(transparent) {

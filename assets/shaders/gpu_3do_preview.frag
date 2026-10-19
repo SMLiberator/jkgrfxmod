@@ -18,7 +18,7 @@ uniform int has_emissive;
 uniform int transparent_pass;
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
 uniform int emissive_only; // zero-alpha base, independently blended emission
-uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blend only
+uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blend only, 4 dithered
 in vec2 pixel_uv;
 in vec3 view_normal;
 in vec3 jk_lit_rgb;
@@ -26,6 +26,19 @@ layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
 layout(location=3) out vec4 out_depth;
+// 4x4 Bayer ordered screen-door coverage. Kept samples become fully
+// opaque and write ordinary depth/SSAO; no blend or per-face sort needed.
+float dither_threshold()
+{
+    const int bayer[16]=int[16](
+         0, 8, 2,10,
+        12, 4,14, 6,
+         3,11, 1, 9,
+        15, 7,13, 5);
+    ivec2 p=ivec2(gl_FragCoord.xy)&3;
+    return (float(bayer[p.x+4*p.y])+0.5)/16.0;
+}
+
 void main() {
     // gl_FragCoord.w is 1/clip.w, and clip.w is camera-forward Y.
     // This is the exact native 1/rhw linear depth (32*Y) even on large
@@ -41,8 +54,9 @@ void main() {
         if(alpha_mode==3) discard; // native translucent/additive/opacity<1
         if(alpha_mode==1 && albedo.a<0.999) discard;
         if(alpha_mode==2 && albedo.a<alpha_cutoff) discard;
+        if(alpha_mode==4 && albedo.a<=dither_threshold()) discard;
     } else {
-        if(alpha_mode==0 || alpha_mode==2) discard;
+        if(alpha_mode==0 || alpha_mode==2 || alpha_mode==4) discard;
         if(albedo.a<=0.001 && emissive_only==0) discard;
         if(alpha_mode==1 && albedo.a>=0.999) discard;
     }

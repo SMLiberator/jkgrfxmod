@@ -352,6 +352,19 @@ vec3 parallax_mapping(vec2 tc)
     return vec3(adj_tc, adj_vp_z);
 }
 
+// 4x4 Bayer ordered screen-door coverage. Kept samples become fully
+// opaque and write ordinary depth/SSAO; no blend or per-face sort needed.
+float dither_threshold()
+{
+    const int bayer[16]=int[16](
+         0, 8, 2,10,
+        12, 4,14, 6,
+         3,11, 1, 9,
+        15, 7,13, 5);
+    ivec2 p=ivec2(gl_FragCoord.xy)&3;
+    return (float(bayer[p.x+4*p.y])+0.5)/16.0;
+}
+
 void main()
 {
     vec2 adj_texcoords = vp_texcoords;
@@ -371,16 +384,22 @@ void main()
         albedo_map_sample = mix(albedo_map_sample, target, albedo_transition.y);
     }
 
-    if(features.z > 0.5) {
-        if(albedo_map_sample.a < alpha_cutoff) {
-            discard;
-        }
+    // features.z: 0=blend/default, 1=mask, 2=screen-door dither.
+    // Mask has historically tested texture alpha only; preserve that.
+    if(features.z > 0.5 && features.z < 1.5) {
+        if(albedo_map_sample.a < alpha_cutoff) discard;
         albedo_map_sample.a = 1.0;
     }
 
     vec4 posterized_vertex_color = vec4(ceil(vp_color * 64.0)) / 64.0;
     vec4 vertex_color = mix(vp_color, posterized_vertex_color, features.w);
     vec4 albedo = albedo_map_sample * vertex_color * albedo_factor;
+    if(features.z > 1.5) {
+        // Texture, material opacity and native JK vertex alpha all
+        // contribute to coverage, including mesh/sector fading.
+        if(albedo.a <= dither_threshold()) discard;
+        albedo.a = 1.0;
+    }
     if(albedo.a < 0.99999f) {
         discard;
     }

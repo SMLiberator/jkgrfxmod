@@ -210,6 +210,12 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             else if(am == "blend") {
                 mat->alpha_mode = material_alpha_mode::blend;
             }
+            else if(am == "dithered") {
+                mat->alpha_mode = material_alpha_mode::dithered;
+            }
+            else {
+                throw std::runtime_error("Unknown alpha_mode in metadata.json");
+            }
         }
 
         if(em.contains("blend_mode")) {

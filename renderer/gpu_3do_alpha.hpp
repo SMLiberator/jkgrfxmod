@@ -5,14 +5,19 @@
 #include <cmath>
 namespace jkgm {
     enum class gpu_3do_alpha_mode : int {
-        solid=0, mixed=1, masked=2, blend_only=3
+        solid=0, mixed=1, masked=2, blend_only=3, dithered=4
     };
     inline gpu_3do_alpha_mode choose_gpu_3do_alpha_mode(
         bool face_translucent,bool texture_has_alpha,bool alpha_mask,
-        bool special_blend,float opacity)
+        bool special_blend,float opacity,bool alpha_dither=false)
     {
-        if(face_translucent || special_blend || !std::isfinite(opacity) ||
-           opacity<0.999f)
+        // The material's screen-door override can turn even native JK
+        // translucent faces into opaque depth-writing coverage. Never do
+        // that for additive/multiply/fluid/depth-clip/emission-only effects.
+        if(special_blend || !std::isfinite(opacity))
+            return gpu_3do_alpha_mode::blend_only;
+        if(alpha_dither) return gpu_3do_alpha_mode::dithered;
+        if(face_translucent || opacity<0.999f)
             return gpu_3do_alpha_mode::blend_only;
         if(alpha_mask) return gpu_3do_alpha_mode::masked;
         if(texture_has_alpha) return gpu_3do_alpha_mode::mixed;
@@ -33,15 +38,31 @@ namespace jkgm {
               mode==gpu_3do_alpha_mode::blend_only
             : mode!=gpu_3do_alpha_mode::blend_only;
     }
+    // 4x4 screen-door order, shared with all three fragment shaders. Use
+    // a spatially stable threshold; no temporal noise or depth-independent
+    // transparent blending. Opaque SSAO/depth are preserved on kept pixels.
+    inline float gpu_3do_dither_threshold(unsigned x,unsigned y)
+    {
+        constexpr unsigned char bayer[16]={
+             0, 8, 2,10,
+            12, 4,14, 6,
+             3,11, 1, 9,
+            15, 7,13, 5
+        };
+        return (float(bayer[(x&3U)+4U*(y&3U)])+0.5f)/16.0f;
+    }
     // Mirrors the discard branches in gpu_3do_preview.frag.
     // Source alpha already includes the material and face alpha multipliers.
     inline bool gpu_3do_fragment_visible(gpu_3do_alpha_mode mode,
-                                         bool transparent,float alpha,float cutoff)
+                                         bool transparent,float alpha,float cutoff,
+                                         unsigned pixel_x=0,unsigned pixel_y=0)
     {
         if(!gpu_3do_draws_in_pass(mode,transparent)) return false;
         if(transparent)
             return alpha>0.001f &&
                    (mode!=gpu_3do_alpha_mode::mixed || alpha<0.999f);
+        if(mode==gpu_3do_alpha_mode::dithered)
+            return alpha>gpu_3do_dither_threshold(pixel_x,pixel_y);
         return mode==gpu_3do_alpha_mode::masked
             ? alpha>=cutoff
             : mode!=gpu_3do_alpha_mode::mixed || alpha>=0.999f;

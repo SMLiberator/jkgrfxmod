@@ -284,6 +284,37 @@ negative U/V speeds, ensure UVs wrap, verify `sine`/`square` timing and
 `emissive_factor` only (no `emissive_map`), and test both opaque and
 depth-clipped surfaces.
 
+## Dithered alpha (screen-door transparency)
+
+Material pack metadata now supports `"alpha_mode": "dithered"` in addition to
+`"blend"` (default) and `"mask"`. It uses a stable screen-space 4x4 Bayer
+pattern, preserving the average transparency as the fraction of surviving pixels.
+Coverage includes texture alpha, `albedo_factor` alpha and native 3DO face/vertex
+opacity. It does not use `alpha_cutoff` (which remains exclusive to `"mask"`).
+
+```json
+{
+  "materials": [{
+    "name": "foliage",
+    "replaces": ["foliage.mat"],
+    "alpha_mode": "dithered",
+    "albedo_factor": [1, 1, 1, 0.7]
+  }]
+}
+```
+
+Dithered fragments write opaque depth and receive SSAO and distance fog, so
+they require no alpha blending or transparency sorting. Both native JK-assisted
+world/sector polygons and GPU-resident 3DO meshes use the same 4x4 threshold.
+Native JK face translucency (90/255) becomes dither coverage for GPU 3DOs.
+Materials using additive, multiply, fluid, depth clipping or emissive-only
+blending still follow their dedicated translucent paths.
+
+Dithering is not universally faster: it removes blending/sorting overhead,
+but introduces discard and visible screen-door grain; moving the camera can
+make the pattern shimmer. It is best suited to foliage, fences and semi-
+transparent solid meshes, not glass or fluids.
+
 ## Material blend modes
 
 Material packs now support an optional `blend_mode`, independent of the
