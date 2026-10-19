@@ -25,9 +25,9 @@ namespace jkgm {
     // surfaces match the nonmirrored/JK rendering behavior.
     inline float gpu_3do_transform_determinant(std::array<float,12> const &m)
     {
-        float const cx=m[3]*m[8]-m[5]*m[6];
-        float const cy=m[5]*m[7]-m[4]*m[8];
-        float const cz=m[4]*m[6]-m[3]*m[7];
+        float const cx=m[4]*m[8]-m[5]*m[7];
+        float const cy=m[5]*m[6]-m[3]*m[8];
+        float const cz=m[3]*m[7]-m[4]*m[6];
         return m[0]*cx+m[1]*cy+m[2]*cz;
     }
     inline bool gpu_3do_reversed_winding(std::array<float,12> const &m)
