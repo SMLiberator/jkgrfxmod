@@ -815,6 +815,16 @@ or a true area-light approximation.
 Benchmark scenes with strong reflections and many nearby lights: these
 are per-fragment GGX loops, which can be expensive on large polygons.
 
+### COG runtime material parity on GPU 3DOs
+
+GPU-resident 3DO materials now follow the same stable MAT-ID mapping used
+by JK-assisted draws, including D3D-handle generation validation. Runtime
+`SetMaterialColor` adjustments, per-MAT albedo crossfades, global EnvMap
+transitions and per-MAT EnvMap overrides resolve against the same registered
+replacement-pack images. EnvMap commands may enable reflection on an
+otherwise matte replacement just as in the native path. The old geometry
+cache is not rebuilt when these shader-only material values change.
+
 ## Native JK hardware color effects and sector-screen tint
 
 JK hardware acceleration copies the accumulated stdPalEffects via

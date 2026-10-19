@@ -405,11 +405,17 @@ namespace jkgm {
 
         struct gpu_3do_texture {
             gl::texture_view texture = gl::default_texture;
+            gl::texture_view texture2 = gl::default_texture;
+            float albedo_transition=0.0f;
+            int albedo_source2=2;
             gl::texture_view emission = gl::default_texture;
             gl::texture_view normal = gl::default_texture;
             gl::texture_view normal2 = gl::default_texture;
             gl::texture_view surface = gl::default_texture;
             gl::texture_view environment = gl::default_texture;
+            gl::texture_view environment2 = gl::default_texture;
+            bool has_environment2=false;
+            float environment_transition=0.0f;
             float width=1.0f, height=1.0f;
             float reflection_strength=0.0f,roughness=0.5f,metalness=0.0f;
             float normal_strength=1.0f,normal_strength2=1.0f;
@@ -2055,17 +2061,40 @@ namespace jkgm {
             if(id==0 || id>vidmem_texture_surfaces.size()) return out;
             auto const &surface=vidmem_texture_surfaces[id-1];
             if(!surface) return out;
+            // JK-assisted and GPU 3DO paths share the same stable native
+            // MAT ID. Validate D3D handle generation before trusting links.
+            uint32_t native_id=mat.id;
+            auto handle_it=runtime_mat_by_handle.find(id);
+            if(handle_it!=runtime_mat_by_handle.end() &&
+               handle_it->second.surface==surface.get() &&
+               handle_it->second.generation==surface->texture_generation)
+                native_id=handle_it->second.mat_id;
+            runtime_mat_override const *ctl=nullptr;
+            auto ctl_it=runtime_controls.per_mat.find(native_id);
+            if(ctl_it!=runtime_controls.per_mat.end()) ctl=&ctl_it->second;
             // A replacement can deliberately have no albedo map, e.g.
             // emissive-only brake lights with albedo_factor 0 0 0 0.
             // Do not discard the *entire* material and its emissive map.
-            if(surface->albedo_map) {
-                out.texture=texture_cache->get_texture_handle(*surface->albedo_map);
-                out.alpha=texture_cache->has_nonopaque_alpha(*surface->albedo_map);
+            auto from_albedo=surface->albedo_map;
+            auto to_albedo=from_albedo;
+            float albedo_weight=0.0f;
+            if(ctl && ctl->albedo)
+                resolve_runtime_transition(*ctl->albedo,surface->albedo_map,
+                                           from_albedo,to_albedo,albedo_weight);
+            if(from_albedo) {
+                out.texture=texture_cache->get_texture_handle(*from_albedo);
+                out.alpha=texture_cache->has_nonopaque_alpha(*from_albedo);
                 out.albedo_source=1;
                 out.has_image=true;
-            } else {
-                out.albedo_source=2; // neutral texture; tint controls base color
-                out.alpha=false; // no actual alpha texture to split
+            } else out.albedo_source=2; // intentionally untextured
+            if(albedo_weight>0.0f) {
+                out.albedo_transition=albedo_weight;
+                if(to_albedo) {
+                    out.texture2=texture_cache->get_texture_handle(*to_albedo);
+                    out.albedo_source2=1;
+                    out.alpha=out.alpha ||
+                        texture_cache->has_nonopaque_alpha(*to_albedo);
+                } else out.albedo_source2=2;
             }
             out.masked=surface->alpha_mode==material_alpha_mode::mask;
             out.dithered=surface->alpha_mode==material_alpha_mode::dithered;
@@ -2078,6 +2107,11 @@ namespace jkgm {
             auto const &tint=surface->albedo_factor;
             out.tint=make_point(get<0>(tint),get<1>(tint),
                                 get<2>(tint),get<3>(tint));
+            if(ctl && ctl->color) {
+                auto const rgb=ctl->color->value();
+                out.tint=make_point(get<0>(tint)*rgb[0],get<1>(tint)*rgb[1],
+                                    get<2>(tint)*rgb[2],get<3>(tint));
+            }
             out.opacity=get<3>(tint);
             out.albedo_scroll=scroll_offset(surface->albedo_scroll);
             out.emissive_scroll=scroll_offset(surface->emissive_scroll);
@@ -2100,8 +2134,32 @@ namespace jkgm {
                 get<1>(out.emission_factor),get<2>(out.emission_factor));
             // Opt-in GPU 3DO material specularity: compute only for
             // reflective replacements and active native Thing lights.
-            if(the_config->enable_reflections && surface->reflection_strength>0) {
-                out.reflection_strength=surface->reflection_strength;
+            auto env_from=surface->env_map;
+            auto env_to=env_from;
+            float env_weight=0.0f;
+            bool env_command=false;
+            if(the_config->enable_reflections &&
+               surface->replacement_material &&
+               !surface->replacement_material->has_explicit_env_map &&
+               runtime_controls.global_env) {
+                resolve_runtime_transition(*runtime_controls.global_env,
+                                           surface->env_map,env_from,env_to,env_weight);
+                env_command=runtime_controls.global_env->to.has_value() ||
+                            runtime_controls.global_env->from.has_value();
+            }
+            if(the_config->enable_reflections && ctl && ctl->env) {
+                auto const global_target=env_weight>0.0f?env_to:env_from;
+                resolve_runtime_transition(*ctl->env,global_target,
+                                           env_from,env_to,env_weight);
+                env_command=ctl->env->from.has_value() ||
+                            ctl->env->to.has_value();
+            }
+            bool const has_env=env_from.has_value()||env_to.has_value();
+            float const strength=surface->reflection_strength>0
+                ? surface->reflection_strength :
+                ((env_command && has_env)?1.0f:0.0f);
+            if(the_config->enable_reflections && strength>0) {
+                out.reflection_strength=strength;
                 out.roughness=surface->roughness;
                 out.metalness=surface->metalness;
                 out.normal_strength=surface->normal_strength;
@@ -2109,9 +2167,16 @@ namespace jkgm {
                 out.normal_scroll=scroll_offset(surface->normal_scroll);
                 out.normal_scroll2=scroll_offset(surface->normal_scroll2);
                 out.reflection_mode=static_cast<int>(surface->reflection_mode);
-                if(surface->env_map) {
-                    out.environment=texture_cache->get_texture_handle(*surface->env_map);
+                if(env_from) {
+                    out.environment=texture_cache->get_texture_handle(*env_from);
                     out.has_environment=true;
+                }
+                if(env_weight>0.0f) {
+                    out.environment_transition=env_weight;
+                    if(env_to) {
+                        out.environment2=texture_cache->get_texture_handle(*env_to);
+                        out.has_environment2=true;
+                    }
                 }
                 if(surface->normal_map2) {
                     out.normal2=texture_cache->get_texture_handle(*surface->normal_map2);
@@ -2183,7 +2248,7 @@ namespace jkgm {
                 make_point(0.0f,0.5f,0.0f,0.0f),
                 make_point(0.0f,1.0f,0.0f,0.0f),
                 make_point(0.0f,0.0f),make_point(0.0f,0.0f));
-            prog.set_environment(false,0);
+            prog.set_environment(false,false,0.0f,0);
             prog.set_camera_axes(cam.right,cam.forward,cam.up);
             auto const &sun=get_sun_settings();
             auto const sun_direction=normalized_sun_direction(sun.direction.value());
@@ -2432,9 +2497,13 @@ namespace jkgm {
                 }
                 bind_color_texture(draw.texture.texture,0,draw.texture.filtered);
                 bind_color_texture(draw.texture.emission,1,draw.texture.filtered);
+                if(draw.texture.albedo_transition>0.0f)
+                    bind_color_texture(draw.texture.texture2,6,draw.texture.filtered);
+                prog.set_albedo_transition(draw.texture.albedo_source2,
+                                           draw.texture.albedo_transition);
                 bool const spec_active=draw.texture.reflection_strength>0 &&
                     (inst.num_lights>0 || draw.texture.has_environment ||
-                     sun_active);
+                     draw.texture.has_environment2 || sun_active);
                 if(spec_active) {
                     gl::set_active_texture_unit(2);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
@@ -2452,7 +2521,15 @@ namespace jkgm {
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          draw.texture.environment);
                     }
+                    if(draw.texture.environment_transition>0.0f &&
+                       draw.texture.has_environment2) {
+                        gl::set_active_texture_unit(7);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         draw.texture.environment2);
+                    }
                     prog.set_environment(draw.texture.has_environment,
+                                         draw.texture.has_environment2,
+                                         draw.texture.environment_transition,
                                          draw.texture.reflection_mode);
                     prog.set_point_specular(
                         make_point(draw.texture.reflection_strength,
@@ -2469,7 +2546,7 @@ namespace jkgm {
                         make_point(0.0f,0.5f,0.0f,0.0f),
                         make_point(0.0f,1.0f,0.0f,0.0f),
                         make_point(0.0f,0.0f),make_point(0.0f,0.0f));
-                    prog.set_environment(false,0);
+                    prog.set_environment(false,false,0.0f,0);
                 }
                 prev_specular_active=spec_active;
                 prog.set_surface(draw.texture.albedo_source,draw.texture.width,

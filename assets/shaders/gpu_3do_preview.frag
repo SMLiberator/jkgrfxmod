@@ -3,6 +3,8 @@
 // MIXED surfaces draw fully opaque pixels into the G-buffer and translucent
 // pixels in the sorted alpha pass, without double shading any pixel.
 uniform sampler2D albedo_map;
+uniform sampler2D albedo_map2;
+uniform vec4 albedo_transition; // has second albedo, progress, enabled, unused
 uniform sampler2D emissive_map;
 uniform vec2 uv_scale;
 uniform vec2 albedo_scroll;
@@ -27,9 +29,10 @@ uniform sampler2D surface_map; // linear RGB: reflectivity, roughness, metalness
 uniform sampler2D normal_map;  // tangent-space RGB
 uniform sampler2D normal_map2; // second slope layer
 uniform sampler2D env_map;     // equirectangular / matcap
+uniform sampler2D env_map2;
 uniform vec4 view_right, view_forward, view_up, view_origin;
 uniform vec3 camera_right_axis,camera_forward_axis,camera_up_axis;
-uniform vec2 environment_info; // enabled, reflection_mode
+uniform vec4 environment_info; // from enabled, reflection_mode, to enabled, progress
 uniform vec4 sun_direction; // view-space direction TOWARD sun
 uniform vec4 sun_color_intensity; // rgb, intensity
 uniform vec4 specular_params; // strength, roughness, metalness, has surface map
@@ -121,13 +124,15 @@ vec3 point_light_specular(vec3 base_color,vec2 uv)
 vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
 {
     metalness=0.0;
-    if(environment_info.x<0.5 || specular_params.x<=0.0)
+    if((environment_info.x<0.5 && environment_info.z<0.5) ||
+       specular_params.x<=0.0)
         return vec3(0.0);
     vec3 surf=specular_params.w>0.5 ? texture(surface_map,uv).rgb:vec3(1.0);
     float strength=max(specular_params.x*surf.r,0.0);
     if(strength<=0.0) return vec3(0.0);
     float roughness=clamp(specular_params.y*surf.g,0.0,1.0);
-    metalness=clamp(specular_params.z*surf.b,0.0,1.0);
+    metalness=clamp(specular_params.z*surf.b,0.0,1.0)*
+              mix(environment_info.x,environment_info.z,environment_info.w);
     vec3 n_local=mapped_local_normal(uv);
     vec3 nv=view_right.xyz*n_local.x+
             view_forward.xyz*n_local.y+view_up.xyz*n_local.z;
@@ -151,9 +156,15 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
         ? clamp(vec2(0.5+0.5*n.x,0.5-0.5*n.y),vec2(0.001),vec2(0.999))
         : vec2(fract(atan(dir.x,dir.z)/6.28318530718+0.5),
                0.5-asin(clamp(dir.y,-1.0,1.0))/3.14159265359);
-    ivec2 dims=textureSize(env_map,0);
+    ivec2 dims=environment_info.x>0.5 ?
+        textureSize(env_map,0) : textureSize(env_map2,0);
     float lod=roughness*log2(max(float(max(dims.x,dims.y)),1.0));
-    vec3 env=textureLod(env_map,env_uv,lod).rgb;
+    vec3 env_from=vec3(0.0),env_to=vec3(0.0);
+    if(environment_info.x>0.5 && environment_info.w<1.0)
+        env_from=textureLod(env_map,env_uv,lod).rgb;
+    if(environment_info.z>0.5 && environment_info.w>0.0)
+        env_to=textureLod(env_map2,env_uv,lod).rgb;
+    vec3 env=mix(env_from,env_to,environment_info.w);
     vec3 f0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
     float cos_theta=clamp(dot(n,-v),0.0,1.0);
     vec3 fresnel=f0+(vec3(1.0)-f0)*pow(1.0-cos_theta,5.0);
@@ -224,6 +235,11 @@ void main() {
     vec4 texel=has_texture==1
         ? texture(albedo_map,uv+albedo_scroll)
         : (has_texture==2 ? vec4(1.0) : vec4(1.0,0.05,0.65,1.0));
+    if(albedo_transition.z>0.5) {
+        vec4 next_texel=albedo_transition.x>0.5
+            ? texture(albedo_map2,uv+albedo_scroll) : vec4(1.0);
+        texel=mix(texel,next_texel,albedo_transition.y);
+    }
     vec4 albedo=texel*albedo_factor;
     albedo.a*=native_face_opacity;
     if(transparent_pass==0) {

@@ -173,6 +173,9 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , specular_normal_sampler(gl::get_uniform_location(the_program,"normal_map"))
     , specular_normal2_sampler(gl::get_uniform_location(the_program,"normal_map2"))
     , specular_environment_sampler(gl::get_uniform_location(the_program,"env_map"))
+    , specular_environment2_sampler(gl::get_uniform_location(the_program,"env_map2"))
+    , albedo2_sampler(gl::get_uniform_location(the_program,"albedo_map2"))
+    , albedo_transition_info(gl::get_uniform_location(the_program,"albedo_transition"))
     , environment_info(gl::get_uniform_location(the_program,"environment_info"))
     , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
     , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
@@ -277,11 +280,21 @@ void jkgm::shaders::gpu_3do_preview_shader::set_point_specular(
     gl::set_uniform_vector(normal_specular_scroll2,scroll2);
 }
 
-void jkgm::shaders::gpu_3do_preview_shader::set_environment(bool present,int mode)
+void jkgm::shaders::gpu_3do_preview_shader::set_environment(
+    bool from,bool to,float weight,int mode)
 {
     gl::set_uniform_integer(specular_environment_sampler,4);
+    gl::set_uniform_integer(specular_environment2_sampler,7);
     gl::set_uniform_vector(environment_info,
-        make_point(present?1.0f:0.0f,static_cast<float>(mode)));
+        make_point(from?1.0f:0.0f,static_cast<float>(mode),
+                   to?1.0f:0.0f,weight));
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_albedo_transition(
+    int source2,float weight)
+{
+    gl::set_uniform_integer(albedo2_sampler,6);
+    gl::set_uniform_vector(albedo_transition_info,
+        make_point(source2==1?1.0f:0.0f,weight,weight>0.0f?1.0f:0.0f,0.0f));
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_sun(
