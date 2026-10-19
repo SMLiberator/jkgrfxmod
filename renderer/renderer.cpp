@@ -6,6 +6,7 @@
 #include "gpu_3do_alpha.hpp"
 #include "native_jk_palette_effects.hpp"
 #include "retro_palette.hpp"
+#include "jk_colormap_layout.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
@@ -1241,7 +1242,7 @@ namespace jkgm {
                     frame_screen->get_resolved_depth_texture());
             }
             // Retro Mode consumes the exact in-memory RGB888 entries from JK's
-            // identity CMP (+0x10, NOT the file's +0x40 palette offset).
+            // identity CMP (+0x30, NOT the file's +0x40 palette offset).
             // Compare this pointer against SithWorld::colormaps[0] and dump
             // every RGB byte on first load/change; log rows can be compared to
             // the original CMP with tools/verify_retro_cmp.py.
@@ -1258,7 +1259,8 @@ namespace jkgm {
                 if(engine_material_debug::read_object(0x0073A414U,identity_cmp) &&
                    identity_cmp>=0x10000U &&
                    engine_material_debug::read_bytes(
-                       uintptr_t(identity_cmp)+0x10U,palette.data(),palette.size())) {
+                       uintptr_t(identity_cmp)+jk_cmp_colors_offset,
+                       palette.data(),palette.size())) {
                     ogs->retro_read_failure_logged=false;
                     uint32_t world_addr=0,world_cmp0=0;
                     engine_material_debug::world_header world{};
@@ -1284,7 +1286,7 @@ namespace jkgm {
                         retro_palette_rgb world_palette{};
                         bool const world_palette_readable=world_readable &&
                             engine_material_debug::read_bytes(
-                                uintptr_t(world_cmp0)+0x10U,
+                                uintptr_t(world_cmp0)+jk_cmp_colors_offset,
                                 world_palette.data(),world_palette.size());
                         if(world_palette_readable) {
                             unsigned mismatches=0;
