@@ -603,7 +603,10 @@ namespace {
                     bounds_hi[axis]=std::max(bounds_hi[axis],value);
                 }
             }
-            if(!translucent && !g->groups.empty() &&
+            // Warped faces use JK's one-plane visibility rule with GL culling
+            // disabled. Keep each warped face in a distinct range so the CPU
+            // can reject it individually rather than draw unrelated backsides.
+            if(!translucent && !nonplanar && !g->groups.empty() &&
                g->groups.back().material==ptr &&
                g->groups.back().cel==cel &&
                g->groups.back().face_type==flags &&
