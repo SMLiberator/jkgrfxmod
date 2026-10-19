@@ -177,6 +177,8 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
     , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
     , camera_up_axis(gl::get_uniform_location(the_program,"camera_up_axis"))
+    , sun_direction(gl::get_uniform_location(the_program,"sun_direction"))
+    , sun_color_intensity(gl::get_uniform_location(the_program,"sun_color_intensity"))
     , normal_specular_params(gl::get_uniform_location(the_program,"normal_specular_params"))
     , normal_specular_scroll(gl::get_uniform_location(the_program,"normal_specular_scroll"))
     , normal_specular_scroll2(gl::get_uniform_location(the_program,"normal_specular_scroll2"))
@@ -280,6 +282,13 @@ void jkgm::shaders::gpu_3do_preview_shader::set_environment(bool present,int mod
     gl::set_uniform_integer(specular_environment_sampler,4);
     gl::set_uniform_vector(environment_info,
         make_point(present?1.0f:0.0f,static_cast<float>(mode)));
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_sun(
+    point<4,float> direction,point<4,float> color_intensity)
+{
+    gl::set_uniform_vector(sun_direction,direction);
+    gl::set_uniform_vector(sun_color_intensity,color_intensity);
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_camera_axes(

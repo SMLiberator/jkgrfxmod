@@ -2185,6 +2185,21 @@ namespace jkgm {
                 make_point(0.0f,0.0f),make_point(0.0f,0.0f));
             prog.set_environment(false,0);
             prog.set_camera_axes(cam.right,cam.forward,cam.up);
+            auto const &sun=get_sun_settings();
+            auto const sun_direction=normalized_sun_direction(sun.direction.value());
+            auto const sun_color=sun.color.value();
+            auto const sun_project=[&](std::array<float,3> const &axis) {
+                return sun_direction[0]*axis[0]+sun_direction[1]*axis[1]+
+                       sun_direction[2]*axis[2];
+            };
+            float const sun_power=the_config->enable_reflections
+                ? std::max(0.0f,sun.intensity.value()[0]) : 0.0f;
+            bool const sun_active=sun_power>0.0f;
+            prog.set_sun(make_point(sun_project(cam.right),
+                                    sun_project(cam.up),
+                                    sun_project(cam.forward),1.0f),
+                         make_point(sun_color[0],sun_color[1],sun_color[2],
+                                    sun_power));
             float const aspect=get<x>(internal_scr_res_f)/get<y>(internal_scr_res_f);
             float const tan_half_fov=std::tan(cam.fov*0.008726646259971648f);
             prog.set_projection(make_point(tan_half_fov,aspect,1.0f/far_plane,0.0f));
@@ -2418,7 +2433,8 @@ namespace jkgm {
                 bind_color_texture(draw.texture.texture,0,draw.texture.filtered);
                 bind_color_texture(draw.texture.emission,1,draw.texture.filtered);
                 bool const spec_active=draw.texture.reflection_strength>0 &&
-                    (inst.num_lights>0 || draw.texture.has_environment);
+                    (inst.num_lights>0 || draw.texture.has_environment ||
+                     sun_active);
                 if(spec_active) {
                     gl::set_active_texture_unit(2);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,

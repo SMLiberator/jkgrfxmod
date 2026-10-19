@@ -807,9 +807,10 @@ composited after SSAO and participates in fog for transparent materials.
 GPU 3DOs now also support static/per-material and pack-default EnvMaps
 (equirectangular world/screen/fixed/matcap modes) plus a second normal-map
 layer, with normal scroll and mip-based roughness blur. These use the native
-material properties. Animated COG EnvMap transitions, sun specularity,
-displacement, depth-clipped polygon decals, and complete fluid parity still
-need a separate GPU 3DO implementation. This is not SSR, shadow mapping,
+material properties. Directional-sun GGX specular now also follows `SetSunInfo` on GPU 3DOs,
+using the same shader model as native material rendering. Animated COG
+EnvMap transitions, displacement, depth-clipped polygon decals, and
+complete fluid parity still need a separate GPU 3DO implementation. This is not SSR, shadow mapping,
 or a true area-light approximation.
 Benchmark scenes with strong reflections and many nearby lights: these
 are per-fragment GGX loops, which can be expensive on large polygons.

@@ -30,6 +30,8 @@ uniform sampler2D env_map;     // equirectangular / matcap
 uniform vec4 view_right, view_forward, view_up, view_origin;
 uniform vec3 camera_right_axis,camera_forward_axis,camera_up_axis;
 uniform vec2 environment_info; // enabled, reflection_mode
+uniform vec4 sun_direction; // view-space direction TOWARD sun
+uniform vec4 sun_color_intensity; // rgb, intensity
 uniform vec4 specular_params; // strength, roughness, metalness, has surface map
 uniform vec4 normal_specular_params; // has normal map, strength, unused, unused
 uniform vec2 normal_specular_scroll;
@@ -158,6 +160,47 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     return env*fresnel*strength;
 }
 
+
+// The same view-space GGX/Schlick/Smith sun term used by the native
+// opaque material shader; independent of the existing Gouraud diffuse.
+vec3 gpu_sun_specular(vec3 base_color,vec2 uv)
+{
+    if(specular_params.x<=0.0 || sun_color_intensity.w<=0.0 ||
+       sun_direction.w<0.5) return vec3(0.0);
+    vec3 surface=specular_params.w>0.5 ?
+        texture(surface_map,uv).rgb : vec3(1.0);
+    float strength=max(specular_params.x*surface.r,0.0);
+    if(strength<=0.0) return vec3(0.0);
+    float roughness=clamp(specular_params.y*surface.g,0.08,1.0);
+    float metalness=clamp(specular_params.z*surface.b,0.0,1.0);
+    vec3 n_local=mapped_local_normal(uv);
+    vec3 vnorm=view_right.xyz*n_local.x+
+               view_forward.xyz*n_local.y+view_up.xyz*n_local.z;
+    vec3 N=normalize(vec3(vnorm.x,vnorm.z,vnorm.y));
+    vec3 vp=view_origin.xyz+
+            view_right.xyz*local_fragment_position.x+
+            view_forward.xyz*local_fragment_position.y+
+            view_up.xyz*local_fragment_position.z;
+    vec3 V=-normalize(vec3(vp.x,vp.z,vp.y));
+    if(dot(N,V)<0.0) N=-N;
+    vec3 L=normalize(sun_direction.xyz);
+    float NdotL=max(dot(N,L),0.0),NdotV=max(dot(N,V),0.0);
+    if(NdotL<=0.0 || NdotV<=0.0) return vec3(0.0);
+    vec3 H=normalize(L+V);
+    float Nh=max(dot(N,H),0.0),Vh=max(dot(V,H),0.0);
+    float a=roughness*roughness,a2=a*a;
+    float d=Nh*Nh*(a2-1.0)+1.0;
+    float D=a2/(3.14159265359*d*d);
+    float k=(roughness+1.0)*(roughness+1.0)/8.0;
+    float Gv=NdotV/(NdotV*(1.0-k)+k);
+    float Gl=NdotL/(NdotL*(1.0-k)+k);
+    vec3 F0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
+    vec3 F=F0+(vec3(1.0)-F0)*pow(1.0-Vh,5.0);
+    return min(F*(D*Gv*Gl/max(4.0*NdotV,0.0001))*
+               sun_color_intensity.rgb*sun_color_intensity.w*strength,
+               vec3(32.0));
+}
+
 layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
@@ -208,7 +251,8 @@ void main() {
         emission*=texture(emissive_map,uv+emissive_scroll).rgb;
     // Only reflective materials with nearby JK point-light Things enter
     // this branch. Highlights bypass SSAO, as with the existing sun term.
-    vec3 specular=(point_light_specular(albedo.rgb,uv)+env_reflection)*
+    vec3 specular=(point_light_specular(albedo.rgb,uv)+
+                   gpu_sun_specular(albedo.rgb,uv)+env_reflection)*
                   (1.0-fog);
     // The opaque pass composites this separate emissive attachment after
     // SSAO. The translucent pass has only the color target: emission must

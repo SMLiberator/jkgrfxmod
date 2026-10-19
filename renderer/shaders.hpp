@@ -155,6 +155,7 @@ namespace jkgm {
             gl::uniform_location_id specular_normal2_sampler,specular_environment_sampler;
             gl::uniform_location_id environment_info;
             gl::uniform_location_id camera_right_axis,camera_forward_axis,camera_up_axis;
+            gl::uniform_location_id sun_direction,sun_color_intensity;
             gl::uniform_location_id normal_specular_scroll,normal_specular_scroll2,local_eye;
             gl::uniform_location_id ambient_light,attenuation_min,num_lights,
                                     effective_light_mode;
@@ -179,6 +180,7 @@ namespace jkgm {
                                     point<2,float> normal_scroll,
                                     point<2,float> normal_scroll2);
             void set_environment(bool present,int mode);
+            void set_sun(point<4,float> direction,point<4,float> color_intensity);
             void set_camera_axes(std::array<float,3> const &right,
                                  std::array<float,3> const &forward,
                                  std::array<float,3> const &up);
