@@ -154,6 +154,25 @@ namespace jkgm {
             if(facing<0.0) std::swap(ib,ic);
             result.push_back({ia,ib,ic});
         };
+        // Preserve the original fan for strictly convex outlines. It
+        // retains the legacy diagonal/UV interpolation on ordinary quads,
+        // including warped quads, and avoids needless ear work.
+        bool convex=true;
+        for(size_t i=0;i<contour.size();i++) {
+            auto a=projected[contour[(i+contour.size()-1)%contour.size()]];
+            auto b=projected[contour[i]];
+            auto c=projected[contour[(i+1)%contour.size()]];
+            if(sign*gpu_3do_cross(a,b,c)<=eps) {
+                convex=false;
+                break;
+            }
+        }
+        if(convex) {
+            for(size_t i=1;i+1<contour.size();i++)
+                emit(contour[0],contour[i],contour[i+1]);
+            triangles=std::move(result);
+            return true;
+        }
         size_t iterations=0;
         while(contour.size()>3 && iterations++<points.size()*points.size()) {
             bool clipped=false;
