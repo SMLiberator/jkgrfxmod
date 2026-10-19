@@ -905,10 +905,16 @@ than losing triangles through OpenGL culling. Self-intersecting or degenerate
 outlines fall back for the **whole mesh** to native JK.
 Texture surfaces are warmed using a fallback native draw when needed.
 Unsupported 3DO geometry (such as wireframe/point faces or invalid/missing
-data) also falls back to native JK. Cache identity currently tracks mesh
-pointers and counts; JK.dll verbs that rewrite existing vertex/face buffers
-in place may not yet invalidate a cached mesh. This remains an experimental
-parity limitation to address separately.
+data) also falls back to native JK. Cached meshes now compute a
+guarded byte signature of their position, UV, face, normal, static-light and
+vertex-color buffers once per distinct mesh per frame; edits by JK.dll verbs
+invalidate that mesh even when all pointers and counts remain unchanged.
+Snapshot failures are memoized until these source bytes change, avoiding
+repeated failed triangulation of uncacheable meshes. Changes made between two
+draws of the *same mesh in the same frame* remain a known narrow limitation.
+This source check has measurable CPU overhead: enable `profile_renderer`
+and inspect `PERF gpu_3do source_check_us_avg`, `checks_avg` and
+`invalidations_total` before judging the benefit of persistent caching.
 Legitimately untextured faces use a neutral color for now;
 their exact JK flat colors still require lighting/material parity.
 The engine still renders world-sector geometry through the original path.
