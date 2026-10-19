@@ -230,6 +230,10 @@ namespace jkgm {
             gl::uniform_location_id depth_image;
             gl::uniform_location_id fog_params;
             gl::uniform_location_id fog_color;
+            gl::uniform_location_id decal_active,decal_image,normal_image;
+            gl::uniform_location_id decal_origin,decal_right,decal_up,decal_forward;
+            gl::uniform_location_id decal_options,camera_origin,camera_right,
+                                    camera_forward,camera_up;
 
         public:
             explicit game_post_opaque_composite_shader(fs::path const &data_root);
@@ -239,6 +243,12 @@ namespace jkgm {
             void set_occlusion_sampler(int sampler);
             void set_depth_sampler(int sampler);
             void set_fog(point<4,float> params,color_rgb fog);
+            void disable_projected_decal();
+            void set_projected_decal(point<4,float> origin,
+                                     point<4,float> right,point<4,float> up,
+                                     point<4,float> forward,point<4,float> options,
+                                     point<4,float> cam_origin,point<4,float> cam_right,
+                                     point<4,float> cam_forward,point<4,float> cam_up);
         };
 
         class game_transparency_pass_shader : public game_pass_shader {
