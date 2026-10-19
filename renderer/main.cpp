@@ -12,6 +12,7 @@
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_triangulation.hpp"
+#include "gpu_3do_cache_signature.hpp"
 #include "gpu_3do_colormap.hpp"
 #include "jk_colormap_layout.hpp"
 #include "native_mat_mips.hpp"
@@ -343,6 +344,95 @@ namespace {
             out.radius=radius;
             out.intensity=strength;
         }
+        return true;
+    }
+
+    // Memoize readable virtual-memory regions while hashing a mesh. All face
+    // corner index arrays generally live in one/few allocation regions; avoid
+    // two expensive VirtualQuery calls per face on every animation frame.
+    struct gpu_source_readable_regions {
+        struct region { uintptr_t begin=0,end=0; };
+        std::array<region,16> regions{};
+        size_t next=0;
+        bool readable(void const *ptr,size_t length) {
+            if(!ptr || length==0 || length>4*1024*1024) return false;
+            uintptr_t const address=reinterpret_cast<uintptr_t>(ptr);
+            if(address<0x10000U || address>0x7fffffffU ||
+               address+length<address) return false;
+            for(auto const &r:regions) {
+                if(address>=r.begin && address+length<=r.end) return true;
+            }
+            MEMORY_BASIC_INFORMATION info{};
+            if(VirtualQuery(ptr,&info,sizeof(info))==0 ||
+               info.State!=MEM_COMMIT ||
+               (info.Protect&(PAGE_GUARD|PAGE_NOACCESS))) return false;
+            uintptr_t const begin=reinterpret_cast<uintptr_t>(info.BaseAddress);
+            uintptr_t const end=begin+info.RegionSize;
+            if(end<begin || address+length>end) return false;
+            regions[next++%regions.size()]={begin,end};
+            return true;
+        }
+    };
+
+    // A full source signature once per *unique mesh per frame* detects
+    // in-place COG/JK.dll changes without relying on a particular verb list.
+    // All array reads are guarded; the old cache never noticed writes when
+    // allocations, face/vertex counts, and pointers stayed identical.
+    bool gpu_mesh_source_signature(native_mesh const &m,
+                                   float const *vertex_rgb,uint64_t &value) {
+        if(m.num_vertices<3 || m.num_vertices>65536 ||
+           m.num_faces<1 || m.num_faces>65536 ||
+           !gpu_span_readable(m.vertices,size_t(m.num_vertices)*3*sizeof(float)) ||
+           !gpu_span_readable(m.faces,size_t(m.num_faces)*sizeof(native_face)) ||
+           (vertex_rgb && !gpu_span_readable(
+               vertex_rgb,size_t(m.num_vertices)*3*sizeof(float))))
+            return false;
+
+        jkgm::gpu_3do_byte_signature h;
+        h.add(m.vertices);h.add(m.faces);h.add(m.uvs);
+        h.add(m.vertex_lights);h.add(m.normals);h.add(vertex_rgb);
+        h.add(m.num_vertices);h.add(m.num_faces);h.add(m.num_uvs);
+        h.add(m.geometry_mode);h.add(m.lighting_mode);h.add(m.texture_mode);
+        h.add_bytes(m.vertices,size_t(m.num_vertices)*3*sizeof(float));
+        if(vertex_rgb)
+            h.add_bytes(vertex_rgb,size_t(m.num_vertices)*3*sizeof(float));
+
+        bool const has_uvs=m.uvs && m.num_uvs>0 && m.num_uvs<=65536;
+        if(has_uvs) {
+            size_t const bytes=size_t(m.num_uvs)*2*sizeof(float);
+            if(!gpu_span_readable(m.uvs,bytes)) return false;
+            h.add_bytes(m.uvs,bytes);
+        }
+        if(m.vertex_lights) {
+            size_t const bytes=size_t(m.num_vertices)*sizeof(float);
+            if(!gpu_span_readable(m.vertex_lights,bytes)) return false;
+            h.add_bytes(m.vertex_lights,bytes);
+        }
+        if(m.normals) {
+            size_t const bytes=size_t(m.num_vertices)*3*sizeof(float);
+            if(!gpu_span_readable(m.normals,bytes)) return false;
+            h.add_bytes(m.normals,bytes);
+        }
+
+        gpu_source_readable_regions readable;
+        for(int i=0;i<m.num_faces;i++) {
+            native_face f{};
+            std::memcpy(&f,m.faces+size_t(i)*sizeof(f),sizeof(f));
+            h.add(f.num);h.add(f.type);h.add(f.geo);h.add(f.light);
+            h.add(f.tex);h.add(f.count);h.add(f.pos_indices);
+            h.add(f.uv_indices);h.add(f.material);h.add(f.cel);
+            h.add(f.uv_x);h.add(f.uv_y);h.add(f.extra_light);
+            h.add_bytes(f.normal,sizeof(f.normal));
+            if(f.count<3 || f.count>128) return false;
+            size_t const bytes=size_t(f.count)*sizeof(int);
+            if(!readable.readable(f.pos_indices,bytes)) return false;
+            h.add_bytes(f.pos_indices,bytes);
+            if(has_uvs && f.uv_indices) {
+                if(!readable.readable(f.uv_indices,bytes)) return false;
+                h.add_bytes(f.uv_indices,bytes);
+            }
+        }
+        value=h.value;
         return true;
     }
 
