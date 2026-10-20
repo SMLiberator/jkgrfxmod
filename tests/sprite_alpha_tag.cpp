@@ -12,6 +12,16 @@ int main() {
     // temporarily marked as translucent for native GPU batch routing.
     assert(sprite_alpha_override(tag,90)==128);
     assert(sprite_alpha_override(tag,255)==128);
+    // A full-opacity flare still needs the native transparent-face route,
+    // but its original texture/material opacity must not be reduced.
+    assert(sprite_alpha_encode(1.0f,false,tag,true));
+    assert((tag&sprite_alpha_flare)!=0U);
+    assert(sprite_alpha_override(tag,90)==255);
+    assert(sprite_alpha_encode(0.5f,true,tag,true));
+    assert((tag&sprite_alpha_flare)!=0U);
+    assert(sprite_alpha_override(tag,90)==45);
+    assert(sprite_alpha_encode(0.5f,false,tag));
+    assert((tag&sprite_alpha_flare)==0U);
     assert(sprite_alpha_encode(0.25f,true,tag));
     assert(sprite_alpha_override(tag,90)==23); // Preserve existing translucency.
     assert(sprite_alpha_encode(1.0f,false,tag));
