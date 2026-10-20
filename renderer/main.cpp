@@ -14,6 +14,7 @@
 #include "sprite_type_registry.hpp"
 #include "sprite_instance_info.hpp"
 #include "sprite_quad_transform.hpp"
+#include "sprite_alpha_tag.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_triangulation.hpp"
@@ -1004,6 +1005,20 @@ namespace {
     using native_sprite_mid_fn = void (__cdecl *)();
     constexpr uintptr_t sprite_draw_addr=0x0046CF40U;
     constexpr uintptr_t sprite_preclip_addr=0x0046D182U;
+    // JK23: rdCache_AddProcFace records a completed proc-face at
+    // [0x86ede0 + 0x6c*index]. The cache converter's 0x43b6f9 cmp
+    // immediately follows selection of the native 90/255 alpha.
+    constexpr uintptr_t sprite_addproc_addr=0x0043B240U;
+    constexpr uintptr_t sprite_alpha_mid_addr=0x0043B6F9U;
+    constexpr uintptr_t sprite_proc_count_addr=0x0086EDC0U;
+    constexpr uintptr_t sprite_proc_base_addr=0x0086EDE0U;
+    constexpr size_t sprite_proc_stride=0x6cU;
+    constexpr uint8_t sprite_addproc_bytes[]={
+        0x55,0x8b,0xec,0x83,0xec,0x18,0xa1,0xc0,0xed,0x86,0x00
+    };
+    constexpr uint8_t sprite_alpha_mid_bytes[]={
+        0x81,0xf9,0xff,0x00,0x00,0x00
+    };
     // Preserve frustum bounds when SetSpriteInfo enlarges an individual Thing.
     constexpr uintptr_t sprite_frustum_addr=0x004758D0U;
     constexpr uint8_t sprite_frustum_bytes[]={
@@ -1073,9 +1088,23 @@ namespace {
         reinterpret_cast<native_sprite_mid_fn>(sprite_preclip_addr);
     bool native_sprite_hook_active=false;
     bool sprite_frustum_hook_active=false;
+    bool sprite_alpha_hook_active=false;
+    using sprite_addproc_fn=int(__cdecl *)(int,unsigned int,int);
+    sprite_addproc_fn RealSpriteAddProc=
+        reinterpret_cast<sprite_addproc_fn>(sprite_addproc_addr);
+    native_sprite_mid_fn RealSpriteAlphaMid=
+        reinterpret_cast<native_sprite_mid_fn>(sprite_alpha_mid_addr);
     using sprite_frustum_fn=int(__cdecl *)(void *,void const *,float);
     sprite_frustum_fn RealSpriteFrustum=
         reinterpret_cast<sprite_frustum_fn>(sprite_frustum_addr);
+    void const *sprite_proc_entry(uint32_t index)
+    {
+        if(index>=1024U) return nullptr;
+        auto const addr=sprite_proc_base_addr+
+                        static_cast<uintptr_t>(index)*sprite_proc_stride;
+        return reinterpret_cast<void const *>(addr);
+    }
+
     // Level-global resources can be shared by many Things. In profiling mode,
     // report a few actual rendered instances per .SPR, not just definitions:
     // this distinguishes a type parsed as zero from Things with differing axes.
@@ -1322,6 +1351,72 @@ namespace {
         }
     }
 
+    int __cdecl HookedSpriteAddProc(int extra,unsigned int vertices,int flags)
+    {
+        // rdSprite_Draw passes extraData 0, unlike various other primitives.
+        // Record the completed face, not a shared rdSprite resource. The
+        // tag persists until the native cache consumes this specific face.
+        bool const is_sprite=sprite_draw_active.thing!=nullptr;
+        float const opacity=is_sprite ?
+            current_sprite_info(sprite_draw_active.thing).opacity:1.0f;
+        uint32_t const before=*reinterpret_cast<uint32_t const *>(
+            sprite_proc_count_addr);
+        int const result=RealSpriteAddProc(extra,vertices,flags);
+        if(result==0 || !is_sprite || !(opacity>0.0f && opacity<1.0f) ||
+           extra!=0) return result;
+        uint32_t const after=*reinterpret_cast<uint32_t const *>(
+            sprite_proc_count_addr);
+        if(after!=before+1U) return result;
+        auto *entry=const_cast<uint8_t *>(static_cast<uint8_t const *>(
+            sprite_proc_entry(before)));
+        if(!entry || !gpu_span_readable(entry,sprite_proc_stride)) return result;
+        // The first word is rdProcEntry.extraData, +4 its native face flags.
+        // ExtraData is only used for line colors in this cache path.
+        uint32_t face_type=0;
+        std::memcpy(&face_type,entry+4,4);
+        uint32_t const geometry_mode=*reinterpret_cast<uint32_t const *>(
+            entry+0x14);
+        if(geometry_mode<2U) return result;
+        uint32_t alpha_tag=0;
+        if(!jkgm::sprite_alpha_encode(
+               opacity,(face_type&2U)!=0U,alpha_tag)) return result;
+        std::memcpy(entry,&alpha_tag,4);
+        face_type|=2U; // Force native translucent render state, without MAT mutation.
+        std::memcpy(entry+4,&face_type,4);
+        return result;
+    }
+
+    int __cdecl SpriteFaceAlpha(void const *face,int native_alpha)
+    {
+        if(!face || !gpu_span_readable(face,4)) return -1;
+        uint32_t tag=0;
+        std::memcpy(&tag,face,4);
+        return jkgm::sprite_alpha_override(tag,native_alpha);
+    }
+
+    // At 0x43b6f9 ESI points to the current rdProcEntry and ECX is the
+    // alpha just selected by native JK. Set saved ECX and [EBP-8] before
+    // the displaced CMP executes. All other CPU state is preserved.
+    __declspec(naked) void __cdecl SpriteAlphaThunk()
+    {
+        __asm {
+            pushfd
+            pushad
+            push ecx
+            push esi
+            call SpriteFaceAlpha
+            add esp,8
+            cmp eax,-1
+            je no_override
+            mov dword ptr [ebp-8],eax
+            mov dword ptr [esp+24],eax
+        no_override:
+            popad
+            popfd
+            jmp dword ptr [RealSpriteAlphaMid]
+        }
+    }
+
     int __cdecl HookedNativeSprite(void *thing,void *orientation)
     {
         auto const info=current_sprite_info(thing);
@@ -1403,6 +1498,31 @@ namespace {
             LOG_WARNING("SPR preclip hook unavailable: ",error);
             return false;
         }
+        // Optional exact-alpha hooks. A signature mismatch must never disable
+        // native SPR orientation or make changes to unrelated cache faces.
+        if(gpu_span_readable(reinterpret_cast<void const *>(sprite_addproc_addr),
+                             sizeof(sprite_addproc_bytes)) &&
+           gpu_span_readable(reinterpret_cast<void const *>(sprite_alpha_mid_addr),
+                             sizeof(sprite_alpha_mid_bytes)) &&
+           std::memcmp(reinterpret_cast<void const *>(sprite_addproc_addr),
+                       sprite_addproc_bytes,sizeof(sprite_addproc_bytes))==0 &&
+           std::memcmp(reinterpret_cast<void const *>(sprite_alpha_mid_addr),
+                       sprite_alpha_mid_bytes,sizeof(sprite_alpha_mid_bytes))==0) {
+            LONG const proc_err=DetourAttach(
+                &(PVOID &)RealSpriteAddProc,HookedSpriteAddProc);
+            if(proc_err==NO_ERROR) {
+                LONG const alpha_err=DetourAttach(
+                    &(PVOID &)RealSpriteAlphaMid,SpriteAlphaThunk);
+                if(alpha_err==NO_ERROR) sprite_alpha_hook_active=true;
+                else {
+                    DetourDetach(&(PVOID &)RealSpriteAddProc,HookedSpriteAddProc);
+                    LOG_WARNING("SPR alpha converter hook unavailable: ",alpha_err);
+                }
+            }
+            else LOG_WARNING("SPR face recording hook unavailable: ",proc_err);
+        }
+        else LOG_WARNING("SPR exact alpha disabled: unrecognized JK23 cache");
+
         error=DetourAttach(&(PVOID &)RealSpriteFrustum,HookedSpriteFrustum);
         if(error==NO_ERROR) sprite_frustum_hook_active=true;
         else LOG_WARNING("SPR instance frustum-radius hook unavailable: ",error);
@@ -2584,6 +2704,7 @@ bool attach_hooks()
         key_callback_registration_hook_active=false;
         key_callback_message_registered=false;
         sprite_frustum_hook_active=false;
+        sprite_alpha_hook_active=false;
     }
     if(error==NO_ERROR) native_sprite_hook_active=sprite_hooks_requested;
     if(error==NO_ERROR && mip_hook_requested) {
@@ -2600,6 +2721,11 @@ bool detach_hooks()
     DetourUpdateThread(GetCurrentThread());
 
     // Revert all SPR detours before releasing the DLL.
+    if(sprite_alpha_hook_active) {
+        DetourDetach(&(PVOID &)RealSpriteAlphaMid,SpriteAlphaThunk);
+        DetourDetach(&(PVOID &)RealSpriteAddProc,HookedSpriteAddProc);
+        sprite_alpha_hook_active=false;
+    }
     if(sprite_frustum_hook_active) {
         DetourDetach(&(PVOID &)RealSpriteFrustum,HookedSpriteFrustum);
         sprite_frustum_hook_active=false;
