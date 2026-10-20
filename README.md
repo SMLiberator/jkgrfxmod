@@ -1115,6 +1115,26 @@ assume every target sighting, movement, or attack dispatches `aievent:`.
 This behavior has been checked against the user's JK23 executable and
 the available OpenJKDF2 reconstruction; gameplay verification is pending.
 
+## Center-occluded SPR flares (experimental groundwork)
+
+SPR type bit `0x40` is reserved for a flare whose **center** must pass the
+opaque-scene depth test, while the whole textured quad can extend behind
+nearby geometry when its center remains visible. This is distinct from
+projected-decal bit `0x20` and does not change the billboard orientation.
+
+The SHA-locked JK23 `patch_jkgm_sprite_types.py` now accepts the original
+executable and the previous type-63 variant, upgrading either to type-127
+(`cmp edi,0x7F`). The patched executable is **not** included in the
+repository or test-build artifact: run the script on your local executable.
+
+The CPU reference for center depth visibility, a small depth tolerance,
+short fade envelope and composition with per-Thing opacity is implemented
+in `renderer/sprite_flare_visibility.hpp`, with isolated regression tests.
+**Important: the runtime sprite draw path is NOT yet wired to this center
+depth rule. Marking a SPR type `0x40` does not yet make it a functioning
+through-geometry flare.** This step establishes the safe type-bit, testing
+and visibility semantics ahead of renderer plumbing.
+
 ## Per-Thing SPR animation (JK23, work in progress)
 
 The experimental `SetSpriteInfo` / `GetSpriteInfo` COG verbs operate on **a
