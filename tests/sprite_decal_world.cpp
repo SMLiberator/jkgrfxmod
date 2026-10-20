@@ -55,6 +55,11 @@ int main() {
     assert(mesh.surfaces_seen==4);
     assert(mesh.receivers==2);
     assert(mesh.invalid_surfaces==0);
+    assert(mesh.skipped_portals==1);
+    assert(mesh.skipped_sky==1);
+    assert(mesh.skipped_material==0);
+    assert(mesh.skipped_backfaces==0);
+    assert(mesh.skipped_projection==0);
     assert(mesh.triangles.size()==4);
     for(auto const &tri:mesh.triangles) {
         assert(tri.surface_index<2);
