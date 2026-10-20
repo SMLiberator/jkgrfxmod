@@ -1118,6 +1118,22 @@ assume every target sighting, movement, or attack dispatches `aievent:`.
 This behavior has been checked against the user's JK23 executable and
 the available OpenJKDF2 reconstruction; gameplay verification is pending.
 
+## SPR projected decals — clipping groundwork
+
+The first **geometry-only** stage of SPR type bit `0x20` is implemented
+in `renderer/sprite_decal_clip.hpp`. It defines an oriented projector
+with independent width, height and forward reach. Convex receiving
+polygons are clipped against all six projection-volume planes using
+Sutherland–Hodgman clipping; UVs come from the projected SPR Right/Up
+axes. Backfacing or degenerate polygons are rejected. Regression tests
+verify a wall larger than the decal, neighboring partial walls, flipped
+normals, depth rejection, and invalid projector axes.
+
+**Not yet a runtime decal renderer:** world-surface discovery, sector
+traversal, GPU submission, Z-bias, cached clipped polygons and attachment
+to rigid/animated 3DO meshes remain to be wired. This is a standalone,
+testable algorithm rather than a visible new `0x20` SPR behavior.
+
 ## Center-occluded SPR flares (experimental groundwork)
 
 SPR type bit `0x40` is reserved for a flare whose **center** must pass the
