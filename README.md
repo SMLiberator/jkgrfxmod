@@ -1047,25 +1047,28 @@ keep their original native mip behavior. The override does not run with
 
 ## KEY animation marker `callback` COG message (JK23)
 
-JkGRfxMod now forwards native KEY marker events from a Thing's playing
-animation track to a `callback:` COG message. This is modeled on IJIM's
-keyframe marker messaging, with the requested parameter order:
+JkGRfxMod now forwards KEY marker events from a Thing's playing
+animation track to a `callback:` COG message. The Thing is already available
+as `GetSenderRef()`, so only marker value and animation track are parameters:
 
 ```c
 callback:
-    eventThing = GetParam(0);  // Thing reference / index
-    marker     = GetParam(1);  // marker value from the KEY
-    track      = GetParam(2);  // playing rdPuppet track index
+    eventThing = GetSenderRef(); // animated Thing
+    marker     = GetParam(0);    // marker value from the KEY
+    track      = GetParam(1);    // playing rdPuppet track index
     return;
 ```
 
 The message is delivered to the Thing's COG, capture COG, and linked COGs
 through the native Thing-message dispatcher. Existing marker behavior such as
 footsteps, firing and track-end callbacks is preserved. Marker 0 (track
-completion) is forwarded too. The implementation hooks the existing puppet
-callback while a track advances; it does not poll animation progress or
-duplicate KEY data. The extended message is registered through the JK23
-`JK.dll` `InitNewCogMessages` extension point.
+completion) is forwarded too. The implementation temporarily installs a
+marker relay while a track advances, including when its native callback slot
+is empty; it does not poll animation progress or duplicate KEY data.
+The extended message is registered through the JK23 `JK.dll`
+`InitNewCogMessages` extension point. Native signature checks occur *before*
+Detours patches the executable; repeating them during message registration
+would incorrectly reject the modified function prologue.
 
 This feature is **specific to the tested JK23 EXE and JK.dll**. Native
 signature validation disables it when addresses or layout do not match.

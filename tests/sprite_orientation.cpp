@@ -49,6 +49,18 @@ int main() {
     assert(compute_sprite_axes(sprite_preserve_up,thing,camera,out));
     assert(eq(out.up,thing.up));
     assert(eq(out.right,camera.right));
+    // Tilted Thing Up plus camera roll used to flip the billboard away from
+    // camera Look when Right was used as the primary orientation reference.
+    camera.right={{-1.0f,0.0f,0.0f}};
+    camera.look={{0.0f,1.0f,0.0f}};
+    camera.up={{0.0f,0.0f,-1.0f}};
+    sprite_axes tilted=thing;
+    tilted.up={{0.0f,0.6f,0.8f}};
+    assert(compute_sprite_axes(sprite_preserve_up,tilted,camera,out));
+    assert(eq(out.up,tilted.up));
+    assert(sprite_dot(out.look,camera.look)>0.75f);
+    assert(std::fabs(sprite_dot(out.look,out.up))<0.001f);
+    assert(std::fabs(sprite_dot(out.right,out.up))<0.001f);
     // A Thing with sideways Up exercises the fallback path when camera
     // Right and the preserved axis are parallel.
     sprite_axes sideways=thing;
