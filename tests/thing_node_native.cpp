@@ -31,14 +31,22 @@ int main() {
             std::memcpy(dst,sig.data(),sig.size());
             return true;
         }
+        if(a==jkgm_node_angles_address && len==jkgm_node_angles_prologue.size()) {
+            auto sig=jkgm_node_angles_prologue;
+            if(!signature_ok)sig[0]=0x90;
+            std::memcpy(dst,sig.data(),sig.size());
+            return true;
+        }
         if(a<base || a-base>memory.size() ||
            len>memory.size()-(a-base))return false;
         std::memcpy(dst,memory.data()+a-base,len);
         return true;
     };
     assert(validate_native_thing_node_accessor(reader));
+    assert(validate_native_thing_node_angles(reader));
     signature_ok=false;
     assert(!validate_native_thing_node_accessor(reader));
+    assert(!validate_native_thing_node_angles(reader));
     signature_ok=true;
     thing_node_native_input input{};
     assert(resolve_native_thing_node(reader,thing,2,input));
