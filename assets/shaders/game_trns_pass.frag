@@ -18,6 +18,7 @@ uniform float alpha_cutoff;
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
 uniform float fluid_thickness; // Beer-Lambert absorption per game unit
 uniform int depth_clip;
+uniform int flare_mode; // SPR type 0x40: center-only depth occlusion
 uniform sampler2D scene_depth; // Resolved opaque linear view depth (R16F)
 
 uniform sampler2D displacement_map;
@@ -359,8 +360,59 @@ float dither_threshold()
     return (float(4*lo+hi)+0.5)/16.0;
 }
 
+// A flare is an ordinary native billboard with special depth behavior.
+// Rather than per-pixel occlusion, reconstruct its center from the
+// sprite's UV mapping and the screen-space derivatives of that mapping.
+// All pixels of one billboard therefore query the same opaque-scene point.
+float flare_center_visibility()
+{
+    vec2 dx=dFdx(vp_texcoords);
+    vec2 dy=dFdy(vp_texcoords);
+    float determinant=dx.x*dy.y-dx.y*dy.x;
+    if(abs(determinant)<1e-8) return 0.0;
+
+    vec2 uv_to_center=vec2(0.5)-vp_texcoords;
+    vec2 offset=vec2(
+        (uv_to_center.x*dy.y-uv_to_center.y*dy.x)/determinant,
+        (dx.x*uv_to_center.y-dx.y*uv_to_center.x)/determinant
+    );
+    vec2 pixel=gl_FragCoord.xy+offset;
+    ivec2 dimensions=textureSize(scene_depth,0);
+    if(any(lessThan(pixel,vec2(0.0))) ||
+       any(greaterThanEqual(pixel,vec2(dimensions)))) return 0.0;
+
+    float center_depth=vp_z+dot(vec2(dFdx(vp_z),dFdy(vp_z)),offset);
+    if(center_depth<=0.0) return 0.0;
+    ivec2 texel=ivec2(pixel);
+    float sampled_depth=texelFetch(scene_depth,texel,0).r;
+
+    // A pixel marked 65504 is unoccupied. Do not require a background
+    // surface: flares also work against the sky. Reject the entire quad
+    // whenever its CENTER is behind an opaque object.
+    if(sampled_depth<65500.0 && sampled_depth+0.01<center_depth)
+        return 0.0;
+
+    // Spatial edge softening (not a CPU readback or temporal lag). This
+    // preserves the center test while avoiding an abrupt full-bright pop.
+    float visible=1.0;
+    const ivec2 taps[4]=ivec2[4](
+        ivec2(-1,0),ivec2(1,0),ivec2(0,-1),ivec2(0,1));
+    for(int i=0;i<4;i++) {
+        ivec2 xy=clamp(texel+taps[i],ivec2(0),dimensions-ivec2(1));
+        float d=texelFetch(scene_depth,xy,0).r;
+        if(d<65500.0 && d+0.01<center_depth)
+            visible-=0.125;
+    }
+    return visible;
+}
+
 void main()
 {
+    float flare_visibility=1.0;
+    if(flare_mode!=0) {
+        flare_visibility=flare_center_visibility();
+        if(flare_visibility<=0.0) discard;
+    }
     if(depth_clip != 0) {
         // Compare perpendicular separation from the DECAL PLANE, not raw
         // camera-forward depth: the latter grows at grazing angles even when
@@ -538,4 +590,7 @@ void main()
                              : 1.0;
         out_color = vec4(color * coverage, albedo.a);
     }
+    // RGB is already premultiplied in the transparent blending path.
+    // Attenuate both RGB and alpha to preserve that convention.
+    if(flare_mode!=0) out_color*=flare_visibility;
 }
