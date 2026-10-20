@@ -4,7 +4,7 @@
 // nothing in this header writes to the native SithWorld.
 // World/surface offsets are reconstructed from JKDF2 and still require
 // verification against the actual JK23 executable before runtime use.
-#include "sprite_decal_clip.hpp"
+#include "sprite_decal_projector.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -123,6 +123,10 @@ namespace jkgm {
                 result.truncated=true;
                 break;
             }
+            // Apply the same tiny fixed z-fighting offset to every clipped
+            // vertex, preserving the UVs calculated on the receiver plane.
+            for(auto &v:clipped)
+                offset_sprite_decal_receiver(v,normal);
             for(size_t t=1;t+1<clipped.size();++t)
                 result.triangles.push_back(
                     {{{clipped[0],clipped[t],clipped[t+1]}},i});
