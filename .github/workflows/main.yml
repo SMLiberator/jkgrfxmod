@@ -43,6 +43,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_modelview.cpp /Fe:gpu_3do_modelview_test.exe
         gpu_3do_modelview_test.exe
+    - name: Verified native JKGM ThingNode accessor validation tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\thing_node_native.cpp /Fe:thing_node_native_test.exe
+        thing_node_native_test.exe
     - name: Animated ThingNode pose and attachment reference tests
       shell: cmd
       run: |
