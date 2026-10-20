@@ -50,7 +50,7 @@ namespace jkgm {
             sprite_vec3 const fallback{{1,0,0}};
             out.right=sprite_cross(out.look,world_up);
             if(!sprite_normalize(out.right)) {
-                out.right=sprite_cross(fallback,out.look);
+                out.right=sprite_cross(out.look,fallback);
                 if(!sprite_normalize(out.right)) return false;
             }
             out.up=sprite_cross(out.right,out.look);
