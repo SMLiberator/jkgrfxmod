@@ -1130,13 +1130,27 @@ executable and the previous type-63 variant, upgrading either to type-127
 (`cmp edi,0x7F`). The patched executable is **not** included in the
 repository or test-build artifact: run the script on your local executable.
 
-The CPU reference for center depth visibility, a small depth tolerance,
-short fade envelope and composition with per-Thing opacity is implemented
-in `renderer/sprite_flare_visibility.hpp`, with isolated regression tests.
-**Important: the runtime sprite draw path is NOT yet wired to this center
-depth rule. Marking a SPR type `0x40` does not yet make it a functioning
-through-geometry flare.** This step establishes the safe type-bit, testing
-and visibility semantics ahead of renderer plumbing.
+**Runtime implementation (experimental):** the JK23 native cache now marks
+only triangles emitted by authored type-`0x40` SPRs. The D3D bridge routes
+them into a separate OpenGL transparency batch. A fragment shader reconstructs
+the sprite's screen-space center from its native UV interpolation, samples
+the **resolved linear opaque depth at that center**, and discards the entire
+flare when the center is behind opaque geometry. When the center is visible,
+the sprite is drawn with normal alpha blending but with ordinary per-pixel
+depth testing disabled, allowing its edges to overlap foreground geometry.
+Four additional neighboring center-depth samples soften silhouette edges.
+
+The visibility calculation is entirely GPU-side (no `glReadPixels` stalls);
+fractional per-Thing opacity and roll remain independent. The reference
+math and regression tests are in `renderer/sprite_flare_visibility.hpp`
+and `renderer/sprite_flare_projection.hpp`.
+
+**Runtime verification pending:** both Detours signatures and the HW-vertex
+marker route are specific to the tested JK23 executable, and should be
+validated in-game before relying on type-`0x40`. The shader implements
+spatial edge softening, **not yet temporal 0.08-second fading**; that would
+require persistent per-instance visibility history. Ordinary SPRs are
+unaffected, and type-`0x40` must not be applied to decal SPRs.
 
 ## Per-Thing SPR animation (JK23, work in progress)
 
