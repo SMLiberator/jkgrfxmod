@@ -16,7 +16,6 @@ namespace jkgm {
     struct mots_collision_participant {
         int collide = 0;
         float collide_size = 0.0f;
-        float tree_size = 0.0f;
     };
     struct mots_collision_dispatch {
         bool valid = false;
@@ -25,6 +24,10 @@ namespace jkgm {
         float broadphase_moving_radius = 0.0f;
         float broadphase_checked_radius = 0.0f;
         float narrowphase_moving_radius = 0.0f;
+        // Type 2 has no separate treeSize. A future caller can either skip
+        // broad-phase entirely, or compute a conservative bound directly
+        // from the current animated mesh spheres.
+        bool skip_broadphase = false;
         bool check_end_position = false;
         bool reverse_cast = false;
     };
@@ -33,7 +36,7 @@ namespace jkgm {
 
     // 'moving' is allowed to be null for ordinary raycasts. This function
     // does NOT assume that the original JKGM SithThing has a treeSize field:
-    // sizes are explicit data supplied by a future *verified* port.
+    // no extra per-Thing broad-phase radius is required.
     // A failure preserves the caller's output, allowing safe opt-in use.
     inline bool select_mots_collision(
         mots_collision_participant const *moving,
@@ -63,20 +66,11 @@ namespace jkgm {
         selected.narrowphase_moving_radius = moving_radius;
 
         if(tree) {
-            if(checked.collide == 2) {
-                if(!std::isfinite(checked.tree_size) || checked.tree_size < 0.0f)
-                    return false;
-                selected.broadphase_checked_radius = checked.tree_size;
-            }
-            else {
-                if(!moving || !std::isfinite(moving->tree_size) ||
-                   moving->tree_size < 0.0f)
-                    return false;
-                selected.broadphase_moving_radius = moving->tree_size;
-                // This is what the MotS dispatch code actually does when the
-                // moving Thing owns the tree (not the checked Thing's size).
-                selected.broadphase_checked_radius = moving_radius;
-            }
+            // The original MotS implementation uses a separately authored
+            // treeSize. We intentionally omit it: the narrow-phase sees all
+            // active mesh spheres, even if the model's normal collideSize
+            // would be too small to enclose them.
+            selected.skip_broadphase = true;
         }
 
         if(tree || face) {
