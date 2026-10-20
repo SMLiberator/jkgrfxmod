@@ -163,3 +163,71 @@ directly to this patched executable.
 These checks establish the correctness of the *specific static binary
 prerequisites*, not successful COG registration or correct output in a
 running game; the latter still requires an animated-3DO runtime test.
+
+## Collision dispatch and record layout (static JKGM audit)
+
+A complete disassembly of the supplied `jkgm.exe` identifies one direct
+`call 0x00508360`, at **`0x004E8888`**, in the collision traversal code.
+The call site pushes eleven arguments and then executes `add esp, 0x2C`.
+The argument count and parameter order are consistent with
+OpenJKDF2's reconstructed
+`sithIntersect_CheckSphereThingIntersection` signature:
+
+```c
+int CheckSphereThingIntersection(
+    SithThing *movingThing, rdVector3 const *start,
+    rdVector3 const *direction, float maxDistance, float movingRadius,
+    SithThing *checkedThing, int flags, float *hitDistance,
+    rdMesh **hitMesh, rdFace **hitFace, rdVector3 *hitNormal);
+```
+
+The call is followed by `test eax,eax` and, on success, a write into a
+collision-record array. The corresponding code at `0x004E88BD` uses
+a **0x28-byte record stride** and an observed maximum of **128 records
+per list**. Relevant observed fields are:
+
+| Offset | Evidence at call site | Likely meaning |
+| --- | --- | --- |
+| `+0x00` | collision return value OR 1 | collision flags |
+| `+0x04` | checked Thing pointer | hit Thing |
+| `+0x08` | zero | unused/other collision type |
+| `+0x0C` | mesh output pointer | hit mesh |
+| `+0x10` | face output pointer | hit face |
+| `+0x14` | three floats from normal output | hit normal |
+| `+0x20` | float from distance output | hit distance |
+| `+0x24` | zero | reserved/other field |
+
+These are **static observations, not an authorized ABI for a detour**.
+The return flags and lifetime/ownership of hit mesh and face still need
+review before implementing a collision hook. In particular, the stock
+MotS sphere-tree path does not report a specific polygon hit.
+
+### Isolated MotS compatibility logic
+
+`renderer/mots_collision_dispatch.hpp` captures the unhooked
+decision logic for type 1 (sphere), type 3 (face), and MotS type 2
+(sphere-tree). Importantly, type 2 takes precedence over a type-3
+participant **only in MotS-compatible mode**, and raycast flag `0x80`
+forces sphere-only checks. The broad-phase uses `treeSize` from the
+*checked* Thing if it has type 2, but takes `treeSize` from the *moving*
+Thing and substitutes the input moving radius for the checked broad-phase
+radius when the moving Thing owns the tree. In that reverse case,
+the narrow-phase moving radius becomes the checked Thing's
+`collideSize`. This asymmetry is intentional, not a typo.
+
+The helper takes explicit sizes; it does not assume the original JKGM
+`SithThing` contains MotS's `treeSize` field. Standalone tests:
+`tests/mots_collision_dispatch.cpp`, registered in development CI.
+
+The companion reference `mots_tree_sphere_cast` now rejects exact
+tangency and zero-length casts starting at the boundary (matching
+the strict comparison in `sithIntersect_CheckSphereIntersection`).
+Neither reference currently implements MotS's complete raycast flag
+semantics or integrates with the collision result array.
+
+**Remaining gates before runtime type 2:** identify a safe persistent
+`treeSize` storage/initialization path, confirm `SithThing` and
+render-data layouts, check geoset and amputation behavior, validate
+caller and callee ABI/return flags, and only then add an opt-in detour.
+Do not modify the original collision values `1` or `3` in the
+meantime.
