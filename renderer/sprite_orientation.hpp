@@ -1,6 +1,6 @@
 #pragma once
-// Shared Sprite orientation rules. Original SPR types 0, 1 and 2 remain
-// camera-facing; extended flags occupy bits 2-5 of the existing type integer.
+// Shared Sprite orientation rules. JK's legacy type 2 follows the fixed-plane
+// behavior of IJIM; extended flags occupy bits 2-5 of the type integer.
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -38,8 +38,24 @@ namespace jkgm {
     inline bool compute_sprite_axes(uint32_t type,sprite_axes const &thing,
                                     sprite_axes const &camera,sprite_axes &out)
     {
-        // Legacy types 0-2 always draw native camera-facing sprites in JK23.
+        // Infernal Machine's type 2 keeps the Thing's Look direction, and
+        // derives its horizontal axis from world Up. JK natively ignores SPR
+        // types, so supply that legacy behavior here. Type 3 (undocumented
+        // combination) and type 1 remain vanilla camera-facing.
         auto bits=type&sprite_extended_mask;
+        if(bits==0 && type==2U) {
+            out.look=thing.look;
+            if(!sprite_normalize(out.look)) return false;
+            sprite_vec3 const world_up{{0,0,1}};
+            sprite_vec3 const fallback{{1,0,0}};
+            out.right=sprite_cross(world_up,out.look);
+            if(!sprite_normalize(out.right)) {
+                out.right=sprite_cross(fallback,out.look);
+                if(!sprite_normalize(out.right)) return false;
+            }
+            out.up=sprite_cross(out.right,out.look);
+            return sprite_normalize(out.up);
+        }
         if(bits==0) {out=camera;return true;}
         if((bits&sprite_project_decal)!=0) bits|=sprite_preserve_up|
             sprite_preserve_look|sprite_preserve_right;
