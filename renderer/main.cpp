@@ -1082,7 +1082,7 @@ namespace {
         char sprite_name[33]{};
         std::memcpy(sprite_name,p,32);
         sprite_name[32]=0;
-        if((type&jkgm::sprite_extended_mask)==0) {
+        if((type&jkgm::sprite_extended_mask)==0 && type!=2U) {
             if(the_config && the_config->profile_renderer &&
                sprite_trace_counts.size()<128U) {
                 auto const key=std::string(sprite_name);
