@@ -50,4 +50,24 @@ int main() {
     assert(mots_tree_sphere_cast(nodes,{{10,0,0}},{{1,0,0}},
                                  0,0,hit));
     assert(hit.node==2 && close(hit.distance,0));
+    // The native sphere primitive uses a strict '< radius' comparison
+    // against perpendicular distance, so an exact tangent is NOT a hit.
+    nodes[2].parent=0;
+    nodes[1].amputated=true;
+    assert(!mots_tree_sphere_cast(nodes,{{6,1.5f,0}},{{1,0,0}},
+                                  5.0f,0.0f,hit));
+    // Exactly touching and moving away is not a collision. Moving
+    // inward from that same boundary should report distance zero.
+    assert(!mots_tree_sphere_cast(nodes,{{11.5f,0,0}},{{1,0,0}},
+                                  5.0f,0.0f,hit));
+    assert(mots_tree_sphere_cast(nodes,{{11.5f,0,0}},{{-1,0,0}},
+                                 5.0f,0.0f,hit));
+    assert(hit.node==2 && close(hit.distance,0.0f));
+    assert(!mots_tree_sphere_cast(nodes,{{11.5f,0,0}},{{-1,0,0}},
+                                  0.0f,0.0f,hit));
+    // Bad parent references must not silently turn a node into a root.
+    nodes[2].parent=-2;
+    assert(!mots_tree_node_active(nodes,2));
+    nodes[2].parent=0;
+
 }
