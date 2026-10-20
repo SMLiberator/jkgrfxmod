@@ -19,10 +19,10 @@ int main()
     // A long, narrow limb with a knee-origin mesh pivot.
     // Origin-centered 3DO radius is about 4; the fitted geometry sphere
     // has a center halfway down the leg and radius ~2.016.
-    std::vector<thing_node_vector> limb{{
+    std::vector<thing_node_vector> limb{
         {{-0.25f,0,0}}, {{0.25f,0,0}},
         {{-0.25f,-4,0}}, {{0.25f,-4,0}}
-    }};
+    };
     mots_local_mesh_sphere fitted{};
     assert(mots_center_mesh_sphere(limb,fitted));
     float const expected_radius=std::sqrt(4.0f+0.25f*0.25f);
