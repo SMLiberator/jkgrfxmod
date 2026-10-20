@@ -15,6 +15,7 @@
 #include "sprite_instance_info.hpp"
 #include "sprite_quad_transform.hpp"
 #include "sprite_decal_world.hpp"
+#include "sprite_decal_resource.hpp"
 #include "sprite_alpha_tag.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
@@ -1338,6 +1339,14 @@ namespace {
                     } else {
                         auto const scan=jkgm::project_decal_world_surfaces(
                             read,world_address,projector,2048U);
+                        jkgm::sprite_decal_resource resource{};
+                        bool const resource_ok=jkgm::read_sprite_decal_resource(
+                            read,reinterpret_cast<uintptr_t>(sprite),resource);
+                        jkgm::sprite_decal_mesh prepared{};
+                        bool const mesh_ready=resource_ok &&
+                            jkgm::make_sprite_decal_gpu_mesh(
+                                scan,projector,resource.material,
+                                resource.texcoords,info.opacity,prepared);
                         LOG_INFO("SPR decal probe name=",sprite_name,
                                  " world=",world_address,
                                  " valid_world=",scan.valid_world,
@@ -1345,7 +1354,9 @@ namespace {
                                  " receivers=",scan.receivers,
                                  " clipped_tris=",scan.triangles.size(),
                                  " malformed=",scan.invalid_surfaces,
-                                 " truncated=",scan.truncated);
+                                 " truncated=",scan.truncated,
+                                 " mat_valid=",resource_ok,
+                                 " gpu_mesh_ready=",mesh_ready);
                     }
                 }
             }
