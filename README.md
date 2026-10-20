@@ -1082,18 +1082,26 @@ input. Example (run on a copy of your executable):
 python tools/patch_jkgm_sprite_types.py jkgm.exe jkgm-spr.exe
 ```
 
-The experimental SPR draw hook now honors original type `2` (IJIM-like fixed Look direction with a world-up reference), in addition to the extended orientation bits:
+The experimental SPR draw hook honors these *authored* SPR type bits:
 `0x04` preserves the Thing Up vector, `0x08` its Look vector,
 `0x10` its Right vector; combining two preserves the complete plane.
 `0x20` reserves decal projection and *currently only produces an oriented
-flat quad*, **not yet a depth-projected decal**. For testing an upright
-billboard, set the SPR's decimal type to `4` and use an unmodified sprite
-material. For a fixed-orientation flat sprite, use type `12`
-(`0x04 | 0x08`). Types 0, 1, and 2 stay on the original unmodified
-native renderer path. The hook modifies only the four camera-space vertex
-positions before JK's original primitive clipping; MAT sampling, UVs and
-lighting stay native. It uses signature checks for both hook addresses
-and stays disabled with `use_vanilla_renderer=true`.
+flat quad*, **not yet a depth-projected decal**. For an upright billboard,
+set the SPR file's decimal type to `4`. For fixed orientation use `12`
+(`0x04 | 0x08`). Authored types 0, 1, 2 remain JK-native camera billboards.
+
+**Important JK23 binary quirk, fixed in the sprite hook:** `rdSprite_NewEntry`
+initially writes the file's type to `rdSprite+0x20`, but
+`sithSprite_Load` later overwrites `+0x20` with the **World SPRITES
+resource index**, not the authored type. Previous experimental builds
+accidentally interpreted these resource indices as orientation flags,
+causing trees/grass/rocks to behave inconsistently even when their SPR
+definitions specified types 4 and 0. The new renderer captures the
+author-specified type from the loader call and retains it in per-resource
+metadata until free; it never modifies JK's index. The original MAT, UV,
+and primitive clipping pipeline remains unchanged. Signature checks
+disable these extensions on unknown executables.
+
 
 The SPR loader patch is necessary before types higher than 2 can load.
 `SetSpriteInfo` (per-Thing scaling/opacity/fading), true projected decals,
