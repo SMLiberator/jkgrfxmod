@@ -1411,6 +1411,141 @@ LONG WINAPI HookedChangeDisplaySettingsW(DEVMODEW *lpDevMode, DWORD dwFlags)
     return TrueChangeDisplaySettingsW(lpDevMode, dwFlags);
 }
 
+// IJIM-style KEY marker callbacks. Addresses and callback track stride were
+// disassembled from the supported JK23 game executable, not guessed from stock
+// JK. Do not install unless each native function still has its tested prologue.
+namespace {
+    constexpr uintptr_t puppet_advance_addr=0x0043ED50U;
+    constexpr uintptr_t cog_thing_send_addr=0x004DFD80U;
+    constexpr uintptr_t cog_add_message_addr=0x004E0890U;
+    constexpr int key_callback_message=42; // free message slot in JK23 (JK.dll adds 40,44,47)
+    constexpr uint8_t puppet_advance_bytes[]={
+        0x55,0x8b,0xec,0x83,0xec,0x10,0x8b,0x55,0x0c
+    };
+    constexpr uint8_t cog_thing_send_bytes[]={
+        0x83,0xec,0x08,0xa1,0x78,0x6c,0x83,0x00
+    };
+    constexpr uint8_t cog_add_message_bytes[]={
+        0x8b,0x44,0x24,0x0c,0x8b,0x4c,0x24,0x04
+    };
+    using puppet_callback_fn=void(__cdecl *)(void *,int,uint32_t);
+    using puppet_advance_fn=void(__cdecl *)(void *,int,float);
+    using cog_thing_send_fn=float(__cdecl *)(void *,void *,int,float,float,float,float);
+    using cog_add_message_fn=void(__cdecl *)(void *,int,char const *);
+    puppet_advance_fn RealPuppetAdvance=
+        reinterpret_cast<puppet_advance_fn>(puppet_advance_addr);
+    bool key_callback_hook_active=false;
+    bool key_callback_message_registered=false;
+    thread_local puppet_callback_fn active_previous_callback=nullptr;
+
+    bool key_callback_signatures_match()
+    {
+        auto matches=[](uintptr_t addr,uint8_t const *bytes,size_t len) {
+            return gpu_span_readable(reinterpret_cast<void const *>(addr),len) &&
+                   std::memcmp(reinterpret_cast<void const *>(addr),bytes,len)==0;
+        };
+        return reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))==0x00400000U &&
+               matches(puppet_advance_addr,puppet_advance_bytes,
+                       sizeof(puppet_advance_bytes)) &&
+               matches(cog_thing_send_addr,cog_thing_send_bytes,
+                       sizeof(cog_thing_send_bytes)) &&
+               matches(cog_add_message_addr,cog_add_message_bytes,
+                       sizeof(cog_add_message_bytes));
+    }
+
+    void __cdecl RelayPuppetCallback(void *thing,int track,uint32_t marker)
+    {
+        // Preserve all original footsteps, saber events, sound cues and track
+        // completion logic even when there is no COG callback label.
+        uint32_t thing_index=0;
+        bool const valid_thing=thing && gpu_span_readable(thing,16);
+        if(valid_thing)
+            std::memcpy(&thing_index,static_cast<uint8_t const *>(thing)+4,4);
+        puppet_callback_fn const original=active_previous_callback;
+        if(original) original(thing,track,marker);
+        if(!key_callback_message_registered || !valid_thing ||
+           !gpu_span_readable(thing,16)) return;
+        uint32_t current_index=0,thing_type=0;
+        std::memcpy(&current_index,static_cast<uint8_t const *>(thing)+4,4);
+        std::memcpy(&thing_type,static_cast<uint8_t const *>(thing)+12,4);
+        if(current_index!=thing_index || thing_type==0) return;
+        auto const send=reinterpret_cast<cog_thing_send_fn>(cog_thing_send_addr);
+        // Event order requested: Thing index, KEY marker value, track number.
+        send(thing,nullptr,key_callback_message,
+             static_cast<float>(thing_index),
+             static_cast<float>(marker),
+             static_cast<float>(track),0.0f);
+    }
+
+    void __cdecl HookedPuppetAdvance(void *puppet,int track,float frames)
+    {
+        // rdPuppet has a track array at +8, stride 0x134; the callback is
+        // at +0x12c in each track. The original engine calls it from three
+        // branches in rdPuppet_AdvanceTrack. Temporarily relay it only while
+        // advancing, so native callback lifetime and cleanup stay untouched.
+        if(!key_callback_message_registered || !puppet ||
+           track<0 || track>=4) {
+            RealPuppetAdvance(puppet,track,frames);
+            return;
+        }
+        auto *slot=static_cast<uint8_t *>(puppet)+8+0x134U*track+0x12cU;
+        if(!gpu_span_readable(slot,sizeof(void *))) {
+            RealPuppetAdvance(puppet,track,frames);
+            return;
+        }
+        puppet_callback_fn cb=nullptr;
+        std::memcpy(&cb,slot,sizeof(cb));
+        if(!cb || cb==RelayPuppetCallback) {
+            RealPuppetAdvance(puppet,track,frames);
+            return;
+        }
+        auto const previous=active_previous_callback;
+        active_previous_callback=cb;
+        puppet_callback_fn const relay=RelayPuppetCallback;
+        std::memcpy(slot,&relay,sizeof(relay));
+        RealPuppetAdvance(puppet,track,frames);
+        // rdPuppet_RemoveTrack may clear the callback during playback.
+        // Never restore stale callback pointers after engine cleanup.
+        if(gpu_span_readable(slot,sizeof(void *))) {
+            puppet_callback_fn current=nullptr;
+            std::memcpy(&current,slot,sizeof(current));
+            if(current==relay) std::memcpy(slot,&cb,sizeof(cb));
+        }
+        active_previous_callback=previous;
+    }
+
+    void __cdecl register_key_callback_message(void *symbols)
+    {
+        if(!symbols || !key_callback_signatures_match()) {
+            LOG_WARNING("COG callback message not registered: unsupported JK23 executable");
+            return;
+        }
+        reinterpret_cast<cog_add_message_fn>(cog_add_message_addr)(
+            symbols,key_callback_message,"callback");
+        key_callback_message_registered=true;
+        LOG_INFO("Registered KEY callback COG message: Param(0)=Thing, "
+                 "Param(1)=marker, Param(2)=track");
+    }
+    using jk_init_messages_fn=void(__cdecl *)();
+    jk_init_messages_fn TrueJkInitNewCogMessages=nullptr;
+    // JK.dll's InitNewCogMessages passes the COG symbol table in ESI rather
+    // than on the stack. Preserve that register across its original thunk.
+    __declspec(naked) void __cdecl HookedJkInitNewCogMessages()
+    {
+        __asm {
+            pushfd
+            pushad
+            call dword ptr [TrueJkInitNewCogMessages]
+            push esi
+            call register_key_callback_message
+            add esp,4
+            popad
+            popfd
+            ret
+        }
+    }
+}
+
 // COG verbs (distance fog)
 //
 // The community patch's JK.dll exports InitNewCogVerbs, which jk.exe calls at startup
@@ -2033,6 +2168,18 @@ bool attach_hooks()
     if(HMODULE jk_dll = GetModuleHandleA("JK.dll")) {
         TrueJkInitNewCogVerbs =
             (JkInitNewCogVerbs_type)GetProcAddress(jk_dll, MAKEINTRESOURCEA(1));
+        TrueJkInitNewCogMessages=reinterpret_cast<jk_init_messages_fn>(
+            GetProcAddress(jk_dll,MAKEINTRESOURCEA(12)));
+        if(TrueJkInitNewCogMessages && key_callback_signatures_match()) {
+            DetourAttach(&(PVOID &)TrueJkInitNewCogMessages,
+                         HookedJkInitNewCogMessages);
+            LONG const cb_err=DetourAttach(&(PVOID &)RealPuppetAdvance,
+                                          HookedPuppetAdvance);
+            if(cb_err!=NO_ERROR)
+                LOG_WARNING("Could not attach KEY callback event hook: ",cb_err);
+            else key_callback_hook_active=true;
+        }
+        else LOG_WARNING("KEY callback hook unavailable: unsupported JK.dll / game");
         if(TrueJkInitNewCogVerbs != nullptr) {
             DetourAttach(&(PVOID &)TrueJkInitNewCogVerbs, HookedJkInitNewCogVerbs);
         }
@@ -2125,6 +2272,15 @@ bool detach_hooks()
     if(native_mat_mips_hook_active) {
         DetourDetach(&(PVOID &)RealNativeSetMipDistances,HookedNativeSetMipDistances);
         native_mat_mips_hook_active=false;
+    }
+    if(key_callback_hook_active) {
+        DetourDetach(&(PVOID &)RealPuppetAdvance,HookedPuppetAdvance);
+        key_callback_hook_active=false;
+    }
+    if(TrueJkInitNewCogMessages) {
+        DetourDetach(&(PVOID &)TrueJkInitNewCogMessages,
+                     HookedJkInitNewCogMessages);
+        key_callback_message_registered=false;
     }
     if(TrueJkInitNewCogVerbs != nullptr) {
         DetourDetach(&(PVOID &)TrueJkInitNewCogVerbs, HookedJkInitNewCogVerbs);
