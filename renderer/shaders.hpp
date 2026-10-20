@@ -45,6 +45,7 @@ namespace jkgm {
             gl::uniform_location_id features;
             gl::uniform_location_id blend_mode;
             gl::uniform_location_id depth_clip;
+            gl::uniform_location_id flare_mode;
             gl::uniform_location_id scene_depth;
             gl::uniform_location_id fluid_thickness;
 
@@ -98,6 +99,7 @@ namespace jkgm {
             void set_blend_mode(int mode);
             void set_fluid_thickness(float absorption);
             void set_depth_clip(bool enabled);
+            void set_flare_mode(bool enabled);
             void set_scene_depth_sampler(int sampler);
 
             void set_albedo_map_sampler(int sampler);
