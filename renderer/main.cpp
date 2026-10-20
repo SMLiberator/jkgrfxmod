@@ -14,6 +14,7 @@
 #include "sprite_type_registry.hpp"
 #include "sprite_instance_info.hpp"
 #include "sprite_quad_transform.hpp"
+#include "sprite_decal_world.hpp"
 #include "sprite_alpha_tag.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
@@ -1051,6 +1052,7 @@ namespace {
     };
     jkgm::sprite_type_registry sprite_types;
     jkgm::sprite_instance_registry sprite_instances;
+    std::unordered_set<uint64_t> sprite_decal_diagnostic_keys;
     native_sprite_newentry_fn RealNativeSpriteNewEntry=
         reinterpret_cast<native_sprite_newentry_fn>(sprite_newentry_addr);
     native_sprite_free_fn RealNativeSpriteFree=
@@ -1297,6 +1299,56 @@ namespace {
         if(!jkgm::gpu_3do_matrix_finite(view)) {
             trace_sprite_skip(sprite_name,type,"nonfinite camera matrix");
             return;
+        }
+
+        // Diagnostic receiver discovery, one time per world/resource in
+        // renderer profiling builds only. The native world/surface layout
+        // beyond the validated header must not be used for rendering until
+        // this reports plausible counts for real maps.
+        if(type==jkgm::sprite_project_decal && the_config &&
+           the_config->profile_renderer) {
+            auto const read=[](uintptr_t address,void *dst,size_t bytes)->bool {
+                if(!gpu_span_readable(reinterpret_cast<void const *>(address),bytes))
+                    return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(address),bytes);
+                return true;
+            };
+            uint32_t world_address=0;
+            if(read(jkgm::engine_material_debug::current_world_global,
+                    &world_address,sizeof(world_address)) &&
+               world_address>=0x10000U) {
+                uint64_t const key=(uint64_t(world_address)<<32) |
+                    uint32_t(reinterpret_cast<uintptr_t>(sprite));
+                if(sprite_decal_diagnostic_keys.size()<1024U &&
+                   sprite_decal_diagnostic_keys.insert(key).second) {
+                    jkgm::sprite_axes const axes{{
+                        {thing[0],thing[1],thing[2]}}, {{
+                        thing[3],thing[4],thing[5]}}, {{
+                        thing[6],thing[7],thing[8]}}
+                    };
+                    jkgm::decal_projector projector{};
+                    bool const valid=jkgm::make_sprite_decal_projector(
+                        axes,{{thing[9],thing[10],thing[11]}},
+                        {{offset[0],offset[1],offset[2]}},
+                        size[0],size[1],info.width,info.height,roll,
+                        projector);
+                    if(!valid) {
+                        LOG_WARNING("SPR decal probe name=",sprite_name,
+                                    " failed to build projector");
+                    } else {
+                        auto const scan=jkgm::project_decal_world_surfaces(
+                            read,world_address,projector,2048U);
+                        LOG_INFO("SPR decal probe name=",sprite_name,
+                                 " world=",world_address,
+                                 " valid_world=",scan.valid_world,
+                                 " surfaces=",scan.surfaces_seen,
+                                 " receivers=",scan.receivers,
+                                 " clipped_tris=",scan.triangles.size(),
+                                 " malformed=",scan.invalid_surfaces,
+                                 " truncated=",scan.truncated);
+                    }
+                }
+            }
         }
 
         // Invert only the orthogonal camera basis to recover WORLD axes.
@@ -2825,6 +2877,7 @@ bool detach_hooks()
         native_sprite_hook_active=false;
         sprite_types.clear();
         sprite_instances.clear();
+        sprite_decal_diagnostic_keys.clear();
     }
     // Detach injected functions
     if(native_mat_mips_hook_active) {
