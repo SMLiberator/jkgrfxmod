@@ -159,8 +159,9 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             mat->displacement_factor = em["displacement_factor"];
         }
 
-        // Reflections. With a surface map the factors default to 1 (so the map alone decides);
-        // without one, reflections are off unless a strength is given.
+        // Experimental neutral dielectric defaults on ordinary materials.
+        // Authored surface maps still default to unity multipliers, since
+        // their R/G/B channels explicitly define the per-pixel properties.
         bool const has_surface_map = em.contains("surface_map");
         if(has_surface_map) {
             mat->surface_map = data_dir / std::string(em["surface_map"]);
@@ -168,9 +169,9 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
 
         mat->reflection_strength =
             em.contains("reflection_strength") ? static_cast<float>(em["reflection_strength"])
-                                                : (has_surface_map ? 1.0f : 0.0f);
+                                                : (has_surface_map ? 1.0f : 0.1f);
         mat->roughness = em.contains("roughness") ? static_cast<float>(em["roughness"])
-                                                   : (has_surface_map ? 1.0f : 0.5f);
+                                                   : (has_surface_map ? 1.0f : 0.9f);
         mat->metalness = em.contains("metalness") ? static_cast<float>(em["metalness"])
                                                    : (has_surface_map ? 1.0f : 0.0f);
 
