@@ -1145,7 +1145,7 @@ namespace {
         if(seen++>=3) return;
         std::ostringstream entry;
         entry << "SPR pose name=" << key << " type=" << type
-              << " bits=" << (type & jkgm::sprite_extended_mask)
+              << " mode=" << type
               << " applied=" << (updated ? "yes" : "no")
               << " thingUp=(" << thing_axes.up[0] << ","
                                   << thing_axes.up[1] << ","
@@ -1243,14 +1243,14 @@ namespace {
             transform_native_sprite_quad(info.width,info.height,roll);
             return;
         }
-        if((type&jkgm::sprite_extended_mask)==0) {
+        if(!jkgm::sprite_needs_custom_axes(type)) {
             if(the_config && the_config->profile_renderer &&
                sprite_trace_counts.size()<128U) {
                 auto const key=std::string(sprite_name);
                 int &seen=sprite_trace_counts[key];
                 if(seen++==0) LOG_INFO("SPR pose name=",key,
                     " loaded_type=",type,
-                    " (authored type; native camera billboard)");
+                    " (native camera-facing mode)");
             }
             transform_native_sprite_quad(info.width,info.height,roll);
             return;
@@ -1384,7 +1384,7 @@ namespace {
         bool const is_flare=gpu_span_readable(sprite,32) &&
             sprite_types.lookup(sprite,static_cast<char const *>(sprite),
                                 authored_type) &&
-            (authored_type&jkgm::sprite_center_occluded_flare)!=0U;
+            jkgm::sprite_is_flare(authored_type);
         if(!is_flare && !(opacity>0.0f && opacity<1.0f))
             return result;
         uint32_t const after=*reinterpret_cast<uint32_t const *>(
@@ -1523,7 +1523,7 @@ namespace {
                               sizeof(sprite_frustum_bytes)) ||
            std::memcmp(reinterpret_cast<void const *>(sprite_frustum_addr),
                        sprite_frustum_bytes,sizeof(sprite_frustum_bytes))!=0) {
-            LOG_WARNING("Extended SPR orientation disabled: unrecognized JK23 executable");
+            LOG_WARNING("SPR mode overrides disabled: unrecognized JK23 executable");
             return false;
         }
         LONG error=DetourAttach(&(PVOID &)RealNativeSpriteNewEntry,
