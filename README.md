@@ -1045,6 +1045,32 @@ No additional config option or EXE patch is needed. Unsupported executables
 keep their original native mip behavior. The override does not run with
 `"use_vanilla_renderer": true`.
 
+## KEY animation marker `callback` COG message (JK23)
+
+JkGRfxMod now forwards native KEY marker events from a Thing's playing
+animation track to a `callback:` COG message. This is modeled on IJIM's
+keyframe marker messaging, with the requested parameter order:
+
+```c
+callback:
+    eventThing = GetParam(0);  // Thing reference / index
+    marker     = GetParam(1);  // marker value from the KEY
+    track      = GetParam(2);  // playing rdPuppet track index
+    return;
+```
+
+The message is delivered to the Thing's COG, capture COG, and linked COGs
+through the native Thing-message dispatcher. Existing marker behavior such as
+footsteps, firing and track-end callbacks is preserved. Marker 0 (track
+completion) is forwarded too. The implementation hooks the existing puppet
+callback while a track advances; it does not poll animation progress or
+duplicate KEY data. The extended message is registered through the JK23
+`JK.dll` `InitNewCogMessages` extension point.
+
+This feature is **specific to the tested JK23 EXE and JK.dll**. Native
+signature validation disables it when addresses or layout do not match.
+Use `callback:` in a linked COG, not as a callable COG verb.
+
 ## Experimental extended SPR type foundation (JK23 only)
 
 The checked-in `tools/patch_jkgm_sprite_types.py` verifies the exact
@@ -1056,7 +1082,7 @@ input. Example (run on a copy of your executable):
 python tools/patch_jkgm_sprite_types.py jkgm.exe jkgm-spr.exe
 ```
 
-The experimental SPR draw hook now honors the additional orientation bits:
+The experimental SPR draw hook now honors original type `2` (IJIM-like fixed Look direction with a world-up reference), in addition to the extended orientation bits:
 `0x04` preserves the Thing Up vector, `0x08` its Look vector,
 `0x10` its Right vector; combining two preserves the complete plane.
 `0x20` reserves decal projection and *currently only produces an oriented
