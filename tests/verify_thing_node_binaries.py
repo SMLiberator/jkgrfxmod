@@ -106,6 +106,25 @@ def check_game(exe):
         raise ValueError("Native node accessor body no longer matches the audited function")
     print("  PASS hierarchy count, frame counter, puppet refresh, 12-float copy")
 
+    # Separate identification of the JKGM collision routine. These checks
+    # deliberately do NOT authorize a runtime detour: callers, ABI and
+    # output collision records require independent verification.
+    collision_va = 0x00508360
+    collision_end = 0x005085FA
+    collision = exe.va_bytes(collision_va, collision_end - collision_va)
+    signature = bytes.fromhex("83 ec 4c 8b 44 24 68 53 55 56 57 8b 7c 24 74 a8 80")
+    if not collision.startswith(signature) or collision[-1] != 0xC3:
+        raise ValueError("JKGM collision entry/body does not match the audited build")
+    for label, pattern in (
+        ("face collision compare", bytes.fromhex("83 7f 28 03")),
+        ("checked collider size", bytes.fromhex("8b 57 30")),
+        ("initial sphere test call", bytes.fromhex("e8 05 04 00 00")),
+        ("per-mesh intersection call", bytes.fromhex("e8 0c 01 00 00")),
+    ):
+        if pattern not in collision:
+            raise ValueError(f"JKGM collision body changed: {label}")
+    print("  PASS likely sphere/face collision entry at 0x508360 (no live hook)")
+
 
 def check_patch(dll):
     required = {"InitNewCogVerbs": 1, "InitNewCogMessages": 12}
@@ -129,7 +148,7 @@ def main():
             check_game(pe)
         else:
             check_patch(pe)
-    print("PASS: binaries match the native ThingNode interface prerequisites")
+    print("PASS: binaries match the audited ThingNode and collision entry prerequisites")
 
 
 if __name__ == "__main__":
