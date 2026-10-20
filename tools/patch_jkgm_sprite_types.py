@@ -2,8 +2,10 @@
 """Enable extended .SPR type bits in the inspected, SHA-locked JK23 executable.
 
 Only changes the immediate in sithSprite_Load's cmp edi,2 at 0x004F27BA to
-63. This does not implement the new sprite rendering modes; renderer.dll must
-also interpret the extended types. Keeps the original EXE untouched.
+127 (0x7F). Previous extended-SPR patch level 63 (0x3F) is also accepted.
+This enables type bit 0x40 for center-occluded flares, but does not by itself
+implement that rendering mode; renderer.dll must implement the flag.
+Keeps the source EXE untouched and verifies supported binary checksums.
 """
 from __future__ import annotations
 
@@ -13,10 +15,12 @@ import struct
 from pathlib import Path
 
 ORIGINAL_SHA256 = "220f150ec14f1d2de35125d5f345ba69fff2ff43cfe474e8f18b97577b1d556b"
-PATCHED_SHA256 = "bf782538f665da0d34231d77382827851a4210da0af2eb74d7958645bc814803"
+PREVIOUS_PATCHED_SHA256 = "bf782538f665da0d34231d77382827851a4210da0af2eb74d7958645bc814803"
+PATCHED_SHA256 = "afb4605c8259075c151ad6b034b98562be87ebe90369d4d9abaee09b396ed50f"
 SPR_TYPE_CHECK_VA = 0x004F27BA
 BEFORE = bytes.fromhex("83 FF 02 0F 87 83 00 00 00")
-AFTER = bytes.fromhex("83 FF 3F 0F 87 83 00 00 00")
+PREVIOUS_AFTER = bytes.fromhex("83 FF 3F 0F 87 83 00 00 00")
+AFTER = bytes.fromhex("83 FF 7F 0F 87 83 00 00 00")
 
 
 def va_to_offset(blob: bytes, address: int) -> int:
@@ -50,7 +54,11 @@ def patch_bytes(blob: bytes) -> tuple[bytes, bool]:
     original = blob[off:off + len(BEFORE)]
     if original == AFTER and checksum == PATCHED_SHA256:
         return blob, False
-    if original != BEFORE or checksum != ORIGINAL_SHA256:
+    supported = (
+        (original == BEFORE and checksum == ORIGINAL_SHA256)
+        or (original == PREVIOUS_AFTER and checksum == PREVIOUS_PATCHED_SHA256)
+    )
+    if not supported:
         raise ValueError("Unexpected SPR instructions or unsupported executable checksum")
     patched = bytearray(blob)
     patched[off:off + len(BEFORE)] = AFTER
@@ -73,7 +81,7 @@ def main() -> None:
         cli.error(str(e))
     args.destination.write_bytes(output)
     print(f"{'Patched' if changed else 'Already patched'}: {args.destination}")
-    print("SPR types up to 63 now load; extended rendering requires a supporting renderer.dll.")
+    print("SPR types up to 127 now load; 0x40 flare rendering requires a supporting renderer.dll.")
 
 
 if __name__ == "__main__":
