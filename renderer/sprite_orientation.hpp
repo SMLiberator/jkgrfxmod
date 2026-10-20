@@ -78,19 +78,24 @@ namespace jkgm {
             return sprite_normalize(out.right);
         }
         if(up) {
-            // Retain camera horizontal orientation through steep pitch.
-            // Projecting camera Look was ill-conditioned near top-down
-            // views and could suddenly select an unrelated Thing axis.
-            out.up=thing.up;out.right=camera.right;
+            // A cylindrical billboard must face the camera while preserving
+            // the Thing's Up vector. Project camera Look first: deriving Look
+            // exclusively from camera Right can face away when Up is tilted
+            // or when the camera is rolled.
+            out.up=thing.up;
             if(!sprite_normalize(out.up)) return false;
-            if(!sprite_project_orthogonal(out.right,out.up)) {
-                out.look=camera.look;
-                if(!sprite_project_orthogonal(out.look,out.up)) {
-                    out.look=thing.look;
-                    if(!sprite_project_orthogonal(out.look,out.up)) return false;
-                }
+            out.look=camera.look;
+            if(sprite_project_orthogonal(out.look,out.up)) {
                 out.right=sprite_cross(out.look,out.up);
-                if(!sprite_normalize(out.right)) return false;
+                return sprite_normalize(out.right);
+            }
+            // Camera looks almost along the locked Up axis. The billboard
+            // necessarily becomes edge-on; use a stable tangent fallback
+            // rather than a degenerate basis.
+            out.right=camera.right;
+            if(!sprite_project_orthogonal(out.right,out.up)) {
+                out.right=thing.right;
+                if(!sprite_project_orthogonal(out.right,out.up)) return false;
             }
             out.look=sprite_cross(out.up,out.right);
             return sprite_normalize(out.look);
