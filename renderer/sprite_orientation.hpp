@@ -1,22 +1,36 @@
 #pragma once
-// Extended SPR orientation bits occupy bits 2-5 of the authored SPR type.
-// Bit 6 is reserved for center-occluded flares; it must not alter orientation.
-// Original JK23 types 0, 1, and 2 remain camera-facing.
+// SPR 'type' is a mutually exclusive mode, not a bitmask.
+// 0 = classic JK camera-facing billboard
+// 1 = cylindrical billboard: preserve Thing Up while facing the camera
+// 2 = fixed plane: preserve the Thing's complete Right/Look/Up basis
+// 3 = projected decal, based on fixed-plane projector axes
+// 4 = center-occluded screen-facing flare
+// Values 5..127 are reserved (unknown types fall back to classic behavior).
 #include <array>
 #include <cmath>
 #include <cstdint>
 
 namespace jkgm {
-    constexpr uint32_t sprite_preserve_up=0x04U;
-    constexpr uint32_t sprite_preserve_look=0x08U;
-    constexpr uint32_t sprite_preserve_right=0x10U;
-    constexpr uint32_t sprite_project_decal=0x20U;
-    constexpr uint32_t sprite_center_occluded_flare=0x40U;
-    constexpr uint32_t sprite_extended_mask=0x3CU;
+    constexpr uint32_t sprite_default=0U;
+    constexpr uint32_t sprite_billboard=1U;
+    constexpr uint32_t sprite_fixed=2U;
+    constexpr uint32_t sprite_project_decal=3U;
+    constexpr uint32_t sprite_center_occluded_flare=4U;
+
+    inline bool sprite_is_flare(uint32_t type) {
+        return type==sprite_center_occluded_flare;
+    }
+    inline bool sprite_is_decal(uint32_t type) {
+        return type==sprite_project_decal;
+    }
+    inline bool sprite_needs_custom_axes(uint32_t type) {
+        return type==sprite_billboard || type==sprite_fixed ||
+               type==sprite_project_decal;
+    }
 
     using sprite_vec3=std::array<float,3>;
     struct sprite_axes {
-        sprite_vec3 right{{1,0,0}}, look{{0,1,0}}, up{{0,0,1}};
+        sprite_vec3 right{{1,0,0}},look{{0,1,0}},up{{0,0,1}};
     };
     inline float sprite_dot(sprite_vec3 const &a,sprite_vec3 const &b)
     { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
@@ -24,105 +38,55 @@ namespace jkgm {
     { return {{a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]}}; }
     inline bool sprite_normalize(sprite_vec3 &a)
     {
-        auto const d=sprite_dot(a,a);
-        if(!std::isfinite(d) || d<1.e-8f) return false;
+        float const d=sprite_dot(a,a);
+        if(!std::isfinite(d)||d<1.e-8f) return false;
         float const inv=1.0f/std::sqrt(d);
-        for(float &x:a) x*=inv;
+        for(float &x:a)x*=inv;
         return true;
     }
     inline bool sprite_project_orthogonal(sprite_vec3 &a,sprite_vec3 const &normal)
     {
         float const d=sprite_dot(a,normal);
-        for(int i=0;i<3;i++) a[i]-=d*normal[i];
+        for(int i=0;i<3;i++)a[i]-=d*normal[i];
         return sprite_normalize(a);
     }
-    // Returns false for invalid vectors, so caller may use vanilla rendering.
     inline bool compute_sprite_axes(uint32_t type,sprite_axes const &thing,
                                     sprite_axes const &camera,sprite_axes &out)
     {
-        // Keep original JK23 types 0, 1, and 2 untouched. The original
-        // game does not use this type to choose any non-billboard drawing.
-        // The type was previously confused with World SPRITES array index.
-        auto bits=type&sprite_extended_mask;
-        if(bits==0) {out=camera;return true;}
-        if((bits&sprite_project_decal)!=0) bits|=sprite_preserve_up|
-            sprite_preserve_look|sprite_preserve_right;
+        out=camera; // also the safe fallback for types 5..127
+        if(type==sprite_default || type==sprite_center_occluded_flare ||
+           !sprite_needs_custom_axes(type))return true;
 
-        bool const right=(bits&sprite_preserve_right)!=0;
-        bool const look=(bits&sprite_preserve_look)!=0;
-        bool const up=(bits&sprite_preserve_up)!=0;
-
-        out=sprite_axes{};
-        if(right && look && up) {
-            out=thing;
-            return sprite_normalize(out.right)&&sprite_normalize(out.look)&&
-                   sprite_normalize(out.up);
-        }
-        if(right && look) {
-            out.right=thing.right;out.look=thing.look;
-            if(!sprite_normalize(out.right)||
-               !sprite_project_orthogonal(out.look,out.right)) return false;
-            out.up=sprite_cross(out.right,out.look);
-            return sprite_normalize(out.up);
-        }
-        if(right && up) {
-            out.right=thing.right;out.up=thing.up;
-            if(!sprite_normalize(out.right)||
-               !sprite_project_orthogonal(out.up,out.right)) return false;
-            out.look=sprite_cross(out.up,out.right);
-            return sprite_normalize(out.look);
-        }
-        if(look && up) {
-            out.look=thing.look;out.up=thing.up;
-            if(!sprite_normalize(out.look)||
-               !sprite_project_orthogonal(out.up,out.look)) return false;
-            out.right=sprite_cross(out.look,out.up);
-            return sprite_normalize(out.right);
-        }
-        if(up) {
-            // A cylindrical billboard must face the camera while preserving
-            // the Thing's Up vector. Project camera Look first: deriving Look
-            // exclusively from camera Right can face away when Up is tilted
-            // or when the camera is rolled.
+        if(type==sprite_fixed || type==sprite_project_decal) {
+            out.right=thing.right;
+            out.look=thing.look;
             out.up=thing.up;
-            if(!sprite_normalize(out.up)) return false;
-            out.look=camera.look;
-            if(sprite_project_orthogonal(out.look,out.up)) {
-                out.right=sprite_cross(out.look,out.up);
-                return sprite_normalize(out.right);
-            }
-            // Camera looks almost along the locked Up axis. The billboard
-            // necessarily becomes edge-on; use a stable tangent fallback
-            // rather than a degenerate basis.
-            out.right=camera.right;
-            if(!sprite_project_orthogonal(out.right,out.up)) {
-                out.right=thing.right;
-                if(!sprite_project_orthogonal(out.right,out.up)) return false;
-            }
-            out.look=sprite_cross(out.up,out.right);
-            return sprite_normalize(out.look);
+            if(!sprite_normalize(out.right) ||
+               !sprite_project_orthogonal(out.look,out.right))return false;
+            out.up=sprite_cross(out.right,out.look);
+            if(!sprite_normalize(out.up))return false;
+            // Do not silently flip a fixed-plane projector whose source axes
+            // were degenerate or mirrored; the clipping direction matters.
+            if(sprite_dot(out.up,thing.up)<0.5f)return false;
+            return true;
         }
-        if(look) {
-            out.look=thing.look;out.up=camera.up;
-            if(!sprite_normalize(out.look)) return false;
-            if(!sprite_project_orthogonal(out.up,out.look)) {
-                out.up=thing.up;
-                if(!sprite_project_orthogonal(out.up,out.look)) return false;
-            }
+
+        // Cylindrical billboard (type 1): preserve Up, aim Look toward camera.
+        out.up=thing.up;
+        if(!sprite_normalize(out.up))return false;
+        out.look=camera.look;
+        if(sprite_project_orthogonal(out.look,out.up)) {
             out.right=sprite_cross(out.look,out.up);
             return sprite_normalize(out.right);
         }
-        if(right) {
-            out.right=thing.right;out.up=camera.up;
-            if(!sprite_normalize(out.right)) return false;
-            if(!sprite_project_orthogonal(out.up,out.right)) {
-                out.up=thing.up;
-                if(!sprite_project_orthogonal(out.up,out.right)) return false;
-            }
-            out.look=sprite_cross(out.up,out.right);
-            return sprite_normalize(out.look);
+        // Camera looks almost along the locked Up axis. Use a stable
+        // orthogonal tangent, rather than producing a zero-area quad.
+        out.right=camera.right;
+        if(!sprite_project_orthogonal(out.right,out.up)) {
+            out.right=thing.right;
+            if(!sprite_project_orthogonal(out.right,out.up))return false;
         }
-        out=camera;
-        return true;
+        out.look=sprite_cross(out.up,out.right);
+        return sprite_normalize(out.look);
     }
 }
