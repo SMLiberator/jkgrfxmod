@@ -83,6 +83,9 @@ namespace jkgm {
             float const projected=mots_dot(diff,unit_direction);
             float const constant=mots_dot(diff,diff)-combined*combined;
             float const discriminant=projected*projected-constant;
+            // The native zero-length test only reports strict overlap;
+            // starting precisely on the sphere boundary is not enough.
+            if(max_distance==0.0f && constant>=0.0f)continue;
             // The JK/MotS sphere test rejects exact tangency (distance
             // from center to ray >= radius), including zero-length casts.
             if(discriminant<=0)continue;
