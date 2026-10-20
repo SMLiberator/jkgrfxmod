@@ -17,16 +17,16 @@ int main() {
     auto const grass=name("gen_grass07a.spr");
     std::memcpy(pooled_sprite.data(),grass.data(),grass.size());
     void const *sprite=pooled_sprite.data();
-    types.remember(sprite,4,reinterpret_cast<char const *>(pooled_sprite.data()));
+    types.remember(sprite,sprite_billboard,reinterpret_cast<char const *>(pooled_sprite.data()));
     // sithSprite_Load overwrites +0x20 with index 11; the authored type
-    // must remain 4 so the sprite preserves Up, not Look.
+    // must remain 1 so the sprite is an upright billboard.
     uint32_t world_sprite_index=11;
     std::memcpy(pooled_sprite.data()+0x20,&world_sprite_index,4);
     uint32_t saved=0;
     assert(types.lookup(sprite,reinterpret_cast<char const *>(pooled_sprite.data()),saved));
-    assert(saved==4);
-    assert((saved&sprite_preserve_up)!=0);
-    assert((saved&sprite_preserve_look)==0);
+    assert(saved==sprite_billboard);
+    assert(sprite_needs_custom_axes(saved));
+    assert(!sprite_is_flare(saved));
 
     // A zero-type rock in the same world can have index 12.
     auto const rock=name("gen_rock01a.spr");
@@ -47,7 +47,7 @@ int main() {
     uint32_t tree_index=16;
     std::memcpy(pooled_sprite.data()+0x20,&tree_index,4);
     assert(types.lookup(sprite,reinterpret_cast<char const *>(pooled_sprite.data()),saved));
-    assert(saved==4);
+    assert(saved==sprite_billboard);
     assert(types.size()==1);
     types.clear();
     assert(types.size()==0);
