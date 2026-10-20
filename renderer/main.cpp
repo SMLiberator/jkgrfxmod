@@ -1106,6 +1106,14 @@ namespace {
     // Only used while the native render cache is converting a face list.
     // Reset after each native HW draw/flush; no stale per-Thing references.
     thread_local std::vector<sprite_flare_span> pending_sprite_flare_spans;
+    // Bounded stage-by-stage flare diagnostics. Logging occurs only with
+    // profile_renderer and only a handful of times for the process lifetime.
+    // A successful DetourAttach is not evidence that a flare reaches OpenGL.
+    unsigned flare_draw_trace_count=0;
+    unsigned flare_face_trace_count=0;
+    unsigned flare_alpha_trace_count=0;
+    unsigned flare_flush_trace_count=0;
+    unsigned flare_bad_face_trace_count=0;
     using sprite_addproc_fn=int(__cdecl *)(int,unsigned int,int);
     sprite_addproc_fn RealSpriteAddProc=
         reinterpret_cast<sprite_addproc_fn>(sprite_addproc_addr);
@@ -1450,6 +1458,13 @@ namespace {
             jkgm::sprite_is_flare(authored_type);
         if(!is_flare && !(opacity>0.0f && opacity<1.0f))
             return result;
+        if(is_flare && the_config && the_config->profile_renderer &&
+           flare_face_trace_count++<6U)
+            LOG_INFO("SPR flare stage=face_append before=",before,
+                     " after_candidate=",*reinterpret_cast<uint32_t const *>(
+                         sprite_proc_count_addr),
+                     " extra=",extra," opacity=",opacity,
+                     " authored_type=",authored_type);
         uint32_t const after=*reinterpret_cast<uint32_t const *>(
             sprite_proc_count_addr);
         if(after!=before+1U) return result;
@@ -1462,7 +1477,13 @@ namespace {
         std::memcpy(&face_type,entry+4,4);
         uint32_t const geometry_mode=*reinterpret_cast<uint32_t const *>(
             entry+0x08); // rdProcEntry.geometryMode
-        if(geometry_mode<2U) return result;
+        if(geometry_mode<2U) {
+            if(is_flare && the_config && the_config->profile_renderer &&
+               flare_bad_face_trace_count++<4U)
+                LOG_WARNING("SPR flare stage=face_rejected geomode=",
+                            geometry_mode," face_type=",face_type);
+            return result;
+        }
         uint32_t alpha_tag=0;
         if(!jkgm::sprite_alpha_encode(
                opacity,(face_type&2U)!=0U,alpha_tag,is_flare)) return result;
@@ -1486,6 +1507,11 @@ namespace {
             std::memcpy(&n,static_cast<uint8_t const *>(face)+0x1c,4);
             std::memcpy(&start,reinterpret_cast<void const *>(
                 sprite_hw_vertex_count_addr),4);
+            if(the_config && the_config->profile_renderer &&
+               flare_alpha_trace_count++<6U)
+                LOG_INFO("SPR flare stage=alpha_converter num_vertices=",n,
+                         " first_hw_vertex=",start," tag=",tag,
+                         " accepted=",n>=3U && n<=32U && start+n<=4096U);
             if(n>=3U && n<=32U && start+n<=4096U)
                 pending_sprite_flare_spans.push_back({start,n});
         }
@@ -1500,6 +1526,13 @@ namespace {
         uint32_t count=0;
         std::memcpy(&count,reinterpret_cast<void const *>(
             sprite_hw_vertex_count_addr),4);
+        if(the_config && the_config->profile_renderer &&
+           !pending_sprite_flare_spans.empty() &&
+           flare_flush_trace_count++<6U)
+            LOG_INFO("SPR flare stage=hw_flush vertex_count=",count,
+                     " pending_spans=",pending_sprite_flare_spans.size(),
+                     " first_span_start=",pending_sprite_flare_spans.front().start,
+                     " first_span_count=",pending_sprite_flare_spans.front().count);
         if(count<=4096U) {
             for(auto const &span:pending_sprite_flare_spans) {
                 if(span.start+span.count>count) continue;
@@ -1552,6 +1585,23 @@ namespace {
         auto const info=current_sprite_info(thing);
         if(info.width==0.0f || info.height==0.0f || info.opacity==0.0f)
             return 0;
+        // A loaded type-4 SPR may never actually be submitted. Trace native
+        // draw entry separately from texture/resource loading and face output.
+        if(the_config && the_config->profile_renderer &&
+           gpu_span_readable(thing,8)) {
+            void const *resource=nullptr;
+            std::memcpy(&resource,static_cast<uint8_t const *>(thing)+4,
+                        sizeof(resource));
+            uint32_t authored_type=0;
+            if(gpu_span_readable(resource,32) &&
+               sprite_types.lookup(resource,static_cast<char const *>(resource),
+                                   authored_type) &&
+               jkgm::sprite_is_flare(authored_type) &&
+               flare_draw_trace_count++<6U)
+                LOG_INFO("SPR flare stage=draw_enter resource=",
+                         reinterpret_cast<uintptr_t>(resource),
+                         " opacity=",info.opacity);
+        }
         auto const previous=sprite_draw_active;
         sprite_draw_active={thing,orientation};
         int const result=RealNativeSprite(thing,orientation);
@@ -2851,6 +2901,8 @@ bool attach_hooks()
         sprite_frustum_hook_active=false;
         sprite_alpha_hook_active=false;
         pending_sprite_flare_spans.clear();
+        flare_draw_trace_count=flare_face_trace_count=flare_alpha_trace_count=
+            flare_flush_trace_count=flare_bad_face_trace_count=0U;
     }
     if(error==NO_ERROR) native_sprite_hook_active=sprite_hooks_requested;
     if(error==NO_ERROR && mip_hook_requested) {
