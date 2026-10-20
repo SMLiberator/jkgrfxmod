@@ -48,6 +48,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
         sprite_orientation_test.exe
+    - name: Sprite flare center-depth and opacity tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_flare_visibility.cpp /Fe:sprite_flare_visibility_test.exe
+        sprite_flare_visibility_test.exe
     - name: Sprite roll geometry and timing tests
       shell: cmd
       run: |
