@@ -140,16 +140,25 @@ To repeat these read-only prerequisite checks for future builds:
 python3 tests/verify_thing_node_binaries.py /path/to/jkgm.exe /path/to/JK.dll
 ```
 
-**Important collision-hook warning:** The original JK collision
-address `0x005080D0` listed as
+**Collision entry-point identification (static, not yet hooked):**
+The original JK collision address `0x005080D0` listed as
 `sithIntersect_CheckSphereThingIntersection_ADDR` in OpenJKDF2's
-`sithIntersect.h` does *not* identify that function in the supplied
-JKGM binary: disassembly there starts a different routine with calls
-to `0x0042F430`, `0x00430E50` and `0x004DA720`.
-Do **not** attach a type-2 collision hook using unverified vanilla
-JK addresses. The patched executable's collision dispatcher and
-associated ABI/layout must be independently located and checked
-before attempting gameplay integration.
+`sithIntersect.h` is unrelated in this JKGM binary. The likely
+corresponding JKGM function starts at **`0x00508360`**, with prologue
+`83 EC 4C 8B 44 24 68 53 55 56 57`. This identification is
+supported by the `colflags & 0x80` check, comparisons of
+`SithThing.collide` at offset `+0x28` against `3` for both objects,
+`SithThing.collideSize` at `+0x30`, the sphere-test call to
+`0x005087D0`, and the following mesh-face branch. Unlike MotS's
+dispatcher, its leading branch does not recognize `collide=2`;
+this mode currently falls through the ordinary non-face path.
+The routine appears to end near `0x005085F9`.
+
+This is a **strong static match, not a live-hook guarantee**.
+Verify function signature, collision-record semantics, all callers,
+and detour safety before installing an opt-in collision override.
+In particular, never apply OpenJKDF2's original vanilla addresses
+directly to this patched executable.
 
 These checks establish the correctness of the *specific static binary
 prerequisites*, not successful COG registration or correct output in a
