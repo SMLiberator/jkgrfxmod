@@ -1535,6 +1535,7 @@ namespace {
     puppet_advance_fn RealPuppetAdvance=
         reinterpret_cast<puppet_advance_fn>(puppet_advance_addr);
     bool key_callback_hook_active=false;
+    bool key_callback_registration_hook_active=false;
     bool key_callback_message_registered=false;
     thread_local puppet_callback_fn active_previous_callback=nullptr;
 
@@ -1570,11 +1571,10 @@ namespace {
         std::memcpy(&thing_type,static_cast<uint8_t const *>(thing)+12,4);
         if(current_index!=thing_index || thing_type==0) return;
         auto const send=reinterpret_cast<cog_thing_send_fn>(cog_thing_send_addr);
-        // Event order requested: Thing index, KEY marker value, track number.
+        // Sender is the animated Thing. Match IJIM-style marker/track parameters.
         send(thing,nullptr,key_callback_message,
-             static_cast<float>(thing_index),
              static_cast<float>(marker),
-             static_cast<float>(track),0.0f);
+             static_cast<float>(track),0.0f,0.0f);
     }
 
     void __cdecl HookedPuppetAdvance(void *puppet,int track,float frames)
@@ -1616,15 +1616,18 @@ namespace {
 
     void __cdecl register_key_callback_message(void *symbols)
     {
-        if(!symbols || !key_callback_signatures_match()) {
-            LOG_WARNING("COG callback message not registered: unsupported JK23 executable");
+        // The executable signatures were verified before attaching Detours.
+        // Do NOT recheck original bytes here: rdPuppet_AdvanceTrack has already
+        // been patched with a Detours jump, so that check always fails.
+        if(!symbols || !key_callback_hook_active) {
+            LOG_WARNING("COG callback message not registered: missing symbol table or KEY hook");
             return;
         }
         reinterpret_cast<cog_add_message_fn>(cog_add_message_addr)(
             symbols,key_callback_message,"callback");
         key_callback_message_registered=true;
-        LOG_INFO("Registered KEY callback COG message: Param(0)=Thing, "
-                 "Param(1)=marker, Param(2)=track");
+        LOG_INFO("Registered KEY callback COG message: Sender=Thing, "
+                 "Param(0)=marker, Param(1)=track");
     }
     using jk_init_messages_fn=void(__cdecl *)();
     jk_init_messages_fn TrueJkInitNewCogMessages=nullptr;
@@ -2271,13 +2274,24 @@ bool attach_hooks()
         TrueJkInitNewCogMessages=reinterpret_cast<jk_init_messages_fn>(
             GetProcAddress(jk_dll,MAKEINTRESOURCEA(12)));
         if(TrueJkInitNewCogMessages && key_callback_signatures_match()) {
-            DetourAttach(&(PVOID &)TrueJkInitNewCogMessages,
-                         HookedJkInitNewCogMessages);
-            LONG const cb_err=DetourAttach(&(PVOID &)RealPuppetAdvance,
-                                          HookedPuppetAdvance);
-            if(cb_err!=NO_ERROR)
-                LOG_WARNING("Could not attach KEY callback event hook: ",cb_err);
-            else key_callback_hook_active=true;
+            LONG const msg_err=DetourAttach(
+                &(PVOID &)TrueJkInitNewCogMessages,HookedJkInitNewCogMessages);
+            if(msg_err!=NO_ERROR) {
+                LOG_WARNING("Could not attach KEY COG message registration hook: ",msg_err);
+            }
+            else {
+                LONG const cb_err=DetourAttach(
+                    &(PVOID &)RealPuppetAdvance,HookedPuppetAdvance);
+                if(cb_err!=NO_ERROR) {
+                    DetourDetach(&(PVOID &)TrueJkInitNewCogMessages,
+                                 HookedJkInitNewCogMessages);
+                    LOG_WARNING("Could not attach KEY callback event hook: ",cb_err);
+                }
+                else {
+                    key_callback_hook_active=true;
+                    key_callback_registration_hook_active=true;
+                }
+            }
         }
         else LOG_WARNING("KEY callback hook unavailable: unsupported JK.dll / game");
         if(TrueJkInitNewCogVerbs != nullptr) {
@@ -2348,6 +2362,11 @@ bool attach_hooks()
     bool const sprite_hooks_requested=request_native_sprite_hooks();
 
     LONG error = DetourTransactionCommit();
+    if(error!=NO_ERROR) {
+        key_callback_hook_active=false;
+        key_callback_registration_hook_active=false;
+        key_callback_message_registered=false;
+    }
     if(error==NO_ERROR) native_sprite_hook_active=sprite_hooks_requested;
     if(error==NO_ERROR && mip_hook_requested) {
         native_mat_mips_hook_active=true;
@@ -2382,9 +2401,10 @@ bool detach_hooks()
         DetourDetach(&(PVOID &)RealPuppetAdvance,HookedPuppetAdvance);
         key_callback_hook_active=false;
     }
-    if(TrueJkInitNewCogMessages) {
+    if(key_callback_registration_hook_active) {
         DetourDetach(&(PVOID &)TrueJkInitNewCogMessages,
                      HookedJkInitNewCogMessages);
+        key_callback_registration_hook_active=false;
         key_callback_message_registered=false;
     }
     if(TrueJkInitNewCogVerbs != nullptr) {
