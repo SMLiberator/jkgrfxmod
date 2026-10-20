@@ -1196,16 +1196,20 @@ are implemented. The shader reconstructs the SPR's projected center using
 its UVs, samples resolved opaque depth, and applies small spatial edge
 softening. It does not perform temporal fades yet.
 
-The exact native JK23 hook offsets and the HW vertex marker path need
-in-game verification; this is experimental. Roll and per-Thing opacity
-remain independent, and non-flare SPRs retain ordinary depth behavior.
+The native JK23 addresses were rechecked against both supported patched
+executables. The native converter inlines the render-list flush; the
+original 0x43C590 hook was never reached, and its vertex addresses were
+actually pointing at triangle data. The hook now tags D3DTLVERTEX.specular
+at the std3D vertex-upload boundary instead. **In-game verification is
+still needed.** Roll and per-Thing opacity remain independent, and
+non-flare SPRs retain ordinary depth behavior.
 
 **Troubleshooting type 4:** `SPR pose ... loaded_type=4` and
 `SPR per-Thing alpha and flare markers enabled` establish only resource
 parsing and Detour attachment, **not actual flare rendering**. With
 `profile_renderer=true`, the DLL now emits up to six diagnostic messages
 for each critical stage: `stage=draw_enter`, `stage=face_append`,
-`stage=alpha_converter`, `stage=hw_flush`,
+`stage=alpha_converter`, `stage=hw_upload`,
 `stage=d3d_triangle` and `stage=gl_pass`. The first missing stage
 isolates where the flare flag stops propagating. The counter is bounded
 to avoid per-frame log spam.
