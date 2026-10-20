@@ -43,7 +43,7 @@ namespace jkgm {
         while(current>=0 && hops++<nodes.size()) {
             if(size_t(current)>=nodes.size())return false;
             auto const &n=nodes[size_t(current)];
-            if(n.amputated || n.parent==current)return false;
+            if(n.amputated || n.parent==current || n.parent < -1)return false;
             current=n.parent;
         }
         return current<0;
@@ -83,8 +83,10 @@ namespace jkgm {
             float const projected=mots_dot(diff,unit_direction);
             float const constant=mots_dot(diff,diff)-combined*combined;
             float const discriminant=projected*projected-constant;
-            if(discriminant<0)continue;
-            float const distance=constant<=0
+            // The JK/MotS sphere test rejects exact tangency (distance
+            // from center to ray >= radius), including zero-length casts.
+            if(discriminant<=0)continue;
+            float const distance=constant<0
                 ?0.0f : -projected-std::sqrt(discriminant);
             if(distance<0 || distance>limit)continue;
             thing_node_vector norm{{
