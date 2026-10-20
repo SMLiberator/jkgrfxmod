@@ -1157,6 +1157,13 @@ OpenJKDF2 and **must be checked in the executable before runtime use**.
 Tests use synthetic in-memory JK structures and cover adjacent surfaces,
 invalid indices, backfaces, sky/portal exclusions and output caps.
 
+`renderer/sprite_decal_projector.hpp` builds a projector from the Thing's
+current position and R/L/U axes, the SPR's local offset and base dimensions,
+and independent `SetSpriteInfo` size / `SetSpriteRoll` values. Projection
+depth is fixed at 0.25 engine units; receiver triangles are offset a
+hardcoded 0.001 units toward their front side to avoid z-fighting without
+changing texture coordinates. These values are experimental, not COG knobs.
+
 **Not yet visible in-game:** runtime world receiver lookup, caching,
 actual OpenGL submission, depth bias and 3DO mesh projection remain
 to be connected. A `type 3` SPR should not yet be used expecting it
