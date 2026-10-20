@@ -12,12 +12,23 @@ int main() {
     thing.right={{0,1,0}};
     thing.look={{-1,0,0}};
     thing.up={{0,0,1}};
-    for(uint32_t legacy:{0U,1U,2U}) {
+    for(uint32_t legacy:{0U,1U,3U}) {
         assert(compute_sprite_axes(legacy,thing,camera,out));
         assert(eq(out.right,camera.right));
         assert(eq(out.look,camera.look));
         assert(eq(out.up,camera.up));
     }
+    // Type 2 follows IJIM's Thing Look plane and stays upright in world Z.
+    assert(compute_sprite_axes(2U,thing,camera,out));
+    assert(eq(out.look,thing.look));
+    assert(eq(out.up,thing.up));
+    assert(eq(out.right,thing.right));
+    // Fixed planes remain anchored when the camera yaws/pitches.
+    sprite_axes swung_camera=camera;
+    swung_camera.look={{0.7f,0.2f,-0.68f}};
+    assert(compute_sprite_axes(2U,thing,swung_camera,out));
+    assert(eq(out.look,thing.look));
+    assert(eq(out.up,thing.up));
     assert(compute_sprite_axes(sprite_preserve_up,thing,camera,out));
     assert(eq(out.up,thing.up));
     assert(eq(out.look,camera.look));
