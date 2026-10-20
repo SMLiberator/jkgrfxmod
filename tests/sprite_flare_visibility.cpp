@@ -1,4 +1,5 @@
 #include "renderer/sprite_flare_visibility.hpp"
+#include "renderer/sprite_flare_projection.hpp"
 #include "renderer/sprite_orientation.hpp"
 #include <cassert>
 #include <cmath>
@@ -6,6 +7,24 @@
 using namespace jkgm;
 static bool near(float a,float b) {return std::fabs(a-b)<1.e-5f;}
 int main() {
+    sprite_flare_center center{};
+    assert(reconstruct_sprite_flare_center(
+        {{100,200}},{{0.25f,0.75f}},8.0f,
+        {{0.01f,0.0f}},{{0.0f,-0.01f}},0.0f,0.0f,
+        {{800,600}},center));
+    assert(near(center.pixel[0],125.0f));
+    assert(near(center.pixel[1],225.0f));
+    assert(near(center.view_depth,8.0f));
+    // The same center is recovered from another pixel of the quad.
+    assert(reconstruct_sprite_flare_center(
+        {{110,210}},{{0.35f,0.65f}},8.0f,
+        {{0.01f,0.0f}},{{0.0f,-0.01f}},0.0f,0.0f,
+        {{800,600}},center));
+    assert(near(center.pixel[0],125.0f));
+    assert(near(center.pixel[1],225.0f));
+    assert(!reconstruct_sprite_flare_center(
+        {{100,200}},{{0.25f,0.75f}},8.0f,
+        {{0,0}},{{0,0}},0.0f,0.0f,{{800,600}},center));
     assert(sprite_center_occluded_flare==0x40U);
     // A flare-only type preserves the ordinary camera-facing billboard.
     assert((sprite_center_occluded_flare&sprite_extended_mask)==0U);
