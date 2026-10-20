@@ -58,6 +58,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_collision_dispatch.cpp /Fe:mots_collision_dispatch_test.exe
         mots_collision_dispatch_test.exe
+    - name: Geometry-centered mesh collision and automatic tree bounds
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_mesh_collision_bounds.cpp /Fe:mots_mesh_collision_bounds_test.exe
+        mots_mesh_collision_bounds_test.exe
     - name: MotS animated collision sphere-tree reference tests
       shell: cmd
       run: |
