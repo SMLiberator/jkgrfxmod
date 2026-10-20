@@ -53,6 +53,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_alpha_tag.cpp /Fe:sprite_alpha_tag_test.exe
         sprite_alpha_tag_test.exe
+    - name: SPR decal GPU mesh and MAT UV preparation tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_gpu_mesh.cpp /Fe:sprite_decal_gpu_mesh_test.exe
+        sprite_decal_gpu_mesh_test.exe
     - name: SPR projected decal transform and roll tests
       shell: cmd
       run: |
