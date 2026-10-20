@@ -1721,6 +1721,7 @@ namespace {
     using cog_pop_float_type = float(__cdecl *)(void *ctx);
     using cog_pop_int_type = int(__cdecl *)(void *ctx);
     using cog_pop_vector_type = void(__cdecl *)(void *ctx, float *out_xyz);
+    using cog_pop_thing_type = void *(__cdecl *)(void *ctx);
     using cog_push_float_type = void(__cdecl *)(void *ctx, float value);
     using cog_push_int_type = void(__cdecl *)(void *ctx, int value);
     using cog_push_vector_type = void(__cdecl *)(void *ctx, float const *xyz);
@@ -1728,6 +1729,7 @@ namespace {
     constexpr uintptr_t pop_float_address = 0x4E2780;
     constexpr uintptr_t pop_int_address = 0x4E2850;
     constexpr uintptr_t pop_vector_address = 0x4E2970;
+    constexpr uintptr_t pop_thing_address = 0x4E2B50;
     constexpr uintptr_t push_float_address = 0x4E3650;
     constexpr uintptr_t push_int_address = 0x4E35D0;
     constexpr uintptr_t push_vector_address = 0x4E36E0;
@@ -1736,6 +1738,8 @@ namespace {
     cog_pop_int_type const cog_pop_int = reinterpret_cast<cog_pop_int_type>(pop_int_address);
     cog_pop_vector_type const cog_pop_vector =
         reinterpret_cast<cog_pop_vector_type>(pop_vector_address);
+    cog_pop_thing_type const cog_pop_thing =
+        reinterpret_cast<cog_pop_thing_type>(pop_thing_address);
     cog_push_float_type const cog_push_float =
         reinterpret_cast<cog_push_float_type>(push_float_address);
     cog_push_int_type const cog_push_int = reinterpret_cast<cog_push_int_type>(push_int_address);
@@ -1747,10 +1751,11 @@ namespace {
         std::array<uint8_t, 8> prologue;
     };
 
-    constexpr std::array<cog_helper_signature, 6> cog_helper_signatures = {{
+    constexpr std::array<cog_helper_signature, 7> cog_helper_signatures = {{
         {pop_float_address, {0x8b, 0x4c, 0x24, 0x04, 0x83, 0xec, 0x20, 0x8b}},
         {pop_int_address, {0x55, 0x8b, 0xec, 0x83, 0xec, 0x10, 0x8b, 0x4d}},
         {pop_vector_address, {0x8b, 0x4c, 0x24, 0x04, 0x83, 0xec, 0x10, 0x8b}},
+        {pop_thing_address, {0x55, 0x8b, 0xec, 0x83, 0xec, 0x10, 0x8b, 0x4d}},
         {push_float_address, {0x83, 0xec, 0x10, 0x8b, 0x44, 0x24, 0x18, 0x56}},
         {push_int_address, {0x83, 0xec, 0x10, 0x53, 0x8b, 0x5c, 0x24, 0x1c}},
         {push_vector_address, {0x83, 0xec, 0x10, 0x8b, 0x44, 0x24, 0x18, 0x53}},
@@ -1786,6 +1791,48 @@ namespace {
     float clamp_float(float v, float lo, float hi)
     {
         return v < lo ? lo : (v > hi ? hi : v);
+    }
+
+    // SetSpriteInfo(thing, vector(width multiplier, height multiplier, opacity),
+    //               transition_seconds). A Thing's rdThing is embedded at +0xc4
+    // in the validated JK23 SithThing layout, and type 4 means rdSprite.
+    // Never alter a shared rdSprite's dimensions or material.
+    bool sprite_cog_thing_identity(void const *thing,uint32_t &signature)
+    {
+        if(!thing || !gpu_span_readable(thing,0xc8)) return false;
+        auto const *p=static_cast<uint8_t const *>(thing);
+        uint32_t sith_type=0,rd_type=0;
+        std::memcpy(&sith_type,p+0x0c,4);
+        std::memcpy(&rd_type,p+0xc4,4);
+        if(sith_type==0 || rd_type!=4) return false;
+        std::memcpy(&signature,p+0x74,4);
+        return true;
+    }
+
+    void __cdecl cog_set_sprite_info(void *ctx)
+    {
+        float const seconds=cog_pop_float(ctx);
+        float xyz[3]{};
+        cog_pop_vector(ctx,xyz);
+        void *thing=cog_pop_thing(ctx);
+        uint32_t signature=0;
+        if(!sprite_cog_thing_identity(thing,signature)) return;
+        jkgm::sprite_instance_info const info{xyz[0],xyz[1],xyz[2]};
+        if(!sprite_instances.set(thing,signature,info,GetTickCount(),seconds))
+            LOG_WARNING("SetSpriteInfo: invalid width, height, opacity or duration");
+    }
+
+    // GetSpriteInfo(thing): current independently interpolated width, height,
+    // and opacity (defaults to 1,1,1 when no override is active).
+    void __cdecl cog_get_sprite_info(void *ctx)
+    {
+        void *thing=cog_pop_thing(ctx);
+        uint32_t signature=0;
+        jkgm::sprite_instance_info info{};
+        if(sprite_cog_thing_identity(thing,signature))
+            info=sprite_instances.sample(thing,signature,GetTickCount());
+        float const values[]={info.width,info.height,info.opacity};
+        cog_push_vector(ctx,values);
     }
 
     // SetFogColor(vector rgb, float fadeTime)
@@ -2284,6 +2331,8 @@ namespace {
         cog_verb_entry{"resetmaterialalbedo", cog_reset_material_albedo},
         cog_verb_entry{"setmaterialcolor", cog_set_material_color},
         cog_verb_entry{"resetmaterialcolor", cog_reset_material_color},
+        cog_verb_entry{"setspriteinfo", cog_set_sprite_info},
+        cog_verb_entry{"getspriteinfo", cog_get_sprite_info},
     };
 
     JkInitNewCogVerbs_type TrueJkInitNewCogVerbs = nullptr;
@@ -2302,7 +2351,7 @@ namespace {
             register_verb(ctx, verb.handler, verb.name);
         }
 
-        LOG_DEBUG("Registered fog, sunlight, post-processing, and material COG verbs");
+        LOG_DEBUG("Registered fog, sunlight, post-processing, material, and SPR COG verbs");
     }
 }
 
