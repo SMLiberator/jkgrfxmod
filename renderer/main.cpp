@@ -1882,6 +1882,8 @@ namespace {
         cog_push_vector(ctx,result);
     }
 
+    bool sprite_cog_thing_identity(void const *thing,uint32_t &signature);
+
     // Independently animate roll around the SPR's camera-facing plane normal.
     void __cdecl cog_set_sprite_roll(void *ctx)
     {
