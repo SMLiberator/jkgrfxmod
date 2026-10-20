@@ -44,10 +44,35 @@ only the orientation, or the child will not orbit a rotating parent.
 Runtime attachment needs lifetime/sector, detach, save/load, and network
 synchronization handling.
 
-**Do not use OpenJKDF2's `rdModel3_GetMeshMatrix_ADDR=0x00445D80`
-blindly.** The uploaded JKGM executable differs: a direct PE inspection
-shows that address is not the start of the documented function. The
-correct JKGM function signature/location must be verified before hooking.
+**JKGM accessor verified in the supplied PE:** `rdModel3_GetMeshMatrix`
+starts at `0x00445FD0` (not OpenJKDF2's `0x00445D80`). The function
+checks the requested node against the model's `numHNodes`, compares
+`rdThing.rdFrameNum` against `rdroid_frameTrue` at `0x005703D8`,
+calls `rdPuppet_BuildJointMatrices` at `0x0043F160` if stale, and copies
+12 floats (`rdMatrix34`) from `rdThing.paJointMatrices[node]`.
+The native `rdMatrix_ExtractAngles34` is `0x00440950`; it handles
+engine PYR conversion. Both entry points are protected by exact first-16-
+byte checks and the COG handlers additionally validate Thing, model,
+node range, world placement and output finiteness.
+
+**Five registered JKGM verbs in `renderer.dll` (development):**
+
+    vector origin = GetThingNodePos(thing, node);
+    vector rvec = GetThingNodeRVec(thing, node);
+    vector lvec = GetThingNodeLVec(thing, node);
+    vector uvec = GetThingNodeUVec(thing, node);
+    vector pyr = GetThingNodePYR(thing, node);
+
+Each returns the current world-space node transform; the getters return
+`(0, 0, 0)` on invalid Thing, unsupported executable, missing 3DO,
+out-of-range node, or invalid matrix. COG arguments pop `node` first
+and then `thing`. The position is the transformed mesh-node origin.
+The R/L/U vectors retain native scale/mirroring. Angle extraction can
+have normal Euler discontinuities and is not a substitute for the
+basis vectors when implementing attachments.
+
+This validates the machine code and function entry points, **not**
+yet the COG behavior in a live level; that still needs testing.
 
 ## MotS collide=2 is not polygon-perfect mesh collision
 
@@ -81,11 +106,11 @@ factor, world-space node origins, nearest collision, and amputation
 inheritance. It does not claim binary equivalence to MotS for unusual
 edge cases and is not wired into the Sith collision dispatcher.
 
-Next work that *does* need executable verification:
-1. Identify and validate the JKGM address/signature for the matrix
-   accessor, plus its ABI and actual `SithThing` layout.
-2. Register read-only `GetThingNode*` verbs with safe invalid-node
-   responses and consistent world-space semantics.
-3. Only after confirming native behavior, add an opt-in
+Next work:
+1. Test all five registered node getters on a 3DO with at least two
+   animated hierarchy nodes, including a Thing culled offscreen.
+2. Implement opt-in node attachments using per-frame world matrices,
+   local child transforms and clean detach/destruction handling.
+3. Only after confirming native collision entry points, add an opt-in
    `collide=2` collision hook, retaining type-1/type-3 handling,
-   broad-phase behavior, contact normals and existing multiplayer state.
+   broad-phase behavior, contact normals and multiplayer state.
