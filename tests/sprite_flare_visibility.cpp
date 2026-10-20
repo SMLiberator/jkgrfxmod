@@ -25,9 +25,9 @@ int main() {
     assert(!reconstruct_sprite_flare_center(
         {{100,200}},{{0.25f,0.75f}},8.0f,
         {{0,0}},{{0,0}},0.0f,0.0f,{{800,600}},center));
-    assert(sprite_center_occluded_flare==0x40U);
-    // A flare-only type preserves the ordinary camera-facing billboard.
-    assert((sprite_center_occluded_flare&sprite_extended_mask)==0U);
+    assert(sprite_center_occluded_flare==4U);
+    // Mode 4 is exclusively a camera-facing flare, never a decal.
+    assert(!sprite_is_decal(sprite_center_occluded_flare));
     sprite_axes thing{},camera{},axes{};
     assert(compute_sprite_axes(sprite_center_occluded_flare,thing,camera,axes));
     assert(near(axes.look[1],1.0f));
