@@ -1,5 +1,6 @@
 #pragma once
 // Extended SPR orientation bits occupy bits 2-5 of the authored SPR type.
+// Bit 6 is reserved for center-occluded flares; it must not alter orientation.
 // Original JK23 types 0, 1, and 2 remain camera-facing.
 #include <array>
 #include <cmath>
@@ -10,6 +11,7 @@ namespace jkgm {
     constexpr uint32_t sprite_preserve_look=0x08U;
     constexpr uint32_t sprite_preserve_right=0x10U;
     constexpr uint32_t sprite_project_decal=0x20U;
+    constexpr uint32_t sprite_center_occluded_flare=0x40U;
     constexpr uint32_t sprite_extended_mask=0x3CU;
 
     using sprite_vec3=std::array<float,3>;
