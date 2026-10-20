@@ -1821,6 +1821,69 @@ namespace {
         return v < lo ? lo : (v > hi ? hi : v);
     }
 
+    // Confirmed in JK23 jkgm.exe: Thing.controlType is +0x14,
+    // Thing.actor is +0x278; AIControlBlock goalLVec +0x194,
+    // movePos +0x1a0, pDistractor +0x1d0, and movepos +0x218.
+    // These access the existing AI controller, not a duplicate AI state.
+    void const *valid_ai_controller(void *thing)
+    {
+        if(!thing || !gpu_span_readable(thing,0x27c)) return nullptr;
+        auto const *p=static_cast<uint8_t const *>(thing);
+        uint32_t control=0;
+        void const *ai=nullptr;
+        std::memcpy(&control,p+0x14,4);
+        if(control!=2) return nullptr;
+        std::memcpy(&ai,p+0x278,sizeof(ai));
+        return gpu_span_readable(ai,0x220)?ai:nullptr;
+    }
+
+    // AIGetFireTarget(actorThing): returns the target of the native
+    // AISetFireTarget verb, or -1 if the AI/target is unavailable.
+    // This is the AI 'distractor' / fire-target request; attack instincts
+    // can independently decide whether to fire.
+    void __cdecl cog_ai_get_fire_target(void *ctx)
+    {
+        void *thing=cog_pop_thing(ctx);
+        void const *ai=valid_ai_controller(thing);
+        void const *target=nullptr;
+        if(ai) std::memcpy(&target,
+            static_cast<uint8_t const *>(ai)+0x1d0,sizeof(target));
+        int result=-1;
+        if(target && gpu_span_readable(target,0x18)) {
+            auto const *p=static_cast<uint8_t const *>(target);
+            uint32_t kind=0,idx=0;
+            std::memcpy(&kind,p+0x10,4);
+            std::memcpy(&idx,p+4,4);
+            if(kind!=0 && kind<=12 && idx<65536U)
+                result=static_cast<int>(idx);
+        }
+        cog_push_int(ctx,result);
+    }
+
+    // AIGetMoveTargetPos(actorThing): native movement destination (+0x1a0).
+    // JK's existing AIGetMovePos reads a different vector (+0x218).
+    void __cdecl cog_ai_get_move_target_pos(void *ctx)
+    {
+        void *thing=cog_pop_thing(ctx);
+        void const *ai=valid_ai_controller(thing);
+        float result[3]{};
+        if(ai) std::memcpy(result,
+            static_cast<uint8_t const *>(ai)+0x1a0,sizeof(result));
+        cog_push_vector(ctx,result);
+    }
+
+    // AIGetLookDir(actorThing): the actor's current horizontal goal
+    // direction (native goalLVec, +0x194), not an absolute look position.
+    void __cdecl cog_ai_get_look_dir(void *ctx)
+    {
+        void *thing=cog_pop_thing(ctx);
+        void const *ai=valid_ai_controller(thing);
+        float result[3]{};
+        if(ai) std::memcpy(result,
+            static_cast<uint8_t const *>(ai)+0x194,sizeof(result));
+        cog_push_vector(ctx,result);
+    }
+
     // SetSpriteInfo(thing, vector(width multiplier, height multiplier, opacity),
     //               transition_seconds). A Thing's rdThing is embedded at +0xc4
     // in the validated JK23 SithThing layout, and type 4 means rdSprite.
@@ -2361,6 +2424,9 @@ namespace {
         cog_verb_entry{"resetmaterialcolor", cog_reset_material_color},
         cog_verb_entry{"setspriteinfo", cog_set_sprite_info},
         cog_verb_entry{"getspriteinfo", cog_get_sprite_info},
+        cog_verb_entry{"aigetfiretarget", cog_ai_get_fire_target},
+        cog_verb_entry{"aigetmovetargetpos", cog_ai_get_move_target_pos},
+        cog_verb_entry{"aigetlookdir", cog_ai_get_look_dir},
     };
 
     JkInitNewCogVerbs_type TrueJkInitNewCogVerbs = nullptr;
@@ -2379,7 +2445,7 @@ namespace {
             register_verb(ctx, verb.handler, verb.name);
         }
 
-        LOG_DEBUG("Registered fog, sunlight, post-processing, material, and SPR COG verbs");
+        LOG_DEBUG("Registered fog, sunlight, post-processing, material, SPR and AI COG verbs");
     }
 }
 
