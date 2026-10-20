@@ -1173,11 +1173,24 @@ currently hides the sprite entirely.
 generation, including ordinary and extended sprite types. It changes no
 shared `.SPR` dimensions, materials, or UVs. The optional frustum hook
 conservatively expands the visibility radius for enlarged instances.
-Per-Thing opacity is stored and interpolated, but intermediate opacity
-values (strictly between 0 and 1) are **not yet applied to pixels**: native
-JK has a fixed 90/255 translucent-face alpha and needs an instance-aware
-transparent rendering path before smooth fades can be considered complete.
-Avoid relying on fractional-opacity visuals until that path is added.
+
+**New, awaiting in-game verification:** fractional opacity now enters JK23's
+native render-cache conversion through two signature-checked Detours.
+Only proc-faces created during a SPR draw are tagged. Their alpha is set to
+`round(original_face_alpha * instance_opacity)`, with originally opaque
+faces using baseline 255 and originally translucent faces retaining the
+native translucent baseline (normally 90). The renderer's existing
+transparent D3D-state pipeline then processes the resulting vertices.
+These changes are **per draw/Thing**: no shared `.SPR` or `.MAT`
+data are modified. Fully transparent or zero-sized SPRs are skipped by
+the draw hook.
+
+This relies on JK23's validated proc-entry offsets and a fixed native
+alpha-selection hook; if their signatures differ, intermediate opacity
+is not available and an explicit warning is logged. CI covers alpha-tag
+math and Windows compilation, but full transparency routing, animated
+fades and interactions with other alpha materials still require in-game
+tests.
 
 The engine Thing signature prevents stale data from being applied to a
 reused Thing slot. The registry is reset when SPR hooks are released.
