@@ -48,7 +48,7 @@ namespace jkgm {
             if(!sprite_normalize(out.look)) return false;
             sprite_vec3 const world_up{{0,0,1}};
             sprite_vec3 const fallback{{1,0,0}};
-            out.right=sprite_cross(world_up,out.look);
+            out.right=sprite_cross(out.look,world_up);
             if(!sprite_normalize(out.right)) {
                 out.right=sprite_cross(fallback,out.look);
                 if(!sprite_normalize(out.right)) return false;
