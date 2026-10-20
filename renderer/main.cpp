@@ -10,6 +10,7 @@
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_modelview.hpp"
+#include "thing_node_native.hpp"
 #include "sprite_orientation.hpp"
 #include "sprite_type_registry.hpp"
 #include "sprite_instance_info.hpp"
@@ -2219,6 +2220,73 @@ namespace {
         cog_push_vector(ctx,result);
     }
 
+    // JKGM's native rdModel3_GetMeshMatrix has a different address from
+    // OpenJKDF2's JK layout. In the tested JKGM EXE, 0x445FD0 refreshes the
+    // animated node matrices when the render frame is stale, then returns
+    // an rdMatrix34 (12 floats). Never rely on a cached offscreen pose.
+    using jkgm_get_node_matrix_fn=int(__cdecl *)(void *,float const *,
+                                                  unsigned,float *);
+    jkgm_get_node_matrix_fn const jkgm_get_node_matrix=
+        reinterpret_cast<jkgm_get_node_matrix_fn>(
+            jkgm::jkgm_node_matrix_address);
+
+    bool get_cog_thing_node_pose(void *thing,int node,
+                                 jkgm::thing_node_pose &pose)
+    {
+        auto const safe_read=[](uintptr_t address,void *dest,size_t length)->bool {
+            if(!jkgm::thing_node_valid_address(address,length) ||
+               !gpu_span_readable(reinterpret_cast<void const *>(address),
+                                  length))
+                return false;
+            std::memcpy(dest,reinterpret_cast<void const *>(address),length);
+            return true;
+        };
+        // Check the exact engine accessor, not merely COG helper signatures.
+        // This also rejects a different JK executable without touching it.
+        static bool const supported=jkgm::validate_native_thing_node_accessor(
+            safe_read);
+        if(!supported) return false;
+        jkgm::thing_node_native_input native{};
+        if(!jkgm::resolve_native_thing_node(safe_read,
+              reinterpret_cast<uintptr_t>(thing),node,native))
+            return false;
+        jkgm::gpu_3do_matrix34 output{};
+        if(!jkgm_get_node_matrix(reinterpret_cast<void *>(native.rd_thing),
+                                 native.world_placement.data(),
+                                 static_cast<unsigned>(node),output.data()))
+            return false;
+        return jkgm::get_thing_node_pose(output,pose);
+    }
+
+    enum class cog_thing_node_channel {position,right,look,up};
+    void get_cog_thing_node_vector(void *ctx,cog_thing_node_channel channel)
+    {
+        int const node=cog_pop_int(ctx);
+        void *thing=cog_pop_thing(ctx);
+        float result[3]{};
+        jkgm::thing_node_pose pose{};
+        if(get_cog_thing_node_pose(thing,node,pose)) {
+            auto const &v=channel==cog_thing_node_channel::position ? pose.origin:
+                          channel==cog_thing_node_channel::right ? pose.right:
+                          channel==cog_thing_node_channel::look ? pose.look:
+                                                                pose.up;
+            for(int i=0;i<3;++i)result[i]=v[i];
+        }
+        cog_push_vector(ctx,result);
+    }
+    void __cdecl cog_get_thing_node_pos(void *ctx) {
+        get_cog_thing_node_vector(ctx,cog_thing_node_channel::position);
+    }
+    void __cdecl cog_get_thing_node_rvec(void *ctx) {
+        get_cog_thing_node_vector(ctx,cog_thing_node_channel::right);
+    }
+    void __cdecl cog_get_thing_node_lvec(void *ctx) {
+        get_cog_thing_node_vector(ctx,cog_thing_node_channel::look);
+    }
+    void __cdecl cog_get_thing_node_uvec(void *ctx) {
+        get_cog_thing_node_vector(ctx,cog_thing_node_channel::up);
+    }
+
     bool sprite_cog_thing_identity(void const *thing,uint32_t &signature);
 
     // Independently animate roll around the SPR's camera-facing plane normal.
@@ -2791,6 +2859,10 @@ namespace {
         cog_verb_entry{"aigetmovepos", cog_ai_get_move_target_pos},
         cog_verb_entry{"aigetmovetargetpos", cog_ai_get_move_target_pos},
         cog_verb_entry{"aigetlookdir", cog_ai_get_look_dir},
+        cog_verb_entry{"getthingnodepos", cog_get_thing_node_pos},
+        cog_verb_entry{"getthingnodervec", cog_get_thing_node_rvec},
+        cog_verb_entry{"getthingnodelvec", cog_get_thing_node_lvec},
+        cog_verb_entry{"getthingnodeuvec", cog_get_thing_node_uvec},
     };
 
     JkInitNewCogVerbs_type TrueJkInitNewCogVerbs = nullptr;
@@ -2809,7 +2881,7 @@ namespace {
             register_verb(ctx, verb.handler, verb.name);
         }
 
-        LOG_DEBUG("Registered fog, sunlight, post-processing, material, SPR and AI COG verbs");
+        LOG_DEBUG("Registered fog, sunlight, post-processing, material, SPR, AI and ThingNode COG verbs");
     }
 }
 
