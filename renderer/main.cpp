@@ -12,6 +12,7 @@
 #include "gpu_3do_modelview.hpp"
 #include "sprite_orientation.hpp"
 #include "sprite_type_registry.hpp"
+#include "sprite_instance_info.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_triangulation.hpp"
@@ -1021,6 +1022,7 @@ namespace {
         0x56,0x8b,0x74,0x24,0x08,0x8b,0x86,0x9c,0x00,0x00,0x00
     };
     jkgm::sprite_type_registry sprite_types;
+    jkgm::sprite_instance_registry sprite_instances;
     native_sprite_newentry_fn RealNativeSpriteNewEntry=
         reinterpret_cast<native_sprite_newentry_fn>(sprite_newentry_addr);
     native_sprite_free_fn RealNativeSpriteFree=
@@ -1113,6 +1115,43 @@ namespace {
     // JK renders on its main thread. Recursion still preserves the outer call.
     thread_local sprite_draw_context sprite_draw_active{};
 
+    // Scale native camera-space sprite vertices without touching the shared
+    // rdSprite width, height, face, material, or UV coordinates.
+    void scale_native_sprite_quad(float width,float height)
+    {
+        if(width==1.0f && height==1.0f) return;
+        constexpr uintptr_t native_quad_addr=0x0082EA00U;
+        if(!gpu_span_readable(reinterpret_cast<void const *>(native_quad_addr),
+                              12*sizeof(float))) return;
+        auto *v=reinterpret_cast<float *>(native_quad_addr);
+        std::array<float,12> original{};
+        std::memcpy(original.data(),v,sizeof(float)*12);
+        for(int axis=0;axis<3;axis++) {
+            float const center=0.25f*(original[axis]+original[axis+3]+
+                                      original[axis+6]+original[axis+9]);
+            float const right=0.5f*(original[axis+3]-original[axis]);
+            float const up=0.5f*(original[axis+9]-original[axis]);
+            if(!std::isfinite(center)||!std::isfinite(right)||
+               !std::isfinite(up)) return;
+            v[axis]=center-right*width-up*height;
+            v[axis+3]=center+right*width-up*height;
+            v[axis+6]=center+right*width+up*height;
+            v[axis+9]=center-right*width+up*height;
+        }
+    }
+
+    jkgm::sprite_instance_info current_sprite_info(void const *rd_thing)
+    {
+        auto const *rd=static_cast<uint8_t const *>(rd_thing);
+        if(!rd||!gpu_span_readable(rd,0x48)) return {};
+        void const *thing=nullptr;
+        std::memcpy(&thing,rd+0x44,sizeof(thing)); // rdThing.pThing
+        if(!thing || !gpu_span_readable(thing,0x78)) return {};
+        uint32_t signature=0;
+        std::memcpy(&signature,static_cast<uint8_t const *>(thing)+0x74,4);
+        return sprite_instances.sample(thing,signature,GetTickCount());
+    }
+
     // Called from a naked, register/FPU-preserving mid-function Detours thunk.
     // The original native quad is in this JK23-specific fixed buffer.
     void __cdecl update_native_sprite_vertices()
@@ -1141,6 +1180,7 @@ namespace {
             }
             return;
         }
+        auto const info=current_sprite_info(rd_thing);
         if((type&jkgm::sprite_extended_mask)==0) {
             if(the_config && the_config->profile_renderer &&
                sprite_trace_counts.size()<128U) {
@@ -1150,6 +1190,7 @@ namespace {
                     " loaded_type=",type,
                     " (authored type; native camera billboard)");
             }
+            scale_native_sprite_quad(info.width,info.height);
             return;
         }
 
@@ -1244,6 +1285,7 @@ namespace {
         }
         std::memcpy(reinterpret_cast<void *>(native_quad_addr),transformed,
                     sizeof(transformed));
+        scale_native_sprite_quad(info.width,info.height);
         trace_native_sprite(sprite_name,type,thing_axes,camera_axes,final_axes,true);
     }
 
@@ -1263,6 +1305,9 @@ namespace {
 
     int __cdecl HookedNativeSprite(void *thing,void *orientation)
     {
+        auto const info=current_sprite_info(thing);
+        if(info.width==0.0f || info.height==0.0f || info.opacity==0.0f)
+            return 0;
         auto const previous=sprite_draw_active;
         sprite_draw_active={thing,orientation};
         int const result=RealNativeSprite(thing,orientation);
@@ -2393,6 +2438,7 @@ bool detach_hooks()
         DetourDetach(&(PVOID &)RealNativeSpriteNewEntry,HookedSpriteNewEntry);
         native_sprite_hook_active=false;
         sprite_types.clear();
+        sprite_instances.clear();
     }
     // Detach injected functions
     if(native_mat_mips_hook_active) {
