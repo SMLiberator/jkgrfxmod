@@ -692,6 +692,7 @@ namespace jkgm {
 
         triangle_batch world_batch;
         sorted_triangle_batch world_transparent_batch;
+        sorted_triangle_batch world_flare_batch;
         triangle_batch gun_batch;
         sorted_triangle_batch gun_transparent_batch;
         triangle_batch overlay_batch;
@@ -2932,6 +2933,7 @@ namespace jkgm {
             ogs->game_transparency_pass_program.set_env_map_sampler(4);
             ogs->game_transparency_pass_program.set_normal_map_samplers(6, 7);
             ogs->game_transparency_pass_program.set_scene_depth_sampler(5);
+            ogs->game_transparency_pass_program.set_flare_mode(false);
             // Sample the completed opaque pass; this is a different texture
             // from the framebuffer receiving the transparency draw.
             gl::set_active_texture_unit(5);
@@ -2971,6 +2973,21 @@ namespace jkgm {
                        /*force opaque*/ false,
                        posterize_lighting,
                        batch_blend_filter::special);
+
+            // SPR 0x40 flare quads use center-only occlusion against the
+            // resolved opaque depth texture. Never write or test ordinary
+            // per-fragment depth: the sprite's EDGES may cover world geometry.
+            if(world_flare_batch.size()!=0U) {
+                gl::disable(gl::capability::depth_test);
+                gl::set_depth_mask(false);
+                ogs->game_transparency_pass_program.set_flare_mode(true);
+                draw_batch(&ogs->game_transparency_pass_program,
+                           world_flare_batch,&trimdl->flare_trimdl,
+                           /*force opaque*/ false,posterize_lighting,
+                           batch_blend_filter::all);
+                ogs->game_transparency_pass_program.set_flare_mode(false);
+                gl::enable(gl::capability::depth_test);
+            }
 
             // GPU-resident 3DO translucent faces join the existing alpha pass.
             draw_gpu_3do_preview(true);
@@ -3217,7 +3234,7 @@ namespace jkgm {
                         // D3DTLVERTEX.specular. Vanilla output uses specular=0, so treat zero
                         // as neutral white to preserve compatibility with an unpatched engine.
                         auto unpack_vertex_tint = [](DWORD packed) {
-                            if(packed == 0U) {
+                            if(packed == 0U || packed == 0xB6A9D000U) {
                                 return color::fill(1.0f);
                             }
                             return to_float_color(color_rgba8((uint8_t)RGBA_GETRED(packed),
@@ -3236,6 +3253,14 @@ namespace jkgm {
                         c2 = extend(get<rgb>(c2) * get<rgb>(tint2), get<a>(c2));
                         c3 = extend(get<rgb>(c3) * get<rgb>(tint3), get<a>(c3));
 
+                        // An exact native vertex marker means the three
+                        // vertices came from an authored SPR with type 0x40.
+                        // Route separately; a regular world triangle can
+                        // never accidentally inherit flare depth behavior.
+                        bool const is_flare=!is_gun &&
+                            v1.specular==0xB6A9D000U &&
+                            v2.specular==0xB6A9D000U &&
+                            v3.specular==0xB6A9D000U;
                         // Check if the current triangle is part of an overlay
                         if(is_gun &&
                            almost_equal(make_point(v1.sx, v1.sy, v1.sz), point<3, float>::zero()) &&
@@ -3267,7 +3292,8 @@ namespace jkgm {
                                          current_material));
                         }
                         else {
-                            current_triangle_batch->insert(
+                            (is_flare ? static_cast<triangle_batch *>(&world_flare_batch)
+                                      : current_triangle_batch)->insert(
                                 triangle(triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
                                                                         internal_scr_offset_f,
                                                                         v1),
@@ -3319,10 +3345,12 @@ namespace jkgm {
                 }
                 last_profile_frame = started;
                 profile_frame.tris = world_batch.size() + world_transparent_batch.size() +
+                                      world_flare_batch.size() +
                                      gun_batch.size() + gun_transparent_batch.size() +
                                      overlay_batch.size();
                 profile_frame.trans_tris =
-                    world_transparent_batch.size() + gun_transparent_batch.size();
+                    world_transparent_batch.size() + world_flare_batch.size() +
+                    gun_transparent_batch.size();
             }
 
             // Consume once, then render both opaque and translucent subsets.
@@ -3361,6 +3389,7 @@ namespace jkgm {
                 profile_scope timer(profiling,
                     profile_frame.timings[profile_idx(profile_stage::sort_transparent)]);
                 world_transparent_batch.sort();
+                world_flare_batch.sort();
                 gun_transparent_batch.sort();
             }
             {
@@ -3368,6 +3397,7 @@ namespace jkgm {
                     profile_frame.timings[profile_idx(profile_stage::upload)]);
                 fill_buffer(world_batch, &trimdl->world_trimdl);
                 fill_buffer(world_transparent_batch, &trimdl->world_transparent_trimdl);
+                fill_buffer(world_flare_batch, &trimdl->flare_trimdl);
                 fill_buffer(gun_batch, &trimdl->gun_trimdl);
                 fill_buffer(gun_transparent_batch, &trimdl->gun_transparent_trimdl);
                 fill_buffer(overlay_batch, &trimdl->overlay_trimdl);
@@ -3416,6 +3446,7 @@ namespace jkgm {
             current_material = material_instance_id(0U);
             world_batch.clear();
             world_transparent_batch.clear();
+            world_flare_batch.clear();
             gun_batch.clear();
             gun_transparent_batch.clear();
             overlay_batch.clear();
