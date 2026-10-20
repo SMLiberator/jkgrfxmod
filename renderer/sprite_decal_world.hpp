@@ -25,6 +25,8 @@ namespace jkgm {
         uint32_t surfaces_seen=0;
         uint32_t receivers=0;
         uint32_t invalid_surfaces=0;
+        uint32_t skipped_portals=0,skipped_sky=0,skipped_material=0;
+        uint32_t skipped_backfaces=0,skipped_projection=0;
         bool truncated=false;
         bool valid_world=false;
     };
@@ -92,12 +94,15 @@ namespace jkgm {
             }
             // Transparent portals, sky surfaces, untextured/empty walls
             // are excluded from this initial opaque-architecture pass.
-            if(adjoin || (flags&0x600U)!=0U ||
-               geo_mode<2U || !material || count<3 ||
-               count>128U || !decal_native_address_ok(indices))
-                continue;
-            if(decal_dot(normal,projector.look)>=-0.05f)
-                continue;
+            if(adjoin) {++result.skipped_portals;continue;}
+            if((flags&0x600U)!=0U) {++result.skipped_sky;continue;}
+            if(geo_mode<2U || !material || count<3 ||
+               count>128U || !decal_native_address_ok(indices)) {
+                ++result.skipped_material;continue;
+            }
+            if(decal_dot(normal,projector.look)>=-0.05f) {
+                ++result.skipped_backfaces;continue;
+            }
             std::vector<decal_vec3> polygon;
             polygon.reserve(count);
             bool ok=true;
@@ -116,7 +121,9 @@ namespace jkgm {
                 ++result.invalid_surfaces;continue;
             }
             auto clipped=clip_projected_decal(projector,polygon,normal);
-            if(clipped.size()<3)continue;
+            if(clipped.size()<3) {
+                ++result.skipped_projection;continue;
+            }
             ++result.receivers;
             uint32_t const needed=uint32_t(clipped.size()-2);
             if(needed>max_output_triangles-result.triangles.size()) {
