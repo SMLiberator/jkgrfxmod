@@ -48,6 +48,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
         sprite_orientation_test.exe
+    - name: SPR per-instance cache alpha tag regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_alpha_tag.cpp /Fe:sprite_alpha_tag_test.exe
+        sprite_alpha_tag_test.exe
     - name: Sprite flare center-depth and opacity tests
       shell: cmd
       run: |
