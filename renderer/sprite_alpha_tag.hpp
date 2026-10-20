@@ -9,18 +9,19 @@
 
 namespace jkgm {
     constexpr uint32_t sprite_alpha_tag_magic=0x51A70000U;
-    constexpr uint32_t sprite_alpha_tag_mask=0xfffffe00U;
+    constexpr uint32_t sprite_alpha_tag_mask=0xfffffc00U;
+    constexpr uint32_t sprite_alpha_flare=0x200U;
     constexpr uint32_t sprite_alpha_original_translucent=0x100U;
 
     inline bool sprite_alpha_encode(float factor,bool originally_translucent,
-                                    uint32_t &tag)
+                                    uint32_t &tag,bool flare=false)
     {
         if(!std::isfinite(factor)||factor<0.0f||factor>1.0f)
             return false;
         unsigned const q=static_cast<unsigned>(std::lround(factor*255.0f));
         tag=sprite_alpha_tag_magic |
             (originally_translucent?sprite_alpha_original_translucent:0U) |
-            q;
+            (flare?sprite_alpha_flare:0U) | q;
         return true;
     }
 
