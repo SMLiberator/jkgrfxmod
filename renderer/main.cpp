@@ -1401,6 +1401,14 @@ namespace {
     {
         __asm {
             pushfd
+            // Cheap reject for ordinary world/model/particle faces. Only a
+            // tagged SPR enters the C++ helper, avoiding per-face call cost.
+            push eax
+            mov eax,dword ptr [esi]
+            and eax,0xfffffe00
+            cmp eax,0x51a70000
+            pop eax
+            jne native_alpha
             pushad
             push ecx
             push esi
@@ -1412,6 +1420,7 @@ namespace {
             mov dword ptr [esp+24],eax
         no_override:
             popad
+        native_alpha:
             popfd
             jmp dword ptr [RealSpriteAlphaMid]
         }
