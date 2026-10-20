@@ -1003,6 +1003,11 @@ namespace {
     using native_sprite_mid_fn = void (__cdecl *)();
     constexpr uintptr_t sprite_draw_addr=0x0046CF40U;
     constexpr uintptr_t sprite_preclip_addr=0x0046D182U;
+    // Preserve frustum bounds when SetSpriteInfo enlarges an individual Thing.
+    constexpr uintptr_t sprite_frustum_addr=0x004758D0U;
+    constexpr uint8_t sprite_frustum_bytes[]={
+        0x83,0xec,0x0c,0x8b,0x54,0x24,0x14,0x8b
+    };
     // rdSprite_NewEntry writes type to +0x20; sithSprite_Load overwrites it
     // with the World SPRITES array index. Capture the authored argument.
     using native_sprite_newentry_fn=int(__cdecl *)(
@@ -1066,6 +1071,10 @@ namespace {
     native_sprite_mid_fn RealSpritePreclip=
         reinterpret_cast<native_sprite_mid_fn>(sprite_preclip_addr);
     bool native_sprite_hook_active=false;
+    bool sprite_frustum_hook_active=false;
+    using sprite_frustum_fn=int(__cdecl *)(void *,void const *,float);
+    sprite_frustum_fn RealSpriteFrustum=
+        reinterpret_cast<sprite_frustum_fn>(sprite_frustum_addr);
     // Level-global resources can be shared by many Things. In profiling mode,
     // report a few actual rendered instances per .SPR, not just definitions:
     // this distinguishes a type parsed as zero from Things with differing axes.
@@ -1124,7 +1133,7 @@ namespace {
         if(!gpu_span_readable(reinterpret_cast<void const *>(native_quad_addr),
                               12*sizeof(float))) return;
         auto *v=reinterpret_cast<float *>(native_quad_addr);
-        std::array<float,12> original{};
+        std::array<float,12> original{},scaled{};
         std::memcpy(original.data(),v,sizeof(float)*12);
         for(int axis=0;axis<3;axis++) {
             float const center=0.25f*(original[axis]+original[axis+3]+
@@ -1133,11 +1142,12 @@ namespace {
             float const up=0.5f*(original[axis+9]-original[axis]);
             if(!std::isfinite(center)||!std::isfinite(right)||
                !std::isfinite(up)) return;
-            v[axis]=center-right*width-up*height;
-            v[axis+3]=center+right*width-up*height;
-            v[axis+6]=center+right*width+up*height;
-            v[axis+9]=center-right*width+up*height;
+            scaled[axis]=center-right*width-up*height;
+            scaled[axis+3]=center+right*width-up*height;
+            scaled[axis+6]=center+right*width+up*height;
+            scaled[axis+9]=center-right*width+up*height;
         }
+        std::memcpy(v,scaled.data(),sizeof(float)*12);
     }
 
     jkgm::sprite_instance_info current_sprite_info(void const *rd_thing)
@@ -1150,6 +1160,16 @@ namespace {
         uint32_t signature=0;
         std::memcpy(&signature,static_cast<uint8_t const *>(thing)+0x74,4);
         return sprite_instances.sample(thing,signature,GetTickCount());
+    }
+
+    int __cdecl HookedSpriteFrustum(void *frustum,void const *center,float radius)
+    {
+        if(sprite_draw_active.thing && std::isfinite(radius) && radius>=0.0f) {
+            auto const info=current_sprite_info(sprite_draw_active.thing);
+            // Native radius is based on .SPR dimensions, not this instance.
+            radius*=std::max(1.0f,std::max(info.width,info.height));
+        }
+        return RealSpriteFrustum(frustum,center,radius);
     }
 
     // Called from a naked, register/FPU-preserving mid-function Detours thunk.
@@ -1169,6 +1189,7 @@ namespace {
         char sprite_name[33]{};
         std::memcpy(sprite_name,p,32);
         sprite_name[32]=0;
+        auto const info=current_sprite_info(rd_thing);
         uint32_t type=0;
         if(!sprite_types.lookup(sprite,reinterpret_cast<char const *>(p),type)) {
             if(the_config && the_config->profile_renderer &&
@@ -1178,9 +1199,9 @@ namespace {
                 if(seen++==0) LOG_WARNING(
                     "SPR pose name=",key," has no captured authored type; native fallback");
             }
+            scale_native_sprite_quad(info.width,info.height);
             return;
         }
-        auto const info=current_sprite_info(rd_thing);
         if((type&jkgm::sprite_extended_mask)==0) {
             if(the_config && the_config->profile_renderer &&
                sprite_trace_counts.size()<128U) {
@@ -1337,7 +1358,11 @@ namespace {
            !gpu_span_readable(reinterpret_cast<void const *>(sprite_freeentry_addr),
                               sizeof(sprite_freeentry_bytes)) ||
            std::memcmp(reinterpret_cast<void const *>(sprite_freeentry_addr),
-                       sprite_freeentry_bytes,sizeof(sprite_freeentry_bytes))!=0) {
+                       sprite_freeentry_bytes,sizeof(sprite_freeentry_bytes))!=0 ||
+           !gpu_span_readable(reinterpret_cast<void const *>(sprite_frustum_addr),
+                              sizeof(sprite_frustum_bytes)) ||
+           std::memcmp(reinterpret_cast<void const *>(sprite_frustum_addr),
+                       sprite_frustum_bytes,sizeof(sprite_frustum_bytes))!=0) {
             LOG_WARNING("Extended SPR orientation disabled: unrecognized JK23 executable");
             return false;
         }
@@ -1380,6 +1405,9 @@ namespace {
             LOG_WARNING("SPR preclip hook unavailable: ",error);
             return false;
         }
+        error=DetourAttach(&(PVOID &)RealSpriteFrustum,HookedSpriteFrustum);
+        if(error==NO_ERROR) sprite_frustum_hook_active=true;
+        else LOG_WARNING("SPR instance frustum-radius hook unavailable: ",error);
         LOG_INFO("SPR authored-type capture attached (index at +0x20 ignored)");
         return true;
     }
@@ -2462,6 +2490,7 @@ bool attach_hooks()
         key_callback_hook_active=false;
         key_callback_registration_hook_active=false;
         key_callback_message_registered=false;
+        sprite_frustum_hook_active=false;
     }
     if(error==NO_ERROR) native_sprite_hook_active=sprite_hooks_requested;
     if(error==NO_ERROR && mip_hook_requested) {
@@ -2477,7 +2506,11 @@ bool detach_hooks()
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
 
-    // Revert both SPR detours before releasing the DLL.
+    // Revert all SPR detours before releasing the DLL.
+    if(sprite_frustum_hook_active) {
+        DetourDetach(&(PVOID &)RealSpriteFrustum,HookedSpriteFrustum);
+        sprite_frustum_hook_active=false;
+    }
     if(native_sprite_hook_active) {
         DetourDetach(&(PVOID &)RealSpritePreclip,SpritePreclipThunk);
         DetourDetach(&(PVOID &)RealNativeSprite,HookedNativeSprite);
