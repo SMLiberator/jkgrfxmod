@@ -1464,12 +1464,15 @@ namespace {
         if(!is_flare && !(opacity>0.0f && opacity<1.0f))
             return result;
         if(is_flare && the_config && the_config->profile_renderer &&
-           flare_face_trace_count++<6U)
-            LOG_INFO("SPR flare stage=face_append before=",before,
-                     " after_candidate=",*reinterpret_cast<uint32_t const *>(
-                         sprite_proc_count_addr),
-                     " extra=",extra," opacity=",opacity,
-                     " authored_type=",authored_type);
+           flare_face_trace_count++<6U) {
+            std::ostringstream msg;
+            msg<<"SPR flare stage=face_append before="<<before
+               <<" after_candidate="<<*reinterpret_cast<uint32_t const *>(
+                   sprite_proc_count_addr)
+               <<" extra="<<extra<<" opacity="<<opacity
+               <<" authored_type="<<authored_type;
+            LOG_INFO(msg.str());
+        }
         uint32_t const after=*reinterpret_cast<uint32_t const *>(
             sprite_proc_count_addr);
         if(after!=before+1U) return result;
@@ -1602,10 +1605,13 @@ namespace {
                sprite_types.lookup(resource,static_cast<char const *>(resource),
                                    authored_type) &&
                jkgm::sprite_is_flare(authored_type) &&
-               flare_draw_trace_count++<6U)
-                LOG_INFO("SPR flare stage=draw_enter resource=",
-                         reinterpret_cast<uintptr_t>(resource),
-                         " opacity=",info.opacity);
+               flare_draw_trace_count++<6U) {
+                std::ostringstream msg;
+                msg<<"SPR flare stage=draw_enter resource="
+                   <<reinterpret_cast<uintptr_t>(resource)
+                   <<" opacity="<<info.opacity;
+                LOG_INFO(msg.str());
+            }
         }
         auto const previous=sprite_draw_active;
         sprite_draw_active={thing,orientation};
