@@ -4,6 +4,7 @@
 // even when the original quad has been clipped to the viewing frustum.
 #include <array>
 #include <cmath>
+#include <initializer_list>
 
 namespace jkgm {
 struct sprite_flare_center {
