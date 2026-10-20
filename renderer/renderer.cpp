@@ -693,6 +693,8 @@ namespace jkgm {
         triangle_batch world_batch;
         sorted_triangle_batch world_transparent_batch;
         sorted_triangle_batch world_flare_batch;
+        unsigned flare_gpu_trace_count=0U;
+        unsigned flare_present_trace_count=0U;
         triangle_batch gun_batch;
         sorted_triangle_batch gun_transparent_batch;
         triangle_batch overlay_batch;
@@ -2978,6 +2980,11 @@ namespace jkgm {
             // resolved opaque depth texture. Never write or test ordinary
             // per-fragment depth: the sprite's EDGES may cover world geometry.
             if(world_flare_batch.size()!=0U) {
+                if(the_config->profile_renderer &&
+                   flare_present_trace_count++<6U)
+                    LOG_INFO("SPR flare stage=gl_pass triangles=",
+                             world_flare_batch.size(),
+                             " shader_flare_mode=1");
                 gl::disable(gl::capability::depth_test);
                 gl::set_depth_mask(false);
                 ogs->game_transparency_pass_program.set_flare_mode(true);
@@ -3261,6 +3268,12 @@ namespace jkgm {
                             v1.specular==0xB6A9D000U &&
                             v2.specular==0xB6A9D000U &&
                             v3.specular==0xB6A9D000U;
+                        if(is_flare && the_config->profile_renderer &&
+                           flare_gpu_trace_count++<6U)
+                            LOG_INFO("SPR flare stage=d3d_triangle material=",
+                                     current_material.get(),
+                                     " is_transparent=",is_transparent,
+                                     " specular_marker=",v1.specular);
                         // Check if the current triangle is part of an overlay
                         if(is_gun &&
                            almost_equal(make_point(v1.sx, v1.sy, v1.sz), point<3, float>::zero()) &&
