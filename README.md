@@ -1125,6 +1125,21 @@ SetSpriteInfo(mySprite, VectorSet(1.5, 0.75, 0.5), 0.4);
 vector info = GetSpriteInfo(mySprite);
 ```
 
+An independent roll control is available for billboards, flares and smoke:
+
+```c
+SetSpriteRoll(mySprite, 90.0, 0.25); // animate 90 degrees over 0.25 s
+float roll = GetSpriteRoll(mySprite);
+```
+
+Roll uses degrees around the sprite's own plane normal, so ordinary
+camera-facing sprites rotate **in screen space**. It applies to extended
+SPR orientations too. Rotation is independent of width, height and opacity;
+a 360-degree transition makes one full revolution. It is per Thing, not per
+shared SPR definition. The existing native preclip stage transforms the four
+vertices in camera space without altering UVs or requiring an additional
+SPR type flag.
+
 The vector is `(width multiplier, height multiplier, opacity)`, and the
 second argument is the linear transition duration in seconds (zero for
 instant changes). `GetSpriteInfo` returns the current interpolated values.
