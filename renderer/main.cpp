@@ -2449,6 +2449,9 @@ namespace {
         cog_verb_entry{"setspriteroll", cog_set_sprite_roll},
         cog_verb_entry{"getspriteroll", cog_get_sprite_roll},
         cog_verb_entry{"aigetfiretarget", cog_ai_get_fire_target},
+        // Replace the original misleading AIGetMovePos with the commanded
+        // movement destination. The extended spelling remains an alias.
+        cog_verb_entry{"aigetmovepos", cog_ai_get_move_target_pos},
         cog_verb_entry{"aigetmovetargetpos", cog_ai_get_move_target_pos},
         cog_verb_entry{"aigetlookdir", cog_ai_get_look_dir},
     };
