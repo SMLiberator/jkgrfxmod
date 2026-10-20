@@ -4,6 +4,7 @@
 // vertex coordinates, or KEY animation. It is separate from the legacy
 // mesh RADIUS authored in a 3DO, which is origin-centered.
 #include "thing_node_math.hpp"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
