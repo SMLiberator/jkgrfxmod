@@ -1012,12 +1012,19 @@ namespace {
     // immediately follows selection of the native 90/255 alpha.
     constexpr uintptr_t sprite_addproc_addr=0x0043B240U;
     constexpr uintptr_t sprite_alpha_mid_addr=0x0043B6F9U;
-    constexpr uintptr_t sprite_hw_draw_addr=0x0043C590U;
-    constexpr uintptr_t sprite_hw_buffer_addr=0x006353F8U;
-    constexpr uintptr_t sprite_hw_vertex_count_addr=0x005753E8U;
+    // Verified directly against the supported patched JK23 executables:
+    // rdCache_DrawRenderList (0x43C590) is not CALLED by the inlined cache
+    // converter. Both the old address 0x5753E8 (triangle count) and
+    // 0x6353F8 (triangle buffer) were incorrect for the vertex marker.
+    // Hook the actual std3D_AddRenderListVertices submission instead.
+    constexpr uintptr_t sprite_hw_upload_addr=0x00429C60U;
+    constexpr uintptr_t sprite_hw_buffer_addr=0x0063A400U;
+    constexpr uintptr_t sprite_hw_vertex_count_addr=0x005F53F0U;
     constexpr uint32_t sprite_flare_vertex_magic=0xB6A9D000U;
-    constexpr uint8_t sprite_hw_draw_bytes[]={
-        0xa1,0xf0,0x53,0x5f,0x00,0x85,0xc0
+    // The supported patched executables redirect this function to
+    // the extended vertex upload implementation through a rel32 JMP.
+    constexpr uint8_t sprite_hw_upload_bytes[]={
+        0xe9,0x1d,0x72,0x4d,0x00
     };
     constexpr uintptr_t sprite_proc_count_addr=0x0086EDC0U;
     constexpr uintptr_t sprite_proc_base_addr=0x0086EDE0U;
@@ -1099,12 +1106,12 @@ namespace {
     bool native_sprite_hook_active=false;
     bool sprite_frustum_hook_active=false;
     bool sprite_alpha_hook_active=false;
-    using sprite_hw_draw_fn=void(__cdecl *)();
-    sprite_hw_draw_fn RealSpriteHWDraw=
-        reinterpret_cast<sprite_hw_draw_fn>(sprite_hw_draw_addr);
+    using sprite_hw_upload_fn=int(__cdecl *)(void const *,uint32_t);
+    sprite_hw_upload_fn RealSpriteHWUpload=
+        reinterpret_cast<sprite_hw_upload_fn>(sprite_hw_upload_addr);
     struct sprite_flare_span {uint32_t start=0,count=0;};
     // Only used while the native render cache is converting a face list.
-    // Reset after each native HW draw/flush; no stale per-Thing references.
+    // Reset when that vertex batch is submitted to D3D; no stale Thing refs.
     thread_local std::vector<sprite_flare_span> pending_sprite_flare_spans;
     // Bounded stage-by-stage flare diagnostics. Logging occurs only with
     // profile_renderer and only a handful of times for the process lifetime.
@@ -1526,34 +1533,38 @@ namespace {
         return jkgm::sprite_alpha_override(tag,native_alpha);
     }
 
-    // Tag only flare vertices at the end of JK's native face conversion.
-    // The D3D bridge recognizes this sentinel and routes those triangles
-    // into a separate transparent pass; it never reaches 3DO tint handling.
-    void __cdecl HookedSpriteHWDraw()
+    // The compiler inlines the cache-flush function in the ordinary render
+    // path. Tag the native D3DTLVERTEX array at its *actual upload*, just
+    // before std3D copies it into its render list. This also handles
+    // buffer-capacity flushes in the middle of a proc-face sequence.
+    int __cdecl HookedSpriteHWUpload(void const *vertices,uint32_t count)
     {
-        uint32_t count=0;
-        std::memcpy(&count,reinterpret_cast<void const *>(
-            sprite_hw_vertex_count_addr),4);
-        if(the_config && the_config->profile_renderer &&
-           !pending_sprite_flare_spans.empty() &&
-           flare_flush_trace_count++<6U)
-            LOG_INFO("SPR flare stage=hw_flush vertex_count=",count,
-                     " pending_spans=",pending_sprite_flare_spans.size(),
-                     " first_span_start=",pending_sprite_flare_spans.front().start,
-                     " first_span_count=",pending_sprite_flare_spans.front().count);
-        if(count<=4096U) {
-            for(auto const &span:pending_sprite_flare_spans) {
-                if(span.start+span.count>count) continue;
-                for(uint32_t i=span.start;i<span.start+span.count;i++) {
-                    auto *specular=reinterpret_cast<void *>(
-                        sprite_hw_buffer_addr+uintptr_t(i)*32U+20U);
-                    uint32_t const marker=sprite_flare_vertex_magic;
-                    std::memcpy(specular,&marker,4);
+        if(vertices==reinterpret_cast<void const *>(sprite_hw_buffer_addr) &&
+           !pending_sprite_flare_spans.empty()) {
+            uint32_t const native_count=*reinterpret_cast<uint32_t const *>(
+                sprite_hw_vertex_count_addr);
+            if(the_config && the_config->profile_renderer &&
+               flare_flush_trace_count++<6U)
+                LOG_INFO("SPR flare stage=hw_upload vertex_count=",count,
+                         " native_count=",native_count,
+                         " pending_spans=",pending_sprite_flare_spans.size(),
+                         " first_span_start=",pending_sprite_flare_spans.front().start,
+                         " first_span_count=",pending_sprite_flare_spans.front().count);
+            if(count<=4096U && native_count==count &&
+               gpu_span_readable(vertices,uintptr_t(count)*32U)) {
+                for(auto const &span:pending_sprite_flare_spans) {
+                    if(span.start+span.count>count) continue;
+                    for(uint32_t i=span.start;i<span.start+span.count;i++) {
+                        auto *specular=reinterpret_cast<uint8_t *>(
+                            const_cast<void *>(vertices))+uintptr_t(i)*32U+20U;
+                        uint32_t const marker=sprite_flare_vertex_magic;
+                        std::memcpy(specular,&marker,4);
+                    }
                 }
             }
+            pending_sprite_flare_spans.clear();
         }
-        pending_sprite_flare_spans.clear();
-        RealSpriteHWDraw();
+        return RealSpriteHWUpload(vertices,count);
     }
 
     // At 0x43b6f9 ESI points to the current rdProcEntry and ECX is the
@@ -1695,10 +1706,10 @@ namespace {
                              sizeof(sprite_addproc_bytes)) &&
            gpu_span_readable(reinterpret_cast<void const *>(sprite_alpha_mid_addr),
                              sizeof(sprite_alpha_mid_bytes)) &&
-           gpu_span_readable(reinterpret_cast<void const *>(sprite_hw_draw_addr),
-                             sizeof(sprite_hw_draw_bytes)) &&
-           std::memcmp(reinterpret_cast<void const *>(sprite_hw_draw_addr),
-                       sprite_hw_draw_bytes,sizeof(sprite_hw_draw_bytes))==0 &&
+           gpu_span_readable(reinterpret_cast<void const *>(sprite_hw_upload_addr),
+                             sizeof(sprite_hw_upload_bytes)) &&
+           std::memcmp(reinterpret_cast<void const *>(sprite_hw_upload_addr),
+                       sprite_hw_upload_bytes,sizeof(sprite_hw_upload_bytes))==0 &&
            std::memcmp(reinterpret_cast<void const *>(sprite_addproc_addr),
                        sprite_addproc_bytes,sizeof(sprite_addproc_bytes))==0 &&
            std::memcmp(reinterpret_cast<void const *>(sprite_alpha_mid_addr),
@@ -1710,14 +1721,14 @@ namespace {
                     &(PVOID &)RealSpriteAlphaMid,SpriteAlphaThunk);
                 if(alpha_err==NO_ERROR) {
                     LONG const hw_err=DetourAttach(
-                        &(PVOID &)RealSpriteHWDraw,HookedSpriteHWDraw);
+                        &(PVOID &)RealSpriteHWUpload,HookedSpriteHWUpload);
                     if(hw_err==NO_ERROR) {
                         sprite_alpha_hook_active=true;
                         LOG_INFO("SPR per-Thing alpha and flare markers enabled");
                     } else {
                         DetourDetach(&(PVOID &)RealSpriteAlphaMid,SpriteAlphaThunk);
                         DetourDetach(&(PVOID &)RealSpriteAddProc,HookedSpriteAddProc);
-                        LOG_WARNING("SPR HW flare marker hook unavailable: ",hw_err);
+                        LOG_WARNING("SPR HW upload flare marker hook unavailable: ",hw_err);
                     }
                 }
                 else {
@@ -2931,7 +2942,7 @@ bool detach_hooks()
 
     // Revert all SPR detours before releasing the DLL.
     if(sprite_alpha_hook_active) {
-        DetourDetach(&(PVOID &)RealSpriteHWDraw,HookedSpriteHWDraw);
+        DetourDetach(&(PVOID &)RealSpriteHWUpload,HookedSpriteHWUpload);
         DetourDetach(&(PVOID &)RealSpriteAlphaMid,SpriteAlphaThunk);
         DetourDetach(&(PVOID &)RealSpriteAddProc,HookedSpriteAddProc);
         sprite_alpha_hook_active=false;
