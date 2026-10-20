@@ -15,6 +15,11 @@ namespace jkgm {
         gpu_3do_matrix34 world_placement{};
     };
     constexpr uintptr_t jkgm_node_matrix_address=0x00445FD0U;
+    constexpr uintptr_t jkgm_node_angles_address=0x00440950U;
+    constexpr std::array<uint8_t,16> jkgm_node_angles_prologue{{
+        0x83,0xec,0x20,0x8b,0x44,0x24,0x24,0x56,
+        0x8b,0x48,0x0c,0x8b,0x50,0x10,0x89,0x4c
+    }};
     constexpr std::array<uint8_t,16> jkgm_node_matrix_prologue{{
         0x56,0x8b,0x74,0x24,0x08,0x57,0x8b,0x7c,
         0x24,0x14,0x8b,0x46,0x04,0x3b,0x78,0x54
@@ -56,5 +61,13 @@ namespace jkgm {
         return read && read(jkgm_node_matrix_address,
                             bytes.data(),bytes.size()) &&
                bytes==jkgm_node_matrix_prologue;
+    }
+    inline bool validate_native_thing_node_angles(
+        thing_node_reader const &read)
+    {
+        std::array<uint8_t,16> bytes{};
+        return read && read(jkgm_node_angles_address,
+                            bytes.data(),bytes.size()) &&
+               bytes==jkgm_node_angles_prologue;
     }
 }
