@@ -485,7 +485,14 @@ void main()
 
     vec3 emissive_map_sample = texture(emissive_map, adj_texcoords + emissive_uv_offset).rgb;
     emissive_map_sample = mix(vec3(1.0), emissive_map_sample, features.y);
-    vec3 emissive = emissive_map_sample * emissive_factor;
+    // The JK/D3D bridge premultiplies diffuse RGB by vertex alpha, but
+    // emissive maps bypassed that path entirely. Consequently a
+    // SetSpriteInfo opacity fade darkened the diffuse sprite while its
+    // emissive contribution remained constant. Apply native vertex alpha
+    // ONCE to emission here; additive blending applies texture/material
+    // coverage separately further below.
+    vec3 emissive = emissive_map_sample * emissive_factor *
+                    clamp(vertex_color.a, 0.0, 1.0);
     float fog_amount = fog_factor(vp_z);
 
     vec3 unlit_base_color = albedo_map_sample.rgb * albedo_factor.rgb;
