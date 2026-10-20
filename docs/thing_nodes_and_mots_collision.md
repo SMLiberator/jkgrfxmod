@@ -118,34 +118,34 @@ Next work:
 
 ## JKGM binary compatibility audit (2026-10-20)
 
-The supplied \`jkgm.exe\` and community-patch \`JK.dll\` were inspected
+The supplied `jkgm.exe` and community-patch `JK.dll` were inspected
 without executing or modifying them. SHA-256 fingerprints:
 
-- \`jkgm.exe\`: \`afb4605c8259075c151ad6b034b98562be87ebe90369d4d9abaee09b396ed50f\`
-- \`JK.dll\`: \`e86a021a41d399d4c95c96b9746d8308b3166abacfb7c7ba7794aace4fd377ca\`
+- `jkgm.exe`: `afb4605c8259075c151ad6b034b98562be87ebe90369d4d9abaee09b396ed50f`
+- `JK.dll`: `e86a021a41d399d4c95c96b9746d8308b3166abacfb7c7ba7794aace4fd377ca`
 
 The uploaded executable matches the *development* branch's two
-16-byte native getter prologues at \`0x00445FD0\` and \`0x00440950\`.
-Disassembly at \`0x00445FD0\` independently confirms the hierarchy
-node-count check (\`rdModel3 + 0x54\`), frame-count comparison against
-\`0x005703D8\`, conditional call to \`0x0043F160\` to refresh the puppet
+16-byte native getter prologues at `0x00445FD0` and `0x00440950`.
+Disassembly at `0x00445FD0` independently confirms the hierarchy
+node-count check (`rdModel3 + 0x54`), frame-count comparison against
+`0x005703D8`, conditional call to `0x0043F160` to refresh the puppet
 joint matrices, and copy of 12 floats for the result.
 
-The supplied DLL exports \`InitNewCogVerbs\` at ordinal 1 and
-\`InitNewCogMessages\` at ordinal 12, as expected by the renderer hooks.
+The supplied DLL exports `InitNewCogVerbs` at ordinal 1 and
+`InitNewCogMessages` at ordinal 12, as expected by the renderer hooks.
 
 To repeat these read-only prerequisite checks for future builds:
 
-\`\`\`sh
+```sh
 python3 tests/verify_thing_node_binaries.py /path/to/jkgm.exe /path/to/JK.dll
-\`\`\`
+```
 
 **Important collision-hook warning:** The original JK collision
-address \`0x005080D0\` listed as
-\`sithIntersect_CheckSphereThingIntersection_ADDR\` in OpenJKDF2's
-\`sithIntersect.h\` does *not* identify that function in the supplied
+address `0x005080D0` listed as
+`sithIntersect_CheckSphereThingIntersection_ADDR` in OpenJKDF2's
+`sithIntersect.h` does *not* identify that function in the supplied
 JKGM binary: disassembly there starts a different routine with calls
-to \`0x0042F430\`, \`0x00430E50\` and \`0x004DA720\`.
+to `0x0042F430`, `0x00430E50` and `0x004DA720`.
 Do **not** attach a type-2 collision hook using unverified vanilla
 JK addresses. The patched executable's collision dispatcher and
 associated ABI/layout must be independently located and checked
