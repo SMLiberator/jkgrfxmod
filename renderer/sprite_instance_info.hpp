@@ -1,0 +1,76 @@
+#pragma once
+// Per-Thing SPR size/opacity animation. Never changes a shared rdSprite.
+// A Thing's pointer + engine signature identify an instance across slot reuse.
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <unordered_map>
+
+namespace jkgm {
+    struct sprite_instance_info {
+        float width=1.0f;
+        float height=1.0f;
+        float opacity=1.0f;
+    };
+
+    inline bool valid_sprite_instance_info(sprite_instance_info const &s) {
+        return std::isfinite(s.width) && s.width>=0.0f && s.width<=128.0f &&
+               std::isfinite(s.height) && s.height>=0.0f && s.height<=128.0f &&
+               std::isfinite(s.opacity) && s.opacity>=0.0f && s.opacity<=1.0f;
+    }
+
+    inline sprite_instance_info interpolate_sprite_instance_info(
+        sprite_instance_info a,sprite_instance_info b,float t) {
+        t=std::max(0.0f,std::min(1.0f,t));
+        return {a.width+(b.width-a.width)*t,
+                a.height+(b.height-a.height)*t,
+                a.opacity+(b.opacity-a.opacity)*t};
+    }
+
+    class sprite_instance_registry {
+    public:
+        bool set(void const *thing,uint32_t signature,
+                 sprite_instance_info value,uint32_t now_ms,float seconds) {
+            if(!thing || !valid_sprite_instance_info(value) ||
+               !std::isfinite(seconds) || seconds<0.0f || seconds>3600.0f)
+                return false;
+            auto &entry=entries_[thing];
+            sprite_instance_info const start=entry.signature==signature ?
+                evaluate(entry,now_ms) : sprite_instance_info{};
+            entry.signature=signature;
+            entry.start=start;
+            entry.target=value;
+            entry.started=now_ms;
+            entry.duration=static_cast<uint32_t>(seconds*1000.0f);
+            if(entry.duration==0) entry.start=value;
+            return true;
+        }
+
+        sprite_instance_info sample(void const *thing,uint32_t signature,
+                                    uint32_t now_ms) const {
+            auto const it=entries_.find(thing);
+            if(it==entries_.end() || it->second.signature!=signature)
+                return {};
+            return evaluate(it->second,now_ms);
+        }
+
+        void forget(void const *thing) {entries_.erase(thing);}
+        void clear() {entries_.clear();}
+        size_t size() const {return entries_.size();}
+    private:
+        struct animation {
+            uint32_t signature=0;
+            sprite_instance_info start{},target{};
+            uint32_t started=0,duration=0;
+        };
+        static sprite_instance_info evaluate(animation const &a,uint32_t now_ms) {
+            if(a.duration==0) return a.target;
+            // Unsigned time subtraction supports GetTickCount's wraparound.
+            float const t=std::min(1.0f,
+                static_cast<float>(now_ms-a.started)/static_cast<float>(a.duration));
+            return interpolate_sprite_instance_info(a.start,a.target,t);
+        }
+        std::unordered_map<void const *,animation> entries_;
+    };
+}
