@@ -106,6 +106,7 @@ namespace jkgm {
     struct triangle_buffer_models {
         triangle_buffer_model world_trimdl;
         triangle_buffer_model world_transparent_trimdl;
+        triangle_buffer_model flare_trimdl;
         triangle_buffer_model gun_trimdl;
         triangle_buffer_model gun_transparent_trimdl;
         triangle_buffer_model overlay_trimdl;
