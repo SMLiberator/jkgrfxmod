@@ -43,6 +43,16 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_modelview.cpp /Fe:gpu_3do_modelview_test.exe
         gpu_3do_modelview_test.exe
+    - name: Animated ThingNode pose and attachment reference tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\thing_node_math.cpp /Fe:thing_node_math_test.exe
+        thing_node_math_test.exe
+    - name: MotS animated collision sphere-tree reference tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\mots_sphere_tree.cpp /Fe:mots_sphere_tree_test.exe
+        mots_sphere_tree_test.exe
     - name: SPR extended orientation modes
       shell: cmd
       run: |
