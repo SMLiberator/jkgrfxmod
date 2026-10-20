@@ -36,6 +36,20 @@ def test():
     assert changed and result==bytes(patched)
     again, changed=p.patch_bytes(result)
     assert not changed and again==result
+    # Accept and upgrade a SHA-verified prior installation with type limit 63.
+    previous=bytearray(original)
+    previous[addr:addr+len(p.BEFORE)]=p.PREVIOUS_AFTER
+    p.PREVIOUS_PATCHED_SHA256=hashlib.sha256(previous).hexdigest()
+    upgraded, changed=p.patch_bytes(bytes(previous))
+    assert changed and upgraded==bytes(patched)
+    # Reject tampered previous extended-SPR executable as well.
+    tampered=bytearray(previous)
+    tampered[0x290]^=3
+    try:
+        p.patch_bytes(bytes(tampered))
+        assert False, "Tampered previous patch unexpectedly accepted"
+    except ValueError:
+        pass
     wrong=bytearray(original)
     wrong[0x280]=17
     try:
