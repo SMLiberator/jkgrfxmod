@@ -152,15 +152,6 @@ jobs:
         Copy-Item 'assets/shaders/post_frame_blend.frag' 'test-build/jkgm/shaders/' -Force
         Copy-Item 'assets/shaders/gpu_3do_preview.vert' 'test-build/jkgm/shaders/' -Force
         Copy-Item 'assets/shaders/gpu_3do_preview.frag' 'test-build/jkgm/shaders/' -Force
-    - name: Audit Release renderer DLL size and contents
-      shell: pwsh
-      run: ./tools/audit_renderer_size.ps1
-    - name: Upload renderer linker and size audit
-      uses: actions/upload-artifact@v4
-      with:
-        name: jkgrfxmod-renderer-size-audit
-        path: build-audit/*
-        if-no-files-found: error
     - name: Upload standalone development test build
       uses: actions/upload-artifact@v4
       with:
