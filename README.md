@@ -1074,6 +1074,35 @@ This feature is **specific to the tested JK23 EXE and JK.dll**. Native
 signature validation disables it when addresses or layout do not match.
 Use `callback:` in a linked COG, not as a callable COG verb.
 
+## Per-Thing SPR animation (JK23, work in progress)
+
+The experimental `SetSpriteInfo` / `GetSpriteInfo` COG verbs operate on **a
+sprite Thing**, not the shared SPR resource:
+
+```c
+SetSpriteInfo(mySprite, VectorSet(1.5, 0.75, 0.5), 0.4);
+vector info = GetSpriteInfo(mySprite);
+```
+
+The vector is `(width multiplier, height multiplier, opacity)`, and the
+second argument is the linear transition duration in seconds (zero for
+instant changes). `GetSpriteInfo` returns the current interpolated values.
+Width and height start at 1, with 0 hiding that dimension. An opacity of 0
+currently hides the sprite entirely.
+
+**Status:** per-Thing width/height animation is wired into native SPR quad
+generation, including ordinary and extended sprite types. It changes no
+shared `.SPR` dimensions, materials, or UVs. The optional frustum hook
+conservatively expands the visibility radius for enlarged instances.
+Per-Thing opacity is stored and interpolated, but intermediate opacity
+values (strictly between 0 and 1) are **not yet applied to pixels**: native
+JK has a fixed 90/255 translucent-face alpha and needs an instance-aware
+transparent rendering path before smooth fades can be considered complete.
+Avoid relying on fractional-opacity visuals until that path is added.
+
+The engine Thing signature prevents stale data from being applied to a
+reused Thing slot. The registry is reset when SPR hooks are released.
+
 ## Experimental extended SPR type foundation (JK23 only)
 
 The checked-in `tools/patch_jkgm_sprite_types.py` verifies the exact
