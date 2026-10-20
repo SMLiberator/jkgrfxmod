@@ -1321,10 +1321,10 @@ namespace {
                     uint32_t(reinterpret_cast<uintptr_t>(sprite));
                 if(sprite_decal_diagnostic_keys.size()<1024U &&
                    sprite_decal_diagnostic_keys.insert(key).second) {
-                    jkgm::sprite_axes const axes{{
-                        {thing[0],thing[1],thing[2]}}, {{
-                        thing[3],thing[4],thing[5]}}, {{
-                        thing[6],thing[7],thing[8]}}
+                    jkgm::sprite_axes const axes{
+                        {{thing[0],thing[1],thing[2]}},
+                        {{thing[3],thing[4],thing[5]}},
+                        {{thing[6],thing[7],thing[8]}}
                     };
                     jkgm::decal_projector projector{};
                     bool const valid=jkgm::make_sprite_decal_projector(
