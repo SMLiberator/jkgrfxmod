@@ -3,8 +3,10 @@
 
 Only changes the immediate in sithSprite_Load's cmp edi,2 at 0x004F27BA to
 127 (0x7F). Previous extended-SPR patch level 63 (0x3F) is also accepted.
-This enables type bit 0x40 for center-occluded flares, but does not by itself
-implement that rendering mode; renderer.dll must implement the flag.
+This expands the accepted type range, while renderer.dll interprets each
+type as a mutually exclusive mode (0 default, 1 cylindrical billboard,
+2 fixed, 3 decal, 4 center-occluded flare). No new EXE patch is needed when
+switching a SPR from old experimental flag values to those modes.
 Keeps the source EXE untouched and verifies supported binary checksums.
 """
 from __future__ import annotations
@@ -81,7 +83,7 @@ def main() -> None:
         cli.error(str(e))
     args.destination.write_bytes(output)
     print(f"{'Patched' if changed else 'Already patched'}: {args.destination}")
-    print("SPR types up to 127 now load; 0x40 flare rendering requires a supporting renderer.dll.")
+    print("SPR types 0..127 now load; use decimal type 3 for decals and 4 for flares with current renderer.dll.")
 
 
 if __name__ == "__main__":
