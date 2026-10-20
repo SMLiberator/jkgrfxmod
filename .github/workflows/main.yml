@@ -53,6 +53,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_alpha_tag.cpp /Fe:sprite_alpha_tag_test.exe
         sprite_alpha_tag_test.exe
+    - name: Projected SPR decal geometry clipping tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_clip.cpp /Fe:sprite_decal_clip_test.exe
+        sprite_decal_clip_test.exe
     - name: Sprite flare center-depth and opacity tests
       shell: cmd
       run: |
