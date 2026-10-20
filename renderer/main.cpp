@@ -2229,9 +2229,15 @@ namespace {
     jkgm_get_node_matrix_fn const jkgm_get_node_matrix=
         reinterpret_cast<jkgm_get_node_matrix_fn>(
             jkgm::jkgm_node_matrix_address);
+    // Native rdMatrix_ExtractAngles34 found by matching JK's PYR
+    // extraction algorithm in the tested JKGM executable.
+    using jkgm_extract_node_angles_fn=void(__cdecl *)(float const *,float *);
+    jkgm_extract_node_angles_fn const jkgm_extract_node_angles=
+        reinterpret_cast<jkgm_extract_node_angles_fn>(
+            jkgm::jkgm_node_angles_address);
 
-    bool get_cog_thing_node_pose(void *thing,int node,
-                                 jkgm::thing_node_pose &pose)
+    bool get_cog_thing_node_matrix(void *thing,int node,
+                                    jkgm::gpu_3do_matrix34 &output)
     {
         auto const safe_read=[](uintptr_t address,void *dest,size_t length)->bool {
             if(!jkgm::thing_node_valid_address(address,length) ||
@@ -2250,12 +2256,18 @@ namespace {
         if(!jkgm::resolve_native_thing_node(safe_read,
               reinterpret_cast<uintptr_t>(thing),node,native))
             return false;
-        jkgm::gpu_3do_matrix34 output{};
         if(!jkgm_get_node_matrix(reinterpret_cast<void *>(native.rd_thing),
                                  native.world_placement.data(),
                                  static_cast<unsigned>(node),output.data()))
             return false;
-        return jkgm::get_thing_node_pose(output,pose);
+        return jkgm::gpu_3do_matrix_finite(output);
+    }
+    bool get_cog_thing_node_pose(void *thing,int node,
+                                 jkgm::thing_node_pose &pose)
+    {
+        jkgm::gpu_3do_matrix34 matrix{};
+        return get_cog_thing_node_matrix(thing,node,matrix) &&
+               jkgm::get_thing_node_pose(matrix,pose);
     }
 
     enum class cog_thing_node_channel {position,right,look,up};
@@ -2285,6 +2297,32 @@ namespace {
     }
     void __cdecl cog_get_thing_node_uvec(void *ctx) {
         get_cog_thing_node_vector(ctx,cog_thing_node_channel::up);
+    }
+    void __cdecl cog_get_thing_node_pyr(void *ctx)
+    {
+        int const node=cog_pop_int(ctx);
+        void *thing=cog_pop_thing(ctx);
+        float pyr[3]{};
+        auto const safe_read=[](uintptr_t address,void *out,size_t count)->bool {
+            if(!jkgm::thing_node_valid_address(address,count) ||
+               !gpu_span_readable(reinterpret_cast<void const *>(address),count))
+                return false;
+            std::memcpy(out,reinterpret_cast<void const *>(address),count);
+            return true;
+        };
+        static bool const angles_supported=
+            jkgm::validate_native_thing_node_angles(safe_read);
+        jkgm::gpu_3do_matrix34 matrix{};
+        if(angles_supported && get_cog_thing_node_matrix(thing,node,matrix)) {
+            jkgm_extract_node_angles(matrix.data(),pyr);
+            for(float v:pyr) {
+                if(!std::isfinite(v)) {
+                    pyr[0]=pyr[1]=pyr[2]=0.0f;
+                    break;
+                }
+            }
+        }
+        cog_push_vector(ctx,pyr);
     }
 
     bool sprite_cog_thing_identity(void const *thing,uint32_t &signature);
@@ -2863,6 +2901,7 @@ namespace {
         cog_verb_entry{"getthingnodervec", cog_get_thing_node_rvec},
         cog_verb_entry{"getthingnodelvec", cog_get_thing_node_lvec},
         cog_verb_entry{"getthingnodeuvec", cog_get_thing_node_uvec},
+        cog_verb_entry{"getthingnodepyr", cog_get_thing_node_pyr},
     };
 
     JkInitNewCogVerbs_type TrueJkInitNewCogVerbs = nullptr;
