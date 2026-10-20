@@ -24,8 +24,8 @@ namespace jkgm {
             float const up=0.5f*(v[axis+9]-v[axis]);
             if(!std::isfinite(center)||!std::isfinite(right)||
                !std::isfinite(up)) return false;
-            float const rotated_r=ca*right*width+sa*up*height;
-            float const rotated_u=ca*up*height-sa*right*width;
+            float const rotated_r=width*(ca*right+sa*up);
+            float const rotated_u=height*(ca*up-sa*right);
             result[axis]=center-rotated_r-rotated_u;
             result[axis+3]=center+rotated_r-rotated_u;
             result[axis+6]=center+rotated_r+rotated_u;
