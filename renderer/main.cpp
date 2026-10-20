@@ -13,6 +13,7 @@
 #include "sprite_orientation.hpp"
 #include "sprite_type_registry.hpp"
 #include "sprite_instance_info.hpp"
+#include "sprite_quad_transform.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_triangulation.hpp"
@@ -1124,30 +1125,14 @@ namespace {
     // JK renders on its main thread. Recursion still preserves the outer call.
     thread_local sprite_draw_context sprite_draw_active{};
 
-    // Scale native camera-space sprite vertices without touching the shared
-    // rdSprite width, height, face, material, or UV coordinates.
-    void scale_native_sprite_quad(float width,float height)
+    void transform_native_sprite_quad(float width,float height,float roll)
     {
-        if(width==1.0f && height==1.0f) return;
         constexpr uintptr_t native_quad_addr=0x0082EA00U;
+        if(width==1.0f && height==1.0f && roll==0.0f) return;
         if(!gpu_span_readable(reinterpret_cast<void const *>(native_quad_addr),
                               12*sizeof(float))) return;
-        auto *v=reinterpret_cast<float *>(native_quad_addr);
-        std::array<float,12> original{},scaled{};
-        std::memcpy(original.data(),v,sizeof(float)*12);
-        for(int axis=0;axis<3;axis++) {
-            float const center=0.25f*(original[axis]+original[axis+3]+
-                                      original[axis+6]+original[axis+9]);
-            float const right=0.5f*(original[axis+3]-original[axis]);
-            float const up=0.5f*(original[axis+9]-original[axis]);
-            if(!std::isfinite(center)||!std::isfinite(right)||
-               !std::isfinite(up)) return;
-            scaled[axis]=center-right*width-up*height;
-            scaled[axis+3]=center+right*width-up*height;
-            scaled[axis+6]=center+right*width+up*height;
-            scaled[axis+9]=center-right*width+up*height;
-        }
-        std::memcpy(v,scaled.data(),sizeof(float)*12);
+        jkgm::transform_sprite_camera_quad(
+            reinterpret_cast<float *>(native_quad_addr),width,height,roll);
     }
 
     jkgm::sprite_instance_info current_sprite_info(void const *rd_thing)
@@ -1172,6 +1157,18 @@ namespace {
         return RealSpriteFrustum(frustum,center,radius);
     }
 
+    float current_sprite_roll(void const *rd_thing)
+    {
+        auto const *rd=static_cast<uint8_t const *>(rd_thing);
+        if(!rd || !gpu_span_readable(rd,0x48)) return 0.0f;
+        void const *thing=nullptr;
+        std::memcpy(&thing,rd+0x44,sizeof(thing));
+        if(!thing || !gpu_span_readable(thing,0x78)) return 0.0f;
+        uint32_t signature=0;
+        std::memcpy(&signature,static_cast<uint8_t const *>(thing)+0x74,4);
+        return sprite_instances.sample_roll(thing,signature,GetTickCount());
+    }
+
     // Called from a naked, register/FPU-preserving mid-function Detours thunk.
     // The original native quad is in this JK23-specific fixed buffer.
     void __cdecl update_native_sprite_vertices()
@@ -1190,6 +1187,7 @@ namespace {
         std::memcpy(sprite_name,p,32);
         sprite_name[32]=0;
         auto const info=current_sprite_info(rd_thing);
+        float const roll=current_sprite_roll(rd_thing);
         uint32_t type=0;
         if(!sprite_types.lookup(sprite,reinterpret_cast<char const *>(p),type)) {
             if(the_config && the_config->profile_renderer &&
@@ -1199,7 +1197,7 @@ namespace {
                 if(seen++==0) LOG_WARNING(
                     "SPR pose name=",key," has no captured authored type; native fallback");
             }
-            scale_native_sprite_quad(info.width,info.height);
+            transform_native_sprite_quad(info.width,info.height,roll);
             return;
         }
         if((type&jkgm::sprite_extended_mask)==0) {
@@ -1211,7 +1209,7 @@ namespace {
                     " loaded_type=",type,
                     " (authored type; native camera billboard)");
             }
-            scale_native_sprite_quad(info.width,info.height);
+            transform_native_sprite_quad(info.width,info.height,roll);
             return;
         }
 
@@ -1306,7 +1304,7 @@ namespace {
         }
         std::memcpy(reinterpret_cast<void *>(native_quad_addr),transformed,
                     sizeof(transformed));
-        scale_native_sprite_quad(info.width,info.height);
+        transform_native_sprite_quad(info.width,info.height,roll);
         trace_native_sprite(sprite_name,type,thing_axes,camera_axes,final_axes,true);
     }
 
@@ -1884,6 +1882,28 @@ namespace {
         cog_push_vector(ctx,result);
     }
 
+    // Independently animate roll around the SPR's camera-facing plane normal.
+    void __cdecl cog_set_sprite_roll(void *ctx)
+    {
+        float const seconds=cog_pop_float(ctx);
+        float const degrees=cog_pop_float(ctx);
+        void *thing=cog_pop_thing(ctx);
+        uint32_t signature=0;
+        if(!sprite_cog_thing_identity(thing,signature)) return;
+        if(!sprite_instances.set_roll(thing,signature,degrees,GetTickCount(),seconds))
+            LOG_WARNING("SetSpriteRoll: invalid angle or transition");
+    }
+
+    void __cdecl cog_get_sprite_roll(void *ctx)
+    {
+        void *thing=cog_pop_thing(ctx);
+        uint32_t signature=0;
+        float roll=0.0f;
+        if(sprite_cog_thing_identity(thing,signature))
+            roll=sprite_instances.sample_roll(thing,signature,GetTickCount());
+        cog_push_float(ctx,roll);
+    }
+
     // SetSpriteInfo(thing, vector(width multiplier, height multiplier, opacity),
     //               transition_seconds). A Thing's rdThing is embedded at +0xc4
     // in the validated JK23 SithThing layout, and type 4 means rdSprite.
@@ -2424,6 +2444,8 @@ namespace {
         cog_verb_entry{"resetmaterialcolor", cog_reset_material_color},
         cog_verb_entry{"setspriteinfo", cog_set_sprite_info},
         cog_verb_entry{"getspriteinfo", cog_get_sprite_info},
+        cog_verb_entry{"setspriteroll", cog_set_sprite_roll},
+        cog_verb_entry{"getspriteroll", cog_get_sprite_roll},
         cog_verb_entry{"aigetfiretarget", cog_ai_get_fire_target},
         cog_verb_entry{"aigetmovetargetpos", cog_ai_get_move_target_pos},
         cog_verb_entry{"aigetlookdir", cog_ai_get_look_dir},
