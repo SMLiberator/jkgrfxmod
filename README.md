@@ -1089,10 +1089,13 @@ vector lookDir    = AIGetLookDir(actorThing);
 - `AIGetFireTarget` returns the Thing reference last supplied to
   `AISetFireTarget`. This is the controller's `pDistractor`, not a promise
   that attack instincts will actually fire on this frame.
-- `AIGetMoveTargetPos` reads the *commanded* native destination at
-  `SithAIControlBlock + 0x1A0`. The original JK `AIGetMovePos`
-  instead reads a different position vector at `+0x218`; preserve
-  the native verb for compatibility.
+- `AIGetMovePos` **overrides JK's original getter** to return the
+  *commanded* movement destination at `SithAIControlBlock + 0x1A0`.
+  `AIGetMoveTargetPos` remains an alias. JK's original getter instead
+  read the AI's sight/search position at `+0x218` (also consumed by
+  `sithAI_sub_4EAF40`), which is not the movement target. This deliberate
+  override changes a native verb's semantics; the correct name binding and
+  gameplay behavior still need verification in JK23.
 - `AIGetLookDir` reads the existing horizontal normalized `goalLVec`
   at `+0x194`. The engine does not retain the original absolute
   `AISetLookPos` argument after converting it to this direction.
