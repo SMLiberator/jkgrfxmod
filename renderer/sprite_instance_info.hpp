@@ -55,13 +55,52 @@ namespace jkgm {
             return evaluate(it->second,now_ms);
         }
 
-        void forget(void const *thing) {entries_.erase(thing);}
-        void clear() {entries_.clear();}
-        size_t size() const {return entries_.size();}
+        // Roll is an independent channel: a 360-degree transition must spin
+        // a complete turn, rather than collapsing to a shortest-arc zero turn.
+        bool set_roll(void const *thing,uint32_t signature,float degrees,
+                      uint32_t now_ms,float seconds) {
+            if(!thing || !std::isfinite(degrees) ||
+               std::fabs(degrees)>36000.0f ||
+               !std::isfinite(seconds) || seconds<0.0f || seconds>3600.0f)
+                return false;
+            auto &roll=rolls_[thing];
+            float const start=roll.signature==signature ?
+                evaluate_roll(roll,now_ms) : 0.0f;
+            roll.signature=signature;
+            roll.start=start;
+            roll.target=degrees;
+            roll.started=now_ms;
+            roll.duration=static_cast<uint32_t>(seconds*1000.0f);
+            if(roll.duration==0) roll.start=degrees;
+            return true;
+        }
+
+        float sample_roll(void const *thing,uint32_t signature,
+                          uint32_t now_ms) const {
+            auto const it=rolls_.find(thing);
+            if(it==rolls_.end() || it->second.signature!=signature)
+                return 0.0f;
+            return evaluate_roll(it->second,now_ms);
+        }
+
+        void forget(void const *thing) {
+            entries_.erase(thing);
+            rolls_.erase(thing);
+        }
+        void clear() {
+            entries_.clear();
+            rolls_.clear();
+        }
+        size_t size() const {return entries_.size()+rolls_.size();}
     private:
         struct animation {
             uint32_t signature=0;
             sprite_instance_info start{},target{};
+            uint32_t started=0,duration=0;
+        };
+        struct roll_animation {
+            uint32_t signature=0;
+            float start=0.0f,target=0.0f;
             uint32_t started=0,duration=0;
         };
         static sprite_instance_info evaluate(animation const &a,uint32_t now_ms) {
@@ -71,6 +110,13 @@ namespace jkgm {
                 static_cast<float>(now_ms-a.started)/static_cast<float>(a.duration));
             return interpolate_sprite_instance_info(a.start,a.target,t);
         }
+        static float evaluate_roll(roll_animation const &a,uint32_t now_ms) {
+            if(a.duration==0) return a.target;
+            float const t=std::min(1.0f,
+                static_cast<float>(now_ms-a.started)/static_cast<float>(a.duration));
+            return a.start+(a.target-a.start)*t;
+        }
         std::unordered_map<void const *,animation> entries_;
+        std::unordered_map<void const *,roll_animation> rolls_;
     };
 }
