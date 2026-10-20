@@ -1375,7 +1375,7 @@ namespace {
         uint32_t face_type=0;
         std::memcpy(&face_type,entry+4,4);
         uint32_t const geometry_mode=*reinterpret_cast<uint32_t const *>(
-            entry+0x14);
+            entry+0x08); // rdProcEntry.geometryMode
         if(geometry_mode<2U) return result;
         uint32_t alpha_tag=0;
         if(!jkgm::sprite_alpha_encode(
