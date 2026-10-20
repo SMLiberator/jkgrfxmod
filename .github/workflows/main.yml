@@ -48,6 +48,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
         sprite_orientation_test.exe
+    - name: Sprite roll geometry and timing tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_roll.cpp /Fe:sprite_roll_test.exe
+        sprite_roll_test.exe
     - name: Per-Thing sprite interpolation and lifecycle tests
       shell: cmd
       run: |
