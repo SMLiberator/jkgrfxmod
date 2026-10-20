@@ -225,6 +225,17 @@ the strict comparison in `sithIntersect_CheckSphereIntersection`).
 Neither reference currently implements MotS's complete raycast flag
 semantics or integrates with the collision result array.
 
+**Confirmed layout incompatibility:** The OpenJKDF2
+[`SithThing` definition](https://github.com/shinyquagsire23/OpenJKDF2/blob/master/src/types.h)
+places `treeSize` inside `#ifdef JKM_PARAMS` immediately after
+`collideSize`, and also adds an earlier MotS-only field ahead of `type`.
+The audited JKGM executable accesses `SithThing.collide` at
+`+0x28` and `collideSize` at `+0x30`, matching the JK layout.
+Treating a JKGM `SithThing*` as a MotS structure would shift
+subsequent fields and corrupt memory. A compatibility port should
+store `treeSize` externally (or use an explicitly audited, fully
+migrated game structure), never write at a guessed MotS offset.
+
 **Remaining gates before runtime type 2:** identify a safe persistent
 `treeSize` storage/initialization path, confirm `SithThing` and
 render-data layouts, check geoset and amputation behavior, validate
