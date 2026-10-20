@@ -1118,55 +1118,62 @@ assume every target sighting, movement, or attack dispatches `aievent:`.
 This behavior has been checked against the user's JK23 executable and
 the available OpenJKDF2 reconstruction; gameplay verification is pending.
 
-## SPR projected decals — clipping groundwork
+## SPR types and new rendering modes (JK23)
 
-The first **geometry-only** stage of SPR type bit `0x20` is implemented
-in `renderer/sprite_decal_clip.hpp`. It defines an oriented projector
-with independent width, height and forward reach. Convex receiving
-polygons are clipped against all six projection-volume planes using
-Sutherland–Hodgman clipping; UVs come from the projected SPR Right/Up
-axes. Backfacing or degenerate polygons are rejected. Regression tests
-verify a wall larger than the decal, neighboring partial walls, flipped
-normals, depth rejection, and invalid projector axes.
+The SPR `type` field is a **mutually exclusive mode**, not a set of
+bitwise flags. Its values are ordinary **decimal integers**, parsed by the
+original loader with `atoi()`. The JkGRfxMod-only modes are:
 
-**Not yet a runtime decal renderer:** world-surface discovery, sector
-traversal, GPU submission, Z-bias, cached clipped polygons and attachment
-to rigid/animated 3DO meshes remain to be wired. This is a standalone,
-testable algorithm rather than a visible new `0x20` SPR behavior.
+| Type | Rendering |
+|---|---|
+| `0` | Unmodified JK camera-facing sprite (standard) |
+| `1` | Upright/cylindrical billboard (preserves Thing Up) |
+| `2` | Fixed 3D plane (preserves Thing R/L/U) |
+| `3` | Projected surface decal (fixed projector basis) |
+| `4` | Center-occluded flare (camera-facing) |
 
-## Center-occluded SPR flares (experimental groundwork)
+No combinations are defined or supported. Values `5`–`127` are
+reserved and currently use the ordinary camera-facing fallback.
+Previously used experimental bit values `0x20` and `0x40` are obsolete;
+change those SPR definitions to **decimal 3** and **decimal 4** respectively.
+Types `0`–`2` remain valid without any executable patch; the extended
+JK23 executable remains capable of loading values `0`–`127` and doesn't
+need another patch for this change.
 
-SPR type bit `0x40` is reserved for a flare whose **center** must pass the
-opaque-scene depth test, while the whole textured quad can extend behind
-nearby geometry when its center remains visible. This is distinct from
-projected-decal bit `0x20` and does not change the billboard orientation.
+## SPR projected decals — geometry and receiver discovery
 
-The SHA-locked JK23 `patch_jkgm_sprite_types.py` now accepts the original
-executable and the previous type-63 variant, upgrading either to type-127
-(`cmp edi,0x7F`). The patched executable is **not** included in the
-repository or test-build artifact: run the script on your local executable.
+SPR type **`3`** currently supplies a fixed projector basis and
+`renderer/sprite_decal_clip.hpp` clips convex receiving polygons against
+six oriented projector planes. UVs derive from SPR Right/Up orientation;
+back-facing, degenerate and out-of-range surfaces are rejected.
 
-**Runtime implementation (experimental):** the JK23 native cache now marks
-only triangles emitted by authored type-`0x40` SPRs. The D3D bridge routes
-them into a separate OpenGL transparency batch. A fragment shader reconstructs
-the sprite's screen-space center from its native UV interpolation, samples
-the **resolved linear opaque depth at that center**, and discards the entire
-flare when the center is behind opaque geometry. When the center is visible,
-the sprite is drawn with normal alpha blending but with ordinary per-pixel
-depth testing disabled, allowing its edges to overlap foreground geometry.
-Four additional neighboring center-depth samples soften silhouette edges.
+`renderer/sprite_decal_world.hpp` adds **bounded JK23 SithWorld surface
+extraction**, reading the native world vertex index arrays and rejecting sky,
+portal, untextured and non-facing surfaces. It produces triangulated decal
+geometry with surface IDs and projected UVs. This extraction uses an
+injectable, read-only memory reader for safety and isolated testing.
+The world/surface offsets after the verified world header are based on
+OpenJKDF2 and **must be checked in the executable before runtime use**.
+Tests use synthetic in-memory JK structures and cover adjacent surfaces,
+invalid indices, backfaces, sky/portal exclusions and output caps.
 
-The visibility calculation is entirely GPU-side (no `glReadPixels` stalls);
-fractional per-Thing opacity and roll remain independent. The reference
-math and regression tests are in `renderer/sprite_flare_visibility.hpp`
-and `renderer/sprite_flare_projection.hpp`.
+**Not yet visible in-game:** runtime world receiver lookup, caching,
+actual OpenGL submission, depth bias and 3DO mesh projection remain
+to be connected. A `type 3` SPR should not yet be used expecting it
+to conform to walls.
 
-**Runtime verification pending:** both Detours signatures and the HW-vertex
-marker route are specific to the tested JK23 executable, and should be
-validated in-game before relying on type-`0x40`. The shader implements
-spatial edge softening, **not yet temporal 0.08-second fading**; that would
-require persistent per-instance visibility history. Ordinary SPRs are
-unaffected, and type-`0x40` must not be applied to decal SPRs.
+## Center-occluded SPR flares (experimental)
+
+SPR type **`4`** is a camera-facing flare whose **center** must pass
+the opaque-scene depth test; the rest of its billboard may overlap foreground
+geometry. The native JK23 face markers and dedicated OpenGL transparency pass
+are implemented. The shader reconstructs the SPR's projected center using
+its UVs, samples resolved opaque depth, and applies small spatial edge
+softening. It does not perform temporal fades yet.
+
+The exact native JK23 hook offsets and the HW vertex marker path need
+in-game verification; this is experimental. Roll and per-Thing opacity
+remain independent, and non-flare SPRs retain ordinary depth behavior.
 
 ## Per-Thing SPR animation (JK23, work in progress)
 
