@@ -47,7 +47,8 @@ int main() {
     uint32_t tree_index=16;
     std::memcpy(pooled_sprite.data()+0x20,&tree_index,4);
     assert(types.lookup(sprite,reinterpret_cast<char const *>(pooled_sprite.data()),saved));
-    assert(saved==sprite_billboard);
+    assert(saved==sprite_center_occluded_flare);
+    assert(sprite_is_flare(saved));
     assert(types.size()==1);
     types.clear();
     assert(types.size()==0);
