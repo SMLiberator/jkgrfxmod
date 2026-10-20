@@ -11,6 +11,7 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_modelview.hpp"
 #include "sprite_orientation.hpp"
+#include "sprite_type_registry.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_triangulation.hpp"
@@ -1001,6 +1002,57 @@ namespace {
     using native_sprite_mid_fn = void (__cdecl *)();
     constexpr uintptr_t sprite_draw_addr=0x0046CF40U;
     constexpr uintptr_t sprite_preclip_addr=0x0046D182U;
+    // rdSprite_NewEntry writes type to +0x20; sithSprite_Load overwrites it
+    // with the World SPRITES array index. Capture the authored argument.
+    using native_sprite_newentry_fn=int(__cdecl *)(
+        void *,char const *,int,char const *,float,float,int,int,int,float,
+        void const *);
+    using native_sprite_free_fn=void(__cdecl *)(void *);
+    constexpr uintptr_t sprite_newentry_addr=0x0046CC70U;
+    constexpr uintptr_t sprite_free_addr=0x0046CE70U;
+    constexpr uintptr_t sprite_freeentry_addr=0x0046CEE0U;
+    constexpr uint8_t sprite_newentry_bytes[]={
+        0x8b,0x44,0x24,0x08,0x83,0xec,0x10,0x85,0xc0
+    };
+    constexpr uint8_t sprite_free_bytes[]={
+        0x56,0x8b,0x74,0x24,0x08,0x85,0xf6,0x74,0x62
+    };
+    constexpr uint8_t sprite_freeentry_bytes[]={
+        0x56,0x8b,0x74,0x24,0x08,0x8b,0x86,0x9c,0x00,0x00,0x00
+    };
+    jkgm::sprite_type_registry sprite_types;
+    native_sprite_newentry_fn RealNativeSpriteNewEntry=
+        reinterpret_cast<native_sprite_newentry_fn>(sprite_newentry_addr);
+    native_sprite_free_fn RealNativeSpriteFree=
+        reinterpret_cast<native_sprite_free_fn>(sprite_free_addr);
+    native_sprite_free_fn RealNativeSpriteFreeEntry=
+        reinterpret_cast<native_sprite_free_fn>(sprite_freeentry_addr);
+
+    int __cdecl HookedSpriteNewEntry(
+        void *sprite,char const *name,int authored_type,char const *material,
+        float width,float height,int geometry,int light,int tex,float extra,
+        void const *offset)
+    {
+        int const ok=RealNativeSpriteNewEntry(
+            sprite,name,authored_type,material,width,height,geometry,light,tex,
+            extra,offset);
+        if(ok && gpu_span_readable(sprite,32))
+            sprite_types.remember(sprite,static_cast<uint32_t>(authored_type),
+                                  static_cast<char const *>(sprite));
+        else sprite_types.forget(sprite);
+        return ok;
+    }
+    void __cdecl HookedSpriteFreeEntry(void *sprite)
+    {
+        sprite_types.forget(sprite);
+        RealNativeSpriteFreeEntry(sprite);
+    }
+    void __cdecl HookedSpriteFree(void *sprite)
+    {
+        sprite_types.forget(sprite);
+        RealNativeSpriteFree(sprite);
+    }
+
     constexpr uint8_t sprite_draw_bytes[]={
         0xa1,0x18,0xa4,0x73,0x00,0x8b,0x4c,0x24,0x08
     };
@@ -1074,22 +1126,29 @@ namespace {
         std::memcpy(&sprite,rd_thing+4,sizeof(sprite));
         if(!gpu_span_readable(sprite,0xACU)) return;
         auto const *p=static_cast<uint8_t const *>(sprite);
-        uint32_t type=0;
-        std::memcpy(&type,p+0x20,sizeof(type));
-        // This is the actual loaded rdSprite.type. It is written by
-        // rdSprite_NewEntry at +0x20, not the Thing's type or flags.
-        // Preserve the name for one-shot runtime diagnostics below.
+        // +0x20 holds the world SPR index, not the authored type by draw.
         char sprite_name[33]{};
         std::memcpy(sprite_name,p,32);
         sprite_name[32]=0;
-        if((type&jkgm::sprite_extended_mask)==0 && type!=2U) {
+        uint32_t type=0;
+        if(!sprite_types.lookup(sprite,reinterpret_cast<char const *>(p),type)) {
+            if(the_config && the_config->profile_renderer &&
+               sprite_trace_counts.size()<128U) {
+                std::string const key(sprite_name);
+                int &seen=sprite_trace_counts[key];
+                if(seen++==0) LOG_WARNING(
+                    "SPR pose name=",key," has no captured authored type; native fallback");
+            }
+            return;
+        }
+        if((type&jkgm::sprite_extended_mask)==0) {
             if(the_config && the_config->profile_renderer &&
                sprite_trace_counts.size()<128U) {
                 auto const key=std::string(sprite_name);
                 int &seen=sprite_trace_counts[key];
                 if(seen++==0) LOG_INFO("SPR pose name=",key,
                     " loaded_type=",type,
-                    " (no extended orientation; did the SPR use decimal 4 rather than 0x4?)");
+                    " (authored type; native camera billboard)");
             }
             return;
         }
@@ -1221,21 +1280,62 @@ namespace {
            std::memcmp(reinterpret_cast<void const *>(sprite_draw_addr),
                        sprite_draw_bytes,sizeof(sprite_draw_bytes))!=0 ||
            std::memcmp(reinterpret_cast<void const *>(sprite_preclip_addr),
-                       sprite_preclip_bytes,sizeof(sprite_preclip_bytes))!=0) {
+                       sprite_preclip_bytes,sizeof(sprite_preclip_bytes))!=0 ||
+           !gpu_span_readable(reinterpret_cast<void const *>(sprite_newentry_addr),
+                              sizeof(sprite_newentry_bytes)) ||
+           std::memcmp(reinterpret_cast<void const *>(sprite_newentry_addr),
+                       sprite_newentry_bytes,sizeof(sprite_newentry_bytes))!=0 ||
+           !gpu_span_readable(reinterpret_cast<void const *>(sprite_free_addr),
+                              sizeof(sprite_free_bytes)) ||
+           std::memcmp(reinterpret_cast<void const *>(sprite_free_addr),
+                       sprite_free_bytes,sizeof(sprite_free_bytes))!=0 ||
+           !gpu_span_readable(reinterpret_cast<void const *>(sprite_freeentry_addr),
+                              sizeof(sprite_freeentry_bytes)) ||
+           std::memcmp(reinterpret_cast<void const *>(sprite_freeentry_addr),
+                       sprite_freeentry_bytes,sizeof(sprite_freeentry_bytes))!=0) {
             LOG_WARNING("Extended SPR orientation disabled: unrecognized JK23 executable");
             return false;
         }
-        LONG error=DetourAttach(&(PVOID &)RealNativeSprite,HookedNativeSprite);
+        LONG error=DetourAttach(&(PVOID &)RealNativeSpriteNewEntry,
+                                HookedSpriteNewEntry);
         if(error!=NO_ERROR) {
+            LOG_WARNING("SPR authored-type capture hook unavailable: ",error);
+            return false;
+        }
+        error=DetourAttach(&(PVOID &)RealNativeSpriteFree,HookedSpriteFree);
+        if(error!=NO_ERROR) {
+            DetourDetach(&(PVOID &)RealNativeSpriteNewEntry,HookedSpriteNewEntry);
+            LOG_WARNING("SPR resource free hook unavailable: ",error);
+            return false;
+        }
+        error=DetourAttach(&(PVOID &)RealNativeSpriteFreeEntry,
+                           HookedSpriteFreeEntry);
+        if(error!=NO_ERROR) {
+            DetourDetach(&(PVOID &)RealNativeSpriteFree,HookedSpriteFree);
+            DetourDetach(&(PVOID &)RealNativeSpriteNewEntry,HookedSpriteNewEntry);
+            LOG_WARNING("SPR pooled resource free hook unavailable: ",error);
+            return false;
+        }
+        error=DetourAttach(&(PVOID &)RealNativeSprite,HookedNativeSprite);
+        if(error!=NO_ERROR) {
+            DetourDetach(&(PVOID &)RealNativeSpriteFreeEntry,
+                         HookedSpriteFreeEntry);
+            DetourDetach(&(PVOID &)RealNativeSpriteFree,HookedSpriteFree);
+            DetourDetach(&(PVOID &)RealNativeSpriteNewEntry,HookedSpriteNewEntry);
             LOG_WARNING("SPR entry hook unavailable: ",error);
             return false;
         }
         error=DetourAttach(&(PVOID &)RealSpritePreclip,SpritePreclipThunk);
         if(error!=NO_ERROR) {
             DetourDetach(&(PVOID &)RealNativeSprite,HookedNativeSprite);
+            DetourDetach(&(PVOID &)RealNativeSpriteFreeEntry,
+                         HookedSpriteFreeEntry);
+            DetourDetach(&(PVOID &)RealNativeSpriteFree,HookedSpriteFree);
+            DetourDetach(&(PVOID &)RealNativeSpriteNewEntry,HookedSpriteNewEntry);
             LOG_WARNING("SPR preclip hook unavailable: ",error);
             return false;
         }
+        LOG_INFO("SPR authored-type capture attached (index at +0x20 ignored)");
         return true;
     }
 }
@@ -2266,7 +2366,12 @@ bool detach_hooks()
     if(native_sprite_hook_active) {
         DetourDetach(&(PVOID &)RealSpritePreclip,SpritePreclipThunk);
         DetourDetach(&(PVOID &)RealNativeSprite,HookedNativeSprite);
+        DetourDetach(&(PVOID &)RealNativeSpriteFreeEntry,
+                     HookedSpriteFreeEntry);
+        DetourDetach(&(PVOID &)RealNativeSpriteFree,HookedSpriteFree);
+        DetourDetach(&(PVOID &)RealNativeSpriteNewEntry,HookedSpriteNewEntry);
         native_sprite_hook_active=false;
+        sprite_types.clear();
     }
     // Detach injected functions
     if(native_mat_mips_hook_active) {
