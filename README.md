@@ -1200,6 +1200,22 @@ The exact native JK23 hook offsets and the HW vertex marker path need
 in-game verification; this is experimental. Roll and per-Thing opacity
 remain independent, and non-flare SPRs retain ordinary depth behavior.
 
+**Troubleshooting type 4:** `SPR pose ... loaded_type=4` and
+`SPR per-Thing alpha and flare markers enabled` establish only resource
+parsing and Detour attachment, **not actual flare rendering**. With
+`profile_renderer=true`, the DLL now emits up to six diagnostic messages
+for each critical stage: `stage=draw_enter`, `stage=face_append`,
+`stage=alpha_converter`, `stage=hw_flush`,
+`stage=d3d_triangle` and `stage=gl_pass`. The first missing stage
+isolates where the flare flag stops propagating. The counter is bounded
+to avoid per-frame log spam.
+
+A working flare looks identical to a normal sprite when fully visible or
+when its center is behind a wall. To see the difference, position the
+**center** just outside a building's silhouette so its edges still overlap
+the building: a type-4 flare should remain whole while a default sprite
+would be partially clipped.
+
 ## Per-Thing SPR animation (JK23, work in progress)
 
 The experimental `SetSpriteInfo` / `GetSpriteInfo` COG verbs operate on **a
