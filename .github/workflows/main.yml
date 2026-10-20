@@ -48,6 +48,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
         sprite_orientation_test.exe
+    - name: Per-Thing sprite interpolation and lifecycle tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_instance_info.cpp /Fe:sprite_instance_info_test.exe
+        sprite_instance_info_test.exe
     - name: Captured SPR type and resource lifecycle tests
       shell: cmd
       run: |
