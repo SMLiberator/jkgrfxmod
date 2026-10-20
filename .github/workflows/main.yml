@@ -48,6 +48,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
         sprite_orientation_test.exe
+    - name: Captured SPR type and resource lifecycle tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_type_registry.cpp /Fe:sprite_type_registry_test.exe
+        sprite_type_registry_test.exe
     - name: Sprite type patcher PE regression tests
       run: python tests/test_sprite_type_patcher.py
     - name: Projected decal basis and configuration tests
