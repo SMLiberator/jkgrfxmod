@@ -1074,6 +1074,47 @@ This feature is **specific to the tested JK23 EXE and JK.dll**. Native
 signature validation disables it when addresses or layout do not match.
 Use `callback:` in a linked COG, not as a callable COG verb.
 
+## JK23 AI introspection COG verbs
+
+JkGRfxMod adds three **read-only** getters for AI-controlled actors.
+They use native JK23 AI controller fields and do not replace the original
+AI logic or alter any animation/instincts:
+
+```c
+thing  fireTarget = AIGetFireTarget(actorThing); // -1 if unavailable
+vector moveGoal   = AIGetMoveTargetPos(actorThing);
+vector lookDir    = AIGetLookDir(actorThing);
+```
+
+- `AIGetFireTarget` returns the Thing reference last supplied to
+  `AISetFireTarget`. This is the controller's `pDistractor`, not a promise
+  that attack instincts will actually fire on this frame.
+- `AIGetMoveTargetPos` reads the *commanded* native destination at
+  `SithAIControlBlock + 0x1A0`. The original JK `AIGetMovePos`
+  instead reads a different position vector at `+0x218`; preserve
+  the native verb for compatibility.
+- `AIGetLookDir` reads the existing horizontal normalized `goalLVec`
+  at `+0x194`. The engine does not retain the original absolute
+  `AISetLookPos` argument after converting it to this direction.
+- The position/direction getters return `(0, 0, 0)` for invalid or
+  non-AI Things, and the fire-target getter returns `-1`.
+
+### Why `aievent:` rarely fires in JK
+
+`aievent` is built-in COG message **24**, not a catch-all for the
+native AI's internal instinct events. In the JK AI event emission routine
+`sithAI_EmitEvent`, the COG message is sent for **AI mode changes**,
+with `GetParam(0) = 256` (`SITHAI_EVENTMODECHANGED`). The internal
+event argument is otherwise dispatched to registered AI instincts without
+sending a COG `aievent` message for each event. It is routed via the
+normal Thing-message system (class, capture and eligible linked COGs).
+
+The native handler first checks actor/class existence, health, death,
+disabled/sleeping state and related conditions. Therefore, a script cannot
+assume every target sighting, movement, or attack dispatches `aievent:`.
+This behavior has been checked against the user's JK23 executable and
+the available OpenJKDF2 reconstruction; gameplay verification is pending.
+
 ## Per-Thing SPR animation (JK23, work in progress)
 
 The experimental `SetSpriteInfo` / `GetSpriteInfo` COG verbs operate on **a
