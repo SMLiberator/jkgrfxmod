@@ -1362,6 +1362,11 @@ namespace {
                                  " receivers=",scan.receivers,
                                  " clipped_tris=",scan.triangles.size(),
                                  " malformed=",scan.invalid_surfaces,
+                                 " skipped_portals=",scan.skipped_portals,
+                                 " skipped_sky=",scan.skipped_sky,
+                                 " skipped_material=",scan.skipped_material,
+                                 " skipped_backfaces=",scan.skipped_backfaces,
+                                 " missed_volume=",scan.skipped_projection,
                                  " truncated=",scan.truncated,
                                  " mat_valid=",resource_ok,
                                  " gpu_mesh_ready=",mesh_ready);
