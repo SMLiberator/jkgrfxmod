@@ -1164,10 +1164,18 @@ depth is fixed at 0.25 engine units; receiver triangles are offset a
 hardcoded 0.001 units toward their front side to avoid z-fighting without
 changing texture coordinates. These values are experimental, not COG knobs.
 
-**Not yet visible in-game:** runtime world receiver lookup, caching,
-actual OpenGL submission, depth bias and 3DO mesh projection remain
-to be connected. A `type 3` SPR should not yet be used expecting it
-to conform to walls.
+**Runtime diagnostic bridge (opt-in):** with renderer profiling enabled,
+the first draw of each type-`3` SPR resource per world builds the current
+Thing projector and makes a **read-only** attempt to clip the live JK23
+SithWorld's opaque surfaces. The log prints `SPR decal probe` with
+`valid_world`, surface/receiver counts, triangle counts and errors. This
+confirms world offsets and projector dimensions without touching any game
+render state. The scan does not run in ordinary non-profiling gameplay.
+
+**Not yet visible in-game:** geometry caching and actual OpenGL
+submission remain to be connected, followed by rigid and animated 3DO
+receivers. A `type 3` SPR should not yet be used expecting it to
+conform to walls.
 
 ## Center-occluded SPR flares (experimental)
 
