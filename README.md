@@ -1168,9 +1168,19 @@ changing texture coordinates. These values are experimental, not COG knobs.
 the first draw of each type-`3` SPR resource per world builds the current
 Thing projector and makes a **read-only** attempt to clip the live JK23
 SithWorld's opaque surfaces. The log prints `SPR decal probe` with
-`valid_world`, surface/receiver counts, triangle counts and errors. This
-confirms world offsets and projector dimensions without touching any game
-render state. The scan does not run in ordinary non-profiling gameplay.
+`valid_world`, surface/receiver counts, triangle counts and errors.
+The probe also reads the **original SPR material and four MAT UV corners** and
+attempts to build an indexed GPU-compatible mesh. Check `mat_valid=1` and
+`gpu_mesh_ready=1` in addition to `receivers`/`clipped_tris`.
+A zero receiver count is expected if the projector points away from nearby
+opaque architecture. The scan does not run in non-profiling gameplay.
+
+`renderer/sprite_decal_gpu_mesh.hpp` converts clipped, world-space
+triangles to the same vertex/index/group format as the existing GPU 3DO
+renderer, retaining the SPR's native MAT pointer, cel tracking and original
+pixel-center UV convention. It builds bounds, surface normals and fully-lit
+base colors; no new texture format is needed. Its intended draw path must
+preserve **per-Thing opacity** independently of ordinary 3DO face alpha.
 
 **Not yet visible in-game:** geometry caching and actual OpenGL
 submission remain to be connected, followed by rigid and animated 3DO
