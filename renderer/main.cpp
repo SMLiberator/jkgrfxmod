@@ -1595,7 +1595,9 @@ namespace {
         }
         puppet_callback_fn cb=nullptr;
         std::memcpy(&cb,slot,sizeof(cb));
-        if(!cb || cb==RelayPuppetCallback) {
+        // Also relay tracks without a native callback: the original
+        // rdPuppet dispatcher skips every marker when this slot is null.
+        if(cb==RelayPuppetCallback) {
             RealPuppetAdvance(puppet,track,frames);
             return;
         }
