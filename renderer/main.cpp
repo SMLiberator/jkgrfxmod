@@ -1522,7 +1522,10 @@ namespace {
             if(proc_err==NO_ERROR) {
                 LONG const alpha_err=DetourAttach(
                     &(PVOID &)RealSpriteAlphaMid,SpriteAlphaThunk);
-                if(alpha_err==NO_ERROR) sprite_alpha_hook_active=true;
+                if(alpha_err==NO_ERROR) {
+                    sprite_alpha_hook_active=true;
+                    LOG_INFO("SPR fractional opacity hooks requested for JK23 native cache");
+                }
                 else {
                     DetourDetach(&(PVOID &)RealSpriteAddProc,HookedSpriteAddProc);
                     LOG_WARNING("SPR alpha converter hook unavailable: ",alpha_err);
