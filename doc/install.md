@@ -138,3 +138,35 @@ normal and does not pretend that a `collide=2` *sphere* hit has a
 polygon normal. With `collide=3`, or when a Thing is attached to a
 real world surface, it provides the geometric normal needed for
 alignment.
+
+
+## Icy / very icy surfaces on 3DO Things (experimental)
+
+The model's **ThingFlags** can give every solid polygon face the same
+attachment friction effect as native world-surface flags `0x1000`
+(ICY) and `0x2000` (VERYICY):
+
+| ThingFlags (additive bit) | Meaning | Native friction multiplier |
+| --- | --- | --- |
+| `0x10000` | Icy supporting Thing | `0.3` |
+| `0x40000000` | Very icy supporting Thing | `0.1` |
+
+These bits were unused in the audited reference JK code, but remain
+**specific to our patched JKGM build**. If both are set, very icy wins.
+For a standable icy model, combine `0x40` (STANDABLE) with the new bit:
+`thingflags=0x10040` or `thingflags=0x40000040`.
+
+The signature-guarded native hook executes inside
+`sithPhysics_UpdateAttachedThingPhysics` at `0x004F7833` and
+replaces only the existing friction multiplier when a physics Thing
+has a **Thing-face attachment** to the flagged object. This is the
+same native multiplier applied to world-surface ice, including its
+effect on `SurfDrag` and `StaticDrag`. World surfaces and ordinary
+Thing attachments remain unchanged. A log line
+`JKGM Thing-face icy flags enabled` confirms hook installation.
+
+**Note:** This applies to true 3DO face attachments (normally
+`collide=3`), not to the geometric sphere-tree contact itself
+(`collide=2`), which does not identify an attached polygon face.
+This feature has regression tests, but needs its first in-game
+verification on a standable 3DO platform.
