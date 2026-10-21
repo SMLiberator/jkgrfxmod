@@ -306,3 +306,45 @@ local vertices and node matrices; validate callee ABI, caller flags,
 hit-record semantics, and safe detour lifetime; then add an opt-in
 collision hook preserving original collision modes `1` and `3`.
 No additional template parameter is required.
+
+## Read-only JKGM mesh-geometry snapshot (development)
+
+`renderer/mots_native_mesh_snapshot.hpp` separates two steps:
+
+- `read_native_collision_model(reader, thing, out)` reads the selected
+  3DO geoset, mesh-local vertices, authored radii, hierarchy links,
+  node pivot offsets, and amputation flags. It never invokes animation
+  code or modifies the game. Memory reads use validated pointers and
+  64 KiB chunks, and failure preserves the previous output.
+- `build_native_collision_tree(snapshot, poseReader, preferFitted, out)`
+  uses a separate pose provider for **current world-space animated
+  matrices**. It honors amputations and supports the experimental
+  geometry-centered bounds without changing hierarchy pivots.
+
+Offsets confirmed against the patched JKGM executable and native
+mesh interception (not the incompatible MotS structure):
+
+| Structure | Relevant fields |
+| --- | --- |
+| rdModel3 | geosets `+0x24`; num geosets `+0x44`; default geoset `+0x50`; node count `+0x54`; hierarchy pointer `+0x58` |
+| rdGeoset | stride `0x08`; mesh count `+0`; mesh array pointer `+4` |
+| rdMesh | stride `0x70`; vertex pointer `+0x30`; vertex count `+0x48`; radius `+0x54` |
+| rdHierarchyNode | stride `0xB4`; flags `+0x40`; index `+0x44`; mesh index `+0x4C`; parent pointer `+0x50`; pivot `+0x60` |
+| rdThing | amputation flags pointer `+0x28`; geoset override `+0x30` |
+
+JKGM disassembly at `0x00446247`–`0x00446276` reads hierarchy
+mesh index `+0x4C` and joint index `+0x44`, then computes
+`meshIndex * 0x70` and `jointIndex * 0x30` before calling
+`rdModel3_DrawMesh` at `0x00446360`. This independently validates
+core field use. The renderer's existing native wrapper also verifies
+the `0x58`-byte mesh header.
+
+`tests/mots_native_mesh_snapshot.cpp` uses synthetic x86 address
+spaces to exercise correct geoset selection, parent links,
+amputation, pivots, malformed pointers, failure atomicity,
+and more than 64 KiB of source vertices.
+
+This is **not a live collision hook** and has not been tested in-game.
+The pose callback must be guarded by the existing native function
+signature validation before actual integration. Future geometry
+caching must also detect asset replacement and COG mesh mutations.
