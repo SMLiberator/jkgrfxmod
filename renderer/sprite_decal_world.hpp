@@ -24,6 +24,7 @@ namespace jkgm {
         std::vector<decal_world_triangle> triangles;
         uint32_t surfaces_seen=0;
         uint32_t receivers=0;
+        uint32_t broadphase_candidates=0; // surfaces requiring precise clipping
         uint32_t invalid_surfaces=0;
         uint32_t skipped_portals=0,skipped_sky=0,skipped_material=0;
         uint32_t skipped_backfaces=0,skipped_projection=0;
