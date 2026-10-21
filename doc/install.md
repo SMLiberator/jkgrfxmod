@@ -79,7 +79,8 @@ collision detour is installed. The option is independent of
 `"use_model_cache"`: GPU model caching is not required.
 
 The hook is signature-locked to this patched executable, and handles
-collision flags **zero only**. It uses current animated node matrices,
+collision flags except **0x80** (force-sphere) and **0x400** (special
+hit-distance convention). It uses current animated node matrices,
 a fitted sphere around each mesh's local vertex geometry, and the
 ordinary native Thing hit bit, hit distance and normal. As in MotS,
 mesh/face output pointers are not written for tree-sphere collisions.
