@@ -1,4 +1,4 @@
-#include "renderer/mots_native_mesh_snapshot.hpp"
+#include "renderer/mots_native_collision_query.hpp"
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -124,6 +124,19 @@ int main()
     assert(mots_tree_world_sphere(tree[1],center,radius));
     assert(near(center[0],11) && near(center[1],18));
     assert(near(radius,source.nodes[1].fitted_sphere.radius));
+
+    // Full read-only pipeline: synthetic JKGM bytes -> validated 3DO
+    // snapshot -> animated matrices -> nearest collision sphere.
+    mots_collision_query_hit collision{};
+    mots_collision_query_stats metrics{};
+    assert(mots_probe_collision_tree(
+        source,pose,true,{{10,20,30}},{{11,18,40}},{{0,0,-1}},
+        20.0f,0.5f,collision,&metrics)==mots_query_status::hit);
+    assert(collision.node==1);
+    assert(near(collision.distance,
+                10.0f-source.nodes[1].fitted_sphere.radius-0.5f));
+    assert(metrics.active_meshes==2 && metrics.tested_broadphase);
+
     // Legacy path uses the authored origin-centered radius * 0.75.
     assert(build_native_collision_tree(source,pose,false,tree));
     assert(!tree[1].center_on_geometry);
