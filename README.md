@@ -1194,14 +1194,24 @@ builds/clips its projected geometry, shares the SPR's original MAT,
 and queues it into the GPU **alpha pass** with its independent
 `SetSpriteInfo` opacity. Its own projector and clipped world geometry
 are cached by world/Thing/pose and updated when scale/roll/orientation
-changes. The renderer offsets clipped triangles by 0.001 JK units
-and depth-tests against the scene. GPU instance resources expire
-after they are no longer used.
+changes. If a type-3 projectile becomes attached to a **world face**,
+the renderer reads the same attachment normal exposed by
+`GetThingAttachNormal()`, rotates the decal projector **into the
+hit surface**, and centers its 0.25-unit projection depth around the
+contact plane. The original Thing orientation is not modified.
+The projector mesh is regenerated after attachment, rather than
+created once at Thing creation. The renderer offsets clipped
+triangles by 0.001 JK units and depth-tests against the scene.
+GPU instance resources expire after they are no longer used.
 
 If the source MAT is not yet resident, the projector is invalid, or
 no acceptable level polygons lie in the projection volume, native
 SPR rendering remains as a fallback; this is not proof that
-projection was applied. With `profile_renderer` enabled, the new
+projection was applied. Static Things with no valid receiver cache that
+negative result until their pose/attachment changes, avoiding expensive
+per-frame level scans. With `profile_renderer` enabled,
+`SPR decal GPU stage=no_receiver` reports whether the scanned world
+was valid and why candidate faces were rejected. The new
 `SPR decal GPU stage=geometry` line reports actual submitted
 projectors and triangle counts. A separate `SPR decal GPU stage=queued` log confirms the mesh actually
 entered the GPU draw queue after its MAT became resident. The earlier
