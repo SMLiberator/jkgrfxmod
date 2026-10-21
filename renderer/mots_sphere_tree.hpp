@@ -128,10 +128,14 @@ namespace jkgm {
         bool found=false;
         double furthest=0.0;
         for(size_t i=0;i<nodes.size();++i) {
-            if(!mots_tree_node_active(nodes,uint32_t(i)))continue;
+            if(!mots_tree_node_active(nodes,uint32_t(i)) ||
+               !nodes[i].has_mesh)continue;
             thing_node_vector center{};
             float radius=0;
-            if(!mots_tree_world_sphere(nodes[i],center,radius))continue;
+            // A partially constructed broad phase would be unsafe:
+            // if an active mesh cannot be bounded, let the caller bypass
+            // the broad-phase rather than reject possible hits.
+            if(!mots_tree_world_sphere(nodes[i],center,radius))return false;
             double distance_squared=0.0;
             for(int k=0;k<3;++k) {
                 double const d=double(center[k])-thing_origin[k];
