@@ -21,6 +21,8 @@
 #include "sprite_instance_info.hpp"
 #include "sprite_quad_transform.hpp"
 #include "sprite_decal_world.hpp"
+#include "sprite_decal_world_cache.hpp"
+#include "sprite_decal_pose_cache.hpp"
 #include "sprite_decal_resource.hpp"
 #include "sprite_decal_attachment.hpp"
 #include "sprite_alpha_tag.hpp"
@@ -1617,6 +1619,7 @@ namespace {
         uint32_t world=0;
         uintptr_t resource=0;
         uintptr_t material=0;
+        uint32_t thing_signature=0;
         std::array<float,12> matrix{};
         bool attached_to_face=false;
         jkgm::decal_vec3 attached_normal{};
@@ -1625,6 +1628,7 @@ namespace {
         std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
     };
     std::unordered_map<uint64_t,cached_runtime_sprite_decal> sprite_gpu_decals;
+    jkgm::decal_world_geometry sprite_world_geometry;
     unsigned sprite_decal_submit_logs=0;
     unsigned sprite_decal_queued_logs=0;
 
@@ -1676,9 +1680,10 @@ namespace {
         bool attached_to_face=false;
         // rdThing.pThing lives at +0x44. This is the same native
         // attachment data already used by GetThingAttachNormal().
-        uint32_t owner=0;
+        uint32_t owner=0,thing_signature=0;
         if(read(reinterpret_cast<uintptr_t>(rd_thing)+0x44,&owner,4) &&
            jkgm::decal_native_address_ok(owner)) {
+            read(uintptr_t(owner)+0x74,&thing_signature,4);
             attached_to_face=jkgm::read_thing_attachment_normal(
                 read,owner,attached_normal);
         }
@@ -1688,10 +1693,14 @@ namespace {
         bool const hit=it!=sprite_gpu_decals.end() &&
             it->second.world==world && it->second.resource==sprite &&
             it->second.material==resource.material &&
-            it->second.matrix==m && it->second.settings==settings &&
+            it->second.thing_signature==thing_signature &&
+            it->second.settings==settings &&
             it->second.attached_to_face==attached_to_face &&
+            jkgm::sprite_decal_pose_stable(
+                it->second.matrix,m,attached_to_face) &&
             (!attached_to_face ||
-             it->second.attached_normal==attached_normal);
+             jkgm::sprite_decal_normals_stable(
+                 it->second.attached_normal,attached_normal));
         if(!hit) {
             jkgm::sprite_axes axes{
                 {{m[0],m[1],m[2]}},{{m[3],m[4],m[5]}},
@@ -1709,11 +1718,24 @@ namespace {
                 {{offset[0],offset[1],offset[2]}},
                 size[0],size[1],info.width,info.height,roll,projector))
                 return false;
-            if(attached_to_face)
-                jkgm::sprite_decal_center_around_attached_face(
-                    projector,attached_normal);
-            auto const scan=jkgm::project_decal_world_surfaces(
-                read,world,projector,2048U);
+            if(!sprite_world_geometry.matches(read,world)) {
+                auto const begin=std::chrono::steady_clock::now();
+                bool const ok=sprite_world_geometry.load(read,world);
+                if(the_config->profile_renderer) {
+                    auto const micros=std::chrono::duration_cast<
+                        std::chrono::microseconds>(
+                            std::chrono::steady_clock::now()-begin).count();
+                    std::ostringstream msg;
+                    msg<<"SPR decal receiver cache loaded="<<ok
+                       <<" surfaces="<<sprite_world_geometry.surface_count
+                       <<" eligible="<<sprite_world_geometry.receivers.size()
+                       <<" build_us="<<micros;
+                    LOG_INFO(msg.str());
+                }
+                if(!ok)return false;
+            }
+            auto const scan=jkgm::project_cached_decal_world(
+                sprite_world_geometry,projector,2048U);
             jkgm::sprite_decal_mesh mesh{};
             bool const ready=jkgm::make_sprite_decal_gpu_mesh(
                 scan,projector,resource.material,resource.texcoords,
@@ -1742,6 +1764,7 @@ namespace {
             entry.world=world;
             entry.resource=sprite;
             entry.material=resource.material;
+            entry.thing_signature=thing_signature;
             entry.matrix=m;
             entry.attached_to_face=attached_to_face;
             entry.attached_normal=attached_normal;
@@ -3561,6 +3584,7 @@ bool detach_hooks()
         sprite_instances.clear();
         sprite_decal_diagnostic_keys.clear();
         sprite_gpu_decals.clear();
+        sprite_world_geometry.clear();
     }
     // Detach injected functions
     if(native_earth_hit_sound_hook_active) {
