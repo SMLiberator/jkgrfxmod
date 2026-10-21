@@ -227,7 +227,8 @@ int main()
     // Multiple Things using one 3DO/geoset MUST share a single fitted
     // geometry snapshot even with different Thing signatures.
     constexpr uintptr_t thing2=base+0x200;
-    std::memcpy(mem.data()+thing2-base,mem.data()+thing-base,0xe8);
+    // rdThing geoset and amputation pointers reach SithThing+0xF4.
+    std::memcpy(mem.data()+thing2-base,mem.data()+thing-base,0x100);
     set_u32(thing2+0x74,24);
     uint64_t const prior_rebuilds=cache.counters().rebuilds;
     assert(cache.get(reader,thing2,14,cached));
