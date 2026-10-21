@@ -113,6 +113,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_gpu_mesh.cpp /Fe:sprite_decal_gpu_mesh_test.exe
         sprite_decal_gpu_mesh_test.exe
+    - name: Multi-entry SPR syntax and variant selection regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_variants.cpp /Fe:sprite_variants_test.exe
+        sprite_variants_test.exe
     - name: SPR decal world BVH spatial query tests
       shell: cmd
       run: |
