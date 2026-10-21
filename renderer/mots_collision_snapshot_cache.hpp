@@ -45,7 +45,7 @@ namespace jkgm {
         if(!read || !thing_node_valid_address(thing,0xe8))return false;
         mots_collision_model_identity k{};
         k.thing=thing;
-        uint32_t model=0,selected=0,preferred=0,amputation_ptr=0;
+        uint32_t model=0,amputation_ptr=0;
         if(!read_u32(read,thing+0x0c,k.kind) ||
            k.kind==0 || k.kind>15 ||
            !read_u32(read,thing+0x74,k.thing_signature) ||
@@ -53,26 +53,23 @@ namespace jkgm {
            k.rd_type!=1 ||
            !read_u32(read,thing+0xc8,model) ||
            !thing_node_valid_address(model,0x60) ||
-           !read_u32(read,thing+0xc4+rd_geoset_select,selected) ||
            !read_u32(read,thing+0xc4+rd_amputations,amputation_ptr))
             return false;
         k.amputations=amputation_ptr;
         k.model=model;
         uint32_t hierarchy=0,meshes=0;
         if(!read_u32(read,model+model_num_geos,k.geos) ||
-           !read_u32(read,model+model_default_geoset,preferred) ||
            !read_u32(read,model+model_num_nodes,k.node_count) ||
            !read_u32(read,model+model_hierarchy,hierarchy) ||
            k.geos==0 || k.geos>4 ||
            k.node_count==0 || k.node_count>max_nodes ||
            !thing_node_valid_address(hierarchy,node_stride))
             return false;
-        if(selected==0xffffffffU)selected=preferred;
-        if(selected>=k.geos)return false;
-        k.geoset=selected;
+        // Collision always uses the highest-detail 3DO geoset (0).
+        // Rendering LOD selections do not affect this cache's identity.
+        k.geoset=0;
         k.hierarchy=hierarchy;
-        uintptr_t const geo=uintptr_t(model)+model_geosets+
-                            uintptr_t(selected)*geoset_stride;
+        uintptr_t const geo=uintptr_t(model)+model_geosets;
         if(!read_u32(read,geo,k.mesh_count) ||
            !read_u32(read,geo+4,meshes) ||
            k.mesh_count==0 || k.mesh_count>max_meshes ||
