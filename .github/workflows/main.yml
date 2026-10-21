@@ -113,6 +113,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_gpu_mesh.cpp /Fe:sprite_decal_gpu_mesh_test.exe
         sprite_decal_gpu_mesh_test.exe
+    - name: SPR blood attachment normal projector tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_decal_attachment.cpp /Fe:sprite_decal_attachment_test.exe
+        sprite_decal_attachment_test.exe
     - name: SPR projected decal transform and roll tests
       shell: cmd
       run: |
