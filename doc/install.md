@@ -148,13 +148,17 @@ attachment friction effect as native world-surface flags `0x1000`
 
 | ThingFlags (additive bit) | Meaning | Native friction multiplier |
 | --- | --- | --- |
-| `0x10000` | Icy supporting Thing | `0.3` |
+| `0x20` | Icy supporting Thing (provisional custom use) | `0.3` |
 | `0x40000000` | Very icy supporting Thing | `0.1` |
 
-These bits were unused in the audited reference JK code, but remain
-**specific to our patched JKGM build**. If both are set, very icy wins.
+The older 0x10000 assignment was **withdrawn**: historical JK specs
+identify it as a 'not in single-player' bit. `0x20` is provisionally
+reserved for icy because the audit found no existing `SithThing.flags`
+consumer; this is not an exhaustive proof for every modded executable.
+`0x40000000` remains the reserved custom very-icy bit. Do not use
+`0x80000000`: the reference renderer can suppress Thing drawing with it. If both are set, very icy wins.
 For a standable icy model, combine `0x40` (STANDABLE) with the new bit:
-`thingflags=0x10040` or `thingflags=0x40000040`.
+`thingflags=0x60` or `thingflags=0x40000040`.
 
 The signature-guarded native hook executes inside
 `sithPhysics_UpdateAttachedThingPhysics` at `0x004F7833` and
