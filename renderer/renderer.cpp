@@ -614,7 +614,7 @@ namespace jkgm {
                      " post_swap=", avg(profile_stage::present_swap),
                      " HUDupload=", avg(profile_stage::hud_upload),
                      " HUDdraw=", avg(profile_stage::hud_draw));
-            if(the_config->use_model_cache) {
+            if(the_config->use_model_cache || the_config->enable_sprite_decals) {
                 LOG_INFO("PERF gpu_3do fallback_native_per_frame text=",
                          profile_window.gpu_text_native/frames,
                          " geometry=",profile_window.gpu_geometry_native/frames,
@@ -740,7 +740,7 @@ namespace jkgm {
         void set_renderer_mode(renderer_mode mode) override
         {
             if(this->mode != mode) {
-                if(the_config->use_model_cache) {
+                if(the_config->use_model_cache || the_config->enable_sprite_decals) {
                     // Levels recycle native mesh pointers; discard both copies.
                     reset_gpu_3do_instances();
                     gpu_3do_gl_cache.clear();
