@@ -13,6 +13,7 @@
 #include "thing_node_native.hpp"
 #include "thing_attachment_normal.hpp"
 #include "native_thingface_friction.hpp"
+#include "native_earth_hit_sound.hpp"
 #include "mots_native_collision_bridge.hpp"
 #include "mots_collision_snapshot_cache.hpp"
 #include "sprite_orientation.hpp"
@@ -55,6 +56,7 @@ static bool native_3do_hooks_active = false;
 static bool native_mat_mips_hook_active = false;
 static bool native_mesh_collision_hook_active = false;
 static bool native_thingface_friction_hook_active = false;
+static bool native_earth_hit_sound_hook_active = false;
 
 // Function boundaries and prologues independently verified in both the
 // user's SHA-locked jk23.exe and standalone jkgm.exe. Not portable to other JKs.
@@ -2269,6 +2271,56 @@ namespace {
         return jkgm::gpu_3do_matrix_finite(output);
     }
 
+    // World-impact handler, metal already dispatched: select HITEARTH
+    // for EARTH surfaces instead of routing every remaining hit to HITHARD.
+    // Signature-guarded, no change to native volume/threshold/touched order.
+    using native_earth_sound_fn=void(__cdecl *)();
+    native_earth_sound_fn RealNativeEarthSound=
+        reinterpret_cast<native_earth_sound_fn>(
+            jkgm::native_earth_sound_branch);
+    void *native_earth_sound_resume_addr=
+        reinterpret_cast<void *>(jkgm::native_earth_sound_resume);
+    __declspec(naked) void __cdecl NativeEarthSoundThunk()
+    {
+        __asm {
+            // Original: MOV ECX,[ESP+0xC]; PUSH ECX.
+            mov ecx,dword ptr [esp+0x0c]
+            push ecx
+            pushfd
+            // EDI still points at the impacted SithSurface, +0x10 flags.
+            test dword ptr [edi+0x10],0x00080000
+            jz earth_sound_hard
+            popfd
+            push 48 // SITH_SC_HITEARTH
+            jmp dword ptr [native_earth_sound_resume_addr]
+        earth_sound_hard:
+            popfd
+            push 46 // SITH_SC_HITHARD
+            jmp dword ptr [native_earth_sound_resume_addr]
+        }
+    }
+    bool request_native_earth_sound_hook()
+    {
+        auto const addr=jkgm::native_earth_sound_branch;
+        if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=
+               0x00400000U ||
+           !gpu_span_readable(reinterpret_cast<void const *>(addr),
+                              jkgm::native_earth_sound_bytes.size()) ||
+           std::memcmp(reinterpret_cast<void const *>(addr),
+                       jkgm::native_earth_sound_bytes.data(),
+                       jkgm::native_earth_sound_bytes.size())!=0) {
+            LOG_WARNING("JKGM HITEARTH hook skipped: unsupported EXE");
+            return false;
+        }
+        LONG const error=DetourAttach(
+            &(PVOID &)RealNativeEarthSound,NativeEarthSoundThunk);
+        if(error!=NO_ERROR) {
+            LOG_WARNING("JKGM HITEARTH hook attach failed: ",error);
+            return false;
+        }
+        return true;
+    }
+
     // At 0x4F7833 native physics has JUST selected its friction factor:
     // [ESP+0x10]. ESI is the Thing being simulated; for a Thing-face
     // attachment, [ESI+0x58] is the supporting Thing. Preserve all flags
@@ -3269,6 +3321,7 @@ bool attach_hooks()
     bool const sprite_hooks_requested=request_native_sprite_hooks();
     bool const mesh_collision_hook_requested=request_type2_intersection_hook();
     bool const ice_thing_hook_requested=request_native_thingface_friction_hook();
+    bool const earth_sound_hook_requested=request_native_earth_sound_hook();
 
     LONG error = DetourTransactionCommit();
     if(error!=NO_ERROR) {
@@ -3285,6 +3338,10 @@ bool attach_hooks()
     if(error==NO_ERROR && mesh_collision_hook_requested) {
         native_mesh_collision_hook_active=true;
         LOG_INFO("JKGM experimental collide=2 Detour installed");
+    }
+    if(error==NO_ERROR && earth_sound_hook_requested) {
+        native_earth_hit_sound_hook_active=true;
+        LOG_INFO("JKGM HITEARTH native surface-impact branch installed");
     }
     if(error==NO_ERROR && ice_thing_hook_requested) {
         native_thingface_friction_hook_active=true;
@@ -3328,6 +3385,10 @@ bool detach_hooks()
         sprite_decal_diagnostic_keys.clear();
     }
     // Detach injected functions
+    if(native_earth_hit_sound_hook_active) {
+        DetourDetach(&(PVOID &)RealNativeEarthSound,NativeEarthSoundThunk);
+        native_earth_hit_sound_hook_active=false;
+    }
     if(native_thingface_friction_hook_active) {
         DetourDetach(&(PVOID&)RealThingFaceIceJoin,
                      ThingFaceIceMultiplierThunk);
