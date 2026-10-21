@@ -4127,7 +4127,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         }
 
         renderer_hooks_active = true;
-        if(the_config->profile_renderer || the_config->use_model_cache) {
+        if(the_config->profile_renderer || the_config->use_model_cache ||
+           the_config->enable_sprite_decals) {
             native_3do_hooks_active = attach_native_3do_hooks(the_config->profile_renderer);
         }
         LOG_DEBUG("Finished attaching renderer to process");
