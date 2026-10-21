@@ -12,6 +12,7 @@
 #include "gpu_3do_modelview.hpp"
 #include "thing_node_native.hpp"
 #include "mots_native_collision_bridge.hpp"
+#include "mots_collision_snapshot_cache.hpp"
 #include "sprite_orientation.hpp"
 #include "sprite_type_registry.hpp"
 #include "sprite_instance_info.hpp"
@@ -2339,21 +2340,45 @@ namespace {
         bool const reverse=checked_mode!=2;
         void* owner=reverse?moving:checked;
         if(!owner)return native();
-        jkgm::mots_native_model_snapshot model{};
-        if(!jkgm::read_native_collision_model(
-               read,reinterpret_cast<uintptr_t>(owner),model)) {
+        // Cached geometry is read/fitted only on a new model identity or
+        // a bounded periodic refresh. Amputation flags remain live.
+        thread_local jkgm::mots_collision_snapshot_cache collision_cache;
+        jkgm::mots_native_model_snapshot const *model=nullptr;
+        uint64_t const now_ms=GetTickCount64();
+        if(!collision_cache.get(
+               read,reinterpret_cast<uintptr_t>(owner),now_ms,model)) {
             trace_type2("invalid_3do_snapshot");
+            return native();
+        }
+        // Resolve the current Thing placement ONCE, not per mesh. Native
+        // rdModel3_GetMeshMatrix still updates animated nodes every query.
+        jkgm::thing_node_native_input pose_source{};
+        if(!jkgm::resolve_native_thing_node(
+               read,reinterpret_cast<uintptr_t>(owner),0,pose_source)) {
+            trace_type2("invalid_pose_source");
             return native();
         }
         jkgm::mots_native_pose_reader pose=[&](
             uint32_t index,jkgm::gpu_3do_matrix34 &matrix) {
-            return get_cog_thing_node_matrix(owner,static_cast<int>(index),matrix);
+            return jkgm_get_node_matrix(
+                reinterpret_cast<void*>(pose_source.rd_thing),
+                pose_source.world_placement.data(),index,matrix.data()) &&
+                jkgm::gpu_3do_matrix_finite(matrix);
         };
+        thread_local uint64_t last_cache_log_ms=0;
+        if(the_config->profile_renderer &&
+           (last_cache_log_ms==0 || now_ms-last_cache_log_ms>=2000)) {
+            auto const &c=collision_cache.counters();
+            LOG_INFO("JKGM collide=2 cache hits=",c.hits,
+                     " rebuilds=",c.rebuilds," failures=",c.failed,
+                     " evictions=",c.evicted);
+            last_cache_log_ms=now_ms;
+        }
         jkgm::mots_collision_query_hit result{};
         jkgm::mots_collision_query_stats counters{};
         auto const status=jkgm::mots_probe_type2_collision(
             moving?&moving_part:nullptr,checked_part,
-            reverse?&model:nullptr,reverse?nullptr:&model,
+            reverse?model:nullptr,reverse?nullptr:model,
             pose,pose,moving_pos,checked_pos,source,direction,
             max_distance,moving_radius,flags,true,true,result,&counters);
         if(status==jkgm::mots_query_status::unavailable) {
@@ -2365,7 +2390,7 @@ namespace {
             return 0;
         }
         jkgm::mots_engine_type2_hit hit{};
-        if(!jkgm::mots_prepare_engine_type2_hit(model,result,hit)) {
+        if(!jkgm::mots_prepare_engine_type2_hit(*model,result,hit)) {
             trace_type2("invalid_hit_pointer");
             return native();
         }
