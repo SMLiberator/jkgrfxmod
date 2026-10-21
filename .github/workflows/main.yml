@@ -58,6 +58,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_collision_dispatch.cpp /Fe:mots_collision_dispatch_test.exe
         mots_collision_dispatch_test.exe
+    - name: JKGM icy Thing-face friction flag tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_thingface_friction.cpp /Fe:native_thingface_friction_test.exe
+        native_thingface_friction_test.exe
     - name: JKGM true attached-face normal COG getter tests
       shell: cmd
       run: |
