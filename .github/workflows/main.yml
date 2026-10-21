@@ -58,6 +58,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_collision_dispatch.cpp /Fe:mots_collision_dispatch_test.exe
         mots_collision_dispatch_test.exe
+    - name: JKGM true attached-face normal COG getter tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\thing_attachment_normal.cpp /Fe:thing_attachment_normal_test.exe
+        thing_attachment_normal_test.exe
     - name: Native JKGM type-2 collision hit ABI tests
       shell: cmd
       run: |
