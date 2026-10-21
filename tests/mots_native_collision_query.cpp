@@ -145,6 +145,13 @@ int main()
         origin,dir,25,0.5f,0,true,true,hit)
         ==mots_query_status::hit);
 
+    // Ordinary raycast flags are not interpreted by the sphere narrowphase
+    // itself and must not silently disable collide=2 during movement.
+    assert(mots_probe_type2_collision(
+        &sphere,tree,nullptr,&model,pose,pose,{{0,0,0}},
+        thingpos,origin,dir,25,0.5f,0x21U,true,true,hit)
+        ==mots_query_status::hit);
+
     // Modes 1/3, disabled type2, RAYCAST_80, and unsupported flags all
     // remain unavailable to this adapter (native path must handle them).
     assert(mots_probe_type2_collision(
