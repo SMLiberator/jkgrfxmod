@@ -93,10 +93,20 @@ A bounded diagnostic sample appears as `JKGM collide=2 stage=`:
 `invalid_pose_or_query`, or `invalid_hit_pointer`. A missing hook
 signature also produces a warning when this option is on.
 
-This initial implementation **rebuilds its mesh snapshot per relevant
-collision query**. Avoid large, busy scenes until geometry caching and
-invalidation are implemented; performance and actual JKGM behavior
-are not yet verified. There is no new `treeSize` field. Upstream
+The initial version rebuilt every mesh on every query and caused severe
+slowdowns around animated actors. The new implementation **caches fitted
+mesh geometry across collision queries** (up to 24 active Thing entries),
+invalidating when the Thing signature or selected model/geoset/hierarchy
+identity changes and periodically every 1000 ms to pick up in-place
+COG vertex edits. Limb amputation flags are read live each query;
+animated node matrices are also refreshed per query. With
+`profile_renderer=true`, lines beginning `JKGM collide=2 cache`
+report reuse, rebuild, failure and eviction totals.
+
+This optimization is still experimental and has not yet been profiled
+in-game. In-place vertex edits can have up to one second of delayed
+collision bounds updates; abnormal models above 262144 total vertices
+fall back to native behavior. Use simple test levels first. There is no new `treeSize` field. Upstream
 sector candidate filtering and unusual collision flags still need
 additional live testing. Back up files and disable the switch to
 restore original collision behavior.
