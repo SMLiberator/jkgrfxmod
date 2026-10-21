@@ -58,6 +58,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_collision_dispatch.cpp /Fe:mots_collision_dispatch_test.exe
         mots_collision_dispatch_test.exe
+    - name: JKGM Earth surface impact sound tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_earth_hit_sound.cpp /Fe:native_earth_hit_sound_test.exe
+        native_earth_hit_sound_test.exe
     - name: JKGM icy Thing-face friction flag tests
       shell: cmd
       run: |
