@@ -121,7 +121,7 @@ int main()
         origin,dir,25,0.5f,0,true,true,hit)
         ==mots_query_status::hit);
     assert(hit.reverse_cast && hit.node==1);
-    assert(near(hit.distance,8.0f)); // center 11, radius 1+checked size 1
+    assert(near(hit.distance,7.0f)); // start 20, center 11, radius 1+checked size 1
     assert(near(hit.normal[0],-1.0f));
 
     // Type 2 takes precedence over a face collider only when enabled.
