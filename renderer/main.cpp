@@ -1623,6 +1623,7 @@ namespace {
     };
     std::unordered_map<uint64_t,cached_runtime_sprite_decal> sprite_gpu_decals;
     unsigned sprite_decal_submit_logs=0;
+    unsigned sprite_decal_queued_logs=0;
 
     bool submit_native_sprite_decal(
         void const *rd_thing,void const *orientation,
@@ -1722,6 +1723,11 @@ namespace {
         inst.decal_opacity=info.opacity;
         inst.effective_light_mode=0.0f;
         pending_gpu_instances.emplace_back(std::move(inst));
+        if(the_config->profile_renderer &&
+           sprite_decal_queued_logs++<12U)
+            LOG_INFO("SPR decal GPU stage=queued id=",it->second.id,
+                     " opacity=",info.opacity,
+                     " vertices=",it->second.geometry->vertices.size());
         return true;
     }
 
