@@ -2292,7 +2292,7 @@ namespace {
             mov dword ptr [esp+0x18],0x3dcccccd
             jmp ice_done
         ice_regular:
-            test dword ptr [eax],0x10000 // Icy (0.3)
+            test dword ptr [eax],0x20 // Provisional icy ThingFlag (0.3)
             jz ice_done
             mov dword ptr [esp+0x18],0x3e99999a
         ice_done:
@@ -3293,7 +3293,7 @@ bool attach_hooks()
     }
     if(error==NO_ERROR && ice_thing_hook_requested) {
         native_thingface_friction_hook_active=true;
-        LOG_INFO("JKGM Thing-face icy flags enabled (0x10000/0x40000000)");
+        LOG_INFO("JKGM Thing-face icy flags enabled (0x20/0x40000000)");
     }
     if(error==NO_ERROR && mip_hook_requested) {
         native_mat_mips_hook_active=true;
