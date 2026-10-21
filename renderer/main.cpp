@@ -11,6 +11,7 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_modelview.hpp"
 #include "thing_node_native.hpp"
+#include "mots_native_collision_bridge.hpp"
 #include "sprite_orientation.hpp"
 #include "sprite_type_registry.hpp"
 #include "sprite_instance_info.hpp"
@@ -49,6 +50,7 @@ static bool renderer_hooks_active = false;
 
 static bool native_3do_hooks_active = false;
 static bool native_mat_mips_hook_active = false;
+static bool native_mesh_collision_hook_active = false;
 
 // Function boundaries and prologues independently verified in both the
 // user's SHA-locked jk23.exe and standalone jkgm.exe. Not portable to other JKs.
@@ -2262,6 +2264,147 @@ namespace {
             return false;
         return jkgm::gpu_3do_matrix_finite(output);
     }
+
+    // Tested JKGM ABI: 11 cdecl args. Do not patch the original EXE.
+    using native_intersect_fn=int (__cdecl *)(
+        void*,float const*,float const*,float,float,void*,
+        uint32_t,float*,void**,void**,float*);
+    native_intersect_fn RealType2Intersection=reinterpret_cast<native_intersect_fn>(
+        jkgm::jkgm_sphere_thing_intersect_address);
+    thread_local bool type2_busy=false;
+    unsigned type2_trace_count=0;
+    void trace_type2(char const *status,uint32_t node=0) {
+        if(the_config && the_config->profile_renderer && type2_trace_count++<16)
+            LOG_INFO("JKGM collide=2 stage=",status," node=",node);
+    }
+
+    int __cdecl HookedType2Intersection(
+        void* moving,float const* start,float const* dir,float max_distance,
+        float moving_radius,void* checked,uint32_t flags,float* out_distance,
+        void** out_mesh,void** out_face,float* out_normal)
+    {
+        auto const native=[&]()->int {
+            return RealType2Intersection(moving,start,dir,max_distance,
+                                         moving_radius,checked,flags,
+                                         out_distance,out_mesh,out_face,out_normal);
+        };
+        if(type2_busy || !the_config || !the_config->enable_mesh_collision ||
+           flags!=0 || !checked || !start || !dir || !out_distance ||
+           !out_mesh || !out_face || !out_normal)
+            return native();
+        auto const read=[](uintptr_t address,void* output,size_t size)->bool {
+            if(!jkgm::thing_node_valid_address(address,size) ||
+               !gpu_span_readable(reinterpret_cast<void const*>(address),size))
+                return false;
+            std::memcpy(output,reinterpret_cast<void const*>(address),size);
+            return true;
+        };
+        auto get_mode=[&](void* ptr,int32_t &mode)->bool {
+            return read(reinterpret_cast<uintptr_t>(ptr)+0x28,&mode,4);
+        };
+        int32_t checked_mode=0,moving_mode=0;
+        if(!get_mode(checked,checked_mode) ||
+           (moving && !get_mode(moving,moving_mode)))return native();
+        if(checked_mode!=2 && moving_mode!=2)return native();
+        if(!gpu_span_readable(start,12) || !gpu_span_readable(dir,12) ||
+           !gpu_span_readable(out_distance,4) ||
+           !gpu_span_readable(out_mesh,4) || !gpu_span_readable(out_face,4) ||
+           !gpu_span_readable(out_normal,12))return native();
+
+        struct guard {
+            bool &flag;
+            explicit guard(bool &x):flag(x){flag=true;}
+            ~guard(){flag=false;}
+        } active(type2_busy);
+
+        jkgm::thing_node_vector source{},direction{},checked_pos{},moving_pos{};
+        std::memcpy(source.data(),start,12);
+        std::memcpy(direction.data(),dir,12);
+        if(!jkgm::mots_native_detail::read_vec3(
+               read,reinterpret_cast<uintptr_t>(checked)+0xb8,checked_pos) ||
+           (moving && !jkgm::mots_native_detail::read_vec3(
+               read,reinterpret_cast<uintptr_t>(moving)+0xb8,moving_pos))) {
+            trace_type2("invalid_thing_position");
+            return native();
+        }
+        float checked_size=0,moving_size=0;
+        if(!read(reinterpret_cast<uintptr_t>(checked)+0x30,&checked_size,4) ||
+           (moving && !read(reinterpret_cast<uintptr_t>(moving)+0x30,
+                            &moving_size,4)))return native();
+        jkgm::mots_collision_participant const checked_part{
+            checked_mode,checked_size};
+        jkgm::mots_collision_participant const moving_part{
+            moving_mode,moving_size};
+        bool const reverse=checked_mode!=2;
+        void* owner=reverse?moving:checked;
+        if(!owner)return native();
+        jkgm::mots_native_model_snapshot model{};
+        if(!jkgm::read_native_collision_model(
+               read,reinterpret_cast<uintptr_t>(owner),model)) {
+            trace_type2("invalid_3do_snapshot");
+            return native();
+        }
+        jkgm::mots_native_pose_reader pose=[&](
+            uint32_t index,jkgm::gpu_3do_matrix34 &matrix) {
+            return get_cog_thing_node_matrix(owner,static_cast<int>(index),matrix);
+        };
+        jkgm::mots_collision_query_hit result{};
+        jkgm::mots_collision_query_stats counters{};
+        auto const status=jkgm::mots_probe_type2_collision(
+            moving?&moving_part:nullptr,checked_part,
+            reverse?&model:nullptr,reverse?nullptr:&model,
+            pose,pose,moving_pos,checked_pos,source,direction,
+            max_distance,moving_radius,flags,true,true,result,&counters);
+        if(status==jkgm::mots_query_status::unavailable) {
+            trace_type2("invalid_pose_or_query");
+            return native();
+        }
+        if(status==jkgm::mots_query_status::miss) {
+            trace_type2("miss");
+            return 0;
+        }
+        jkgm::mots_engine_type2_hit hit{};
+        if(!jkgm::mots_prepare_engine_type2_hit(model,result,hit)) {
+            trace_type2("invalid_hit_pointer");
+            return native();
+        }
+        *out_distance=hit.distance;
+        *out_mesh=reinterpret_cast<void*>(hit.mesh);
+        *out_face=nullptr;
+        std::memcpy(out_normal,hit.normal.data(),12);
+        trace_type2("hit",result.node);
+        return hit.flags;
+    }
+
+    bool request_type2_intersection_hook()
+    {
+        if(!the_config || !the_config->enable_mesh_collision)return false;
+        auto const safe_read=[](uintptr_t at,void* dst,size_t len)->bool {
+            if(!jkgm::thing_node_valid_address(at,len) ||
+               !gpu_span_readable(reinterpret_cast<void const*>(at),len))
+                return false;
+            std::memcpy(dst,reinterpret_cast<void const*>(at),len);
+            return true;
+        };
+        std::array<uint8_t,12> signature{};
+        if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=
+               0x00400000U ||
+           !safe_read(jkgm::jkgm_sphere_thing_intersect_address,
+                      signature.data(),signature.size()) ||
+           signature!=jkgm::jkgm_sphere_thing_intersect_prologue ||
+           !jkgm::validate_native_thing_node_accessor(safe_read)) {
+            LOG_WARNING("JKGM collide=2 hook skipped: unknown game executable");
+            return false;
+        }
+        LONG const err=DetourAttach(&(PVOID&)RealType2Intersection,
+                                    HookedType2Intersection);
+        if(err!=NO_ERROR) {
+            LOG_WARNING("JKGM collide=2 DetourAttach failed: ",err);
+            return false;
+        }
+        return true;
+    }
+
     bool get_cog_thing_node_pose(void *thing,int node,
                                  jkgm::thing_node_pose &pose)
     {
@@ -3025,6 +3168,7 @@ bool attach_hooks()
     }
 
     bool const sprite_hooks_requested=request_native_sprite_hooks();
+    bool const mesh_collision_hook_requested=request_type2_intersection_hook();
 
     LONG error = DetourTransactionCommit();
     if(error!=NO_ERROR) {
@@ -3038,6 +3182,10 @@ bool attach_hooks()
             flare_flush_trace_count=flare_bad_face_trace_count=0U;
     }
     if(error==NO_ERROR) native_sprite_hook_active=sprite_hooks_requested;
+    if(error==NO_ERROR && mesh_collision_hook_requested) {
+        native_mesh_collision_hook_active=true;
+        LOG_INFO("JKGM experimental collide=2 Detour installed");
+    }
     if(error==NO_ERROR && mip_hook_requested) {
         native_mat_mips_hook_active=true;
         force_native_mat_mip_zero();
@@ -3076,6 +3224,10 @@ bool detach_hooks()
         sprite_decal_diagnostic_keys.clear();
     }
     // Detach injected functions
+    if(native_mesh_collision_hook_active) {
+        DetourDetach(&(PVOID&)RealType2Intersection,HookedType2Intersection);
+        native_mesh_collision_hook_active=false;
+    }
     if(native_mat_mips_hook_active) {
         DetourDetach(&(PVOID &)RealNativeSetMipDistances,HookedNativeSetMipDistances);
         native_mat_mips_hook_active=false;
