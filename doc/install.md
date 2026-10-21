@@ -100,3 +100,27 @@ are not yet verified. There is no new `treeSize` field. Upstream
 sector candidate filtering and unusual collision flags still need
 additional live testing. Back up files and disable the switch to
 restore original collision behavior.
+
+
+## GetThingAttachNormal COG verb (all collision modes)
+
+`GetThingAttachNormal(thing)` returns the **world-space unit normal
+of the face the Thing is currently attached to**. World-surface
+attachments return the level surface's actual `rdFace.normal`;
+Thing-face attachments transform the attached object's local face
+normal through its current orientation. A zero vector means the Thing
+has no face attachment or the attachment data could not be read.
+Ordinary Thing-to-Thing attachments (without a face) return zero.
+
+```c
+vector normal = GetThingAttachNormal(player);
+if (VectorLen(normal) > 0.001)
+    PrintVector(normal);
+```
+
+This getter works with `"enable_mesh_collision": false`, because it
+reads JK's existing attachment state. It is **not** the last raycast
+normal and does not pretend that a `collide=2` *sphere* hit has a
+polygon normal. With `collide=3`, or when a Thing is attached to a
+real world surface, it provides the geometric normal needed for
+alignment.
