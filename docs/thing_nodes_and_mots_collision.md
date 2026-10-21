@@ -348,3 +348,77 @@ This is **not a live collision hook** and has not been tested in-game.
 The pose callback must be guarded by the existing native function
 signature validation before actual integration. Future geometry
 caching must also detect asset replacement and COG mesh mutations.
+
+
+## Type-2 query staging (no engine detour enabled)
+
+`renderer/mots_native_collision_query.hpp` now joins the previous
+read-only mesh snapshot and per-frame pose provider to an actual
+sphere-tree collision query. It selects the nearest hit and exposes
+three explicit outcomes:
+
+- `hit`: valid collision with hierarchy-node index, distance,
+  normal, and selected world-space sphere center
+- `miss`: valid complete query with no collision, including safe
+  rejection by a derived broad-phase bounding sphere
+- `unavailable`: unsupported collision mode/raycast flag, invalid
+  snapshot, or failed/non-finite pose; callers **must not** interpret
+  this as a completed type-2 miss
+
+`mots_probe_type2_collision` also reproduces the MotS branch where
+the **moving** Thing owns the sphere-tree geometry: it reverses
+the ray, casts from the checked Thing's position using its collision
+radius, then negates the resulting normal. When the checked Thing
+owns the type-2 hierarchy the ray runs forward normally. A pair
+including types 2 and 3 selects type 2 as in MotS. Flags other than
+zero (including the special `RAYCAST_80` forced-sphere case) and
+collision modes 1 or 3 do **not** enter this implementation. The
+native engine must continue handling those cases unchanged.
+
+The derived sphere envelope is recomputed from the current animated
+pose. For a moving sphere, an optional conservative double-precision
+segment-to-center calculation skips the narrow phase only when the
+cast is **definitely outside** that envelope; tangent or invalid
+bounds are never culled. Sphere intersection arithmetic also uses
+double precision internally, preventing `INF-INF`/NaN hit distances
+from very large but finite model coordinates.
+
+The associated tests are
+`tests/mots_native_collision_query.cpp` (mode arbitration, reverse
+casts, nearest mesh, broad-phase culling, invalid pose, amputation),
+`tests/mots_native_mesh_snapshot.cpp` (synthetic native
+bytes -> fitted vertices -> animated collision), and
+`tests/mots_sphere_tree.cpp` (large-coordinate robustness).
+All tests run under development CI.
+
+### Gates before enabling native JKGM collide=2
+
+The identified `sithIntersect_CheckSphereThingIntersection` entry
+is `0x00508360`, called from `0x004E8888`; static disassembly
+supports the 11-argument cdecl ABI, but there is no detour yet.
+A future opt-in detour must:
+1. Validate the exact executable signature and all Thing pointers,
+   keep a trampoline to the original function, and intercept only
+   specifically enabled type-2 candidates with understood flags.
+2. Snapshot the owning model and retrieve animated world-space poses
+   via the already validated native `rdModel3_GetMeshMatrix` accessor.
+   No render-culling dependency is allowed for collision.
+3. Write a valid hit distance and normal with `SITHCOLLISION_THING`
+   status, preserving native mesh/face output conventions. Return
+   definitive `miss` only after an entire valid type-2 test;
+   `unavailable` must fall back to the original engine.
+4. **Audit the caller's earlier sector/Thing broad-phase filtering.**
+   If it uses `collideSize` to decide which Things reach the
+   narrow-phase function, a too-small collideSize would still
+   prevent type-2 tests entirely, even though our internal
+   treeSize-free bounding sphere is correct. The native candidate
+   selection must be examined before enabling the detour.
+5. Establish stable mesh snapshot caching/invalidation rules for
+   COG vertex edits, mesh replacement, geoset changes, animation,
+   amputation, and entity destruction. Snapshotting thousands of
+   vertices on every collision probe is safe as an experimental
+   reference but **not** an acceptable final hot-path cost.
+
+The code is currently **staged and testable, not active in gameplay**.
+This avoids making untested changes to native collision modes 1 or 3
+or silently relying on an undersized sector-level broad phase.
