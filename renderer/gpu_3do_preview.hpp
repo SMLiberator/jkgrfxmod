@@ -59,6 +59,8 @@ namespace jkgm {
         // JK's rdCamera light list is Thing-dependent: snapshot when the mesh
         // hook runs, NOT at present(), after another Thing changes it.
         float ambient=1.0f, attenuation=0.0f;
+        bool is_projected_decal=false; // world-space clipped type-3 SPR
+        float decal_opacity=1.0f; // separate from the native MAT's alpha
         float effective_light_mode=3.0f; // JK's effective per-Thing lighting cap
         std::array<float,3> colormap_tint{{1.0f,1.0f,1.0f}};
         unsigned num_lights=0;
