@@ -81,8 +81,10 @@ collision detour is installed. The option is independent of
 The hook is signature-locked to this patched executable, and handles
 collision flags **zero only**. It uses current animated node matrices,
 a fitted sphere around each mesh's local vertex geometry, and the
-ordinary native Thing hit bit/mesh output. For unsupported flags, models,
-or failed geometry/pose reads, it calls the original JK collision function.
+ordinary native Thing hit bit, hit distance and normal. As in MotS,
+mesh/face output pointers are not written for tree-sphere collisions.
+For unsupported flags, models, or failed geometry/pose reads, the
+original JK collision function is called.
 Modes 1 and 3 are not redirected.
 
 A bounded diagnostic sample appears as `JKGM collide=2 stage=`:
