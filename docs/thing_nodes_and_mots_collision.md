@@ -301,7 +301,7 @@ offset or change the JKGM structure layout.
 
 **Remaining gates before runtime type 2:** confirm `SithThing`,
 `rdModel3`, `rdMesh`, geoset and amputation layouts in this JKGM
-build; select the appropriate per-Thing render geoset; provide correct
+build; use only full-detail geoset 0 for collision (independent of render LOD); provide correct
 local vertices and node matrices; validate callee ABI, caller flags,
 hit-record semantics, and safe detour lifetime; then add an opt-in
 collision hook preserving original collision modes `1` and `3`.
@@ -311,8 +311,8 @@ No additional template parameter is required.
 
 `renderer/mots_native_mesh_snapshot.hpp` separates two steps:
 
-- `read_native_collision_model(reader, thing, out)` reads the selected
-  3DO geoset, mesh-local vertices, authored radii, hierarchy links,
+- `read_native_collision_model(reader, thing, out)` reads full-detail
+  3DO geoset 0, mesh-local vertices, authored radii, hierarchy links,
   node pivot offsets, and amputation flags. It never invokes animation
   code or modifies the game. Memory reads use validated pointers and
   64 KiB chunks, and failure preserves the previous output.
@@ -340,7 +340,7 @@ core field use. The renderer's existing native wrapper also verifies
 the `0x58`-byte mesh header.
 
 `tests/mots_native_mesh_snapshot.cpp` uses synthetic x86 address
-spaces to exercise correct geoset selection, parent links,
+spaces to exercise geoset-0 collision independent of rendered LOD, parent links,
 amputation, pivots, malformed pointers, failure atomicity,
 and more than 64 KiB of source vertices.
 
@@ -441,7 +441,7 @@ The initial version read and fit ALL model vertices on EVERY type-2
 probe; an in-game log showed ~600 ms JK-side frame stalls around an
 animated actor. A bounded `mots_collision_snapshot_cache` now retains only the
 per-mesh fitted local collision-only center and radius, not full
-vertex arrays. All Things sharing a selected 3DO model/geoset share
+vertex arrays. All Things sharing a full-detail 3DO model share
 the same fitted geometry. It never rewrites the model's genuine
 hierarchy pivot, vertex positions or authored mesh radius; doing so
 would affect geometry and keyframed animation. The current node matrix
@@ -449,7 +449,7 @@ transforms that *fixed* center into world space per query, while limb
 amputation flags are read live. The 24-entry model LRU prevents
 unbounded retention; models over 262144 total vertices fall back
 to native handling. In-place changes to source vertex positions are
-not automatically refitted until model/geoset replacement or a
+not automatically refitted until model replacement or a
 renderer restart; an explicit geometry-dirty invalidation hook is
 future work. The source remains opt-in until live gameplay
 validation establishes its stability, candidate coverage, and
