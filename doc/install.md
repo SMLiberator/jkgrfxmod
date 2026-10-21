@@ -184,3 +184,43 @@ attachments and do not receive this feature by themselves.
 For diagnosis, a successful hook installation logs
 `JKGM Thing-face icy flag enabled (0x80000000)`. This behavior
 has regression tests but still needs a controlled gameplay test.
+
+## Native `hitearth` sound routing (JKGM)
+
+The original surface-impact handler distinguishes `hitmetal` (SoundClass
+47) from `hithard` (46), but it never selects `hitearth` (48)
+even on Earth surfaces (`surfaceflags & 0x80000`). The signature-guarded
+DLL detour at `0x004E8EBA` preserves native damage checks, sound volume,
+metal priority and the `touched` callback, changing only the nonmetal
+sound mode when the hit surface is Earth. It is enabled on the supported
+JKGM executable automatically (no separate EXE patch).
+
+The `scrapehard`, `scrapemetal`, and `scrapeearth` soundclass modes
+(50/51/52) are present in the enumerations but have no observed
+automatic call sites in the reference engine. We have **not** added
+scraping sounds; those need sustained sliding contact and loop control.
+
+## Experimental projected SPR decals (world architecture only)
+
+To opt in to the initial GPU-submitted, geometry-clipped type-3 SPR
+projector, add:
+
+```json
+"enable_sprite_decals": true
+```
+
+This option is independent of `"enable_mesh_collision"` and
+`"use_model_cache"`. Give an SPR authored `type 3` a nonzero
+projection width/height, place it facing a **real JK world polygon**
+(not a flat 3DO), and ensure the original SPR MAT is resident.
+The first valid projector scans world faces, clips a polygon mesh to
+the 0.25-unit depth window, reuses the SPR's MAT/UVs, and sends it
+to the GPU alpha pass. Sprite opacity/roll/scale affect the result.
+The clip mesh is cached by world/Thing/pose. If projection is invalid
+or no world polygon qualifies, the ordinary native sprite is drawn.
+
+Set `"profile_renderer": true` and look for
+`SPR decal GPU stage=geometry` with positive receiver and triangle
+counts. The new GPU rendering path is **not yet validated in-game**;
+3DO receivers, animated receivers, and interactions with transparent
+surfaces need separate implementation.
