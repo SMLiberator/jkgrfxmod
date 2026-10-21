@@ -257,11 +257,33 @@ affect sphere size conservatively. The helper falls back to a
 conservative Frobenius bound for unusual sheared matrices.
 
 The model's **actual pivot and KEY animation are unchanged** by this
-collision-only recentering. A future Blender Sith exporter option
-called **Correct Pivots** may alter the hierarchy's actual joint
-geometry, but must preserve the desired rotations/positions and
-parent-child animation behavior; it is not required for this
-collision enhancement.
+collision-only recentering. The 3DO HIERARCHYDEF `pivotx/y/z` is
+an offset in the node's geometry/transform relationship, not simply
+a new location for its joint. OpenJKDF2's
+[`rdThing_AccumulateMatrices`](https://github.com/shinyquagsire23/OpenJKDF2/blob/master/src/Engine/rdThing.c)
+builds the final matrix using the node pivot and compensating parent
+pivot before combining it with the parent placement. Therefore the
+matrix returned by `rdModel3_GetMeshMatrix` **already includes pivot
+effects**. To center the collision sphere, transform its mesh-local
+center by that final animated matrix **exactly once**; do not separately
+add/subtract a node pivot or use the node's world-space matrix origin
+as a proxy for the actual joint.
+
+This distinction also applies to our existing
+`GetThingNodePos` COG getter: it currently reports the origin of the
+*animated mesh transform*, which need not coincide with a physical
+joint when nonzero pivots are involved. A separate joint-position
+getter would require an explicitly verified definition of the
+node's joint point and parent/child pivot semantics.
+
+A future Blender Sith exporter **Correct Pivots** mode can recenter
+vertex coordinates and adjust corresponding HIERARCHYDEF pivot data
+so the rendered, animated result stays unchanged. It must coordinate
+mesh vertices, hierarchy-relative transforms and children, and
+preserve the existing joint behavior: changing the pivot value
+alone would alter the appearance/animation. This feature is
+independent of sphere-tree collision; no exporter changes are needed
+for the optional collision-only fitted centers.
 
 Relevant unit tests in development CI:
 `tests/mots_collision_dispatch.cpp`,
