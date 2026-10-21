@@ -61,16 +61,19 @@ int main(){
     assert(index.load(reader,world));
     assert(index.matches(reader,world));
     assert(index.surface_count==4 && index.receivers.size()==2);
+    assert(index.acceleration.node_count()>0);
     decal_projector p{};
     const int after_load=reads;
     auto result=project_cached_decal_world(index,p);
     assert(reads==after_load); // Cached queries do not read SithWorld.
     assert(result.valid_world && result.receivers==2);
+    assert(result.broadphase_candidates==2);
     assert(result.triangles.size()==4);
     p.origin[0]=10;
     auto far=project_cached_decal_world(index,p);
     assert(reads==after_load);
     assert(far.valid_world && far.receivers==0);
+    assert(far.broadphase_candidates==0);
     assert(far.triangles.empty());
     // In place vertex source edits no longer trigger silent repeated reads.
     vec(vertices,{{100,100,100}});
