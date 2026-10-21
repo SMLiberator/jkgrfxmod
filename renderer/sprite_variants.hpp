@@ -3,6 +3,7 @@
 // selectable variants of the FIRST line; existing single-line SPRs are
 // unchanged. The engine tokenizer supplies already-separated fields.
 #include <array>
+#include <cstddef>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -10,6 +11,7 @@
 #include <limits>
 #include <random>
 #include <string>
+#include <utility>
 
 namespace jkgm {
 struct sprite_variant_spec {
