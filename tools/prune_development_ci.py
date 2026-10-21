@@ -81,6 +81,8 @@ def main():
     parser.add_argument("--keep-failures", type=int, default=5)
     parser.add_argument("--max-deletes", type=int, default=100)
     parser.add_argument("--execute", action="store_true", help="delete, not just list")
+    parser.add_argument("--expected-head-sha", default="",
+                        help="prune only when this CI run still builds branch HEAD")
     args = parser.parse_args()
     if not args.repo or "/" not in args.repo:
         parser.error("A GitHub owner/repo is required")
@@ -89,6 +91,18 @@ def main():
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if not token:
         parser.error("GH_TOKEN/GITHUB_TOKEN is required")
+
+    # Rapid development pushes can overlap CI runs. Only the newest one
+    # needs to prune. This avoids overlapping bulk DELETE requests and
+    # lets superseded CI builds finish green rather than being cancelled.
+    if args.expected_head_sha:
+        branch = request(
+            token, "GET",
+            f"/repos/{args.repo}/branches/{urllib.parse.quote(args.branch, safe='')}"
+        )
+        if branch["commit"]["sha"] != args.expected_head_sha:
+            print("Prune skipped: superseded by a newer development push.")
+            return
 
     runs = list_ci_runs(token, args.repo, args.branch)
     candidates = selection(runs, args.keep_latest, args.keep_failures)
