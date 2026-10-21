@@ -118,6 +118,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_variants.cpp /Fe:sprite_variants_test.exe
         sprite_variants_test.exe
+    - name: Static collide-3 3DO decal receiver tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_decal_static_mesh.cpp /Fe:sprite_decal_static_mesh_test.exe
+        sprite_decal_static_mesh_test.exe
     - name: SPR decal world BVH spatial query tests
       shell: cmd
       run: |
