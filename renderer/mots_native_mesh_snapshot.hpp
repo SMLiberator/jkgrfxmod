@@ -118,7 +118,7 @@ namespace jkgm {
         }
     }
 
-    // Snapshots the *selected* geoset and all hierarchy nodes, including
+    // Snapshots collision geometry from FULL DETAIL geoset 0 and all hierarchy nodes, including
     // empty parent nodes, so amputated branches remain correctly linked.
     // A failed read preserves 'out'. This is suitable for a future cached
     // model-geometry source, but does not install any live collision hook.
@@ -138,20 +138,19 @@ namespace jkgm {
         uint32_t model_addr=0;
         if(!read_u32(read,validated.rd_thing+4,model_addr))return false;
         uintptr_t const model=model_addr;
-        uint32_t geos=0,preferred=0,selection=0,count=0,hierarchy_addr=0;
+        uint32_t geos=0,count=0,hierarchy_addr=0;
         if(!read_u32(read,model+model_num_geos,geos) ||
-           !read_u32(read,model+model_default_geoset,preferred) ||
            !read_u32(read,model+model_num_nodes,count) ||
            !read_u32(read,model+model_hierarchy,hierarchy_addr) ||
-           !read_u32(read,validated.rd_thing+rd_geoset_select,selection) ||
            geos==0 || geos>4 || count==0 || count>max_nodes ||
            !thing_node_valid_address(hierarchy_addr,0x70))
             return false;
-        if(selection==0xffffffffU) selection=preferred;
-        if(selection>=geos)return false;
-
+        // In JK the geosets above 0 are lower-detail *rendering* LODs.
+        // Never let rdThing.geosetSelect or rdModel3.geosetSelect
+        // alter gameplay collision geometry.
+        constexpr uint32_t collision_geoset=0;
         uint32_t mesh_count=0,mesh_addr=0,amputations=0;
-        uintptr_t const geo=model+model_geosets+selection*geoset_stride;
+        uintptr_t const geo=model+model_geosets;
         if(!read_u32(read,geo,mesh_count) ||
            !read_u32(read,geo+4,mesh_addr) ||
            !read_u32(read,validated.rd_thing+rd_amputations,amputations) ||
@@ -161,7 +160,7 @@ namespace jkgm {
 
         mots_native_model_snapshot snapshot{};
         snapshot.model=model;
-        snapshot.geoset=selection;
+        snapshot.geoset=collision_geoset;
         snapshot.nodes.reserve(count);
         uint32_t total_vertices=0;
         for(uint32_t i=0;i<count;++i) {
