@@ -50,6 +50,16 @@ namespace jkgm {
         double const dir2=double(direction[0])*direction[0]+
                           double(direction[1])*direction[1]+
                           double(direction[2])*direction[2];
+        if(length==0.0f) {
+            double dist2=0.0;
+            for(int i=0;i<3;++i) {
+                double const d=double(center[i])-start[i];
+                dist2+=d*d;
+            }
+            double const reach=double(bound_radius)+moving_radius;
+            return std::isfinite(dist2) &&
+                   dist2>reach*reach*(1.0+1.0e-5)+1.0e-5;
+        }
         if(std::fabs(dir2-1.0)>0.001)return false;
         double const dx=double(center[0])-start[0];
         double const dy=double(center[1])-start[1];
@@ -93,7 +103,8 @@ namespace jkgm {
             return mots_query_status::unavailable;
 
         // The narrow phase uses a unit vector even for an overlap query.
-        if(std::fabs(mots_dot(direction,direction)-1.0f)>0.001f)
+        if(max_distance>0.0f &&
+           std::fabs(mots_dot(direction,direction)-1.0f)>0.001f)
             return mots_query_status::unavailable;
 
         std::vector<mots_tree_node> nodes;
