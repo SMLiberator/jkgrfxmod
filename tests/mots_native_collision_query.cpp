@@ -74,6 +74,17 @@ int main()
         {{0,0,0}},dir,20,0.5f,{{10,0,0}},
         std::numeric_limits<float>::quiet_NaN()));
 
+    // Stationary overlap checks do not require a unit movement vector.
+    // These are used by JK when the query length is exactly zero.
+    assert(mots_probe_collision_tree(
+        model,pose,true,thingpos,{{10.5f,0,0}},{{0,0,0}},
+        0.0f,0.0f,hit)==mots_query_status::hit);
+    assert(hit.node==1 && near(hit.distance,0.0f));
+    assert(near(hit.normal[0],-1.0f));
+    assert(mots_probe_collision_tree(
+        model,pose,true,thingpos,{{0,0,0}},{{0,0,0}},
+        0.0f,0.0f,hit)==mots_query_status::miss);
+
     // Amputating node 1 must remove its sphere while retaining node 2.
     model.nodes[1].amputated=true;
     assert(mots_probe_collision_tree(
