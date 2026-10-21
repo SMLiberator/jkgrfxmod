@@ -60,3 +60,40 @@ See [config.md](config.md) for all current settings.
 - The current standalone bootstrap has been tested with the specified user's
   executable, not generalized to all games. Native Direct3D rendering may
   independently fail on particular Wine/driver configurations.
+
+
+## Experimental per-mesh collision (JKGM only)
+
+The current `development` build includes a first **opt-in**, untested-in-game
+`collide=2` sphere-tree hook. To try it only in a disposable test level,
+change `jkgm.json` and restart:
+
+```json
+"enable_mesh_collision": true,
+"profile_renderer": true,
+"log_path": "jkgm-collision.log"
+```
+
+With the default `"enable_mesh_collision": false`, no native Thing
+collision detour is installed. The option is independent of
+`"use_model_cache"`: GPU model caching is not required.
+
+The hook is signature-locked to this patched executable, and handles
+collision flags **zero only**. It uses current animated node matrices,
+a fitted sphere around each mesh's local vertex geometry, and the
+ordinary native Thing hit bit/mesh output. For unsupported flags, models,
+or failed geometry/pose reads, it calls the original JK collision function.
+Modes 1 and 3 are not redirected.
+
+A bounded diagnostic sample appears as `JKGM collide=2 stage=`:
+`hit`, `miss`, `invalid_3do_snapshot`,
+`invalid_pose_or_query`, or `invalid_hit_pointer`. A missing hook
+signature also produces a warning when this option is on.
+
+This initial implementation **rebuilds its mesh snapshot per relevant
+collision query**. Avoid large, busy scenes until geometry caching and
+invalidation are implemented; performance and actual JKGM behavior
+are not yet verified. There is no new `treeSize` field. Upstream
+sector candidate filtering and unusual collision flags still need
+additional live testing. Back up files and disable the switch to
+restore original collision behavior.
