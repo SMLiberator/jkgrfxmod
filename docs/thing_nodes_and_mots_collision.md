@@ -437,10 +437,16 @@ produce the **Thing hit bit, hit distance and normal** but leave
 `ppHitMesh` and `ppHitFace` unchanged; only polygon collision
 populates them. A confirmed tree miss returns zero.
 
-The first version reads and fits source vertices for every relevant
-type-2 query, without a persistent geometry cache. This is a
-correctness-oriented, experimental test path; it can be expensive in
-large active scenes. The source remains opt-in until live gameplay
+The initial version read and fit ALL model vertices on EVERY type-2
+probe; an in-game log showed ~600 ms JK-side frame stalls around an
+animated actor. A bounded `mots_collision_snapshot_cache` now retains
+the fitted hierarchy, refreshes instantaneously on Thing/model/geoset
+identity changes, reads limb amputation flags live and refits in-place
+vertex changes at most 1 second after mutation. Current animation
+matrices still refresh per query. The cache's 24-entry LRU prevents
+unbounded model retention; models over 262144 total vertices fall back
+to native handling. Geometry edits may be stale for <=1s: a follow-up
+requires more precise geometry invalidation. The source remains opt-in until live gameplay
 validation establishes its stability, candidate coverage, and
 collision response. See `doc/install.md` for the test switch,
 fallback behavior and bounded diagnostic logs.
