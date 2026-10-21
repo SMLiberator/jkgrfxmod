@@ -116,9 +116,15 @@ int main()
 
     // The MOVING Thing owns the tree: ray is reversed from the checked
     // Thing's position; the engine hit normal is negated afterwards.
-    // Hide the second mesh for this particular assertion: otherwise the
-    // checked Thing starts INSIDE that mesh sphere and its distance-zero
-    // hit correctly wins over the first mesh.
+    // The checked Thing initially overlaps the SECOND mesh's sphere;
+    // the nearest hit must therefore be a distance-zero node-2 hit.
+    assert(mots_probe_type2_collision(
+        &tree,sphere,&model,nullptr,pose,pose,thingpos,{{20,0,0}},
+        origin,dir,25,0.5f,0,true,true,hit)
+        ==mots_query_status::hit);
+    assert(hit.reverse_cast && hit.node==2 && near(hit.distance,0.0f));
+    // Hide that second mesh to independently verify the farther mesh's
+    // impact distance and the reversed collision normal.
     model.nodes[2].amputated=true;
     assert(mots_probe_type2_collision(
         &tree,sphere,&model,nullptr,pose,pose,thingpos,{{20,0,0}},
