@@ -9,7 +9,6 @@ int main() {
     mots_native_model_snapshot m{};
     m.nodes.resize(2);
     m.nodes[1].mesh_index=3;
-    m.nodes[1].native_mesh_address=0x10120000U;
     mots_collision_query_hit hit{};
     hit.node=1;
     hit.distance=2.25f;
@@ -28,6 +27,5 @@ int main() {
     assert(!mots_prepare_engine_type2_hit(m,hit,out));
     hit.normal={{1,0,0}};
     // Native MotS does not fill mesh/face outputs for sphere-tree hits.
-    m.nodes[1].native_mesh_address=0;
     assert(mots_prepare_engine_type2_hit(m,hit,out));
 }
