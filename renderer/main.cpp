@@ -11,6 +11,7 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_modelview.hpp"
 #include "thing_node_native.hpp"
+#include "thing_attachment_normal.hpp"
 #include "mots_native_collision_bridge.hpp"
 #include "mots_collision_snapshot_cache.hpp"
 #include "sprite_orientation.hpp"
@@ -2439,6 +2440,25 @@ namespace {
                jkgm::get_thing_node_pose(matrix,pose);
     }
 
+    // Returns the REAL attached face normal, not the transient sphere-
+    // collision response normal. World/Thing-face attachments are already
+    // tracked by JK even when experimental collide=2 is disabled.
+    void __cdecl cog_get_thing_attach_normal(void *ctx)
+    {
+        void *thing=cog_pop_thing(ctx);
+        jkgm::thing_node_vector normal{};
+        auto const read=[](uintptr_t address,void *dst,size_t length) {
+            if(!jkgm::thing_node_valid_address(address,length) ||
+               !gpu_span_readable(reinterpret_cast<void const *>(address),length))
+                return false;
+            std::memcpy(dst,reinterpret_cast<void const *>(address),length);
+            return true;
+        };
+        if(thing)jkgm::read_thing_attachment_normal(
+            read,reinterpret_cast<uintptr_t>(thing),normal);
+        cog_push_vector(ctx,normal.data());
+    }
+
     enum class cog_thing_node_channel {position,right,look,up};
     void get_cog_thing_node_vector(void *ctx,cog_thing_node_channel channel)
     {
@@ -3066,6 +3086,7 @@ namespace {
         cog_verb_entry{"aigetmovepos", cog_ai_get_move_target_pos},
         cog_verb_entry{"aigetmovetargetpos", cog_ai_get_move_target_pos},
         cog_verb_entry{"aigetlookdir", cog_ai_get_look_dir},
+        cog_verb_entry{"getthingattachnormal", cog_get_thing_attach_normal},
         cog_verb_entry{"getthingnodepos", cog_get_thing_node_pos},
         cog_verb_entry{"getthingnodervec", cog_get_thing_node_rvec},
         cog_verb_entry{"getthingnodelvec", cog_get_thing_node_lvec},
