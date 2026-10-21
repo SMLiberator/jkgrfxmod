@@ -210,12 +210,21 @@ projector, add:
 ```
 
 This option is independent of `"enable_mesh_collision"` and
-`"use_model_cache"`. Give an SPR authored `type 3` a nonzero
-projection width/height, place it facing a **real JK world polygon**
-(not a flat 3DO), and ensure the original SPR MAT is resident.
-The first valid projector scans world faces, clips a polygon mesh to
-the 0.25-unit depth window, reuses the SPR's MAT/UVs, and sends it
-to the GPU alpha pass. Sprite opacity/roll/scale affect the result.
+`"use_model_cache"`. Give an SPR authored `type 3` nonzero
+width and height and place it against **actual JK world architecture**
+(not a flat 3DO). The sprite defines a box centered on its Thing position,
+with width/height from the SPR and fixed 0.25-unit depth. Its **Up
+vector** points out of the surface; projection aims along **-Up**,
+using Right/Look for the image plane. These are the same axes used
+for JK's attached Things. The native sprite MAT/UVs enter the
+GPU alpha pass.
+
+Static receiver geometry is read/validated once per world and cached
+in native-independent polygon arrays. Subsequent projection queries
+reject distant surfaces by inexpensive AABBs and clip only local
+candidates. Attached decals tolerate tiny physics rotation/position
+jitter and keep the same projected mesh instead of rescanning the
+entire world every frame. Sprite opacity/roll/scale affect the result.
 The clip mesh is cached by world/Thing/pose/attachment. For
 projectile blood sprites attached to a surface, JKGM automatically
 reads the **attached face normal** (via the same native data used by
