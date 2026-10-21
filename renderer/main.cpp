@@ -18,6 +18,7 @@
 #include "mots_collision_snapshot_cache.hpp"
 #include "sprite_orientation.hpp"
 #include "sprite_type_registry.hpp"
+#include "sprite_variants.hpp"
 #include "sprite_instance_info.hpp"
 #include "sprite_quad_transform.hpp"
 #include "sprite_decal_world.hpp"
@@ -49,6 +50,8 @@
 #include <cstddef>
 #include <string>
 #include <sstream>
+#include <cstdio>
+#include <random>
 #include <detours/detours.h>
 
 static std::unique_ptr<jkgm::renderer> the_renderer;
@@ -1017,6 +1020,204 @@ bool jkgm::native_3do_available()
 namespace {
     using native_sprite_fn = int (__cdecl *)(void *,void *);
     using native_sprite_mid_fn = void (__cdecl *)();
+    // JK23: sithSprite_Load reads ONE 11-field line. Extended SPRs keep
+    // that native first resource, with additional variants loaded once and
+    // selected when sithThing_SetThingBasedOn creates each Thing.
+    constexpr uintptr_t sprite_load_addr=0x004F2620U;
+    constexpr uintptr_t sprite_free_world_addr=0x004F25A0U;
+    constexpr uintptr_t sprite_clone_thing_addr=0x004CDB70U;
+    constexpr uintptr_t sprite_world_loading_ptr=0x00833A18U;
+    constexpr uintptr_t sprite_config_arg_count=0x008607E0U;
+    constexpr uintptr_t sprite_config_arg_first=0x008607E8U;
+    constexpr uint8_t sprite_load_bytes[]={
+        0xa1,0xd8,0x2f,0x85,0x00,0x81,0xec,0xc4,0x00,0x00,0x00
+    };
+    constexpr uint8_t sprite_free_world_bytes[]={
+        0x56,0x8b,0x74,0x24,0x08,0x8b,0x46,0x74
+    };
+    constexpr uint8_t sprite_clone_thing_bytes[]={
+        0x83,0xec,0x0c,0x53,0x8b,0x5c,0x24,0x14
+    };
+    constexpr size_t native_sprite_entry_size=0xACU;
+    using sprite_load_fn=void *(__cdecl *)(char const *);
+    using sprite_free_world_fn=void (__cdecl *)(void *);
+    using sprite_clone_thing_fn=void *(__cdecl *)(void *,void const *);
+    using sprite_conf_open_fn=int (__cdecl *)(char const *);
+    using sprite_conf_read_fn=int (__cdecl *)();
+    using sprite_conf_close_fn=void (__cdecl *)();
+    sprite_load_fn RealSithSpriteLoad=
+        reinterpret_cast<sprite_load_fn>(sprite_load_addr);
+    sprite_free_world_fn RealSithSpriteFreeWorld=
+        reinterpret_cast<sprite_free_world_fn>(sprite_free_world_addr);
+    sprite_clone_thing_fn RealSithThingClone=
+        reinterpret_cast<sprite_clone_thing_fn>(sprite_clone_thing_addr);
+    sprite_conf_open_fn SpriteConfigOpen=
+        reinterpret_cast<sprite_conf_open_fn>(0x00431210U);
+    sprite_conf_read_fn SpriteConfigRead=
+        reinterpret_cast<sprite_conf_read_fn>(0x00431880U);
+    sprite_conf_close_fn SpriteConfigClose=
+        reinterpret_cast<sprite_conf_close_fn>(0x004315D0U);
+
+    struct sprite_variant_group {
+        void *world=nullptr;
+        std::vector<std::unique_ptr<std::array<uint8_t,native_sprite_entry_size>>> owned;
+        std::vector<void *> choices; // first = the normal world-owned sprite
+    };
+    std::unordered_map<void *,sprite_variant_group> sprite_variant_groups;
+    std::unordered_map<void *,void *> sprite_variant_roots;
+    std::mt19937 sprite_variant_rng{
+        static_cast<uint32_t>(GetTickCount()^GetCurrentProcessId()^0xC053F123U)
+    };
+
+    bool read_sprite_variant_fields(jkgm::sprite_variant_spec &out)
+    {
+        if(!gpu_span_readable(reinterpret_cast<void const *>(
+                sprite_config_arg_count),4))return false;
+        uint32_t count=0;
+        std::memcpy(&count,reinterpret_cast<void const *>(
+                    sprite_config_arg_count),4);
+        if(count<11 || count>64)return false;
+        std::array<std::string,11> fields;
+        for(size_t i=0;i<fields.size();++i) {
+            uint32_t address=0;
+            auto const ptr=sprite_config_arg_first+i*8U;
+            if(!gpu_span_readable(reinterpret_cast<void const *>(ptr),4))
+                return false;
+            std::memcpy(&address,reinterpret_cast<void const *>(ptr),4);
+            if(!gpu_span_readable(reinterpret_cast<void const *>(
+                    uintptr_t(address)),128))
+                return false;
+            auto const *value=reinterpret_cast<char const *>(uintptr_t(address));
+            size_t len=0;
+            while(len<128 && value[len])++len;
+            if(len==128)return false;
+            fields[i].assign(value,len);
+        }
+        return jkgm::parse_sprite_variant(fields,out);
+    }
+
+    void release_sprite_variants(void *world)
+    {
+        for(auto it=sprite_variant_groups.begin();
+            it!=sprite_variant_groups.end();) {
+            if(world && it->second.world!=world) {++it;continue;}
+            for(size_t n=1;n<it->second.choices.size();++n) {
+                void *variant=it->second.choices[n];
+                sprite_variant_roots.erase(variant);
+                sprite_types.forget(variant);
+                RealNativeSpriteFreeEntry(variant);
+            }
+            sprite_variant_roots.erase(it->first);
+            it=sprite_variant_groups.erase(it);
+        }
+    }
+
+    void *__cdecl HookedSithSpriteLoad(char const *name)
+    {
+        void *base=RealSithSpriteLoad(name);
+        if(!base || !name || sprite_variant_groups.count(base) ||
+           !gpu_span_readable(base,native_sprite_entry_size))
+            return base;
+        // Missing names may resolve to default.spr. Do not manufacture
+        // variants for an unrelated fallback resource.
+        char const *loaded=static_cast<char const *>(base);
+        if(_stricmp(loaded,name)!=0)return base;
+        uint32_t world_address=0;
+        if(!gpu_span_readable(reinterpret_cast<void const *>(
+               sprite_world_loading_ptr),4))return base;
+        std::memcpy(&world_address,reinterpret_cast<void const *>(
+                    sprite_world_loading_ptr),4);
+        if(!jkgm::decal_native_address_ok(world_address))return base;
+
+        char path[160]{};
+        int const n=std::snprintf(path,sizeof(path),"misc\\spr\\%s",name);
+        if(n<=0 || static_cast<size_t>(n)>=sizeof(path) ||
+           !SpriteConfigOpen(path))return base;
+        std::vector<jkgm::sprite_variant_spec> specs;
+        specs.reserve(8);
+        constexpr size_t max_entries=64;
+        bool malformed=false;
+        while(SpriteConfigRead()) {
+            jkgm::sprite_variant_spec entry{};
+            if(!read_sprite_variant_fields(entry)) {
+                malformed=true;
+                break;
+            }
+            specs.emplace_back(std::move(entry));
+            if(specs.size()>=max_entries)break;
+        }
+        SpriteConfigClose();
+        if(malformed) {
+            if(the_config && the_config->profile_renderer)
+                LOG_WARNING("SPR multi-entry rejected invalid line: ",name);
+            return base;
+        }
+        if(specs.size()<2)return base;
+
+        sprite_variant_group group{};
+        group.world=reinterpret_cast<void *>(uintptr_t(world_address));
+        group.choices.push_back(base);
+        // Native rdSprite_NewEntry loads shared MATs and owns its own
+        // UV/face arrays. Every extra resource is created exactly once.
+        for(size_t i=1;i<specs.size();++i) {
+            auto entry=std::make_unique<
+                std::array<uint8_t,native_sprite_entry_size>>();
+            entry->fill(0);
+            auto const &v=specs[i];
+            float const offset[3]{v.offset[0],v.offset[1],v.offset[2]};
+            if(!RealNativeSpriteNewEntry(entry->data(),name,int(v.type),
+                  v.material.c_str(),v.width,v.height,v.geometry,
+                  v.lighting,v.texture,v.extra_light,offset)) {
+                // Failed partial allocations must also be released.
+                sprite_types.forget(entry->data());
+                RealNativeSpriteFreeEntry(entry->data());
+                continue;
+            }
+            group.choices.push_back(entry->data());
+            group.owned.emplace_back(std::move(entry));
+        }
+        if(group.choices.size()<2)return base;
+        sprite_variant_roots[base]=base;
+        for(size_t i=1;i<group.choices.size();++i)
+            sprite_variant_roots[group.choices[i]]=base;
+        if(the_config && the_config->profile_renderer)
+            LOG_INFO("SPR variants name=",name,
+                     " entries=",group.choices.size(),
+                     " shared_resources=1");
+        sprite_variant_groups.emplace(base,std::move(group));
+        return base;
+    }
+
+    void __cdecl HookedSithSpriteFreeWorld(void *world)
+    {
+        RealSithSpriteFreeWorld(world);
+        release_sprite_variants(world);
+    }
+
+    void *__cdecl HookedSithThingClone(void *thing,void const *source)
+    {
+        void *result=RealSithThingClone(thing,source);
+        if(!thing || !source || !gpu_span_readable(thing,0xCCU))
+            return result;
+        auto *rd=static_cast<uint8_t *>(thing)+0xC4U;
+        uint32_t kind=0,source_sprite=0;
+        std::memcpy(&kind,rd,4);
+        if(kind!=4U)return result; // RD_THING_SPRITE3
+        std::memcpy(&source_sprite,rd+4,4);
+        auto const root=sprite_variant_roots.find(
+            reinterpret_cast<void *>(uintptr_t(source_sprite)));
+        if(root==sprite_variant_roots.end())return result;
+        auto const group=sprite_variant_groups.find(root->second);
+        if(group==sprite_variant_groups.end() ||
+           group->second.choices.size()<2)return result;
+        size_t const choice=jkgm::choose_sprite_variant(
+            group->second.choices.size(),sprite_variant_rng);
+        uint32_t const selected=static_cast<uint32_t>(
+            reinterpret_cast<uintptr_t>(group->second.choices[choice]));
+        std::memcpy(rd+4,&selected,4);
+        return result;
+    }
+
     constexpr uintptr_t sprite_draw_addr=0x0046CF40U;
     constexpr uintptr_t sprite_preclip_addr=0x0046D182U;
     // JK23: rdCache_AddProcFace records a completed proc-face at
@@ -1116,6 +1317,7 @@ namespace {
     native_sprite_mid_fn RealSpritePreclip=
         reinterpret_cast<native_sprite_mid_fn>(sprite_preclip_addr);
     bool native_sprite_hook_active=false;
+    bool sprite_variant_hooks_active=false;
     bool sprite_frustum_hook_active=false;
     bool sprite_alpha_hook_active=false;
     using sprite_hw_upload_fn=int(__cdecl *)(void const *,uint32_t);
