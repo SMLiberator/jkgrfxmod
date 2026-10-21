@@ -179,37 +179,49 @@ namespace jkgm {
             thing_node_vector center{};
             float mesh_radius=0.0f;
             if(!mots_tree_world_sphere(n,center,mesh_radius))continue;
-            float const combined=mesh_radius+moving_radius;
-            if(!std::isfinite(combined) || combined<=0)continue;
-            thing_node_vector diff{{
-                origin[0]-center[0],origin[1]-center[1],
-                origin[2]-center[2]}};
-            float const projected=mots_dot(diff,unit_direction);
-            float const constant=mots_dot(diff,diff)-combined*combined;
-            float const discriminant=projected*projected-constant;
-            // The native zero-length test only reports strict overlap;
-            // starting precisely on the sphere boundary is not enough.
-            if(max_distance==0.0f && constant>=0.0f)continue;
-            // The JK/MotS sphere test rejects exact tangency (distance
-            // from center to ray >= radius), including zero-length casts.
-            if(discriminant<=0)continue;
-            float const distance=constant<0
-                ?0.0f : -projected-std::sqrt(discriminant);
-            if(distance<0 || distance>limit)continue;
-            thing_node_vector norm{{
-                diff[0]+distance*unit_direction[0],
-                diff[1]+distance*unit_direction[1],
-                diff[2]+distance*unit_direction[2]}};
-            float const squared=mots_dot(norm,norm);
-            if(squared>1.e-10f) {
-                float const inv=1.0f/std::sqrt(squared);
-                for(float &v:norm)v*=inv;
+            // A double-precision narrow phase prevents finite x86 float
+            // positions near 1e20 from overflowing the quadratic into
+            // INF/NaN, which could otherwise publish an invalid hit.
+            double const combined=double(mesh_radius)+moving_radius;
+            if(!std::isfinite(combined) || combined<=0.0)continue;
+            double const diff[3]{
+                double(origin[0])-center[0],
+                double(origin[1])-center[1],
+                double(origin[2])-center[2]};
+            double projected=0.0, squared_distance=0.0;
+            for(int k=0;k<3;++k) {
+                projected+=diff[k]*unit_direction[k];
+                squared_distance+=diff[k]*diff[k];
+            }
+            double const constant=squared_distance-combined*combined;
+            double const discriminant=projected*projected-constant;
+            // JK/MotS checks strict overlap for stationary probes and
+            // rejects exact tangency along moving probes.
+            if(max_distance==0.0f && constant>=0.0)continue;
+            if(!(discriminant>0.0) || !std::isfinite(discriminant))
+                continue;
+            double const distance=constant<0.0
+                ?0.0 : -projected-std::sqrt(discriminant);
+            if(!std::isfinite(distance) || distance<0.0 ||
+               distance>double(limit))continue;
+            double norm3[3]{};
+            double norm_length_sq=0.0;
+            for(int k=0;k<3;++k) {
+                norm3[k]=diff[k]+distance*unit_direction[k];
+                norm_length_sq+=norm3[k]*norm3[k];
+            }
+            thing_node_vector norm{};
+            if(std::isfinite(norm_length_sq) && norm_length_sq>1.e-20) {
+                double const inv=1.0/std::sqrt(norm_length_sq);
+                for(int k=0;k<3;++k)norm[k]=float(norm3[k]*inv);
             } else {
                 norm={{-unit_direction[0],-unit_direction[1],
                        -unit_direction[2]}};
             }
-            nearest={true,uint32_t(i),distance,center,norm};
-            limit=distance;
+            float const published_distance=float(distance);
+            if(!std::isfinite(published_distance))continue;
+            nearest={true,uint32_t(i),published_distance,center,norm};
+            limit=published_distance;
         }
         if(!nearest.hit)return false;
         result=nearest;
