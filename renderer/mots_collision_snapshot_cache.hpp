@@ -36,7 +36,7 @@ namespace jkgm {
         if(!read || !thing_node_valid_address(thing,0xe8))return false;
         mots_collision_model_identity k{};
         k.thing=thing;
-        uint32_t model=0,selected=0,preferred=0;
+        uint32_t model=0,selected=0,preferred=0,amputation_ptr=0;
         if(!read_u32(read,thing+0x0c,k.kind) ||
            k.kind==0 || k.kind>15 ||
            !read_u32(read,thing+0x74,k.thing_signature) ||
@@ -45,10 +45,9 @@ namespace jkgm {
            !read_u32(read,thing+0xc8,model) ||
            !thing_node_valid_address(model,0x60) ||
            !read_u32(read,thing+0xc4+rd_geoset_select,selected) ||
-           !read_u32(read,thing+0xc4+rd_amputations,model /* temporary */))
+           !read_u32(read,thing+0xc4+rd_amputations,amputation_ptr))
             return false;
-        k.amputations=model;
-        if(!read_u32(read,thing+0xc8,model))return false;
+        k.amputations=amputation_ptr;
         k.model=model;
         uint32_t hierarchy=0,meshes=0;
         if(!read_u32(read,model+model_num_geos,k.geos) ||
@@ -131,7 +130,7 @@ namespace jkgm {
             // is per-Thing and can change between consecutive raycasts.
             // Bulk-read all flags once; a failed read is NOT a collision miss.
             if(identity.amputations) {
-                std::array<uint32_t,max_nodes> flags{};
+                std::array<uint32_t,mots_native_layout::max_nodes> flags{};
                 size_t const bytes=size_t(identity.node_count)*4;
                 if(!thing_node_valid_address(identity.amputations,bytes) ||
                    !read(identity.amputations,flags.data(),bytes)) {
