@@ -14,9 +14,11 @@ namespace jkgm {
     constexpr std::array<uint8_t,8> native_thingface_ice_bytes{{
         0x8b,0x8e,0xd0,0x01,0x00,0x00,0x8b,0xd1
     }};
-    // These have no discovered reads in reference OpenJKDF2 code.
-    // They still require verification against customized third-party EXEs.
-    constexpr uint32_t thingflag_icy=0x00010000U;
+    // 0x10000 is NOT free: historical JK specs mark it as 'not in SP'.
+    // 0x20 has no confirmed SithThing.flags reader in the audited
+    // reference engine or patched JKGM; treat this as PROVISIONAL.
+    // 0x80000000 suppresses rendering in the OpenJKDF2 reference.
+    constexpr uint32_t thingflag_icy=0x00000020U;
     constexpr uint32_t thingflag_very_icy=0x40000000U;
     constexpr uint32_t attachment_to_world_face=0x1U;
     constexpr uint32_t attachment_to_thing_face=0x2U;
