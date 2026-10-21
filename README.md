@@ -1182,10 +1182,35 @@ pixel-center UV convention. It builds bounds, surface normals and fully-lit
 base colors; no new texture format is needed. Its intended draw path must
 preserve **per-Thing opacity** independently of ordinary 3DO face alpha.
 
-**Not yet visible in-game:** geometry caching and actual OpenGL
-submission remain to be connected, followed by rigid and animated 3DO
-receivers. A `type 3` SPR should not yet be used expecting it to
-conform to walls.
+**First GPU submission path (experimental, off by default):** set
+
+```json
+"enable_sprite_decals": true
+```
+
+in `jkgm.json` and load a type-`3` SPR placed near an **actual JK
+world surface** (not a 3DO-only wall). Each native Sprite Thing now
+builds/clips its projected geometry, shares the SPR's original MAT,
+and queues it into the GPU **alpha pass** with its independent
+`SetSpriteInfo` opacity. Its own projector and clipped world geometry
+are cached by world/Thing/pose and updated when scale/roll/orientation
+changes. The renderer offsets clipped triangles by 0.001 JK units
+and depth-tests against the scene. GPU instance resources expire
+after they are no longer used.
+
+If the source MAT is not yet resident, the projector is invalid, or
+no acceptable level polygons lie in the projection volume, native
+SPR rendering remains as a fallback; this is not proof that
+projection was applied. With `profile_renderer` enabled, the new
+`SPR decal GPU stage=geometry` line reports actual submitted
+projectors and triangle counts. The earlier diagnostic-only
+`SPR decal probe` remains for comparison.
+
+**Not yet verified in-game:** GPU submission, opacity and UV orientation
+must still be compared to actual JK world walls. The current receiver
+scanner supports **level architecture only**. Rigid 3DOs, animated
+3DOs, and receiver sector restrictions are future work. This mode
+does not need `use_model_cache` or `enable_mesh_collision`.
 
 ## Center-occluded SPR flares (experimental)
 
