@@ -62,6 +62,35 @@ See [config.md](config.md) for all current settings.
   independently fail on particular Wine/driver configurations.
 
 
+## Multi-entry SPR variants (experimental)
+
+A `.spr` can now contain more than one ordinary 11-field SPR definition.
+Each line has the **same format** as a standalone SPR; no new asset type or
+keyword is needed:
+
+```text
+spark01.mat 0 0.2 0.2 4 0 1 0 0 0 0
+spark02.mat 0 0.25 0.3 4 0 1 0 0 0 0
+spark03.mat 3 0.4 0.5 4 0 1 0 0 0 0
+```
+
+JK still loads the first entry as its ordinary world-owned SPR. JkGRfxMod
+reads up to 64 definitions and creates extra **shared** SPR resources.
+When a Thing is instantiated from a template (including COG-created Things),
+it picks one loaded entry uniformly at random. The selected resource is then
+held by that Thing; it does **not** switch entry every frame. All eleven
+fields can differ across entries, including MAT, sprite type, dimensions,
+geometry/light/texture modes, extra light and XYZ offset.
+
+Single-entry SPR files behave as before. Invalid extended definitions fall
+back to the normal first-line resource. The alternate resources are freed
+when the owning world unloads. This is a native-executable-specific,
+signature-checked DLL extension, so no further EXE patch is required.
+
+**Not yet in-game tested.** In particular, saved-game serialization and
+multiplayer synchronization of per-Thing variant pointers are not verified;
+use disposable levels and saves while testing.
+
 ## Experimental per-mesh collision (JKGM only)
 
 The current `development` build includes a first **opt-in**, untested-in-game
