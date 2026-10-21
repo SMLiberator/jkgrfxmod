@@ -12,15 +12,16 @@ int main() {
     // Projectile's ordinary image plane is upright (Right X / Up Z).
     // When attached to a horizontal floor, it must project into -Z.
     assert(sprite_decal_attachment_axes(original,{{0,0,1}},aligned));
-    assert(near(aligned.look[0],0) && near(aligned.look[1],0) &&
-           near(aligned.look[2],-1));
-    assert(near(aligned.right[0],1) && near(aligned.up[1],1));
+    assert(near(aligned.up[0],0) && near(aligned.up[1],0) &&
+           near(aligned.up[2],1));
+    assert(near(aligned.right[0],1) && near(aligned.look[1],1));
 
     decal_projector projector{};
     assert(make_sprite_decal_projector(
         aligned,{{0,0,0}},{{0,0,0}},1,1,1,1,0,projector));
-    sprite_decal_center_around_attached_face(projector,{{0,0,1}});
+    // All volume projectors are now centered on the sprite Thing.
     assert(near(projector.origin[2],0.125f));
+    assert(near(projector.look[2],-1.0f));
     assert(near(projector.depth,0.25f));
 
     // Native Thing points exactly ON the floor. It still clips a valid
@@ -40,8 +41,9 @@ int main() {
     vertical.up={{0,1,0}};
     assert(sprite_decal_attachment_axes(vertical,{{0,0,1}},aligned));
     assert(valid_decal_projector(
-        decal_projector{{{0,0,0}},aligned.right,aligned.up,
-                         aligned.look,1,1,0.25f}));
+        decal_projector{{{0,0,0}},aligned.right,aligned.look,
+                         {{-aligned.up[0],-aligned.up[1],-aligned.up[2]}},
+                         1,1,0.25f}));
     assert(!sprite_decal_attachment_axes(
         original,{{0,0,0}},aligned));
 }
