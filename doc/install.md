@@ -221,6 +221,7 @@ or no world polygon qualifies, the ordinary native sprite is drawn.
 
 Set `"profile_renderer": true` and look for
 `SPR decal GPU stage=geometry` with positive receiver and triangle
-counts. The new GPU rendering path is **not yet validated in-game**;
+counts, followed by `SPR decal GPU stage=queued` when the native MAT
+has become resident and GPU submission actually occurs. The new GPU rendering path is **not yet validated in-game**;
 3DO receivers, animated receivers, and interactions with transparent
 surfaces need separate implementation.
