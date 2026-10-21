@@ -113,6 +113,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_gpu_mesh.cpp /Fe:sprite_decal_gpu_mesh_test.exe
         sprite_decal_gpu_mesh_test.exe
+    - name: SPR decal world BVH spatial query tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_bvh.cpp /Fe:sprite_decal_bvh_test.exe
+        sprite_decal_bvh_test.exe
     - name: SPR cached world volume and jitter regression tests
       shell: cmd
       run: |
