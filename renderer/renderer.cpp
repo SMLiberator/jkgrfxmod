@@ -2737,6 +2737,14 @@ namespace jkgm {
                                         GL_UNSIGNED_INT,multidraw_offsets.data(),
                                         static_cast<GLsizei>(multidraw_counts.size()));
                 }
+                if(the_config->profile_renderer &&
+                   transparent && draw.instance->is_projected_decal) {
+                    static unsigned decal_gpu_draw_logs=0;
+                    if(decal_gpu_draw_logs++<12U)
+                        LOG_INFO("SPR decal GPU stage=draw triangles=",
+                                 group.count/3U,
+                                 " alpha=",draw.instance->decal_opacity);
+                }
                 if(the_config->profile_renderer) {
                     ++profile_frame.gpu_draw_calls;
                     profile_frame.gpu_draw_ranges+=draw_end-draw_start;
