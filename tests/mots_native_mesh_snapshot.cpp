@@ -129,6 +129,17 @@ int main()
     assert(calls==0);
     set_u32(amputation+4,0);
 
+    // Parent nodes are not guaranteed to appear before children. Populate
+    // all links and amputations before requesting even one live pose.
+    auto reverse_parent_order=source;
+    reverse_parent_order.nodes[1].amputated=false;
+    reverse_parent_order.nodes[1].parent=2;
+    reverse_parent_order.nodes[2].parent=-1;
+    reverse_parent_order.nodes[2].amputated=true;
+    calls=0;
+    assert(build_native_collision_tree(reverse_parent_order,pose,true,tree));
+    assert(calls==0);
+
     // Changes during a failed source read must not partially publish data.
     auto before=source;
     set_u32(nodes+0xb4+0x50,uint32_t(nodes+1)); // misaligned parent
