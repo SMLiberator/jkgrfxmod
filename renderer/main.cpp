@@ -23,6 +23,7 @@
 #include "sprite_quad_transform.hpp"
 #include "sprite_decal_world.hpp"
 #include "sprite_decal_world_cache.hpp"
+#include "sprite_decal_static_mesh.hpp"
 #include "sprite_decal_pose_cache.hpp"
 #include "sprite_decal_resource.hpp"
 #include "sprite_decal_attachment.hpp"
@@ -710,8 +711,11 @@ namespace {
         if(result != 0) ++native_totals.model_drawn;
         return result;
     }
+    void capture_static_sprite_decal_mesh(void *mesh,void *placement);
     void __cdecl HookedNativeMesh(void *mesh, void *placement)
     {
+        if(the_config && the_config->enable_sprite_decals)
+            capture_static_sprite_decal_mesh(mesh,placement);
         auto const profiling=the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
@@ -1830,6 +1834,7 @@ namespace {
         uintptr_t resource=0;
         uintptr_t material=0;
         uint32_t thing_signature=0;
+        uint64_t object_revision=0;
         std::array<float,12> matrix{};
         bool attached_to_face=false;
         jkgm::decal_vec3 attached_normal{};
@@ -1842,6 +1847,155 @@ namespace {
     jkgm::decal_world_geometry sprite_world_geometry;
     unsigned sprite_decal_submit_logs=0;
     unsigned sprite_decal_queued_logs=0;
+
+    struct static_sprite_decal_mesh {
+        uint32_t world=0,signature=0;
+        std::array<float,12> transform{};
+        std::vector<jkgm::decal_world_surface_geometry> receivers;
+    };
+    std::unordered_map<uint64_t,static_sprite_decal_mesh> sprite_static_meshes;
+    jkgm::decal_world_geometry sprite_static_receiver_world;
+    uint32_t sprite_static_world=0;
+    uint64_t sprite_static_revision=1;
+    bool sprite_static_receivers_dirty=true;
+    unsigned sprite_static_mesh_logs=0;
+
+    void reset_static_sprite_decal_meshes(uint32_t world)
+    {
+        sprite_static_meshes.clear();
+        sprite_static_receiver_world.clear();
+        sprite_static_world=world;
+        sprite_static_receivers_dirty=true;
+        ++sprite_static_revision;
+    }
+
+    // rdModel3_DrawMesh supplies the composed WORLD joint transform.
+    // Only stationary collide=3 Things are eligible for long-lived caching.
+    void capture_static_sprite_decal_mesh(void *mesh,void *placement)
+    {
+        if(!the_config || !the_config->enable_sprite_decals ||
+           !mesh || !placement ||
+           !gpu_span_readable(mesh,sizeof(native_mesh)) ||
+           !gpu_span_readable(placement,12*sizeof(float)))
+            return;
+        constexpr uintptr_t current_rdmodel_thing=0x0073C320U;
+        if(!gpu_span_readable(reinterpret_cast<void const *>(
+                                  current_rdmodel_thing),4))return;
+        uint32_t rd=0;
+        std::memcpy(&rd,reinterpret_cast<void const *>(current_rdmodel_thing),4);
+        if(!gpu_span_readable(reinterpret_cast<void const *>(rd),0x48U))
+            return;
+        uint32_t rd_type=0,owner=0;
+        std::memcpy(&rd_type,reinterpret_cast<void const *>(rd),4);
+        std::memcpy(&owner,reinterpret_cast<void const *>(rd+0x44U),4);
+        if(rd_type!=1 || !jkgm::decal_native_address_ok(owner) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(owner),0xc8U) ||
+           rd!=owner+0xc4U)return;
+        uint32_t type=0,move_type=0,collision=0,signature=0;
+        std::memcpy(&type,reinterpret_cast<void const *>(owner+0x0cU),4);
+        std::memcpy(&move_type,reinterpret_cast<void const *>(owner+0x10U),4);
+        std::memcpy(&collision,reinterpret_cast<void const *>(owner+0x28U),4);
+        std::memcpy(&signature,reinterpret_cast<void const *>(owner+0x74U),4);
+        if(!type || move_type!=0 || collision!=3)return;
+        constexpr uintptr_t world_ptr=
+            jkgm::engine_material_debug::current_world_global;
+        if(!gpu_span_readable(reinterpret_cast<void const *>(world_ptr),4))
+            return;
+        uint32_t world=0;
+        std::memcpy(&world,reinterpret_cast<void const *>(world_ptr),4);
+        if(!jkgm::decal_native_address_ok(world))return;
+        if(sprite_static_world!=world)
+            reset_static_sprite_decal_meshes(world);
+        jkgm::gpu_3do_matrix34 transform{};
+        std::memcpy(transform.data(),placement,sizeof(transform));
+        if(!jkgm::gpu_3do_matrix_finite(transform))return;
+        native_mesh source{};
+        std::memcpy(&source,mesh,sizeof(source));
+        if(source.num_faces<1 || source.num_faces>8192 ||
+           source.num_vertices<3 || source.num_vertices>65536 ||
+           !gpu_span_readable(source.vertices,
+                     size_t(source.num_vertices)*3U*sizeof(float)) ||
+           !gpu_span_readable(source.faces,
+                     size_t(source.num_faces)*sizeof(native_face)))return;
+        uint64_t const key=(uint64_t(owner)<<32) |
+            uint32_t(reinterpret_cast<uintptr_t>(mesh));
+        auto existing=sprite_static_meshes.find(key);
+        if(existing!=sprite_static_meshes.end() &&
+           existing->second.world==world &&
+           existing->second.signature==signature &&
+           existing->second.transform==transform)return;
+        if(existing==sprite_static_meshes.end() &&
+           sprite_static_meshes.size()>=4096U)return;
+        static_sprite_decal_mesh updated{};
+        updated.world=world;
+        updated.signature=signature;
+        updated.transform=transform;
+        updated.receivers.reserve(static_cast<size_t>(source.num_faces));
+        for(int fi=0;fi<source.num_faces;++fi) {
+            native_face face{};
+            std::memcpy(&face,source.faces+size_t(fi)*sizeof(face),
+                        sizeof(face));
+            if(face.geo<2 || face.count<3 || face.count>128 ||
+               !gpu_span_readable(face.pos_indices,
+                                  size_t(face.count)*sizeof(int)))
+                continue;
+            std::vector<jkgm::decal_vec3> local;
+            local.reserve(face.count);
+            bool valid=true;
+            for(unsigned vi=0;vi<face.count;++vi) {
+                int idx=0;
+                std::memcpy(&idx,face.pos_indices+vi,sizeof(idx));
+                if(idx<0 || idx>=source.num_vertices) {
+                    valid=false;break;
+                }
+                jkgm::decal_vec3 v{};
+                std::memcpy(v.data(),source.vertices+size_t(idx)*3U,
+                            3U*sizeof(float));
+                if(!jkgm::decal_finite(v)) {valid=false;break;}
+                local.push_back(v);
+            }
+            if(!valid)continue;
+            jkgm::decal_world_surface_geometry receiver{};
+            if(jkgm::build_static_sprite_receiver(
+                    transform,local,uint32_t(fi),receiver))
+                updated.receivers.push_back(std::move(receiver));
+        }
+        if(existing!=sprite_static_meshes.end())
+            sprite_static_meshes.erase(existing);
+        if(!updated.receivers.empty())
+            sprite_static_meshes.emplace(key,std::move(updated));
+        sprite_static_receivers_dirty=true;
+        ++sprite_static_revision;
+        if(the_config->profile_renderer &&
+           sprite_static_mesh_logs++<12U)
+            LOG_INFO("SPR decal static3do captured thing=",owner,
+                     " mesh=",reinterpret_cast<uintptr_t>(mesh),
+                     " faces=",source.num_faces);
+    }
+
+    void rebuild_static_sprite_decal_receivers(uint32_t world)
+    {
+        if(sprite_static_world!=world)
+            reset_static_sprite_decal_meshes(world);
+        if(!sprite_static_receivers_dirty)return;
+        sprite_static_receiver_world.clear();
+        sprite_static_receiver_world.world=world;
+        constexpr size_t limit=100000U;
+        for(auto const &item:sprite_static_meshes) {
+            if(item.second.world!=world)continue;
+            if(item.second.receivers.size()>
+               limit-sprite_static_receiver_world.receivers.size())
+                break;
+            for(auto const &receiver:item.second.receivers)
+                sprite_static_receiver_world.receivers.push_back(receiver);
+        }
+        sprite_static_receiver_world.surface_count=static_cast<uint32_t>(
+            sprite_static_receiver_world.receivers.size());
+        sprite_static_receiver_world.valid_world=true;
+        sprite_static_receiver_world.acceleration.build(
+            sprite_static_receiver_world.receivers);
+        sprite_static_receivers_dirty=false;
+    }
 
     bool submit_native_sprite_decal(
         void const *rd_thing,void const *orientation,
@@ -1902,6 +2056,7 @@ namespace {
             uint32_t(reinterpret_cast<uintptr_t>(rd_thing));
         auto it=sprite_gpu_decals.find(key);
         bool const hit=it!=sprite_gpu_decals.end() &&
+            it->second.object_revision==sprite_static_revision &&
             it->second.world==world && it->second.resource==sprite &&
             it->second.material==resource.material &&
             it->second.thing_signature==thing_signature &&
@@ -1945,8 +2100,23 @@ namespace {
                 }
                 if(!ok)return false;
             }
-            auto const scan=jkgm::project_cached_decal_world(
+            auto scan=jkgm::project_cached_decal_world(
                 sprite_world_geometry,projector,2048U);
+            rebuild_static_sprite_decal_receivers(world);
+            uint32_t object_triangles=0,object_receivers=0;
+            if(!sprite_static_receiver_world.receivers.empty() &&
+               !scan.truncated && scan.triangles.size()<2048U) {
+                auto objects=jkgm::project_cached_decal_world(
+                    sprite_static_receiver_world,projector,
+                    2048U-static_cast<uint32_t>(scan.triangles.size()));
+                object_triangles=static_cast<uint32_t>(objects.triangles.size());
+                object_receivers=objects.receivers;
+                scan.truncated|=objects.truncated;
+                scan.receivers+=objects.receivers;
+                scan.broadphase_candidates+=objects.broadphase_candidates;
+                scan.triangles.insert(scan.triangles.end(),
+                    objects.triangles.begin(),objects.triangles.end());
+            }
             jkgm::sprite_decal_mesh mesh{};
             bool const ready=jkgm::make_sprite_decal_gpu_mesh(
                 scan,projector,resource.material,resource.texcoords,
@@ -1977,6 +2147,7 @@ namespace {
             entry.resource=sprite;
             entry.material=resource.material;
             entry.thing_signature=thing_signature;
+            entry.object_revision=sprite_static_revision;
             entry.matrix=m;
             entry.attached_to_face=attached_to_face;
             entry.attached_normal=attached_normal;
@@ -2010,6 +2181,8 @@ namespace {
                          " triangles=",scan.triangles.size(),
                          " receivers=",scan.receivers,
                          " broadphase=",scan.broadphase_candidates,
+                         " static3do_tris=",object_triangles,
+                         " static3do_receivers=",object_receivers,
                          " attached=",attached_to_face,
                          " id=",it->second.id);
         }
@@ -3871,6 +4044,7 @@ bool detach_hooks()
         sprite_instances.clear();
         sprite_decal_diagnostic_keys.clear();
         sprite_gpu_decals.clear();
+        reset_static_sprite_decal_meshes(0);
         sprite_world_geometry.clear();
     }
     // Detach injected functions
