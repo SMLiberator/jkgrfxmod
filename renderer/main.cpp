@@ -1020,6 +1020,69 @@ bool jkgm::native_3do_available()
 namespace {
     using native_sprite_fn = int (__cdecl *)(void *,void *);
     using native_sprite_mid_fn = void (__cdecl *)();
+    constexpr uintptr_t sprite_draw_addr=0x0046CF40U;
+    constexpr uintptr_t sprite_preclip_addr=0x0046D182U;
+    // JK23: rdCache_AddProcFace records a completed proc-face at
+    // [0x86ede0 + 0x6c*index]. The cache converter's 0x43b6f9 cmp
+    // immediately follows selection of the native 90/255 alpha.
+    constexpr uintptr_t sprite_addproc_addr=0x0043B240U;
+    constexpr uintptr_t sprite_alpha_mid_addr=0x0043B6F9U;
+    // Verified directly against the supported patched JK23 executables:
+    // rdCache_DrawRenderList (0x43C590) is not CALLED by the inlined cache
+    // converter. Both the old address 0x5753E8 (triangle count) and
+    // 0x6353F8 (triangle buffer) were incorrect for the vertex marker.
+    // Hook the actual std3D_AddRenderListVertices submission instead.
+    constexpr uintptr_t sprite_hw_upload_addr=0x00429C60U;
+    constexpr uintptr_t sprite_hw_buffer_addr=0x0063A400U;
+    constexpr uintptr_t sprite_hw_vertex_count_addr=0x005F53F0U;
+    constexpr uint32_t sprite_flare_vertex_magic=0xB6A9D000U;
+    // The supported patched executables redirect this function to
+    // the extended vertex upload implementation through a rel32 JMP.
+    constexpr uint8_t sprite_hw_upload_bytes[]={
+        0xe9,0x1d,0x72,0x4d,0x00
+    };
+    constexpr uintptr_t sprite_proc_count_addr=0x0086EDC0U;
+    constexpr uintptr_t sprite_proc_base_addr=0x0086EDE0U;
+    constexpr size_t sprite_proc_stride=0x6cU;
+    constexpr uint8_t sprite_addproc_bytes[]={
+        0x55,0x8b,0xec,0x83,0xec,0x18,0xa1,0xc0,0xed,0x86,0x00
+    };
+    constexpr uint8_t sprite_alpha_mid_bytes[]={
+        0x81,0xf9,0xff,0x00,0x00,0x00
+    };
+    // Preserve frustum bounds when SetSpriteInfo enlarges an individual Thing.
+    constexpr uintptr_t sprite_frustum_addr=0x004758D0U;
+    constexpr uint8_t sprite_frustum_bytes[]={
+        0x83,0xec,0x0c,0x8b,0x54,0x24,0x14,0x8b
+    };
+    // rdSprite_NewEntry writes type to +0x20; sithSprite_Load overwrites it
+    // with the World SPRITES array index. Capture the authored argument.
+    using native_sprite_newentry_fn=int(__cdecl *)(
+        void *,char const *,int,char const *,float,float,int,int,int,float,
+        void const *);
+    using native_sprite_free_fn=void(__cdecl *)(void *);
+    constexpr uintptr_t sprite_newentry_addr=0x0046CC70U;
+    constexpr uintptr_t sprite_free_addr=0x0046CE70U;
+    constexpr uintptr_t sprite_freeentry_addr=0x0046CEE0U;
+    constexpr uint8_t sprite_newentry_bytes[]={
+        0x8b,0x44,0x24,0x08,0x83,0xec,0x10,0x85,0xc0
+    };
+    constexpr uint8_t sprite_free_bytes[]={
+        0x56,0x8b,0x74,0x24,0x08,0x85,0xf6,0x74,0x62
+    };
+    constexpr uint8_t sprite_freeentry_bytes[]={
+        0x56,0x8b,0x74,0x24,0x08,0x8b,0x86,0x9c,0x00,0x00,0x00
+    };
+    jkgm::sprite_type_registry sprite_types;
+    jkgm::sprite_instance_registry sprite_instances;
+    std::unordered_set<uint64_t> sprite_decal_diagnostic_keys;
+    native_sprite_newentry_fn RealNativeSpriteNewEntry=
+        reinterpret_cast<native_sprite_newentry_fn>(sprite_newentry_addr);
+    native_sprite_free_fn RealNativeSpriteFree=
+        reinterpret_cast<native_sprite_free_fn>(sprite_free_addr);
+    native_sprite_free_fn RealNativeSpriteFreeEntry=
+        reinterpret_cast<native_sprite_free_fn>(sprite_freeentry_addr);
+
     // JK23: sithSprite_Load reads ONE 11-field line. Extended SPRs keep
     // that native first resource, with additional variants loaded once and
     // selected when sithThing_SetThingBasedOn creates each Thing.
@@ -1218,68 +1281,6 @@ namespace {
         return result;
     }
 
-    constexpr uintptr_t sprite_draw_addr=0x0046CF40U;
-    constexpr uintptr_t sprite_preclip_addr=0x0046D182U;
-    // JK23: rdCache_AddProcFace records a completed proc-face at
-    // [0x86ede0 + 0x6c*index]. The cache converter's 0x43b6f9 cmp
-    // immediately follows selection of the native 90/255 alpha.
-    constexpr uintptr_t sprite_addproc_addr=0x0043B240U;
-    constexpr uintptr_t sprite_alpha_mid_addr=0x0043B6F9U;
-    // Verified directly against the supported patched JK23 executables:
-    // rdCache_DrawRenderList (0x43C590) is not CALLED by the inlined cache
-    // converter. Both the old address 0x5753E8 (triangle count) and
-    // 0x6353F8 (triangle buffer) were incorrect for the vertex marker.
-    // Hook the actual std3D_AddRenderListVertices submission instead.
-    constexpr uintptr_t sprite_hw_upload_addr=0x00429C60U;
-    constexpr uintptr_t sprite_hw_buffer_addr=0x0063A400U;
-    constexpr uintptr_t sprite_hw_vertex_count_addr=0x005F53F0U;
-    constexpr uint32_t sprite_flare_vertex_magic=0xB6A9D000U;
-    // The supported patched executables redirect this function to
-    // the extended vertex upload implementation through a rel32 JMP.
-    constexpr uint8_t sprite_hw_upload_bytes[]={
-        0xe9,0x1d,0x72,0x4d,0x00
-    };
-    constexpr uintptr_t sprite_proc_count_addr=0x0086EDC0U;
-    constexpr uintptr_t sprite_proc_base_addr=0x0086EDE0U;
-    constexpr size_t sprite_proc_stride=0x6cU;
-    constexpr uint8_t sprite_addproc_bytes[]={
-        0x55,0x8b,0xec,0x83,0xec,0x18,0xa1,0xc0,0xed,0x86,0x00
-    };
-    constexpr uint8_t sprite_alpha_mid_bytes[]={
-        0x81,0xf9,0xff,0x00,0x00,0x00
-    };
-    // Preserve frustum bounds when SetSpriteInfo enlarges an individual Thing.
-    constexpr uintptr_t sprite_frustum_addr=0x004758D0U;
-    constexpr uint8_t sprite_frustum_bytes[]={
-        0x83,0xec,0x0c,0x8b,0x54,0x24,0x14,0x8b
-    };
-    // rdSprite_NewEntry writes type to +0x20; sithSprite_Load overwrites it
-    // with the World SPRITES array index. Capture the authored argument.
-    using native_sprite_newentry_fn=int(__cdecl *)(
-        void *,char const *,int,char const *,float,float,int,int,int,float,
-        void const *);
-    using native_sprite_free_fn=void(__cdecl *)(void *);
-    constexpr uintptr_t sprite_newentry_addr=0x0046CC70U;
-    constexpr uintptr_t sprite_free_addr=0x0046CE70U;
-    constexpr uintptr_t sprite_freeentry_addr=0x0046CEE0U;
-    constexpr uint8_t sprite_newentry_bytes[]={
-        0x8b,0x44,0x24,0x08,0x83,0xec,0x10,0x85,0xc0
-    };
-    constexpr uint8_t sprite_free_bytes[]={
-        0x56,0x8b,0x74,0x24,0x08,0x85,0xf6,0x74,0x62
-    };
-    constexpr uint8_t sprite_freeentry_bytes[]={
-        0x56,0x8b,0x74,0x24,0x08,0x8b,0x86,0x9c,0x00,0x00,0x00
-    };
-    jkgm::sprite_type_registry sprite_types;
-    jkgm::sprite_instance_registry sprite_instances;
-    std::unordered_set<uint64_t> sprite_decal_diagnostic_keys;
-    native_sprite_newentry_fn RealNativeSpriteNewEntry=
-        reinterpret_cast<native_sprite_newentry_fn>(sprite_newentry_addr);
-    native_sprite_free_fn RealNativeSpriteFree=
-        reinterpret_cast<native_sprite_free_fn>(sprite_free_addr);
-    native_sprite_free_fn RealNativeSpriteFreeEntry=
-        reinterpret_cast<native_sprite_free_fn>(sprite_freeentry_addr);
 
     int __cdecl HookedSpriteNewEntry(
         void *sprite,char const *name,int authored_type,char const *material,
