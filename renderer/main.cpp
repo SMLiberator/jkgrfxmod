@@ -1608,11 +1608,132 @@ namespace {
         }
     }
 
+    // Type-3 SPR: transform an ordinary SPR Thing into projected geometry
+    // over actual level architecture, preserving the original loaded MAT.
+    // Static receivers are cached per Thing/world/projector to avoid a full
+    // level-surface scan on every physics/render frame.
+    struct cached_runtime_sprite_decal {
+        uint32_t world=0;
+        uintptr_t resource=0;
+        uintptr_t material=0;
+        std::array<float,12> matrix{};
+        std::array<float,10> settings{}; // size(4), offset(3), scale(2), roll
+        uint64_t id=0;
+        std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
+    };
+    std::unordered_map<uint64_t,cached_runtime_sprite_decal> sprite_gpu_decals;
+    unsigned sprite_decal_submit_logs=0;
+
+    bool submit_native_sprite_decal(
+        void const *rd_thing,void const *orientation,
+        jkgm::sprite_instance_info const &info)
+    {
+        if(!the_config || !the_config->enable_sprite_decals ||
+           !rd_thing || !orientation ||
+           !gpu_span_readable(rd_thing,8) ||
+           !gpu_span_readable(orientation,12*sizeof(float)))
+            return false;
+        uintptr_t sprite=0;
+        std::memcpy(&sprite,static_cast<uint8_t const *>(rd_thing)+4,4);
+        uint32_t authored_type=0;
+        if(!gpu_span_readable(reinterpret_cast<void const *>(sprite),0xa4) ||
+           !sprite_types.lookup(reinterpret_cast<void const *>(sprite),
+                               reinterpret_cast<char const *>(sprite),
+                               authored_type) ||
+           authored_type!=jkgm::sprite_project_decal)
+            return false;
+        const auto read=[](uintptr_t at,void *dst,size_t n)->bool {
+            if(!gpu_span_readable(reinterpret_cast<void const *>(at),n))
+                return false;
+            std::memcpy(dst,reinterpret_cast<void const *>(at),n);
+            return true;
+        };
+        uint32_t world=0;
+        if(!read(jkgm::engine_material_debug::current_world_global,
+                 &world,4) || !jkgm::decal_native_address_ok(world))
+            return false;
+        std::array<float,12> m{};
+        std::memcpy(m.data(),orientation,sizeof(m));
+        if(!jkgm::gpu_3do_matrix_finite(m))return false;
+        float size[4]{},offset[3]{};
+        if(!read(sprite+0x4c,size,sizeof(size)) ||
+           !read(sprite+0xa0,offset,sizeof(offset)))
+            return false;
+        float const roll=current_sprite_roll(rd_thing);
+        std::array<float,10> const settings{{
+            size[0],size[1],size[2],size[3],
+            offset[0],offset[1],offset[2],
+            info.width,info.height,roll
+        }};
+        jkgm::sprite_decal_resource resource{};
+        if(!jkgm::read_sprite_decal_resource(read,sprite,resource))
+            return false;
+        uint64_t const key=(uint64_t(world)<<32) |
+            uint32_t(reinterpret_cast<uintptr_t>(rd_thing));
+        auto it=sprite_gpu_decals.find(key);
+        bool const hit=it!=sprite_gpu_decals.end() &&
+            it->second.world==world && it->second.resource==sprite &&
+            it->second.material==resource.material &&
+            it->second.matrix==m && it->second.settings==settings;
+        if(!hit) {
+            jkgm::sprite_axes const axes{
+                {{m[0],m[1],m[2]}},{{m[3],m[4],m[5]}},
+                {{m[6],m[7],m[8]}}
+            };
+            jkgm::decal_projector projector{};
+            if(!jkgm::make_sprite_decal_projector(
+                axes,{{m[9],m[10],m[11]}},
+                {{offset[0],offset[1],offset[2]}},
+                size[0],size[1],info.width,info.height,roll,projector))
+                return false;
+            auto const scan=jkgm::project_decal_world_surfaces(
+                read,world,projector,2048U);
+            jkgm::sprite_decal_mesh mesh{};
+            if(!jkgm::make_sprite_decal_gpu_mesh(
+                scan,projector,resource.material,resource.texcoords,
+                info.opacity,mesh))
+                return false;
+            cached_runtime_sprite_decal entry{};
+            entry.world=world;
+            entry.resource=sprite;
+            entry.material=resource.material;
+            entry.matrix=m;
+            entry.settings=settings;
+            entry.id=next_gpu_id++;
+            entry.geometry=std::move(mesh.geometry);
+            // Bounded, no stale pointers across arbitrary level changes.
+            if(sprite_gpu_decals.size()>=128) sprite_gpu_decals.clear();
+            it=sprite_gpu_decals.insert_or_assign(key,std::move(entry)).first;
+            if(the_config->profile_renderer &&
+               sprite_decal_submit_logs++<12U)
+                LOG_INFO("SPR decal GPU stage=geometry world=",world,
+                         " triangles=",scan.triangles.size(),
+                         " receivers=",scan.receivers,
+                         " id=",it->second.id);
+        }
+        if(!it->second.geometry ||
+           !gpu_mesh_materials_ready(*it->second.geometry))
+            return false; // Let native SPR load/warm up its MAT first.
+        jkgm::gpu_3do_instance inst{};
+        inst.id=it->second.id;
+        inst.geometry=it->second.geometry;
+        inst.transform={{1,0,0, 0,1,0, 0,0,1, 0,0,0}};
+        inst.is_projected_decal=true;
+        inst.decal_opacity=info.opacity;
+        inst.effective_light_mode=0.0f;
+        pending_gpu_instances.emplace_back(std::move(inst));
+        return true;
+    }
+
     int __cdecl HookedNativeSprite(void *thing,void *orientation)
     {
         auto const info=current_sprite_info(thing);
         if(info.width==0.0f || info.height==0.0f || info.opacity==0.0f)
             return 0;
+        // Successful native projected decal submission replaces the SPR
+        // billboard; unsupported/unready surfaces retain native rendering.
+        if(submit_native_sprite_decal(thing,orientation,info))
+            return 1;
         // A loaded type-4 SPR may never actually be submitted. Trace native
         // draw entry separately from texture/resource loading and face output.
         if(the_config && the_config->profile_renderer &&
@@ -3383,6 +3504,7 @@ bool detach_hooks()
         sprite_types.clear();
         sprite_instances.clear();
         sprite_decal_diagnostic_keys.clear();
+        sprite_gpu_decals.clear();
     }
     // Detach injected functions
     if(native_earth_hit_sound_hook_active) {
