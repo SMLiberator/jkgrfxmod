@@ -2465,10 +2465,17 @@ namespace jkgm {
                             ++profile_frame.gpu_material_resolves;
                     }
                     auto const &tex=found->second;
-                    auto const policy=choose_gpu_3do_alpha_mode(
-                        (group.face_type&0x2U)!=0,
-                        tex.alpha,tex.masked,tex.special||tex.emissive_only,
-                        tex.opacity,tex.dithered);
+                    // Projected SPRs are always alpha-composited over
+                    // the existing opaque architecture and depth-tested.
+                    // The MAT may be fully opaque; its native SPR instance
+                    // opacity (including SetSpriteInfo) is independent.
+                    auto const policy=inst.is_projected_decal
+                        ? gpu_3do_alpha_mode::blend_only
+                        : choose_gpu_3do_alpha_mode(
+                            (group.face_type&0x2U)!=0,
+                            tex.alpha,tex.masked,
+                            tex.special||tex.emissive_only,
+                            tex.opacity,tex.dithered);
                     if(!gpu_3do_draws_in_pass(policy,transparent)) continue;
                     float depth=0.0f;
                     if(transparent) {
@@ -2592,8 +2599,9 @@ namespace jkgm {
                 }
                 // The native translucent face flag forces alpha even when
                 // its MAT texture is fully opaque (JK uses alpha=90/255).
-                float const face_opacity=(group.face_type&0x2U)!=0
-                    ? 90.0f/255.0f : 1.0f;
+                float const face_opacity=inst.is_projected_decal
+                    ? inst.decal_opacity
+                    : ((group.face_type&0x2U)!=0 ? 90.0f/255.0f : 1.0f);
                 if(transparent) {
                     switch(draw.texture.blend) {
                     case material_blend_mode::additive:
@@ -3437,7 +3445,8 @@ namespace jkgm {
             // by JK. Expire their GPU resources, keeping recently reused meshes
             // without retaining every allocation for the entire level.
             // Sweep periodically to avoid iterating the cache on every frame.
-            if(the_config->use_model_cache && (gpu_3do_present_serial%16U)==0U) {
+            if((the_config->use_model_cache || the_config->enable_sprite_decals) &&
+               (gpu_3do_present_serial%16U)==0U) {
                 for(auto it=gpu_3do_gl_cache.begin();it!=gpu_3do_gl_cache.end();) {
                     auto const used=gpu_3do_last_drawn.find(it->first);
                     if(used==gpu_3do_last_drawn.end() ||
