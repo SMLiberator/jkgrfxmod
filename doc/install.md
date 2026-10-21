@@ -94,19 +94,23 @@ A bounded diagnostic sample appears as `JKGM collide=2 stage=`:
 signature also produces a warning when this option is on.
 
 The initial version rebuilt every mesh on every query and caused severe
-slowdowns around animated actors. The new implementation **caches fitted
-mesh geometry across collision queries** (up to 24 active Thing entries),
-invalidating when the Thing signature or selected model/geoset/hierarchy
-identity changes and periodically every 1000 ms to pick up in-place
-COG vertex edits. Limb amputation flags are read live each query;
-animated node matrices are also refreshed per query. With
-`profile_renderer=true`, lines beginning `JKGM collide=2 cache`
-report reuse, rebuild, failure and eviction totals.
+slowdowns around animated actors. The optimized implementation now
+**fits each mesh's local center and radius once per model/geoset** and
+shares that geometry between Things using the same 3DO. It discards
+its copies of source vertices after fitting, retaining only the
+collision-only offsets, radii and hierarchy relationships. It does
+**not** rewrite any actual 3DO pivots or mesh radii (which would
+change animation/rendering). Live animation matrix transforms and
+amputation flags are still evaluated per query.
 
-This optimization is still experimental and has not yet been profiled
-in-game. In-place vertex edits can have up to one second of delayed
-collision bounds updates; abnormal models above 262144 total vertices
-fall back to native behavior. Use simple test levels first. There is no new `treeSize` field. Upstream
+The bounded model cache holds up to 24 selected model/geoset instances,
+and invalidates when the loaded model identity changes. It does not
+automatically pick up in-place COG modifications to a mesh's raw
+vertices until the model/geoset is replaced or the renderer restarts;
+there is no recurring full-vertex refit. The
+`JKGM collide=2 cache` log shows reuse/rebuild/failure/eviction counts
+when profiling is enabled. Models over 262144 total vertices fall back
+to native collision handling. In-game performance remains experimental. There is no new `treeSize` field. Upstream
 sector candidate filtering and unusual collision flags still need
 additional live testing. Back up files and disable the switch to
 restore original collision behavior.
