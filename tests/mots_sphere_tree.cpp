@@ -69,5 +69,15 @@ int main() {
     nodes[2].parent=-2;
     assert(!mots_tree_node_active(nodes,2));
     nodes[2].parent=0;
-
+    // An enormous but finite separation formerly overflowed float dot
+    // products: INF-INF produced NaN, making an invalid "hit" possible.
+    std::vector<mots_tree_node> distant(1);
+    distant[0].parent=-1;
+    distant[0].has_mesh=true;
+    distant[0].mesh_radius=1.0f;
+    distant[0].world_matrix=make_pose(1.0e20f,0,0);
+    mots_tree_hit untouched=hit;
+    assert(!mots_tree_sphere_cast(distant,{{0,0,0}},{{-1,0,0}},
+                                  10.0f,0.0f,hit));
+    assert(hit.node==untouched.node && hit.distance==untouched.distance);
 }
