@@ -17,8 +17,7 @@ namespace jkgm {
     struct mots_engine_type2_hit {
         float distance=0.0f;
         thing_node_vector normal{};
-        uintptr_t mesh=0;
-        uintptr_t face=0;
+        // MotS tree hits do not write ppHitMesh or ppHitFace.
         int flags=jkgm_collision_hit_thing;
     };
 
@@ -31,9 +30,7 @@ namespace jkgm {
            !std::isfinite(collision.distance) || collision.distance<0.0f)
             return false;
         auto const &node=owner.nodes[collision.node];
-        if(node.mesh_index<0 || !thing_node_valid_address(
-               node.native_mesh_address,mots_native_layout::mesh_stride))
-            return false;
+        if(node.mesh_index<0)return false;
         float length2=0.0f;
         for(float component:collision.normal) {
             if(!std::isfinite(component))return false;
@@ -44,7 +41,6 @@ namespace jkgm {
         mots_engine_type2_hit hit{};
         hit.distance=collision.distance;
         hit.normal=collision.normal;
-        hit.mesh=node.native_mesh_address;
         output=hit;
         return true;
     }
