@@ -38,6 +38,7 @@ namespace jkgm {
         bool profile_renderer = false; // opt-in CPU frame timings
         std::optional<projected_decal_config> projected_decal; // opt-in static depth projector
         bool use_model_cache = false; // cache 3DO meshes as persistent GPU geometry
+        bool enable_sprite_decals = false; // opt-in type-3 SPR projection onto level geometry
         bool enable_mesh_collision = false; // experimental JKGM collide=2 Detour (off by default)
         bool use_vanilla_renderer = false; // native EXE bootstrap: skip JKGM hooks
         std::string data_path = "jkgm";
