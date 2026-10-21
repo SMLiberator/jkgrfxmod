@@ -1189,12 +1189,21 @@ preserve **per-Thing opacity** independently of ordinary 3DO face alpha.
 ```
 
 in `jkgm.json` and load a type-`3` SPR placed near an **actual JK
-world surface** (not a 3DO-only wall). Each native Sprite Thing now
-builds/clips its projected geometry, shares the SPR's original MAT,
-and queues it into the GPU **alpha pass** with its independent
-`SetSpriteInfo` opacity. Its own projector and clipped world geometry
-are cached by world/Thing/pose and updated when scale/roll/orientation
-changes. If a type-3 projectile becomes attached to a **world face**,
+world surface** (not a 3DO-only wall). Each sprite defines a **centered
+box** with source SPR width and height and fixed 0.25 JK-unit depth.
+The Thing **Up axis is the outward surface normal**: projection goes
+along -Up, while Right/Look span the textured decal. This corresponds
+to JK's native Thing-surface attachment convention.
+
+The renderer caches native world polygons **once per world**, then
+checks only their in-memory AABBs before clipping candidate receivers.
+The result is a MAT-textured mesh drawn in the GPU alpha pass. Each
+attached Thing caches its projected mesh until its attachment/size
+changes or its position moves significantly; tiny physics jitter
+does not repeatedly scan or rebuild the world. An unattached moving
+Thing may still update its projection, so blood projectiles should
+spawn a separate type-3 splat upon impact rather than project while
+in flight. If a type-3 projectile becomes attached to a **world face**,
 the renderer reads the same attachment normal exposed by
 `GetThingAttachNormal()`, rotates the decal projector **into the
 hit surface**, and centers its 0.25-unit projection depth around the
