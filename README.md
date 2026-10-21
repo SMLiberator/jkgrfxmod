@@ -1203,8 +1203,9 @@ no acceptable level polygons lie in the projection volume, native
 SPR rendering remains as a fallback; this is not proof that
 projection was applied. With `profile_renderer` enabled, the new
 `SPR decal GPU stage=geometry` line reports actual submitted
-projectors and triangle counts. The earlier diagnostic-only
-`SPR decal probe` remains for comparison.
+projectors and triangle counts. A separate `SPR decal GPU stage=queued` log confirms the mesh actually
+entered the GPU draw queue after its MAT became resident. The earlier
+diagnostic-only `SPR decal probe` remains for comparison.
 
 **Not yet verified in-game:** GPU submission, opacity and UV orientation
 must still be compared to actual JK world walls. The current receiver
