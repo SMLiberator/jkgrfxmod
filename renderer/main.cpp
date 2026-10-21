@@ -12,6 +12,7 @@
 #include "gpu_3do_modelview.hpp"
 #include "thing_node_native.hpp"
 #include "thing_attachment_normal.hpp"
+#include "native_thingface_friction.hpp"
 #include "mots_native_collision_bridge.hpp"
 #include "mots_collision_snapshot_cache.hpp"
 #include "sprite_orientation.hpp"
@@ -53,6 +54,7 @@ static bool renderer_hooks_active = false;
 static bool native_3do_hooks_active = false;
 static bool native_mat_mips_hook_active = false;
 static bool native_mesh_collision_hook_active = false;
+static bool native_thingface_friction_hook_active = false;
 
 // Function boundaries and prologues independently verified in both the
 // user's SHA-locked jk23.exe and standalone jkgm.exe. Not portable to other JKs.
@@ -2267,6 +2269,61 @@ namespace {
         return jkgm::gpu_3do_matrix_finite(output);
     }
 
+    // At 0x4F7833 native physics has JUST selected its friction factor:
+    // [ESP+0x10]. ESI is the Thing being simulated; for a Thing-face
+    // attachment, [ESI+0x58] is the supporting Thing. Preserve all flags
+    // and registers; Detours replays the displaced MOV ECX/MOV EDX.
+    using native_thingface_ice_join_fn=void(__cdecl *)();
+    native_thingface_ice_join_fn RealThingFaceIceJoin=
+        reinterpret_cast<native_thingface_ice_join_fn>(
+            jkgm::native_thingface_ice_point);
+    __declspec(naked) void __cdecl ThingFaceIceMultiplierThunk()
+    {
+        __asm {
+            pushfd
+            push eax
+            test dword ptr [esi+0x34],2  // SITH_ATTACH_THINGFACE
+            jz ice_done
+            mov eax,dword ptr [esi+0x58] // attached parent Thing
+            test eax,eax
+            jz ice_done
+            test dword ptr [eax],0x40000000 // Very icy (0.1)
+            jz ice_regular
+            mov dword ptr [esp+0x18],0x3dcccccd
+            jmp ice_done
+        ice_regular:
+            test dword ptr [eax],0x10000 // Icy (0.3)
+            jz ice_done
+            mov dword ptr [esp+0x18],0x3e99999a
+        ice_done:
+            pop eax
+            popfd
+            jmp dword ptr [RealThingFaceIceJoin]
+        }
+    }
+
+    bool request_native_thingface_friction_hook()
+    {
+        auto const at=jkgm::native_thingface_ice_point;
+        if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=
+               0x00400000U ||
+           !gpu_span_readable(reinterpret_cast<void const *>(at),
+                              jkgm::native_thingface_ice_bytes.size()) ||
+           std::memcmp(reinterpret_cast<void const *>(at),
+                       jkgm::native_thingface_ice_bytes.data(),
+                       jkgm::native_thingface_ice_bytes.size())!=0) {
+            LOG_WARNING("JKGM Thing-face icy hook skipped: unsupported EXE");
+            return false;
+        }
+        LONG const error=DetourAttach(
+            &(PVOID&)RealThingFaceIceJoin,ThingFaceIceMultiplierThunk);
+        if(error!=NO_ERROR) {
+            LOG_WARNING("JKGM Thing-face icy hook attach failed: ",error);
+            return false;
+        }
+        return true;
+    }
+
     // Tested JKGM ABI: 11 cdecl args. Do not patch the original EXE.
     using native_intersect_fn=int (__cdecl *)(
         void*,float const*,float const*,float,float,void*,
@@ -3216,6 +3273,7 @@ bool attach_hooks()
 
     bool const sprite_hooks_requested=request_native_sprite_hooks();
     bool const mesh_collision_hook_requested=request_type2_intersection_hook();
+    bool const ice_thing_hook_requested=request_native_thingface_friction_hook();
 
     LONG error = DetourTransactionCommit();
     if(error!=NO_ERROR) {
@@ -3232,6 +3290,10 @@ bool attach_hooks()
     if(error==NO_ERROR && mesh_collision_hook_requested) {
         native_mesh_collision_hook_active=true;
         LOG_INFO("JKGM experimental collide=2 Detour installed");
+    }
+    if(error==NO_ERROR && ice_thing_hook_requested) {
+        native_thingface_friction_hook_active=true;
+        LOG_INFO("JKGM Thing-face icy flags enabled (0x10000/0x40000000)");
     }
     if(error==NO_ERROR && mip_hook_requested) {
         native_mat_mips_hook_active=true;
@@ -3271,6 +3333,11 @@ bool detach_hooks()
         sprite_decal_diagnostic_keys.clear();
     }
     // Detach injected functions
+    if(native_thingface_friction_hook_active) {
+        DetourDetach(&(PVOID&)RealThingFaceIceJoin,
+                     ThingFaceIceMultiplierThunk);
+        native_thingface_friction_hook_active=false;
+    }
     if(native_mesh_collision_hook_active) {
         DetourDetach(&(PVOID&)RealType2Intersection,HookedType2Intersection);
         native_mesh_collision_hook_active=false;
