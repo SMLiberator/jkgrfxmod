@@ -116,6 +116,10 @@ int main()
 
     // The MOVING Thing owns the tree: ray is reversed from the checked
     // Thing's position; the engine hit normal is negated afterwards.
+    // Hide the second mesh for this particular assertion: otherwise the
+    // checked Thing starts INSIDE that mesh sphere and its distance-zero
+    // hit correctly wins over the first mesh.
+    model.nodes[2].amputated=true;
     assert(mots_probe_type2_collision(
         &tree,sphere,&model,nullptr,pose,pose,thingpos,{{20,0,0}},
         origin,dir,25,0.5f,0,true,true,hit)
@@ -123,6 +127,7 @@ int main()
     assert(hit.reverse_cast && hit.node==1);
     assert(near(hit.distance,7.0f)); // start 20, center 11, radius 1+checked size 1
     assert(near(hit.normal[0],-1.0f));
+    model.nodes[2].amputated=false;
 
     // Type 2 takes precedence over a face collider only when enabled.
     assert(mots_probe_type2_collision(
