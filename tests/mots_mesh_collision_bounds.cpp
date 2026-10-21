@@ -93,6 +93,14 @@ int main()
     assert(fitted.center==unchanged.center &&
            fitted.radius==unchanged.radius);
 
+    // If any still-active mesh cannot be bounded, suppress the bound
+    // altogether; a partial radius could incorrectly discard a hit.
+    nodes[0].mesh_radius=std::numeric_limits<float>::quiet_NaN();
+    float const old_bound=bound;
+    assert(!mots_tree_enclosing_radius(nodes,{{10,20,30}},bound));
+    assert(bound==old_bound);
+    nodes[0].mesh_radius=fitted.radius;
+
     // A disconnected invalid hierarchy cannot produce a broad phase.
     nodes[0].parent=0;
     assert(!mots_tree_enclosing_radius(nodes,{{0,0,0}},bound));
