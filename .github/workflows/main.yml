@@ -268,9 +268,6 @@ jobs:
     needs: [build]
     if: ${{ always() }}
     runs-on: ubuntu-latest
-    concurrency:
-      group: jkgm-development-ci-prune
-      cancel-in-progress: false
     permissions:
       actions: write
       contents: read
@@ -282,4 +279,4 @@ jobs:
         GH_TOKEN: ${{ github.token }}
       run: |
         python3 -m unittest discover -s tests -p test_prune_development_ci.py
-        python3 tools/prune_development_ci.py --repo "${{ github.repository }}" --branch development --keep-latest 40 --keep-failures 5 --max-deletes 100 --execute
+        python3 tools/prune_development_ci.py --repo "${{ github.repository }}" --branch development --expected-head-sha "${{ github.sha }}" --keep-latest 40 --keep-failures 5 --max-deletes 100 --execute
