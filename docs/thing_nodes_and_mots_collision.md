@@ -101,19 +101,20 @@ cheaper than sweeping against every polygon. It does **not** solve
 wheel-level or body-panel-accurate impacts.
 
 `renderer/mots_sphere_tree.hpp` is a pure, independently testable
-reference for the narrow-phase sphere-tree cast. It uses the 0.75 radius
-factor, world-space node origins, nearest collision, and amputation
-inheritance. It does not claim binary equivalence to MotS for unusual
-edge cases and is not wired into the Sith collision dispatcher.
+reference for narrow-phase sphere-tree casts. Legacy mode retains MotS's
+0.75 mesh-radius multiplier and origin-centered sphere; an optional
+geometry-centered mode uses fitted spheres without shrinking them. Both
+follow animated matrices and inherited amputation. Neither is wired
+into the Sith collision dispatcher.
 
 Next work:
 1. Test all five registered node getters on a 3DO with at least two
    animated hierarchy nodes, including a Thing culled offscreen.
 2. Implement opt-in node attachments using per-frame world matrices,
    local child transforms and clean detach/destruction handling.
-3. Only after confirming native collision entry points, add an opt-in
-   `collide=2` collision hook, retaining type-1/type-3 handling,
-   broad-phase behavior, contact normals and multiplayer state.
+3. Before any `collide=2` hook, establish a safe way to read geometry and
+   per-node radii, identify existing collision ABI/output semantics,
+   and preserve type-1/type-3 behavior and multiplayer state.
 
 
 ## JKGM binary compatibility audit (2026-10-20)
@@ -202,43 +203,84 @@ The return flags and lifetime/ownership of hit mesh and face still need
 review before implementing a collision hook. In particular, the stock
 MotS sphere-tree path does not report a specific polygon hit.
 
-### Isolated MotS compatibility logic
+### Type-2 collision without treeSize (JKGM proposal)
 
-`renderer/mots_collision_dispatch.hpp` captures the unhooked
-decision logic for type 1 (sphere), type 3 (face), and MotS type 2
-(sphere-tree). Importantly, type 2 takes precedence over a type-3
-participant **only in MotS-compatible mode**, and raycast flag `0x80`
-forces sphere-only checks. The broad-phase uses `treeSize` from the
-*checked* Thing if it has type 2, but takes `treeSize` from the *moving*
-Thing and substitutes the input moving radius for the checked broad-phase
-radius when the moving Thing owns the tree. In that reverse case,
-the narrow-phase moving radius becomes the checked Thing's
-`collideSize`. This asymmetry is intentional, not a typo.
+MotS uses `treeSize` only as a broad-phase radius before its
+per-node sphere tests. It is **not** needed to construct those spheres:
+the 3DO parser already reads each mesh's `RADIUS` into `rdMesh.radius`
+(`rdModel3_LoadEntry`), and MotS tests that value multiplied by
+`0.75` at each current joint-matrix origin.
 
-The helper takes explicit sizes; it does not assume the original JKGM
-`SithThing` contains MotS's `treeSize` field. Standalone tests:
-`tests/mots_collision_dispatch.cpp`, registered in development CI.
+The `rdModel3_CalcRadii` postprocess calculates additional **expanded
+model** radius data from local mesh vertices and hierarchy positions.
+It does *not* replace the per-mesh authored `rdMesh.radius` field.
+A joint-origin mesh sphere is often oversized when an artist stores a
+knee/elbow/etc. at the joint but places most geometry away from it.
 
-The companion reference `mots_tree_sphere_cast` now rejects exact
-tangency and zero-length casts starting at the boundary (matching
-the strict comparison in `sithIntersect_CheckSphereIntersection`).
-Neither reference currently implements MotS's complete raycast flag
-semantics or integrates with the collision result array.
+Our first compatibility goal is a separate opt-in `collide=2` mode
+requiring **no** additional per-Thing `treeSize` property.
+`renderer/mots_collision_dispatch.hpp` therefore keeps the 1/2/3
+mode selection but marks type-2 checks with `skip_broadphase=true`.
+The selection retains flag `0x80` forcing sphere-only handling,
+type-2 precedence over type 3 when enabled, and reversed geometry
+selection with the checked Thing's `collideSize` used as the
+narrow-phase moving radius. It is a testable selector, **not** a
+live engine collision replacement.
 
-**Confirmed layout incompatibility:** The OpenJKDF2
+To avoid doing expensive per-mesh checks for every candidate forever,
+`mots_tree_enclosing_radius` can *derive* a conservative broad-phase
+radius from the active animated mesh spheres' centers relative to the
+Thing's origin. This requires no special 3DO or template field, and is
+separate from the selector until the hook ABI has been verified.
+
+### Optional geometry-centered mesh collision spheres
+
+`renderer/mots_mesh_collision_bounds.hpp` contains
+`mots_center_mesh_sphere(vertices,out)`, which returns:
+- Local center = midpoint of the mesh vertex AABB.
+- Radius = farthest vertex distance from that center, rounded outward
+  to avoid floating-point underestimation.
+
+Unlike blindly multiplying the 3DO's origin-centered radius by `0.75`,
+the computed radius encloses all supplied vertices. It is often
+substantially tighter for long, joint-origin limbs and appendages.
+Its purpose is a conservative **collision sphere**, not a minimum
+bounding sphere or a replacement for polygon collision.
+
+`mots_tree_node.center_on_geometry` selects this optional mode:
+`local_center` is transformed by the *current animated mesh matrix*;
+`mesh_radius` must be the corresponding fitted radius, **not** the
+original 3DO Radius. For native mode leave this flag false, supply
+the original Radius, and the historical MotS `0.75` multiplier is
+preserved. In centered mode, mirrored/orthogonal nonuniform scales
+affect sphere size conservatively. The helper falls back to a
+conservative Frobenius bound for unusual sheared matrices.
+
+The model's **actual pivot and KEY animation are unchanged** by this
+collision-only recentering. A future Blender Sith exporter option
+called **Correct Pivots** may alter the hierarchy's actual joint
+geometry, but must preserve the desired rotations/positions and
+parent-child animation behavior; it is not required for this
+collision enhancement.
+
+Relevant unit tests in development CI:
+`tests/mots_collision_dispatch.cpp`,
+`tests/mots_sphere_tree.cpp`, and
+`tests/mots_mesh_collision_bounds.cpp`.
+These test mathematical helpers only; no JKGM gameplay collision
+behavior has been modified.
+
+**Confirmed layout incompatibility:** MotS's OpenJKDF2
 [`SithThing` definition](https://github.com/shinyquagsire23/OpenJKDF2/blob/master/src/types.h)
-places `treeSize` inside `#ifdef JKM_PARAMS` immediately after
-`collideSize`, and also adds an earlier MotS-only field ahead of `type`.
-The audited JKGM executable accesses `SithThing.collide` at
-`+0x28` and `collideSize` at `+0x30`, matching the JK layout.
-Treating a JKGM `SithThing*` as a MotS structure would shift
-subsequent fields and corrupt memory. A compatibility port should
-store `treeSize` externally (or use an explicitly audited, fully
-migrated game structure), never write at a guessed MotS offset.
+contains an extra conditional `treeSize` member and an additional
+earlier field, so it is not binary-compatible with JKGM's
+`SithThing`. We explicitly do **not** write a MotS `treeSize`
+offset or change the JKGM structure layout.
 
-**Remaining gates before runtime type 2:** identify a safe persistent
-`treeSize` storage/initialization path, confirm `SithThing` and
-render-data layouts, check geoset and amputation behavior, validate
-caller and callee ABI/return flags, and only then add an opt-in detour.
-Do not modify the original collision values `1` or `3` in the
-meantime.
+**Remaining gates before runtime type 2:** confirm `SithThing`,
+`rdModel3`, `rdMesh`, geoset and amputation layouts in this JKGM
+build; select the appropriate per-Thing render geoset; provide correct
+local vertices and node matrices; validate callee ABI, caller flags,
+hit-record semantics, and safe detour lifetime; then add an opt-in
+collision hook preserving original collision modes `1` and `3`.
+No additional template parameter is required.
