@@ -439,14 +439,19 @@ populates them. A confirmed tree miss returns zero.
 
 The initial version read and fit ALL model vertices on EVERY type-2
 probe; an in-game log showed ~600 ms JK-side frame stalls around an
-animated actor. A bounded `mots_collision_snapshot_cache` now retains
-the fitted hierarchy, refreshes instantaneously on Thing/model/geoset
-identity changes, reads limb amputation flags live and refits in-place
-vertex changes at most 1 second after mutation. Current animation
-matrices still refresh per query. The cache's 24-entry LRU prevents
-unbounded model retention; models over 262144 total vertices fall back
-to native handling. Geometry edits may be stale for <=1s: a follow-up
-requires more precise geometry invalidation. The source remains opt-in until live gameplay
+animated actor. A bounded `mots_collision_snapshot_cache` now retains only the
+per-mesh fitted local collision-only center and radius, not full
+vertex arrays. All Things sharing a selected 3DO model/geoset share
+the same fitted geometry. It never rewrites the model's genuine
+hierarchy pivot, vertex positions or authored mesh radius; doing so
+would affect geometry and keyframed animation. The current node matrix
+transforms that *fixed* center into world space per query, while limb
+amputation flags are read live. The 24-entry model LRU prevents
+unbounded retention; models over 262144 total vertices fall back
+to native handling. In-place changes to source vertex positions are
+not automatically refitted until model/geoset replacement or a
+renderer restart; an explicit geometry-dirty invalidation hook is
+future work. The source remains opt-in until live gameplay
 validation establishes its stability, candidate coverage, and
 collision response. See `doc/install.md` for the test switch,
 fallback behavior and bounded diagnostic logs.
