@@ -2174,6 +2174,49 @@ namespace {
         }
         else LOG_WARNING("SPR exact alpha disabled: unrecognized JK23 cache");
 
+        // Optional native multi-entry .SPR extension. All three detours are
+        // required together. A signature mismatch leaves ordinary single-
+        // entry SPR loading untouched, rather than patching unknown code.
+        bool const variant_signatures_ok=
+            gpu_span_readable(reinterpret_cast<void const *>(
+                sprite_load_addr),sizeof(sprite_load_bytes)) &&
+            gpu_span_readable(reinterpret_cast<void const *>(
+                sprite_free_world_addr),sizeof(sprite_free_world_bytes)) &&
+            gpu_span_readable(reinterpret_cast<void const *>(
+                sprite_clone_thing_addr),sizeof(sprite_clone_thing_bytes)) &&
+            std::memcmp(reinterpret_cast<void const *>(sprite_load_addr),
+                        sprite_load_bytes,sizeof(sprite_load_bytes))==0 &&
+            std::memcmp(reinterpret_cast<void const *>(sprite_free_world_addr),
+                        sprite_free_world_bytes,sizeof(sprite_free_world_bytes))==0 &&
+            std::memcmp(reinterpret_cast<void const *>(sprite_clone_thing_addr),
+                        sprite_clone_thing_bytes,sizeof(sprite_clone_thing_bytes))==0;
+        if(variant_signatures_ok) {
+            LONG const load_err=DetourAttach(
+                &(PVOID &)RealSithSpriteLoad,HookedSithSpriteLoad);
+            if(load_err==NO_ERROR) {
+                LONG const free_err=DetourAttach(
+                    &(PVOID &)RealSithSpriteFreeWorld,HookedSithSpriteFreeWorld);
+                if(free_err==NO_ERROR) {
+                    LONG const clone_err=DetourAttach(
+                        &(PVOID &)RealSithThingClone,HookedSithThingClone);
+                    if(clone_err==NO_ERROR) {
+                        sprite_variant_hooks_active=true;
+                        LOG_INFO("SPR multi-entry per-Thing variant hooks enabled");
+                    } else {
+                        DetourDetach(&(PVOID &)RealSithSpriteFreeWorld,
+                                     HookedSithSpriteFreeWorld);
+                        DetourDetach(&(PVOID &)RealSithSpriteLoad,
+                                     HookedSithSpriteLoad);
+                        LOG_WARNING("SPR Thing variant selection unavailable: ",
+                                    clone_err);
+                    }
+                } else {
+                    DetourDetach(&(PVOID &)RealSithSpriteLoad,
+                                 HookedSithSpriteLoad);
+                    LOG_WARNING("SPR variant world cleanup unavailable: ",free_err);
+                }
+            } else LOG_WARNING("SPR variant loader unavailable: ",load_err);
+        } else LOG_WARNING("SPR variants disabled: unknown native loader");
         error=DetourAttach(&(PVOID &)RealSpriteFrustum,HookedSpriteFrustum);
         if(error==NO_ERROR) sprite_frustum_hook_active=true;
         else LOG_WARNING("SPR instance frustum-radius hook unavailable: ",error);
@@ -3755,6 +3798,7 @@ bool attach_hooks()
         key_callback_message_registered=false;
         sprite_frustum_hook_active=false;
         sprite_alpha_hook_active=false;
+        sprite_variant_hooks_active=false;
         pending_sprite_flare_spans.clear();
         flare_draw_trace_count=flare_face_trace_count=flare_alpha_trace_count=
             flare_flush_trace_count=flare_bad_face_trace_count=0U;
@@ -3786,6 +3830,17 @@ bool detach_hooks()
     DetourUpdateThread(GetCurrentThread());
 
     // Revert all SPR detours before releasing the DLL.
+    if(sprite_variant_hooks_active) {
+        DetourDetach(&(PVOID &)RealSithThingClone,HookedSithThingClone);
+        DetourDetach(&(PVOID &)RealSithSpriteFreeWorld,
+                     HookedSithSpriteFreeWorld);
+        DetourDetach(&(PVOID &)RealSithSpriteLoad,HookedSithSpriteLoad);
+        sprite_variant_hooks_active=false;
+    }
+    // Release variant rdSprite-owned arrays while native allocator/entry
+    // trampolines remain valid; never release world-owned first entries.
+    release_sprite_variants(nullptr);
+    sprite_variant_roots.clear();
     if(sprite_alpha_hook_active) {
         DetourDetach(&(PVOID &)RealSpriteHWUpload,HookedSpriteHWUpload);
         DetourDetach(&(PVOID &)RealSpriteAlphaMid,SpriteAlphaThunk);
