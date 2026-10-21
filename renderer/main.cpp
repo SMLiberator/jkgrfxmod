@@ -2289,7 +2289,8 @@ namespace {
                                          out_distance,out_mesh,out_face,out_normal);
         };
         if(type2_busy || !the_config || !the_config->enable_mesh_collision ||
-           flags!=0 || !checked || !start || !dir || !out_distance ||
+           (flags&(jkgm::mots_raycast_force_sphere|0x400U))!=0 ||
+           !checked || !start || !dir || !out_distance ||
            !out_mesh || !out_face || !out_normal)
             return native();
         auto const read=[](uintptr_t address,void* output,size_t size)->bool {
