@@ -1,9 +1,11 @@
 #pragma once
 // Bounded JKGM type-2 collision *geometry* cache.
 //
-// Fitted mesh spheres and hierarchy are model data, not per-probe data.
+// Fitted mesh spheres and hierarchy are model-level data, not per-probe
+// or per-Thing data. After fitting, the full vertex arrays are discarded.
+// All Things sharing a selected model/geoset use one geometry snapshot.
 // Animation matrices and amputation flags are still read for each query.
-// Models which edit source vertices in-place are periodically refitted.
+// A true in-place vertex edit needs explicit cache invalidation/model reload.
 // Does not cache any Thing pointer dereference beyond validated metadata.
 #include "mots_native_mesh_snapshot.hpp"
 #include <array>
@@ -22,6 +24,13 @@ namespace jkgm {
                 amputations==o.amputations &&
                 thing_signature==o.thing_signature && kind==o.kind &&
                 rd_type==o.rd_type && geoset==o.geoset &&
+                geos==o.geos && node_count==o.node_count &&
+                mesh_count==o.mesh_count;
+        }
+        bool same_geometry(mots_collision_model_identity const &o) const {
+            // Thing identity and limb amputation are NOT model geometry.
+            return model==o.model && hierarchy==o.hierarchy &&
+                meshes==o.meshes && geoset==o.geoset &&
                 geos==o.geos && node_count==o.node_count &&
                 mesh_count==o.mesh_count;
         }
@@ -80,7 +89,6 @@ namespace jkgm {
 
     class mots_collision_snapshot_cache {
     public:
-        static constexpr uint64_t refresh_interval_ms=1000;
         static constexpr size_t max_entries=24;
         // The borrowed result remains valid only until the next get/clear.
         bool get(thing_node_reader const &read,uintptr_t thing,
@@ -94,13 +102,11 @@ namespace jkgm {
             }
             entry *slot=nullptr;
             for(auto &candidate:entries_)
-                if(candidate.key.thing==thing) {
+                if(candidate.key.same_geometry(identity)) {
                     slot=&candidate;
                     break;
                 }
-            bool const reuse=slot && slot->key==identity &&
-                now_ms>=slot->loaded_ms &&
-                now_ms-slot->loaded_ms<refresh_interval_ms;
+            bool const reuse=slot!=nullptr;
             if(!reuse) {
                 mots_native_model_snapshot snapshot{};
                 if(!read_native_collision_model(read,thing,snapshot)) {
@@ -120,8 +126,12 @@ namespace jkgm {
                     entries_.emplace_back();
                     slot=&entries_.back();
                 }
+                // The native renderer still owns its vertices/pivots.
+                // This retained collision-only snapshot needs only each
+                // mesh's fitted local center, radius and hierarchy links.
+                for(auto &node:snapshot.nodes)
+                    std::vector<thing_node_vector>().swap(node.local_vertices);
                 slot->key=identity;
-                slot->loaded_ms=now_ms;
                 slot->snapshot=std::move(snapshot);
                 ++counts_.rebuilds;
             } else ++counts_.hits;
@@ -156,7 +166,7 @@ namespace jkgm {
     private:
         struct entry {
             mots_collision_model_identity key{};
-            uint64_t loaded_ms=0,last_used_ms=0;
+            uint64_t last_used_ms=0;
             mots_native_model_snapshot snapshot{};
         };
         std::vector<entry> entries_;
