@@ -350,7 +350,7 @@ signature validation before actual integration. Future geometry
 caching must also detect asset replacement and COG mesh mutations.
 
 
-## Type-2 query staging (no engine detour enabled)
+## Type-2 query staging and experimental engine detour
 
 `renderer/mots_native_collision_query.hpp` now joins the previous
 read-only mesh snapshot and per-frame pose provider to an actual
@@ -425,6 +425,28 @@ A future opt-in detour must:
    vertices on every collision probe is safe as an experimental
    reference but **not** an acceptable final hot-path cost.
 
-The code is currently **staged and testable, not active in gameplay**.
-This avoids making untested changes to native collision modes 1 or 3
-or silently relying on an undersized sector-level broad phase.
+The reference query is now bridged into an **opt-in native detour** in
+`renderer/main.cpp`, at `0x00508360`, with the exact x86 cdecl
+prototype and a verified original prologue. This is OFF by default:
+`"enable_mesh_collision": false` in `jkgm.json`. On supported builds,
+the enabled hook intercepts collide=2 only and uses a verified native
+`rdModel3_GetMeshMatrix` pose provider; other modes keep the original
+JK behavior. Unsupported flags, malformed models, invalid poses, or
+unsafe output pointers fall back to the trampoline. MotS tree hits
+produce the **Thing hit bit, hit distance and normal** but leave
+`ppHitMesh` and `ppHitFace` unchanged; only polygon collision
+populates them. A confirmed tree miss returns zero.
+
+The first version reads and fits source vertices for every relevant
+type-2 query, without a persistent geometry cache. This is a
+correctness-oriented, experimental test path; it can be expensive in
+large active scenes. The source remains opt-in until live gameplay
+validation establishes its stability, candidate coverage, and
+collision response. See `doc/install.md` for the test switch,
+fallback behavior and bounded diagnostic logs.
+
+The native intersection routine accepts general raycast flags; only
+`0x80` forces sphere collision and `0x400` changes an overlap
+distance convention. Those two special flags continue to use the
+original native function. Outer caller flags remain intact, including
+ordinary combinations used during movement.
