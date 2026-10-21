@@ -1,7 +1,7 @@
 #pragma once
-// Converts a type-3 SPR Thing's world transform, offset and animated instance
-// size/roll to the finite projector consumed by the surface decal clipper.
-// Geometry depth deliberately remains one fixed engine-unit value for now.
+// Type-3 SPR: Thing UP is the surface normal; sprite image lies in its
+// Right/Look plane. Project INTO that surface (-Up) from a small box
+// centered on the Thing origin. The projection depth is fixed for now.
 #include "sprite_decal_clip.hpp"
 #include "sprite_orientation.hpp"
 #include <array>
@@ -39,13 +39,17 @@ inline bool make_sprite_decal_projector(
                       0.01745329251994329577f;
     float const ca=std::cos(angle),sa=std::sin(angle);
     decal_projector projector{};
-    projector.origin=position;
-    projector.look=normalized.look;
+    // JK attachment convention: the Thing's Up vector points OUT of
+    // the hit face. The volume projects inward, opposite to Up.
+    // Right and Look remain the two tangent/image axes.
     for(int axis=0;axis<3;++axis) {
+        projector.look[axis]=-normalized.up[axis];
         projector.right[axis]=ca*normalized.right[axis]+
-                              sa*normalized.up[axis];
-        projector.up[axis]=ca*normalized.up[axis]-
+                              sa*normalized.look[axis];
+        projector.up[axis]=ca*normalized.look[axis]-
                            sa*normalized.right[axis];
+        projector.origin[axis]=position[axis]-
+                 projector.look[axis]*(sprite_decal_projection_depth*0.5f);
     }
     projector.width=source_width*scale_width;
     projector.height=source_height*scale_height;
