@@ -41,8 +41,9 @@ int main()
     set_u32(model+0x50,0);                   // default geoset 0
     set_u32(model+0x54,3);                   // node count
     set_u32(model+0x58,uint32_t(nodes));
-    set_u32(model+0x24+8,2);                // geoset 1 has two meshes
-    set_u32(model+0x24+12,uint32_t(meshes));
+    set_u32(model+0x24,2);                  // collision uses geoset 0
+    set_u32(model+0x24+4,uint32_t(meshes));
+    // geoset 1 is deliberately empty: selection must NEVER enter it.
     const float placement[12]{1,0,0, 0,1,0, 0,0,1, 0,0,0};
     std::memcpy(mem.data()+(thing+0x88-base),
                 placement,sizeof(placement));
@@ -88,7 +89,7 @@ int main()
     };
     mots_native_model_snapshot source{};
     assert(read_native_collision_model(reader,thing,source));
-    assert(source.model==model && source.geoset==1 && source.nodes.size()==3);
+    assert(source.model==model && source.geoset==0 && source.nodes.size()==3);
     assert(source.nodes[0].mesh_index==-1);
     assert(source.nodes[1].parent==0 && source.nodes[2].parent==1);
     assert(source.nodes[1].mesh_index==0);
@@ -101,11 +102,16 @@ int main()
     supported_build=false;
     assert(!read_native_collision_model(reader,thing,source));
     supported_build=true;
-    // rdThing geoset 0xffffffff uses rdModel3 default selection.
+    // Selected lower LOD (1), automatic selection (-1), and a default
+    // geoset of 1 must ALL resolve to full-detail geoset 0 for collision.
+    assert(source.geoset==0);
     set_u32(thing+0xc4+0x30,0xffffffffU);
     set_u32(model+0x50,1);
     assert(read_native_collision_model(reader,thing,source));
-    assert(source.geoset==1);
+    assert(source.geoset==0);
+    set_u32(thing+0xc4+0x30,1);
+    assert(read_native_collision_model(reader,thing,source));
+    assert(source.geoset==0);
 
     // Pose provider is deliberately separate from the memory reader.
     // It stands in for the existing signature-checked native accessor.
@@ -215,6 +221,12 @@ int main()
     int const warm_reads=reads-initial_reads;
     assert(cold_reads>warm_reads+15);
     assert(cache.counters().hits==1 && cache.counters().rebuilds==1);
+    // Visual LOD changes must neither refit nor select lower-detail
+    // collision geometry.
+    set_u32(thing+0xc4+0x30,0);
+    assert(cache.get(reader,thing,12,cached));
+    assert(cached->geoset==0 && cache.counters().rebuilds==1);
+    set_u32(thing+0xc4+0x30,1);
 
     // Limb removal is live even when fitted vertices remain cached.
     set_u32(amputation+4,1);
@@ -251,7 +263,7 @@ int main()
     constexpr uintptr_t meshes2=base+0x30000;
     std::memcpy(mem.data()+meshes2-base,
                 mem.data()+meshes-base,0x70*2);
-    set_u32(model+0x24+12,uint32_t(meshes2));
+    set_u32(model+0x24+4,uint32_t(meshes2));
     assert(cache.get(reader,thing,100000,cached));
     assert(cache.size()==2 && cache.counters().rebuilds==prior_rebuilds+1);
     assert(cached->nodes[1].fitted_sphere.radius>before_radius);
