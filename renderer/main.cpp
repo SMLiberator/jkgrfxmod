@@ -1859,11 +1859,14 @@ namespace {
     uint64_t sprite_static_revision=1;
     bool sprite_static_receivers_dirty=true;
     unsigned sprite_static_mesh_logs=0;
+    unsigned sprite_static_projection_logs=0;
 
     void reset_static_sprite_decal_meshes(uint32_t world)
     {
         sprite_static_meshes.clear();
         sprite_static_receiver_world.clear();
+        sprite_static_projection_logs=0;
+        sprite_static_mesh_logs=0;
         sprite_static_world=world;
         sprite_static_receivers_dirty=true;
         ++sprite_static_revision;
@@ -2117,6 +2120,13 @@ namespace {
                 scan.triangles.insert(scan.triangles.end(),
                     objects.triangles.begin(),objects.triangles.end());
             }
+            if(the_config->profile_renderer &&
+               sprite_static_projection_logs++<16U)
+                LOG_INFO("SPR decal static3do projection meshes=",
+                         sprite_static_meshes.size(),
+                         " faces=",sprite_static_receiver_world.receivers.size(),
+                         " clipped_tris=",object_triangles,
+                         " clipped_faces=",object_receivers);
             jkgm::sprite_decal_mesh mesh{};
             bool const ready=jkgm::make_sprite_decal_gpu_mesh(
                 scan,projector,resource.material,resource.texcoords,
