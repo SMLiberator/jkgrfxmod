@@ -37,9 +37,11 @@ int main(){
     u32(world+0xa8,4);
     u32(world+0xac,uint32_t(surfaces));
     for(int j=0;j<8;++j){
-        float const x=j<4?-0.25f:0.25f;
+        int const corner=j%4;
+        float const x=j<4?(corner<2?-0.25f:0.0f):
+                              (corner<2?0.0f:0.25f);
         float const y=0.1f;
-        float const z=j%4<2?-0.25f:0.25f;
+        float const z=(corner==0 || corner==3)?-0.25f:0.25f;
         vec(vertices+j*12,{{x,y,z}});
     }
     for(uint32_t i=0;i<4;++i){
