@@ -407,12 +407,18 @@ A future opt-in detour must:
    status, preserving native mesh/face output conventions. Return
    definitive `miss` only after an entire valid type-2 test;
    `unavailable` must fall back to the original engine.
-4. **Audit the caller's earlier sector/Thing broad-phase filtering.**
-   If it uses `collideSize` to decide which Things reach the
-   narrow-phase function, a too-small collideSize would still
-   prevent type-2 tests entirely, even though our internal
-   treeSize-free bounding sphere is correct. The native candidate
-   selection must be examined before enabling the detour.
+4. **Finish auditing sector-level candidate selection.** Static
+   disassembly of JKGM's Thing candidate traversal at
+   `0x004E86C0` shows a linked-list iteration of Things at
+   `SithThing + 0x60`, checks for the Thing collision mode at
+   `+0x28` (rejecting zero), and then calls `0x00508360` from
+   `0x004E8888`. There is **no direct collideSize radius
+   comparison in that visible Thing loop**, which is encouraging.
+   However the *earlier sector traversal and spatial candidate
+   discovery* have not yet been proven independent of
+   `collideSize`. If any upstream broad phase omits candidates with
+   undersized collideSize, the type-2 hook cannot recover them merely
+   by replacing the narrow phase.
 5. Establish stable mesh snapshot caching/invalidation rules for
    COG vertex edits, mesh replacement, geoset changes, animation,
    amputation, and entity destruction. Snapshotting thousands of
