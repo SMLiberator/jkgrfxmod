@@ -47,6 +47,7 @@ namespace jkgm {
         uint32_t hierarchy_index=0;
         int32_t parent=-1;
         int32_t mesh_index=-1;
+        uintptr_t native_mesh_address=0; // x86 rdMesh*, for hitMesh output
         uint32_t flags=0;
         bool amputated=false;
         thing_node_vector pivot{};
@@ -199,6 +200,7 @@ namespace jkgm {
                    vertex_count>max_vertices_per_mesh)
                     return false;
                 entry.mesh_index=static_cast<int32_t>(mesh_id);
+                entry.native_mesh_address=mesh;
                 entry.authored_radius=radius;
                 if(vertex_count>0) {
                     if(!read_vertex_array(read,vertices_addr,vertex_count,
