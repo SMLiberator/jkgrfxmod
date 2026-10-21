@@ -47,21 +47,31 @@ and collision-hit records can use the same number. To identify a
 ThingFlag, establish data provenance back to `SithThing.flags`
 (offset `0x00`) as well as an actual branch controlled by that bit.
 
-### Current experimental icy flags
+### Current experimental icy flag
 
-The bit allocations are **provisional** and JKGM-specific:
+Only `0x80000000` is now reserved for **Icy Thing-face friction
+(0.3x)** in the patched JKGM mod. User testing and native render-loop
+inspection found no rendering-suppression behavior for this bit in
+JKGM, unlike the OpenJKDF2 renderer. This is a custom reservation,
+not a claim the flag was universally unused in every subsystem.
 
-- `0x20` = icy Thing-face friction (0.3x)
-- `0x40000000` = very icy Thing-face friction (0.1x)
+The earlier experimental assignments `0x20` and `0x40000000` have
+been **released**: setting either no longer requests icy Thing-face
+physics. `0x10000` also remains unused by the custom hook because
+historical JK documentation identifies it as a single-player exclusion
+bit. We removed the custom Very Icy ThingFlag; vanilla world-surface
+flags `0x1000` and `0x2000` retain their Icy and Very Icy behavior.
 
-The bit `0x10000` is **not used** by these hooks any more.
-World-surface flags `0x1000` and `0x2000` retain native behavior.
+In the native attached-physics code, world-face ice coefficients
+`0.3` and `0.1` multiply `SurfDrag`, and values below or equal
+to `0.8` prevent `StaticDrag` from being used as a speed
+stopping threshold. Neither authored drag parameter is overwritten.
 
 ### Remaining verification
 
 - Build a provenance-oriented disassembly/XREF map for all
   `SithThing.flags` reads in the full patched executable and its
-  loaded extension DLLs before treating `0x20` or `0x40000000`
+  loaded extension DLLs before treating any high ThingFlag (including `0x80000000`)
   as universally available.
 - Optionally instrument controlled changes in a sandbox level with
   single-player, multiplayer, special raycasts, and rendering.
