@@ -1625,6 +1625,7 @@ namespace {
         jkgm::decal_vec3 attached_normal{};
         std::array<float,10> settings{}; // size(4), offset(3), scale(2), roll
         uint64_t id=0;
+        uint64_t last_seen_frame=0;
         std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
     };
     std::unordered_map<uint64_t,cached_runtime_sprite_decal> sprite_gpu_decals;
@@ -1748,6 +1749,7 @@ namespace {
                    <<" valid_world="<<scan.valid_world
                    <<" surfaces="<<scan.surfaces_seen
                    <<" receivers="<<scan.receivers
+                   <<" broadphase="<<scan.broadphase_candidates
                    <<" missed_volume="<<scan.skipped_projection
                    <<" backfaces="<<scan.skipped_backfaces
                    <<" material="<<scan.skipped_material;
@@ -1771,17 +1773,37 @@ namespace {
             entry.settings=settings;
             entry.id=ready?next_gpu_id++:0;
             entry.geometry=ready?std::move(mesh.geometry):nullptr;
-            // Bounded, no stale pointers across arbitrary level changes.
-            if(sprite_gpu_decals.size()>=128) sprite_gpu_decals.clear();
+            // Do not discard EVERY blood splat when crossing the cache
+            // limit: that previously caused repeated projection and GPU
+            // uploads for all still-visible decals after the 128th entry.
+            // Prefer stale-world entries, otherwise evict only the LRU.
+            constexpr size_t decal_cache_limit=1024U;
+            if(it==sprite_gpu_decals.end() &&
+               sprite_gpu_decals.size()>=decal_cache_limit) {
+                auto victim=sprite_gpu_decals.begin();
+                for(auto candidate=sprite_gpu_decals.begin();
+                    candidate!=sprite_gpu_decals.end();++candidate) {
+                    if(candidate->second.world!=world) {
+                        victim=candidate;
+                        break;
+                    }
+                    if(candidate->second.last_seen_frame<
+                       victim->second.last_seen_frame)
+                        victim=candidate;
+                }
+                sprite_gpu_decals.erase(victim);
+            }
             it=sprite_gpu_decals.insert_or_assign(key,std::move(entry)).first;
             if(ready && the_config->profile_renderer &&
                sprite_decal_submit_logs++<12U)
                 LOG_INFO("SPR decal GPU stage=geometry world=",world,
                          " triangles=",scan.triangles.size(),
                          " receivers=",scan.receivers,
+                         " broadphase=",scan.broadphase_candidates,
                          " attached=",attached_to_face,
                          " id=",it->second.id);
         }
+        it->second.last_seen_frame=gpu_frame_serial;
         if(!it->second.geometry ||
            !gpu_mesh_materials_ready(*it->second.geometry))
             return false; // Let native SPR load/warm up its MAT first.
