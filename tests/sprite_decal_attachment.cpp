@@ -25,9 +25,10 @@ int main() {
 
     // Native Thing points exactly ON the floor. It still clips a valid
     // decal on the floor rather than drawing its original upright quad.
-    std::vector<decal_vec3> ground{{
-        {{-1,-1,0}},{{1,-1,0}},{{1,1,0}},{{-1,1,0}}
-    }};
+    std::vector<decal_vec3> ground{
+        decal_vec3{{-1,-1,0}},decal_vec3{{1,-1,0}},
+        decal_vec3{{1,1,0}},decal_vec3{{-1,1,0}}
+    };
     auto clipped=clip_projected_decal(projector,ground,{{0,0,1}});
     assert(clipped.size()>=3);
 
