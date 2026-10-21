@@ -7,6 +7,7 @@
 // Later queries use cheap in-process polygon AABB tests and clipping.
 // AABB rejects cannot discard a truly intersecting projector polygon.
 #include "sprite_decal_world.hpp"
+#include "sprite_decal_bvh.hpp"
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -27,6 +28,7 @@ namespace jkgm {
         uint32_t skipped_sky=0,skipped_material=0;
         bool valid_world=false;
         std::vector<decal_world_surface_geometry> receivers;
+        decal_receiver_bvh<decal_world_surface_geometry> acceleration;
 
         void clear(){*this={};}
 
@@ -123,6 +125,7 @@ namespace jkgm {
                 total_polygon_vertices+=count;
                 receivers.emplace_back(std::move(surface));
             }
+            acceleration.build(receivers);
             valid_world=true;
             return true;
         }
@@ -171,13 +174,16 @@ namespace jkgm {
         result.skipped_sky=geometry.skipped_sky;
         result.skipped_material=geometry.skipped_material;
         decal_volume_aabb const box=sprite_decal_volume_aabb(projector);
-        for(auto const &s:geometry.receivers) {
-            // Cheap local broadphase before polygon clipping. Only relevant
-            // polygons are touched; NO native reads in this inner loop.
-            if(!sprite_decal_bounds_overlap(box,s)) {
-                ++result.skipped_projection;
-                continue;
-            }
+        std::vector<uint32_t> candidates;
+        geometry.acceleration.query(
+            geometry.receivers,box.low,box.high,candidates);
+        result.broadphase_candidates=static_cast<uint32_t>(candidates.size());
+        result.skipped_projection=static_cast<uint32_t>(
+            geometry.receivers.size()-candidates.size());
+        // Only clip surfaces overlapping this small projector volume.
+        // Candidate indices are ordered as in SithWorld for stable results.
+        for(uint32_t const index:candidates) {
+            auto const &s=geometry.receivers[index];
             if(decal_dot(s.normal,projector.look)>=-0.05f) {
                 ++result.skipped_backfaces;
                 continue;
