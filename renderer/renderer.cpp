@@ -62,6 +62,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <sstream>
 #include <unordered_map>
 
 namespace jkgm {
@@ -2740,10 +2741,13 @@ namespace jkgm {
                 if(the_config->profile_renderer &&
                    transparent && draw.instance->is_projected_decal) {
                     static unsigned decal_gpu_draw_logs=0;
-                    if(decal_gpu_draw_logs++<12U)
-                        LOG_INFO("SPR decal GPU stage=draw triangles=",
-                                 group.count/3U,
-                                 " alpha=",draw.instance->decal_opacity);
+                    if(decal_gpu_draw_logs++<12U) {
+                        std::ostringstream msg;
+                        msg<<"SPR decal GPU stage=draw triangles="
+                           <<(group.count/3U)
+                           <<" alpha="<<draw.instance->decal_opacity;
+                        LOG_INFO(msg.str());
+                    }
                 }
                 if(the_config->profile_renderer) {
                     ++profile_frame.gpu_draw_calls;
