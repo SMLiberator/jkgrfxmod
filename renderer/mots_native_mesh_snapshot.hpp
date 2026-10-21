@@ -14,6 +14,7 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace jkgm {
@@ -233,12 +234,17 @@ namespace jkgm {
         if(!pose || snapshot.nodes.empty() ||
            snapshot.nodes.size()>mots_native_layout::max_nodes)return false;
         std::vector<mots_tree_node> result(snapshot.nodes.size());
+        // Populate all hierarchy links and amputation flags BEFORE walking
+        // active nodes; parent indices need not precede their children.
+        for(size_t i=0;i<snapshot.nodes.size();++i) {
+            result[i].parent=snapshot.nodes[i].parent;
+            result[i].amputated=snapshot.nodes[i].amputated;
+            result[i].has_mesh=snapshot.nodes[i].mesh_index>=0 &&
+                               !snapshot.nodes[i].local_vertices.empty();
+        }
         for(size_t i=0;i<snapshot.nodes.size();++i) {
             auto const &src=snapshot.nodes[i];
             auto &dst=result[i];
-            dst.parent=src.parent;
-            dst.amputated=src.amputated;
-            dst.has_mesh=src.mesh_index>=0 && !src.local_vertices.empty();
             if(!dst.has_mesh || !mots_tree_node_active(result,
                               static_cast<uint32_t>(i)))continue;
             dst.center_on_geometry=prefer_fitted && src.has_fitted_sphere;
