@@ -22,6 +22,7 @@
 #include "sprite_quad_transform.hpp"
 #include "sprite_decal_world.hpp"
 #include "sprite_decal_resource.hpp"
+#include "sprite_decal_attachment.hpp"
 #include "sprite_alpha_tag.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
@@ -1617,6 +1618,8 @@ namespace {
         uintptr_t resource=0;
         uintptr_t material=0;
         std::array<float,12> matrix{};
+        bool attached_to_face=false;
+        jkgm::decal_vec3 attached_normal{};
         std::array<float,10> settings{}; // size(4), offset(3), scale(2), roll
         uint64_t id=0;
         std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
@@ -1669,24 +1672,46 @@ namespace {
         jkgm::sprite_decal_resource resource{};
         if(!jkgm::read_sprite_decal_resource(read,sprite,resource))
             return false;
+        jkgm::decal_vec3 attached_normal{};
+        bool attached_to_face=false;
+        // rdThing.pThing lives at +0x44. This is the same native
+        // attachment data already used by GetThingAttachNormal().
+        uint32_t owner=0;
+        if(read(reinterpret_cast<uintptr_t>(rd_thing)+0x44,&owner,4) &&
+           jkgm::decal_native_address_ok(owner)) {
+            attached_to_face=jkgm::read_thing_attachment_normal(
+                read,owner,attached_normal);
+        }
         uint64_t const key=(uint64_t(world)<<32) |
             uint32_t(reinterpret_cast<uintptr_t>(rd_thing));
         auto it=sprite_gpu_decals.find(key);
         bool const hit=it!=sprite_gpu_decals.end() &&
             it->second.world==world && it->second.resource==sprite &&
             it->second.material==resource.material &&
-            it->second.matrix==m && it->second.settings==settings;
+            it->second.matrix==m && it->second.settings==settings &&
+            it->second.attached_to_face==attached_to_face &&
+            (!attached_to_face ||
+             it->second.attached_normal==attached_normal);
         if(!hit) {
-            jkgm::sprite_axes const axes{
+            jkgm::sprite_axes axes{
                 {{m[0],m[1],m[2]}},{{m[3],m[4],m[5]}},
                 {{m[6],m[7],m[8]}}
             };
+            if(attached_to_face) {
+                jkgm::sprite_axes aligned{};
+                if(!jkgm::sprite_decal_attachment_axes(
+                       axes,attached_normal,aligned))return false;
+                axes=aligned;
+            }
             jkgm::decal_projector projector{};
             if(!jkgm::make_sprite_decal_projector(
                 axes,{{m[9],m[10],m[11]}},
                 {{offset[0],offset[1],offset[2]}},
                 size[0],size[1],info.width,info.height,roll,projector))
                 return false;
+            if(attached_to_face)
+                jkgm::sprite_decal_center_around_attached_face(
+                    projector,attached_normal);
             auto const scan=jkgm::project_decal_world_surfaces(
                 read,world,projector,2048U);
             jkgm::sprite_decal_mesh mesh{};
@@ -1699,6 +1724,8 @@ namespace {
             entry.resource=sprite;
             entry.material=resource.material;
             entry.matrix=m;
+            entry.attached_to_face=attached_to_face;
+            entry.attached_normal=attached_normal;
             entry.settings=settings;
             entry.id=next_gpu_id++;
             entry.geometry=std::move(mesh.geometry);
@@ -1710,6 +1737,7 @@ namespace {
                 LOG_INFO("SPR decal GPU stage=geometry world=",world,
                          " triangles=",scan.triangles.size(),
                          " receivers=",scan.receivers,
+                         " attached=",attached_to_face,
                          " id=",it->second.id);
         }
         if(!it->second.geometry ||
