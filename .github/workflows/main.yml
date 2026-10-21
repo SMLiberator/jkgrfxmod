@@ -58,6 +58,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_collision_dispatch.cpp /Fe:mots_collision_dispatch_test.exe
         mots_collision_dispatch_test.exe
+    - name: Staged JKGM animated type-2 collision query tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_native_collision_query.cpp /Fe:mots_native_collision_query_test.exe
+        mots_native_collision_query_test.exe
     - name: Read-only JKGM 3DO collision mesh snapshots
       shell: cmd
       run: |
