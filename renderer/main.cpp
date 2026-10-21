@@ -1177,13 +1177,15 @@ namespace {
 
     void *__cdecl HookedSithSpriteLoad(char const *name)
     {
+        // Native Open/Close can reuse the conffile token backing 'name'.
+        // Capture the request before letting the native parser run.
+        std::string const sprite_name=name?name:"";
         void *base=RealSithSpriteLoad(name);
         if(!base || !name || sprite_variant_groups.count(base) ||
            !gpu_span_readable(base,native_sprite_entry_size))
             return base;
         // Missing names may resolve to default.spr. Do not manufacture
         // variants for an unrelated fallback resource.
-        std::string const sprite_name(name);
         char const *loaded=static_cast<char const *>(base);
         if(_stricmp(loaded,sprite_name.c_str())!=0)return base;
         uint32_t world_address=0;
