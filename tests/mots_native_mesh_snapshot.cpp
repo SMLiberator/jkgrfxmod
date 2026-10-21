@@ -70,8 +70,16 @@ int main()
     set_vec(verts1+12,{{1,0,0}});
     set_vec(verts1+24,{{0,1,0}});
     int reads=0;
+    bool supported_build=true;
     thing_node_reader reader=[&](uintptr_t at,void *dst,size_t length) {
         ++reads;
+        if(at==jkgm_node_matrix_address &&
+           length==jkgm_node_matrix_prologue.size()) {
+            auto bytes=jkgm_node_matrix_prologue;
+            if(!supported_build)bytes[0]=0x90;
+            std::memcpy(dst,bytes.data(),bytes.size());
+            return true;
+        }
         if(at<base || at-base>mem.size() ||
            length>mem.size()-(at-base))return false;
         std::memcpy(dst,mem.data()+(at-base),length);
@@ -89,6 +97,9 @@ int main()
     assert(source.nodes[1].fitted_sphere.radius<4.1f);
     assert(near(source.nodes[1].pivot[1],1));
     assert(reads>10);
+    supported_build=false;
+    assert(!read_native_collision_model(reader,thing,source));
+    supported_build=true;
     // rdThing geoset 0xffffffff uses rdModel3 default selection.
     set_u32(thing+0xc4+0x30,0xffffffffU);
     set_u32(model+0x50,1);
@@ -163,6 +174,11 @@ int main()
     size_t largest=0;
     thing_node_reader limited=[&](uintptr_t at,void *dst,size_t length) {
         largest=std::max(largest,length);
+        if(at==jkgm_node_matrix_address &&
+           length==jkgm_node_matrix_prologue.size()) {
+            std::memcpy(dst,jkgm_node_matrix_prologue.data(),length);
+            return true;
+        }
         if(length>0x10000 || at<base || at-base>mem.size() ||
            length>mem.size()-(at-base))return false;
         std::memcpy(dst,mem.data()+(at-base),length);
