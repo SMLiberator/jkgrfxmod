@@ -216,12 +216,22 @@ projection width/height, place it facing a **real JK world polygon**
 The first valid projector scans world faces, clips a polygon mesh to
 the 0.25-unit depth window, reuses the SPR's MAT/UVs, and sends it
 to the GPU alpha pass. Sprite opacity/roll/scale affect the result.
-The clip mesh is cached by world/Thing/pose. If projection is invalid
-or no world polygon qualifies, the ordinary native sprite is drawn.
+The clip mesh is cached by world/Thing/pose/attachment. For
+projectile blood sprites attached to a surface, JKGM automatically
+reads the **attached face normal** (via the same native data used by
+`GetThingAttachNormal()`) and projects into that face, keeping the
+projectile Thing's orientation unchanged. This alignment is updated
+when the Thing attaches, not during Thing creation; its initial
+projector can still be drawn while in flight. An attachment to a
+3DO face provides an appropriate direction but currently has no
+3DO receiver geometry; this pass still projects onto **world architecture
+only**. If projection is invalid or no world polygon qualifies, the
+ordinary native sprite is drawn.
 
 Set `"profile_renderer": true` and look for
 `SPR decal GPU stage=geometry` with positive receiver and triangle
-counts, followed by `SPR decal GPU stage=queued` when the native MAT
+counts (or inspect `SPR decal GPU stage=no_receiver`
+for failure reasons), followed by `SPR decal GPU stage=queued` when the native MAT
 has become resident and GPU submission actually occurs. The new GPU rendering path is **not yet validated in-game**;
 3DO receivers, animated receivers, and interactions with transparent
 surfaces need separate implementation.
