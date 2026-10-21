@@ -1715,9 +1715,28 @@ namespace {
             auto const scan=jkgm::project_decal_world_surfaces(
                 read,world,projector,2048U);
             jkgm::sprite_decal_mesh mesh{};
-            if(!jkgm::make_sprite_decal_gpu_mesh(
+            bool const ready=jkgm::make_sprite_decal_gpu_mesh(
                 scan,projector,resource.material,resource.texcoords,
-                info.opacity,mesh))
+                info.opacity,mesh);
+            if(!ready && the_config->profile_renderer &&
+               sprite_decal_submit_logs++<12U) {
+                std::ostringstream msg;
+                msg<<"SPR decal GPU stage=no_receiver"
+                   <<" attached="<<attached_to_face
+                   <<" valid_world="<<scan.valid_world
+                   <<" surfaces="<<scan.surfaces_seen
+                   <<" receivers="<<scan.receivers
+                   <<" missed_volume="<<scan.skipped_projection
+                   <<" backfaces="<<scan.skipped_backfaces
+                   <<" material="<<scan.skipped_material;
+                LOG_INFO(msg.str());
+            }
+            // Cache definitive no-receiver results, too. Otherwise an
+            // attached static blood splat can rescan EVERY world polygon on
+            // every frame forever. Moving/reoriented/attached Things still
+            // invalidate the key, so impact recomputes the projected shape.
+            if(!ready && (!scan.valid_world || scan.truncated ||
+                          !scan.triangles.empty()))
                 return false;
             cached_runtime_sprite_decal entry{};
             entry.world=world;
@@ -1727,12 +1746,12 @@ namespace {
             entry.attached_to_face=attached_to_face;
             entry.attached_normal=attached_normal;
             entry.settings=settings;
-            entry.id=next_gpu_id++;
-            entry.geometry=std::move(mesh.geometry);
+            entry.id=ready?next_gpu_id++:0;
+            entry.geometry=ready?std::move(mesh.geometry):nullptr;
             // Bounded, no stale pointers across arbitrary level changes.
             if(sprite_gpu_decals.size()>=128) sprite_gpu_decals.clear();
             it=sprite_gpu_decals.insert_or_assign(key,std::move(entry)).first;
-            if(the_config->profile_renderer &&
+            if(ready && the_config->profile_renderer &&
                sprite_decal_submit_logs++<12U)
                 LOG_INFO("SPR decal GPU stage=geometry world=",world,
                          " triangles=",scan.triangles.size(),
