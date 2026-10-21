@@ -58,6 +58,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_collision_dispatch.cpp /Fe:mots_collision_dispatch_test.exe
         mots_collision_dispatch_test.exe
+    - name: Read-only JKGM 3DO collision mesh snapshots
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_native_mesh_snapshot.cpp /Fe:mots_native_mesh_snapshot_test.exe
+        mots_native_mesh_snapshot_test.exe
     - name: Geometry-centered mesh collision and automatic tree bounds
       shell: cmd
       run: |
