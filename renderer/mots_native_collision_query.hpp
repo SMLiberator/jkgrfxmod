@@ -166,9 +166,11 @@ namespace jkgm {
            mode.path!=mots_collision_path::sphere_tree)
             return mots_query_status::unavailable;
 
-        // Only the base type-2 branch has been reproduced. Other native
-        // flags (including RAYCAST_400) may change the output convention.
-        if(flags!=0U)return mots_query_status::unavailable;
+        // The JKGM intersection path interprets 0x80 as force-sphere and
+        // 0x400 as alternate overlap distance; all other raycast flags
+        // only affect the outer caller's candidate traversal.
+        if((flags&(mots_raycast_force_sphere|0x400U))!=0)
+            return mots_query_status::unavailable;
 
         bool const reversed=mode.reverse_cast;
         auto const *model=reversed?moving_model:checked_model;
