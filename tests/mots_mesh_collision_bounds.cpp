@@ -69,6 +69,20 @@ int main()
     assert(near(world_center[1],20.0f));
     assert(near(world_radius,expected_radius));
 
+    // Nonzero HIERARCHYDEF PIVOT is already part of the completed
+    // rdPuppet/rdThing animated mesh matrix. This offset represents
+    // its effect on the matrix translation; do NOT apply it twice.
+    // The fitted local center is still transformed exactly once.
+    nodes[0].world_matrix=placement(10,25,30);
+    assert(mots_tree_world_sphere(nodes[0],world_center,world_radius));
+    assert(near(world_center[0],10.0f));
+    assert(near(world_center[1],23.0f));
+    assert(near(world_center[2],30.0f));
+    assert(near(world_radius,expected_radius));
+    assert(mots_tree_sphere_cast(nodes,{{10,23,35}},{{0,0,-1}},
+                                 10.0f,0.0f,hit));
+    assert(near(hit.distance,5.0f-expected_radius));
+
     // Nonuniform scaling is conservatively handled, not ignored.
     nodes[0].world_matrix={{1,0,0, 0,2,0, 0,0,1, 10,20,30}};
     assert(mots_tree_world_sphere(nodes[0],world_center,world_radius));
