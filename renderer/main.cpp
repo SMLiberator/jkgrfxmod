@@ -1183,8 +1183,9 @@ namespace {
             return base;
         // Missing names may resolve to default.spr. Do not manufacture
         // variants for an unrelated fallback resource.
+        std::string const sprite_name(name);
         char const *loaded=static_cast<char const *>(base);
-        if(_stricmp(loaded,name)!=0)return base;
+        if(_stricmp(loaded,sprite_name.c_str())!=0)return base;
         uint32_t world_address=0;
         if(!gpu_span_readable(reinterpret_cast<void const *>(
                sprite_world_loading_ptr),4))return base;
@@ -1193,7 +1194,7 @@ namespace {
         if(!jkgm::decal_native_address_ok(world_address))return base;
 
         char path[160]{};
-        int const n=std::snprintf(path,sizeof(path),"misc\\spr\\%s",name);
+        int const n=std::snprintf(path,sizeof(path),"misc\\spr\\%s",sprite_name.c_str());
         if(n<=0 || static_cast<size_t>(n)>=sizeof(path) ||
            !SpriteConfigOpen(path))return base;
         std::vector<jkgm::sprite_variant_spec> specs;
@@ -1212,7 +1213,7 @@ namespace {
         SpriteConfigClose();
         if(malformed) {
             if(the_config && the_config->profile_renderer)
-                LOG_WARNING("SPR multi-entry rejected invalid line: ",name);
+                LOG_WARNING("SPR multi-entry rejected invalid line: ",sprite_name);
             return base;
         }
         if(specs.size()<2)return base;
@@ -1228,7 +1229,7 @@ namespace {
             entry->fill(0);
             auto const &v=specs[i];
             float const offset[3]{v.offset[0],v.offset[1],v.offset[2]};
-            if(!RealNativeSpriteNewEntry(entry->data(),name,int(v.type),
+            if(!RealNativeSpriteNewEntry(entry->data(),sprite_name.c_str(),int(v.type),
                   v.material.c_str(),v.width,v.height,v.geometry,
                   v.lighting,v.texture,v.extra_light,offset)) {
                 // Failed partial allocations must also be released.
@@ -1236,6 +1237,10 @@ namespace {
                 RealNativeSpriteFreeEntry(entry->data());
                 continue;
             }
+            // The trampoline bypasses HookedSpriteNewEntry, so manually
+            // retain each alternative's authored mode for rendering.
+            sprite_types.remember(entry->data(),v.type,
+                                  reinterpret_cast<char const *>(entry->data()));
             group.choices.push_back(entry->data());
             group.owned.emplace_back(std::move(entry));
         }
@@ -1244,7 +1249,7 @@ namespace {
         for(size_t i=1;i<group.choices.size();++i)
             sprite_variant_roots[group.choices[i]]=base;
         if(the_config && the_config->profile_renderer)
-            LOG_INFO("SPR variants name=",name,
+            LOG_INFO("SPR variants name=",sprite_name,
                      " entries=",group.choices.size(),
                      " shared_resources=1");
         sprite_variant_groups.emplace(base,std::move(group));
