@@ -128,7 +128,11 @@ namespace jkgm {
         using namespace mots_native_layout;
         using namespace mots_native_detail;
         thing_node_native_input validated{};
-        if(!read || !resolve_native_thing_node(read,thing,0,validated))
+        // Match the already verified JKGM binary before interpreting any
+        // game object as an rdModel3/rdHierarchyNode. Never silently use
+        // these offsets against a different executable.
+        if(!read || !validate_native_thing_node_accessor(read) ||
+           !resolve_native_thing_node(read,thing,0,validated))
             return false;
         uint32_t model_addr=0;
         if(!read_u32(read,validated.rd_thing+4,model_addr))return false;
