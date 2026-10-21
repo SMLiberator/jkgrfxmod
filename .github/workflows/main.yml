@@ -253,3 +253,28 @@ jobs:
         name: jkgrfxmod-standalone-development
         path: test-build/*
         if-no-files-found: error
+        retention-days: 7
+
+  prune-old-runs:
+    name: Prune obsolete development CI runs
+    # Scheduled workflows only run from master (the repo default branch).
+    # Instead, prune after EVERY development CI push, even failed builds,
+    # without introducing a new workflow on master.
+    needs: [build]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: jkgm-development-ci-prune
+      cancel-in-progress: false
+    permissions:
+      actions: write
+      contents: read
+    steps:
+    - name: Checkout development branch
+      uses: actions/checkout@v4
+    - name: Run safe CI history prune
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        python3 -m unittest discover -s tests -p test_prune_development_ci.py
+        python3 tools/prune_development_ci.py --repo "${{ github.repository }}" --branch development --keep-latest 40 --keep-failures 5 --max-deletes 100 --execute
