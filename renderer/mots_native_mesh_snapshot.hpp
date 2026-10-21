@@ -247,8 +247,10 @@ namespace jkgm {
         for(size_t i=0;i<snapshot.nodes.size();++i) {
             result[i].parent=snapshot.nodes[i].parent;
             result[i].amputated=snapshot.nodes[i].amputated;
+            // Cached collision nodes retain only fitted center/radius.
+            // Source vertex arrays can be discarded after fitting.
             result[i].has_mesh=snapshot.nodes[i].mesh_index>=0 &&
-                               !snapshot.nodes[i].local_vertices.empty();
+                               snapshot.nodes[i].has_fitted_sphere;
         }
         for(size_t i=0;i<snapshot.nodes.size();++i) {
             auto const &src=snapshot.nodes[i];
