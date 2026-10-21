@@ -140,37 +140,47 @@ real world surface, it provides the geometric normal needed for
 alignment.
 
 
-## Icy / very icy surfaces on 3DO Things (experimental)
+## Icy surfaces on 3DO Things (experimental)
 
-The model's **ThingFlags** can give every solid polygon face the same
-attachment friction effect as native world-surface flags `0x1000`
-(ICY) and `0x2000` (VERYICY):
+For a standable 3DO, use **ThingFlag `0x80000000`** to make its faces
+slippery when another physics Thing is attached to one of its polygon
+faces. Include `0x40` (STANDABLE) as appropriate:
 
-| ThingFlags (additive bit) | Meaning | Native friction multiplier |
-| --- | --- | --- |
-| `0x20` | Icy supporting Thing (provisional custom use) | `0.3` |
-| `0x40000000` | Very icy supporting Thing | `0.1` |
+```
+thingflags=0x80000040
+collide=3
+```
 
-The older 0x10000 assignment was **withdrawn**: historical JK specs
-identify it as a 'not in single-player' bit. `0x20` is provisionally
-reserved for icy because the audit found no existing `SithThing.flags`
-consumer; this is not an exhaustive proof for every modded executable.
-`0x40000000` remains the reserved custom very-icy bit. Do not use
-`0x80000000`: the reference renderer can suppress Thing drawing with it. If both are set, very icy wins.
-For a standable icy model, combine `0x40` (STANDABLE) with the new bit:
-`thingflags=0x60` or `thingflags=0x40000040`.
+This is a custom JKGM extension, not a newly discovered vanilla
+ThingFlag meaning. We verified that the tested JKGM rendering loop
+does **not** hide objects with bit `0x80000000` (although the
+OpenJKDF2 renderer does). That bit still has not been proven unused
+throughout every subsystem or third-party patch.
 
-The signature-guarded native hook executes inside
-`sithPhysics_UpdateAttachedThingPhysics` at `0x004F7833` and
-replaces only the existing friction multiplier when a physics Thing
-has a **Thing-face attachment** to the flagged object. This is the
-same native multiplier applied to world-surface ice, including its
-effect on `SurfDrag` and `StaticDrag`. World surfaces and ordinary
-Thing attachments remain unchanged. A log line
-`JKGM Thing-face icy flags enabled` confirms hook installation.
+The signature-guarded detour at `0x004F7833` modifies the native
+friction multiplier **only for Thing-face attachments**. Ordinary
+Icy world surfaces (`surfaceflags=0x1000`) already select
+`friction=0.3`; Very Icy world surfaces (`0x2000`) select
+`friction=0.1`. No new Very Icy **ThingFlag** is defined.
 
-**Note:** This applies to true 3DO face attachments (normally
-`collide=3`), not to the geometric sphere-tree contact itself
-(`collide=2`), which does not identify an attached polygon face.
-This feature has regression tests, but needs its first in-game
-verification on a standable 3DO platform.
+Native attached-physics drag behavior:
+
+- `effectiveSurfDrag = surfDrag * friction`.
+- Under ordinary no-acceleration/no-sector-thrust conditions,
+  `StaticDrag` supplies a low-speed stopping threshold on normal
+  surfaces, but the native physics branch disables that threshold
+  when `friction <= 0.8`. Consequently, both normal native Icy and
+  Very Icy surfaces **ignore StaticDrag** while maintaining an
+  attachment.
+- The stored `surfDrag` and `staticDrag` parameters are
+  **not modified**; the coefficient is only applied while attached.
+
+The new custom ThingFlag uses the same `0.3` multiplier as native
+Icy, so it also causes `StaticDrag` to be ignored in that branch.
+World-face attachments and ordinary Thing-to-Thing attachments
+are unchanged. `collide=2` sphere-tree contacts are not face
+attachments and do not receive this feature by themselves.
+
+For diagnosis, a successful hook installation logs
+`JKGM Thing-face icy flag enabled (0x80000000)`. This behavior
+has regression tests but still needs a controlled gameplay test.
