@@ -40,6 +40,7 @@ namespace jkgm {
         constexpr uint32_t max_nodes=4096;
         constexpr uint32_t max_meshes=4096;
         constexpr uint32_t max_vertices_per_mesh=65536;
+        constexpr uint32_t max_total_vertices=262144;
         constexpr size_t max_read_chunk=0x10000;
     }
 
@@ -162,6 +163,7 @@ namespace jkgm {
         snapshot.model=model;
         snapshot.geoset=selection;
         snapshot.nodes.reserve(count);
+        uint32_t total_vertices=0;
         for(uint32_t i=0;i<count;++i) {
             uintptr_t const node=uintptr_t(hierarchy_addr)+
                                  uintptr_t(i)*node_stride;
@@ -196,8 +198,10 @@ namespace jkgm {
                    !read_u32(read,mesh+mesh_vertex_count,vertex_count) ||
                    !read_f32(read,mesh+mesh_radius,radius) ||
                    !std::isfinite(radius) || radius<0 ||
-                   vertex_count>max_vertices_per_mesh)
+                   vertex_count>max_vertices_per_mesh ||
+                   vertex_count>max_total_vertices-total_vertices)
                     return false;
+                total_vertices+=vertex_count;
                 entry.mesh_index=static_cast<int32_t>(mesh_id);
                 entry.authored_radius=radius;
                 if(vertex_count>0) {
