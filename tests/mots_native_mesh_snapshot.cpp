@@ -207,7 +207,8 @@ int main()
     mots_native_model_snapshot const *cached=nullptr;
     int initial_reads=reads;
     assert(cache.get(reader,thing,10,cached));
-    assert(cache.size()==1 && cached->nodes[1].local_vertices.size()==many);
+    assert(cache.size()==1 && cached->nodes[1].local_vertices.empty() &&
+           cached->nodes[1].has_fitted_sphere);
     int const cold_reads=reads-initial_reads;
     initial_reads=reads;
     assert(cache.get(reader,thing,11,cached));
@@ -223,22 +224,37 @@ int main()
     assert(cache.get(reader,thing,13,cached));
     assert(!cached->nodes[1].amputated);
 
-    // In-place COG mesh edits are picked up by a bounded timed refresh
-    // rather than forcing a full vertex fit on EVERY physics collision.
+    // Multiple Things using one 3DO/geoset MUST share a single fitted
+    // geometry snapshot even with different Thing signatures.
+    constexpr uintptr_t thing2=base+0x200;
+    std::memcpy(mem.data()+thing2-base,mem.data()+thing-base,0xe8);
+    set_u32(thing2+0x74,24);
+    uint64_t const prior_rebuilds=cache.counters().rebuilds;
+    assert(cache.get(reader,thing2,14,cached));
+    assert(cache.size()==1 && cache.counters().rebuilds==prior_rebuilds);
+
+    // A changed signature of the same Thing still uses its identical
+    // model data; geometry is immutable until the model/geoset changes.
+    set_u32(thing+0x74,25);
+    assert(cache.get(reader,thing,1010,cached));
+    assert(cache.counters().rebuilds==prior_rebuilds);
+
+    // Local vertex edits do not trigger hidden every-second refits.
     float const before_radius=cached->nodes[1].fitted_sphere.radius;
     set_vec(big_verts,{{300.0f,0,0}});
-    assert(cache.get(reader,thing,14,cached));
+    assert(cache.get(reader,thing,99999,cached));
     assert(near(cached->nodes[1].fitted_sphere.radius,before_radius));
-    assert(cache.get(reader,thing,1010,cached));
+
+    // Engine reload/geoset replacement invalidates the geometry,
+    // refitting the new vertices only once.
+    constexpr uintptr_t meshes2=base+0x30000;
+    std::memcpy(mem.data()+meshes2-base,
+                mem.data()+meshes-base,0x70*2);
+    set_u32(model+0x24+12,uint32_t(meshes2));
+    assert(cache.get(reader,thing,100000,cached));
+    assert(cache.size()==2 && cache.counters().rebuilds==prior_rebuilds+1);
     assert(cached->nodes[1].fitted_sphere.radius>before_radius);
     set_vec(big_verts,{{0,0,0}});
-
-    // Reuse of a SithThing pointer for a new Thing signature refits,
-    // even if the model pointer itself was recycled.
-    uint64_t const before_rebuilds=cache.counters().rebuilds;
-    set_u32(thing+0x74,24);
-    assert(cache.get(reader,thing,1011,cached));
-    assert(cache.counters().rebuilds==before_rebuilds+1);
 
     // An invalid amputation array or model must not turn into a miss.
     set_u32(thing+0xc4+0x28,0x7ffffff0U);
