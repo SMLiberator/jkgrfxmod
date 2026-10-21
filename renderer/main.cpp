@@ -1724,10 +1724,13 @@ namespace {
         inst.effective_light_mode=0.0f;
         pending_gpu_instances.emplace_back(std::move(inst));
         if(the_config->profile_renderer &&
-           sprite_decal_queued_logs++<12U)
-            LOG_INFO("SPR decal GPU stage=queued id=",it->second.id,
-                     " opacity=",info.opacity,
-                     " vertices=",it->second.geometry->vertices.size());
+           sprite_decal_queued_logs++<12U) {
+            std::ostringstream msg;
+            msg<<"SPR decal GPU stage=queued id="<<it->second.id
+               <<" opacity="<<info.opacity
+               <<" vertices="<<it->second.geometry->vertices.size();
+            LOG_INFO(msg.str());
+        }
         return true;
     }
 
