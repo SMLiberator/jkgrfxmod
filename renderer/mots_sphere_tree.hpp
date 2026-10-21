@@ -168,7 +168,8 @@ namespace jkgm {
             return false;
         for(float x:origin)if(!std::isfinite(x))return false;
         for(float x:unit_direction)if(!std::isfinite(x))return false;
-        if(std::fabs(mots_dot(unit_direction,unit_direction)-1)>0.001f)
+        if(max_distance>0.0f &&
+           std::fabs(mots_dot(unit_direction,unit_direction)-1)>0.001f)
             return false;
         mots_tree_hit nearest;
         float limit=max_distance;
