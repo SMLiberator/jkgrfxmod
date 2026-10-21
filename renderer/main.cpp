@@ -2369,8 +2369,8 @@ namespace {
             return native();
         }
         *out_distance=hit.distance;
-        *out_mesh=reinterpret_cast<void*>(hit.mesh);
-        *out_face=nullptr;
+        // MotS sphere-tree collision does not change mesh/face outputs;
+        // preserving them matches its native hit-result ABI.
         std::memcpy(out_normal,hit.normal.data(),12);
         trace_type2("hit",result.node);
         return hit.flags;
