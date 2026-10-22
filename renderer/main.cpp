@@ -4287,7 +4287,7 @@ std::vector<jkgm::spotlight_instance> jkgm::collect_spotlights_for_frame()
         std::memcpy(&identity,thing+0x74,4);
         if(kind==0||kind>15||identity!=request.identity) {
             // Reclaim active-light slots as soon as JK recycles an owner.
-            get_spotlight_registry().erase(request.thing,request.node);
+            get_spotlight_registry().erase_thing(request.thing);
             continue;
         }
         thing_node_pose pose{};
