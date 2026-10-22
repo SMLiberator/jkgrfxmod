@@ -3782,15 +3782,15 @@ namespace {
                          " image=", image);
     }
 
-    // SetSpotlight(thing,node,mat,xSize,ySize,localOffset).
+    // SetSpotlight(thing,node,mat,vector(width,height,range),localOffset).
     // Use MAT indices like other COG material verbs; the renderer resolves
     // the current texture cel only after its native texture is resident.
     void __cdecl cog_set_spotlight(void *ctx)
     {
         float offset[3]{};
         cog_pop_vector(ctx,offset);
-        float const height=cog_pop_float(ctx);
-        float const width=cog_pop_float(ctx);
+        float dimensions[3]{};
+        cog_pop_vector(ctx,dimensions);
         int const material=cog_pop_int(ctx);
         int const node=cog_pop_int(ctx);
         void *thing=cog_pop_thing(ctx);
@@ -3814,11 +3814,12 @@ namespace {
         request.identity=signature;
         request.node=node;
         request.material=static_cast<uint32_t>(material);
-        request.width=width;
-        request.height=height;
+        request.width=dimensions[0];
+        request.height=dimensions[1];
+        request.range=dimensions[2];
         request.offset={{offset[0],offset[1],offset[2]}};
         if(!jkgm::get_spotlight_registry().set(request))
-            LOG_WARNING("SetSpotlight: invalid dimensions/node or 4-light limit reached");
+            LOG_WARNING("SetSpotlight: invalid dimensions/range/node or 4-light limit reached");
         else LOG_INFO("SetSpotlight: Thing=",request.thing,
                       " node=",node," MAT=",material);
     }
@@ -3830,6 +3831,14 @@ namespace {
         void *thing=cog_pop_thing(ctx);
         jkgm::get_spotlight_registry().erase(
             reinterpret_cast<uintptr_t>(thing),node);
+    }
+
+    // ResetSpotlight(thing): remove all node-bound and root spotlights.
+    void __cdecl cog_reset_spotlight(void *ctx)
+    {
+        void *thing=cog_pop_thing(ctx);
+        if(thing)jkgm::get_spotlight_registry().erase_thing(
+            reinterpret_cast<uintptr_t>(thing));
     }
 
     void __cdecl cog_reset_global_env_map(void *ctx)
@@ -3981,6 +3990,7 @@ namespace {
         cog_verb_entry{"resetperipheralblur", cog_reset_peripheral_blur},
         cog_verb_entry{"setspotlight", cog_set_spotlight},
         cog_verb_entry{"removespotlight", cog_remove_spotlight},
+        cog_verb_entry{"resetspotlight", cog_reset_spotlight},
         cog_verb_entry{"setglobalenvmap", cog_set_global_env_map},
         cog_verb_entry{"resetglobalenvmap", cog_reset_global_env_map},
         cog_verb_entry{"setmatenvmap", cog_set_mat_env_map},
