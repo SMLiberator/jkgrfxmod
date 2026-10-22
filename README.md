@@ -626,6 +626,11 @@ separate operation.
 // SetSpotlight(sourceThing, projectionMat, 'width height range', localOffset)
 SetSpotlight(flare, flashlightMat, '3 2 12', '0 0 0');
 SetSpotlight(car, headlightMat, '2.5 1.5 8', '-0.35 0.7 0.1');
+
+// SetSpotlightIntensities(thing, light, add, fadetimeSeconds)
+SetSpotlightIntensities(flare, 1.0, 0.12, 0.0); // current look
+SetSpotlightIntensities(flare, 1.5, 0.05, 0.5); // fade over 0.5 seconds
+SetSpotlightIntensities(car, 0.8, 0.0, 0.25); // diffuse only
 ResetSpotlight(flare); // remove this Thing's light
 ```
 
@@ -635,9 +640,18 @@ The MAT's current albedo RGB and alpha form a light cookie with
 soft edges and distance cutoff. The opaque depth buffer can preserve the
 receiver's **unlit albedo** (in its GBA channels) when spotlights are
 enabled. Spotlights light that pigment with a screen-like diffuse term
-plus 12% additive glow, even if the previously shaded surface was black. It affects **opaque world and 3DO
-receivers** through the shared depth/normal buffer, independent of model
-caching. Transparency, shadows, specular lighting and volumetric beams
+plus a separate additive cookie contribution, even if the previously shaded
+surface was black. **SetSpotlightIntensities** independently scales the
+two components: `light` illuminates the receiver's unlit pigment,
+`add` overlays unmodulated cookie radiance. Their defaults are **1.0**
+and **0.12**, preserving existing Spotlight visuals. Both accept
+strengths from 0 to 16 (not restricted to 0–1); `fadetimeSeconds`
+is 0 for immediate changes or up to 3600 for linear interpolation.
+Repeated calls start from the currently interpolated values, and
+`SetSpotlight` on the same Thing preserves an active fade. Call
+`SetSpotlight` first; the intensities verb requires an active Spotlight.
+These contributions affect **opaque world and 3DO receivers** through
+the shared depth/normal buffer, independent of model caching. Transparency, shadows, specular lighting and volumetric beams
 are not yet implemented. The first version evaluates four lights
 fullscreen, so performance should be measured before increasing that cap.
 
