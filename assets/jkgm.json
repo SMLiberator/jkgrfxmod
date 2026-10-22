@@ -15,6 +15,7 @@
     "enable_fog": true,
     "enable_post": true,
     "enable_reflections": true,
+    "enable_dynamic_light_specular": false,
     "enable_ssao": true,
     "enable_parallax": true,
     "enable_texture_filtering": true,
