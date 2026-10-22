@@ -3782,62 +3782,10 @@ namespace {
                          " image=", image);
     }
 
-    // JK23 rdMaterial_AddToTextureCache (original 4-argument ABI).
-    // A COG MAT index can be resolved to a native rdMaterial + its selected
-    // rdTexture, then uploaded without adding a hidden mesh/face to rdCache.
-    // JKGM's supported executable retains the original rdMaterial entrypoint.
-    // Only issue the native D3D cache call on the GL-owning render thread.
-    using native_rd_material_cache_fn=int(__cdecl *)(void *,void *,int,int);
-    constexpr uintptr_t native_rd_material_cache_addr=0x0044AA70U;
-    bool spotlight_warm_native_mat(uint32_t material_id)
-    {
-        using namespace jkgm::engine_material_debug;
-        if(!matches_tested_executable() || !wglGetCurrentContext() ||
-           !gpu_span_readable(
-             reinterpret_cast<void const *>(native_rd_material_cache_addr),16))
-            return false;
-        bool const shared=(material_id&0x8000U)!=0U;
-        unsigned const index=material_id&0x7fffU;
-        uint32_t world_addr=0;
-        world_header world{};
-        if(!load_world(shared?static_world_global:current_world_global,
-                       world_addr,world) ||
-           index>=unsigned(world.num_materials))return false;
-        uintptr_t const material=uintptr_t(world.materials)+
-                                 index*sizeof(native_material);
-        native_material mat{};
-        if(!read_object(material,mat) || mat.id!=material_id ||
-           (mat.tex_type&2U)==0U || mat.num_texinfo==0U ||
-           mat.num_texinfo>16U)return false;
-        unsigned const cel=std::min(mat.current_cel,mat.num_texinfo-1U);
-        native_texinfo info{};
-        if(!mat.texinfo[cel]||!read_object(mat.texinfo[cel],info)||
-           !info.texture || (info.header[0]&8U)==0U)return false;
-        native_texture tex{};
-        if(!read_object(info.texture,tex) || !tex.mipmap_buffers[0] ||
-           tex.header[6]==0U||tex.header[6]>4U)return false;
-        bool const needs_alpha=(tex.header[0]&1U)!=0U;
-        native_surface const &resident=needs_alpha?
-            tex.alpha_mips[0]:tex.opaque_mips[0];
-        if(resident.texture_loaded && resident.texture_handle>0)return true;
-        // "no_alpha"==1 selects opaqueMats; 0 selects alphaMats.
-        auto const native_load=reinterpret_cast<native_rd_material_cache_fn>(
-            native_rd_material_cache_addr);
-        if(!native_load(reinterpret_cast<void *>(material),
-                        reinterpret_cast<void *>(info.texture),0,
-                        needs_alpha?0:1))return false;
-        native_texture updated{};
-        if(!read_object(info.texture,updated))return false;
-        auto const &loaded=needs_alpha?
-            updated.alpha_mips[0]:updated.opaque_mips[0];
-        if(loaded.texture_loaded && loaded.texture_handle>0) {
-            LOG_INFO("Spotlight MAT prewarmed: MAT=",material_id,
-                     " cel=",cel);
-            return true;
-        }
-        return false;
-    }
-
+    // IMPORTANT: no native MAT-cache invocation here. Address 0x0044AA70
+    // belongs to a DIFFERENT executable layout and caused a page fault in
+    // the supported JKGM build. Material upload must go through a verified
+    // engine entrypoint or the normal native render/cache warm-up path.
     // SetSpotlight(thing,node,mat,vector(width,height,range),localOffset).
     // Use MAT indices like other COG material verbs; the renderer resolves
     // the current texture cel only after its native texture is resident.
@@ -3878,11 +3826,8 @@ namespace {
             LOG_WARNING("SetSpotlight: invalid dimensions/range/node or 4-light limit reached");
         }
         else {
-            // Upload the referenced cel immediately, when a GL context is
-            // available; a future render frame retries a deferred request.
-            bool const warm=spotlight_warm_native_mat(request.material);
-            LOG_INFO("SetSpotlight: MAT=",material,
-                     " resident=",warm," node=",node);
+            LOG_INFO("SetSpotlight: MAT=",material," node=",node,
+                     " registered; native MAT preloader disabled for safety");
         }
     }
 
@@ -4137,10 +4082,6 @@ std::vector<jkgm::spotlight_instance> jkgm::collect_spotlights_for_frame()
             std::memcpy(m.data()+9,thing+0xb8,3*sizeof(float));
             if(!get_thing_node_pose(m,pose))continue;
         }
-        // The COG verb runs even during early level initialization, before
-        // a valid GL context exists. Try again on the first render frame.
-        // Native rdMaterial_AddToTextureCache is a no-op for resident cels.
-        spotlight_warm_native_mat(request.material);
         spotlight_instance instance{};
         if(spotlight_make_instance(request,pose,instance))
             instances.push_back(instance);
