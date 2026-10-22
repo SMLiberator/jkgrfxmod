@@ -4120,8 +4120,11 @@ namespace {
             auto const &surface=has_alpha?t.alpha_mips[0]:t.opaque_mips[0];
             return surface.texture_loaded!=0 && surface.texture_handle>0;
         };
-        if(resident(texture))return true;
-
+        bool const previously_resident=resident(texture);
+        // Always call the verified native function. For an already-resident
+        // texture it updates std3D's cache/LRU frame counter, preventing
+        // spotlights that are never drawn on geometry from being evicted.
+        // For an unloaded texture it creates the usual DDraw-backed surface.
         auto const native_load=reinterpret_cast<jkgm_rd_material_cache_fn>(
             jkgm_mat_cache_addr);
         if(!native_load(reinterpret_cast<void *>(mat_address),
@@ -4131,8 +4134,9 @@ namespace {
         native_texture updated{};
         if(!read_object(info.texture,updated) || !resident(updated))
             return false;
-        LOG_INFO("Spotlight MAT loaded on demand: id=",mat_id,
-                 " cel=",cel," alpha=",has_alpha);
+        if(!previously_resident)
+            LOG_INFO("Spotlight MAT loaded on demand: id=",mat_id,
+                     " cel=",cel," alpha=",has_alpha);
         return true;
     }
     // SetSpotlight(thing,mat,vector(width,height,range),localOffset).
