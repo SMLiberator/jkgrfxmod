@@ -577,7 +577,21 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , camera_right(gl::get_uniform_location(the_program, "camera_right"))
     , camera_forward(gl::get_uniform_location(the_program, "camera_forward"))
     , camera_up(gl::get_uniform_location(the_program, "camera_up"))
+    , spotlight_count(gl::get_uniform_location(the_program,"spotlight_count"))
 {
+    for(int i=0;i<4;++i) {
+        spotlight_images.push_back(gl::get_uniform_location(
+            the_program,"spotlight_image_"+std::to_string(i)));
+        spotlight_origins.push_back(gl::get_uniform_location(
+            the_program,"spotlight_origins["+std::to_string(i)+"]"));
+        spotlight_rights.push_back(gl::get_uniform_location(
+            the_program,"spotlight_rights["+std::to_string(i)+"]"));
+        spotlight_ups.push_back(gl::get_uniform_location(
+            the_program,"spotlight_ups["+std::to_string(i)+"]"));
+        spotlight_forwards.push_back(gl::get_uniform_location(
+            the_program,"spotlight_forwards["+std::to_string(i)+"]"));
+        gl::set_uniform_integer(spotlight_images.back(),6+i);
+    }
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_color_sampler(int sampler)
@@ -605,6 +619,32 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_fog(point<4,float> pa
 {
     gl::set_uniform_vector(fog_params,params);
     gl::set_uniform_vector(fog_color,fog);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_projector_camera(
+    point<4,float> origin,point<4,float> right,point<4,float> forward,
+    point<4,float> up)
+{
+    gl::set_uniform_vector(camera_origin,origin);
+    gl::set_uniform_vector(camera_right,right);
+    gl::set_uniform_vector(camera_forward,forward);
+    gl::set_uniform_vector(camera_up,up);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight_count(int count)
+{
+    gl::set_uniform_integer(spotlight_count,count);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight(
+    int slot,point<4,float> origin,point<4,float> right,point<4,float> up,
+    point<4,float> forward)
+{
+    if(slot<0 || slot>=4)return;
+    gl::set_uniform_vector(spotlight_origins[slot],origin);
+    gl::set_uniform_vector(spotlight_rights[slot],right);
+    gl::set_uniform_vector(spotlight_ups[slot],up);
+    gl::set_uniform_vector(spotlight_forwards[slot],forward);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::disable_projected_decal()
