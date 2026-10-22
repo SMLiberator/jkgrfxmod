@@ -56,7 +56,7 @@ vec3 reconstruct_scene_world(float depth)
 }
 
 // Project a perspective light-cookie texture onto opaque G-buffer receivers.
-// No shadow casting or per-material BRDF yet; texture RGB+alpha are additive.
+// Light-cookie color/intensity is accumulated here, independent of pigment.
 vec3 project_spotlights(float depth,ivec2 pixel)
 {
     if(spotlight_count<=0 || depth<=0.0 || depth>=65500.0)
@@ -158,9 +158,19 @@ void main()
     }
     vec3 surface_rgb=albedo.rgb*occlusion;
     surface_rgb=project_decal(surface_rgb,depth,tc);
-    // Add projected MAT illumination before distance fog. Decals remain
-    // pigment; headlights are light, independent of the receiver albedo.
+    // Blend the new light against the material's UNLIT pigment, not its
+    // already-darkened framebuffer result. Screen/soft-light applied directly
+    // to surface_rgb cannot recover texture detail from a pitch-black pixel.
+    // Depth.GBA stores base pigment when spotlights are enabled; depth.R
+    // remains unchanged for SSAO, decals and reconstruction.
     vec3 light_rgb=project_spotlights(depth,tc);
-    vec3 lit=mix(surface_rgb+light_rgb,fog_color,fog);
+    vec3 pigment=spotlight_count>0
+        ? max(texelFetch(depth_image,tc,0).gba,vec3(0.0))
+        : vec3(0.0);
+    vec3 diffuse_light=pigment*light_rgb;
+    vec3 screened=surface_rgb+diffuse_light*
+                  (vec3(1.0)-clamp(surface_rgb,0.0,1.0));
+    // Small glow allows white flare spill, without washing the pigment out.
+    vec3 lit=mix(screened+0.12*light_rgb,fog_color,fog);
     out_color=vec4(emissive.rgb+lit,albedo.a);
 }
