@@ -21,8 +21,17 @@ int main() {
     }
     assert(eq(minU,0) && eq(maxU,1));
     assert(eq(minV,0) && eq(maxV,1));
-    // Reversed wall normal must not receive the decal.
+    // Legacy clip helper still rejects reversed walls by default.
     assert(clip_projected_decal(p,wall,{{0,1,0}}).empty());
+    // Runtime experiment bypasses the normal test, preserving volume bounds.
+    assert(clip_projected_decal(p,wall,{{0,1,0}},0.05f,false).size()==4);
+    // A strictly perpendicular wall still has zero projected UV area; the
+    // limiter removal alone cannot make its texture wrap around the edge.
+    std::vector<decal_vec3> perpendicular={
+        {{0.1f,0.0f,-0.5f}},{{0.1f,0.25f,-0.5f}},
+        {{0.1f,0.25f,0.5f}},{{0.1f,0.0f,0.5f}}
+    };
+    assert(clip_projected_decal(p,perpendicular,{{1,0,0}},0.05f,false).empty());
     // A neighboring wall crossing the box edge produces a partial polygon.
     std::vector<decal_vec3> half_wall={
         {{0,0.1f,-1}},{{0,0.1f,1}},{{1,0.1f,1}},{{1,0.1f,-1}}
