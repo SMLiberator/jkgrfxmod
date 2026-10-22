@@ -598,7 +598,9 @@ pose functions. This is not an IJIM template-spawning verb: the child is an
 // Node index is the model hierarchy index, not a mesh name.
 // Full animated node orientation and translation are always inherited.
 AttachThingToThingNode(flare, player, 4, '0 0 0');
-DetachThing(flare); // ordinary built-in verb also removes node-following
+// GetThingAttachFlags(flare) includes 0x4 (THING), 0x8 (NOMOVE),
+// and our 0x80 (NODE) while attached.
+DetachThing(flare); // built-in verb also clears 0x80 and node-following
 ```
 
 The child joins JK's native attached-Thing list with THING (0x4) and
