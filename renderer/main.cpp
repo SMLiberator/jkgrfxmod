@@ -63,6 +63,91 @@ static std::unique_ptr<jkgm::config> the_config;
 static bool renderer_hooks_active = false;
 
 static bool native_3do_hooks_active = false;
+
+    // The user's JK.dll exposes mesh/material mutations through registered
+    // COG verbs. Wrap the verb *registration*, not DLL machine-code offsets:
+    // this preserves original arguments/results and detects modifications
+    // immediately after the verb handler returns.
+    namespace mesh_revision {
+        using handler = void(__cdecl *)(void *);
+        using registrar = void(__cdecl *)(void *,handler,char const *);
+        constexpr size_t mutator_count=16U;
+        constexpr std::array<char const *,mutator_count> names{{
+            "setmodelmesh","clonemodel","changemodelmaterial",
+            "replacemodelmaterial","appendthingmaterial","appendmodelmaterial",
+            "appendthingemptymesh","appendmodelemptymesh","appendmodelnode",
+            "replacemodelmeshmaterial","clearmodel","clearmodelmesh",
+            "overwritemodel","reloadmodel","setmodelnodemesh","swapmodelmesh"
+        }};
+        std::array<handler,mutator_count> originals{};
+        registrar original_registrar=nullptr;
+        uint32_t registered_mask=0U;
+        uint64_t generation=1U;
+        bool complete=false;
+        bool untracked_write=false;
+
+        template<size_t I>
+        void __cdecl invoke(void *ctx)
+        {
+            // Call the original JK.dll COG handler exactly once, without
+            // touching the interpreter's stack or its returned result.
+            originals[I](ctx);
+            ++generation; // global invalidation; only actual verb calls do this
+        }
+        constexpr std::array<handler,mutator_count> wrappers{{
+            invoke<0>,invoke<1>,invoke<2>,invoke<3>,
+            invoke<4>,invoke<5>,invoke<6>,invoke<7>,
+            invoke<8>,invoke<9>,invoke<10>,invoke<11>,
+            invoke<12>,invoke<13>,invoke<14>,invoke<15>
+        }};
+
+        void __cdecl register_mutator(void *ctx,handler fn,char const *name)
+        {
+            if(fn && name) {
+                for(size_t i=0;i<mutator_count;++i) {
+                    if(std::strcmp(name,names[i])==0) {
+                        originals[i]=fn;
+                        registered_mask|=uint32_t(1U<<i);
+                        original_registrar(ctx,wrappers[i],name);
+                        return;
+                    }
+                }
+            }
+            original_registrar(ctx,fn,name);
+        }
+
+        void begin(registrar fn)
+        {
+            original_registrar=fn;
+            registered_mask=0U;
+            originals.fill(nullptr);
+            complete=false;
+            untracked_write=false;
+        }
+        void finish()
+        {
+            complete=registered_mask==((1U<<mutator_count)-1U);
+            if(complete) {
+                LOG_INFO("GPU 3DO revision tracking: ",mutator_count,
+                         " JK.dll mesh/material COG mutation verbs wrapped; "
+                         "periodic signature audit every 32 frames");
+            } else {
+                LOG_WARNING("GPU 3DO revision tracking unavailable: missing JK.dll "
+                            "mesh/material verb registrations; full hashing retained");
+            }
+        }
+        bool active() {return complete && !untracked_write;}
+        uint64_t current() {return generation;}
+        void report_untracked()
+        {
+            if(untracked_write)return;
+            untracked_write=true;
+            LOG_WARNING("GPU 3DO revision audit detected a mesh write outside "
+                        "tracked JK.dll COG verbs; disabling fast path, "
+                        "restoring full per-frame hashing for this session");
+        }
+    }
+
 static bool native_mat_mips_hook_active = false;
 static bool native_mesh_collision_hook_active = false;
 static bool native_node_attachment_hooks_active = false;
@@ -149,6 +234,7 @@ namespace {
         int num_vertices=0,num_faces=0,num_uvs=0;
         int lighting_mode=0,texture_mode=0;
         uint64_t source_signature=0,source_checked_frame=0;
+        uint64_t source_checked_generation=0,last_audit_frame=0;
         char const *snapshot_failure=nullptr; // memoized failed snapshots
         uint64_t id=0;
         std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
@@ -871,8 +957,16 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
         it->second.num_uvs==m.num_uvs &&
         it->second.lighting_mode==m.lighting_mode &&
         it->second.texture_mode==m.texture_mode;
-    if(!header_unchanged ||
-       it->second.source_checked_frame!=gpu_frame_serial) {
+    bool const revision_fastpath=the_config->mesh_revision_tracking &&
+                                 mesh_revision::active();
+    uint64_t const current_generation=mesh_revision::current();
+    bool const audit_frame=(gpu_frame_serial%32U)==0U;
+    bool const should_hash=!header_unchanged ||
+        (revision_fastpath
+          ? (it->second.source_checked_generation!=current_generation ||
+             (audit_frame && it->second.last_audit_frame!=gpu_frame_serial))
+          : it->second.source_checked_frame!=gpu_frame_serial);
+    if(should_hash) {
         bool const profiling=the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
@@ -886,6 +980,13 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
             if(profiling) ++gpu_native_stats.snapshot_native;
             gpu_log_fallback(m,"invalid_mesh_source_memory");
             return false;
+        }
+        if(revision_fastpath && audit_frame && header_unchanged &&
+           it->second.source_checked_generation==current_generation &&
+           it->second.source_signature!=signature) {
+            // A periodic audit caught a modification that bypassed every
+            // known JK.dll mutation verb. Switch back to exact old behavior.
+            mesh_revision::report_untracked();
         }
         if(!header_unchanged || it->second.source_signature!=signature) {
             char const *failure="unknown_snapshot_error";
@@ -908,6 +1009,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
             updated.texture_mode=m.texture_mode;
             updated.source_signature=signature;
             updated.source_checked_frame=gpu_frame_serial;
+            updated.source_checked_generation=current_generation;
+            updated.last_audit_frame=audit_frame ? gpu_frame_serial : 0U;
             if(geom) {
                 updated.id=next_gpu_id++;
                 updated.geometry=std::move(geom);
@@ -924,6 +1027,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
         }
         else {
             it->second.source_checked_frame=gpu_frame_serial;
+            it->second.source_checked_generation=current_generation;
+            if(audit_frame)it->second.last_audit_frame=gpu_frame_serial;
         }
     }
     if(!it->second.geometry) {
@@ -4402,7 +4507,14 @@ namespace {
 
     void __cdecl HookedJkInitNewCogVerbs(cog_register_verb_type register_verb, void *ctx)
     {
-        TrueJkInitNewCogVerbs(register_verb, ctx);
+        if(the_config && the_config->use_model_cache &&
+           the_config->mesh_revision_tracking && register_verb) {
+            mesh_revision::begin(register_verb);
+            TrueJkInitNewCogVerbs(mesh_revision::register_mutator,ctx);
+            mesh_revision::finish();
+        } else {
+            TrueJkInitNewCogVerbs(register_verb,ctx);
+        }
 
         if(!cog_helpers_match()) {
             LOG_ERROR("jk.exe does not match the build the fog COG verbs were written for; "

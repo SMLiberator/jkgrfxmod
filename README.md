@@ -1062,6 +1062,27 @@ The new path requires the updated \`renderer.dll\`, plus
 build in \`jkgm/shaders/\`. Keep the native \`jkgm.exe\` bootstrap.
 
 
+
+### Experimental mesh revision tracking
+
+With \`"use_model_cache": true\`, set \`"mesh_revision_tracking": true\` to
+enable experimental JK.dll COG mutation tracking. The renderer wraps 16
+mesh/material mutator verb registrations, preserving the original COG handlers
+and results. A mutation bumps a global generation: cached 3DOs only need a new
+source-byte signature when the generation changes, their mesh header changes, or
+once every 32 frames for an integrity audit. An audit mismatch permanently
+disables the shortcut for that session and restores original per-frame hashing.
+If the expected JK.dll registrations are missing, full hashing remains active.
+
+The setting defaults to false. **This is not yet a guarantee of instant
+invalidation for writes originating outside the known JK.dll verbs**; those
+can remain stale until the next audit. Texture pixel uploads/residency and
+per-Thing lighting are separate from geometry revision tracking. Benchmark
+with \`"profile_renderer": true\` and compare \`PERF gpu_3do source_check_us_avg\`,
+\`checks_avg\`, and \`invalidations_total\` with the setting off/on. For
+compatibility tests, exercise CloneModel, SetModelMesh, ReloadModel,
+ReplaceModelMaterial and ReplaceModelMeshMaterial, as well as animated cels.
+
 ## Native MAT mip selection
 
 The original Sith renderer chooses a particular mip level from a MAT before
