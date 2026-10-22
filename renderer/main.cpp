@@ -3384,6 +3384,8 @@ namespace {
                    !read_node_attachment_identity(rec.parent,parent_sig) ||
                    child_sig!=rec.child_signature ||
                    parent_sig!=rec.parent_signature) {
+                    // Never touch the memory of a recycled/destroyed child.
+                    // The native detach/destruction routine owns flag cleanup.
                     jkgm::get_node_attachment_registry().erase(rec.child);
                     continue;
                 }
@@ -3392,7 +3394,10 @@ namespace {
                 uint32_t native_flags=0,parent_ptr=0;
                 std::memcpy(&native_flags,child+0x34,4);
                 std::memcpy(&parent_ptr,child+0x58,4);
-                if((native_flags & jkgm::native_attach_thing)==0 ||
+                if((native_flags & (jkgm::native_attach_thing |
+                                     jkgm::native_attach_node)) !=
+                   (jkgm::native_attach_thing |
+                    jkgm::native_attach_node) ||
                    parent_ptr!=rec.parent) {
                     // Vanilla DetachThing, destruction or reattachment won.
                     jkgm::get_node_attachment_registry().erase(rec.child);
