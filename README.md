@@ -589,21 +589,22 @@ Keep using your patched JK executable; this PR does not change it.
 
 ## Native ThingNode attachments and MAT Spotlights (experimental)
 
-The renderer adds **`AttachThingToThingNode(child,parent,node,offset,flags)`**
+The renderer adds **`AttachThingToThingNode(child,parent,node,offset)`**
 using the verified native JKGM Thing attachment, detach, update, sector and
 pose functions. This is not an IJIM template-spawning verb: the child is an
 **existing Thing**, retaining its sprite/3DO identity and COG controls.
 
 ```c
 // Node index is the model hierarchy index, not a mesh name.
-// Flags: 1 = follow position + orientation, 0 = follow position only.
-AttachThingToThingNode(flare, player, 4, '0 0 0', 1);
+// Full animated node orientation and translation are always inherited.
+AttachThingToThingNode(flare, player, 4, '0 0 0');
 DetachThing(flare); // ordinary built-in verb also removes node-following
 ```
 
-The child joins JK's native attached-Thing list with its standard THING
-and NOMOVE bits; node-relative offset and optional rotation inheritance
-are stored separately in the renderer. Each game Thing update samples the
+The child joins JK's native attached-Thing list with THING (0x4) and
+NOMOVE (0x8) plus new NODE (0x80) bits, readable through stock
+`GetThingAttachFlags(child)`. Full node rotation is always inherited;
+only the node index and local offset live in the sidecar. Each game Thing update samples the
 **animated world-space node matrix**, transforms the local offset, updates
 the child's real Sith position and orientation, and uses native sector
 transitions to keep it co-located with the parent. The engine's ordinary
@@ -628,8 +629,11 @@ ResetSpotlight(flare); // remove this Thing's light
 
 The projector's Look axis is its forward beam direction, and the offset
 uses its Right/Look/Up axes. Sizes and range are measured in JK units.
-The MAT's current albedo RGB and alpha form an additive light cookie with
-soft edges and distance cutoff. It affects **opaque world and 3DO
+The MAT's current albedo RGB and alpha form a light cookie with
+soft edges and distance cutoff. The opaque depth buffer can preserve the
+receiver's **unlit albedo** (in its GBA channels) when spotlights are
+enabled. Spotlights light that pigment with a screen-like diffuse term
+plus 12% additive glow, even if the previously shaded surface was black. It affects **opaque world and 3DO
 receivers** through the shared depth/normal buffer, independent of model
 caching. Transparency, shadows, specular lighting and volumetric beams
 are not yet implemented. The first version evaluates four lights
