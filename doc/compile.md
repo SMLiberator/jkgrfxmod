@@ -268,7 +268,7 @@ The `alpha_mode` field is optional.
 
 The `alpha_mode` field describes how the material should interpret transparency. `blend` uses alpha blending, `mask` uses alpha testing with a cutoff defined by `alpha_cutoff`, and `dithered` uses a 4x4 screen-door pattern to approximate partial alpha using opaque, depth-writing pixels. The default value is `blend`. The spelling `dither` is also accepted by the compiler and normalized to `dithered` in the compiled pack.
 
-`mask` tests only the albedo map alpha and is useful for hard-edged cutouts, including JK translucent faces. `dithered` tests the combined texture/material/vertex alpha and is especially useful for overlapping foliage, at the cost of visible stippling. Screen-door coverage is intended for normal blending, not additive, multiply, or fluid materials.
+`mask` tests only the albedo map alpha and is useful for hard-edged cutouts, including JK translucent faces. `dithered` tests the combined texture/material/vertex alpha and is especially useful for overlapping foliage, at the cost of visible stippling. Screen-door coverage is intended for normal blending, not additive, multiply, or fluid materials. For native-rendered geometry, dithered cutouts keep their original triangle submission order in the opaque pass instead of being painter-sorted with blended geometry. This avoids unnecessary order changes on overlapping foliage.
 
 Note also that the alpha mode only applies to translucent faces or faces which normally permit color keyed transparency. The material is drawn opaque on all other faces, with blending and alpha testing disabled.
 

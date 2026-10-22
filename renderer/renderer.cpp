@@ -3480,7 +3480,25 @@ namespace jkgm {
             {
                 profile_scope timer(profiling,
                     profile_frame.timings[profile_idx(profile_stage::sort_transparent)]);
-                world_transparent_batch.sort();
+                // Native alpha-dithered faces are rendered once, as opaque
+                // depth-writing coverage. They MUST NOT be painter-sorted:
+                // ambiguous overlapping tree cards can otherwise swap order
+                // as the camera moves, even though blending is disabled.
+                // Preserve the engine's submission order for those faces and
+                // sort only the truly translucent tail of the batch.
+                auto const cutout = [this](triangle const &tri) {
+                    return is_dithered_material(tri.material);
+                };
+                if(std::any_of(world_transparent_batch.begin(),
+                               world_transparent_batch.end(),cutout)) {
+                    auto const blended_begin=std::stable_partition(
+                        world_transparent_batch.begin(),
+                        world_transparent_batch.end(),cutout);
+                    world_transparent_batch.sort_from(static_cast<size_t>(
+                        blended_begin-world_transparent_batch.begin()));
+                } else {
+                    world_transparent_batch.sort();
+                }
                 world_flare_batch.sort();
                 gun_transparent_batch.sort();
             }

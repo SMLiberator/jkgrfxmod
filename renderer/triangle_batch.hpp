@@ -78,5 +78,8 @@ namespace jkgm {
 
     public:
         void sort() override;
+        // Leave [begin, begin+first) in submission order (depth-writing
+        // cutouts); painter-sort only the remaining blended triangles.
+        void sort_from(size_t first);
     };
 }

@@ -345,5 +345,11 @@ namespace jkgm {
 
 void jkgm::sorted_triangle_batch::sort()
 {
-    do_fast_partition(begin(), end());
+    sort_from(0U);
+}
+
+void jkgm::sorted_triangle_batch::sort_from(size_t first)
+{
+    if(first >= size()) return;
+    do_fast_partition(begin() + first, end());
 }
