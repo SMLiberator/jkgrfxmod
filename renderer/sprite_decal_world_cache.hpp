@@ -80,7 +80,15 @@ namespace jkgm {
                    !read_decal_vec3(read,addr+0x48,normal)) {
                     ++invalid_surfaces;continue;
                 }
-                if(adjoin) {++skipped_portals;continue;}
+                // Adjoin 0x2 is passable; a solid, masked grate is a
+                // valid receiver even when it has an adjoin pointer.
+                auto const adjoin_status=classify_decal_adjoin(read,adjoin);
+                if(adjoin_status==decal_adjoin_status::invalid) {
+                    ++invalid_surfaces;continue;
+                }
+                if(adjoin_status==decal_adjoin_status::passable) {
+                    ++skipped_portals;continue;
+                }
                 if(flags&0x600U) {++skipped_sky;continue;}
                 if(geo<2 || !mat || count<3 || count>128 ||
                    !decal_native_address_ok(indices)) {
