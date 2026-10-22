@@ -2933,7 +2933,8 @@ namespace jkgm {
                             point_axis(spot.origin,0.0f),
                             point_axis(spot.right,spot.range/spot.width),
                             point_axis(spot.up,spot.range/spot.height),
-                            point_axis(spot.forward,1.0f/spot.range));
+                            point_axis(spot.forward,1.0f/spot.range),
+                            make_point(spot.light_intensity,spot.add_intensity));
                         gl::set_active_texture_unit(6+active);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          *image);
