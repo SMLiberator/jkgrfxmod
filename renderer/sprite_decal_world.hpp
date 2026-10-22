@@ -44,6 +44,23 @@ namespace jkgm {
     inline bool decal_native_address_ok(uintptr_t p) {
         return p>=0x10000U && p<=0x7ff00000U;
     }
+    // SithSurface.adjoin is a pointer, not a boolean portal flag.
+    // SithSurfaceAdjoin.flags starts at +0: bit 0x2 permits movement.
+    // A textured, impassable adjoin (e.g. glass/grate, flags 0x5) is
+    // solid decal-receiving geometry even though it has an adjoin.
+    enum class decal_adjoin_status { solid, passable, invalid };
+    inline decal_adjoin_status classify_decal_adjoin(
+        decal_native_read const &read,uint32_t adjoin) {
+        if(!adjoin)return decal_adjoin_status::solid;
+        if(!decal_native_address_ok(adjoin))
+            return decal_adjoin_status::invalid;
+        uint32_t flags=0;
+        if(!read_decal_u32(read,uintptr_t(adjoin),flags))
+            return decal_adjoin_status::invalid;
+        return (flags&0x2U) ? decal_adjoin_status::passable
+                            : decal_adjoin_status::solid;
+    }
+
     inline decal_world_scan project_decal_world_surfaces(
         decal_native_read const &read,uintptr_t world,
         decal_projector const &projector,
@@ -93,9 +110,15 @@ namespace jkgm {
                 ++result.invalid_surfaces;
                 continue;
             }
-            // Transparent portals, sky surfaces, untextured/empty walls
-            // are excluded from this initial opaque-architecture pass.
-            if(adjoin) {++result.skipped_portals;continue;}
+            // Only passable portals are excluded. Solid textured adjoins
+            // (grates, glass, forcefields) can receive projected decals.
+            auto const adjoin_status=classify_decal_adjoin(read,adjoin);
+            if(adjoin_status==decal_adjoin_status::invalid) {
+                ++result.invalid_surfaces;continue;
+            }
+            if(adjoin_status==decal_adjoin_status::passable) {
+                ++result.skipped_portals;continue;
+            }
             if((flags&0x600U)!=0U) {++result.skipped_sky;continue;}
             if(geo_mode<2U || !material || count<3 ||
                count>128U || !decal_native_address_ok(indices)) {
