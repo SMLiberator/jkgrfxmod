@@ -3037,6 +3037,29 @@ namespace {
         jkgm::jkgm_sphere_thing_intersect_address);
     thread_local bool type2_busy=false;
     unsigned type2_trace_count=0;
+
+    // Native engine collision candidates are valid SithThing pointers.
+    // The common case is NOT collide=2; avoid multiple VirtualQuery calls
+    // and allocating/converting 3DO data for every crowded-sector pair.
+    // Keep an SEH guard because this is an injected native ABI boundary.
+    bool type2_pair_needs_mesh(void const *checked,void const *moving)
+    {
+        if(!checked || reinterpret_cast<uintptr_t>(checked)<0x10000U ||
+           (moving && reinterpret_cast<uintptr_t>(moving)<0x10000U))
+            return false;
+        int32_t checked_mode=0,moving_mode=0;
+        __try {
+            auto const *c=static_cast<uint8_t const *>(checked);
+            checked_mode=*reinterpret_cast<int32_t const *>(c+0x28);
+            if(moving) {
+                auto const *m=static_cast<uint8_t const *>(moving);
+                moving_mode=*reinterpret_cast<int32_t const *>(m+0x28);
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+        return checked_mode==2 || moving_mode==2;
+    }
     void trace_type2(char const *status,uint32_t node=0) {
         if(the_config && the_config->profile_renderer && type2_trace_count++<16)
             LOG_INFO("JKGM collide=2 stage=",status," node=",node);
@@ -3057,6 +3080,8 @@ namespace {
            !checked || !start || !dir || !out_distance ||
            !out_mesh || !out_face || !out_normal)
             return native();
+        if(!type2_pair_needs_mesh(checked,moving))
+            return native();
         auto const read=[](uintptr_t address,void* output,size_t size)->bool {
             if(!jkgm::thing_node_valid_address(address,size) ||
                !gpu_span_readable(reinterpret_cast<void const*>(address),size))
@@ -3064,13 +3089,11 @@ namespace {
             std::memcpy(output,reinterpret_cast<void const*>(address),size);
             return true;
         };
-        auto get_mode=[&](void* ptr,int32_t &mode)->bool {
-            return read(reinterpret_cast<uintptr_t>(ptr)+0x28,&mode,4);
-        };
         int32_t checked_mode=0,moving_mode=0;
-        if(!get_mode(checked,checked_mode) ||
-           (moving && !get_mode(moving,moving_mode)))return native();
-        if(checked_mode!=2 && moving_mode!=2)return native();
+        if(!read(reinterpret_cast<uintptr_t>(checked)+0x28,&checked_mode,4) ||
+           (moving && !read(reinterpret_cast<uintptr_t>(moving)+0x28,
+                           &moving_mode,4)))
+            return native();
         if(!gpu_span_readable(start,12) || !gpu_span_readable(dir,12) ||
            !gpu_span_readable(out_distance,4) ||
            !gpu_span_readable(out_mesh,4) || !gpu_span_readable(out_face,4) ||
