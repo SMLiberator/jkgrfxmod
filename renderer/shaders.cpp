@@ -624,6 +624,10 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_projector_camera(
     point<4,float> origin,point<4,float> right,point<4,float> forward,
     point<4,float> up)
 {
+    // Both projected decals and MAT spotlights read the same normal G-buffer.
+    // Do not rely on set_projected_decal() to initialize this sampler: a
+    // spotlight-only scene would otherwise sample the albedo (texture 0).
+    gl::set_uniform_integer(normal_image,5);
     gl::set_uniform_vector(camera_origin,origin);
     gl::set_uniform_vector(camera_right,right);
     gl::set_uniform_vector(camera_forward,forward);
