@@ -1865,7 +1865,7 @@ namespace jkgm {
                 auto env_to = mat->env_map;
                 float env_weight = 0.0f;
                 bool env_command = false;
-                bool const global_allowed = mat->replacement_material &&
+                bool const global_allowed = !mat->replacement_material ||
                     !mat->replacement_material->has_explicit_env_map;
                 if(the_config->enable_reflections &&
                    global_allowed && runtime_controls.global_env) {
@@ -2238,8 +2238,8 @@ namespace jkgm {
             float env_weight=0.0f;
             bool env_command=false;
             if(the_config->enable_reflections &&
-               surface->replacement_material &&
-               !surface->replacement_material->has_explicit_env_map &&
+               (!surface->replacement_material ||
+                !surface->replacement_material->has_explicit_env_map) &&
                runtime_controls.global_env) {
                 resolve_runtime_transition(*runtime_controls.global_env,
                                            surface->env_map,env_from,env_to,env_weight);
