@@ -1545,7 +1545,7 @@ namespace jkgm {
             if(the_config->optimize_hud_uploads) {
                 auto &mirror=hud_uploaded_pixels[hud_back_index];
                 if(mirror.size()!=ogs->hud_texture_data.size()) {
-                    mirror.resize(ogs->hud_texture_data.size());
+                    mirror.resize(ogs->hud_texture_data.size(),color_rgba8::zero());
                     hud_slab_valid[hud_back_index].fill(false);
                 }
                 if(hud_slab_valid[hud_back_index][curr_slab]) {
