@@ -1678,18 +1678,17 @@ namespace {
 
     int __cdecl HookedSpriteAddProc(int extra,unsigned int vertices,int flags)
     {
-        // Let the native SPR routine warm its MAT, but do NOT submit the
-        // original floating quad when the projected decal has no receiver or
-        // its GPU texture is not resident yet. Those quads caused wall
-        // penetration and occasional misleading floor-facing artifacts.
-        if(extra==0 && suppress_native_decal_face &&
-           sprite_draw_active.thing) return 1;
-        // rdSprite_Draw passes extraData 0, unlike various other primitives.
-        // Record the completed face, not a shared rdSprite resource. The
-        // tag persists until the native cache consumes this specific face.
+        // Type-3 fallback must still append its native proc entry: JK's
+        // rdCache processes that face to load its MAT cel into video memory.
+        // Earlier returning 1 here suppressed BOTH the visible quad AND MAT
+        // warm-up, leaving every GPU decal forever waiting for its texture.
+        // Tag the face with zero alpha instead, so cache/texture upload still
+        // run while the native free-standing sprite quad is invisible.
         bool const is_sprite=sprite_draw_active.thing!=nullptr;
-        float const opacity=is_sprite ?
-            current_sprite_info(sprite_draw_active.thing).opacity:1.0f;
+        bool const hide_decal_face=is_sprite && extra==0 &&
+                                   suppress_native_decal_face;
+        float const opacity=hide_decal_face?0.0f:
+            (is_sprite?current_sprite_info(sprite_draw_active.thing).opacity:1.0f);
         uint32_t const before=*reinterpret_cast<uint32_t const *>(
             sprite_proc_count_addr);
         int const result=RealSpriteAddProc(extra,vertices,flags);
@@ -1702,7 +1701,8 @@ namespace {
             sprite_types.lookup(sprite,static_cast<char const *>(sprite),
                                 authored_type) &&
             jkgm::sprite_is_flare(authored_type);
-        if(!is_flare && !(opacity>0.0f && opacity<1.0f))
+        if(!hide_decal_face && !is_flare &&
+           !(opacity>0.0f && opacity<1.0f))
             return result;
         if(is_flare && the_config && the_config->profile_renderer &&
            flare_face_trace_count++<6U) {
@@ -2266,8 +2266,8 @@ namespace {
             return 0;
         // A type-3 projected SPR must NEVER become its original free-
         // standing quad, even when clipping misses or MAT warm-up is needed.
-        // Native draws are permitted for MAT initialization, but the face
-        // recorder suppresses their output until GPU projection is ready.
+        // Native rdCache still must process the face to initialize MAT
+        // textures. HookedSpriteAddProc tags it with zero opacity.
         bool projected=false;
         if(the_config && the_config->enable_sprite_decals &&
            gpu_span_readable(thing,8)) {
