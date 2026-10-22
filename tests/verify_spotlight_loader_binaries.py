@@ -34,7 +34,7 @@ def main(filename: str) -> int:
         print("FAIL: not an MZ executable")
         return 1
     pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
-    if data[pe_offset:pe_offset + 4] != b"PE\\0\\0":
+    if data[pe_offset:pe_offset + 4] != bytes((0x50,0x45,0,0)):
         print("FAIL: invalid PE signature")
         return 1
     count = struct.unpack_from("<H", data, pe_offset + 6)[0]
