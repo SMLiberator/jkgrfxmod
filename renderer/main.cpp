@@ -11,6 +11,7 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_modelview.hpp"
 #include "thing_node_native.hpp"
+#include "spotlight.hpp"
 #include "thing_attachment_normal.hpp"
 #include "native_thingface_friction.hpp"
 #include "native_earth_hit_sound.hpp"
@@ -3781,6 +3782,57 @@ namespace {
                          " image=", image);
     }
 
+    // SetSpotlight(thing,node,mat,xSize,ySize,localOffset).
+    // Use MAT indices like other COG material verbs; the renderer resolves
+    // the current texture cel only after its native texture is resident.
+    void __cdecl cog_set_spotlight(void *ctx)
+    {
+        float offset[3]{};
+        cog_pop_vector(ctx,offset);
+        float const height=cog_pop_float(ctx);
+        float const width=cog_pop_float(ctx);
+        int const material=cog_pop_int(ctx);
+        int const node=cog_pop_int(ctx);
+        void *thing=cog_pop_thing(ctx);
+        if(!thing||!gpu_span_readable(thing,0xe8)||
+           !valid_mat_index(material)) {
+            LOG_WARNING("SetSpotlight: invalid Thing or MAT");
+            return;
+        }
+        uint32_t kind=0,signature=0;
+        auto const *p=static_cast<uint8_t const *>(thing);
+        std::memcpy(&kind,p+0x0c,4);
+        std::memcpy(&signature,p+0x74,4);
+        if(kind==0 || kind>15) return;
+        uint32_t world=0;
+        if(jkgm::engine_material_debug::matches_tested_executable() &&
+           jkgm::engine_material_debug::read_object(
+               jkgm::engine_material_debug::current_world_global,world))
+            jkgm::get_spotlight_registry().prepare_world(world);
+        jkgm::spotlight_request request{};
+        request.thing=reinterpret_cast<uintptr_t>(thing);
+        request.identity=signature;
+        request.node=node;
+        request.material=static_cast<uint32_t>(material);
+        request.width=width;
+        request.height=height;
+        request.offset={{offset[0],offset[1],offset[2]}};
+        if(!jkgm::get_spotlight_registry().set(request))
+            LOG_WARNING("SetSpotlight: invalid dimensions/node or 4-light limit reached");
+        else LOG_INFO("SetSpotlight: Thing=",request.thing,
+                      " node=",node," MAT=",material,
+                      " size=",width,"x",height);
+    }
+
+    // RemoveSpotlight(thing,node). Node -1 follows the Thing origin.
+    void __cdecl cog_remove_spotlight(void *ctx)
+    {
+        int const node=cog_pop_int(ctx);
+        void *thing=cog_pop_thing(ctx);
+        jkgm::get_spotlight_registry().erase(
+            reinterpret_cast<uintptr_t>(thing),node);
+    }
+
     void __cdecl cog_reset_global_env_map(void *ctx)
     {
         float fade = cog_pop_float(ctx);
@@ -3928,6 +3980,8 @@ namespace {
         cog_verb_entry{"setperipheralblur", cog_set_peripheral_blur},
         cog_verb_entry{"getperipheralblur", cog_get_peripheral_blur},
         cog_verb_entry{"resetperipheralblur", cog_reset_peripheral_blur},
+        cog_verb_entry{"setspotlight", cog_set_spotlight},
+        cog_verb_entry{"removespotlight", cog_remove_spotlight},
         cog_verb_entry{"setglobalenvmap", cog_set_global_env_map},
         cog_verb_entry{"resetglobalenvmap", cog_reset_global_env_map},
         cog_verb_entry{"setmatenvmap", cog_set_mat_env_map},
@@ -3971,8 +4025,45 @@ namespace {
             register_verb(ctx, verb.handler, verb.name);
         }
 
-        LOG_DEBUG("Registered fog, sunlight, post-processing, material, SPR, AI and ThingNode COG verbs");
+        LOG_DEBUG("Registered fog, sun, spotlight, post-processing, material, SPR, AI and ThingNode COG verbs");
     }
+}
+
+// Snapshot active spotlight owners after native animations have advanced.
+// COG stores stable Thing identity; reused/deleted pointers are never read as
+// different Things, and invalid animated node poses simply skip a light.
+std::vector<jkgm::spotlight_instance> jkgm::collect_spotlights_for_frame()
+{
+    std::vector<spotlight_instance> instances;
+    if(!the_config || !the_config->enable_spotlights)return instances;
+    uint32_t world=0;
+    if(engine_material_debug::matches_tested_executable() &&
+       engine_material_debug::read_object(
+           engine_material_debug::current_world_global,world))
+        get_spotlight_registry().prepare_world(world);
+    for(auto const &request:get_spotlight_registry().snapshot()) {
+        auto const *thing=reinterpret_cast<uint8_t const *>(request.thing);
+        if(!thing||!gpu_span_readable(thing,0xe8))continue;
+        uint32_t kind=0,identity=0;
+        std::memcpy(&kind,thing+0x0c,4);
+        std::memcpy(&identity,thing+0x74,4);
+        if(kind==0||kind>15||identity!=request.identity)continue;
+        thing_node_pose pose{};
+        if(request.node>=0) {
+            if(!get_cog_thing_node_pose(
+                   reinterpret_cast<void *>(request.thing),request.node,pose))
+                continue;
+        } else {
+            gpu_3do_matrix34 m{};
+            std::memcpy(m.data(),thing+0x88,9*sizeof(float));
+            std::memcpy(m.data()+9,thing+0xb8,3*sizeof(float));
+            if(!get_thing_node_pose(m,pose))continue;
+        }
+        spotlight_instance instance{};
+        if(spotlight_make_instance(request,pose,instance))
+            instances.push_back(instance);
+    }
+    return instances;
 }
 
 bool attach_hooks()
