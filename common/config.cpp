@@ -82,6 +82,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_reflections")) {
             j.at("enable_reflections").get_to(rv->enable_reflections);
         }
+        if(j.contains("enable_dynamic_light_specular")) {
+            j.at("enable_dynamic_light_specular").get_to(
+                rv->enable_dynamic_light_specular);
+        }
 
         if(j.contains("enable_ssao")) {
             j.at("enable_ssao").get_to(rv->enable_ssao);
