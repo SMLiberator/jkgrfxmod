@@ -53,6 +53,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\thing_node_math.cpp /Fe:thing_node_math_test.exe
         thing_node_math_test.exe
+    - name: Native ThingNode attachment registry and transform tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\thing_node_attachment.cpp /Fe:thing_node_attachment_test.exe
+        thing_node_attachment_test.exe
     - name: COG MAT spotlight registry and animated-node tests
       shell: cmd
       run: |
