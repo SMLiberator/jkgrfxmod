@@ -123,6 +123,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_decal_static_mesh.cpp /Fe:sprite_decal_static_mesh_test.exe
         sprite_decal_static_mesh_test.exe
+    - name: Unattached decal wall/floor receiver selection
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_decal_auto_align.cpp /Fe:sprite_decal_auto_align_test.exe
+        sprite_decal_auto_align_test.exe
     - name: SPR decal world BVH spatial query tests
       shell: cmd
       run: |
