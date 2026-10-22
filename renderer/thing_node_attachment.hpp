@@ -1,7 +1,7 @@
 #pragma once
 // JKGM node attachments: small sidecar for native SITH_ATTACH_THING.
 // The engine owns parent/child links and DetachThing lifecycle. This registry
-// only remembers the animated node, offset and optional rotation inheritance.
+// only remembers the animated node and local offset. Native flags expose node attachment.
 #include "thing_node_math.hpp"
 #include <cmath>
 #include <cstdint>
@@ -9,28 +9,27 @@
 #include <mutex>
 #include <vector>
 namespace jkgm {
-    constexpr uint32_t node_attach_copy_rotation=0x1U;
-    constexpr uint32_t node_attach_allowed_flags=node_attach_copy_rotation;
     constexpr uint32_t native_attach_thing=0x4U;
     constexpr uint32_t native_attach_no_move=0x8U;
+    // 0x80 is unused by stock JK/MotS attach flags (<= 0x10); reserved
+    // for a live COG-readable animated-node attachment.
+    constexpr uint32_t native_attach_node=0x80U;
     struct node_attachment {
         uintptr_t child=0,parent=0;
         uint32_t child_signature=0,parent_signature=0;
         int node=-1;
-        uint32_t flags=node_attach_copy_rotation;
         thing_node_vector offset{{0,0,0}};
     };
     inline bool node_attachment_valid(node_attachment const &a) {
         if(a.child<0x10000 || a.parent<0x10000 || a.child==a.parent ||
-           a.node<0 || a.node>=4096 ||
-           (a.flags & ~node_attach_allowed_flags)!=0)return false;
+           a.node<0 || a.node>=4096)return false;
         for(float x:a.offset)if(!std::isfinite(x) || std::fabs(x)>256.0f)
             return false;
         return true;
     }
     inline bool compute_node_attachment_pose(
         node_attachment const &a,thing_node_pose const &node,
-        thing_node_pose const &child_current,thing_node_pose &result)
+        thing_node_pose &result)
     {
         if(!node_attachment_valid(a))return false;
         // Node matrices may carry artist-authored nonuniform scale/mirroring.
@@ -43,7 +42,7 @@ namespace jkgm {
             for(float &f:axis)f*=n;
             return true;
         };
-        result=(a.flags&node_attach_copy_rotation)?node:child_current;
+        result=node;
         if(!normalize(result.right) || !normalize(result.look) ||
            !normalize(result.up))return false;
         // Offset retains actual node scale, mirroring and orientation.
