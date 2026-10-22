@@ -11,7 +11,7 @@ int main()
     a.identity=7;
     a.node=-1;
     a.material=5;
-    a.width=2.0f;a.height=1.2f;
+    a.width=2.0f;a.height=1.2f;a.range=12.0f;
     a.offset={{0.5f,1.0f,0.25f}};
     assert(spotlight_request_valid(a));
     assert(reg.set(a));
@@ -26,7 +26,7 @@ int main()
     assert(spotlight_make_instance(a,pose,out));
     assert(close(out.origin[0],10.5f) && close(out.origin[1],21.0f));
     assert(close(out.origin[2],30.25f));
-    assert(close(out.forward[1],1) && close(out.range,8.0f));
+    assert(close(out.forward[1],1) && close(out.range,12.0f));
     // Animated node movement changes the next light position/orientation.
     pose.origin={{12,22,32}};
     pose.look={{0,-1,0}};
@@ -40,7 +40,9 @@ int main()
     assert(close(out.right[0],-1.0f));
     a.node=4096;assert(!spotlight_request_valid(a));
     a.node=0;a.width=0.0f;assert(!spotlight_request_valid(a));
-    a.width=2.0f;
+    a.width=2.0f;a.range=0.0f;assert(!spotlight_request_valid(a));
+    a.range=-2.0f;assert(!spotlight_request_valid(a));
+    a.range=12.0f;
     a.material=0x10000U;assert(!spotlight_request_valid(a));
     a.material=5;
     reg.prepare_world(0x1111U);
@@ -55,6 +57,14 @@ int main()
     assert(reg.snapshot().size()==4);
     reg.prepare_world(0x1111U);
     assert(reg.snapshot().size()==4);
+    // ResetSpotlight removes all node slots for one owning Thing only.
+    spotlight_request other=a;
+    other.thing=0x234567U;
+    reg.erase(a.thing,2);
+    assert(reg.set(other));
+    reg.erase_thing(a.thing);
+    assert(reg.snapshot().size()==1);
+    assert(reg.snapshot()[0].thing==other.thing);
     reg.prepare_world(0x2222U);
     assert(reg.snapshot().empty());
     reg.set(a);
