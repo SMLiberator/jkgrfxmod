@@ -33,7 +33,8 @@ std::unique_ptr<jkgm::renderer_screen> jkgm::create_renderer_screen(config const
             }
 
             return std::make_unique<renderer_screen_msaa>(
-                screen_res, msaa_samples, min_sample_factor);
+                screen_res, msaa_samples, min_sample_factor,
+                the_config->enable_spotlights);
         }
 
         if(iequal(aa_type, std::string_view("ssaa"))) {
@@ -53,7 +54,8 @@ std::unique_ptr<jkgm::renderer_screen> jkgm::create_renderer_screen(config const
             }
 
             return std::make_unique<renderer_screen_msaa>(
-                screen_res, msaa_samples, min_sample_factor);
+                screen_res, msaa_samples, min_sample_factor,
+                the_config->enable_spotlights);
         }
 
         LOG_WARNING("Unknown antialiasing type ignored: ", aa_type);
@@ -62,5 +64,6 @@ std::unique_ptr<jkgm::renderer_screen> jkgm::create_renderer_screen(config const
                                        "'. This session will not use antialiasing.")));
     }
 
-    return std::make_unique<renderer_screen_basic>(screen_res);
+    return std::make_unique<renderer_screen_basic>(screen_res,
+        the_config->enable_spotlights);
 }
