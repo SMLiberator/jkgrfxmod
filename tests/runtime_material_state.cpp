@@ -50,6 +50,36 @@ int main()
     controls.reset_global_env(0.0f);
     assert(controls.snapshot().empty());
 
+    // A missing global source MAT or image ID must not erase a pack's
+    // existing EnvMap: this was the all-black/cleared-env regression.
+    auto resolve_image=[](runtime_image_key const &key)->std::optional<int> {
+        if(key.source_mat==32781 && key.image_id==1) return 101;
+        if(key.source_mat==32781 && key.image_id==2) return 102;
+        return std::nullopt;
+    };
+    std::optional<int> from,to;
+    float weight=-1.0f;
+    runtime_image_transition pending{};
+    pending.to=runtime_image_key{32781,9};
+    assert(!resolve_runtime_transition_images(
+        pending,std::optional<int>(55),resolve_image,from,to,weight));
+    assert(from && *from==55 && to && *to==55 && weight==0.0f);
+    pending.from=runtime_image_key{32781,1};
+    assert(!resolve_runtime_transition_images(
+        pending,std::optional<int>(55),resolve_image,from,to,weight));
+    assert(from && *from==101 && to && *to==101 && weight==0.0f);
+    // A missing old fade source must not poison a successfully resolved
+    // new target, and reset to default must not hide the material.
+    pending.from=runtime_image_key{32781,9};
+    pending.to=runtime_image_key{32781,2};
+    assert(resolve_runtime_transition_images(
+        pending,std::optional<int>(55),resolve_image,from,to,weight));
+    assert(from && *from==102 && to && *to==102 && weight==0.0f);
+    pending.to.reset();
+    assert(resolve_runtime_transition_images(
+        pending,std::optional<int>(55),resolve_image,from,to,weight));
+    assert(from && *from==55 && to && *to==55 && weight==0.0f);
+
     // Simulate a level transition; same-world COG requests must persist.
     controls.set_mat_color(76, {{0.4f, 0.5f, 0.6f}}, 0.0f);
     controls.prepare_world(0x123456);
