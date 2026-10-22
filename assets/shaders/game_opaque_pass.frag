@@ -448,5 +448,5 @@ void main()
     // Depth R retains the existing linear-depth ABI. With spotlights
     // enabled the target is RGBA16F and GBA preserves unlit pigment.
     // In R16F mode OpenGL discards unused GBA without extra cost.
-    out_depth = vec4(adj_vp_z, unlit_base_color.rgb, 0.0);
+    out_depth = vec4(adj_vp_z, unlit_base_color.rgb);
 }
