@@ -11,6 +11,7 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_modelview.hpp"
 #include "thing_node_native.hpp"
+#include "thing_node_attachment.hpp"
 #include "spotlight.hpp"
 #include "thing_attachment_normal.hpp"
 #include "native_thingface_friction.hpp"
@@ -64,6 +65,7 @@ static bool renderer_hooks_active = false;
 static bool native_3do_hooks_active = false;
 static bool native_mat_mips_hook_active = false;
 static bool native_mesh_collision_hook_active = false;
+static bool native_node_attachment_hooks_active = false;
 static bool native_thingface_friction_hook_active = false;
 static bool native_earth_hit_sound_hook_active = false;
 
@@ -3300,6 +3302,234 @@ namespace {
         jkgm::gpu_3do_matrix34 matrix{};
         return get_cog_thing_node_matrix(thing,node,matrix) &&
                jkgm::get_thing_node_pose(matrix,pose);
+    }
+
+    // Exact signatures from the user's SHA-verified JKGM executable, NOT
+    // vanilla OpenJKDF2 addresses. Reject all calls on another executable.
+    constexpr uintptr_t node_attach_native_update=0x004CC4B0U;
+    constexpr uintptr_t node_attach_native_attach=0x004CE5A0U;
+    constexpr uintptr_t node_attach_native_detach=0x004CE660U;
+    constexpr uintptr_t node_attach_native_setpose=0x004CDAB0U;
+    constexpr uintptr_t node_attach_native_setsector=0x004CD4B0U;
+    using native_thing_update_fn=void(__cdecl *)(float,int);
+    using native_thing_attach_fn=void(__cdecl *)(void*,void*);
+    using native_thing_detach_fn=void(__cdecl *)(void*);
+    using native_thing_setpose_fn=void(__cdecl *)(void*,float const*,float const*);
+    using native_thing_setsector_fn=void(__cdecl *)(void*,void*,int);
+    native_thing_update_fn RealNativeThingUpdate=
+        reinterpret_cast<native_thing_update_fn>(node_attach_native_update);
+    native_thing_detach_fn RealNativeThingDetach=
+        reinterpret_cast<native_thing_detach_fn>(node_attach_native_detach);
+
+    bool node_attach_native_signatures_match()
+    {
+        if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=0x00400000U ||
+           !jkgm::engine_material_debug::matches_tested_executable())return false;
+        auto match=[](uintptr_t address,std::initializer_list<uint8_t> signature) {
+            return gpu_span_readable(reinterpret_cast<void const *>(address),
+                                     signature.size()) &&
+                   std::memcmp(reinterpret_cast<void const *>(address),
+                               signature.begin(),signature.size())==0;
+        };
+        return match(node_attach_native_update,
+                     {0x51,0x8b,0x0d,0x10,0x3a,0x83,0x00,0x53}) &&
+               match(node_attach_native_attach,
+                     {0x83,0xec,0x0c,0x56,0x8b,0x74,0x24,0x14,0x57}) &&
+               match(node_attach_native_detach,
+                     {0x83,0xec,0x0c,0x53,0x56,0x8b,0x74,0x24,0x18,0x57}) &&
+               match(node_attach_native_setpose,
+                     {0x8b,0x44,0x24,0x04,0x8b,0x54,0x24,0x08,0x56,0x57}) &&
+               match(node_attach_native_setsector,
+                     {0x56,0x8b,0x74,0x24,0x08,0x57,0x8b,0x7c,0x24,0x10});
+    }
+
+    bool read_node_attachment_identity(uintptr_t thing,uint32_t &signature)
+    {
+        if(!jkgm::thing_node_valid_address(thing,0xe8) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(thing),0xe8))
+            return false;
+        uint32_t kind=0;
+        std::memcpy(&kind,reinterpret_cast<void const *>(thing+0x0c),4);
+        std::memcpy(&signature,reinterpret_cast<void const *>(thing+0x74),4);
+        return kind>0 && kind<=15 && signature!=0;
+    }
+
+    // Advance native attachments AFTER Sith's normal Thing update and BEFORE
+    // rendering/culling. Keep sector membership, COG position and render pose
+    // synchronized, not just a render-only sprite transform.
+    void __cdecl HookedNativeThingUpdate(float seconds,int milliseconds)
+    {
+        RealNativeThingUpdate(seconds,milliseconds);
+        uint32_t world=0;
+        if(jkgm::engine_material_debug::read_object(
+             jkgm::engine_material_debug::current_world_global,world))
+            jkgm::get_node_attachment_registry().prepare_world(world);
+        auto records=jkgm::get_node_attachment_registry().snapshot();
+        // Parent node attachments must advance before their children.
+        std::unordered_set<uintptr_t> completed;
+        for(size_t pass=0;pass<records.size();++pass) {
+            bool advanced=false;
+            for(auto const &rec:records) {
+                if(completed.count(rec.child))continue;
+                bool awaiting_parent=false;
+                for(auto const &p:records)
+                    if(p.child==rec.parent && !completed.count(p.child)) {
+                        awaiting_parent=true;break;
+                    }
+                if(awaiting_parent)continue;
+                advanced=true;
+                completed.insert(rec.child);
+                uint32_t child_sig=0,parent_sig=0;
+                if(!read_node_attachment_identity(rec.child,child_sig) ||
+                   !read_node_attachment_identity(rec.parent,parent_sig) ||
+                   child_sig!=rec.child_signature ||
+                   parent_sig!=rec.parent_signature) {
+                    jkgm::get_node_attachment_registry().erase(rec.child);
+                    continue;
+                }
+                auto const *child=reinterpret_cast<uint8_t const *>(rec.child);
+                auto const *parent=reinterpret_cast<uint8_t const *>(rec.parent);
+                uint32_t native_flags=0,parent_ptr=0;
+                std::memcpy(&native_flags,child+0x34,4);
+                std::memcpy(&parent_ptr,child+0x58,4);
+                if((native_flags & jkgm::native_attach_thing)==0 ||
+                   parent_ptr!=rec.parent) {
+                    // Vanilla DetachThing, destruction or reattachment won.
+                    jkgm::get_node_attachment_registry().erase(rec.child);
+                    continue;
+                }
+                jkgm::thing_node_pose node_pose{},child_pose{},out{};
+                if(!get_cog_thing_node_pose(
+                       reinterpret_cast<void *>(rec.parent),rec.node,node_pose))
+                    continue;
+                jkgm::gpu_3do_matrix34 child_matrix{};
+                std::memcpy(child_matrix.data(),child+0x88,9*sizeof(float));
+                std::memcpy(child_matrix.data()+9,child+0xb8,3*sizeof(float));
+                if(!jkgm::get_thing_node_pose(child_matrix,child_pose) ||
+                   !jkgm::compute_node_attachment_pose(
+                       rec,node_pose,child_pose,out))continue;
+                float pose[12]={
+                    out.right[0],out.right[1],out.right[2],
+                    out.look[0],out.look[1],out.look[2],
+                    out.up[0],out.up[1],out.up[2],0,0,0
+                };
+                auto const setpose=reinterpret_cast<native_thing_setpose_fn>(
+                    node_attach_native_setpose);
+                setpose(reinterpret_cast<void *>(rec.child),
+                        out.origin.data(),pose);
+                uint32_t child_sector=0,parent_sector=0;
+                std::memcpy(&child_sector,child+0x5c,4);
+                std::memcpy(&parent_sector,parent+0x5c,4);
+                if(parent_sector && parent_sector!=child_sector) {
+                    auto const setsector=reinterpret_cast<native_thing_setsector_fn>(
+                        node_attach_native_setsector);
+                    setsector(reinterpret_cast<void *>(rec.child),
+                              reinterpret_cast<void *>(uintptr_t(parent_sector)),
+                              0);
+                }
+            }
+            if(!advanced)break; // defensive against impossible cycle
+        }
+    }
+
+    void __cdecl HookedNativeThingDetach(void *child)
+    {
+        jkgm::get_node_attachment_registry().erase(
+            reinterpret_cast<uintptr_t>(child));
+        RealNativeThingDetach(child);
+    }
+
+    bool attach_native_node_attachment_hooks()
+    {
+        if(!node_attach_native_signatures_match() ||
+           !gpu_span_readable(
+             reinterpret_cast<void const *>(jkgm::jkgm_node_matrix_address),
+             jkgm::jkgm_node_matrix_prologue.size())) {
+            LOG_WARNING("ThingNode attachment hooks unavailable: native signature mismatch");
+            return false;
+        }
+        DetourTransactionBegin();
+        DetourUpdateThread(GetCurrentThread());
+        LONG const a=DetourAttach(&(PVOID&)RealNativeThingUpdate,
+                                  HookedNativeThingUpdate);
+        LONG const b=a==NO_ERROR ?
+            DetourAttach(&(PVOID&)RealNativeThingDetach,
+                         HookedNativeThingDetach):a;
+        if(a!=NO_ERROR || b!=NO_ERROR) {
+            DetourTransactionAbort();
+            LOG_WARNING("ThingNode attachment Detours failed: ",b);
+            return false;
+        }
+        LONG const committed=DetourTransactionCommit();
+        if(committed!=NO_ERROR) {
+            LOG_WARNING("ThingNode attachment transaction failed: ",committed);
+            return false;
+        }
+        LOG_INFO("Native ThingNode attachment hooks installed");
+        return true;
+    }
+    void detach_native_node_attachment_hooks()
+    {
+        DetourTransactionBegin();
+        DetourUpdateThread(GetCurrentThread());
+        DetourDetach(&(PVOID&)RealNativeThingUpdate,HookedNativeThingUpdate);
+        DetourDetach(&(PVOID&)RealNativeThingDetach,HookedNativeThingDetach);
+        DetourTransactionCommit();
+    }
+
+    // AttachThingToThingNode(child,parent,node,localOffset,flags):
+    // flags 0x1 inherits node orientation; 0 follows position only.
+    // Engine maintains native SITH_ATTACH_THING | SITH_ATTACH_NOMOVE and
+    // ordinary DetachThing() clears this sidecar through the Detours hook.
+    void __cdecl cog_attach_thing_to_thing_node(void *ctx)
+    {
+        int const flags=cog_pop_int(ctx);
+        float xyz[3]{};
+        cog_pop_vector(ctx,xyz);
+        int const node=cog_pop_int(ctx);
+        void *parent=cog_pop_thing(ctx);
+        void *child=cog_pop_thing(ctx);
+        if(!native_node_attachment_hooks_active)return;
+        jkgm::node_attachment a{};
+        a.child=reinterpret_cast<uintptr_t>(child);
+        a.parent=reinterpret_cast<uintptr_t>(parent);
+        a.node=node;
+        a.flags=uint32_t(flags);
+        a.offset={{xyz[0],xyz[1],xyz[2]}};
+        if(!read_node_attachment_identity(a.child,a.child_signature) ||
+           !read_node_attachment_identity(a.parent,a.parent_signature) ||
+           !jkgm::node_attachment_valid(a))return;
+        jkgm::gpu_3do_matrix34 matrix{};
+        if(!get_cog_thing_node_matrix(parent,node,matrix))return;
+        uint32_t world=0;
+        if(jkgm::engine_material_debug::read_object(
+             jkgm::engine_material_debug::current_world_global,world))
+            jkgm::get_node_attachment_registry().prepare_world(world);
+        auto &registry=jkgm::get_node_attachment_registry();
+        // Check cycles before invoking native attachment, which may detach
+        // an existing parent and thus erase an old entry via the hook.
+        if(!registry.set(a)) {
+            LOG_WARNING("AttachThingToThingNode rejected: invalid node/flags/cycle");
+            return;
+        }
+        auto const native_attach=reinterpret_cast<native_thing_attach_fn>(
+            node_attach_native_attach);
+        native_attach(child,parent);
+        // Native reattachment may invoke DetachThing and erase the sidecar.
+        registry.set(a);
+        uint32_t current=0,linked=0;
+        std::memcpy(&current,static_cast<uint8_t const *>(child)+0x34,4);
+        std::memcpy(&linked,static_cast<uint8_t const *>(child)+0x58,4);
+        if((current & jkgm::native_attach_thing)==0 ||
+           linked!=a.parent) {
+            registry.erase(a.child);
+            LOG_WARNING("AttachThingToThingNode: native parent link failed");
+            return;
+        }
+        current |= jkgm::native_attach_no_move;
+        std::memcpy(static_cast<uint8_t *>(child)+0x34,&current,4);
+        LOG_INFO("AttachThingToThingNode: node=",node,
+                 " flags=",flags," child=",a.child);
     }
 
     // Returns the REAL attached face normal, not the transient sphere-
