@@ -222,8 +222,8 @@ void jkgm::vidmem_texture_surface::clear()
         env_map.reset();
     }
 
-    reflection_strength = 0.3f;
-    roughness = 0.12f;
+    reflection_strength = 0.2f;
+    roughness = 0.9f;
     metalness = 0.0f;
     reflection_mode = material_reflection_mode::envmap;
     texture_filtering.reset();
