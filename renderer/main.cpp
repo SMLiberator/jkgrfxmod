@@ -1855,6 +1855,7 @@ namespace {
     jkgm::decal_world_geometry sprite_world_geometry;
     unsigned sprite_decal_submit_logs=0;
     unsigned sprite_decal_queued_logs=0;
+    unsigned sprite_decal_material_logs=0;
 
     struct static_sprite_decal_mesh {
         uint32_t world=0,signature=0;
@@ -2237,9 +2238,18 @@ namespace {
                          " id=",it->second.id);
         }
         it->second.last_seen_frame=gpu_frame_serial;
-        if(!it->second.geometry ||
-           !gpu_mesh_materials_ready(*it->second.geometry))
-            return false; // Let native SPR load/warm up its MAT first.
+        if(!it->second.geometry)return false; // Cached no-receiver.
+        if(!gpu_mesh_materials_ready(*it->second.geometry)) {
+            if(the_config->profile_renderer &&
+               sprite_decal_material_logs++<12U)
+                LOG_INFO("SPR decal GPU stage=mat_wait id=",it->second.id,
+                         " native_proc_warmup=",
+                         sprite_alpha_hook_active);
+            return false;
+        }
+        if(the_config->profile_renderer &&
+           sprite_decal_material_logs++<12U)
+            LOG_INFO("SPR decal GPU stage=mat_ready id=",it->second.id);
         jkgm::gpu_3do_instance inst{};
         inst.id=it->second.id;
         inst.geometry=it->second.geometry;
