@@ -1179,6 +1179,28 @@ Types `0`–`2` remain valid without any executable patch; the extended
 JK23 executable remains capable of loading values `0`–`127` and doesn't
 need another patch for this change.
 
+## Automatic HDR eye exposure (experimental)
+
+Set `"enable_auto_exposure": true` in `jkgm.json` to enable automatic
+eye adaptation. `"auto_exposure_sensitivity": 1.0` controls the amount of
+scene-driven adjustment from 0 (none) to 2 (exaggerated); values outside this
+range are rejected. Defaults: off, sensitivity 1.0.
+
+A 1x1 RGBA16F GPU render pass samples 144 positions in the central 80% of the
+scene and estimates log-average linear luminance. It computes exposure around
+18% grey (bounded to -3..+3 EV before sensitivity), then smoothly interpolates
+to the target: quicker darkening when entering sunlight, slower brightening
+when entering shadows. No framebuffer readbacks are performed. The existing
+final pass applies the adapted exposure in linear HDR space and an ACES-like
+filmic highlight curve before color grading. Existing bloom already runs in
+HDR ahead of tone mapping. The exposure history resets for menus, disabled
+postprocessing, or Retro 256-color mode.
+
+The screen sample includes any overlaid HUD; central-region metering reduces
+but does not entirely exclude HUD interference. Future world-only metering
+could improve this if needed. This initial feature does not change native JK
+vertex-light clamping or add HDR values to engine-issued RGB8 vertices.
+
 ## SPR projected decals — geometry and receiver discovery
 
 SPR type **`3`** currently supplies a fixed projector basis and

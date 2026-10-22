@@ -1,6 +1,8 @@
 #version 330 core
 
 uniform sampler2D fbuf_image;
+uniform sampler2D exposure_image; // 1x1 adapted EV (linear scene metering)
+uniform int exposure_enabled;
 
 const int num_bloom_layers = 5;
 uniform sampler2D bloom_fbuf[num_bloom_layers];
@@ -55,6 +57,14 @@ void main()
     bloom_samp += texture(bloom_fbuf[4], vp_texcoords) * bloom_weight[4];
 
     vec3 color = samp.rgb + bloom_samp.rgb;
+    if(exposure_enabled != 0) {
+        // Exposure applies to HDR scene+bloom BEFORE the display transform.
+        // ACES approximation rolls over highlights instead of hard clipping.
+        float ev = texelFetch(exposure_image,ivec2(0),0).r;
+        vec3 hdr = max(color * exp2(clamp(ev,-4.0,4.0)), vec3(0.0));
+        color = (hdr * (2.51 * hdr + 0.03)) /
+                (hdr * (2.43 * hdr + 0.59) + 0.14);
+    }
 
     // Apply color balancing
     color += brightness;

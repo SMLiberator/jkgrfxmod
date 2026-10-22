@@ -397,6 +397,16 @@ namespace jkgm {
             void set_retro_palette(int sampler,bool enabled);
         };
 
+        // One-pixel GPU reduction / temporal eye-adaptation shader.
+        class post_auto_exposure_shader : public opengl_shader {
+            gl::uniform_location_id scene_image, previous_exposure, exposure_params;
+        public:
+            explicit post_auto_exposure_shader(fs::path const &data_root);
+            void set_inputs(int scene_sampler,int history_sampler);
+            // sensitivity, dt seconds, has_history, reserved
+            void set_params(point<4,float> params);
+        };
+
         class post_to_srgb_shader : public opengl_shader {
         public:
             static constexpr int num_bloom_layers = 5;
@@ -408,6 +418,7 @@ namespace jkgm {
             gl::uniform_location_id brightness;
             gl::uniform_location_id contrast;
             gl::uniform_location_id saturation;
+            gl::uniform_location_id exposure_image,exposure_enabled;
             std::vector<gl::uniform_location_id> bloom_fbuf;
             std::vector<gl::uniform_location_id> bloom_weight;
 
@@ -415,6 +426,7 @@ namespace jkgm {
             explicit post_to_srgb_shader(fs::path const &data_root);
 
             void set_fbuf_sampler(int sampler);
+            void set_auto_exposure(int sampler,bool enabled);
             void set_bloom_samplers(span<int const> samplers);
             void set_bloom_weights(span<float const> weights);
 

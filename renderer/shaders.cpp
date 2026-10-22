@@ -885,6 +885,29 @@ void jkgm::shaders::post_frame_blend_shader::set_blend_strength(float strength)
     gl::set_uniform_float(blend_strength, strength);
 }
 
+jkgm::shaders::post_auto_exposure_shader::post_auto_exposure_shader(
+    fs::path const &data_root)
+    : opengl_shader("post_auto_exposure",
+                    data_root / "shaders/postprocess.vert",
+                    data_root / "shaders/post_auto_exposure.frag")
+    , scene_image(gl::get_uniform_location(the_program,"scene_image"))
+    , previous_exposure(gl::get_uniform_location(the_program,"previous_exposure"))
+    , exposure_params(gl::get_uniform_location(the_program,"exposure_params"))
+{
+}
+
+void jkgm::shaders::post_auto_exposure_shader::set_inputs(
+    int scene_sampler,int history_sampler)
+{
+    gl::set_uniform_integer(scene_image,scene_sampler);
+    gl::set_uniform_integer(previous_exposure,history_sampler);
+}
+
+void jkgm::shaders::post_auto_exposure_shader::set_params(point<4,float> params)
+{
+    gl::set_uniform_vector(exposure_params,params);
+}
+
 jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(fs::path const &data_root)
     : opengl_shader("post_to_srgb",
                     data_root / "shaders/postprocess.vert",
@@ -895,6 +918,8 @@ jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(fs::path const &data_roo
     , brightness(gl::get_uniform_location(the_program, "brightness"))
     , contrast(gl::get_uniform_location(the_program, "contrast"))
     , saturation(gl::get_uniform_location(the_program, "saturation"))
+    , exposure_image(gl::get_uniform_location(the_program, "exposure_image"))
+    , exposure_enabled(gl::get_uniform_location(the_program, "exposure_enabled"))
 {
     bloom_fbuf.reserve(num_bloom_layers);
     bloom_weight.reserve(num_bloom_layers);
@@ -912,6 +937,12 @@ jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(fs::path const &data_roo
 void jkgm::shaders::post_to_srgb_shader::set_fbuf_sampler(int sampler)
 {
     gl::set_uniform_integer(fbuf_image, sampler);
+}
+
+void jkgm::shaders::post_to_srgb_shader::set_auto_exposure(int sampler,bool enabled)
+{
+    gl::set_uniform_integer(exposure_image,sampler);
+    gl::set_uniform_integer(exposure_enabled,enabled?1:0);
 }
 
 void jkgm::shaders::post_to_srgb_shader::set_bloom_samplers(span<int const> samplers)

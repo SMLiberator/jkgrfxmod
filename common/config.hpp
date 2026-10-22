@@ -28,6 +28,8 @@ namespace jkgm {
         bool enable_trails = true;
         bool enable_fog = true;
         bool enable_post = true;
+        bool enable_auto_exposure = false; // optional GPU eye adaptation in HDR
+        float auto_exposure_sensitivity = 1.0f; // 0=no adaptation, 1=normal, 2=strong
         bool enable_reflections = true;
         bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
         bool enable_ssao = true;

@@ -4,6 +4,8 @@
 #include "base/memory_block.hpp"
 #include "error_reporter.hpp"
 #include "json_incl.hpp"
+#include <cmath>
+#include <stdexcept>
 
 std::unique_ptr<jkgm::config> jkgm::load_config_file()
 {
@@ -77,6 +79,22 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
 
         if(j.contains("enable_post")) {
             j.at("enable_post").get_to(rv->enable_post);
+        }
+
+        if(j.contains("enable_auto_exposure")) {
+            j.at("enable_auto_exposure").get_to(rv->enable_auto_exposure);
+        }
+        if(j.contains("auto_exposure_sensitivity")) {
+            auto const &v=j.at("auto_exposure_sensitivity");
+            if(!v.is_number() || !std::isfinite(static_cast<double>(v))) {
+                throw std::runtime_error("auto_exposure_sensitivity must be a finite number");
+            }
+            rv->auto_exposure_sensitivity=static_cast<float>(v);
+            if(!std::isfinite(rv->auto_exposure_sensitivity) ||
+               rv->auto_exposure_sensitivity<0.0f ||
+               rv->auto_exposure_sensitivity>2.0f) {
+                throw std::runtime_error("auto_exposure_sensitivity must be between 0 and 2");
+            }
         }
 
         if(j.contains("enable_reflections")) {

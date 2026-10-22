@@ -11,6 +11,7 @@
 #include "glutil/vertex_array.hpp"
 #include "shaders.hpp"
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -130,6 +131,9 @@ namespace jkgm {
         bool enable_post = true;
         bool enable_blur = true;
         bool enable_trails = true;
+        bool enable_auto_exposure = false;
+        bool auto_exposure_scene = false;
+        float auto_exposure_sensitivity = 1.0f;
 
         shaders::menu_shader menu_program;
 
@@ -148,6 +152,7 @@ namespace jkgm {
         shaders::post_low_pass_shader post_low_pass;
         shaders::post_scale_shader post_scale;
         shaders::post_to_srgb_shader post_to_srgb;
+        shaders::post_auto_exposure_shader post_auto_exposure;
         shaders::post_frame_blend_shader post_frame_blend;
         shaders::post_spatial_blur_shader post_spatial_blur;
 
@@ -174,6 +179,13 @@ namespace jkgm {
 
         post_buffer screen_postbuffer1;
         post_buffer screen_postbuffer2;
+
+        // Fully GPU-resident 1x1 logarithmic luminance adaptation (no readback).
+        post_buffer auto_exposure_a;
+        post_buffer auto_exposure_b;
+        bool auto_exposure_next_a = true;
+        bool auto_exposure_history_valid = false;
+        std::chrono::steady_clock::time_point auto_exposure_last_frame{};
 
         // Separable spatial blur works in linear HDR before final post processing.
         post_buffer spatial_blur_work;

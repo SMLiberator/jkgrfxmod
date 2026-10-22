@@ -1353,6 +1353,10 @@ namespace jkgm {
                 }
                 }
             }
+            // Only meter in-game scenes. Avoid menu exposure and preserve
+            // exact Retro CMP color presentation.
+            ogs->auto_exposure_scene=(mode==renderer_mode::ingame) &&
+                                      !ogs->retro_mode_active;
             frame_compositor->end_frame(ogs.get(), conf_scr_res, scene);
 
             SwapBuffers(hDC);

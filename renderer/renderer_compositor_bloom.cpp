@@ -3,11 +3,14 @@
 #include "opengl_state.hpp"
 #include "frameblend.hpp"
 #include "postfx.hpp"
+#include "auto_exposure.hpp"
 
 void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
                                                 size<2, int> screen_size,
                                                 gl::texture_view composed_screen)
 {
+    update_auto_exposure(ogs,composed_screen);
+
     // Compose renderbuffer onto window:
     gl::bind_vertex_array(ogs->postmdl.vao);
 
@@ -113,6 +116,7 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
     // happens in the shared final pass after this shader completes.
     ogs->post_to_srgb.use_program();
     ogs->post_to_srgb.set_fbuf_sampler(0);
+    bind_auto_exposure(ogs);
 
     gl::set_active_texture_unit(0);
     gl::bind_texture(gl::texture_bind_target::texture_2d, composed_screen);
