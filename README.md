@@ -587,6 +587,42 @@ Install them in the corresponding game directories after backing up the
 existing files. A DLL-only swap does **not** activate the shader fast path.
 Keep using your patched JK executable; this PR does not change it.
 
+## Experimental MAT Spotlights
+
+Set `"enable_spotlights": true` in `jkgm.json` to activate up to **four**
+COG-controlled perspective spotlights per level. A spotlight is identified
+by its owning Thing and model node index (use `-1` to follow the Thing's
+own R/L/U matrix). Animated nodes are resolved through the validated
+JKGM node transform accessor **each render frame**, so a flashlight can
+follow the player's hand without creating a separate Thing.
+
+```c
+// SetSpotlight(thing, node, MAT, xSize, ySize, localOffset)
+SetSpotlight(player, 4, flashlightMat, 3.0, 2.0, '0 0 0');
+SetSpotlight(car, -1, headlightMat, 2.5, 1.5, '-0.35 0.7 0.1');
+RemoveSpotlight(player, 4);
+```
+
+The Thing/animated node **Look** axis is the direction of projection.
+`localOffset` uses the node's Right / Look / Up axes, in JK units.
+`xSize` and `ySize` specify the beam footprint at the experimental
+fixed range of **8 JK units**; close-range projection contracts toward
+the source. The MAT is treated as an additive RGB+alpha light cookie,
+with fade at the edges and maximum distance, independent of receiver
+albedo. The renderer uses the MAT's currently loaded cel. A light may
+not appear until the referenced MAT is first loaded into JK's native
+texture cache; try a MAT also used on visible geometry for initial tests.
+
+Spotlights illuminate **opaque native world sectors and 3DOs** via the
+resolved G-buffer, independently of `use_model_cache`. They have no
+dynamic shadows, do not currently light translucent receivers, do not
+contribute GGX material specularity, and don't emit volumetric fog beams.
+The first version loops over at most four spotlights on the fullscreen
+composite; performance is intentionally measurable before adding
+scissor-volume optimizations. They are removed on level transitions.
+Use `RemoveSpotlight` when a Thing is destroyed to release its slot
+immediately (stale/recycled owner identities are ignored at rendering).
+
 ## Experimental runtime MAT material controls
 
 Material packs may now declare optional **pack-local** numeric image IDs in their
