@@ -68,6 +68,25 @@ int main()
     assert(!resolve_runtime_transition_images(
         pending,std::optional<int>(55),resolve_image,from,to,weight));
     assert(from && *from==101 && to && *to==101 && weight==0.0f);
+    // A pending image becomes usable as soon as the source pack appears,
+    // without needing a second SetGlobalEnvMap call.
+    bool ready=false;
+    auto eventually_resolves=[&](runtime_image_key const &key)
+        ->std::optional<int> {
+        if(ready && key.source_mat==32781 && key.image_id==9)
+            return 109;
+        return std::nullopt;
+    };
+    assert(!resolve_runtime_transition_images(
+        pending,std::optional<int>(55),eventually_resolves,
+        from,to,weight));
+    assert(from && *from==55 && to && *to==55);
+    ready=true;
+    assert(resolve_runtime_transition_images(
+        pending,std::optional<int>(55),eventually_resolves,
+        from,to,weight));
+    assert(from && *from==109 && to && *to==109);
+
     // A missing old fade source must not poison a successfully resolved
     // new target, and reset to default must not hide the material.
     pending.from=runtime_image_key{32781,9};
