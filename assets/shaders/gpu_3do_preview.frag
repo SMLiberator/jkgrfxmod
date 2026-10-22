@@ -383,5 +383,7 @@ void main() {
     out_emissive=vec4(transparent_pass!=0
                           ? vec3(0.0) : emission+specular,a);
     out_normal=vec4(normalize(view_normal),1.0);
-    out_depth=vec4(view_depth,0.0,0.0,1.0);
+    // Depth target optionally carries the unlit diffuse base in GBA.
+    // This keeps projected lighting independent of baked JK vertex light.
+    out_depth=vec4(view_depth,albedo.rgb);
 }
