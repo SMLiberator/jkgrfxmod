@@ -4031,10 +4031,110 @@ namespace {
                          " image=", image);
     }
 
-    // IMPORTANT: no native MAT-cache invocation here. Address 0x0044AA70
-    // belongs to a DIFFERENT executable layout and caused a page fault in
-    // the supported JKGM build. Material upload must go through a verified
-    // engine entrypoint or the normal native render/cache warm-up path.
+    // JKGM MAT residency: use the EXACT rdMaterial_AddToTextureCache
+    // entrypoint in the user's SHA-audited executable (0x0044ACC0).
+    // Verified independently against its native rdCache calls at
+    // 0x0043B853 / 0x0043B914 and the std3D uploader at 0x0042A330.
+    // 0x0044AA70 is UNRELATED code: invoking it previously crashed Wine.
+    using jkgm_rd_material_cache_fn=int(__cdecl *)(void*,void*,int,int);
+    constexpr uintptr_t jkgm_mat_cache_addr=0x0044ACC0U;
+    bool spotlight_native_mat_cache_verified()
+    {
+        static bool const verified=[] {
+            using namespace jkgm::engine_material_debug;
+            constexpr uint8_t entry[]{
+                0x8b,0x4c,0x24,0x08,0x8b,0x44,0x24,0x0c,
+                0x56,0x8b,0x74,0x24,0x14,0x8b,0x54,0x81
+            };
+            constexpr uint8_t upload_alpha[]{
+                0xe8,0x34,0xf6,0xfd,0xff
+            };
+            constexpr uint8_t upload_opaque[]{
+                0xe8,0xef,0xf5,0xfd,0xff
+            };
+            constexpr uint8_t uploader[]{
+                0x55,0x8b,0xec,0x81,0xec,0x58,0x01,0x00,
+                0x00,0x53,0x8b,0x5d,0x08
+            };
+            constexpr uint8_t native_caller[]{
+                0x8b,0x45,0xb0,0x50,0x57,0x56,0x53,
+                0xe8,0x68,0xf4,0x00,0x00,0x83,0xc4,0x10
+            };
+            return matches_tested_executable() &&
+                   has_signature(jkgm_mat_cache_addr,entry,sizeof(entry)) &&
+                   has_signature(0x0044ACF7U,upload_alpha,sizeof(upload_alpha)) &&
+                   has_signature(0x0044AD3CU,upload_opaque,sizeof(upload_opaque)) &&
+                   has_signature(0x0042A330U,uploader,sizeof(uploader)) &&
+                   has_signature(0x0043B84CU,native_caller,sizeof(native_caller));
+        }();
+        return verified;
+    }
+
+    // Called once when the COG message executes, or retried during opaque
+    // composition if that message ran before OpenGL/native D3D was ready.
+    // On success JKGM's existing DDraw intercept creates exactly the same
+    // texture-cache handle/pack mapping used by a normally rendered MAT.
+    bool spotlight_warm_native_mat(uint32_t mat_id)
+    {
+        using namespace jkgm::engine_material_debug;
+        if(!spotlight_native_mat_cache_verified() ||
+           !wglGetCurrentContext())return false;
+        // std3D_AddToTextureCache dereferences JK's initialized D3D device.
+        uint32_t native_device=0;
+        if(!read_object(0x0055C7ECU,native_device) || !native_device)
+            return false;
+        bool const shared=(mat_id&0x8000U)!=0U;
+        unsigned const index=mat_id&0x7fffU;
+        uint32_t world_address=0;
+        world_header world{};
+        if(!load_world(shared?static_world_global:current_world_global,
+                       world_address,world) ||
+           index>=unsigned(world.num_materials))return false;
+        uintptr_t const mat_address=uintptr_t(world.materials)+
+                              index*sizeof(native_material);
+        native_material mat{};
+        if(!read_object(mat_address,mat) ||
+           mat.id!=mat_id || (mat.tex_type&2U)==0U ||
+           mat.num_texinfo==0U || mat.num_texinfo>16U ||
+           mat.num_textures==0U || mat.num_textures>256U ||
+           !mat.textures)return false;
+        unsigned const cel=std::min(mat.current_cel,mat.num_texinfo-1U);
+        native_texinfo info{};
+        if(!mat.texinfo[cel] || !read_object(mat.texinfo[cel],info) ||
+           (info.header[0]&8U)==0U || !info.texture ||
+           info.texture<mat.textures)return false;
+        uint64_t const texture_offset=uint64_t(info.texture)-mat.textures;
+        if(texture_offset%sizeof(native_texture)!=0 ||
+           texture_offset/sizeof(native_texture)>=mat.num_textures)
+            return false;
+        native_texture texture{};
+        if(!read_object(info.texture,texture) ||
+           texture.header[6]==0U || texture.header[6]>4U ||
+           !texture.mipmap_buffers[0] ||
+           !engine_camera_detail::readable(texture.mipmap_buffers[0],0x18))
+            return false;
+        // Transparent MATs need the alpha texture cache; opaque ones
+        // select the native no_alpha path (arg 4 = 1).
+        bool const has_alpha=(texture.header[0]&1U)!=0U;
+        auto const resident=[&](native_texture const &t)->bool {
+            auto const &surface=has_alpha?t.alpha_mips[0]:t.opaque_mips[0];
+            return surface.texture_loaded!=0 && surface.texture_handle>0;
+        };
+        if(resident(texture))return true;
+
+        auto const native_load=reinterpret_cast<jkgm_rd_material_cache_fn>(
+            jkgm_mat_cache_addr);
+        if(!native_load(reinterpret_cast<void *>(mat_address),
+                        reinterpret_cast<void *>(uintptr_t(info.texture)),
+                        0,has_alpha?0:1))
+            return false;
+        native_texture updated{};
+        if(!read_object(info.texture,updated) || !resident(updated))
+            return false;
+        LOG_INFO("Spotlight MAT loaded on demand: id=",mat_id,
+                 " cel=",cel," alpha=",has_alpha);
+        return true;
+    }
     // SetSpotlight(thing,mat,vector(width,height,range),localOffset).
     // Use MAT indices like other COG material verbs; the renderer resolves
     // the current texture cel only after its native texture is resident.
@@ -4073,8 +4173,10 @@ namespace {
             LOG_WARNING("SetSpotlight: invalid dimensions/range or 4-light limit reached");
         }
         else {
+            bool const resident=spotlight_warm_native_mat(request.material);
             LOG_INFO("SetSpotlight: MAT=",material,
-                     " registered; native MAT preloader disabled for safety");
+                     " registered native_resident=",resident,
+                     " (deferred retry if graphics not ready)");
         }
     }
 
@@ -4342,6 +4444,9 @@ std::vector<jkgm::spotlight_instance> jkgm::collect_spotlights_for_frame()
         std::memcpy(m.data(),thing+0x88,9*sizeof(float));
         std::memcpy(m.data()+9,thing+0xb8,3*sizeof(float));
         if(!get_thing_node_pose(m,pose))continue;
+        // The first COG call may run before OpenGL/D3D initialization.
+        // A resident MAT is a cheap no-op in the native cache function.
+        spotlight_warm_native_mat(request.material);
         spotlight_instance instance{};
         if(spotlight_make_instance(request,pose,instance,GetTickCount()))
             instances.push_back(instance);
