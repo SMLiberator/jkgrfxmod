@@ -3407,8 +3407,8 @@ namespace {
                 if(!get_cog_thing_node_pose(
                        reinterpret_cast<void *>(rec.parent),rec.node,node_pose))
                     continue;
-                   !jkgm::compute_node_attachment_pose(
-                       rec,node_pose,out))continue;
+                if(!jkgm::compute_node_attachment_pose(rec,node_pose,out))
+                    continue;
                 float pose[12]={
                     out.right[0],out.right[1],out.right[2],
                     out.look[0],out.look[1],out.look[2],
