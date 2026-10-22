@@ -655,10 +655,20 @@ the shared depth/normal buffer, independent of model caching. Transparency, shad
 are not yet implemented. The first version evaluates four lights
 fullscreen, so performance should be measured before increasing that cap.
 
-**MAT preload remains disabled:** a hardcoded loader entrypoint from an
-incompatible executable caused a page fault. Until we verify an
-equivalent cache-loader call in the actual JKGM binary, a source MAT has
-to become resident through normal native rendering.
+**Native MAT preload (experimental):** SetSpotlight now attempts to load
+its MAT's currently selected cel immediately, using the verified JKGM
+`rdMaterial_AddToTextureCache` entrypoint at `0x0044ACC0`. If the
+rendering device is not initialized when the COG verb runs, it retries
+during opaque composition. Active lights refresh the native texture-cache
+LRU even when their MAT is not rendered on any polygon. The function,
+its original native callsite, and the D3D upload target are all checked
+against the audited executable's instruction bytes before any call;
+unknown executables decline the native preload. This is distinct from
+the **incorrect** `0x0044AA70` address, which previously crashed Wine.
+The new native route is statically verified but must still be tested
+in-game before treating it as stable.
+To recheck the original binary:
+`python3 tests/verify_spotlight_loader_binaries.py /path/to/jkgm.exe`.
 
 Type-4 camera-facing flare SPRs are separate Things. Attach a flare
 Thing to a node, then assign that same Thing a Spotlight. Its independent
