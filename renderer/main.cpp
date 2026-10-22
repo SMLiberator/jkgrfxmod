@@ -3501,6 +3501,25 @@ namespace {
            !jkgm::node_attachment_valid(a))return;
         jkgm::gpu_3do_matrix34 matrix{};
         if(!get_cog_thing_node_matrix(parent,node,matrix))return;
+        // A parent may already have a *native* attachment (not in our
+        // registry). Reject cycles through those as well: JK's intrusive
+        // pAttachedThing lists cannot represent cyclic parent chains.
+        uintptr_t walker=a.parent;
+        for(unsigned depth=0;depth<128U;++depth) {
+            if(walker==a.child)return;
+            if(!jkgm::thing_node_valid_address(walker,0x5c) ||
+               !gpu_span_readable(
+                   reinterpret_cast<void const *>(walker),0x5c))return;
+            uint32_t native_flags=0,native_parent=0;
+            std::memcpy(&native_flags,
+                reinterpret_cast<void const *>(walker+0x34),4);
+            if((native_flags & 0x6U)==0U)break;
+            std::memcpy(&native_parent,
+                reinterpret_cast<void const *>(walker+0x58),4);
+            if(!native_parent)return;
+            walker=uintptr_t(native_parent);
+            if(depth==127U)return;
+        }
         uint32_t world=0;
         if(jkgm::engine_material_debug::read_object(
              jkgm::engine_material_debug::current_world_global,world))
