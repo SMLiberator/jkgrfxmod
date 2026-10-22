@@ -33,6 +33,7 @@ uniform vec4 spotlight_origins[4];  // world origin
 uniform vec4 spotlight_rights[4];   // XYZ axis, W fixed range / width
 uniform vec4 spotlight_ups[4];      // XYZ axis, W fixed range / height
 uniform vec4 spotlight_forwards[4]; // XYZ axis, W inverse range
+uniform vec2 spotlight_intensities[4]; // light (pigment), additive (cookie)
 
 layout(location = 0) out vec4 out_color;
 
@@ -55,19 +56,22 @@ vec3 reconstruct_scene_world(float depth)
         ndc.y*camera_up.w*camera_up.xyz);
 }
 
-// Project a perspective light-cookie texture onto opaque G-buffer receivers.
-// Light-cookie color/intensity is accumulated here, independent of pigment.
-vec3 project_spotlights(float depth,ivec2 pixel)
+// Evaluate cookie radiance once per light and route it into two
+// independently controlled channels. Diffuse is later multiplied by the
+// UNLIT receiver pigment, so dark framebuffer colors retain surface detail.
+void project_spotlights(float depth,ivec2 pixel,
+                        out vec3 diffuse,out vec3 additive)
 {
+    diffuse=vec3(0.0);
+    additive=vec3(0.0);
     if(spotlight_count<=0 || depth<=0.0 || depth>=65500.0)
-        return vec3(0.0);
+        return;
     vec3 position=reconstruct_scene_world(depth);
     vec3 vn=texelFetch(normal_image,pixel,0).rgb;
-    if(dot(vn,vn)<0.0001)return vec3(0.0);
+    if(dot(vn,vn)<0.0001)return;
     vec3 normal=normalize(camera_right.xyz*(vn.x/camera_right.w)+
                           camera_up.xyz*(vn.y/camera_up.w)+
                           camera_forward.xyz*vn.z);
-    vec3 lighting=vec3(0.0);
     for(int i=0;i<4;i++) {
         if(i>=spotlight_count)break;
         vec3 relative=position-spotlight_origins[i].xyz;
@@ -89,9 +93,10 @@ vec3 project_spotlights(float depth,ivec2 pixel)
         float facing=max(dot(normal,normalize(-relative)),0.0);
         // Mild floor illumination even with near-horizontal beams.
         float incidence=0.25+0.75*facing;
-        lighting+=cookie.rgb*cookie.a*(edge*fade*incidence);
+        vec3 radiance=cookie.rgb*cookie.a*(edge*fade*incidence);
+        diffuse+=radiance*spotlight_intensities[i].x;
+        additive+=radiance*spotlight_intensities[i].y;
     }
-    return lighting;
 }
 
 // Applied before distance fog, after AO shading, and under existing
@@ -163,14 +168,16 @@ void main()
     // to surface_rgb cannot recover texture detail from a pitch-black pixel.
     // Depth.GBA stores base pigment when spotlights are enabled; depth.R
     // remains unchanged for SSAO, decals and reconstruction.
-    vec3 light_rgb=project_spotlights(depth,tc);
+    vec3 light_rgb,add_rgb;
+    project_spotlights(depth,tc,light_rgb,add_rgb);
     vec3 pigment=spotlight_count>0
         ? max(texelFetch(depth_image,tc,0).gba,vec3(0.0))
         : vec3(0.0);
     vec3 diffuse_light=pigment*light_rgb;
     vec3 screened=surface_rgb+diffuse_light*
                   (vec3(1.0)-clamp(surface_rgb,0.0,1.0));
-    // Small glow allows white flare spill, without washing the pigment out.
-    vec3 lit=mix(screened+0.12*light_rgb,fog_color,fog);
+    // Artist-controlled additive spill retains cookie color without albedo
+    // multiplication. Both contributions sit beneath distance fog.
+    vec3 lit=mix(screened+add_rgb,fog_color,fog);
     out_color=vec4(emissive.rgb+lit,albedo.a);
 }
