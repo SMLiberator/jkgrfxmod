@@ -238,6 +238,12 @@ namespace jkgm {
             gl::uniform_location_id decal_origin,decal_right,decal_up,decal_forward;
             gl::uniform_location_id decal_options,camera_origin,camera_right,
                                     camera_forward,camera_up;
+            gl::uniform_location_id spotlight_count;
+            std::vector<gl::uniform_location_id> spotlight_images;
+            std::vector<gl::uniform_location_id> spotlight_origins;
+            std::vector<gl::uniform_location_id> spotlight_rights;
+            std::vector<gl::uniform_location_id> spotlight_ups;
+            std::vector<gl::uniform_location_id> spotlight_forwards;
 
         public:
             explicit game_post_opaque_composite_shader(fs::path const &data_root);
@@ -248,6 +254,13 @@ namespace jkgm {
             void set_depth_sampler(int sampler);
             void set_fog(point<4,float> params,color_rgb fog);
             void disable_projected_decal();
+            void set_projector_camera(point<4,float> origin,
+                                      point<4,float> right,point<4,float> forward,
+                                      point<4,float> up);
+            void set_spotlight_count(int count);
+            void set_spotlight(int slot,point<4,float> origin,
+                               point<4,float> right,point<4,float> up,
+                               point<4,float> forward);
             void set_projected_decal(point<4,float> origin,
                                      point<4,float> right,point<4,float> up,
                                      point<4,float> forward,point<4,float> options,
