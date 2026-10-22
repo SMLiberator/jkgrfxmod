@@ -3398,16 +3398,12 @@ namespace {
                     jkgm::get_node_attachment_registry().erase(rec.child);
                     continue;
                 }
-                jkgm::thing_node_pose node_pose{},child_pose{},out{};
+                jkgm::thing_node_pose node_pose{},out{};
                 if(!get_cog_thing_node_pose(
                        reinterpret_cast<void *>(rec.parent),rec.node,node_pose))
                     continue;
-                jkgm::gpu_3do_matrix34 child_matrix{};
-                std::memcpy(child_matrix.data(),child+0x88,9*sizeof(float));
-                std::memcpy(child_matrix.data()+9,child+0xb8,3*sizeof(float));
-                if(!jkgm::get_thing_node_pose(child_matrix,child_pose) ||
                    !jkgm::compute_node_attachment_pose(
-                       rec,node_pose,child_pose,out))continue;
+                       rec,node_pose,out))continue;
                 float pose[12]={
                     out.right[0],out.right[1],out.right[2],
                     out.look[0],out.look[1],out.look[2],
@@ -3477,13 +3473,12 @@ namespace {
         DetourTransactionCommit();
     }
 
-    // AttachThingToThingNode(child,parent,node,localOffset,flags):
-    // flags 0x1 inherits node orientation; 0 follows position only.
-    // Engine maintains native SITH_ATTACH_THING | SITH_ATTACH_NOMOVE and
-    // ordinary DetachThing() clears this sidecar through the Detours hook.
+    // AttachThingToThingNode(child,parent,node,localOffset).
+    // Always follows both position and orientation. Native attach flags hold
+    // THING | NOMOVE | NODE, so built-in GetThingAttachFlags() sees 0x80.
+    // Normal DetachThing() removes the node bit and sidecar.
     void __cdecl cog_attach_thing_to_thing_node(void *ctx)
     {
-        int const flags=cog_pop_int(ctx);
         float xyz[3]{};
         cog_pop_vector(ctx,xyz);
         int const node=cog_pop_int(ctx);
@@ -3494,7 +3489,6 @@ namespace {
         a.child=reinterpret_cast<uintptr_t>(child);
         a.parent=reinterpret_cast<uintptr_t>(parent);
         a.node=node;
-        a.flags=uint32_t(flags);
         a.offset={{xyz[0],xyz[1],xyz[2]}};
         if(!read_node_attachment_identity(a.child,a.child_signature) ||
            !read_node_attachment_identity(a.parent,a.parent_signature) ||
@@ -3545,10 +3539,11 @@ namespace {
             LOG_WARNING("AttachThingToThingNode: native parent link failed");
             return;
         }
-        current |= jkgm::native_attach_no_move;
+        current |= jkgm::native_attach_no_move |
+                   jkgm::native_attach_node;
         std::memcpy(static_cast<uint8_t *>(child)+0x34,&current,4);
         LOG_INFO("AttachThingToThingNode: node=",node,
-                 " flags=",flags," child=",a.child);
+                 " child=",a.child," attachFlags=",current);
     }
 
     // Returns the REAL attached face normal, not the transient sphere-
