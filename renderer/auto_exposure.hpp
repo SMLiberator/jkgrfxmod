@@ -6,6 +6,7 @@
 #include "glad/gl.h"
 #include <algorithm>
 #include <chrono>
+#include <sstream>
 
 namespace jkgm {
 
@@ -68,11 +69,13 @@ inline void update_auto_exposure(opengl_state *ogs,gl::texture_view scene)
         float diagnostic[4]={0.0f,0.0f,0.0f,0.0f};
         glReadBuffer(GL_COLOR_ATTACHMENT0);
         glReadPixels(0,0,1,1,GL_RGBA,GL_FLOAT,diagnostic);
-        LOG_INFO("Auto exposure: adapted_ev=",diagnostic[0],
-                 " target_ev=",diagnostic[1],
-                 " luminance=",diagnostic[2],
-                 " dt=",dt,
-                 " sensitivity=",ogs->auto_exposure_sensitivity);
+        std::ostringstream message;
+        message << "Auto exposure: adapted_ev=" << diagnostic[0]
+                << " target_ev=" << diagnostic[1]
+                << " luminance=" << diagnostic[2]
+                << " dt=" << dt
+                << " sensitivity=" << ogs->auto_exposure_sensitivity;
+        LOG_INFO(message.str());
     }
     ogs->auto_exposure_history_valid=true;
     ogs->auto_exposure_next_a=!ogs->auto_exposure_next_a;
