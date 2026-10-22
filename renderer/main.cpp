@@ -3527,7 +3527,7 @@ namespace {
         // Check cycles before invoking native attachment, which may detach
         // an existing parent and thus erase an old entry via the hook.
         if(!registry.set(a)) {
-            LOG_WARNING("AttachThingToThingNode rejected: invalid node/flags/cycle");
+            LOG_WARNING("AttachThingToThingNode rejected: invalid node/offset/cycle");
             return;
         }
         auto const native_attach=reinterpret_cast<native_thing_attach_fn>(
