@@ -26,7 +26,7 @@ int main() {
     uintptr_t const idx=base+0x1100;
     set32(world+0x88,8);
     set32(world+0x8c,uint32_t(vertices));
-    set32(world+0xa8,4);
+    set32(world+0xa8,5);
     set32(world+0xac,uint32_t(surfaces));
     // Two adjacent halves of an opaque wall, with shared edge x=0.
     for(int j=0;j<8;++j) {
@@ -35,7 +35,7 @@ int main() {
         float const z=((j%4)==0 || (j%4)==3)?-1.0f:1.0f;
         set3(vertices+uintptr_t(j)*12U,{{x,0.1f,z}});
     }
-    for(int surf=0;surf<4;++surf) {
+    for(int surf=0;surf<5;++surf) {
         uintptr_t const a=surfaces+uintptr_t(surf)*0x5c;
         set32(a+0x1c,4); // face geomode textured
         set32(a+0x28,4);
@@ -45,24 +45,28 @@ int main() {
         for(int k=0;k<4;++k)
             set32(idx+surf*16+k*4, uint32_t((surf%2)*4+k));
     }
-    // Third wall is a portal: must not receive projected paint.
+    // Passable 0x7 portal is not a decal receiver.
     set32(surfaces+2*0x5c+0x0c,uint32_t(base+0x1500));
+    set32(base+0x1500,0x7);
     // Fourth wall is sky: must not receive projected paint.
     set32(surfaces+3*0x5c+0x10,0x200U);
+    // A textured 0x5 solid adjoin (e.g. grate) DOES receive decals.
+    set32(surfaces+4*0x5c+0x0c,uint32_t(base+0x1510));
+    set32(base+0x1510,0x5);
     decal_projector p{};
     auto mesh=project_decal_world_surfaces(reader,world,p);
     assert(mesh.valid_world);
-    assert(mesh.surfaces_seen==4);
-    assert(mesh.receivers==2);
+    assert(mesh.surfaces_seen==5);
+    assert(mesh.receivers==3);
     assert(mesh.invalid_surfaces==0);
     assert(mesh.skipped_portals==1);
     assert(mesh.skipped_sky==1);
     assert(mesh.skipped_material==0);
     assert(mesh.skipped_backfaces==0);
     assert(mesh.skipped_projection==0);
-    assert(mesh.triangles.size()==4);
+    assert(mesh.triangles.size()==6);
     for(auto const &tri:mesh.triangles) {
-        assert(tri.surface_index<2);
+        assert(tri.surface_index<2 || tri.surface_index==4);
         for(auto const &v:tri.vertices) {
             auto const uv=projected_decal_uv(v,p);
             assert(uv[0]>=-0.001f&&uv[0]<=1.001f);
@@ -77,7 +81,7 @@ int main() {
     // A malformed surface index never dereferences arbitrary game memory.
     set32(idx+0*16+0*4,9999999U);
     auto invalid=project_decal_world_surfaces(reader,world,p);
-    assert(invalid.invalid_surfaces==1 && invalid.triangles.size()==2);
+    assert(invalid.invalid_surfaces==1 && invalid.triangles.size()==4);
     // A nonsensical world count fails before scanning.
     set32(world+0xa8,9000000U);
     auto rejected=project_decal_world_surfaces(reader,world,p);
