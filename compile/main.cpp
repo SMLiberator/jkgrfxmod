@@ -21,7 +21,7 @@
 #include <map>
 
 namespace jkgm {
-    enum class out_material_alpha_mode { blend, mask };
+    enum class out_material_alpha_mode { blend, mask, dithered };
 
     class out_material_replacement {
     public:
@@ -581,6 +581,10 @@ namespace jkgm {
             else if(am == "blend") {
                 rv->alpha_mode = out_material_alpha_mode::blend;
             }
+            else if(am == "dithered" || am == "dither") {
+                // Emit one canonical value; the renderer reads "dithered".
+                rv->alpha_mode = out_material_alpha_mode::dithered;
+            }
             else {
                 LOG_ERROR("Material '",
                           rv->name,
@@ -787,6 +791,10 @@ namespace jkgm {
 
             case out_material_alpha_mode::mask:
                 rv["alpha_mode"] = "mask";
+                break;
+
+            case out_material_alpha_mode::dithered:
+                rv["alpha_mode"] = "dithered";
                 break;
             }
         }

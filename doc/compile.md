@@ -266,9 +266,9 @@ The `env_map` field references an equirectangular environment image (see Environ
 
 The `alpha_mode` field is optional.
 
-The `alpha_mode` field describes how the material should interpret the albedo map alpha channel. If the `alpha_mode` is `blend`, the alpha channel is used for alpha blending. If the `alpha_mode` is `mask`, the alpha channel is used for alpha testing with a cutoff defined by `alpha_cutoff`. The default value is `blend`.
+The `alpha_mode` field describes how the material should interpret transparency. `blend` uses alpha blending, `mask` uses alpha testing with a cutoff defined by `alpha_cutoff`, and `dithered` uses a 4x4 screen-door pattern to approximate partial alpha using opaque, depth-writing pixels. The default value is `blend`. The spelling `dither` is also accepted by the compiler and normalized to `dithered` in the compiled pack.
 
-Note that only the albedo map alpha value is considered under the alpha mode. Materials that use the `mask` alpha mode can be applied to faces flagged translucent, and will render as Jedi Knight: Dark Forces II modders typically expect.
+`mask` tests only the albedo map alpha and is useful for hard-edged cutouts, including JK translucent faces. `dithered` tests the combined texture/material/vertex alpha and is especially useful for overlapping foliage, at the cost of visible stippling. Screen-door coverage is intended for normal blending, not additive, multiply, or fluid materials.
 
 Note also that the alpha mode only applies to translucent faces or faces which normally permit color keyed transparency. The material is drawn opaque on all other faces, with blending and alpha testing disabled.
 
