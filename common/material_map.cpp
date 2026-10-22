@@ -159,10 +159,9 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             mat->displacement_factor = em["displacement_factor"];
         }
 
-        // Experimental glossy defaults. Without an authored roughness,
-        // the 0.12 factor multiplies an optional surface map's green channel,
-        // too: useful for temporarily exaggerating sharp reflections.
-        // Explicit material roughness continues to take precedence.
+        // Neutral dielectric defaults for materials without a surface map.
+        // Authored surface maps use unity multipliers by default, so their
+        // R/G/B channels define per-pixel reflectivity, roughness and metalness.
         bool const has_surface_map = em.contains("surface_map");
         if(has_surface_map) {
             mat->surface_map = data_dir / std::string(em["surface_map"]);
@@ -170,9 +169,9 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
 
         mat->reflection_strength =
             em.contains("reflection_strength") ? static_cast<float>(em["reflection_strength"])
-                                                : (has_surface_map ? 1.0f : 0.3f);
+                                                : (has_surface_map ? 1.0f : 0.2f);
         mat->roughness = em.contains("roughness") ? static_cast<float>(em["roughness"])
-                                                   : 0.12f;
+                                                   : (has_surface_map ? 1.0f : 0.9f);
         mat->metalness = em.contains("metalness") ? static_cast<float>(em["metalness"])
                                                    : (has_surface_map ? 1.0f : 0.0f);
 
