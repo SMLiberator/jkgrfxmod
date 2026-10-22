@@ -587,45 +587,62 @@ Install them in the corresponding game directories after backing up the
 existing files. A DLL-only swap does **not** activate the shader fast path.
 Keep using your patched JK executable; this PR does not change it.
 
-## Experimental MAT Spotlights
+## Native ThingNode attachments and MAT Spotlights (experimental)
 
-Set `"enable_spotlights": true` in `jkgm.json` to activate up to **four**
-COG-controlled perspective spotlights per level. A spotlight is identified
-by its owning Thing and model node index (use `-1` to follow the Thing's
-own R/L/U matrix). Animated nodes are resolved through the validated
-JKGM node transform accessor **each render frame**, so a flashlight can
-follow the player's hand without creating a separate Thing.
+The renderer adds **`AttachThingToThingNode(child,parent,node,offset,flags)`**
+using the verified native JKGM Thing attachment, detach, update, sector and
+pose functions. This is not an IJIM template-spawning verb: the child is an
+**existing Thing**, retaining its sprite/3DO identity and COG controls.
 
 ```c
-// SetSpotlight(thing, node, MAT, 'width height range', localOffset)
-SetSpotlight(player, 4, flashlightMat, '3 2 12', '0 0 0');
-SetSpotlight(car, -1, headlightMat, '2.5 1.5 8', '-0.35 0.7 0.1');
-RemoveSpotlight(player, 4);  // Remove only this node's spotlight
-ResetSpotlight(car);         // Remove every spotlight belonging to this Thing
+// Node index is the model hierarchy index, not a mesh name.
+// Flags: 1 = follow position + orientation, 0 = follow position only.
+AttachThingToThingNode(flare, player, 4, '0 0 0', 1);
+DetachThing(flare); // ordinary built-in verb also removes node-following
 ```
 
-The Thing/animated node **Look** axis is the direction of projection.
-`localOffset` uses the node's Right / Look / Up axes, in JK units.
-The `width height range` vector specifies the beam footprint at its
-far plane and its maximum projection distance, all in JK world units.
-Close-range projection contracts toward the source. The MAT is treated as an additive RGB+alpha light cookie,
-with fade at the edges and maximum distance, independent of receiver
-albedo. The renderer uses the MAT's currently loaded cel. **Native MAT
-preloading is temporarily disabled**: an incorrect hard-coded loader call
-caused a crash in the patched JKGM executable. Until we verify a safe
-preload entry point, source MATs must become resident through normal JK
-rendering. A source MAT not used elsewhere may remain unresolved.
+The child joins JK's native attached-Thing list with its standard THING
+and NOMOVE bits; node-relative offset and optional rotation inheritance
+are stored separately in the renderer. Each game Thing update samples the
+**animated world-space node matrix**, transforms the local offset, updates
+the child's real Sith position and orientation, and uses native sector
+transitions to keep it co-located with the parent. The engine's ordinary
+`DetachThing` remains authoritative (via a native detach interception).
+Destroyed/reused Things and level changes invalidate the sidecar. Native
+hooks activate only if all required entrypoint signatures match the
+tested JKGM executable. This is currently single-player experimental
+code: synchronization/savegame semantics and collision effects still need
+in-game verification.
 
-Spotlights illuminate **opaque native world sectors and 3DOs** via the
-resolved G-buffer, independently of `use_model_cache`. They have no
-dynamic shadows, do not currently light translucent receivers, do not
-contribute GGX material specularity, and don't emit volumetric fog beams.
-The first version loops over at most four spotlights on the fullscreen
-composite; performance is intentionally measurable before adding
-scissor-volume optimizations. They are removed on level transitions.
-Use `RemoveSpotlight(thing,node)` to release one slot or
-`ResetSpotlight(thing)` to clear all that Thing's lights. Destroyed or
-recycled owners are automatically reclaimed in the render path.
+Set `"enable_spotlights": true` in `jkgm.json` to enable up to **four**
+COG MAT spotlights, **one per Thing**. The Thing's own Right/Look/Up
+matrix defines the projector; attachment to an animated parent is now a
+separate operation.
+
+```c
+// SetSpotlight(sourceThing, projectionMat, 'width height range', localOffset)
+SetSpotlight(flare, flashlightMat, '3 2 12', '0 0 0');
+SetSpotlight(car, headlightMat, '2.5 1.5 8', '-0.35 0.7 0.1');
+ResetSpotlight(flare); // remove this Thing's light
+```
+
+The projector's Look axis is its forward beam direction, and the offset
+uses its Right/Look/Up axes. Sizes and range are measured in JK units.
+The MAT's current albedo RGB and alpha form an additive light cookie with
+soft edges and distance cutoff. It affects **opaque world and 3DO
+receivers** through the shared depth/normal buffer, independent of model
+caching. Transparency, shadows, specular lighting and volumetric beams
+are not yet implemented. The first version evaluates four lights
+fullscreen, so performance should be measured before increasing that cap.
+
+**MAT preload remains disabled:** a hardcoded loader entrypoint from an
+incompatible executable caused a page fault. Until we verify an
+equivalent cache-loader call in the actual JKGM binary, a source MAT has
+to become resident through normal native rendering.
+
+Type-4 camera-facing flare SPRs are separate Things. Attach a flare
+Thing to a node, then assign that same Thing a Spotlight. Its independent
+`SetSpriteInfo` and `SetSpriteRoll` COG controls remain available.
 
 ## Experimental runtime MAT material controls
 
