@@ -1,7 +1,7 @@
 #pragma once
-// COG-controlled MAT spotlights. Registry contains no engine pointers except
-// validated owning Thing addresses; node matrices are sampled at draw time.
-// A missing model node or unloaded MAT silently skips that frame.
+// COG-controlled MAT spotlights. Each Thing owns at most one projector.
+// The source Thing can itself be attached to an animated model node.
+// A missing texture or destroyed Thing suppresses that frame.
 #include "thing_node_math.hpp"
 #include <algorithm>
 #include <array>
@@ -17,7 +17,6 @@ constexpr size_t spotlight_max_active=4;
 struct spotlight_request {
     uintptr_t thing=0;
     uint32_t identity=0;
-    int node=-1; // -1 follows Thing, >=0 follows animated model node
     uint32_t material=0; // stable native JK MAT index, not D3D handle
     float width=1.0f,height=1.0f,range=8.0f; // far-plane size and depth in JK units
     thing_node_vector offset{{0,0,0}};
@@ -31,7 +30,7 @@ struct spotlight_instance {
 
 inline bool spotlight_request_valid(spotlight_request const &v)
 {
-    if(v.thing<0x10000U || v.node< -1 || v.node>=4096 ||
+    if(v.thing<0x10000U ||
        (v.material&0x7fffU)>=16384U ||
        (v.material&0xffff0000U)!=0 ||
        !std::isfinite(v.width)||!std::isfinite(v.height)||
@@ -81,7 +80,7 @@ inline bool spotlight_make_instance(spotlight_request const &request,
 
 class spotlight_registry {
     std::mutex mutex_;
-    std::map<std::pair<uintptr_t,int>,spotlight_request> lights_;
+    std::map<uintptr_t,spotlight_request> lights_;
     uint32_t world_=0;
 public:
     void prepare_world(uint32_t world)
@@ -96,21 +95,14 @@ public:
         if(!spotlight_request_valid(v))return false;
         std::lock_guard<std::mutex> guard(mutex_);
         if(lights_.size()>=spotlight_max_active &&
-           !lights_.count({v.thing,v.node}))return false;
-        lights_[{v.thing,v.node}]=v;
+           !lights_.count(v.thing))return false;
+        lights_[v.thing]=v;
         return true;
-    }
-    void erase(uintptr_t thing,int node)
-    {
-        std::lock_guard<std::mutex> guard(mutex_);
-        lights_.erase({thing,node});
     }
     void erase_thing(uintptr_t thing)
     {
         std::lock_guard<std::mutex> guard(mutex_);
-        auto it=lights_.lower_bound({thing,-1});
-        while(it!=lights_.end() && it->first.first==thing)
-            it=lights_.erase(it);
+        lights_.erase(thing);
     }
     std::vector<spotlight_request> snapshot()
     {
@@ -128,6 +120,6 @@ inline spotlight_registry &get_spotlight_registry()
     return rv;
 }
 
-// Defined in main.cpp to reuse the validated JKGM animated-node accessor.
+// Defined in main.cpp; samples the owning Thing's world-space R/L/U.
 std::vector<spotlight_instance> collect_spotlights_for_frame();
 } // namespace jkgm
