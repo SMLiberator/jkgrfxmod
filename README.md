@@ -610,11 +610,11 @@ The `width height range` vector specifies the beam footprint at its
 far plane and its maximum projection distance, all in JK world units.
 Close-range projection contracts toward the source. The MAT is treated as an additive RGB+alpha light cookie,
 with fade at the edges and maximum distance, independent of receiver
-albedo. The renderer uses the MAT's currently loaded cel and
-attempts to upload it immediately using JK's native material cache loader
-when SetSpotlight is called. Commands made before a GPU context exists are
-retried in the render path; a missing MAT or an unavailable native texture
-remains pending. The MAT need not first appear on visible geometry.
+albedo. The renderer uses the MAT's currently loaded cel. **Native MAT
+preloading is temporarily disabled**: an incorrect hard-coded loader call
+caused a crash in the patched JKGM executable. Until we verify a safe
+preload entry point, source MATs must become resident through normal JK
+rendering. A source MAT not used elsewhere may remain unresolved.
 
 Spotlights illuminate **opaque native world sectors and 3DOs** via the
 resolved G-buffer, independently of `use_model_cache`. They have no
