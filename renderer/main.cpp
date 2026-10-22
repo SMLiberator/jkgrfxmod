@@ -4078,7 +4078,34 @@ namespace {
         }
     }
 
-    // ResetSpotlight(thing): remove all node-bound and root spotlights.
+    // SetSpotlightIntensities(thing,light,add,fadetime).
+    // The light channel illuminates the receiving material's original
+    // pigment; add is a separate raw cookie-radiance contribution.
+    void __cdecl cog_set_spotlight_intensities(void *ctx)
+    {
+        float const fade=cog_pop_float(ctx);
+        float const add=cog_pop_float(ctx);
+        float const light=cog_pop_float(ctx);
+        void *thing=cog_pop_thing(ctx);
+        if(!thing || !gpu_span_readable(thing,0xe8))return;
+        uint32_t kind=0,signature=0;
+        auto const *p=static_cast<uint8_t const *>(thing);
+        std::memcpy(&kind,p+0x0c,4);
+        std::memcpy(&signature,p+0x74,4);
+        if(kind==0 || kind>15 || signature==0)return;
+        uint32_t world=0;
+        if(jkgm::engine_material_debug::matches_tested_executable() &&
+           jkgm::engine_material_debug::read_object(
+               jkgm::engine_material_debug::current_world_global,world))
+            jkgm::get_spotlight_registry().prepare_world(world);
+        if(!jkgm::get_spotlight_registry().set_intensities(
+                reinterpret_cast<uintptr_t>(thing),signature,
+                {light,add},fade,GetTickCount()))
+            LOG_WARNING("SetSpotlightIntensities: no matching active light "
+                        "or invalid strengths/fade (0..16, 0..3600s)");
+    }
+
+    // ResetSpotlight(thing): remove the Thing's spotlight.
     void __cdecl cog_reset_spotlight(void *ctx)
     {
         void *thing=cog_pop_thing(ctx);
@@ -4234,6 +4261,7 @@ namespace {
         cog_verb_entry{"getperipheralblur", cog_get_peripheral_blur},
         cog_verb_entry{"resetperipheralblur", cog_reset_peripheral_blur},
         cog_verb_entry{"setspotlight", cog_set_spotlight},
+        cog_verb_entry{"setspotlightintensities", cog_set_spotlight_intensities},
         cog_verb_entry{"resetspotlight", cog_reset_spotlight},
         cog_verb_entry{"setglobalenvmap", cog_set_global_env_map},
         cog_verb_entry{"resetglobalenvmap", cog_reset_global_env_map},
@@ -4315,7 +4343,7 @@ std::vector<jkgm::spotlight_instance> jkgm::collect_spotlights_for_frame()
         std::memcpy(m.data()+9,thing+0xb8,3*sizeof(float));
         if(!get_thing_node_pose(m,pose))continue;
         spotlight_instance instance{};
-        if(spotlight_make_instance(request,pose,instance))
+        if(spotlight_make_instance(request,pose,instance,GetTickCount()))
             instances.push_back(instance);
     }
     return instances;
