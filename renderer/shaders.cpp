@@ -170,6 +170,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , jk_color_add_fade(gl::get_uniform_location(the_program,"jk_color_add_fade"))
     , colormap_tint(gl::get_uniform_location(the_program,"colormap_tint"))
     , specular_params(gl::get_uniform_location(the_program,"specular_params"))
+    , dynamic_light_specular_enabled(gl::get_uniform_location(the_program,"dynamic_light_specular_enabled"))
     , specular_surface_sampler(gl::get_uniform_location(the_program,"surface_map"))
     , specular_normal_sampler(gl::get_uniform_location(the_program,"normal_map"))
     , specular_normal2_sampler(gl::get_uniform_location(the_program,"normal_map2"))
@@ -270,6 +271,11 @@ void jkgm::shaders::gpu_3do_preview_shader::set_local_eye(
     std::array<float,3> const &eye)
 {
     gl::set_uniform_vector(local_eye,make_point(eye[0],eye[1],eye[2]));
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_dynamic_light_specular(bool enabled)
+{
+    gl::set_uniform_integer(dynamic_light_specular_enabled,enabled?1:0);
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_point_specular(
