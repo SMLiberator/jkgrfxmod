@@ -61,5 +61,65 @@ int main()
     assert(reg.snapshot().size()==4);
     reg.prepare_world(0x2222U);
     assert(reg.snapshot().empty());
+
+    // Default visual look and instantaneous intensity override.
+    a.thing=0x123456U;
+    a.identity=7;
+    assert(reg.set(a));
+    auto current=reg.snapshot().front();
+    auto levels=spotlight_sample_intensities(current,1000U);
+    assert(close(levels.light,1.0f) && close(levels.add,0.12f));
+    assert(reg.set_intensities(a.thing,a.identity,{2.0f,0.5f},0.0f,1000U));
+    current=reg.snapshot().front();
+    levels=spotlight_sample_intensities(current,1000U);
+    assert(close(levels.light,2.0f) && close(levels.add,0.5f));
+
+    // Two-second fade and restart halfway through without a brightness jump.
+    assert(reg.set_intensities(a.thing,a.identity,{4.0f,0.1f},2.0f,1000U));
+    current=reg.snapshot().front();
+    levels=spotlight_sample_intensities(current,2000U);
+    assert(close(levels.light,3.0f) && close(levels.add,0.3f));
+    assert(reg.set_intensities(a.thing,a.identity,{0.0f,1.0f},1.0f,2000U));
+    current=reg.snapshot().front();
+    levels=spotlight_sample_intensities(current,2500U);
+    assert(close(levels.light,1.5f) && close(levels.add,0.65f));
+    levels=spotlight_sample_intensities(current,3000U);
+    assert(close(levels.light,0.0f) && close(levels.add,1.0f));
+    levels=spotlight_sample_intensities(current,9000U);
+    assert(close(levels.light,0.0f) && close(levels.add,1.0f));
+
+    // Modifying the projector's MAT/size preserves its ongoing animation.
+    assert(reg.set_intensities(a.thing,a.identity,{1.0f,0.0f},2.0f,10000U));
+    a.material=9;
+    assert(reg.set(a));
+    current=reg.snapshot().front();
+    assert(current.material==9U);
+    levels=spotlight_sample_intensities(current,11000U);
+    assert(close(levels.light,0.5f) && close(levels.add,0.5f));
+
+    // Bad input and a recycled Thing signature cannot modify the light.
+    assert(!reg.set_intensities(a.thing,999,{1.0f,1.0f},1.0f,11000U));
+    assert(!reg.set_intensities(a.thing,a.identity,{-1.0f,1.0f},1.0f,11000U));
+    assert(!reg.set_intensities(a.thing,a.identity,{1.0f,17.0f},1.0f,11000U));
+    assert(!reg.set_intensities(a.thing,a.identity,{1.0f,1.0f},-1.0f,11000U));
+    assert(!reg.set_intensities(a.thing,a.identity,{1.0f,1.0f},
+                                INFINITY,11000U));
+
+    // Unsigned GetTickCount arithmetic handles rollover during a fade.
+    assert(reg.set_intensities(a.thing,a.identity,{3.0f,2.0f},
+                               2.0f,0xffffff00U));
+    current=reg.snapshot().front();
+    levels=spotlight_sample_intensities(current,0x000002e8U); // +1000 ms
+    assert(close(levels.light,2.0f) && close(levels.add,1.0f));
+
+    // Recycled Thing pointer starts from defaults, not previous owner fade.
+    a.identity=8;
+    assert(reg.set(a));
+    current=reg.snapshot().front();
+    levels=spotlight_sample_intensities(current,11000U);
+    assert(close(levels.light,1.0f) && close(levels.add,0.12f));
+    assert(reg.snapshot().size()==1);
+    reg.erase_thing(a.thing);
+    assert(reg.snapshot().empty());
     return 0;
 }
