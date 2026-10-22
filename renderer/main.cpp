@@ -3820,8 +3820,7 @@ namespace {
         if(!jkgm::get_spotlight_registry().set(request))
             LOG_WARNING("SetSpotlight: invalid dimensions/node or 4-light limit reached");
         else LOG_INFO("SetSpotlight: Thing=",request.thing,
-                      " node=",node," MAT=",material,
-                      " size=",width,"x",height);
+                      " node=",node," MAT=",material);
     }
 
     // RemoveSpotlight(thing,node). Node -1 follows the Thing origin.
