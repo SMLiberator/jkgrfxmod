@@ -24,6 +24,7 @@
     "enable_vsync": false,
     "profile_renderer": false,
     "use_model_cache": false,
+    "enable_spotlights": false,
     "enable_sprite_decals": false,
     "enable_mesh_collision": false,
     "use_vanilla_renderer": false,
