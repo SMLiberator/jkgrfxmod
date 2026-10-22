@@ -590,7 +590,6 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
             the_program,"spotlight_ups["+std::to_string(i)+"]"));
         spotlight_forwards.push_back(gl::get_uniform_location(
             the_program,"spotlight_forwards["+std::to_string(i)+"]"));
-        gl::set_uniform_integer(spotlight_images.back(),6+i);
     }
 }
 
@@ -641,6 +640,7 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight(
     point<4,float> forward)
 {
     if(slot<0 || slot>=4)return;
+    gl::set_uniform_integer(spotlight_images[slot],6+slot);
     gl::set_uniform_vector(spotlight_origins[slot],origin);
     gl::set_uniform_vector(spotlight_rights[slot],right);
     gl::set_uniform_vector(spotlight_ups[slot],up);
