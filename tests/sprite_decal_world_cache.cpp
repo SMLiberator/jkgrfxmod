@@ -34,7 +34,7 @@ int main(){
     uintptr_t const indices=base+0x1100;
     u32(world+0x88,8);
     u32(world+0x8c,uint32_t(vertices));
-    u32(world+0xa8,4);
+    u32(world+0xa8,5);
     u32(world+0xac,uint32_t(surfaces));
     for(int j=0;j<8;++j){
         int const corner=j%4;
@@ -44,7 +44,7 @@ int main(){
         float const z=(corner==0 || corner==3)?-0.25f:0.25f;
         vec(vertices+j*12,{{x,y,z}});
     }
-    for(uint32_t i=0;i<4;++i){
+    for(uint32_t i=0;i<5;++i){
         auto const addr=surfaces+i*0x5c;
         u32(addr+0x1c,4);
         u32(addr+0x28,4);
@@ -54,21 +54,24 @@ int main(){
         for(uint32_t j=0;j<4;++j)
             u32(indices+i*16+j*4,(i%2)*4+j);
     }
-    // A portal and sky should not be cached as receivers.
-    u32(surfaces+2*0x5c+0x0c,uint32_t(base+0x1800));
+    // Passable portal 0x7 must be excluded; solid grate 0x5 included.
+    u32(surfaces+2*0x5c+0x0c,uint32_t(base+0x1900));
+    u32(base+0x1900,0x7);
     u32(surfaces+3*0x5c+0x10,0x200);
+    u32(surfaces+4*0x5c+0x0c,uint32_t(base+0x1910));
+    u32(base+0x1910,0x5);
     decal_world_geometry index{};
     assert(index.load(reader,world));
     assert(index.matches(reader,world));
-    assert(index.surface_count==4 && index.receivers.size()==2);
+    assert(index.surface_count==5 && index.receivers.size()==3);
     assert(index.acceleration.node_count()>0);
     decal_projector p{};
     const int after_load=reads;
     auto result=project_cached_decal_world(index,p);
     assert(reads==after_load); // Cached queries do not read SithWorld.
-    assert(result.valid_world && result.receivers==2);
-    assert(result.broadphase_candidates==2);
-    assert(result.triangles.size()==4);
+    assert(result.valid_world && result.receivers==3);
+    assert(result.broadphase_candidates==3);
+    assert(result.triangles.size()==6);
     p.origin[0]=10;
     auto far=project_cached_decal_world(index,p);
     assert(reads==after_load);
@@ -78,7 +81,7 @@ int main(){
     // In place vertex source edits no longer trigger silent repeated reads.
     vec(vertices,{{100,100,100}});
     p.origin[0]=0;
-    assert(project_cached_decal_world(index,p).triangles.size()==4);
+    assert(project_cached_decal_world(index,p).triangles.size()==6);
     // New world surfaces invalidate the model cache.
     u32(world+0xa8,3);
     assert(!index.matches(reader,world));
