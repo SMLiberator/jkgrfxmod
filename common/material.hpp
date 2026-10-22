@@ -65,7 +65,7 @@ namespace jkgm {
         // R = reflectivity, G = roughness, B = metalness. The factors below scale the map
         // values, or stand on their own if there is no map.
         std::optional<fs::path> surface_map;
-        float reflection_strength = 0.1f;
+        float reflection_strength = 0.3f;
         float roughness = 0.9f;
         float metalness = 0.0f;
 
