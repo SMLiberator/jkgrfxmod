@@ -694,6 +694,9 @@ namespace jkgm {
 
         triangle_batch world_batch;
         sorted_triangle_batch world_transparent_batch;
+        // Reuse space across frames: only depth-writing foliage cutouts need
+        // buffering when splitting them from truly blended native triangles.
+        std::vector<triangle> native_cutout_scratch;
         sorted_triangle_batch world_flare_batch;
         unsigned flare_gpu_trace_count=0U;
         unsigned flare_present_trace_count=0U;
@@ -3480,25 +3483,33 @@ namespace jkgm {
             {
                 profile_scope timer(profiling,
                     profile_frame.timings[profile_idx(profile_stage::sort_transparent)]);
-                // Native alpha-dithered faces are rendered once, as opaque
-                // depth-writing coverage. They MUST NOT be painter-sorted:
-                // ambiguous overlapping tree cards can otherwise swap order
-                // as the camera moves, even though blending is disabled.
-                // Preserve the engine's submission order for those faces and
-                // sort only the truly translucent tail of the batch.
-                auto const cutout = [this](triangle const &tri) {
-                    return is_dithered_material(tri.material);
-                };
-                if(std::any_of(world_transparent_batch.begin(),
-                               world_transparent_batch.end(),cutout)) {
-                    auto const blended_begin=std::stable_partition(
-                        world_transparent_batch.begin(),
-                        world_transparent_batch.end(),cutout);
-                    world_transparent_batch.sort_from(static_cast<size_t>(
-                        blended_begin-world_transparent_batch.begin()));
-                } else {
-                    world_transparent_batch.sort();
+                // Depth-writing dithered cutouts do not require painter-order
+                // sorting. Preserve their submission order and sort only the
+                // truly blended native triangles. std::stable_partition fails
+                // to compile with JKGM's over-aligned triangle type on MSVC.
+                // Instead, retain only cutouts in a reusable scratch buffer,
+                // shift blends backward IN PLACE (preserving their order),
+                // then restore the cutouts at the front. O(N), no allocations
+                // after the scratch capacity has warmed up.
+                native_cutout_scratch.clear();
+                for(auto const &tri : world_transparent_batch) {
+                    if(is_dithered_material(tri.material))
+                        native_cutout_scratch.push_back(tri);
                 }
+                size_t const cutout_count=native_cutout_scratch.size();
+                size_t const triangle_count=world_transparent_batch.size();
+                if(cutout_count>0U && cutout_count<triangle_count) {
+                    auto first=world_transparent_batch.begin();
+                    size_t write=triangle_count;
+                    for(size_t i=triangle_count;i>0U;--i) {
+                        size_t const read=i-1U;
+                        if(!is_dithered_material(first[read].material))
+                            first[--write]=std::move(first[read]);
+                    }
+                    for(size_t i=0U;i<cutout_count;++i)
+                        first[i]=std::move(native_cutout_scratch[i]);
+                }
+                world_transparent_batch.sort_from(cutout_count);
                 world_flare_batch.sort();
                 gun_transparent_batch.sort();
             }
