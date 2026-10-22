@@ -24,6 +24,7 @@
 #include "sprite_decal_world.hpp"
 #include "sprite_decal_world_cache.hpp"
 #include "sprite_decal_static_mesh.hpp"
+#include "sprite_decal_auto_align.hpp"
 #include "sprite_decal_pose_cache.hpp"
 #include "sprite_decal_resource.hpp"
 #include "sprite_decal_attachment.hpp"
@@ -1411,6 +1412,7 @@ namespace {
     };
     // JK renders on its main thread. Recursion still preserves the outer call.
     thread_local sprite_draw_context sprite_draw_active{};
+    thread_local bool suppress_native_decal_face=false;
 
     void transform_native_sprite_quad(float width,float height,float roll)
     {
@@ -1676,6 +1678,12 @@ namespace {
 
     int __cdecl HookedSpriteAddProc(int extra,unsigned int vertices,int flags)
     {
+        // Let the native SPR routine warm its MAT, but do NOT submit the
+        // original floating quad when the projected decal has no receiver or
+        // its GPU texture is not resident yet. Those quads caused wall
+        // penetration and occasional misleading floor-facing artifacts.
+        if(extra==0 && suppress_native_decal_face &&
+           sprite_draw_active.thing) return 1;
         // rdSprite_Draw passes extraData 0, unlike various other primitives.
         // Record the completed face, not a shared rdSprite resource. The
         // tag persists until the native cache consumes this specific face.
@@ -2071,22 +2079,9 @@ namespace {
              jkgm::sprite_decal_normals_stable(
                  it->second.attached_normal,attached_normal));
         if(!hit) {
-            jkgm::sprite_axes axes{
-                {{m[0],m[1],m[2]}},{{m[3],m[4],m[5]}},
-                {{m[6],m[7],m[8]}}
-            };
-            if(attached_to_face) {
-                jkgm::sprite_axes aligned{};
-                if(!jkgm::sprite_decal_attachment_axes(
-                       axes,attached_normal,aligned))return false;
-                axes=aligned;
-            }
-            jkgm::decal_projector projector{};
-            if(!jkgm::make_sprite_decal_projector(
-                axes,{{m[9],m[10],m[11]}},
-                {{offset[0],offset[1],offset[2]}},
-                size[0],size[1],info.width,info.height,roll,projector))
-                return false;
+            // Surface normals are needed BEFORE constructing the projector.
+            // Unattached impact sprites generally retain UP=(0,0,1), even
+            // when created from a projectile hitting a vertical wall.
             if(!sprite_world_geometry.matches(read,world)) {
                 auto const begin=std::chrono::steady_clock::now();
                 bool const ok=sprite_world_geometry.load(read,world);
@@ -2103,9 +2098,54 @@ namespace {
                 }
                 if(!ok)return false;
             }
+            rebuild_static_sprite_decal_receivers(world);
+            jkgm::sprite_axes axes{
+                {{m[0],m[1],m[2]}},{{m[3],m[4],m[5]}},
+                {{m[6],m[7],m[8]}}
+            };
+            jkgm::decal_vec3 chosen_normal=attached_normal;
+            bool aligned_to_receiver=attached_to_face;
+            if(!attached_to_face) {
+                jkgm::decal_vec3 position{{m[9],m[10],m[11]}};
+                // The sprite resource's offset is local to its Thing.
+                for(int i=0;i<3;++i)
+                    position[i]+=offset[0]*axes.right[i]+
+                                 offset[1]*axes.look[i]+
+                                 offset[2]*axes.up[i];
+                auto const camera=jkgm::read_active_render_camera();
+                jkgm::decal_vec3 const incoming=camera.valid
+                    ?camera.forward:jkgm::decal_vec3{{0,0,0}};
+                auto const nearby=jkgm::find_nearest_decal_surface(
+                    sprite_world_geometry,sprite_static_receiver_world,
+                    position,incoming);
+                if(nearby.valid) {
+                    chosen_normal=nearby.normal;
+                    aligned_to_receiver=true;
+                    if(the_config->profile_renderer &&
+                       sprite_decal_submit_logs<12U) {
+                        LOG_INFO("SPR decal autoalign normal=(",
+                                 std::to_string(chosen_normal[0]),",",
+                                 std::to_string(chosen_normal[1]),",",
+                                 std::to_string(chosen_normal[2]),
+                                 ") proximity_score=",
+                                 std::to_string(nearby.distance));
+                    }
+                }
+            }
+            if(aligned_to_receiver) {
+                jkgm::sprite_axes aligned{};
+                if(!jkgm::sprite_decal_attachment_axes(
+                       axes,chosen_normal,aligned))return false;
+                axes=aligned;
+            }
+            jkgm::decal_projector projector{};
+            if(!jkgm::make_sprite_decal_projector(
+                axes,{{m[9],m[10],m[11]}},
+                {{offset[0],offset[1],offset[2]}},
+                size[0],size[1],info.width,info.height,roll,projector))
+                return false;
             auto scan=jkgm::project_cached_decal_world(
                 sprite_world_geometry,projector,2048U);
-            rebuild_static_sprite_decal_receivers(world);
             uint32_t object_triangles=0,object_receivers=0;
             if(!sprite_static_receiver_world.receivers.empty() &&
                !scan.truncated && scan.triangles.size()<2048U) {
@@ -2224,10 +2264,36 @@ namespace {
         auto const info=current_sprite_info(thing);
         if(info.width==0.0f || info.height==0.0f || info.opacity==0.0f)
             return 0;
-        // Successful native projected decal submission replaces the SPR
-        // billboard; unsupported/unready surfaces retain native rendering.
-        if(submit_native_sprite_decal(thing,orientation,info))
+        // A type-3 projected SPR must NEVER become its original free-
+        // standing quad, even when clipping misses or MAT warm-up is needed.
+        // Native draws are permitted for MAT initialization, but the face
+        // recorder suppresses their output until GPU projection is ready.
+        bool projected=false;
+        if(the_config && the_config->enable_sprite_decals &&
+           gpu_span_readable(thing,8)) {
+            uintptr_t sprite=0;
+            std::memcpy(&sprite,static_cast<uint8_t const *>(thing)+4,4);
+            uint32_t type=0;
+            projected=gpu_span_readable(
+                reinterpret_cast<void const *>(sprite),32) &&
+                sprite_types.lookup(reinterpret_cast<void const *>(sprite),
+                                    reinterpret_cast<char const *>(sprite),type) &&
+                type==jkgm::sprite_project_decal;
+        }
+        if(projected) {
+            if(submit_native_sprite_decal(thing,orientation,info))
+                return 1;
+            if(sprite_alpha_hook_active) {
+                auto const previous=sprite_draw_active;
+                bool const was_suppressed=suppress_native_decal_face;
+                sprite_draw_active={thing,orientation};
+                suppress_native_decal_face=true;
+                RealNativeSprite(thing,orientation);
+                suppress_native_decal_face=was_suppressed;
+                sprite_draw_active=previous;
+            }
             return 1;
+        }
         // A loaded type-4 SPR may never actually be submitted. Trace native
         // draw entry separately from texture/resource loading and face output.
         if(the_config && the_config->profile_renderer &&
