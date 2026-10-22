@@ -13,20 +13,19 @@
 
 namespace jkgm {
 constexpr size_t spotlight_max_active=4;
-constexpr float spotlight_fixed_range=8.0f; // JK world units, prototype
 
 struct spotlight_request {
     uintptr_t thing=0;
     uint32_t identity=0;
     int node=-1; // -1 follows Thing, >=0 follows animated model node
     uint32_t material=0; // stable native JK MAT index, not D3D handle
-    float width=1.0f,height=1.0f; // far-plane footprint in JK units
+    float width=1.0f,height=1.0f,range=8.0f; // far-plane size and depth in JK units
     thing_node_vector offset{{0,0,0}};
 };
 
 struct spotlight_instance {
     uint32_t material=0;
-    float width=1.0f,height=1.0f,range=spotlight_fixed_range;
+    float width=1.0f,height=1.0f,range=8.0f;
     thing_node_vector origin{},right{},up{},forward{};
 };
 
@@ -35,9 +34,10 @@ inline bool spotlight_request_valid(spotlight_request const &v)
     if(v.thing<0x10000U || v.node< -1 || v.node>=4096 ||
        (v.material&0x7fffU)>=16384U ||
        (v.material&0xffff0000U)!=0 ||
-       !std::isfinite(v.width)||!std::isfinite(v.height) ||
-       v.width<=0.0f||v.height<=0.0f ||
-       v.width>256.0f||v.height>256.0f)return false;
+       !std::isfinite(v.width)||!std::isfinite(v.height)||
+       !std::isfinite(v.range)||
+       v.width<=0.0f||v.height<=0.0f||v.range<=0.0f||
+       v.width>256.0f||v.height>256.0f||v.range>256.0f)return false;
     for(float x:v.offset)if(!std::isfinite(x))return false;
     return true;
 }
@@ -66,7 +66,7 @@ inline bool spotlight_make_instance(spotlight_request const &request,
        std::fabs(dot(up,forward))>0.1f)return false;
     out.material=request.material;
     out.width=request.width;out.height=request.height;
-    out.range=spotlight_fixed_range;
+    out.range=request.range;
     out.right=right;out.up=up;out.forward=forward;
     out.origin=pose.origin;
     for(int i=0;i<3;i++) {
@@ -104,6 +104,13 @@ public:
     {
         std::lock_guard<std::mutex> guard(mutex_);
         lights_.erase({thing,node});
+    }
+    void erase_thing(uintptr_t thing)
+    {
+        std::lock_guard<std::mutex> guard(mutex_);
+        auto it=lights_.lower_bound({thing,-1});
+        while(it!=lights_.end() && it->first.first==thing)
+            it=lights_.erase(it);
     }
     std::vector<spotlight_request> snapshot()
     {
