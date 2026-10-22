@@ -1129,6 +1129,9 @@ namespace jkgm {
             }
             auto texture = texture_cache->get_srgb_texture_from_filename(*path);
             runtime_images.emplace(*path, texture); // Keep one owning reference per image.
+            LOG_INFO("Runtime MAT image ready: source MAT=",image.source_mat,
+                     " image=",image.image_id,
+                     " pack=",pack->second.generic_string());
             return texture;
         }
 
