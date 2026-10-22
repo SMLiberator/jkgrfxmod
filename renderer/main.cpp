@@ -4016,7 +4016,7 @@ namespace {
     // belongs to a DIFFERENT executable layout and caused a page fault in
     // the supported JKGM build. Material upload must go through a verified
     // engine entrypoint or the normal native render/cache warm-up path.
-    // SetSpotlight(thing,node,mat,vector(width,height,range),localOffset).
+    // SetSpotlight(thing,mat,vector(width,height,range),localOffset).
     // Use MAT indices like other COG material verbs; the renderer resolves
     // the current texture cel only after its native texture is resident.
     void __cdecl cog_set_spotlight(void *ctx)
@@ -4026,7 +4026,6 @@ namespace {
         float dimensions[3]{};
         cog_pop_vector(ctx,dimensions);
         int const material=cog_pop_int(ctx);
-        int const node=cog_pop_int(ctx);
         void *thing=cog_pop_thing(ctx);
         if(!thing||!gpu_span_readable(thing,0xe8)||
            !valid_mat_index(material)) {
@@ -4046,28 +4045,18 @@ namespace {
         jkgm::spotlight_request request{};
         request.thing=reinterpret_cast<uintptr_t>(thing);
         request.identity=signature;
-        request.node=node;
         request.material=static_cast<uint32_t>(material);
         request.width=dimensions[0];
         request.height=dimensions[1];
         request.range=dimensions[2];
         request.offset={{offset[0],offset[1],offset[2]}};
         if(!jkgm::get_spotlight_registry().set(request)) {
-            LOG_WARNING("SetSpotlight: invalid dimensions/range/node or 4-light limit reached");
+            LOG_WARNING("SetSpotlight: invalid dimensions/range or 4-light limit reached");
         }
         else {
-            LOG_INFO("SetSpotlight: MAT=",material," node=",node,
+            LOG_INFO("SetSpotlight: MAT=",material,
                      " registered; native MAT preloader disabled for safety");
         }
-    }
-
-    // RemoveSpotlight(thing,node). Node -1 follows the Thing origin.
-    void __cdecl cog_remove_spotlight(void *ctx)
-    {
-        int const node=cog_pop_int(ctx);
-        void *thing=cog_pop_thing(ctx);
-        jkgm::get_spotlight_registry().erase(
-            reinterpret_cast<uintptr_t>(thing),node);
     }
 
     // ResetSpotlight(thing): remove all node-bound and root spotlights.
@@ -4226,7 +4215,6 @@ namespace {
         cog_verb_entry{"getperipheralblur", cog_get_peripheral_blur},
         cog_verb_entry{"resetperipheralblur", cog_reset_peripheral_blur},
         cog_verb_entry{"setspotlight", cog_set_spotlight},
-        cog_verb_entry{"removespotlight", cog_remove_spotlight},
         cog_verb_entry{"resetspotlight", cog_reset_spotlight},
         cog_verb_entry{"setglobalenvmap", cog_set_global_env_map},
         cog_verb_entry{"resetglobalenvmap", cog_reset_global_env_map},
@@ -4291,7 +4279,7 @@ std::vector<jkgm::spotlight_instance> jkgm::collect_spotlights_for_frame()
     for(auto const &request:get_spotlight_registry().snapshot()) {
         auto const *thing=reinterpret_cast<uint8_t const *>(request.thing);
         if(!thing||!gpu_span_readable(thing,0xe8)) {
-            get_spotlight_registry().erase(request.thing,request.node);
+            get_spotlight_registry().erase_thing(request.thing);
             continue;
         }
         uint32_t kind=0,identity=0;
@@ -4303,16 +4291,10 @@ std::vector<jkgm::spotlight_instance> jkgm::collect_spotlights_for_frame()
             continue;
         }
         thing_node_pose pose{};
-        if(request.node>=0) {
-            if(!get_cog_thing_node_pose(
-                   reinterpret_cast<void *>(request.thing),request.node,pose))
-                continue;
-        } else {
-            gpu_3do_matrix34 m{};
-            std::memcpy(m.data(),thing+0x88,9*sizeof(float));
-            std::memcpy(m.data()+9,thing+0xb8,3*sizeof(float));
-            if(!get_thing_node_pose(m,pose))continue;
-        }
+        gpu_3do_matrix34 m{};
+        std::memcpy(m.data(),thing+0x88,9*sizeof(float));
+        std::memcpy(m.data()+9,thing+0xb8,3*sizeof(float));
+        if(!get_thing_node_pose(m,pose))continue;
         spotlight_instance instance{};
         if(spotlight_make_instance(request,pose,instance))
             instances.push_back(instance);
