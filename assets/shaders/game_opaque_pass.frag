@@ -445,5 +445,8 @@ void main()
     out_emissive = vec4(emissive + (reflection + sun_specular) * (1.0 - fog_amount),
                         albedo.a);
     out_normal = vec4(normalize(vp_normal), 1.0);
-    out_depth = vec4(adj_vp_z, 0.0, 0.0, 1.0);
+    // Depth R retains the existing linear-depth ABI. With spotlights
+    // enabled the target is RGBA16F and GBA preserves unlit pigment.
+    // In R16F mode OpenGL discards unused GBA without extra cost.
+    out_depth = vec4(adj_vp_z, unlit_base_color.rgb, 0.0);
 }
