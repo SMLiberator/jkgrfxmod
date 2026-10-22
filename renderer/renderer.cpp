@@ -2353,6 +2353,9 @@ namespace jkgm {
             // No overhead from per-material GGX state for nonreflective maps.
             // Each pass resets shader state once; individual draws only
             // update the extra uniforms when actually reflective.
+            prog.set_dynamic_light_specular(
+                the_config->enable_reflections &&
+                the_config->enable_dynamic_light_specular);
             prog.set_point_specular(
                 make_point(0.0f,0.5f,0.0f,0.0f),
                 make_point(0.0f,1.0f,0.0f,0.0f),
@@ -2653,11 +2656,18 @@ namespace jkgm {
                     prog.set_parallax(0.0f);
                 }
                 prev_parallax=parallax;
-                // Point-light GGX was intentionally suspended. Do not set up
-                // reflection-only textures unless an EnvMap or sun can use them.
+                // Only bind normal/surface maps when EnvMap, sun or the
+                // opt-in dynamic Thing point-light GGX can use them.
+                // Decals have no native point lights; ordinary per-vertex JK
+                // diffuse lighting is entirely unaffected by this switch.
+                bool const point_specular_active=
+                    the_config->enable_reflections &&
+                    the_config->enable_dynamic_light_specular &&
+                    !inst.is_projected_decal && inst.num_lights>0U;
                 bool const spec_active=draw.texture.reflection_strength>0 &&
                     (draw.texture.has_environment ||
-                     draw.texture.has_environment2 || sun_active);
+                     draw.texture.has_environment2 || sun_active ||
+                     point_specular_active);
                 if(spec_active) {
                     gl::set_active_texture_unit(2);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
