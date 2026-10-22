@@ -66,7 +66,7 @@ namespace jkgm {
         // values, or stand on their own if there is no map.
         std::optional<fs::path> surface_map;
         float reflection_strength = 0.3f;
-        float roughness = 0.9f;
+        float roughness = 0.12f;
         float metalness = 0.0f;
 
         // Equirectangular environment image this material reflects. A material that does not set
