@@ -35,7 +35,7 @@ namespace jkgm {
 
         box<2, int> viewport;
 
-        render_gbuffer_msaa(size<2, int> dims, int num_samples, render_depthbuffer_msaa *rbo);
+        render_gbuffer_msaa(size<2, int> dims, int num_samples, render_depthbuffer_msaa *rbo, bool spotlight_albedo);
     };
 
     class msaa_resolve_buffer {
@@ -66,7 +66,8 @@ namespace jkgm {
     public:
         renderer_screen_msaa(size<2, int> screen_res,
                              int num_samples,
-                             std::optional<float> min_sample_factor);
+                             std::optional<float> min_sample_factor,
+                             bool spotlight_albedo);
 
         void begin_frame() override;
 
