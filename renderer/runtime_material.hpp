@@ -49,6 +49,48 @@ struct runtime_image_transition {
     }
 };
 
+// Resolve a COG image crossfade without losing existing materials when an
+// image pack hasn't been mapped/uploaded yet. An unresolved new target leaves
+// the previous valid image in place; an unresolved old source falls back to
+// the material's own base image rather than overriding it with null.
+template <typename Image,typename Resolver>
+bool resolve_runtime_transition_images(
+    runtime_image_transition const &transition,
+    std::optional<Image> base,
+    Resolver const &resolve,
+    std::optional<Image> &from,
+    std::optional<Image> &to,
+    float &weight)
+{
+    auto previous=base;
+    if(transition.from) {
+        auto const found=resolve(*transition.from);
+        if(found) previous=found;
+    }
+    auto target=base;
+    if(transition.to) {
+        auto const found=resolve(*transition.to);
+        if(!found) {
+            // Keep the last resolved image while the source pack or requested
+            // ID is unavailable. In particular, never clear EVERY EnvMap
+            // while waiting for one SetGlobalEnvMap source MAT to load.
+            from=previous;
+            to=previous;
+            weight=0.0f;
+            return false;
+        }
+        target=found;
+    }
+    weight=transition.progress();
+    if(weight>=1.0f) {
+        previous=target;
+        weight=0.0f;
+    }
+    from=previous;
+    to=target;
+    return true;
+}
+
 struct runtime_mat_override {
     std::optional<runtime_image_transition> env;
     std::optional<runtime_image_transition> albedo;
