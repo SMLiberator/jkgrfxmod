@@ -7,7 +7,9 @@
 namespace jkgm {
 enum class profile_stage : size_t {
   execute, mat_resolve, present_swap, hud_upload, sort_opaque,
-  sort_transparent, upload, opaque_pass, transparent_pass, hud_draw, count
+  sort_transparent, upload, opaque_pass, transparent_pass, hud_draw,
+  present_resolve, present_blur, present_retro, present_composite,
+  present_swapbuffers, present_beginframe, count
 };
 using profile_clock = std::chrono::steady_clock;
 constexpr size_t profile_stage_count = static_cast<size_t>(profile_stage::count);

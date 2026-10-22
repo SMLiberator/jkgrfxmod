@@ -382,7 +382,7 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , enable_blur(the_config->enable_blur)
     , enable_trails(the_config->enable_trails)
     , auto_exposure_sensitivity(the_config->auto_exposure_sensitivity)
-    , auto_exposure_diagnostics(the_config->profile_renderer)
+    , auto_exposure_diagnostics(the_config->profile_auto_exposure)
     , menu_program(data_root)
     , game_opaque_pass_program(data_root)
     , game_post_ssao_program(data_root)

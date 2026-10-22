@@ -768,6 +768,40 @@ position identical. Compare the averages and peak values, not a single FPS
 sample. Setting `profile_renderer: false` returns the normal low-overhead
 path. If `log_path` is unset, the measurements will not be persisted to disk.
 
+
+### Native-path presentation profiler (CPU + asynchronous GPU)
+
+With `"profile_renderer": true`, the existing inclusive `PERF passes_us
+post_swap` timer is additionally split into:
+
+- `PERF present_cpu_us resolve`: end-of-frame MSAA/color resolve;
+  `blur`: optional depth/peripheral blur;
+  `retro`: Retro CMP palette verification/update;
+  `compositor`: auto exposure, bloom, final post-processing;
+  `swapbuffers`: `SwapBuffers`, which can include driver waiting;
+  `beginframe`: start next render frame.
+- `PERF present_gpu_us resolve/blur/compositor` uses OpenGL timestamp
+  queries, buffered eight frames. Query results are **only read after the
+  final timestamp is reported available**; no glFinish or blocking
+  query-result polling. `samples` counts completed prior frames, and
+  `ring_busy_skips` counts unsampled frames when results are still pending.
+  A zero GPU time with zero samples is *not* a measured zero.
+  SwapBuffers waiting is CPU-side and does not have its own GPU timestamp.
+
+These measurements separate CPU submission/wait from queued GPU work.
+`present_cpu_us` timings are children of `post_swap`; do **not**
+add them to it. GPU work may overlap CPU work and should not be added to
+CPU timings to estimate a frame period. The existing native 3DO timers
+are inclusive too.
+
+`"profile_auto_exposure": false` (default) disables the old periodic
+debug `glReadPixels` that previously ran automatically whenever
+`profile_renderer` was enabled. Set it to true only to inspect
+exposure EV/luminance; the readback synchronizes with GL and can distort
+timings. For A/B comparisons, keep VSync off, settings/resolution and
+camera view identical, and disable both profiling options for final FPS
+measurements.
+
 ## Faster JK vertex-color decoding (default)
 
 The original execute-buffer decoder calculated nine 1.8-gamma power functions

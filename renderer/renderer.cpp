@@ -1,5 +1,6 @@
 #include "renderer.hpp"
 #include "frame_profile.hpp"
+#include "presentation_gpu_profile.hpp"
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_compat.hpp"
@@ -552,6 +553,13 @@ namespace jkgm {
         profile_clock::time_point last_execute_end{};
         bool frame_had_execute = false;
 
+        // Timestamp queries are only issued with profile_renderer enabled.
+        // Results are delayed by up to eight frames and never force a GPU
+        // flush/wait. The CPU present_swap stage still includes SwapBuffers.
+        presentation_gpu_profile present_gpu_queries;
+        std::array<uint64_t,presentation_gpu_profile::num_stages> present_gpu_ns{};
+        uint64_t present_gpu_samples=0, present_gpu_skipped=0;
+
         static uint64_t elapsed_profile_us(profile_clock::time_point a,
                                            profile_clock::time_point b)
         {
@@ -617,6 +625,23 @@ namespace jkgm {
                      " post_swap=", avg(profile_stage::present_swap),
                      " HUDupload=", avg(profile_stage::hud_upload),
                      " HUDdraw=", avg(profile_stage::hud_draw));
+            LOG_INFO("PERF present_cpu_us resolve=",avg(profile_stage::present_resolve),
+                     " blur=",avg(profile_stage::present_blur),
+                     " retro=",avg(profile_stage::present_retro),
+                     " compositor=",avg(profile_stage::present_composite),
+                     " swapbuffers=",avg(profile_stage::present_swapbuffers),
+                     " beginframe=",avg(profile_stage::present_beginframe),
+                     " NOTE=substages_of_post_swap");
+            uint64_t const gpu_samples=present_gpu_samples;
+            LOG_INFO("PERF present_gpu_us resolve=",
+                     gpu_samples?(present_gpu_ns[0]/1000U)/gpu_samples:0U,
+                     " blur=",gpu_samples?(present_gpu_ns[1]/1000U)/gpu_samples:0U,
+                     " compositor=",gpu_samples?(present_gpu_ns[2]/1000U)/gpu_samples:0U,
+                     " samples=",gpu_samples," ring_busy_skips=",present_gpu_skipped,
+                     " supported=",present_gpu_queries.is_supported(),
+                     " NOTE=delayed_nonblocking_GPU_timestamps_zero_if_no_samples");
+            present_gpu_ns.fill(0U);
+            present_gpu_samples=present_gpu_skipped=0U;
             if(the_config->use_model_cache || the_config->enable_sprite_decals) {
                 LOG_INFO("PERF gpu_3do fallback_native_per_frame text=",
                          profile_window.gpu_text_native/frames,
@@ -741,6 +766,15 @@ namespace jkgm {
 
             menu_prev_ticks = std::chrono::high_resolution_clock::now();
             menu_curr_ticks = menu_prev_ticks;
+        }
+
+        ~renderer_impl() override
+        {
+            // Context-owned GL queries must be deleted before the context
+            // disappears. If the context is already gone, its objects go
+            // away with it; do not issue GL calls on an invalid context.
+            if(hGLRC && wglGetCurrentContext()==hGLRC)
+                present_gpu_queries.release();
         }
 
         void set_renderer_mode(renderer_mode mode) override
@@ -1245,24 +1279,49 @@ namespace jkgm {
 
         void end_frame()
         {
+            bool const measure=the_config->profile_renderer &&
+                               mode==renderer_mode::ingame;
+            presentation_gpu_profile::completed_sample completed{};
+            bool const gpu_timing=measure && present_gpu_queries.begin(completed);
+            if(completed.ready) {
+                for(size_t i=0;i<present_gpu_ns.size();++i)
+                    present_gpu_ns[i]+=completed.nanoseconds[i];
+                ++present_gpu_samples;
+            }
+            if(completed.skipped)++present_gpu_skipped;
             if(mode == renderer_mode::ingame && !the_config->profile_renderer) {
                 log_mat_links(); // Don't add diagnostic scans to profiling overhead.
             }
-            // Compose renderbuffer onto window:
-            frame_screen->end_frame();
+            // Resolve the scene, e.g. the final MSAA color blit.
+            {
+                profile_scope cpu(measure,profile_frame.timings[
+                    profile_idx(profile_stage::present_resolve)]);
+                if(gpu_timing)present_gpu_queries.timestamp(0U,true);
+                frame_screen->end_frame();
+                if(gpu_timing)present_gpu_queries.timestamp(0U,false);
+            }
             // Optional depth/peripheral blur occurs before bloom, color processing
             // and frame blending. Keep the source texture untouched for no-blur mode.
             gl::texture_view scene = frame_screen->get_resolved_final_texture();
-            if(mode == renderer_mode::ingame) {
-                scene = apply_spatial_blur(
-                    ogs.get(), conf_scr_res, scene,
-                    frame_screen->get_resolved_depth_texture());
+            {
+                profile_scope cpu(measure,profile_frame.timings[
+                    profile_idx(profile_stage::present_blur)]);
+                if(gpu_timing)present_gpu_queries.timestamp(1U,true);
+                if(mode == renderer_mode::ingame) {
+                    scene = apply_spatial_blur(
+                        ogs.get(), conf_scr_res, scene,
+                        frame_screen->get_resolved_depth_texture());
+                }
+                if(gpu_timing)present_gpu_queries.timestamp(1U,false);
             }
             // Retro Mode consumes the exact in-memory RGB888 entries from JK's
             // identity CMP (+0x30, NOT the file's +0x40 palette offset).
             // Compare this pointer against SithWorld::colormaps[0] and dump
             // every RGB byte on first load/change; log rows can be compared to
             // the original CMP with tools/verify_retro_cmp.py.
+            {
+            profile_scope cpu(measure,profile_frame.timings[
+                profile_idx(profile_stage::present_retro)]);
             ogs->retro_mode_active=false;
             if(mode==renderer_mode::ingame && the_config->retro_mode) {
                 if(!engine_material_debug::matches_tested_executable()) {
@@ -1358,15 +1417,29 @@ namespace jkgm {
                 }
                 }
             }
+            }
             // Only meter in-game scenes. Avoid menu exposure and preserve
             // exact Retro CMP color presentation.
             ogs->auto_exposure_scene=(mode==renderer_mode::ingame) &&
                                       !ogs->retro_mode_active;
-            frame_compositor->end_frame(ogs.get(), conf_scr_res, scene);
-
-            SwapBuffers(hDC);
-
-            begin_frame();
+            {
+                profile_scope cpu(measure,profile_frame.timings[
+                    profile_idx(profile_stage::present_composite)]);
+                if(gpu_timing)present_gpu_queries.timestamp(2U,true);
+                frame_compositor->end_frame(ogs.get(),conf_scr_res,scene);
+                if(gpu_timing)present_gpu_queries.timestamp(2U,false);
+            }
+            if(gpu_timing)present_gpu_queries.end();
+            {
+                profile_scope cpu(measure,profile_frame.timings[
+                    profile_idx(profile_stage::present_swapbuffers)]);
+                SwapBuffers(hDC);
+            }
+            {
+                profile_scope cpu(measure,profile_frame.timings[
+                    profile_idx(profile_stage::present_beginframe)]);
+                begin_frame();
+            }
         }
 
         void show_directplay_dialog() override
