@@ -29,6 +29,7 @@ namespace jkgm {
         bool enable_fog = true;
         bool enable_post = true;
         bool enable_reflections = true;
+        bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
         bool enable_ssao = true;
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
