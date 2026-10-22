@@ -24,6 +24,7 @@
     "enable_posterized_lighting": false,
     "enable_vsync": false,
     "profile_renderer": false,
+    "optimize_hud_uploads": true,
     "use_model_cache": false,
     "mesh_revision_tracking": false,
     "enable_spotlights": false,

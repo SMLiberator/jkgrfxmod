@@ -38,6 +38,7 @@ namespace jkgm {
         bool enable_posterized_lighting = false;
         bool enable_vsync = false;
         bool profile_renderer = false; // opt-in CPU frame timings
+        bool optimize_hud_uploads = true; // upload only changed HUD rows (disable for A/B test)
         std::optional<projected_decal_config> projected_decal; // opt-in static depth projector
         bool use_model_cache = false; // cache 3DO meshes as persistent GPU geometry
         bool mesh_revision_tracking = false; // experimental JK.dll COG mutation tracking

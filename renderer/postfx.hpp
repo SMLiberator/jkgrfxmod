@@ -35,9 +35,9 @@ namespace jkgm {
     struct color_filter_settings {
         // brightness: -1.0 - 1.0, contrast: 0.0 - 4.0, saturation: 0.0 - 4.0
         //
-        // The defaults are the values that used to be hard-coded in post_to_srgb.frag. Because
-        // the renderer now sets these every frame, change them here rather than in the shader.
-        animated_floats<3> params{std::array<float, 3>{0.07f, 1.16f, 0.9f}};
+        // Identity grade by default; mod/level COGs choose the actual look.
+        // ResetColorFilter() also returns to this neutral state.
+        animated_floats<3> params{std::array<float, 3>{0.0f, 1.0f, 1.0f}};
     };
 
     // Recursive temporal accumulation. 0 = no trails, 1 = hold the previous

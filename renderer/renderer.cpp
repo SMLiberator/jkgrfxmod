@@ -57,9 +57,11 @@
 #include "zbuffer_surface.hpp"
 #include <Windows.h>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <set>
 #include <string>
@@ -1513,55 +1515,94 @@ namespace jkgm {
         static constexpr int hud_texture_num_slabs = 4;
 
         int curr_slab = 0;
+        // Mirror the contents of each actual OpenGL HUD texture. Front/back
+        // swap every four frames; their contents can differ. Comparing against
+        // just the previous source bitmap would therefore be incorrect.
+        std::array<std::vector<color_rgba8>,2> hud_uploaded_pixels;
+        std::array<std::array<bool,hud_texture_num_slabs>,2> hud_slab_valid{};
+        unsigned hud_back_index = 1U; // hud_texture_a=front, hud_texture_b=back
         void update_hud_texture()
         {
             if(curr_slab == 0) {
-                // Convert HUD bitmap into valid texture data once every 4 frames
-                ZeroMemory(ogs->hud_texture_data.data(), ogs->hud_texture_data.size());
-
-                for(size_t i = 0; i < ddraw1_backbuffer_surface.buffer.size(); ++i) {
-                    auto const &in_em = ddraw1_backbuffer_surface.buffer[i];
-
-                    // Convert from RGB565 to RGBA8888
-                    ogs->hud_texture_data[i] = rgb565_key_to_srgb_a8(
-                        in_em, /*transparent?*/ in_em == ddraw1_backbuffer_surface.color_key);
+                // Convert the source bitmap once every four frames.
+                // Every output pixel is overwritten, so no ZeroMemory needed.
+                for(size_t i=0;i<ddraw1_backbuffer_surface.buffer.size();++i) {
+                    auto const in_em=ddraw1_backbuffer_surface.buffer[i];
+                    ogs->hud_texture_data[i]=rgb565_key_to_srgb_a8(
+                        in_em,in_em==ddraw1_backbuffer_surface.color_key);
                 }
             }
 
-            // Blit 1/nslabs of the HUD texture data into GPU texture
-            gl::set_active_texture_unit(0);
-            gl::bind_texture(gl::texture_bind_target::texture_2d, ogs->hud_texture_back);
+            int const width=get<x>(internal_scr_res);
+            int const slab_rows=get<y>(internal_scr_res)/hud_texture_num_slabs;
+            int const start_row=slab_rows*curr_slab;
+            int const stop_row=curr_slab==hud_texture_num_slabs-1
+                               ? get<y>(internal_scr_res)
+                               : slab_rows*(curr_slab+1);
+            int first_changed=start_row;
+            int last_changed=stop_row;
 
-            int slab_rows = get<y>(internal_scr_res) / hud_texture_num_slabs;
-            int start_row = slab_rows * curr_slab;
-
-            int stop_row = slab_rows * (curr_slab + 1);
-            if(curr_slab >= (hud_texture_num_slabs - 1)) {
-                stop_row = get<y>(internal_scr_res);
+            if(the_config->optimize_hud_uploads) {
+                auto &mirror=hud_uploaded_pixels[hud_back_index];
+                if(mirror.size()!=ogs->hud_texture_data.size()) {
+                    mirror.resize(ogs->hud_texture_data.size());
+                    hud_slab_valid[hud_back_index].fill(false);
+                }
+                if(hud_slab_valid[hud_back_index][curr_slab]) {
+                    // Find the first and last changed rows; keep exactly one
+                    // contiguous upload. This avoids making many tiny GL calls
+                    // for scattered UI pixels while shrinking unchanged slabs.
+                    first_changed=stop_row;
+                    last_changed=start_row;
+                    size_t const row_bytes=size_t(width)*sizeof(color_rgba8);
+                    for(int row=start_row;row<stop_row;++row) {
+                        size_t const offset=size_t(row)*size_t(width);
+                        if(std::memcmp(ogs->hud_texture_data.data()+offset,
+                                       mirror.data()+offset,row_bytes)!=0) {
+                            first_changed=std::min(first_changed,row);
+                            last_changed=row+1;
+                        }
+                    }
+                }
             }
 
-            auto region =
-                make_box(make_point(0, start_row), make_point(get<x>(internal_scr_res), stop_row));
-            auto offset = start_row * get<x>(internal_scr_res);
-            auto num_pixels = volume(region);
-
-            gl::tex_sub_image_2d(
-                gl::texture_bind_target::texture_2d,
-                /*level*/ 0,
-                region,
-                gl::texture_pixel_format::rgba,
-                gl::texture_pixel_type::uint8,
-                make_span(ogs->hud_texture_data).subspan(offset, num_pixels).as_const_bytes());
+            if(first_changed<last_changed) {
+                // Texture mirrors track the actual back texture, not the
+                // previous source bitmap, so alternating front/back buffers
+                // never cause stale pixels or skipped updates.
+                gl::set_active_texture_unit(0);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 ogs->hud_texture_back);
+                auto const region=make_box(make_point(0,first_changed),
+                                           make_point(width,last_changed));
+                size_t const offset=size_t(first_changed)*size_t(width);
+                size_t const num_pixels=size_t(last_changed-first_changed)*size_t(width);
+                gl::tex_sub_image_2d(
+                    gl::texture_bind_target::texture_2d,
+                    /*level*/ 0,region,gl::texture_pixel_format::rgba,
+                    gl::texture_pixel_type::uint8,
+                    make_span(ogs->hud_texture_data)
+                        .subspan(offset,num_pixels).as_const_bytes());
+                if(the_config->optimize_hud_uploads) {
+                    auto &mirror=hud_uploaded_pixels[hud_back_index];
+                    std::memcpy(mirror.data()+offset,
+                                ogs->hud_texture_data.data()+offset,
+                                num_pixels*sizeof(color_rgba8));
+                }
+            }
+            if(the_config->optimize_hud_uploads)
+                hud_slab_valid[hud_back_index][curr_slab]=true;
 
             ++curr_slab;
-            if(curr_slab >= hud_texture_num_slabs) {
-                // Swap and present after all 4 slabs have been copied
+            if(curr_slab>=hud_texture_num_slabs) {
+                // Preserve JKGM's original four-slab presentation latency and
+                // backbuffer clear regardless of which rows needed upload.
                 std::fill(ddraw1_backbuffer_surface.buffer.begin(),
                           ddraw1_backbuffer_surface.buffer.end(),
                           ddraw1_backbuffer_surface.color_key);
-
-                std::swap(ogs->hud_texture_front, ogs->hud_texture_back);
-                curr_slab = 0;
+                std::swap(ogs->hud_texture_front,ogs->hud_texture_back);
+                hud_back_index^=1U;
+                curr_slab=0;
             }
         }
 

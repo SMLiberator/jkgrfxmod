@@ -792,6 +792,25 @@ less than the decoder itself. The next optimization stage targets JK's
 native model traversal and geometry preparation.
 
 
+### Neutral color grade and native-path HUD upload optimization
+
+The default post-process `SetColorFilter` grade is now the identity:
+brightness `0`, contrast `1`, saturation `1`. Level scripts can select
+their preferred grade using `SetColorFilter(vector, fadeTime)`, and
+`ResetColorFilter()` restores the neutral values.
+
+The replacement renderer's DirectDraw HUD overlay (shared by native and GPU
+3DO rendering) still uses the original four-frame double-buffer update cycle,
+but `"optimize_hud_uploads": true` (default) compares each slab against a
+CPU-side mirror of its **actual destination texture**. It skips unchanged
+slabs and uploads only the contiguous rows containing changes. It never
+alters geometry or shading and always clears/swaps the HUD at the same time.
+Set `"optimize_hud_uploads": false` for the previous full-slab behavior.
+With `"profile_renderer": true`, compare the `PERF passes_us HUDupload`
+value in identical locations. Note that this category includes both
+CPU RGBA conversion and the GPU driver call, and does not measure GPU time
+independently.
+
 ## Direct executable startup (development)
 
 JkGRfxMod no longer builds or ships an injection launcher. The standalone

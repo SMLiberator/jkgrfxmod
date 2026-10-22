@@ -14,9 +14,9 @@ layout(location = 0) out vec4 out_color;
 
 // Color filter, set by the renderer from the SetColorFilter COG verb (the values below are only
 // used if the renderer does not set them; the real defaults live in postfx.hpp).
-uniform float brightness = 0.07; // [-1.0 to 1.0]
-uniform float contrast = 1.16;   // [0.0 to 4.0]
-uniform float saturation = 0.9;  // [0.0 to 4.0]
+uniform float brightness = 0.0; // [-1.0 to 1.0], 0 = no change
+uniform float contrast = 1.0;   // [0.0 to 4.0], 1 = no change
+uniform float saturation = 1.0; // [0.0 to 4.0], 1 = no change
 
 // Vignette, set by the renderer from the SetVignette COG verb.
 // rgb = color the edges are pulled towards, w = strength:
