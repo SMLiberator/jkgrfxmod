@@ -244,6 +244,7 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> spotlight_rights;
             std::vector<gl::uniform_location_id> spotlight_ups;
             std::vector<gl::uniform_location_id> spotlight_forwards;
+            std::vector<gl::uniform_location_id> spotlight_strengths;
 
         public:
             explicit game_post_opaque_composite_shader(fs::path const &data_root);
@@ -260,7 +261,8 @@ namespace jkgm {
             void set_spotlight_count(int count);
             void set_spotlight(int slot,point<4,float> origin,
                                point<4,float> right,point<4,float> up,
-                               point<4,float> forward);
+                               point<4,float> forward,
+                               point<2,float> intensities);
             void set_projected_decal(point<4,float> origin,
                                      point<4,float> right,point<4,float> up,
                                      point<4,float> forward,point<4,float> options,
