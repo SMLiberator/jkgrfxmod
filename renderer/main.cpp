@@ -4248,6 +4248,7 @@ namespace {
         cog_verb_entry{"aigetmovetargetpos", cog_ai_get_move_target_pos},
         cog_verb_entry{"aigetlookdir", cog_ai_get_look_dir},
         cog_verb_entry{"getthingattachnormal", cog_get_thing_attach_normal},
+        cog_verb_entry{"attachthingtothingnode", cog_attach_thing_to_thing_node},
         cog_verb_entry{"getthingnodepos", cog_get_thing_node_pos},
         cog_verb_entry{"getthingnodervec", cog_get_thing_node_rvec},
         cog_verb_entry{"getthingnodelvec", cog_get_thing_node_lvec},
@@ -4271,7 +4272,7 @@ namespace {
             register_verb(ctx, verb.handler, verb.name);
         }
 
-        LOG_DEBUG("Registered fog, sun, spotlight, post-processing, material, SPR, AI and ThingNode COG verbs");
+        LOG_DEBUG("Registered fog, sun, spotlight, post-processing, material, SPR, AI and ThingNode attachment COG verbs");
     }
 }
 
@@ -4580,6 +4581,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         }
 
         renderer_hooks_active = true;
+        native_node_attachment_hooks_active=attach_native_node_attachment_hooks();
         if(the_config->profile_renderer || the_config->use_model_cache ||
            the_config->enable_sprite_decals) {
             native_3do_hooks_active = attach_native_3do_hooks(the_config->profile_renderer);
@@ -4587,6 +4589,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         LOG_DEBUG("Finished attaching renderer to process");
     }
     else if(ul_reason_for_call == DLL_PROCESS_DETACH && renderer_hooks_active) {
+        if(native_node_attachment_hooks_active) {
+            detach_native_node_attachment_hooks();
+            native_node_attachment_hooks_active=false;
+        }
         if(native_3do_hooks_active) {
             detach_native_3do_hooks();
             native_3do_hooks_active = false;
