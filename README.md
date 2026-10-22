@@ -948,11 +948,11 @@ tracked with targeted GPU mesh-cache invalidation.
 
 ## Experimental GPU-resident 3DO mesh path
 
-Set \`"use_model_cache": true\` in \`jkgm.json\` to draw **all supported
-filled 3DO meshes** from cached GPU vertex/index buffers. Set \`false\`
+Set `"use_model_cache": true` in `jkgm.json` to draw **all supported
+filled 3DO meshes** from cached GPU vertex/index buffers. Set `false`
 (default) to use the previous JK-assisted 3DO renderer, while retaining
 JkGRfxMod's normal OpenGL world/sector rendering. This is not
-\`use_vanilla_renderer\`, which disables JkGRfxMod entirely.
+`use_vanilla_renderer`, which disables JkGRfxMod entirely.
 
 The GPU renderer snapshots 3DO face-corner positions, UVs and face normals
 once and updates only world/joint matrices per frame. Simple concave face
@@ -1009,7 +1009,7 @@ cutoff. Faces marked 0x1 are two-sided; 0x2 forces translucency. Transparent
 GPU face batches sort against other GPU 3DOs, but not yet against all native
 sector polygons.
 
-Emissive-only replacements with albedo factor \`0 0 0 0\` preserve the
+Emissive-only replacements with albedo factor `0 0 0 0` preserve the
 zero-alpha base and composite their glow directly in the transparency pass,
 without writing opaque depth or turning their base solid black. Other
 emissive materials participate in the normal opaque G-buffer/composition.
@@ -1057,15 +1057,15 @@ resolutions and CPU-side GPU submission cost. These are CPU timings, *not*
 actual GPU execution time. Disable profiling for final FPS measurements.
 GPU instancing and cross-mesh material batching remain unfinished.
 
-The new path requires the updated \`renderer.dll\`, plus
-\`gpu_3do_preview.vert\` and \`gpu_3do_preview.frag\` from the same
-build in \`jkgm/shaders/\`. Keep the native \`jkgm.exe\` bootstrap.
+The new path requires the updated `renderer.dll`, plus
+`gpu_3do_preview.vert` and `gpu_3do_preview.frag` from the same
+build in `jkgm/shaders/`. Keep the native `jkgm.exe` bootstrap.
 
 
 
 ### Experimental mesh revision tracking
 
-With \`"use_model_cache": true\`, set \`"mesh_revision_tracking": true\` to
+With `"use_model_cache": true`, set `"mesh_revision_tracking": true` to
 enable experimental JK.dll COG mutation tracking. The renderer wraps 16
 mesh/material mutator verb registrations, preserving the original COG handlers
 and results. A mutation bumps a global generation: cached 3DOs only need a new
@@ -1078,8 +1078,8 @@ The setting defaults to false. **This is not yet a guarantee of instant
 invalidation for writes originating outside the known JK.dll verbs**; those
 can remain stale until the next audit. Texture pixel uploads/residency and
 per-Thing lighting are separate from geometry revision tracking. Benchmark
-with \`"profile_renderer": true\` and compare \`PERF gpu_3do source_check_us_avg\`,
-\`checks_avg\`, and \`invalidations_total\` with the setting off/on. For
+with `"profile_renderer": true` and compare `PERF gpu_3do source_check_us_avg`,
+`checks_avg`, and `invalidations_total` with the setting off/on. For
 compatibility tests, exercise CloneModel, SetModelMesh, ReloadModel,
 ReplaceModelMaterial and ReplaceModelMeshMaterial, as well as animated cels.
 
