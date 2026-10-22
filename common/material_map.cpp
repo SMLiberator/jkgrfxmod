@@ -159,9 +159,10 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             mat->displacement_factor = em["displacement_factor"];
         }
 
-        // Experimental neutral dielectric defaults on ordinary materials.
-        // Authored surface maps still default to unity multipliers, since
-        // their R/G/B channels explicitly define the per-pixel properties.
+        // Experimental glossy defaults. Without an authored roughness,
+        // the 0.12 factor multiplies an optional surface map's green channel,
+        // too: useful for temporarily exaggerating sharp reflections.
+        // Explicit material roughness continues to take precedence.
         bool const has_surface_map = em.contains("surface_map");
         if(has_surface_map) {
             mat->surface_map = data_dir / std::string(em["surface_map"]);
