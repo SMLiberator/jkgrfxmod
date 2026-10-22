@@ -431,7 +431,6 @@ namespace jkgm {
             float alpha_cutoff=0.5f;
             float opacity=1.0f;
             float fluid_thickness=0.25f;
-            bool depth_clip=false;
             // 0=invalid/unresolved MAT (diagnostic magenta), 1=texture,
             // 2=intentionally no albedo map (neutral white).
             int albedo_source=0;
@@ -1619,15 +1618,13 @@ namespace jkgm {
             return vidmem_texture_surfaces.at(id.get() - 1)->blend_mode;
         }
 
-        // Depth-clipped polygons count as special even with normal blending:
-        // they must never enter the opaque pass or modify the G-buffer depth.
         bool is_special_material(material_instance_id id) const
         {
             if(id.get() == 0U) {
                 return false;
             }
             auto const &mat = vidmem_texture_surfaces.at(id.get() - 1);
-            return mat->blend_mode != material_blend_mode::normal || mat->depth_clip;
+            return mat->blend_mode != material_blend_mode::normal;
         }
 
         // Compute UV offsets in double precision before reducing them to
@@ -1689,15 +1686,13 @@ namespace jkgm {
         enum class batch_blend_filter { regular, all, special };
 
         // Opaque screen-door coverage is meaningful only for ordinary
-        // over/under compositing. Special blends and depth-clipped decals
-        // must keep their existing translucent behavior.
+        // over/under compositing. Special blend modes remain translucent.
         bool is_dithered_material(material_instance_id id) const
         {
             if(id.get()==0U) return false;
             auto const &mat=vidmem_texture_surfaces.at(id.get()-1);
             return mat && mat->alpha_mode==material_alpha_mode::dithered &&
-                   mat->blend_mode==material_blend_mode::normal &&
-                   !mat->depth_clip;
+                   mat->blend_mode==material_blend_mode::normal;
         }
 
         void bind_material(shaders::game_pass_shader *prog,
@@ -1713,8 +1708,6 @@ namespace jkgm {
             prog->set_fluid_thickness(
                 id.get() != 0U ? vidmem_texture_surfaces.at(id.get() - 1)->fluid_thickness
                                : 0.25f);
-            prog->set_depth_clip(id.get() != 0U &&
-                                 vidmem_texture_surfaces.at(id.get() - 1)->depth_clip);
 
             if(prog == &ogs->game_transparency_pass_program) {
                 // Normal/fluid use premultiplied alpha (ONE, 1-SRC_ALPHA).
@@ -2181,7 +2174,6 @@ namespace jkgm {
             out.masked=surface->alpha_mode==material_alpha_mode::mask;
             out.dithered=surface->alpha_mode==material_alpha_mode::dithered;
             out.blend=surface->blend_mode;
-            out.depth_clip=surface->depth_clip;
             out.fluid_thickness=surface->fluid_thickness;
             if(the_config->enable_parallax && surface->displacement_map &&
                surface->displacement_factor!=0.0f) {
@@ -2189,8 +2181,7 @@ namespace jkgm {
                     *surface->displacement_map);
                 out.displacement_factor=surface->displacement_factor;
             }
-            out.special=surface->depth_clip ||
-                        surface->blend_mode!=material_blend_mode::normal;
+            out.special=surface->blend_mode!=material_blend_mode::normal;
             out.filtered=surface->texture_filtering.value_or(
                 the_config->enable_texture_filtering);
             out.alpha_cutoff=surface->alpha_cutoff;
@@ -2628,11 +2619,14 @@ namespace jkgm {
                     prog.set_albedo_transition(2,0.0f);
                 }
                 prev_albedo_transition=has_albedo_transition;
-                bool const advanced=transparent &&
-                    (draw.texture.depth_clip ||
+                // Projected SPR decals always use receiver-plane depth
+                // clipping; shared MAT material flags cannot disable it.
+                bool const clip_decal=transparent && inst.is_projected_decal;
+                bool const advanced=clip_decal ||
+                    (transparent &&
                      draw.texture.blend==material_blend_mode::fluid);
                 if(advanced)
-                    prog.set_advanced_material(draw.texture.depth_clip,
+                    prog.set_advanced_material(clip_decal,
                                                draw.texture.fluid_thickness);
                 else if(prev_advanced_material)
                     prog.set_advanced_material(false,0.25f);

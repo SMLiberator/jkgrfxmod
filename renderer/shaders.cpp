@@ -103,7 +103,6 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , screen_resolution(gl::get_uniform_location(the_program, "screen_resolution"))
     , features(gl::get_uniform_location(the_program, "features"))
     , blend_mode(gl::get_uniform_location(the_program, "blend_mode"))
-    , depth_clip(gl::get_uniform_location(the_program, "depth_clip"))
     , flare_mode(gl::get_uniform_location(the_program, "flare_mode"))
     , scene_depth(gl::get_uniform_location(the_program, "scene_depth"))
     , fluid_thickness(gl::get_uniform_location(the_program, "fluid_thickness"))
@@ -382,11 +381,6 @@ void jkgm::shaders::game_pass_shader::set_blend_mode(int mode)
 void jkgm::shaders::game_pass_shader::set_fluid_thickness(float absorption)
 {
     gl::set_uniform_float(fluid_thickness, absorption);
-}
-
-void jkgm::shaders::game_pass_shader::set_depth_clip(bool enabled)
-{
-    gl::set_uniform_integer(depth_clip, enabled ? 1 : 0);
 }
 
 void jkgm::shaders::game_pass_shader::set_flare_mode(bool enabled)

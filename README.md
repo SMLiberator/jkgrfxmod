@@ -295,13 +295,12 @@ be overridden per material:
 
 Randomness is deterministic per material instance and interval, not per frame,
 so the pattern is independent of framerate and draw order. Animations do not
-modify emissive/albedo opacity handling, blend modes or depth clipping.
+modify emissive/albedo opacity handling or blend modes.
 
 **Animation test cases:** scroll each layer separately and together, test
 negative U/V speeds, ensure UVs wrap, verify `sine`/`square` timing and
 `flicker`/`random` stability at different FPS, check blinking with
-`emissive_factor` only (no `emissive_map`), and test both opaque and
-depth-clipped surfaces.
+`emissive_factor` only (no `emissive_map`), and test both opaque and alpha-blended surfaces.
 
 ## Dithered alpha (screen-door transparency)
 
@@ -326,7 +325,7 @@ Dithered fragments write opaque depth and receive SSAO and distance fog, so
 they require no alpha blending or transparency sorting. Both native JK-assisted
 world/sector polygons and GPU-resident 3DO meshes use the same 4x4 threshold.
 Native JK face translucency (90/255) becomes dither coverage for GPU 3DOs.
-Materials using additive, multiply, fluid, depth clipping or emissive-only
+Materials using additive, multiply, fluid or emissive-only
 blending still follow their dedicated translucent paths.
 
 Dithering is not universally faster: it removes blending/sorting overhead,
@@ -427,64 +426,13 @@ refraction or volumetric scattering. It cannot see through several layers
 of transparent geometry, and multiple overlapping fluid polygons are still
 subject to the existing transparent draw-order limitations.
 
-`fluid` and `depth_clip: true` cannot be combined: the former regards
-empty depth as deep liquid while the latter intentionally discards it.
-As with other materials, `fluid_thickness` can be a pack-wide default
-overridden per material.
+`fluid_thickness` can be a pack-wide default overridden per material.
 
 **Testing:** shallow/deep slopes and gaps with no underlying opaque
 geometry; grazing angles; strongly reflecting normal-mapped water; opaque
 versus alpha-masked albedo; fog on/off; MSAA; foreground occluders; very
 high/low `fluid_thickness` and no `fluid_thickness` field. Check that
 `normal`, `additive`, and `multiply` blend modes remain unchanged.
-
-### Depth-clipped polygon decals
-
-Set `"depth_clip": true` on a material (or as a pack-wide default) to clip it
-against nearby opaque scene geometry. This is independent of `blend_mode` and
-`alpha_mode`, defaults to `false`, and is validated by the compiler:
-
-```json
-{
-  "name": "floor_stain",
-  "albedo_map": "stain.png",
-  "alpha_mode": "blend",
-  "blend_mode": "multiply",
-  "depth_clip": true,
-  "replaces": ["stain.mat"]
-}
-```
-
-Place the polygon slightly in front of the receiving geometry. Fragments
-without opaque scene depth, or with more than **0.15 game units of perpendicular
-separation from the decal's polygon plane**, are discarded. Unlike comparing raw
-view-depth differences, this remains stable at oblique/grazing camera angles.
-The shader reconstructs view-space positions using the existing resolved depth
-texture (also with MSAA), derives the decal's geometric normal with screen-space
-derivatives, and adds no new fullscreen passes. Even `blend_mode: normal`
-depth-clipped materials are rendered in the transparency stage. For these
-normal clipped decals, texture/material alpha is premultiplied to prevent
-bright fringes.
-
-This is **not** a projector or volume decal: the polygon UVs remain unchanged,
-and it does not wrap around curved objects. Transparent-only geometry cannot
-receive decals. The fixed gap may need retuning after visual testing.
-
-Their geometry must still be placed against the target surface. Since the renderer
-cannot perfectly depth-sort the additive/multiply geometry originally submitted
-as opaque triangles against arbitrary transparent world geometry, overlapping
-transparent objects may exhibit order-dependent composition. There is no
-extra full-screen rendering pass for these effects.
-
-**Test cases:** a partially transparent PNG with a black-ish multiply
-tint over a brightly lit floor, alpha-zero regions against several backgrounds,
-an additive glow overlapping opaque scenery, and an originally opaque JK face
-overridden with a special blend mode. Confirm that `normal` materials and
-existing alpha-masked glass remain unaffected, and check with MSAA on/off.
-For depth clipping, test a slightly offset stain crossing a floor edge,
-an originally opaque JK polygon with `blend_mode: normal`, a floating decal
-beyond the fixed gap, empty-background pixels, grazing-angle views,
-and MSAA silhouettes. Also test decals with smoothed vertex normals.
 
 ## Experimental material link diagnostics
 
@@ -1240,7 +1188,8 @@ back-facing, degenerate and out-of-range surfaces are rejected.
 
 `renderer/sprite_decal_world.hpp` adds **bounded JK23 SithWorld surface
 extraction**, reading the native world vertex index arrays and rejecting sky,
-portal, untextured and non-facing surfaces. It produces triangulated decal
+passable portals, untextured and non-facing surfaces. Solid textured adjoins
+(including grates) remain eligible. It produces triangulated decal
 geometry with surface IDs and projected UVs. This extraction uses an
 injectable, read-only memory reader for safety and isolated testing.
 The world/surface offsets after the verified world header are based on
@@ -1265,6 +1214,11 @@ attempts to build an indexed GPU-compatible mesh. Check `mat_valid=1` and
 `gpu_mesh_ready=1` in addition to `receivers`/`clipped_tris`.
 A zero receiver count is expected if the projector points away from nearby
 opaque architecture. The scan does not run in non-profiling gameplay.
+
+Type-`3` SPR decals automatically use resolved opaque scene-depth clipping
+(fixed 0.15 JK-unit plane-gap tolerance). No `depth_clip` material JSON
+setting is needed or supported. Alpha-masked grates contribute depth only
+at opaque pixels; alpha-blended receivers may lack usable opaque depth.
 
 `renderer/sprite_decal_gpu_mesh.hpp` converts clipped, world-space
 triangles to the same vertex/index/group format as the existing GPU 3DO

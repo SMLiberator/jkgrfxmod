@@ -76,7 +76,6 @@ namespace jkgm {
         material_alpha_mode alpha_mode = material_alpha_mode::blend;
         material_blend_mode blend_mode = material_blend_mode::normal;
         float fluid_thickness = 0.25f;
-        bool depth_clip = false;
         float alpha_cutoff = 0.5f;
 
         vidmem_texture_surface(renderer *r, material_instance_id material_id);

@@ -17,7 +17,6 @@ uniform vec2 emissive_uv_offset;
 uniform float alpha_cutoff;
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
 uniform float fluid_thickness; // Beer-Lambert absorption per game unit
-uniform int depth_clip;
 uniform int flare_mode; // SPR type 0x40: center-only depth occlusion
 uniform sampler2D scene_depth; // Resolved opaque linear view depth (R16F)
 
@@ -413,46 +412,6 @@ void main()
         flare_visibility=flare_center_visibility();
         if(flare_visibility<=0.0) discard;
     }
-    if(depth_clip != 0) {
-        // Compare perpendicular separation from the DECAL PLANE, not raw
-        // camera-forward depth: the latter grows at grazing angles even when
-        // a polygon remains a fixed distance above its receiving surface.
-        // The resolved R16F opaque depth uses 65504 to mark empty pixels.
-        const float DECAL_MAX_PLANE_GAP = 0.15;
-        float surface_depth = texelFetch(scene_depth, ivec2(gl_FragCoord.xy), 0).r;
-        if(surface_depth >= 65500.0) {
-            discard;
-        }
-
-        // Reconstruct metric view-space positions from the same coordinates
-        // used by the reflection shader. The supplied vertex_position.xy
-        // contains clip XY, while vertex_position.w contains linear view Z.
-        float h_scale = camera_right.w > 0.5
-                            ? view_params.x
-                            : tan(radians(REFLECTION_HFOV_DEGREES) * 0.5);
-        float aspect = screen_resolution.x / max(screen_resolution.y, 1.0);
-        vec3 decal_pos = vec3(vp_pos.xy * vec2(h_scale, h_scale / aspect), vp_z);
-
-        // Use the actual triangle plane, not interpolated smooth normals,
-        // which can differ substantially from the polygon orientation.
-        vec3 plane_normal = cross(dFdx(decal_pos), dFdy(decal_pos));
-        float plane_len = length(plane_normal);
-        if(plane_len < 1e-10 || vp_z <= 0.0) {
-            discard;
-        }
-        plane_normal /= plane_len;
-
-        // Both depth values describe points along the same screen-space ray.
-        // Their displacement along that ray, projected onto the decal plane
-        // normal, is the true perpendicular gap in view-space game units.
-        vec3 ray_per_view_z = decal_pos / vp_z;
-        float plane_gap = abs((surface_depth - vp_z) *
-                              dot(plane_normal, ray_per_view_z));
-        if(plane_gap > DECAL_MAX_PLANE_GAP) {
-            discard;
-        }
-    }
-
     vec2 adj_texcoords = vp_texcoords;
     if(displacement_factor != 0.0) {
         adj_texcoords = parallax_mapping(vp_texcoords);
@@ -590,12 +549,7 @@ void main()
     }
     else {
         // Preserve the existing JK convention for regular geometry.
-        // Depth-clipped decals also premultiply texture/material coverage
-        // to avoid overbright fringes at translucent PNG edges.
-        float coverage = depth_clip != 0
-                             ? clamp(albedo_map_sample.a * albedo_factor.a, 0.0, 1.0)
-                             : 1.0;
-        out_color = vec4(color * coverage, albedo.a);
+        out_color = vec4(color, albedo.a);
     }
     // RGB is already premultiplied in the transparent blending path.
     // Attenuate both RGB and alpha to preserve that convention.

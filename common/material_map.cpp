@@ -246,13 +246,6 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             mat->fluid_thickness = value;
         }
 
-        if(em.contains("depth_clip")) {
-            if(!em["depth_clip"].is_boolean()) {
-                throw std::runtime_error("depth_clip in metadata.json must be a boolean");
-            }
-            mat->depth_clip = static_cast<bool>(em["depth_clip"]);
-        }
-
         if(em.contains("alpha_cutoff")) {
             mat->alpha_cutoff = em["alpha_cutoff"];
         }

@@ -83,8 +83,6 @@ namespace jkgm {
         // Beer-Lambert absorption per game unit of thickness through a fluid.
         // Higher values make the albedo opaque at shorter viewing distances.
         float fluid_thickness = 0.25f;
-        // Restrict decal polygons to nearby opaque scene geometry.
-        bool depth_clip = false;
         float alpha_cutoff = 0.5f;
     };
 }
