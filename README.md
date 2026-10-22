@@ -30,7 +30,7 @@ replacement settings and replacement materials without explicit reflection
 values now default to:
 
 ```json
-{"reflection_strength": 0.1, "roughness": 0.9, "metalness": 0.0}
+{"reflection_strength": 0.2, "roughness": 0.9, "metalness": 0.0}
 ```
 
 This preserves explicit per-material scalar overrides. Authored RGB surface
@@ -627,7 +627,11 @@ ResetMaterialAlbedo(carpaint, 1.0);
 MATs and all cels are resolved through the validated native JK material
 tables. Source MATs need at least one mapped replacement texture to identify
 their originating pack. A command remains pending if the relevant texture
-has not yet been uploaded. World changes clear commands to avoid handle reuse.
+has not yet been uploaded. The renderer preserves the previous valid EnvMap
+(or the material's default) while a requested source image cannot be resolved,
+instead of clearing every EnvMap on a failed global image lookup. The requested
+image becomes active once its pack mapping and image ID are available.
+World changes clear commands to avoid handle reuse.
 An image fade samples two 2D images; interrupting a fade currently starts
 the new transition from the prior target instead of a three-way composite.
 EnvMaps in this renderer are equirectangular 2D images, not cubemap arrays.
