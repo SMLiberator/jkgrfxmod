@@ -4042,11 +4042,18 @@ std::vector<jkgm::spotlight_instance> jkgm::collect_spotlights_for_frame()
         get_spotlight_registry().prepare_world(world);
     for(auto const &request:get_spotlight_registry().snapshot()) {
         auto const *thing=reinterpret_cast<uint8_t const *>(request.thing);
-        if(!thing||!gpu_span_readable(thing,0xe8))continue;
+        if(!thing||!gpu_span_readable(thing,0xe8)) {
+            get_spotlight_registry().erase(request.thing,request.node);
+            continue;
+        }
         uint32_t kind=0,identity=0;
         std::memcpy(&kind,thing+0x0c,4);
         std::memcpy(&identity,thing+0x74,4);
-        if(kind==0||kind>15||identity!=request.identity)continue;
+        if(kind==0||kind>15||identity!=request.identity) {
+            // Reclaim active-light slots as soon as JK recycles an owner.
+            get_spotlight_registry().erase(request.thing,request.node);
+            continue;
+        }
         thing_node_pose pose{};
         if(request.node>=0) {
             if(!get_cog_thing_node_pose(
