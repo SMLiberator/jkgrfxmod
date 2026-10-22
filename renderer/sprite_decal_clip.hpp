@@ -69,13 +69,17 @@ inline std::vector<decal_vertex> clip_projected_decal(
     decal_projector const &projector,
     std::vector<decal_vec3> const &receiver,
     decal_vec3 receiver_normal,
-    float min_facing=0.05f)
+    float min_facing=0.05f,bool enforce_facing=true)
 {
+    // Experimental corner decals may accept both perpendicular and
+    // back-facing receivers. Keep the default facing test for other callers.
+    // UV-area filtering below still rejects truly edge-on projections.
     if(!valid_decal_projector(projector) ||
        !decal_finite(receiver_normal) || receiver.size()<3 ||
        receiver.size()>128 || !std::isfinite(min_facing) ||
        min_facing<0.0f||min_facing>=1.0f ||
-       decal_dot(receiver_normal,projector.look)>-min_facing)
+       (enforce_facing &&
+        decal_dot(receiver_normal,projector.look)>-min_facing))
         return {};
     std::vector<decal_vertex> clipped;
     clipped.reserve(receiver.size()+12);
