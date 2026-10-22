@@ -81,9 +81,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("enable_post").get_to(rv->enable_post);
         }
 
-        if(j.contains("enable_auto_exposure")) {
-            j.at("enable_auto_exposure").get_to(rv->enable_auto_exposure);
-        }
         if(j.contains("auto_exposure_sensitivity")) {
             auto const &v=j.at("auto_exposure_sensitivity");
             if(!v.is_number() || !std::isfinite(static_cast<double>(v))) {

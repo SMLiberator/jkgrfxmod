@@ -2,6 +2,8 @@
 // Shared bloom/basic compositor GPU exposure pass. This shader renders
 // precisely one RGBA16F pixel and retains the previous EV in a ping-pong FBO.
 #include "opengl_state.hpp"
+#include "base/log.hpp"
+#include "glad/gl.h"
 #include <algorithm>
 #include <chrono>
 
@@ -9,7 +11,7 @@ namespace jkgm {
 
 inline bool auto_exposure_enabled(opengl_state const *ogs)
 {
-    return ogs && ogs->enable_post && ogs->enable_auto_exposure &&
+    return ogs && ogs->enable_post &&
            ogs->auto_exposure_scene && ogs->auto_exposure_sensitivity>0.0f;
 }
 
@@ -38,6 +40,10 @@ inline void update_auto_exposure(opengl_state *ogs,gl::texture_view scene)
     gl::disable(gl::capability::depth_test);
     gl::disable(gl::capability::cull_face);
     gl::disable(gl::capability::blend);
+    // Scissor state inherited from native rendering must never clip the
+    // single output pixel and silently freeze the temporal exposure buffer.
+    GLboolean const had_scissor=glIsEnabled(GL_SCISSOR_TEST);
+    if(had_scissor) glDisable(GL_SCISSOR_TEST);
     gl::bind_vertex_array(ogs->postmdl.vao);
     ogs->post_auto_exposure.use_program();
     ogs->post_auto_exposure.set_inputs(0,1);
@@ -51,6 +57,23 @@ inline void update_auto_exposure(opengl_state *ogs,gl::texture_view scene)
     gl::draw_elements(
         gl::element_type::triangles,ogs->postmdl.num_indices,
         gl::index_type::uint32);
+    if(had_scissor) glEnable(GL_SCISSOR_TEST);
+
+    // Debug once every 2s only with profile_renderer=true. A single-pixel
+    // readback is intentionally not in the normal path: it synchronizes GL.
+    if(ogs->auto_exposure_diagnostics &&
+       (ogs->auto_exposure_last_log==std::chrono::steady_clock::time_point{} ||
+        now-ogs->auto_exposure_last_log>=std::chrono::seconds(2))) {
+        ogs->auto_exposure_last_log=now;
+        float diagnostic[4]={0.0f,0.0f,0.0f,0.0f};
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glReadPixels(0,0,1,1,GL_RGBA,GL_FLOAT,diagnostic);
+        LOG_INFO("Auto exposure: adapted_ev=",diagnostic[0],
+                 " target_ev=",diagnostic[1],
+                 " luminance=",diagnostic[2],
+                 " dt=",dt,
+                 " sensitivity=",ogs->auto_exposure_sensitivity);
+    }
     ogs->auto_exposure_history_valid=true;
     ogs->auto_exposure_next_a=!ogs->auto_exposure_next_a;
     gl::set_active_texture_unit(0);

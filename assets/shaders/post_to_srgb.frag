@@ -61,7 +61,7 @@ void main()
         // Exposure applies to HDR scene+bloom BEFORE the display transform.
         // ACES approximation rolls over highlights instead of hard clipping.
         float ev = texelFetch(exposure_image,ivec2(0),0).r;
-        vec3 hdr = max(color * exp2(clamp(ev,-4.0,4.0)), vec3(0.0));
+        vec3 hdr = max(color * exp2(clamp(ev,-5.0,5.0)), vec3(0.0));
         color = (hdr * (2.51 * hdr + 0.03)) /
                 (hdr * (2.43 * hdr + 0.59) + 0.14);
     }

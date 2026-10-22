@@ -1181,16 +1181,19 @@ need another patch for this change.
 
 ## Automatic HDR eye exposure (experimental)
 
-Set `"enable_auto_exposure": true` in `jkgm.json` to enable automatic
-eye adaptation. `"auto_exposure_sensitivity": 1.0` controls the amount of
-scene-driven adjustment from 0 (none) to 2 (exaggerated); values outside this
-range are rejected. Defaults: off, sensitivity 1.0.
+Set `"auto_exposure_sensitivity": 1.0` in `jkgm.json` to enable automatic
+eye adaptation. Values range from 0 (off, including tone mapping), through 1
+(normal response), up to 2 (exaggerated). The default is 0 (disabled).
 
 A 1x1 RGBA16F GPU render pass samples 144 positions in the central 80% of the
-scene and estimates log-average linear luminance. It computes exposure around
-18% grey (bounded to -3..+3 EV before sensitivity), then smoothly interpolates
-to the target: quicker darkening when entering sunlight, slower brightening
-when entering shadows. No framebuffer readbacks are performed. The existing
+scene, combining log-average and linear-average luminance so relatively small
+bright objects can influence eye adaptation. It computes exposure around 18%
+grey (up to +/-5 EV), then smoothly interpolates to the target: quicker
+darkening when entering sunlight, slower brightening when entering shadows.
+No framebuffer readbacks are performed in normal gameplay; with
+`"profile_renderer": true`, a single-pixel diagnostic readback every two
+seconds logs metered luminance, target EV, adapted EV and frame delta.
+The existing
 final pass applies the adapted exposure in linear HDR space and an ACES-like
 filmic highlight curve before color grading. Existing bloom already runs in
 HDR ahead of tone mapping. The exposure history resets for menus, disabled

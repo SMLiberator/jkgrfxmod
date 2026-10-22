@@ -131,9 +131,9 @@ namespace jkgm {
         bool enable_post = true;
         bool enable_blur = true;
         bool enable_trails = true;
-        bool enable_auto_exposure = false;
         bool auto_exposure_scene = false;
-        float auto_exposure_sensitivity = 1.0f;
+        float auto_exposure_sensitivity = 0.0f;
+        bool auto_exposure_diagnostics = false;
 
         shaders::menu_shader menu_program;
 
@@ -186,6 +186,7 @@ namespace jkgm {
         bool auto_exposure_next_a = true;
         bool auto_exposure_history_valid = false;
         std::chrono::steady_clock::time_point auto_exposure_last_frame{};
+        std::chrono::steady_clock::time_point auto_exposure_last_log{};
 
         // Separable spatial blur works in linear HDR before final post processing.
         post_buffer spatial_blur_work;
