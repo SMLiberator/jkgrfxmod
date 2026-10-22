@@ -597,21 +597,24 @@ JKGM node transform accessor **each render frame**, so a flashlight can
 follow the player's hand without creating a separate Thing.
 
 ```c
-// SetSpotlight(thing, node, MAT, xSize, ySize, localOffset)
-SetSpotlight(player, 4, flashlightMat, 3.0, 2.0, '0 0 0');
-SetSpotlight(car, -1, headlightMat, 2.5, 1.5, '-0.35 0.7 0.1');
-RemoveSpotlight(player, 4);
+// SetSpotlight(thing, node, MAT, 'width height range', localOffset)
+SetSpotlight(player, 4, flashlightMat, '3 2 12', '0 0 0');
+SetSpotlight(car, -1, headlightMat, '2.5 1.5 8', '-0.35 0.7 0.1');
+RemoveSpotlight(player, 4);  // Remove only this node's spotlight
+ResetSpotlight(car);         // Remove every spotlight belonging to this Thing
 ```
 
 The Thing/animated node **Look** axis is the direction of projection.
 `localOffset` uses the node's Right / Look / Up axes, in JK units.
-`xSize` and `ySize` specify the beam footprint at the experimental
-fixed range of **8 JK units**; close-range projection contracts toward
-the source. The MAT is treated as an additive RGB+alpha light cookie,
+The `width height range` vector specifies the beam footprint at its
+far plane and its maximum projection distance, all in JK world units.
+Close-range projection contracts toward the source. The MAT is treated as an additive RGB+alpha light cookie,
 with fade at the edges and maximum distance, independent of receiver
-albedo. The renderer uses the MAT's currently loaded cel. A light may
-not appear until the referenced MAT is first loaded into JK's native
-texture cache; try a MAT also used on visible geometry for initial tests.
+albedo. The renderer uses the MAT's currently loaded cel and
+attempts to upload it immediately using JK's native material cache loader
+when SetSpotlight is called. Commands made before a GPU context exists are
+retried in the render path; a missing MAT or an unavailable native texture
+remains pending. The MAT need not first appear on visible geometry.
 
 Spotlights illuminate **opaque native world sectors and 3DOs** via the
 resolved G-buffer, independently of `use_model_cache`. They have no
@@ -620,8 +623,9 @@ contribute GGX material specularity, and don't emit volumetric fog beams.
 The first version loops over at most four spotlights on the fullscreen
 composite; performance is intentionally measurable before adding
 scissor-volume optimizations. They are removed on level transitions.
-Use `RemoveSpotlight` when a Thing is destroyed to release its slot
-immediately (stale/recycled owner identities are ignored at rendering).
+Use `RemoveSpotlight(thing,node)` to release one slot or
+`ResetSpotlight(thing)` to clear all that Thing's lights. Destroyed or
+recycled owners are automatically reclaimed in the render path.
 
 ## Experimental runtime MAT material controls
 
