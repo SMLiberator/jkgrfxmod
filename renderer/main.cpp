@@ -4111,7 +4111,8 @@ namespace {
         if(!read_object(info.texture,texture) ||
            texture.header[6]==0U || texture.header[6]>4U ||
            !texture.mipmap_buffers[0] ||
-           !engine_camera_detail::readable(texture.mipmap_buffers[0],0x18))
+           !gpu_span_readable(reinterpret_cast<void const *>(
+               uintptr_t(texture.mipmap_buffers[0])),0x18))
             return false;
         // Transparent MATs need the alpha texture cache; opaque ones
         // select the native no_alpha path (arg 4 = 1).
