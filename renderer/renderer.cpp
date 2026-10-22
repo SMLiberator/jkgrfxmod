@@ -1133,34 +1133,20 @@ namespace jkgm {
         }
 
         // "base" is the compiled-pack image (or the original JK albedo).
-        // The FROM/TO keys are resolved in their own originating MAT's pack.
-        // Missing source files never silently replace the original image.
+        // Pending source packs must not clear an already valid environment,
+        // even if the previous image in an interrupted fade is unavailable.
         void resolve_runtime_transition(runtime_image_transition const &transition,
                                         std::optional<srgb_texture_id> base,
                                         std::optional<srgb_texture_id> &from,
                                         std::optional<srgb_texture_id> &to,
                                         float &weight)
         {
-            from = base;
-            to = base;
-            weight = 0.0f;
-            if(transition.from) {
-                from = resolve_runtime_image(*transition.from);
-                if(!from) return;
-            }
-            if(transition.to) {
-                to = resolve_runtime_image(*transition.to);
-                if(!to) {
-                    from = base;
-                    to = base;
-                    return;
-                }
-            }
-            weight = transition.progress();
-            if(weight >= 1.0f) {
-                from = to;
-                weight = 0.0f;
-            }
+            resolve_runtime_transition_images(
+                transition,base,
+                [this](runtime_image_key const &key) {
+                    return resolve_runtime_image(key);
+                },
+                from,to,weight);
         }
 
         // Diagnostic only: correlate JK material cels to live D3D texture
