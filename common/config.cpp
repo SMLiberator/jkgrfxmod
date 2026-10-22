@@ -145,6 +145,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("use_model_cache")) {
             j.at("use_model_cache").get_to(rv->use_model_cache);
         }
+        if(j.contains("enable_spotlights")) {
+            j.at("enable_spotlights").get_to(rv->enable_spotlights);
+        }
         if(j.contains("enable_sprite_decals")) {
             j.at("enable_sprite_decals").get_to(rv->enable_sprite_decals);
         }
