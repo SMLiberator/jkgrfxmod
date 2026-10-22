@@ -536,6 +536,7 @@ namespace jkgm {
         std::map<uint32_t, native_handle_link> runtime_mat_by_handle;
         std::map<uint32_t, fs::path> runtime_pack_by_mat;
         std::map<fs::path, srgb_texture_id> runtime_images;
+        std::set<uint32_t> spotlight_unready_mats;
         std::set<std::pair<uint32_t, int>> runtime_missing_images;
         std::set<uint32_t> runtime_missing_sources;
         bool warned_reflections_disabled = false;
@@ -2866,7 +2867,13 @@ namespace jkgm {
             group.material=mat_ptr;
             group.cel=-1;
             auto const material=resolve_gpu_3do_material(group);
-            if(!material.has_image || material.albedo_source!=1)return std::nullopt;
+            if(!material.has_image || material.albedo_source!=1) {
+                if(spotlight_unready_mats.insert(mat_id).second)
+                    LOG_WARNING("Spotlight MAT ",mat_id,
+                                " has no resident albedo; render/load its MAT first");
+                return std::nullopt;
+            }
+            spotlight_unready_mats.erase(mat_id);
             return material.texture;
         }
 
