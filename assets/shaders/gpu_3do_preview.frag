@@ -45,6 +45,7 @@ uniform vec2 normal_specular_scroll;
 uniform vec2 normal_specular_scroll2;
 uniform vec3 local_eye;
 uniform int num_lights;
+uniform int dynamic_light_specular_enabled;
 uniform vec4 light_position_radius[16];
 uniform float light_intensity[16];
 uniform float attenuation_min;
@@ -344,11 +345,14 @@ void main() {
     vec3 emission=emissive_factor;
     if(has_emissive!=0)
         emission*=texture(emissive_map,uv+emissive_scroll).rgb;
-    // Dynamic JK point-light -> GGX specular association is suspended until
-    // native point-light RGB and independent specular intensity are supported.
-    // Keep native point-light diffuse lighting, the COG sun and EnvMaps.
-    vec3 specular=(gpu_sun_specular(albedo.rgb,uv)+env_reflection)*
-                  (1.0-fog);
+    // Optional dynamic Thing point-light -> GGX highlights. JK currently
+    // supplies scalar light intensity (not independent per-light RGB), so
+    // these experimental highlights are neutral/white. Diffuse remains JK.
+    vec3 specular=gpu_sun_specular(albedo.rgb,uv)+env_reflection;
+    if(dynamic_light_specular_enabled!=0 && num_lights>0 &&
+       specular_params.x>0.0)
+        specular+=point_light_specular(albedo.rgb,uv);
+    specular*=(1.0-fog);
     // The opaque pass composites this separate emissive attachment after
     // SSAO. The translucent pass has only the color target: emission must
     // therefore be added directly to premultiplied RGB, never multiplied
