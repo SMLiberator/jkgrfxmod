@@ -153,6 +153,7 @@ namespace jkgm {
             gl::uniform_location_id jk_color_filter,jk_color_tint,jk_color_add_fade;
             gl::uniform_location_id colormap_tint;
             gl::uniform_location_id specular_params,normal_specular_params;
+            gl::uniform_location_id dynamic_light_specular_enabled;
             gl::uniform_location_id specular_surface_sampler,specular_normal_sampler;
             gl::uniform_location_id specular_normal2_sampler,specular_environment_sampler;
             gl::uniform_location_id specular_environment2_sampler;
@@ -181,6 +182,7 @@ namespace jkgm {
             void set_lighting(gpu_3do_instance const &instance);
             void set_colormap_tint(std::array<float,3> const &tint);
             void set_local_eye(std::array<float,3> const &eye);
+            void set_dynamic_light_specular(bool enabled);
             void set_point_specular(point<4,float> material,
                                     point<4,float> normal,
                                     point<2,float> normal_scroll,
