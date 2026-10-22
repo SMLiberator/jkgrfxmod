@@ -10,6 +10,7 @@
 #include "gpu_3do_frustum.hpp"
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
+#include "spotlight.hpp"
 #include "backbuffer_menu_surface.hpp"
 #include "backbuffer_surface.hpp"
 #include "base/file_block.hpp"
@@ -2843,6 +2844,32 @@ namespace jkgm {
             draw_gpu_3do_preview(false);
         }
 
+        // Resolve a COG MAT by its stable native index to its currently
+        // resident original/replacement albedo. Reuses GPU 3DO MAT lookup,
+        // so spotlights work whether or not geometry caching is enabled.
+        // The MAT must first have been loaded by JK's native texture cache.
+        std::optional<gl::texture_view> spotlight_mat_texture(uint32_t mat_id)
+        {
+            if(!engine_material_debug::matches_tested_executable())return std::nullopt;
+            bool const shared=(mat_id&0x8000U)!=0U;
+            uint32_t const index=mat_id&0x7fffU;
+            uint32_t address=0;
+            engine_material_debug::world_header world{};
+            if(!engine_material_debug::load_world(
+                  shared?engine_material_debug::static_world_global:
+                         engine_material_debug::current_world_global,
+                  address,world) || index>=uint32_t(world.num_materials))
+                return std::nullopt;
+            uintptr_t const mat_ptr=uintptr_t(world.materials)+
+                index*sizeof(engine_material_debug::native_material);
+            gpu_3do_group group{};
+            group.material=mat_ptr;
+            group.cel=-1;
+            auto const material=resolve_gpu_3do_material(group);
+            if(!material.has_image || material.albedo_source!=1)return std::nullopt;
+            return material.texture;
+        }
+
         void draw_game_opaque_composite()
         {
             gl::disable(gl::capability::depth_test);
@@ -2852,20 +2879,27 @@ namespace jkgm {
             ogs->game_post_opaque_composite_program.set_emissive_sampler(1);
             ogs->game_post_opaque_composite_program.set_occlusion_sampler(2);
             ogs->game_post_opaque_composite_program.set_depth_sampler(3);
-            ogs->game_post_opaque_composite_program.disable_projected_decal();
-            if(projected_decal_texture && the_config->projected_decal) {
-                // The active native rdCamera tracks temporary/idle cameras,
-                // unlike Sith's logical camera array. Use its exact placement.
-                auto const cam=read_active_render_camera();
-                if(cam.valid) {
+            auto &prog=ogs->game_post_opaque_composite_program;
+            prog.disable_projected_decal();
+            prog.set_spotlight_count(0);
+            // Share JK camera projection between the existing static decal
+            // and dynamically node-attached MAT spotlights.
+            auto const cam=read_active_render_camera();
+            if(cam.valid && (the_config->projected_decal ||
+                             the_config->enable_spotlights)) {
+                float const h=std::tan(cam.fov*(3.14159265358979323846f/360.0f));
+                float const v=h*float(get<y>(conf_scr_res))/
+                                  float(get<x>(conf_scr_res));
+                auto point_axis=[](std::array<float,3> const &a,float w) {
+                    return make_point(a[0],a[1],a[2],w);
+                };
+                prog.set_projector_camera(
+                    point_axis(cam.position,0.0f),
+                    point_axis(cam.right,h),
+                    point_axis(cam.forward,0.0f),
+                    point_axis(cam.up,v));
+                if(projected_decal_texture && the_config->projected_decal) {
                     auto const &d=*the_config->projected_decal;
-                    float const h=std::tan(cam.fov*(3.14159265358979323846f/360.0f));
-                    float const v=h*float(get<y>(conf_scr_res))/
-                                      float(get<x>(conf_scr_res));
-                    auto point_axis=[](std::array<float,3> const &a,float w) {
-                        return make_point(a[0],a[1],a[2],w);
-                    };
-                    auto &prog=ogs->game_post_opaque_composite_program;
                     prog.set_projected_decal(
                         point_axis(d.position,0.0f),
                         point_axis(projected_decal_axes.right,1.0f/d.size[0]),
@@ -2877,13 +2911,33 @@ namespace jkgm {
                         point_axis(cam.right,h),
                         point_axis(cam.forward,0.0f),
                         point_axis(cam.up,v));
-                    gl::set_active_texture_unit(5);
-                    gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                     frame_screen->get_resolved_normal_texture());
                     gl::set_active_texture_unit(4);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
                                      texture_cache->get_texture_handle(
                                          *projected_decal_texture));
+                }
+                int active=0;
+                if(the_config->enable_spotlights) {
+                    for(auto const &spot:collect_spotlights_for_frame()) {
+                        auto image=spotlight_mat_texture(spot.material);
+                        if(!image)continue;
+                        prog.set_spotlight(
+                            active,
+                            point_axis(spot.origin,0.0f),
+                            point_axis(spot.right,spot.range/spot.width),
+                            point_axis(spot.up,spot.range/spot.height),
+                            point_axis(spot.forward,1.0f/spot.range));
+                        gl::set_active_texture_unit(6+active);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         *image);
+                        if(++active>=int(spotlight_max_active))break;
+                    }
+                }
+                prog.set_spotlight_count(active);
+                if(active>0 || projected_decal_texture) {
+                    gl::set_active_texture_unit(5);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     frame_screen->get_resolved_normal_texture());
                 }
             }
             {
