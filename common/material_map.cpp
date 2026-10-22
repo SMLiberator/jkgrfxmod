@@ -171,7 +171,7 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             em.contains("reflection_strength") ? static_cast<float>(em["reflection_strength"])
                                                 : (has_surface_map ? 1.0f : 0.3f);
         mat->roughness = em.contains("roughness") ? static_cast<float>(em["roughness"])
-                                                   : (has_surface_map ? 1.0f : 0.9f);
+                                                   : 0.12f;
         mat->metalness = em.contains("metalness") ? static_cast<float>(em["metalness"])
                                                    : (has_surface_map ? 1.0f : 0.0f);
 
