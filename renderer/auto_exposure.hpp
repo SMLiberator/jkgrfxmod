@@ -10,10 +10,15 @@
 
 namespace jkgm {
 
+inline bool hdr_enabled(opengl_state const *ogs)
+{
+    return ogs && ogs->enable_post && ogs->auto_exposure_scene &&
+           (ogs->enable_hdr || ogs->auto_exposure_sensitivity>0.0f);
+}
+
 inline bool auto_exposure_enabled(opengl_state const *ogs)
 {
-    return ogs && ogs->enable_post &&
-           ogs->auto_exposure_scene && ogs->auto_exposure_sensitivity>0.0f;
+    return hdr_enabled(ogs) && ogs->auto_exposure_sensitivity>0.0f;
 }
 
 inline void update_auto_exposure(opengl_state *ogs,gl::texture_view scene)
@@ -60,7 +65,7 @@ inline void update_auto_exposure(opengl_state *ogs,gl::texture_view scene)
         gl::index_type::uint32);
     if(had_scissor) glEnable(GL_SCISSOR_TEST);
 
-    // Debug once every 2s only with profile_renderer=true. A single-pixel
+    // Debug once every 2s only with profile_auto_exposure=true. A single-pixel
     // readback is intentionally not in the normal path: it synchronizes GL.
     if(ogs->auto_exposure_diagnostics &&
        (ogs->auto_exposure_last_log==std::chrono::steady_clock::time_point{} ||
@@ -74,7 +79,8 @@ inline void update_auto_exposure(opengl_state *ogs,gl::texture_view scene)
                 << " target_ev=" << diagnostic[1]
                 << " luminance=" << diagnostic[2]
                 << " dt=" << dt
-                << " sensitivity=" << ogs->auto_exposure_sensitivity;
+                << " sensitivity=" << ogs->auto_exposure_sensitivity
+                << " compensation_ev=" << ogs->hdr_exposure_compensation;
         LOG_INFO(message.str());
     }
     ogs->auto_exposure_history_valid=true;
@@ -87,7 +93,8 @@ inline void bind_auto_exposure(opengl_state *ogs)
 {
     bool const enabled=auto_exposure_enabled(ogs) &&
                        ogs->auto_exposure_history_valid;
-    ogs->post_to_srgb.set_auto_exposure(6,enabled);
+    ogs->post_to_srgb.set_hdr(6,hdr_enabled(ogs),enabled,
+                                ogs->hdr_exposure_compensation);
     gl::set_active_texture_unit(6);
     gl::bind_texture(gl::texture_bind_target::texture_2d,
         enabled

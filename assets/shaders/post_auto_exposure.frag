@@ -30,10 +30,14 @@ void main()
     float log_average = exp(log_sum*inv_count);
     float linear_average = linear_sum*inv_count;
     float meter_lum = mix(log_average,linear_average,0.4);
-    // Bound only the displayed EV, rather than saturating the metering
-    // before applying sensitivity. This preserves changes within dark rooms.
-    float target_ev = clamp(
-        log2(0.18/max(meter_lum,0.00001))*exposure_params.x,-5.0,5.0);
+    // Asymmetric eye adaptation: bright scenes can lower exposure quickly,
+    // but pitch-black JK interiors must not be turned into daylight at high
+    // sensitivity. Keep a little dark adaptation without lifting black itself.
+    float scene_ev = clamp(log2(0.18/max(meter_lum,0.00001)),-5.0,5.0);
+    float sensitivity = clamp(exposure_params.x,0.0,2.0);
+    float target_ev = scene_ev < 0.0
+        ? scene_ev * min(1.0,sensitivity*2.0)
+        : min(scene_ev*sensitivity*0.5,1.25);
     float previous = target_ev;
     if(exposure_params.z>0.5)
         previous = texelFetch(previous_exposure,ivec2(0),0).r;

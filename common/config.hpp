@@ -27,7 +27,9 @@ namespace jkgm {
         bool enable_trails = true;
         bool enable_fog = true;
         bool enable_post = true;
-        float auto_exposure_sensitivity = 0.0f; // 0=disabled, 1=normal, 2=strong
+        bool enable_hdr = false; // tone mapping without eye adaptation (also enabled when sensitivity>0)
+        float auto_exposure_sensitivity = 0.0f; // 0=fixed exposure, 0..2=adaptive
+        float hdr_exposure_compensation = 0.5f; // constant EV offset, used only with HDR
         bool enable_reflections = true;
         bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
         bool enable_ssao = true;

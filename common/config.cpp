@@ -81,6 +81,23 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("enable_post").get_to(rv->enable_post);
         }
 
+        if(j.contains("enable_hdr")) {
+            j.at("enable_hdr").get_to(rv->enable_hdr);
+        }
+
+        if(j.contains("hdr_exposure_compensation")) {
+            auto const &v=j.at("hdr_exposure_compensation");
+            if(!v.is_number() || !std::isfinite(static_cast<double>(v))) {
+                throw std::runtime_error("hdr_exposure_compensation must be a finite number");
+            }
+            rv->hdr_exposure_compensation=static_cast<float>(v);
+            if(!std::isfinite(rv->hdr_exposure_compensation) ||
+               rv->hdr_exposure_compensation<-3.0f ||
+               rv->hdr_exposure_compensation>3.0f) {
+                throw std::runtime_error("hdr_exposure_compensation must be between -3 and 3");
+            }
+        }
+
         if(j.contains("auto_exposure_sensitivity")) {
             auto const &v=j.at("auto_exposure_sensitivity");
             if(!v.is_number() || !std::isfinite(static_cast<double>(v))) {

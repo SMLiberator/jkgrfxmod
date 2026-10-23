@@ -890,6 +890,8 @@ jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(fs::path const &data_roo
     , saturation(gl::get_uniform_location(the_program, "saturation"))
     , exposure_image(gl::get_uniform_location(the_program, "exposure_image"))
     , exposure_enabled(gl::get_uniform_location(the_program, "exposure_enabled"))
+    , hdr_enabled(gl::get_uniform_location(the_program, "hdr_enabled"))
+    , hdr_exposure_compensation(gl::get_uniform_location(the_program, "hdr_exposure_compensation"))
 {
     bloom_fbuf.reserve(num_bloom_layers);
     bloom_weight.reserve(num_bloom_layers);
@@ -909,10 +911,13 @@ void jkgm::shaders::post_to_srgb_shader::set_fbuf_sampler(int sampler)
     gl::set_uniform_integer(fbuf_image, sampler);
 }
 
-void jkgm::shaders::post_to_srgb_shader::set_auto_exposure(int sampler,bool enabled)
+void jkgm::shaders::post_to_srgb_shader::set_hdr(
+    int sampler,bool hdr,bool adaptive,float compensation_ev)
 {
     gl::set_uniform_integer(exposure_image,sampler);
-    gl::set_uniform_integer(exposure_enabled,enabled?1:0);
+    gl::set_uniform_integer(exposure_enabled,adaptive?1:0);
+    gl::set_uniform_integer(hdr_enabled,hdr?1:0);
+    gl::set_uniform_float(hdr_exposure_compensation,compensation_ev);
 }
 
 void jkgm::shaders::post_to_srgb_shader::set_bloom_samplers(span<int const> samplers)

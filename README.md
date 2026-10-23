@@ -17,7 +17,7 @@ Optional boolean master switches, all `true` by default:
 | --- | --- |
 | `enable_fog` | Renders COG-controlled distance fog; COG parameters are still stored if disabled |
 | `enable_reflections` | Master switch for environment reflections **and directional-sun GGX specularity**; disabling them also skips reflection-only normal/surface map sampling and restores the unreflected diffuse appearance |
-| `enable_post` | Enables optional presentation effects (bloom, film grain, vignette, brightness/contrast/saturation); sRGB output remains active when disabled |
+| `enable_post` | Enables optional presentation effects (bloom, HDR, film grain, vignette, brightness/contrast/saturation); sRGB output remains active when disabled |
 | `enable_blur` | Enables distance and peripheral spatial blur (more GPU-intensive) |
 | `enable_trails` | Enables lightweight temporal feedback / frame blending |
 
@@ -1356,28 +1356,45 @@ need another patch for this change.
 
 ## Automatic HDR eye exposure (experimental)
 
-Set `"auto_exposure_sensitivity": 1.0` in `jkgm.json` to enable automatic
-eye adaptation. Values range from 0 (off, including tone mapping), through 1
-(normal response), up to 2 (exaggerated). The default is 0 (disabled).
+The HDR display transform and automatic eye adaptation are separate. For a
+starting point with restrained dark-scene adaptation, use:
 
-A 1x1 RGBA16F GPU render pass samples 144 positions in the central 80% of the
-scene, combining log-average and linear-average luminance so relatively small
-bright objects can influence eye adaptation. It computes exposure around 18%
-grey (up to +/-5 EV), then smoothly interpolates to the target: quicker
-darkening when entering sunlight, slower brightening when entering shadows.
-No framebuffer readbacks are performed in normal gameplay; with
-`"profile_renderer": true`, a single-pixel diagnostic readback every two
-seconds logs metered luminance, target EV, adapted EV and frame delta.
-The existing
-final pass applies the adapted exposure in linear HDR space and an ACES-like
-filmic highlight curve before color grading. Existing bloom already runs in
-HDR ahead of tone mapping. The exposure history resets for menus, disabled
-postprocessing, or Retro 256-color mode.
+```json
+"enable_hdr": true,
+"auto_exposure_sensitivity": 0.2,
+"hdr_exposure_compensation": 0.5
+```
 
-The screen sample includes any overlaid HUD; central-region metering reduces
-but does not entirely exclude HUD interference. Future world-only metering
-could improve this if needed. This initial feature does not change native JK
-vertex-light clamping or add HDR values to engine-issued RGB8 vertices.
+- `enable_hdr` (default `false`) enables HDR tone mapping at **fixed**
+  exposure even when sensitivity is zero. To preserve older experimental
+  configurations, any positive `auto_exposure_sensitivity` also activates HDR.
+  Both remain disabled by `enable_post: false`, and HDR is bypassed for
+  menus and Retro CMP output.
+- `auto_exposure_sensitivity` (0..2, default 0) enables scene-adaptive
+  exposure if positive; **0 now means fixed exposure, not necessarily no
+  tone mapping**. The new adaptation responds more strongly to bright scenes
+  than dark ones. Dark-scene boosts are capped at +1.25 EV to avoid washing
+  out near-black interiors; bright-scene compensation still supports up to
+  -5 EV. Adaptation is faster going into bright light.
+- `hdr_exposure_compensation` (-3..+3 EV, default +0.5) is a **fixed**
+  brightness adjustment added to any adaptive exposure before tone mapping.
+  Increase this to lift visible shadow detail without increasing the
+  adaptation strength. A strictly black input stays black.
+
+The GPU-only 1x1 RGBA16F pass meters 144 samples in the central 80% of the
+scene, combining log- and linear-average luminance. The presentation shader
+uses a softer filmic shadow toe and luminance-based mapping with highlight
+gamut compression, reducing channel-dependent hue shifts and excessively
+saturated highlights. HDR runs after scene composition and bloom, before
+COG color grading and optional grain/vignette. Existing bloom need not change.
+
+`profile_auto_exposure: true` enables a blocking diagnostic readback every
+two seconds (meter luminance, adaptation EV, target EV, sensitivity and fixed
+compensation). Leave it off for frame-rate measurements. The exposure history
+is reset for menus, disabled postprocessing or Retro 256-color mode. Metering
+still includes center-screen HUD elements; bright/dark input calibration
+remains material-dependent. This feature does not change native JK vertex
+lighting limits.
 
 ## SPR projected decals — geometry and receiver discovery
 

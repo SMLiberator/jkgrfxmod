@@ -3,6 +3,8 @@
 uniform sampler2D fbuf_image;
 uniform sampler2D exposure_image; // 1x1 adapted EV (linear scene metering)
 uniform int exposure_enabled;
+uniform int hdr_enabled; // HDR display transform independent of adaptation
+uniform float hdr_exposure_compensation; // fixed EV offset
 
 const int num_bloom_layers = 5;
 uniform sampler2D bloom_fbuf[num_bloom_layers];
@@ -44,6 +46,17 @@ float grain_noise(ivec2 cell, int seed)
     return float(h) * (1.0 / 4294967295.0);
 }
 
+
+float filmic_luminance(float x)
+{
+    // Use the existing ACES fit for midtones/highlights but soften its
+    // low-light toe. Zero always remains zero (no artificial ambient light).
+    float aces = (x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14);
+    float soft_toe = x/(1.0+x);
+    float toe_weight = 0.6*(1.0-smoothstep(0.015,0.10,x));
+    return clamp(mix(aces,soft_toe,toe_weight),0.0,1.0);
+}
+
 void main()
 {
     ivec2 sc = ivec2(gl_FragCoord.xy);
@@ -60,13 +73,29 @@ void main()
     if(bloom_weight[4] > 0.0) bloom_samp += texture(bloom_fbuf[4],vp_texcoords)*bloom_weight[4];
 
     vec3 color = samp.rgb + bloom_samp.rgb;
-    if(exposure_enabled != 0) {
-        // Exposure applies to HDR scene+bloom BEFORE the display transform.
-        // ACES approximation rolls over highlights instead of hard clipping.
-        float ev = texelFetch(exposure_image,ivec2(0),0).r;
-        vec3 hdr = max(color * exp2(clamp(ev,-5.0,5.0)), vec3(0.0));
-        color = (hdr * (2.51 * hdr + 0.03)) /
-                (hdr * (2.43 * hdr + 0.59) + 0.14);
+    if(hdr_enabled != 0) {
+        // Fixed EV compensation works even when eye adaptation is disabled.
+        // All exposure happens in linear HDR before tone mapping.
+        float ev = hdr_exposure_compensation;
+        if(exposure_enabled != 0)
+            ev += texelFetch(exposure_image,ivec2(0),0).r;
+        vec3 hdr = max(color*exp2(clamp(ev,-5.0,5.0)),vec3(0.0));
+
+        // Map luminance rather than R/G/B independently to retain hue.
+        // Compress any out-of-gamut chroma toward mapped luminance instead
+        // of clipping the strongest RGB channel into an oversaturated color.
+        float lum = dot(hdr,vec3(0.2126,0.7152,0.0722));
+        float mapped_lum = filmic_luminance(lum);
+        vec3 mapped = hdr*(mapped_lum/max(lum,0.00001));
+        float peak = max(max(mapped.r,mapped.g),mapped.b);
+        float chroma_scale = min(1.0,
+            (1.0-mapped_lum)/max(peak-mapped_lum,0.00001));
+        mapped = vec3(mapped_lum)+(mapped-vec3(mapped_lum))*chroma_scale;
+
+        // Modest additional highlight desaturation; leave dim materials
+        // untouched, and preserve actual black.
+        float highlight_fade = 0.08*smoothstep(0.7,2.5,lum);
+        color = mix(mapped,vec3(mapped_lum),highlight_fade);
     }
 
     // Apply color balancing
