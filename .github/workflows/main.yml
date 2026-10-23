@@ -18,6 +18,12 @@ jobs:
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
 
+    - name: Bounded transparency sorter regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\triangle_sort_budget.cpp /Fe:triangle_sort_budget_test.exe
+        triangle_sort_budget_test.exe
+
     - name: Material transition regression tests
       shell: cmd
       run: |

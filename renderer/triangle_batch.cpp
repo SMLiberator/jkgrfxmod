@@ -1,5 +1,7 @@
 #include "triangle_batch.hpp"
 #include "base/log.hpp"
+#include "triangle_sort_budget.hpp"
+#include <cmath>
 
 jkgm::triangle_vertex::triangle_vertex()
     : pos(point<4, float>::zero())
@@ -91,12 +93,31 @@ namespace jkgm {
     namespace {
         constexpr float dist_threshold = 0.001f;
 
+        // Fallback uses the same eye-space W convention as do_fast_partition.
+        // Avoid non-finite sort keys violating std::sort's ordering contract.
+        float approximate_depth(triangle const &tri) {
+            auto finite_w=[](float w){ return std::isfinite(w) ? w : 0.0f; };
+            return (finite_w(get<w>(tri.v0.pos)) / 3.0f) +
+                   (finite_w(get<w>(tri.v1.pos)) / 3.0f) +
+                   (finite_w(get<w>(tri.v2.pos)) / 3.0f);
+        }
+
         template <class ItT>
-        void do_partition(ItT it_begin, ItT it_end)
+        bool guard_sort(ItT begin,ItT end,triangle_sort_budget &budget,
+                        unsigned depth,unsigned stalled)
         {
-            if(it_begin == it_end) {
-                return;
-            }
+            auto const n=static_cast<size_t>(std::distance(begin,end));
+            if(n<2U) return false;
+            if(budget.permit(n,depth,stalled)) return true;
+            budget.fallback(begin,end,approximate_depth);
+            return false;
+        }
+
+        template <class ItT>
+        void do_partition(ItT it_begin, ItT it_end,triangle_sort_budget &budget,
+                          unsigned depth,unsigned stalled)
+        {
+            if(!guard_sort(it_begin,it_end,budget,depth,stalled)) return;
 
             // Separate triangles into occluded-by, ambiguous, and occludes
             auto &a = *it_begin;
@@ -174,21 +195,22 @@ namespace jkgm {
 
             if(segs_remaining <= 1) {
                 // All remaining triangles are ambiguous with this pivot.
-                do_partition(it_begin + 1, it_end);
+                // Try a few different pivots before conceding a genuinely
+                // ambiguous range. This bounds degenerate identical planes.
+                do_partition(it_begin + 1,it_end,budget,depth+1U,stalled+1U);
                 return;
             }
 
-            do_partition(it_begin, split_it);
-            do_partition(split_it, split_jt);
-            do_partition(split_jt, it_end);
+            do_partition(it_begin,split_it,budget,depth+1U,0U);
+            do_partition(split_it,split_jt,budget,depth+1U,0U);
+            do_partition(split_jt,it_end,budget,depth+1U,0U);
         }
 
         template <class ItT>
-        void do_mid_partition(ItT it_begin, ItT it_end)
+        void do_mid_partition(ItT it_begin, ItT it_end,
+                              triangle_sort_budget &budget,unsigned depth)
         {
-            if(it_begin == it_end) {
-                return;
-            }
+            if(!guard_sort(it_begin,it_end,budget,depth,0U)) return;
 
             // Partition triangles by a triangle
             auto &a = *it_begin;
@@ -248,21 +270,20 @@ namespace jkgm {
 
             if(segs_remaining <= 1) {
                 // All remaining triangles are ambiguous with this pivot.
-                do_partition(it_begin, it_end);
+                do_partition(it_begin,it_end,budget,depth+1U,0U);
                 return;
             }
 
-            do_mid_partition(it_begin, split_it);
-            do_partition(split_it, split_jt);
-            do_mid_partition(split_jt, it_end);
+            do_mid_partition(it_begin,split_it,budget,depth+1U);
+            do_partition(split_it,split_jt,budget,depth+1U,0U);
+            do_mid_partition(split_jt,it_end,budget,depth+1U);
         }
 
         template <class ItT>
-        void do_fast_partition(ItT it_begin, ItT it_end)
+        void do_fast_partition(ItT it_begin, ItT it_end,
+                               triangle_sort_budget &budget,unsigned depth)
         {
-            if(it_begin == it_end) {
-                return;
-            }
+            if(!guard_sort(it_begin,it_end,budget,depth,0U)) return;
 
             // Partition triangles by the midpoint of the space.
             // Note that the eye space depth coordinate is stored in W, not in Z.
@@ -332,13 +353,13 @@ namespace jkgm {
 
             if(segs_remaining <= 1) {
                 // Remaining triangles can't be separated this way
-                do_mid_partition(it_begin, it_end);
+                do_mid_partition(it_begin,it_end,budget,depth+1U);
                 return;
             }
 
-            do_fast_partition(it_begin, split_it);
-            do_mid_partition(split_it, split_jt);
-            do_fast_partition(split_jt, it_end);
+            do_fast_partition(it_begin,split_it,budget,depth+1U);
+            do_mid_partition(split_it,split_jt,budget,depth+1U);
+            do_fast_partition(split_jt,it_end,budget,depth+1U);
         }
     }
 }
@@ -350,6 +371,11 @@ void jkgm::sorted_triangle_batch::sort()
 
 void jkgm::sorted_triangle_batch::sort_from(size_t first)
 {
+    fallback_groups=0U;
+    fallback_triangles=0U;
     if(first >= size()) return;
-    do_fast_partition(begin() + first, end());
+    triangle_sort_budget budget;
+    do_fast_partition(begin()+first,end(),budget,0U);
+    fallback_groups=budget.fallback_groups;
+    fallback_triangles=budget.fallback_triangles;
 }

@@ -72,11 +72,13 @@ namespace jkgm {
     };
 
     class sorted_triangle_batch : public triangle_batch {
-    protected:
-        std::vector<triangle> buffer;
-        size_t num_triangles = 0U;
+    private:
+        uint64_t fallback_groups=0U;
+        uint64_t fallback_triangles=0U;
 
     public:
+        uint64_t sort_fallback_groups() const { return fallback_groups; }
+        uint64_t sort_fallback_triangles() const { return fallback_triangles; }
         void sort() override;
         // Leave [begin, begin+first) in submission order (depth-writing
         // cutouts); painter-sort only the remaining blended triangles.

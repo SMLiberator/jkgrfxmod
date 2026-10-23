@@ -622,6 +622,12 @@ namespace jkgm {
                      " peaks=", peak_sort_opaque, "/", peak_sort_trans,
                      " upload_us=", avg(profile_stage::upload),
                      " nativeMAT_us=", avg(profile_stage::mat_resolve));
+            LOG_INFO("PERF transparent_sort_fallback groups=",
+                     profile_window.sort_fallback_groups,
+                     " triangles=",profile_window.sort_fallback_triangles,
+                     " frames=",profile_window.sort_fallback_frames,
+                     "/",frames,
+                     " NOTE=approximate_eye_depth_only_on_budget_exhaustion");
             LOG_INFO("PERF passes_us opaque=", avg(profile_stage::opaque_pass),
                      " transparent=", avg(profile_stage::transparent_pass),
                      " post_swap=", avg(profile_stage::present_swap),
@@ -3692,6 +3698,18 @@ namespace jkgm {
                 world_transparent_batch.sort_from(cutout_count);
                 world_flare_batch.sort();
                 gun_transparent_batch.sort();
+                if(profiling) {
+                    profile_frame.sort_fallback_groups=
+                        world_transparent_batch.sort_fallback_groups()+
+                        world_flare_batch.sort_fallback_groups()+
+                        gun_transparent_batch.sort_fallback_groups();
+                    profile_frame.sort_fallback_triangles=
+                        world_transparent_batch.sort_fallback_triangles()+
+                        world_flare_batch.sort_fallback_triangles()+
+                        gun_transparent_batch.sort_fallback_triangles();
+                    if(profile_frame.sort_fallback_groups)
+                        ++profile_frame.sort_fallback_frames;
+                }
             }
             {
                 profile_scope timer(profiling,

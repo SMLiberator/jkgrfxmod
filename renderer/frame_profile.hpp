@@ -17,6 +17,7 @@ inline size_t profile_idx(profile_stage s) { return static_cast<size_t>(s); }
 struct profile_sample {
   std::array<uint64_t, profile_stage_count> timings{};
   uint64_t period_us=0, present_us=0, tris=0, trans_tris=0, draw_batches=0, binds=0;
+  uint64_t sort_fallback_groups=0, sort_fallback_triangles=0, sort_fallback_frames=0;
   // Time outside the replacement renderer, measured at JK's Execute/Flip boundary.
   // These intervals also include any simulation/COG/driver work, not just 3DO processing.
   uint64_t before_first_execute_us=0, between_executes_us=0, after_last_execute_us=0;
@@ -41,6 +42,9 @@ struct profile_sample {
     for(size_t i=0;i<timings.size();++i) timings[i]+=o.timings[i];
     period_us+=o.period_us; present_us+=o.present_us; tris+=o.tris;
     trans_tris+=o.trans_tris; draw_batches+=o.draw_batches; binds+=o.binds;
+    sort_fallback_groups+=o.sort_fallback_groups;
+    sort_fallback_triangles+=o.sort_fallback_triangles;
+    sort_fallback_frames+=o.sort_fallback_frames;
     before_first_execute_us+=o.before_first_execute_us;
     between_executes_us+=o.between_executes_us;
     after_last_execute_us+=o.after_last_execute_us;

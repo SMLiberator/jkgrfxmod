@@ -752,6 +752,26 @@ COG fades are not reset by showing a menu. The menu also skips the
 bloom compositor's intermediate render targets, rather than just
 zeroing the bloom weights.
 
+
+### Native transparent triangle sorter: bounded worst-case
+
+Translucent native triangles continue to use the original depth/plane-aware
+geometric partitioning in ordinary cases. Very overlapping or coplanar
+surfaces could previously trigger deeply recursive full-range sorts without
+making progress. The sorter now limits the total classified elements per
+batch to 98,304 and recursion to 48 levels, with at most eight consecutively
+unproductive pivots. Only a partition that exhausts one of these limits is
+ordered approximately by eye-space W (matching the existing near/far sign);
+other partitions retain their geometric order. Alpha-masked depth-writing
+triangles preceding the blended range are never affected.
+
+With `"profile_renderer": true`, the `PERF transparent_sort_fallback` line
+records the fallback partition count, affected triangle count and frames
+requiring a fallback. Occasional nonzero values are expected when strongly
+overlapping transparent faces become ambiguous. If a particular visual effect
+sorts incorrectly, capture the scene and profiler line so we can refine that
+case without restoring unbounded recursion.
+
 ## Optional CPU/geometry frame profiler
 
 Set `"profile_renderer": true` in `jkgm.json` and configure `log_path`.
