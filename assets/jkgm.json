@@ -31,6 +31,5 @@
     "enable_spotlights": false,
     "enable_sprite_decals": false,
     "enable_mesh_collision": false,
-    "use_vanilla_renderer": false,
-    "projected_decal": null
+    "use_vanilla_renderer": false
 }

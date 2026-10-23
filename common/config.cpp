@@ -133,36 +133,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("optimize_hud_uploads")) {
             j.at("optimize_hud_uploads").get_to(rv->optimize_hud_uploads);
         }
-        // Initial projector prototype: one optional orthographic decal.
-        // Unknown/malformed geometries are ignored without changing level
-        // materials or installing extra native JK hooks.
-        if(j.contains("projected_decal") && !j.at("projected_decal").is_null()) {
-            auto const &entry=j.at("projected_decal");
-            projected_decal_config d;
-            entry.at("image").get_to(d.image);
-            if(entry.contains("position"))
-                entry.at("position").get_to(d.position);
-            if(entry.contains("direction"))
-                entry.at("direction").get_to(d.direction);
-            if(entry.contains("up"))
-                entry.at("up").get_to(d.up);
-            if(entry.contains("size"))
-                entry.at("size").get_to(d.size);
-            if(entry.contains("opacity"))
-                entry.at("opacity").get_to(d.opacity);
-            if(entry.contains("normal_threshold"))
-                entry.at("normal_threshold").get_to(d.normal_threshold);
-            if(entry.contains("blend")) {
-                std::string blend=entry.at("blend").get<std::string>();
-                if(blend=="alpha") d.blend=projected_decal_blend::alpha;
-                else if(blend=="multiply") d.blend=projected_decal_blend::multiply;
-                else if(blend=="additive") d.blend=projected_decal_blend::additive;
-                else LOG_WARNING("Unknown projected_decal blend; using multiply: ",blend);
-            }
-            projected_decal_basis basis;
-            if(prepare_projected_decal(d,basis)) rv->projected_decal=d;
-            else LOG_WARNING("Invalid projected_decal geometry/image/settings; projector disabled");
-        }
         if(j.contains("use_model_cache")) {
             j.at("use_model_cache").get_to(rv->use_model_cache);
         }

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "projected_decal.hpp"
 #include <memory>
 #include <optional>
 #include <string>
@@ -40,7 +39,6 @@ namespace jkgm {
         bool profile_renderer = false; // opt-in CPU and async GPU frame timings
         bool profile_auto_exposure = false; // optional blocking 1px readback diagnostics
         bool optimize_hud_uploads = true; // upload only changed HUD rows (disable for A/B test)
-        std::optional<projected_decal_config> projected_decal; // opt-in static depth projector
         bool use_model_cache = false; // cache 3DO meshes as persistent GPU geometry
         bool mesh_revision_tracking = false; // experimental JK.dll COG mutation tracking
         bool enable_spotlights = false; // COG MAT-based screen-space spotlights

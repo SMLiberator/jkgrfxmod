@@ -494,8 +494,6 @@ namespace jkgm {
 
         std::unique_ptr<opengl_state> ogs;
         // One opt-in, level/world-space projector for initial decal parity tests.
-        std::optional<srgb_texture_id> projected_decal_texture;
-        projected_decal_basis projected_decal_axes{};
         std::unordered_map<uint64_t,std::unique_ptr<gpu_3do_gl_mesh>> gpu_3do_gl_cache;
         std::unordered_map<uint64_t,uint64_t> gpu_3do_last_drawn;
         uint64_t gpu_3do_present_serial=0;
@@ -1004,15 +1002,6 @@ namespace jkgm {
             ogs = std::make_unique<opengl_state>(
                 conf_scr_res, internal_scr_res, actual_display_area, actual_menu_area, the_config);
             texture_cache = create_texture_cache(the_config);
-            if(the_config->projected_decal &&
-               prepare_projected_decal(*the_config->projected_decal,projected_decal_axes)) {
-                // Keep one owning SRGB texture reference for the game's lifetime.
-                // The decal is dormant until a valid active render camera exists.
-                projected_decal_texture=texture_cache->get_srgb_texture_from_filename(
-                    fs::path(the_config->projected_decal->image));
-                LOG_INFO("Projected decal ready: ",the_config->projected_decal->image);
-            }
-
             frame_compositor = create_renderer_compositor(the_config);
             frame_ao = create_renderer_ao(the_config, conf_scr_res);
             frame_screen = create_renderer_screen(the_config, conf_scr_res);
@@ -3128,13 +3117,10 @@ namespace jkgm {
             ogs->game_post_opaque_composite_program.set_occlusion_sampler(2);
             ogs->game_post_opaque_composite_program.set_depth_sampler(3);
             auto &prog=ogs->game_post_opaque_composite_program;
-            prog.disable_projected_decal();
             prog.set_spotlight_count(0);
-            // Share JK camera projection between the existing static decal
-            // and dynamically node-attached MAT spotlights.
+            // Reconstruct receiving surfaces for node-attached MAT spotlights.
             auto const cam=read_active_render_camera();
-            if(cam.valid && (the_config->projected_decal ||
-                             the_config->enable_spotlights)) {
+            if(cam.valid && the_config->enable_spotlights) {
                 float const h=std::tan(cam.fov*(3.14159265358979323846f/360.0f));
                 float const v=h*float(get<y>(conf_scr_res))/
                                   float(get<x>(conf_scr_res));
@@ -3146,24 +3132,6 @@ namespace jkgm {
                     point_axis(cam.right,h),
                     point_axis(cam.forward,0.0f),
                     point_axis(cam.up,v));
-                if(projected_decal_texture && the_config->projected_decal) {
-                    auto const &d=*the_config->projected_decal;
-                    prog.set_projected_decal(
-                        point_axis(d.position,0.0f),
-                        point_axis(projected_decal_axes.right,1.0f/d.size[0]),
-                        point_axis(projected_decal_axes.up,1.0f/d.size[1]),
-                        point_axis(projected_decal_axes.forward,1.0f/d.size[2]),
-                        make_point(d.opacity,d.normal_threshold,
-                                   float(static_cast<int>(d.blend)),0.0f),
-                        point_axis(cam.position,0.0f),
-                        point_axis(cam.right,h),
-                        point_axis(cam.forward,0.0f),
-                        point_axis(cam.up,v));
-                    gl::set_active_texture_unit(4);
-                    gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                     texture_cache->get_texture_handle(
-                                         *projected_decal_texture));
-                }
                 int active=0;
                 auto spots=the_config->enable_spotlights
                     ? collect_spotlights_for_frame()
@@ -3187,7 +3155,7 @@ namespace jkgm {
                     }
                 }
                 prog.set_spotlight_count(active);
-                if(active>0 || projected_decal_texture) {
+                if(active>0) {
                     gl::set_active_texture_unit(5);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
                                      frame_screen->get_resolved_normal_texture());
