@@ -453,6 +453,8 @@ namespace jkgm {
         config const *the_config;
 
         renderer_mode mode = renderer_mode::menu;
+        // Actual GDI/8-bit menu presentation need not switch display mode.
+        bool menu_frame_pending = false;
         size<2, int> conf_scr_res;
 
         size<2, int> internal_scr_res;
@@ -1300,8 +1302,11 @@ namespace jkgm {
 
         void end_frame()
         {
+            bool const presenting_menu = menu_frame_pending ||
+                                         mode==renderer_mode::menu;
+            menu_frame_pending = false;
             bool const measure=the_config->profile_renderer &&
-                               mode==renderer_mode::ingame;
+                               !presenting_menu;
             presentation_gpu_profile::completed_sample completed{};
             bool const gpu_timing=measure && present_gpu_queries.begin(completed);
             if(completed.ready) {
@@ -1325,13 +1330,14 @@ namespace jkgm {
             // and frame blending. Keep the source texture untouched for no-blur mode.
             gl::texture_view scene = frame_screen->get_resolved_final_texture();
 
-            if(mode == renderer_mode::menu) {
+            if(presenting_menu) {
                 // Menus are palette-sRGB imagery drawn into our linear screen
                 // buffer. Present directly: GL_FRAMEBUFFER_SRGB performs the
                 // usual linear->sRGB conversion, but there is no game bloom,
                 // grading, vignette, grain, exposure, blur or frame trails.
                 // Skipping the compositor also avoids the bloom GPU work.
                 ogs->retro_mode_active=false;
+                ogs->auto_exposure_scene=false;
                 ogs->auto_exposure_history_valid=false;
                 ogs->frame_blend_history_valid=false;
                 gl::bind_framebuffer(gl::framebuffer_bind_target::any,
@@ -1341,8 +1347,9 @@ namespace jkgm {
                 gl::disable(gl::capability::depth_test);
                 gl::disable(gl::capability::cull_face);
                 gl::set_depth_mask(false);
-                ogs->menu_program.use_program();
-                ogs->menu_program.set_menu_sampler(0);
+                // The fullscreen quad has positions only; its shader generates UVs.
+                ogs->menu_present_program.use_program();
+                ogs->menu_present_program.set_menu_sampler(0);
                 gl::set_active_texture_unit(0);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,scene);
                 gl::bind_vertex_array(ogs->postmdl.vao);
@@ -1541,6 +1548,7 @@ namespace jkgm {
 
         void present_menu_gdi() override
         {
+            menu_frame_pending=true;
             if(!indexed_bitmap_source) {
                 end_frame();
                 return;
@@ -1580,6 +1588,7 @@ namespace jkgm {
 
         void present_menu_surface_body()
         {
+            menu_frame_pending=true;
             // Copy new data from menu source
             for(size_t idx = 0U; idx < ogs->menu_texture_data.size(); ++idx) {
                 uint8_t index = ddraw1_primary_menu_surface.buffer[idx];

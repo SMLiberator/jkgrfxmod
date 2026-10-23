@@ -262,6 +262,22 @@ The `env_map` field is optional.
 
 The `env_map` field references an equirectangular environment image (see Environment map above) that this material reflects instead of the default environment.
 
+##### depth_bias
+
+The optional `depth_bias` property controls native model raster depth preference
+without moving the actual geometry. The default is `0.0` (unchanged).
+Positive values favor the surface toward the camera; negative values push
+it away. Accepted values are finite floats in `[-16.0, 16.0]`.
+
+For eye planes behind alpha-masked eye sockets, try `0.5` or `1.0` and
+adjust cautiously. The units are OpenGL polygon offset units, not model
+world units. A large bias can expose surfaces through surrounding geometry.
+This setting does not change transparency sort order or silhouettes.
+
+This field is accepted per material or as a pack-wide default, and preserved
+in the generated `metadata.json`. The experimental GPU-resident 3DO renderer
+does not yet support it.
+
 ##### alpha_mode
 
 The `alpha_mode` field is optional.

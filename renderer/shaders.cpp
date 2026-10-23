@@ -85,8 +85,10 @@ void jkgm::opengl_shader::use_program()
     gl::use_program(the_program);
 }
 
-jkgm::shaders::menu_shader::menu_shader(fs::path const &data_root)
-    : opengl_shader("menu", data_root / "shaders/game.vert", data_root / "shaders/menu.frag")
+jkgm::shaders::menu_shader::menu_shader(fs::path const &data_root, bool fullscreen)
+    : opengl_shader(fullscreen ? "menu_present" : "menu",
+                    data_root / (fullscreen ? "shaders/postprocess.vert" : "shaders/game.vert"),
+                    data_root / "shaders/menu.frag")
     , tex(gl::get_uniform_location(the_program, "tex"))
 {
 }

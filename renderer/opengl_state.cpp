@@ -384,6 +384,7 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , auto_exposure_sensitivity(the_config->auto_exposure_sensitivity)
     , auto_exposure_diagnostics(the_config->profile_auto_exposure)
     , menu_program(data_root)
+    , menu_present_program(data_root, true)
     , game_opaque_pass_program(data_root)
     , game_post_ssao_program(data_root)
     , game_post_opaque_composite_program(data_root)

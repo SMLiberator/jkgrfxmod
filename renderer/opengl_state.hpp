@@ -136,6 +136,8 @@ namespace jkgm {
         bool auto_exposure_diagnostics = false;
 
         shaders::menu_shader menu_program;
+        // Fullscreen copy uses position-derived UVs (post_model has no UV attribute).
+        shaders::menu_shader menu_present_program;
 
         shaders::game_opaque_pass_shader game_opaque_pass_program;
         std::unique_ptr<shaders::gpu_3do_preview_shader> gpu_3do_preview_program;

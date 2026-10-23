@@ -727,8 +727,12 @@ native JK triangles; the experimental GPU-cached 3DO path is unchanged.
 
 ## Unprocessed menu presentation
 
-Menu surfaces now bypass gameplay post-processing entirely. JK's
-palette-based menu texture is still decoded as sRGB and presented
+Menu surfaces now bypass gameplay post-processing entirely, including
+8-bit/GDI pause menus that are presented while the display mode still reports
+gameplay. The fullscreen menu-present shader derives its texture coordinates
+from the fullscreen quad positions (the ordinary menu shader expects explicit
+UVs, which caused a blank startup menu). JK's palette-based menu texture is
+still decoded as sRGB and presented
 through the normal linear-to-sRGB framebuffer conversion, but menus
 skip bloom, exposure, grading, film grain, vignette, spatial blur,
 and frame-trail accumulation. Gameplay post settings and their

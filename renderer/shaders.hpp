@@ -33,7 +33,7 @@ namespace jkgm {
             gl::uniform_location_id tex;
 
         public:
-            explicit menu_shader(fs::path const &data_root);
+            explicit menu_shader(fs::path const &data_root, bool fullscreen = false);
 
             void set_menu_sampler(int sampler);
         };

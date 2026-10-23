@@ -74,6 +74,7 @@ namespace jkgm {
         std::optional<std::string> blend_mode;
         std::optional<float> fluid_thickness;
         std::optional<float> alpha_cutoff;
+        std::optional<float> depth_bias;
     };
 
     class out_material_pack {
@@ -619,6 +620,18 @@ namespace jkgm {
             rv->fluid_thickness = static_cast<float>(v);
         }
 
+        if(doc.contains("depth_bias")) {
+            auto const &v = doc["depth_bias"];
+            if(!v.is_number() ||
+               !std::isfinite(static_cast<double>(v)) ||
+               !std::isfinite(static_cast<float>(v)) ||
+               std::abs(static_cast<float>(v)) > 16.0f) {
+                LOG_ERROR("Material '", rv->name,
+                          "' depth_bias must be finite and in [-16,16]");
+                throw std::runtime_error("Invalid script");
+            }
+            rv->depth_bias = static_cast<float>(v);
+        }
         if(doc.contains("alpha_cutoff")) {
             if(rv->alpha_mode != out_material_alpha_mode::mask) {
                 LOG_ERROR(
@@ -804,6 +817,9 @@ namespace jkgm {
         }
         if(mat.fluid_thickness.has_value()) {
             rv["fluid_thickness"] = *mat.fluid_thickness;
+        }
+        if(mat.depth_bias.has_value()) {
+            rv["depth_bias"] = *mat.depth_bias;
         }
 
         if(mat.alpha_mode.has_value() && mat.alpha_cutoff.has_value()) {
@@ -1050,6 +1066,7 @@ namespace jkgm {
                     "blend_mode",
                     "fluid_thickness",
                     "alpha_cutoff",
+                    "depth_bias",
                     }) {
                         if(!effective.contains(property) && script_doc.contains(property)) {
                             effective[property] = script_doc[property];
