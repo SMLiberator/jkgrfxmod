@@ -102,7 +102,19 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
             gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
     }
 
-    gl::bind_framebuffer(gl::framebuffer_bind_target::any, ogs->screen_postbuffer1.fbo);
+    // Without trails or Retro quantization, the completed linear frame can
+    // be drawn straight to the sRGB window. Avoid the otherwise redundant
+    // full-resolution history write and subsequent copy to the backbuffer.
+    bool const direct_present=!ogs->enable_trails && !ogs->retro_mode_active;
+    if(direct_present) {
+        gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                             gl::default_framebuffer);
+        ogs->frame_blend_history_valid=false;
+    }
+    else {
+        gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                             ogs->screen_postbuffer1.fbo);
+    }
     gl::set_viewport(make_box(make_point(0, 0), screen_size));
 
     gl::set_clear_color(solid(colors::black));
@@ -143,5 +155,11 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
     gl::draw_elements(
         gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
 
-    present_frame_blend(ogs, screen_size);
+    if(direct_present) {
+        // Match present_frame_blend's GL depth state for the next frame.
+        gl::set_depth_mask(true);
+    }
+    else {
+        present_frame_blend(ogs, screen_size);
+    }
 }

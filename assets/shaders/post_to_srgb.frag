@@ -50,11 +50,14 @@ void main()
     vec4 samp = texelFetch(fbuf_image, sc, 0);
 
     vec4 bloom_samp = vec4(0.0);
-    bloom_samp += texture(bloom_fbuf[0], vp_texcoords) * bloom_weight[0];
-    bloom_samp += texture(bloom_fbuf[1], vp_texcoords) * bloom_weight[1];
-    bloom_samp += texture(bloom_fbuf[2], vp_texcoords) * bloom_weight[2];
-    bloom_samp += texture(bloom_fbuf[3], vp_texcoords) * bloom_weight[3];
-    bloom_samp += texture(bloom_fbuf[4], vp_texcoords) * bloom_weight[4];
+    // Each weight is uniform across the frame. Do not issue expensive
+    // texture fetches for disabled bloom layers (especially the basic
+    // compositor, which has no bloom images at all).
+    if(bloom_weight[0] > 0.0) bloom_samp += texture(bloom_fbuf[0],vp_texcoords)*bloom_weight[0];
+    if(bloom_weight[1] > 0.0) bloom_samp += texture(bloom_fbuf[1],vp_texcoords)*bloom_weight[1];
+    if(bloom_weight[2] > 0.0) bloom_samp += texture(bloom_fbuf[2],vp_texcoords)*bloom_weight[2];
+    if(bloom_weight[3] > 0.0) bloom_samp += texture(bloom_fbuf[3],vp_texcoords)*bloom_weight[3];
+    if(bloom_weight[4] > 0.0) bloom_samp += texture(bloom_fbuf[4],vp_texcoords)*bloom_weight[4];
 
     vec3 color = samp.rgb + bloom_samp.rgb;
     if(exposure_enabled != 0) {
@@ -77,24 +80,16 @@ void main()
     //color.g = dot(color, vec3(0.494, 0.769, 0.686));
     //color.b = dot(color, vec3(0.494, 0.769, 0.686));
     
-    // Calculate distance from center (0.5, 0.5)
-    vec2 uv = vp_texcoords -0.5;
-    // How far the vignette has closed in: 1 = classic size, 0 = fully closed (strength 2)
     float vignette_strength = vignette_params.w;
-    float iris = 1.0 - clamp(vignette_strength - 1.0, 0.0, 1.0);
-
-    // 0 in the centre, rising towards the edges. At iris = 1 this is the same curve as the
-    // original 1.0 - smoothstep(0.8, 0.4, length(uv)), written with the edges in valid order.
-    float edge = smoothstep(0.4 * iris, max(0.8 * iris, 0.0001), length(uv));
-
-    // Pull the edges towards the vignette color. The color is given as the value you would see
-    // on screen, so convert it to linear like the rest of the pipeline.
+    // Vignette off is the common case: bypass sqrt/smoothstep/pow entirely.
+    // Keep the exact original curve when the vignette is enabled.
     if(vignette_strength > 0.0) {
+        vec2 uv = vp_texcoords - 0.5;
+        float iris = 1.0 - clamp(vignette_strength - 1.0, 0.0, 1.0);
+        float edge = smoothstep(0.4 * iris, max(0.8 * iris, 0.0001), length(uv));
         vec3 vignette_color = pow(clamp(vignette_params.rgb, 0.0, 1.0), vec3(2.2));
-
         float cover = clamp(edge * min(vignette_strength, 1.0), 0.0, 1.0);
-        cover = mix(cover, 1.0, step(1.0, vignette_strength - 1.0)); // strength 2: everything
-
+        cover = mix(cover, 1.0, step(1.0, vignette_strength - 1.0));
         color = mix(color, vignette_color, cover);
     }
 

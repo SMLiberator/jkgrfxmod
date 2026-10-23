@@ -737,6 +737,20 @@ face at grazing angles and cannot correct geometry silhouettes or
 transparent face sort order. The initial implementation only affects
 native JK triangles; the experimental GPU-cached 3DO path is unchanged.
 
+## Fast compositor presentation
+
+When both temporal trails (`enable_trails`) and Retro CMP quantization are off,
+the final color/post-FX shader now renders directly to the sRGB backbuffer,
+skipping a redundant fullscreen history write and copy. Enabled bloom, film
+grain, exposure and color filters still use their original shaders and order.
+The direct path explicitly invalidates old trail history, so re-enabling trails
+cannot blend a stale frame. With trails or Retro enabled, the original
+two-stage history/quantization path is preserved. The non-bloom compositor
+also skips sampling unused bloom maps, and disabled vignette avoids expensive
+per-fragment distance calculations. Check `PERF present_gpu_us compositor=`
+before/after in the same scene; an FPS gain is not guaranteed if the game is
+CPU-bound.
+
 ## Unprocessed menu presentation
 
 Menu surfaces now bypass gameplay post-processing entirely, including
