@@ -736,6 +736,27 @@ namespace jkgm {
         triangle_batch *current_triangle_batch = &world_batch;
 
         material_instance_id current_material = material_instance_id(0U);
+        float active_native_depth_bias = 0.0f;
+
+        // Polygon offset is a depth-buffer preference, not a mesh transform.
+        // A zero offset disables it entirely so unrelated draws retain JK
+        // depth semantics. Avoid redundant GL state changes on material binds.
+        void set_native_depth_bias(float bias)
+        {
+            if(bias == active_native_depth_bias) return;
+            if(bias == 0.0f) {
+                glDisable(GL_POLYGON_OFFSET_FILL);
+            }
+            else {
+                if(active_native_depth_bias == 0.0f)
+                    glEnable(GL_POLYGON_OFFSET_FILL);
+                // OpenGL standard depth increases away from the camera.
+                // Positive material bias moves a face closer for depth tests;
+                // factor handles grazing angles and units handle coplanarity.
+                glPolygonOffset(-bias, -bias);
+            }
+            active_native_depth_bias = bias;
+        }
 
     public:
         explicit renderer_impl(HINSTANCE dll_instance, config const *the_config)
@@ -1303,6 +1324,35 @@ namespace jkgm {
             // Optional depth/peripheral blur occurs before bloom, color processing
             // and frame blending. Keep the source texture untouched for no-blur mode.
             gl::texture_view scene = frame_screen->get_resolved_final_texture();
+
+            if(mode == renderer_mode::menu) {
+                // Menus are palette-sRGB imagery drawn into our linear screen
+                // buffer. Present directly: GL_FRAMEBUFFER_SRGB performs the
+                // usual linear->sRGB conversion, but there is no game bloom,
+                // grading, vignette, grain, exposure, blur or frame trails.
+                // Skipping the compositor also avoids the bloom GPU work.
+                ogs->retro_mode_active=false;
+                ogs->auto_exposure_history_valid=false;
+                ogs->frame_blend_history_valid=false;
+                gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                     gl::default_framebuffer);
+                gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+                gl::disable(gl::capability::blend);
+                gl::disable(gl::capability::depth_test);
+                gl::disable(gl::capability::cull_face);
+                gl::set_depth_mask(false);
+                ogs->menu_program.use_program();
+                ogs->menu_program.set_menu_sampler(0);
+                gl::set_active_texture_unit(0);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,scene);
+                gl::bind_vertex_array(ogs->postmdl.vao);
+                gl::draw_elements(gl::element_type::triangles,
+                    ogs->postmdl.num_indices,gl::index_type::uint32);
+                gl::set_depth_mask(true);
+                SwapBuffers(hDC);
+                begin_frame();
+                return;
+            }
             {
                 profile_scope cpu(measure,profile_frame.timings[
                     profile_idx(profile_stage::present_blur)]);
@@ -1824,6 +1874,10 @@ namespace jkgm {
             if(the_config->profile_renderer) ++profile_frame.binds;
             // Only the transparent shader actually declares blend_mode; setting
             // it on the opaque shader is ignored (uniform location -1).
+            // Native triangle batches only: custom GPU-resident decals, flares,
+            // post passes and menus never inherit this raster state.
+            set_native_depth_bias(id.get()!=0U
+                ? vidmem_texture_surfaces.at(id.get()-1)->depth_bias : 0.0f);
             auto const blend_mode = get_material_blend_mode(id);
             prog->set_blend_mode(static_cast<int>(blend_mode));
             prog->set_fluid_thickness(
@@ -2140,6 +2194,9 @@ namespace jkgm {
                 if(the_config->profile_renderer) ++profile_frame.draw_batches;
                 gl::draw_arrays(gl::element_type::triangles, curr_offset, num_verts);
             }
+            // A native batch must not leak polygon offset into GPU sprite
+            // decals, post-processing, HUD, or menu rendering.
+            set_native_depth_bias(0.0f);
         }
 
         // Engine sideband normal is stored in view axes x=right, y=forward, z=up.

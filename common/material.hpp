@@ -80,6 +80,9 @@ namespace jkgm {
 
         material_alpha_mode alpha_mode = material_alpha_mode::blend;
         material_blend_mode blend_mode = material_blend_mode::normal;
+        // Native raster depth preference in OpenGL polygon-offset units.
+        // Positive pulls geometry toward the camera; 0 preserves vanilla depth.
+        float depth_bias = 0.0f;
         // Beer-Lambert absorption per game unit of thickness through a fluid.
         // Higher values make the albedo opaque at shorter viewing distances.
         float fluid_thickness = 0.25f;

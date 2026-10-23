@@ -75,6 +75,7 @@ namespace jkgm {
 
         material_alpha_mode alpha_mode = material_alpha_mode::blend;
         material_blend_mode blend_mode = material_blend_mode::normal;
+        float depth_bias = 0.0f;
         float fluid_thickness = 0.25f;
         float alpha_cutoff = 0.5f;
 

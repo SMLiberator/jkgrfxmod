@@ -710,6 +710,32 @@ for the material and reset COG verbs, even if it is `0.0`.
 Repeated set/reset sequences are exercised by the lightweight native
 `tests/runtime_material_state.cpp` regression test in Windows CI.
 
+## Material depth bias for overlapping model surfaces
+
+A replacement material may specify `"depth_bias": 1.0` in its
+`metadata.json` entry (default `0.0`, valid range `-16.0` to `16.0`).
+Positive values favor that native-rendered surface in depth tests by
+pulling its depth slightly toward the camera; negative values push it
+away. This uses raster `glPolygonOffset` (slope-aware factor and depth
+units), **not** a geometric displacement, and restores the standard GL
+state at the end of each native triangle batch. Eye planes behind
+alpha-masked eye sockets are an intended use case: start at 0.5–1.0 and
+increase cautiously. Large biases can pull eyes visibly through the
+face at grazing angles and cannot correct geometry silhouettes or
+transparent face sort order. The initial implementation only affects
+native JK triangles; the experimental GPU-cached 3DO path is unchanged.
+
+## Unprocessed menu presentation
+
+Menu surfaces now bypass gameplay post-processing entirely. JK's
+palette-based menu texture is still decoded as sRGB and presented
+through the normal linear-to-sRGB framebuffer conversion, but menus
+skip bloom, exposure, grading, film grain, vignette, spatial blur,
+and frame-trail accumulation. Gameplay post settings and their
+COG fades are not reset by showing a menu. The menu also skips the
+bloom compositor's intermediate render targets, rather than just
+zeroing the bloom weights.
+
 ## Optional CPU/geometry frame profiler
 
 Set `"profile_renderer": true` in `jkgm.json` and configure `log_path`.

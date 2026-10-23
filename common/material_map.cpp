@@ -249,6 +249,13 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
         if(em.contains("alpha_cutoff")) {
             mat->alpha_cutoff = em["alpha_cutoff"];
         }
+        if(em.contains("depth_bias")) {
+            float const value = em["depth_bias"].get<float>();
+            if(!std::isfinite(value) || std::abs(value) > 16.0f) {
+                throw std::runtime_error("Invalid depth_bias in metadata.json (range -16..16)");
+            }
+            mat->depth_bias = value;
+        }
 
         auto mat_index = materials.size();
         materials.push_back(std::move(mat));
