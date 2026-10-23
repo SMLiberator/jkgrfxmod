@@ -4226,11 +4226,16 @@ namespace {
             auto const &surface=has_alpha?t.alpha_mips[0]:t.opaque_mips[0];
             return surface.texture_loaded!=0 && surface.texture_handle>0;
         };
-        bool const previously_resident=resident(texture);
-        // Always call the verified native function. For an already-resident
-        // texture it updates std3D's cache/LRU frame counter, preventing
-        // spotlights that are never drawn on geometry from being evicted.
-        // For an unloaded texture it creates the usual DDraw-backed surface.
+        // Never invoke native std3D for an already-resident texture.
+        // JK can temporarily detach its D3D device during pause/unpause
+        // while this native material still reports a valid cached handle.
+        // Touching rdMaterial_AddToTextureCache in that window can enter
+        // std3D's uploader with a null internal device pointer.
+        if(resident(texture))
+            return true;
+        // Only the explicit SetSpotlight request can enter the native loader
+        // for an *unloaded* MAT. In particular, frame rendering must not
+        // refresh native texture-cache LRU: that was the unsafe call site.
         auto const native_load=reinterpret_cast<jkgm_rd_material_cache_fn>(
             jkgm_mat_cache_addr);
         if(!native_load(reinterpret_cast<void *>(mat_address),
@@ -4240,9 +4245,8 @@ namespace {
         native_texture updated{};
         if(!read_object(info.texture,updated) || !resident(updated))
             return false;
-        if(!previously_resident)
-            LOG_INFO("Spotlight MAT loaded on demand: id=",mat_id,
-                     " cel=",cel," alpha=",has_alpha);
+        LOG_INFO("Spotlight MAT loaded on demand: id=",mat_id,
+                 " cel=",cel," alpha=",has_alpha);
         return true;
     }
     // SetSpotlight(thing,mat,vector(width,height,range),localOffset).
@@ -4317,12 +4321,18 @@ namespace {
                         "or invalid strengths/fade (0..16, 0..3600s)");
     }
 
-    // ResetSpotlight(thing): remove the Thing's spotlight.
-    void __cdecl cog_reset_spotlight(void *ctx)
+    // ClearSpotlight(thing): unregister this Thing's projector immediately.
+    // ResetSpotlight remains an alias for older COG scripts. This erases the
+    // request without touching the native MAT or Direct3D texture cache.
+    void __cdecl cog_clear_spotlight(void *ctx)
     {
         void *thing=cog_pop_thing(ctx);
-        if(thing)jkgm::get_spotlight_registry().erase_thing(
-            reinterpret_cast<uintptr_t>(thing));
+        bool const removed=thing &&
+            jkgm::get_spotlight_registry().erase_thing(
+                reinterpret_cast<uintptr_t>(thing));
+        LOG_DEBUG("COG ClearSpotlight: thing=",
+                  reinterpret_cast<uintptr_t>(thing),
+                  " removed=",removed);
     }
 
     void __cdecl cog_reset_global_env_map(void *ctx)
@@ -4474,7 +4484,8 @@ namespace {
         cog_verb_entry{"resetperipheralblur", cog_reset_peripheral_blur},
         cog_verb_entry{"setspotlight", cog_set_spotlight},
         cog_verb_entry{"setspotlightintensities", cog_set_spotlight_intensities},
-        cog_verb_entry{"resetspotlight", cog_reset_spotlight},
+        cog_verb_entry{"clearspotlight", cog_clear_spotlight},
+        cog_verb_entry{"resetspotlight", cog_clear_spotlight},
         cog_verb_entry{"setglobalenvmap", cog_set_global_env_map},
         cog_verb_entry{"resetglobalenvmap", cog_reset_global_env_map},
         cog_verb_entry{"setmatenvmap", cog_set_mat_env_map},
@@ -4561,9 +4572,11 @@ std::vector<jkgm::spotlight_instance> jkgm::collect_spotlights_for_frame()
         std::memcpy(m.data(),thing+0x88,9*sizeof(float));
         std::memcpy(m.data()+9,thing+0xb8,3*sizeof(float));
         if(!get_thing_node_pose(m,pose))continue;
-        // The first COG call may run before OpenGL/D3D initialization.
-        // A resident MAT is a cheap no-op in the native cache function.
-        spotlight_warm_native_mat(request.material);
+        // IMPORTANT: Never call the native MAT preloader from frame rendering.
+        // DirectDraw device teardown/recreation during pause/unpause can leave
+        // native std3D internals null even while the spotlight's owner and MAT
+        // pointers remain readable. Resolve only currently resident images;
+        // native MAT loading remains an explicit SetSpotlight-time attempt.
         spotlight_instance instance{};
         if(spotlight_make_instance(request,pose,instance,GetTickCount()))
             instances.push_back(instance);

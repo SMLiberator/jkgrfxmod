@@ -119,7 +119,11 @@ int main()
     levels=spotlight_sample_intensities(current,11000U);
     assert(close(levels.light,1.0f) && close(levels.add,0.12f));
     assert(reg.snapshot().size()==1);
-    reg.erase_thing(a.thing);
+    assert(reg.erase_thing(a.thing));
+    assert(!reg.erase_thing(a.thing)); // idempotent; no stale projector
+    assert(reg.snapshot().empty());
+    assert(reg.set(a));
+    assert(reg.erase_thing(a.thing));
     assert(reg.snapshot().empty());
     return 0;
 }

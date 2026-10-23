@@ -579,7 +579,8 @@ SetSpotlight(car, headlightMat, '2.5 1.5 8', '-0.35 0.7 0.1');
 SetSpotlightIntensities(flare, 1.0, 0.12, 0.0); // current look
 SetSpotlightIntensities(flare, 1.5, 0.05, 0.5); // fade over 0.5 seconds
 SetSpotlightIntensities(car, 0.8, 0.0, 0.25); // diffuse only
-ResetSpotlight(flare); // remove this Thing's light
+ClearSpotlight(flare); // immediately remove this Thing's projector
+ResetSpotlight(flare); // compatibility alias for ClearSpotlight
 ```
 
 The projector's Look axis is its forward beam direction, and the offset
@@ -596,19 +597,30 @@ and **0.12**, preserving existing Spotlight visuals. Both accept
 strengths from 0 to 16 (not restricted to 0–1); `fadetimeSeconds`
 is 0 for immediate changes or up to 3600 for linear interpolation.
 Repeated calls start from the currently interpolated values, and
-`SetSpotlight` on the same Thing preserves an active fade. Call
+`SetSpotlight` on the same Thing preserves an active fade.
+`ClearSpotlight(thing)` removes the registered projector immediately
+without releasing its MAT; `ResetSpotlight` is the same operation.
+`RemoveSpotlight` was never a registered COG verb. Call
 `SetSpotlight` first; the intensities verb requires an active Spotlight.
 These contributions affect **opaque world and 3DO receivers** through
 the shared depth/normal buffer, independent of model caching. Transparency, shadows, specular lighting and volumetric beams
 are not yet implemented. The first version evaluates four lights
 fullscreen, so performance should be measured before increasing that cap.
 
-**Native MAT preload (experimental):** SetSpotlight now attempts to load
-its MAT's currently selected cel immediately, using the verified JKGM
-`rdMaterial_AddToTextureCache` entrypoint at `0x0044ACC0`. If the
-rendering device is not initialized when the COG verb runs, it retries
-during opaque composition. Active lights refresh the native texture-cache
-LRU even when their MAT is not rendered on any polygon. The function,
+**Native MAT preload (experimental):** SetSpotlight attempts to load
+its MAT's currently selected cel, using the verified JKGM
+`rdMaterial_AddToTextureCache` entrypoint at `0x0044ACC0`, **only if
+the MAT is not already resident**. Native calls are no longer retried
+or used to refresh the texture-cache LRU during frame rendering: JK's
+pause/unpause DirectDraw transitions can leave native std3D internals
+uninitialized, and those calls caused a null-pointer write in the native
+uploader. If a projector MAT is missing/evicted later, the spotlight
+temporarily does not draw and a warning requests that its MAT be loaded
+normally. Reissue SetSpotlight only after the game graphics are stable,
+or arrange for the MAT to be rendered on native geometry. This conservative
+change prioritizes avoiding crashes over unconditional offscreen MAT
+residency; a safer deferred asset-loading route may be introduced later.
+The function,
 its original native callsite, and the D3D upload target are all checked
 against the audited executable's instruction bytes before any call;
 unknown executables decline the native preload. This is distinct from

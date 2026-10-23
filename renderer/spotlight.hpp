@@ -163,10 +163,10 @@ public:
         v.fade_duration_ms=static_cast<uint32_t>(seconds*1000.0f+0.5f);
         return true;
     }
-    void erase_thing(uintptr_t thing)
+    bool erase_thing(uintptr_t thing)
     {
         std::lock_guard<std::mutex> guard(mutex_);
-        lights_.erase(thing);
+        return lights_.erase(thing)!=0U;
     }
     std::vector<spotlight_request> snapshot()
     {
