@@ -28,8 +28,9 @@ namespace jkgm {
         //   1 - 2 closes the vignette in like an iris, reaching a solid screen of the vignette
         //   color at 2 (a fade to black, or to red, etc.)
         //
-        // The defaults reproduce the original fixed vignette: black edges at full strength.
-        animated_floats<4> params{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
+        // Vanilla JK has no vignette. Levels and mods explicitly enable it
+        // with SetVignette; ResetVignette returns to this neutral state.
+        animated_floats<4> params{std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}};
     };
 
     struct color_filter_settings {

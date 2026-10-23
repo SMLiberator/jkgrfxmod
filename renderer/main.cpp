@@ -3982,7 +3982,7 @@ namespace {
         cog_push_float(ctx, jkgm::get_vignette_settings().params.value()[3]);
     }
 
-    // ResetVignette()    black edges at full strength (the original look), immediately
+    // ResetVignette()    disable vignette immediately (vanilla JK has none)
     void __cdecl cog_reset_vignette(void * /*ctx*/)
     {
         jkgm::get_vignette_settings() = jkgm::vignette_settings();

@@ -128,6 +128,14 @@ transitions should call `ResetFrameTrail()` from a shutdown/startup COG.
 The explicit history reset is also useful before cutscene camera teleports.
 
 
+## Default vignette behavior
+
+The base game has **no vignette**. JKGM now starts with strength 0, and
+`ResetVignette()` also returns to 0. A level or mod may explicitly apply
+`SetVignette(VectorSet(0, 0, 0), 1.0, 0.0)` to restore the former dark
+edge effect, or animate it using the existing fade argument. This also
+keeps disabled-vignette GPU work on the fast shader path.
+
 ## COG-controlled distance and peripheral blur
 
 These spatial effects are **disabled by default**. They are evaluated on
@@ -152,7 +160,11 @@ ResetPeripheralBlur();
 Both strengths are clamped to `[0,1]`. Zero disables that effect.
 Distance thresholds are JK engine units (not pixels). The distance
 intensity ramps from 0 at the start to full strength at the end;
-pixels without valid depth do not receive *distance* blur. Peripheral
+depth values at or beyond the end threshold share a uniform blur zone,
+including background pixels whose R16F depth is cleared to 65504.
+Depth-aware filtering still protects nearer foreground silhouettes. Thus
+two surfaces at depths 700 and 1000 blur together when the end threshold
+is 500, instead of retaining an artificial sharp edge. Peripheral
 blur is radial, with 0 at the center and 1 at the far corners.
 All values animate over the requested `fadeTime`, using the same
 wall-clock mechanism as the other COG effects.

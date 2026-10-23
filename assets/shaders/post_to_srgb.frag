@@ -23,7 +23,7 @@ uniform float saturation = 1.0; // [0.0 to 4.0], 1 = no change
 //   0       off
 //   0 - 1   fades in the classic vignette (black rgb = the usual darkening vignette)
 //   1 - 2   closes the vignette in like an iris until the whole screen is the vignette color
-uniform vec4 vignette_params = vec4(0.0, 0.0, 0.0, 1.0);
+uniform vec4 vignette_params = vec4(0.0, 0.0, 0.0, 0.0);
 
 // Film grain, set by the renderer from the SetFilmGrain COG verb.
 // x = amount (0 turns grain off), y = grain size in pixels, z = frame seed (new noise per value)
