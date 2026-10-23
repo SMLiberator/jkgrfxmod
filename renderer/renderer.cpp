@@ -410,6 +410,8 @@ namespace jkgm {
     };
 
         struct gpu_3do_texture {
+            // Stable texture-cache ID, unlike a borrowed GL texture_view.
+            std::optional<srgb_texture_id> albedo_id;
             gl::texture_view texture = gl::default_texture;
             gl::texture_view texture2 = gl::default_texture;
             float albedo_transition=0.0f;
@@ -541,6 +543,8 @@ namespace jkgm {
         std::map<uint32_t, fs::path> runtime_pack_by_mat;
         std::map<fs::path, srgb_texture_id> runtime_images;
         std::set<uint32_t> spotlight_unready_mats;
+        std::map<uint32_t,srgb_texture_id> spotlight_retained_albedo;
+        uint32_t spotlight_retained_world=0;
         std::set<std::pair<uint32_t, int>> runtime_missing_images;
         std::set<uint32_t> runtime_missing_sources;
         bool warned_reflections_disabled = false;
@@ -799,6 +803,7 @@ namespace jkgm {
 
         ~renderer_impl() override
         {
+            release_spotlight_images();
             // Context-owned GL queries must be deleted before the context
             // disappears. If the context is already gone, its objects go
             // away with it; do not issue GL calls on an invalid context.
@@ -2350,6 +2355,7 @@ namespace jkgm {
                 resolve_runtime_transition(*ctl->albedo,surface->albedo_map,
                                            from_albedo,to_albedo,albedo_weight);
             if(from_albedo) {
+                out.albedo_id=from_albedo;
                 out.texture=texture_cache->get_texture_handle(*from_albedo);
                 out.alpha=texture_cache->has_nonopaque_alpha(*from_albedo);
                 out.albedo_source=1;
@@ -3032,13 +3038,48 @@ namespace jkgm {
             draw_gpu_3do_preview(false);
         }
 
-        // Resolve a COG MAT by its stable native index to its currently
-        // resident original/replacement albedo. Reuses GPU 3DO MAT lookup,
-        // so spotlights work whether or not geometry caching is enabled.
-        // The MAT must first have been loaded by JK's native texture cache.
+        void release_spotlight_images()
+        {
+            if(texture_cache)
+                for(auto const &item:spotlight_retained_albedo)
+                    texture_cache->release_srgb_texture(item.second);
+            spotlight_retained_albedo.clear();
+            spotlight_unready_mats.clear();
+        }
+
+        // This is called on the renderer thread. Pin only active cookie MATs,
+        // and invalidate immediately when JK loads a different world.
+        void maintain_spotlight_images(std::vector<spotlight_instance> const &spots)
+        {
+            uint32_t world=0;
+            engine_material_debug::read_object(
+                engine_material_debug::current_world_global,world);
+            if(world!=spotlight_retained_world) {
+                release_spotlight_images();
+                spotlight_retained_world=world;
+            }
+            std::set<uint32_t> active;
+            for(auto const &spot:spots)active.insert(spot.material);
+            for(auto it=spotlight_retained_albedo.begin();
+                it!=spotlight_retained_albedo.end();) {
+                if(active.count(it->first)==0) {
+                    texture_cache->release_srgb_texture(it->second);
+                    it=spotlight_retained_albedo.erase(it);
+                }
+                else ++it;
+            }
+        }
+
+        // Keep the image in JKGM's GL texture cache independently of native
+        // D3D texture eviction. Never call the native uploader from here.
         std::optional<gl::texture_view> spotlight_mat_texture(uint32_t mat_id)
         {
             if(!engine_material_debug::matches_tested_executable())return std::nullopt;
+            auto held=spotlight_retained_albedo.find(mat_id);
+            auto const retained=[&]()->std::optional<gl::texture_view> {
+                if(held==spotlight_retained_albedo.end())return std::nullopt;
+                return texture_cache->get_texture_handle(held->second);
+            };
             bool const shared=(mat_id&0x8000U)!=0U;
             uint32_t const index=mat_id&0x7fffU;
             uint32_t address=0;
@@ -3047,21 +3088,34 @@ namespace jkgm {
                   shared?engine_material_debug::static_world_global:
                          engine_material_debug::current_world_global,
                   address,world) || index>=uint32_t(world.num_materials))
-                return std::nullopt;
+                return retained();
             uintptr_t const mat_ptr=uintptr_t(world.materials)+
                 index*sizeof(engine_material_debug::native_material);
             gpu_3do_group group{};
             group.material=mat_ptr;
             group.cel=-1;
             auto const material=resolve_gpu_3do_material(group);
-            if(!material.has_image || material.albedo_source!=1) {
-                if(spotlight_unready_mats.insert(mat_id).second)
-                    LOG_WARNING("Spotlight MAT ",mat_id,
-                                " has no resident albedo; render/load its MAT first");
-                return std::nullopt;
+            if(material.has_image && material.albedo_source==1 &&
+               material.albedo_id) {
+                auto const id=*material.albedo_id;
+                // Pin the new image before releasing a previous cel/handle.
+                if(held==spotlight_retained_albedo.end()) {
+                    texture_cache->retain_srgb_texture(id);
+                    spotlight_retained_albedo.emplace(mat_id,id);
+                }
+                else if(held->second.get()!=id.get()) {
+                    texture_cache->retain_srgb_texture(id);
+                    texture_cache->release_srgb_texture(held->second);
+                    held->second=id;
+                }
+                spotlight_unready_mats.erase(mat_id);
+                return texture_cache->get_texture_handle(id);
             }
-            spotlight_unready_mats.erase(mat_id);
-            return material.texture;
+            if(auto image=retained())return image; // native cache was evicted
+            if(spotlight_unready_mats.insert(mat_id).second)
+                LOG_WARNING("Spotlight MAT ",mat_id,
+                            " has no resident albedo; render/load its MAT first");
+            return std::nullopt;
         }
 
         void draw_game_opaque_composite()
@@ -3111,8 +3165,12 @@ namespace jkgm {
                                          *projected_decal_texture));
                 }
                 int active=0;
+                auto spots=the_config->enable_spotlights
+                    ? collect_spotlights_for_frame()
+                    : std::vector<spotlight_instance>{};
+                maintain_spotlight_images(spots);
                 if(the_config->enable_spotlights) {
-                    for(auto const &spot:collect_spotlights_for_frame()) {
+                    for(auto const &spot:spots) {
                         auto image=spotlight_mat_texture(spot.material);
                         if(!image)continue;
                         prog.set_spotlight(

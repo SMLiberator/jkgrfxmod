@@ -737,6 +737,19 @@ face at grazing angles and cannot correct geometry silhouettes or
 transparent face sort order. The initial implementation only affects
 native JK triangles; the experimental GPU-cached 3DO path is unchanged.
 
+## Spotlight MAT residency
+
+Once a projector cookie MAT has reached JKGM's GPU texture cache, the
+renderer retains an extra reference to its OpenGL image. JK's native Direct3D
+LRU may evict or reuse the original surface without invalidating the
+projector image. The held reference is released when no active spotlight uses
+the MAT, when the world changes, or when the renderer shuts down. If a
+projector first activates *before* its MAT has ever been uploaded, the
+normal native SetSpotlight-time upload/readiness restrictions still apply.
+No native MAT loader calls are made per frame, preserving the pause/unpause
+crash fix. A cached cookie may keep showing the last loaded cel while a new
+cel remains non-resident; once JK uploads the new cel, the hold updates.
+
 ## Fast compositor presentation
 
 When both temporal trails (`enable_trails`) and Retro CMP quantization are off,

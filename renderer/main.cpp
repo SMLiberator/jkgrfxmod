@@ -4290,7 +4290,7 @@ namespace {
             bool const resident=spotlight_warm_native_mat(request.material);
             LOG_INFO("SetSpotlight: MAT=",material,
                      " registered native_resident=",resident,
-                     " (deferred retry if graphics not ready)");
+                     " (native loading occurs only in SetSpotlight)");
         }
     }
 

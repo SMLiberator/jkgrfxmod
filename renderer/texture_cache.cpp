@@ -228,6 +228,11 @@ namespace jkgm {
                 return rv;
             }
 
+            void retain_srgb_texture(srgb_texture_id id) override
+            {
+                ++at(srgb_textures, id).refct;
+            }
+
             void release_srgb_texture(srgb_texture_id id) override
             {
                 --at(srgb_textures, id).refct;

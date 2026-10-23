@@ -23,6 +23,8 @@ namespace jkgm {
         virtual srgb_texture_id get_srgb_texture_from_filename(fs::path const &file) = 0;
         virtual linear_texture_id get_linear_texture_from_filename(fs::path const &file) = 0;
 
+        // Explicit reference for GL images used beyond native D3D residency.
+        virtual void retain_srgb_texture(srgb_texture_id id) = 0;
         virtual void release_srgb_texture(srgb_texture_id id) = 0;
         virtual void release_linear_texture(linear_texture_id id) = 0;
 
