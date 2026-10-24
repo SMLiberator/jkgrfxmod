@@ -923,9 +923,19 @@ into the prefix, because incompatible wrappers are known to break JK
 in-game sound effects even if its menus still work. Compare normal
 playback, A3D menu availability, and audible front/back positioning.
 
-Neither diagnostic changes the audio backend. Future work can trace
-actual DirectSound/A3D buffer creation and COG sound-handle behavior
-after the loaded DLL chain is understood.
+With `profile_audio=true` the renderer also traces JKGM's audited
+A3D COM activation shim at `0x00437136`. Its log lines include the
+requested CLSID/IID, HRESULT, returned COM interface pointer, and whether
+`a3d.dll` was loaded when the call returned. This distinguishes a DLL
+merely being loaded from an actual A3D COM activation request and its
+success or failure; a successful activation **still does not prove HRTF
+or audible 3D positioning**. This is a pass-through diagnostic: the game
+executes its original A3D call unchanged. The shim is signature-checked
+and tracing is not installed when `profile_audio` is disabled.
+
+Neither diagnostic changes the audio backend. Subsequent work can verify
+creation and positioning of actual DirectSound3D/A3D sound buffers and
+audible front/back localization after COM activation has been confirmed.
 
 ## High-resolution MAT UVs on GPU-cached 3DOs
 
