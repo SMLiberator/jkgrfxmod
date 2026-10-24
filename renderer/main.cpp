@@ -4575,18 +4575,170 @@ namespace {
         cog_verb_entry{"getthingnodepyr", cog_get_thing_node_pyr},
     };
 
+    // JK.dll's SetThingSector(thing,sector) dereferences destination+0x30
+    // without checking a failed COG sector lookup. Verified in the supplied
+    // JK.dll at 0x10050A4D (mov ecx,[eax+0x30], eax==NULL).
+    //
+    // Intercept its registered handler rather than patching JK.dll. Probe the
+    // original two COG arguments with JKGM's native converters, then restore
+    // the unchanged stack before invoking the original handler on valid input.
+    // This preserves variable references and the original verb's behavior.
+    namespace sector_verb_guard {
+        constexpr uintptr_t pop_sector_address=0x004E2E60U;
+        constexpr std::array<uint8_t,8> pop_sector_signature{{
+            0x55,0x8b,0xec,0x83,0xec,0x10,0x8b,0x4d
+        }};
+        constexpr size_t stack_start=0x98U;
+        constexpr size_t stack_count_offset=0x498U;
+        constexpr size_t stack_item_size=16U;
+        constexpr uint32_t stack_capacity=
+            static_cast<uint32_t>((stack_count_offset-stack_start)/stack_item_size);
+        using pop_sector_type=void *(__cdecl *)(void *);
+        cog_register_verb_type delegate_registrar=nullptr;
+        cog_handler_type original=nullptr;
+        bool available=false;
+        bool registered=false;
+        unsigned rejected=0;
+
+        bool signatures_match()
+        {
+            return cog_helpers_match() &&
+                gpu_span_readable(reinterpret_cast<void const *>(pop_sector_address),
+                                  pop_sector_signature.size()) &&
+                std::memcmp(reinterpret_cast<void const *>(pop_sector_address),
+                            pop_sector_signature.data(),
+                            pop_sector_signature.size())==0;
+        }
+
+        void warn(char const *reason,int sector_type,int sector_raw,
+                  int thing_type,int thing_raw)
+        {
+            ++rejected;
+            // An invalid sector in a COG's per-frame loop should not flood
+            // the log while we gather information about its origin.
+            if(rejected<=8 || (rejected%128)==0)
+                LOG_WARNING("JK.dll SetThingSector rejected: ",reason,
+                            " sector_arg(type=",sector_type,", raw=",sector_raw,
+                            ") thing_arg(type=",thing_type,", raw=",thing_raw,
+                            ") count=",rejected);
+        }
+
+        void __cdecl invoke(void *ctx)
+        {
+            if(!original)return;
+            if(!ctx || !gpu_span_readable(ctx,stack_count_offset+sizeof(uint32_t))) {
+                warn("invalid COG context",0,0,0,0);
+                return;
+            }
+            auto *const memory=static_cast<uint8_t *>(ctx);
+            uint32_t count=0;
+            std::memcpy(&count,memory+stack_count_offset,sizeof(count));
+            if(count<2 || count>stack_capacity) {
+                warn("invalid COG argument count",0,0,0,0);
+                return;
+            }
+
+            size_t const thing_slot=stack_start+
+                static_cast<size_t>(count-2)*stack_item_size;
+            size_t const sector_slot=stack_start+
+                static_cast<size_t>(count-1)*stack_item_size;
+            std::array<uint8_t,stack_item_size> thing_arg{};
+            std::array<uint8_t,stack_item_size> sector_arg{};
+            std::memcpy(thing_arg.data(),memory+thing_slot,stack_item_size);
+            std::memcpy(sector_arg.data(),memory+sector_slot,stack_item_size);
+
+            int sector_type=0,sector_raw=0,thing_type=0,thing_raw=0;
+            std::memcpy(&sector_type,sector_arg.data(),sizeof(int));
+            std::memcpy(&sector_raw,sector_arg.data()+4,sizeof(int));
+            std::memcpy(&thing_type,thing_arg.data(),sizeof(int));
+            std::memcpy(&thing_raw,thing_arg.data()+4,sizeof(int));
+
+            auto const pop_sector=reinterpret_cast<pop_sector_type>(
+                pop_sector_address);
+            void *const sector=pop_sector(ctx);
+            void *const thing=cog_pop_thing(ctx);
+            if(!sector || !thing) {
+                warn(!sector ? "invalid destination sector" : "invalid Thing",
+                     sector_type,sector_raw,thing_type,thing_raw);
+                return; // Both arguments have already been consumed.
+            }
+
+            uint32_t current_sector=0;
+            if(!gpu_span_readable(thing,0x60U)) {
+                warn("unreadable Thing",sector_type,sector_raw,
+                     thing_type,thing_raw);
+                return;
+            }
+            std::memcpy(&current_sector,
+                        static_cast<uint8_t const *>(thing)+0x5c,
+                        sizeof(current_sector));
+            if(!current_sector ||
+               !gpu_span_readable(
+                   reinterpret_cast<void const *>(uintptr_t(current_sector)),
+                   0x34U)) {
+                warn("invalid source sector",sector_type,sector_raw,
+                     thing_type,thing_raw);
+                return;
+            }
+
+            // The original handler must still consume the exact COG values,
+            // not reconstructed indices; restore variable/reference types.
+            std::memcpy(memory+thing_slot,thing_arg.data(),stack_item_size);
+            std::memcpy(memory+sector_slot,sector_arg.data(),stack_item_size);
+            std::memcpy(memory+stack_count_offset,&count,sizeof(count));
+            original(ctx);
+        }
+
+        void begin(cog_register_verb_type registrar,bool supported)
+        {
+            delegate_registrar=registrar;
+            available=supported;
+            original=nullptr;
+            registered=false;
+            rejected=0;
+        }
+
+        void __cdecl register_verb(void *ctx,cog_handler_type fn,
+                                   char const *name)
+        {
+            if(available && fn && name &&
+               std::strcmp(name,"setthingsector")==0) {
+                original=fn;
+                registered=true;
+                delegate_registrar(ctx,invoke,name);
+                return;
+            }
+            delegate_registrar(ctx,fn,name);
+        }
+
+        void finish()
+        {
+            if(registered)
+                LOG_INFO("JK.dll SetThingSector COG null-sector crash guard enabled");
+            else if(available)
+                LOG_WARNING("JK.dll SetThingSector guard: verb not registered");
+            else
+                LOG_WARNING("JK.dll SetThingSector guard unavailable: "
+                            "unsupported COG helper signatures");
+        }
+    }
+
     JkInitNewCogVerbs_type TrueJkInitNewCogVerbs = nullptr;
 
     void __cdecl HookedJkInitNewCogVerbs(cog_register_verb_type register_verb, void *ctx)
     {
-        if(the_config && the_config->use_model_cache &&
-           the_config->mesh_revision_tracking && register_verb) {
+        bool const track_revisions=the_config && the_config->use_model_cache &&
+            the_config->mesh_revision_tracking && register_verb;
+        cog_register_verb_type delegate=register_verb;
+        if(track_revisions) {
             mesh_revision::begin(register_verb);
-            TrueJkInitNewCogVerbs(mesh_revision::register_mutator,ctx);
-            mesh_revision::finish();
-        } else {
-            TrueJkInitNewCogVerbs(register_verb,ctx);
+            delegate=mesh_revision::register_mutator;
         }
+        sector_verb_guard::begin(delegate,
+                                 register_verb && sector_verb_guard::signatures_match());
+        TrueJkInitNewCogVerbs(sector_verb_guard::register_verb,ctx);
+        sector_verb_guard::finish();
+        if(track_revisions)mesh_revision::finish();
 
         if(!cog_helpers_match()) {
             LOG_ERROR("jk.exe does not match the build the fog COG verbs were written for; "
