@@ -867,14 +867,35 @@ successfully use) Aureal A3D, add these settings to `jkgm.json`:
 "log_path": "jkgm_audio.log"
 ```
 
-The renderer now logs `AUDIO modules:` at most once per 1.5 seconds,
-**only when the loaded module set changes**, in both game menus and gameplay.
-It records the paths of loaded `dsound.dll`, `a3d.dll`, `a3dapi.dll`,
-`a3dsnd.dll`, `dsoal-aldrv.dll`, `openal32.dll`, and `winmm.dll`.
-These are passive `GetModuleHandleA` queries: no extra DLLs or devices are
-loaded, no playback is intercepted, and existing sound/COG behavior is
-unchanged. The module list is a starting point: **a loaded A3D DLL does not
-prove that the game has enabled A3D or that positional HRTF works**.
+The renderer logs `AUDIO modules:` at most once per 1.5 seconds,
+**only when the module set or audited engine state changes**, in both game
+menus and gameplay. It records the paths of loaded `dsound.dll`,
+`a3d.dll`, `a3dapi.dll`, `a3dsnd.dll`, `dsoal-aldrv.dll`,
+`openal32.dll` and `winmm.dll`, plus whether the *already loaded*
+`a3d.dll` exports `DllGetClassObject`.
+
+On the matching, signature-verified standalone JKGM executable it also
+reports an `A3D engine state` snapshot:
+- `sound_device`: the interface JK uses after either the A3D path or
+  fallback `DirectSoundCreate` (nonzero does **not** establish A3D).
+- `a3d_path_flag`: JK's indicator from its A3D-specific initialization
+  path. The initializer clears this flag on several failures.
+- `a3d_secondary`, `primary_buffer`, `a3d_extension`: additional
+  interface pointers reached during JK's sound initialization. Nonzero
+  means an interface pointer was stored, not that hardware/HRTF works.
+
+These are passive `GetModuleHandleA`/`GetProcAddress` queries and guarded
+4-byte memory reads. They do not load new libraries, call A3D/DirectSound
+methods, create buffers or install hooks. Unknown executables report
+`unsupported executable/signature` and do not read these addresses.
+
+For a useful A/B test, keep the same Wine prefix and DLLs, record one run
+with ordinary sound and another after selecting A3D in JK's sound menu
+(if selectable). Compare the `a3d_path_flag` and interface pointers.
+A DLL loading or even an A3D flag of 1 cannot establish actual positional
+HRTF. If the flag stays 0, inspect the **exact** game-local `a3d.dll` to
+find out whether its COM class factory is actually compatible with JK;
+do not blindly install DLL wrappers into a working game.
 
 A separately packaged 32-bit `audio_probe.exe` tests whether the Wine
 prefix can create a DirectSound device, obtain device capabilities, and
