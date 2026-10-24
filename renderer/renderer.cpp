@@ -427,7 +427,7 @@ namespace jkgm {
             bool has_environment2=false;
             float environment_transition=0.0f;
             float width=1.0f, height=1.0f;
-            float reflection_strength=0.0f,roughness=0.5f,metalness=0.0f;
+            float reflection_strength=0.0f,roughness=0.0f,metalness=0.0f;
             float normal_strength=1.0f,normal_strength2=1.0f;
             bool has_normal=false,has_normal2=false,has_surface=false,has_environment=false;
             int reflection_mode=0;
@@ -2079,7 +2079,7 @@ namespace jkgm {
                 prog->set_normal_params(make_point(0.0f, 0.0f, 0.0f, 0.0f),
                                         point<2, float>::zero(),
                                         point<2, float>::zero());
-                prog->set_reflection(make_point(0.0f, 0.5f, 0.0f, 0.0f),
+                prog->set_reflection(make_point(0.0f, 0.0f, 0.0f, 0.0f),
                                      make_point(0.0f, 0.0f, 0.0f, 0.0f));
                 prog->set_albedo_transition(8, make_point(0.0f, 0.0f, 0.0f, 0.0f));
                 prog->set_env_transition(9, make_point(0.0f, 0.0f, 0.0f, 0.0f));

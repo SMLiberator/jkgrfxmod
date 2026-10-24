@@ -159,9 +159,9 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             mat->displacement_factor = em["displacement_factor"];
         }
 
-        // Neutral dielectric defaults for materials without a surface map.
-        // Authored surface maps use unity multipliers by default, so their
-        // R/G/B channels define per-pixel reflectivity, roughness and metalness.
+        // Unspecified materials are matte by default (0/0/0). When authored
+        // surface maps exist, unity scalar multipliers (1/1/1) preserve
+        // the map's R/G/B reflectivity, roughness and metalness channels.
         bool const has_surface_map = em.contains("surface_map");
         if(has_surface_map) {
             mat->surface_map = data_dir / std::string(em["surface_map"]);
@@ -169,9 +169,9 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
 
         mat->reflection_strength =
             em.contains("reflection_strength") ? static_cast<float>(em["reflection_strength"])
-                                                : (has_surface_map ? 1.0f : 0.2f);
+                                                : (has_surface_map ? 1.0f : 0.0f);
         mat->roughness = em.contains("roughness") ? static_cast<float>(em["roughness"])
-                                                   : (has_surface_map ? 1.0f : 0.9f);
+                                                   : (has_surface_map ? 1.0f : 0.0f);
         mat->metalness = em.contains("metalness") ? static_cast<float>(em["metalness"])
                                                    : (has_surface_map ? 1.0f : 0.0f);
 

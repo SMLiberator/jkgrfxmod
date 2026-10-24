@@ -23,24 +23,23 @@ Optional boolean master switches, all `true` by default:
 
 The existing `enable_ssao` switch remains independent of `enable_post`, making it useful for testing SSAO artifacts. `enable_bloom` independently disables bloom even when `enable_post` is true.
 
-## Experimental neutral surface defaults
+## Default material reflectivity
 
-For a renderer-wide visual experiment, native JK MATs without authored
-replacement settings and replacement materials without explicit reflection
-values now default to:
+Materials with no explicitly authored reflection scalars and no RGB surface map
+are matte by default:
 
 ```json
-{"reflection_strength": 0.2, "roughness": 0.9, "metalness": 0.0}
+{"reflection_strength": 0.0, "roughness": 0.0, "metalness": 0.0}
 ```
 
-This preserves explicit per-material scalar overrides. Authored RGB surface
-maps continue to use unity multipliers if no scalar overrides are given,
-preserving the texture's R/G/B channels rather than weakening the intended
-material definition. MATs with no EnvMap do not start reflecting their
-surroundings automatically: with an enabled directional sun, the new weak
-dielectric GGX highlight can still be visible. This experiment does not
-create a fallback environment texture, and `"enable_reflections": false`
-continues to turn reflections off.
+Materials with an authored `surface_map` but no scalar overrides instead use
+`1.0, 1.0, 1.0` multipliers, so the map's R/G/B channels determine the
+per-pixel reflectivity, roughness and metalness without weakening their values.
+Explicit per-material scalar settings always take priority. With no reflection
+strength, environment and directional-sun GGX highlights remain disabled; no
+fallback environment texture is created. Explicit COG environment-map changes
+can still activate otherwise matte materials, and `enable_reflections: false`
+disables reflection rendering globally.
 
 ## COG-controlled directional sun and specular highlights
 
