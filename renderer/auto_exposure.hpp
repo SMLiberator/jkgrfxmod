@@ -12,8 +12,10 @@ namespace jkgm {
 
 inline bool hdr_enabled(opengl_state const *ogs)
 {
+    // enable_hdr is the sole HDR master switch: sensitivity, fixed EV and
+    // all tone-map controls are inert when it is disabled.
     return ogs && ogs->enable_post && ogs->auto_exposure_scene &&
-           (ogs->enable_hdr || ogs->auto_exposure_sensitivity>0.0f);
+           ogs->enable_hdr;
 }
 
 inline bool auto_exposure_enabled(opengl_state const *ogs)
@@ -78,6 +80,7 @@ inline void update_auto_exposure(opengl_state *ogs,gl::texture_view scene)
         message << "Auto exposure: adapted_ev=" << diagnostic[0]
                 << " target_ev=" << diagnostic[1]
                 << " luminance=" << diagnostic[2]
+                << " highlight_luminance=" << diagnostic[3]
                 << " dt=" << dt
                 << " sensitivity=" << ogs->auto_exposure_sensitivity
                 << " compensation_ev=" << ogs->hdr_exposure_compensation;
@@ -113,10 +116,13 @@ inline void bind_auto_exposure(opengl_state *ogs)
 {
     bool const enabled=auto_exposure_enabled(ogs) &&
                        ogs->auto_exposure_history_valid;
-    ogs->post_to_srgb.set_hdr(6,hdr_enabled(ogs),enabled,
-                                ogs->hdr_exposure_compensation,
-                                ogs->hdr_shadow_softness,
-                                ogs->hdr_color_crispness);
+    bool const hdr=hdr_enabled(ogs);
+    // Pass neutral values as well as disabling the branch, to ensure HDR
+    // controls never leak into non-HDR presentation.
+    ogs->post_to_srgb.set_hdr(6,hdr,enabled,
+                                hdr ? ogs->hdr_exposure_compensation : 0.0f,
+                                hdr ? ogs->hdr_shadow_softness : 0.0f,
+                                hdr ? ogs->hdr_color_crispness : 0.0f);
     gl::set_active_texture_unit(6);
     gl::bind_texture(gl::texture_bind_target::texture_2d,
         enabled

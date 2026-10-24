@@ -1405,32 +1405,35 @@ starting point with restrained dark-scene adaptation, use:
 "hdr_exposure_compensation": 0.5
 ```
 
-- `enable_hdr` (default `false`) enables HDR tone mapping at **fixed**
-  exposure even when sensitivity is zero. To preserve older experimental
-  configurations, any positive `auto_exposure_sensitivity` also activates HDR.
-  Both remain disabled by `enable_post: false`, and HDR is bypassed for
-  menus and Retro CMP output.
+- `enable_hdr` (default `false`) is the **strict master switch** for HDR
+  tone mapping, exposure compensation, and automatic eye adaptation. When
+  false, every other HDR setting is ignored (including positive
+  `auto_exposure_sensitivity`). HDR is also bypassed when
+  `enable_post: false`, in menus, and for Retro CMP output.
 - `auto_exposure_sensitivity` (0..2, default 0) enables scene-adaptive
-  exposure if positive; **0 now means fixed exposure, not necessarily no
-  tone mapping**. The new adaptation responds more strongly to bright scenes
-  than dark ones. Dark-scene boosts are capped at +1.25 EV to avoid washing
-  out near-black interiors; bright-scene compensation still supports up to
-  -5 EV. Adaptation is faster going into bright light.
+  exposure only when `enable_hdr: true`; at zero, HDR uses fixed exposure.
+  The meter now considers localized bright patches, so a flashlight on a
+  dark wall can lower exposure and deepen other, dimly lit parts of the view.
+  Isolated hotspots are capped to avoid large exposure jumps.
+  Dark-scene boosts remain capped at +1.25 EV; bright-scene compensation
+  supports up to -5 EV. Adaptation is faster when entering bright light.
 - `hdr_exposure_compensation` (-3..+3 EV, default +0.5) is a **fixed**
   brightness adjustment added to any adaptive exposure before tone mapping.
   Increase this to lift visible shadow detail without increasing the
   adaptation strength. A strictly black input stays black.
 
-The GPU-only 1x1 RGBA16F pass meters 144 samples in the central 80% of the
-scene, combining log- and linear-average luminance. The presentation shader
-uses a softer filmic shadow toe and luminance-based mapping with highlight
-gamut compression, reducing channel-dependent hue shifts and excessively
-saturated highlights. HDR runs after scene composition and bloom, before
-COG color grading and optional grain/vignette. Existing bloom need not change.
+The GPU-only 1x1 RGBA16F pass meters 144 samples in the central 80% of
+the scene, combining log/linear averages with a capped RMS highlight meter.
+The shadow toe (`hdr_shadow_softness`) and color mapping
+(`hdr_color_crispness`) can be adjusted independently between older
+crisper and newer hue-preserving styles. Bloom is extracted based on the
+same exposed brightness as the final image, then added in HDR before tone
+mapping, not double-exposed. Tone mapping precedes COG color grading and
+optional grain/vignette.
 
 `profile_auto_exposure: true` enables a blocking diagnostic readback every
-two seconds (meter luminance, adaptation EV, target EV, sensitivity and fixed
-compensation). Leave it off for frame-rate measurements. The exposure history
+two seconds (meter luminance, capped highlight luminance, adapted and
+target EV, sensitivity and fixed compensation). Leave it off for frame-rate measurements. The exposure history
 is reset for menus, disabled postprocessing or Retro 256-color mode. Metering
 still includes center-screen HUD elements; bright/dark input calibration
 remains material-dependent. This feature does not change native JK vertex

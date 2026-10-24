@@ -85,7 +85,7 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("enable_hdr").get_to(rv->enable_hdr);
         }
 
-        if(j.contains("hdr_exposure_compensation")) {
+        if(rv->enable_hdr && j.contains("hdr_exposure_compensation")) {
             auto const &v=j.at("hdr_exposure_compensation");
             if(!v.is_number() || !std::isfinite(static_cast<double>(v))) {
                 throw std::runtime_error("hdr_exposure_compensation must be a finite number");
@@ -98,7 +98,7 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             }
         }
 
-        if(j.contains("hdr_shadow_softness")) {
+        if(rv->enable_hdr && j.contains("hdr_shadow_softness")) {
             auto const &v=j.at("hdr_shadow_softness");
             if(!v.is_number() || !std::isfinite(static_cast<double>(v)))
                 throw std::runtime_error("hdr_shadow_softness must be finite");
@@ -109,7 +109,7 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                 throw std::runtime_error("hdr_shadow_softness must be between 0 and 1");
         }
 
-        if(j.contains("hdr_color_crispness")) {
+        if(rv->enable_hdr && j.contains("hdr_color_crispness")) {
             auto const &v=j.at("hdr_color_crispness");
             if(!v.is_number() || !std::isfinite(static_cast<double>(v)))
                 throw std::runtime_error("hdr_color_crispness must be finite");
@@ -119,7 +119,7 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                 throw std::runtime_error("hdr_color_crispness must be between 0 and 1");
         }
 
-        if(j.contains("auto_exposure_sensitivity")) {
+        if(rv->enable_hdr && j.contains("auto_exposure_sensitivity")) {
             auto const &v=j.at("auto_exposure_sensitivity");
             if(!v.is_number() || !std::isfinite(static_cast<double>(v))) {
                 throw std::runtime_error("auto_exposure_sensitivity must be a finite number");
