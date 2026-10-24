@@ -3,6 +3,7 @@
 #include "presentation_gpu_profile.hpp"
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
+#include "gpu_3do_uv.hpp"
 #include "native_sprite_profile.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_alpha.hpp"
@@ -2626,8 +2627,9 @@ namespace jkgm {
                     out.has_normal=true;
                 }
             }
-            // JK stores local 3DO UVs in first-mipmap pixel units.
-            // Normalize them against the equivalent original mip-0 size.
+            // Preserve the native MAT's effective original mip-0 size.
+            // Its UV reference size is clamped to 256 at draw submission,
+            // rather than changing shared source geometry or decal UVs.
             out.width=static_cast<float>(chosen->width << mip);
             out.height=static_cast<float>(chosen->height << mip);
             return out;
@@ -3080,8 +3082,20 @@ namespace jkgm {
                     prog.set_environment(false,false,0.0f,0);
                 }
                 prev_specular_active=spec_active;
-                prog.set_surface(draw.texture.albedo_source,draw.texture.width,
-                                 draw.texture.height,transparent,
+                // JK's high-resolution MAT patch uses a 256x256 maximum UV
+                // reference area for *models*, independently per dimension.
+                // For a 64px MAT, 0..256 repeats four times; for >=256px,
+                // the same UV span covers one complete texture.
+                // Type-3 SPR decal UVs come from rdSprite and must continue
+                // to use their original native dimensions.
+                float const uv_width=inst.is_projected_decal
+                    ? draw.texture.width
+                    : gpu_3do_model_uv_extent(draw.texture.width);
+                float const uv_height=inst.is_projected_decal
+                    ? draw.texture.height
+                    : gpu_3do_model_uv_extent(draw.texture.height);
+                prog.set_surface(draw.texture.albedo_source,uv_width,
+                                 uv_height,transparent,
                                  static_cast<int>(draw.texture.blend),
                                  static_cast<int>(draw.policy),
                                  draw.texture.alpha_cutoff,face_opacity,

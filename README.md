@@ -857,6 +857,28 @@ overlapping transparent faces become ambiguous. If a particular visual effect
 sorts incorrectly, capture the scene and profiler line so we can refine that
 case without restoring unbounded recursion.
 
+## High-resolution MAT UVs on GPU-cached 3DOs
+
+The community high-resolution MAT patch preserves a 256x256 maximum UV
+reference area for **model geometry**, regardless of the texture's actual
+resolution. GPU-cached 3DOs now follow native JK: each UV axis is divided by
+`min(native MAT mip-0 width/height, 256)`, not necessarily by the full texture
+dimensions.
+
+For example, a quad with U and V spanning 0..256 tiles a 64x64 MAT four
+times per axis, a 128x128 MAT twice per axis, and any native MAT of 256px or
+greater once per axis. 512x256 and 1024x2048 textures also fill that UV square
+once in both directions. Smaller rectangular MATs repeat independently in
+each dimension. This applies to the base albedo and material detail maps,
+because all GPU 3DO shader sampling shares these UV coordinates.
+
+The dimensions come from the *native MAT cel*, not the resolution of an
+optional replacement PNG: replacing a 64x64 MAT with an HD material does not
+automatically change the model's intended UV tiling. The fix is draw-time
+only and does not rewrite model geometry, affect native 3DOs, world surfaces
+or the separate projected SPR decal UV path. A Blender exporter authoring
+change can follow later, so exports present the same 256-based convention.
+
 ## Experimental MAT preload during native 3DO interception
 
 Set `"use_model_cache": true` and optionally `"gpu_mat_preload": true`
