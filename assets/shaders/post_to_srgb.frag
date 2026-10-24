@@ -6,6 +6,7 @@ uniform int exposure_enabled;
 uniform int hdr_enabled; // HDR display transform independent of adaptation
 uniform float hdr_exposure_compensation; // fixed EV offset
 uniform float hdr_shadow_softness; // 0 original ACES toe, 0.6 current softened toe
+uniform float hdr_color_crispness; // 0 hue-preserving, 1 old per-channel ACES
 
 const int num_bloom_layers = 5;
 uniform sampler2D bloom_fbuf[num_bloom_layers];
@@ -100,7 +101,18 @@ void main()
         // Modest additional highlight desaturation; leave dim materials
         // untouched, and preserve actual black.
         float highlight_fade = 0.08*smoothstep(0.7,2.5,lum);
-        color = mix(mapped,vec3(mapped_lum),highlight_fade);
+        vec3 consistent_color=mix(mapped,vec3(mapped_lum),highlight_fade);
+        color=consistent_color;
+        if(hdr_color_crispness>0.0) {
+            // Older per-RGB-channel ACES was punchier but could shift hues.
+            // Keep SHADOW toe adjustment identical in both styles, so
+            // hdr_shadow_softness and hdr_color_crispness stay independent.
+            vec3 crisp_color=vec3(filmic_luminance(hdr.r),
+                                 filmic_luminance(hdr.g),
+                                 filmic_luminance(hdr.b));
+            color=mix(consistent_color,crisp_color,
+                      clamp(hdr_color_crispness,0.0,1.0));
+        }
     }
 
     // Apply color balancing

@@ -31,6 +31,7 @@ namespace jkgm {
         float auto_exposure_sensitivity = 0.0f; // 0=fixed exposure, 0..2=adaptive
         float hdr_exposure_compensation = 0.5f; // constant EV offset, used only with HDR
         float hdr_shadow_softness = 0.6f; // 0=original crisp ACES toe, 0.6=current softer toe
+        float hdr_color_crispness = 0.0f; // 0=hue-preserving, 1=original per-channel ACES
         bool enable_reflections = true;
         bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
         bool enable_ssao = true;

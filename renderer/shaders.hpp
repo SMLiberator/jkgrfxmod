@@ -347,11 +347,14 @@ namespace jkgm {
         class post_low_pass_shader : public opengl_shader {
         private:
             gl::uniform_location_id fbuf_image;
+            gl::uniform_location_id exposure_image,exposure_enabled;
+            gl::uniform_location_id hdr_exposure_compensation;
 
         public:
             explicit post_low_pass_shader(fs::path const &data_root);
 
             void set_fbuf_sampler(int sampler);
+            void set_exposure(int sampler,bool adaptive,float compensation_ev);
         };
 
         class post_scale_shader : public opengl_shader {
@@ -421,6 +424,7 @@ namespace jkgm {
             gl::uniform_location_id saturation;
             gl::uniform_location_id exposure_image,exposure_enabled;
             gl::uniform_location_id hdr_enabled,hdr_exposure_compensation,hdr_shadow_softness;
+            gl::uniform_location_id hdr_color_crispness;
             std::vector<gl::uniform_location_id> bloom_fbuf;
             std::vector<gl::uniform_location_id> bloom_weight;
 
@@ -428,7 +432,8 @@ namespace jkgm {
             explicit post_to_srgb_shader(fs::path const &data_root);
 
             void set_fbuf_sampler(int sampler);
-            void set_hdr(int sampler,bool hdr,bool adaptive,float compensation_ev,float shadow_softness);
+            void set_hdr(int sampler,bool hdr,bool adaptive,float compensation_ev,
+                         float shadow_softness,float color_crispness);
             void set_bloom_samplers(span<int const> samplers);
             void set_bloom_weights(span<float const> weights);
 

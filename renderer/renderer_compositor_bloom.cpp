@@ -23,6 +23,7 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
 
     ogs->post_low_pass.use_program();
     ogs->post_low_pass.set_fbuf_sampler(0);
+    bind_bloom_exposure(ogs);
 
     gl::set_active_texture_unit(0);
     gl::bind_texture(gl::texture_bind_target::texture_2d, composed_screen);

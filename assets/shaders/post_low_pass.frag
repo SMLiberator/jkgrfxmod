@@ -1,6 +1,9 @@
 #version 330 core
 
 uniform sampler2D fbuf_image;
+uniform sampler2D exposure_image; // same adapted 1x1 EV as final HDR pass
+uniform int exposure_enabled;
+uniform float hdr_exposure_compensation; // zero when HDR presentation is off
 
 in vec2 vp_texcoords;
 
@@ -28,8 +31,14 @@ void main()
 
     vec3 col = samp.rgb;
 
+    // Select bloom using EXPOSED brightness, rather than raw scene brightness.
+    // But emit original HDR radiance: the final composite applies EV once to
+    // both scene and bloom. No double-exposed/overblown bloom contribution.
+    float ev=hdr_exposure_compensation;
+    if(exposure_enabled!=0)
+        ev+=texelFetch(exposure_image,ivec2(0),0).r;
     float lum = dot(vec3(0.2125, 0.7154, 0.0721), col);
-    lum = max(0.0, lum * bloom_brightness_scale);
+    lum = max(0.0, lum*exp2(clamp(ev,-5.0,5.0))*bloom_brightness_scale);
 
     float x = pow(lum, bloom_curve_power);
     float fac = smoothstep(0.0, 1.0, x);

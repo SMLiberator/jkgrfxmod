@@ -781,12 +781,23 @@ jkgm::shaders::post_low_pass_shader::post_low_pass_shader(fs::path const &data_r
                     data_root / "shaders/postprocess.vert",
                     data_root / "shaders/post_low_pass.frag")
     , fbuf_image(gl::get_uniform_location(the_program, "fbuf_image"))
+    , exposure_image(gl::get_uniform_location(the_program,"exposure_image"))
+    , exposure_enabled(gl::get_uniform_location(the_program,"exposure_enabled"))
+    , hdr_exposure_compensation(gl::get_uniform_location(the_program,"hdr_exposure_compensation"))
 {
 }
 
 void jkgm::shaders::post_low_pass_shader::set_fbuf_sampler(int sampler)
 {
     gl::set_uniform_integer(fbuf_image, sampler);
+}
+
+void jkgm::shaders::post_low_pass_shader::set_exposure(
+    int sampler,bool adaptive,float compensation_ev)
+{
+    gl::set_uniform_integer(exposure_image,sampler);
+    gl::set_uniform_integer(exposure_enabled,adaptive?1:0);
+    gl::set_uniform_float(hdr_exposure_compensation,compensation_ev);
 }
 
 jkgm::shaders::post_scale_shader::post_scale_shader(fs::path const &data_root)
@@ -918,6 +929,7 @@ jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(fs::path const &data_roo
     , hdr_enabled(gl::get_uniform_location(the_program, "hdr_enabled"))
     , hdr_exposure_compensation(gl::get_uniform_location(the_program, "hdr_exposure_compensation"))
     , hdr_shadow_softness(gl::get_uniform_location(the_program, "hdr_shadow_softness"))
+    , hdr_color_crispness(gl::get_uniform_location(the_program, "hdr_color_crispness"))
 {
     bloom_fbuf.reserve(num_bloom_layers);
     bloom_weight.reserve(num_bloom_layers);
@@ -938,13 +950,15 @@ void jkgm::shaders::post_to_srgb_shader::set_fbuf_sampler(int sampler)
 }
 
 void jkgm::shaders::post_to_srgb_shader::set_hdr(
-    int sampler,bool hdr,bool adaptive,float compensation_ev,float shadow_softness)
+    int sampler,bool hdr,bool adaptive,float compensation_ev,
+    float shadow_softness,float color_crispness)
 {
     gl::set_uniform_integer(exposure_image,sampler);
     gl::set_uniform_integer(exposure_enabled,adaptive?1:0);
     gl::set_uniform_integer(hdr_enabled,hdr?1:0);
     gl::set_uniform_float(hdr_exposure_compensation,compensation_ev);
     gl::set_uniform_float(hdr_shadow_softness,shadow_softness);
+    gl::set_uniform_float(hdr_color_crispness,color_crispness);
 }
 
 void jkgm::shaders::post_to_srgb_shader::set_bloom_samplers(span<int const> samplers)

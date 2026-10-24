@@ -88,6 +88,26 @@ inline void update_auto_exposure(opengl_state *ogs,gl::texture_view scene)
     gl::set_active_texture_unit(0);
 }
 
+// Bloom threshold must use the SAME exposure as the final HDR display
+// transform. Bind a read-only 1x1 adapted EV texture (when enabled), never
+// the scene or a framebuffer currently being drawn.
+inline void bind_bloom_exposure(opengl_state *ogs)
+{
+    bool const hdr=hdr_enabled(ogs);
+    bool const adaptive=auto_exposure_enabled(ogs) &&
+                        ogs->auto_exposure_history_valid;
+    ogs->post_low_pass.set_exposure(1,adaptive,
+        hdr ? ogs->hdr_exposure_compensation : 0.0f);
+    gl::set_active_texture_unit(1);
+    gl::bind_texture(gl::texture_bind_target::texture_2d,
+        adaptive
+        ? (ogs->auto_exposure_next_a
+            ? gl::texture_view(ogs->auto_exposure_b.tex)
+            : gl::texture_view(ogs->auto_exposure_a.tex))
+        : gl::default_texture);
+    gl::set_active_texture_unit(0);
+}
+
 // Called after the presentation shader has been made current.
 inline void bind_auto_exposure(opengl_state *ogs)
 {
@@ -95,7 +115,8 @@ inline void bind_auto_exposure(opengl_state *ogs)
                        ogs->auto_exposure_history_valid;
     ogs->post_to_srgb.set_hdr(6,hdr_enabled(ogs),enabled,
                                 ogs->hdr_exposure_compensation,
-                                ogs->hdr_shadow_softness);
+                                ogs->hdr_shadow_softness,
+                                ogs->hdr_color_crispness);
     gl::set_active_texture_unit(6);
     gl::bind_texture(gl::texture_bind_target::texture_2d,
         enabled

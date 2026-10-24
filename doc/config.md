@@ -18,7 +18,8 @@
 | **enable_hdr** | Enable the filmic HDR display transform with fixed exposure even if automatic adaptation is disabled. Positive auto-exposure sensitivity also enables HDR for existing experimental configs; ignored if post-processing is off or Retro CMP active. | boolean | `false` |
 | **auto_exposure_sensitivity** | Controls automatic scene-adaptive exposure (0=fixed, 0..2=adaptation), with stronger adjustment when entering bright scenes and at most +1.25 EV boost in dark scenes. | number `0..2` | `0.0` |
 | **hdr_exposure_compensation** | Fixed EV offset to brighten/darken the HDR image independently of adaptation; +1 doubles linear exposure. Does not change true black. | number `-3..3` | `0.5` |
-| **hdr_shadow_softness** | Filmic shadow toe independent of HDR exposure and color mapping. `0` uses the original crisp ACES shadow response; `0.6` retains the recent softer shadows. Intermediate values blend the curves without returning to per-channel tone mapping. | number `0..1` | `0.6` |
+| **hdr_shadow_softness** | Independent filmic shadow toe. `0` uses original crisp ACES shadows; `0.6` retains the recent softer shadows. Applies to both color mapping styles. | number `0..1` | `0.6` |
+| **hdr_color_crispness** | `0` retains hue-consistent luminance-first tone mapping; `1` uses the older punchier per-channel ACES mapping, with intermediate blends. Independent of shadow softness; strongest values may shift hues. | number `0..1` | `0.0` |
 | **enable_bloom** | Use [bloom](https://en.wikipedia.org/wiki/Bloom_(shader_effect)) effect for brighter lights. Requires compatible texture pack. | boolean | Default: `true` |
 | **enable_ssao** | Use [screen-space ambient occlusion](https://en.wikipedia.org/wiki/Screen_space_ambient_occlusion) to subtly increase perceived depth in the image. | boolean | `true` |
 | **enable_parallax** | Use [parallax occlusion mapping](https://en.wikipedia.org/wiki/Parallax_occlusion_mapping) to add depth to individual textures. Requires compatible texture pack. | boolean | `true` |
@@ -33,3 +34,5 @@
 ## HUD Scaling
 Recommend values for HUD scaling (based on 360p HUD size and Jedi Outcast/Academy HUD sizes): `2.0` for 720p, `3.0` for 1080p, `4.0` for 1440p, `6.0` for 2160p.
 -->
+
+Bloom brightness extraction now measures HDR-exposed linear scene luminance using the same fixed EV and adapted 1x1 EV as the final display pass. It still adds bloom before tone mapping and never double-exposes the bloom contribution. Bloom threshold and existing weights are unchanged when HDR is off.

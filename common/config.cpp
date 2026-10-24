@@ -109,6 +109,16 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                 throw std::runtime_error("hdr_shadow_softness must be between 0 and 1");
         }
 
+        if(j.contains("hdr_color_crispness")) {
+            auto const &v=j.at("hdr_color_crispness");
+            if(!v.is_number() || !std::isfinite(static_cast<double>(v)))
+                throw std::runtime_error("hdr_color_crispness must be finite");
+            rv->hdr_color_crispness=static_cast<float>(v);
+            if(!std::isfinite(rv->hdr_color_crispness) ||
+               rv->hdr_color_crispness<0.0f || rv->hdr_color_crispness>1.0f)
+                throw std::runtime_error("hdr_color_crispness must be between 0 and 1");
+        }
+
         if(j.contains("auto_exposure_sensitivity")) {
             auto const &v=j.at("auto_exposure_sensitivity");
             if(!v.is_number() || !std::isfinite(static_cast<double>(v))) {

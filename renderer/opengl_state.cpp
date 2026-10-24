@@ -385,6 +385,7 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , auto_exposure_sensitivity(the_config->auto_exposure_sensitivity)
     , hdr_exposure_compensation(the_config->hdr_exposure_compensation)
     , hdr_shadow_softness(the_config->hdr_shadow_softness)
+    , hdr_color_crispness(the_config->hdr_color_crispness)
     , auto_exposure_diagnostics(the_config->profile_auto_exposure)
     , menu_program(data_root)
     , menu_present_program(data_root, true)
