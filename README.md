@@ -857,6 +857,55 @@ overlapping transparent faces become ambiguous. If a particular visual effect
 sorts incorrectly, capture the scene and profiler line so we can refine that
 case without restoring unbounded recursion.
 
+## Audio diagnostics: Aureal A3D and Wine (read-only)
+
+To investigate why the JK sound menu does not expose (or does not
+successfully use) Aureal A3D, add these settings to `jkgm.json`:
+
+```json
+"profile_audio": true,
+"log_path": "jkgm_audio.log"
+```
+
+The renderer now logs `AUDIO modules:` at most once per 1.5 seconds,
+**only when the loaded module set changes**, in both game menus and gameplay.
+It records the paths of loaded `dsound.dll`, `a3d.dll`, `a3dapi.dll`,
+`a3dsnd.dll`, `dsoal-aldrv.dll`, `openal32.dll`, and `winmm.dll`.
+These are passive `GetModuleHandleA` queries: no extra DLLs or devices are
+loaded, no playback is intercepted, and existing sound/COG behavior is
+unchanged. The module list is a starting point: **a loaded A3D DLL does not
+prove that the game has enabled A3D or that positional HRTF works**.
+
+A separately packaged 32-bit `audio_probe.exe` tests whether the Wine
+prefix can create a DirectSound device, obtain device capabilities, and
+create/query a mono DirectSound3D buffer. It does not play sound or change
+registry settings. Put it in the same directory as the game executable
+and run it using the **same Wine prefix** as JK:
+
+```sh
+WINEPREFIX=/path/to/your/prefix wine audio_probe.exe > audio_probe.txt 2>&1
+```
+
+`DirectSoundCreate=OK` is not sufficient by itself: A3D is a separate
+legacy API/compatibility layer, and a DirectSound3D-capable driver does
+not guarantee JK recognizes the A3D device. To see whether Wine chooses
+builtin or native audio DLLs, launch JK once with:
+
+```sh
+WINEPREFIX=/path/to/your/prefix WINEDEBUG=+loaddll wine jkgm.exe > wine_audio_load.log 2>&1
+```
+
+Keep your exact existing launch arguments/environment when testing. On
+Wine, a native `dsound.dll` or Aureal compatibility wrapper requires
+careful DLL-overrides configuration; do not copy unverified A3D wrappers
+into the prefix, because incompatible wrappers are known to break JK
+in-game sound effects even if its menus still work. Compare normal
+playback, A3D menu availability, and audible front/back positioning.
+
+Neither diagnostic changes the audio backend. Future work can trace
+actual DirectSound/A3D buffer creation and COG sound-handle behavior
+after the loaded DLL chain is understood.
+
 ## High-resolution MAT UVs on GPU-cached 3DOs
 
 The community high-resolution MAT patch preserves a 256x256 maximum UV

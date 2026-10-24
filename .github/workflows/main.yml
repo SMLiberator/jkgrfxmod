@@ -275,6 +275,10 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\frame_profile_gaps.cpp /Fe:frame_profile_gaps_test.exe
         frame_profile_gaps_test.exe
+    - name: Compile Wine/Windows DirectSound3D probe
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 tools\audio_probe.cpp /Fe:audio_probe.exe /link dsound.lib dxguid.lib user32.lib
     - name: Package standalone development binaries
       shell: pwsh
       run: |
@@ -297,6 +301,7 @@ jobs:
         Copy-Item 'tools/patch_jkgm_sprite_types.py' 'test-build/patch_jkgm_sprite_types.py' -Force
         Copy-Item 'tools/verify_retro_cmp.py' 'test-build/verify_retro_cmp.py' -Force
         Copy-Item 'assets/jkgm.json' 'test-build/jkgm.json' -Force
+        Copy-Item 'audio_probe.exe' 'test-build/audio_probe.exe' -Force
         Copy-Item 'doc/install.md' 'test-build/install.md' -Force
         # Runtime GLSL is loaded from data_path/shaders. The test must ship
         # changed shaders alongside the DLL or the new fast path will not run.

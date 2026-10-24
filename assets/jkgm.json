@@ -28,6 +28,7 @@
     "enable_posterized_lighting": false,
     "enable_vsync": false,
     "profile_renderer": false,
+    "profile_audio": false,
     "profile_auto_exposure": false,
     "optimize_hud_uploads": true,
     "use_model_cache": false,

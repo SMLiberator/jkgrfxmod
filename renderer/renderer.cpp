@@ -5,6 +5,7 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_uv.hpp"
 #include "native_sprite_profile.hpp"
+#include "audio_module_probe.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_alpha.hpp"
 #include "native_jk_palette_effects.hpp"
@@ -1056,6 +1057,15 @@ namespace jkgm {
             begin_frame();
         }
 
+        audio_module_probe audio_modules;
+
+        void poll_audio_modules()
+        {
+            if(!the_config->profile_audio)return;
+            auto const report=audio_modules.poll();
+            if(report)LOG_INFO("AUDIO modules: ",*report);
+        }
+
         void begin_frame()
         {
             gl::set_active_texture_unit(0);
@@ -1679,6 +1689,7 @@ namespace jkgm {
 
         void present_menu_gdi() override
         {
+            poll_audio_modules();
             menu_frame_pending=true;
             if(!indexed_bitmap_source) {
                 end_frame();
@@ -1719,6 +1730,7 @@ namespace jkgm {
 
         void present_menu_surface_body()
         {
+            poll_audio_modules();
             menu_frame_pending=true;
             // Copy new data from menu source
             for(size_t idx = 0U; idx < ogs->menu_texture_data.size(); ++idx) {
@@ -3874,6 +3886,7 @@ namespace jkgm {
 
         void present_game() override
         {
+            poll_audio_modules();
             bool const profiling = the_config->profile_renderer;
             auto const started = profile_clock::now();
             if(profiling) {
