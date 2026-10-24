@@ -40,7 +40,7 @@ class audio_module_probe {
         // 0x563754 - engine's A3D-path indicator
         // 0x563758 - A3D-only secondary COM interface
         // 0x56375c - primary sound-buffer interface
-        // 0x563760 - additional A3D interface
+        // 0x563760 - DirectSound3D listener interface
         // These pointers are NOT proof of hardware A3D or HRTF.
         constexpr uintptr_t signature_address=0x00437140U;
         constexpr std::array<uint8_t,10> signature{{
@@ -66,14 +66,14 @@ class audio_module_probe {
         uint32_t const flag=read32(0x00563754U);
         uint32_t const secondary=read32(0x00563758U);
         uint32_t const primary=read32(0x0056375cU);
-        uint32_t const extension=read32(0x00563760U);
+        uint32_t const listener=read32(0x00563760U);
         std::ostringstream report;
         report<<std::hex
               <<"A3D engine state: sound_device=0x"<<device
               <<" a3d_path_flag="<<std::dec<<flag<<std::hex
               <<" a3d_secondary=0x"<<secondary
               <<" primary_buffer=0x"<<primary
-              <<" a3d_extension=0x"<<extension;
+              <<" ds3d_listener=0x"<<listener;
         return report.str();
     }
 
