@@ -2601,11 +2601,16 @@ namespace jkgm {
 
         // Separate opaque and alpha passes. Native JK no longer processes
         // individual faces in either path: only GPU indexed ranges remain.
-        void draw_gpu_3do_preview(bool transparent,bool post_exempt=false)
+        void draw_gpu_3do_preview(bool transparent,bool post_exempt=false,
+                                  bool decals_only=false)
         {
             auto const &instances=post_exempt ? deferred_gpu_3do_instances
                                               : frame_gpu_3do_instances;
             if(!ogs->gpu_3do_preview_program || instances.empty())
+                return;
+            if(decals_only &&
+               std::none_of(instances.begin(),instances.end(),
+                   [](gpu_3do_instance const &inst){return inst.is_projected_decal;}))
                 return;
             profile_scope gpu_profiler(the_config->profile_renderer,
                                        profile_frame.gpu_preview_cpu_us);
@@ -2646,6 +2651,19 @@ namespace jkgm {
             prog.use_program();
             prog.set_scene_depth(8);
             prog.set_post_exempt(post_exempt);
+            prog.set_decal_receiver_lighting(decals_only,10,11);
+            if(decals_only) {
+                // Reuse the unused alpha of the opaque emissive G-buffer for
+                // the receiver's JK light intensity. No extra render target,
+                // color/depth copy or feedback from the active framebuffer.
+                gl::set_active_texture_unit(10);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 frame_screen->get_resolved_emissive_texture());
+                gl::set_active_texture_unit(11);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 frame_ao->get_ssao_texture());
+                gl::set_active_texture_unit(0);
+            }
             prog.set_advanced_material(false,0.25f);
             prog.set_parallax(0.0f);
             if(transparent) {
@@ -2717,7 +2735,9 @@ namespace jkgm {
             std::vector<gpu_3do_matrix34> modelviews;
             modelviews.reserve(instances.size());
             for(auto const &inst:instances) {
-                if(!inst.geometry) continue;
+                if(!inst.geometry ||
+                   (!post_exempt && inst.is_projected_decal!=decals_only))
+                    continue;
                 modelviews.push_back(gpu_3do_native_modelview(native_view,inst.transform));
                 std::array<float,3> local_eye{};
                 bool const can_cpu_cull=gpu_3do_local_eye(modelviews.back(),local_eye);
@@ -3392,9 +3412,19 @@ namespace jkgm {
             }
             gl::set_active_texture_unit(0);
 
-            // Draw third pass (transparent world geometry with alpha blending)
+            // Decals use the resolved *opaque* receiver depth and are painted
+            // onto those opaque/alpha-tested pixels. Draw them BEFORE regular
+            // translucent surfaces so glass, foliage, forcefields, etc. can
+            // blend over a decal instead of the decal incorrectly covering them.
+            // Material and UV caches are shared with the ordinary GPU 3DO path.
             gl::enable(gl::capability::blend);
             gl::set_depth_mask(false);
+            if(the_config->enable_sprite_decals) {
+                draw_gpu_3do_preview(true,false,true);
+                ogs->game_transparency_pass_program.use_program();
+            }
+
+            // Draw third pass (transparent world geometry with alpha blending)
             draw_batch(&ogs->game_transparency_pass_program,
                        world_transparent_batch,
                        &trimdl->world_transparent_trimdl,
@@ -3431,7 +3461,9 @@ namespace jkgm {
                 gl::enable(gl::capability::depth_test);
             }
 
-            // GPU-resident 3DO translucent faces join the existing alpha pass.
+            // GPU-resident ordinary 3DO translucent faces join the alpha
+            // pass after native world geometry. Projected SPRs were submitted
+            // earlier so translucent world pixels may correctly cover them.
             draw_gpu_3do_preview(true);
             ogs->game_transparency_pass_program.use_program();
 

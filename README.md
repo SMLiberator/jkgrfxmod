@@ -1476,13 +1476,29 @@ opaque architecture. The scan does not run in non-profiling gameplay.
 Type-`3` SPR decals automatically use resolved opaque scene-depth clipping
 (fixed 0.15 JK-unit plane-gap tolerance). No `depth_clip` material JSON
 setting is needed or supported. Alpha-masked grates contribute depth only
-at opaque pixels; alpha-blended receivers may lack usable opaque depth.
+at opaque pixels; transparent holes remain empty. Fully alpha-blended
+receivers still lack usable opaque depth and cannot receive decals.
+
+**Receiver lighting and translucency (experimental):** projected SPRs use the
+opaque G-buffer's JK diffuse-light value, plus the same SSAO factor as the
+receiver, instead of remaining fullbright in dark sectors. The light value
+occupies the previously unused **alpha** of the existing RGBA16F emissive
+target; the opaque compositor still uses its original RGB and no additional
+texture or fullscreen pass is allocated. This transfers diffuse brightness,
+not the underlying wall's pigment or dynamic spotlight illumination.
+Decals now draw immediately after opaque compositing, **before** ordinary
+native/GPU alpha-blended world geometry. Translucent glass, grates and similar
+foreground surfaces therefore blend over decals instead of being painted over
+by them. Hardware depth and the existing receiver-plane depth clip remain
+active; opaque and alpha-tested receiver pixels behave as before. Very complex
+transparency stacks are not depth-peeled, so physically exact sorting with
+intersecting translucent receivers remains future work.
 
 `renderer/sprite_decal_gpu_mesh.hpp` converts clipped, world-space
 triangles to the same vertex/index/group format as the existing GPU 3DO
 renderer, retaining the SPR's native MAT pointer, cel tracking and original
-pixel-center UV convention. It builds bounds, surface normals and fully-lit
-base colors; no new texture format is needed. Its intended draw path must
+pixel-center UV convention. It builds bounds and surface normals; receiver
+lighting is applied in the projected-decals shader with no new texture format. Its intended draw path must
 preserve **per-Thing opacity** independently of ordinary 3DO face alpha.
 
 **First GPU submission path (experimental, off by default):** set

@@ -442,8 +442,12 @@ void main()
     // Defer fog to the opaque composite, AFTER SSAO has shaded the
     // surface. Otherwise SSAO multiplies/darkens the fog color itself.
     out_color = vec4(albedo.rgb, albedo.a);
+    // This G-buffer's emissive alpha is not used by the opaque compositor.
+    // Preserve native JK's vertex-interpolated diffuse intensity here for
+    // projected decals; no extra texture or render target is required.
+    float receiver_light = dot(vertex_color.rgb, vec3(0.2126, 0.7152, 0.0722));
     out_emissive = vec4(emissive + (reflection + sun_specular) * (1.0 - fog_amount),
-                        albedo.a);
+                        receiver_light);
     out_normal = vec4(normalize(vp_normal), 1.0);
     // Depth R retains the existing linear-depth ABI. With spotlights
     // enabled the target is RGBA16F and GBA preserves unlit pigment.

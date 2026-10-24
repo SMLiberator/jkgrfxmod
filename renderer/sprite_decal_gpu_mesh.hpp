@@ -96,7 +96,7 @@ namespace jkgm {
                 vert.nx=normal[0];vert.ny=normal[1];vert.nz=normal[2];
                 vert.lnx=normal[0];vert.lny=normal[1];vert.lnz=normal[2];
                 vert.static_light=1.0f;
-                vert.light_mode=0.0f; // sprite texture unlit by 3DO light model
+                vert.light_mode=0.0f; // receiver G-buffer supplies the decal's illumination
                 vert.cr=1.0f;vert.cg=1.0f;vert.cb=1.0f;
                 vert.fax=p0[0];vert.fay=p0[1];vert.faz=p0[2];
                 mesh->vertices.push_back(vert);

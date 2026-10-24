@@ -183,6 +183,9 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , scene_depth_sampler(gl::get_uniform_location(the_program,"scene_depth"))
     , advanced_material_params(gl::get_uniform_location(the_program,"advanced_material_params"))
     , post_exempt_pass(gl::get_uniform_location(the_program,"post_exempt_pass"))
+    , decal_light_texture(gl::get_uniform_location(the_program,"decal_light_texture"))
+    , decal_occlusion(gl::get_uniform_location(the_program,"decal_occlusion"))
+    , decal_receiver_lighting(gl::get_uniform_location(the_program,"decal_receiver_lighting"))
     , displacement_sampler(gl::get_uniform_location(the_program,"displacement_map"))
     , displacement_factor(gl::get_uniform_location(the_program,"displacement_factor"))
     , environment_info(gl::get_uniform_location(the_program,"environment_info"))
@@ -319,6 +322,16 @@ void jkgm::shaders::gpu_3do_preview_shader::set_scene_depth(int sampler)
 void jkgm::shaders::gpu_3do_preview_shader::set_post_exempt(bool enabled)
 {
     gl::set_uniform_integer(post_exempt_pass,enabled?1:0);
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_decal_receiver_lighting(
+    bool enabled,int light,int ao)
+{
+    gl::set_uniform_integer(decal_receiver_lighting,enabled?1:0);
+    if(enabled) {
+        gl::set_uniform_integer(decal_light_texture,light);
+        gl::set_uniform_integer(decal_occlusion,ao);
+    }
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_advanced_material(
     bool clipped,float thickness)

@@ -23,6 +23,11 @@ uniform int has_texture; // 0=unresolved diagnostic, 1=albedo map, 2=intentional
 uniform int has_emissive;
 uniform int transparent_pass;
 uniform int post_exempt_pass; // draw after post, depth-tested against opaque world
+// Projected decal only: opaque G-buffer emissive.A stores diffuse JK light,
+// leaving emission RGB and all existing render targets unchanged.
+uniform int decal_receiver_lighting;
+uniform sampler2D decal_light_texture;
+uniform sampler2D decal_occlusion;
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
 uniform int emissive_only; // zero-alpha base, independently blended emission
 uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blend only, 4 dithered
@@ -353,6 +358,19 @@ void main() {
     // Metal suppresses diffuse only when its environment contribution
     // actually exists; follows the native replacement shader.
     vec3 lit_rgb=albedo.rgb*jk_lit_rgb*(1.0-env_metalness);
+    // Decal pigment inherits the receiver's interpolated JK diffuse light
+    // instead of appearing fullbright. That scalar is written into unused
+    // opaque emissive.A. AO matches the opaque scene's compositing pass.
+    // Crucially, the receiver material's own pigment color is NOT multiplied
+    // into the decal (black/dark painted surfaces retain decal color).
+    if(decal_receiver_lighting!=0) {
+        ivec2 pixel=ivec2(gl_FragCoord.xy);
+        float illumination=clamp(
+            texelFetch(decal_light_texture,pixel,0).a,0.0,1.25);
+        float occlusion=clamp(1.0-
+            texelFetch(decal_occlusion,pixel,0).r,0.0,1.0);
+        lit_rgb*=illumination*occlusion;
+    }
     vec3 rgb=mix(lit_rgb,fog_color,fog);
     vec3 emission=emissive_factor;
     if(has_emissive!=0)
@@ -392,8 +410,13 @@ void main() {
                            ? rgb*a+emission+specular*a : lit_rgb,
                        (transparent_pass!=0 && blend_mode==1) ? 0.0 : a);
     }
+    // For the opaque G-buffer, emissive alpha is unused by composition.
+    // Store JK's already-interpolated light scalar for projected decals;
+    // normal emissive RGB is unchanged.
     out_emissive=vec4(transparent_pass!=0
-                          ? vec3(0.0) : emission+specular,a);
+                          ? vec3(0.0) : emission+specular,
+                      transparent_pass!=0 ? a :
+                      dot(jk_lit_rgb,vec3(0.2126,0.7152,0.0722)));
     out_normal=vec4(normalize(view_normal),1.0);
     // Depth target optionally carries the unlit diffuse base in GBA.
     // This keeps projected lighting independent of baked JK vertex light.
