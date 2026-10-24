@@ -11,6 +11,7 @@
 #include "native_sprite_profile.hpp"
 #include "gpu_3do_preview.hpp"
 #include "gpu_mat_ready_cache.hpp"
+#include "gpu_mat_preload_gate.hpp"
 #include "gpu_3do_modelview.hpp"
 #include "thing_node_native.hpp"
 #include "thing_node_attachment.hpp"
@@ -250,6 +251,10 @@ namespace {
     uint64_t gpu_frame_serial=1;
     jkgm::gpu_3do_native_stats gpu_native_stats;
     jkgm::gpu_mat_ready_cache gpu_mat_residency;
+    jkgm::gpu_mat_preload_gate gpu_mat_preload_attempts;
+    uint64_t gpu_mat_preload_budget_frame=0;
+    unsigned gpu_mat_preload_budget_used=0;
+    thread_local bool native_mesh_draw_active=false;
     std::atomic<uint64_t> native_mat_upload_generation{1};
     // Debug-only fallback names, capped to avoid filling the performance log
     // with transient meshes. This never runs in normal gameplay.
@@ -761,6 +766,65 @@ namespace {
     // Calling the native mesh renderer on the first frames is essential:
     // rdCache normally causes MAT cels to be resident and D3D surfaces to
     // receive texture handles. Never bypass it before that work has happened.
+    // Existing verified cache-loader, previously only used by SetSpotlight.
+    // Forward declaration: the verified signatures remain defined with the
+    // COG MAT commands below. Only invoke it while native mesh rendering is
+    // actively in progress (never from a present/compositor callback).
+    bool spotlight_warm_native_mat(uint32_t mat_id);
+    bool spotlight_native_mat_cache_verified();
+
+    bool gpu_try_preload_mat(uintptr_t mat_address,uint32_t mat_id,
+                             uint32_t selected_cel)
+    {
+        using namespace jkgm::engine_material_debug;
+        if(!the_config || !the_config->gpu_mat_preload ||
+           !the_config->use_model_cache || !native_mesh_draw_active ||
+           !spotlight_native_mat_cache_verified() ||
+           !wglGetCurrentContext())return false;
+        // Confirm this pointer refers to the actual current/static world's
+        // rdMaterial array before passing the MAT to native JK code.
+        bool const shared=(mat_id&0x8000U)!=0;
+        unsigned const index=mat_id&0x7fffU;
+        uint32_t world_address=0;
+        world_header world{};
+        if(!load_world(shared?static_world_global:current_world_global,
+                       world_address,world) ||
+           index>=static_cast<unsigned>(world.num_materials) ||
+           mat_address!=uintptr_t(world.materials)+
+                       index*sizeof(native_material))
+            return false;
+        native_material mat{};
+        if(!read_object(mat_address,mat) || mat.id!=mat_id ||
+           mat.current_cel!=selected_cel ||
+           mat.num_texinfo==0U || selected_cel>=mat.num_texinfo)
+            return false;
+        // A maximum of four verified native loads per active render frame
+        // prevents pathological level-start stalls. No retries on eviction.
+        if(gpu_mat_preload_budget_frame!=gpu_frame_serial) {
+            gpu_mat_preload_budget_frame=gpu_frame_serial;
+            gpu_mat_preload_budget_used=0;
+        }
+        if(gpu_mat_preload_budget_used>=4U)return false;
+        // rdMaterial_AddToTextureCache has a known unsafe path while JK's D3D
+        // device is detached on pause/unpause. Only enter the loader for an
+        // unloaded cel, once per level, from this native mesh callback.
+        uint32_t device=0;
+        if(!read_object(0x0055C7ECU,device) || !device)return false;
+        // Current level identity must be stable across regular and static
+        // MATs, or switching between both tables would reset the gate.
+        uint32_t level_address=0;
+        if(!read_object(current_world_global,level_address) ||
+           !level_address)return false;
+        if(!gpu_mat_preload_attempts.first_attempt(
+               level_address,mat_address,selected_cel))return false;
+        ++gpu_mat_preload_budget_used;
+        if(the_config->profile_renderer)++gpu_native_stats.mat_preload_attempts;
+        bool const ok=spotlight_warm_native_mat(mat_id);
+        if(ok && the_config->profile_renderer)
+            ++gpu_native_stats.mat_preload_success;
+        return ok;
+    }
+
     bool gpu_mesh_materials_ready(jkgm::gpu_3do_geometry const &g)
     {
         using namespace jkgm::engine_material_debug;
@@ -800,7 +864,14 @@ namespace {
                 present|=(a.texture_loaded && a.texture_handle>0) ||
                          (o.texture_loaded && o.texture_handle>0);
             }
-            if(!present) return false;
+            if(!present) {
+                // Warm an unloaded current cel through JK's verified texture
+                // CACHE loader without asking rdModel3 to draw any polygon.
+                // Explicit noncurrent face cels keep the native fallback.
+                if(!gpu_try_preload_mat(ref.first,mat.id,
+                                        static_cast<uint32_t>(cel)))
+                    return false;
+            }
             // Never cache a negative result: JK may make a cel resident
             // later in this SAME frame via native drawing or D3D texture load.
             gpu_mat_residency.mark_ready(gpu_frame_serial,upload_generation,
@@ -832,7 +903,13 @@ namespace {
         auto const profiling=the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
-        if(!jkgm::queue_gpu_3do_mesh(mesh,placement)) {
+        // Direct MAT warm-up is permitted only during this native mesh
+        // callback, never from sprite decal composition or presentation.
+        bool const was_drawing=native_mesh_draw_active;
+        native_mesh_draw_active=true;
+        bool const queued=jkgm::queue_gpu_3do_mesh(mesh,placement);
+        native_mesh_draw_active=was_drawing;
+        if(!queued) {
             RealNativeMesh(mesh, placement);
         }
         else {
@@ -1134,6 +1211,9 @@ void jkgm::reset_gpu_3do_instances()
     pending_gpu_instances.clear();
     gpu_mesh_cache.clear();
     gpu_mat_residency.clear();
+    gpu_mat_preload_attempts.clear();
+    gpu_mat_preload_budget_frame=0;
+    gpu_mat_preload_budget_used=0;
     ++gpu_frame_serial;
     gpu_native_stats={};
 }
@@ -4305,7 +4385,7 @@ namespace {
         native_texture updated{};
         if(!read_object(info.texture,updated) || !resident(updated))
             return false;
-        LOG_INFO("Spotlight MAT loaded on demand: id=",mat_id,
+        LOG_INFO("Native MAT loaded on demand: id=",mat_id,
                  " cel=",cel," alpha=",has_alpha);
         return true;
     }

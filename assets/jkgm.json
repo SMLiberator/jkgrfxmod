@@ -32,6 +32,7 @@
     "optimize_hud_uploads": true,
     "use_model_cache": false,
     "mesh_revision_tracking": false,
+    "gpu_mat_preload": false,
     "enable_spotlights": false,
     "enable_sprite_decals": false,
     "enable_mesh_collision": false,

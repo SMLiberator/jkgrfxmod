@@ -716,7 +716,11 @@ namespace jkgm {
                          " mat_cel_refs_avg=",
                          profile_window.gpu_ready_material_refs/frames,
                          " shared_resident_hits_avg=",
-                         profile_window.gpu_ready_cache_hits/frames);
+                         profile_window.gpu_ready_cache_hits/frames,
+                         " preload_attempts_total=",
+                         profile_window.gpu_mat_preload_attempts,
+                         " preload_success_total=",
+                         profile_window.gpu_mat_preload_success);
                 LOG_INFO("PERF gpu_3do source_check_us_avg=",
                          (profile_window.gpu_source_ns/1000)/frames,
                          " checks_avg=",profile_window.gpu_source_checks/frames,
@@ -4049,6 +4053,8 @@ namespace jkgm {
                 profile_frame.gpu_ready_material_refs+=stats.ready_material_refs;
                 profile_frame.gpu_ready_ns+=stats.ready_ns;
                 profile_frame.gpu_ready_cache_hits+=stats.ready_cache_hits;
+                profile_frame.gpu_mat_preload_attempts+=stats.mat_preload_attempts;
+                profile_frame.gpu_mat_preload_success+=stats.mat_preload_success;
                 profile_frame.gpu_text_native+=stats.text_native;
                 profile_frame.gpu_geometry_native+=stats.geometry_native;
                 profile_frame.gpu_snapshot_native+=stats.snapshot_native;

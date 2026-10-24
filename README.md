@@ -857,6 +857,32 @@ overlapping transparent faces become ambiguous. If a particular visual effect
 sorts incorrectly, capture the scene and profiler line so we can refine that
 case without restoring unbounded recursion.
 
+## Experimental MAT preload during native 3DO interception
+
+Set `"use_model_cache": true` and optionally `"gpu_mat_preload": true`
+to test **direct native MAT cel warm-up without drawing a polygon**. If a
+3DO's required material has not reached JK's video-memory cache, the
+interceptor can invoke the previously SHA-verified
+`rdMaterial_AddToTextureCache` loader (the same entrypoint used by
+`SetSpotlight`) while JK is actively submitting that 3DO mesh.
+
+This is intentionally **off by default**. Earlier experimentation found
+native std3D cache-loading can crash after pause/unpause when the device is
+detached. This version never calls the loader from the compositor, an
+arbitrary frame callback or projected-decal rendering: it only runs inside
+the active, validated native mesh hook with a current OpenGL context and
+initialized JK device. Every native MAT pointer must belong to the
+verified current/static world material array; loads are limited to four
+per frame and attempted at most once per MAT/cel per level. Explicit
+noncurrent face cels, unsupported builds and unsuccessful requests keep
+the existing native-renderer fallback, so an unready MAT is never hidden.
+
+`PERF gpu_3do readiness` includes `preload_attempts_total` and
+`preload_success_total` (per reporting window) for A/B testing. This
+still uses JK's internal MAT decoding/upload function; fully independent
+raw MAT decoding is a separate, more invasive effort. Do not treat this
+preloader as a GPU sprite batcher: SPR types 0-2 still render natively.
+
 ## Shared native MAT readiness checks
 
 GPU-cached 3DO meshes and GPU SPR decals now share confirmed native MAT/cel
