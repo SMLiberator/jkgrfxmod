@@ -886,8 +886,18 @@ reports an `A3D engine state` snapshot:
   `IDirectSound3DListener` on the primary buffer. Nonzero means an interface
   pointer was stored, not that hardware/HRTF works.
 
+The snapshot also reports `listener_input_camera`, `sound_slots`,
+`listener_input_pos`, `listener_input_front` and `listener_input_up`
+when the executable's native audio-tick code signatures match. These are
+the original camera/listener inputs JK prepares for its listener-update
+routine, **not** a readback of Wine's listener state or proof that an
+update call executed. Walk and turn in a level to see whether the values
+change. A missing camera or unchanged input helps narrow the next test;
+a changing input with absent Wine spatial traces points to the update
+path or the interface-call boundary.
+
 These are passive `GetModuleHandleA`/`GetProcAddress` queries and guarded
-4-byte memory reads. They do not load new libraries, call A3D/DirectSound
+engine memory reads. They do not load new libraries, call A3D/DirectSound
 methods, create buffers or install hooks. Unknown executables report
 `unsupported executable/signature` and do not read these addresses.
 
