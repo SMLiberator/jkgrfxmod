@@ -74,6 +74,54 @@ class audio_module_probe {
               <<" a3d_secondary=0x"<<secondary
               <<" primary_buffer=0x"<<primary
               <<" ds3d_listener=0x"<<listener;
+
+        // Audio tick (0x004DC580) supplies the listener's orientation and
+        // position to 0x00437770. Sample the ORIGINAL engine-side inputs
+        // instead of calling COM methods or patching the game's code.
+        constexpr uintptr_t tick_address=0x004DC580U;
+        constexpr std::array<uint8_t,8> tick_signature{{
+            0xa1,0x4c,0xf1,0x82,0x00,0x83,0xec,0x10
+        }};
+        constexpr uintptr_t listener_call=0x004DC9CEU;
+        constexpr std::array<uint8_t,5> call_signature{{
+            0xe8,0x9d,0xad,0xf5,0xff
+        }};
+        if(readable(tick_address,tick_signature.size()) &&
+           readable(listener_call,call_signature.size()) &&
+           std::memcmp(reinterpret_cast<void const *>(tick_address),
+                       tick_signature.data(),tick_signature.size())==0 &&
+           std::memcmp(reinterpret_cast<void const *>(listener_call),
+                       call_signature.data(),call_signature.size())==0 &&
+           readable(0x0082F14CU,sizeof(uint32_t))) {
+            uint32_t const camera=read32(0x0082F14CU);
+            report<<" listener_input_camera=0x"<<camera;
+            if(readable(0x0083602CU,sizeof(uint32_t)))
+                report<<" sound_slots="<<std::dec
+                      <<read32(0x0083602CU)<<std::hex;
+            if(camera && readable(uintptr_t(camera)+0x40U,0x30U)) {
+                float front[3]{},up[3]{},position[3]{};
+                std::memcpy(front,reinterpret_cast<void const *>(
+                    uintptr_t(camera)+0x40U),sizeof(front));
+                std::memcpy(up,reinterpret_cast<void const *>(
+                    uintptr_t(camera)+0x4CU),sizeof(up));
+                std::memcpy(position,reinterpret_cast<void const *>(
+                    uintptr_t(camera)+0x64U),sizeof(position));
+                // Rounded values keep the low-frequency log readable.
+                auto const previous_precision=report.precision();
+                report<<std::dec<<std::fixed;
+                report.precision(2);
+                report<<" listener_input_pos=("<<position[0]<<","
+                      <<position[1]<<","<<position[2]<<")"
+                      <<" listener_input_front=("<<front[0]<<","
+                      <<front[1]<<","<<front[2]<<")"
+                      <<" listener_input_up=("<<up[0]<<","
+                      <<up[1]<<","<<up[2]<<")";
+                report.unsetf(std::ios_base::floatfield);
+                report.precision(previous_precision);
+            }
+        } else {
+            report<<" listener_input=signature-unverified";
+        }
         return report.str();
     }
 
