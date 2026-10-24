@@ -18,6 +18,7 @@ uniform float alpha_cutoff;
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
 uniform float fluid_thickness; // Beer-Lambert absorption per game unit
 uniform int flare_mode; // SPR type 0x40: center-only depth occlusion
+uniform int post_exempt_mode; // 0 normal, 1 deferred 3D world, 2 deferred weapon overlay
 uniform sampler2D scene_depth; // Resolved opaque linear view depth (R16F)
 
 uniform sampler2D displacement_map;
@@ -407,6 +408,13 @@ float flare_center_visibility()
 
 void main()
 {
+    // Late-post geometry has no hardware depth attachment in the final
+    // framebuffer. Reuse the original opaque view-depth image per pixel.
+    // Gun overlays are depth-cleared in the native renderer and stay on top.
+    if(post_exempt_mode==1) {
+        float behind=texelFetch(scene_depth,ivec2(gl_FragCoord.xy),0).r;
+        if(behind<65500.0 && vp_z>behind+max(0.05,behind*0.0005)) discard;
+    }
     float flare_visibility=1.0;
     if(flare_mode!=0) {
         flare_visibility=flare_center_visibility();

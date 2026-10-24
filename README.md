@@ -734,6 +734,47 @@ for the material and reset COG verbs, even if it is `0.0`.
 Repeated set/reset sequences are exercised by the lightweight native
 `tests/runtime_material_state.cpp` regression test in Windows CI.
 
+## Post-processing-exempt 3D materials (experimental)
+
+Add `"skip_post_processing": true` to an individual material in the
+**source** pack script (default `false`). The pack compiler preserves the
+Boolean in the compiled `metadata.json`, where the renderer reads it.
+
+```json
+{
+  "name": "nametag-font",
+  "replaces": ["font.mat"],
+  "alpha_mode": "blend",
+  "skip_post_processing": true
+}
+```
+
+The material still belongs to ordinary COG-created 3DO meshes, with normal
+vertex lighting, UVs, animation and alpha blending. There is **no** special
+font/Thing handling or model recreation. Native triangles reuse their existing
+per-frame vertex buffer ranges; GPU-cached 3DO instances reuse their original
+meshes and transforms. Only flagged materials are submitted to a conditional
+pass **after** blur, bloom, HDR exposure/tone mapping, grading, film grain,
+vignette, frame trails, and Retro quantization. Normal materials are unchanged.
+Setting `enable_post: false` disables this late-pass routing.
+
+The late pass renders directly to the final sRGB framebuffer. It uses the
+already-resolved opaque scene-depth texture to hide 3D UI behind world
+geometry, including in MSAA mode, and keeps ordinary premultiplied alpha,
+additive, and multiply blending. Gun-model overlays retain their native
+always-on-top behavior. No permanent full-resolution exclusion mask is
+allocated; when no exempt geometry is present, no extra render pass runs.
+
+**Known limitations:** the depth test uses the **opaque** world depth, not a
+complete depth-peeled transparency stack. Ordinary translucent geometry
+(glass/fluids/sprites) cannot reliably occlude deferred UI; separately
+exempted transparent objects from unrelated draw groups can also sort
+incorrectly against one another. Regular scene bloom behind opaque exempt
+polygons may remain visible as a halo. Since this pass runs after the game's
+normal HUD composition, exempt geometry can draw over vanilla JK HUD where
+they overlap. These tradeoffs are intentional for the initial in-world UI
+experiment; evaluate dense alpha-blended nametags before extending it.
+
 ## Material depth bias for overlapping model surfaces
 
 A replacement material may specify `"depth_bias": 1.0` in its

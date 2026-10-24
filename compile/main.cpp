@@ -72,6 +72,7 @@ namespace jkgm {
 
         std::optional<out_material_alpha_mode> alpha_mode;
         std::optional<std::string> blend_mode;
+        std::optional<bool> skip_post_processing;
         std::optional<float> fluid_thickness;
         std::optional<float> alpha_cutoff;
         std::optional<float> depth_bias;
@@ -596,6 +597,16 @@ namespace jkgm {
             }
         }
 
+        if(doc.contains("skip_post_processing")) {
+            auto const &v=doc["skip_post_processing"];
+            if(!v.is_boolean()) {
+                LOG_ERROR("Material '",rv->name,
+                          "' skip_post_processing must be true or false");
+                throw std::runtime_error("Invalid script");
+            }
+            rv->skip_post_processing=v.get<bool>();
+        }
+
         if(doc.contains("blend_mode")) {
             auto const &mode = doc["blend_mode"];
             if(!mode.is_string() ||
@@ -814,6 +825,9 @@ namespace jkgm {
 
         if(mat.blend_mode.has_value()) {
             rv["blend_mode"] = *mat.blend_mode;
+        }
+        if(mat.skip_post_processing.has_value()) {
+            rv["skip_post_processing"] = *mat.skip_post_processing;
         }
         if(mat.fluid_thickness.has_value()) {
             rv["fluid_thickness"] = *mat.fluid_thickness;

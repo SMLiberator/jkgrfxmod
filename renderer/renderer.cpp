@@ -441,6 +441,7 @@ namespace jkgm {
             int albedo_source=0;
             bool has_image=false, alpha=false, masked=false, dithered=false, special=false;
             bool has_emission=false, emissive_only=false;
+            bool post_exempt=false;
             bool filtered=true;
             material_blend_mode blend=material_blend_mode::normal;
             point<4,float> tint=make_point(1.0f,1.0f,1.0f,1.0f);
@@ -501,6 +502,19 @@ namespace jkgm {
         // frame; share costly native memory reads across both GPU passes.
         std::unordered_map<uint64_t,gpu_3do_texture> gpu_frame_material_cache;
         std::vector<gpu_3do_instance> frame_gpu_3do_instances;
+        // Retained across the one-frame render/present boundary.
+        std::vector<gpu_3do_instance> deferred_gpu_3do_instances;
+        bool frame_has_exempt_gpu=false;
+        bool frame_has_exempt_native=false;
+        std::set<uint64_t> frame_exempt_gpu_meshes;
+        enum class exempt_buffer { world, world_alpha, gun, gun_alpha };
+        struct exempt_range {
+            exempt_buffer source;
+            material_instance_id material;
+            size_t first_vertex;
+            size_t vertex_count;
+        };
+        std::vector<exempt_range> deferred_native_ranges;
         std::unique_ptr<renderer_compositor> frame_compositor;
         std::unique_ptr<renderer_ao> frame_ao;
         std::unique_ptr<renderer_screen> frame_screen;
@@ -1300,6 +1314,86 @@ namespace jkgm {
             }
         }
 
+        // Execute AFTER the complete post/trail/Retro presentation, directly
+        // into the final sRGB framebuffer. No extra full-resolution mask/FBO.
+        // The opaque G-buffer view-depth texture still belongs to this frame;
+        // world-space UI tests against it in the fragment shader.
+        void draw_post_exempt()
+        {
+            if(deferred_native_ranges.empty() &&
+               deferred_gpu_3do_instances.empty()) return;
+
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 gl::default_framebuffer);
+            gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+            gl::disable(gl::capability::depth_test);
+            gl::set_depth_mask(false);
+            gl::disable(gl::capability::cull_face);
+            gl::enable(gl::capability::blend);
+            gl::set_blend_function(gl::blend_function::one,
+                                   gl::blend_function::one_minus_source_alpha);
+
+            if(!deferred_native_ranges.empty()) {
+                auto *trimdl=ogs->tribuf.get_current();
+                auto &prog=ogs->game_transparency_pass_program;
+                prog.use_program();
+                prog.set_screen_resolution(static_cast<size<2,float>>(conf_scr_res));
+                prog.set_albedo_map_sampler(0);
+                prog.set_emissive_map_sampler(1);
+                prog.set_displacement_map_sampler(2);
+                prog.set_surface_map_sampler(3);
+                prog.set_env_map_sampler(4);
+                prog.set_normal_map_samplers(6,7);
+                prog.set_scene_depth_sampler(5);
+                prog.set_flare_mode(false);
+                apply_engine_camera(prog);
+                auto const &fog=get_fog_settings();
+                auto const fog_color=fog.color.value();
+                auto const fog_info=fog.info.value();
+                prog.set_fog(make_point(fog_info[0],fog_info[1],
+                    the_config->enable_fog?fog_info[2]:0.0f,0.0f),
+                    color_rgb(fog_color[0],fog_color[1],fog_color[2]));
+                gl::set_active_texture_unit(5);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 frame_screen->get_resolved_depth_texture());
+                gl::set_active_texture_unit(0);
+
+                for(auto const &range:deferred_native_ranges) {
+                    triangle_buffer_model *model=nullptr;
+                    int mode=1;
+                    switch(range.source) {
+                    case exempt_buffer::world:
+                        model=&trimdl->world_trimdl;break;
+                    case exempt_buffer::world_alpha:
+                        model=&trimdl->world_transparent_trimdl;break;
+                    case exempt_buffer::gun:
+                        model=&trimdl->gun_trimdl;mode=2;break;
+                    case exempt_buffer::gun_alpha:
+                        model=&trimdl->gun_transparent_trimdl;mode=2;break;
+                    }
+                    prog.set_post_exempt_mode(mode);
+                    bind_material(&prog,range.material,false,
+                                  the_config->enable_posterized_lighting);
+                    gl::bind_vertex_array(model->vao);
+                    gl::draw_arrays(gl::element_type::triangles,
+                                    range.first_vertex,range.vertex_count);
+                }
+                prog.set_post_exempt_mode(0);
+                set_native_depth_bias(0.0f);
+            }
+
+            // Cached mesh instances retain their transform and face/UV groups;
+            // the existing range renderer sorts/blends them without re-upload.
+            if(!deferred_gpu_3do_instances.empty())
+                draw_gpu_3do_preview(true,true);
+
+            gl::set_blend_function(gl::blend_function::one,
+                                   gl::blend_function::one_minus_source_alpha);
+            gl::set_active_texture_unit(0);
+            gl::disable(gl::capability::blend);
+            gl::set_depth_mask(true);
+        }
+
         void end_frame()
         {
             bool const presenting_menu = menu_frame_pending ||
@@ -1331,6 +1425,8 @@ namespace jkgm {
             gl::texture_view scene = frame_screen->get_resolved_final_texture();
 
             if(presenting_menu) {
+                deferred_native_ranges.clear();
+                deferred_gpu_3do_instances.clear();
                 // Menus are palette-sRGB imagery drawn into our linear screen
                 // buffer. Present directly: GL_FRAMEBUFFER_SRGB performs the
                 // usual linear->sRGB conversion, but there is no game bloom,
@@ -1484,6 +1580,7 @@ namespace jkgm {
                     profile_idx(profile_stage::present_composite)]);
                 if(gpu_timing)present_gpu_queries.timestamp(2U,true);
                 frame_compositor->end_frame(ogs.get(),conf_scr_res,scene);
+                draw_post_exempt();
                 if(gpu_timing)present_gpu_queries.timestamp(2U,false);
             }
             if(gpu_timing)present_gpu_queries.end();
@@ -1805,6 +1902,36 @@ namespace jkgm {
             }
             auto const &mat = vidmem_texture_surfaces.at(id.get() - 1);
             return mat->blend_mode != material_blend_mode::normal;
+        }
+
+        bool is_post_exempt_material(material_instance_id id) const
+        {
+            if(!the_config->enable_post || id.get()==0U ||
+               id.get()>vidmem_texture_surfaces.size()) return false;
+            auto const &surface=vidmem_texture_surfaces[id.get()-1];
+            return surface && surface->skip_post_processing;
+        }
+
+        // Preserve original GPU buffer offsets: no geometry duplication or
+        // additional upload. Adjacent same-MAT glyphs form one draw range.
+        void capture_exempt_ranges(exempt_buffer src,triangle_batch const &batch)
+        {
+            size_t offset=0;
+            for(auto const &tri:batch) {
+                if(is_post_exempt_material(tri.material)) {
+                    if(!deferred_native_ranges.empty()) {
+                        auto &last=deferred_native_ranges.back();
+                        if(last.source==src && last.material==tri.material &&
+                           last.first_vertex+last.vertex_count==offset) {
+                            last.vertex_count+=3;
+                            offset+=3;
+                            continue;
+                        }
+                    }
+                    deferred_native_ranges.push_back({src,tri.material,offset,3U});
+                }
+                offset+=3;
+            }
         }
 
         // Compute UV offsets in double precision before reducing them to
@@ -2168,6 +2295,10 @@ namespace jkgm {
                 bool special = is_special_material(tri.material);
                 bool selected = filter == batch_blend_filter::all ||
                                 (filter == batch_blend_filter::special ? special : !special);
+                if(is_post_exempt_material(tri.material)) {
+                    selected=false;
+                    frame_has_exempt_native=true;
+                }
                 // All native world/gun transparent batches are initially
                 // classified by JK, not by replacement metadata. A dithered
                 // replacement was already drawn depth-writing in the opaque
@@ -2362,6 +2493,7 @@ namespace jkgm {
             out.masked=surface->alpha_mode==material_alpha_mode::mask;
             out.dithered=surface->alpha_mode==material_alpha_mode::dithered;
             out.blend=surface->blend_mode;
+            out.post_exempt=the_config->enable_post && surface->skip_post_processing;
             out.fluid_thickness=surface->fluid_thickness;
             if(the_config->enable_parallax && surface->displacement_map &&
                surface->displacement_factor!=0.0f) {
@@ -2469,9 +2601,11 @@ namespace jkgm {
 
         // Separate opaque and alpha passes. Native JK no longer processes
         // individual faces in either path: only GPU indexed ranges remain.
-        void draw_gpu_3do_preview(bool transparent)
+        void draw_gpu_3do_preview(bool transparent,bool post_exempt=false)
         {
-            if(!ogs->gpu_3do_preview_program || frame_gpu_3do_instances.empty())
+            auto const &instances=post_exempt ? deferred_gpu_3do_instances
+                                              : frame_gpu_3do_instances;
+            if(!ogs->gpu_3do_preview_program || instances.empty())
                 return;
             profile_scope gpu_profiler(the_config->profile_renderer,
                                        profile_frame.gpu_preview_cpu_us);
@@ -2511,6 +2645,7 @@ namespace jkgm {
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
             prog.set_scene_depth(8);
+            prog.set_post_exempt(post_exempt);
             prog.set_advanced_material(false,0.25f);
             prog.set_parallax(0.0f);
             if(transparent) {
@@ -2580,8 +2715,8 @@ namespace jkgm {
             std::vector<pending_draw> draws;
             // Keep composed matrices stable across sorting and draw submission.
             std::vector<gpu_3do_matrix34> modelviews;
-            modelviews.reserve(frame_gpu_3do_instances.size());
-            for(auto const &inst:frame_gpu_3do_instances) {
+            modelviews.reserve(instances.size());
+            for(auto const &inst:instances) {
                 if(!inst.geometry) continue;
                 modelviews.push_back(gpu_3do_native_modelview(native_view,inst.transform));
                 std::array<float,3> local_eye{};
@@ -2639,6 +2774,11 @@ namespace jkgm {
                             ++profile_frame.gpu_material_resolves;
                     }
                     auto const &tex=found->second;
+                    if(!post_exempt && tex.post_exempt) {
+                        frame_has_exempt_gpu=true;
+                        frame_exempt_gpu_meshes.insert(inst.id);
+                    }
+                    if(tex.post_exempt!=post_exempt) continue;
                     // Projected SPRs are always alpha-composited over
                     // the existing opaque architecture and depth-tested.
                     // The MAT may be fully opaque; its native SPR instance
@@ -2650,7 +2790,7 @@ namespace jkgm {
                             tex.alpha,tex.masked,
                             tex.special||tex.emissive_only,
                             tex.opacity,tex.dithered);
-                    if(!gpu_3do_draws_in_pass(policy,transparent)) continue;
+                    if(!post_exempt && !gpu_3do_draws_in_pass(policy,transparent)) continue;
                     float depth=0.0f;
                     if(transparent) {
                         auto const &m=inst.transform;
@@ -3220,6 +3360,7 @@ namespace jkgm {
             gl::set_depth_function(gl::comparison_function::less);
 
             ogs->game_transparency_pass_program.use_program();
+            ogs->game_transparency_pass_program.set_post_exempt_mode(0);
             ogs->game_transparency_pass_program.set_screen_resolution(
                 static_cast<size<2, float>>(conf_scr_res));
             ogs->game_transparency_pass_program.set_albedo_map_sampler(0);
@@ -3764,6 +3905,26 @@ namespace jkgm {
                     profile_frame.timings[profile_idx(profile_stage::hud_draw)]);
                 draw_hud();
             }
+
+            // Present this frame's exempt ranges next time end_frame runs.
+            deferred_native_ranges.clear();
+            if(frame_has_exempt_native && the_config->enable_post) {
+                capture_exempt_ranges(exempt_buffer::world,world_batch);
+                capture_exempt_ranges(exempt_buffer::world_alpha,world_transparent_batch);
+                capture_exempt_ranges(exempt_buffer::gun,gun_batch);
+                capture_exempt_ranges(exempt_buffer::gun_alpha,gun_transparent_batch);
+            }
+            deferred_gpu_3do_instances.clear();
+            if(frame_has_exempt_gpu && the_config->enable_post) {
+                // Only retain meshes that actually contain flagged materials,
+                // not every car/NPC in a level with one GUI font.
+                for(auto &inst:frame_gpu_3do_instances)
+                    if(frame_exempt_gpu_meshes.count(inst.id))
+                        deferred_gpu_3do_instances.push_back(std::move(inst));
+            }
+            frame_has_exempt_gpu=false;
+            frame_has_exempt_native=false;
+            frame_exempt_gpu_meshes.clear();
 
             // Transient 3DOs (text, HUD, effects) may have already been freed
             // by JK. Expire their GPU resources, keeping recently reused meshes

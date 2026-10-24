@@ -22,6 +22,7 @@ uniform float native_face_opacity;
 uniform int has_texture; // 0=unresolved diagnostic, 1=albedo map, 2=intentionally no albedo
 uniform int has_emissive;
 uniform int transparent_pass;
+uniform int post_exempt_pass; // draw after post, depth-tested against opaque world
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
 uniform int emissive_only; // zero-alpha base, independently blended emission
 uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blend only, 4 dithered
@@ -309,6 +310,10 @@ void main() {
     // This is the exact native 1/rhw linear depth (32*Y) even on large
     // triangles crossing the camera near plane; no vertex-depth clamping.
     float view_depth=32.0/max(gl_FragCoord.w,0.00000001);
+    if(post_exempt_pass!=0) {
+        float behind=texelFetch(scene_depth,ivec2(gl_FragCoord.xy),0).r;
+        if(behind<65500.0 && view_depth>behind+max(0.05,behind*0.0005)) discard;
+    }
     if(transparent_pass!=0 && advanced_material_params.x>0.5 &&
        depth_clip_rejected(view_depth)) discard;
     vec2 uv=gpu_parallax_uv(pixel_uv*uv_scale);
@@ -322,7 +327,14 @@ void main() {
     }
     vec4 albedo=texel*albedo_factor;
     albedo.a*=native_face_opacity;
-    if(transparent_pass==0) {
+    if(post_exempt_pass!=0) {
+        // Render ALL coverage of the exempt material once, rather than
+        // splitting mixed alpha between separate opaque/translucent passes.
+        if(alpha_mode==2 && albedo.a<alpha_cutoff) discard;
+        if(alpha_mode==4 && albedo.a<=dither_threshold()) discard;
+        if(alpha_mode==0 || alpha_mode==2 || alpha_mode==4) albedo.a=1.0;
+        if(albedo.a<=0.001 && emissive_only==0) discard;
+    } else if(transparent_pass==0) {
         if(alpha_mode==3) discard; // native translucent/additive/opacity<1
         if(alpha_mode==1 && albedo.a<0.999) discard;
         if(alpha_mode==2 && albedo.a<alpha_cutoff) discard;
