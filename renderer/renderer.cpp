@@ -2164,10 +2164,11 @@ namespace jkgm {
                     !mat->replacement_material->has_explicit_env_map;
                 if(the_config->enable_reflections &&
                    global_allowed && runtime_controls.global_env) {
+                    // Global EnvMap changes the reflected IMAGE, not each
+                    // material's reflectivity. Otherwise matte materials with
+                    // default 0 strength / 0 roughness become sharp mirrors.
                     resolve_runtime_transition(*runtime_controls.global_env,
                                                mat->env_map, env_from, env_to, env_weight);
-                    env_command = runtime_controls.global_env->to.has_value() ||
-                                  runtime_controls.global_env->from.has_value();
                 }
                 if(the_config->enable_reflections &&
                    override_mat && override_mat->env) {
@@ -2543,10 +2544,10 @@ namespace jkgm {
                (!surface->replacement_material ||
                 !surface->replacement_material->has_explicit_env_map) &&
                runtime_controls.global_env) {
+                // Only the texture is global. Reflection strength remains a
+                // property of the actual material (or an explicit MAT verb).
                 resolve_runtime_transition(*runtime_controls.global_env,
                                            surface->env_map,env_from,env_to,env_weight);
-                env_command=runtime_controls.global_env->to.has_value() ||
-                            runtime_controls.global_env->from.has_value();
             }
             if(the_config->enable_reflections && ctl && ctl->env) {
                 auto const global_target=env_weight>0.0f?env_to:env_from;

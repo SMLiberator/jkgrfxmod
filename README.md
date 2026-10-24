@@ -664,7 +664,7 @@ IDs range from 0 to 65535 and are unique within each material pack.
 
 | COG verb | Effect |
 | --- | --- |
-| `SetGlobalEnvMap(sourceMat, imageID, fadeTime)` | EnvMap from source MAT's pack on all replacement materials without an explicit EnvMap, across packs |
+| `SetGlobalEnvMap(sourceMat, imageID, fadeTime)` | EnvMap from source MAT's pack on all replacement materials without an explicit EnvMap, across packs; does **not** override individual material reflection strength or roughness |
 | `ResetGlobalEnvMap(fadeTime)` | Return to pack defaults |
 | `SetMatEnvMap(mat, imageID, fadeTime)` | Per-native-MAT EnvMap override |
 | `SetMatEnvMapFrom(mat, sourceMat, imageID, fadeTime)` | Per-MAT EnvMap from another MAT's pack |
