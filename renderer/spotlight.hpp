@@ -62,6 +62,99 @@ struct spotlight_instance {
     thing_node_vector origin{},right{},up{},forward{};
 };
 
+    
+// Conservative footprint of a finite rectangular spotlight pyramid in screen
+// UV coordinates (bottom-left origin). An invalid camera returns full-screen:
+// optimization must never clip an otherwise valid spotlight.
+struct spotlight_screen_rect {
+    float min_x=0.0f,min_y=0.0f,max_x=1.0f,max_y=1.0f;
+    bool visible=true;
+};
+struct spotlight_projection_camera {
+    thing_node_vector position{},right{},up{},forward{};
+    float tan_half_horizontal=1.0f,tan_half_vertical=1.0f;
+    int width=1,height=1;
+};
+inline spotlight_screen_rect spotlight_screen_coverage(
+    spotlight_instance const &spot,spotlight_projection_camera const &cam)
+{
+    spotlight_screen_rect fallback{};
+    if(cam.width<=0 || cam.height<=0 ||
+       !std::isfinite(cam.tan_half_horizontal) ||
+       !std::isfinite(cam.tan_half_vertical) ||
+       cam.tan_half_horizontal<=0.0f || cam.tan_half_vertical<=0.0f)
+        return fallback;
+    auto dot=[](thing_node_vector const &a,thing_node_vector const &b) {
+        return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+    };
+    // Vertices of the projector's exact square pyramid: the apex and four
+    // far-plane corners. It matches the shader's UV limits and depth cutoff.
+    std::array<thing_node_vector,5> vertices{};
+    vertices[0]=spot.origin;
+    for(int k=0;k<4;k++) {
+        auto &p=vertices[k+1];
+        float const sx=(k&1)?0.5f:-0.5f;
+        float const sy=(k&2)?0.5f:-0.5f;
+        for(int axis=0;axis<3;axis++)
+            p[axis]=spot.origin[axis]+spot.forward[axis]*spot.range+
+                    spot.right[axis]*spot.width*sx+
+                    spot.up[axis]*spot.height*sy;
+    }
+    std::array<thing_node_vector,5> relative{};
+    std::array<float,5> depths{};
+    constexpr float near_plane=1.e-4f;
+    for(int k=0;k<5;k++) {
+        for(int axis=0;axis<3;axis++)
+            relative[k][axis]=vertices[k][axis]-cam.position[axis];
+        depths[k]=dot(relative[k],cam.forward);
+        if(!std::isfinite(depths[k]))return fallback;
+    }
+    float lo_x=1.e30f,lo_y=1.e30f,hi_x=-1.e30f,hi_y=-1.e30f;
+    bool found=false;
+    auto project=[&](thing_node_vector const &rel,float depth)->bool {
+        if(depth<near_plane)return true;
+        float const x=0.5f+0.5f*dot(rel,cam.right)/
+                             (depth*cam.tan_half_horizontal);
+        float const y=0.5f+0.5f*dot(rel,cam.up)/
+                             (depth*cam.tan_half_vertical);
+        if(!std::isfinite(x)||!std::isfinite(y))return false;
+        lo_x=std::min(lo_x,x);hi_x=std::max(hi_x,x);
+        lo_y=std::min(lo_y,y);hi_y=std::max(hi_y,y);
+        found=true;
+        return true;
+    };
+    for(int k=0;k<5;k++)
+        if(depths[k]>=near_plane && !project(relative[k],depths[k]))
+            return fallback;
+    // Clip pyramid edges against the camera-facing near plane. Projection
+    // of a clipped convex polytope reaches its screen extrema at vertices,
+    // so this includes even beams that cross the viewer's near plane.
+    constexpr std::array<std::array<int,2>,8> edges{{
+        {{0,1}},{{0,2}},{{0,3}},{{0,4}},
+        {{1,2}},{{2,4}},{{4,3}},{{3,1}}
+    }};
+    for(auto const &edge:edges) {
+        int const a=edge[0],b=edge[1];
+        if((depths[a]<near_plane)==(depths[b]<near_plane))continue;
+        float const t=(near_plane-depths[a])/(depths[b]-depths[a]);
+        thing_node_vector intersection{};
+        for(int axis=0;axis<3;axis++)
+            intersection[axis]=relative[a][axis]+
+                t*(relative[b][axis]-relative[a][axis]);
+        if(!project(intersection,near_plane))return fallback;
+    }
+    if(!found)return {0.0f,0.0f,0.0f,0.0f,false};
+    // Expand by two pixels to cover numerical roundoff, MSAA/depth-edge
+    // reconstruction and fractional viewport positions.
+    float const pad_x=2.0f/float(cam.width);
+    float const pad_y=2.0f/float(cam.height);
+    if(hi_x+pad_x<0.0f || lo_x-pad_x>1.0f ||
+       hi_y+pad_y<0.0f || lo_y-pad_y>1.0f)
+        return {0.0f,0.0f,0.0f,0.0f,false};
+    return {std::max(0.0f,lo_x-pad_x),std::max(0.0f,lo_y-pad_y),
+            std::min(1.0f,hi_x+pad_x),std::min(1.0f,hi_y+pad_y),true};
+}
+
 inline bool spotlight_request_valid(spotlight_request const &v)
 {
     if(v.thing<0x10000U ||

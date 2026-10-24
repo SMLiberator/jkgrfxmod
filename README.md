@@ -601,7 +601,13 @@ soft edges and distance cutoff. The opaque depth buffer can preserve the
 receiver's **unlit albedo** (in its GBA channels) when spotlights are
 enabled. Spotlights light that pigment with a screen-like diffuse term
 plus a separate additive cookie contribution, even if the previously shaded
-surface was black. **SetSpotlightIntensities** independently scales the
+surface was black. Each projected beam now has conservative screen-space
+bounds, so the compositor skips expensive projector and normal sampling
+outside the beam footprint without scissoring away fog or SSAO. Fully
+offscreen beams are culled. Light attenuation starts gradually at 35% of
+the requested range instead of falling away only in the final 15%;
+the beam still reaches zero at the same specified range.
+**SetSpotlightIntensities** independently scales the
 two components: `light` illuminates the receiver's unlit pigment,
 `add` overlays unmodulated cookie radiance. Their defaults are **1.0**
 and **0.12**, preserving existing Spotlight visuals. Both accept

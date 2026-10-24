@@ -3299,7 +3299,21 @@ namespace jkgm {
                     : std::vector<spotlight_instance>{};
                 maintain_spotlight_images(spots);
                 if(the_config->enable_spotlights) {
+                    spotlight_projection_camera projection{};
+                    projection.position=cam.position;
+                    projection.right=cam.right;
+                    projection.up=cam.up;
+                    projection.forward=cam.forward;
+                    projection.tan_half_horizontal=h;
+                    projection.tan_half_vertical=v;
+                    projection.width=get<x>(conf_scr_res);
+                    projection.height=get<y>(conf_scr_res);
                     for(auto const &spot:spots) {
+                        // Conservative cone screen bounds: skip fully offscreen
+                        // lights and gate GLSL projector/normal work per pixel.
+                        // The shared fullscreen fog/SSAO composite is untouched.
+                        auto const rect=spotlight_screen_coverage(spot,projection);
+                        if(!rect.visible)continue;
                         auto image=spotlight_mat_texture(spot.material);
                         if(!image)continue;
                         prog.set_spotlight(
@@ -3308,7 +3322,9 @@ namespace jkgm {
                             point_axis(spot.right,spot.range/spot.width),
                             point_axis(spot.up,spot.range/spot.height),
                             point_axis(spot.forward,1.0f/spot.range),
-                            make_point(spot.light_intensity,spot.add_intensity));
+                            make_point(spot.light_intensity,spot.add_intensity),
+                            make_point(rect.min_x,rect.min_y,
+                                       rect.max_x,rect.max_y));
                         gl::set_active_texture_unit(6+active);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          *image);

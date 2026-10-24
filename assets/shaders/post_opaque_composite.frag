@@ -25,6 +25,9 @@ uniform vec4 spotlight_rights[4];   // XYZ axis, W fixed range / width
 uniform vec4 spotlight_ups[4];      // XYZ axis, W fixed range / height
 uniform vec4 spotlight_forwards[4]; // XYZ axis, W inverse range
 uniform vec2 spotlight_intensities[4]; // light (pigment), additive (cookie)
+// Conservative screen UV coverage of each pyramid, minXY/maxXY.
+// Fullscreen fog/AO still renders; only projector work is footprint-gated.
+uniform vec4 spotlight_screen_bounds[4];
 
 layout(location = 0) out vec4 out_color;
 
@@ -57,14 +60,29 @@ void project_spotlights(float depth,ivec2 pixel,
     additive=vec3(0.0);
     if(spotlight_count<=0 || depth<=0.0 || depth>=65500.0)
         return;
-    vec3 position=reconstruct_scene_world(depth);
-    vec3 vn=texelFetch(normal_image,pixel,0).rgb;
-    if(dot(vn,vn)<0.0001)return;
-    vec3 normal=normalize(camera_right.xyz*(vn.x/camera_right.w)+
-                          camera_up.xyz*(vn.y/camera_up.w)+
-                          camera_forward.xyz*vn.z);
+    vec2 pixel_uv=(vec2(pixel)+vec2(0.5))/
+                   vec2(textureSize(depth_image,0));
+    // Avoid depth->world reconstruction and normal-buffer sampling on all
+    // pixels outside every active spotlight's projected screen footprint.
+    bool potentially_lit=false;
     for(int i=0;i<4;i++) {
         if(i>=spotlight_count)break;
+        vec4 bounds=spotlight_screen_bounds[i];
+        if(all(greaterThanEqual(pixel_uv,bounds.xy)) &&
+           all(lessThanEqual(pixel_uv,bounds.zw))) {
+            potentially_lit=true;
+            break;
+        }
+    }
+    if(!potentially_lit)return;
+    vec3 position=reconstruct_scene_world(depth);
+    vec3 normal=vec3(0.0);
+    bool have_normal=false;
+    for(int i=0;i<4;i++) {
+        if(i>=spotlight_count)break;
+        vec4 bounds=spotlight_screen_bounds[i];
+        if(any(lessThan(pixel_uv,bounds.xy)) ||
+           any(greaterThan(pixel_uv,bounds.zw)))continue;
         vec3 relative=position-spotlight_origins[i].xyz;
         float distance=dot(relative,spotlight_forwards[i].xyz);
         float t=distance*spotlight_forwards[i].w;
@@ -77,10 +95,23 @@ void project_spotlights(float depth,ivec2 pixel,
            any(greaterThan(uv,vec2(1.0))))continue;
         vec4 cookie=sample_spotlight(i,uv);
         if(cookie.a<=0.001)continue;
+        // Only sample/reconstruct normals when at least one spotlight actually
+        // reaches the receiver, not once per fullscreen compositor pixel.
+        if(!have_normal) {
+            vec3 vn=texelFetch(normal_image,pixel,0).rgb;
+            if(dot(vn,vn)<0.0001)return;
+            normal=normalize(camera_right.xyz*(vn.x/camera_right.w)+
+                             camera_up.xyz*(vn.y/camera_up.w)+
+                             camera_forward.xyz*vn.z);
+            have_normal=true;
+        }
         float border=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
         float edge=smoothstep(0.0,0.02,border);
+        // Begin attenuation much earlier than the old 85%-to-100% cutoff.
+        // A longer smooth fade looks more natural on car-headlight receivers,
+        // retaining near-field brightness and reaching zero at the same range.
         float fade=smoothstep(0.01,0.04,t)*
-                   (1.0-smoothstep(0.85,1.0,t));
+                   (1.0-smoothstep(0.35,1.0,t));
         float facing=max(dot(normal,normalize(-relative)),0.0);
         // Mild floor illumination even with near-horizontal beams.
         float incidence=0.25+0.75*facing;

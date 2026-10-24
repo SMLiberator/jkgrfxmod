@@ -125,5 +125,69 @@ int main()
     assert(reg.set(a));
     assert(reg.erase_thing(a.thing));
     assert(reg.snapshot().empty());
+
+    // Conservative screen-space bounds for the fullscreen spotlight pass.
+    spotlight_projection_camera cam{};
+    cam.position={{0,0,0}};
+    cam.right={{1,0,0}};
+    cam.forward={{0,1,0}};
+    cam.up={{0,0,1}};
+    cam.tan_half_horizontal=1.0f;
+    cam.tan_half_vertical=0.75f;
+    cam.width=800;cam.height=600;
+    spotlight_instance beam{};
+    beam.origin={{0,4,0}};
+    beam.right={{1,0,0}};
+    beam.forward={{0,1,0}};
+    beam.up={{0,0,1}};
+    beam.width=3;beam.height=2;beam.range=12;
+    auto rect=spotlight_screen_coverage(beam,cam);
+    assert(rect.visible);
+    assert(rect.min_x<0.5f&&rect.max_x>0.5f);
+    assert(rect.min_y<0.5f&&rect.max_y>0.5f);
+    assert(rect.min_x>0.0f&&rect.max_x<1.0f);
+    // Exhaustively sample the cone interior: every screen-visible receiver
+    // inside the projector must lie within the rectangle (no light clipping).
+    auto assert_contains=[&](spotlight_instance const &light) {
+        auto const bounds=spotlight_screen_coverage(light,cam);
+        for(int n=1;n<=20;n++)for(int x=-10;x<=10;x++)
+            for(int z=-10;z<=10;z++) {
+                float const t=float(n)/20.0f;
+                thing_node_vector p{};
+                for(int axis=0;axis<3;axis++)
+                    p[axis]=light.origin[axis]+
+                        t*(light.forward[axis]*light.range+
+                           light.right[axis]*light.width*float(x)/20.0f+
+                           light.up[axis]*light.height*float(z)/20.0f);
+                thing_node_vector d{{p[0]-cam.position[0],
+                                     p[1]-cam.position[1],
+                                     p[2]-cam.position[2]}};
+                float const forward=d[0]*cam.forward[0]+d[1]*cam.forward[1]+
+                                    d[2]*cam.forward[2];
+                if(forward<=0.001f)continue;
+                float const u=0.5f+0.5f*
+                    (d[0]*cam.right[0]+d[1]*cam.right[1]+d[2]*cam.right[2])/
+                    (forward*cam.tan_half_horizontal);
+                float const v=0.5f+0.5f*
+                    (d[0]*cam.up[0]+d[1]*cam.up[1]+d[2]*cam.up[2])/
+                    (forward*cam.tan_half_vertical);
+                if(u<0.0f||u>1.0f||v<0.0f||v>1.0f)continue;
+                assert(bounds.visible);
+                assert(u>=bounds.min_x-0.0001f && u<=bounds.max_x+0.0001f);
+                assert(v>=bounds.min_y-0.0001f && v<=bounds.max_y+0.0001f);
+            }
+    };
+    assert_contains(beam);
+    // A camera partly inside the projector requires near-plane edge clipping.
+    cam.position={{0,8,0}};
+    assert_contains(beam);
+    cam.position={{0,0,0}};
+    beam.origin={{50,4,0}};
+    assert(!spotlight_screen_coverage(beam,cam).visible);
+    beam.origin={{0,-4,0}};
+    beam.forward={{0,-1,0}};
+    assert(!spotlight_screen_coverage(beam,cam).visible);
+    cam.tan_half_horizontal=0.0f;
+    assert(spotlight_screen_coverage(beam,cam).visible); // safe fallback
     return 0;
 }

@@ -250,6 +250,7 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> spotlight_ups;
             std::vector<gl::uniform_location_id> spotlight_forwards;
             std::vector<gl::uniform_location_id> spotlight_strengths;
+            std::vector<gl::uniform_location_id> spotlight_screen_bounds;
 
         public:
             explicit game_post_opaque_composite_shader(fs::path const &data_root);
@@ -266,7 +267,8 @@ namespace jkgm {
             void set_spotlight(int slot,point<4,float> origin,
                                point<4,float> right,point<4,float> up,
                                point<4,float> forward,
-                               point<2,float> intensities);
+                               point<2,float> intensities,
+                               point<4,float> screen_bounds);
         };
 
         class game_transparency_pass_shader : public game_pass_shader {
