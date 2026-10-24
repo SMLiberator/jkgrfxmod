@@ -881,8 +881,10 @@ reports an `A3D engine state` snapshot:
 - `a3d_path_flag`: JK's indicator from its A3D-specific initialization
   path. The initializer clears this flag on several failures.
 - `a3d_secondary`, `primary_buffer`, `a3d_extension`: additional
-  interface pointers reached during JK's sound initialization. Nonzero
-  means an interface pointer was stored, not that hardware/HRTF works.
+  interface pointers reached during JK's sound initialization. The
+  `ds3d_listener` interface at `0x00563760` is explicitly requested as
+  `IDirectSound3DListener` on the primary buffer. Nonzero means an interface
+  pointer was stored, not that hardware/HRTF works.
 
 These are passive `GetModuleHandleA`/`GetProcAddress` queries and guarded
 4-byte memory reads. They do not load new libraries, call A3D/DirectSound
