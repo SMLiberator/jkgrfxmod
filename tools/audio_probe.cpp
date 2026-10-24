@@ -2,6 +2,7 @@
 // Does not play audio, modify the registry, or patch a game process.
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
+#include <mmreg.h> // WAVEFORMATEX and WAVE_FORMAT_PCM
 #include <dsound.h>
 #include <cstdio>
 #pragma comment(lib,"dsound.lib")

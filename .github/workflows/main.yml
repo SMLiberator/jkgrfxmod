@@ -275,6 +275,10 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\frame_profile_gaps.cpp /Fe:frame_profile_gaps_test.exe
         frame_profile_gaps_test.exe
+    - name: Enable 32-bit MSVC for Wine audio probe
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x86
     - name: Compile Wine/Windows DirectSound3D probe
       shell: cmd
       run: |
