@@ -94,7 +94,8 @@ inline void bind_auto_exposure(opengl_state *ogs)
     bool const enabled=auto_exposure_enabled(ogs) &&
                        ogs->auto_exposure_history_valid;
     ogs->post_to_srgb.set_hdr(6,hdr_enabled(ogs),enabled,
-                                ogs->hdr_exposure_compensation);
+                                ogs->hdr_exposure_compensation,
+                                ogs->hdr_shadow_softness);
     gl::set_active_texture_unit(6);
     gl::bind_texture(gl::texture_bind_target::texture_2d,
         enabled

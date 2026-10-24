@@ -5,6 +5,7 @@ uniform sampler2D exposure_image; // 1x1 adapted EV (linear scene metering)
 uniform int exposure_enabled;
 uniform int hdr_enabled; // HDR display transform independent of adaptation
 uniform float hdr_exposure_compensation; // fixed EV offset
+uniform float hdr_shadow_softness; // 0 original ACES toe, 0.6 current softened toe
 
 const int num_bloom_layers = 5;
 uniform sampler2D bloom_fbuf[num_bloom_layers];
@@ -53,7 +54,11 @@ float filmic_luminance(float x)
     // low-light toe. Zero always remains zero (no artificial ambient light).
     float aces = (x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14);
     float soft_toe = x/(1.0+x);
-    float toe_weight = 0.6*(1.0-smoothstep(0.015,0.10,x));
+    // Adjustable low-light toe: 0 restores the original sharper ACES
+    // shadow curve, while 0.6 retains the current softened appearance.
+    // Keep hue-preserving luminance mapping and highlight gamut handling.
+    float toe_weight = clamp(hdr_shadow_softness,0.0,1.0) *
+                       (1.0-smoothstep(0.015,0.10,x));
     return clamp(mix(aces,soft_toe,toe_weight),0.0,1.0);
 }
 

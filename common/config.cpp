@@ -98,6 +98,17 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             }
         }
 
+        if(j.contains("hdr_shadow_softness")) {
+            auto const &v=j.at("hdr_shadow_softness");
+            if(!v.is_number() || !std::isfinite(static_cast<double>(v)))
+                throw std::runtime_error("hdr_shadow_softness must be finite");
+            rv->hdr_shadow_softness=static_cast<float>(v);
+            if(!std::isfinite(rv->hdr_shadow_softness) ||
+               rv->hdr_shadow_softness<0.0f ||
+               rv->hdr_shadow_softness>1.0f)
+                throw std::runtime_error("hdr_shadow_softness must be between 0 and 1");
+        }
+
         if(j.contains("auto_exposure_sensitivity")) {
             auto const &v=j.at("auto_exposure_sensitivity");
             if(!v.is_number() || !std::isfinite(static_cast<double>(v))) {

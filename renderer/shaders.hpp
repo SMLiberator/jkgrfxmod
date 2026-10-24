@@ -420,7 +420,7 @@ namespace jkgm {
             gl::uniform_location_id contrast;
             gl::uniform_location_id saturation;
             gl::uniform_location_id exposure_image,exposure_enabled;
-            gl::uniform_location_id hdr_enabled,hdr_exposure_compensation;
+            gl::uniform_location_id hdr_enabled,hdr_exposure_compensation,hdr_shadow_softness;
             std::vector<gl::uniform_location_id> bloom_fbuf;
             std::vector<gl::uniform_location_id> bloom_weight;
 
@@ -428,7 +428,7 @@ namespace jkgm {
             explicit post_to_srgb_shader(fs::path const &data_root);
 
             void set_fbuf_sampler(int sampler);
-            void set_hdr(int sampler,bool hdr,bool adaptive,float compensation_ev);
+            void set_hdr(int sampler,bool hdr,bool adaptive,float compensation_ev,float shadow_softness);
             void set_bloom_samplers(span<int const> samplers);
             void set_bloom_weights(span<float const> weights);
 

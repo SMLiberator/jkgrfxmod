@@ -135,6 +135,7 @@ namespace jkgm {
         bool enable_hdr = false;
         float auto_exposure_sensitivity = 0.0f;
         float hdr_exposure_compensation = 0.5f;
+        float hdr_shadow_softness = 0.6f;
         bool auto_exposure_diagnostics = false;
 
         shaders::menu_shader menu_program;
