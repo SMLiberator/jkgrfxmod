@@ -857,27 +857,6 @@ overlapping transparent faces become ambiguous. If a particular visual effect
 sorts incorrectly, capture the scene and profiler line so we can refine that
 case without restoring unbounded recursion.
 
-## JK.dll SetThingSector crash guard (COG)
-
-The supplied community `JK.dll` crashes at `0x10050A4D` when
-`SetThingSector(thing, sector)` receives an invalid destination sector:
-the original handler reads `[sector+0x30]` without checking for NULL.
-The renderer now wraps the *registered COG verb* (not the binary) whenever
-the audited JKGM COG helpers match. It uses the native argument converters to
-validate both arguments, verifies the Thing's current sector, and invokes
-the unmodified `JK.dll` handler with the original argument types and stack
-only for valid calls. Invalid calls are consumed and rejected, with warnings
-such as `JK.dll SetThingSector rejected: invalid destination sector
-sector_arg(type=3, raw=-1) thing_arg(type=3, raw=17)`.
-The warning includes the original argument types and raw values to track
-the offending COG logic. Repetitive warnings are rate-limited.
-
-The guard is independent of `use_model_cache` and
-`mesh_revision_tracking`. It is a compatibility safeguard, not a fix for
-the COG script generating the invalid sector; diagnose the script using the
-logged argument values. Unsupported executable signatures leave the
-original JK.dll verb untouched. This guard does not alter audio/A3D.
-
 ## Audio diagnostics: Aureal A3D and Wine (read-only)
 
 To investigate why the JK sound menu does not expose (or does not
@@ -923,19 +902,9 @@ into the prefix, because incompatible wrappers are known to break JK
 in-game sound effects even if its menus still work. Compare normal
 playback, A3D menu availability, and audible front/back positioning.
 
-With `profile_audio=true` the renderer also traces JKGM's audited
-A3D COM activation shim at `0x00437136`. Its log lines include the
-requested CLSID/IID, HRESULT, returned COM interface pointer, and whether
-`a3d.dll` was loaded when the call returned. This distinguishes a DLL
-merely being loaded from an actual A3D COM activation request and its
-success or failure; a successful activation **still does not prove HRTF
-or audible 3D positioning**. This is a pass-through diagnostic: the game
-executes its original A3D call unchanged. The shim is signature-checked
-and tracing is not installed when `profile_audio` is disabled.
-
-Neither diagnostic changes the audio backend. Subsequent work can verify
-creation and positioning of actual DirectSound3D/A3D sound buffers and
-audible front/back localization after COM activation has been confirmed.
+Neither diagnostic changes the audio backend. Future work can trace
+actual DirectSound/A3D buffer creation and COG sound-handle behavior
+after the loaded DLL chain is understood.
 
 ## High-resolution MAT UVs on GPU-cached 3DOs
 
