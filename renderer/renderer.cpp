@@ -3,6 +3,7 @@
 #include "presentation_gpu_profile.hpp"
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
+#include "native_sprite_profile.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_alpha.hpp"
 #include "native_jk_palette_effects.hpp"
@@ -632,6 +633,29 @@ namespace jkgm {
                          " mesh_calls_avg=", profile_window.native_mesh_calls / frames,
                          " face_calls_avg=", profile_window.native_face_calls / frames,
                          " face_emitted_avg=", profile_window.native_face_emitted / frames);
+            }
+            if(native_sprite_available()) {
+                LOG_INFO("PERF native_sprite calls_avg type0/1/2/3/4=",
+                         profile_window.sprite_type_calls[0]/frames,"/",
+                         profile_window.sprite_type_calls[1]/frames,"/",
+                         profile_window.sprite_type_calls[2]/frames,"/",
+                         profile_window.sprite_type_calls[3]/frames,"/",
+                         profile_window.sprite_type_calls[4]/frames,
+                         " other=",profile_window.sprite_other_type_calls/frames,
+                         " hidden=",profile_window.sprite_hidden_calls/frames);
+                LOG_INFO("PERF native_sprite draw_us_avg=",
+                         (profile_window.sprite_native_ns/1000)/frames,
+                         " rdSprite_Draw_calls_avg=",
+                         profile_window.sprite_native_calls/frames,
+                         " returned_nonzero_avg=",
+                         profile_window.sprite_native_success/frames,
+                         " proc_faces_avg=",
+                         profile_window.sprite_native_proc_faces/frames,
+                         " projected_gpu_avg=",
+                         profile_window.sprite_projected_gpu/frames,
+                         " projected_native_warmup_avg=",
+                         profile_window.sprite_projected_warmups/frames,
+                         " NOTE=inclusive_native_only_not_gpu_or_decal_projection");
             }
             LOG_INFO("PERF sorting_us opaque=", avg(profile_stage::sort_opaque),
                      " transparent=", avg(profile_stage::sort_transparent),
@@ -4033,6 +4057,17 @@ namespace jkgm {
                 profile_frame.native_model_ns += native.model_ns;
                 profile_frame.native_mesh_ns += native.mesh_ns;
                 profile_frame.native_face_ns += native.face_ns;
+                auto const sprites=consume_native_sprite_sample();
+                for(size_t i=0;i<sprites.type_calls.size();++i)
+                    profile_frame.sprite_type_calls[i]+=sprites.type_calls[i];
+                profile_frame.sprite_other_type_calls+=sprites.other_type_calls;
+                profile_frame.sprite_hidden_calls+=sprites.hidden_calls;
+                profile_frame.sprite_native_calls+=sprites.native_calls;
+                profile_frame.sprite_native_success+=sprites.native_success;
+                profile_frame.sprite_native_ns+=sprites.native_ns;
+                profile_frame.sprite_native_proc_faces+=sprites.native_proc_faces;
+                profile_frame.sprite_projected_gpu+=sprites.projected_gpu;
+                profile_frame.sprite_projected_warmups+=sprites.projected_warmups;
             }
             record_profile(started, profile_clock::now());
             if(profiling) {

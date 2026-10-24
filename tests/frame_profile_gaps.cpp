@@ -12,6 +12,10 @@ int main()
     a.execute_vertices = 500;
     a.execute_instruction_bytes = 7000;
     a.frames_with_execute = 1;
+    a.sprite_type_calls[0] = 10;
+    a.sprite_native_calls = 10;
+    a.sprite_native_ns = 123456;
+    a.sprite_projected_gpu = 3;
 
     jkgm::profile_sample b{};
     b.before_first_execute_us = 200;
@@ -20,6 +24,11 @@ int main()
     b.execute_vertices = 400;
     b.execute_instruction_bytes = 1000;
     b.frames_with_execute = 1;
+    b.sprite_type_calls[0] = 12;
+    b.sprite_type_calls[4] = 5;
+    b.sprite_native_calls = 17;
+    b.sprite_native_ns = 222222;
+    b.sprite_projected_gpu = 2;
 
     jkgm::profile_sample combined{};
     combined.add(a);
@@ -31,5 +40,10 @@ int main()
     assert(combined.execute_vertices == 900);
     assert(combined.execute_instruction_bytes == 8000);
     assert(combined.frames_with_execute == 2);
+    assert(combined.sprite_type_calls[0] == 22);
+    assert(combined.sprite_type_calls[4] == 5);
+    assert(combined.sprite_native_calls == 27);
+    assert(combined.sprite_native_ns == 345678);
+    assert(combined.sprite_projected_gpu == 5);
     return 0;
 }

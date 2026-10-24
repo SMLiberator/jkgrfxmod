@@ -26,6 +26,11 @@ struct profile_sample {
   uint64_t native_model_calls=0, native_model_drawn=0, native_mesh_calls=0;
   uint64_t native_face_calls=0, native_face_emitted=0;
   uint64_t native_model_ns=0, native_mesh_ns=0, native_face_ns=0;
+  std::array<uint64_t,5> sprite_type_calls{};
+  uint64_t sprite_other_type_calls=0,sprite_hidden_calls=0;
+  uint64_t sprite_native_calls=0,sprite_native_success=0,sprite_native_ns=0;
+  uint64_t sprite_native_proc_faces=0;
+  uint64_t sprite_projected_gpu=0,sprite_projected_warmups=0;
   uint64_t gpu_candidates=0,gpu_culled=0,gpu_queued=0,gpu_snapshots=0,gpu_ready_checks=0;
   uint64_t gpu_source_checks=0,gpu_source_ns=0,gpu_source_invalidations=0;
   uint64_t gpu_failed_snapshot_reuses=0;
@@ -60,6 +65,16 @@ struct profile_sample {
     native_model_ns+=o.native_model_ns;
     native_mesh_ns+=o.native_mesh_ns;
     native_face_ns+=o.native_face_ns;
+    for(size_t i=0;i<sprite_type_calls.size();++i)
+      sprite_type_calls[i]+=o.sprite_type_calls[i];
+    sprite_other_type_calls+=o.sprite_other_type_calls;
+    sprite_hidden_calls+=o.sprite_hidden_calls;
+    sprite_native_calls+=o.sprite_native_calls;
+    sprite_native_success+=o.sprite_native_success;
+    sprite_native_ns+=o.sprite_native_ns;
+    sprite_native_proc_faces+=o.sprite_native_proc_faces;
+    sprite_projected_gpu+=o.sprite_projected_gpu;
+    sprite_projected_warmups+=o.sprite_projected_warmups;
     gpu_candidates+=o.gpu_candidates; gpu_culled+=o.gpu_culled;
     gpu_queued+=o.gpu_queued; gpu_snapshots+=o.gpu_snapshots;
     gpu_source_checks+=o.gpu_source_checks;

@@ -859,6 +859,33 @@ case without restoring unbounded recursion.
 
 ## Optional CPU/geometry frame profiler
 
+### Native sprite pipeline profiling (SPR GPU batching baseline)
+
+The experimental native SPR profiler is available when `"profile_renderer": true`
+and the verified JK23 sprite detour is attached. It adds two `PERF
+native_sprite` lines every ~2 seconds:
+
+- `type0/1/2/3/4`: authored sprite draw-hook calls per frame; `other`
+  includes missing type metadata and unsupported types. `hidden` counts
+  calls skipped due to zero size/opacity.
+- `draw_us_avg`: inclusive CPU time per frame in JK's real
+  `rdSprite_Draw` function, excluding GPU decal projection and OpenGL work;
+  `rdSprite_Draw_calls_avg` and `returned_nonzero_avg` show how often the
+  native path was invoked and returned successfully.
+- `proc_faces_avg`: native SPR faces successfully submitted to
+  `rdCache_AddProcFace` (available only with the exact-alpha hook).
+- `projected_gpu_avg`: type-3 sprites that successfully queued cached GPU
+  decal geometry. `projected_native_warmup_avg`: masked native fallback
+  draws used to make decal MAT textures resident.
+
+Use a particle-heavy level and compare these lines with `PERF execute_buffers`,
+`PERF sorting_us`, and `PERF geometry`. They establish whether native sprite
+generation, converted triangles, or OpenGL material/draw overhead dominates.
+The profiler changes no rendering behavior; ordinary SPR types 0-2 and
+center-occluded type-4 flares still use JK's native quad submission.
+The planned persistent GPU quad path must preserve per-Thing sprite orientation,
+per-MAT cel loading and transparency sorting before replacing that submission.
+
 Set `"profile_renderer": true` in `jkgm.json` and configure `log_path`.
 It emits four `PERF` log lines about every two seconds, reporting:
 

@@ -8,6 +8,7 @@
 #include "renderer.hpp"
 #include "runtime_material.hpp"
 #include "native_3do_profile.hpp"
+#include "native_sprite_profile.hpp"
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_modelview.hpp"
 #include "thing_node_native.hpp"
@@ -1438,6 +1439,7 @@ namespace {
     native_sprite_mid_fn RealSpritePreclip=
         reinterpret_cast<native_sprite_mid_fn>(sprite_preclip_addr);
     bool native_sprite_hook_active=false;
+    jkgm::native_sprite_sample native_sprite_totals{};
     bool sprite_variant_hooks_active=false;
     bool sprite_frustum_hook_active=false;
     bool sprite_alpha_hook_active=false;
@@ -1800,6 +1802,9 @@ namespace {
         uint32_t const before=*reinterpret_cast<uint32_t const *>(
             sprite_proc_count_addr);
         int const result=RealSpriteAddProc(extra,vertices,flags);
+        if(result!=0 && is_sprite && extra==0 &&
+           the_config && the_config->profile_renderer)
+            ++native_sprite_totals.native_proc_faces;
         if(result==0 || !is_sprite || extra!=0) return result;
         void const *sprite=nullptr;
         std::memcpy(&sprite,static_cast<uint8_t const *>(
@@ -2377,66 +2382,82 @@ namespace {
         return true;
     }
 
+    // Only timer rdSprite_Draw itself, rather than attributing the
+    // separate GPU projector geometry build to the native submission path.
+    int profile_native_sprite_draw(void *thing,void *orientation)
+    {
+        auto const previous=sprite_draw_active;
+        sprite_draw_active={thing,orientation};
+        bool const profiling=the_config && the_config->profile_renderer;
+        auto const start=profiling?std::chrono::steady_clock::now()
+                                  :std::chrono::steady_clock::time_point{};
+        int const result=RealNativeSprite(thing,orientation);
+        if(profiling) {
+            native_sprite_totals.native_ns+=static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now()-start).count());
+            ++native_sprite_totals.native_calls;
+            if(result!=0)++native_sprite_totals.native_success;
+        }
+        sprite_draw_active=previous;
+        return result;
+    }
+
     int __cdecl HookedNativeSprite(void *thing,void *orientation)
     {
-        auto const info=current_sprite_info(thing);
-        if(info.width==0.0f || info.height==0.0f || info.opacity==0.0f)
-            return 0;
-        // A type-3 projected SPR must NEVER become its original free-
-        // standing quad, even when clipping misses or MAT warm-up is needed.
-        // Native rdCache still must process the face to initialize MAT
-        // textures. HookedSpriteAddProc tags it with zero opacity.
-        bool projected=false;
-        if(the_config && the_config->enable_sprite_decals &&
-           gpu_span_readable(thing,8)) {
-            uintptr_t sprite=0;
-            std::memcpy(&sprite,static_cast<uint8_t const *>(thing)+4,4);
-            uint32_t type=0;
-            projected=gpu_span_readable(
-                reinterpret_cast<void const *>(sprite),32) &&
-                sprite_types.lookup(reinterpret_cast<void const *>(sprite),
-                                    reinterpret_cast<char const *>(sprite),type) &&
-                type==jkgm::sprite_project_decal;
-        }
-        if(projected) {
-            if(submit_native_sprite_decal(thing,orientation,info))
-                return 1;
-            if(sprite_alpha_hook_active) {
-                auto const previous=sprite_draw_active;
-                bool const was_suppressed=suppress_native_decal_face;
-                sprite_draw_active={thing,orientation};
-                suppress_native_decal_face=true;
-                RealNativeSprite(thing,orientation);
-                suppress_native_decal_face=was_suppressed;
-                sprite_draw_active=previous;
-            }
-            return 1;
-        }
-        // A loaded type-4 SPR may never actually be submitted. Trace native
-        // draw entry separately from texture/resource loading and face output.
-        if(the_config && the_config->profile_renderer &&
+        bool const profiling=the_config && the_config->profile_renderer;
+        uint32_t authored_type=0;
+        bool known_type=false;
+        // When decal projection is active, reuse this lookup for both
+        // classification and routing. Normal gameplay with both flags off
+        // skips it entirely.
+        if(the_config && (the_config->enable_sprite_decals || profiling) &&
            gpu_span_readable(thing,8)) {
             void const *resource=nullptr;
             std::memcpy(&resource,static_cast<uint8_t const *>(thing)+4,
                         sizeof(resource));
-            uint32_t authored_type=0;
-            if(gpu_span_readable(resource,32) &&
-               sprite_types.lookup(resource,static_cast<char const *>(resource),
-                                   authored_type) &&
-               jkgm::sprite_is_flare(authored_type) &&
-               flare_draw_trace_count++<6U) {
-                std::ostringstream msg;
-                msg<<"SPR flare stage=draw_enter resource="
-                   <<reinterpret_cast<uintptr_t>(resource)
-                   <<" opacity="<<info.opacity;
-                LOG_INFO(msg.str());
-            }
+            known_type=gpu_span_readable(resource,32) &&
+                sprite_types.lookup(resource,static_cast<char const *>(resource),
+                                    authored_type);
         }
-        auto const previous=sprite_draw_active;
-        sprite_draw_active={thing,orientation};
-        int const result=RealNativeSprite(thing,orientation);
-        sprite_draw_active=previous;
-        return result;
+        if(profiling) {
+            if(known_type && authored_type<native_sprite_totals.type_calls.size())
+                ++native_sprite_totals.type_calls[authored_type];
+            else
+                ++native_sprite_totals.other_type_calls;
+        }
+        auto const info=current_sprite_info(thing);
+        if(info.width==0.0f || info.height==0.0f || info.opacity==0.0f) {
+            if(profiling)++native_sprite_totals.hidden_calls;
+            return 0;
+        }
+        // Type-3 decals keep their GPU path and masked native MAT warm-up.
+        // Count these separately from regular native sprite submissions.
+        bool const projected=the_config && the_config->enable_sprite_decals &&
+                             known_type &&
+                             authored_type==jkgm::sprite_project_decal;
+        if(projected) {
+            if(submit_native_sprite_decal(thing,orientation,info)) {
+                if(profiling)++native_sprite_totals.projected_gpu;
+                return 1;
+            }
+            if(sprite_alpha_hook_active) {
+                auto const was_suppressed=suppress_native_decal_face;
+                suppress_native_decal_face=true;
+                profile_native_sprite_draw(thing,orientation);
+                suppress_native_decal_face=was_suppressed;
+                if(profiling)++native_sprite_totals.projected_warmups;
+            }
+            return 1;
+        }
+        if(profiling && known_type && jkgm::sprite_is_flare(authored_type) &&
+           flare_draw_trace_count++<6U) {
+            // Native flare submission may be zero even if the SPR loaded.
+            std::ostringstream msg;
+            msg<<"SPR flare stage=draw_enter opacity="<<info.opacity;
+            LOG_INFO(msg.str());
+        }
+        return profile_native_sprite_draw(thing,orientation);
     }
 
     bool request_native_sprite_hooks()
@@ -2597,6 +2618,17 @@ namespace {
         LOG_INFO("SPR authored-type capture attached (index at +0x20 ignored)");
         return true;
     }
+}
+
+jkgm::native_sprite_sample jkgm::consume_native_sprite_sample()
+{
+    auto result=native_sprite_totals;
+    native_sprite_totals={};
+    return result;
+}
+bool jkgm::native_sprite_available()
+{
+    return native_sprite_hook_active;
 }
 
 // DirectX hooks

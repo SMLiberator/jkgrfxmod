@@ -248,6 +248,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\native_3do_profile.cpp /Fe:native_3do_profile_test.exe
         native_3do_profile_test.exe
+    - name: Native sprite profiler counter regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_sprite_profile.cpp /Fe:native_sprite_profile_test.exe
+        native_sprite_profile_test.exe
     - name: Native JKGM EXE bootstrap PE regression tests
       run: python tests/test_bootstrap_patcher.py
     - name: Frame profiler counter regression tests
