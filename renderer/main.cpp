@@ -4797,6 +4797,60 @@ std::vector<jkgm::spotlight_instance> jkgm::collect_spotlights_for_frame()
     return instances;
 }
 
+// JKGM's dedicated A3D COM activation shim at 0x00437136 loads a3d.dll,
+// asks for DllGetClassObject and falls back to CoCreateInstance. This records
+// the *returned HRESULT and interface pointer*, unlike passive module polling.
+// Install only for profile_audio on the exact audited executable; the original
+// 5-argument stdcall is always invoked once with unchanged parameters.
+namespace a3d_activation_trace {
+    using create_fn=HRESULT (WINAPI *)(GUID const &,void *,DWORD,
+                                        GUID const &,void **);
+    constexpr uintptr_t shim_address=0x00437136U;
+    constexpr std::array<uint8_t,10> shim_signature{{
+        0xbe,0xa0,0x40,0x52,0x00,0xe9,0xb0,0xfd,0xfe,0xff
+    }};
+    create_fn real_create=nullptr;
+    bool active=false;
+    unsigned calls=0;
+
+    bool supported()
+    {
+        return gpu_span_readable(reinterpret_cast<void const *>(shim_address),
+                                 shim_signature.size()) &&
+               std::memcmp(reinterpret_cast<void const *>(shim_address),
+                           shim_signature.data(),shim_signature.size())==0;
+    }
+    void format_guid(GUID const &g,char (&out)[40])
+    {
+        std::snprintf(out,sizeof(out),
+            "%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+            static_cast<unsigned long>(g.Data1),
+            static_cast<unsigned>(g.Data2),static_cast<unsigned>(g.Data3),
+            static_cast<unsigned>(g.Data4[0]),static_cast<unsigned>(g.Data4[1]),
+            static_cast<unsigned>(g.Data4[2]),static_cast<unsigned>(g.Data4[3]),
+            static_cast<unsigned>(g.Data4[4]),static_cast<unsigned>(g.Data4[5]),
+            static_cast<unsigned>(g.Data4[6]),static_cast<unsigned>(g.Data4[7]));
+    }
+    HRESULT WINAPI invoke(GUID const &clsid,void *outer,DWORD context,
+                          GUID const &iid,void **out)
+    {
+        HRESULT const result=real_create(clsid,outer,context,iid,out);
+        if(++calls<=32 || (calls%128)==0) {
+            char class_name[40]{},interface_name[40]{};
+            format_guid(clsid,class_name);
+            format_guid(iid,interface_name);
+            std::ostringstream hr;
+            hr<<"0x"<<std::hex<<static_cast<uint32_t>(result);
+            LOG_INFO("AUDIO A3D COM activation: hr=",hr.str(),
+                     " interface=",out && SUCCEEDED(result)?*out:nullptr,
+                     " a3d_dll_loaded=",GetModuleHandleA("a3d.dll")!=nullptr,
+                     " clsid=",class_name," iid=",interface_name,
+                     " calls=",calls);
+        }
+        return result;
+    }
+}
+
 bool attach_hooks()
 {
     DetourRestoreAfterWith();
@@ -4841,6 +4895,26 @@ bool attach_hooks()
     }
     else {
         LOG_DEBUG("JK.dll is not loaded; fog COG verbs unavailable");
+    }
+
+    // Only profile A3D activation when explicitly requested. Hook the
+    // exact JKGM shim, not COM globally or the Aureal DLL implementation.
+    if(the_config && the_config->profile_audio) {
+        if(a3d_activation_trace::supported()) {
+            a3d_activation_trace::real_create=
+                reinterpret_cast<a3d_activation_trace::create_fn>(
+                    a3d_activation_trace::shim_address);
+            LONG const status=DetourAttach(
+                &(PVOID &)a3d_activation_trace::real_create,
+                a3d_activation_trace::invoke);
+            if(status==NO_ERROR) {
+                a3d_activation_trace::active=true;
+                LOG_INFO("AUDIO A3D COM activation tracing attached");
+            }
+            else LOG_WARNING("AUDIO A3D COM tracing attach failed: ",status);
+        }
+        else LOG_WARNING("AUDIO A3D COM tracing unavailable: "
+                         "unsupported executable signature");
     }
 
     // DirectX
@@ -5008,6 +5082,11 @@ bool detach_hooks()
     }
     if(TrueJkInitNewCogVerbs != nullptr) {
         DetourDetach(&(PVOID &)TrueJkInitNewCogVerbs, HookedJkInitNewCogVerbs);
+    }
+    if(a3d_activation_trace::active) {
+        DetourDetach(&(PVOID &)a3d_activation_trace::real_create,
+                     a3d_activation_trace::invoke);
+        a3d_activation_trace::active=false;
     }
     DetourDetach(&(PVOID &)TrueDirectDrawCreate, HookedDirectDrawCreate);
     DetourDetach(&(PVOID &)TrueDirectDrawEnumerateA, HookedDirectDrawEnumerateA);
