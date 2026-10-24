@@ -928,31 +928,18 @@ only and does not rewrite model geometry, affect native 3DOs, world surfaces
 or the separate projected SPR decal UV path. A Blender exporter authoring
 change can follow later, so exports present the same 256-based convention.
 
-## Experimental MAT preload during native 3DO interception
+## MAT residency and native fallback
 
-Set `"use_model_cache": true` and optionally `"gpu_mat_preload": true`
-to test **direct native MAT cel warm-up without drawing a polygon**. If a
-3DO's required material has not reached JK's video-memory cache, the
-interceptor can invoke the previously SHA-verified
-`rdMaterial_AddToTextureCache` loader (the same entrypoint used by
-`SetSpotlight`) while JK is actively submitting that 3DO mesh.
+Direct native MAT preloading from GPU-cached 3DO interception has been
+**removed** after it caused a page fault in JKGM's std3D uploader during
+level loading. Older configs containing `"gpu_mat_preload": true` are
+accepted but ignored with a warning. When a GPU-cached 3DO references an
+unloaded MAT cel, the renderer yields to native JK's normal mesh draw and
+automatically uses the GPU path once the texture becomes resident. No
+special switch is necessary.
 
-This is intentionally **off by default**. Earlier experimentation found
-native std3D cache-loading can crash after pause/unpause when the device is
-detached. This version never calls the loader from the compositor, an
-arbitrary frame callback or projected-decal rendering: it only runs inside
-the active, validated native mesh hook with a current OpenGL context and
-initialized JK device. Every native MAT pointer must belong to the
-verified current/static world material array; loads are limited to four
-per frame and attempted at most once per MAT/cel per level. Explicit
-noncurrent face cels, unsupported builds and unsuccessful requests keep
-the existing native-renderer fallback, so an unready MAT is never hidden.
-
-`PERF gpu_3do readiness` includes `preload_attempts_total` and
-`preload_success_total` (per reporting window) for A/B testing. This
-still uses JK's internal MAT decoding/upload function; fully independent
-raw MAT decoding is a separate, more invasive effort. Do not treat this
-preloader as a GPU sprite batcher: SPR types 0-2 still render natively.
+The separate explicit `SetSpotlight` MAT request remains available:
+its loader is *not* invoked from the per-frame GPU mesh interception path.
 
 ## Shared native MAT readiness checks
 

@@ -201,11 +201,6 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_mat_ready_cache.cpp /Fe:gpu_mat_ready_cache_test.exe
         gpu_mat_ready_cache_test.exe
-    - name: One-shot native MAT preload gating tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_mat_preload_gate.cpp /Fe:gpu_mat_preload_gate_test.exe
-        gpu_mat_preload_gate_test.exe
     - name: Mutable cached 3DO source signature regression tests
       shell: cmd
       run: |

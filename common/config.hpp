@@ -46,7 +46,6 @@ namespace jkgm {
         bool optimize_hud_uploads = true; // upload only changed HUD rows (disable for A/B test)
         bool use_model_cache = false; // cache 3DO meshes as persistent GPU geometry
         bool mesh_revision_tracking = false; // experimental JK.dll COG mutation tracking
-        bool gpu_mat_preload = false; // experimental direct native MAT cache loading during 3DO draw
         bool enable_spotlights = false; // COG MAT-based screen-space spotlights
         bool enable_sprite_decals = false; // opt-in type-3 SPR projection onto level geometry
         bool enable_mesh_collision = false; // experimental JKGM collide=2 Detour (off by default)

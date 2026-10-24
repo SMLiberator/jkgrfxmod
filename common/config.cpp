@@ -180,8 +180,11 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("mesh_revision_tracking")) {
             j.at("mesh_revision_tracking").get_to(rv->mesh_revision_tracking);
         }
-        if(j.contains("gpu_mat_preload")) {
-            j.at("gpu_mat_preload").get_to(rv->gpu_mat_preload);
+        if(j.contains("gpu_mat_preload") &&
+           j.at("gpu_mat_preload").is_boolean() &&
+           j.at("gpu_mat_preload").get<bool>()) {
+            LOG_WARNING("gpu_mat_preload was removed after a native MAT uploader "
+                        "crash during level loading; falling back to safe native warm-up");
         }
         if(j.contains("enable_spotlights")) {
             j.at("enable_spotlights").get_to(rv->enable_spotlights);

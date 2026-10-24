@@ -17,8 +17,6 @@ int main()
     a.sprite_native_ns = 123456;
     a.sprite_projected_gpu = 3;
     a.gpu_ready_cache_hits = 25;
-    a.gpu_mat_preload_attempts = 2;
-    a.gpu_mat_preload_success = 1;
 
     jkgm::profile_sample b{};
     b.before_first_execute_us = 200;
@@ -33,8 +31,6 @@ int main()
     b.sprite_native_ns = 222222;
     b.sprite_projected_gpu = 2;
     b.gpu_ready_cache_hits = 30;
-    b.gpu_mat_preload_attempts = 3;
-    b.gpu_mat_preload_success = 2;
 
     jkgm::profile_sample combined{};
     combined.add(a);
@@ -52,7 +48,5 @@ int main()
     assert(combined.sprite_native_ns == 345678);
     assert(combined.sprite_projected_gpu == 5);
     assert(combined.gpu_ready_cache_hits == 55);
-    assert(combined.gpu_mat_preload_attempts == 5);
-    assert(combined.gpu_mat_preload_success == 3);
     return 0;
 }
