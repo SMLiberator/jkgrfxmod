@@ -713,8 +713,10 @@ namespace jkgm {
                          " ready_checks_avg=",profile_window.gpu_ready_checks/frames);
                 LOG_INFO("PERF gpu_3do readiness_us_avg=",
                          (profile_window.gpu_ready_ns/1000)/frames,
-                         " unique_mat_cel_checks_avg=",
-                         profile_window.gpu_ready_material_refs/frames);
+                         " mat_cel_refs_avg=",
+                         profile_window.gpu_ready_material_refs/frames,
+                         " shared_resident_hits_avg=",
+                         profile_window.gpu_ready_cache_hits/frames);
                 LOG_INFO("PERF gpu_3do source_check_us_avg=",
                          (profile_window.gpu_source_ns/1000)/frames,
                          " checks_avg=",profile_window.gpu_source_checks/frames,
@@ -902,6 +904,9 @@ namespace jkgm {
         {
             force_runtime_refresh = true;
             runtime_fast_retries = 0;
+            // A D3D load can replace a native MAT handle mid-frame.
+            // Drop previously confirmed positive residency on next lookup.
+            notify_native_mat_texture_uploaded();
         }
 
         point<2, int> get_cursor_pos(point<2, int> real_pos) override
@@ -4043,6 +4048,7 @@ namespace jkgm {
                 profile_frame.gpu_ready_checks+=stats.ready_checks;
                 profile_frame.gpu_ready_material_refs+=stats.ready_material_refs;
                 profile_frame.gpu_ready_ns+=stats.ready_ns;
+                profile_frame.gpu_ready_cache_hits+=stats.ready_cache_hits;
                 profile_frame.gpu_text_native+=stats.text_native;
                 profile_frame.gpu_geometry_native+=stats.geometry_native;
                 profile_frame.gpu_snapshot_native+=stats.snapshot_native;

@@ -857,6 +857,22 @@ overlapping transparent faces become ambiguous. If a particular visual effect
 sorts incorrectly, capture the scene and profiler line so we can refine that
 case without restoring unbounded recursion.
 
+## Shared native MAT readiness checks
+
+GPU-cached 3DO meshes and GPU SPR decals now share confirmed native MAT/cel
+residency results within a frame. Previously, each mesh repeated the same
+native texture and mip-surface validation for every material reference.
+The shared cache rechecks the active cel for animated materials, discards
+results at the next frame, and invalidates on D3D texture uploads. Missing
+cels are **never** memoized, so JK can warm them up in the same frame via
+native drawing. This is an incremental CPU optimization only: it does not
+yet directly upload MAT pixels without JK, and does not change how materials
+are decoded or rendered.
+
+With `profile_renderer`, the `PERF gpu_3do readiness` line now includes
+`mat_cel_refs_avg` (references examined) and `shared_resident_hits_avg`
+(cache hits) next to `readiness_us_avg` to measure the savings.
+
 ## Optional CPU/geometry frame profiler
 
 ### Native sprite pipeline profiling (SPR GPU batching baseline)

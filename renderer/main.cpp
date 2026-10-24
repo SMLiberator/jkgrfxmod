@@ -10,6 +10,7 @@
 #include "native_3do_profile.hpp"
 #include "native_sprite_profile.hpp"
 #include "gpu_3do_preview.hpp"
+#include "gpu_mat_ready_cache.hpp"
 #include "gpu_3do_modelview.hpp"
 #include "thing_node_native.hpp"
 #include "thing_node_attachment.hpp"
@@ -44,6 +45,7 @@
 #include <Windows.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -247,6 +249,8 @@ namespace {
     uint64_t next_gpu_id=1;
     uint64_t gpu_frame_serial=1;
     jkgm::gpu_3do_native_stats gpu_native_stats;
+    jkgm::gpu_mat_ready_cache gpu_mat_residency;
+    std::atomic<uint64_t> native_mat_upload_generation{1};
     // Debug-only fallback names, capped to avoid filling the performance log
     // with transient meshes. This never runs in normal gameplay.
     std::unordered_set<std::string> gpu_logged_fallbacks;
@@ -761,6 +765,8 @@ namespace {
     {
         using namespace jkgm::engine_material_debug;
         if(!matches_tested_executable()) return false;
+        auto const upload_generation=
+            native_mat_upload_generation.load(std::memory_order_relaxed);
         for(auto const &ref:g.material_refs) {
             native_material mat{};
             if(!read_object(ref.first,mat)) return false;
@@ -769,9 +775,21 @@ namespace {
             int32_t cel=ref.second<0
                 ? static_cast<int32_t>(mat.current_cel) : ref.second;
             cel=std::max(0,std::min(cel,static_cast<int32_t>(mat.num_texinfo)-1));
+            // Re-read current_cel on every query: SetMatCel and animated MATs
+            // must never reuse the previous cel's resident handle.
+            if(gpu_mat_residency.contains(gpu_frame_serial,upload_generation,
+                                          ref.first,static_cast<uint32_t>(cel))) {
+                if(the_config && the_config->profile_renderer)
+                    ++gpu_native_stats.ready_cache_hits;
+                continue;
+            }
             native_texinfo info{};
             if(!read_object(mat.texinfo[cel],info)) return false;
-            if((info.header[0]&8U)==0) continue; // no texture for this cel
+            if((info.header[0]&8U)==0) {
+                gpu_mat_residency.mark_ready(gpu_frame_serial,upload_generation,
+                                              ref.first,static_cast<uint32_t>(cel));
+                continue; // no texture for this cel
+            }
             native_texture tex{};
             if(!read_object(info.texture,tex)) return false;
             unsigned const mips=std::min(tex.header[6],4U);
@@ -783,6 +801,10 @@ namespace {
                          (o.texture_loaded && o.texture_handle>0);
             }
             if(!present) return false;
+            // Never cache a negative result: JK may make a cel resident
+            // later in this SAME frame via native drawing or D3D texture load.
+            gpu_mat_residency.mark_ready(gpu_frame_serial,upload_generation,
+                                          ref.first,static_cast<uint32_t>(cel));
         }
         return true;
     }
@@ -1111,8 +1133,14 @@ void jkgm::reset_gpu_3do_instances()
 {
     pending_gpu_instances.clear();
     gpu_mesh_cache.clear();
+    gpu_mat_residency.clear();
     ++gpu_frame_serial;
     gpu_native_stats={};
+}
+
+void jkgm::notify_native_mat_texture_uploaded()
+{
+    native_mat_upload_generation.fetch_add(1,std::memory_order_relaxed);
 }
 
 jkgm::native_3do_sample jkgm::consume_native_3do_sample()
