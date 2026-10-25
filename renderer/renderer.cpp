@@ -591,6 +591,10 @@ namespace jkgm {
             projected_sun_model_cache;
         uint64_t projected_sun_model_parent=0;
         uint64_t projected_sun_model_generation=0;
+        bool projected_sun_world_cache_valid=false;
+        uint64_t projected_sun_world_cache_signature=0;
+        size_t projected_sun_world_cache_casters=0;
+        std::vector<projected_sun_triangle> projected_sun_world_cache;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
         // Track only owners with a successfully rasterized atlas tile.
@@ -937,6 +941,8 @@ namespace jkgm {
                 projected_sun_world.clear();
                 projected_sun_model_cache.clear();
                 projected_sun_model_parent=0;
+                projected_sun_world_cache_valid=false;
+                projected_sun_world_cache.clear();
                 projected_sun_cache_valid=false;
                 projected_sun_gpu_signature=0;
                 projected_sun_cached_vertices.clear();
@@ -4643,6 +4649,8 @@ namespace jkgm {
                 projected_sun_cached_vertices.clear();
                 projected_sun_model_cache.clear();
                 projected_sun_model_parent=0;
+                projected_sun_world_cache_valid=false;
+                projected_sun_world_cache.clear();
                 if(!projected_sun_world.load(safe_read,world,250000U,true))
                     return;
             }
@@ -4724,7 +4732,9 @@ namespace jkgm {
             std::vector<projected_sun_triangle> output;
             output.reserve(4096);
             std::vector<uint32_t> receivers;
-            size_t casters=0,world_casters=0,model_casters=0;
+            size_t casters=0;
+            world_casters=0;
+            model_casters=0;
             auto emit=[&](projected_sun_triangle const &source) {
                 if(casters>=max_casters || output.size()>=max_triangles)return;
                 ++casters;
@@ -4748,6 +4758,15 @@ namespace jkgm {
                     }
                 }
             };
+            // World architecture is independent of actor animation: reuse
+            // its clipped polygons on otherwise-static world/camera/sun data.
+            if(projected_sun_world_cache_valid &&
+               projected_sun_world_cache_signature==model_parent) {
+                output=projected_sun_world_cache;
+                casters=projected_sun_world_cache_casters;
+                world_casters=casters;
+            }
+            else {
             // Stable camera-cell broadphase, already included in the cache
             // signature above (no per-frame clip rebuild while moving within
             // the same cell).
@@ -4775,6 +4794,11 @@ namespace jkgm {
                             s.polygon[j+1]}},s.surface_index});
                     ++world_casters;
                 }
+            }
+            projected_sun_world_cache=output;
+            projected_sun_world_cache_casters=casters;
+            projected_sun_world_cache_signature=model_parent;
+            projected_sun_world_cache_valid=true;
             }
             // Don't invalidate stationary 3DO projections whenever a
             // completely different character moves.
