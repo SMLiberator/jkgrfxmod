@@ -74,6 +74,21 @@ int main()
     query_spotlight_shadow_static_mesh(world,mesh,p,candidates);
     assert(candidates.size()==1);
     assert(candidates[0].first_index==6);
+    // A solid (non-passable) adjoin can be a masked grate or glass:
+    // without sampling MAT alpha, never emit its solid rectangle into
+    // the static caster pass. Ordinary wall surfaces still cast.
+    world.receivers[0].solid_adjoin=true;
+    spotlight_shadow_static_mesh filtered{};
+    assert(build_spotlight_shadow_static_mesh(world,filtered));
+    assert(filtered.surfaces.size()==3);
+    assert(filtered.surfaces[0].count==0);
+    assert(filtered.surfaces[1].count==6);
+    assert(filtered.surfaces[2].count==6);
+    assert(filtered.indices.size()==12);
+    query_spotlight_shadow_static_mesh(world,filtered,p,candidates);
+    assert(candidates.size()==1);
+    assert(candidates.front().first_index==0);
+
     // Invalid transforms do not produce a shadow projection.
     s.forward={{0,0,0}};
     assert(!make_spotlight_shadow_projection(s,p));
