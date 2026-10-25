@@ -56,8 +56,12 @@ namespace jkgm {
         gpu_3do_group group{};
         group.material=material;
         group.cel=-1;
-        group.face_type=0x1U;  // two-sided: render pass will supply alpha
-        group.nonplanar=true;
+        // Projected receivers are one-sided! The old two-sided flag plus
+        // nonplanar fallback disabled raster culling and made top decals
+        // visible from underneath thin slabs. Each triangle retains its
+        // receiver's original winding; the renderer now culls its back.
+        group.face_type=0U;
+        group.nonplanar=false;
         group.count=uint32_t(count);
         group.bounds_min={{std::numeric_limits<float>::max(),
                            std::numeric_limits<float>::max(),
