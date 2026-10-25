@@ -170,6 +170,8 @@ namespace jkgm::gl {
     static_assert(texture_internal_format::rg32f == texture_internal_format(GL_RG32F));
     static_assert(texture_internal_format::depth_component_16 ==
                   texture_internal_format(GL_DEPTH_COMPONENT16));
+    static_assert(texture_internal_format::depth_component_24 ==
+                  texture_internal_format(GL_DEPTH_COMPONENT24));
 
     static_assert(texture_pixel_format::rgb == texture_pixel_format(GL_RGB));
     static_assert(texture_pixel_format::rgba == texture_pixel_format(GL_RGBA));

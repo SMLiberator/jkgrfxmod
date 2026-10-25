@@ -86,6 +86,10 @@ int main()
     assert(near_projection.width<far_projection.width);
     assert(near_projection.height<far_projection.height);
     assert(near_projection.range==far_projection.range);
+    // A world-space texel is far smaller in the local cascade even though
+    // both textures have the same pixel dimensions.
+    assert(near_projection.width/1024.0f < far_projection.width/1024.0f);
+    assert(near_projection.height/1024.0f < far_projection.height/1024.0f);
     assert(stabilize_sun_shadow_projection(near_projection,512U));
     assert(stabilize_sun_shadow_projection(far_projection,512U));
     auto visible=sun_shadow_clip(projection,{{105.0f,215.0f,2.0f}});

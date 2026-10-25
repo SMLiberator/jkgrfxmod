@@ -37,7 +37,7 @@ uniform vec2 spotlight_shadow_near_range; // near, far in JK world units
 
 uniform int sun_lighting_active; // independent of depth-map readiness
 uniform int sun_shadow_active;
-uniform sampler2D sun_shadow_image;
+uniform sampler2DShadow sun_shadow_image;
 uniform vec3 sun_shadow_direction; // world-space direction toward the sun
 uniform vec4 sun_shadow_color_intensity;
 uniform vec3 sun_shadow_origin;
@@ -45,7 +45,7 @@ uniform vec3 sun_shadow_right;
 uniform vec3 sun_shadow_up;
 uniform vec3 sun_shadow_forward;
 uniform vec3 sun_shadow_limits; // orthographic width, height, depth range
-uniform sampler2D sun_shadow_far_image;
+uniform sampler2DShadow sun_shadow_far_image;
 uniform vec3 sun_shadow_far_origin,sun_shadow_far_right;
 uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
@@ -63,15 +63,22 @@ bool sun_shadow_inside(vec3 coord)
     return all(greaterThanEqual(coord,vec3(0.0))) &&
            all(lessThanEqual(coord,vec3(1.0)));
 }
-float sun_shadow_filter(sampler2D map,vec3 coordinate,float range)
+float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range)
 {
-    // Depth bias is world-space, not tied to shadow texture XY resolution.
-    float bias=max(2.0/65535.0,0.015/max(range,0.001));
+    // A 24-bit normalized orthographic depth map avoids quantizing the
+    // world's full light-axis range into only 65536 possible distances.
+    // Keep a small world-space offset for geometric precision/roundoff.
+    float bias=max(4.0/16777215.0,0.015/max(range,0.001));
     vec2 texel=1.0/vec2(textureSize(map,0));
+    float receiver=coordinate.z-bias;
     float visible=0.0;
+    // GL_LINEAR on a comparison sampler performs bilinear comparison PCF
+    // *before* these samples are averaged. Previously nearest depth reads
+    // produced only ten discrete levels across the full 3x3 kernel.
+    // Keep the same nine fetches and let hardware interpolate sub-texels.
     for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++) {
-        float caster=texture(map,coordinate.xy+vec2(x,y)*texel).r;
-        visible+=coordinate.z-bias<=caster ? 1.0 : 0.0;
+        vec2 uv=coordinate.xy+vec2(x,y)*texel;
+        visible+=texture(map,vec3(uv,receiver));
     }
     return visible/9.0;
 }

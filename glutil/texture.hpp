@@ -54,7 +54,8 @@ namespace jkgm::gl {
         rgba32f = 0x8814,
         r16f = 0x822D,
         rg32f = 0x8230,
-        depth_component_16 = 0x81A5
+        depth_component_16 = 0x81A5,
+        depth_component_24 = 0x81A6
     };
 
     enum class texture_pixel_format : enum_type {
