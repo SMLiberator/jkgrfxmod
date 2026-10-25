@@ -695,6 +695,10 @@ jkgm::shaders::spotlight_shadow_depth_shader::spotlight_shadow_depth_shader(
     , shadow_up(gl::get_uniform_location(the_program,"shadow_up"))
     , shadow_forward(gl::get_uniform_location(the_program,"shadow_forward"))
     , shadow_limits(gl::get_uniform_location(the_program,"shadow_limits"))
+    , shadow_model_right(gl::get_uniform_location(the_program,"shadow_model_right"))
+    , shadow_model_forward(gl::get_uniform_location(the_program,"shadow_model_forward"))
+    , shadow_model_up(gl::get_uniform_location(the_program,"shadow_model_up"))
+    , shadow_model_origin(gl::get_uniform_location(the_program,"shadow_model_origin"))
 {
 }
 
@@ -707,6 +711,16 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_light(
     gl::set_uniform_vector(shadow_up,up);
     gl::set_uniform_vector(shadow_forward,forward);
     gl::set_uniform_vector(shadow_limits,limits);
+}
+
+void jkgm::shaders::spotlight_shadow_depth_shader::set_model(
+    point<3,float> right,point<3,float> forward,
+    point<3,float> up,point<3,float> origin)
+{
+    gl::set_uniform_vector(shadow_model_right,right);
+    gl::set_uniform_vector(shadow_model_forward,forward);
+    gl::set_uniform_vector(shadow_model_up,up);
+    gl::set_uniform_vector(shadow_model_origin,origin);
 }
 
 jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_shader(
