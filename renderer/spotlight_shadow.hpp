@@ -27,12 +27,17 @@ struct spotlight_shadow_clip_point {
 };
 struct spotlight_shadow_surface_range {
     uint32_t first_index=0,count=0;
+    uint32_t source_index=0; // world.receivers index, for MAT alpha lookup
+};
+struct spotlight_shadow_vertex {
+    decal_vec3 position{};
+    std::array<float,2> uv{};
 };
 struct spotlight_shadow_static_mesh {
     // Indexed vertices, retaining each native polygon vertex just once.
     // The surfaces vector has EXACTLY the order of world.receivers, so a
     // receiver BVH query indexes the corresponding draw range directly.
-    std::vector<decal_vec3> vertices;
+    std::vector<spotlight_shadow_vertex> vertices;
     std::vector<uint32_t> indices;
     std::vector<spotlight_shadow_surface_range> surfaces;
 };
@@ -132,15 +137,14 @@ inline bool build_spotlight_shadow_static_mesh(
     for(auto const &surface:world.receivers) {
         uint32_t const base=static_cast<uint32_t>(out.vertices.size());
         uint32_t const offset=static_cast<uint32_t>(out.indices.size());
-        // Impassable adjoins can carry alpha-tested grate/glass MATs.
-        // Their material alpha isn't available in this untextured depth
-        // pass, so exclude the WHOLE adjoin rather than cast an opaque
-        // rectangle. This is conservative until texture-aware shadows.
-        if(surface.solid_adjoin) {
-            out.surfaces.push_back({offset,0U});
-            continue;
+        for(size_t v=0;v<surface.polygon.size();++v) {
+            spotlight_shadow_vertex vertex{};
+            vertex.position=surface.polygon[v];
+            if(surface.has_shadow_uv &&
+               surface.shadow_uv.size()==surface.polygon.size())
+                vertex.uv=surface.shadow_uv[v];
+            out.vertices.push_back(vertex);
         }
-        for(auto const &v:surface.polygon)out.vertices.push_back(v);
         // JK level polygons are expected to be planar and convex. The
         // original decal receiver cache uses the same fan assumption.
         for(uint32_t i=1;i+1<surface.polygon.size();++i) {
@@ -149,7 +153,8 @@ inline bool build_spotlight_shadow_static_mesh(
             out.indices.push_back(base+i+1);
         }
         out.surfaces.push_back({
-            offset,static_cast<uint32_t>(out.indices.size())-offset
+            offset,static_cast<uint32_t>(out.indices.size())-offset,
+            static_cast<uint32_t>(out.surfaces.size())
         });
     }
     return true;
