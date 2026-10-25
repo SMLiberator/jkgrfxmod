@@ -307,17 +307,33 @@ jobs:
         Copy-Item 'assets/jkgm.json' 'test-build/jkgm.json' -Force
         Copy-Item 'audio_probe.exe' 'test-build/audio_probe.exe' -Force
         Copy-Item 'doc/install.md' 'test-build/install.md' -Force
-        # Runtime GLSL is loaded from data_path/shaders. The test must ship
-        # changed shaders alongside the DLL or the new fast path will not run.
+        # Runtime GLSL is read from data_path/shaders at startup. Ship the
+        # complete current shader set, including shader files added after
+        # the original hand-maintained packaging list.
         New-Item -ItemType Directory -Path 'test-build/jkgm/shaders' -Force | Out-Null
-        Copy-Item 'assets/shaders/game_opaque_pass.frag' 'test-build/jkgm/shaders/' -Force
-        Copy-Item 'assets/shaders/game_trns_pass.frag' 'test-build/jkgm/shaders/' -Force
-        Copy-Item 'assets/shaders/post_opaque_composite.frag' 'test-build/jkgm/shaders/' -Force
-        Copy-Item 'assets/shaders/post_to_srgb.frag' 'test-build/jkgm/shaders/' -Force
-        Copy-Item 'assets/shaders/post_auto_exposure.frag' 'test-build/jkgm/shaders/' -Force
-        Copy-Item 'assets/shaders/post_frame_blend.frag' 'test-build/jkgm/shaders/' -Force
-        Copy-Item 'assets/shaders/gpu_3do_preview.vert' 'test-build/jkgm/shaders/' -Force
-        Copy-Item 'assets/shaders/gpu_3do_preview.frag' 'test-build/jkgm/shaders/' -Force
+        Copy-Item -Path 'assets/shaders/*' -Destination 'test-build/jkgm/shaders/' -Recurse -Force
+    - name: Verify standalone GLSL packaging
+      shell: pwsh
+      run: |
+        $sourceShaders = @(Get-ChildItem -Path 'assets/shaders' -File)
+        if ($sourceShaders.Count -eq 0) { throw "No source shaders were found" }
+        foreach ($shader in $sourceShaders) {
+          $packaged = Join-Path 'test-build/jkgm/shaders' $shader.Name
+          if (-not (Test-Path -LiteralPath $packaged -PathType Leaf)) {
+            throw "Missing packaged shader: $($shader.Name)"
+          }
+          $originalHash = (Get-FileHash -LiteralPath $shader.FullName -Algorithm SHA256).Hash
+          $packagedHash = (Get-FileHash -LiteralPath $packaged -Algorithm SHA256).Hash
+          if ($originalHash -ne $packagedHash) {
+            throw "Packaged shader differs from source: $($shader.Name)"
+          }
+        }
+        foreach ($name in @('spotlight_shadow.vert', 'spotlight_shadow.frag')) {
+          if (-not (Test-Path -LiteralPath (Join-Path 'test-build/jkgm/shaders' $name))) {
+            throw "Required spotlight shadow shader missing: $name"
+          }
+        }
+        Write-Host "Verified $($sourceShaders.Count) packaged shaders against repository sources."
     - name: Upload standalone development test build
       uses: actions/upload-artifact@v4
       with:
