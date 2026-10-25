@@ -3487,6 +3487,8 @@ namespace jkgm {
             struct shadow_3do_range {
                 gpu_3do_instance const *instance;
                 gpu_3do_group const *group;
+                gpu_3do_texture texture;
+                bool cutout=false;
             };
             std::vector<shadow_3do_range> model_casters;
             auto const light_bounds=spotlight_shadow_volume_bounds(view);
@@ -3519,17 +3521,64 @@ namespace jkgm {
                         if(!decal_aabbs_overlap(low,high,
                                                 light_bounds.low,light_bounds.high))
                             continue;
-                        // Opaque-only for now: an untextured shadow shader
-                        // cannot correctly cut holes in alpha/mask/decals.
-                        // Never cast an opaque box for known alpha material.
+                        // A blended effect never writes opaque shadow
+                        // depth. Masked/mixed MATs cast cutout silhouettes
+                        // using the same UVs/textures as visible geometry.
                         auto const tex=resolve_gpu_3do_material(group);
-                        if(tex.albedo_source==0 || tex.alpha || tex.masked ||
-                           tex.dithered || tex.special || tex.emissive_only ||
-                           tex.post_exempt || tex.opacity<0.999f ||
-                           (group.face_type&0x2U)!=0U)
+                        bool const cutout=tex.masked||tex.alpha||tex.dithered;
+                        if(tex.albedo_source==0 || tex.special ||
+                           tex.emissive_only || tex.post_exempt ||
+                           tex.opacity<0.999f || (group.face_type&0x2U) ||
+                           (cutout && tex.albedo_source!=1))
                             continue;
-                        model_casters.push_back({&instance,&group});
+                        model_casters.push_back({&instance,&group,tex,cutout});
                     }
+                }
+            }
+
+            // Resolve world MAT coverage once per light update. Most
+            // architecture remains a single untextured MultiDraw; only
+            // alpha-cutout surfaces need bound textures and individual draws.
+            struct shadow_world_cutout {
+                spotlight_shadow_surface_range range;
+                gpu_3do_texture texture;
+            };
+            std::vector<GLsizei> opaque_world_counts;
+            std::vector<void const *> opaque_world_offsets;
+            std::vector<shadow_world_cutout> masked_world;
+            query_spotlight_shadow_static_mesh(map.world,map.mesh,view,map.selected);
+            opaque_world_counts.reserve(map.selected.size());
+            opaque_world_offsets.reserve(map.selected.size());
+            for(auto const &range:map.selected) {
+                if(range.source_index>=map.world.receivers.size())continue;
+                auto const &surface=map.world.receivers[range.source_index];
+                gpu_3do_group material_group{};
+                material_group.material=surface.material;
+                material_group.cel=surface.cel;
+                // Reuse the frame-scoped material lookup shared by 3DOs.
+                uint64_t const mat_key=
+                    (uint64_t(surface.material)<<32)|uint32_t(surface.cel);
+                auto found=gpu_frame_material_cache.find(mat_key);
+                if(found==gpu_frame_material_cache.end())
+                    found=gpu_frame_material_cache.emplace(
+                        mat_key,resolve_gpu_3do_material(material_group)).first;
+                auto const &tex=found->second;
+                bool const cutout=tex.masked||tex.alpha||tex.dithered;
+                if(tex.albedo_source==0 || tex.special ||
+                   tex.emissive_only || tex.post_exempt ||
+                   tex.opacity<0.999f ||
+                   (cutout && (tex.albedo_source!=1 ||
+                               !surface.has_shadow_uv)) ||
+                   range.count>uint32_t(std::numeric_limits<GLsizei>::max()))
+                    continue;
+                // A shadow never treats unresolved transparent adjoins as
+                // opaque. Resolved non-alpha adjoins cast solid shadows.
+                if(cutout)
+                    masked_world.push_back({range,tex});
+                else {
+                    opaque_world_counts.push_back(static_cast<GLsizei>(range.count));
+                    opaque_world_offsets.push_back(reinterpret_cast<void const *>(
+                        uintptr_t(range.first_index)*sizeof(uint32_t)));
                 }
             }
 
@@ -3543,7 +3592,38 @@ namespace jkgm {
                     caster_signature*=1099511628211ULL;
                 }
             };
+            auto hash_float=[&](float v) {
+                uint32_t bits=0;
+                std::memcpy(&bits,&v,sizeof(bits));
+                hash_u32(bits);
+            };
+            // Textured casters may animate their material cel/scroll even
+            // with fixed geometry. Include their coverage state in the
+            // shadow-cache key so a stationary grate updates correctly.
+            auto hash_material=[&](uintptr_t material,int32_t cel,
+                                   gpu_3do_texture const &tex) {
+                hash_u32(uint32_t(material));
+                hash_u32(uint32_t(cel));
+                if(cel<0 && material) {
+                    engine_material_debug::native_material mat{};
+                    if(engine_material_debug::read_object(material,mat))
+                        hash_u32(mat.current_cel);
+                }
+                hash_float(tex.alpha_cutoff);
+                hash_float(tex.opacity);
+                hash_float(get<x>(tex.albedo_scroll));
+                hash_float(get<y>(tex.albedo_scroll));
+                hash_float(tex.albedo_transition);
+            };
+            for(auto const &draw:masked_world) {
+                auto const &surface=map.world.receivers[draw.range.source_index];
+                hash_u32(surface.surface_index);
+                hash_material(surface.material,surface.cel,draw.texture);
+            }
             for(auto const &caster:model_casters) {
+                if(caster.cutout)
+                    hash_material(caster.group->material,
+                                  caster.group->cel,caster.texture);
                 hash_u32(uint32_t(caster.instance->id));
                 hash_u32(uint32_t(caster.instance->id>>32));
                 hash_u32(caster.group->offset);
@@ -3604,11 +3684,50 @@ namespace jkgm {
                            vec(view.up),vec(view.forward),
                            make_point(view.width,view.height,view.range,
                                       view.near_distance));
+            auto set_shadow_cutout=[&](gpu_3do_texture const &tex,
+                                       bool world_uv) {
+                float const width=world_uv ? tex.width
+                    : gpu_3do_model_uv_extent(tex.width);
+                float const height=world_uv ? tex.height
+                    : gpu_3do_model_uv_extent(tex.height);
+                bool const second=tex.albedo_transition>0.0f &&
+                                  tex.albedo_source2==1;
+                prog.set_shadow_alpha(true,
+                    make_point(1.0f/std::max(width,1.0f),
+                               1.0f/std::max(height,1.0f)),
+                    tex.albedo_scroll,
+                    tex.masked ? tex.alpha_cutoff :
+                    (tex.dithered ? 0.5f : 0.998f),
+                    tex.opacity,second,tex.albedo_transition);
+                gl::set_active_texture_unit(11);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 tex.texture);
+                if(second) {
+                    gl::set_active_texture_unit(12);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     tex.texture2);
+                }
+            };
             prog.set_model(make_point(1.0f,0.0f,0.0f),
                            make_point(0.0f,1.0f,0.0f),
                            make_point(0.0f,0.0f,1.0f),
                            make_point(0.0f,0.0f,0.0f));
-            map.draw_world(view);
+            prog.set_shadow_alpha(false,make_point(1.0f,1.0f),
+                make_point(0.0f,0.0f),0.5f,1.0f,false,0.0f);
+            gl::bind_vertex_array(map.vao);
+            if(!opaque_world_counts.empty())
+                glMultiDrawElements(GL_TRIANGLES,opaque_world_counts.data(),
+                    GL_UNSIGNED_INT,opaque_world_offsets.data(),
+                    static_cast<GLsizei>(opaque_world_counts.size()));
+            for(auto const &draw:masked_world) {
+                set_shadow_cutout(draw.texture,true);
+                gl::draw_elements(gl::element_type::triangles,
+                    draw.range.count,gl::index_type::uint32,
+                    static_cast<ptrdiff_t>(
+                        draw.range.first_index*sizeof(uint32_t)));
+            }
+            prog.set_shadow_alpha(false,make_point(1.0f,1.0f),
+                make_point(0.0f,0.0f),0.5f,1.0f,false,0.0f);
             for(auto const &caster:model_casters) {
                 auto const &instance=*caster.instance;
                 auto const &group=*caster.group;
@@ -3626,6 +3745,11 @@ namespace jkgm {
                                make_point(m[6],m[7],m[8]),
                                make_point(m[9],m[10],m[11]));
                 gl::bind_vertex_array(it->second->vao);
+                if(caster.cutout)
+                    set_shadow_cutout(caster.texture,false);
+                else
+                    prog.set_shadow_alpha(false,make_point(1.0f,1.0f),
+                        make_point(0.0f,0.0f),0.5f,1.0f,false,0.0f);
                 gl::draw_elements(gl::element_type::triangles,group.count,
                                   gl::index_type::uint32,
                                   static_cast<ptrdiff_t>(
