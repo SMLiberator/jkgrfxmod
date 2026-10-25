@@ -16,6 +16,7 @@
 #include "runtime_material.hpp"
 #include "spotlight.hpp"
 #include "spotlight_shadow_gpu.hpp"
+#include "sun_shadow_gpu.hpp"
 #include "backbuffer_menu_surface.hpp"
 #include "backbuffer_surface.hpp"
 #include "base/file_block.hpp"
@@ -567,6 +568,14 @@ namespace jkgm {
         };
         std::vector<translucent_spotlight_draw> translucent_spotlights_for_frame;
         std::unique_ptr<spotlight_shadow_gpu> spotlight_shadow_target;
+        std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
+        sun_shadow_projection sun_shadow_view{};
+        bool sun_shadow_ready=false;
+        bool sun_shadow_cached=false;
+        std::array<float,3> sun_shadow_direction{};
+        uintptr_t sun_shadow_world=0;
+        uint64_t sun_shadow_revision=0;
+        uint64_t sun_shadow_caster_signature=0;
         spotlight_instance spotlight_shadow_light{};
         spotlight_shadow_projection spotlight_shadow_view{};
         bool spotlight_shadow_ready=false;
@@ -859,6 +868,7 @@ namespace jkgm {
         {
             release_spotlight_images();
             spotlight_shadow_target.reset();
+            sun_shadow_target.reset();
             // Context-owned GL queries must be deleted before the context
             // disappears. If the context is already gone, its objects go
             // away with it; do not issue GL calls on an invalid context.
@@ -870,7 +880,8 @@ namespace jkgm {
         {
             if(this->mode != mode) {
                 if(the_config->use_model_cache || the_config->enable_sprite_decals ||
-                   (the_config->enable_spotlights && the_config->enable_spotlight_shadows)) {
+                   (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
+                   the_config->enable_sun_shadows) {
                     // Levels recycle native mesh pointers; discard both copies.
                     reset_gpu_3do_instances();
                     gpu_3do_gl_cache.clear();
@@ -892,6 +903,8 @@ namespace jkgm {
                 spotlight_shadow_ready=false;
                 spotlight_shadow_cached=false;
                 spotlight_shadow_3do_signature=0;
+                sun_shadow_ready=false;
+                sun_shadow_cached=false;
                 // Pausing/menu transitions may evict and reload D3D textures.
                 // Refresh the native MAT resolver on the next game frame,
                 // instead of letting the previous one-second timer cause a flash.
@@ -3841,6 +3854,247 @@ namespace jkgm {
             spotlight_shadow_ready=true;
         }
 
+        // Directional sun shadows use a level-wide orthographic map. The
+        // receiver/depth pass is deliberately independent of the camera so
+        // shadows remain stable as the player moves through the level.
+        void draw_sun_shadow_map()
+        {
+            sun_shadow_ready=false;
+            if(!the_config->enable_sun_shadows ||
+               !ogs->spotlight_shadow_depth_program ||
+               !engine_material_debug::matches_tested_executable())return;
+            auto const sun=get_sun_settings();
+            auto const direction=normalized_sun_direction(sun.direction.value());
+            auto const rgb=sun.color.value();
+            float const intensity=sun.intensity.value()[0];
+            if(!(intensity>0.0f) || !std::isfinite(intensity))return;
+
+            uint32_t world=0;
+            if(!engine_material_debug::read_object(
+                   engine_material_debug::current_world_global,world) ||
+               !decal_native_address_ok(world))return;
+            decal_native_read const safe_read=[](uintptr_t ptr,void *dst,size_t n) {
+                if(n==0 || !engine_camera_detail::readable(ptr,n))return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(ptr),n);
+                return true;
+            };
+            if(!sun_shadow_target)
+                sun_shadow_target=std::make_unique<sun_shadow_gpu>(
+                    the_config->sun_shadow_resolution);
+            auto &map=*sun_shadow_target;
+            if(!map.update_world(safe_read,world))return;
+            sun_shadow_projection view{};
+            if(!make_sun_shadow_projection(map.world,direction,view))return;
+
+            // Query the complete orthographic box. The spotlight helper's
+            // perspective pyramid bounds do not cover a directional map.
+            map.selected.clear();
+            auto const world_bounds=sun_shadow_volume_bounds(view);
+            std::vector<uint32_t> selected_surfaces;
+            map.world.acceleration.query(map.world.receivers,
+                world_bounds.low,world_bounds.high,selected_surfaces);
+            map.selected.reserve(selected_surfaces.size());
+            for(uint32_t id:selected_surfaces)
+                if(id<map.mesh.surfaces.size() && map.mesh.surfaces[id].count>0U)
+                    map.selected.push_back(map.mesh.surfaces[id]);
+            std::vector<GLsizei> counts;
+            std::vector<void const *> offsets;
+            struct sun_world_cutout {
+                spotlight_shadow_surface_range range;
+                gpu_3do_texture texture;
+            };
+            std::vector<sun_world_cutout> world_cutouts;
+            uint64_t caster_signature=14695981039346656037ULL;
+            auto hash_u32=[&](uint32_t v) {
+                for(int b=0;b<4;++b) {
+                    caster_signature^=uint64_t((v>>(b*8))&255U);
+                    caster_signature*=1099511628211ULL;
+                }
+            };
+            auto hash_float=[&](float v) {
+                uint32_t bits=0;std::memcpy(&bits,&v,sizeof(bits));hash_u32(bits);
+            };
+            for(float v:direction)hash_float(v);
+            // Read live geomodes and MAT coverage each frame. COG changes to
+            // a surface therefore invalidate the cached depth image.
+            for(auto const &range:map.selected) {
+                if(range.source_index>=map.world.receivers.size())continue;
+                auto const &surface=map.world.receivers[range.source_index];
+                uint32_t geomode=0;
+                uintptr_t const address=map.world.surfaces_addr+
+                    uintptr_t(surface.surface_index)*0x5cU;
+                engine_material_debug::read_object(address+0x1cU,geomode);
+                hash_u32(surface.surface_index);hash_u32(geomode);
+                if(!sun_shadow_world_face_visible(geomode,surface.normal,direction))
+                    continue;
+                gpu_3do_group group{};group.material=surface.material;
+                group.cel=surface.cel;
+                int32_t cel=group.cel;
+                engine_material_debug::read_object(address+0x38U,cel);
+                group.cel=cel;
+                uint64_t const key=(uint64_t(surface.material)<<32)|uint32_t(cel);
+                auto found=gpu_frame_material_cache.find(key);
+                if(found==gpu_frame_material_cache.end())
+                    found=gpu_frame_material_cache.emplace(
+                        key,resolve_gpu_3do_material(group)).first;
+                auto const &tex=found->second;
+                bool const cutout=tex.masked||tex.alpha||tex.dithered;
+                // Keep cutout MAT silhouettes using their shadow UVs.
+                if(tex.albedo_source==0 || tex.special || tex.emissive_only ||
+                   tex.post_exempt || tex.opacity<0.999f ||
+                   (cutout && (tex.albedo_source!=1 || !surface.has_shadow_uv)) ||
+                   range.count>uint32_t(std::numeric_limits<GLsizei>::max()))
+                    continue;
+                if(cutout)world_cutouts.push_back({range,tex});
+                else {
+                    counts.push_back(static_cast<GLsizei>(range.count));
+                    offsets.push_back(reinterpret_cast<void const *>(
+                        uintptr_t(range.first_index)*sizeof(uint32_t)));
+                }
+                hash_u32(surface.surface_index);hash_u32(uint32_t(cel));
+            }
+            for(auto const &draw:world_cutouts) {
+                auto const &surface=map.world.receivers[draw.range.source_index];
+                hash_u32(surface.surface_index);
+                hash_float(draw.texture.alpha_cutoff);
+                hash_float(draw.texture.opacity);
+                hash_float(get<x>(draw.texture.albedo_scroll));
+                hash_float(get<y>(draw.texture.albedo_scroll));
+                hash_float(draw.texture.albedo_transition);
+            }
+
+            // Include submitted 3DO transforms. The native hook is enabled
+            // when this feature is on; model groups share their normal GPU
+            // buffers with the visible renderer.
+            auto const bounds=world_bounds;
+            struct sun_model_draw {gpu_3do_instance const *instance;
+                                   gpu_3do_group const *group;
+                                   gpu_3do_texture texture;bool cutout;};
+            std::vector<sun_model_draw> models;
+            for(auto const &instance:frame_gpu_3do_instances) {
+                if(!instance.geometry || instance.is_projected_decal)continue;
+                auto const &m=instance.transform;
+                for(auto const &group:instance.geometry->groups) {
+                    if(group.count<3U)continue;
+                    decal_vec3 low{{std::numeric_limits<float>::max(),
+                                    std::numeric_limits<float>::max(),
+                                    std::numeric_limits<float>::max()}};
+                    decal_vec3 high{{-low[0],-low[1],-low[2]}};
+                    for(int c=0;c<8;++c) {
+                        float x=(c&1)?group.bounds_max[0]:group.bounds_min[0];
+                        float y=(c&2)?group.bounds_max[1]:group.bounds_min[1];
+                        float z=(c&4)?group.bounds_max[2]:group.bounds_min[2];
+                        decal_vec3 p{{m[0]*x+m[3]*y+m[6]*z+m[9],
+                                      m[1]*x+m[4]*y+m[7]*z+m[10],
+                                      m[2]*x+m[5]*y+m[8]*z+m[11]}};
+                        for(int a=0;a<3;++a) {low[a]=std::min(low[a],p[a]);
+                                               high[a]=std::max(high[a],p[a]);}
+                    }
+                    if(!decal_aabbs_overlap(low,high,bounds.low,bounds.high))continue;
+                    auto const tex=resolve_gpu_3do_material(group);
+                    bool const cutout=tex.masked||tex.alpha||tex.dithered;
+                    if(tex.albedo_source==0 || tex.special || tex.emissive_only ||
+                       tex.post_exempt || tex.opacity<0.999f ||
+                       (cutout && tex.albedo_source!=1) ||
+                       (group.face_type&0x2U))continue;
+                    models.push_back({&instance,&group,tex,cutout});
+                    hash_u32(uint32_t(instance.id));hash_u32(uint32_t(instance.id>>32));
+                    hash_u32(group.offset);hash_u32(group.count);
+                    if(cutout) {
+                        hash_float(tex.alpha_cutoff);hash_float(tex.opacity);
+                        hash_float(get<x>(tex.albedo_scroll));
+                        hash_float(get<y>(tex.albedo_scroll));
+                        hash_float(tex.albedo_transition);
+                    }
+                    for(float v:m)hash_float(v);
+                }
+            }
+            bool unchanged=sun_shadow_cached && sun_shadow_world==world &&
+                sun_shadow_revision==map.revision &&
+                caster_signature==sun_shadow_caster_signature;
+            for(int i=0;i<3 && unchanged;++i)
+                unchanged=std::fabs(direction[i]-sun_shadow_direction[i])<1.0e-5f;
+            if(unchanged) {sun_shadow_ready=true;return;}
+
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,map.fbo);
+            gl::set_viewport(make_box(make_point(0,0),
+                make_size(int(map.resolution),int(map.resolution))));
+            gl::disable(gl::capability::blend);
+            gl::disable(gl::capability::cull_face);
+            gl::enable(gl::capability::depth_test);
+            gl::set_depth_mask(true);
+            gl::set_depth_function(gl::comparison_function::less);
+            gl::clear_buffer_depth(1.0f);
+            auto &prog=*ogs->spotlight_shadow_depth_program;
+            prog.use_program();
+            auto vec=[](decal_vec3 const &a){return make_point(a[0],a[1],a[2]);};
+            prog.set_orthographic_light(vec(view.origin),vec(view.right),
+                vec(view.up),vec(view.forward),
+                make_point(view.width,view.height,view.range,0.0f));
+            prog.set_model(make_point(1.0f,0.0f,0.0f),make_point(0.0f,1.0f,0.0f),
+                           make_point(0.0f,0.0f,1.0f),make_point(0.0f,0.0f,0.0f));
+            prog.set_shadow_alpha(false,make_point(1.0f,1.0f),make_point(0.0f,0.0f),
+                                  0.5f,1.0f,false,0.0f);
+            auto set_cutout=[&](gpu_3do_texture const &tex,bool world_uv) {
+                float const width=world_uv?tex.width:gpu_3do_model_uv_extent(tex.width);
+                float const height=world_uv?tex.height:gpu_3do_model_uv_extent(tex.height);
+                bool const second=tex.albedo_transition>0.0f && tex.albedo_source2==1;
+                prog.set_shadow_alpha(true,
+                    make_point(1.0f/std::max(width,1.0f),
+                               1.0f/std::max(height,1.0f)),
+                    tex.albedo_scroll,
+                    tex.masked?tex.alpha_cutoff:(tex.dithered?0.5f:0.998f),
+                    tex.opacity,second,tex.albedo_transition);
+                gl::set_active_texture_unit(11);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,tex.texture);
+                if(second) {
+                    gl::set_active_texture_unit(12);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,tex.texture2);
+                }
+            };
+            gl::bind_vertex_array(map.vao);
+            if(!counts.empty())glMultiDrawElements(GL_TRIANGLES,counts.data(),
+                GL_UNSIGNED_INT,offsets.data(),static_cast<GLsizei>(counts.size()));
+            for(auto const &draw:world_cutouts) {
+                set_cutout(draw.texture,true);
+                gl::bind_vertex_array(map.vao);
+                gl::draw_elements(gl::element_type::triangles,draw.range.count,
+                    gl::index_type::uint32,static_cast<ptrdiff_t>(
+                        draw.range.first_index*sizeof(uint32_t)));
+            }
+            for(auto const &draw:models) {
+                auto const &instance=*draw.instance;auto const &group=*draw.group;
+                auto it=gpu_3do_gl_cache.find(instance.id);
+                if(it==gpu_3do_gl_cache.end())
+                    it=gpu_3do_gl_cache.emplace(instance.id,
+                        std::make_unique<gpu_3do_gl_mesh>(*instance.geometry)).first;
+                auto const &m=instance.transform;
+                prog.set_model(make_point(m[0],m[1],m[2]),
+                    make_point(m[3],m[4],m[5]),make_point(m[6],m[7],m[8]),
+                    make_point(m[9],m[10],m[11]));
+                if((group.face_type&0x1U)!=0 || group.nonplanar)
+                    gl::disable(gl::capability::cull_face);
+                else {gl::enable(gl::capability::cull_face);
+                      gl::set_face_cull_mode(gpu_3do_reversed_winding(m)
+                          ?gl::face_mode::front:gl::face_mode::back);}
+                gl::bind_vertex_array(it->second->vao);
+                if(draw.cutout)set_cutout(draw.texture,false);
+                else prog.set_shadow_alpha(false,make_point(1.0f,1.0f),make_point(0.0f,0.0f),
+                                           0.5f,1.0f,false,0.0f);
+                gl::draw_elements(gl::element_type::triangles,group.count,
+                    gl::index_type::uint32,static_cast<ptrdiff_t>(
+                        group.offset*sizeof(uint32_t)));
+            }
+            gl::disable(gl::capability::cull_face);
+            gl::set_face_cull_mode(gl::face_mode::back);
+            gl::set_active_texture_unit(0);
+            gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+            sun_shadow_view=view;sun_shadow_direction=direction;
+            sun_shadow_world=world;sun_shadow_revision=map.revision;
+            sun_shadow_cached=true;sun_shadow_caster_signature=caster_signature;
+            sun_shadow_ready=true;
+        }
+
         bool shadow_matches_light(spotlight_instance const &spot) const
         {
             if(!spotlight_shadow_ready ||
@@ -3870,9 +4124,14 @@ namespace jkgm {
             auto &prog=ogs->game_post_opaque_composite_program;
             prog.set_spotlight_count(0);
             prog.set_spotlight_shadow(-1,0.0f,0.0f);
+            prog.set_sun_shadow(false,make_point(0.0f,0.0f,1.0f),
+                make_point(0.0f,0.0f,0.0f,0.0f),
+                make_point(0.0f,0.0f,0.0f),make_point(1.0f,0.0f,0.0f),
+                make_point(0.0f,1.0f,0.0f),make_point(0.0f,0.0f,1.0f),
+                make_point(1.0f,1.0f,1.0f));
             // Reconstruct receiving surfaces for node-attached MAT spotlights.
             auto const cam=read_active_render_camera();
-            if(cam.valid && the_config->enable_spotlights) {
+            if(cam.valid && (the_config->enable_spotlights || sun_shadow_ready)) {
                 float const h=std::tan(cam.fov*(3.14159265358979323846f/360.0f));
                 float const v=h*float(get<y>(conf_scr_res))/
                                   float(get<x>(conf_scr_res));
@@ -3885,10 +4144,10 @@ namespace jkgm {
                     point_axis(cam.forward,0.0f),
                     point_axis(cam.up,v));
                 int active=0;
-                auto spots=the_config->enable_spotlights
+                auto spots=(the_config->enable_spotlights)
                     ? collect_spotlights_for_frame()
                     : std::vector<spotlight_instance>{};
-                maintain_spotlight_images(spots);
+                if(the_config->enable_spotlights)maintain_spotlight_images(spots);
                 if(the_config->enable_spotlights) {
                     spotlight_projection_camera projection{};
                     projection.position=cam.position;
@@ -3931,10 +4190,26 @@ namespace jkgm {
                     }
                 }
                 prog.set_spotlight_count(active);
-                if(active>0) {
+                if(active>0 || sun_shadow_ready) {
                     gl::set_active_texture_unit(5);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
                                      frame_screen->get_resolved_normal_texture());
+                }
+                if(sun_shadow_ready && sun_shadow_target) {
+                    auto const sun=get_sun_settings();
+                    auto const direction=normalized_sun_direction(sun.direction.value());
+                    auto const rgb=sun.color.value();
+                    prog.set_sun_shadow(true,
+                        make_point(direction[0],direction[1],direction[2]),
+                        make_point(rgb[0],rgb[1],rgb[2],sun.intensity.value()[0]),
+                        make_point(sun_shadow_view.origin[0],sun_shadow_view.origin[1],sun_shadow_view.origin[2]),
+                        make_point(sun_shadow_view.right[0],sun_shadow_view.right[1],sun_shadow_view.right[2]),
+                        make_point(sun_shadow_view.up[0],sun_shadow_view.up[1],sun_shadow_view.up[2]),
+                        make_point(sun_shadow_view.forward[0],sun_shadow_view.forward[1],sun_shadow_view.forward[2]),
+                        make_point(sun_shadow_view.width,sun_shadow_view.height,sun_shadow_view.range));
+                    gl::set_active_texture_unit(13);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     sun_shadow_target->depth);
                 }
             }
             {
@@ -4547,6 +4822,7 @@ namespace jkgm {
                 profile_scope timer(profiling,
                     profile_frame.timings[profile_idx(profile_stage::opaque_pass)]);
                 draw_spotlight_shadow_map();
+                draw_sun_shadow_map();
                 draw_game_gbuffer_pass(trimdl, posterize_lighting);
             }
             {
@@ -4585,7 +4861,8 @@ namespace jkgm {
             // without retaining every allocation for the entire level.
             // Sweep periodically to avoid iterating the cache on every frame.
             if((the_config->use_model_cache || the_config->enable_sprite_decals ||
-                (the_config->enable_spotlights && the_config->enable_spotlight_shadows)) &&
+                (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
+                the_config->enable_sun_shadows) &&
                (gpu_3do_present_serial%16U)==0U) {
                 for(auto it=gpu_3do_gl_cache.begin();it!=gpu_3do_gl_cache.end();) {
                     auto const used=gpu_3do_last_drawn.find(it->first);

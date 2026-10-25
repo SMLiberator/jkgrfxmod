@@ -205,6 +205,22 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             }
             rv->spotlight_shadow_resolution = static_cast<unsigned int>(pixels);
         }
+        if(j.contains("enable_sun_shadows")) {
+            j.at("enable_sun_shadows").get_to(rv->enable_sun_shadows);
+        }
+        if(j.contains("sun_shadow_resolution")) {
+            auto const &v = j.at("sun_shadow_resolution");
+            if(!v.is_number_integer()) {
+                throw std::runtime_error(
+                    "sun_shadow_resolution must be an integer between 64 and 1024");
+            }
+            auto const pixels = v.get<long long>();
+            if(pixels < 64 || pixels > 1024) {
+                throw std::runtime_error(
+                    "sun_shadow_resolution must be between 64 and 1024");
+            }
+            rv->sun_shadow_resolution = static_cast<unsigned int>(pixels);
+        }
         if(j.contains("enable_sprite_decals")) {
             j.at("enable_sprite_decals").get_to(rv->enable_sprite_decals);
         }

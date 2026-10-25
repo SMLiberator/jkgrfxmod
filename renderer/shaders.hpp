@@ -289,6 +289,7 @@ namespace jkgm {
         class spotlight_shadow_depth_shader : public opengl_shader {
             gl::uniform_location_id shadow_origin,shadow_right,shadow_up;
             gl::uniform_location_id shadow_forward,shadow_limits;
+            gl::uniform_location_id shadow_orthographic;
             gl::uniform_location_id shadow_model_right,shadow_model_forward;
             gl::uniform_location_id shadow_model_up,shadow_model_origin;
             gl::uniform_location_id shadow_use_alpha,shadow_alpha_texture;
@@ -301,6 +302,11 @@ namespace jkgm {
             void set_light(point<3,float> origin,point<3,float> right,
                            point<3,float> up,point<3,float> forward,
                            point<4,float> limits);
+            void set_orthographic_light(point<3,float> origin,
+                                        point<3,float> right,
+                                        point<3,float> up,
+                                        point<3,float> forward,
+                                        point<4,float> limits);
             void set_model(point<3,float> right,point<3,float> forward,
                            point<3,float> up,point<3,float> origin);
             void set_shadow_alpha(bool enabled,point<2,float> uv_scale,
@@ -323,6 +329,11 @@ namespace jkgm {
             gl::uniform_location_id spotlight_shadow_slot;
             gl::uniform_location_id spotlight_shadow_image;
             gl::uniform_location_id spotlight_shadow_near_range;
+            gl::uniform_location_id sun_shadow_active,sun_shadow_image;
+            gl::uniform_location_id sun_shadow_direction,sun_shadow_color_intensity;
+            gl::uniform_location_id sun_shadow_origin,sun_shadow_right;
+            gl::uniform_location_id sun_shadow_up,sun_shadow_forward;
+            gl::uniform_location_id sun_shadow_limits;
             std::vector<gl::uniform_location_id> spotlight_images;
             std::vector<gl::uniform_location_id> spotlight_origins;
             std::vector<gl::uniform_location_id> spotlight_rights;
@@ -344,6 +355,11 @@ namespace jkgm {
                                       point<4,float> up);
             void set_spotlight_count(int count);
             void set_spotlight_shadow(int slot,float near_plane,float far_plane);
+            void set_sun_shadow(bool enabled,point<3,float> direction,
+                                point<4,float> color_intensity,
+                                point<3,float> origin,point<3,float> right,
+                                point<3,float> up,point<3,float> forward,
+                                point<3,float> limits);
             void set_spotlight(int slot,point<4,float> origin,
                                point<4,float> right,point<4,float> up,
                                point<4,float> forward,

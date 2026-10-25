@@ -911,7 +911,12 @@ namespace {
 bool native_mesh_overlaps_shadow_light(native_mesh const &mesh,
                                        void const *matrix)
 {
-    if(!the_config || !the_config->enable_spotlights ||
+    if(!the_config)return false;
+    // Sun shadows cover the whole loaded world, so conservatively retain
+    // every native model snapshot when that pass is enabled. The renderer
+    // then clips each group to the directional map's bounds.
+    if(the_config->enable_sun_shadows)return true;
+    if(!the_config->enable_spotlights ||
        !the_config->enable_spotlight_shadows)
         return false;
     static uint64_t cached_frame=std::numeric_limits<uint64_t>::max();
@@ -964,8 +969,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
                std::memcmp(reinterpret_cast<void const *>(code),init_bytes,
                            sizeof(init_bytes))==0;
     }();
-    bool const shadow_enabled=the_config && the_config->enable_spotlights &&
-        the_config->enable_spotlight_shadows;
+    bool const shadow_enabled=the_config &&
+        ((the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
+         the_config->enable_sun_shadows);
     bool const shadow_only=the_config && !the_config->use_model_cache &&
         shadow_enabled;
     if(!the_config || (!the_config->use_model_cache && !shadow_only) ||
@@ -4973,7 +4979,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         native_node_attachment_hooks_active=attach_native_node_attachment_hooks();
         if(the_config->profile_renderer || the_config->use_model_cache ||
            the_config->enable_sprite_decals ||
-           (the_config->enable_spotlights && the_config->enable_spotlight_shadows)) {
+           (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
+           the_config->enable_sun_shadows) {
             native_3do_hooks_active = attach_native_3do_hooks(the_config->profile_renderer);
         }
         LOG_DEBUG("Finished attaching renderer to process");

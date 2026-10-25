@@ -35,6 +35,37 @@ uniform int spotlight_shadow_slot; // -1 when no valid shadow map this frame
 uniform sampler2D spotlight_shadow_image;
 uniform vec2 spotlight_shadow_near_range; // near, far in JK world units
 
+uniform int sun_shadow_active;
+uniform sampler2D sun_shadow_image;
+uniform vec3 sun_shadow_direction; // world-space direction toward the sun
+uniform vec4 sun_shadow_color_intensity;
+uniform vec3 sun_shadow_origin;
+uniform vec3 sun_shadow_right;
+uniform vec3 sun_shadow_up;
+uniform vec3 sun_shadow_forward;
+uniform vec3 sun_shadow_limits; // orthographic width, height, depth range
+
+float sun_shadow_visibility(vec3 world_position)
+{
+    vec3 relative=world_position-sun_shadow_origin;
+    vec3 coordinate=vec3(
+        dot(relative,sun_shadow_right)/sun_shadow_limits.x,
+        dot(relative,sun_shadow_up)/sun_shadow_limits.y,
+        dot(relative,sun_shadow_forward)/sun_shadow_limits.z);
+    if(any(lessThan(coordinate,vec3(0.0))) ||
+       any(greaterThan(coordinate,vec3(1.0))))return 1.0;
+    float receiver=coordinate.z;
+    float bias=max(0.0001,1.0/float(textureSize(sun_shadow_image,0).x));
+    vec2 texel=1.0/vec2(textureSize(sun_shadow_image,0));
+    float visible=0.0;
+    for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++) {
+        float caster=texture(sun_shadow_image,
+            coordinate.xy+vec2(x,y)*texel).r;
+        visible+=receiver-bias<=caster ? 1.0 : 0.0;
+    }
+    return visible/9.0;
+}
+
 float spotlight_shadow_visibility(vec2 uv,float receiver_distance)
 {
     float n=spotlight_shadow_near_range.x;
@@ -178,9 +209,25 @@ void main()
     // remains unchanged for SSAO and reconstruction.
     vec3 light_rgb,add_rgb;
     project_spotlights(depth,tc,light_rgb,add_rgb);
-    vec3 pigment=spotlight_count>0
+    vec3 pigment=(spotlight_count>0 || sun_shadow_active!=0)
         ? max(texelFetch(depth_image,tc,0).gba,vec3(0.0))
         : vec3(0.0);
+    if(sun_shadow_active!=0 && depth>0.0 && depth<65500.0) {
+        vec3 vn=texelFetch(normal_image,tc,0).rgb;
+        if(dot(vn,vn)>0.0001) {
+            vec3 normal=normalize(camera_right.xyz*(vn.x/camera_right.w)+
+                                  camera_up.xyz*(vn.y/camera_up.w)+
+                                  camera_forward.xyz*vn.z);
+            float incidence=max(dot(normal,sun_shadow_direction),0.0);
+            if(incidence>0.0) {
+                vec3 world_position=reconstruct_scene_world(depth);
+                float visibility=sun_shadow_visibility(world_position);
+                vec3 sun_light=pigment*sun_shadow_color_intensity.rgb*
+                    sun_shadow_color_intensity.a*incidence*visibility;
+                surface_rgb+=sun_light*(vec3(1.0)-clamp(surface_rgb,0.0,1.0));
+            }
+        }
+    }
     vec3 diffuse_light=pigment*light_rgb;
     vec3 screened=surface_rgb+diffuse_light*
                   (vec3(1.0)-clamp(surface_rgb,0.0,1.0));

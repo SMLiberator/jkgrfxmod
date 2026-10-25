@@ -36,6 +36,8 @@
     "enable_spotlights": false,
     "enable_spotlight_shadows": false,
     "spotlight_shadow_resolution": 256,
+    "enable_sun_shadows": false,
+    "sun_shadow_resolution": 512,
     "enable_sprite_decals": false,
     "enable_mesh_collision": false,
     "use_vanilla_renderer": false

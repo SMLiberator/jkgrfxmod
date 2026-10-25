@@ -420,7 +420,8 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
 {
     LOG_DEBUG("Loading OpenGL assets");
     // Avoid even compiling shadow shaders on ordinary (disabled) installs.
-    if(the_config->enable_spotlights && the_config->enable_spotlight_shadows)
+    if((the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
+       the_config->enable_sun_shadows)
         spotlight_shadow_depth_program =
             std::make_unique<shaders::spotlight_shadow_depth_shader>(data_root);
     // Projected sprite decals share the GPU 3DO shader, even when
