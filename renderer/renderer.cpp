@@ -570,6 +570,8 @@ namespace jkgm {
         spotlight_instance spotlight_shadow_light{};
         spotlight_shadow_projection spotlight_shadow_view{};
         bool spotlight_shadow_ready=false;
+        bool spotlight_shadow_cached=false;
+        uint32_t spotlight_shadow_world=0;
         std::set<std::pair<uint32_t, int>> runtime_missing_images;
         std::set<uint32_t> runtime_missing_sources;
         bool warned_reflections_disabled = false;
@@ -885,6 +887,7 @@ namespace jkgm {
                     frame_had_execute = false;
                 }
                 spotlight_shadow_ready=false;
+                spotlight_shadow_cached=false;
                 // Pausing/menu transitions may evict and reload D3D textures.
                 // Refresh the native MAT resolver on the next game frame,
                 // instead of letting the previous one-second timer cause a flash.
@@ -3473,6 +3476,30 @@ namespace jkgm {
                 spotlight_shadow_target=std::make_unique<spotlight_shadow_gpu>();
             auto &map=*spotlight_shadow_target;
             if(!map.update_world(safe_read,world))return;
+
+            // Static-only shadows need a new depth render only when the
+            // projector/world changes. No CPU/GPU depth readback or per-frame
+            // draw is necessary for stationary flashlights or lamps.
+            auto same=[](std::array<float,3> const &a,
+                         std::array<float,3> const &b) {
+                for(int i=0;i<3;++i)
+                    if(std::fabs(a[i]-b[i])>0.00001f)return false;
+                return true;
+            };
+            bool const unchanged=spotlight_shadow_cached &&
+                spotlight_shadow_world==world &&
+                chosen.material==spotlight_shadow_light.material &&
+                same(chosen.origin,spotlight_shadow_light.origin) &&
+                same(chosen.right,spotlight_shadow_light.right) &&
+                same(chosen.up,spotlight_shadow_light.up) &&
+                same(chosen.forward,spotlight_shadow_light.forward) &&
+                std::fabs(chosen.width-spotlight_shadow_light.width)<0.00001f &&
+                std::fabs(chosen.height-spotlight_shadow_light.height)<0.00001f &&
+                std::fabs(chosen.range-spotlight_shadow_light.range)<0.00001f;
+            if(unchanged) {
+                spotlight_shadow_ready=true;
+                return;
+            }
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,map.fbo);
             gl::set_viewport(make_box(make_point(0,0),
                 make_size(int(map.resolution),int(map.resolution))));
@@ -3497,6 +3524,8 @@ namespace jkgm {
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
             spotlight_shadow_light=chosen;
             spotlight_shadow_view=view;
+            spotlight_shadow_world=world;
+            spotlight_shadow_cached=true;
             spotlight_shadow_ready=true;
         }
 
