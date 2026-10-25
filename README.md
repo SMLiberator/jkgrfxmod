@@ -651,43 +651,51 @@ Type-4 camera-facing flare SPRs are separate Things. Attach a flare
 Thing to a node, then assign that same Thing a Spotlight. Its independent
 `SetSpriteInfo` and `SetSpriteRoll` COG controls remain available.
 
-## Experimental static-world spotlight shadows
+## Experimental spotlight shadows
 
 Set `"enable_spotlights": true` and `"enable_spotlight_shadows": true`
 to test **one** 256×256 depth-only spotlight shadow map. Shadow rendering is
 off by default. The ordinary `SetSpotlight` verb works unchanged; the first
-on-screen ready projector gets the shadow-map budget. Other active spotlights
-remain unshadowed.
+on-screen ready projector gets the shadow-map budget. Other projectors remain
+unshadowed.
 
-This **first-stage implementation** reuses the existing validated static
-SithWorld surface snapshot and BVH from the decal projector: solid,
-non-sky, non-passable-adjoin level polygons are cached once as an indexed
-GPU mesh. Each moving spotlight queries the BVH for potential casters and
-draws only overlapping ranges. An unchanged static-world/projector pair
-reuses the previous depth map with no additional geometry draw. Opaque
-spotlight diffuse/additive cookie radiance uses a four-tap PCF depth
-comparison. Neither JK's existing baked illumination nor ambient/
-emissive contributions are darkened by the map.
+The static SithWorld caster mesh reuses the level-surface cache and BVH.
+Shadow rendering tests the projector volume and submits only overlapping
+indexed geometry. World architecture outside the player's camera view remains
+available to cast shadows. Unchanged static shadows reuse the previous depth
+map without redrawing the world. Dynamic 3DO mesh ranges use their existing
+cached vertex/index data and updated Thing/node world transforms.
 
-**Known limitations, do not mistake for final shadow behavior:**
+**Native renderer compatibility:** with `"use_model_cache": false`, and
+shadows enabled, the verified native rdModel3 mesh hook copies bounded,
+near-spotlight geometry into a shadow-only cache but still lets JK draw the
+actual 3DO. This is not the GPU-cached model rendering option and is not
+enabled when shadow maps are off. With `"use_model_cache": true`, the
+existing indexed buffers are reused for rendering and shadows.
 
-- Only static world architecture casts shadows for now: moving 3DO actors,
-  vehicles, and static 3DO geometry are not included yet.
-- Opaque world surfaces receive shadows, but transparent/fluid receivers
-  currently receive the projected lighting **without** shadow-map occlusion.
-- The static-world extractor does not yet sample material alpha, so masked
-  grates or transparent glass may cast solid silhouettes; only truly opaque
-  world geometry should be used for the initial visual test.
-- Off-camera **world geometry** is included independently of the gameplay
-  frustum. GPU-cached 3DOs require a separate, independent caster
-  collector before they can be added without camera-dependent popping.
-- The 256-pixel resolution and four PCF taps are deliberately conservative
-  performance defaults; shadow precision, bias, and edge quality still need
-  in-game measurements.
+**Important limitations:**
 
-If the experimental FBO or world snapshot cannot be created, the normal
-non-shadowed spotlight remains functional. Leave this switch off for
-regular play until the caster/receiver compatibility work is complete.
+- The depth shader does not yet sample MAT alpha. Solid (impassable) adjoins,
+  including masked grates and transparent glazing, are conservatively
+  excluded from the world shadow caster mesh instead of casting completely
+  opaque rectangular silhouettes. The bars' true cutout shadows are **not**
+  generated yet; some opaque solid-adjoin panels also cease casting.
+- 3DO groups with known translucency, alpha masks, dither, additive/multiply
+  modes or emissive-only materials are excluded from caster submission.
+- 3DO shadows include meshes reached by JK's normal rdModel3 hierarchy
+  traversal. If JK eliminates a Thing/model before invoking its mesh hook,
+  it cannot yet cast a shadow from fully outside the camera view. An
+  independent Thing-level caster collector is still needed for that case.
+- Transparent/fluid faces receive the projected light, but their **received**
+  lighting is not yet occluded by the shadow map. Ordinary opaque surfaces
+  are shadowed. Neither original JK vertex lighting nor emissive material
+  contributions are darkened by the map.
+- Dynamic 3DOs in the spotlight range require a fresh shadow depth draw each
+  frame, even when stationary. The low 256-pixel resolution, one-light budget
+  and four PCF taps are intentional initial performance limits.
+
+This feature still requires in-game testing on native and cached 3DOs, and
+may be disabled independently without affecting projected spotlight lighting.
 
 ## Forward projected lighting on translucent receivers (experimental)
 
