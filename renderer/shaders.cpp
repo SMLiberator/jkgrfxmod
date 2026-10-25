@@ -145,6 +145,9 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , translucent_spotlight_camera_right(gl::get_uniform_location(the_program,"translucent_spotlight_camera_right"))
     , translucent_spotlight_camera_forward(gl::get_uniform_location(the_program,"translucent_spotlight_camera_forward"))
     , translucent_spotlight_camera_up(gl::get_uniform_location(the_program,"translucent_spotlight_camera_up"))
+    , translucent_shadow_slot(gl::get_uniform_location(the_program,"translucent_shadow_slot"))
+    , translucent_shadow_image(gl::get_uniform_location(the_program,"translucent_shadow_image"))
+    , translucent_shadow_near_range(gl::get_uniform_location(the_program,"translucent_shadow_near_range"))
 {
     for(int i=0;i<4;++i) {
         translucent_spotlight_images.push_back(gl::get_uniform_location(
@@ -164,6 +167,16 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     }
 }
 
+
+void jkgm::shaders::game_pass_shader::set_translucent_shadow(
+    int slot,float near_plane,float far_plane)
+{
+    gl::set_uniform_integer(translucent_shadow_slot,slot);
+    if(slot<0)return;
+    gl::set_uniform_integer(translucent_shadow_image,10);
+    gl::set_uniform_vector(translucent_shadow_near_range,
+                           make_point(near_plane,far_plane));
+}
 
 void jkgm::shaders::game_pass_shader::set_translucent_spotlight_count(int count)
 {
@@ -258,6 +271,9 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , translucent_spotlight_camera_right(gl::get_uniform_location(the_program,"translucent_spotlight_camera_right"))
     , translucent_spotlight_camera_forward(gl::get_uniform_location(the_program,"translucent_spotlight_camera_forward"))
     , translucent_spotlight_camera_up(gl::get_uniform_location(the_program,"translucent_spotlight_camera_up"))
+    , translucent_shadow_slot(gl::get_uniform_location(the_program,"translucent_shadow_slot"))
+    , translucent_shadow_image(gl::get_uniform_location(the_program,"translucent_shadow_image"))
+    , translucent_shadow_near_range(gl::get_uniform_location(the_program,"translucent_shadow_near_range"))
     , ambient_light(gl::get_uniform_location(the_program,"ambient_light"))
     , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
@@ -286,6 +302,16 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
         translucent_spotlight_bounds.push_back(gl::get_uniform_location(
             the_program,"translucent_spotlight_bounds["+std::to_string(i)+"]"));
     }
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_translucent_shadow(
+    int slot,float near_plane,float far_plane)
+{
+    gl::set_uniform_integer(translucent_shadow_slot,slot);
+    if(slot<0)return;
+    gl::set_uniform_integer(translucent_shadow_image,10);
+    gl::set_uniform_vector(translucent_shadow_near_range,
+                           make_point(near_plane,far_plane));
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_translucent_spotlight_count(int count)
