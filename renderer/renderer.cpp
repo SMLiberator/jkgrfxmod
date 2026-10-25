@@ -4214,7 +4214,7 @@ namespace jkgm {
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN composite diffuse=",sun_lit && cam.valid?1:0,
                          " shadow=",sun_shadow_ready?1:0,
-                         " intensity=",sun_power);
+                         " intensity=",std::to_string(sun_power));
             if(cam.valid && (the_config->enable_spotlights || sun_lit)) {
                 float const h=std::tan(cam.fov*(3.14159265358979323846f/360.0f));
                 float const v=h*float(get<y>(conf_scr_res))/
