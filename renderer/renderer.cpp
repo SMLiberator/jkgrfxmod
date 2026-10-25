@@ -3390,6 +3390,26 @@ namespace jkgm {
             int const count=active
                 ? int(translucent_spotlights_for_frame.size()) : 0;
             prog.set_translucent_spotlight_count(count);
+            // The same single shadow map is shared with the opaque
+            // compositor; all other active projectors remain unshadowed.
+            int shadow_slot=-1;
+            if(count && spotlight_shadow_ready && spotlight_shadow_target) {
+                for(int i=0;i<count;++i) {
+                    if(shadow_matches_light(
+                           translucent_spotlights_for_frame[i].light)) {
+                        shadow_slot=i;break;
+                    }
+                }
+            }
+            prog.set_translucent_shadow(shadow_slot,
+                shadow_slot>=0 ? spotlight_shadow_view.near_distance : 0.0f,
+                shadow_slot>=0 ? spotlight_shadow_view.range : 0.0f);
+            if(shadow_slot>=0) {
+                gl::set_active_texture_unit(10);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 spotlight_shadow_target->depth);
+                gl::set_active_texture_unit(0);
+            }
             if(!count)return;
             auto const cam=read_active_render_camera();
             if(!cam.valid) {
