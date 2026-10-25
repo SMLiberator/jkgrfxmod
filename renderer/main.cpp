@@ -934,11 +934,12 @@ bool native_mesh_overlaps_shadow_light(native_mesh const &mesh,
              light.height>0.0f))continue;
         bool overlap=true;
         for(int axis=0;axis<3;++axis) {
-            float const far=light.origin[axis]+light.forward[axis]*light.range;
+            float const far_point=light.origin[axis]+
+                                  light.forward[axis]*light.range;
             float const extent=std::fabs(light.right[axis])*light.width*0.5f+
                                std::fabs(light.up[axis])*light.height*0.5f;
-            float const lo=std::min(light.origin[axis],far-extent)-radius;
-            float const hi=std::max(light.origin[axis],far+extent)+radius;
+            float const lo=std::min(light.origin[axis],far_point-extent)-radius;
+            float const hi=std::max(light.origin[axis],far_point+extent)+radius;
             if(m[9+axis]<lo || m[9+axis]>hi) {
                 overlap=false;break;
             }
