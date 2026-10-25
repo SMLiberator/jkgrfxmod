@@ -607,7 +607,8 @@ void main()
     vec3 lit = surface_color * (1.0 - fog_amount) + fog_color * (fog_amount * albedo.a);
 
     vec3 projected_light = vec3(0.0);
-    if(blend_mode != 1 && blend_mode != 2 && flare_mode == 0 &&
+    if(translucent_spotlight_count > 0 &&
+       blend_mode != 1 && blend_mode != 2 && flare_mode == 0 &&
        post_exempt_mode == 0 && features.z < 0.5) {
         projected_light = light_translucent_spotlight(
             vp_z, vp_normal, unlit_base_color, clamp(albedo.a, 0.0, 1.0)) *
