@@ -902,6 +902,52 @@ namespace {
 } // namespace
 
 
+// Bound shadow-only mesh snapshots to light-local geometry rather than
+// copying every native Thing in the level. This AABB/sphere check is
+// deliberately conservative; the renderer performs per-group culling later.
+// Cached once per native render frame to avoid walking COG Things per mesh.
+namespace {
+bool native_mesh_overlaps_shadow_light(native_mesh const &mesh,
+                                       void const *matrix)
+{
+    if(!the_config || !the_config->enable_spotlights ||
+       !the_config->enable_spotlight_shadows)
+        return false;
+    static uint64_t cached_frame=std::numeric_limits<uint64_t>::max();
+    static std::vector<jkgm::spotlight_instance> lights;
+    if(cached_frame!=gpu_frame_serial) {
+        cached_frame=gpu_frame_serial;
+        lights=jkgm::collect_spotlights_for_frame();
+    }
+    if(lights.empty())return false;
+    if(!gpu_span_readable(matrix,12*sizeof(float)))return false;
+    float m[12]{};
+    std::memcpy(m,matrix,sizeof(m));
+    for(float value:m)if(!std::isfinite(value))return false;
+    float scale=1.0f;
+    for(int i=0;i<9;i+=3)
+        scale=std::max(scale,std::sqrt(m[i]*m[i]+m[i+1]*m[i+1]+m[i+2]*m[i+2]));
+    float const radius=std::max(0.1f,mesh.radius*scale+0.5f);
+    for(auto const &light:lights) {
+        if(!(light.range>0.0f && light.width>0.0f &&
+             light.height>0.0f))continue;
+        bool overlap=true;
+        for(int axis=0;axis<3;++axis) {
+            float const far=light.origin[axis]+light.forward[axis]*light.range;
+            float const extent=std::fabs(light.right[axis])*light.width*0.5f+
+                               std::fabs(light.up[axis])*light.height*0.5f;
+            float const lo=std::min(light.origin[axis],far-extent)-radius;
+            float const hi=std::max(light.origin[axis],far+extent)+radius;
+            if(m[9+axis]<lo || m[9+axis]>hi) {
+                overlap=false;break;
+            }
+        }
+        if(overlap)return true;
+    }
+    return false;
+}
+}
+
 bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
 {
     // The exact RGB/smooth-normal JK patch has an additional float3*
@@ -916,8 +962,12 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
                std::memcmp(reinterpret_cast<void const *>(code),init_bytes,
                            sizeof(init_bytes))==0;
     }();
-    if(!the_config || !the_config->use_model_cache || !mesh || !matrix ||
-       pending_gpu_instances.size()>=16384 ||
+    bool const shadow_enabled=the_config && the_config->enable_spotlights &&
+        the_config->enable_spotlight_shadows;
+    bool const shadow_only=the_config && !the_config->use_model_cache &&
+        shadow_enabled;
+    if(!the_config || (!the_config->use_model_cache && !shadow_only) ||
+       !mesh || !matrix || pending_gpu_instances.size()>=16384 ||
        // Single VirtualQuery per candidate, including the optional RGB
        // field; thousands of calls happen on busy scenes.
        !gpu_span_readable(mesh,has_rgb_mesh_extension?0x70U:sizeof(native_mesh)) ||
@@ -962,9 +1012,16 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
         gpu_log_fallback(m,"camera_unavailable");
         return false;
     }
-    if(gpu_mesh_outside_native_frustum(m,matrix,camera)) {
+    // In shadow-only mode JK must still draw the model normally. Outside
+    // camera view, only keep a mesh if it can intersect a current spotlight;
+    // this also permits off-camera objects to cast shadows.
+    bool const near_shadow=shadow_enabled &&
+        native_mesh_overlaps_shadow_light(m,matrix);
+    if(shadow_only && !near_shadow)return false;
+    if(gpu_mesh_outside_native_frustum(m,matrix,camera) &&
+       !near_shadow) {
         if(the_config->profile_renderer) ++gpu_native_stats.culled;
-        return true;
+        return !shadow_only;
     }
     auto it=gpu_mesh_cache.find(mesh);
     bool snapshot_attempted_this_call=false;
@@ -1069,7 +1126,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     // its native material cache. We can switch to GPU rendering next frame.
     // Many instances share this mesh. Check MAT handles once per mesh per
     // frame, refreshing next frame so animated cels still get a warm-up.
-    if(it->second.ready_checked_frame!=gpu_frame_serial) {
+    if(!shadow_only && it->second.ready_checked_frame!=gpu_frame_serial) {
         bool const profiling=the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
@@ -1082,7 +1139,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
         if(profiling) gpu_native_stats.ready_ns+=elapsed_native_ns(start);
         it->second.ready_checked_frame=gpu_frame_serial;
     }
-    if(!it->second.ready_for_frame) {
+    if(!shadow_only && !it->second.ready_for_frame) {
         if(the_config->profile_renderer) ++gpu_native_stats.material_native;
         gpu_log_fallback(m,"native_MAT_cel_not_yet_resident");
         return false;
@@ -1090,32 +1147,37 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     gpu_3do_instance inst;
     inst.id=it->second.id;
     inst.geometry=it->second.geometry;
-    inst.colormap_tint=read_gpu_3do_colormap_tint();
-    // curLightingMode (rdModel3_Draw's effective Thing/global cap):
-    // the verified rdModel3 global block is +0x48 from original JK.
-    // This is sampled per instance because COG can change it each frame.
-    constexpr uintptr_t effective_light_mode_addr=0x0073C218U;
-    if(!gpu_span_readable(reinterpret_cast<void const *>(effective_light_mode_addr),4))
-        return false;
-    int32_t lighting_cap=0;
-    std::memcpy(&lighting_cap,
-                reinterpret_cast<void const *>(effective_light_mode_addr),4);
-    if(lighting_cap<0 || lighting_cap>3) {
-        if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
-        gpu_log_fallback(m,"unsupported_thing_lighting_mode");
-        return false;
-    }
-    inst.effective_light_mode=static_cast<float>(lighting_cap);
+    inst.shadow_only=shadow_only;
+    // Depth-only casters need no native MAT residency, point lights,
+    // colormap or per-Thing lighting cap. Preserve the native render call.
     std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
-    for(float f:inst.transform) if(!std::isfinite(f)) return false;
-    if(!snapshot_gpu_3do_lighting(m,inst.transform.data(),inst)) {
-        if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
-        gpu_log_fallback(m,"unsupported_dynamic_lighting_or_light_count");
-        return false;
-    }
+    for(float v:inst.transform)if(!std::isfinite(v))return false;
+    if(!shadow_only) {
+        inst.colormap_tint=read_gpu_3do_colormap_tint();
+        // curLightingMode (rdModel3_Draw's effective Thing/global cap):
+        // the verified rdModel3 global block is +0x48 from original JK.
+        // This is sampled per instance because COG can change it each frame.
+        constexpr uintptr_t effective_light_mode_addr=0x0073C218U;
+        if(!gpu_span_readable(reinterpret_cast<void const *>(effective_light_mode_addr),4))
+            return false;
+        int32_t lighting_cap=0;
+        std::memcpy(&lighting_cap,
+                    reinterpret_cast<void const *>(effective_light_mode_addr),4);
+        if(lighting_cap<0 || lighting_cap>3) {
+            if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
+            gpu_log_fallback(m,"unsupported_thing_lighting_mode");
+            return false;
+        }
+        inst.effective_light_mode=static_cast<float>(lighting_cap);
+        if(!snapshot_gpu_3do_lighting(m,inst.transform.data(),inst)) {
+            if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
+            gpu_log_fallback(m,"unsupported_dynamic_lighting_or_light_count");
+            return false;
+        }
+        }
     pending_gpu_instances.emplace_back(std::move(inst));
     if(the_config->profile_renderer) ++gpu_native_stats.queued;
-    return true;
+    return !shadow_only;
 }
 jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
 {
@@ -4908,7 +4970,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         renderer_hooks_active = true;
         native_node_attachment_hooks_active=attach_native_node_attachment_hooks();
         if(the_config->profile_renderer || the_config->use_model_cache ||
-           the_config->enable_sprite_decals) {
+           the_config->enable_sprite_decals ||
+           (the_config->enable_spotlights && the_config->enable_spotlight_shadows)) {
             native_3do_hooks_active = attach_native_3do_hooks(the_config->profile_renderer);
         }
         LOG_DEBUG("Finished attaching renderer to process");
