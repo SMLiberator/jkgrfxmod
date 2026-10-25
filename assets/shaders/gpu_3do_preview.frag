@@ -496,8 +496,9 @@ void main() {
     // Only forward-blended non-decal faces receive projected light.
     // Ordinary alpha-tested coverage already receives opaque-composite light.
     vec3 projected_light=vec3(0.0);
-    if(transparent_pass!=0 && post_exempt_pass==0 &&
-       decal_receiver_lighting==0 && (alpha_mode==1 || alpha_mode==3) &&
+    if(translucent_spotlight_count>0 && transparent_pass!=0 &&
+       post_exempt_pass==0 && decal_receiver_lighting==0 &&
+       (alpha_mode==1 || alpha_mode==3) &&
        blend_mode!=1 && blend_mode!=2 && emissive_only==0) {
         projected_light=light_translucent_spotlight(
             view_depth,view_normal,albedo.rgb,clamp(albedo.a,0.0,1.0)) *
