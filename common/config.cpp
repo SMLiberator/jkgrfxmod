@@ -189,6 +189,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_spotlights")) {
             j.at("enable_spotlights").get_to(rv->enable_spotlights);
         }
+        if(j.contains("enable_spotlight_shadows")) {
+            j.at("enable_spotlight_shadows").get_to(rv->enable_spotlight_shadows);
+        }
         if(j.contains("enable_sprite_decals")) {
             j.at("enable_sprite_decals").get_to(rv->enable_sprite_decals);
         }
