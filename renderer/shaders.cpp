@@ -699,6 +699,14 @@ jkgm::shaders::spotlight_shadow_depth_shader::spotlight_shadow_depth_shader(
     , shadow_model_forward(gl::get_uniform_location(the_program,"shadow_model_forward"))
     , shadow_model_up(gl::get_uniform_location(the_program,"shadow_model_up"))
     , shadow_model_origin(gl::get_uniform_location(the_program,"shadow_model_origin"))
+    , shadow_use_alpha(gl::get_uniform_location(the_program,"shadow_use_alpha"))
+    , shadow_alpha_texture(gl::get_uniform_location(the_program,"shadow_alpha_texture"))
+    , shadow_alpha_texture_next(gl::get_uniform_location(the_program,"shadow_alpha_texture_next"))
+    , shadow_alpha_uv_scale(gl::get_uniform_location(the_program,"shadow_alpha_uv_scale"))
+    , shadow_alpha_uv_scroll(gl::get_uniform_location(the_program,"shadow_alpha_uv_scroll"))
+    , shadow_alpha_transition(gl::get_uniform_location(the_program,"shadow_alpha_transition"))
+    , shadow_alpha_cutoff(gl::get_uniform_location(the_program,"shadow_alpha_cutoff"))
+    , shadow_alpha_factor(gl::get_uniform_location(the_program,"shadow_alpha_factor"))
 {
 }
 
@@ -721,6 +729,22 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_model(
     gl::set_uniform_vector(shadow_model_forward,forward);
     gl::set_uniform_vector(shadow_model_up,up);
     gl::set_uniform_vector(shadow_model_origin,origin);
+}
+
+void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(
+    bool enabled,point<2,float> uv_scale,point<2,float> uv_scroll,
+    float cutoff,float factor,bool has_next,float progress)
+{
+    gl::set_uniform_integer(shadow_use_alpha,enabled?1:0);
+    if(!enabled)return;
+    gl::set_uniform_integer(shadow_alpha_texture,11);
+    gl::set_uniform_integer(shadow_alpha_texture_next,12);
+    gl::set_uniform_vector(shadow_alpha_uv_scale,uv_scale);
+    gl::set_uniform_vector(shadow_alpha_uv_scroll,uv_scroll);
+    gl::set_uniform_float(shadow_alpha_cutoff,cutoff);
+    gl::set_uniform_float(shadow_alpha_factor,factor);
+    gl::set_uniform_vector(shadow_alpha_transition,
+        make_point(has_next?1.0f:0.0f,progress));
 }
 
 jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_shader(
