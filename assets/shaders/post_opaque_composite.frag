@@ -45,29 +45,63 @@ uniform vec3 sun_shadow_right;
 uniform vec3 sun_shadow_up;
 uniform vec3 sun_shadow_forward;
 uniform vec3 sun_shadow_limits; // orthographic width, height, depth range
+uniform sampler2D sun_shadow_far_image;
+uniform vec3 sun_shadow_far_origin,sun_shadow_far_right;
+uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
+uniform float sun_shadow_split; // JK forward distance from camera
 
+vec3 sun_shadow_coordinates(vec3 position,vec3 origin,vec3 right,
+                            vec3 up,vec3 forward,vec3 limits)
+{
+    vec3 p=position-origin;
+    return vec3(dot(p,right)/limits.x,
+                dot(p,up)/limits.y,
+                dot(p,forward)/limits.z);
+}
+bool sun_shadow_inside(vec3 coord)
+{
+    return all(greaterThanEqual(coord,vec3(0.0))) &&
+           all(lessThanEqual(coord,vec3(1.0)));
+}
+float sun_shadow_filter(sampler2D map,vec3 coordinate,float range)
+{
+    // Depth bias is world-space, not tied to shadow texture XY resolution.
+    float bias=max(2.0/65535.0,0.015/max(range,0.001));
+    vec2 texel=1.0/vec2(textureSize(map,0));
+    float visible=0.0;
+    for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++) {
+        float caster=texture(map,coordinate.xy+vec2(x,y)*texel).r;
+        visible+=coordinate.z-bias<=caster ? 1.0 : 0.0;
+    }
+    return visible/9.0;
+}
 float sun_shadow_visibility(vec3 world_position)
 {
     if(sun_shadow_active==0)return 1.0;
-    vec3 relative=world_position-sun_shadow_origin;
-    vec3 coordinate=vec3(
-        dot(relative,sun_shadow_right)/sun_shadow_limits.x,
-        dot(relative,sun_shadow_up)/sun_shadow_limits.y,
-        dot(relative,sun_shadow_forward)/sun_shadow_limits.z);
-    if(any(lessThan(coordinate,vec3(0.0))) ||
-       any(greaterThan(coordinate,vec3(1.0))))return 1.0;
-    float receiver=coordinate.z;
-    // World-space bias converted to orthographic normalized depth, with
-    // two D16 depth steps for quantization. XY map size is not depth bias.
-    float bias=max(2.0/65535.0,0.015/max(sun_shadow_limits.z,0.001));
-    vec2 texel=1.0/vec2(textureSize(sun_shadow_image,0));
-    float visible=0.0;
-    for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++) {
-        float caster=texture(sun_shadow_image,
-            coordinate.xy+vec2(x,y)*texel).r;
-        visible+=receiver-bias<=caster ? 1.0 : 0.0;
-    }
-    return visible/9.0;
+    float camera_depth=dot(world_position-camera_origin.xyz,
+                           camera_forward.xyz);
+    vec3 near_uv=sun_shadow_coordinates(world_position,sun_shadow_origin,
+        sun_shadow_right,sun_shadow_up,sun_shadow_forward,sun_shadow_limits);
+    // Far cascade overlaps near coverage; never discard a receiver merely
+    // because its near projection fell outside the map.
+    bool use_near=camera_depth<sun_shadow_split && sun_shadow_inside(near_uv);
+    if(use_near && camera_depth<sun_shadow_split-6.0)
+        return sun_shadow_filter(sun_shadow_image,near_uv,sun_shadow_limits.z);
+    vec3 far_uv=sun_shadow_coordinates(world_position,sun_shadow_far_origin,
+        sun_shadow_far_right,sun_shadow_far_up,
+        sun_shadow_far_forward,sun_shadow_far_limits);
+    if(!sun_shadow_inside(far_uv))
+        return use_near
+            ? sun_shadow_filter(sun_shadow_image,near_uv,sun_shadow_limits.z)
+            : 1.0;
+    float far_visibility=sun_shadow_filter(sun_shadow_far_image,
+        far_uv,sun_shadow_far_limits.z);
+    if(!use_near)return far_visibility;
+    float near_visibility=sun_shadow_filter(sun_shadow_image,
+        near_uv,sun_shadow_limits.z);
+    float blend=smoothstep(sun_shadow_split-6.0,sun_shadow_split-2.0,
+                          camera_depth);
+    return mix(near_visibility,far_visibility,blend);
 }
 
 float spotlight_shadow_visibility(vec2 uv,float receiver_distance)

@@ -74,6 +74,20 @@ int main()
     assert(projection.width<50.0f && projection.height<50.0f);
     assert(stabilize_sun_shadow_projection(projection,512U));
     assert(!stabilize_sun_shadow_projection(projection,0U));
+    // Near and far maps share caster depth but fit different screen regions.
+    auto near_projection=projection;
+    auto far_projection=projection;
+    assert(fit_sun_shadow_to_camera(near_projection,{{105.0f,205.0f,2.0f}},
+        {{1.0f,0.0f,0.0f}},{{0.0f,0.0f,1.0f}},
+        {{0.0f,1.0f,0.0f}},0.5f,0.4f,sun_shadow_near_distance));
+    assert(fit_sun_shadow_to_camera(far_projection,{{105.0f,205.0f,2.0f}},
+        {{1.0f,0.0f,0.0f}},{{0.0f,0.0f,1.0f}},
+        {{0.0f,1.0f,0.0f}},0.5f,0.4f,sun_shadow_far_distance));
+    assert(near_projection.width<far_projection.width);
+    assert(near_projection.height<far_projection.height);
+    assert(near_projection.range==far_projection.range);
+    assert(stabilize_sun_shadow_projection(near_projection,512U));
+    assert(stabilize_sun_shadow_projection(far_projection,512U));
     auto visible=sun_shadow_clip(projection,{{105.0f,215.0f,2.0f}});
     assert(visible.x>-1.0f && visible.x<1.0f);
     assert(visible.y>-1.0f && visible.y<1.0f);

@@ -817,6 +817,13 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , sun_shadow_up(gl::get_uniform_location(the_program,"sun_shadow_up"))
     , sun_shadow_forward(gl::get_uniform_location(the_program,"sun_shadow_forward"))
     , sun_shadow_limits(gl::get_uniform_location(the_program,"sun_shadow_limits"))
+    , sun_shadow_far_image(gl::get_uniform_location(the_program,"sun_shadow_far_image"))
+    , sun_shadow_far_origin(gl::get_uniform_location(the_program,"sun_shadow_far_origin"))
+    , sun_shadow_far_right(gl::get_uniform_location(the_program,"sun_shadow_far_right"))
+    , sun_shadow_far_up(gl::get_uniform_location(the_program,"sun_shadow_far_up"))
+    , sun_shadow_far_forward(gl::get_uniform_location(the_program,"sun_shadow_far_forward"))
+    , sun_shadow_far_limits(gl::get_uniform_location(the_program,"sun_shadow_far_limits"))
+    , sun_shadow_split(gl::get_uniform_location(the_program,"sun_shadow_split"))
 {
     for(int i=0;i<4;++i) {
         spotlight_images.push_back(gl::get_uniform_location(
@@ -910,6 +917,19 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow(
     gl::set_uniform_vector(sun_shadow_up,up);
     gl::set_uniform_vector(sun_shadow_forward,forward);
     gl::set_uniform_vector(sun_shadow_limits,limits);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_far(
+    point<3,float> origin,point<3,float> right,point<3,float> up,
+    point<3,float> forward,point<3,float> limits,float split)
+{
+    gl::set_uniform_integer(sun_shadow_far_image,14);
+    gl::set_uniform_vector(sun_shadow_far_origin,origin);
+    gl::set_uniform_vector(sun_shadow_far_right,right);
+    gl::set_uniform_vector(sun_shadow_far_up,up);
+    gl::set_uniform_vector(sun_shadow_far_forward,forward);
+    gl::set_uniform_vector(sun_shadow_far_limits,limits);
+    gl::set_uniform_float(sun_shadow_split,split);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight(

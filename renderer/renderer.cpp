@@ -569,13 +569,14 @@ namespace jkgm {
         std::vector<translucent_spotlight_draw> translucent_spotlights_for_frame;
         std::unique_ptr<spotlight_shadow_gpu> spotlight_shadow_target;
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
-        sun_shadow_projection sun_shadow_view{};
+        std::array<sun_shadow_projection,2> sun_shadow_views{};
         bool sun_shadow_ready=false;
-        bool sun_shadow_cached=false;
-        std::array<float,3> sun_shadow_direction{};
-        uintptr_t sun_shadow_world=0;
-        uint64_t sun_shadow_revision=0;
-        uint64_t sun_shadow_caster_signature=0;
+        std::array<bool,2> sun_shadow_cascade_ready{{false,false}};
+        std::array<bool,2> sun_shadow_cascade_cached{{false,false}};
+        std::array<std::array<float,3>,2> sun_shadow_directions{};
+        std::array<uintptr_t,2> sun_shadow_worlds{};
+        std::array<uint64_t,2> sun_shadow_revisions{};
+        std::array<uint64_t,2> sun_shadow_caster_signatures{};
         spotlight_instance spotlight_shadow_light{};
         spotlight_shadow_projection spotlight_shadow_view{};
         bool spotlight_shadow_ready=false;
@@ -904,7 +905,8 @@ namespace jkgm {
                 spotlight_shadow_cached=false;
                 spotlight_shadow_3do_signature=0;
                 sun_shadow_ready=false;
-                sun_shadow_cached=false;
+                sun_shadow_cascade_ready={{false,false}};
+                sun_shadow_cascade_cached={{false,false}};
                 // Pausing/menu transitions may evict and reload D3D textures.
                 // Refresh the native MAT resolver on the next game frame,
                 // instead of letting the previous one-second timer cause a flash.
@@ -3859,6 +3861,7 @@ namespace jkgm {
         void draw_sun_shadow_map()
         {
             sun_shadow_ready=false;
+            sun_shadow_cascade_ready={{false,false}};
             if(!the_config->enable_sun_shadows)return;
             auto sun_failure=[&](char const *reason) {
                 if(the_config->profile_renderer &&
@@ -3929,8 +3932,8 @@ namespace jkgm {
                         model_bounds.push_back(bounds);
                 }
             }
-            sun_shadow_projection view{};
-            if(!make_sun_shadow_projection(map.world,direction,view,model_bounds)) {
+            sun_shadow_projection world_view{};
+            if(!make_sun_shadow_projection(map.world,direction,world_view,model_bounds)) {
                 sun_failure("no world receivers or captured 3DO casters");
                 return;
             }
@@ -3943,11 +3946,15 @@ namespace jkgm {
                 (3.14159265358979323846f/360.0f));
             float const vertical=horizontal*float(get<y>(conf_scr_res))/
                 float(get<x>(conf_scr_res));
+            for(int cascade=0;cascade<2;++cascade) {
+            sun_shadow_projection view=world_view;
+            float const distance=cascade==0
+                ? sun_shadow_near_distance : sun_shadow_far_distance;
             if(!fit_sun_shadow_to_camera(view,camera.position,camera.right,
-                    camera.up,camera.forward,horizontal,vertical,128.0f) ||
+                    camera.up,camera.forward,horizontal,vertical,distance) ||
                !stabilize_sun_shadow_projection(view,map.resolution)) {
-                sun_failure("camera-local projection invalid");
-                return;
+                sun_failure("camera-local cascade projection invalid");
+                continue;
             }
 
             // Query the complete orthographic box. The spotlight helper's
@@ -4079,10 +4086,12 @@ namespace jkgm {
                 LOG_INFO("SUN shadow caster batches world=",
                          counts.size()+world_cutouts.size(),
                          " 3do=",models.size()," skybox_skipped=",
-                         skipped_skybox_instances," map=",map.resolution);
-            bool unchanged=sun_shadow_cached && sun_shadow_world==world &&
-                sun_shadow_revision==map.revision &&
-                caster_signature==sun_shadow_caster_signature;
+                         skipped_skybox_instances," cascade=",cascade,
+                         " map=",map.resolution);
+            bool unchanged=sun_shadow_cascade_cached[cascade] &&
+                sun_shadow_worlds[cascade]==world &&
+                sun_shadow_revisions[cascade]==map.revision &&
+                caster_signature==sun_shadow_caster_signatures[cascade];
             // Submitted models can alter the fitted projection even if the
             // cached caster set and their transforms have not changed.
             auto same_point=[](decal_vec3 const &a,decal_vec3 const &b) {
@@ -4090,15 +4099,17 @@ namespace jkgm {
                     if(std::fabs(a[i]-b[i])>1.0e-5f)return false;
                 return true;
             };
-            unchanged=unchanged && same_point(view.origin,sun_shadow_view.origin) &&
-                std::fabs(view.width-sun_shadow_view.width)<1.0e-5f &&
-                std::fabs(view.height-sun_shadow_view.height)<1.0e-5f &&
-                std::fabs(view.range-sun_shadow_view.range)<1.0e-5f;
+            unchanged=unchanged &&
+                same_point(view.origin,sun_shadow_views[cascade].origin) &&
+                std::fabs(view.width-sun_shadow_views[cascade].width)<1.0e-5f &&
+                std::fabs(view.height-sun_shadow_views[cascade].height)<1.0e-5f &&
+                std::fabs(view.range-sun_shadow_views[cascade].range)<1.0e-5f;
             for(int i=0;i<3 && unchanged;++i)
-                unchanged=std::fabs(direction[i]-sun_shadow_direction[i])<1.0e-5f;
-            if(unchanged) {sun_shadow_ready=true;return;}
+                unchanged=std::fabs(direction[i]-sun_shadow_directions[cascade][i])<1.0e-5f;
+            if(unchanged) {sun_shadow_cascade_ready[cascade]=true;continue;}
 
-            gl::bind_framebuffer(gl::framebuffer_bind_target::any,map.fbo);
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 cascade==0 ? map.fbo : map.far_fbo);
             gl::set_viewport(make_box(make_point(0,0),
                 make_size(int(map.resolution),int(map.resolution))));
             gl::disable(gl::capability::blend);
@@ -4171,10 +4182,16 @@ namespace jkgm {
             gl::set_face_cull_mode(gl::face_mode::back);
             gl::set_active_texture_unit(0);
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
-            sun_shadow_view=view;sun_shadow_direction=direction;
-            sun_shadow_world=world;sun_shadow_revision=map.revision;
-            sun_shadow_cached=true;sun_shadow_caster_signature=caster_signature;
-            sun_shadow_ready=true;
+            sun_shadow_views[cascade]=view;
+            sun_shadow_directions[cascade]=direction;
+            sun_shadow_worlds[cascade]=world;
+            sun_shadow_revisions[cascade]=map.revision;
+            sun_shadow_cascade_cached[cascade]=true;
+            sun_shadow_caster_signatures[cascade]=caster_signature;
+            sun_shadow_cascade_ready[cascade]=true;
+            } // cascade
+            sun_shadow_ready=sun_shadow_cascade_ready[0] &&
+                             sun_shadow_cascade_ready[1];
         }
 
         bool shadow_matches_light(spotlight_instance const &spot) const
@@ -4293,15 +4310,26 @@ namespace jkgm {
                     prog.set_sun_shadow(true,shadows,
                         make_point(direction[0],direction[1],direction[2]),
                         make_point(rgb[0],rgb[1],rgb[2],sun_power),
-                        make_point(sun_shadow_view.origin[0],sun_shadow_view.origin[1],sun_shadow_view.origin[2]),
-                        make_point(sun_shadow_view.right[0],sun_shadow_view.right[1],sun_shadow_view.right[2]),
-                        make_point(sun_shadow_view.up[0],sun_shadow_view.up[1],sun_shadow_view.up[2]),
-                        make_point(sun_shadow_view.forward[0],sun_shadow_view.forward[1],sun_shadow_view.forward[2]),
-                        make_point(sun_shadow_view.width,sun_shadow_view.height,sun_shadow_view.range));
+                        make_point(sun_shadow_views[0].origin[0],sun_shadow_views[0].origin[1],sun_shadow_views[0].origin[2]),
+                        make_point(sun_shadow_views[0].right[0],sun_shadow_views[0].right[1],sun_shadow_views[0].right[2]),
+                        make_point(sun_shadow_views[0].up[0],sun_shadow_views[0].up[1],sun_shadow_views[0].up[2]),
+                        make_point(sun_shadow_views[0].forward[0],sun_shadow_views[0].forward[1],sun_shadow_views[0].forward[2]),
+                        make_point(sun_shadow_views[0].width,sun_shadow_views[0].height,sun_shadow_views[0].range));
                     if(shadows) {
+                        auto const &far=sun_shadow_views[1];
+                        prog.set_sun_shadow_far(
+                            make_point(far.origin[0],far.origin[1],far.origin[2]),
+                            make_point(far.right[0],far.right[1],far.right[2]),
+                            make_point(far.up[0],far.up[1],far.up[2]),
+                            make_point(far.forward[0],far.forward[1],far.forward[2]),
+                            make_point(far.width,far.height,far.range),
+                            sun_shadow_near_distance);
                         gl::set_active_texture_unit(13);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          sun_shadow_target->depth);
+                        gl::set_active_texture_unit(14);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         sun_shadow_target->far_depth);
                     }
                 }
             }

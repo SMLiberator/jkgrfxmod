@@ -12,8 +12,8 @@
 
 namespace jkgm {
 struct sun_shadow_gpu {
-    gl::framebuffer fbo;
-    gl::texture depth;
+    gl::framebuffer fbo,far_fbo;
+    gl::texture depth,far_depth;
     gl::vertex_array vao;
     gl::buffer vertices,indices;
     decal_world_geometry world{};
@@ -57,6 +57,40 @@ struct sun_shadow_gpu {
                      gl::framebuffer_bind_target::any)==
                      gl::framebuffer_status::complete;
         if(!complete)LOG_WARNING("Sun shadow depth framebuffer incomplete");
+        gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                             gl::default_framebuffer);
+        // The second cascade shares the exact same world mesh/VAO.
+        // Only a second depth attachment is needed.
+        gl::bind_texture(gl::texture_bind_target::texture_2d,far_depth);
+        gl::tex_image_2d(gl::texture_bind_target::texture_2d,0,
+            gl::texture_internal_format::depth_component_16,
+            make_size(int(resolution),int(resolution)),
+            gl::texture_pixel_format::depth_component,
+            gl::texture_pixel_type::float32,
+            span<char const>(nullptr,0U));
+        gl::set_texture_max_level(gl::texture_bind_target::texture_2d,0);
+        gl::set_texture_min_filter(gl::texture_bind_target::texture_2d,
+                                   gl::min_filter::nearest);
+        gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d,
+                                   gl::mag_filter::nearest);
+        gl::set_texture_wrap_mode(gl::texture_bind_target::texture_2d,
+            gl::texture_direction::s,gl::texture_wrap_mode::clamp_to_border);
+        gl::set_texture_wrap_mode(gl::texture_bind_target::texture_2d,
+            gl::texture_direction::t,gl::texture_wrap_mode::clamp_to_border);
+        gl::set_texture_border_color(gl::texture_bind_target::texture_2d,
+                                     color(1.0f,1.0f,1.0f,1.0f));
+        gl::set_texture_compare_mode(gl::texture_bind_target::texture_2d,
+                                     gl::texture_compare_mode::none);
+        gl::bind_framebuffer(gl::framebuffer_bind_target::any,far_fbo);
+        gl::framebuffer_texture(gl::framebuffer_bind_target::any,
+                                gl::framebuffer_attachment::depth,far_depth,0);
+        gl::draw_buffers(gl::draw_buffer::none);
+        glReadBuffer(GL_NONE);
+        bool const far_complete=gl::check_framebuffer_status(
+            gl::framebuffer_bind_target::any)==
+            gl::framebuffer_status::complete;
+        if(!far_complete)LOG_WARNING("Far sun shadow framebuffer incomplete");
+        complete=complete && far_complete;
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                              gl::default_framebuffer);
         gl::bind_vertex_array(vao);
