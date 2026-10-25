@@ -572,6 +572,7 @@ namespace jkgm {
         bool spotlight_shadow_ready=false;
         bool spotlight_shadow_cached=false;
         uint32_t spotlight_shadow_world=0;
+        uint64_t spotlight_shadow_revision=0;
         std::set<std::pair<uint32_t, int>> runtime_missing_images;
         std::set<uint32_t> runtime_missing_sources;
         bool warned_reflections_disabled = false;
