@@ -85,6 +85,20 @@ namespace jkgm {
             gl::uniform_location_id camera_forward;
             gl::uniform_location_id camera_up;
             gl::uniform_location_id view_params;
+            // Forward-only translucent MAT spotlight receivers.
+            gl::uniform_location_id translucent_spotlight_count;
+            gl::uniform_location_id translucent_spotlight_resolution;
+            gl::uniform_location_id translucent_spotlight_camera_origin;
+            gl::uniform_location_id translucent_spotlight_camera_right;
+            gl::uniform_location_id translucent_spotlight_camera_forward;
+            gl::uniform_location_id translucent_spotlight_camera_up;
+            std::vector<gl::uniform_location_id> translucent_spotlight_images;
+            std::vector<gl::uniform_location_id> translucent_spotlight_origins;
+            std::vector<gl::uniform_location_id> translucent_spotlight_rights;
+            std::vector<gl::uniform_location_id> translucent_spotlight_ups;
+            std::vector<gl::uniform_location_id> translucent_spotlight_forwards;
+            std::vector<gl::uniform_location_id> translucent_spotlight_intensities;
+            std::vector<gl::uniform_location_id> translucent_spotlight_bounds;
 
         protected:
             game_pass_shader(std::string const &name,
@@ -140,6 +154,15 @@ namespace jkgm {
 
             // params = (enabled 0/1, start, end, opacity)
             void set_fog(point<4, float> params, color_rgb color);
+            void set_translucent_spotlight_count(int count);
+            void set_translucent_spotlight_camera(
+                point<4,float> origin,point<4,float> right,
+                point<4,float> forward,point<4,float> up,
+                point<2,float> resolution);
+            void set_translucent_spotlight(int slot,
+                point<4,float> origin,point<4,float> right,
+                point<4,float> up,point<4,float> forward,
+                point<2,float> strengths,point<4,float> bounds);
         };
 
         // Isolated first GPU 3DO mesh test: independent of old D3D vertex format.
@@ -168,6 +191,19 @@ namespace jkgm {
             gl::uniform_location_id camera_right_axis,camera_forward_axis,camera_up_axis;
             gl::uniform_location_id sun_direction,sun_color_intensity;
             gl::uniform_location_id normal_specular_scroll,normal_specular_scroll2,local_eye;
+            gl::uniform_location_id translucent_spotlight_count;
+            gl::uniform_location_id translucent_spotlight_resolution;
+            gl::uniform_location_id translucent_spotlight_camera_origin;
+            gl::uniform_location_id translucent_spotlight_camera_right;
+            gl::uniform_location_id translucent_spotlight_camera_forward;
+            gl::uniform_location_id translucent_spotlight_camera_up;
+            std::vector<gl::uniform_location_id> translucent_spotlight_images;
+            std::vector<gl::uniform_location_id> translucent_spotlight_origins;
+            std::vector<gl::uniform_location_id> translucent_spotlight_rights;
+            std::vector<gl::uniform_location_id> translucent_spotlight_ups;
+            std::vector<gl::uniform_location_id> translucent_spotlight_forwards;
+            std::vector<gl::uniform_location_id> translucent_spotlight_intensities;
+            std::vector<gl::uniform_location_id> translucent_spotlight_bounds;
             gl::uniform_location_id ambient_light,attenuation_min,num_lights,
                                     effective_light_mode;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity;
@@ -194,6 +230,15 @@ namespace jkgm {
             void set_environment(bool from,bool to,float weight,int mode);
             void set_albedo_transition(int source2,float weight);
             void set_scene_depth(int sampler);
+            void set_translucent_spotlight_count(int count);
+            void set_translucent_spotlight_camera(
+                point<4,float> origin,point<4,float> right,
+                point<4,float> forward,point<4,float> up,
+                point<2,float> resolution);
+            void set_translucent_spotlight(int slot,
+                point<4,float> origin,point<4,float> right,
+                point<4,float> up,point<4,float> forward,
+                point<2,float> strengths,point<4,float> bounds);
             void set_post_exempt(bool enabled);
             void set_decal_receiver_lighting(bool enabled,int light,int ao);
             void set_advanced_material(bool clipped,float fluid_thickness);
