@@ -208,23 +208,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_sun_shadows")) {
             j.at("enable_sun_shadows").get_to(rv->enable_sun_shadows);
         }
-        if(j.contains("enable_projected_sun_shadows")) {
-            j.at("enable_projected_sun_shadows").get_to(
-                rv->enable_projected_sun_shadows);
-        }
-        if(j.contains("projected_sun_mask_scale")) {
-            auto const &scale=j.at("projected_sun_mask_scale");
-            if(!scale.is_number()) {
-                throw std::runtime_error(
-                    "projected_sun_mask_scale must be a number between 0.25 and 1");
-            }
-            float value=scale.get<float>();
-            if(!std::isfinite(value) || value<0.25f || value>1.0f) {
-                throw std::runtime_error(
-                    "projected_sun_mask_scale must be between 0.25 and 1");
-            }
-            rv->projected_sun_mask_scale=value;
-        }
         if(j.contains("enable_sun_dynamic_shadows")) {
             j.at("enable_sun_dynamic_shadows").get_to(rv->enable_sun_dynamic_shadows);
         }

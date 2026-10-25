@@ -50,8 +50,6 @@ uniform vec3 sun_shadow_far_origin,sun_shadow_far_right;
 uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
 uniform int sun_shadow_far_soft_filter; // 1: nine PCF lookups; 0: single bilinear PCF
-uniform int projected_sun_active;
-uniform sampler2D projected_sun_mask;
 // 4x2 tiles, 256px each, 2px clear guard around the 252px viewport.
 uniform int sun_dynamic_count;
 uniform sampler2DShadow sun_dynamic_image;
@@ -310,14 +308,9 @@ void main()
             float incidence=max(dot(normal,sun_shadow_direction),0.0);
             if(incidence>0.0) {
                 vec3 world_position=reconstruct_scene_world(depth);
-                // Projected geometry is rasterized into a configurable
-                // fraction of display resolution. Bilinear upsampling
-                // smooths silhouette edges without adding PCF cost.
-                float visibility=projected_sun_active!=0
-                    ? 1.0-texture(projected_sun_mask,
-                        (vec2(tc)+0.5)/vec2(textureSize(depth_image,0))).r
-                    : min(sun_shadow_visibility(world_position,incidence),
-                          sun_dynamic_shadow_visibility(world_position,incidence));
+                float visibility=min(
+                    sun_shadow_visibility(world_position,incidence),
+                    sun_dynamic_shadow_visibility(world_position,incidence));
                 // JK's vertex colors already contain authored lighting. If
                 // only the newly added sun term is shadowed, a bright baked
                 // floor barely changes under a caster. Keep a generous

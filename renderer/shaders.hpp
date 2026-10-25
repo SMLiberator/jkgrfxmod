@@ -314,21 +314,6 @@ namespace jkgm {
                                   float factor,bool has_next,float progress);
         };
 
-        // Rasterizes CPU-clipped projected sun polygons into an R8 mask.
-        // The G-buffer's linear depth rejects polygons on hidden receivers.
-        class projected_sun_mask_shader : public opengl_shader {
-            gl::uniform_location_id camera_origin,camera_right,camera_up;
-            gl::uniform_location_id camera_forward,view_tangents,depth_image;
-            gl::uniform_location_id mask_resolution;
-        public:
-            explicit projected_sun_mask_shader(fs::path const &data_root);
-            void set_view(point<3,float> origin,point<3,float> right,
-                          point<3,float> up,point<3,float> forward,
-                          point<2,float> tangents);
-            void set_depth_sampler(int unit);
-            void set_mask_resolution(point<2,float> resolution);
-        };
-
         class game_post_opaque_composite_shader : public opengl_shader {
         private:
             gl::uniform_location_id color_image;
@@ -354,7 +339,6 @@ namespace jkgm {
             gl::uniform_location_id sun_shadow_far_forward,sun_shadow_far_limits;
             gl::uniform_location_id sun_shadow_split,sun_shadow_far_soft_filter;
             gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
-            gl::uniform_location_id projected_sun_active,projected_sun_mask;
             std::vector<gl::uniform_location_id> sun_dynamic_origin;
             std::vector<gl::uniform_location_id> sun_dynamic_right;
             std::vector<gl::uniform_location_id> sun_dynamic_up;
@@ -391,7 +375,6 @@ namespace jkgm {
                                     point<3,float> up,point<3,float> forward,
                                     point<3,float> limits,float split);
             void set_sun_shadow_far_soft_filter(bool soft);
-            void set_projected_sun_mask(bool enabled);
             void set_sun_dynamic_count(int count);
             void set_sun_dynamic(int slot,point<3,float> origin,
                                  point<3,float> right,point<3,float> up,

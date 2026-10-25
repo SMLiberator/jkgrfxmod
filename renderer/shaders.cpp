@@ -787,42 +787,6 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(
         make_point(has_next?1.0f:0.0f,progress));
 }
 
-jkgm::shaders::projected_sun_mask_shader::projected_sun_mask_shader(
-    fs::path const &data_root)
-    : opengl_shader("projected_sun_mask",
-        data_root/"shaders/projected_sun_mask.vert",
-        data_root/"shaders/projected_sun_mask.frag")
-    , camera_origin(gl::get_uniform_location(the_program,"camera_origin"))
-    , camera_right(gl::get_uniform_location(the_program,"camera_right"))
-    , camera_up(gl::get_uniform_location(the_program,"camera_up"))
-    , camera_forward(gl::get_uniform_location(the_program,"camera_forward"))
-    , view_tangents(gl::get_uniform_location(the_program,"view_tangents"))
-    , depth_image(gl::get_uniform_location(the_program,"depth_image"))
-    , mask_resolution(gl::get_uniform_location(the_program,"mask_resolution"))
-{}
-
-void jkgm::shaders::projected_sun_mask_shader::set_view(
-    point<3,float> origin,point<3,float> right,point<3,float> up,
-    point<3,float> forward,point<2,float> tangents)
-{
-    gl::set_uniform_vector(camera_origin,origin);
-    gl::set_uniform_vector(camera_right,right);
-    gl::set_uniform_vector(camera_up,up);
-    gl::set_uniform_vector(camera_forward,forward);
-    gl::set_uniform_vector(view_tangents,tangents);
-}
-
-void jkgm::shaders::projected_sun_mask_shader::set_depth_sampler(int unit)
-{
-    gl::set_uniform_integer(depth_image,unit);
-}
-
-void jkgm::shaders::projected_sun_mask_shader::set_mask_resolution(
-    point<2,float> resolution)
-{
-    gl::set_uniform_vector(mask_resolution,resolution);
-}
-
 jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_shader(
     fs::path const &data_root)
     : opengl_shader("game_post_opaque_composite",
@@ -864,8 +828,6 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
         the_program,"sun_shadow_far_soft_filter"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
-    , projected_sun_active(gl::get_uniform_location(the_program,"projected_sun_active"))
-    , projected_sun_mask(gl::get_uniform_location(the_program,"projected_sun_mask"))
 {
     for(int i=0;i<8;++i) {
         sun_dynamic_origin.push_back(gl::get_uniform_location(
@@ -990,13 +952,6 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_far_soft_f
     bool soft)
 {
     gl::set_uniform_integer(sun_shadow_far_soft_filter,soft?1:0);
-}
-
-void jkgm::shaders::game_post_opaque_composite_shader::set_projected_sun_mask(
-    bool enabled)
-{
-    gl::set_uniform_integer(projected_sun_active,enabled?1:0);
-    if(enabled)gl::set_uniform_integer(projected_sun_mask,12);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_count(

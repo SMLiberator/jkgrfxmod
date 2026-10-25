@@ -148,7 +148,6 @@ namespace jkgm {
         shaders::game_post_ssao_shader game_post_ssao_program;
         shaders::game_post_opaque_composite_shader game_post_opaque_composite_program;
         std::unique_ptr<shaders::spotlight_shadow_depth_shader> spotlight_shadow_depth_program;
-        std::unique_ptr<shaders::projected_sun_mask_shader> projected_sun_mask_program;
 
         shaders::game_transparency_pass_shader game_transparency_pass_program;
 

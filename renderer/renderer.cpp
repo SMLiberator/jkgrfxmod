@@ -18,7 +18,6 @@
 #include "spotlight_shadow_gpu.hpp"
 #include "sun_shadow_gpu.hpp"
 #include "sun_dynamic_shadow_gpu.hpp"
-#include "projected_sun_mask_gpu.hpp"
 #include "backbuffer_menu_surface.hpp"
 #include "backbuffer_surface.hpp"
 #include "base/file_block.hpp"
@@ -572,29 +571,6 @@ namespace jkgm {
         std::vector<translucent_spotlight_draw> translucent_spotlights_for_frame;
         std::unique_ptr<spotlight_shadow_gpu> spotlight_shadow_target;
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
-        std::unique_ptr<projected_sun_mask_gpu> projected_sun_target;
-        decal_world_geometry projected_sun_world{};
-        bool projected_sun_ready=false;
-        bool projected_sun_cache_valid=false;
-        uint64_t projected_sun_cache_signature=0;
-        uint64_t projected_sun_gpu_signature=0;
-        size_t projected_sun_cached_world_casters=0;
-        size_t projected_sun_cached_model_casters=0;
-        std::vector<projected_sun_mask_vertex> projected_sun_cached_vertices;
-        // Stationary 3DOs survive invalidation by independently moving actors.
-        struct projected_sun_model_cache_entry {
-            std::vector<projected_sun_triangle> triangles;
-            size_t casters=0,model_casters=0;
-            uint64_t last_used=0;
-        };
-        std::unordered_map<uint64_t,projected_sun_model_cache_entry>
-            projected_sun_model_cache;
-        uint64_t projected_sun_model_parent=0;
-        uint64_t projected_sun_model_generation=0;
-        bool projected_sun_world_cache_valid=false;
-        uint64_t projected_sun_world_cache_signature=0;
-        size_t projected_sun_world_cache_casters=0;
-        std::vector<projected_sun_triangle> projected_sun_world_cache;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
         // Track only owners with a successfully rasterized atlas tile.
@@ -900,7 +876,6 @@ namespace jkgm {
             release_spotlight_images();
             spotlight_shadow_target.reset();
             sun_shadow_target.reset();
-            projected_sun_target.reset();
             sun_dynamic_target.reset();
             // Context-owned GL queries must be deleted before the context
             // disappears. If the context is already gone, its objects go
@@ -937,15 +912,6 @@ namespace jkgm {
                 spotlight_shadow_cached=false;
                 spotlight_shadow_3do_signature=0;
                 sun_shadow_ready=false;
-                projected_sun_ready=false;
-                projected_sun_world.clear();
-                projected_sun_model_cache.clear();
-                projected_sun_model_parent=0;
-                projected_sun_world_cache_valid=false;
-                projected_sun_world_cache.clear();
-                projected_sun_cache_valid=false;
-                projected_sun_gpu_signature=0;
-                projected_sun_cached_vertices.clear();
                 sun_shadow_cascade_ready={{false,false}};
                 sun_shadow_cascade_cached={{false,false}};
                 sun_dynamic_views.clear();
@@ -4081,8 +4047,7 @@ namespace jkgm {
             sun_shadow_cascade_ready={{false,false}};
             sun_dynamic_views.clear();
             sun_dynamic_atlas_owners.clear();
-            if(the_config->enable_projected_sun_shadows ||
-               !the_config->enable_sun_shadows)return;
+            if(!the_config->enable_sun_shadows)return;
             auto sun_failure=[&](char const *reason) {
                 if(the_config->profile_renderer &&
                    gpu_3do_present_serial%120U==0U)
@@ -4453,7 +4418,6 @@ namespace jkgm {
             prog.set_sun_dynamic_count(0);
             prog.set_sun_shadow_far_soft_filter(
                 the_config->sun_shadow_far_soft_filter);
-            prog.set_projected_sun_mask(false);
             prog.set_spotlight_shadow(-1,0.0f,0.0f);
             prog.set_sun_shadow(false,false,make_point(0.0f,0.0f,1.0f),
                 make_point(0.0f,0.0f,0.0f,0.0f),
@@ -4563,15 +4527,7 @@ namespace jkgm {
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          sun_shadow_target->far_depth);
                     }
-                    if(the_config->enable_projected_sun_shadows &&
-                       projected_sun_ready && projected_sun_target) {
-                        gl::set_active_texture_unit(12);
-                        gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                         projected_sun_target->mask);
-                        prog.set_projected_sun_mask(true);
-                    }
-                    if(!the_config->enable_projected_sun_shadows &&
-                       the_config->enable_sun_dynamic_shadows &&
+                    if(the_config->enable_sun_dynamic_shadows &&
                        sun_dynamic_target && !sun_dynamic_views.empty()) {
                         gl::set_active_texture_unit(15);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
@@ -4618,379 +4574,6 @@ namespace jkgm {
                 gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
         }
 
-        // Geometric sunlight prototype: project native-world and submitted
-        // 3DO triangles onto opaque SithWorld polygons, then rasterize those
-        // clipped polygons into an idempotent R8 mask. The resolved scene-depth
-        // image rejects projections hidden by opaque geometry, and the usual
-        // sunlight composite applies the mask ONCE (no overlap darkening).
-        // Intentionally bounded until visibility/caching have been measured.
-        void draw_projected_sun_mask()
-        {
-            projected_sun_ready=false;
-            if(!the_config->enable_sun_shadows ||
-               !the_config->enable_projected_sun_shadows ||
-               !ogs->projected_sun_mask_program ||
-               !engine_material_debug::matches_tested_executable())return;
-            auto const projected_begin=profile_clock::now();
-            auto const sun=get_sun_settings();
-            float const strength=sun.intensity.value()[0];
-            if(!std::isfinite(strength) || strength<=0.0f)return;
-            auto const cam=read_active_render_camera();
-            if(!cam.valid)return;
-            uint32_t world=0;
-            if(!engine_material_debug::read_object(
-                engine_material_debug::current_world_global,world) ||
-               !decal_native_address_ok(world))return;
-            decal_native_read const safe_read=[](uintptr_t addr,void *dst,size_t n) {
-                if(n==0 || !engine_camera_detail::readable(addr,n))return false;
-                std::memcpy(dst,reinterpret_cast<void const *>(addr),n);
-                return true;
-            };
-            if(!projected_sun_world.matches(safe_read,world)) {
-                projected_sun_cache_valid=false;
-                projected_sun_gpu_signature=0;
-                projected_sun_cached_vertices.clear();
-                projected_sun_model_cache.clear();
-                projected_sun_model_parent=0;
-                projected_sun_world_cache_valid=false;
-                projected_sun_world_cache.clear();
-                if(!projected_sun_world.load(safe_read,world,250000U,true))
-                    return;
-            }
-            auto const dir=normalized_sun_direction(sun.direction.value());
-            decal_vec3 ray{{-dir[0],-dir[1],-dir[2]}};
-            constexpr float max_ray=24.0f;
-            constexpr size_t max_casters=900,max_triangles=16000;
-            // The receiver BVH is immutable world geometry. Track current
-            // GeoMode separately so hidden/setgeomode=0 faces cannot receive.
-            auto &geometry=projected_sun_world;
-            // Camera CELL, not camera position: a reusable source-volume
-            // query must remain invariant as the camera moves inside it.
-            // Expand the original +/-44-unit search to cover the entire cell.
-            constexpr float cell_size=8.0f;
-            decal_vec3 query_low{},query_high{};
-            std::array<int32_t,3> cell{};
-            for(int a=0;a<3;++a) {
-                cell[a]=int32_t(std::floor(cam.position[a]/cell_size));
-                float const start=float(cell[a])*cell_size;
-                query_low[a]=start-44.0f;
-                query_high[a]=start+cell_size+44.0f;
-            }
-            // Hash observable caster inputs without clipping any triangles:
-            // world GeoModes, sunlight, camera query cell, cached 3DO mesh
-            // identity and pose. A change invalidates the projected VBO.
-            // This avoids the CPU clipping and GPU buffer upload entirely
-            // for stationary scenes, rather than only memoizing the BVH.
-            uint64_t signature=14695981039346656037ULL;
-            auto mix_byte=[&](uint8_t byte) {
-                signature^=byte;signature*=1099511628211ULL;
-            };
-            auto mix_data=[&](void const *data,size_t bytes) {
-                auto const *p=static_cast<uint8_t const *>(data);
-                for(size_t i=0;i<bytes;++i)mix_byte(p[i]);
-            };
-            mix_data(&world,sizeof(world));
-            mix_data(ray.data(),3*sizeof(float));
-            mix_data(cell.data(),cell.size()*sizeof(int32_t));
-            mix_data(&runtime_controls.revision,sizeof(runtime_controls.revision));
-            // Most levels keep the entire SithSurface array in one readable
-            // native heap allocation. Validate that range ONCE, then read
-            // individual GeoModes without thousands of VirtualQuery calls.
-            // Non-contiguous allocations retain the original safe fallback.
-            size_t const surface_bytes=
-                size_t(geometry.surface_count)*size_t(0x5cU);
-            bool const contiguous=surface_bytes>0U &&
-                engine_camera_detail::readable(
-                    geometry.surfaces_addr,surface_bytes);
-            auto const *native_surfaces=contiguous
-                ?reinterpret_cast<uint8_t const *>(geometry.surfaces_addr)
-                :nullptr;
-            std::vector<uint8_t> receiver_visible(geometry.receivers.size(),0);
-            std::vector<uint32_t> receiver_modes(geometry.receivers.size(),0U);
-            for(size_t i=0;i<geometry.receivers.size();++i) {
-                auto const &s=geometry.receivers[i];
-                uint32_t mode=0;
-                uintptr_t const offset=
-                    uintptr_t(s.surface_index)*0x5cU+0x1cU;
-                if(native_surfaces)
-                    std::memcpy(&mode,native_surfaces+offset,sizeof(mode));
-                else if(!engine_material_debug::read_object(
-                    geometry.surfaces_addr+offset,mode))
-                    mode=0;
-                receiver_modes[i]=mode;
-                mix_data(&mode,sizeof(mode));
-                receiver_visible[i]=uint8_t(
-                    sun_shadow_world_face_visible(mode,s.normal,dir));
-            }
-            uint64_t const model_parent=signature;
-            for(auto const &inst:frame_gpu_3do_instances) {
-                if(!inst.geometry || !inst.casts_sun_shadows ||
-                   inst.is_projected_decal)continue;
-                mix_data(&inst.id,sizeof(inst.id));
-                uintptr_t const mesh_id=
-                    reinterpret_cast<uintptr_t>(inst.geometry.get());
-                mix_data(&mesh_id,sizeof(mesh_id));
-                mix_data(inst.transform.data(),
-                         inst.transform.size()*sizeof(float));
-                for(auto const &group:inst.geometry->groups) {
-                    mix_data(&group.material,sizeof(group.material));
-                    mix_data(&group.cel,sizeof(group.cel));
-                }
-            }
-            bool const cache_hit=projected_sun_cache_valid &&
-                                 projected_sun_cache_signature==signature;
-            bool world_cache_hit=false;
-            size_t cached_models=0;
-            std::vector<projected_sun_mask_vertex> points;
-            size_t world_casters=projected_sun_cached_world_casters;
-            size_t model_casters=projected_sun_cached_model_casters;
-            if(cache_hit) {
-                // This is an array/vector copy of the already projected mesh,
-                // not the O(casters * receivers) CPU clipping work.
-                // The GL upload is also skipped below on a matching hash.
-                if(projected_sun_cached_vertices.empty())return;
-            }
-            if(!cache_hit) {
-            std::vector<projected_sun_triangle> output;
-            output.reserve(4096);
-            std::vector<uint32_t> receivers;
-            size_t casters=0;
-            world_casters=0;
-            model_casters=0;
-            auto emit=[&](projected_sun_triangle const &source) {
-                if(casters>=max_casters || output.size()>=max_triangles)return;
-                ++casters;
-                auto const box=projected_sun_swept_bounds(source,ray,max_ray);
-                receivers.clear();
-                geometry.acceleration.query(geometry.receivers,
-                    box.low,box.high,receivers);
-                for(uint32_t index:receivers) {
-                    if(index>=geometry.receivers.size() ||
-                       !receiver_visible[index])continue;
-                    auto const &s=geometry.receivers[index];
-                    if(s.surface_index==source.source_surface)continue;
-                    // Any world polygon uses the same native winding fan
-                    // as static-world shadow depth and projected decals.
-                    for(size_t j=1;j+1<s.polygon.size();++j) {
-                        std::array<decal_vec3,3> tri{{
-                            s.polygon[0],s.polygon[j],s.polygon[j+1]}};
-                        project_sun_triangle_on_receiver(source,tri,s.normal,
-                            ray,max_ray,output,max_triangles);
-                        if(output.size()>=max_triangles)return;
-                    }
-                }
-            };
-            // World architecture is independent of actor animation: reuse
-            // its clipped polygons on otherwise-static world/camera/sun data.
-            if(projected_sun_world_cache_valid &&
-               projected_sun_world_cache_signature==model_parent) {
-                world_cache_hit=true;
-                output=projected_sun_world_cache;
-                casters=projected_sun_world_cache_casters;
-                world_casters=casters;
-            }
-            else {
-            // Stable camera-cell broadphase, already included in the cache
-            // signature above (no per-frame clip rebuild while moving within
-            // the same cell).
-            std::vector<uint32_t> nearby;
-            geometry.acceleration.query(geometry.receivers,query_low,query_high,
-                                        nearby);
-            for(uint32_t index:nearby) {
-                if(casters>=max_casters/2U || output.size()>=max_triangles)break;
-                auto const &s=geometry.receivers[index];
-                uint32_t const mode=receiver_modes[index];
-                // Skip masked/solid-adjoin geometry in this first cut:
-                // silhouettes must not fill the holes of grates or glass.
-                if(mode<2U || s.solid_adjoin || s.polygon.size()<3U)continue;
-                gpu_3do_group g{};g.material=s.material;g.cel=s.cel;
-                auto tex=resolve_gpu_3do_material(g);
-                if(tex.albedo_source==0 || tex.masked || tex.alpha ||
-                   tex.dithered || tex.special || tex.emissive_only ||
-                   tex.opacity<0.999f)continue;
-                for(size_t j=1;j+1<s.polygon.size();++j) {
-                    if(casters>=max_casters/2U)break;
-                    emit({{{s.polygon[0],s.polygon[j],
-                            s.polygon[j+1]}},s.surface_index});
-                    ++world_casters;
-                }
-            }
-            projected_sun_world_cache=output;
-            projected_sun_world_cache_casters=casters;
-            projected_sun_world_cache_signature=model_parent;
-            projected_sun_world_cache_valid=true;
-            }
-            // Don't invalidate stationary 3DO projections whenever a
-            // completely different character moves.
-            if(projected_sun_model_parent!=model_parent) {
-                projected_sun_model_parent=model_parent;
-                projected_sun_model_cache.clear();
-            }
-            ++projected_sun_model_generation;
-            if(projected_sun_model_generation%32U==0U) {
-                for(auto it=projected_sun_model_cache.begin();
-                    it!=projected_sun_model_cache.end();) {
-                    if(projected_sun_model_generation-it->second.last_used>16U)
-                        it=projected_sun_model_cache.erase(it);
-                    else ++it;
-                }
-            }
-            // Submitted 3DO models can cast onto world geometry, but this
-            // initial test intentionally does not create 3DO receivers.
-            for(auto const &instance:frame_gpu_3do_instances) {
-                if(casters>=max_casters || output.size()>=max_triangles)break;
-                if(!instance.geometry || !instance.casts_sun_shadows ||
-                   instance.is_projected_decal)continue;
-                uint64_t key=model_parent;
-                auto hash_bytes=[&](void const *src,size_t length) {
-                    auto const *bytes=static_cast<uint8_t const *>(src);
-                    for(size_t k=0;k<length;++k) {
-                        key^=bytes[k];key*=1099511628211ULL;
-                    }
-                };
-                hash_bytes(&instance.id,sizeof(instance.id));
-                uintptr_t const ptr=
-                    reinterpret_cast<uintptr_t>(instance.geometry.get());
-                hash_bytes(&ptr,sizeof(ptr));
-                hash_bytes(instance.transform.data(),
-                           instance.transform.size()*sizeof(float));
-                for(auto const &group:instance.geometry->groups) {
-                    hash_bytes(&group.material,sizeof(group.material));
-                    hash_bytes(&group.cel,sizeof(group.cel));
-                }
-                auto found=projected_sun_model_cache.find(key);
-                if(found!=projected_sun_model_cache.end() &&
-                   casters+found->second.casters<=max_casters &&
-                   output.size()+found->second.triangles.size()<=max_triangles) {
-                    casters+=found->second.casters;
-                    model_casters+=found->second.model_casters;
-                    output.insert(output.end(),found->second.triangles.begin(),
-                                  found->second.triangles.end());
-                    found->second.last_used=projected_sun_model_generation;
-                    ++cached_models;
-                    continue;
-                }
-                size_t const caster_start=casters;
-                size_t const model_start=model_casters;
-                size_t const output_start=output.size();
-                auto const &m=instance.transform;
-                for(auto const &g:instance.geometry->groups) {
-                    if(casters>=max_casters || output.size()>=max_triangles)break;
-                    if(g.count<3U || (g.face_type&2U))continue;
-                    auto const tex=resolve_gpu_3do_material(g);
-                    if(tex.albedo_source==0 || tex.masked || tex.alpha ||
-                       tex.dithered || tex.special || tex.emissive_only ||
-                       tex.post_exempt || tex.opacity<0.999f)continue;
-                    auto const &geom=*instance.geometry;
-                    auto transformed=[&](uint32_t vertex) {
-                        auto const &v=geom.vertices[vertex];
-                        return decal_vec3{{m[0]*v.x+m[3]*v.y+m[6]*v.z+m[9],
-                                           m[1]*v.x+m[4]*v.y+m[7]*v.z+m[10],
-                                           m[2]*v.x+m[5]*v.y+m[8]*v.z+m[11]}};
-                    };
-                    for(uint32_t j=0;j+2U<g.count && casters<max_casters;
-                        j+=3U) {
-                        if(size_t(g.offset)+j+2U>=geom.indices.size())break;
-                        uint32_t const a=geom.indices[g.offset+j];
-                        uint32_t const b=geom.indices[g.offset+j+1U];
-                        uint32_t const c=geom.indices[g.offset+j+2U];
-                        if(a>=geom.vertices.size() || b>=geom.vertices.size() ||
-                           c>=geom.vertices.size())continue;
-                        projected_sun_triangle source{{
-                            {transformed(a),transformed(b),transformed(c)}},~0U};
-                        if(!decal_finite(source.points[0]) ||
-                           !decal_finite(source.points[1]) ||
-                           !decal_finite(source.points[2]))continue;
-                        emit(source);
-                        ++model_casters;
-                        if(output.size()>=max_triangles)break;
-                    }
-                }
-                // Never cache truncated per-model projections.
-                if(casters<max_casters && output.size()<max_triangles &&
-                   projected_sun_model_cache.size()<512U) {
-                    projected_sun_model_cache_entry entry{};
-                    entry.casters=casters-caster_start;
-                    entry.model_casters=model_casters-model_start;
-                    entry.last_used=projected_sun_model_generation;
-                    entry.triangles.assign(output.begin()+output_start,
-                                           output.end());
-                    projected_sun_model_cache[key]=std::move(entry);
-                }
-            }
-            points.reserve(output.size()*3U);
-            for(auto const &tri:output)for(auto const &p:tri.points)
-                points.push_back({p,tri.receiver_normal});
-            projected_sun_cached_world_casters=world_casters;
-            projected_sun_cached_model_casters=model_casters;
-            projected_sun_cached_vertices=std::move(points);
-            projected_sun_cache_signature=signature;
-            projected_sun_cache_valid=true;
-            } // regenerate geometry only when the cache signature changes
-            if(projected_sun_cached_vertices.empty())return;
-            // A screen-space mask, not a shadow depth map: half-resolution
-            // reduces rasterized pixels to 1/4; quarter reduces to 1/16.
-            // The CPU-clipped world-space polygons retain full precision.
-            float const scale=the_config->projected_sun_mask_scale;
-            auto const mask_res=make_size(
-                std::max(1,int(std::lround(float(get<x>(conf_scr_res))*scale))),
-                std::max(1,int(std::lround(float(get<y>(conf_scr_res))*scale))));
-            if(!projected_sun_target)
-                projected_sun_target=
-                    std::make_unique<projected_sun_mask_gpu>(mask_res);
-            auto &mask=*projected_sun_target;
-            if(!mask.complete)return;
-            gl::bind_framebuffer(gl::framebuffer_bind_target::any,mask.fbo);
-            gl::set_viewport(make_box(make_point(0,0),mask_res));
-            gl::clear_buffer_color(0,color::zero());
-            gl::disable(gl::capability::depth_test);
-            gl::disable(gl::capability::cull_face);
-            gl::disable(gl::capability::blend);
-            gl::set_depth_mask(false);
-            auto &prog=*ogs->projected_sun_mask_program;
-            prog.use_program();
-            prog.set_view(make_point(cam.position[0],cam.position[1],cam.position[2]),
-                make_point(cam.right[0],cam.right[1],cam.right[2]),
-                make_point(cam.up[0],cam.up[1],cam.up[2]),
-                make_point(cam.forward[0],cam.forward[1],cam.forward[2]),
-                make_point(std::tan(cam.fov*0.008726646259971648f),
-                    std::tan(cam.fov*0.008726646259971648f)*
-                    float(get<y>(conf_scr_res))/float(get<x>(conf_scr_res))));
-            prog.set_depth_sampler(0);
-            prog.set_mask_resolution(make_point(
-                float(get<x>(mask_res)),float(get<y>(mask_res))));
-            gl::set_active_texture_unit(0);
-            gl::bind_texture(gl::texture_bind_target::texture_2d,
-                             frame_screen->get_resolved_depth_texture());
-            gl::bind_vertex_array(mask.vao);
-            gl::bind_buffer(gl::buffer_bind_target::array,mask.vbo);
-            if(projected_sun_gpu_signature!=signature) {
-                gl::buffer_data(gl::buffer_bind_target::array,
-                    make_span(projected_sun_cached_vertices).as_const_bytes(),
-                    gl::buffer_usage::static_draw);
-                projected_sun_gpu_signature=signature;
-            }
-            glDrawArrays(GL_TRIANGLES,0,
-                static_cast<GLsizei>(projected_sun_cached_vertices.size()));
-            gl::set_depth_mask(true);
-            gl::bind_vertex_array(gl::vertex_array_view(0U));
-            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                                 gl::default_framebuffer);
-            gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
-            projected_sun_ready=true;
-            if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
-                LOG_INFO("SUN projected geometry world_casters=",world_casters,
-                         " 3do_casters=",model_casters,
-                         " projected_triangles=",projected_sun_cached_vertices.size()/3U,
-                         " mask=",get<x>(mask_res),"x",get<y>(mask_res),
-                         " cache_hit=",cache_hit?1:0,
-                         " static_cache_hit=",world_cache_hit?1:0,
-                         " 3do_cache_hits=",cached_models,
-                         " bulk_geomodes=",contiguous?1:0,
-                         " submit_cpu_us=",elapsed_profile_us(
-                             projected_begin,profile_clock::now()));
-        }
-
         void draw_game_gbuffer_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
         {
             frame_screen->begin_opaque_pass();
@@ -5000,7 +4583,6 @@ namespace jkgm {
             frame_ao->update_ssao_texture(ogs.get(),
                                           frame_screen->get_resolved_normal_texture(),
                                           frame_screen->get_resolved_depth_texture());
-            draw_projected_sun_mask();
 
             frame_screen->begin_compose_opaque_pass();
             draw_game_opaque_composite();

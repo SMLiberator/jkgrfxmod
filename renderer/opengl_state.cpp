@@ -421,12 +421,9 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     LOG_DEBUG("Loading OpenGL assets");
     // Avoid even compiling shadow shaders on ordinary (disabled) installs.
     if((the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
-       (the_config->enable_sun_shadows && !the_config->enable_projected_sun_shadows))
+       the_config->enable_sun_shadows)
         spotlight_shadow_depth_program =
             std::make_unique<shaders::spotlight_shadow_depth_shader>(data_root);
-    if(the_config->enable_sun_shadows && the_config->enable_projected_sun_shadows)
-        projected_sun_mask_program =
-            std::make_unique<shaders::projected_sun_mask_shader>(data_root);
     // Projected sprite decals share the GPU 3DO shader, even when
     // native 3DO model caching is disabled. A decal can be successfully
     // clipped and queued without ever drawing if this shader is absent.
