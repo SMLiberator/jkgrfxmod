@@ -11,6 +11,12 @@
 #include <cstddef>
 
 namespace jkgm {
+struct projected_sun_mask_vertex {
+    decal_vec3 world;
+    decal_vec3 plane_normal;
+};
+static_assert(sizeof(projected_sun_mask_vertex)==sizeof(float)*6,
+              "Projected sun vertex must contain two packed vec3s");
 struct projected_sun_mask_gpu {
     gl::framebuffer fbo;
     gl::texture mask;
@@ -43,7 +49,12 @@ struct projected_sun_mask_gpu {
         gl::bind_buffer(gl::buffer_bind_target::array,vbo);
         gl::enable_vertex_attrib_array(0);
         gl::vertex_attrib_pointer(0,3,gl::vertex_element_type::float32,
-                                  false,sizeof(decal_vec3),0);
+                                  false,sizeof(projected_sun_mask_vertex),
+                                  offsetof(projected_sun_mask_vertex,world));
+        gl::enable_vertex_attrib_array(1);
+        gl::vertex_attrib_pointer(1,3,gl::vertex_element_type::float32,
+                                  false,sizeof(projected_sun_mask_vertex),
+                                  offsetof(projected_sun_mask_vertex,plane_normal));
         gl::bind_vertex_array(gl::vertex_array_view(0U));
     }
 };

@@ -4741,10 +4741,10 @@ namespace jkgm {
                     std::make_unique<projected_sun_mask_gpu>(conf_scr_res);
             auto &mask=*projected_sun_target;
             if(!mask.complete)return;
-            std::vector<decal_vec3> points;
+            std::vector<projected_sun_mask_vertex> points;
             points.reserve(output.size()*3U);
             for(auto const &tri:output)for(auto const &p:tri.points)
-                points.push_back(p);
+                points.push_back({p,tri.receiver_normal});
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,mask.fbo);
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
             gl::clear_buffer_color(0,color::zero());

@@ -14,6 +14,7 @@ namespace jkgm {
 struct projected_sun_triangle {
     std::array<decal_vec3,3> points{};
     uint32_t source_surface=~0U; // native surface index; ~0 for a 3DO
+    decal_vec3 receiver_normal{}; // actual triangle plane, for mask verification
 };
 inline decal_vec3 projected_sun_cross(decal_vec3 a,decal_vec3 b)
 {
@@ -61,38 +62,47 @@ inline void project_sun_triangle_on_receiver(
     if(out.size()>=max_output || !decal_finite(receiver_normal) ||
        !decal_finite(ray) || !std::isfinite(max_distance) ||
        max_distance<=0.0f)return;
-    float const denom=decal_dot(receiver_normal,ray);
-    if(std::fabs(denom)<0.06f)return; // grazing ray cannot be projected stably
     for(auto const &p:caster.points)if(!decal_finite(p))return;
     for(auto const &p:receiver)if(!decal_finite(p))return;
+    // JK surface normals are polygon-wide. Nonplanar quads can contain
+    // individual rasterized triangles whose actual planes differ from that
+    // shared normal. Project onto the RECEIVER TRIANGLE plane instead.
+    auto const face=projected_sun_cross(
+        decal_sub(receiver[1],receiver[0]),
+        decal_sub(receiver[2],receiver[0]));
+    float const len2=decal_dot(face,face);
+    float const facing=decal_dot(face,receiver_normal);
+    if(!(len2>1.e-12f) || std::fabs(facing)<1.e-9f)return;
+    float const scale=(facing>0.0f?1.0f:-1.0f)/std::sqrt(len2);
+    decal_vec3 plane_normal{{face[0]*scale,face[1]*scale,face[2]*scale}};
+    float const denom=decal_dot(plane_normal,ray);
+    if(std::fabs(denom)<0.06f)return; // grazing ray cannot be projected stably
     auto time=[&](decal_vec3 const &p) {
-        return decal_dot(decal_sub(receiver[0],p),receiver_normal)/denom;
+        return decal_dot(decal_sub(receiver[0],p),plane_normal)/denom;
     };
     std::vector<decal_vec3> poly(caster.points.begin(),caster.points.end());
     projected_sun_clip(poly,[&](decal_vec3 const &p){return time(p)-0.005f;});
     projected_sun_clip(poly,[&](decal_vec3 const &p){return max_distance-time(p);});
     if(poly.size()<3U)return;
     for(auto &p:poly)p=projected_sun_add(p,ray,time(p));
-    // The receiver can have winding opposite its cached plane normal.
-    auto face=projected_sun_cross(decal_sub(receiver[1],receiver[0]),
-                                  decal_sub(receiver[2],receiver[0]));
-    float const orientation=decal_dot(face,receiver_normal);
-    if(std::fabs(orientation)<1e-9f)return;
-    float const side=orientation>0.0f ? 1.0f:-1.0f;
+    // Receiver winding can oppose its polygon normal, but the clipping
+    // half-spaces must consistently use the triangle's actual plane.
+    float const side=facing>0.0f ? 1.0f:-1.0f;
     for(int k=0;k<3;++k) {
         decal_vec3 const &a=receiver[k],&b=receiver[(k+1)%3];
         auto const edge=decal_sub(b,a);
         projected_sun_clip(poly,[&](decal_vec3 const &p){
             return side*decal_dot(
-                projected_sun_cross(edge,decal_sub(p,a)),receiver_normal);
+                projected_sun_cross(edge,decal_sub(p,a)),plane_normal);
         });
         if(poly.size()<3U)return;
     }
     for(size_t k=1;k+1<poly.size() && out.size()<max_output;++k) {
         auto const area=projected_sun_cross(
             decal_sub(poly[k],poly[0]),decal_sub(poly[k+1],poly[0]));
-        if(std::fabs(decal_dot(area,receiver_normal))<1e-7f)continue;
-        out.push_back({{{poly[0],poly[k],poly[k+1]}},caster.source_surface});
+        if(std::fabs(decal_dot(area,plane_normal))<1e-7f)continue;
+        out.push_back({{{poly[0],poly[k],poly[k+1]}},
+                       caster.source_surface,plane_normal});
     }
 }
 // Conservative world-space swept AABB used for the cached native receiver BVH.
