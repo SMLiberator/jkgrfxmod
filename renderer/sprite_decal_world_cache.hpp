@@ -17,7 +17,11 @@
 namespace jkgm {
     struct decal_world_surface_geometry {
         uint32_t surface_index=0;
-        bool solid_adjoin=false; // exclude from untextured shadow depth
+        bool solid_adjoin=false; // may be a masked grate/glass surface
+        uintptr_t material=0;
+        int32_t cel=-1;
+        bool has_shadow_uv=false;
+        std::vector<std::array<float,2>> shadow_uv;
         decal_vec3 normal{};
         decal_vec3 bounds_min{},bounds_max{};
         std::vector<decal_vec3> polygon;
@@ -50,6 +54,7 @@ namespace jkgm {
             clear();
             if(!read || !decal_native_address_ok(current))return false;
             uint32_t nverts=0,verts=0,nfaces=0,faces=0;
+            uint32_t ntexverts=0,texverts=0;
             if(!read_decal_u32(read,current+0x88,nverts) ||
                !read_decal_u32(read,current+0x8c,verts) ||
                !read_decal_u32(read,current+0xa8,nfaces) ||
@@ -59,6 +64,14 @@ namespace jkgm {
                !decal_native_address_ok(verts) ||
                !decal_native_address_ok(faces))
                 return false;
+            // These optional arrays provide world-space MAT UVs for
+            // alpha-tested shadows; decal geometry itself needs neither.
+            // Verified SithWorld offsets: +a0 tex vertex count, +a4 pointer.
+            if(!read_decal_u32(read,current+0xa0,ntexverts) ||
+               !read_decal_u32(read,current+0xa4,texverts) ||
+               ntexverts>1000000 || !decal_native_address_ok(texverts)) {
+                ntexverts=texverts=0;
+            }
             world=current;
             vertices_addr=verts;
             surfaces_addr=faces;
@@ -102,6 +115,10 @@ namespace jkgm {
                 decal_world_surface_geometry surface{};
                 surface.surface_index=i;
                 surface.solid_adjoin=(adjoin!=0U);
+                surface.material=mat;
+                uint32_t native_cel=0;
+                if(read_decal_u32(read,addr+0x38,native_cel))
+                    surface.cel=static_cast<int32_t>(native_cel);
                 surface.normal=normal;
                 surface.polygon.reserve(count);
                 surface.bounds_min={{std::numeric_limits<float>::max(),
@@ -131,6 +148,38 @@ namespace jkgm {
                 if(!ok) {
                     ++invalid_surfaces;
                     continue;
+                }
+                // rdFace UV index pointer +0x30, UV offset +0x3c.
+                // All UV reads are bounded and optional. Unknown UVs
+                // disable alpha shadows for this surface instead of
+                // creating an opaque shadow rectangle.
+                uint32_t uv_indices=0;
+                std::array<float,2> uv_offset{};
+                if(texverts && read_decal_u32(read,addr+0x30,uv_indices) &&
+                   decal_native_address_ok(uv_indices) &&
+                   read( addr+0x3c,uv_offset.data(),sizeof(float)*2) &&
+                   std::isfinite(uv_offset[0]) &&
+                   std::isfinite(uv_offset[1])) {
+                    surface.shadow_uv.reserve(count);
+                    bool valid_uv=true;
+                    for(uint32_t j=0;j<count;++j) {
+                        uint32_t idx=0;
+                        std::array<float,2> uv{};
+                        if(!read_decal_u32(read,uintptr_t(uv_indices)+j*4U,idx) ||
+                           idx>=ntexverts ||
+                           !read(uintptr_t(texverts)+uintptr_t(idx)*8U,
+                                 uv.data(),sizeof(float)*2)) {
+                            valid_uv=false;break;
+                        }
+                        uv[0]+=uv_offset[0];
+                        uv[1]+=uv_offset[1];
+                        if(!std::isfinite(uv[0])||!std::isfinite(uv[1])){
+                            valid_uv=false;break;
+                        }
+                        surface.shadow_uv.push_back(uv);
+                    }
+                    surface.has_shadow_uv=valid_uv;
+                    if(!valid_uv)surface.shadow_uv.clear();
                 }
                 total_polygon_vertices+=count;
                 receivers.emplace_back(std::move(surface));
