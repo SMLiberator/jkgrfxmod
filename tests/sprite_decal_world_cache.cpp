@@ -36,6 +36,15 @@ int main(){
     u32(world+0x8c,uint32_t(vertices));
     u32(world+0xa8,5);
     u32(world+0xac,uint32_t(surfaces));
+    uintptr_t const uv_pool=base+0x2100;
+    uintptr_t const uv_indices=base+0x2200;
+    u32(world+0xa0,4);
+    u32(world+0xa4,uint32_t(uv_pool));
+    for(uint32_t n=0;n<4;++n) {
+        std::array<float,2> uv{{float((n==1||n==2)?64:0),
+                                 float((n>=2)?32:0)}};
+        put(uv_pool+n*8,uv.data(),8);
+    }
     for(int j=0;j<8;++j){
         int const corner=j%4;
         float const x=j<4?(corner<2?-0.25f:0.0f):
@@ -50,9 +59,14 @@ int main(){
         u32(addr+0x28,4);
         u32(addr+0x2c,uint32_t(indices+i*16));
         u32(addr+0x34,uint32_t(base+0x1800));
+        u32(addr+0x30,uint32_t(uv_indices+i*16));
+        float const offset[2]={float(i)*4.0f,2.0f};
+        put(addr+0x3c,offset,8);
         vec(addr+0x48,{{0,-1,0}});
-        for(uint32_t j=0;j<4;++j)
+        for(uint32_t j=0;j<4;++j) {
             u32(indices+i*16+j*4,(i%2)*4+j);
+            u32(uv_indices+i*16+j*4,j);
+        }
     }
     // Passable portal 0x7 must be excluded; solid grate 0x5 included.
     u32(surfaces+2*0x5c+0x0c,uint32_t(base+0x1900));
@@ -64,6 +78,13 @@ int main(){
     assert(index.load(reader,world));
     assert(index.matches(reader,world));
     assert(index.surface_count==5 && index.receivers.size()==3);
+    assert(index.receivers[0].has_shadow_uv);
+    assert(index.receivers[0].shadow_uv.size()==4);
+    assert(index.receivers[0].material==base+0x1800);
+    assert(std::fabs(index.receivers[0].shadow_uv[1][0]-64.0f)<0.0001f);
+    assert(std::fabs(index.receivers[0].shadow_uv[0][1]-2.0f)<0.0001f);
+    assert(index.receivers[2].solid_adjoin);
+
     assert(index.acceleration.node_count()>0);
     decal_projector p{};
     const int after_load=reads;
