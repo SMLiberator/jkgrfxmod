@@ -283,6 +283,11 @@ namespace jkgm {
             gl::uniform_location_id shadow_forward,shadow_limits;
             gl::uniform_location_id shadow_model_right,shadow_model_forward;
             gl::uniform_location_id shadow_model_up,shadow_model_origin;
+            gl::uniform_location_id shadow_use_alpha,shadow_alpha_texture;
+            gl::uniform_location_id shadow_alpha_texture_next;
+            gl::uniform_location_id shadow_alpha_uv_scale,shadow_alpha_uv_scroll;
+            gl::uniform_location_id shadow_alpha_transition,shadow_alpha_cutoff;
+            gl::uniform_location_id shadow_alpha_factor;
         public:
             explicit spotlight_shadow_depth_shader(fs::path const &data_root);
             void set_light(point<3,float> origin,point<3,float> right,
@@ -290,6 +295,9 @@ namespace jkgm {
                            point<4,float> limits);
             void set_model(point<3,float> right,point<3,float> forward,
                            point<3,float> up,point<3,float> origin);
+            void set_shadow_alpha(bool enabled,point<2,float> uv_scale,
+                                  point<2,float> uv_scroll,float cutoff,
+                                  float factor,bool has_next,float progress);
         };
 
         class game_post_opaque_composite_shader : public opengl_shader {
