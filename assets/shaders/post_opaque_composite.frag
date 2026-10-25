@@ -143,7 +143,7 @@ void project_spotlights(float depth,ivec2 pixel,
                    (1.0-smoothstep(0.35,1.0,t));
         float facing=max(dot(normal,normalize(-relative)),0.0);
         // Mild floor illumination even with near-horizontal beams.
-        float incidence=0.25+0.75*facing;
+        float incidence=0.05+0.95*facing;
         float shadow=1.0;
         if(i==spotlight_shadow_slot)
             shadow=spotlight_shadow_visibility(uv,distance);
