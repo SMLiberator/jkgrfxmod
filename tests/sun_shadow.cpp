@@ -19,6 +19,13 @@ int main()
     owners.clear();
     assert(sun_shadow_caster_in_static_cascades(
         0x1111222233334444ULL,owners));
+    // Static architectural Things are reusable, but movers, unknown owners,
+    // disabled caching and missing FBOs always use the live 3DO pass.
+    assert(sun_shadow_cache_stationary_model(1234,false,true,true));
+    assert(!sun_shadow_cache_stationary_model(1234,true,true,true));
+    assert(!sun_shadow_cache_stationary_model(0,false,true,true));
+    assert(!sun_shadow_cache_stationary_model(1234,false,false,true));
+    assert(!sun_shadow_cache_stationary_model(1234,false,true,false));
     // Exact transformed bounds for translated, rotated, and mirrored models.
     auto const xform=sun_shadow_transformed_aabb(
         {{-2.0f,-1.0f,-3.0f}},{{4.0f,5.0f,7.0f}},

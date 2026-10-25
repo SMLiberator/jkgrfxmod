@@ -21,6 +21,18 @@ inline bool sun_shadow_caster_in_static_cascades(
     return owner==0 || atlas_owners.find(owner)==atlas_owners.end();
 }
 
+// A stable, verified SithThing may join the cached sunlight layer. Actors
+// in physics/path motion and unverified objects stay in the working cascade.
+// A supposedly stationary Thing changing pose will invalidate that layer
+// through its transform/mesh/material signature.
+inline bool sun_shadow_cache_stationary_model(
+    uint64_t shadow_owner,bool dynamic_motion,
+    bool enabled,bool target_complete)
+{
+    return enabled && target_complete && shadow_owner!=0 &&
+           !dynamic_motion;
+}
+
 // Exact world-space AABB of an affine-transformed 3DO mesh group, using its
 // center and half-extents. Computes nine absolute products instead of
 // transforming eight corners per group (and doing it once per cascade).

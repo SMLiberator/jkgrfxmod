@@ -4276,9 +4276,9 @@ namespace jkgm {
                 // Verified non-moving SithThings may join the cached static
                 // layer. An unknown owner stays dynamic (conservative), and
                 // even a path/physics Thing parked in place remains dynamic.
-                bool const stable=the_config->enable_sun_static_cache &&
-                    map.static_complete && instance.shadow_owner!=0 &&
-                    !instance.dynamic_sun_caster;
+                bool const stable=sun_shadow_cache_stationary_model(
+                    instance.shadow_owner,instance.dynamic_sun_caster,
+                    the_config->enable_sun_static_cache,map.static_complete);
                 (stable?static_models:models).push_back(
                     {&instance,&group,tex,cutout});
                 auto hash_model=[&](auto &&integer,auto &&floating) {
