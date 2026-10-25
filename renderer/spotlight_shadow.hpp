@@ -132,6 +132,14 @@ inline bool build_spotlight_shadow_static_mesh(
     for(auto const &surface:world.receivers) {
         uint32_t const base=static_cast<uint32_t>(out.vertices.size());
         uint32_t const offset=static_cast<uint32_t>(out.indices.size());
+        // Impassable adjoins can carry alpha-tested grate/glass MATs.
+        // Their material alpha isn't available in this untextured depth
+        // pass, so exclude the WHOLE adjoin rather than cast an opaque
+        // rectangle. This is conservative until texture-aware shadows.
+        if(surface.solid_adjoin) {
+            out.surfaces.push_back({offset,0U});
+            continue;
+        }
         for(auto const &v:surface.polygon)out.vertices.push_back(v);
         // JK level polygons are expected to be planar and convex. The
         // original decal receiver cache uses the same fan assumption.
