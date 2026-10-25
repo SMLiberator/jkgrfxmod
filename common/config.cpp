@@ -208,6 +208,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_sun_shadows")) {
             j.at("enable_sun_shadows").get_to(rv->enable_sun_shadows);
         }
+        if(j.contains("enable_projected_sun_shadows")) {
+            j.at("enable_projected_sun_shadows").get_to(
+                rv->enable_projected_sun_shadows);
+        }
         if(j.contains("enable_sun_dynamic_shadows")) {
             j.at("enable_sun_dynamic_shadows").get_to(rv->enable_sun_dynamic_shadows);
         }

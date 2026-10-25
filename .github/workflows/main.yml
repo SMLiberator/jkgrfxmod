@@ -74,6 +74,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\spotlight_shadow.cpp /Fe:spotlight_shadow_test.exe
         spotlight_shadow_test.exe
+    - name: CPU projected sunlight triangle clipping regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sun_projected.cpp /Fe:sun_projected_test.exe
+        sun_projected_test.exe
     - name: Directional sunlight and empty-world shadow regression tests
       shell: cmd
       run: |
