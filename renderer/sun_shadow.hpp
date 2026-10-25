@@ -20,6 +20,32 @@ inline bool sun_shadow_caster_in_static_cascades(
     return owner==0 || atlas_owners.find(owner)==atlas_owners.end();
 }
 
+// Exact world-space AABB of an affine-transformed 3DO mesh group, using its
+// center and half-extents. Computes nine absolute products instead of
+// transforming eight corners per group (and doing it once per cascade).
+inline decal_volume_aabb sun_shadow_transformed_aabb(
+    std::array<float,3> const &minimum,
+    std::array<float,3> const &maximum,
+    std::array<float,12> const &transform)
+{
+    decal_volume_aabb bounds{};
+    float center[3],extent[3];
+    for(int i=0;i<3;++i) {
+        center[i]=0.5f*(minimum[i]+maximum[i]);
+        extent[i]=0.5f*(maximum[i]-minimum[i]);
+    }
+    for(int a=0;a<3;++a) {
+        float const position=transform[a]*center[0]+
+            transform[a+3]*center[1]+transform[a+6]*center[2]+transform[a+9];
+        float const radius=std::fabs(transform[a])*extent[0]+
+            std::fabs(transform[a+3])*extent[1]+
+            std::fabs(transform[a+6])*extent[2];
+        bounds.low[a]=position-radius;
+        bounds.high[a]=position+radius;
+    }
+    return bounds;
+}
+
 // Two nested camera-depth regions. The far cascade overlaps the near
 // cascade, so near receivers can fall back if a light-space edge is crossed.
 constexpr float sun_shadow_near_distance=16.0f;

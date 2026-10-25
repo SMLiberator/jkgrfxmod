@@ -4081,11 +4081,19 @@ namespace jkgm {
                 sun_failure("SithWorld shadow snapshot failed");
                 return;
             }
+            // Avoid three full sets of transformed group bounds (projection,
+            // near cascade, far cascade), especially in crowded 3DO levels.
             // A level may have only a tiny native-world shell while its
             // playable architecture is made from 3DOs. Include submitted
             // model groups before fitting the sun map; otherwise both the
             // receiver lighting and model shadows fall outside the map.
             std::vector<decal_volume_aabb> model_bounds;
+            struct sun_model_candidate {
+                gpu_3do_instance const *instance;
+                gpu_3do_group const *group;
+                decal_volume_aabb bounds;
+            };
+            std::vector<sun_model_candidate> model_candidates;
             size_t skipped_skybox_instances=0;
             for(auto const &instance:frame_gpu_3do_instances) {
                 if(!instance.casts_sun_shadows) {
@@ -4096,25 +4104,12 @@ namespace jkgm {
                 auto const &m=instance.transform;
                 for(auto const &group:instance.geometry->groups) {
                     if(group.count<3U || (group.face_type&0x2U))continue;
-                    decal_volume_aabb bounds{};
-                    for(int axis=0;axis<3;++axis) {
-                        bounds.low[axis]=std::numeric_limits<float>::max();
-                        bounds.high[axis]=-bounds.low[axis];
-                    }
-                    for(int c=0;c<8;++c) {
-                        float const x=(c&1)?group.bounds_max[0]:group.bounds_min[0];
-                        float const y=(c&2)?group.bounds_max[1]:group.bounds_min[1];
-                        float const z=(c&4)?group.bounds_max[2]:group.bounds_min[2];
-                        decal_vec3 const p{{m[0]*x+m[3]*y+m[6]*z+m[9],
-                                             m[1]*x+m[4]*y+m[7]*z+m[10],
-                                             m[2]*x+m[5]*y+m[8]*z+m[11]}};
-                        for(int axis=0;axis<3;++axis) {
-                            bounds.low[axis]=std::min(bounds.low[axis],p[axis]);
-                            bounds.high[axis]=std::max(bounds.high[axis],p[axis]);
-                        }
-                    }
-                    if(decal_finite(bounds.low) && decal_finite(bounds.high))
+                    auto const bounds=sun_shadow_transformed_aabb(
+                        group.bounds_min,group.bounds_max,m);
+                    if(decal_finite(bounds.low) && decal_finite(bounds.high)) {
                         model_bounds.push_back(bounds);
+                        model_candidates.push_back({&instance,&group,bounds});
+                    }
                 }
             }
             sun_shadow_projection world_view{};
@@ -4230,46 +4225,43 @@ namespace jkgm {
                                    gpu_3do_group const *group;
                                    gpu_3do_texture texture;bool cutout;};
             std::vector<sun_model_draw> models;
-            for(auto const &instance:frame_gpu_3do_instances) {
-                if(!instance.casts_sun_shadows ||
-                   !instance.geometry || instance.is_projected_decal ||
-                   !sun_shadow_caster_in_static_cascades(
+            // The expensive group-box transforms were computed once before
+            // fitting the sun projection; both cascades use those exact AABBs.
+            // Share one per-frame material lookup across world and 3DOs,
+            // rather than re-reading the native MAT for each cascade.
+            auto cached_material=[&](gpu_3do_group const &group)
+                ->gpu_3do_texture const & {
+                uint64_t const key=(uint64_t(group.material)<<32)|
+                    uint32_t(group.cel);
+                auto found=gpu_frame_material_cache.find(key);
+                if(found==gpu_frame_material_cache.end())
+                    found=gpu_frame_material_cache.emplace(
+                        key,resolve_gpu_3do_material(group)).first;
+                return found->second;
+            };
+            for(auto const &prepared:model_candidates) {
+                auto const &instance=*prepared.instance;
+                auto const &group=*prepared.group;
+                if(!sun_shadow_caster_in_static_cascades(
                        instance.shadow_owner,sun_dynamic_atlas_owners))continue;
-                auto const &m=instance.transform;
-                for(auto const &group:instance.geometry->groups) {
-                    if(group.count<3U)continue;
-                    decal_vec3 low{{std::numeric_limits<float>::max(),
-                                    std::numeric_limits<float>::max(),
-                                    std::numeric_limits<float>::max()}};
-                    decal_vec3 high{{-low[0],-low[1],-low[2]}};
-                    for(int c=0;c<8;++c) {
-                        float x=(c&1)?group.bounds_max[0]:group.bounds_min[0];
-                        float y=(c&2)?group.bounds_max[1]:group.bounds_min[1];
-                        float z=(c&4)?group.bounds_max[2]:group.bounds_min[2];
-                        decal_vec3 p{{m[0]*x+m[3]*y+m[6]*z+m[9],
-                                      m[1]*x+m[4]*y+m[7]*z+m[10],
-                                      m[2]*x+m[5]*y+m[8]*z+m[11]}};
-                        for(int a=0;a<3;++a) {low[a]=std::min(low[a],p[a]);
-                                               high[a]=std::max(high[a],p[a]);}
-                    }
-                    if(!decal_aabbs_overlap(low,high,bounds.low,bounds.high))continue;
-                    auto const tex=resolve_gpu_3do_material(group);
-                    bool const cutout=tex.masked||tex.alpha||tex.dithered;
-                    if(tex.albedo_source==0 || tex.special || tex.emissive_only ||
-                       tex.post_exempt || tex.opacity<0.999f ||
-                       (cutout && tex.albedo_source!=1) ||
-                       (group.face_type&0x2U))continue;
-                    models.push_back({&instance,&group,tex,cutout});
-                    hash_u32(uint32_t(instance.id));hash_u32(uint32_t(instance.id>>32));
-                    hash_u32(group.offset);hash_u32(group.count);
-                    if(cutout) {
-                        hash_float(tex.alpha_cutoff);hash_float(tex.opacity);
-                        hash_float(get<x>(tex.albedo_scroll));
-                        hash_float(get<y>(tex.albedo_scroll));
-                        hash_float(tex.albedo_transition);
-                    }
-                    for(float v:m)hash_float(v);
+                if(!decal_aabbs_overlap(
+                       prepared.bounds.low,prepared.bounds.high,
+                       bounds.low,bounds.high))continue;
+                auto const &tex=cached_material(group);
+                bool const cutout=tex.masked||tex.alpha||tex.dithered;
+                if(tex.albedo_source==0 || tex.special || tex.emissive_only ||
+                   tex.post_exempt || tex.opacity<0.999f ||
+                   (cutout && tex.albedo_source!=1))continue;
+                models.push_back({&instance,&group,tex,cutout});
+                hash_u32(uint32_t(instance.id));hash_u32(uint32_t(instance.id>>32));
+                hash_u32(group.offset);hash_u32(group.count);
+                if(cutout) {
+                    hash_float(tex.alpha_cutoff);hash_float(tex.opacity);
+                    hash_float(get<x>(tex.albedo_scroll));
+                    hash_float(get<y>(tex.albedo_scroll));
+                    hash_float(tex.albedo_transition);
                 }
+                for(float v:instance.transform)hash_float(v);
             }
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U)
