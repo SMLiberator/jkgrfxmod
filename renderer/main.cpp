@@ -49,6 +49,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <limits>
 #include <chrono>
 #include <unordered_map>
 #include <unordered_set>
@@ -1174,7 +1175,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
             gpu_log_fallback(m,"unsupported_dynamic_lighting_or_light_count");
             return false;
         }
-        }
+    }
     pending_gpu_instances.emplace_back(std::move(inst));
     if(the_config->profile_renderer) ++gpu_native_stats.queued;
     return !shadow_only;
