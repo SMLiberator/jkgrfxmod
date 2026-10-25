@@ -3783,6 +3783,9 @@ namespace jkgm {
                                   static_cast<ptrdiff_t>(
                                       group.offset*sizeof(uint32_t)));
             }
+            // The alpha caster pass can bind units 11/12. Never leak
+            // its active texture state into the ordinary game renderer.
+            gl::set_active_texture_unit(0);
             // The regular opaque pass binds its own FBO next, but it does
             // not restore the viewport; undo the small shadow viewport here.
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
