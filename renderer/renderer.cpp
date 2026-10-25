@@ -575,6 +575,12 @@ namespace jkgm {
         std::unique_ptr<projected_sun_mask_gpu> projected_sun_target;
         decal_world_geometry projected_sun_world{};
         bool projected_sun_ready=false;
+        bool projected_sun_cache_valid=false;
+        uint64_t projected_sun_cache_signature=0;
+        uint64_t projected_sun_gpu_signature=0;
+        size_t projected_sun_cached_world_casters=0;
+        size_t projected_sun_cached_model_casters=0;
+        std::vector<projected_sun_mask_vertex> projected_sun_cached_vertices;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
         // Track only owners with a successfully rasterized atlas tile.
@@ -919,6 +925,9 @@ namespace jkgm {
                 sun_shadow_ready=false;
                 projected_sun_ready=false;
                 projected_sun_world.clear();
+                projected_sun_cache_valid=false;
+                projected_sun_gpu_signature=0;
+                projected_sun_cached_vertices.clear();
                 sun_shadow_cascade_ready={{false,false}};
                 sun_shadow_cascade_cached={{false,false}};
                 sun_dynamic_views.clear();
@@ -4617,6 +4626,9 @@ namespace jkgm {
                 return true;
             };
             if(!projected_sun_world.matches(safe_read,world)) {
+                projected_sun_cache_valid=false;
+                projected_sun_gpu_signature=0;
+                projected_sun_cached_vertices.clear();
                 if(!projected_sun_world.load(safe_read,world,250000U,true))
                     return;
             }
@@ -4627,16 +4639,73 @@ namespace jkgm {
             // The receiver BVH is immutable world geometry. Track current
             // GeoMode separately so hidden/setgeomode=0 faces cannot receive.
             auto &geometry=projected_sun_world;
+            // Camera CELL, not camera position: a reusable source-volume
+            // query must remain invariant as the camera moves inside it.
+            // Expand the original +/-44-unit search to cover the entire cell.
+            constexpr float cell_size=8.0f;
+            decal_vec3 query_low{},query_high{};
+            std::array<int32_t,3> cell{};
+            for(int a=0;a<3;++a) {
+                cell[a]=int32_t(std::floor(cam.position[a]/cell_size));
+                float const start=float(cell[a])*cell_size;
+                query_low[a]=start-44.0f;
+                query_high[a]=start+cell_size+44.0f;
+            }
+            // Hash observable caster inputs without clipping any triangles:
+            // world GeoModes, sunlight, camera query cell, cached 3DO mesh
+            // identity and pose. A change invalidates the projected VBO.
+            // This avoids the CPU clipping and GPU buffer upload entirely
+            // for stationary scenes, rather than only memoizing the BVH.
+            uint64_t signature=14695981039346656037ULL;
+            auto mix_byte=[&](uint8_t byte) {
+                signature^=byte;signature*=1099511628211ULL;
+            };
+            auto mix_data=[&](void const *data,size_t bytes) {
+                auto const *p=static_cast<uint8_t const *>(data);
+                for(size_t i=0;i<bytes;++i)mix_byte(p[i]);
+            };
+            mix_data(&world,sizeof(world));
+            mix_data(ray.data(),3*sizeof(float));
+            mix_data(cell.data(),cell.size()*sizeof(int32_t));
+            mix_data(&runtime_controls.revision,sizeof(runtime_controls.revision));
             std::vector<uint8_t> receiver_visible(geometry.receivers.size(),0);
             for(size_t i=0;i<geometry.receivers.size();++i) {
                 auto const &s=geometry.receivers[i];
                 uint32_t mode=0;
                 uintptr_t const addr=geometry.surfaces_addr+
                     uintptr_t(s.surface_index)*0x5cU+0x1cU;
-                engine_material_debug::read_object(addr,mode);
+                if(!engine_material_debug::read_object(addr,mode))
+                    mode=0;
+                mix_data(&mode,sizeof(mode));
                 receiver_visible[i]=uint8_t(
                     sun_shadow_world_face_visible(mode,s.normal,dir));
             }
+            for(auto const &inst:frame_gpu_3do_instances) {
+                if(!inst.geometry || !inst.casts_sun_shadows ||
+                   inst.is_projected_decal)continue;
+                mix_data(&inst.id,sizeof(inst.id));
+                uintptr_t const mesh_id=
+                    reinterpret_cast<uintptr_t>(inst.geometry.get());
+                mix_data(&mesh_id,sizeof(mesh_id));
+                mix_data(inst.transform.data(),
+                         inst.transform.size()*sizeof(float));
+                for(auto const &group:inst.geometry->groups) {
+                    mix_data(&group.material,sizeof(group.material));
+                    mix_data(&group.cel,sizeof(group.cel));
+                }
+            }
+            bool const cache_hit=projected_sun_cache_valid &&
+                                 projected_sun_cache_signature==signature;
+            std::vector<projected_sun_mask_vertex> points;
+            size_t world_casters=projected_sun_cached_world_casters;
+            size_t model_casters=projected_sun_cached_model_casters;
+            if(cache_hit) {
+                // This is an array/vector copy of the already projected mesh,
+                // not the O(casters * receivers) CPU clipping work.
+                // The GL upload is also skipped below on a matching hash.
+                if(projected_sun_cached_vertices.empty())return;
+            }
+            if(!cache_hit) {
             std::vector<projected_sun_triangle> output;
             output.reserve(4096);
             std::vector<uint32_t> receivers;
@@ -4664,12 +4733,9 @@ namespace jkgm {
                     }
                 }
             };
-            // Camera-local broadphase, not a traversal of every level face.
-            decal_vec3 query_low{},query_high{};
-            for(int a=0;a<3;++a) {
-                query_low[a]=cam.position[a]-44.0f;
-                query_high[a]=cam.position[a]+44.0f;
-            }
+            // Stable camera-cell broadphase, already included in the cache
+            // signature above (no per-frame clip rebuild while moving within
+            // the same cell).
             std::vector<uint32_t> nearby;
             geometry.acceleration.query(geometry.receivers,query_low,query_high,
                                         nearby);
@@ -4735,16 +4801,21 @@ namespace jkgm {
                     }
                 }
             }
-            if(output.empty())return;
+            points.reserve(output.size()*3U);
+            for(auto const &tri:output)for(auto const &p:tri.points)
+                points.push_back({p,tri.receiver_normal});
+            projected_sun_cached_world_casters=world_casters;
+            projected_sun_cached_model_casters=model_casters;
+            projected_sun_cached_vertices=std::move(points);
+            projected_sun_cache_signature=signature;
+            projected_sun_cache_valid=true;
+            } // regenerate geometry only when the cache signature changes
+            if(projected_sun_cached_vertices.empty())return;
             if(!projected_sun_target)
                 projected_sun_target=
                     std::make_unique<projected_sun_mask_gpu>(conf_scr_res);
             auto &mask=*projected_sun_target;
             if(!mask.complete)return;
-            std::vector<projected_sun_mask_vertex> points;
-            points.reserve(output.size()*3U);
-            for(auto const &tri:output)for(auto const &p:tri.points)
-                points.push_back({p,tri.receiver_normal});
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,mask.fbo);
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
             gl::clear_buffer_color(0,color::zero());
@@ -4767,9 +4838,14 @@ namespace jkgm {
                              frame_screen->get_resolved_depth_texture());
             gl::bind_vertex_array(mask.vao);
             gl::bind_buffer(gl::buffer_bind_target::array,mask.vbo);
-            gl::buffer_data(gl::buffer_bind_target::array,
-                make_span(points).as_const_bytes(),gl::buffer_usage::stream_draw);
-            glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(points.size()));
+            if(projected_sun_gpu_signature!=signature) {
+                gl::buffer_data(gl::buffer_bind_target::array,
+                    make_span(projected_sun_cached_vertices).as_const_bytes(),
+                    gl::buffer_usage::static_draw);
+                projected_sun_gpu_signature=signature;
+            }
+            glDrawArrays(GL_TRIANGLES,0,
+                static_cast<GLsizei>(projected_sun_cached_vertices.size()));
             gl::set_depth_mask(true);
             gl::bind_vertex_array(gl::vertex_array_view(0U));
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,
@@ -4778,8 +4854,8 @@ namespace jkgm {
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN projected geometry world_casters=",world_casters,
                          " 3do_casters=",model_casters,
-                         " projected_triangles=",output.size(),
-                         " exhausted=",output.size()>=max_triangles?1:0);
+                         " projected_triangles=",projected_sun_cached_vertices.size()/3U,
+                         " cache_hit=",cache_hit?1:0);
         }
 
         void draw_game_gbuffer_pass(triangle_buffer_models *trimdl, bool posterize_lighting)

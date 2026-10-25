@@ -24,18 +24,19 @@ void main()
     // from the separately rasterized shadow polygon at grazing angles.
     float plane_depth=dot(receiver_plane_point-camera_origin,n)/incidence;
     if(plane_depth<=0.0 || (isnan(plane_depth) || isinf(plane_depth)))discard;
-    // JK's opaque G-buffer depth is R16F, not a full-precision hardware
-    // depth buffer. Compare perpendicular distance to the actual receiver
-    // plane, accounting for quantization of scene_depth and subpixel error.
-    // The plane test remains stable as the viewing angle becomes shallow.
-    float plane_error=abs(scene_depth-plane_depth)*abs(incidence);
-    float plane_epsilon=0.006+0.0008*scene_depth*abs(incidence);
-    // Also reject different foreground/background receivers whose planes
-    // happen to be close in space near a grazing ray.
-    float distance_epsilon=0.02+0.002*scene_depth+
-        min(0.5*fwidth(plane_depth),0.06+0.001*scene_depth);
-    if(plane_error>plane_epsilon ||
-       abs(scene_depth-plane_depth)>distance_epsilon)discard;
+    // This is a visibility / occlusion test, NOT a test for whether the
+    // projected polygon and the receiver depth are exactly equal. Both
+    // geometric surfaces lie on the same plane, but their interpolation and
+    // R16F depth quantization differ at distance and grazing angles.
+    // Requiring equality punched unstable holes (apparent z-fighting).
+    //
+    // Only reject when the opaque pixel is clearly CLOSER than the projected
+    // receiver: a real wall/step in front of the receiver must occlude it.
+    // R16F stores 10 fractional mantissa bits. Compute the exact half-ULP
+    // tolerance in world distance to avoid the quantized-depth stripes.
+    float half_ulp=exp2(floor(log2(raw))-11.0)/32.0;
+    float guard=half_ulp+0.004+0.0005*scene_depth;
+    if(scene_depth+guard<plane_depth)discard;
     // Overlapping triangles all write one, not cumulative darkness.
     out_mask=vec4(1.0,0.0,0.0,1.0);
 }
