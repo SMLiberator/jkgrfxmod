@@ -15,6 +15,7 @@
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
 #include "spotlight.hpp"
+#include "spotlight_shadow_gpu.hpp"
 #include "backbuffer_menu_surface.hpp"
 #include "backbuffer_surface.hpp"
 #include "base/file_block.hpp"
@@ -565,6 +566,10 @@ namespace jkgm {
             spotlight_screen_rect coverage;
         };
         std::vector<translucent_spotlight_draw> translucent_spotlights_for_frame;
+        std::unique_ptr<spotlight_shadow_gpu> spotlight_shadow_target;
+        spotlight_instance spotlight_shadow_light{};
+        spotlight_shadow_projection spotlight_shadow_view{};
+        bool spotlight_shadow_ready=false;
         std::set<std::pair<uint32_t, int>> runtime_missing_images;
         std::set<uint32_t> runtime_missing_sources;
         bool warned_reflections_disabled = false;
@@ -849,6 +854,7 @@ namespace jkgm {
         ~renderer_impl() override
         {
             release_spotlight_images();
+            spotlight_shadow_target.reset();
             // Context-owned GL queries must be deleted before the context
             // disappears. If the context is already gone, its objects go
             // away with it; do not issue GL calls on an invalid context.
@@ -878,6 +884,7 @@ namespace jkgm {
                     last_execute_end = {};
                     frame_had_execute = false;
                 }
+                spotlight_shadow_ready=false;
                 // Pausing/menu transitions may evict and reload D3D textures.
                 // Refresh the native MAT resolver on the next game frame,
                 // instead of letting the previous one-second timer cause a flash.
@@ -3407,6 +3414,109 @@ namespace jkgm {
             }
         }
 
+
+        // One intentionally low-resolution static-world shadow map. Reuses
+        // SithWorld's off-camera polygons and a level-wide indexed VBO instead
+        // of the native JK camera-submitted 2D triangle stream.
+        //
+        // The first experiment intentionally excludes moving 3DO casters and
+        // alpha-tested cutouts; neither can be handled correctly with this
+        // static, material-independent depth-only draw alone.
+        void draw_spotlight_shadow_map()
+        {
+            spotlight_shadow_ready=false;
+            if(!the_config->enable_spotlights ||
+               !the_config->enable_spotlight_shadows ||
+               !ogs->spotlight_shadow_depth_program ||
+               !engine_material_debug::matches_tested_executable())
+                return;
+            auto const camera=read_active_render_camera();
+            if(!camera.valid)return;
+            spotlight_projection_camera coverage_camera{};
+            coverage_camera.position=camera.position;
+            coverage_camera.right=camera.right;
+            coverage_camera.forward=camera.forward;
+            coverage_camera.up=camera.up;
+            coverage_camera.tan_half_horizontal=
+                std::tan(camera.fov*0.008726646259971648f);
+            coverage_camera.tan_half_vertical=
+                coverage_camera.tan_half_horizontal*
+                float(get<y>(conf_scr_res))/float(get<x>(conf_scr_res));
+            coverage_camera.width=get<x>(conf_scr_res);
+            coverage_camera.height=get<y>(conf_scr_res);
+            spotlight_instance chosen{};
+            spotlight_shadow_projection view{};
+            bool selected=false;
+            for(auto const &spot:collect_spotlights_for_frame()) {
+                if(spot.light_intensity<=0.0f &&
+                   spot.add_intensity<=0.0f)continue;
+                if(!spotlight_screen_coverage(spot,coverage_camera).visible)
+                    continue;
+                if(!make_spotlight_shadow_projection(spot,view))continue;
+                if(!spotlight_mat_texture(spot.material))continue;
+                chosen=spot;
+                selected=true;
+                break; // strict one-shadowed-spotlight budget
+            }
+            if(!selected)return;
+
+            uint32_t world=0;
+            if(!engine_material_debug::read_object(
+                   engine_material_debug::current_world_global,world) ||
+               !decal_native_address_ok(world))return;
+            decal_native_read const safe_read=[](uintptr_t ptr,void *dst,size_t n) {
+                if(n==0 || !engine_camera_detail::readable(ptr,n))return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(ptr),n);
+                return true;
+            };
+            if(!spotlight_shadow_target)
+                spotlight_shadow_target=std::make_unique<spotlight_shadow_gpu>();
+            auto &map=*spotlight_shadow_target;
+            if(!map.update_world(safe_read,world))return;
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,map.fbo);
+            gl::set_viewport(make_box(make_point(0,0),
+                make_size(int(map.resolution),int(map.resolution))));
+            gl::disable(gl::capability::blend);
+            gl::disable(gl::capability::cull_face);
+            gl::enable(gl::capability::depth_test);
+            gl::set_depth_mask(true);
+            gl::set_depth_function(gl::comparison_function::less);
+            gl::clear_buffer_depth(1.0f);
+            auto &prog=*ogs->spotlight_shadow_depth_program;
+            prog.use_program();
+            auto vec=[](std::array<float,3> const &a) {
+                return make_point(a[0],a[1],a[2]);
+            };
+            prog.set_light(vec(view.origin),vec(view.right),
+                           vec(view.up),vec(view.forward),
+                           make_point(view.width,view.height,view.range,
+                                      view.near_distance));
+            map.draw_world(view);
+            // The regular opaque pass binds its own FBO next, but it does
+            // not restore the viewport; undo the small shadow viewport here.
+            gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+            spotlight_shadow_light=chosen;
+            spotlight_shadow_view=view;
+            spotlight_shadow_ready=true;
+        }
+
+        bool shadow_matches_light(spotlight_instance const &spot) const
+        {
+            if(!spotlight_shadow_ready ||
+               spot.material!=spotlight_shadow_light.material)return false;
+            auto same=[](std::array<float,3> const &a,
+                         std::array<float,3> const &b) {
+                for(int i=0;i<3;++i)
+                    if(std::fabs(a[i]-b[i])>0.00001f)return false;
+                return true;
+            };
+            return same(spot.origin,spotlight_shadow_light.origin) &&
+                   same(spot.right,spotlight_shadow_light.right) &&
+                   same(spot.up,spotlight_shadow_light.up) &&
+                   same(spot.forward,spotlight_shadow_light.forward) &&
+                   std::fabs(spot.range-spotlight_shadow_light.range)<0.00001f;
+        }
+
         void draw_game_opaque_composite()
         {
             gl::disable(gl::capability::depth_test);
@@ -3418,6 +3528,7 @@ namespace jkgm {
             ogs->game_post_opaque_composite_program.set_depth_sampler(3);
             auto &prog=ogs->game_post_opaque_composite_program;
             prog.set_spotlight_count(0);
+            prog.set_spotlight_shadow(-1,0.0f,0.0f);
             // Reconstruct receiving surfaces for node-attached MAT spotlights.
             auto const cam=read_active_render_camera();
             if(cam.valid && the_config->enable_spotlights) {
@@ -3455,6 +3566,14 @@ namespace jkgm {
                         if(!rect.visible)continue;
                         auto image=spotlight_mat_texture(spot.material);
                         if(!image)continue;
+                        if(shadow_matches_light(spot) && spotlight_shadow_target) {
+                            prog.set_spotlight_shadow(
+                                active,spotlight_shadow_view.near_distance,
+                                spotlight_shadow_view.range);
+                            gl::set_active_texture_unit(10);
+                            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                             spotlight_shadow_target->depth);
+                        }
                         prog.set_spotlight(
                             active,
                             point_axis(spot.origin,0.0f),
@@ -4086,6 +4205,7 @@ namespace jkgm {
             {
                 profile_scope timer(profiling,
                     profile_frame.timings[profile_idx(profile_stage::opaque_pass)]);
+                draw_spotlight_shadow_map();
                 draw_game_gbuffer_pass(trimdl, posterize_lighting);
             }
             {
