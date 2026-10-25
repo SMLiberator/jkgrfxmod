@@ -74,20 +74,24 @@ int main()
     query_spotlight_shadow_static_mesh(world,mesh,p,candidates);
     assert(candidates.size()==1);
     assert(candidates[0].first_index==6);
-    // A solid (non-passable) adjoin can be a masked grate or glass:
-    // without sampling MAT alpha, never emit its solid rectangle into
-    // the static caster pass. Ordinary wall surfaces still cast.
+    // The cached shadow vertices preserve the native UVs, allowing
+    // the depth shader to discard the holes in alpha-tested adjoins.
     world.receivers[0].solid_adjoin=true;
+    world.receivers[0].has_shadow_uv=true;
+    world.receivers[0].shadow_uv={{{0,0}},{{32,0}},{{32,64}},{{0,64}}};
     spotlight_shadow_static_mesh filtered{};
     assert(build_spotlight_shadow_static_mesh(world,filtered));
     assert(filtered.surfaces.size()==3);
-    assert(filtered.surfaces[0].count==0);
+    assert(filtered.surfaces[0].count==6);
+    assert(filtered.surfaces[0].source_index==0);
     assert(filtered.surfaces[1].count==6);
     assert(filtered.surfaces[2].count==6);
-    assert(filtered.indices.size()==12);
+    assert(filtered.indices.size()==18);
+    assert(near(filtered.vertices[1].uv[0],32.0f));
+    assert(near(filtered.vertices[2].uv[1],64.0f));
     query_spotlight_shadow_static_mesh(world,filtered,p,candidates);
     assert(candidates.size()==1);
-    assert(candidates.front().first_index==0);
+    assert(candidates.front().source_index==1);
 
     // Invalid transforms do not produce a shadow projection.
     s.forward={{0,0,0}};
