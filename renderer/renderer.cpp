@@ -4384,7 +4384,7 @@ namespace jkgm {
                 gl::blit_framebuffer(
                     make_box(make_point(0,0),dimensions),
                     make_box(make_point(0,0),dimensions),
-                    gl::framebuffer_blit_buffer::depth,
+                    {gl::framebuffer_blit_buffer::depth},
                     gl::framebuffer_blit_filter::nearest);
             }
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,cascade_target);
