@@ -651,6 +651,44 @@ Type-4 camera-facing flare SPRs are separate Things. Attach a flare
 Thing to a node, then assign that same Thing a Spotlight. Its independent
 `SetSpriteInfo` and `SetSpriteRoll` COG controls remain available.
 
+## Experimental static-world spotlight shadows
+
+Set `"enable_spotlights": true` and `"enable_spotlight_shadows": true`
+to test **one** 256×256 depth-only spotlight shadow map. Shadow rendering is
+off by default. The ordinary `SetSpotlight` verb works unchanged; the first
+on-screen ready projector gets the shadow-map budget. Other active spotlights
+remain unshadowed.
+
+This **first-stage implementation** reuses the existing validated static
+SithWorld surface snapshot and BVH from the decal projector: solid,
+non-sky, non-passable-adjoin level polygons are cached once as an indexed
+GPU mesh. Each moving spotlight queries the BVH for potential casters and
+draws only overlapping ranges. An unchanged static-world/projector pair
+reuses the previous depth map with no additional geometry draw. Opaque
+spotlight diffuse/additive cookie radiance uses a four-tap PCF depth
+comparison. Neither JK's existing baked illumination nor ambient/
+emissive contributions are darkened by the map.
+
+**Known limitations, do not mistake for final shadow behavior:**
+
+- Only static world architecture casts shadows for now: moving 3DO actors,
+  vehicles, and static 3DO geometry are not included yet.
+- Opaque world surfaces receive shadows, but transparent/fluid receivers
+  currently receive the projected lighting **without** shadow-map occlusion.
+- The static-world extractor does not yet sample material alpha, so masked
+  grates or transparent glass may cast solid silhouettes; only truly opaque
+  world geometry should be used for the initial visual test.
+- Off-camera **world geometry** is included independently of the gameplay
+  frustum. GPU-cached 3DOs require a separate, independent caster
+  collector before they can be added without camera-dependent popping.
+- The 256-pixel resolution and four PCF taps are deliberately conservative
+  performance defaults; shadow precision, bias, and edge quality still need
+  in-game measurements.
+
+If the experimental FBO or world snapshot cannot be created, the normal
+non-shadowed spotlight remains functional. Leave this switch off for
+regular play until the caster/receiver compatibility work is complete.
+
 ## Forward projected lighting on translucent receivers (experimental)
 
 The existing COG MAT spotlights also illuminate **genuinely alpha-blended**
