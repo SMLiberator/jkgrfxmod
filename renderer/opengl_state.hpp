@@ -147,6 +147,7 @@ namespace jkgm {
         std::unique_ptr<shaders::gpu_3do_preview_shader> gpu_3do_preview_program;
         shaders::game_post_ssao_shader game_post_ssao_program;
         shaders::game_post_opaque_composite_shader game_post_opaque_composite_program;
+        std::unique_ptr<shaders::spotlight_shadow_depth_shader> spotlight_shadow_depth_program;
 
         shaders::game_transparency_pass_shader game_transparency_pass_program;
 
