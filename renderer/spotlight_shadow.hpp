@@ -113,6 +113,34 @@ inline decal_volume_aabb spotlight_shadow_volume_bounds(
     return bounds;
 }
 
+// A world face casts only when its current geomode is drawable AND its
+// normal faces the light. Back-facing or hidden faces must not contribute a
+// depth sample. Keep the original one-sided JK world semantics here instead
+// of relying on unverified polygon winding.
+inline bool spotlight_shadow_world_face_visible(
+    uint32_t geometry_mode,decal_vec3 const &normal,
+    decal_vec3 const &light_direction)
+{
+    if(geometry_mode<2U || !decal_finite(normal) ||
+       !decal_finite(light_direction))return false;
+    return decal_dot(normal,light_direction)<-0.005f;
+}
+
+// A source embedded in an opaque 3DO draw group's bounds (e.g. headlights
+// attached inside a car model) should not occlude its own projected beam.
+// This only rejects 3DO groups, never arbitrary world architecture.
+inline bool spotlight_shadow_origin_inside(
+    decal_vec3 const &origin,decal_vec3 const &low,
+    decal_vec3 const &high,float tolerance=0.02f)
+{
+    if(!decal_finite(origin)||!decal_finite(low)||!decal_finite(high))
+        return false;
+    for(int i=0;i<3;++i)
+        if(origin[i]<low[i]-tolerance || origin[i]>high[i]+tolerance)
+            return false;
+    return true;
+}
+
 // Build once per LEVEL, not per shadow frame or projector movement.
 // No engine reads are performed: it consumes the already-validated decal
 // snapshot, retaining world geometry independently of the main camera.
