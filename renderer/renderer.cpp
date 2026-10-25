@@ -3541,6 +3541,10 @@ namespace jkgm {
                         if(!decal_aabbs_overlap(low,high,
                                                 light_bounds.low,light_bounds.high))
                             continue;
+                        // A spotlight mounted within its source 3DO must not
+                        // have that mesh's inside/backside block its own beam.
+                        if(spotlight_shadow_origin_inside(chosen.origin,low,high))
+                            continue;
                         // A blended effect never writes opaque shadow
                         // depth. Masked/mixed MATs cast cutout silhouettes
                         // using the same UVs/textures as visible geometry.
@@ -3567,12 +3571,33 @@ namespace jkgm {
             std::vector<GLsizei> opaque_world_counts;
             std::vector<void const *> opaque_world_offsets;
             std::vector<shadow_world_cutout> masked_world;
+            // This signature includes live geomodes, even invisible
+            // candidates, so stationary projectors update on 0<->4 changes.
+            uint64_t world_visibility_signature=14695981039346656037ULL;
+            auto hash_world_visibility=[&](uint32_t value) {
+                for(int b=0;b<4;++b) {
+                    world_visibility_signature^=uint64_t((value>>(b*8))&255U);
+                    world_visibility_signature*=1099511628211ULL;
+                }
+            };
             query_spotlight_shadow_static_mesh(map.world,map.mesh,view,map.selected);
             opaque_world_counts.reserve(map.selected.size());
             opaque_world_offsets.reserve(map.selected.size());
             for(auto const &range:map.selected) {
                 if(range.source_index>=map.world.receivers.size())continue;
                 auto const &surface=map.world.receivers[range.source_index];
+                // Do NOT use cached geomode: COG may change it at any
+                // moment without changing the world/surface allocation.
+                uint32_t current_geomode=0;
+                uintptr_t const surface_address=map.world.surfaces_addr+
+                    uintptr_t(surface.surface_index)*0x5cU;
+                engine_material_debug::read_object(
+                    surface_address+0x1cU,current_geomode);
+                hash_world_visibility(surface.surface_index);
+                hash_world_visibility(current_geomode);
+                if(!spotlight_shadow_world_face_visible(
+                        current_geomode,surface.normal,view.forward))
+                    continue;
                 gpu_3do_group material_group{};
                 material_group.material=surface.material;
                 material_group.cel=surface.cel;
@@ -3620,6 +3645,9 @@ namespace jkgm {
                     caster_signature*=1099511628211ULL;
                 }
             };
+            // Include current world surface visibility, not just MAT alpha.
+            hash_u32(uint32_t(world_visibility_signature));
+            hash_u32(uint32_t(world_visibility_signature>>32));
             auto hash_float=[&](float v) {
                 uint32_t bits=0;
                 std::memcpy(&bits,&v,sizeof(bits));
@@ -3772,6 +3800,16 @@ namespace jkgm {
                                make_point(m[3],m[4],m[5]),
                                make_point(m[6],m[7],m[8]),
                                make_point(m[9],m[10],m[11]));
+                // Match visible 3DO rendering. Two-sided/warped faces
+                // are intentionally exempt; mirrored models invert winding.
+                if((group.face_type&0x1U)!=0 || group.nonplanar) {
+                    gl::disable(gl::capability::cull_face);
+                } else {
+                    gl::enable(gl::capability::cull_face);
+                    gl::set_face_cull_mode(
+                        gpu_3do_reversed_winding(instance.transform)
+                            ? gl::face_mode::front : gl::face_mode::back);
+                }
                 gl::bind_vertex_array(it->second->vao);
                 if(caster.cutout)
                     set_shadow_cutout(caster.texture,false);
@@ -3783,6 +3821,10 @@ namespace jkgm {
                                   static_cast<ptrdiff_t>(
                                       group.offset*sizeof(uint32_t)));
             }
+            // World draw state above stays double-sided for historical
+            // sector winding; 3DOs explicitly honor their backfaces.
+            gl::disable(gl::capability::cull_face);
+            gl::set_face_cull_mode(gl::face_mode::back);
             // The alpha caster pass can bind units 11/12. Never leak
             // its active texture state into the ordinary game renderer.
             gl::set_active_texture_unit(0);
