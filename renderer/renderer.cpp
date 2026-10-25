@@ -3883,8 +3883,39 @@ namespace jkgm {
                     the_config->sun_shadow_resolution);
             auto &map=*sun_shadow_target;
             if(!map.update_world(safe_read,world))return;
+            // A level may have only a tiny native-world shell while its
+            // playable architecture is made from 3DOs. Include submitted
+            // model groups before fitting the sun map; otherwise both the
+            // receiver lighting and model shadows fall outside the map.
+            std::vector<decal_volume_aabb> model_bounds;
+            for(auto const &instance:frame_gpu_3do_instances) {
+                if(!instance.geometry || instance.is_projected_decal)continue;
+                auto const &m=instance.transform;
+                for(auto const &group:instance.geometry->groups) {
+                    if(group.count<3U || (group.face_type&0x2U))continue;
+                    decal_volume_aabb bounds{};
+                    for(int axis=0;axis<3;++axis) {
+                        bounds.low[axis]=std::numeric_limits<float>::max();
+                        bounds.high[axis]=-bounds.low[axis];
+                    }
+                    for(int c=0;c<8;++c) {
+                        float const x=(c&1)?group.bounds_max[0]:group.bounds_min[0];
+                        float const y=(c&2)?group.bounds_max[1]:group.bounds_min[1];
+                        float const z=(c&4)?group.bounds_max[2]:group.bounds_min[2];
+                        decal_vec3 const p{{m[0]*x+m[3]*y+m[6]*z+m[9],
+                                             m[1]*x+m[4]*y+m[7]*z+m[10],
+                                             m[2]*x+m[5]*y+m[8]*z+m[11]}};
+                        for(int axis=0;axis<3;++axis) {
+                            bounds.low[axis]=std::min(bounds.low[axis],p[axis]);
+                            bounds.high[axis]=std::max(bounds.high[axis],p[axis]);
+                        }
+                    }
+                    if(decal_finite(bounds.low) && decal_finite(bounds.high))
+                        model_bounds.push_back(bounds);
+                }
+            }
             sun_shadow_projection view{};
-            if(!make_sun_shadow_projection(map.world,direction,view))return;
+            if(!make_sun_shadow_projection(map.world,direction,view,model_bounds))return;
 
             // Query the complete orthographic box. The spotlight helper's
             // perspective pyramid bounds do not cover a directional map.
@@ -4012,6 +4043,17 @@ namespace jkgm {
             bool unchanged=sun_shadow_cached && sun_shadow_world==world &&
                 sun_shadow_revision==map.revision &&
                 caster_signature==sun_shadow_caster_signature;
+            // Submitted models can alter the fitted projection even if the
+            // cached caster set and their transforms have not changed.
+            auto same_point=[](decal_vec3 const &a,decal_vec3 const &b) {
+                for(int i=0;i<3;++i)
+                    if(std::fabs(a[i]-b[i])>1.0e-5f)return false;
+                return true;
+            };
+            unchanged=unchanged && same_point(view.origin,sun_shadow_view.origin) &&
+                std::fabs(view.width-sun_shadow_view.width)<1.0e-5f &&
+                std::fabs(view.height-sun_shadow_view.height)<1.0e-5f &&
+                std::fabs(view.range-sun_shadow_view.range)<1.0e-5f;
             for(int i=0;i<3 && unchanged;++i)
                 unchanged=std::fabs(direction[i]-sun_shadow_direction[i])<1.0e-5f;
             if(unchanged) {sun_shadow_ready=true;return;}

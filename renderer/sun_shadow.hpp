@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 namespace jkgm {
 
@@ -29,9 +30,10 @@ inline decal_vec3 sun_shadow_cross(decal_vec3 const &a,decal_vec3 const &b)
 inline bool make_sun_shadow_projection(
     decal_world_geometry const &world,
     std::array<float,3> const &direction_toward_sun,
-    sun_shadow_projection &out)
+    sun_shadow_projection &out,
+    std::vector<decal_volume_aabb> const &model_bounds={})
 {
-    if(!world.valid_world || world.receivers.empty() ||
+    if(!world.valid_world || (world.receivers.empty() && model_bounds.empty()) ||
        !std::isfinite(direction_toward_sun[0]) ||
        !std::isfinite(direction_toward_sun[1]) ||
        !std::isfinite(direction_toward_sun[2]))return false;
@@ -51,9 +53,7 @@ inline bool make_sun_shadow_projection(
     float min_y=min_x,min_z=min_x;
     float max_x=-min_x,max_y=-min_x,max_z=-min_x;
     bool found=false;
-    for(auto const &surface:world.receivers) {
-        for(auto const &point:surface.polygon) {
-            if(!decal_finite(point))return false;
+    auto include=[&](decal_vec3 const &point) {
             float const x=decal_dot(point,right);
             float const y=decal_dot(point,up);
             float const z=decal_dot(point,forward);
@@ -61,6 +61,20 @@ inline bool make_sun_shadow_projection(
             min_y=std::min(min_y,y);max_y=std::max(max_y,y);
             min_z=std::min(min_z,z);max_z=std::max(max_z,z);
             found=true;
+    };
+    for(auto const &surface:world.receivers) {
+        for(auto const &point:surface.polygon) {
+            if(!decal_finite(point))return false;
+            include(point);
+        }
+    }
+    for(auto const &bounds:model_bounds) {
+        if(!decal_finite(bounds.low) || !decal_finite(bounds.high))return false;
+        for(int corner=0;corner<8;++corner) {
+            decal_vec3 point{{(corner&1)?bounds.high[0]:bounds.low[0],
+                              (corner&2)?bounds.high[1]:bounds.low[1],
+                              (corner&4)?bounds.high[2]:bounds.low[2]}};
+            include(point);
         }
     }
     if(!found)return false;
@@ -69,8 +83,8 @@ inline bool make_sun_shadow_projection(
     float const raw_height=max_y-min_y;
     float const raw_range=max_z-min_z;
     if(!(std::isfinite(raw_width)&&std::isfinite(raw_height)&&
-         std::isfinite(raw_range)) || raw_width<=0.0f ||
-       raw_height<=0.0f || raw_range<=0.0f)return false;
+         std::isfinite(raw_range)) || raw_width<0.0f ||
+       raw_height<0.0f || raw_range<0.0f)return false;
     // A small perimeter protects edge receivers from clipping. The map spans
     // the full loaded level, so it remains stable as the camera moves.
     float const margin=std::max(1.0f,
