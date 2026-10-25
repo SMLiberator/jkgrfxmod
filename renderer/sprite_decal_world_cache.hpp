@@ -32,6 +32,7 @@ namespace jkgm {
         uint32_t invalid_surfaces=0,skipped_portals=0;
         uint32_t skipped_sky=0,skipped_material=0;
         bool valid_world=false;
+        bool include_hidden_faces=false; // shadow cache only
         std::vector<decal_world_surface_geometry> receivers;
         decal_receiver_bvh<decal_world_surface_geometry> acceleration;
 
@@ -50,7 +51,8 @@ namespace jkgm {
         }
 
         bool load(decal_native_read const &read,uintptr_t current,
-                  uint32_t max_surfaces=250000) {
+                  uint32_t max_surfaces=250000,
+                  bool shadow_include_hidden=false) {
             clear();
             if(!read || !decal_native_address_ok(current))return false;
             uint32_t nverts=0,verts=0,nfaces=0,faces=0;
@@ -73,6 +75,7 @@ namespace jkgm {
                 ntexverts=texverts=0;
             }
             world=current;
+            include_hidden_faces=shadow_include_hidden;
             vertices_addr=verts;
             surfaces_addr=faces;
             vertex_count=nverts;
@@ -104,7 +107,8 @@ namespace jkgm {
                     ++skipped_portals;continue;
                 }
                 if(flags&0x600U) {++skipped_sky;continue;}
-                if(geo<2 || !mat || count<3 || count>128 ||
+                if((geo<2 && !shadow_include_hidden) || !mat ||
+                   count<3 || count>128 ||
                    !decal_native_address_ok(indices)) {
                     ++skipped_material;continue;
                 }
