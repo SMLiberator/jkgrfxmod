@@ -583,6 +583,12 @@ namespace jkgm {
         std::array<uintptr_t,2> sun_shadow_worlds{};
         std::array<uint64_t,2> sun_shadow_revisions{};
         std::array<uint64_t,2> sun_shadow_caster_signatures{};
+        std::array<bool,2> sun_shadow_static_cached{{false,false}};
+        std::array<uint64_t,2> sun_shadow_static_signatures{};
+        std::array<uint64_t,2> sun_shadow_static_revisions{};
+        std::array<uintptr_t,2> sun_shadow_static_worlds{};
+        std::array<sun_shadow_projection,2> sun_shadow_static_views{};
+        std::array<std::array<float,3>,2> sun_shadow_static_directions{};
         spotlight_instance spotlight_shadow_light{};
         spotlight_shadow_projection spotlight_shadow_view{};
         bool spotlight_shadow_ready=false;
@@ -914,6 +920,7 @@ namespace jkgm {
                 sun_shadow_ready=false;
                 sun_shadow_cascade_ready={{false,false}};
                 sun_shadow_cascade_cached={{false,false}};
+                sun_shadow_static_cached={{false,false}};
                 sun_dynamic_views.clear();
                 sun_dynamic_atlas_owners.clear();
                 // Pausing/menu transitions may evict and reload D3D textures.
@@ -4216,6 +4223,8 @@ namespace jkgm {
                 hash_float(get<y>(draw.texture.albedo_scroll));
                 hash_float(draw.texture.albedo_transition);
             }
+            // World-only signature excludes all moving 3DO transforms.
+            uint64_t const static_signature=caster_signature;
 
             // Include submitted 3DO transforms. The native hook is enabled
             // when this feature is on; model groups share their normal GPU
@@ -4288,18 +4297,41 @@ namespace jkgm {
                 std::fabs(view.range-sun_shadow_views[cascade].range)<1.0e-5f;
             for(int i=0;i<3 && unchanged;++i)
                 unchanged=std::fabs(direction[i]-sun_shadow_directions[cascade][i])<1.0e-5f;
-            if(unchanged) {sun_shadow_cascade_ready[cascade]=true;continue;}
-
-            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                                 cascade==0 ? map.fbo : map.far_fbo);
-            gl::set_viewport(make_box(make_point(0,0),
-                make_size(int(map.resolution),int(map.resolution))));
+            if(unchanged) {
+                sun_shadow_cascade_ready[cascade]=true;
+                if(the_config->profile_renderer &&
+                   gpu_3do_present_serial%120U==0U)
+                    LOG_INFO("SUN cascade=",cascade," full_cache_hit=1");
+                continue;
+            }
+            // Reusing a depth texture requires the exact same stabilized
+            // light projection, not merely the same sun and static casters.
+            bool static_same=map.static_complete &&
+                sun_shadow_static_cached[cascade] &&
+                sun_shadow_static_worlds[cascade]==world &&
+                sun_shadow_static_revisions[cascade]==map.revision &&
+                sun_shadow_static_signatures[cascade]==static_signature &&
+                same_point(view.origin,sun_shadow_static_views[cascade].origin) &&
+                std::fabs(view.width-sun_shadow_static_views[cascade].width)<1.0e-5f &&
+                std::fabs(view.height-sun_shadow_static_views[cascade].height)<1.0e-5f &&
+                std::fabs(view.range-sun_shadow_static_views[cascade].range)<1.0e-5f;
+            for(int i=0;i<3 && static_same;++i)
+                static_same=std::fabs(direction[i]-
+                    sun_shadow_static_directions[cascade][i])<1.0e-5f;
+            auto const cascade_target=cascade==0 ? map.fbo : map.far_fbo;
+            auto const static_target=cascade==0 ? map.static_fbo : map.static_far_fbo;
+            auto const dimensions=make_size(int(map.resolution),int(map.resolution));
+            gl::set_viewport(make_box(make_point(0,0),dimensions));
             gl::disable(gl::capability::blend);
             gl::disable(gl::capability::cull_face);
             gl::enable(gl::capability::depth_test);
             gl::set_depth_mask(true);
             gl::set_depth_function(gl::comparison_function::less);
-            gl::clear_buffer_depth(1.0f);
+            if(!static_same) {
+                gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                    map.static_complete ? static_target : cascade_target);
+                gl::clear_buffer_depth(1.0f);
+            }
             glEnable(GL_POLYGON_OFFSET_FILL);
             glPolygonOffset(1.25f,1.5f);
             auto &prog=*ogs->spotlight_shadow_depth_program;
@@ -4329,16 +4361,39 @@ namespace jkgm {
                     gl::bind_texture(gl::texture_bind_target::texture_2d,tex.texture2);
                 }
             };
-            gl::bind_vertex_array(map.vao);
-            if(!counts.empty())glMultiDrawElements(GL_TRIANGLES,counts.data(),
-                GL_UNSIGNED_INT,offsets.data(),static_cast<GLsizei>(counts.size()));
-            for(auto const &draw:world_cutouts) {
-                set_cutout(draw.texture,true);
+            if(!static_same) {
                 gl::bind_vertex_array(map.vao);
-                gl::draw_elements(gl::element_type::triangles,draw.range.count,
-                    gl::index_type::uint32,static_cast<ptrdiff_t>(
-                        draw.range.first_index*sizeof(uint32_t)));
+                if(!counts.empty())glMultiDrawElements(GL_TRIANGLES,counts.data(),
+                    GL_UNSIGNED_INT,offsets.data(),static_cast<GLsizei>(counts.size()));
+                for(auto const &draw:world_cutouts) {
+                    set_cutout(draw.texture,true);
+                    gl::bind_vertex_array(map.vao);
+                    gl::draw_elements(gl::element_type::triangles,draw.range.count,
+                        gl::index_type::uint32,static_cast<ptrdiff_t>(
+                            draw.range.first_index*sizeof(uint32_t)));
+                }
+                if(map.static_complete) {
+                    sun_shadow_static_cached[cascade]=true;
+                    sun_shadow_static_worlds[cascade]=world;
+                    sun_shadow_static_revisions[cascade]=map.revision;
+                    sun_shadow_static_signatures[cascade]=static_signature;
+                    sun_shadow_static_views[cascade]=view;
+                    sun_shadow_static_directions[cascade]=direction;
+                }
             }
+            if(map.static_complete) {
+                // Copy the static depth on GPU (no readback) and depth-test
+                // current 3DOs against it. Even dynamic Thing updates no
+                // longer trigger a draw of the world architecture.
+                gl::bind_framebuffer(gl::framebuffer_bind_target::read,static_target);
+                gl::bind_framebuffer(gl::framebuffer_bind_target::draw,cascade_target);
+                gl::blit_framebuffer(
+                    make_box(make_point(0,0),dimensions),
+                    make_box(make_point(0,0),dimensions),
+                    gl::framebuffer_blit_buffer::depth,
+                    gl::framebuffer_blit_filter::nearest);
+            }
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,cascade_target);
             for(auto const &draw:models) {
                 auto const &instance=*draw.instance;auto const &group=*draw.group;
                 auto it=gpu_3do_gl_cache.find(instance.id);
@@ -4367,6 +4422,13 @@ namespace jkgm {
             gl::set_face_cull_mode(gl::face_mode::back);
             gl::set_active_texture_unit(0);
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("SUN cascade=",cascade,
+                         " static_cache_hit=",static_same?1:0,
+                         " world_batches_redrawn=",static_same?0:
+                             counts.size()+world_cutouts.size(),
+                         " model_batches=",models.size());
             sun_shadow_views[cascade]=view;
             sun_shadow_directions[cascade]=direction;
             sun_shadow_worlds[cascade]=world;
