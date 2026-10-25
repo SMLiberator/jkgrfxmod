@@ -4212,6 +4212,7 @@ namespace jkgm {
                 std::vector<gpu_3do_instance const *> parts;
                 decal_volume_aabb bounds{};
                 float distance2=0.0f;
+                bool has_bounds=false;
             };
             std::map<uint64_t,candidate> keyed;
             for(auto const &inst:frame_gpu_3do_instances) {
@@ -4231,12 +4232,11 @@ namespace jkgm {
                                       m[1]*x+m[4]*y+m[7]*z+m[10],
                                       m[2]*x+m[5]*y+m[8]*z+m[11]}};
                         if(!decal_finite(p))continue;
-                        // A newly constructed candidate initially has no
-                        // bounds: the first point seeds both min and max.
-                        if(c.distance2<0.0f)continue;
-                        if(c.bounds.low==decal_vec3{} &&
-                           c.bounds.high==decal_vec3{}) {
+                        // Valid geometry can be positioned at world origin.
+                        // Track initialization explicitly, not via zero AABBs.
+                        if(!c.has_bounds) {
                             c.bounds.low=p;c.bounds.high=p;
+                            c.has_bounds=true;
                         }
                         else for(int k=0;k<3;++k) {
                             c.bounds.low[k]=std::min(c.bounds.low[k],p[k]);
@@ -4248,8 +4248,7 @@ namespace jkgm {
             std::vector<candidate *> sorted;
             for(auto &entry:keyed) {
                 auto &c=entry.second;
-                if(c.bounds.low==decal_vec3{} &&
-                   c.bounds.high==decal_vec3{})continue;
+                if(!c.has_bounds)continue;
                 auto const &lo=c.bounds.low,&hi=c.bounds.high;
                 c.distance2=0.0f;
                 for(int i=0;i<3;++i) {
