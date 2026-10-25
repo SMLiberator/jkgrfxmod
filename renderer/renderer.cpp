@@ -571,6 +571,7 @@ namespace jkgm {
         spotlight_shadow_projection spotlight_shadow_view{};
         bool spotlight_shadow_ready=false;
         bool spotlight_shadow_cached=false;
+        bool spotlight_shadow_had_3do=false;
         uint32_t spotlight_shadow_world=0;
         uint64_t spotlight_shadow_revision=0;
         std::set<std::pair<uint32_t, int>> runtime_missing_images;
@@ -889,6 +890,7 @@ namespace jkgm {
                 }
                 spotlight_shadow_ready=false;
                 spotlight_shadow_cached=false;
+                spotlight_shadow_had_3do=false;
                 // Pausing/menu transitions may evict and reload D3D textures.
                 // Refresh the native MAT resolver on the next game frame,
                 // instead of letting the previous one-second timer cause a flash.
@@ -3419,13 +3421,11 @@ namespace jkgm {
         }
 
 
-        // One intentionally low-resolution static-world shadow map. Reuses
-        // SithWorld's off-camera polygons and a level-wide indexed VBO instead
-        // of the native JK camera-submitted 2D triangle stream.
-        //
-        // The first experiment intentionally excludes moving 3DO casters and
-        // alpha-tested cutouts; neither can be handled correctly with this
-        // static, material-independent depth-only draw alone.
+        // One intentionally low-resolution depth map. Static SithWorld
+        // casters remain independent of camera visibility; cached 3DOs share
+        // their existing vertex/index buffers, including dynamic transforms.
+        // Alpha-tested holes are still excluded until the depth shader can
+        // sample their material textures.
         void draw_spotlight_shadow_map()
         {
             spotlight_shadow_ready=false;
@@ -3478,6 +3478,60 @@ namespace jkgm {
             auto &map=*spotlight_shadow_target;
             if(!map.update_world(safe_read,world))return;
 
+            // Collect GPU-cached 3DO caster ranges intersecting the light
+            // volume. Their existing VAO/VBO/EBO is reused by the depth-only
+            // shadow pass; no texture binds or new mesh uploads per frame.
+            // This does NOT yet include native-only 3DOs or any geometry
+            // never submitted by JK's rdModel3 traversal.
+            struct shadow_3do_range {
+                gpu_3do_instance const *instance;
+                gpu_3do_group const *group;
+            };
+            std::vector<shadow_3do_range> model_casters;
+            auto const light_bounds=spotlight_shadow_volume_bounds(view);
+            if(the_config->use_model_cache) {
+                for(auto const &instance:frame_gpu_3do_instances) {
+                    if(!instance.geometry || instance.is_projected_decal)
+                        continue;
+                    auto const &m=instance.transform;
+                    for(auto const &group:instance.geometry->groups) {
+                        if(group.count<3U)continue;
+                        decal_vec3 low{{std::numeric_limits<float>::max(),
+                                        std::numeric_limits<float>::max(),
+                                        std::numeric_limits<float>::max()}};
+                        decal_vec3 high{{-std::numeric_limits<float>::max(),
+                                         -std::numeric_limits<float>::max(),
+                                         -std::numeric_limits<float>::max()}};
+                        for(int c=0;c<8;++c) {
+                            float const x=(c&1)?group.bounds_max[0]:group.bounds_min[0];
+                            float const y=(c&2)?group.bounds_max[1]:group.bounds_min[1];
+                            float const z=(c&4)?group.bounds_max[2]:group.bounds_min[2];
+                            decal_vec3 worldpos{{
+                                m[0]*x+m[3]*y+m[6]*z+m[9],
+                                m[1]*x+m[4]*y+m[7]*z+m[10],
+                                m[2]*x+m[5]*y+m[8]*z+m[11]}};
+                            for(int a=0;a<3;++a) {
+                                low[a]=std::min(low[a],worldpos[a]);
+                                high[a]=std::max(high[a],worldpos[a]);
+                            }
+                        }
+                        if(!decal_aabbs_overlap(low,high,
+                                                light_bounds.low,light_bounds.high))
+                            continue;
+                        // Opaque-only for now: an untextured shadow shader
+                        // cannot correctly cut holes in alpha/mask/decals.
+                        // Never cast an opaque box for known alpha material.
+                        auto const tex=resolve_gpu_3do_material(group);
+                        if(tex.albedo_source==0 || tex.alpha || tex.masked ||
+                           tex.dithered || tex.special || tex.emissive_only ||
+                           tex.post_exempt || tex.opacity<0.999f ||
+                           (group.face_type&0x2U)!=0U)
+                            continue;
+                        model_casters.push_back({&instance,&group});
+                    }
+                }
+            }
+
             // Static-only shadows need a new depth render only when the
             // projector/world changes. No CPU/GPU depth readback or per-frame
             // draw is necessary for stationary flashlights or lamps.
@@ -3498,7 +3552,8 @@ namespace jkgm {
                 std::fabs(chosen.width-spotlight_shadow_light.width)<0.00001f &&
                 std::fabs(chosen.height-spotlight_shadow_light.height)<0.00001f &&
                 std::fabs(chosen.range-spotlight_shadow_light.range)<0.00001f;
-            if(unchanged) {
+            if(unchanged && model_casters.empty() &&
+               !spotlight_shadow_had_3do) {
                 spotlight_shadow_ready=true;
                 return;
             }
@@ -3520,7 +3575,33 @@ namespace jkgm {
                            vec(view.up),vec(view.forward),
                            make_point(view.width,view.height,view.range,
                                       view.near_distance));
+            prog.set_model(make_point(1.0f,0.0f,0.0f),
+                           make_point(0.0f,1.0f,0.0f),
+                           make_point(0.0f,0.0f,1.0f),
+                           make_point(0.0f,0.0f,0.0f));
             map.draw_world(view);
+            for(auto const &caster:model_casters) {
+                auto const &instance=*caster.instance;
+                auto const &group=*caster.group;
+                auto it=gpu_3do_gl_cache.find(instance.id);
+                if(it==gpu_3do_gl_cache.end()) {
+                    it=gpu_3do_gl_cache.emplace(instance.id,
+                        std::make_unique<gpu_3do_gl_mesh>(*instance.geometry)).first;
+                    if(the_config->profile_renderer)
+                        ++profile_frame.gpu_uploads;
+                }
+                gpu_3do_last_drawn[instance.id]=gpu_3do_present_serial;
+                auto const &m=instance.transform;
+                prog.set_model(make_point(m[0],m[1],m[2]),
+                               make_point(m[3],m[4],m[5]),
+                               make_point(m[6],m[7],m[8]),
+                               make_point(m[9],m[10],m[11]));
+                gl::bind_vertex_array(it->second->vao);
+                gl::draw_elements(gl::element_type::triangles,group.count,
+                                  gl::index_type::uint32,
+                                  static_cast<ptrdiff_t>(
+                                      group.offset*sizeof(uint32_t)));
+            }
             // The regular opaque pass binds its own FBO next, but it does
             // not restore the viewport; undo the small shadow viewport here.
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
@@ -3529,6 +3610,7 @@ namespace jkgm {
             spotlight_shadow_world=world;
             spotlight_shadow_revision=map.revision;
             spotlight_shadow_cached=true;
+            spotlight_shadow_had_3do=!model_casters.empty();
             spotlight_shadow_ready=true;
         }
 
