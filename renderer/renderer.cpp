@@ -4309,8 +4309,8 @@ namespace jkgm {
             for(int i=0;i<3 && static_same;++i)
                 static_same=std::fabs(direction[i]-
                     sun_shadow_static_directions[cascade][i])<1.0e-5f;
-            auto const cascade_target=cascade==0 ? map.fbo : map.far_fbo;
-            auto const static_target=cascade==0 ? map.static_fbo : map.static_far_fbo;
+            auto const &cascade_target=cascade==0 ? map.fbo : map.far_fbo;
+            auto const &static_target=cascade==0 ? map.static_fbo : map.static_far_fbo;
             auto const dimensions=make_size(int(map.resolution),int(map.resolution));
             gl::set_viewport(make_box(make_point(0,0),dimensions));
             gl::disable(gl::capability::blend);
