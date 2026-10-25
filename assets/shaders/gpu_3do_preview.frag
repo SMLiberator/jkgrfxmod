@@ -296,6 +296,120 @@ vec2 gpu_parallax_uv(vec2 tc)
     return mix(current,previous,clamp(after/denom,0.0,1.0));
 }
 
+// Optional forward spotlights on genuinely blended receivers. The opaque
+// composite already lights masked/dithered surfaces; NEVER relight them here.
+// No geometry pass, framebuffer copy, shadow map or normal texture is needed.
+uniform int translucent_spotlight_count;
+uniform vec2 translucent_spotlight_resolution;
+uniform vec4 translucent_spotlight_camera_origin;
+uniform vec4 translucent_spotlight_camera_right;   // w = horizontal tan(FOV/2)
+uniform vec4 translucent_spotlight_camera_forward;
+uniform vec4 translucent_spotlight_camera_up;      // w = vertical tan(FOV/2)
+uniform sampler2D translucent_spotlight_image_0;
+uniform sampler2D translucent_spotlight_image_1;
+uniform sampler2D translucent_spotlight_image_2;
+uniform sampler2D translucent_spotlight_image_3;
+uniform vec4 translucent_spotlight_origins[4];
+uniform vec4 translucent_spotlight_rights[4];
+uniform vec4 translucent_spotlight_ups[4];
+uniform vec4 translucent_spotlight_forwards[4];
+uniform vec2 translucent_spotlight_intensities[4];
+uniform vec4 translucent_spotlight_bounds[4];
+
+vec4 sample_translucent_spotlight(int i, vec2 uv)
+{
+    if(i == 0) return texture(translucent_spotlight_image_0, uv);
+    if(i == 1) return texture(translucent_spotlight_image_1, uv);
+    if(i == 2) return texture(translucent_spotlight_image_2, uv);
+    return texture(translucent_spotlight_image_3, uv);
+}
+
+// Input depth is JK's view-space forward distance multiplied by 32.
+vec3 translucent_spotlight_world_pos(float depth)
+{
+    vec2 ndc = gl_FragCoord.xy / translucent_spotlight_resolution * 2.0 - 1.0;
+    return translucent_spotlight_camera_origin.xyz + (depth / 32.0) * (
+        translucent_spotlight_camera_forward.xyz +
+        ndc.x * translucent_spotlight_camera_right.w *
+                translucent_spotlight_camera_right.xyz +
+        ndc.y * translucent_spotlight_camera_up.w *
+                translucent_spotlight_camera_up.xyz);
+}
+
+// View normals in JK's original projected-normal convention are corrected
+// for the camera FOV before transforming into world axes.
+vec3 translucent_spotlight_world_normal(vec3 normal)
+{
+    vec3 n = normalize(normal);
+    return normalize(
+        translucent_spotlight_camera_right.xyz *
+            (n.x / max(translucent_spotlight_camera_right.w, 0.0001)) +
+        translucent_spotlight_camera_up.xyz *
+            (n.y / max(translucent_spotlight_camera_up.w, 0.0001)) +
+        translucent_spotlight_camera_forward.xyz * n.z);
+}
+
+vec3 light_translucent_spotlight(float depth, vec3 view_normal,
+                                vec3 unlit_pigment, float opacity)
+{
+    if(translucent_spotlight_count == 0 || opacity <= 0.001 ||
+       depth <= 0.0 || depth >= 65500.0)
+        return vec3(0.0);
+
+    vec2 pixel_uv = gl_FragCoord.xy / translucent_spotlight_resolution;
+    bool covered = false;
+    for(int i = 0; i < 4; ++i) {
+        if(i >= translucent_spotlight_count) break;
+        vec4 box = translucent_spotlight_bounds[i];
+        if(all(greaterThanEqual(pixel_uv, box.xy)) &&
+           all(lessThanEqual(pixel_uv, box.zw))) {
+            covered = true;
+            break;
+        }
+    }
+    if(!covered) return vec3(0.0);
+
+    vec3 position = translucent_spotlight_world_pos(depth);
+    vec3 normal = vec3(0.0);
+    bool have_normal = false;
+    vec3 diffuse = vec3(0.0), additive = vec3(0.0);
+    for(int i = 0; i < 4; ++i) {
+        if(i >= translucent_spotlight_count) break;
+        vec4 box = translucent_spotlight_bounds[i];
+        if(any(lessThan(pixel_uv, box.xy)) ||
+           any(greaterThan(pixel_uv, box.zw))) continue;
+        vec3 relative = position - translucent_spotlight_origins[i].xyz;
+        float distance = dot(relative, translucent_spotlight_forwards[i].xyz);
+        float t = distance * translucent_spotlight_forwards[i].w;
+        if(t <= 0.01 || t >= 1.0) continue;
+        vec2 uv = vec2(
+            dot(relative, translucent_spotlight_rights[i].xyz) *
+                translucent_spotlight_rights[i].w / distance + 0.5,
+            dot(relative, translucent_spotlight_ups[i].xyz) *
+                translucent_spotlight_ups[i].w / distance + 0.5);
+        if(any(lessThan(uv, vec2(0.0))) ||
+           any(greaterThan(uv, vec2(1.0)))) continue;
+        vec4 cookie = sample_translucent_spotlight(i, uv);
+        if(cookie.a <= 0.001) continue;
+        if(!have_normal) {
+            normal = translucent_spotlight_world_normal(view_normal);
+            have_normal = true;
+        }
+        float border = min(min(uv.x, 1.0-uv.x), min(uv.y, 1.0-uv.y));
+        float edge = smoothstep(0.0, 0.02, border);
+        float fade = smoothstep(0.01, 0.04, t) *
+                     (1.0-smoothstep(0.35, 1.0, t));
+        // Thin glass/sprites may face either way. Do not flip mesh normals
+        // globally: the double-sided incidence is local to this lighting.
+        float facing = abs(dot(normal, normalize(-relative)));
+        float incidence = 0.25 + 0.75 * facing;
+        vec3 radiance = cookie.rgb * cookie.a * (edge * fade * incidence);
+        diffuse += radiance * translucent_spotlight_intensities[i].x;
+        additive += radiance * translucent_spotlight_intensities[i].y;
+    }
+    return (unlit_pigment * diffuse + additive) * opacity;
+}
+
 layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
@@ -379,6 +493,16 @@ void main() {
     // supplies scalar light intensity (not independent per-light RGB), so
     // these experimental highlights are neutral/white. Diffuse remains JK.
     vec3 specular=gpu_sun_specular(albedo.rgb,uv)+env_reflection;
+    // Only forward-blended non-decal faces receive projected light.
+    // Ordinary alpha-tested coverage already receives opaque-composite light.
+    vec3 projected_light=vec3(0.0);
+    if(transparent_pass!=0 && post_exempt_pass==0 &&
+       decal_receiver_lighting==0 && (alpha_mode==1 || alpha_mode==3) &&
+       blend_mode!=1 && blend_mode!=2 && emissive_only==0) {
+        projected_light=light_translucent_spotlight(
+            view_depth,view_normal,albedo.rgb,clamp(albedo.a,0.0,1.0)) *
+            (1.0-fog);
+    }
     if(dynamic_light_specular_enabled!=0 && num_lights>0 &&
        specular_params.x>0.0)
         specular+=point_light_specular(albedo.rgb,uv);
@@ -393,7 +517,7 @@ void main() {
         // while specular highlights/emission remain independently visible.
         float absorption=fluid_absorption(view_depth);
         float opacity=albedo.a*absorption;
-        out_color=vec4(rgb*opacity+emission+specular,opacity);
+        out_color=vec4(rgb*opacity+emission+specular+projected_light,opacity);
     } else if(transparent_pass!=0 && blend_mode==2) {
         // With (DST_COLOR, ZERO) the RGB output is a multiplier, not
         // premultiplied color. Alpha zero must multiply by WHITE (identity).
@@ -407,7 +531,7 @@ void main() {
         // additive framebuffer itself is preserved by glBlendFuncSeparate.
         // Opaque fog is applied after SSAO in the shared composite.
         out_color=vec4(transparent_pass!=0
-                           ? rgb*a+emission+specular*a : lit_rgb,
+                           ? rgb*a+emission+specular*a+projected_light : lit_rgb,
                        (transparent_pass!=0 && blend_mode==1) ? 0.0 : a);
     }
     // For the opaque G-buffer, emissive alpha is unused by composition.
