@@ -99,6 +99,7 @@ struct spotlight_shadow_gpu {
                         gl::buffer_usage::static_draw);
         gl::bind_vertex_array(gl::vertex_array_view(0U));
         loaded_world=address;
+        ++revision;
         LOG_INFO("Spotlight shadow static world ready surfaces=",mesh.surfaces.size(),
                  " indices=",mesh.indices.size());
         return true;
