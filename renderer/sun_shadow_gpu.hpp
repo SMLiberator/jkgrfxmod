@@ -18,6 +18,7 @@ struct sun_shadow_gpu {
     gl::buffer vertices,indices;
     decal_world_geometry world{};
     spotlight_shadow_static_mesh mesh{};
+    std::vector<spotlight_shadow_surface_range> selected;
     unsigned resolution=512U;
     bool complete=false;
     uintptr_t loaded_world=0;
