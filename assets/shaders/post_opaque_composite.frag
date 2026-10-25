@@ -222,6 +222,12 @@ void main()
             if(incidence>0.0) {
                 vec3 world_position=reconstruct_scene_world(depth);
                 float visibility=sun_shadow_visibility(world_position);
+                // JK's vertex colors already contain authored lighting. If
+                // only the newly added sun term is shadowed, a bright baked
+                // floor barely changes under a caster. Keep a generous
+                // ambient floor while allowing the occluder to shade that
+                // baseline as well.
+                surface_rgb*=1.0-0.6*incidence*(1.0-visibility);
                 vec3 sun_light=pigment*sun_shadow_color_intensity.rgb*
                     sun_shadow_color_intensity.a*incidence*visibility;
                 surface_rgb+=sun_light*(vec3(1.0)-clamp(surface_rgb,0.0,1.0));
