@@ -120,6 +120,20 @@ int main()
     assert(near_projection.height/1024.0f < far_projection.height/1024.0f);
     assert(stabilize_sun_shadow_projection(near_projection,512U));
     assert(stabilize_sun_shadow_projection(far_projection,512U));
+    // Reusing a cached depth layer requires matching every projection
+    // component: even a rotated light with the same origin/extent is wrong.
+    assert(sun_shadow_same_projection(near_projection,near_projection));
+    auto altered_projection=near_projection;
+    altered_projection.width+=0.01f;
+    assert(!sun_shadow_same_projection(near_projection,altered_projection));
+    altered_projection=near_projection;
+    altered_projection.forward[0]+=0.01f;
+    assert(!sun_shadow_same_projection(near_projection,altered_projection));
+    altered_projection=near_projection;
+    altered_projection.origin[1]+=0.01f;
+    assert(!sun_shadow_same_projection(near_projection,altered_projection));
+    assert(!sun_shadow_same_projection(
+        near_projection,near_projection,-0.01f));
     auto visible=sun_shadow_clip(projection,{{105.0f,215.0f,2.0f}});
     assert(visible.x>-1.0f && visible.x<1.0f);
     assert(visible.y>-1.0f && visible.y<1.0f);

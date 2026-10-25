@@ -229,6 +229,31 @@ inline bool make_sun_dynamic_shadow_projection(
            std::isfinite(out.height);
 }
 
+// Cache keys must reject any change to a light-space orthographic mapping,
+// including orientation, not just the snapped XY origin and dimensions.
+inline bool sun_shadow_same_projection(
+    sun_shadow_projection const &a,sun_shadow_projection const &b,
+    float tolerance=1.0e-5f)
+{
+    if(!(tolerance>=0.0f) || !std::isfinite(tolerance))return false;
+    for(auto const &vectors: {
+        std::pair<decal_vec3,decal_vec3>{a.origin,b.origin},
+        {a.right,b.right},{a.up,b.up},{a.forward,b.forward}}) {
+        for(int i=0;i<3;++i) {
+            if(!std::isfinite(vectors.first[i]) ||
+               !std::isfinite(vectors.second[i]) ||
+               std::fabs(vectors.first[i]-vectors.second[i])>tolerance)
+                return false;
+        }
+    }
+    return std::isfinite(a.width) && std::isfinite(b.width) &&
+           std::isfinite(a.height) && std::isfinite(b.height) &&
+           std::isfinite(a.range) && std::isfinite(b.range) &&
+           std::fabs(a.width-b.width)<=tolerance &&
+           std::fabs(a.height-b.height)<=tolerance &&
+           std::fabs(a.range-b.range)<=tolerance;
+}
+
 // Snap orthographic translation to exact texels; static shadows then
 // stay fixed during sub-texel camera translation.
 inline bool stabilize_sun_shadow_projection(

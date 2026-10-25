@@ -4283,18 +4283,10 @@ namespace jkgm {
                 sun_shadow_worlds[cascade]==world &&
                 sun_shadow_revisions[cascade]==map.revision &&
                 caster_signature==sun_shadow_caster_signatures[cascade];
-            // Submitted models can alter the fitted projection even if the
-            // cached caster set and their transforms have not changed.
-            auto same_point=[](decal_vec3 const &a,decal_vec3 const &b) {
-                for(int i=0;i<3;++i)
-                    if(std::fabs(a[i]-b[i])>1.0e-5f)return false;
-                return true;
-            };
+            // Reuse only when the complete stabilized orthographic map,
+            // including its light-space basis, is identical.
             unchanged=unchanged &&
-                same_point(view.origin,sun_shadow_views[cascade].origin) &&
-                std::fabs(view.width-sun_shadow_views[cascade].width)<1.0e-5f &&
-                std::fabs(view.height-sun_shadow_views[cascade].height)<1.0e-5f &&
-                std::fabs(view.range-sun_shadow_views[cascade].range)<1.0e-5f;
+                sun_shadow_same_projection(view,sun_shadow_views[cascade]);
             for(int i=0;i<3 && unchanged;++i)
                 unchanged=std::fabs(direction[i]-sun_shadow_directions[cascade][i])<1.0e-5f;
             if(unchanged) {
@@ -4311,10 +4303,8 @@ namespace jkgm {
                 sun_shadow_static_worlds[cascade]==world &&
                 sun_shadow_static_revisions[cascade]==map.revision &&
                 sun_shadow_static_signatures[cascade]==static_signature &&
-                same_point(view.origin,sun_shadow_static_views[cascade].origin) &&
-                std::fabs(view.width-sun_shadow_static_views[cascade].width)<1.0e-5f &&
-                std::fabs(view.height-sun_shadow_static_views[cascade].height)<1.0e-5f &&
-                std::fabs(view.range-sun_shadow_static_views[cascade].range)<1.0e-5f;
+                sun_shadow_same_projection(
+                    view,sun_shadow_static_views[cascade]);
             for(int i=0;i<3 && static_same;++i)
                 static_same=std::fabs(direction[i]-
                     sun_shadow_static_directions[cascade][i])<1.0e-5f;
