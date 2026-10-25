@@ -74,6 +74,7 @@
 #include <string>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace jkgm {
     static WNDPROC original_wkernel_wndproc = nullptr;
@@ -572,6 +573,8 @@ namespace jkgm {
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
+        // Track only owners with a successfully rasterized atlas tile.
+        std::unordered_set<uint64_t> sun_dynamic_atlas_owners;
         std::array<sun_shadow_projection,2> sun_shadow_views{};
         bool sun_shadow_ready=false;
         std::array<bool,2> sun_shadow_cascade_ready{{false,false}};
@@ -912,6 +915,7 @@ namespace jkgm {
                 sun_shadow_cascade_ready={{false,false}};
                 sun_shadow_cascade_cached={{false,false}};
                 sun_dynamic_views.clear();
+                sun_dynamic_atlas_owners.clear();
                 // Pausing/menu transitions may evict and reload D3D textures.
                 // Refresh the native MAT resolver on the next game frame,
                 // instead of letting the previous one-second timer cause a flash.
@@ -3863,10 +3867,186 @@ namespace jkgm {
 
         // Fit one directional map to the nearby camera frustum, retaining
         // the loaded level's full light-axis depth for offscreen casters.
+        void draw_sun_dynamic_shadow_atlas(
+            sun_shadow_projection const &world_view)
+        {
+            sun_dynamic_views.clear();
+            sun_dynamic_atlas_owners.clear();
+            if(!the_config->enable_sun_shadows ||
+               !the_config->enable_sun_dynamic_shadows ||
+               !ogs->spotlight_shadow_depth_program)return;
+            auto camera=read_active_render_camera();
+            if(!camera.valid)return;
+            struct candidate {
+                uint64_t key=0;
+                std::vector<gpu_3do_instance const *> parts;
+                decal_volume_aabb bounds{};
+                float distance2=0.0f;
+                bool has_bounds=false;
+            };
+            std::map<uint64_t,candidate> keyed;
+            for(auto const &inst:frame_gpu_3do_instances) {
+                if(!inst.geometry || !inst.casts_sun_shadows ||
+                   !inst.dynamic_sun_caster || !inst.shadow_owner ||
+                   inst.is_projected_decal)continue;
+                auto &c=keyed[inst.shadow_owner];
+                c.key=inst.shadow_owner;c.parts.push_back(&inst);
+                auto const &m=inst.transform;
+                for(auto const &g:inst.geometry->groups) {
+                    if(g.count<3U || (g.face_type&2U))continue;
+                    for(int j=0;j<8;++j) {
+                        float x=(j&1)?g.bounds_max[0]:g.bounds_min[0];
+                        float y=(j&2)?g.bounds_max[1]:g.bounds_min[1];
+                        float z=(j&4)?g.bounds_max[2]:g.bounds_min[2];
+                        decal_vec3 p{{m[0]*x+m[3]*y+m[6]*z+m[9],
+                                      m[1]*x+m[4]*y+m[7]*z+m[10],
+                                      m[2]*x+m[5]*y+m[8]*z+m[11]}};
+                        if(!decal_finite(p))continue;
+                        // Valid geometry can be positioned at world origin.
+                        // Track initialization explicitly, not via zero AABBs.
+                        if(!c.has_bounds) {
+                            c.bounds.low=p;c.bounds.high=p;
+                            c.has_bounds=true;
+                        }
+                        else for(int k=0;k<3;++k) {
+                            c.bounds.low[k]=std::min(c.bounds.low[k],p[k]);
+                            c.bounds.high[k]=std::max(c.bounds.high[k],p[k]);
+                        }
+                    }
+                }
+            }
+            std::vector<candidate *> sorted;
+            for(auto &entry:keyed) {
+                auto &c=entry.second;
+                if(!c.has_bounds)continue;
+                auto const &lo=c.bounds.low,&hi=c.bounds.high;
+                c.distance2=0.0f;
+                for(int i=0;i<3;++i) {
+                    float d=(lo[i]+hi[i])*0.5f-camera.position[i];
+                    c.distance2+=d*d;
+                }
+                sorted.push_back(&c);
+            }
+            std::sort(sorted.begin(),sorted.end(),
+                [](candidate const *a,candidate const *b) {
+                    return a->distance2<b->distance2;
+                });
+            if(sorted.empty())return;
+            if(!sun_dynamic_target)
+                sun_dynamic_target=std::make_unique<sun_dynamic_shadow_gpu>();
+            if(!sun_dynamic_target->complete)return;
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 sun_dynamic_target->fbo);
+            gl::set_viewport(make_box(make_point(0,0),make_size(1024,512)));
+            gl::disable(gl::capability::blend);
+            gl::disable(gl::capability::cull_face);
+            gl::enable(gl::capability::depth_test);
+            gl::set_depth_mask(true);
+            gl::set_depth_function(gl::comparison_function::less);
+            gl::clear_buffer_depth(1.0f);
+            // Slope-scale offset keeps grazing-angle caster depth off
+            // the matching receiver plane, without blurring silhouettes.
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(1.25f,1.5f);
+            auto &prog=*ogs->spotlight_shadow_depth_program;
+            prog.use_program();
+            auto vec=[](decal_vec3 const &p) {
+                return make_point(p[0],p[1],p[2]);
+            };
+            auto shadow_material=[&](gpu_3do_texture const &tex,bool cutout) {
+                if(!cutout) {
+                    prog.set_shadow_alpha(false,make_point(1.0f,1.0f),
+                        make_point(0.0f,0.0f),0.5f,1.0f,false,0.0f);
+                    return;
+                }
+                float w=gpu_3do_model_uv_extent(tex.width);
+                float h=gpu_3do_model_uv_extent(tex.height);
+                bool second=tex.albedo_transition>0.0f && tex.albedo_source2==1;
+                prog.set_shadow_alpha(true,
+                    make_point(1.0f/std::max(w,1.0f),
+                               1.0f/std::max(h,1.0f)),
+                    tex.albedo_scroll,
+                    tex.masked?tex.alpha_cutoff:(tex.dithered?0.5f:0.998f),
+                    tex.opacity,second,tex.albedo_transition);
+                gl::set_active_texture_unit(11);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 tex.texture);
+                if(second) {
+                    gl::set_active_texture_unit(12);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     tex.texture2);
+                }
+            };
+            for(auto *object:sorted) {
+                if(sun_dynamic_views.size()>=sun_dynamic_shadow_slots)break;
+                sun_shadow_projection view{};
+                if(!make_sun_dynamic_shadow_projection(
+                    world_view,object->bounds,view))continue;
+                int tile=int(sun_dynamic_views.size());
+                int px=(tile%4)*256+sun_dynamic_shadow_inset;
+                int py=(tile/4)*256+sun_dynamic_shadow_inset;
+                gl::set_viewport(make_box(make_point(px,py),
+                                          make_size(252,252)));
+                prog.set_orthographic_light(vec(view.origin),vec(view.right),
+                    vec(view.up),vec(view.forward),
+                    make_point(view.width,view.height,view.range,0.0f));
+                bool any=false;
+                for(auto const *inst:object->parts) {
+                    auto const &m=inst->transform;
+                    prog.set_model(make_point(m[0],m[1],m[2]),
+                        make_point(m[3],m[4],m[5]),make_point(m[6],m[7],m[8]),
+                        make_point(m[9],m[10],m[11]));
+                    auto it=gpu_3do_gl_cache.find(inst->id);
+                    if(it==gpu_3do_gl_cache.end())
+                        it=gpu_3do_gl_cache.emplace(inst->id,
+                            std::make_unique<gpu_3do_gl_mesh>(
+                                *inst->geometry)).first;
+                    for(auto const &g:inst->geometry->groups) {
+                        if(g.count<3U || (g.face_type&2U))continue;
+                        auto tex=resolve_gpu_3do_material(g);
+                        bool cutout=tex.masked||tex.alpha||tex.dithered;
+                        if(tex.albedo_source==0 || tex.special ||
+                           tex.emissive_only || tex.post_exempt ||
+                           tex.opacity<0.999f ||
+                           (cutout && tex.albedo_source!=1))continue;
+                        if((g.face_type&1U) || g.nonplanar)
+                            gl::disable(gl::capability::cull_face);
+                        else {
+                            gl::enable(gl::capability::cull_face);
+                            gl::set_face_cull_mode(gpu_3do_reversed_winding(m)
+                                ?gl::face_mode::front:gl::face_mode::back);
+                        }
+                        shadow_material(tex,cutout);
+                        gl::bind_vertex_array(it->second->vao);
+                        gl::draw_elements(gl::element_type::triangles,g.count,
+                            gl::index_type::uint32,static_cast<ptrdiff_t>(
+                                g.offset*sizeof(uint32_t)));
+                        any=true;
+                    }
+                }
+                if(any) {
+                    sun_dynamic_views.push_back(view);
+                    sun_dynamic_atlas_owners.insert(object->key);
+                }
+            }
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            gl::disable(gl::capability::cull_face);
+            gl::set_face_cull_mode(gl::face_mode::back);
+            gl::set_active_texture_unit(0);
+            gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 gl::default_framebuffer);
+            if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
+                LOG_INFO("SUN dynamic shadow atlas Things=",
+                         sun_dynamic_views.size()," candidates=",sorted.size());
+        }
+
         void draw_sun_shadow_map()
         {
             sun_shadow_ready=false;
             sun_shadow_cascade_ready={{false,false}};
+            sun_dynamic_views.clear();
+            sun_dynamic_atlas_owners.clear();
             if(!the_config->enable_sun_shadows)return;
             auto sun_failure=[&](char const *reason) {
                 if(the_config->profile_renderer &&
@@ -3947,6 +4127,9 @@ namespace jkgm {
                 sun_failure("render camera unavailable");
                 return;
             }
+            // Atlas first: exclude only successfully drawn Things from CSM.
+            // Excess candidates retain the normal cascade fallback.
+            draw_sun_dynamic_shadow_atlas(world_view);
             float const horizontal=std::tan(camera.fov*
                 (3.14159265358979323846f/360.0f));
             float const vertical=horizontal*float(get<y>(conf_scr_res))/
@@ -4049,7 +4232,9 @@ namespace jkgm {
             std::vector<sun_model_draw> models;
             for(auto const &instance:frame_gpu_3do_instances) {
                 if(!instance.casts_sun_shadows ||
-                   !instance.geometry || instance.is_projected_decal)continue;
+                   !instance.geometry || instance.is_projected_decal ||
+                   !sun_shadow_caster_in_static_cascades(
+                       instance.shadow_owner,sun_dynamic_atlas_owners))continue;
                 auto const &m=instance.transform;
                 for(auto const &group:instance.geometry->groups) {
                     if(group.count<3U)continue;
@@ -4123,6 +4308,8 @@ namespace jkgm {
             gl::set_depth_mask(true);
             gl::set_depth_function(gl::comparison_function::less);
             gl::clear_buffer_depth(1.0f);
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(1.25f,1.5f);
             auto &prog=*ogs->spotlight_shadow_depth_program;
             prog.use_program();
             auto vec=[](decal_vec3 const &a){return make_point(a[0],a[1],a[2]);};
@@ -4183,6 +4370,7 @@ namespace jkgm {
                     gl::index_type::uint32,static_cast<ptrdiff_t>(
                         group.offset*sizeof(uint32_t)));
             }
+            glDisable(GL_POLYGON_OFFSET_FILL);
             gl::disable(gl::capability::cull_face);
             gl::set_face_cull_mode(gl::face_mode::back);
             gl::set_active_texture_unit(0);
@@ -4197,170 +4385,6 @@ namespace jkgm {
             } // cascade
             sun_shadow_ready=sun_shadow_cascade_ready[0] &&
                              sun_shadow_cascade_ready[1];
-        }
-
-        void draw_sun_dynamic_shadow_atlas()
-        {
-            sun_dynamic_views.clear();
-            if(!the_config->enable_sun_shadows ||
-               !the_config->enable_sun_dynamic_shadows ||
-               !sun_shadow_ready || !ogs->spotlight_shadow_depth_program)return;
-            auto camera=read_active_render_camera();
-            if(!camera.valid)return;
-            struct candidate {
-                uint64_t key=0;
-                std::vector<gpu_3do_instance const *> parts;
-                decal_volume_aabb bounds{};
-                float distance2=0.0f;
-                bool has_bounds=false;
-            };
-            std::map<uint64_t,candidate> keyed;
-            for(auto const &inst:frame_gpu_3do_instances) {
-                if(!inst.geometry || !inst.casts_sun_shadows ||
-                   !inst.dynamic_sun_caster || !inst.shadow_owner ||
-                   inst.is_projected_decal)continue;
-                auto &c=keyed[inst.shadow_owner];
-                c.key=inst.shadow_owner;c.parts.push_back(&inst);
-                auto const &m=inst.transform;
-                for(auto const &g:inst.geometry->groups) {
-                    if(g.count<3U || (g.face_type&2U))continue;
-                    for(int j=0;j<8;++j) {
-                        float x=(j&1)?g.bounds_max[0]:g.bounds_min[0];
-                        float y=(j&2)?g.bounds_max[1]:g.bounds_min[1];
-                        float z=(j&4)?g.bounds_max[2]:g.bounds_min[2];
-                        decal_vec3 p{{m[0]*x+m[3]*y+m[6]*z+m[9],
-                                      m[1]*x+m[4]*y+m[7]*z+m[10],
-                                      m[2]*x+m[5]*y+m[8]*z+m[11]}};
-                        if(!decal_finite(p))continue;
-                        // Valid geometry can be positioned at world origin.
-                        // Track initialization explicitly, not via zero AABBs.
-                        if(!c.has_bounds) {
-                            c.bounds.low=p;c.bounds.high=p;
-                            c.has_bounds=true;
-                        }
-                        else for(int k=0;k<3;++k) {
-                            c.bounds.low[k]=std::min(c.bounds.low[k],p[k]);
-                            c.bounds.high[k]=std::max(c.bounds.high[k],p[k]);
-                        }
-                    }
-                }
-            }
-            std::vector<candidate *> sorted;
-            for(auto &entry:keyed) {
-                auto &c=entry.second;
-                if(!c.has_bounds)continue;
-                auto const &lo=c.bounds.low,&hi=c.bounds.high;
-                c.distance2=0.0f;
-                for(int i=0;i<3;++i) {
-                    float d=(lo[i]+hi[i])*0.5f-camera.position[i];
-                    c.distance2+=d*d;
-                }
-                sorted.push_back(&c);
-            }
-            std::sort(sorted.begin(),sorted.end(),
-                [](candidate const *a,candidate const *b) {
-                    return a->distance2<b->distance2;
-                });
-            if(sorted.empty())return;
-            if(!sun_dynamic_target)
-                sun_dynamic_target=std::make_unique<sun_dynamic_shadow_gpu>();
-            if(!sun_dynamic_target->complete)return;
-            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                                 sun_dynamic_target->fbo);
-            gl::set_viewport(make_box(make_point(0,0),make_size(1024,512)));
-            gl::disable(gl::capability::blend);
-            gl::disable(gl::capability::cull_face);
-            gl::enable(gl::capability::depth_test);
-            gl::set_depth_mask(true);
-            gl::set_depth_function(gl::comparison_function::less);
-            gl::clear_buffer_depth(1.0f);
-            auto &prog=*ogs->spotlight_shadow_depth_program;
-            prog.use_program();
-            auto vec=[](decal_vec3 const &p) {
-                return make_point(p[0],p[1],p[2]);
-            };
-            auto shadow_material=[&](gpu_3do_texture const &tex,bool cutout) {
-                if(!cutout) {
-                    prog.set_shadow_alpha(false,make_point(1.0f,1.0f),
-                        make_point(0.0f,0.0f),0.5f,1.0f,false,0.0f);
-                    return;
-                }
-                float w=gpu_3do_model_uv_extent(tex.width);
-                float h=gpu_3do_model_uv_extent(tex.height);
-                bool second=tex.albedo_transition>0.0f && tex.albedo_source2==1;
-                prog.set_shadow_alpha(true,
-                    make_point(1.0f/std::max(w,1.0f),
-                               1.0f/std::max(h,1.0f)),
-                    tex.albedo_scroll,
-                    tex.masked?tex.alpha_cutoff:(tex.dithered?0.5f:0.998f),
-                    tex.opacity,second,tex.albedo_transition);
-                gl::set_active_texture_unit(11);
-                gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                 tex.texture);
-                if(second) {
-                    gl::set_active_texture_unit(12);
-                    gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                     tex.texture2);
-                }
-            };
-            for(auto *object:sorted) {
-                if(sun_dynamic_views.size()>=sun_dynamic_shadow_slots)break;
-                sun_shadow_projection view{};
-                if(!make_sun_dynamic_shadow_projection(
-                    sun_shadow_views[1],object->bounds,view))continue;
-                int tile=int(sun_dynamic_views.size());
-                int px=(tile%4)*256+sun_dynamic_shadow_inset;
-                int py=(tile/4)*256+sun_dynamic_shadow_inset;
-                gl::set_viewport(make_box(make_point(px,py),
-                                          make_size(252,252)));
-                prog.set_orthographic_light(vec(view.origin),vec(view.right),
-                    vec(view.up),vec(view.forward),
-                    make_point(view.width,view.height,view.range,0.0f));
-                bool any=false;
-                for(auto const *inst:object->parts) {
-                    auto const &m=inst->transform;
-                    prog.set_model(make_point(m[0],m[1],m[2]),
-                        make_point(m[3],m[4],m[5]),make_point(m[6],m[7],m[8]),
-                        make_point(m[9],m[10],m[11]));
-                    auto it=gpu_3do_gl_cache.find(inst->id);
-                    if(it==gpu_3do_gl_cache.end())
-                        it=gpu_3do_gl_cache.emplace(inst->id,
-                            std::make_unique<gpu_3do_gl_mesh>(
-                                *inst->geometry)).first;
-                    for(auto const &g:inst->geometry->groups) {
-                        if(g.count<3U || (g.face_type&2U))continue;
-                        auto tex=resolve_gpu_3do_material(g);
-                        bool cutout=tex.masked||tex.alpha||tex.dithered;
-                        if(tex.albedo_source==0 || tex.special ||
-                           tex.emissive_only || tex.post_exempt ||
-                           tex.opacity<0.999f ||
-                           (cutout && tex.albedo_source!=1))continue;
-                        if((g.face_type&1U) || g.nonplanar)
-                            gl::disable(gl::capability::cull_face);
-                        else {
-                            gl::enable(gl::capability::cull_face);
-                            gl::set_face_cull_mode(gpu_3do_reversed_winding(m)
-                                ?gl::face_mode::front:gl::face_mode::back);
-                        }
-                        shadow_material(tex,cutout);
-                        gl::bind_vertex_array(it->second->vao);
-                        gl::draw_elements(gl::element_type::triangles,g.count,
-                            gl::index_type::uint32,static_cast<ptrdiff_t>(
-                                g.offset*sizeof(uint32_t)));
-                        any=true;
-                    }
-                }
-                if(any)sun_dynamic_views.push_back(view);
-            }
-            gl::disable(gl::capability::cull_face);
-            gl::set_face_cull_mode(gl::face_mode::back);
-            gl::set_active_texture_unit(0);
-            gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
-            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                                 gl::default_framebuffer);
-            if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
-                LOG_INFO("SUN dynamic shadow atlas Things=",
-                         sun_dynamic_views.size()," candidates=",sorted.size());
         }
 
         bool shadow_matches_light(spotlight_instance const &spot) const
@@ -5130,7 +5154,6 @@ namespace jkgm {
                     profile_frame.timings[profile_idx(profile_stage::opaque_pass)]);
                 draw_spotlight_shadow_map();
                 draw_sun_shadow_map();
-                draw_sun_dynamic_shadow_atlas();
                 draw_game_gbuffer_pass(trimdl, posterize_lighting);
             }
             {

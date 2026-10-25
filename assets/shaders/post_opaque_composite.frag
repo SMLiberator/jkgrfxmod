@@ -69,12 +69,16 @@ bool sun_shadow_inside(vec3 coord)
            all(lessThanEqual(coord,vec3(1.0)));
 }
 float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
-                        bool soft)
+                        float incidence,bool soft)
 {
     // A 24-bit normalized orthographic depth map avoids quantizing the
     // world's full light-axis range into only 65536 possible distances.
     // Keep a small world-space offset for geometric precision/roundoff.
-    float bias=max(4.0/16777215.0,0.015/max(range,0.001));
+    // Receiver bias grows toward grazing sunlight, where quantization
+    // otherwise causes the surface to repeatedly shadow itself.
+    float grazing=1.0-clamp(incidence,0.0,1.0);
+    float bias_world=0.008+0.027*grazing*grazing;
+    float bias=max(4.0/16777215.0,bias_world/max(range,0.001));
     vec2 texel=1.0/vec2(textureSize(map,0));
     float receiver=coordinate.z-bias;
     // A single hardware PCF lookup preserves small character silhouettes:
@@ -91,7 +95,7 @@ float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
     }
     return visible/9.0;
 }
-float sun_shadow_visibility(vec3 world_position)
+float sun_shadow_visibility(vec3 world_position,float incidence)
 {
     if(sun_shadow_active==0)return 1.0;
     float camera_depth=dot(world_position-camera_origin.xyz,
@@ -107,24 +111,24 @@ float sun_shadow_visibility(vec3 world_position)
     float transition_end=sun_shadow_split*0.9375;
     if(use_near && camera_depth<transition_start)
         return sun_shadow_filter(sun_shadow_image,near_uv,
-                                 sun_shadow_limits.z,false);
+                                 sun_shadow_limits.z,incidence,false);
     vec3 far_uv=sun_shadow_coordinates(world_position,sun_shadow_far_origin,
         sun_shadow_far_right,sun_shadow_far_up,
         sun_shadow_far_forward,sun_shadow_far_limits);
     if(!sun_shadow_inside(far_uv))
         return use_near
-            ? sun_shadow_filter(sun_shadow_image,near_uv,sun_shadow_limits.z,false)
+            ? sun_shadow_filter(sun_shadow_image,near_uv,sun_shadow_limits.z,incidence,false)
             : 1.0;
     float far_visibility=sun_shadow_filter(sun_shadow_far_image,
-        far_uv,sun_shadow_far_limits.z,true);
+        far_uv,sun_shadow_far_limits.z,incidence,true);
     if(!use_near)return far_visibility;
     float near_visibility=sun_shadow_filter(sun_shadow_image,
-        near_uv,sun_shadow_limits.z,false);
+        near_uv,sun_shadow_limits.z,incidence,false);
     float blend=smoothstep(transition_start,transition_end,camera_depth);
     return mix(near_visibility,far_visibility,blend);
 }
 
-float sun_dynamic_shadow_visibility(vec3 position)
+float sun_dynamic_shadow_visibility(vec3 position,float incidence)
 {
     float visibility=1.0;
     for(int i=0;i<8;++i) {
@@ -135,7 +139,10 @@ float sun_dynamic_shadow_visibility(vec3 position)
         if(!sun_shadow_inside(uv))continue;
         vec2 tile=vec2(float(i%4),float(i/4));
         vec2 atlas_uv=(tile*256.0+2.0+uv.xy*252.0)/vec2(1024.0,512.0);
-        float bias=max(4.0/16777215.0,0.012/max(sun_dynamic_limits[i].z,0.001));
+        float grazing=1.0-clamp(incidence,0.0,1.0);
+        float bias_world=0.006+0.032*grazing*grazing;
+        float bias=max(4.0/16777215.0,
+                       bias_world/max(sun_dynamic_limits[i].z,0.001));
         visibility=min(visibility,texture(sun_dynamic_image,
             vec3(atlas_uv,uv.z-bias)));
         if(visibility<=0.001)break;
@@ -299,8 +306,9 @@ void main()
             float incidence=max(dot(normal,sun_shadow_direction),0.0);
             if(incidence>0.0) {
                 vec3 world_position=reconstruct_scene_world(depth);
-                float visibility=min(sun_shadow_visibility(world_position),
-                                     sun_dynamic_shadow_visibility(world_position));
+                float visibility=min(
+                    sun_shadow_visibility(world_position,incidence),
+                    sun_dynamic_shadow_visibility(world_position,incidence));
                 // JK's vertex colors already contain authored lighting. If
                 // only the newly added sun term is shadowed, a bright baked
                 // floor barely changes under a caster. Keep a generous

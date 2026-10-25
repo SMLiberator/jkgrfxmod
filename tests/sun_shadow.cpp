@@ -4,11 +4,21 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <unordered_set>
 
 using namespace jkgm;
 
 int main()
 {
+    std::unordered_set<uint64_t> owners{0x1111222233334444ULL};
+    assert(!sun_shadow_caster_in_static_cascades(
+        0x1111222233334444ULL,owners));
+    assert(sun_shadow_caster_in_static_cascades(
+        0x1111222233334445ULL,owners));
+    assert(sun_shadow_caster_in_static_cascades(0,owners));
+    owners.clear();
+    assert(sun_shadow_caster_in_static_cascades(
+        0x1111222233334444ULL,owners));
     // Empty-world data is a valid shadow shell for 3DO-only levels.
     constexpr uintptr_t world_addr=0x120000U;
     std::array<unsigned char,0xb0> header{};

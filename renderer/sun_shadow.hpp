@@ -8,8 +8,17 @@
 #include <cmath>
 #include <limits>
 #include <vector>
+#include <unordered_set>
 
 namespace jkgm {
+
+// Only atlas-rendered owners leave the broad cascades. Unknown owners
+// and overflowing/unrendered Things retain their low-res shadow fallback.
+inline bool sun_shadow_caster_in_static_cascades(
+    uint64_t owner,std::unordered_set<uint64_t> const &atlas_owners)
+{
+    return owner==0 || atlas_owners.find(owner)==atlas_owners.end();
+}
 
 // Two nested camera-depth regions. The far cascade overlaps the near
 // cascade, so near receivers can fall back if a light-space edge is crossed.
