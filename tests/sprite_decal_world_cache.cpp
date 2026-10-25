@@ -93,6 +93,14 @@ int main(){
     assert(result.valid_world && result.receivers==3);
     assert(result.broadphase_candidates==3);
     assert(result.triangles.size()==6);
+    // Reject an opposite-facing slab underside without sacrificing
+    // neighboring perpendicular-edge projections.
+    index.receivers[0].normal={{0,1,0}};
+    auto backside=project_cached_decal_world(index,p);
+    assert(backside.receivers==2 && backside.triangles.size()==4);
+    assert(backside.skipped_backfaces==1);
+    index.receivers[0].normal={{0,-1,0}};
+    assert(project_cached_decal_world(index,p).triangles.size()==6);
     p.origin[0]=10;
     auto far=project_cached_decal_world(index,p);
     assert(reads==after_load);
