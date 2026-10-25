@@ -571,7 +571,7 @@ namespace jkgm {
         spotlight_shadow_projection spotlight_shadow_view{};
         bool spotlight_shadow_ready=false;
         bool spotlight_shadow_cached=false;
-        bool spotlight_shadow_had_3do=false;
+        uint64_t spotlight_shadow_3do_signature=0;
         uint32_t spotlight_shadow_world=0;
         uint64_t spotlight_shadow_revision=0;
         std::set<std::pair<uint32_t, int>> runtime_missing_images;
@@ -891,7 +891,7 @@ namespace jkgm {
                 }
                 spotlight_shadow_ready=false;
                 spotlight_shadow_cached=false;
-                spotlight_shadow_had_3do=false;
+                spotlight_shadow_3do_signature=0;
                 // Pausing/menu transitions may evict and reload D3D textures.
                 // Refresh the native MAT resolver on the next game frame,
                 // instead of letting the previous one-second timer cause a flash.
@@ -3533,9 +3533,29 @@ namespace jkgm {
                 }
             }
 
-            // Static-only shadows need a new depth render only when the
-            // projector/world changes. No CPU/GPU depth readback or per-frame
-            // draw is necessary for stationary flashlights or lamps.
+            // Hash the actual opaque 3DO caster ranges and their node
+            // transforms. A parked car under a fixed light is effectively
+            // static: it should NOT force a depth pass every frame.
+            uint64_t caster_signature=14695981039346656037ULL;
+            auto hash_u32=[&](uint32_t v) {
+                for(int b=0;b<4;++b) {
+                    caster_signature^=uint64_t((v>>(b*8))&255U);
+                    caster_signature*=1099511628211ULL;
+                }
+            };
+            for(auto const &caster:model_casters) {
+                hash_u32(uint32_t(caster.instance->id));
+                hash_u32(uint32_t(caster.instance->id>>32));
+                hash_u32(caster.group->offset);
+                hash_u32(caster.group->count);
+                for(float value:caster.instance->transform) {
+                    uint32_t bits=0;
+                    std::memcpy(&bits,&value,sizeof(bits));
+                    hash_u32(bits);
+                }
+            }
+            // No CPU/GPU depth readback or per-frame geometry draw is
+            // necessary when both light and caster transforms are unchanged.
             auto same=[](std::array<float,3> const &a,
                          std::array<float,3> const &b) {
                 for(int i=0;i<3;++i)
@@ -3553,8 +3573,8 @@ namespace jkgm {
                 std::fabs(chosen.width-spotlight_shadow_light.width)<0.00001f &&
                 std::fabs(chosen.height-spotlight_shadow_light.height)<0.00001f &&
                 std::fabs(chosen.range-spotlight_shadow_light.range)<0.00001f;
-            if(unchanged && model_casters.empty() &&
-               !spotlight_shadow_had_3do) {
+            if(unchanged &&
+               caster_signature==spotlight_shadow_3do_signature) {
                 spotlight_shadow_ready=true;
                 return;
             }
@@ -3611,7 +3631,7 @@ namespace jkgm {
             spotlight_shadow_world=world;
             spotlight_shadow_revision=map.revision;
             spotlight_shadow_cached=true;
-            spotlight_shadow_had_3do=!model_casters.empty();
+            spotlight_shadow_3do_signature=caster_signature;
             spotlight_shadow_ready=true;
         }
 
