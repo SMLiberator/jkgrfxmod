@@ -3562,6 +3562,7 @@ namespace jkgm {
             struct shadow_world_cutout {
                 spotlight_shadow_surface_range range;
                 gpu_3do_texture texture;
+                int32_t current_cel=-1;
             };
             std::vector<GLsizei> opaque_world_counts;
             std::vector<void const *> opaque_world_offsets;
@@ -3575,9 +3576,16 @@ namespace jkgm {
                 gpu_3do_group material_group{};
                 material_group.material=surface.material;
                 material_group.cel=surface.cel;
+                // SetSurfaceCel can change world surface cel without
+                // reallocating the static polygon snapshot.
+                int32_t active_cel=0;
+                auto const cel_address=map.world.surfaces_addr+
+                    uintptr_t(surface.surface_index)*0x5cU+0x38U;
+                if(engine_material_debug::read_object(cel_address,active_cel))
+                    material_group.cel=active_cel;
                 // Reuse the frame-scoped material lookup shared by 3DOs.
                 uint64_t const mat_key=
-                    (uint64_t(surface.material)<<32)|uint32_t(surface.cel);
+                    (uint64_t(surface.material)<<32)|uint32_t(material_group.cel);
                 auto found=gpu_frame_material_cache.find(mat_key);
                 if(found==gpu_frame_material_cache.end())
                     found=gpu_frame_material_cache.emplace(
@@ -3594,7 +3602,7 @@ namespace jkgm {
                 // A shadow never treats unresolved transparent adjoins as
                 // opaque. Resolved non-alpha adjoins cast solid shadows.
                 if(cutout)
-                    masked_world.push_back({range,tex});
+                    masked_world.push_back({range,tex,material_group.cel});
                 else {
                     opaque_world_counts.push_back(static_cast<GLsizei>(range.count));
                     opaque_world_offsets.push_back(reinterpret_cast<void const *>(
@@ -3638,7 +3646,7 @@ namespace jkgm {
             for(auto const &draw:masked_world) {
                 auto const &surface=map.world.receivers[draw.range.source_index];
                 hash_u32(surface.surface_index);
-                hash_material(surface.material,surface.cel,draw.texture);
+                hash_material(surface.material,draw.current_cel,draw.texture);
             }
             for(auto const &caster:model_casters) {
                 if(caster.cutout)
