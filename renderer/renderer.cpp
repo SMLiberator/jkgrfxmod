@@ -4690,14 +4690,31 @@ namespace jkgm {
             mix_data(ray.data(),3*sizeof(float));
             mix_data(cell.data(),cell.size()*sizeof(int32_t));
             mix_data(&runtime_controls.revision,sizeof(runtime_controls.revision));
+            // Most levels keep the entire SithSurface array in one readable
+            // native heap allocation. Validate that range ONCE, then read
+            // individual GeoModes without thousands of VirtualQuery calls.
+            // Non-contiguous allocations retain the original safe fallback.
+            size_t const surface_bytes=
+                size_t(geometry.surface_count)*size_t(0x5cU);
+            bool const contiguous=surface_bytes>0U &&
+                engine_camera_detail::readable(
+                    geometry.surfaces_addr,surface_bytes);
+            auto const *native_surfaces=contiguous
+                ?reinterpret_cast<uint8_t const *>(geometry.surfaces_addr)
+                :nullptr;
             std::vector<uint8_t> receiver_visible(geometry.receivers.size(),0);
+            std::vector<uint32_t> receiver_modes(geometry.receivers.size(),0U);
             for(size_t i=0;i<geometry.receivers.size();++i) {
                 auto const &s=geometry.receivers[i];
                 uint32_t mode=0;
-                uintptr_t const addr=geometry.surfaces_addr+
+                uintptr_t const offset=
                     uintptr_t(s.surface_index)*0x5cU+0x1cU;
-                if(!engine_material_debug::read_object(addr,mode))
+                if(native_surfaces)
+                    std::memcpy(&mode,native_surfaces+offset,sizeof(mode));
+                else if(!engine_material_debug::read_object(
+                    geometry.surfaces_addr+offset,mode))
                     mode=0;
+                receiver_modes[i]=mode;
                 mix_data(&mode,sizeof(mode));
                 receiver_visible[i]=uint8_t(
                     sun_shadow_world_face_visible(mode,s.normal,dir));
@@ -4776,10 +4793,7 @@ namespace jkgm {
             for(uint32_t index:nearby) {
                 if(casters>=max_casters/2U || output.size()>=max_triangles)break;
                 auto const &s=geometry.receivers[index];
-                uint32_t mode=0;
-                uintptr_t const addr=geometry.surfaces_addr+
-                    uintptr_t(s.surface_index)*0x5cU+0x1cU;
-                engine_material_debug::read_object(addr,mode);
+                uint32_t const mode=receiver_modes[index];
                 // Skip masked/solid-adjoin geometry in this first cut:
                 // silhouettes must not fill the holes of grates or glass.
                 if(mode<2U || s.solid_adjoin || s.polygon.size()<3U)continue;
@@ -4951,7 +4965,8 @@ namespace jkgm {
                 LOG_INFO("SUN projected geometry world_casters=",world_casters,
                          " 3do_casters=",model_casters,
                          " projected_triangles=",projected_sun_cached_vertices.size()/3U,
-                         " cache_hit=",cache_hit?1:0);
+                         " cache_hit=",cache_hit?1:0,
+                         " bulk_geomodes=",contiguous?1:0);
         }
 
         void draw_game_gbuffer_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
