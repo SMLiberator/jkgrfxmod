@@ -890,16 +890,27 @@ The snapshot also reports `listener_input_camera`, `sound_slots`,
 `listener_input_pos`, `listener_input_front` and `listener_input_up`
 when the executable's native audio-tick code signatures match. These are
 the original camera/listener inputs JK prepares for its listener-update
-routine, **not** a readback of Wine's listener state or proof that an
-update call executed. Walk and turn in a level to see whether the values
-change. A missing camera or unchanged input helps narrow the next test;
-a changing input with absent Wine spatial traces points to the update
-path or the interface-call boundary.
+routine, **not** evidence that an update call executed.
 
-These are passive `GetModuleHandleA`/`GetProcAddress` queries and guarded
-engine memory reads. They do not load new libraries, call A3D/DirectSound
-methods, create buffers or install hooks. Unknown executables report
-`unsupported executable/signature` and do not read these addresses.
+It now additionally queries the *existing* DirectSound3D listener's
+`GetAllParameters` method when the method's vtable entry is verified to
+belong to the already loaded `dsound.dll`. This is a read-only COM
+operation, not an audio hook or a setter. The resulting `ds3d_actual_pos`,
+`ds3d_actual_front`, and `ds3d_actual_up` show what DirectSound currently
+holds. The position may differ in scale from `listener_input_pos`:
+JK converts world units to its sound-space units before sending them.
+
+Walk and rotate the camera. If both input and actual values change,
+listener position/orientation reaches DirectSound. If only inputs
+change, examine the native listener-update call path. If the readback
+reports `unverified-dsound-method` or `invalid-vtable`, **do not**
+interpret that as a frozen listener; the diagnostic deliberately skipped
+an unsafe or unverified call.
+
+All probes require `profile_audio` and the audited executable signature.
+They do not load additional libraries, create devices, modify audio
+settings or install hooks. Unknown executables report
+`unsupported executable/signature` and avoid these engine/COM queries.
 
 For a useful A/B test, keep the same Wine prefix and DLLs, record one run
 with ordinary sound and another after selecting A3D in JK's sound menu
