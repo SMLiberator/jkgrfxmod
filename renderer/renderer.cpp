@@ -4223,8 +4223,20 @@ namespace jkgm {
                 hash_float(get<y>(draw.texture.albedo_scroll));
                 hash_float(draw.texture.albedo_transition);
             }
-            // World-only signature excludes all moving 3DO transforms.
-            uint64_t const static_signature=caster_signature;
+            // Keep the stable world state and add stationary 3DOs, but
+            // NEVER include moving/unknown Thing geometry in this key.
+            uint64_t static_signature=caster_signature;
+            auto hash_static_u32=[&](uint32_t value) {
+                for(int b=0;b<4;++b) {
+                    static_signature^=uint64_t((value>>(b*8))&255U);
+                    static_signature*=1099511628211ULL;
+                }
+            };
+            auto hash_static_float=[&](float value) {
+                uint32_t bits=0;
+                std::memcpy(&bits,&value,sizeof(bits));
+                hash_static_u32(bits);
+            };
 
             // Include submitted 3DO transforms. The native hook is enabled
             // when this feature is on; model groups share their normal GPU
@@ -4233,7 +4245,7 @@ namespace jkgm {
             struct sun_model_draw {gpu_3do_instance const *instance;
                                    gpu_3do_group const *group;
                                    gpu_3do_texture texture;bool cutout;};
-            std::vector<sun_model_draw> models;
+            std::vector<sun_model_draw> models,static_models;
             // The expensive group-box transforms were computed once before
             // fitting the sun projection; both cascades use those exact AABBs.
             // Share one per-frame material lookup across world and 3DOs,
@@ -4261,22 +4273,39 @@ namespace jkgm {
                 if(tex.albedo_source==0 || tex.special || tex.emissive_only ||
                    tex.post_exempt || tex.opacity<0.999f ||
                    (cutout && tex.albedo_source!=1))continue;
-                models.push_back({&instance,&group,tex,cutout});
-                hash_u32(uint32_t(instance.id));hash_u32(uint32_t(instance.id>>32));
-                hash_u32(group.offset);hash_u32(group.count);
-                if(cutout) {
-                    hash_float(tex.alpha_cutoff);hash_float(tex.opacity);
-                    hash_float(get<x>(tex.albedo_scroll));
-                    hash_float(get<y>(tex.albedo_scroll));
-                    hash_float(tex.albedo_transition);
-                }
-                for(float v:instance.transform)hash_float(v);
+                // Verified non-moving SithThings may join the cached static
+                // layer. An unknown owner stays dynamic (conservative), and
+                // even a path/physics Thing parked in place remains dynamic.
+                bool const stable=the_config->enable_sun_static_cache &&
+                    map.static_complete && instance.shadow_owner!=0 &&
+                    !instance.dynamic_sun_caster;
+                (stable?static_models:models).push_back(
+                    {&instance,&group,tex,cutout});
+                auto hash_model=[&](auto &&integer,auto &&floating) {
+                    integer(uint32_t(instance.id));
+                    integer(uint32_t(instance.id>>32));
+                    integer(group.offset);integer(group.count);
+                    integer(uint32_t(instance.shadow_owner));
+                    integer(uint32_t(instance.shadow_owner>>32));
+                    integer(uint32_t(group.material));
+                    integer(uint32_t(group.cel));
+                    if(cutout) {
+                        floating(tex.alpha_cutoff);floating(tex.opacity);
+                        floating(get<x>(tex.albedo_scroll));
+                        floating(get<y>(tex.albedo_scroll));
+                        floating(tex.albedo_transition);
+                    }
+                    for(float v:instance.transform)floating(v);
+                };
+                hash_model(hash_u32,hash_float);
+                if(stable)hash_model(hash_static_u32,hash_static_float);
             }
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN shadow caster batches world=",
                          counts.size()+world_cutouts.size(),
-                         " 3do=",models.size()," skybox_skipped=",
+                         " 3do=",models.size()+static_models.size(),
+                         " static_3do=",static_models.size()," skybox_skipped=",
                          skipped_skybox_instances," cascade=",cascade,
                          " map=",map.resolution);
             bool unchanged=sun_shadow_cascade_cached[cascade] &&
@@ -4364,6 +4393,40 @@ namespace jkgm {
                         gl::index_type::uint32,static_cast<ptrdiff_t>(
                             draw.range.first_index*sizeof(uint32_t)));
                 }
+            }
+            // Draw the static non-world 3DOs into the SAME cached depth
+            // target as SithWorld surfaces. Their signatures include pose,
+            // material/cel, mesh instance and validated SithThing owner.
+            auto draw_models=[&](std::vector<sun_model_draw> const &draws) {
+                for(auto const &draw:draws) {
+                    auto const &instance=*draw.instance;auto const &group=*draw.group;
+                    auto it=gpu_3do_gl_cache.find(instance.id);
+                    if(it==gpu_3do_gl_cache.end())
+                        it=gpu_3do_gl_cache.emplace(instance.id,
+                            std::make_unique<gpu_3do_gl_mesh>(*instance.geometry)).first;
+                    auto const &m=instance.transform;
+                    prog.set_model(make_point(m[0],m[1],m[2]),
+                        make_point(m[3],m[4],m[5]),make_point(m[6],m[7],m[8]),
+                        make_point(m[9],m[10],m[11]));
+                    if((group.face_type&0x1U)!=0 || group.nonplanar)
+                        gl::disable(gl::capability::cull_face);
+                    else {
+                        gl::enable(gl::capability::cull_face);
+                        gl::set_face_cull_mode(gpu_3do_reversed_winding(m)
+                            ?gl::face_mode::front:gl::face_mode::back);
+                    }
+                    gl::bind_vertex_array(it->second->vao);
+                    if(draw.cutout)set_cutout(draw.texture,false);
+                    else prog.set_shadow_alpha(false,
+                        make_point(1.0f,1.0f),make_point(0.0f,0.0f),
+                        0.5f,1.0f,false,0.0f);
+                    gl::draw_elements(gl::element_type::triangles,group.count,
+                        gl::index_type::uint32,static_cast<ptrdiff_t>(
+                            group.offset*sizeof(uint32_t)));
+                }
+            };
+            if(!static_same) {
+                draw_models(static_models);
                 if(map.static_complete &&
                    the_config->enable_sun_static_cache) {
                     sun_shadow_static_cached[cascade]=true;
@@ -4388,29 +4451,7 @@ namespace jkgm {
                     gl::framebuffer_blit_filter::nearest);
             }
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,cascade_target);
-            for(auto const &draw:models) {
-                auto const &instance=*draw.instance;auto const &group=*draw.group;
-                auto it=gpu_3do_gl_cache.find(instance.id);
-                if(it==gpu_3do_gl_cache.end())
-                    it=gpu_3do_gl_cache.emplace(instance.id,
-                        std::make_unique<gpu_3do_gl_mesh>(*instance.geometry)).first;
-                auto const &m=instance.transform;
-                prog.set_model(make_point(m[0],m[1],m[2]),
-                    make_point(m[3],m[4],m[5]),make_point(m[6],m[7],m[8]),
-                    make_point(m[9],m[10],m[11]));
-                if((group.face_type&0x1U)!=0 || group.nonplanar)
-                    gl::disable(gl::capability::cull_face);
-                else {gl::enable(gl::capability::cull_face);
-                      gl::set_face_cull_mode(gpu_3do_reversed_winding(m)
-                          ?gl::face_mode::front:gl::face_mode::back);}
-                gl::bind_vertex_array(it->second->vao);
-                if(draw.cutout)set_cutout(draw.texture,false);
-                else prog.set_shadow_alpha(false,make_point(1.0f,1.0f),make_point(0.0f,0.0f),
-                                           0.5f,1.0f,false,0.0f);
-                gl::draw_elements(gl::element_type::triangles,group.count,
-                    gl::index_type::uint32,static_cast<ptrdiff_t>(
-                        group.offset*sizeof(uint32_t)));
-            }
+            draw_models(models);
             glDisable(GL_POLYGON_OFFSET_FILL);
             gl::disable(gl::capability::cull_face);
             gl::set_face_cull_mode(gl::face_mode::back);
@@ -4422,7 +4463,9 @@ namespace jkgm {
                          " static_cache_hit=",static_same?1:0,
                          " world_batches_redrawn=",static_same?0:
                              counts.size()+world_cutouts.size(),
-                         " model_batches=",models.size());
+                         " moving_model_batches=",models.size(),
+                         " static_model_batches_redrawn=",
+                            static_same?0:static_models.size());
             sun_shadow_views[cascade]=view;
             sun_shadow_directions[cascade]=direction;
             sun_shadow_worlds[cascade]=world;
