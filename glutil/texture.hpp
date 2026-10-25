@@ -53,6 +53,7 @@ namespace jkgm::gl {
         rgba16f = 0x881A,
         rgba32f = 0x8814,
         r16f = 0x822D,
+        r8 = 0x8229,
         rg32f = 0x8230,
         depth_component_16 = 0x81A5,
         depth_component_24 = 0x81A6

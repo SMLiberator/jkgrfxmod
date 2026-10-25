@@ -49,6 +49,8 @@ uniform sampler2DShadow sun_shadow_far_image;
 uniform vec3 sun_shadow_far_origin,sun_shadow_far_right;
 uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
+uniform int projected_sun_active;
+uniform sampler2D projected_sun_mask;
 // 4x2 tiles, 256px each, 2px clear guard around the 252px viewport.
 uniform int sun_dynamic_count;
 uniform sampler2DShadow sun_dynamic_image;
@@ -306,9 +308,13 @@ void main()
             float incidence=max(dot(normal,sun_shadow_direction),0.0);
             if(incidence>0.0) {
                 vec3 world_position=reconstruct_scene_world(depth);
-                float visibility=min(
-                    sun_shadow_visibility(world_position,incidence),
-                    sun_dynamic_shadow_visibility(world_position,incidence));
+                // Experimental polygon-projection mode builds an opaque
+                // receiver mask at display resolution, rather than sampling
+                // two sunlight depth cascades plus per-Thing shadow tiles.
+                float visibility=projected_sun_active!=0
+                    ? 1.0-texelFetch(projected_sun_mask,tc,0).r
+                    : min(sun_shadow_visibility(world_position,incidence),
+                          sun_dynamic_shadow_visibility(world_position,incidence));
                 // JK's vertex colors already contain authored lighting. If
                 // only the newly added sun term is shadowed, a bright baked
                 // floor barely changes under a caster. Keep a generous
