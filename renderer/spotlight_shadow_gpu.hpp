@@ -69,7 +69,12 @@ struct spotlight_shadow_gpu {
         gl::bind_buffer(gl::buffer_bind_target::array,vertices);
         gl::enable_vertex_attrib_array(0);
         gl::vertex_attrib_pointer(0,3,gl::vertex_element_type::float32,
-                                  false,sizeof(decal_vec3),0);
+                                  false,sizeof(spotlight_shadow_vertex),
+                                  offsetof(spotlight_shadow_vertex,position));
+        gl::enable_vertex_attrib_array(1);
+        gl::vertex_attrib_pointer(1,2,gl::vertex_element_type::float32,
+                                  false,sizeof(spotlight_shadow_vertex),
+                                  offsetof(spotlight_shadow_vertex,uv));
         gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
         gl::bind_vertex_array(gl::vertex_array_view(0U));
     }
