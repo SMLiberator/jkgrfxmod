@@ -673,28 +673,31 @@ actual 3DO. This is not the GPU-cached model rendering option and is not
 enabled when shadow maps are off. With `"use_model_cache": true`, the
 existing indexed buffers are reused for rendering and shadows.
 
-**Important limitations:**
+**Current behavior and limitations:**
 
-- The depth shader does not yet sample MAT alpha. Solid (impassable) adjoins,
-  including masked grates and transparent glazing, are conservatively
-  excluded from the world shadow caster mesh instead of casting completely
-  opaque rectangular silhouettes. The bars' true cutout shadows are **not**
-  generated yet; some opaque solid-adjoin panels also cease casting.
-- 3DO groups with known translucency, alpha masks, dither, additive/multiply
-  modes or emissive-only materials are excluded from caster submission.
-- 3DO shadows include meshes reached by JK's normal rdModel3 hierarchy
-  traversal. If JK eliminates a Thing/model before invoking its mesh hook,
-  it cannot yet cast a shadow from fully outside the camera view. An
-  independent Thing-level caster collector is still needed for that case.
-- Transparent/fluid faces receive the projected light, but their **received**
-  lighting is not yet occluded by the shadow map. Ordinary opaque surfaces
-  are shadowed. Neither original JK vertex lighting nor emissive material
-  contributions are darkened by the map.
-- The shader reuses the previous depth map when both the light and the
-  participating 3DO mesh identities/transforms are unchanged. Animated or
-  moving casters update the map when their pose or geometry changes. The low
-  256-pixel resolution, one-light budget and four PCF taps are intentional
-  initial performance limits.
+- World casters now retain checked native MAT UV indices, cel and texture
+  offsets. Ordinary opaque surfaces remain a single batched indexed draw;
+  alpha-cutout world faces (grates, fences, masks) sample their current
+  texture alpha in the depth shader so holes transmit light. The same
+  mechanism handles opaque/masked GPU and native-captured 3DO faces.
+  Unresolved or invalid UV/textures fail open instead of casting solid
+  rectangle shadows. The `alpha_cutoff` material setting is honored for
+  masks; mixed native alpha casts only its nearly opaque texels.
+- The selected shadow map is reused for both opaque and forward-blended
+  receivers. It shadows the **added** spotlight contribution, not JK's
+  original baked lighting, ambient or emissive surfaces. Additive/multiply,
+  post-exempt and decal material policies are unchanged.
+- Shader source includes simple alpha transitions and UV scroll values.
+  Dithered shadow casters currently use a stable threshold instead of
+  their visible 4x4 Bayer coverage. Fully transparent glass does not cast
+  colored transmission shadows.
+- 3DO shadows include meshes reached by JK's usual rdModel3 hierarchy.
+  If the engine eliminates an entire model before invoking its mesh hook,
+  it cannot cast shadows from fully outside the camera view. An
+  independent Thing-level collector remains a possible extension.
+- An unchanged light plus unchanged participating 3DO material/transform
+  signature reuses the depth map. A 256px resolution, one-shadowed-light
+  limit and four PCF taps are the deliberate low-cost defaults.
 
 This feature still requires in-game testing on native and cached 3DOs, and
 may be disabled independently without affecting projected spotlight lighting.
