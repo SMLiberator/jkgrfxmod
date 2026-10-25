@@ -281,11 +281,15 @@ namespace jkgm {
         class spotlight_shadow_depth_shader : public opengl_shader {
             gl::uniform_location_id shadow_origin,shadow_right,shadow_up;
             gl::uniform_location_id shadow_forward,shadow_limits;
+            gl::uniform_location_id shadow_model_right,shadow_model_forward;
+            gl::uniform_location_id shadow_model_up,shadow_model_origin;
         public:
             explicit spotlight_shadow_depth_shader(fs::path const &data_root);
             void set_light(point<3,float> origin,point<3,float> right,
                            point<3,float> up,point<3,float> forward,
                            point<4,float> limits);
+            void set_model(point<3,float> right,point<3,float> forward,
+                           point<3,float> up,point<3,float> origin);
         };
 
         class game_post_opaque_composite_shader : public opengl_shader {
