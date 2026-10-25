@@ -4316,13 +4316,13 @@ namespace jkgm {
                         make_point(sun_shadow_views[0].forward[0],sun_shadow_views[0].forward[1],sun_shadow_views[0].forward[2]),
                         make_point(sun_shadow_views[0].width,sun_shadow_views[0].height,sun_shadow_views[0].range));
                     if(shadows) {
-                        auto const &far=sun_shadow_views[1];
+                        auto const &far_view=sun_shadow_views[1];
                         prog.set_sun_shadow_far(
-                            make_point(far.origin[0],far.origin[1],far.origin[2]),
-                            make_point(far.right[0],far.right[1],far.right[2]),
-                            make_point(far.up[0],far.up[1],far.up[2]),
-                            make_point(far.forward[0],far.forward[1],far.forward[2]),
-                            make_point(far.width,far.height,far.range),
+                            make_point(far_view.origin[0],far_view.origin[1],far_view.origin[2]),
+                            make_point(far_view.right[0],far_view.right[1],far_view.right[2]),
+                            make_point(far_view.up[0],far_view.up[1],far_view.up[2]),
+                            make_point(far_view.forward[0],far_view.forward[1],far_view.forward[2]),
+                            make_point(far_view.width,far_view.height,far_view.range),
                             sun_shadow_near_distance);
                         gl::set_active_texture_unit(13);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
