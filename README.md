@@ -907,9 +907,20 @@ reports `unverified-dsound-method` or `invalid-vtable`, **do not**
 interpret that as a frozen listener; the diagnostic deliberately skipped
 an unsafe or unverified call.
 
+The sound-source probe, which also requires signature-verified JKGM
+sound-pool layout, records `allocated_sounds`, `live_sound_buffers`,
+`live_ds3d_sources` and `queried_ds3d_sources`. Up to three currently
+live sources include `ds3d_source[N]=(mode=...,pos=...)`. Mode 0 is
+normal positional audio, 1 is head-relative, and 2 disables 3D processing
+for that buffer. The getter is only invoked if the source interface's
+method is verified to reside in Wine's loaded `dsound.dll`.
+An empty sample is not proof of failure if no live positional sounds
+were present during the short polling interval.
+
 All probes require `profile_audio` and the audited executable signature.
 They do not load additional libraries, create devices, modify audio
-settings or install hooks. Unknown executables report
+settings or install hooks. The guarded COM getters only retrieve existing
+listener/source state. Unknown executables report
 `unsupported executable/signature` and avoid these engine/COM queries.
 
 For a useful A/B test, keep the same Wine prefix and DLLs, record one run
