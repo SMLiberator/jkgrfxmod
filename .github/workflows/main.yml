@@ -69,6 +69,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\spotlight.cpp /Fe:spotlight_test.exe
         spotlight_test.exe
+    - name: Spotlight shadow depth and static caster BVH tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\spotlight_shadow.cpp /Fe:spotlight_shadow_test.exe
+        spotlight_shadow_test.exe
     - name: JK/MotS collision dispatcher regression tests
       shell: cmd
       run: |
