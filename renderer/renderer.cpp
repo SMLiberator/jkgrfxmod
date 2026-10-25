@@ -3556,7 +3556,7 @@ namespace jkgm {
             }
             if(the_config->profile_renderer &&
                (gpu_3do_present_serial%120U)==0U) {
-                LOG_INFO("SHADOW spotlight: world_candidates=",map.mesh.surfaces.size(),
+                LOG_INFO("SHADOW spotlight: world_surfaces=",map.mesh.surfaces.size(),
                          " model_ranges=",model_casters.size(),
                          " model_cache=",the_config->use_model_cache?1:0,
                          " reused=",spotlight_shadow_cached &&
