@@ -1,7 +1,9 @@
 #pragma once
-// Passive JKGM audio diagnostics. Never hooks, loads, creates or modifies
-// DirectSound or A3D objects; all engine reads are gated on the audited EXE.
+// JKGM audio diagnostics: engine reads plus a read-only listener COM getter.
+// Never hooks, loads or creates DirectSound/A3D objects. The COM query is only
+// made for an audited EXE and a vtable method owned by loaded dsound.dll.
 #include <Windows.h>
+#include <dsound.h>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -74,6 +76,67 @@ class audio_module_probe {
               <<" a3d_secondary=0x"<<secondary
               <<" primary_buffer=0x"<<primary
               <<" ds3d_listener=0x"<<listener;
+
+
+        // Verify that the interface's GetAllParameters vtable entry is
+        // implemented inside the already loaded DSOUND.dll. This is a
+        // read-only COM getter; it does NOT create devices, call setters,
+        // rewrite vtables or alter the game's audio state. Do not call an
+        // unknown third-party implementation through an untrusted pointer.
+        if(listener && readable(listener,sizeof(uint32_t))) {
+            uint32_t const vtable=read32(listener);
+            constexpr uintptr_t get_all_index=3U*sizeof(uint32_t);
+            if(vtable && readable(uintptr_t(vtable)+get_all_index,
+                                  sizeof(uint32_t))) {
+                uint32_t const method=
+                    read32(uintptr_t(vtable)+get_all_index);
+                MEMORY_BASIC_INFORMATION method_info{};
+                HMODULE const dsound=GetModuleHandleA("dsound.dll");
+                if(dsound && method &&
+                   VirtualQuery(reinterpret_cast<void const *>(
+                       uintptr_t(method)),&method_info,
+                       sizeof(method_info))==sizeof(method_info) &&
+                   method_info.State==MEM_COMMIT &&
+                   method_info.AllocationBase==dsound &&
+                   (method_info.Protect&(PAGE_GUARD|PAGE_NOACCESS))==0 &&
+                   (method_info.Protect&0xffU)==PAGE_EXECUTE_READ) {
+                    auto *iface=reinterpret_cast<IDirectSound3DListener *>(
+                        uintptr_t(listener));
+                    DS3DLISTENER actual{};
+                    actual.dwSize=sizeof(actual);
+                    HRESULT const hr=iface->GetAllParameters(&actual);
+                    if(SUCCEEDED(hr)) {
+                        auto const precision=report.precision();
+                        report<<std::dec<<std::fixed;
+                        report.precision(2);
+                        report<<" ds3d_actual_pos=("
+                              <<actual.vPosition.x<<","
+                              <<actual.vPosition.y<<","
+                              <<actual.vPosition.z<<")"
+                              <<" ds3d_actual_front=("
+                              <<actual.vOrientFront.x<<","
+                              <<actual.vOrientFront.y<<","
+                              <<actual.vOrientFront.z<<")"
+                              <<" ds3d_actual_up=("
+                              <<actual.vOrientTop.x<<","
+                              <<actual.vOrientTop.y<<","
+                              <<actual.vOrientTop.z<<")";
+                        report.unsetf(std::ios_base::floatfield);
+                        report.precision(precision);
+                        report<<std::hex;
+                    } else {
+                        report<<" ds3d_readback_hr=0x"<<std::hex
+                              <<static_cast<uint32_t>(hr);
+                    }
+                } else {
+                    report<<" ds3d_readback=unverified-dsound-method";
+                }
+            } else {
+                report<<" ds3d_readback=invalid-vtable";
+            }
+        } else {
+            report<<" ds3d_readback=no-listener";
+        }
 
         // Audio tick (0x004DC580) supplies the listener's orientation and
         // position to 0x00437770. Sample the ORIGINAL engine-side inputs
