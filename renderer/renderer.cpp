@@ -560,6 +560,11 @@ namespace jkgm {
         std::set<uint32_t> spotlight_unready_mats;
         std::map<uint32_t,srgb_texture_id> spotlight_retained_albedo;
         uint32_t spotlight_retained_world=0;
+        struct translucent_spotlight_draw {
+            spotlight_instance light;
+            spotlight_screen_rect coverage;
+        };
+        std::vector<translucent_spotlight_draw> translucent_spotlights_for_frame;
         std::set<std::pair<uint32_t, int>> runtime_missing_images;
         std::set<uint32_t> runtime_missing_sources;
         bool warned_reflections_disabled = false;
@@ -1386,6 +1391,7 @@ namespace jkgm {
                 prog.set_normal_map_samplers(6,7);
                 prog.set_scene_depth_sampler(5);
                 prog.set_flare_mode(false);
+                prog.set_translucent_spotlight_count(0);
                 apply_engine_camera(prog);
                 auto const &fog=get_fog_settings();
                 auto const fog_color=fog.color.value();
@@ -2693,6 +2699,8 @@ namespace jkgm {
             }
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
+            set_translucent_spotlights(prog,transparent && !post_exempt &&
+                                      !decals_only);
             prog.set_scene_depth(8);
             prog.set_post_exempt(post_exempt);
             prog.set_decal_receiver_lighting(decals_only,10,11);
@@ -3323,6 +3331,82 @@ namespace jkgm {
             return std::nullopt;
         }
 
+
+        // Reuse the existing COG projector transforms/cookies. The translucent
+        // stage shades only visible blended fragments, so it needs no new FBO
+        // or fullscreen pass. Mask/dither coverage stays in the opaque pass.
+        void prepare_translucent_spotlights()
+        {
+            translucent_spotlights_for_frame.clear();
+            if(!the_config->enable_spotlights)return;
+            auto const cam=read_active_render_camera();
+            if(!cam.valid)return;
+            float const h=std::tan(cam.fov*0.008726646259971648f);
+            float const v=h*float(get<y>(conf_scr_res))/
+                            float(get<x>(conf_scr_res));
+            spotlight_projection_camera projection{};
+            projection.position=cam.position;
+            projection.right=cam.right;
+            projection.up=cam.up;
+            projection.forward=cam.forward;
+            projection.tan_half_horizontal=h;
+            projection.tan_half_vertical=v;
+            projection.width=get<x>(conf_scr_res);
+            projection.height=get<y>(conf_scr_res);
+            for(auto const &spot:collect_spotlights_for_frame()) {
+                auto const coverage=spotlight_screen_coverage(spot,projection);
+                if(!coverage.visible)continue;
+                auto image=spotlight_mat_texture(spot.material);
+                if(!image)continue;
+                int const slot=int(translucent_spotlights_for_frame.size());
+                if(slot>=int(spotlight_max_active))break;
+                // The cached 3DO shader already occupies units 0-11.
+                // Four spare GLSL 3.3 units (12-15) accommodate MAT cookies
+                // without rebinding any existing material textures.
+                gl::set_active_texture_unit(12+slot);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,*image);
+                translucent_spotlights_for_frame.push_back({spot,coverage});
+            }
+            gl::set_active_texture_unit(0);
+        }
+
+        template<typename Shader>
+        void set_translucent_spotlights(Shader &prog,bool active)
+        {
+            int const count=active
+                ? int(translucent_spotlights_for_frame.size()) : 0;
+            prog.set_translucent_spotlight_count(count);
+            if(!count)return;
+            auto const cam=read_active_render_camera();
+            if(!cam.valid) {
+                prog.set_translucent_spotlight_count(0);
+                return;
+            }
+            float const h=std::tan(cam.fov*0.008726646259971648f);
+            float const v=h*float(get<y>(conf_scr_res))/
+                            float(get<x>(conf_scr_res));
+            auto const axis=[](std::array<float,3> const &a,float w) {
+                return make_point(a[0],a[1],a[2],w);
+            };
+            prog.set_translucent_spotlight_camera(
+                axis(cam.position,0.0f),axis(cam.right,h),
+                axis(cam.forward,0.0f),axis(cam.up,v),
+                make_point(float(get<x>(conf_scr_res)),
+                           float(get<y>(conf_scr_res))));
+            for(int i=0;i<count;++i) {
+                auto const &item=translucent_spotlights_for_frame[i];
+                auto const &spot=item.light;
+                auto const &rect=item.coverage;
+                prog.set_translucent_spotlight(
+                    i,axis(spot.origin,0.0f),
+                    axis(spot.right,spot.range/spot.width),
+                    axis(spot.up,spot.range/spot.height),
+                    axis(spot.forward,1.0f/spot.range),
+                    make_point(spot.light_intensity,spot.add_intensity),
+                    make_point(rect.min_x,rect.min_y,rect.max_x,rect.max_y));
+            }
+        }
+
         void draw_game_opaque_composite()
         {
             gl::disable(gl::capability::depth_test);
@@ -3440,6 +3524,7 @@ namespace jkgm {
         void draw_game_transparency_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
         {
             frame_screen->begin_transparency_pass();
+            prepare_translucent_spotlights();
 
             // Draw batches
             gl::disable(gl::capability::blend);
@@ -3463,6 +3548,7 @@ namespace jkgm {
             ogs->game_transparency_pass_program.set_normal_map_samplers(6, 7);
             ogs->game_transparency_pass_program.set_scene_depth_sampler(5);
             ogs->game_transparency_pass_program.set_flare_mode(false);
+            set_translucent_spotlights(ogs->game_transparency_pass_program,true);
             // Sample the completed opaque pass; this is a different texture
             // from the framebuffer receiving the transparency draw.
             gl::set_active_texture_unit(5);
@@ -3539,6 +3625,8 @@ namespace jkgm {
             draw_gpu_3do_preview(true);
             ogs->game_transparency_pass_program.use_program();
 
+            // Weapon/HUD depth is intentionally separate from world lights.
+            ogs->game_transparency_pass_program.set_translucent_spotlight_count(0);
             // Redraw gun overlay after z-clear
             gl::set_depth_mask(true);
             gl::clear({gl::clear_flag::depth});
