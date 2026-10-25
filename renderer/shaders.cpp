@@ -684,6 +684,31 @@ void jkgm::shaders::game_post_ssao_shader::set_samples(span<point<3, float> cons
     }
 }
 
+
+jkgm::shaders::spotlight_shadow_depth_shader::spotlight_shadow_depth_shader(
+    fs::path const &data_root)
+    : opengl_shader("spotlight_shadow",
+        data_root/"shaders/spotlight_shadow.vert",
+        data_root/"shaders/spotlight_shadow.frag")
+    , shadow_origin(gl::get_uniform_location(the_program,"shadow_origin"))
+    , shadow_right(gl::get_uniform_location(the_program,"shadow_right"))
+    , shadow_up(gl::get_uniform_location(the_program,"shadow_up"))
+    , shadow_forward(gl::get_uniform_location(the_program,"shadow_forward"))
+    , shadow_limits(gl::get_uniform_location(the_program,"shadow_limits"))
+{
+}
+
+void jkgm::shaders::spotlight_shadow_depth_shader::set_light(
+    point<3,float> origin,point<3,float> right,point<3,float> up,
+    point<3,float> forward,point<4,float> limits)
+{
+    gl::set_uniform_vector(shadow_origin,origin);
+    gl::set_uniform_vector(shadow_right,right);
+    gl::set_uniform_vector(shadow_up,up);
+    gl::set_uniform_vector(shadow_forward,forward);
+    gl::set_uniform_vector(shadow_limits,limits);
+}
+
 jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_shader(
     fs::path const &data_root)
     : opengl_shader("game_post_opaque_composite",
@@ -701,6 +726,9 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , camera_forward(gl::get_uniform_location(the_program, "camera_forward"))
     , camera_up(gl::get_uniform_location(the_program, "camera_up"))
     , spotlight_count(gl::get_uniform_location(the_program,"spotlight_count"))
+    , spotlight_shadow_slot(gl::get_uniform_location(the_program,"spotlight_shadow_slot"))
+    , spotlight_shadow_image(gl::get_uniform_location(the_program,"spotlight_shadow_image"))
+    , spotlight_shadow_near_range(gl::get_uniform_location(the_program,"spotlight_shadow_near_range"))
 {
     for(int i=0;i<4;++i) {
         spotlight_images.push_back(gl::get_uniform_location(
@@ -763,6 +791,17 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_projector_camera(
 void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight_count(int count)
 {
     gl::set_uniform_integer(spotlight_count,count);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight_shadow(
+    int slot,float near_plane,float far_plane)
+{
+    gl::set_uniform_integer(spotlight_shadow_slot,slot);
+    if(slot>=0) {
+        gl::set_uniform_integer(spotlight_shadow_image,10);
+        gl::set_uniform_vector(spotlight_shadow_near_range,
+                               make_point(near_plane,far_plane));
+    }
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight(
