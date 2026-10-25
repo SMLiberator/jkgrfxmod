@@ -21,7 +21,7 @@ namespace jkgm {
         Read const &read,uintptr_t rd_thing,uint32_t &flags)
     {
         flags=0;
-        if(!read || rd_thing<0x10000U || rd_thing>0x7ffff000U)
+        if(rd_thing<0x10000U || rd_thing>0x7ffff000U)
             return false;
         uint32_t owner=0;
         if(!read(rd_thing+0x44U,&owner,sizeof(owner)) ||
