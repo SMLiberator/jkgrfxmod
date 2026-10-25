@@ -48,6 +48,7 @@ namespace jkgm {
         bool mesh_revision_tracking = false; // experimental JK.dll COG mutation tracking
         bool enable_spotlights = false; // COG MAT-based screen-space spotlights
         bool enable_spotlight_shadows = false; // experimental, one static-world shadow map
+        unsigned int spotlight_shadow_resolution = 256U; // depth-map width and height (64..1024)
         bool enable_sprite_decals = false; // opt-in type-3 SPR projection onto level geometry
         bool enable_mesh_collision = false; // experimental JKGM collide=2 Detour (off by default)
         bool use_vanilla_renderer = false; // native EXE bootstrap: skip JKGM hooks
