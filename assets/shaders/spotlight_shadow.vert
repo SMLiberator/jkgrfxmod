@@ -7,9 +7,17 @@ uniform vec3 shadow_right;
 uniform vec3 shadow_up;
 uniform vec3 shadow_forward;
 uniform vec4 shadow_limits; // width at far plane, height, range, near
+// Identity for static SithWorld, instance matrix for GPU-cached 3DOs.
+uniform vec3 shadow_model_right;
+uniform vec3 shadow_model_forward;
+uniform vec3 shadow_model_up;
+uniform vec3 shadow_model_origin;
 void main()
 {
-    vec3 relative=world_position-shadow_origin;
+    vec3 world=shadow_model_right*world_position.x+
+               shadow_model_forward*world_position.y+
+               shadow_model_up*world_position.z+shadow_model_origin;
+    vec3 relative=world-shadow_origin;
     float distance=dot(relative,shadow_forward);
     float far_plane=shadow_limits.z;
     float near_plane=shadow_limits.w;
