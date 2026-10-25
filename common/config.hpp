@@ -49,7 +49,8 @@ namespace jkgm {
         bool enable_spotlights = false; // COG MAT-based screen-space spotlights
         bool enable_spotlight_shadows = false; // experimental, one static-world shadow map
         unsigned int spotlight_shadow_resolution = 256U; // depth-map width and height (64..1024)
-        bool enable_sun_shadows = false; // directional sunlight + world shadow map
+        bool enable_sun_shadows = false;
+        bool enable_sun_static_cache = true; // world-only depth layers, independently cached per cascade // directional sunlight + world shadow map
         bool enable_sun_dynamic_shadows = false; // optional 8x256 Thing atlas
         bool sun_shadow_far_soft_filter = true; // nine-tap PCF in far cascade; false: one hardware PCF
         unsigned int sun_shadow_resolution = 512U; // per-cascade 24-bit depth map (64..1024)

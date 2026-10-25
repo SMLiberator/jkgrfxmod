@@ -4298,7 +4298,8 @@ namespace jkgm {
             }
             // Reusing a depth texture requires the exact same stabilized
             // light projection, not merely the same sun and static casters.
-            bool static_same=map.static_complete &&
+            bool static_same=the_config->enable_sun_static_cache &&
+                map.static_complete &&
                 sun_shadow_static_cached[cascade] &&
                 sun_shadow_static_worlds[cascade]==world &&
                 sun_shadow_static_revisions[cascade]==map.revision &&
@@ -4319,7 +4320,8 @@ namespace jkgm {
             gl::set_depth_function(gl::comparison_function::less);
             if(!static_same) {
                 gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                    map.static_complete ? static_target : cascade_target);
+                    (the_config->enable_sun_static_cache &&
+                     map.static_complete) ? static_target : cascade_target);
                 gl::clear_buffer_depth(1.0f);
             }
             glEnable(GL_POLYGON_OFFSET_FILL);
@@ -4362,7 +4364,8 @@ namespace jkgm {
                         gl::index_type::uint32,static_cast<ptrdiff_t>(
                             draw.range.first_index*sizeof(uint32_t)));
                 }
-                if(map.static_complete) {
+                if(map.static_complete &&
+                   the_config->enable_sun_static_cache) {
                     sun_shadow_static_cached[cascade]=true;
                     sun_shadow_static_worlds[cascade]=world;
                     sun_shadow_static_revisions[cascade]=map.revision;
@@ -4371,7 +4374,8 @@ namespace jkgm {
                     sun_shadow_static_directions[cascade]=direction;
                 }
             }
-            if(map.static_complete) {
+            if(map.static_complete &&
+               the_config->enable_sun_static_cache) {
                 // Copy the static depth on GPU (no readback) and depth-test
                 // current 3DOs against it. Even dynamic Thing updates no
                 // longer trigger a draw of the world architecture.
