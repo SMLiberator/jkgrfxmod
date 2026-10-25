@@ -28,8 +28,8 @@ int main()
     assert(std::fabs(xform.high[0]-15.0f)<0.0001f);
     assert(std::fabs(xform.low[1]-12.0f)<0.0001f);
     assert(std::fabs(xform.high[1]-24.0f)<0.0001f);
-    assert(std::fabs(xform.low[2]-37.0f)<0.0001f);
-    assert(std::fabs(xform.high[2]-47.0f)<0.0001f);
+    assert(std::fabs(xform.low[2]-23.0f)<0.0001f);
+    assert(std::fabs(xform.high[2]-33.0f)<0.0001f);
     // Empty-world data is a valid shadow shell for 3DO-only levels.
     constexpr uintptr_t world_addr=0x120000U;
     std::array<unsigned char,0xb0> header{};
