@@ -690,9 +690,11 @@ existing indexed buffers are reused for rendering and shadows.
   lighting is not yet occluded by the shadow map. Ordinary opaque surfaces
   are shadowed. Neither original JK vertex lighting nor emissive material
   contributions are darkened by the map.
-- Dynamic 3DOs in the spotlight range require a fresh shadow depth draw each
-  frame, even when stationary. The low 256-pixel resolution, one-light budget
-  and four PCF taps are intentional initial performance limits.
+- The shader reuses the previous depth map when both the light and the
+  participating 3DO mesh identities/transforms are unchanged. Animated or
+  moving casters update the map when their pose or geometry changes. The low
+  256-pixel resolution, one-light budget and four PCF taps are intentional
+  initial performance limits.
 
 This feature still requires in-game testing on native and cached 3DOs, and
 may be disabled independently without affecting projected spotlight lighting.
