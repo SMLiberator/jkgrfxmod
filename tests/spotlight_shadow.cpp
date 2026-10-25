@@ -93,6 +93,19 @@ int main()
     assert(candidates.size()==1);
     assert(candidates.front().source_index==1);
 
+    // Face culling follows live GeoMode, rather than the initial snapshot.
+    assert(spotlight_shadow_world_face_visible(
+        4U,{{0.0f,-1.0f,0.0f}},p.forward));
+    assert(!spotlight_shadow_world_face_visible(
+        0U,{{0.0f,-1.0f,0.0f}},p.forward));
+    assert(!spotlight_shadow_world_face_visible(
+        4U,{{0.0f, 1.0f,0.0f}},p.forward));
+    // A lamp located within a 3DO shell does not let its own body
+    // completely occlude its projected beam.
+    assert(spotlight_shadow_origin_inside({{0,0,0}},
+        {{-0.5f,-0.5f,-0.5f}},{{0.5f,0.5f,0.5f}}));
+    assert(!spotlight_shadow_origin_inside({{2,0,0}},
+        {{-0.5f,-0.5f,-0.5f}},{{0.5f,0.5f,0.5f}}));
     // Invalid transforms do not produce a shadow projection.
     s.forward={{0,0,0}};
     assert(!make_spotlight_shadow_projection(s,p));
