@@ -869,7 +869,8 @@ namespace jkgm {
         void set_renderer_mode(renderer_mode mode) override
         {
             if(this->mode != mode) {
-                if(the_config->use_model_cache || the_config->enable_sprite_decals) {
+                if(the_config->use_model_cache || the_config->enable_sprite_decals ||
+                   (the_config->enable_spotlights && the_config->enable_spotlight_shadows)) {
                     // Levels recycle native mesh pointers; discard both copies.
                     reset_gpu_3do_instances();
                     gpu_3do_gl_cache.clear();
@@ -2800,7 +2801,7 @@ namespace jkgm {
             std::vector<gpu_3do_matrix34> modelviews;
             modelviews.reserve(instances.size());
             for(auto const &inst:instances) {
-                if(!inst.geometry ||
+                if(!inst.geometry || inst.shadow_only ||
                    (!post_exempt && inst.is_projected_decal!=decals_only))
                     continue;
                 modelviews.push_back(gpu_3do_native_modelview(native_view,inst.transform));
@@ -3489,7 +3490,7 @@ namespace jkgm {
             };
             std::vector<shadow_3do_range> model_casters;
             auto const light_bounds=spotlight_shadow_volume_bounds(view);
-            if(the_config->use_model_cache) {
+            {
                 for(auto const &instance:frame_gpu_3do_instances) {
                     if(!instance.geometry || instance.is_projected_decal)
                         continue;
@@ -4357,7 +4358,8 @@ namespace jkgm {
             // by JK. Expire their GPU resources, keeping recently reused meshes
             // without retaining every allocation for the entire level.
             // Sweep periodically to avoid iterating the cache on every frame.
-            if((the_config->use_model_cache || the_config->enable_sprite_decals) &&
+            if((the_config->use_model_cache || the_config->enable_sprite_decals ||
+                (the_config->enable_spotlights && the_config->enable_spotlight_shadows)) &&
                (gpu_3do_present_serial%16U)==0U) {
                 for(auto it=gpu_3do_gl_cache.begin();it!=gpu_3do_gl_cache.end();) {
                     auto const used=gpu_3do_last_drawn.find(it->first);
