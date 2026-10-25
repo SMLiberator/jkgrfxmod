@@ -3489,6 +3489,7 @@ namespace jkgm {
             };
             bool const unchanged=spotlight_shadow_cached &&
                 spotlight_shadow_world==world &&
+                spotlight_shadow_revision==map.revision &&
                 chosen.material==spotlight_shadow_light.material &&
                 same(chosen.origin,spotlight_shadow_light.origin) &&
                 same(chosen.right,spotlight_shadow_light.right) &&
