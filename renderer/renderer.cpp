@@ -4629,6 +4629,7 @@ namespace jkgm {
                !the_config->enable_projected_sun_shadows ||
                !ogs->projected_sun_mask_program ||
                !engine_material_debug::matches_tested_executable())return;
+            auto const projected_begin=profile_clock::now();
             auto const sun=get_sun_settings();
             float const strength=sun.intensity.value()[0];
             if(!std::isfinite(strength) || strength<=0.0f)return;
@@ -4736,6 +4737,8 @@ namespace jkgm {
             }
             bool const cache_hit=projected_sun_cache_valid &&
                                  projected_sun_cache_signature==signature;
+            bool world_cache_hit=false;
+            size_t cached_models=0;
             std::vector<projected_sun_mask_vertex> points;
             size_t world_casters=projected_sun_cached_world_casters;
             size_t model_casters=projected_sun_cached_model_casters;
@@ -4779,6 +4782,7 @@ namespace jkgm {
             // its clipped polygons on otherwise-static world/camera/sun data.
             if(projected_sun_world_cache_valid &&
                projected_sun_world_cache_signature==model_parent) {
+                world_cache_hit=true;
                 output=projected_sun_world_cache;
                 casters=projected_sun_world_cache_casters;
                 world_casters=casters;
@@ -4861,6 +4865,7 @@ namespace jkgm {
                     output.insert(output.end(),found->second.triangles.begin(),
                                   found->second.triangles.end());
                     found->second.last_used=projected_sun_model_generation;
+                    ++cached_models;
                     continue;
                 }
                 size_t const caster_start=casters;
@@ -4966,7 +4971,11 @@ namespace jkgm {
                          " 3do_casters=",model_casters,
                          " projected_triangles=",projected_sun_cached_vertices.size()/3U,
                          " cache_hit=",cache_hit?1:0,
-                         " bulk_geomodes=",contiguous?1:0);
+                         " static_cache_hit=",world_cache_hit?1:0,
+                         " 3do_cache_hits=",cached_models,
+                         " bulk_geomodes=",contiguous?1:0,
+                         " submit_cpu_us=",elapsed_profile_us(
+                             projected_begin,profile_clock::now()));
         }
 
         void draw_game_gbuffer_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
