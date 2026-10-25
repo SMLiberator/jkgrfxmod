@@ -185,6 +185,93 @@ class audio_module_probe {
         } else {
             report<<" listener_input=signature-unverified";
         }
+        // Audited JKGM sound slot array (0x4DB43B and 0x4DC98E):
+        // 32 records, stride 0x5C; +0 is IDirectSoundBuffer,
+        // +4 is IDirectSound3DBuffer, +8 is the engine sound descriptor.
+        // Count live source interfaces and query at most three read-only
+        // parameters, only for verified Wine DSOUND vtable entries.
+        constexpr uintptr_t slot_init=0x004DB43BU;
+        constexpr std::array<uint8_t,5> slot_init_signature{{
+            0xbf,0x30,0x60,0x83,0x00
+        }};
+        constexpr uintptr_t slot_advance=0x004DC98EU;
+        constexpr std::array<uint8_t,3> slot_advance_signature{{
+            0x83,0xc6,0x5c
+        }};
+        if(readable(slot_init,slot_init_signature.size()) &&
+           readable(slot_advance,slot_advance_signature.size()) &&
+           std::memcmp(reinterpret_cast<void const *>(slot_init),
+                       slot_init_signature.data(),
+                       slot_init_signature.size())==0 &&
+           std::memcmp(reinterpret_cast<void const *>(slot_advance),
+                       slot_advance_signature.data(),
+                       slot_advance_signature.size())==0 &&
+           readable(0x0083602CU,sizeof(uint32_t))) {
+            uint32_t const slot_count=read32(0x0083602CU);
+            if(slot_count<=32U) {
+                unsigned allocated=0,live=0,spatial=0,sampled=0;
+                HMODULE const dsound=GetModuleHandleA("dsound.dll");
+                for(uint32_t i=0;i<slot_count;++i) {
+                    uintptr_t const slot=0x00836030U+uintptr_t(i)*0x5CU;
+                    if(!readable(slot,3U*sizeof(uint32_t)))break;
+                    uint32_t const buffer=read32(slot);
+                    uint32_t const spatial_iface=read32(slot+4U);
+                    uint32_t const sound=read32(slot+8U);
+                    if(sound)++allocated;
+                    if(!sound || !buffer)continue;
+                    ++live;
+                    if(!spatial_iface)continue;
+                    ++spatial;
+                    if(sampled>=3U ||
+                       !readable(spatial_iface,sizeof(uint32_t)))
+                        continue;
+                    uint32_t const vtable=read32(spatial_iface);
+                    if(!vtable ||
+                       !readable(uintptr_t(vtable)+12U,sizeof(uint32_t)))
+                        continue;
+                    uint32_t const method=read32(uintptr_t(vtable)+12U);
+                    MEMORY_BASIC_INFORMATION method_info{};
+                    if(!dsound || !method ||
+                       VirtualQuery(reinterpret_cast<void const *>(
+                           uintptr_t(method)),&method_info,
+                           sizeof(method_info))!=sizeof(method_info) ||
+                       method_info.State!=MEM_COMMIT ||
+                       method_info.AllocationBase!=dsound ||
+                       (method_info.Protect&(PAGE_GUARD|PAGE_NOACCESS))!=0 ||
+                       (method_info.Protect&0xffU)!=PAGE_EXECUTE_READ)
+                        continue;
+
+                    auto *iface=reinterpret_cast<IDirectSound3DBuffer *>(
+                        uintptr_t(spatial_iface));
+                    DS3DBUFFER parameters{};
+                    parameters.dwSize=sizeof(parameters);
+                    HRESULT const hr=iface->GetAllParameters(&parameters);
+                    if(FAILED(hr))continue;
+                    auto const precision=report.precision();
+                    report<<std::dec<<std::fixed;
+                    report.precision(2);
+                    report<<" ds3d_source["<<i<<"]=(mode="
+                          <<parameters.dwMode<<",pos="
+                          <<parameters.vPosition.x<<","
+                          <<parameters.vPosition.y<<","
+                          <<parameters.vPosition.z<<")";
+                    report.unsetf(std::ios_base::floatfield);
+                    report.precision(precision);
+                    report<<std::hex;
+                    ++sampled;
+                }
+                report<<std::dec
+                      <<" allocated_sounds="<<allocated
+                      <<" live_sound_buffers="<<live
+                      <<" live_ds3d_sources="<<spatial
+                      <<" queried_ds3d_sources="<<sampled
+                      <<std::hex;
+            } else {
+                report<<" source_pool=invalid-count";
+            }
+        } else {
+            report<<" source_pool=signature-unverified";
+        }
         return report.str();
     }
 
