@@ -247,9 +247,15 @@ namespace jkgm {
         // Candidate indices are ordered as in SithWorld for stable results.
         for(uint32_t const index:candidates) {
             auto const &s=geometry.receivers[index];
-            // Experimental sharp-edge projection: accept every receiver
-            // intersecting the finite volume, regardless of normal angle.
-            // The clipper still rejects collapsed UV polygons.
+            // Keep corner wrapping onto perpendicular faces, but never
+            // project onto the opposite side of a slab. The previous
+            // unrestricted acceptance painted bottom and top simultaneously.
+            // Only reject normals that point meaningfully away from the
+            // projector (no sharp angle limit on adjacent surfaces).
+            if(decal_dot(s.normal,projector.look)>0.05f) {
+                ++result.skipped_backfaces;
+                continue;
+            }
             auto clipped=clip_projected_decal(
                 projector,s.polygon,s.normal,0.05f,false);
             if(clipped.size()<3) {
