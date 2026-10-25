@@ -651,6 +651,36 @@ Type-4 camera-facing flare SPRs are separate Things. Attach a flare
 Thing to a node, then assign that same Thing a Spotlight. Its independent
 `SetSpriteInfo` and `SetSpriteRoll` COG controls remain available.
 
+## Forward projected lighting on translucent receivers (experimental)
+
+The existing COG MAT spotlights also illuminate **genuinely alpha-blended**
+world polygons and GPU-cached 3DO faces. No new framebuffer, depth copy, or
+scene draw is required: the original projected-cookie data is evaluated
+directly during the existing forward-alpha pass. Screen bounds are checked
+before world-position reconstruction; with `enable_spotlights: false` or
+no active lights the shader immediately skips this code.
+
+- Native world transparency and GPU-cached alpha-blended models share the
+  same position, incidence, cookie, attenuation and light/additive intensity
+  behavior. Lights respect the material's alpha and fog.
+- Alpha-mask and ordered-dither coverage already lights through the opaque
+  compositor and is *not* relit. Ordinary additive, multiply, emissive-only,
+  flare, projected-decal and post-exempt/weapon rendering remain unchanged.
+- Fluid transparency may receive projected illumination without making
+  shallow water suddenly opaque; its illumination is handled independently
+  of its Beer–Lambert albedo absorption.
+- Existing projectors occupy texture units 12–15 during the alpha stage;
+  all previous material samplers retain their bindings. This requires the
+  GLSL 3.3 minimum of 16 fragment texture units. Projected lighting on
+  translucent faces is **not shadowed yet**, and does not calculate glass
+  light transmission or refraction.
+
+Verify on alpha-blended glazing, water and fading sprite geometry with the
+same `SetSpotlight` values used for opaque surfaces. With spotlights off,
+appearance should be unchanged, including masked foliage, HUD and decals.
+No new COG verbs are needed. The feature remains experimental until native
+and GPU paths are checked in-game.
+
 ## Experimental runtime MAT material controls
 
 Material packs may now declare optional **pack-local** numeric image IDs in their
