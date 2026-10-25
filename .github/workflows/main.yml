@@ -275,37 +275,20 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\frame_profile_gaps.cpp /Fe:frame_profile_gaps_test.exe
         frame_profile_gaps_test.exe
-    - name: Enable 32-bit MSVC for Wine audio probe
-      uses: ilammy/msvc-dev-cmd@v1
-      with:
-        arch: x86
-    - name: Compile Wine/Windows DirectSound3D probe
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 tools\audio_probe.cpp /Fe:audio_probe.exe /link dsound.lib dxguid.lib user32.lib
     - name: Package standalone development binaries
       shell: pwsh
       run: |
         New-Item -ItemType Directory -Path test-build -Force | Out-Null
-        foreach ($fileName in @('renderer.dll', 'compile.exe')) {
-          $candidate = Get-ChildItem -Path . -Recurse -File -Filter $fileName |
-            Where-Object { $_.FullName -match '[\\/](Release|release)[\\/]' } |
-            Select-Object -First 1
-          if ($candidate) {
-            Copy-Item $candidate.FullName (Join-Path 'test-build' $fileName) -Force
-          }
-        }
-        if (-not (Test-Path 'test-build/renderer.dll')) {
-          throw "Could not find the built renderer.dll"
-        }
-        if (-not (Test-Path 'test-build/compile.exe')) {
-          throw "Could not find the rebuilt material pack compiler"
-        }
+        # Runtime-only artifact. The material compiler, audio probe,
+        # legacy sprite patcher and diagnostic scripts belong in source/tools,
+        # not in each downloadable game test build.
+        $renderer = Get-ChildItem -Path . -Recurse -File -Filter 'renderer.dll' |
+          Where-Object { $_.FullName -match '[\\/](Release|release)[\\/]' } |
+          Select-Object -First 1
+        if (-not $renderer) { throw "Could not find the built renderer.dll" }
+        Copy-Item $renderer.FullName 'test-build/renderer.dll' -Force
         Copy-Item 'tools/patch_jkgm_bootstrap.py' 'test-build/patch_jkgm_bootstrap.py' -Force
-        Copy-Item 'tools/patch_jkgm_sprite_types.py' 'test-build/patch_jkgm_sprite_types.py' -Force
-        Copy-Item 'tools/verify_retro_cmp.py' 'test-build/verify_retro_cmp.py' -Force
         Copy-Item 'assets/jkgm.json' 'test-build/jkgm.json' -Force
-        Copy-Item 'audio_probe.exe' 'test-build/audio_probe.exe' -Force
         Copy-Item 'doc/install.md' 'test-build/install.md' -Force
         # Runtime GLSL is read from data_path/shaders at startup. Ship the
         # complete current shader set, including shader files added after
