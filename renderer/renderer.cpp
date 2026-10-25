@@ -3495,7 +3495,8 @@ namespace jkgm {
                 return true;
             };
             if(!spotlight_shadow_target)
-                spotlight_shadow_target=std::make_unique<spotlight_shadow_gpu>();
+                spotlight_shadow_target=std::make_unique<spotlight_shadow_gpu>(
+                    the_config->spotlight_shadow_resolution);
             auto &map=*spotlight_shadow_target;
             if(!map.update_world(safe_read,world))return;
 
