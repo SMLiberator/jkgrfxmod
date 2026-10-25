@@ -154,6 +154,46 @@ inline bool fit_sun_shadow_to_camera(
            std::isfinite(projection.height);
 }
 
+// A per-Thing light-space crop. Include receiver positions a few units down
+// each ray without inflating to the entire camera frustum. Keep the full
+// depth range of the level to avoid clipping the source geometry.
+inline bool make_sun_dynamic_shadow_projection(
+    sun_shadow_projection const &world,
+    decal_volume_aabb const &bounds,
+    sun_shadow_projection &out,float ray_length=4.0f)
+{
+    if(!decal_finite(bounds.low) || !decal_finite(bounds.high) ||
+       !std::isfinite(ray_length) || ray_length<0.0f ||
+       !(world.range>0.0f))return false;
+    for(int i=0;i<3;++i)if(bounds.low[i]>bounds.high[i])return false;
+    float lo_x=std::numeric_limits<float>::max(),lo_y=lo_x;
+    float hi_x=-lo_x,hi_y=-lo_y;
+    for(int c=0;c<8;++c) {
+        decal_vec3 p{{(c&1)?bounds.high[0]:bounds.low[0],
+                      (c&2)?bounds.high[1]:bounds.low[1],
+                      (c&4)?bounds.high[2]:bounds.low[2]}};
+        for(float t:{0.0f,ray_length}) {
+            decal_vec3 q{{p[0]+world.forward[0]*t,
+                          p[1]+world.forward[1]*t,
+                          p[2]+world.forward[2]*t}};
+            float const x=decal_dot(q,world.right);
+            float const y=decal_dot(q,world.up);
+            lo_x=std::min(lo_x,x);hi_x=std::max(hi_x,x);
+            lo_y=std::min(lo_y,y);hi_y=std::max(hi_y,y);
+        }
+    }
+    float const margin=std::max(0.2f,0.05f*std::max(hi_x-lo_x,hi_y-lo_y));
+    lo_x-=margin;lo_y-=margin;hi_x+=margin;hi_y+=margin;
+    out=world;
+    float const z=decal_dot(world.origin,world.forward);
+    for(int i=0;i<3;++i)out.origin[i]=
+        world.right[i]*lo_x+world.up[i]*lo_y+world.forward[i]*z;
+    out.width=std::max(0.5f,hi_x-lo_x);
+    out.height=std::max(0.5f,hi_y-lo_y);
+    return decal_finite(out.origin) && std::isfinite(out.width) &&
+           std::isfinite(out.height);
+}
+
 // Snap orthographic translation to exact texels; static shadows then
 // stay fixed during sub-texel camera translation.
 inline bool stabilize_sun_shadow_projection(

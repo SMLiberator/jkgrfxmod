@@ -824,7 +824,21 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , sun_shadow_far_forward(gl::get_uniform_location(the_program,"sun_shadow_far_forward"))
     , sun_shadow_far_limits(gl::get_uniform_location(the_program,"sun_shadow_far_limits"))
     , sun_shadow_split(gl::get_uniform_location(the_program,"sun_shadow_split"))
+    , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
+    , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
 {
+    for(int i=0;i<8;++i) {
+        sun_dynamic_origin.push_back(gl::get_uniform_location(
+            the_program,"sun_dynamic_origin["+std::to_string(i)+"]"));
+        sun_dynamic_right.push_back(gl::get_uniform_location(
+            the_program,"sun_dynamic_right["+std::to_string(i)+"]"));
+        sun_dynamic_up.push_back(gl::get_uniform_location(
+            the_program,"sun_dynamic_up["+std::to_string(i)+"]"));
+        sun_dynamic_forward.push_back(gl::get_uniform_location(
+            the_program,"sun_dynamic_forward["+std::to_string(i)+"]"));
+        sun_dynamic_limits.push_back(gl::get_uniform_location(
+            the_program,"sun_dynamic_limits["+std::to_string(i)+"]"));
+    }
     for(int i=0;i<4;++i) {
         spotlight_images.push_back(gl::get_uniform_location(
             the_program,"spotlight_image_"+std::to_string(i)));
@@ -930,6 +944,25 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_far(
     gl::set_uniform_vector(sun_shadow_far_forward,forward);
     gl::set_uniform_vector(sun_shadow_far_limits,limits);
     gl::set_uniform_float(sun_shadow_split,split);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_count(
+    int count)
+{
+    gl::set_uniform_integer(sun_dynamic_count,count);
+    if(count>0)gl::set_uniform_integer(sun_dynamic_image,15);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic(
+    int slot,point<3,float> origin,point<3,float> right,point<3,float> up,
+    point<3,float> forward,point<3,float> limits)
+{
+    if(slot<0 || slot>=8)return;
+    gl::set_uniform_vector(sun_dynamic_origin[slot],origin);
+    gl::set_uniform_vector(sun_dynamic_right[slot],right);
+    gl::set_uniform_vector(sun_dynamic_up[slot],up);
+    gl::set_uniform_vector(sun_dynamic_forward[slot],forward);
+    gl::set_uniform_vector(sun_dynamic_limits[slot],limits);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight(

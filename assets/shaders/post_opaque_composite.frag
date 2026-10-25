@@ -49,6 +49,11 @@ uniform sampler2DShadow sun_shadow_far_image;
 uniform vec3 sun_shadow_far_origin,sun_shadow_far_right;
 uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
+// 4x2 tiles, 256px each, 2px clear guard around the 252px viewport.
+uniform int sun_dynamic_count;
+uniform sampler2DShadow sun_dynamic_image;
+uniform vec3 sun_dynamic_origin[8],sun_dynamic_right[8];
+uniform vec3 sun_dynamic_up[8],sun_dynamic_forward[8],sun_dynamic_limits[8];
 
 vec3 sun_shadow_coordinates(vec3 position,vec3 origin,vec3 right,
                             vec3 up,vec3 forward,vec3 limits)
@@ -117,6 +122,25 @@ float sun_shadow_visibility(vec3 world_position)
         near_uv,sun_shadow_limits.z,false);
     float blend=smoothstep(transition_start,transition_end,camera_depth);
     return mix(near_visibility,far_visibility,blend);
+}
+
+float sun_dynamic_shadow_visibility(vec3 position)
+{
+    float visibility=1.0;
+    for(int i=0;i<8;++i) {
+        if(i>=sun_dynamic_count)break;
+        vec3 uv=sun_shadow_coordinates(position,sun_dynamic_origin[i],
+            sun_dynamic_right[i],sun_dynamic_up[i],sun_dynamic_forward[i],
+            sun_dynamic_limits[i]);
+        if(!sun_shadow_inside(uv))continue;
+        vec2 tile=vec2(float(i%4),float(i/4));
+        vec2 atlas_uv=(tile*256.0+2.0+uv.xy*252.0)/vec2(1024.0,512.0);
+        float bias=max(4.0/16777215.0,0.012/max(sun_dynamic_limits[i].z,0.001));
+        visibility=min(visibility,texture(sun_dynamic_image,
+            vec3(atlas_uv,uv.z-bias)));
+        if(visibility<=0.001)break;
+    }
+    return visibility;
 }
 
 float spotlight_shadow_visibility(vec2 uv,float receiver_distance)
@@ -275,7 +299,8 @@ void main()
             float incidence=max(dot(normal,sun_shadow_direction),0.0);
             if(incidence>0.0) {
                 vec3 world_position=reconstruct_scene_world(depth);
-                float visibility=sun_shadow_visibility(world_position);
+                float visibility=min(sun_shadow_visibility(world_position),
+                                     sun_dynamic_shadow_visibility(world_position));
                 // JK's vertex colors already contain authored lighting. If
                 // only the newly added sun term is shadowed, a bright baked
                 // floor barely changes under a caster. Keep a generous

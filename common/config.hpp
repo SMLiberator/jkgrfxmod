@@ -50,6 +50,7 @@ namespace jkgm {
         bool enable_spotlight_shadows = false; // experimental, one static-world shadow map
         unsigned int spotlight_shadow_resolution = 256U; // depth-map width and height (64..1024)
         bool enable_sun_shadows = false; // directional sunlight + world shadow map
+        bool enable_sun_dynamic_shadows = false; // optional 8x256 Thing atlas
         unsigned int sun_shadow_resolution = 512U; // per-cascade 24-bit depth map (64..1024)
         bool enable_sprite_decals = false; // opt-in type-3 SPR projection onto level geometry
         bool enable_mesh_collision = false; // experimental JKGM collide=2 Detour (off by default)

@@ -179,6 +179,8 @@ namespace {
     // Set for the duration of a single rdModel3_Draw invocation. Nested
     // model calls restore their parent Thing's flags on return.
     thread_local uint32_t active_native_model_thing_flags=0U;
+    thread_local uint64_t active_native_shadow_owner=0;
+    thread_local bool active_native_shadow_dynamic=false;
     native_mesh_func RealNativeMesh =
         reinterpret_cast<native_mesh_func>(native_mesh_addr);
     native_face_func RealNativeFace =
@@ -826,6 +828,8 @@ namespace {
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
         uint32_t flags=0;
+        uint64_t owner_key=0;
+        bool moving=false;
         if(the_config && the_config->enable_sun_shadows) {
             auto const read=[](uintptr_t address,void *dst,size_t n) {
                 if(!gpu_span_readable(reinterpret_cast<void const *>(address),n))
@@ -833,13 +837,30 @@ namespace {
                 std::memcpy(dst,reinterpret_cast<void const *>(address),n);
                 return true;
             };
-            jkgm::read_native_model_thing_flags(
-                read,reinterpret_cast<uintptr_t>(thing),flags);
+            if(jkgm::read_native_model_thing_flags(
+                  read,reinterpret_cast<uintptr_t>(thing),flags) &&
+               the_config->enable_sun_dynamic_shadows) {
+                uint32_t owner=0,signature=0,move_type=0;
+                uintptr_t const rd=reinterpret_cast<uintptr_t>(thing);
+                if(read(rd+0x44U,&owner,4) &&
+                   read(uintptr_t(owner)+0x74U,&signature,4) &&
+                   read(uintptr_t(owner)+0x10U,&move_type,4)) {
+                    owner_key=(uint64_t(owner)<<32)|signature;
+                    // Native SithThing.moveType: 0=stationary, 1=physics, 2=path.
+                    moving=move_type!=0U;
+                }
+            }
         }
         uint32_t const previous_flags=active_native_model_thing_flags;
+        uint64_t const previous_owner=active_native_shadow_owner;
+        bool const previous_moving=active_native_shadow_dynamic;
         active_native_model_thing_flags=flags;
+        active_native_shadow_owner=owner_key;
+        active_native_shadow_dynamic=moving;
         int const result=RealNativeModel(thing,placement);
         active_native_model_thing_flags=previous_flags;
+        active_native_shadow_owner=previous_owner;
+        active_native_shadow_dynamic=previous_moving;
         if(profiling) {
             native_totals.model_ns+=elapsed_native_ns(start);
             ++native_totals.model_calls;
@@ -1188,6 +1209,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     inst.geometry=it->second.geometry;
     inst.shadow_only=shadow_only;
     inst.casts_sun_shadows=casts_sun_shadows;
+    inst.shadow_owner=active_native_shadow_owner;
+    inst.dynamic_sun_caster=active_native_shadow_dynamic;
     // Depth-only casters need no native MAT residency, point lights,
     // colormap or per-Thing lighting cap. Preserve the native render call.
     std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);

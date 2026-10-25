@@ -103,6 +103,17 @@ int main()
     assert(visible.x>-1.0f && visible.x<1.0f);
     assert(visible.y>-1.0f && visible.y<1.0f);
 
+    decal_volume_aabb actor{};
+    actor.low={{107.0f,208.0f,1.0f}};
+    actor.high={{108.0f,209.0f,3.0f}};
+    sun_shadow_projection object_shadow{};
+    assert(make_sun_dynamic_shadow_projection(projection,actor,object_shadow));
+    assert(object_shadow.width>0.0f && object_shadow.height>0.0f);
+    assert(object_shadow.range==projection.range);
+    auto actor_point=sun_shadow_clip(object_shadow,{{107.5f,208.5f,2.0f}});
+    assert(actor_point.x>=-1.0f && actor_point.x<=1.0f);
+    assert(actor_point.y>=-1.0f && actor_point.y<=1.0f);
+    assert(!make_sun_dynamic_shadow_projection(projection,actor,object_shadow,-1.0f));
     // A small native shell must not crop the remote 3DO architecture.
     decal_world_surface_geometry shell{};
     shell.polygon={{{0.0f,0.0f,0.0f}},{{1.0f,0.0f,0.0f}},

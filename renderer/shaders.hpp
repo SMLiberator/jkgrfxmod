@@ -338,6 +338,12 @@ namespace jkgm {
             gl::uniform_location_id sun_shadow_far_right,sun_shadow_far_up;
             gl::uniform_location_id sun_shadow_far_forward,sun_shadow_far_limits;
             gl::uniform_location_id sun_shadow_split;
+            gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
+            std::vector<gl::uniform_location_id> sun_dynamic_origin;
+            std::vector<gl::uniform_location_id> sun_dynamic_right;
+            std::vector<gl::uniform_location_id> sun_dynamic_up;
+            std::vector<gl::uniform_location_id> sun_dynamic_forward;
+            std::vector<gl::uniform_location_id> sun_dynamic_limits;
             std::vector<gl::uniform_location_id> spotlight_images;
             std::vector<gl::uniform_location_id> spotlight_origins;
             std::vector<gl::uniform_location_id> spotlight_rights;
@@ -368,6 +374,10 @@ namespace jkgm {
             void set_sun_shadow_far(point<3,float> origin,point<3,float> right,
                                     point<3,float> up,point<3,float> forward,
                                     point<3,float> limits,float split);
+            void set_sun_dynamic_count(int count);
+            void set_sun_dynamic(int slot,point<3,float> origin,
+                                 point<3,float> right,point<3,float> up,
+                                 point<3,float> forward,point<3,float> limits);
             void set_spotlight(int slot,point<4,float> origin,
                                point<4,float> right,point<4,float> up,
                                point<4,float> forward,
