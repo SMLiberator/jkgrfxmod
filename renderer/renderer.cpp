@@ -3854,9 +3854,8 @@ namespace jkgm {
             spotlight_shadow_ready=true;
         }
 
-        // Directional sun shadows use a level-wide orthographic map. The
-        // receiver/depth pass is deliberately independent of the camera so
-        // shadows remain stable as the player moves through the level.
+        // Fit one directional map to the nearby camera frustum, retaining
+        // the loaded level's full light-axis depth for offscreen casters.
         void draw_sun_shadow_map()
         {
             sun_shadow_ready=false;
@@ -3916,6 +3915,14 @@ namespace jkgm {
             }
             sun_shadow_projection view{};
             if(!make_sun_shadow_projection(map.world,direction,view,model_bounds))return;
+            auto const camera=read_active_render_camera();
+            if(!camera.valid)return;
+            float const horizontal=std::tan(camera.fov*
+                (3.14159265358979323846f/360.0f));
+            float const vertical=horizontal*float(get<y>(conf_scr_res))/
+                float(get<x>(conf_scr_res));
+            if(!fit_sun_shadow_to_camera(view,camera.position,camera.right,
+                    camera.up,camera.forward,horizontal,vertical,128.0f))return;
 
             // Query the complete orthographic box. The spotlight helper's
             // perspective pyramid bounds do not cover a directional map.

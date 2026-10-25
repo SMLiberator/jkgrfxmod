@@ -19,6 +19,15 @@ int main()
     assert(near.y>-1.0f && near.y<1.0f);
     assert(near.z>-1.0f && near.z<1.0f);
 
+    // Nearby view coverage stays compact even with a distant level shell.
+    assert(fit_sun_shadow_to_camera(projection,{{105.0f,205.0f,2.0f}},
+        {{1.0f,0.0f,0.0f}},{{0.0f,0.0f,1.0f}},
+        {{0.0f,1.0f,0.0f}},0.5f,0.4f,20.0f));
+    assert(projection.width<50.0f && projection.height<50.0f);
+    auto visible=sun_shadow_clip(projection,{{105.0f,215.0f,2.0f}});
+    assert(visible.x>-1.0f && visible.x<1.0f);
+    assert(visible.y>-1.0f && visible.y<1.0f);
+
     // A small native shell must not crop the remote 3DO architecture.
     decal_world_surface_geometry shell{};
     shell.polygon={{{0.0f,0.0f,0.0f}},{{1.0f,0.0f,0.0f}},

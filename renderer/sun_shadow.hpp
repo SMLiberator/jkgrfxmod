@@ -103,6 +103,51 @@ inline bool make_sun_shadow_projection(
            std::isfinite(out.range);
 }
 
+// Spend the fixed depth-map resolution on the camera's nearby view rather
+// than the entire loaded level. Keep the full caster depth along sunlight:
+// an object outside the view can still cast into the visible region.
+inline bool fit_sun_shadow_to_camera(
+    sun_shadow_projection &projection,
+    std::array<float,3> const &position,
+    std::array<float,3> const &camera_right,
+    std::array<float,3> const &camera_up,
+    std::array<float,3> const &camera_forward,
+    float tan_half_horizontal,float tan_half_vertical,float distance)
+{
+    if(!(std::isfinite(tan_half_horizontal) && tan_half_horizontal>0.0f &&
+         std::isfinite(tan_half_vertical) && tan_half_vertical>0.0f &&
+         std::isfinite(distance) && distance>0.0f))return false;
+    for(auto const &axis:{position,camera_right,camera_up,camera_forward})
+        for(float v:axis)if(!std::isfinite(v))return false;
+    float min_x=std::numeric_limits<float>::max(),min_y=min_x;
+    float max_x=-min_x,max_y=-min_y;
+    for(float depth:{0.0f,distance})
+        for(int x:{-1,1})for(int y:{-1,1}) {
+            decal_vec3 point{};
+            for(int i=0;i<3;++i)
+                point[i]=position[i]+depth*(camera_forward[i]+
+                    x*tan_half_horizontal*camera_right[i]+
+                    y*tan_half_vertical*camera_up[i]);
+            float const u=decal_dot(point,projection.right);
+            float const v=decal_dot(point,projection.up);
+            min_x=std::min(min_x,u);max_x=std::max(max_x,u);
+            min_y=std::min(min_y,v);max_y=std::max(max_y,v);
+        }
+    // Extra light-space area reduces churn on small camera movements and
+    // lets shadow filtering sample across the view-frustum boundary.
+    float const margin=std::max(2.0f,
+        0.05f*std::max(max_x-min_x,max_y-min_y));
+    min_x-=margin;min_y-=margin;
+    float const old_z=decal_dot(projection.origin,projection.forward);
+    for(int i=0;i<3;++i)
+        projection.origin[i]=projection.right[i]*min_x+
+            projection.up[i]*min_y+projection.forward[i]*old_z;
+    projection.width=max_x-min_x+margin;
+    projection.height=max_y-min_y+margin;
+    return std::isfinite(projection.width) &&
+           std::isfinite(projection.height);
+}
+
 inline sun_shadow_clip_point sun_shadow_clip(
     sun_shadow_projection const &p,decal_vec3 const &world)
 {
