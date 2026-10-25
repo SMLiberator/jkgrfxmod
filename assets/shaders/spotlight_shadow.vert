@@ -2,6 +2,8 @@
 // Depth-only capture of pre-cached, level-wide SithWorld polygons. Positions
 // are original JK world XYZ, independent of the player's camera/frustum.
 layout(location=0) in vec3 world_position;
+layout(location=1) in vec2 world_uv;
+out vec2 shadow_material_uv;
 uniform vec3 shadow_origin;
 uniform vec3 shadow_right;
 uniform vec3 shadow_up;
@@ -14,6 +16,7 @@ uniform vec3 shadow_model_up;
 uniform vec3 shadow_model_origin;
 void main()
 {
+    shadow_material_uv=world_uv;
     vec3 world=shadow_model_right*world_position.x+
                shadow_model_forward*world_position.y+
                shadow_model_up*world_position.z+shadow_model_origin;
