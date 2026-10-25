@@ -3898,7 +3898,12 @@ namespace jkgm {
             // model groups before fitting the sun map; otherwise both the
             // receiver lighting and model shadows fall outside the map.
             std::vector<decal_volume_aabb> model_bounds;
+            size_t skipped_skybox_instances=0;
             for(auto const &instance:frame_gpu_3do_instances) {
+                if(!instance.casts_sun_shadows) {
+                    ++skipped_skybox_instances;
+                    continue;
+                }
                 if(!instance.geometry || instance.is_projected_decal)continue;
                 auto const &m=instance.transform;
                 for(auto const &group:instance.geometry->groups) {
@@ -4031,7 +4036,8 @@ namespace jkgm {
                                    gpu_3do_texture texture;bool cutout;};
             std::vector<sun_model_draw> models;
             for(auto const &instance:frame_gpu_3do_instances) {
-                if(!instance.geometry || instance.is_projected_decal)continue;
+                if(!instance.casts_sun_shadows ||
+                   !instance.geometry || instance.is_projected_decal)continue;
                 auto const &m=instance.transform;
                 for(auto const &group:instance.geometry->groups) {
                     if(group.count<3U)continue;
@@ -4072,7 +4078,8 @@ namespace jkgm {
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN shadow caster batches world=",
                          counts.size()+world_cutouts.size(),
-                         " 3do=",models.size()," map=",map.resolution);
+                         " 3do=",models.size()," skybox_skipped=",
+                         skipped_skybox_instances," map=",map.resolution);
             bool unchanged=sun_shadow_cached && sun_shadow_world==world &&
                 sun_shadow_revision==map.revision &&
                 caster_signature==sun_shadow_caster_signature;

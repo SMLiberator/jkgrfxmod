@@ -1,4 +1,5 @@
 #include "renderer/sun_shadow.hpp"
+#include "renderer/sun_skybox_thing.hpp"
 #include <cassert>
 #include <array>
 #include <cstdint>
@@ -17,6 +18,34 @@ int main()
         std::memcpy(out,header.data()+(addr-world_addr),size);
         return true;
     };
+    // rdThing.pThing -> SithThing.flags must be checked on the current
+    // owner, not on rdMesh (whose geometry can be shared between Things).
+    std::array<unsigned char,0x120> thing{};
+    uint32_t const type=5,identity=1234,skybox=thingflag_skybox;
+    uint32_t const owner=uint32_t(world_addr);
+    std::memcpy(thing.data(),&skybox,4);
+    std::memcpy(thing.data()+0x0c,&type,4);
+    std::memcpy(thing.data()+0x74,&identity,4);
+    std::memcpy(thing.data()+0xc4+0x44,&owner,4);
+    auto native_read=[&](uintptr_t addr,void *out,size_t n) {
+        if(addr<world_addr || addr-world_addr>thing.size() ||
+           n>thing.size()-(addr-world_addr))return false;
+        std::memcpy(out,thing.data()+(addr-world_addr),n);
+        return true;
+    };
+    uint32_t flags=0;
+    assert(read_native_model_thing_flags(native_read,world_addr+0xc4,flags));
+    assert(flags==thingflag_skybox && !thing_casts_sun_shadows(flags));
+    flags=~0U;
+    assert(!read_native_model_thing_flags(
+        native_read,world_addr+0xc8,flags));
+    assert(flags==0U && thing_casts_sun_shadows(flags));
+    // Runtime COG bit changes take effect without resnapshotting rdMesh.
+    uint32_t ordinary_flags=0;
+    std::memcpy(thing.data(),&ordinary_flags,4);
+    assert(read_native_model_thing_flags(native_read,world_addr+0xc4,flags));
+    assert(thing_casts_sun_shadows(flags));
+
     decal_world_geometry world{};
     assert(world.load(read,world_addr,250000U,true));
     assert(world.valid_world && world.receivers.empty());

@@ -42,6 +42,7 @@
 #include "native_mat_mips.hpp"
 #include "engine_material_debug.hpp"
 #include "sun.hpp"
+#include "sun_skybox_thing.hpp"
 #include <Windows.h>
 #include <algorithm>
 #include <array>
@@ -175,6 +176,9 @@ namespace {
         {0x83,0xec,0x0c,0x53,0x55,0x56,0x57,0xe8};
     native_model_func RealNativeModel =
         reinterpret_cast<native_model_func>(native_model_addr);
+    // Set for the duration of a single rdModel3_Draw invocation. Nested
+    // model calls restore their parent Thing's flags on return.
+    thread_local uint32_t active_native_model_thing_flags=0U;
     native_mesh_func RealNativeMesh =
         reinterpret_cast<native_mesh_func>(native_mesh_addr);
     native_face_func RealNativeFace =
@@ -818,11 +822,29 @@ namespace {
     }
     int __cdecl HookedNativeModel(void *thing, void *placement)
     {
-        auto const start = std::chrono::steady_clock::now();
-        int result = RealNativeModel(thing, placement);
-        native_totals.model_ns += elapsed_native_ns(start);
-        ++native_totals.model_calls;
-        if(result != 0) ++native_totals.model_drawn;
+        auto const profiling=the_config && the_config->profile_renderer;
+        auto const start=profiling ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
+        uint32_t flags=0;
+        if(the_config && the_config->enable_sun_shadows) {
+            auto const read=[](uintptr_t address,void *dst,size_t n) {
+                if(!gpu_span_readable(reinterpret_cast<void const *>(address),n))
+                    return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(address),n);
+                return true;
+            };
+            jkgm::read_native_model_thing_flags(
+                read,reinterpret_cast<uintptr_t>(thing),flags);
+        }
+        uint32_t const previous_flags=active_native_model_thing_flags;
+        active_native_model_thing_flags=flags;
+        int const result=RealNativeModel(thing,placement);
+        active_native_model_thing_flags=previous_flags;
+        if(profiling) {
+            native_totals.model_ns+=elapsed_native_ns(start);
+            ++native_totals.model_calls;
+            if(result!=0)++native_totals.model_drawn;
+        }
         return result;
     }
     void capture_static_sprite_decal_mesh(void *mesh,void *placement);
@@ -870,7 +892,9 @@ namespace {
         LONG error = DetourTransactionBegin();
         if(error != NO_ERROR) return false;
         error = DetourUpdateThread(GetCurrentThread());
-        if(error == NO_ERROR && profiling)
+        // Sun shadows need rdThing ownership even when profiling is off:
+        // the mesh callback has no reliable SithThing pointer of its own.
+        if(error == NO_ERROR && (profiling || the_config->enable_sun_shadows))
             error = DetourAttach(&(PVOID &)RealNativeModel, HookedNativeModel);
         if(error == NO_ERROR)
             error = DetourAttach(&(PVOID &)RealNativeMesh, HookedNativeMesh);
@@ -896,7 +920,7 @@ namespace {
         if(the_config->profile_renderer)
             DetourDetach(&(PVOID &)RealNativeFace, HookedNativeFace);
         DetourDetach(&(PVOID &)RealNativeMesh, HookedNativeMesh);
-        if(the_config->profile_renderer)
+        if(the_config->profile_renderer || the_config->enable_sun_shadows)
             DetourDetach(&(PVOID &)RealNativeModel, HookedNativeModel);
         DetourTransactionCommit();
     }
@@ -974,6 +998,13 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
          the_config->enable_sun_shadows);
     bool const shadow_only=the_config && !the_config->use_model_cache &&
         shadow_enabled;
+    bool const casts_sun_shadows=jkgm::thing_casts_sun_shadows(
+        active_native_model_thing_flags);
+    // Don't capture huge skybox meshes solely for the directional map.
+    // Spotlight shadows, when enabled, retain their existing behavior.
+    if(shadow_only && !casts_sun_shadows &&
+       !(the_config->enable_spotlights && the_config->enable_spotlight_shadows))
+        return false;
     if(!the_config || (!the_config->use_model_cache && !shadow_only) ||
        !mesh || !matrix || pending_gpu_instances.size()>=16384 ||
        // Single VirtualQuery per candidate, including the optional RGB
@@ -1156,6 +1187,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     inst.id=it->second.id;
     inst.geometry=it->second.geometry;
     inst.shadow_only=shadow_only;
+    inst.casts_sun_shadows=casts_sun_shadows;
     // Depth-only casters need no native MAT residency, point lights,
     // colormap or per-Thing lighting cap. Preserve the native render call.
     std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
