@@ -15,6 +15,10 @@ namespace jkgm {
 struct sun_shadow_gpu {
     gl::framebuffer fbo,far_fbo;
     gl::texture depth,far_depth;
+    // World-only layers can be reused while dynamic Things change.
+    gl::framebuffer static_fbo,static_far_fbo;
+    gl::texture static_depth,static_far_depth;
+    bool static_complete=false;
     gl::vertex_array vao;
     gl::buffer vertices,indices;
     decal_world_geometry world{};
@@ -96,6 +100,37 @@ struct sun_shadow_gpu {
             gl::framebuffer_status::complete;
         if(!far_complete)LOG_WARNING("Far sun shadow framebuffer incomplete");
         complete=complete && far_complete;
+        gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                             gl::default_framebuffer);
+        // Immutable world-only depth layers; no per-frame texture allocation.
+        // If these additional FBOs fail, callers fall back to full redraw.
+        auto setup_static=[&](gl::framebuffer &target,gl::texture &texture) {
+            gl::set_active_texture_unit(0);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,texture);
+            gl::tex_image_2d(gl::texture_bind_target::texture_2d,0,
+                gl::texture_internal_format::depth_component_24,
+                make_size(int(resolution),int(resolution)),
+                gl::texture_pixel_format::depth_component,
+                gl::texture_pixel_type::float32,
+                span<char const>(nullptr,0U));
+            gl::set_texture_max_level(gl::texture_bind_target::texture_2d,0);
+            gl::set_texture_min_filter(gl::texture_bind_target::texture_2d,
+                                       gl::min_filter::nearest);
+            gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d,
+                                       gl::mag_filter::nearest);
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,target);
+            gl::framebuffer_texture(gl::framebuffer_bind_target::any,
+                                    gl::framebuffer_attachment::depth,texture,0);
+            gl::draw_buffers(gl::draw_buffer::none);
+            glReadBuffer(GL_NONE);
+            return gl::check_framebuffer_status(
+                gl::framebuffer_bind_target::any)==gl::framebuffer_status::complete;
+        };
+        static_complete=setup_static(static_fbo,static_depth);
+        bool const far_static_ok=setup_static(static_far_fbo,static_far_depth);
+        static_complete=static_complete && far_static_ok;
+        if(!static_complete)
+            LOG_WARNING("Sun world depth layer cache unavailable; full cascade fallback");
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                              gl::default_framebuffer);
         gl::bind_vertex_array(vao);
