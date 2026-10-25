@@ -277,6 +277,17 @@ namespace jkgm {
             void set_samples(span<point<3, float> const> values);
         };
 
+        // Optional depth-only spotlight pass, constructed only when enabled.
+        class spotlight_shadow_depth_shader : public opengl_shader {
+            gl::uniform_location_id shadow_origin,shadow_right,shadow_up;
+            gl::uniform_location_id shadow_forward,shadow_limits;
+        public:
+            explicit spotlight_shadow_depth_shader(fs::path const &data_root);
+            void set_light(point<3,float> origin,point<3,float> right,
+                           point<3,float> up,point<3,float> forward,
+                           point<4,float> limits);
+        };
+
         class game_post_opaque_composite_shader : public opengl_shader {
         private:
             gl::uniform_location_id color_image;
@@ -289,6 +300,9 @@ namespace jkgm {
             gl::uniform_location_id camera_origin,camera_right,
                                     camera_forward,camera_up;
             gl::uniform_location_id spotlight_count;
+            gl::uniform_location_id spotlight_shadow_slot;
+            gl::uniform_location_id spotlight_shadow_image;
+            gl::uniform_location_id spotlight_shadow_near_range;
             std::vector<gl::uniform_location_id> spotlight_images;
             std::vector<gl::uniform_location_id> spotlight_origins;
             std::vector<gl::uniform_location_id> spotlight_rights;
@@ -309,6 +323,7 @@ namespace jkgm {
                                       point<4,float> right,point<4,float> forward,
                                       point<4,float> up);
             void set_spotlight_count(int count);
+            void set_spotlight_shadow(int slot,float near_plane,float far_plane);
             void set_spotlight(int slot,point<4,float> origin,
                                point<4,float> right,point<4,float> up,
                                point<4,float> forward,
