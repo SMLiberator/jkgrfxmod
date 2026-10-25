@@ -139,7 +139,61 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , camera_forward(gl::get_uniform_location(the_program, "camera_forward"))
     , camera_up(gl::get_uniform_location(the_program, "camera_up"))
     , view_params(gl::get_uniform_location(the_program, "view_params"))
+    , translucent_spotlight_count(gl::get_uniform_location(the_program,"translucent_spotlight_count"))
+    , translucent_spotlight_resolution(gl::get_uniform_location(the_program,"translucent_spotlight_resolution"))
+    , translucent_spotlight_camera_origin(gl::get_uniform_location(the_program,"translucent_spotlight_camera_origin"))
+    , translucent_spotlight_camera_right(gl::get_uniform_location(the_program,"translucent_spotlight_camera_right"))
+    , translucent_spotlight_camera_forward(gl::get_uniform_location(the_program,"translucent_spotlight_camera_forward"))
+    , translucent_spotlight_camera_up(gl::get_uniform_location(the_program,"translucent_spotlight_camera_up"))
 {
+    for(int i=0;i<4;++i) {
+        translucent_spotlight_images.push_back(gl::get_uniform_location(
+            the_program,"translucent_spotlight_image_"+std::to_string(i)));
+        translucent_spotlight_origins.push_back(gl::get_uniform_location(
+            the_program,"translucent_spotlight_origins["+std::to_string(i)+"]"));
+        translucent_spotlight_rights.push_back(gl::get_uniform_location(
+            the_program,"translucent_spotlight_rights["+std::to_string(i)+"]"));
+        translucent_spotlight_ups.push_back(gl::get_uniform_location(
+            the_program,"translucent_spotlight_ups["+std::to_string(i)+"]"));
+        translucent_spotlight_forwards.push_back(gl::get_uniform_location(
+            the_program,"translucent_spotlight_forwards["+std::to_string(i)+"]"));
+        translucent_spotlight_intensities.push_back(gl::get_uniform_location(
+            the_program,"translucent_spotlight_intensities["+std::to_string(i)+"]"));
+        translucent_spotlight_bounds.push_back(gl::get_uniform_location(
+            the_program,"translucent_spotlight_bounds["+std::to_string(i)+"]"));
+    }
+}
+
+
+void jkgm::shaders::game_pass_shader::set_translucent_spotlight_count(int count)
+{
+    gl::set_uniform_integer(translucent_spotlight_count,count);
+}
+
+void jkgm::shaders::game_pass_shader::set_translucent_spotlight_camera(
+    point<4,float> origin,point<4,float> right,point<4,float> forward,
+    point<4,float> up,point<2,float> resolution)
+{
+    gl::set_uniform_vector(translucent_spotlight_camera_origin,origin);
+    gl::set_uniform_vector(translucent_spotlight_camera_right,right);
+    gl::set_uniform_vector(translucent_spotlight_camera_forward,forward);
+    gl::set_uniform_vector(translucent_spotlight_camera_up,up);
+    gl::set_uniform_vector(translucent_spotlight_resolution,resolution);
+}
+
+void jkgm::shaders::game_pass_shader::set_translucent_spotlight(
+    int slot,point<4,float> origin,point<4,float> right,
+    point<4,float> up,point<4,float> forward,
+    point<2,float> strengths,point<4,float> bounds)
+{
+    if(slot<0 || slot>=4)return;
+    gl::set_uniform_integer(translucent_spotlight_images[slot],12+slot);
+    gl::set_uniform_vector(translucent_spotlight_origins[slot],origin);
+    gl::set_uniform_vector(translucent_spotlight_rights[slot],right);
+    gl::set_uniform_vector(translucent_spotlight_ups[slot],up);
+    gl::set_uniform_vector(translucent_spotlight_forwards[slot],forward);
+    gl::set_uniform_vector(translucent_spotlight_intensities[slot],strengths);
+    gl::set_uniform_vector(translucent_spotlight_bounds[slot],bounds);
 }
 
 jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &root)
@@ -198,6 +252,12 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , normal_specular_scroll(gl::get_uniform_location(the_program,"normal_specular_scroll"))
     , normal_specular_scroll2(gl::get_uniform_location(the_program,"normal_specular_scroll2"))
     , local_eye(gl::get_uniform_location(the_program,"local_eye"))
+    , translucent_spotlight_count(gl::get_uniform_location(the_program,"translucent_spotlight_count"))
+    , translucent_spotlight_resolution(gl::get_uniform_location(the_program,"translucent_spotlight_resolution"))
+    , translucent_spotlight_camera_origin(gl::get_uniform_location(the_program,"translucent_spotlight_camera_origin"))
+    , translucent_spotlight_camera_right(gl::get_uniform_location(the_program,"translucent_spotlight_camera_right"))
+    , translucent_spotlight_camera_forward(gl::get_uniform_location(the_program,"translucent_spotlight_camera_forward"))
+    , translucent_spotlight_camera_up(gl::get_uniform_location(the_program,"translucent_spotlight_camera_up"))
     , ambient_light(gl::get_uniform_location(the_program,"ambient_light"))
     , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
@@ -209,7 +269,56 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
         light_intensity.push_back(gl::get_uniform_location(
             the_program,std::string("light_intensity[")+std::to_string(i)+"]"));
     }
+
+    for(int i=0;i<4;++i) {
+        translucent_spotlight_images.push_back(gl::get_uniform_location(
+            the_program,"translucent_spotlight_image_"+std::to_string(i)));
+        translucent_spotlight_origins.push_back(gl::get_uniform_location(
+            the_program,"translucent_spotlight_origins["+std::to_string(i)+"]"));
+        translucent_spotlight_rights.push_back(gl::get_uniform_location(
+            the_program,"translucent_spotlight_rights["+std::to_string(i)+"]"));
+        translucent_spotlight_ups.push_back(gl::get_uniform_location(
+            the_program,"translucent_spotlight_ups["+std::to_string(i)+"]"));
+        translucent_spotlight_forwards.push_back(gl::get_uniform_location(
+            the_program,"translucent_spotlight_forwards["+std::to_string(i)+"]"));
+        translucent_spotlight_intensities.push_back(gl::get_uniform_location(
+            the_program,"translucent_spotlight_intensities["+std::to_string(i)+"]"));
+        translucent_spotlight_bounds.push_back(gl::get_uniform_location(
+            the_program,"translucent_spotlight_bounds["+std::to_string(i)+"]"));
+    }
 }
+
+void jkgm::shaders::gpu_3do_preview_shader::set_translucent_spotlight_count(int count)
+{
+    gl::set_uniform_integer(translucent_spotlight_count,count);
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_translucent_spotlight_camera(
+    point<4,float> origin,point<4,float> right,point<4,float> forward,
+    point<4,float> up,point<2,float> resolution)
+{
+    gl::set_uniform_vector(translucent_spotlight_camera_origin,origin);
+    gl::set_uniform_vector(translucent_spotlight_camera_right,right);
+    gl::set_uniform_vector(translucent_spotlight_camera_forward,forward);
+    gl::set_uniform_vector(translucent_spotlight_camera_up,up);
+    gl::set_uniform_vector(translucent_spotlight_resolution,resolution);
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_translucent_spotlight(
+    int slot,point<4,float> origin,point<4,float> right,
+    point<4,float> up,point<4,float> forward,
+    point<2,float> strengths,point<4,float> bounds)
+{
+    if(slot<0 || slot>=4)return;
+    gl::set_uniform_integer(translucent_spotlight_images[slot],12+slot);
+    gl::set_uniform_vector(translucent_spotlight_origins[slot],origin);
+    gl::set_uniform_vector(translucent_spotlight_rights[slot],right);
+    gl::set_uniform_vector(translucent_spotlight_ups[slot],up);
+    gl::set_uniform_vector(translucent_spotlight_forwards[slot],forward);
+    gl::set_uniform_vector(translucent_spotlight_intensities[slot],strengths);
+    gl::set_uniform_vector(translucent_spotlight_bounds[slot],bounds);
+}
+
 void jkgm::shaders::gpu_3do_preview_shader::set_view_matrix(
     point<4,float> r,point<4,float> f,point<4,float> u,point<4,float> t)
 {
