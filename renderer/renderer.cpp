@@ -3554,6 +3554,14 @@ namespace jkgm {
                     hash_u32(bits);
                 }
             }
+            if(the_config->profile_renderer &&
+               (gpu_3do_present_serial%120U)==0U) {
+                LOG_INFO("SHADOW spotlight: world_candidates=",map.mesh.surfaces.size(),
+                         " model_ranges=",model_casters.size(),
+                         " model_cache=",the_config->use_model_cache?1:0,
+                         " reused=",spotlight_shadow_cached &&
+                                    caster_signature==spotlight_shadow_3do_signature?1:0);
+            }
             // No CPU/GPU depth readback or per-frame geometry draw is
             // necessary when both light and caster transforms are unchanged.
             auto same=[](std::array<float,3> const &a,
