@@ -581,6 +581,16 @@ namespace jkgm {
         size_t projected_sun_cached_world_casters=0;
         size_t projected_sun_cached_model_casters=0;
         std::vector<projected_sun_mask_vertex> projected_sun_cached_vertices;
+        // Stationary 3DOs survive invalidation by independently moving actors.
+        struct projected_sun_model_cache_entry {
+            std::vector<projected_sun_triangle> triangles;
+            size_t casters=0,model_casters=0;
+            uint64_t last_used=0;
+        };
+        std::unordered_map<uint64_t,projected_sun_model_cache_entry>
+            projected_sun_model_cache;
+        uint64_t projected_sun_model_parent=0;
+        uint64_t projected_sun_model_generation=0;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
         // Track only owners with a successfully rasterized atlas tile.
@@ -925,6 +935,8 @@ namespace jkgm {
                 sun_shadow_ready=false;
                 projected_sun_ready=false;
                 projected_sun_world.clear();
+                projected_sun_model_cache.clear();
+                projected_sun_model_parent=0;
                 projected_sun_cache_valid=false;
                 projected_sun_gpu_signature=0;
                 projected_sun_cached_vertices.clear();
@@ -4629,6 +4641,8 @@ namespace jkgm {
                 projected_sun_cache_valid=false;
                 projected_sun_gpu_signature=0;
                 projected_sun_cached_vertices.clear();
+                projected_sun_model_cache.clear();
+                projected_sun_model_parent=0;
                 if(!projected_sun_world.load(safe_read,world,250000U,true))
                     return;
             }
@@ -4680,6 +4694,7 @@ namespace jkgm {
                 receiver_visible[i]=uint8_t(
                     sun_shadow_world_face_visible(mode,s.normal,dir));
             }
+            uint64_t const model_parent=signature;
             for(auto const &inst:frame_gpu_3do_instances) {
                 if(!inst.geometry || !inst.casts_sun_shadows ||
                    inst.is_projected_decal)continue;
@@ -4761,12 +4776,58 @@ namespace jkgm {
                     ++world_casters;
                 }
             }
+            // Don't invalidate stationary 3DO projections whenever a
+            // completely different character moves.
+            if(projected_sun_model_parent!=model_parent) {
+                projected_sun_model_parent=model_parent;
+                projected_sun_model_cache.clear();
+            }
+            ++projected_sun_model_generation;
+            if(projected_sun_model_generation%32U==0U) {
+                for(auto it=projected_sun_model_cache.begin();
+                    it!=projected_sun_model_cache.end();) {
+                    if(projected_sun_model_generation-it->second.last_used>16U)
+                        it=projected_sun_model_cache.erase(it);
+                    else ++it;
+                }
+            }
             // Submitted 3DO models can cast onto world geometry, but this
             // initial test intentionally does not create 3DO receivers.
             for(auto const &instance:frame_gpu_3do_instances) {
                 if(casters>=max_casters || output.size()>=max_triangles)break;
                 if(!instance.geometry || !instance.casts_sun_shadows ||
                    instance.is_projected_decal)continue;
+                uint64_t key=model_parent;
+                auto hash_bytes=[&](void const *src,size_t length) {
+                    auto const *bytes=static_cast<uint8_t const *>(src);
+                    for(size_t k=0;k<length;++k) {
+                        key^=bytes[k];key*=1099511628211ULL;
+                    }
+                };
+                hash_bytes(&instance.id,sizeof(instance.id));
+                uintptr_t const ptr=
+                    reinterpret_cast<uintptr_t>(instance.geometry.get());
+                hash_bytes(&ptr,sizeof(ptr));
+                hash_bytes(instance.transform.data(),
+                           instance.transform.size()*sizeof(float));
+                for(auto const &group:instance.geometry->groups) {
+                    hash_bytes(&group.material,sizeof(group.material));
+                    hash_bytes(&group.cel,sizeof(group.cel));
+                }
+                auto found=projected_sun_model_cache.find(key);
+                if(found!=projected_sun_model_cache.end() &&
+                   casters+found->second.casters<=max_casters &&
+                   output.size()+found->second.triangles.size()<=max_triangles) {
+                    casters+=found->second.casters;
+                    model_casters+=found->second.model_casters;
+                    output.insert(output.end(),found->second.triangles.begin(),
+                                  found->second.triangles.end());
+                    found->second.last_used=projected_sun_model_generation;
+                    continue;
+                }
+                size_t const caster_start=casters;
+                size_t const model_start=model_casters;
+                size_t const output_start=output.size();
                 auto const &m=instance.transform;
                 for(auto const &g:instance.geometry->groups) {
                     if(casters>=max_casters || output.size()>=max_triangles)break;
@@ -4799,6 +4860,17 @@ namespace jkgm {
                         ++model_casters;
                         if(output.size()>=max_triangles)break;
                     }
+                }
+                // Never cache truncated per-model projections.
+                if(casters<max_casters && output.size()<max_triangles &&
+                   projected_sun_model_cache.size()<512U) {
+                    projected_sun_model_cache_entry entry{};
+                    entry.casters=casters-caster_start;
+                    entry.model_casters=model_casters-model_start;
+                    entry.last_used=projected_sun_model_generation;
+                    entry.triangles.assign(output.begin()+output_start,
+                                           output.end());
+                    projected_sun_model_cache[key]=std::move(entry);
                 }
             }
             points.reserve(output.size()*3U);
