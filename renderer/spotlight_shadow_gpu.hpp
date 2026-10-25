@@ -28,6 +28,7 @@ struct spotlight_shadow_gpu {
     unsigned resolution=spotlight_shadow_initial_resolution;
     bool complete=false;
     uintptr_t loaded_world=0;
+    uint64_t revision=0;
 
     explicit spotlight_shadow_gpu(unsigned pixels=spotlight_shadow_initial_resolution)
     {
