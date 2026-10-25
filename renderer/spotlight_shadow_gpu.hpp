@@ -87,7 +87,10 @@ struct spotlight_shadow_gpu {
         loaded_world=0;
         world.clear();
         mesh={};
-        if(!world.load(read,address) ||
+        // Hidden-but-otherwise-valid surfaces must remain in this shadow
+        // cache: SetSurfaceGeomode may switch them back on without changing
+        // level topology. Visible decal receivers keep their usual filter.
+        if(!world.load(read,address,250000U,true) ||
            !build_spotlight_shadow_static_mesh(world,mesh)) {
             world.clear();
             mesh={};
