@@ -29,6 +29,35 @@ uniform vec2 spotlight_intensities[4]; // light (pigment), additive (cookie)
 // Fullscreen fog/AO still renders; only projector work is footprint-gated.
 uniform vec4 spotlight_screen_bounds[4];
 
+// Optional one-light static-world shadow. Depth is sampled only inside the
+// matching spotlight's cookie footprint; disabled mode has zero texture reads.
+uniform int spotlight_shadow_slot; // -1 when no valid shadow map this frame
+uniform sampler2D spotlight_shadow_image;
+uniform vec2 spotlight_shadow_near_range; // near, far in JK world units
+
+float spotlight_shadow_visibility(vec2 uv,float receiver_distance)
+{
+    float n=spotlight_shadow_near_range.x;
+    float f=spotlight_shadow_near_range.y;
+    if(receiver_distance<=n || receiver_distance>=f)return 1.0;
+    // Same perspective Z transform as spotlight_shadow.vert. Using linear
+    // receiver distance directly would create spurious shadows everywhere.
+    float receiver=f/(f-n)-f*n/((f-n)*receiver_distance);
+    float derivative=f*n/((f-n)*receiver_distance*receiver_distance);
+    // Geometry-scale bias, bounded by one 16-bit depth quantum. Avoid the
+    // huge depth-space bias that would detach contact shadows at long range.
+    float bias=max(0.000025,derivative*0.015);
+    vec2 texel=1.0/vec2(textureSize(spotlight_shadow_image,0));
+    float lit=0.0;
+    for(int y=0;y<2;++y)
+    for(int x=0;x<2;++x) {
+        vec2 delta=(vec2(x,y)-vec2(0.5))*texel;
+        float caster=texture(spotlight_shadow_image,uv+delta).r;
+        lit+=(receiver-bias<=caster)?0.25:0.0;
+    }
+    return lit;
+}
+
 layout(location = 0) out vec4 out_color;
 
 vec4 sample_spotlight(int i,vec2 uv)
@@ -115,7 +144,10 @@ void project_spotlights(float depth,ivec2 pixel,
         float facing=max(dot(normal,normalize(-relative)),0.0);
         // Mild floor illumination even with near-horizontal beams.
         float incidence=0.25+0.75*facing;
-        vec3 radiance=cookie.rgb*cookie.a*(edge*fade*incidence);
+        float shadow=1.0;
+        if(i==spotlight_shadow_slot)
+            shadow=spotlight_shadow_visibility(uv,distance);
+        vec3 radiance=cookie.rgb*cookie.a*(edge*fade*incidence*shadow);
         diffuse+=radiance*spotlight_intensities[i].x;
         additive+=radiance*spotlight_intensities[i].y;
     }
