@@ -675,6 +675,21 @@ existing indexed buffers are reused for rendering and shadows.
 
 **Current behavior and limitations:**
 
+- The shadow-only world cache retains *initially hidden* polygons, but the
+  capture checks each candidate's **live surface geomode** before drawing.
+  This makes COG geomode 4 → 0 and 0 → 4 changes take effect without
+  rebuilding the level mesh. The current geomodes enter the depth-map cache
+  signature so stationary lights don't reuse stale shadows. World surface
+  normals provide one-sided light-facing rejection; 3DO draw ranges match
+  the normal renderer's backface/double-sided and mirrored-winding policy.
+- A spotlight origin inside a 3DO group's world-space bounds excludes that
+  group from the shadow caster pass (common for vehicle headlights). This
+  does not change shadows cast by the rest of the scene; lights truly buried
+  behind a different visible opaque surface may still require an offset.
+- Projected SPR decals reject oppositely facing back sides of slabs and
+  draw one-sided in the cached GPU renderer. Perpendicular/adjacent surfaces
+  can still receive finite-volume projection; no strict corner angle limit
+  has been reintroduced.
 - World casters now retain checked native MAT UV indices, cel and texture
   offsets. Ordinary opaque surfaces remain a single batched indexed draw;
   alpha-cutout world faces (grates, fences, masks) sample their current
