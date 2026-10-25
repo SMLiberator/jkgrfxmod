@@ -3859,9 +3859,17 @@ namespace jkgm {
         void draw_sun_shadow_map()
         {
             sun_shadow_ready=false;
-            if(!the_config->enable_sun_shadows ||
-               !ogs->spotlight_shadow_depth_program ||
-               !engine_material_debug::matches_tested_executable())return;
+            if(!the_config->enable_sun_shadows)return;
+            auto sun_failure=[&](char const *reason) {
+                if(the_config->profile_renderer &&
+                   gpu_3do_present_serial%120U==0U)
+                    LOG_INFO("SUN shadow unavailable: ",reason);
+            };
+            if(!ogs->spotlight_shadow_depth_program ||
+               !engine_material_debug::matches_tested_executable()) {
+                sun_failure("shader missing or executable signature mismatch");
+                return;
+            }
             auto const sun=get_sun_settings();
             auto const direction=normalized_sun_direction(sun.direction.value());
             auto const rgb=sun.color.value();
@@ -3881,7 +3889,10 @@ namespace jkgm {
                 sun_shadow_target=std::make_unique<sun_shadow_gpu>(
                     the_config->sun_shadow_resolution);
             auto &map=*sun_shadow_target;
-            if(!map.update_world(safe_read,world))return;
+            if(!map.update_world(safe_read,world)) {
+                sun_failure("SithWorld shadow snapshot failed");
+                return;
+            }
             // A level may have only a tiny native-world shell while its
             // playable architecture is made from 3DOs. Include submitted
             // model groups before fitting the sun map; otherwise both the
@@ -3914,15 +3925,25 @@ namespace jkgm {
                 }
             }
             sun_shadow_projection view{};
-            if(!make_sun_shadow_projection(map.world,direction,view,model_bounds))return;
+            if(!make_sun_shadow_projection(map.world,direction,view,model_bounds)) {
+                sun_failure("no world receivers or captured 3DO casters");
+                return;
+            }
             auto const camera=read_active_render_camera();
-            if(!camera.valid)return;
+            if(!camera.valid) {
+                sun_failure("render camera unavailable");
+                return;
+            }
             float const horizontal=std::tan(camera.fov*
                 (3.14159265358979323846f/360.0f));
             float const vertical=horizontal*float(get<y>(conf_scr_res))/
                 float(get<x>(conf_scr_res));
             if(!fit_sun_shadow_to_camera(view,camera.position,camera.right,
-                    camera.up,camera.forward,horizontal,vertical,128.0f))return;
+                    camera.up,camera.forward,horizontal,vertical,128.0f) ||
+               !stabilize_sun_shadow_projection(view,map.resolution)) {
+                sun_failure("camera-local projection invalid");
+                return;
+            }
 
             // Query the complete orthographic box. The spotlight helper's
             // perspective pyramid bounds do not cover a directional map.
@@ -4047,6 +4068,11 @@ namespace jkgm {
                     for(float v:m)hash_float(v);
                 }
             }
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("SUN shadow caster batches world=",
+                         counts.size()+world_cutouts.size(),
+                         " 3do=",models.size()," map=",map.resolution);
             bool unchanged=sun_shadow_cached && sun_shadow_world==world &&
                 sun_shadow_revision==map.revision &&
                 caster_signature==sun_shadow_caster_signature;
@@ -4173,14 +4199,23 @@ namespace jkgm {
             auto &prog=ogs->game_post_opaque_composite_program;
             prog.set_spotlight_count(0);
             prog.set_spotlight_shadow(-1,0.0f,0.0f);
-            prog.set_sun_shadow(false,make_point(0.0f,0.0f,1.0f),
+            prog.set_sun_shadow(false,false,make_point(0.0f,0.0f,1.0f),
                 make_point(0.0f,0.0f,0.0f,0.0f),
                 make_point(0.0f,0.0f,0.0f),make_point(1.0f,0.0f,0.0f),
                 make_point(0.0f,1.0f,0.0f),make_point(0.0f,0.0f,1.0f),
                 make_point(1.0f,1.0f,1.0f));
-            // Reconstruct receiving surfaces for node-attached MAT spotlights.
+            // Direct sunlight must survive a failed/unavailable shadow map.
+            auto const sun=get_sun_settings();
+            float const sun_power=sun.intensity.value()[0];
+            bool const sun_lit=the_config->enable_sun_shadows &&
+                std::isfinite(sun_power) && sun_power>0.0f;
             auto const cam=read_active_render_camera();
-            if(cam.valid && (the_config->enable_spotlights || sun_shadow_ready)) {
+            if(the_config->enable_sun_shadows && the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("SUN composite diffuse=",sun_lit && cam.valid?1:0,
+                         " shadow=",sun_shadow_ready?1:0,
+                         " intensity=",sun_power);
+            if(cam.valid && (the_config->enable_spotlights || sun_lit)) {
                 float const h=std::tan(cam.fov*(3.14159265358979323846f/360.0f));
                 float const v=h*float(get<y>(conf_scr_res))/
                                   float(get<x>(conf_scr_res));
@@ -4239,26 +4274,28 @@ namespace jkgm {
                     }
                 }
                 prog.set_spotlight_count(active);
-                if(active>0 || sun_shadow_ready) {
+                if(active>0 || sun_lit) {
                     gl::set_active_texture_unit(5);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
                                      frame_screen->get_resolved_normal_texture());
                 }
-                if(sun_shadow_ready && sun_shadow_target) {
-                    auto const sun=get_sun_settings();
+                if(sun_lit) {
+                    bool const shadows=sun_shadow_ready && bool(sun_shadow_target);
                     auto const direction=normalized_sun_direction(sun.direction.value());
                     auto const rgb=sun.color.value();
-                    prog.set_sun_shadow(true,
+                    prog.set_sun_shadow(true,shadows,
                         make_point(direction[0],direction[1],direction[2]),
-                        make_point(rgb[0],rgb[1],rgb[2],sun.intensity.value()[0]),
+                        make_point(rgb[0],rgb[1],rgb[2],sun_power),
                         make_point(sun_shadow_view.origin[0],sun_shadow_view.origin[1],sun_shadow_view.origin[2]),
                         make_point(sun_shadow_view.right[0],sun_shadow_view.right[1],sun_shadow_view.right[2]),
                         make_point(sun_shadow_view.up[0],sun_shadow_view.up[1],sun_shadow_view.up[2]),
                         make_point(sun_shadow_view.forward[0],sun_shadow_view.forward[1],sun_shadow_view.forward[2]),
                         make_point(sun_shadow_view.width,sun_shadow_view.height,sun_shadow_view.range));
-                    gl::set_active_texture_unit(13);
-                    gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                     sun_shadow_target->depth);
+                    if(shadows) {
+                        gl::set_active_texture_unit(13);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         sun_shadow_target->depth);
+                    }
                 }
             }
             {

@@ -1,12 +1,31 @@
 #include "renderer/sun_shadow.hpp"
 #include <cassert>
+#include <array>
+#include <cstdint>
+#include <cstring>
 
 using namespace jkgm;
 
 int main()
 {
+    // Empty-world data is a valid shadow shell for 3DO-only levels.
+    constexpr uintptr_t world_addr=0x120000U;
+    std::array<unsigned char,0xb0> header{};
+    decal_native_read read=[&](uintptr_t addr,void *out,size_t size) {
+        if(addr<world_addr || addr-world_addr>header.size() ||
+           size>header.size()-(addr-world_addr))return false;
+        std::memcpy(out,header.data()+(addr-world_addr),size);
+        return true;
+    };
     decal_world_geometry world{};
-    world.valid_world=true;
+    assert(world.load(read,world_addr,250000U,true));
+    assert(world.valid_world && world.receivers.empty());
+    assert(world.matches(read,world_addr));
+    spotlight_shadow_static_mesh mesh{};
+    assert(build_spotlight_shadow_static_mesh(world,mesh));
+    assert(mesh.indices.empty());
+    decal_world_geometry decals{};
+    assert(!decals.load(read,world_addr,250000U,false));
     // A model-built level can have no usable native world receivers.
     decal_volume_aabb architecture{};
     architecture.low={{100.0f,200.0f,0.0f}};
@@ -24,6 +43,8 @@ int main()
         {{1.0f,0.0f,0.0f}},{{0.0f,0.0f,1.0f}},
         {{0.0f,1.0f,0.0f}},0.5f,0.4f,20.0f));
     assert(projection.width<50.0f && projection.height<50.0f);
+    assert(stabilize_sun_shadow_projection(projection,512U));
+    assert(!stabilize_sun_shadow_projection(projection,0U));
     auto visible=sun_shadow_clip(projection,{{105.0f,215.0f,2.0f}});
     assert(visible.x>-1.0f && visible.x<1.0f);
     assert(visible.y>-1.0f && visible.y<1.0f);

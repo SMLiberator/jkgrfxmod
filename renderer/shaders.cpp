@@ -807,6 +807,7 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , spotlight_shadow_slot(gl::get_uniform_location(the_program,"spotlight_shadow_slot"))
     , spotlight_shadow_image(gl::get_uniform_location(the_program,"spotlight_shadow_image"))
     , spotlight_shadow_near_range(gl::get_uniform_location(the_program,"spotlight_shadow_near_range"))
+    , sun_lighting_active(gl::get_uniform_location(the_program,"sun_lighting_active"))
     , sun_shadow_active(gl::get_uniform_location(the_program,"sun_shadow_active"))
     , sun_shadow_image(gl::get_uniform_location(the_program,"sun_shadow_image"))
     , sun_shadow_direction(gl::get_uniform_location(the_program,"sun_shadow_direction"))
@@ -892,15 +893,18 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight_shadow(
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow(
-    bool enabled,point<3,float> direction,point<4,float> color_intensity,
+    bool lighting_enabled,bool shadows_enabled,
+    point<3,float> direction,point<4,float> color_intensity,
     point<3,float> origin,point<3,float> right,point<3,float> up,
     point<3,float> forward,point<3,float> limits)
 {
-    gl::set_uniform_integer(sun_shadow_active,enabled?1:0);
-    if(!enabled)return;
-    gl::set_uniform_integer(sun_shadow_image,13);
+    gl::set_uniform_integer(sun_lighting_active,lighting_enabled?1:0);
+    gl::set_uniform_integer(sun_shadow_active,shadows_enabled?1:0);
+    if(!lighting_enabled)return;
     gl::set_uniform_vector(sun_shadow_direction,direction);
     gl::set_uniform_vector(sun_shadow_color_intensity,color_intensity);
+    if(!shadows_enabled)return;
+    gl::set_uniform_integer(sun_shadow_image,13);
     gl::set_uniform_vector(sun_shadow_origin,origin);
     gl::set_uniform_vector(sun_shadow_right,right);
     gl::set_uniform_vector(sun_shadow_up,up);

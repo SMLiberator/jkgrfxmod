@@ -148,6 +148,26 @@ inline bool fit_sun_shadow_to_camera(
            std::isfinite(projection.height);
 }
 
+// Snap orthographic translation to exact texels; static shadows then
+// stay fixed during sub-texel camera translation.
+inline bool stabilize_sun_shadow_projection(
+    sun_shadow_projection &projection,unsigned resolution)
+{
+    if(resolution==0 || !(projection.width>0.0f) ||
+       !(projection.height>0.0f) || !std::isfinite(projection.width) ||
+       !std::isfinite(projection.height))return false;
+    float const tx=projection.width/float(resolution);
+    float const ty=projection.height/float(resolution);
+    float const x=decal_dot(projection.origin,projection.right);
+    float const y=decal_dot(projection.origin,projection.up);
+    float const dx=std::floor(x/tx)*tx-x;
+    float const dy=std::floor(y/ty)*ty-y;
+    if(!std::isfinite(dx) || !std::isfinite(dy))return false;
+    for(int i=0;i<3;++i)
+        projection.origin[i]+=projection.right[i]*dx+projection.up[i]*dy;
+    return decal_finite(projection.origin);
+}
+
 inline sun_shadow_clip_point sun_shadow_clip(
     sun_shadow_projection const &p,decal_vec3 const &world)
 {

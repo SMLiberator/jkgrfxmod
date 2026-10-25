@@ -61,11 +61,23 @@ namespace jkgm {
                !read_decal_u32(read,current+0x8c,verts) ||
                !read_decal_u32(read,current+0xa8,nfaces) ||
                !read_decal_u32(read,current+0xac,faces) ||
-               nverts==0 || nverts>1000000 ||
-               nfaces>max_surfaces || nfaces==0 ||
-               !decal_native_address_ok(verts) ||
-               !decal_native_address_ok(faces))
+               nverts>1000000 || nfaces>max_surfaces)
                 return false;
+            // Shadow maps accept a model-only level with no native surfaces.
+            // Ordinary decal receiver snapshots preserve their strict checks.
+            if(nfaces==0 && shadow_include_hidden) {
+                world=current;
+                include_hidden_faces=true;
+                vertices_addr=verts;
+                surfaces_addr=faces;
+                vertex_count=nverts;
+                surface_count=0;
+                valid_world=true;
+                return true;
+            }
+            if(nverts==0 || nfaces==0 ||
+               !decal_native_address_ok(verts) ||
+               !decal_native_address_ok(faces))return false;
             // These optional arrays provide world-space MAT UVs for
             // alpha-tested shadows; decal geometry itself needs neither.
             // Verified SithWorld offsets: +a0 tex vertex count, +a4 pointer.
