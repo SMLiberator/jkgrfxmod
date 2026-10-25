@@ -38,7 +38,8 @@ int main() {
     auto const &group=gpu.geometry->groups[0];
     assert(group.material==0x123456U);
     assert(group.count==6);
-    assert(group.nonplanar);
+    assert(!group.nonplanar);
+    assert((group.face_type&0x1U)==0U); // one-sided; no bleed through slabs
     assert(gpu.geometry->material_refs[0].first==0x123456U);
     assert(eq(gpu.opacity,0.6f));
     // Pixel-center conversion maps projected (0,0) to (0.5,0.5).
