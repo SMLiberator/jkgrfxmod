@@ -32,7 +32,7 @@ uniform vec4 spotlight_screen_bounds[4];
 // Optional one-light static-world shadow. Depth is sampled only inside the
 // matching spotlight's cookie footprint; disabled mode has zero texture reads.
 uniform int spotlight_shadow_slot; // -1 when no valid shadow map this frame
-uniform sampler2D spotlight_shadow_image;
+uniform sampler2DShadow spotlight_shadow_image;
 uniform vec2 spotlight_shadow_near_range; // near, far in JK world units
 
 uniform int sun_lighting_active; // independent of depth-map readiness
@@ -63,7 +63,8 @@ bool sun_shadow_inside(vec3 coord)
     return all(greaterThanEqual(coord,vec3(0.0))) &&
            all(lessThanEqual(coord,vec3(1.0)));
 }
-float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range)
+float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
+                        bool soft)
 {
     // A 24-bit normalized orthographic depth map avoids quantizing the
     // world's full light-axis range into only 65536 possible distances.
@@ -71,6 +72,9 @@ float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range)
     float bias=max(4.0/16777215.0,0.015/max(range,0.001));
     vec2 texel=1.0/vec2(textureSize(map,0));
     float receiver=coordinate.z-bias;
+    // A single hardware PCF lookup preserves small character silhouettes:
+    // the existing 3x3 filter makes close-range details vanish.
+    if(!soft)return texture(map,vec3(coordinate.xy,receiver));
     float visible=0.0;
     // GL_LINEAR on a comparison sampler performs bilinear comparison PCF
     // *before* these samples are averaged. Previously nearest depth reads
@@ -92,22 +96,26 @@ float sun_shadow_visibility(vec3 world_position)
     // Far cascade overlaps near coverage; never discard a receiver merely
     // because its near projection fell outside the map.
     bool use_near=camera_depth<sun_shadow_split && sun_shadow_inside(near_uv);
-    if(use_near && camera_depth<sun_shadow_split-6.0)
-        return sun_shadow_filter(sun_shadow_image,near_uv,sun_shadow_limits.z);
+    // Keep the sharper near cascade until close to the split. Blending for
+    // six units would waste most of a 16-unit character-focused cascade.
+    float transition_start=sun_shadow_split*0.8125;
+    float transition_end=sun_shadow_split*0.9375;
+    if(use_near && camera_depth<transition_start)
+        return sun_shadow_filter(sun_shadow_image,near_uv,
+                                 sun_shadow_limits.z,false);
     vec3 far_uv=sun_shadow_coordinates(world_position,sun_shadow_far_origin,
         sun_shadow_far_right,sun_shadow_far_up,
         sun_shadow_far_forward,sun_shadow_far_limits);
     if(!sun_shadow_inside(far_uv))
         return use_near
-            ? sun_shadow_filter(sun_shadow_image,near_uv,sun_shadow_limits.z)
+            ? sun_shadow_filter(sun_shadow_image,near_uv,sun_shadow_limits.z,false)
             : 1.0;
     float far_visibility=sun_shadow_filter(sun_shadow_far_image,
-        far_uv,sun_shadow_far_limits.z);
+        far_uv,sun_shadow_far_limits.z,true);
     if(!use_near)return far_visibility;
     float near_visibility=sun_shadow_filter(sun_shadow_image,
-        near_uv,sun_shadow_limits.z);
-    float blend=smoothstep(sun_shadow_split-6.0,sun_shadow_split-2.0,
-                          camera_depth);
+        near_uv,sun_shadow_limits.z,false);
+    float blend=smoothstep(transition_start,transition_end,camera_depth);
     return mix(near_visibility,far_visibility,blend);
 }
 
@@ -120,18 +128,19 @@ float spotlight_shadow_visibility(vec2 uv,float receiver_distance)
     // receiver distance directly would create spurious shadows everywhere.
     float receiver=f/(f-n)-f*n/((f-n)*receiver_distance);
     float derivative=f*n/((f-n)*receiver_distance*receiver_distance);
-    // Geometry-scale bias, bounded by one 16-bit depth quantum. Avoid the
-    // huge depth-space bias that would detach contact shadows at long range.
+    // Preserve the geometry-scale depth bias with a 24-bit comparison map.
+    // Avoid detached contact shadows at long projector ranges.
     float bias=max(0.000025,derivative*0.015);
     vec2 texel=1.0/vec2(textureSize(spotlight_shadow_image,0));
     float lit=0.0;
+    // Four nearby hardware-bilinear depth comparisons smooth jagged edges,
+    // without adding a blur pass or altering the projected MAT cookie.
     for(int y=0;y<2;++y)
     for(int x=0;x<2;++x) {
-        vec2 delta=(vec2(x,y)-vec2(0.5))*texel;
-        float caster=texture(spotlight_shadow_image,uv+delta).r;
-        lit+=(receiver-bias<=caster)?0.25:0.0;
+        vec2 delta=(vec2(x,y)-vec2(0.5))*0.7*texel;
+        lit+=texture(spotlight_shadow_image,vec3(uv+delta,receiver-bias));
     }
-    return lit;
+    return lit*0.25;
 }
 
 layout(location = 0) out vec4 out_color;

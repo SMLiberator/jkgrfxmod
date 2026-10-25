@@ -13,10 +13,10 @@ namespace jkgm {
 
 // Two nested camera-depth regions. The far cascade overlaps the near
 // cascade, so near receivers can fall back if a light-space edge is crossed.
-constexpr float sun_shadow_near_distance=32.0f;
+constexpr float sun_shadow_near_distance=16.0f;
 constexpr float sun_shadow_far_distance=128.0f;
-constexpr float sun_shadow_blend_start=26.0f;
-constexpr float sun_shadow_blend_end=30.0f;
+constexpr float sun_shadow_blend_start=13.0f;
+constexpr float sun_shadow_blend_end=15.0f;
 struct sun_shadow_projection {
     decal_vec3 origin{},right{},up{},forward{};
     float width=1.0f,height=1.0f,range=1.0f;

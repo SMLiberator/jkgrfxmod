@@ -36,16 +36,16 @@ struct spotlight_shadow_gpu {
         gl::set_active_texture_unit(0);
         gl::bind_texture(gl::texture_bind_target::texture_2d,depth);
         gl::tex_image_2d(gl::texture_bind_target::texture_2d,0,
-            gl::texture_internal_format::depth_component_16,
+            gl::texture_internal_format::depth_component_24,
             make_size(int(resolution),int(resolution)),
             gl::texture_pixel_format::depth_component,
             gl::texture_pixel_type::float32,
             span<char const>(nullptr,0U));
         gl::set_texture_max_level(gl::texture_bind_target::texture_2d,0);
         gl::set_texture_min_filter(gl::texture_bind_target::texture_2d,
-                                   gl::min_filter::nearest);
+                                   gl::min_filter::linear);
         gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d,
-                                   gl::mag_filter::nearest);
+                                   gl::mag_filter::linear);
         gl::set_texture_wrap_mode(gl::texture_bind_target::texture_2d,
             gl::texture_direction::s,gl::texture_wrap_mode::clamp_to_border);
         gl::set_texture_wrap_mode(gl::texture_bind_target::texture_2d,
@@ -53,7 +53,9 @@ struct spotlight_shadow_gpu {
         gl::set_texture_border_color(gl::texture_bind_target::texture_2d,
                                      color(1.0f,1.0f,1.0f,1.0f));
         gl::set_texture_compare_mode(gl::texture_bind_target::texture_2d,
-                                     gl::texture_compare_mode::none);
+                                     gl::texture_compare_mode::compare_ref_to_texture);
+        gl::set_texture_compare_function(gl::texture_bind_target::texture_2d,
+                                         gl::comparison_function::less_equal);
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,fbo);
         gl::framebuffer_texture(gl::framebuffer_bind_target::any,
                                 gl::framebuffer_attachment::depth,depth,0);

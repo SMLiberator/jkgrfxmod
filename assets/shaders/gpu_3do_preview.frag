@@ -317,7 +317,7 @@ uniform vec2 translucent_spotlight_intensities[4];
 uniform vec4 translucent_spotlight_bounds[4];
 
 uniform int translucent_shadow_slot; // -1 disables shadow sampling
-uniform sampler2D translucent_shadow_image;
+uniform sampler2DShadow translucent_shadow_image;
 uniform vec2 translucent_shadow_near_range;
 
 float translucent_shadow_visibility(vec2 uv,float distance)
@@ -330,13 +330,14 @@ float translucent_shadow_visibility(vec2 uv,float distance)
     float bias=max(0.000025,derivative*0.015);
     vec2 texel=1.0/vec2(textureSize(translucent_shadow_image,0));
     float visible=0.0;
+    // Match the opaque spotlight's filtered depth comparison.
     for(int y=0;y<2;++y)
     for(int x=0;x<2;++x) {
-        float caster=texture(translucent_shadow_image,
-                            uv+(vec2(x,y)-vec2(0.5))*texel).r;
-        visible+=(receiver-bias<=caster)?0.25:0.0;
+        vec2 delta=(vec2(x,y)-vec2(0.5))*0.7*texel;
+        visible+=texture(translucent_shadow_image,
+                         vec3(uv+delta,receiver-bias));
     }
-    return visible;
+    return visible*0.25;
 }
 
 vec4 sample_translucent_spotlight(int i, vec2 uv)

@@ -86,6 +86,13 @@ int main()
     assert(near_projection.width<far_projection.width);
     assert(near_projection.height<far_projection.height);
     assert(near_projection.range==far_projection.range);
+    // The near cascade gets four times the previous linear shadow density
+    // over the same 1024x1024 map area, and blends over its final two units.
+    assert(sun_shadow_near_distance==16.0f);
+    assert(sun_shadow_blend_start==13.0f);
+    assert(sun_shadow_blend_end==15.0f);
+    assert(sun_shadow_blend_start<sun_shadow_blend_end);
+    assert(sun_shadow_blend_end<sun_shadow_near_distance);
     // A world-space texel is far smaller in the local cascade even though
     // both textures have the same pixel dimensions.
     assert(near_projection.width/1024.0f < far_projection.width/1024.0f);
