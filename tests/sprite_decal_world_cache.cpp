@@ -103,6 +103,18 @@ int main(){
     vec(vertices,{{100,100,100}});
     p.origin[0]=0;
     assert(project_cached_decal_world(index,p).triangles.size()==6);
+    // A hidden surface is excluded from decal receivers, but retained
+    // by the shadow-only cache for later SetSurfaceGeomode(4) calls.
+    u32(surfaces+1*0x5c+0x1c,0);
+    decal_world_geometry decals_visible{};
+    assert(decals_visible.load(reader,world));
+    assert(decals_visible.receivers.size()==2);
+    decal_world_geometry shadows_all{};
+    assert(shadows_all.load(reader,world,250000U,true));
+    assert(shadows_all.receivers.size()==3);
+    // No geometry rebuild is needed after 0 -> 4.
+    u32(surfaces+1*0x5c+0x1c,4);
+    assert(shadows_all.matches(reader,world));
     // New world surfaces invalidate the model cache.
     u32(world+0xa8,3);
     assert(!index.matches(reader,world));
