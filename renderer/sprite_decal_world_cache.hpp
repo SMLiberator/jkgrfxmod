@@ -17,6 +17,7 @@
 namespace jkgm {
     struct decal_world_surface_geometry {
         uint32_t surface_index=0;
+        bool solid_adjoin=false; // exclude from untextured shadow depth
         decal_vec3 normal{};
         decal_vec3 bounds_min{},bounds_max{};
         std::vector<decal_vec3> polygon;
@@ -100,6 +101,7 @@ namespace jkgm {
                 }
                 decal_world_surface_geometry surface{};
                 surface.surface_index=i;
+                surface.solid_adjoin=(adjoin!=0U);
                 surface.normal=normal;
                 surface.polygon.reserve(count);
                 surface.bounds_min={{std::numeric_limits<float>::max(),
