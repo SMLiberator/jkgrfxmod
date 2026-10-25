@@ -308,11 +308,12 @@ void main()
             float incidence=max(dot(normal,sun_shadow_direction),0.0);
             if(incidence>0.0) {
                 vec3 world_position=reconstruct_scene_world(depth);
-                // Experimental polygon-projection mode builds an opaque
-                // receiver mask at display resolution, rather than sampling
-                // two sunlight depth cascades plus per-Thing shadow tiles.
+                // Projected geometry is rasterized into a configurable
+                // fraction of display resolution. Bilinear upsampling
+                // smooths silhouette edges without adding PCF cost.
                 float visibility=projected_sun_active!=0
-                    ? 1.0-texelFetch(projected_sun_mask,tc,0).r
+                    ? 1.0-texture(projected_sun_mask,
+                        (vec2(tc)+0.5)/vec2(textureSize(depth_image,0))).r
                     : min(sun_shadow_visibility(world_position,incidence),
                           sun_dynamic_shadow_visibility(world_position,incidence));
                 // JK's vertex colors already contain authored lighting. If

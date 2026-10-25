@@ -319,12 +319,14 @@ namespace jkgm {
         class projected_sun_mask_shader : public opengl_shader {
             gl::uniform_location_id camera_origin,camera_right,camera_up;
             gl::uniform_location_id camera_forward,view_tangents,depth_image;
+            gl::uniform_location_id mask_resolution;
         public:
             explicit projected_sun_mask_shader(fs::path const &data_root);
             void set_view(point<3,float> origin,point<3,float> right,
                           point<3,float> up,point<3,float> forward,
                           point<2,float> tangents);
             void set_depth_sampler(int unit);
+            void set_mask_resolution(point<2,float> resolution);
         };
 
         class game_post_opaque_composite_shader : public opengl_shader {

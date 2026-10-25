@@ -1,5 +1,5 @@
 #pragma once
-// Screen-resolution R8 silhouette mask and streamed projected polygons.
+// Configurable-resolution R8 silhouette mask and streamed projected polygons.
 // Overlapping triangles all write the same mask value, never multiply shade.
 #include "sun_projected_geometry.hpp"
 #include "base/log.hpp"
@@ -33,9 +33,9 @@ struct projected_sun_mask_gpu {
             span<char const>(nullptr,0U));
         gl::set_texture_max_level(gl::texture_bind_target::texture_2d,0);
         gl::set_texture_min_filter(gl::texture_bind_target::texture_2d,
-                                   gl::min_filter::nearest);
+                                   gl::min_filter::linear);
         gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d,
-                                   gl::mag_filter::nearest);
+                                   gl::mag_filter::linear);
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,fbo);
         gl::framebuffer_texture(gl::framebuffer_bind_target::any,
                                 gl::framebuffer_attachment::color0,mask,0);

@@ -798,6 +798,7 @@ jkgm::shaders::projected_sun_mask_shader::projected_sun_mask_shader(
     , camera_forward(gl::get_uniform_location(the_program,"camera_forward"))
     , view_tangents(gl::get_uniform_location(the_program,"view_tangents"))
     , depth_image(gl::get_uniform_location(the_program,"depth_image"))
+    , mask_resolution(gl::get_uniform_location(the_program,"mask_resolution"))
 {}
 
 void jkgm::shaders::projected_sun_mask_shader::set_view(
@@ -814,6 +815,12 @@ void jkgm::shaders::projected_sun_mask_shader::set_view(
 void jkgm::shaders::projected_sun_mask_shader::set_depth_sampler(int unit)
 {
     gl::set_uniform_integer(depth_image,unit);
+}
+
+void jkgm::shaders::projected_sun_mask_shader::set_mask_resolution(
+    point<2,float> resolution)
+{
+    gl::set_uniform_vector(mask_resolution,resolution);
 }
 
 jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_shader(

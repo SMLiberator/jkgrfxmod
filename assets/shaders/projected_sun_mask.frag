@@ -5,14 +5,22 @@ flat in vec3 receiver_plane_normal;
 flat in vec3 receiver_plane_point;
 uniform vec3 camera_origin,camera_right,camera_up,camera_forward;
 uniform vec2 view_tangents;
+uniform vec2 mask_resolution;
 uniform sampler2D depth_image;
 layout(location=0) out vec4 out_mask;
 void main()
 {
-    float raw=texelFetch(depth_image,ivec2(gl_FragCoord.xy),0).r;
+    // Depth G-buffer stays full-resolution while this shadow mask can be
+    // rasterized at 1/2 or 1/4 screen resolution. Sample the G-buffer at
+    // the center of the corresponding full-resolution footprint.
+    vec2 uv=gl_FragCoord.xy/mask_resolution;
+    ivec2 depth_dims=textureSize(depth_image,0);
+    ivec2 pixel=clamp(ivec2(uv*vec2(depth_dims)),
+                      ivec2(0),depth_dims-ivec2(1));
+    float raw=texelFetch(depth_image,pixel,0).r;
     if(raw<=0.0 || raw>=65500.0)discard;
     float scene_depth=raw/32.0;
-    vec2 ndc=gl_FragCoord.xy/vec2(textureSize(depth_image,0))*2.0-1.0;
+    vec2 ndc=uv*2.0-1.0;
     vec3 ray=camera_forward+
         ndc.x*view_tangents.x*camera_right+
         ndc.y*view_tangents.y*camera_up;

@@ -4926,13 +4926,20 @@ namespace jkgm {
             projected_sun_cache_valid=true;
             } // regenerate geometry only when the cache signature changes
             if(projected_sun_cached_vertices.empty())return;
+            // A screen-space mask, not a shadow depth map: half-resolution
+            // reduces rasterized pixels to 1/4; quarter reduces to 1/16.
+            // The CPU-clipped world-space polygons retain full precision.
+            float const scale=the_config->projected_sun_mask_scale;
+            auto const mask_res=make_size(
+                std::max(1,int(std::lround(float(get<x>(conf_scr_res))*scale))),
+                std::max(1,int(std::lround(float(get<y>(conf_scr_res))*scale))));
             if(!projected_sun_target)
                 projected_sun_target=
-                    std::make_unique<projected_sun_mask_gpu>(conf_scr_res);
+                    std::make_unique<projected_sun_mask_gpu>(mask_res);
             auto &mask=*projected_sun_target;
             if(!mask.complete)return;
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,mask.fbo);
-            gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+            gl::set_viewport(make_box(make_point(0,0),mask_res));
             gl::clear_buffer_color(0,color::zero());
             gl::disable(gl::capability::depth_test);
             gl::disable(gl::capability::cull_face);
@@ -4948,6 +4955,8 @@ namespace jkgm {
                     std::tan(cam.fov*0.008726646259971648f)*
                     float(get<y>(conf_scr_res))/float(get<x>(conf_scr_res))));
             prog.set_depth_sampler(0);
+            prog.set_mask_resolution(make_point(
+                float(get<x>(mask_res)),float(get<y>(mask_res))));
             gl::set_active_texture_unit(0);
             gl::bind_texture(gl::texture_bind_target::texture_2d,
                              frame_screen->get_resolved_depth_texture());
@@ -4965,11 +4974,13 @@ namespace jkgm {
             gl::bind_vertex_array(gl::vertex_array_view(0U));
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                                  gl::default_framebuffer);
+            gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
             projected_sun_ready=true;
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN projected geometry world_casters=",world_casters,
                          " 3do_casters=",model_casters,
                          " projected_triangles=",projected_sun_cached_vertices.size()/3U,
+                         " mask=",get<x>(mask_res),"x",get<y>(mask_res),
                          " cache_hit=",cache_hit?1:0,
                          " static_cache_hit=",world_cache_hit?1:0,
                          " 3do_cache_hits=",cached_models,
