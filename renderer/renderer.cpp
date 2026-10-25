@@ -3527,6 +3527,7 @@ namespace jkgm {
             spotlight_shadow_light=chosen;
             spotlight_shadow_view=view;
             spotlight_shadow_world=world;
+            spotlight_shadow_revision=map.revision;
             spotlight_shadow_cached=true;
             spotlight_shadow_ready=true;
         }
