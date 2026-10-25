@@ -53,6 +53,7 @@ namespace jkgm {
         bool enable_sun_dynamic_shadows = false; // optional 8x256 Thing atlas
         bool enable_projected_sun_shadows = false; // experimental geometry projection
         float projected_sun_mask_scale = 1.0f; // fraction of screen width/height (0.25..1)
+        bool sun_shadow_far_soft_filter = true; // nine-tap PCF in far cascade; false: one hardware PCF
         unsigned int sun_shadow_resolution = 512U; // per-cascade 24-bit depth map (64..1024)
         bool enable_sprite_decals = false; // opt-in type-3 SPR projection onto level geometry
         bool enable_mesh_collision = false; // experimental JKGM collide=2 Detour (off by default)

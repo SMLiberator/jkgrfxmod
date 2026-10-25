@@ -4451,6 +4451,8 @@ namespace jkgm {
             auto &prog=ogs->game_post_opaque_composite_program;
             prog.set_spotlight_count(0);
             prog.set_sun_dynamic_count(0);
+            prog.set_sun_shadow_far_soft_filter(
+                the_config->sun_shadow_far_soft_filter);
             prog.set_projected_sun_mask(false);
             prog.set_spotlight_shadow(-1,0.0f,0.0f);
             prog.set_sun_shadow(false,false,make_point(0.0f,0.0f,1.0f),

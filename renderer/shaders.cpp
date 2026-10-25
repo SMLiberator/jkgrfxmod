@@ -860,6 +860,8 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , sun_shadow_far_forward(gl::get_uniform_location(the_program,"sun_shadow_far_forward"))
     , sun_shadow_far_limits(gl::get_uniform_location(the_program,"sun_shadow_far_limits"))
     , sun_shadow_split(gl::get_uniform_location(the_program,"sun_shadow_split"))
+    , sun_shadow_far_soft_filter(gl::get_uniform_location(
+        the_program,"sun_shadow_far_soft_filter"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
     , projected_sun_active(gl::get_uniform_location(the_program,"projected_sun_active"))
@@ -982,6 +984,12 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_far(
     gl::set_uniform_vector(sun_shadow_far_forward,forward);
     gl::set_uniform_vector(sun_shadow_far_limits,limits);
     gl::set_uniform_float(sun_shadow_split,split);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_far_soft_filter(
+    bool soft)
+{
+    gl::set_uniform_integer(sun_shadow_far_soft_filter,soft?1:0);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_projected_sun_mask(

@@ -49,6 +49,7 @@ uniform sampler2DShadow sun_shadow_far_image;
 uniform vec3 sun_shadow_far_origin,sun_shadow_far_right;
 uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
+uniform int sun_shadow_far_soft_filter; // 1: nine PCF lookups; 0: single bilinear PCF
 uniform int projected_sun_active;
 uniform sampler2D projected_sun_mask;
 // 4x2 tiles, 256px each, 2px clear guard around the 252px viewport.
@@ -122,7 +123,8 @@ float sun_shadow_visibility(vec3 world_position,float incidence)
             ? sun_shadow_filter(sun_shadow_image,near_uv,sun_shadow_limits.z,incidence,false)
             : 1.0;
     float far_visibility=sun_shadow_filter(sun_shadow_far_image,
-        far_uv,sun_shadow_far_limits.z,incidence,true);
+        far_uv,sun_shadow_far_limits.z,incidence,
+        sun_shadow_far_soft_filter!=0);
     if(!use_near)return far_visibility;
     float near_visibility=sun_shadow_filter(sun_shadow_image,
         near_uv,sun_shadow_limits.z,incidence,false);
