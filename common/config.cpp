@@ -254,6 +254,26 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("sun_shadow_far_soft_filter").get_to(
                 rv->sun_shadow_far_soft_filter);
         }
+        if(j.contains("sun_shadow_near_distance")) {
+            auto const &v=j.at("sun_shadow_near_distance");
+            if(!v.is_number())
+                throw std::runtime_error("sun_shadow_near_distance must be numeric (2..128)");
+            double const distance=v.get<double>();
+            if(!std::isfinite(distance) || distance<2.0 || distance>128.0)
+                throw std::runtime_error("sun_shadow_near_distance must be between 2 and 128");
+            rv->sun_shadow_near_distance=static_cast<float>(distance);
+        }
+        if(j.contains("sun_shadow_far_distance")) {
+            auto const &v=j.at("sun_shadow_far_distance");
+            if(!v.is_number())
+                throw std::runtime_error("sun_shadow_far_distance must be numeric (4..512)");
+            double const distance=v.get<double>();
+            if(!std::isfinite(distance) || distance<4.0 || distance>512.0)
+                throw std::runtime_error("sun_shadow_far_distance must be between 4 and 512");
+            rv->sun_shadow_far_distance=static_cast<float>(distance);
+        }
+        if(rv->sun_shadow_far_distance<=rv->sun_shadow_near_distance)
+            throw std::runtime_error("sun_shadow_far_distance must exceed sun_shadow_near_distance");
         if(j.contains("sun_shadow_resolution")) {
             auto const &v = j.at("sun_shadow_resolution");
             if(!v.is_number_integer()) {

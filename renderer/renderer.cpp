@@ -3504,7 +3504,7 @@ namespace jkgm {
             auto const dark=make_point(0.0f,0.0f,0.0f,0.0f);
             auto &uniforms=prog.translucent_sun;
             uniforms.set_state(false,false,0,off,dark,
-                               sun_shadow_near_distance,1.0f);
+                               the_config->sun_shadow_near_distance,1.0f);
             if(!active || !the_config->enable_sun_shadows)return;
             auto const cam=read_active_render_camera();
             if(!cam.valid)return;
@@ -3541,7 +3541,7 @@ namespace jkgm {
             uniforms.set_state(true,shadows,dynamic,
                 make_point(dir[0],dir[1],dir[2]),
                 make_point(rgb[0],rgb[1],rgb[2],intensity),
-                sun_shadow_near_distance,
+                the_config->sun_shadow_near_distance,
                 the_config->sun_shadow_receiver_bias_scale);
             auto set_projection=[&](int slot,sun_shadow_projection const &p,
                                     point<4,float> rect) {
@@ -4320,7 +4320,7 @@ namespace jkgm {
             for(int cascade=0;cascade<2;++cascade) {
             sun_shadow_projection view=world_view;
             float const distance=cascade==0
-                ? sun_shadow_near_distance : sun_shadow_far_distance;
+                ? the_config->sun_shadow_near_distance : the_config->sun_shadow_far_distance;
             if(!fit_sun_shadow_to_camera(view,camera.position,camera.right,
                     camera.up,camera.forward,horizontal,vertical,distance) ||
                !stabilize_sun_shadow_projection(view,map.resolution)) {
@@ -4805,7 +4805,7 @@ namespace jkgm {
                             make_point(far_view.up[0],far_view.up[1],far_view.up[2]),
                             make_point(far_view.forward[0],far_view.forward[1],far_view.forward[2]),
                             make_point(far_view.width,far_view.height,far_view.range),
-                            sun_shadow_near_distance);
+                            the_config->sun_shadow_near_distance);
                         gl::set_active_texture_unit(13);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          sun_shadow_target->depth);
@@ -4989,7 +4989,7 @@ namespace jkgm {
             ogs->game_transparency_pass_program.translucent_sun.set_state(
                 false,false,0,make_point(0.0f,0.0f,1.0f),
                 make_point(0.0f,0.0f,0.0f,0.0f),
-                sun_shadow_near_distance,1.0f);
+                the_config->sun_shadow_near_distance,1.0f);
             // Redraw gun overlay after z-clear
             gl::set_depth_mask(true);
             gl::clear({gl::clear_flag::depth});
