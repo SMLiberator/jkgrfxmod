@@ -338,6 +338,7 @@ namespace jkgm {
             gl::uniform_location_id sun_shadow_far_right,sun_shadow_far_up;
             gl::uniform_location_id sun_shadow_far_forward,sun_shadow_far_limits;
             gl::uniform_location_id sun_shadow_split,sun_shadow_far_soft_filter;
+            gl::uniform_location_id sun_shadow_receiver_bias_scale;
             gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
             gl::uniform_location_id sun_dynamic_tile_resolution;
             std::vector<gl::uniform_location_id> sun_dynamic_origin;
@@ -376,6 +377,7 @@ namespace jkgm {
                                     point<3,float> up,point<3,float> forward,
                                     point<3,float> limits,float split);
             void set_sun_shadow_far_soft_filter(bool soft);
+            void set_sun_shadow_receiver_bias_scale(float scale);
             void set_sun_dynamic_count(int count);
             void set_sun_dynamic_tile_resolution(unsigned pixels);
             void set_sun_dynamic(int slot,point<3,float> origin,

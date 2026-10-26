@@ -229,6 +229,24 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                     "sun_dynamic_shadow_resolution must be between 64 and 1024");
             rv->sun_dynamic_shadow_resolution=static_cast<unsigned int>(pixels);
         }
+        if(j.contains("sun_shadow_receiver_bias_scale")) {
+            auto const &value=j.at("sun_shadow_receiver_bias_scale");
+            if(!value.is_number())
+                throw std::runtime_error("sun_shadow_receiver_bias_scale must be numeric (0..2)");
+            double const factor=value.get<double>();
+            if(!std::isfinite(factor) || factor<0.0 || factor>2.0)
+                throw std::runtime_error("sun_shadow_receiver_bias_scale must be between 0 and 2");
+            rv->sun_shadow_receiver_bias_scale=static_cast<float>(factor);
+        }
+        if(j.contains("sun_shadow_caster_bias_scale")) {
+            auto const &value=j.at("sun_shadow_caster_bias_scale");
+            if(!value.is_number())
+                throw std::runtime_error("sun_shadow_caster_bias_scale must be numeric (0..2)");
+            double const factor=value.get<double>();
+            if(!std::isfinite(factor) || factor<0.0 || factor>2.0)
+                throw std::runtime_error("sun_shadow_caster_bias_scale must be between 0 and 2");
+            rv->sun_shadow_caster_bias_scale=static_cast<float>(factor);
+        }
         if(j.contains("sun_shadow_far_soft_filter")) {
             j.at("sun_shadow_far_soft_filter").get_to(
                 rv->sun_shadow_far_soft_filter);

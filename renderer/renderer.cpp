@@ -3977,7 +3977,8 @@ namespace jkgm {
             // Slope-scale offset keeps grazing-angle caster depth off
             // the matching receiver plane, without blurring silhouettes.
             glEnable(GL_POLYGON_OFFSET_FILL);
-            glPolygonOffset(1.25f,1.5f);
+            glPolygonOffset(1.25f*the_config->sun_shadow_caster_bias_scale,
+                            1.5f*the_config->sun_shadow_caster_bias_scale);
             auto &prog=*ogs->spotlight_shadow_depth_program;
             prog.use_program();
             auto vec=[](decal_vec3 const &p) {
@@ -4396,7 +4397,8 @@ namespace jkgm {
                 gl::clear_buffer_depth(1.0f);
             }
             glEnable(GL_POLYGON_OFFSET_FILL);
-            glPolygonOffset(1.25f,1.5f);
+            glPolygonOffset(1.25f*the_config->sun_shadow_caster_bias_scale,
+                            1.5f*the_config->sun_shadow_caster_bias_scale);
             auto &prog=*ogs->spotlight_shadow_depth_program;
             prog.use_program();
             auto vec=[](decal_vec3 const &a){return make_point(a[0],a[1],a[2]);};
@@ -4551,6 +4553,8 @@ namespace jkgm {
             prog.set_sun_dynamic_count(0);
             prog.set_sun_shadow_far_soft_filter(
                 the_config->sun_shadow_far_soft_filter);
+            prog.set_sun_shadow_receiver_bias_scale(
+                the_config->sun_shadow_receiver_bias_scale);
             prog.set_spotlight_shadow(-1,0.0f,0.0f);
             prog.set_sun_shadow(false,false,make_point(0.0f,0.0f,1.0f),
                 make_point(0.0f,0.0f,0.0f,0.0f),

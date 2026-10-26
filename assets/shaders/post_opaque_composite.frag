@@ -50,6 +50,7 @@ uniform vec3 sun_shadow_far_origin,sun_shadow_far_right;
 uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
 uniform int sun_shadow_far_soft_filter; // 1: nine PCF lookups; 0: single bilinear PCF
+uniform float sun_shadow_receiver_bias_scale; // diagnostic multiplier, 0..2
 // 4x2 tiles with independently configurable resolution and 2px guard.
 uniform int sun_dynamic_count;
 uniform sampler2DShadow sun_dynamic_image;
@@ -79,7 +80,8 @@ float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
     // Receiver bias grows toward grazing sunlight, where quantization
     // otherwise causes the surface to repeatedly shadow itself.
     float grazing=1.0-clamp(incidence,0.0,1.0);
-    float bias_world=0.008+0.027*grazing*grazing;
+    float bias_world=(0.008+0.027*grazing*grazing)*
+                     sun_shadow_receiver_bias_scale;
     float bias=max(4.0/16777215.0,bias_world/max(range,0.001));
     vec2 texel=1.0/vec2(textureSize(map,0));
     float receiver=coordinate.z-bias;
@@ -145,7 +147,8 @@ float sun_dynamic_shadow_visibility(vec3 position,float incidence)
             uv.xy*(sun_dynamic_tile_resolution-4.0)) /
             vec2(textureSize(sun_dynamic_image,0));
         float grazing=1.0-clamp(incidence,0.0,1.0);
-        float bias_world=0.006+0.032*grazing*grazing;
+        float bias_world=(0.006+0.032*grazing*grazing)*
+                         sun_shadow_receiver_bias_scale;
         float bias=max(4.0/16777215.0,
                        bias_world/max(sun_dynamic_limits[i].z,0.001));
         visibility=min(visibility,texture(sun_dynamic_image,

@@ -54,6 +54,8 @@ namespace jkgm {
         bool enable_sun_static_cache = true; // world-only depth layers, independently cached per cascade // directional sunlight + world shadow map
         bool enable_sun_dynamic_shadows = false; // eight-Thing atlas
         unsigned int sun_dynamic_shadow_resolution = 256U; // each tile 64..1024
+        float sun_shadow_receiver_bias_scale = 1.0f; // A/B contact-gap tuning (0..2)
+        float sun_shadow_caster_bias_scale = 1.0f; // A/B shadow polygon offset (0..2)
         bool sun_shadow_far_soft_filter = true; // nine-tap PCF in far cascade; false: one hardware PCF
         unsigned int sun_shadow_resolution = 512U; // per-cascade 24-bit depth map (64..4096)
         bool enable_sprite_decals = false; // opt-in type-3 SPR projection onto level geometry
