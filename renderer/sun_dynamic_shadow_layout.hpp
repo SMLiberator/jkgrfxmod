@@ -1,6 +1,7 @@
 #pragma once
 // GL-free packing and texel-density selection for dynamic sunlight casters.
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
 #include <vector>
 namespace jkgm {
@@ -17,6 +18,20 @@ inline unsigned choose_sun_dynamic_shadow_tile(float projected_pixels,
     while(size<limit && float(size)<projected_pixels)size*=2U;
     return std::min(size,limit);
 }
+// Limit a large near-camera Thing so subsequent candidates can retain at
+// least 64x64 texels. The atlas layout may further shrink to fit geometry.
+inline unsigned sun_dynamic_shadow_budget_tile(
+    unsigned requested,std::size_t used_pixels,std::size_t atlas_pixels,
+    std::size_t remaining_things)
+{
+    unsigned size=std::max(64U,requested);
+    std::size_t const reserve=remaining_things*64U*64U;
+    while(size>64U &&
+          used_pixels+std::size_t(size)*size+reserve>atlas_pixels)
+        size/=2U;
+    return size;
+}
+
 class sun_dynamic_shadow_layout {
     int width_,height_;
     std::vector<sun_dynamic_shadow_tile> placed_;

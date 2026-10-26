@@ -12,6 +12,11 @@ int main()
     assert(choose_sun_dynamic_shadow_tile(900.0f,256)==512);
     assert(choose_sun_dynamic_shadow_tile(900.0f,64)==128);
     assert(choose_sun_dynamic_shadow_tile(NAN,256)==64);
+    // Eight possible casters: never allocate two 512 tiles while the
+    // remaining six need at least 64 pixels each.
+    assert(sun_dynamic_shadow_budget_tile(512,0,1024*512,7)==512);
+    assert(sun_dynamic_shadow_budget_tile(512,512*512,1024*512,6)==256);
+    assert(sun_dynamic_shadow_budget_tile(256,0,1024*512,7)==256);
     sun_dynamic_shadow_layout pack(1024,512);
     sun_dynamic_shadow_tile big{},medium{},small{},tiny{};
     assert(pack.allocate(512,big));

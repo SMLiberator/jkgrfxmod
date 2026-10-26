@@ -4043,7 +4043,21 @@ namespace jkgm {
                          std::max(tan_half,0.05f));
                     auto const desired=choose_sun_dynamic_shadow_tile(
                         pixel_span,sun_dynamic_target->tile_resolution);
-                    if(!tile_layout.allocate(int(desired),tile))continue;
+                    // Leave minimum space for remaining eligible Things.
+                    // A single large car must not evict all smaller casters.
+                    std::size_t used_pixels=0;
+                    for(auto const &used:sun_dynamic_tiles)
+                        used_pixels+=std::size_t(used.size)*used.size;
+                    auto const eligible=std::min(sorted.size(),
+                        std::size_t(sun_dynamic_shadow_slots));
+                    auto const remaining=eligible>sun_dynamic_views.size()+1
+                        ? eligible-sun_dynamic_views.size()-1 : 0U;
+                    auto const budget=std::size_t(
+                        sun_dynamic_shadow_columns*tile_size)*
+                        std::size_t(sun_dynamic_shadow_rows*tile_size);
+                    auto const requested=sun_dynamic_shadow_budget_tile(
+                        desired,used_pixels,budget,remaining);
+                    if(!tile_layout.allocate(int(requested),tile))continue;
                 } else {
                     int const slot=int(sun_dynamic_views.size());
                     tile={(slot%sun_dynamic_shadow_columns)*tile_size,
