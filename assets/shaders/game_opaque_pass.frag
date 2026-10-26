@@ -409,7 +409,16 @@ void main()
 
     // Material color without baked lighting: separate metallic pigment from
     // JK's grayscale and RGB per-vertex illumination.
-    vec3 unlit_base_color = albedo_map_sample.rgb * albedo_factor.rgb;
+    // GeoMode 3 (solid color) has no texture pigment. In JK's native D3D
+    // execute buffer the face color is already baked into vp_color, while
+    // default albedo_factor is white. Using white as the deferred pigment
+    // made direct sunlight / diffuse spotlights bleach colored faces.
+    // For untextured surfaces use the visible native RGB as a conservative
+    // pigment proxy (it can include authored vertex lighting). Textured
+    // faces keep the true unlit MAT pigment, preserving dark-scene recovery.
+    vec3 unlit_base_color = features.x > 0.5
+        ? albedo_map_sample.rgb * albedo_factor.rgb
+        : clamp(vertex_color.rgb * albedo_factor.rgb, 0.0, 1.0);
     // Uniform branch: skip normal-map sampling and derivative-based TBN
     // construction unless a material actually has envmap or sun specularity.
     // The reflection master toggle sends reflection_params.x = 0.
