@@ -28,15 +28,15 @@ namespace jkgm {
         bool enable_fog = true;
         bool enable_post = true;
         bool enable_hdr = false; // strict master switch for tone mapping, auto exposure and HDR tuning
-        float auto_exposure_sensitivity = 0.0f; // 0=fixed exposure, 0..2=adaptive
-        float hdr_exposure_compensation = 0.5f; // constant EV offset, used only with HDR
-        float hdr_shadow_softness = 0.6f; // 0=original crisp ACES toe, 0.6=current softer toe
-        float hdr_color_crispness = 0.0f; // 0=hue-preserving, 1=original per-channel ACES
+        float auto_exposure_sensitivity = 0.4f; // 0=fixed exposure, 0..2=adaptive
+        float hdr_exposure_compensation = 0.0f; // constant EV offset, used only with HDR
+        float hdr_shadow_softness = 0.3f; // 0=original crisp ACES toe, 1=softest
+        float hdr_color_crispness = 0.6f; // 0=hue-preserving, 1=original per-channel ACES
         bool enable_reflections = true;
         bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
         bool enable_ssao = true;
         bool fill_tjunction_gaps = false; // opt-in single-pixel G-buffer gap repair
-        bool retain_hom_pixels = false; // opt-in vanilla-like retained unrendered scene pixels
+        bool retain_hom_pixels = true; // vanilla JK HOM default; false = Clear Display
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
         bool retro_mode = false; // CMP #0 RGB8 post-quantization, no dithering
