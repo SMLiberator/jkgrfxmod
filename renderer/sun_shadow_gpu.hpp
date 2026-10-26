@@ -31,7 +31,7 @@ struct sun_shadow_gpu {
 
     explicit sun_shadow_gpu(unsigned pixels=512U)
     {
-        resolution=std::max(64U,std::min(pixels,2048U));
+        resolution=std::max(64U,std::min(pixels,4096U));
         gl::set_active_texture_unit(0);
         gl::bind_texture(gl::texture_bind_target::texture_2d,depth);
         gl::tex_image_2d(gl::texture_bind_target::texture_2d,0,

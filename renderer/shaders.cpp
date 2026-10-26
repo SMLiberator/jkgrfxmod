@@ -828,6 +828,8 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
         the_program,"sun_shadow_far_soft_filter"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
+    , sun_dynamic_tile_resolution(gl::get_uniform_location(
+        the_program,"sun_dynamic_tile_resolution"))
 {
     for(int i=0;i<8;++i) {
         sun_dynamic_origin.push_back(gl::get_uniform_location(
@@ -959,6 +961,12 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_count(
 {
     gl::set_uniform_integer(sun_dynamic_count,count);
     if(count>0)gl::set_uniform_integer(sun_dynamic_image,15);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_tile_resolution(
+    unsigned pixels)
+{
+    gl::set_uniform_float(sun_dynamic_tile_resolution,float(pixels));
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic(

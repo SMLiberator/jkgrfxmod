@@ -3940,11 +3940,15 @@ namespace jkgm {
                 });
             if(sorted.empty())return;
             if(!sun_dynamic_target)
-                sun_dynamic_target=std::make_unique<sun_dynamic_shadow_gpu>();
+                sun_dynamic_target=std::make_unique<sun_dynamic_shadow_gpu>(
+                    the_config->sun_dynamic_shadow_resolution);
             if(!sun_dynamic_target->complete)return;
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                                  sun_dynamic_target->fbo);
-            gl::set_viewport(make_box(make_point(0,0),make_size(1024,512)));
+            int const tile_size=int(sun_dynamic_target->tile_resolution);
+            gl::set_viewport(make_box(make_point(0,0),
+                make_size(sun_dynamic_shadow_columns*tile_size,
+                          sun_dynamic_shadow_rows*tile_size)));
             gl::disable(gl::capability::blend);
             gl::disable(gl::capability::cull_face);
             gl::enable(gl::capability::depth_test);
@@ -3990,10 +3994,13 @@ namespace jkgm {
                 if(!make_sun_dynamic_shadow_projection(
                     world_view,object->bounds,view))continue;
                 int tile=int(sun_dynamic_views.size());
-                int px=(tile%4)*256+sun_dynamic_shadow_inset;
-                int py=(tile/4)*256+sun_dynamic_shadow_inset;
+                int px=(tile%sun_dynamic_shadow_columns)*tile_size+
+                    sun_dynamic_shadow_inset;
+                int py=(tile/sun_dynamic_shadow_columns)*tile_size+
+                    sun_dynamic_shadow_inset;
+                int const inner=tile_size-2*sun_dynamic_shadow_inset;
                 gl::set_viewport(make_box(make_point(px,py),
-                                          make_size(252,252)));
+                                          make_size(inner,inner)));
                 prog.set_orthographic_light(vec(view.origin),vec(view.right),
                     vec(view.up),vec(view.forward),
                     make_point(view.width,view.height,view.range,0.0f));
@@ -4045,7 +4052,8 @@ namespace jkgm {
                                  gl::default_framebuffer);
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN dynamic shadow atlas Things=",
-                         sun_dynamic_views.size()," candidates=",sorted.size());
+                         sun_dynamic_views.size()," candidates=",sorted.size(),
+                         " tile_resolution=",tile_size);
         }
 
         void draw_sun_shadow_map()
@@ -4623,6 +4631,8 @@ namespace jkgm {
                         gl::set_active_texture_unit(15);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          sun_dynamic_target->depth);
+                        prog.set_sun_dynamic_tile_resolution(
+                            sun_dynamic_target->tile_resolution);
                         for(size_t i=0;i<sun_dynamic_views.size();++i) {
                             auto const &v=sun_dynamic_views[i];
                             prog.set_sun_dynamic(int(i),

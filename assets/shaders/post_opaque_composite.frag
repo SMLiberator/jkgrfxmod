@@ -50,9 +50,10 @@ uniform vec3 sun_shadow_far_origin,sun_shadow_far_right;
 uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
 uniform int sun_shadow_far_soft_filter; // 1: nine PCF lookups; 0: single bilinear PCF
-// 4x2 tiles, 256px each, 2px clear guard around the 252px viewport.
+// 4x2 tiles with independently configurable resolution and 2px guard.
 uniform int sun_dynamic_count;
 uniform sampler2DShadow sun_dynamic_image;
+uniform float sun_dynamic_tile_resolution;
 uniform vec3 sun_dynamic_origin[8],sun_dynamic_right[8];
 uniform vec3 sun_dynamic_up[8],sun_dynamic_forward[8],sun_dynamic_limits[8];
 
@@ -140,7 +141,9 @@ float sun_dynamic_shadow_visibility(vec3 position,float incidence)
             sun_dynamic_limits[i]);
         if(!sun_shadow_inside(uv))continue;
         vec2 tile=vec2(float(i%4),float(i/4));
-        vec2 atlas_uv=(tile*256.0+2.0+uv.xy*252.0)/vec2(1024.0,512.0);
+        vec2 atlas_uv=(tile*sun_dynamic_tile_resolution+2.0+
+            uv.xy*(sun_dynamic_tile_resolution-4.0)) /
+            vec2(textureSize(sun_dynamic_image,0));
         float grazing=1.0-clamp(incidence,0.0,1.0);
         float bias_world=0.006+0.032*grazing*grazing;
         float bias=max(4.0/16777215.0,

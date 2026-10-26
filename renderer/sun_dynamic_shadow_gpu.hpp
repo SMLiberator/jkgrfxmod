@@ -1,6 +1,6 @@
 #pragma once
-// Experimental eight-Thing directional shadow atlas. Each 256px tile
-// contains a separate model instance; the two world cascades remain intact.
+// Experimental eight-Thing directional shadow atlas. Configurable tile size;
+// the two world cascades remain independent.
 #include "sun_shadow.hpp"
 #include "base/log.hpp"
 #include "glad/glad.h"
@@ -8,23 +8,23 @@
 #include "glutil/texture.hpp"
 namespace jkgm {
 constexpr int sun_dynamic_shadow_slots=8;
-constexpr int sun_dynamic_shadow_cell=256;
 constexpr int sun_dynamic_shadow_inset=2;
-constexpr int sun_dynamic_shadow_inner=252;
 constexpr int sun_dynamic_shadow_columns=4;
 constexpr int sun_dynamic_shadow_rows=2;
 struct sun_dynamic_shadow_gpu {
     gl::framebuffer fbo;
     gl::texture depth;
     bool complete=false;
-    sun_dynamic_shadow_gpu()
+    unsigned tile_resolution=256U;
+    explicit sun_dynamic_shadow_gpu(unsigned pixels=256U)
     {
+        tile_resolution=std::max(64U,std::min(pixels,1024U));
         gl::set_active_texture_unit(0);
         gl::bind_texture(gl::texture_bind_target::texture_2d,depth);
         gl::tex_image_2d(gl::texture_bind_target::texture_2d,0,
             gl::texture_internal_format::depth_component_24,
-            make_size(sun_dynamic_shadow_columns*sun_dynamic_shadow_cell,
-                      sun_dynamic_shadow_rows*sun_dynamic_shadow_cell),
+            make_size(sun_dynamic_shadow_columns*int(tile_resolution),
+                      sun_dynamic_shadow_rows*int(tile_resolution)),
             gl::texture_pixel_format::depth_component,
             gl::texture_pixel_type::float32,span<char const>(nullptr,0U));
         gl::set_texture_max_level(gl::texture_bind_target::texture_2d,0);
