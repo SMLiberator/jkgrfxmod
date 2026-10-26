@@ -4173,6 +4173,7 @@ namespace jkgm {
                 gpu_3do_texture texture;
             };
             std::vector<sun_world_cutout> world_cutouts;
+            size_t world_hidden=0,world_backfacing=0,world_material_skipped=0;
             uint64_t caster_signature=14695981039346656037ULL;
             auto hash_u32=[&](uint32_t v) {
                 for(int b=0;b<4;++b) {
@@ -4194,8 +4195,15 @@ namespace jkgm {
                     uintptr_t(surface.surface_index)*0x5cU;
                 engine_material_debug::read_object(address+0x1cU,geomode);
                 hash_u32(surface.surface_index);hash_u32(geomode);
-                if(!sun_shadow_world_face_visible(geomode,surface.normal,direction))
+                if(geomode<2U || !decal_finite(surface.normal)) {
+                    ++world_hidden;
                     continue;
+                }
+                if(!the_config->sun_shadow_two_sided_world &&
+                   !sun_shadow_world_face_visible(geomode,surface.normal,direction)) {
+                    ++world_backfacing;
+                    continue;
+                }
                 gpu_3do_group group{};group.material=surface.material;
                 group.cel=surface.cel;
                 int32_t cel=group.cel;
@@ -4212,8 +4220,10 @@ namespace jkgm {
                 if(tex.albedo_source==0 || tex.special || tex.emissive_only ||
                    tex.post_exempt || tex.opacity<0.999f ||
                    (cutout && (tex.albedo_source!=1 || !surface.has_shadow_uv)) ||
-                   range.count>uint32_t(std::numeric_limits<GLsizei>::max()))
+                   range.count>uint32_t(std::numeric_limits<GLsizei>::max())) {
+                    ++world_material_skipped;
                     continue;
+                }
                 if(cutout)world_cutouts.push_back({range,tex});
                 else {
                     counts.push_back(static_cast<GLsizei>(range.count));
@@ -4315,7 +4325,12 @@ namespace jkgm {
                          " 3do=",models.size()+static_models.size(),
                          " static_3do=",static_models.size()," skybox_skipped=",
                          skipped_skybox_instances," cascade=",cascade,
-                         " map=",map.resolution);
+                         " map=",map.resolution,
+                         " selected_world=",map.selected.size(),
+                         " hidden_world=",world_hidden,
+                         " backfacing_world=",world_backfacing,
+                         " material_skipped_world=",world_material_skipped,
+                         " two_sided_world=",the_config->sun_shadow_two_sided_world?1:0);
             bool unchanged=sun_shadow_cascade_cached[cascade] &&
                 sun_shadow_worlds[cascade]==world &&
                 sun_shadow_revisions[cascade]==map.revision &&

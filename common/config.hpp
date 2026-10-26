@@ -50,6 +50,7 @@ namespace jkgm {
         bool enable_spotlight_shadows = false; // experimental, one static-world shadow map
         unsigned int spotlight_shadow_resolution = 256U; // depth-map width and height (64..1024)
         bool enable_sun_shadows = false;
+        bool sun_shadow_two_sided_world = false; // diagnostic: solid world roofs can cast from either side
         bool enable_sun_static_cache = true; // world-only depth layers, independently cached per cascade // directional sunlight + world shadow map
         bool enable_sun_dynamic_shadows = false; // eight-Thing atlas
         unsigned int sun_dynamic_shadow_resolution = 256U; // each tile 64..1024
