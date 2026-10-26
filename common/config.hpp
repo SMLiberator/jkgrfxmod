@@ -53,7 +53,8 @@ namespace jkgm {
         bool sun_shadow_two_sided_world = false; // diagnostic: solid world roofs can cast from either side
         bool enable_sun_static_cache = true; // world-only depth layers, independently cached per cascade // directional sunlight + world shadow map
         bool enable_sun_dynamic_shadows = false; // eight-Thing atlas
-        unsigned int sun_dynamic_shadow_resolution = 256U; // each tile 64..1024
+        unsigned int sun_dynamic_shadow_resolution = 256U; // baseline 64..1024
+        bool sun_dynamic_shadow_adaptive_resolution = false; // opt-in per-Thing pixel density
         float sun_shadow_receiver_bias_scale = 1.0f; // A/B contact-gap tuning (0..2)
         float sun_shadow_caster_bias_scale = 1.0f; // A/B shadow polygon offset (0..2)
         bool sun_shadow_far_soft_filter = true; // nine-tap PCF in far cascade; false: one hardware PCF

@@ -2,6 +2,7 @@
 // Experimental eight-Thing directional shadow atlas. Configurable tile size;
 // the two world cascades remain independent.
 #include "sun_shadow.hpp"
+#include "sun_dynamic_shadow_layout.hpp"
 #include "base/log.hpp"
 #include "glad/glad.h"
 #include "glutil/framebuffer.hpp"

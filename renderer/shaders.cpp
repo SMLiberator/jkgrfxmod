@@ -838,10 +838,11 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
         the_program,"sun_shadow_receiver_bias_scale"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
-    , sun_dynamic_tile_resolution(gl::get_uniform_location(
-        the_program,"sun_dynamic_tile_resolution"))
+ 
 {
     for(int i=0;i<8;++i) {
+        sun_dynamic_atlas_rects.push_back(gl::get_uniform_location(
+            the_program,"sun_dynamic_atlas_rects["+std::to_string(i)+"]"));
         sun_dynamic_origin.push_back(gl::get_uniform_location(
             the_program,"sun_dynamic_origin["+std::to_string(i)+"]"));
         sun_dynamic_right.push_back(gl::get_uniform_location(
@@ -979,10 +980,11 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_count(
     if(count>0)gl::set_uniform_integer(sun_dynamic_image,15);
 }
 
-void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_tile_resolution(
-    unsigned pixels)
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_atlas_rect(
+    int slot,point<4,float> rect)
 {
-    gl::set_uniform_float(sun_dynamic_tile_resolution,float(pixels));
+    if(slot<0 || slot>=8)return;
+    gl::set_uniform_vector(sun_dynamic_atlas_rects[slot],rect);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic(

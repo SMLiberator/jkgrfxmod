@@ -573,6 +573,7 @@ namespace jkgm {
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
+        std::vector<sun_dynamic_shadow_tile> sun_dynamic_tiles;
         // Track only owners with a successfully rasterized atlas tile.
         std::unordered_set<uint64_t> sun_dynamic_atlas_owners;
         std::array<sun_shadow_projection,2> sun_shadow_views{};
@@ -922,6 +923,7 @@ namespace jkgm {
                 sun_shadow_cascade_cached={{false,false}};
                 sun_shadow_static_cached={{false,false}};
                 sun_dynamic_views.clear();
+            sun_dynamic_tiles.clear();
                 sun_dynamic_atlas_owners.clear();
                 // Pausing/menu transitions may evict and reload D3D textures.
                 // Refresh the native MAT resolver on the next game frame,
@@ -3901,6 +3903,7 @@ namespace jkgm {
             sun_shadow_projection const &world_view)
         {
             sun_dynamic_views.clear();
+            sun_dynamic_tiles.clear();
             sun_dynamic_atlas_owners.clear();
             if(!the_config->enable_sun_shadows ||
                !the_config->enable_sun_dynamic_shadows ||
@@ -3966,9 +3969,12 @@ namespace jkgm {
                 sun_dynamic_target=std::make_unique<sun_dynamic_shadow_gpu>(
                     the_config->sun_dynamic_shadow_resolution);
             if(!sun_dynamic_target->complete)return;
+            int const tile_size=int(sun_dynamic_target->tile_resolution);
+            sun_dynamic_shadow_layout tile_layout(
+                sun_dynamic_shadow_columns*tile_size,
+                sun_dynamic_shadow_rows*tile_size);
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                                  sun_dynamic_target->fbo);
-            int const tile_size=int(sun_dynamic_target->tile_resolution);
             gl::set_viewport(make_box(make_point(0,0),
                 make_size(sun_dynamic_shadow_columns*tile_size,
                           sun_dynamic_shadow_rows*tile_size)));
@@ -4017,14 +4023,37 @@ namespace jkgm {
                 sun_shadow_projection view{};
                 if(!make_sun_dynamic_shadow_projection(
                     world_view,object->bounds,view))continue;
-                int tile=int(sun_dynamic_views.size());
-                int px=(tile%sun_dynamic_shadow_columns)*tile_size+
-                    sun_dynamic_shadow_inset;
-                int py=(tile/sun_dynamic_shadow_columns)*tile_size+
-                    sun_dynamic_shadow_inset;
-                int const inner=tile_size-2*sun_dynamic_shadow_inset;
-                gl::set_viewport(make_box(make_point(px,py),
-                                          make_size(inner,inner)));
+                sun_dynamic_shadow_tile tile{};
+                if(the_config->sun_dynamic_shadow_adaptive_resolution) {
+                    // Project the world-space AABB diameter approximately
+                    // to screen pixels. Stable across object rotations and
+                    // cheap enough to calculate once per eligible Thing.
+                    auto const &lo=object->bounds.low;
+                    auto const &hi=object->bounds.high;
+                    float diagonal2=0.0f;
+                    for(int k=0;k<3;++k) {
+                        float const d=hi[k]-lo[k];
+                        diagonal2+=d*d;
+                    }
+                    float const tan_half=std::tan(
+                        camera.fov*0.008726646259971648f);
+                    float const pixel_span=std::sqrt(diagonal2)*
+                        float(get<x>(conf_scr_res))/
+                        (2.0f*std::max(std::sqrt(object->distance2),0.1f)*
+                         std::max(tan_half,0.05f));
+                    auto const desired=choose_sun_dynamic_shadow_tile(
+                        pixel_span,sun_dynamic_target->tile_resolution);
+                    if(!tile_layout.allocate(int(desired),tile))continue;
+                } else {
+                    int const slot=int(sun_dynamic_views.size());
+                    tile={(slot%sun_dynamic_shadow_columns)*tile_size,
+                          (slot/sun_dynamic_shadow_columns)*tile_size,
+                          tile_size};
+                }
+                int const inner=tile.size-2*sun_dynamic_shadow_inset;
+                gl::set_viewport(make_box(make_point(
+                    tile.x+sun_dynamic_shadow_inset,
+                    tile.y+sun_dynamic_shadow_inset),make_size(inner,inner)));
                 prog.set_orthographic_light(vec(view.origin),vec(view.right),
                     vec(view.up),vec(view.forward),
                     make_point(view.width,view.height,view.range,0.0f));
@@ -4064,7 +4093,10 @@ namespace jkgm {
                 }
                 if(any) {
                     sun_dynamic_views.push_back(view);
+                    sun_dynamic_tiles.push_back(tile);
                     sun_dynamic_atlas_owners.insert(object->key);
+                } else if(the_config->sun_dynamic_shadow_adaptive_resolution) {
+                    tile_layout.undo_last();
                 }
             }
             glDisable(GL_POLYGON_OFFSET_FILL);
@@ -4077,7 +4109,9 @@ namespace jkgm {
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN dynamic shadow atlas Things=",
                          sun_dynamic_views.size()," candidates=",sorted.size(),
-                         " tile_resolution=",tile_size);
+                         " legacy_tile_resolution=",tile_size,
+                         " adaptive=",the_config->sun_dynamic_shadow_adaptive_resolution?1:0,
+                         " allocated_tiles=",sun_dynamic_tiles.size());
         }
 
         void draw_sun_shadow_map()
@@ -4085,6 +4119,7 @@ namespace jkgm {
             sun_shadow_ready=false;
             sun_shadow_cascade_ready={{false,false}};
             sun_dynamic_views.clear();
+            sun_dynamic_tiles.clear();
             sun_dynamic_atlas_owners.clear();
             if(!the_config->enable_sun_shadows)return;
             auto sun_failure=[&](char const *reason) {
@@ -4673,10 +4708,12 @@ namespace jkgm {
                         gl::set_active_texture_unit(15);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          sun_dynamic_target->depth);
-                        prog.set_sun_dynamic_tile_resolution(
-                            sun_dynamic_target->tile_resolution);
                         for(size_t i=0;i<sun_dynamic_views.size();++i) {
                             auto const &v=sun_dynamic_views[i];
+                            auto const &tile=sun_dynamic_tiles[i];
+                            prog.set_sun_dynamic_atlas_rect(int(i),
+                                make_point(float(tile.x),float(tile.y),
+                                           float(tile.size),float(tile.size)));
                             prog.set_sun_dynamic(int(i),
                                 make_point(v.origin[0],v.origin[1],v.origin[2]),
                                 make_point(v.right[0],v.right[1],v.right[2]),

@@ -229,6 +229,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                     "sun_dynamic_shadow_resolution must be between 64 and 1024");
             rv->sun_dynamic_shadow_resolution=static_cast<unsigned int>(pixels);
         }
+        if(j.contains("sun_dynamic_shadow_adaptive_resolution")) {
+            j.at("sun_dynamic_shadow_adaptive_resolution").get_to(
+                rv->sun_dynamic_shadow_adaptive_resolution);
+        }
         if(j.contains("sun_shadow_receiver_bias_scale")) {
             auto const &value=j.at("sun_shadow_receiver_bias_scale");
             if(!value.is_number())

@@ -54,7 +54,7 @@ uniform float sun_shadow_receiver_bias_scale; // diagnostic multiplier, 0..2
 // 4x2 tiles with independently configurable resolution and 2px guard.
 uniform int sun_dynamic_count;
 uniform sampler2DShadow sun_dynamic_image;
-uniform float sun_dynamic_tile_resolution;
+uniform vec4 sun_dynamic_atlas_rects[8]; // xy=tile origin, zw=tile size in pixels
 uniform vec3 sun_dynamic_origin[8],sun_dynamic_right[8];
 uniform vec3 sun_dynamic_up[8],sun_dynamic_forward[8],sun_dynamic_limits[8];
 
@@ -142,10 +142,10 @@ float sun_dynamic_shadow_visibility(vec3 position,float incidence)
             sun_dynamic_right[i],sun_dynamic_up[i],sun_dynamic_forward[i],
             sun_dynamic_limits[i]);
         if(!sun_shadow_inside(uv))continue;
-        vec2 tile=vec2(float(i%4),float(i/4));
-        vec2 atlas_uv=(tile*sun_dynamic_tile_resolution+2.0+
-            uv.xy*(sun_dynamic_tile_resolution-4.0)) /
-            vec2(textureSize(sun_dynamic_image,0));
+        vec4 rect=sun_dynamic_atlas_rects[i];
+        vec2 atlas_uv=(rect.xy+vec2(2.0)+
+                       uv.xy*(rect.zw-vec2(4.0))) /
+                      vec2(textureSize(sun_dynamic_image,0));
         float grazing=1.0-clamp(incidence,0.0,1.0);
         float bias_world=(0.006+0.032*grazing*grazing)*
                          sun_shadow_receiver_bias_scale;
