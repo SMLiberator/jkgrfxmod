@@ -295,7 +295,8 @@ bool covered_gbuffer_pixel(ivec2 p)
 void main()
 {
     ivec2 tc = ivec2(gl_FragCoord.xy);
-    if(fill_tjunction_gaps!=0 && !covered_gbuffer_pixel(tc)) {
+    float depth=texelFetch(depth_image,tc,0).r;
+    if(fill_tjunction_gaps!=0 && (depth<=0.0 || depth>=65500.0)) {
         ivec2 left=tc+ivec2(-1,0),right=tc+ivec2(1,0);
         ivec2 up=tc+ivec2(0,1),down=tc+ivec2(0,-1);
         if(covered_gbuffer_pixel(left) && covered_gbuffer_pixel(right)) {
@@ -305,12 +306,14 @@ void main()
             tc=texelFetch(depth_image,up,0).r<
                texelFetch(depth_image,down,0).r?up:down;
         }
+        if(any(notEqual(tc,ivec2(gl_FragCoord.xy))))
+            depth=texelFetch(depth_image,tc,0).r;
     }
 
     vec4 albedo = texelFetch(color_image, tc, 0);
     vec4 emissive = texelFetch(emissive_image, tc, 0);
     float occlusion = 1.0 - texelFetch(occlusion_image, tc, 0).r;
-    float depth = texelFetch(depth_image, tc, 0).r;
+
 
     // The G-buffer holds un-fogged pigment. AO applies only to that
     // pigment, never to the intervening fog. Depth=65504 is empty sky.
