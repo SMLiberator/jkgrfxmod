@@ -58,6 +58,8 @@ uniform float sun_shadow_receiver_bias_scale; // diagnostic multiplier, 0..2
 // 4x2 tiles with independently configurable resolution and 2px guard.
 uniform int sun_dynamic_count;
 uniform sampler2DShadow sun_dynamic_image;
+uniform float sun_dynamic_shadow_distance_softness;
+uniform float sun_dynamic_caster_depth[8]; // caster far bound in [0,1] light depth
 uniform vec4 sun_dynamic_atlas_rects[8]; // xy=tile origin, zw=tile size in pixels
 uniform vec3 sun_dynamic_origin[8],sun_dynamic_right[8];
 uniform vec3 sun_dynamic_up[8],sun_dynamic_forward[8],sun_dynamic_limits[8];
@@ -155,8 +157,33 @@ float sun_dynamic_shadow_visibility(vec3 position,float incidence)
                          sun_shadow_receiver_bias_scale;
         float bias=max(4.0/16777215.0,
                        bias_world/max(sun_dynamic_limits[i].z,0.001));
-        visibility=min(visibility,texture(sun_dynamic_image,
-            vec3(atlas_uv,uv.z-bias)));
+        float comparison=uv.z-bias;
+        float separation=max(0.0,uv.z-sun_dynamic_caster_depth[i])*
+                         sun_dynamic_limits[i].z;
+        // Wider PCF footprint with increasing caster/receiver separation;
+        // the object map retains its original detail and contact remains crisp.
+        float density=min((rect.z-4.0)/max(sun_dynamic_limits[i].x,0.001),
+                          (rect.w-4.0)/max(sun_dynamic_limits[i].y,0.001));
+        float radius=clamp(separation*sun_dynamic_shadow_distance_softness*
+                           density,0.0,5.0);
+        float object_visibility=1.0;
+        if(radius<0.5) {
+            object_visibility=texture(sun_dynamic_image,
+                vec3(atlas_uv,comparison));
+        } else {
+            vec2 tex_size=vec2(textureSize(sun_dynamic_image,0));
+            vec2 center=rect.xy+vec2(2.0)+uv.xy*(rect.zw-vec2(4.0));
+            vec2 lo=rect.xy+vec2(3.0),hi=rect.xy+rect.zw-vec2(3.0);
+            object_visibility=0.0;
+            for(int y=0;y<2;++y)for(int x=0;x<2;++x) {
+                vec2 offset=vec2(x==0?-0.7:0.7,y==0?-0.7:0.7)*radius;
+                vec2 texel=clamp(center+offset,lo,hi)/tex_size;
+                object_visibility+=texture(sun_dynamic_image,
+                    vec3(texel,comparison));
+            }
+            object_visibility*=0.25;
+        }
+        visibility=min(visibility,object_visibility);
         if(visibility<=0.001)break;
     }
     return visibility;

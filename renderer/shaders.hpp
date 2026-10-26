@@ -35,13 +35,16 @@ namespace jkgm {
             gl::uniform_location_id enabled,maps_ready,dynamic_count;
             gl::uniform_location_id direction,color,split,bias_scale;
             gl::uniform_location_id near_depth,far_depth,dynamic_depth;
-            std::vector<gl::uniform_location_id> x,y,z,rect;
+            gl::uniform_location_id distance_softness;
+            std::vector<gl::uniform_location_id> x,y,z,rect,caster_depth;
             explicit translucent_sun_uniforms(gl::program_view program);
             void set_state(bool active,bool ready,int dynamic,
                            point<3,float> sun_dir,point<4,float> sun_color,
-                           float split_distance,float receiver_bias);
+                           float split_distance,float receiver_bias,
+                           float shadow_distance_softness);
             void set_map(int slot,point<4,float> row_x,point<4,float> row_y,
-                         point<4,float> row_z,point<4,float> tile_rect);
+                         point<4,float> row_z,point<4,float> tile_rect,
+                         float caster_end=0.0f);
         };
 
         class menu_shader : public opengl_shader {
@@ -367,7 +370,9 @@ namespace jkgm {
             gl::uniform_location_id sun_shadow_split,sun_shadow_far_soft_filter;
             gl::uniform_location_id sun_shadow_receiver_bias_scale;
             gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
+            gl::uniform_location_id sun_dynamic_shadow_distance_softness;
             std::vector<gl::uniform_location_id> sun_dynamic_atlas_rects;
+            std::vector<gl::uniform_location_id> sun_dynamic_caster_depth;
             std::vector<gl::uniform_location_id> sun_dynamic_origin;
             std::vector<gl::uniform_location_id> sun_dynamic_right;
             std::vector<gl::uniform_location_id> sun_dynamic_up;
@@ -410,6 +415,8 @@ namespace jkgm {
             void set_sun_shadow_far_soft_filter(bool soft);
             void set_sun_shadow_receiver_bias_scale(float scale);
             void set_sun_dynamic_count(int count);
+            void set_sun_dynamic_shadow_distance_softness(float amount);
+            void set_sun_dynamic_caster_depth(int slot,float normalized_depth);
             void set_sun_dynamic_atlas_rect(int slot,point<4,float> rect);
             void set_sun_dynamic(int slot,point<3,float> origin,
                                  point<3,float> right,point<3,float> up,
