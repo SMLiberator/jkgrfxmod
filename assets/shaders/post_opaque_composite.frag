@@ -3,7 +3,9 @@
 uniform sampler2D color_image;
 uniform sampler2D emissive_image;
 uniform sampler2D occlusion_image;
-uniform int fill_tjunction_gaps; // opt-in: one-pixel depth-bracketed G-buffer cracks
+uniform int fill_tjunction_gaps; // opt-in: depth-bracketed G-buffer cracks
+uniform int tjunction_gap_fill_size; // 0..8 pixels to find geometry on EACH side
+uniform int debug_void_pixels; // unresolved raw empty-depth pixels, neon checkerboard
 uniform int retain_hom_pixels; // skip unwritten pixels, leaving prior scene buffer
 uniform sampler2D depth_image;
 uniform vec4 fog_params; // start, end, opacity, unused
@@ -279,11 +281,10 @@ void project_spotlights(float depth,ivec2 pixel,
     }
 }
 
-// Do not retain a prior frame: full-screen compositing rewrites every pixel,
-// and stale pixels cause HOM trails. Fill only true one-pixel uncovered cracks,
-// where current G-buffer has no geometry AND two opposing neighbours do.
-// The chosen neighbouring G-buffer is shaded by the normal compositor; the
-// offset is one screen pixel and does not require another FBO or draw pass.
+// Fill only truly uncovered pixels bracketed by geometry. Search for the
+// nearest valid opaque depth independently in both directions of each axis;
+// the configurable radius tolerates asymmetric T-junction cracks. Never
+// alter real surfaces, and never sample previous-frame image history.
 bool covered_gbuffer_pixel(ivec2 p)
 {
     ivec2 dims=textureSize(depth_image,0);
@@ -297,18 +298,54 @@ void main()
 {
     ivec2 tc = ivec2(gl_FragCoord.xy);
     float depth=texelFetch(depth_image,tc,0).r;
-    if(fill_tjunction_gaps!=0 && (depth<=0.0 || depth>=65500.0)) {
-        ivec2 left=tc+ivec2(-1,0),right=tc+ivec2(1,0);
-        ivec2 up=tc+ivec2(0,1),down=tc+ivec2(0,-1);
-        if(covered_gbuffer_pixel(left) && covered_gbuffer_pixel(right)) {
-            tc=texelFetch(depth_image,left,0).r<
-               texelFetch(depth_image,right,0).r?left:right;
-        } else if(covered_gbuffer_pixel(up) && covered_gbuffer_pixel(down)) {
-            tc=texelFetch(depth_image,up,0).r<
-               texelFetch(depth_image,down,0).r?up:down;
+    if(fill_tjunction_gaps!=0 && tjunction_gap_fill_size>0 &&
+       (depth<=0.0 || depth>=65500.0)) {
+        ivec2 selected=tc;
+        int best_span=100;
+        float best_depth=65504.0;
+        for(int axis=0;axis<2;++axis) {
+            ivec2 step_dir=axis==0?ivec2(1,0):ivec2(0,1);
+            ivec2 before=tc,after=tc;
+            int dist_before=0,dist_after=0;
+            for(int d=1;d<=8;++d) {
+                if(d>tjunction_gap_fill_size)break;
+                if(dist_before==0 && covered_gbuffer_pixel(tc-step_dir*d)) {
+                    before=tc-step_dir*d;
+                    dist_before=d;
+                }
+                if(dist_after==0 && covered_gbuffer_pixel(tc+step_dir*d)) {
+                    after=tc+step_dir*d;
+                    dist_after=d;
+                }
+                if(dist_before>0 && dist_after>0)break;
+            }
+            // A legitimate open void has no nearby geometry on both sides.
+            if(dist_before==0 || dist_after==0)continue;
+            int span=dist_before+dist_after;
+            float z_before=texelFetch(depth_image,before,0).r;
+            float z_after=texelFetch(depth_image,after,0).r;
+            float closest=min(z_before,z_after);
+            if(span<best_span || (span==best_span && closest<best_depth)) {
+                best_span=span;
+                best_depth=closest;
+                selected=z_before<=z_after?before:after;
+            }
         }
-        if(any(notEqual(tc,ivec2(gl_FragCoord.xy))))
-            depth=texelFetch(depth_image,tc,0).r;
+        if(any(notEqual(selected,tc))) {
+            tc=selected;
+            depth=best_depth;
+        }
+    }
+
+    // Debug the ACTUAL remaining missing pixels after any gap repair,
+    // regardless of HOM being enabled. Bright alternating neon colors make
+    // subpixel edge cracks conspicuous even under sunlight/HDR processing.
+    if(debug_void_pixels!=0 && (depth<=0.0 || depth>=65500.0)) {
+        ivec2 pixel=ivec2(gl_FragCoord.xy);
+        bool checker=(((pixel.x/2)+(pixel.y/2))&1)==0;
+        out_color=vec4(checker?vec3(8.0,0.0,8.0):
+                              vec3(0.0,8.0,0.0),1.0);
+        return;
     }
 
     // No extra history texture or blit: the target scene color attachment

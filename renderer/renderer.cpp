@@ -4702,6 +4702,8 @@ namespace jkgm {
             prog.set_spotlight_count(0);
             prog.set_sun_dynamic_count(0);
             prog.set_fill_tjunction_gaps(the_config->fill_tjunction_gaps);
+            prog.set_tjunction_gap_fill_size(int(the_config->tjunction_gap_fill_size));
+            prog.set_debug_void_pixels(the_config->debug_void_pixels);
             prog.set_retain_hom_pixels(the_config->retain_hom_pixels);
             prog.set_sun_shadow_far_soft_filter(
                 the_config->sun_shadow_far_soft_filter);

@@ -35,7 +35,9 @@ namespace jkgm {
         bool enable_reflections = true;
         bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
         bool enable_ssao = true;
-        bool fill_tjunction_gaps = false; // opt-in single-pixel G-buffer gap repair
+        bool fill_tjunction_gaps = false; // opt-in G-buffer gap repair
+        unsigned int tjunction_gap_fill_size = 1U; // max opposing-neighbor reach, 0..8 pixels
+        bool debug_void_pixels = false; // show raw unresolved empty-depth pixels as neon checkerboard
         bool retain_hom_pixels = true; // vanilla JK HOM default; false = Clear Display
         bool enable_parallax = true;
         bool enable_texture_filtering = true;

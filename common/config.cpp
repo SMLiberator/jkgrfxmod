@@ -208,6 +208,18 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("fill_tjunction_gaps")) {
             j.at("fill_tjunction_gaps").get_to(rv->fill_tjunction_gaps);
         }
+        if(j.contains("tjunction_gap_fill_size")) {
+            auto const &v=j.at("tjunction_gap_fill_size");
+            if(!v.is_number_integer())
+                throw std::runtime_error("tjunction_gap_fill_size must be an integer (0..8)");
+            auto const size=v.get<long long>();
+            if(size<0 || size>8)
+                throw std::runtime_error("tjunction_gap_fill_size must be between 0 and 8");
+            rv->tjunction_gap_fill_size=static_cast<unsigned>(size);
+        }
+        if(j.contains("debug_void_pixels")) {
+            j.at("debug_void_pixels").get_to(rv->debug_void_pixels);
+        }
         if(j.contains("retain_hom_pixels")) {
             j.at("retain_hom_pixels").get_to(rv->retain_hom_pixels);
         }
