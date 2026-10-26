@@ -1672,6 +1672,15 @@ namespace jkgm {
                 if(gpu_timing)present_gpu_queries.timestamp(2U,true);
                 frame_compositor->end_frame(ogs.get(),conf_scr_res,scene);
                 draw_post_exempt();
+                // Vanilla DirectDraw HUD is 2D screen-space UI, not a scene
+                // light source. Keep it out of HDR exposure, bloom, grading,
+                // spatial blur, Retro quantization and frame-trail history.
+                // Draw last so it also overlays 3D post-exempt materials.
+                if(mode==renderer_mode::ingame) {
+                    profile_scope hud_cpu(measure,profile_frame.timings[
+                        profile_idx(profile_stage::hud_draw)]);
+                    draw_hud();
+                }
                 if(gpu_timing)present_gpu_queries.timestamp(2U,false);
             }
             if(gpu_timing)present_gpu_queries.end();
@@ -1930,7 +1939,14 @@ namespace jkgm {
 
         void draw_hud()
         {
+            // Composite the DirectDraw HUD over the final sRGB presentation,
+            // not into the linear 3D scene before tone mapping and bloom.
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 gl::default_framebuffer);
+            gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
             gl::enable(gl::capability::blend);
+            gl::set_blend_function(gl::blend_function::one,
+                                   gl::blend_function::one_minus_source_alpha);
             gl::disable(gl::capability::depth_test);
 
             gl::set_active_texture_unit(0);
@@ -3546,7 +3562,10 @@ namespace jkgm {
             auto const light_bounds=spotlight_shadow_volume_bounds(view);
             {
                 for(auto const &instance:frame_gpu_3do_instances) {
-                    if(!instance.geometry || instance.is_projected_decal)
+                    // SithThing 0x20 skybox/UI meshes are visible but must
+                    // never cost a spotlight depth pass or shadow the scene.
+                    if(!instance.geometry || instance.is_projected_decal ||
+                       !instance.casts_sun_shadows)
                         continue;
                     auto const &m=instance.transform;
                     for(auto const &group:instance.geometry->groups) {
@@ -5279,11 +5298,8 @@ namespace jkgm {
                     profile_frame.timings[profile_idx(profile_stage::transparent_pass)]);
                 draw_game_transparency_pass(trimdl, posterize_lighting);
             }
-            {
-                profile_scope timer(profiling,
-                    profile_frame.timings[profile_idx(profile_stage::hud_draw)]);
-                draw_hud();
-            }
+            // DirectDraw HUD is composited AFTER post-processing in end_frame,
+            // when this rendered scene is presented on the following frame.
 
             // Present this frame's exempt ranges next time end_frame runs.
             deferred_native_ranges.clear();

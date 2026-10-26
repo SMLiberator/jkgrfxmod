@@ -1,7 +1,8 @@
 #pragma once
 // JKGM-only skybox convention used by COG levels: SithThing.flags bit 0x20.
-// This affects DIRECTIONAL SUN SHADOW CASTING only, not visibility, lighting,
-// collisions, normal/material state, or the independent spotlight shadows.
+// This excludes directional sunlight AND spotlight shadow casting, not
+// visibility, light reception, collisions, or normal/material state.
+// SSAO still uses its distance-based fallback pending an object-level mask.
 #include <cstddef>
 #include <cstdint>
 
