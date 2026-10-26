@@ -4106,12 +4106,30 @@ namespace jkgm {
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                                  gl::default_framebuffer);
-            if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
+            if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U) {
+                std::array<unsigned,5> sizes{{0,0,0,0,0}};
+                size_t shaded_pixels=0;
+                for(auto const &tile:sun_dynamic_tiles) {
+                    switch(tile.size) {
+                    case 64: ++sizes[0];break;
+                    case 128: ++sizes[1];break;
+                    case 256: ++sizes[2];break;
+                    case 512: ++sizes[3];break;
+                    case 1024: ++sizes[4];break;
+                    default:break;
+                    }
+                    auto const inner=tile.size-2*sun_dynamic_shadow_inset;
+                    shaded_pixels+=size_t(inner)*size_t(inner);
+                }
                 LOG_INFO("SUN dynamic shadow atlas Things=",
-                         sun_dynamic_views.size()," candidates=",sorted.size(),
-                         " legacy_tile_resolution=",tile_size,
-                         " adaptive=",the_config->sun_dynamic_shadow_adaptive_resolution?1:0,
-                         " allocated_tiles=",sun_dynamic_tiles.size());
+                    sun_dynamic_views.size()," candidates=",sorted.size(),
+                    " base_tile=",tile_size,
+                    " adaptive=",the_config->sun_dynamic_shadow_adaptive_resolution?1:0,
+                    " tiles64=",sizes[0]," tiles128=",sizes[1],
+                    " tiles256=",sizes[2]," tiles512=",sizes[3],
+                    " tiles1024=",sizes[4],
+                    " depth_viewport_pixels=",shaded_pixels);
+            }
         }
 
         void draw_sun_shadow_map()
