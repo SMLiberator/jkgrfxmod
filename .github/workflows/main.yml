@@ -82,7 +82,7 @@ jobs:
     - name: Adaptive sunlight shadow tile allocation tests
       shell: cmd
       run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sun_dynamic_shadow_layout.cpp /Fe:sun_dynamic_shadow_layout_test.exe
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sun_dynamic_shadow_layout.cpp /Fe:sun_dynamic_shadow_layout_test.exe
         sun_dynamic_shadow_layout_test.exe
     - name: JK/MotS collision dispatcher regression tests
       shell: cmd
