@@ -35,6 +35,7 @@ namespace jkgm {
         bool enable_reflections = true;
         bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
         bool enable_ssao = true;
+        bool fill_tjunction_gaps = false; // opt-in single-pixel G-buffer gap repair
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
         bool retro_mode = false; // CMP #0 RGB8 post-quantization, no dithering
@@ -50,7 +51,6 @@ namespace jkgm {
         bool enable_spotlight_shadows = false; // experimental, one static-world shadow map
         unsigned int spotlight_shadow_resolution = 256U; // depth-map width and height (64..1024)
         bool enable_sun_shadows = false;
-        bool sun_shadow_two_sided_world = false; // diagnostic: solid world roofs can cast from either side
         bool enable_sun_static_cache = true; // world-only depth layers, independently cached per cascade // directional sunlight + world shadow map
         bool enable_sun_dynamic_shadows = false; // eight-Thing atlas
         unsigned int sun_dynamic_shadow_resolution = 256U; // baseline 64..1024

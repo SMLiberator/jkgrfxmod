@@ -3,6 +3,7 @@
 uniform sampler2D color_image;
 uniform sampler2D emissive_image;
 uniform sampler2D occlusion_image;
+uniform int fill_tjunction_gaps; // opt-in: one-pixel depth-bracketed G-buffer cracks
 uniform sampler2D depth_image;
 uniform vec4 fog_params; // start, end, opacity, unused
 uniform vec3 fog_color;
@@ -277,9 +278,34 @@ void project_spotlights(float depth,ivec2 pixel,
     }
 }
 
+// Do not retain a prior frame: full-screen compositing rewrites every pixel,
+// and stale pixels cause HOM trails. Fill only true one-pixel uncovered cracks,
+// where current G-buffer has no geometry AND two opposing neighbours do.
+// The chosen neighbouring G-buffer is shaded by the normal compositor; the
+// offset is one screen pixel and does not require another FBO or draw pass.
+bool covered_gbuffer_pixel(ivec2 p)
+{
+    ivec2 dims=textureSize(depth_image,0);
+    if(any(lessThan(p,ivec2(0))) || any(greaterThanEqual(p,dims)))
+        return false;
+    float z=texelFetch(depth_image,p,0).r;
+    return z>0.0 && z<65500.0;
+}
+
 void main()
 {
     ivec2 tc = ivec2(gl_FragCoord.xy);
+    if(fill_tjunction_gaps!=0 && !covered_gbuffer_pixel(tc)) {
+        ivec2 left=tc+ivec2(-1,0),right=tc+ivec2(1,0);
+        ivec2 up=tc+ivec2(0,1),down=tc+ivec2(0,-1);
+        if(covered_gbuffer_pixel(left) && covered_gbuffer_pixel(right)) {
+            tc=texelFetch(depth_image,left,0).r<
+               texelFetch(depth_image,right,0).r?left:right;
+        } else if(covered_gbuffer_pixel(up) && covered_gbuffer_pixel(down)) {
+            tc=texelFetch(depth_image,up,0).r<
+               texelFetch(depth_image,down,0).r?up:down;
+        }
+    }
 
     vec4 albedo = texelFetch(color_image, tc, 0);
     vec4 emissive = texelFetch(emissive_image, tc, 0);

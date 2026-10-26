@@ -4282,11 +4282,6 @@ namespace jkgm {
                     ++world_hidden;
                     continue;
                 }
-                if(!the_config->sun_shadow_two_sided_world &&
-                   !sun_shadow_world_face_visible(geomode,surface.normal,direction)) {
-                    ++world_backfacing;
-                    continue;
-                }
                 gpu_3do_group group{};group.material=surface.material;
                 group.cel=surface.cel;
                 int32_t cel=group.cel;
@@ -4413,7 +4408,7 @@ namespace jkgm {
                          " hidden_world=",world_hidden,
                          " backfacing_world=",world_backfacing,
                          " material_skipped_world=",world_material_skipped,
-                         " two_sided_world=",the_config->sun_shadow_two_sided_world?1:0);
+                         " two_sided_world=1");
             bool unchanged=sun_shadow_cascade_cached[cascade] &&
                 sun_shadow_worlds[cascade]==world &&
                 sun_shadow_revisions[cascade]==map.revision &&
@@ -4614,6 +4609,7 @@ namespace jkgm {
             auto &prog=ogs->game_post_opaque_composite_program;
             prog.set_spotlight_count(0);
             prog.set_sun_dynamic_count(0);
+            prog.set_fill_tjunction_gaps(the_config->fill_tjunction_gaps);
             prog.set_sun_shadow_far_soft_filter(
                 the_config->sun_shadow_far_soft_filter);
             prog.set_sun_shadow_receiver_bias_scale(

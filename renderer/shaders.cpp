@@ -804,6 +804,7 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , emissive_image(gl::get_uniform_location(the_program, "emissive_image"))
     , occlusion_image(gl::get_uniform_location(the_program, "occlusion_image"))
     , depth_image(gl::get_uniform_location(the_program, "depth_image"))
+    , fill_tjunction_gaps(gl::get_uniform_location(the_program, "fill_tjunction_gaps"))
     , fog_params(gl::get_uniform_location(the_program, "fog_params"))
     , fog_color(gl::get_uniform_location(the_program, "fog_color"))
     , normal_image(gl::get_uniform_location(the_program, "normal_image"))
@@ -890,6 +891,12 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_occlusion_sampler(int
 void jkgm::shaders::game_post_opaque_composite_shader::set_depth_sampler(int sampler)
 {
     gl::set_uniform_integer(depth_image, sampler);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_fill_tjunction_gaps(
+    bool enabled)
+{
+    gl::set_uniform_integer(fill_tjunction_gaps,enabled?1:0);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_fog(point<4,float> params,
