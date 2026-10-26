@@ -1,8 +1,9 @@
 #pragma once
 // JKGM-only skybox convention used by COG levels: SithThing.flags bit 0x20.
-// This excludes directional sunlight AND spotlight shadow casting, not
-// visibility, light reception, collisions, or normal/material state.
-// SSAO still uses its distance-based fallback pending an object-level mask.
+// This excludes directional sunlight and spotlight shadow casting.
+// GPU-cached 3DOs additionally skip mod sunlight/specular, spotlights, and
+// SSAO as receivers. Native-D3D 3DO rendering still needs per-Thing G-buffer
+// tagging for receiver exclusion. Visibility and JK authored light remain.
 #include <cstddef>
 #include <cstdint>
 

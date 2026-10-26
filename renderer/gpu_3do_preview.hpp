@@ -61,7 +61,7 @@ namespace jkgm {
         float ambient=1.0f, attenuation=0.0f;
         bool is_projected_decal=false; // world-space clipped type-3 SPR
         bool shadow_only=false; // native 3DO remains JK-rendered; cache is for depth only
-        bool casts_sun_shadows=true; // SithThing 0x20 skybox: no sun depth pass
+        bool casts_sun_shadows=true; // SithThing 0x20: no sun/spot shadows; GPU skips extra light/SSAO
         uint64_t shadow_owner=0; // pointer + signature, not shared rdMesh id
         bool dynamic_sun_caster=false;
         float decal_opacity=1.0f; // separate from the native MAT's alpha

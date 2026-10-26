@@ -23,6 +23,9 @@ uniform int has_texture; // 0=unresolved diagnostic, 1=albedo map, 2=intentional
 uniform int has_emissive;
 uniform int transparent_pass;
 uniform int post_exempt_pass; // draw after post, depth-tested against opaque world
+// Flag 0x20 on a GPU-cached Thing suppresses added sunlight/specular and
+// projected spotlights; a zero G-buffer normal also omits SSAO on this Thing.
+uniform int world_lighting_exempt;
 // Projected decal only: opaque G-buffer emissive.A stores diffuse JK light,
 // leaving emission RGB and all existing render targets unchanged.
 uniform int decal_receiver_lighting;
@@ -187,8 +190,9 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
 // opaque material shader; independent of the existing Gouraud diffuse.
 vec3 gpu_sun_specular(vec3 base_color,vec2 uv)
 {
-    if(specular_params.x<=0.0 || sun_color_intensity.w<=0.0 ||
-       sun_direction.w<0.5) return vec3(0.0);
+    if(world_lighting_exempt!=0 || specular_params.x<=0.0 ||
+       sun_color_intensity.w<=0.0 || sun_direction.w<0.5)
+        return vec3(0.0);
     vec3 surface=specular_params.w>0.5 ?
         texture(surface_map,uv).rgb : vec3(1.0);
     float strength=max(specular_params.x*surface.r,0.0);
@@ -523,7 +527,8 @@ void main() {
     // Ordinary alpha-tested coverage already receives opaque-composite light.
     vec3 projected_light=vec3(0.0);
     if(translucent_spotlight_count>0 && transparent_pass!=0 &&
-       post_exempt_pass==0 && decal_receiver_lighting==0 &&
+       post_exempt_pass==0 && world_lighting_exempt==0 &&
+       decal_receiver_lighting==0 &&
        (alpha_mode==1 || alpha_mode==3) &&
        blend_mode!=1 && blend_mode!=2 && emissive_only==0) {
         projected_light=light_translucent_spotlight(
@@ -568,7 +573,10 @@ void main() {
                           ? vec3(0.0) : emission+specular,
                       transparent_pass!=0 ? a :
                       dot(jk_lit_rgb,vec3(0.2126,0.7152,0.0722)));
-    out_normal=vec4(normalize(view_normal),1.0);
+    // A zero normal is already rejected by the SSAO and sun receivers.
+    // This costs no additional G-buffer attachment or fullscreen pass.
+    out_normal=world_lighting_exempt!=0 ? vec4(0.0) :
+                                      vec4(normalize(view_normal),1.0);
     // Depth target optionally carries the unlit diffuse base in GBA.
     // This keeps projected lighting independent of baked JK vertex light.
     out_depth=vec4(view_depth,albedo.rgb);

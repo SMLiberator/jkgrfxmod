@@ -3023,6 +3023,10 @@ namespace jkgm {
                                          make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(it->second->vao);
                     prog.set_lighting(inst);
+                    // 0x20 suppresses JkGRfxMod light-reception effects on
+                    // GPU-cached 3DOs, not the authored JK vertex lighting.
+                    // Native D3D triangles do not carry per-Thing flags here.
+                    prog.set_world_lighting_exempt(!inst.casts_sun_shadows);
                     prog.set_colormap_tint(inst.colormap_tint);
                     std::array<float,3> local_eye{};
                     bool const has_eye=gpu_3do_local_eye(m,local_eye);
