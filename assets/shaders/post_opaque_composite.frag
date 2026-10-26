@@ -4,6 +4,7 @@ uniform sampler2D color_image;
 uniform sampler2D emissive_image;
 uniform sampler2D occlusion_image;
 uniform int fill_tjunction_gaps; // opt-in: one-pixel depth-bracketed G-buffer cracks
+uniform int retain_hom_pixels; // skip unwritten pixels, leaving prior scene buffer
 uniform sampler2D depth_image;
 uniform vec4 fog_params; // start, end, opacity, unused
 uniform vec3 fog_color;
@@ -309,6 +310,12 @@ void main()
         if(any(notEqual(tc,ivec2(gl_FragCoord.xy))))
             depth=texelFetch(depth_image,tc,0).r;
     }
+
+    // No extra history texture or blit: the target scene color attachment
+    // already contains the previous frame. Keep it only where nothing in
+    // this frame wrote opaque depth. Alpha geometry then blends normally.
+    if(retain_hom_pixels!=0 && (depth<=0.0 || depth>=65500.0))
+        discard;
 
     vec4 albedo = texelFetch(color_image, tc, 0);
     vec4 emissive = texelFetch(emissive_image, tc, 0);

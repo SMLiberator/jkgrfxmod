@@ -40,6 +40,7 @@ namespace jkgm {
 
     class renderer_screen_basic : public renderer_screen {
     private:
+        bool retained_scene_valid=false;
         render_depthbuffer shared_depthbuffer;
         render_buffer screen_buffer;
         render_gbuffer screen_gbuffer;
@@ -47,7 +48,8 @@ namespace jkgm {
     public:
         explicit renderer_screen_basic(size<2, int> screen_res, bool spotlight_albedo);
 
-        void begin_frame() override;
+        void begin_frame(bool retain_hom_pixels) override;
+        void invalidate_retained_scene() override;
 
         void begin_opaque_pass() override;
         void end_opaque_pass() override;
@@ -56,7 +58,7 @@ namespace jkgm {
         gl::texture_view get_resolved_normal_texture() override;
         gl::texture_view get_resolved_depth_texture() override;
 
-        void begin_compose_opaque_pass() override;
+        void begin_compose_opaque_pass(bool retain_hom_pixels) override;
         void end_compose_opaque_pass() override;
 
         void begin_transparency_pass() override;

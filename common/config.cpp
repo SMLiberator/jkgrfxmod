@@ -208,6 +208,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("fill_tjunction_gaps")) {
             j.at("fill_tjunction_gaps").get_to(rv->fill_tjunction_gaps);
         }
+        if(j.contains("retain_hom_pixels")) {
+            j.at("retain_hom_pixels").get_to(rv->retain_hom_pixels);
+        }
         if(j.contains("enable_sun_shadows")) {
             j.at("enable_sun_shadows").get_to(rv->enable_sun_shadows);
         }

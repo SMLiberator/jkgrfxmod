@@ -11,7 +11,10 @@ namespace jkgm {
     public:
         virtual ~renderer_screen() = default;
 
-        virtual void begin_frame() = 0;
+        // Preserve completed linear scene color for vanilla-like HOM; depth and
+        // all G-buffer attachments are still reset every frame.
+        virtual void begin_frame(bool retain_hom_pixels) = 0;
+        virtual void invalidate_retained_scene() = 0;
 
         virtual void begin_opaque_pass() = 0;
         virtual void end_opaque_pass() = 0;
@@ -20,7 +23,7 @@ namespace jkgm {
         virtual gl::texture_view get_resolved_normal_texture() = 0;
         virtual gl::texture_view get_resolved_depth_texture() = 0;
 
-        virtual void begin_compose_opaque_pass() = 0;
+        virtual void begin_compose_opaque_pass(bool retain_hom_pixels) = 0;
         virtual void end_compose_opaque_pass() = 0;
 
         virtual void begin_transparency_pass() = 0;

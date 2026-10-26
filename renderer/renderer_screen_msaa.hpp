@@ -53,6 +53,7 @@ namespace jkgm {
 
     class renderer_screen_msaa : public renderer_screen {
     private:
+        bool retained_scene_valid=false;
         render_depthbuffer_msaa shared_depthbuffer;
         render_buffer_msaa screen_buffer;
         render_gbuffer_msaa screen_gbuffer;
@@ -69,7 +70,8 @@ namespace jkgm {
                              std::optional<float> min_sample_factor,
                              bool spotlight_albedo);
 
-        void begin_frame() override;
+        void begin_frame(bool retain_hom_pixels) override;
+        void invalidate_retained_scene() override;
 
         void begin_opaque_pass() override;
         void end_opaque_pass() override;
@@ -78,7 +80,7 @@ namespace jkgm {
         gl::texture_view get_resolved_normal_texture() override;
         gl::texture_view get_resolved_depth_texture() override;
 
-        void begin_compose_opaque_pass() override;
+        void begin_compose_opaque_pass(bool retain_hom_pixels) override;
         void end_compose_opaque_pass() override;
 
         void begin_transparency_pass() override;

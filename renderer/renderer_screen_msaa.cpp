@@ -234,13 +234,20 @@ jkgm::renderer_screen_msaa::renderer_screen_msaa(size<2, int> screen_res,
     }
 }
 
-void jkgm::renderer_screen_msaa::begin_frame()
+void jkgm::renderer_screen_msaa::begin_frame(bool retain_hom_pixels)
 {
     gl::set_viewport(screen_buffer.viewport);
 
     gl::bind_framebuffer(gl::framebuffer_bind_target::any, screen_buffer.fbo);
-    gl::clear_buffer_color(0, color::zero());
+    if(!retain_hom_pixels || !retained_scene_valid)
+        gl::clear_buffer_color(0, color::zero());
     gl::clear_buffer_depth(1.0f);
+    retained_scene_valid=retain_hom_pixels;
+}
+
+void jkgm::renderer_screen_msaa::invalidate_retained_scene()
+{
+    retained_scene_valid=false;
 }
 
 void jkgm::renderer_screen_msaa::begin_opaque_pass()
@@ -307,10 +314,11 @@ jkgm::gl::texture_view jkgm::renderer_screen_msaa::get_resolved_depth_texture()
     return gbuffer_depth_resolve.tex;
 }
 
-void jkgm::renderer_screen_msaa::begin_compose_opaque_pass()
+void jkgm::renderer_screen_msaa::begin_compose_opaque_pass(bool retain_hom_pixels)
 {
     gl::bind_framebuffer(gl::framebuffer_bind_target::any, screen_buffer.fbo);
-    gl::clear_buffer_color(0, color::zero());
+    if(!retain_hom_pixels)
+        gl::clear_buffer_color(0, color::zero());
 }
 
 void jkgm::renderer_screen_msaa::end_compose_opaque_pass() {}

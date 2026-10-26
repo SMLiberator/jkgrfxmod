@@ -36,6 +36,7 @@ namespace jkgm {
         bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
         bool enable_ssao = true;
         bool fill_tjunction_gaps = false; // opt-in single-pixel G-buffer gap repair
+        bool retain_hom_pixels = false; // opt-in vanilla-like retained unrendered scene pixels
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
         bool retro_mode = false; // CMP #0 RGB8 post-quantization, no dithering

@@ -933,6 +933,7 @@ namespace jkgm {
                 // A scene transition cannot reuse old frame history.
                 // Do not do this in begin_game/end_game (called each frame).
                 get_frame_blend_settings().reset();
+                if(frame_screen)frame_screen->invalidate_retained_scene();
                 get_distance_blur_settings() = distance_blur_settings();
                 get_peripheral_blur_settings() = peripheral_blur_settings();
             }
@@ -1117,7 +1118,8 @@ namespace jkgm {
         void begin_frame()
         {
             gl::set_active_texture_unit(0);
-            frame_screen->begin_frame();
+            frame_screen->begin_frame(
+                the_config->retain_hom_pixels && mode==renderer_mode::ingame);
         }
 
         // Refresh immediately for a COG command or menu return; otherwise
@@ -4700,6 +4702,7 @@ namespace jkgm {
             prog.set_spotlight_count(0);
             prog.set_sun_dynamic_count(0);
             prog.set_fill_tjunction_gaps(the_config->fill_tjunction_gaps);
+            prog.set_retain_hom_pixels(the_config->retain_hom_pixels);
             prog.set_sun_shadow_far_soft_filter(
                 the_config->sun_shadow_far_soft_filter);
             prog.set_sun_shadow_receiver_bias_scale(
@@ -4874,7 +4877,8 @@ namespace jkgm {
                                           frame_screen->get_resolved_normal_texture(),
                                           frame_screen->get_resolved_depth_texture());
 
-            frame_screen->begin_compose_opaque_pass();
+            frame_screen->begin_compose_opaque_pass(
+                the_config->retain_hom_pixels && mode==renderer_mode::ingame);
             draw_game_opaque_composite();
             frame_screen->end_compose_opaque_pass();
         }
