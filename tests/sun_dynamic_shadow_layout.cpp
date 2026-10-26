@@ -8,14 +8,18 @@ int main()
     assert(choose_sun_dynamic_shadow_tile(8.0f,256)==64);
     assert(choose_sun_dynamic_shadow_tile(90.0f,256)==128);
     assert(choose_sun_dynamic_shadow_tile(210.0f,256)==256);
-    assert(choose_sun_dynamic_shadow_tile(350.0f,256)==512);
+    assert(choose_sun_dynamic_shadow_tile(350.0f,256)==384);
+    assert(choose_sun_dynamic_shadow_tile(150.0f,256)==192);
+    assert(choose_sun_dynamic_shadow_tile(290.0f,256)==320);
+    assert(choose_sun_dynamic_shadow_tile(400.0f,256)==448);
+    assert(choose_sun_dynamic_shadow_tile(449.0f,256)==512);
     assert(choose_sun_dynamic_shadow_tile(900.0f,256)==512);
     assert(choose_sun_dynamic_shadow_tile(900.0f,64)==128);
     assert(choose_sun_dynamic_shadow_tile(NAN,256)==64);
     // Eight possible casters: never allocate two 512 tiles while the
     // remaining six need at least 64 pixels each.
     assert(sun_dynamic_shadow_budget_tile(512,0,1024*512,7)==512);
-    assert(sun_dynamic_shadow_budget_tile(512,512*512,1024*512,6)==256);
+    assert(sun_dynamic_shadow_budget_tile(512,512*512,1024*512,6)==448);
     assert(sun_dynamic_shadow_budget_tile(256,0,1024*512,7)==256);
     sun_dynamic_shadow_layout pack(1024,512);
     sun_dynamic_shadow_tile big{},medium{},small{},tiny{};
@@ -44,6 +48,13 @@ int main()
     assert(!limited.allocate(64,none));
     limited.undo_last();
     assert(limited.allocate(64,none));
+    // Non-power-of-two tiles fit exactly and never overlap.
+    sun_dynamic_shadow_layout granular(384,384);
+    sun_dynamic_shadow_tile t320{},t64{};
+    assert(granular.allocate(320,t320));
+    assert(t320.size==320);
+    assert(granular.allocate(64,t64));
+    assert(t64.size==64);
     sun_dynamic_shadow_layout crowded(512,512);
     for(int i=0;i<3;++i) {
         sun_dynamic_shadow_tile tile{};

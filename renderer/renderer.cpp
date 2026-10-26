@@ -4025,22 +4025,21 @@ namespace jkgm {
                     world_view,object->bounds,view))continue;
                 sun_dynamic_shadow_tile tile{};
                 if(the_config->sun_dynamic_shadow_adaptive_resolution) {
-                    // Project the world-space AABB diameter approximately
-                    // to screen pixels. Stable across object rotations and
-                    // cheap enough to calculate once per eligible Thing.
-                    auto const &lo=object->bounds.low;
-                    auto const &hi=object->bounds.high;
-                    float diagonal2=0.0f;
-                    for(int k=0;k<3;++k) {
-                        float const d=hi[k]-lo[k];
-                        diagonal2+=d*d;
-                    }
+                    // Target shadow texels per screen pixel in LIGHT space,
+                    // not from the 3DO AABB diagonal. The fitted shadow
+                    // rectangle also contains the caster's projected reach;
+                    // a large car thus deserves more pixels than a small
+                    // actor even when their apparent mesh sizes look similar.
+                    // Radial distance is conservative for offscreen casters.
                     float const tan_half=std::tan(
                         camera.fov*0.008726646259971648f);
-                    float const pixel_span=std::sqrt(diagonal2)*
-                        float(get<x>(conf_scr_res))/
-                        (2.0f*std::max(std::sqrt(object->distance2),0.1f)*
-                         std::max(tan_half,0.05f));
+                    float const world_units_per_pixel=
+                        2.0f*std::max(std::sqrt(object->distance2),0.1f)*
+                        std::max(tan_half,0.05f)/
+                        float(get<x>(conf_scr_res));
+                    float const pixel_span=
+                        std::max(view.width,view.height)/
+                        std::max(world_units_per_pixel,0.0001f);
                     auto const desired=choose_sun_dynamic_shadow_tile(
                         pixel_span,sun_dynamic_target->tile_resolution);
                     // Leave minimum space for remaining eligible Things.
@@ -4121,17 +4120,12 @@ namespace jkgm {
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                                  gl::default_framebuffer);
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U) {
-                std::array<unsigned,5> sizes{{0,0,0,0,0}};
                 size_t shaded_pixels=0;
-                for(auto const &tile:sun_dynamic_tiles) {
-                    switch(tile.size) {
-                    case 64: ++sizes[0];break;
-                    case 128: ++sizes[1];break;
-                    case 256: ++sizes[2];break;
-                    case 512: ++sizes[3];break;
-                    case 1024: ++sizes[4];break;
-                    default:break;
-                    }
+                std::ostringstream tile_sizes;
+                for(size_t i=0;i<sun_dynamic_tiles.size();++i) {
+                    auto const &tile=sun_dynamic_tiles[i];
+                    if(i!=0)tile_sizes<<",";
+                    tile_sizes<<tile.size;
                     auto const inner=tile.size-2*sun_dynamic_shadow_inset;
                     shaded_pixels+=size_t(inner)*size_t(inner);
                 }
@@ -4139,9 +4133,7 @@ namespace jkgm {
                     sun_dynamic_views.size()," candidates=",sorted.size(),
                     " base_tile=",tile_size,
                     " adaptive=",the_config->sun_dynamic_shadow_adaptive_resolution?1:0,
-                    " tiles64=",sizes[0]," tiles128=",sizes[1],
-                    " tiles256=",sizes[2]," tiles512=",sizes[3],
-                    " tiles1024=",sizes[4],
+                    " tile_sizes=[",tile_sizes.str(),"]",
                     " depth_viewport_pixels=",shaded_pixels);
             }
         }
