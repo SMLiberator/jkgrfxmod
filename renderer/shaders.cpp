@@ -5,6 +5,60 @@
 #include "common/error_reporter.hpp"
 
 namespace jkgm {
+
+jkgm::shaders::translucent_sun_uniforms::translucent_sun_uniforms(
+    gl::program_view program)
+    : enabled(gl::get_uniform_location(program,"translucent_sun_enabled"))
+    , maps_ready(gl::get_uniform_location(program,"translucent_sun_maps_ready"))
+    , dynamic_count(gl::get_uniform_location(program,"translucent_sun_dynamic_count"))
+    , direction(gl::get_uniform_location(program,"translucent_sun_direction"))
+    , color(gl::get_uniform_location(program,"translucent_sun_color"))
+    , split(gl::get_uniform_location(program,"translucent_sun_split"))
+    , bias_scale(gl::get_uniform_location(program,"translucent_sun_bias_scale"))
+    , near_depth(gl::get_uniform_location(program,"translucent_sun_near_depth"))
+    , far_depth(gl::get_uniform_location(program,"translucent_sun_far_depth"))
+    , dynamic_depth(gl::get_uniform_location(program,"translucent_sun_dynamic_depth"))
+{
+    for(int i=0;i<10;++i) {
+        auto const slot=std::to_string(i)+"]";
+        x.push_back(gl::get_uniform_location(program,"translucent_sun_map_x["+slot));
+        y.push_back(gl::get_uniform_location(program,"translucent_sun_map_y["+slot));
+        z.push_back(gl::get_uniform_location(program,"translucent_sun_map_z["+slot));
+        if(i<8)rect.push_back(gl::get_uniform_location(
+            program,"translucent_sun_tile_rect["+slot));
+    }
+}
+
+void jkgm::shaders::translucent_sun_uniforms::set_state(
+    bool active,bool ready,int dynamic,point<3,float> sun_dir,
+    point<4,float> sun_color,float split_distance,float receiver_bias)
+{
+    gl::set_uniform_integer(enabled,active?1:0);
+    gl::set_uniform_integer(maps_ready,ready?1:0);
+    gl::set_uniform_integer(dynamic_count,dynamic);
+    if(!active)return;
+    gl::set_uniform_vector(direction,sun_dir);
+    gl::set_uniform_vector(color,sun_color);
+    gl::set_uniform_float(split,split_distance);
+    gl::set_uniform_float(bias_scale,receiver_bias);
+    if(ready) {
+        gl::set_uniform_integer(near_depth,16);
+        gl::set_uniform_integer(far_depth,17);
+    }
+    if(dynamic>0)gl::set_uniform_integer(dynamic_depth,18);
+}
+
+void jkgm::shaders::translucent_sun_uniforms::set_map(
+    int slot,point<4,float> row_x,point<4,float> row_y,
+    point<4,float> row_z,point<4,float> tile_rect)
+{
+    if(slot<0 || slot>=10)return;
+    gl::set_uniform_vector(x[slot],row_x);
+    gl::set_uniform_vector(y[slot],row_y);
+    gl::set_uniform_vector(z[slot],row_z);
+    if(slot>=2)gl::set_uniform_vector(rect[slot-2],tile_rect);
+}
+
     namespace {
         gl::shader compile_shader_from_file(fs::path const &filename, gl::shader_type type)
         {
@@ -148,6 +202,7 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , translucent_shadow_slot(gl::get_uniform_location(the_program,"translucent_shadow_slot"))
     , translucent_shadow_image(gl::get_uniform_location(the_program,"translucent_shadow_image"))
     , translucent_shadow_near_range(gl::get_uniform_location(the_program,"translucent_shadow_near_range"))
+    , translucent_sun(the_program)
 {
     for(int i=0;i<4;++i) {
         translucent_spotlight_images.push_back(gl::get_uniform_location(
@@ -276,6 +331,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , translucent_shadow_slot(gl::get_uniform_location(the_program,"translucent_shadow_slot"))
     , translucent_shadow_image(gl::get_uniform_location(the_program,"translucent_shadow_image"))
     , translucent_shadow_near_range(gl::get_uniform_location(the_program,"translucent_shadow_near_range"))
+    , translucent_sun(the_program)
     , ambient_light(gl::get_uniform_location(the_program,"ambient_light"))
     , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))

@@ -2764,6 +2764,7 @@ namespace jkgm {
             prog.use_program();
             set_translucent_spotlights(prog,transparent && !post_exempt &&
                                       !decals_only);
+            set_translucent_sun(prog,transparent && !post_exempt && !decals_only);
             prog.set_scene_depth(8);
             prog.set_post_exempt(post_exempt);
             prog.set_decal_receiver_lighting(decals_only,10,11);
@@ -3494,6 +3495,95 @@ namespace jkgm {
             }
         }
 
+
+
+        template<typename Shader>
+        void set_translucent_sun(Shader &prog,bool active)
+        {
+            auto const off=make_point(0.0f,0.0f,1.0f);
+            auto const dark=make_point(0.0f,0.0f,0.0f,0.0f);
+            auto &uniforms=prog.translucent_sun;
+            uniforms.set_state(false,false,0,off,dark,
+                               sun_shadow_near_distance,1.0f);
+            if(!active || !the_config->enable_sun_shadows)return;
+            auto const cam=read_active_render_camera();
+            if(!cam.valid)return;
+            auto const sun=get_sun_settings();
+            float const intensity=sun.intensity.value()[0];
+            if(!std::isfinite(intensity) || intensity<=0.0f)return;
+            auto const dir=normalized_sun_direction(sun.direction.value());
+            auto const rgb=sun.color.value();
+            // The first 16 GL fragment sampler units remain reserved for
+            // MATs, decals, spotlight cookie images and their shadow map.
+            // Keep native and GPU-cached 3DOs functional on GL 3.3 devices
+            // exposing only 16 fragment units: diffuse sun still works.
+            static GLint fragment_texture_units=0;
+            if(fragment_texture_units==0)
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_texture_units);
+            bool const have_texture_slots=fragment_texture_units>=19;
+            bool const shadows=have_texture_slots && sun_shadow_ready &&
+                               bool(sun_shadow_target);
+            int const dynamic=have_texture_slots &&
+                the_config->enable_sun_dynamic_shadows &&
+                sun_dynamic_target && !sun_dynamic_views.empty()
+                    ? int(sun_dynamic_views.size()) : 0;
+            auto const point_axis=[](std::array<float,3> const &v,float w) {
+                return make_point(v[0],v[1],v[2],w);
+            };
+            float const h=std::tan(cam.fov*0.008726646259971648f);
+            float const v=h*float(get<y>(conf_scr_res))/
+                            float(get<x>(conf_scr_res));
+            prog.set_translucent_spotlight_camera(
+                point_axis(cam.position,0.0f),point_axis(cam.right,h),
+                point_axis(cam.forward,0.0f),point_axis(cam.up,v),
+                make_point(float(get<x>(conf_scr_res)),
+                           float(get<y>(conf_scr_res))));
+            uniforms.set_state(true,shadows,dynamic,
+                make_point(dir[0],dir[1],dir[2]),
+                make_point(rgb[0],rgb[1],rgb[2],intensity),
+                sun_shadow_near_distance,
+                the_config->sun_shadow_receiver_bias_scale);
+            auto set_projection=[&](int slot,sun_shadow_projection const &p,
+                                    point<4,float> rect) {
+                auto row=[&](decal_vec3 const &axis,float size) {
+                    float const inv=1.0f/std::max(size,0.00001f);
+                    float const origin_projection=
+                        -(p.origin[0]*axis[0]+p.origin[1]*axis[1]+
+                          p.origin[2]*axis[2])*inv;
+                    return make_point(axis[0]*inv,axis[1]*inv,
+                                      axis[2]*inv,origin_projection);
+                };
+                uniforms.set_map(slot,row(p.right,p.width),
+                    row(p.up,p.height),row(p.forward,p.range),rect);
+            };
+            auto const null_rect=make_point(0.0f,0.0f,0.0f,0.0f);
+            if(shadows) {
+                set_projection(0,sun_shadow_views[0],null_rect);
+                set_projection(1,sun_shadow_views[1],null_rect);
+                gl::set_active_texture_unit(16);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 sun_shadow_target->depth);
+                gl::set_active_texture_unit(17);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 sun_shadow_target->far_depth);
+            }
+            if(dynamic>0) {
+                for(int i=0;i<dynamic;++i) {
+                    auto const &tile=sun_dynamic_tiles[i];
+                    set_projection(i+2,sun_dynamic_views[i],
+                        make_point(float(tile.x),float(tile.y),
+                                   float(tile.size),float(tile.size)));
+                }
+                gl::set_active_texture_unit(18);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 sun_dynamic_target->depth);
+            }
+            gl::set_active_texture_unit(0);
+            if(the_config->profile_renderer && !have_texture_slots &&
+               gpu_3do_present_serial%240U==0U)
+                LOG_INFO("SUN transparent receives diffuse only: fragment sampler units=",
+                         fragment_texture_units," need >=19 for shadow maps");
+        }
 
         // One intentionally low-resolution depth map. Static SithWorld
         // casters remain independent of camera visibility; cached 3DOs share
@@ -4817,6 +4907,7 @@ namespace jkgm {
             ogs->game_transparency_pass_program.set_scene_depth_sampler(5);
             ogs->game_transparency_pass_program.set_flare_mode(false);
             set_translucent_spotlights(ogs->game_transparency_pass_program,true);
+            set_translucent_sun(ogs->game_transparency_pass_program,true);
             // Sample the completed opaque pass; this is a different texture
             // from the framebuffer receiving the transparency draw.
             gl::set_active_texture_unit(5);
@@ -4895,6 +4986,10 @@ namespace jkgm {
 
             // Weapon/HUD depth is intentionally separate from world lights.
             ogs->game_transparency_pass_program.set_translucent_spotlight_count(0);
+            ogs->game_transparency_pass_program.translucent_sun.set_state(
+                false,false,0,make_point(0.0f,0.0f,1.0f),
+                make_point(0.0f,0.0f,0.0f,0.0f),
+                sun_shadow_near_distance,1.0f);
             // Redraw gun overlay after z-clear
             gl::set_depth_mask(true);
             gl::clear({gl::clear_flag::depth});

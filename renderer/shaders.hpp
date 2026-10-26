@@ -28,6 +28,22 @@ namespace jkgm {
     };
 
     namespace shaders {
+
+        // Shared forward-sun state for native transparent triangles and
+        // GPU-cached 3DO translucency. Row vectors map world XYZ to shadow UV.
+        struct translucent_sun_uniforms {
+            gl::uniform_location_id enabled,maps_ready,dynamic_count;
+            gl::uniform_location_id direction,color,split,bias_scale;
+            gl::uniform_location_id near_depth,far_depth,dynamic_depth;
+            std::vector<gl::uniform_location_id> x,y,z,rect;
+            explicit translucent_sun_uniforms(gl::program_view program);
+            void set_state(bool active,bool ready,int dynamic,
+                           point<3,float> sun_dir,point<4,float> sun_color,
+                           float split_distance,float receiver_bias);
+            void set_map(int slot,point<4,float> row_x,point<4,float> row_y,
+                         point<4,float> row_z,point<4,float> tile_rect);
+        };
+
         class menu_shader : public opengl_shader {
         private:
             gl::uniform_location_id tex;
@@ -103,6 +119,8 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> translucent_spotlight_intensities;
             std::vector<gl::uniform_location_id> translucent_spotlight_bounds;
 
+        public:
+            translucent_sun_uniforms translucent_sun;
         protected:
             game_pass_shader(std::string const &name,
                              fs::path const &vertex_part,
@@ -212,6 +230,9 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> translucent_spotlight_forwards;
             std::vector<gl::uniform_location_id> translucent_spotlight_intensities;
             std::vector<gl::uniform_location_id> translucent_spotlight_bounds;
+        public:
+            translucent_sun_uniforms translucent_sun;
+        private:
             gl::uniform_location_id ambient_light,attenuation_min,num_lights,
                                     effective_light_mode;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity;

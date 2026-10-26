@@ -484,6 +484,104 @@ vec3 translucent_spotlight_world_normal(vec3 normal)
         translucent_spotlight_camera_forward.xyz * n.z);
 }
 
+
+uniform int translucent_sun_enabled;
+uniform int translucent_sun_maps_ready;
+uniform int translucent_sun_dynamic_count;
+uniform vec3 translucent_sun_direction;
+uniform vec4 translucent_sun_color; // RGB, positive direct intensity
+uniform float translucent_sun_split;
+uniform float translucent_sun_bias_scale;
+uniform vec4 translucent_sun_map_x[10];
+uniform vec4 translucent_sun_map_y[10];
+uniform vec4 translucent_sun_map_z[10];
+uniform vec4 translucent_sun_tile_rect[8];
+uniform sampler2DShadow translucent_sun_near_depth;
+uniform sampler2DShadow translucent_sun_far_depth;
+uniform sampler2DShadow translucent_sun_dynamic_depth;
+
+vec3 translucent_sun_coordinates(int slot,vec3 world)
+{
+    vec4 p=vec4(world,1.0);
+    return vec3(dot(translucent_sun_map_x[slot],p),
+                dot(translucent_sun_map_y[slot],p),
+                dot(translucent_sun_map_z[slot],p));
+}
+bool translucent_sun_inside(vec3 uv)
+{
+    return all(greaterThanEqual(uv,vec3(0.0))) &&
+           all(lessThanEqual(uv,vec3(1.0)));
+}
+float translucent_sun_sample(int slot,vec3 uv,float incidence)
+{
+    float grazing=1.0-clamp(incidence,0.0,1.0);
+    float offset=(0.008+0.027*grazing*grazing)*
+                 translucent_sun_bias_scale*
+                 length(translucent_sun_map_z[slot].xyz);
+    float comparison=uv.z-max(4.0/16777215.0,offset);
+    if(slot==0)
+        return texture(translucent_sun_near_depth,vec3(uv.xy,comparison));
+    if(slot==1)
+        return texture(translucent_sun_far_depth,vec3(uv.xy,comparison));
+    vec4 tile=translucent_sun_tile_rect[slot-2];
+    vec2 atlas=(tile.xy+vec2(2.0)+uv.xy*(tile.zw-vec2(4.0)))/
+               vec2(textureSize(translucent_sun_dynamic_depth,0));
+    return texture(translucent_sun_dynamic_depth,vec3(atlas,comparison));
+}
+float translucent_sun_visibility(vec3 world,float incidence)
+{
+    float visible=1.0;
+    if(translucent_sun_maps_ready!=0) {
+        vec3 near_uv=translucent_sun_coordinates(0,world);
+        vec3 far_uv=translucent_sun_coordinates(1,world);
+        float camera_distance=dot(world-translucent_spotlight_camera_origin.xyz,
+                                  translucent_spotlight_camera_forward.xyz);
+        bool use_near=camera_distance<translucent_sun_split &&
+                      translucent_sun_inside(near_uv);
+        bool use_far=translucent_sun_inside(far_uv);
+        if(use_near && !use_far) {
+            visible=translucent_sun_sample(0,near_uv,incidence);
+        } else if(use_near && use_far) {
+            float begin_blend=translucent_sun_split*0.8125;
+            float end_blend=translucent_sun_split*0.9375;
+            if(camera_distance<=begin_blend)
+                visible=translucent_sun_sample(0,near_uv,incidence);
+            else {
+                float far_visibility=translucent_sun_sample(1,far_uv,incidence);
+                if(camera_distance>=end_blend)visible=far_visibility;
+                else
+                    visible=mix(translucent_sun_sample(0,near_uv,incidence),
+                                far_visibility,smoothstep(begin_blend,end_blend,camera_distance));
+            }
+        } else if(use_far)visible=translucent_sun_sample(1,far_uv,incidence);
+    }
+    for(int i=0;i<8;++i) {
+        if(i>=translucent_sun_dynamic_count)break;
+        vec3 uv=translucent_sun_coordinates(i+2,world);
+        if(!translucent_sun_inside(uv))continue;
+        visible=min(visible,translucent_sun_sample(i+2,uv,incidence));
+        if(visible<=0.001)break;
+    }
+    return visible;
+}
+// Normal is evaluated on the TRANSLUCENT fragment, not from the opaque
+// G-buffer. Glass and billboard sprites are illuminated from both sides.
+vec3 illuminate_translucent_sun(vec3 baked,vec3 pigment,float opacity,
+                                float depth,vec3 view_normal)
+{
+    if(translucent_sun_enabled==0 || opacity<=0.001 ||
+       depth<=0.0 || depth>=65500.0)return baked;
+    vec3 normal=translucent_spotlight_world_normal(view_normal);
+    float incidence=abs(dot(normal,translucent_sun_direction));
+    if(incidence<=0.001)return baked;
+    vec3 world=translucent_spotlight_world_pos(depth);
+    float visibility=translucent_sun_visibility(world,incidence);
+    vec3 dimmed=baked*(1.0-0.6*incidence*(1.0-visibility));
+    vec3 radiance=pigment*translucent_sun_color.rgb*
+                  translucent_sun_color.a*incidence*visibility*opacity;
+    return dimmed+radiance*(vec3(1.0)-clamp(dimmed,vec3(0.0),vec3(1.0)));
+}
+
 vec3 light_translucent_spotlight(float depth, vec3 view_normal,
                                 vec3 unlit_pigment, float opacity)
 {
@@ -630,6 +728,15 @@ void main()
     const float TRANSLUCENT_COLOR_ALPHA_WEIGHT = 0.0;
     vec3 surface_color = albedo.rgb * (1.0 - metalness) *
                          mix(1.0, albedo.a, TRANSLUCENT_COLOR_ALPHA_WEIGHT);
+    // Only ordinary blended faces/sprites receive sunlight here. Opaque
+    // cutouts are already lit by the deferred pass; flares, fluids,
+    // additive/multiply and post-exempt materials preserve their behavior.
+    if(blend_mode==0 && flare_mode==0 && post_exempt_mode==0 &&
+       features.z<0.5) {
+        surface_color=illuminate_translucent_sun(
+            surface_color,unlit_base_color,clamp(albedo.a,0.0,1.0),
+            vp_z,vp_normal);
+    }
     vec3 lit = surface_color * (1.0 - fog_amount) + fog_color * (fog_amount * albedo.a);
 
     vec3 projected_light = vec3(0.0);
