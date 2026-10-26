@@ -232,6 +232,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_sun_dynamic_shadows")) {
             j.at("enable_sun_dynamic_shadows").get_to(rv->enable_sun_dynamic_shadows);
         }
+        if(j.contains("sun_shadow_two_sided_models")) {
+            j.at("sun_shadow_two_sided_models").get_to(rv->sun_shadow_two_sided_models);
+        }
         if(j.contains("sun_dynamic_shadow_resolution")) {
             auto const &v=j.at("sun_dynamic_shadow_resolution");
             if(!v.is_number_integer())
