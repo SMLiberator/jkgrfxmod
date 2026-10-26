@@ -235,6 +235,35 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("sun_shadow_two_sided_models")) {
             j.at("sun_shadow_two_sided_models").get_to(rv->sun_shadow_two_sided_models);
         }
+        if(j.contains("enable_sun_contact_shadows")) {
+            j.at("enable_sun_contact_shadows").get_to(rv->enable_sun_contact_shadows);
+        }
+        auto contact_number=[&](char const *key,float &target,
+                                double minimum,double maximum) {
+            if(!j.contains(key))return;
+            auto const &v=j.at(key);
+            if(!v.is_number())
+                throw std::runtime_error(std::string(key)+" must be numeric");
+            double const value=v.get<double>();
+            if(!std::isfinite(value) || value<minimum || value>maximum)
+                throw std::runtime_error(std::string(key)+" is out of range");
+            target=static_cast<float>(value);
+        };
+        contact_number("sun_contact_shadow_length",
+            rv->sun_contact_shadow_length,0.05,4.0);
+        contact_number("sun_contact_shadow_thickness",
+            rv->sun_contact_shadow_thickness,0.01,1.0);
+        contact_number("sun_contact_shadow_max_distance",
+            rv->sun_contact_shadow_max_distance,1.0,128.0);
+        if(j.contains("sun_contact_shadow_steps")) {
+            auto const &v=j.at("sun_contact_shadow_steps");
+            if(!v.is_number_integer())
+                throw std::runtime_error("sun_contact_shadow_steps must be an integer (1..12)");
+            auto const steps=v.get<long long>();
+            if(steps<1 || steps>12)
+                throw std::runtime_error("sun_contact_shadow_steps must be between 1 and 12");
+            rv->sun_contact_shadow_steps=static_cast<unsigned>(steps);
+        }
         if(j.contains("sun_dynamic_shadow_resolution")) {
             auto const &v=j.at("sun_dynamic_shadow_resolution");
             if(!v.is_number_integer())

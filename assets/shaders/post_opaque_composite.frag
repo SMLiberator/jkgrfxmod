@@ -55,6 +55,8 @@ uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
 uniform int sun_shadow_far_soft_filter; // 1: nine PCF lookups; 0: single bilinear PCF
 uniform float sun_shadow_receiver_bias_scale; // diagnostic multiplier, 0..2
+uniform int sun_contact_shadows_enabled;
+uniform vec4 sun_contact_shadow_params; // trace length, thickness, max camera distance, steps
 // 4x2 tiles with independently configurable resolution and 2px guard.
 uniform int sun_dynamic_count;
 uniform sampler2DShadow sun_dynamic_image;
@@ -232,6 +234,58 @@ vec3 reconstruct_scene_world(float depth)
         camera_forward.xyz +
         ndc.x*camera_right.w*camera_right.xyz +
         ndc.y*camera_up.w*camera_up.xyz);
+}
+
+
+// Short screen-space ray toward the sun, searching the *already resolved*
+// opaque depth for nearby blockers missed by finite-resolution sun maps.
+// Limited to nearby receivers and disabled by default. Unlike SSAO this is
+// directional; unlike a shadow map it cannot find occluders outside the
+// camera image or behind visible geometry.
+float sun_contact_shadow_visibility(vec3 world_position,float camera_depth)
+{
+    if(sun_contact_shadows_enabled==0)return 1.0;
+    float max_distance=sun_contact_shadow_params.z;
+    if(camera_depth<=0.0 || camera_depth>=max_distance)return 1.0;
+    float trace_length=sun_contact_shadow_params.x;
+    float thickness=sun_contact_shadow_params.y;
+    int steps=int(sun_contact_shadow_params.w);
+    ivec2 dims=textureSize(depth_image,0);
+    ivec2 receiver_pixel=ivec2(gl_FragCoord.xy);
+    // Probe only a short distance beyond the surface, avoiding the first
+    // few centimeters of unavoidable self-intersection/depth roundoff.
+    for(int i=0;i<12;++i) {
+        if(i>=steps)break;
+        float t=(float(i)+1.0)/float(steps);
+        vec3 sample_world=world_position+
+            sun_shadow_direction*(0.04+t*trace_length);
+        vec3 rel=sample_world-camera_origin.xyz;
+        float ray_depth=dot(rel,camera_forward.xyz);
+        if(ray_depth<=0.001)break;
+        vec2 ndc=vec2(
+            dot(rel,camera_right.xyz)/
+                max(ray_depth*camera_right.w,0.0001),
+            dot(rel,camera_up.xyz)/
+                max(ray_depth*camera_up.w,0.0001));
+        vec2 uv=ndc*0.5+0.5;
+        if(any(lessThanEqual(uv,vec2(0.0))) ||
+           any(greaterThanEqual(uv,vec2(1.0))))break;
+        ivec2 pixel=ivec2(uv*vec2(dims));
+        // Treat unchanged raster pixels as the same receiving surface,
+        // not as an occluder (particularly important at grazing angles).
+        if(all(equal(pixel,receiver_pixel)))continue;
+        float scene_depth=texelFetch(depth_image,pixel,0).r;
+        if(scene_depth<=0.0 || scene_depth>=65500.0)continue;
+        float separation=ray_depth-scene_depth/32.0;
+        // Only a nearby depth crossing is a plausible contact blocker.
+        // Farther foreground geometry is likely unrelated to the ray.
+        if(separation>0.025 && separation<thickness) {
+            // Fade to zero at the configured distance to avoid hard LOD
+            // boundaries around distant scene architecture.
+            return smoothstep(max_distance*0.75,max_distance,camera_depth);
+        }
+    }
+    return 1.0;
 }
 
 // Evaluate cookie radiance once per light and route it into two
@@ -417,6 +471,11 @@ void main()
                 float visibility=min(
                     sun_shadow_visibility(world_position,incidence),
                     sun_dynamic_shadow_visibility(world_position,incidence));
+                // Screen-space contact is supplemental: skip its depth
+                // reads when the maps already report complete occlusion.
+                if(visibility>0.001 && sun_contact_shadows_enabled!=0)
+                    visibility=min(visibility,
+                        sun_contact_shadow_visibility(world_position,depth/32.0));
                 // JK's vertex colors already contain authored lighting. If
                 // only the newly added sun term is shadowed, a bright baked
                 // floor barely changes under a caster. Keep a generous

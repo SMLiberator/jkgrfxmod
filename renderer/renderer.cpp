@@ -4731,6 +4731,15 @@ namespace jkgm {
                 the_config->sun_shadow_far_soft_filter);
             prog.set_sun_shadow_receiver_bias_scale(
                 the_config->sun_shadow_receiver_bias_scale);
+            // Screen-depth contact rays reuse the resolved scene depth that
+            // the opaque compositor already samples; no new FBO/pass.
+            prog.set_sun_contact_shadows(
+                the_config->enable_sun_shadows &&
+                    the_config->enable_sun_contact_shadows,
+                the_config->sun_contact_shadow_length,
+                the_config->sun_contact_shadow_thickness,
+                the_config->sun_contact_shadow_max_distance,
+                int(the_config->sun_contact_shadow_steps));
             prog.set_spotlight_shadow(-1,0.0f,0.0f);
             prog.set_sun_shadow(false,false,make_point(0.0f,0.0f,1.0f),
                 make_point(0.0f,0.0f,0.0f,0.0f),
