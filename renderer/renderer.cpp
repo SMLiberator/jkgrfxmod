@@ -885,6 +885,13 @@ namespace jkgm {
                          profile_window.gpu_preview_calls[0]/frames,"/",
                          profile_window.gpu_preview_calls[1]/frames,
                          " NOTE=setup_and_gl_state_restoration_in_total_not_substages");
+                LOG_INFO("PERF gpu_3do filter_state enabled=",
+                         the_config->gpu_3do_cache_filter_state,
+                         " updates_avg=",profile_window.gpu_filter_state_sets/frames,
+                         " skipped_updates_avg=",profile_window.gpu_filter_state_skips/frames,
+                         " avoided_glTexParameter_calls_avg=",
+                         (profile_window.gpu_filter_state_skips*3U)/frames,
+                         " NOTE=albedo_emission_and_transition_textures_only");
                 LOG_INFO("PERF gpu_3do batch GL_calls_avg=",
                          profile_window.gpu_draw_calls/frames,
                          " source_ranges_avg=",
@@ -3138,6 +3145,43 @@ namespace jkgm {
             bool prev_albedo_transition=false;
             bool prev_advanced_material=false;
             bool prev_parallax=false;
+            // Filtering is texture-object state, not texture-unit state.
+            // Repeated 3DO draw groups often use the exact same GL texture;
+            // three glTexParameter calls for every bind become extremely
+            // costly under Wine. Track only states WE applied within this
+            // preview pass, since the other render passes may change GL
+            // texture parameters between preview passes.
+            //
+            // If the same texture is used once filtered and once pixelated,
+            // apply the change again: preserving per-MAT filtering is vital.
+            static thread_local std::unordered_map<unsigned int,bool> filter_states;
+            bool const cache_filter_state=the_config->gpu_3do_cache_filter_state;
+            if(cache_filter_state) filter_states.clear();
+            auto bind_preview_color=[&](gl::texture_view tex,int unit,bool filtered) {
+                if(!cache_filter_state) {
+                    bind_color_texture(tex,unit,filtered);
+                    if(gpu_profiling && tex.value()!=0U)
+                        ++profile_frame.gpu_filter_state_sets;
+                    return;
+                }
+                gl::set_active_texture_unit(unit);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,tex);
+                if(tex.value()==0U)return;
+                auto const found=filter_states.emplace(tex.value(),filtered);
+                if(!found.second && found.first->second==filtered) {
+                    if(gpu_profiling)++profile_frame.gpu_filter_state_skips;
+                    return;
+                }
+                found.first->second=filtered;
+                gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d,
+                    filtered?gl::mag_filter::linear:gl::mag_filter::nearest);
+                gl::set_texture_min_filter(gl::texture_bind_target::texture_2d,
+                    filtered?gl::min_filter::linear_mipmap_linear
+                            :gl::min_filter::nearest_mipmap_nearest);
+                gl::set_texture_max_anisotropy(gl::texture_bind_target::texture_2d,
+                    filtered?std::max(1.0f,the_config->max_anisotropy):1.0f);
+                if(gpu_profiling)++profile_frame.gpu_filter_state_sets;
+            };
             static thread_local std::vector<GLsizei> multidraw_counts;
             static thread_local std::vector<void const *> multidraw_offsets;
             auto const submit_begin=gpu_profiling
@@ -3231,12 +3275,12 @@ namespace jkgm {
                         break;
                     }
                 }
-                bind_color_texture(draw.texture.texture,0,draw.texture.filtered);
-                bind_color_texture(draw.texture.emission,1,draw.texture.filtered);
+                bind_preview_color(draw.texture.texture,0,draw.texture.filtered);
+                bind_preview_color(draw.texture.emission,1,draw.texture.filtered);
                 bool const has_albedo_transition=
                     draw.texture.albedo_transition>0.0f;
                 if(has_albedo_transition) {
-                    bind_color_texture(draw.texture.texture2,6,draw.texture.filtered);
+                    bind_preview_color(draw.texture.texture2,6,draw.texture.filtered);
                     prog.set_albedo_transition(draw.texture.albedo_source2,
                                                draw.texture.albedo_transition);
                 } else if(prev_albedo_transition) {
