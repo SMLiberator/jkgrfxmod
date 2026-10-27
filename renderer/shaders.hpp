@@ -322,6 +322,7 @@ namespace jkgm {
             gl::uniform_location_id shadow_instance_count;
             gl::uniform_location_id shadow_instance_right,shadow_instance_forward;
             gl::uniform_location_id shadow_instance_up,shadow_instance_origin;
+            bool shadow_instance_active=false; // avoid extra uniform calls on normal draws
             gl::uniform_location_id shadow_use_alpha,shadow_alpha_texture;
             gl::uniform_location_id shadow_alpha_texture_next;
             gl::uniform_location_id shadow_alpha_uv_scale,shadow_alpha_uv_scroll;
