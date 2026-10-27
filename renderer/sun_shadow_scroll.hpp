@@ -10,6 +10,16 @@
 
 namespace jkgm {
 
+// World-space texel coverage is a property of the level/cascade, NOT of the
+// moving camera or its animated FOV. Enlarging the grid cells whenever the
+// camera zooms used to discard all 256 static tiles. Extra guard coverage is
+// reserved; extreme FOVs safely use the conventional cascade fallback.
+inline double sun_shadow_scroll_fixed_tile_units(float distance)
+{
+    if(!std::isfinite(distance) || distance<=0.0f)return 2.0;
+    return std::max(2.0,std::ceil(double(distance)*0.4));
+}
+
 struct sun_shadow_scroll_tile {
     int world_x=0,world_y=0; // persistent light-space grid address
     int atlas_x=0,atlas_y=0; // physical circular atlas slot
