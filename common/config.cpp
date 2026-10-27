@@ -184,6 +184,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("gpu_cache_native_memory_regions").get_to(
                 rv->gpu_cache_native_memory_regions);
         }
+        if(j.contains("gpu_3do_cache_filter_state")) {
+            j.at("gpu_3do_cache_filter_state").get_to(
+                rv->gpu_3do_cache_filter_state);
+        }
         if(j.contains("gpu_mat_preload") &&
            j.at("gpu_mat_preload").is_boolean() &&
            j.at("gpu_mat_preload").get<bool>()) {
