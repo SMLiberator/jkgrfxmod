@@ -654,6 +654,10 @@ namespace jkgm {
         std::array<uint64_t,2> sun_profile_moving_submit_us{{0,0}};
         std::array<uint64_t,2> sun_profile_static_submitted{{0,0}};
         std::array<uint64_t,2> sun_profile_moving_submitted{{0,0}};
+        std::array<uint64_t,2> sun_profile_static_gl_calls{{0,0}};
+        std::array<uint64_t,2> sun_profile_moving_gl_calls{{0,0}};
+        std::array<uint64_t,2> sun_profile_static_multi_calls{{0,0}};
+        std::array<uint64_t,2> sun_profile_moving_multi_calls{{0,0}};
         uint64_t sun_profile_candidate_us=0,sun_profile_candidate_groups=0;
         uint64_t sun_profile_atlas_us=0;
         uint64_t sun_profile_atlas_mat_hits=0,sun_profile_atlas_mat_misses=0;
@@ -5187,8 +5191,40 @@ namespace jkgm {
             // target as SithWorld surfaces. Their signatures include pose,
             // material/cel, mesh instance and validated SithThing owner.
             auto draw_models=[&](std::vector<sun_model_draw> const &draws) {
-                for(auto const &draw:draws) {
-                    auto const &instance=*draw.instance;auto const &group=*draw.group;
+                size_t gl_calls=0,multi_calls=0;
+                std::vector<GLsizei> batch_counts;
+                std::vector<void const *> batch_offsets;
+                batch_counts.reserve(32);
+                batch_offsets.reserve(32);
+                // Depth-only opaque groups ignore their visible MAT identity.
+                // Merge adjacent ranges only when they share the SAME 3DO
+                // instance (and therefore VAO/model transform), cutout state
+                // and face-culling behavior. Cutouts additionally require the
+                // same MAT/cel, since their alpha-test texture is sampled.
+                // Never reorder groups: COG, UV or depth-edge behavior stays
+                // identical to the old per-group draw sequence.
+                auto no_cull=[&](sun_model_draw const &d) {
+                    return (!the_config->sun_shadow_cull_back_faces &&
+                            !the_config->sun_shadow_cull_front_faces) ||
+                           (d.group->face_type&0x1U)!=0 ||
+                           d.group->nonplanar;
+                };
+                for(size_t first=0;first<draws.size();) {
+                    auto const &draw=draws[first];
+                    auto const &instance=*draw.instance;
+                    auto const &group=*draw.group;
+                    bool const uncullable=no_cull(draw);
+                    size_t last=first+1;
+                    while(last<draws.size()) {
+                        auto const &other=draws[last];
+                        if(other.instance!=draw.instance ||
+                           other.cutout!=draw.cutout ||
+                           no_cull(other)!=uncullable)break;
+                        if(draw.cutout &&
+                           (other.group->material!=group.material ||
+                            other.group->cel!=group.cel))break;
+                        ++last;
+                    }
                     auto it=gpu_3do_gl_cache.find(instance.id);
                     if(it==gpu_3do_gl_cache.end())
                         it=gpu_3do_gl_cache.emplace(instance.id,
@@ -5197,9 +5233,7 @@ namespace jkgm {
                     prog.set_model(make_point(m[0],m[1],m[2]),
                         make_point(m[3],m[4],m[5]),make_point(m[6],m[7],m[8]),
                         make_point(m[9],m[10],m[11]));
-                    if((!the_config->sun_shadow_cull_back_faces &&
-                         !the_config->sun_shadow_cull_front_faces) ||
-                       (group.face_type&0x1U)!=0 || group.nonplanar)
+                    if(uncullable)
                         gl::disable(gl::capability::cull_face);
                     else {
                         gl::enable(gl::capability::cull_face);
@@ -5213,10 +5247,29 @@ namespace jkgm {
                     else prog.set_shadow_alpha(false,
                         make_point(1.0f,1.0f),make_point(0.0f,0.0f),
                         0.5f,1.0f,false,0.0f);
-                    gl::draw_elements(gl::element_type::triangles,group.count,
-                        gl::index_type::uint32,static_cast<ptrdiff_t>(
-                            group.offset*sizeof(uint32_t)));
+                    if(last==first+1) {
+                        gl::draw_elements(gl::element_type::triangles,
+                            group.count,gl::index_type::uint32,
+                            static_cast<ptrdiff_t>(
+                                group.offset*sizeof(uint32_t)));
+                    } else {
+                        batch_counts.clear();
+                        batch_offsets.clear();
+                        for(size_t k=first;k<last;++k) {
+                            auto const &g=*draws[k].group;
+                            batch_counts.push_back(static_cast<GLsizei>(g.count));
+                            batch_offsets.push_back(reinterpret_cast<void const *>(
+                                uintptr_t(g.offset)*sizeof(uint32_t)));
+                        }
+                        glMultiDrawElements(GL_TRIANGLES,batch_counts.data(),
+                            GL_UNSIGNED_INT,batch_offsets.data(),
+                            static_cast<GLsizei>(batch_counts.size()));
+                        ++multi_calls;
+                    }
+                    ++gl_calls;
+                    first=last;
                 }
+                return std::pair<size_t,size_t>{gl_calls,multi_calls};
             };
             // Populate only the pending PHYSICAL circular slots. A partial
             // warmup never affects the visible working map: the conventional
@@ -5358,11 +5411,13 @@ namespace jkgm {
                      map.static_complete) ? static_target : cascade_target);
                 auto const static_begin=the_config->profile_renderer
                     ?profile_clock::now():profile_clock::time_point{};
-                draw_models(static_models);
+                auto const submitted=draw_models(static_models);
                 if(the_config->profile_renderer) {
                     sun_profile_static_submit_us[cascade]+=elapsed_profile_us(
                         static_begin,profile_clock::now());
                     sun_profile_static_submitted[cascade]+=static_models.size();
+                    sun_profile_static_gl_calls[cascade]+=submitted.first;
+                    sun_profile_static_multi_calls[cascade]+=submitted.second;
                 }
                 if(map.static_complete &&
                    the_config->enable_sun_static_cache) {
@@ -5420,11 +5475,13 @@ namespace jkgm {
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,cascade_target);
             auto const moving_begin=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
-            draw_models(models);
+            auto const submitted=draw_models(models);
             if(the_config->profile_renderer) {
                 sun_profile_moving_submit_us[cascade]+=elapsed_profile_us(
                     moving_begin,profile_clock::now());
                 sun_profile_moving_submitted[cascade]+=models.size();
+                sun_profile_moving_gl_calls[cascade]+=submitted.first;
+                sun_profile_moving_multi_calls[cascade]+=submitted.second;
             }
             glDisable(GL_POLYGON_OFFSET_FILL);
             gl::disable(gl::capability::cull_face);
@@ -5495,8 +5552,12 @@ namespace jkgm {
                             sun_profile_prepare_us[c]/std::max<uint64_t>(1,frames),
                         " static_submit_us_total=",sun_profile_static_submit_us[c],
                         " static_groups_submitted=",sun_profile_static_submitted[c],
+                        " static_GL_calls=",sun_profile_static_gl_calls[c],
+                        " static_multi_calls=",sun_profile_static_multi_calls[c],
                         " moving_submit_us_total=",sun_profile_moving_submit_us[c],
                         " moving_groups_submitted=",sun_profile_moving_submitted[c],
+                        " moving_GL_calls=",sun_profile_moving_gl_calls[c],
+                        " moving_multi_calls=",sun_profile_moving_multi_calls[c],
                         " NOTE=CPU_only_no_GPU_wait");
                     sun_profile_full_misses[c]={};
                     sun_profile_static_misses[c]={};
@@ -5515,6 +5576,10 @@ namespace jkgm {
                 sun_profile_moving_submit_us.fill(0);
                 sun_profile_static_submitted.fill(0);
                 sun_profile_moving_submitted.fill(0);
+                sun_profile_static_gl_calls.fill(0);
+                sun_profile_moving_gl_calls.fill(0);
+                sun_profile_static_multi_calls.fill(0);
+                sun_profile_moving_multi_calls.fill(0);
                 sun_profile_candidate_us=0;
                 sun_profile_candidate_groups=0;
                 sun_profile_atlas_us=0;
