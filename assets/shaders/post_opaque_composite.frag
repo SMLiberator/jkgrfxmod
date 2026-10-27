@@ -55,6 +55,17 @@ uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
 uniform int sun_shadow_far_soft_filter; // 1: nine PCF lookups; 0: single bilinear PCF
 uniform float sun_shadow_receiver_bias_scale; // diagnostic multiplier, 0..2
+uniform float sun_max_distance; // 0=unlimited; JK forward distance where added sun ends
+
+// Added sunlight and its shadows are full strength to 85% of the range, fade
+// smoothly to zero at the range and are absent beyond it, leaving JK's
+// authored vertex lighting untouched there.
+float sun_range_fade(float forward_distance)
+{
+    if(sun_max_distance<=0.0)return 1.0;
+    return 1.0-smoothstep(sun_max_distance*0.85,sun_max_distance,
+                          forward_distance);
+}
 // 4x2 tiles with independently configurable resolution and 2px guard.
 uniform int sun_dynamic_count;
 uniform sampler2DShadow sun_dynamic_image;
@@ -414,7 +425,11 @@ void main()
     vec3 pigment=(spotlight_count>0 || sun_lighting_active!=0)
         ? max(texelFetch(depth_image,tc,0).gba,vec3(0.0))
         : vec3(0.0);
-    if(sun_lighting_active!=0 && depth>0.0 && depth<65500.0) {
+    // Depth is JK's linear forward distance * 32. Far pixels skip the normal
+    // fetch, world reconstruction and every shadow lookup.
+    float sun_fade=(sun_lighting_active!=0 && depth>0.0 && depth<65500.0)
+        ? sun_range_fade(depth/32.0) : 0.0;
+    if(sun_fade>0.0) {
         vec3 vn=texelFetch(normal_image,tc,0).rgb;
         if(dot(vn,vn)>0.0001) {
             vec3 normal=normalize(camera_right.xyz*(vn.x/camera_right.w)+
@@ -431,9 +446,10 @@ void main()
                 // floor barely changes under a caster. Keep a generous
                 // ambient floor while allowing the occluder to shade that
                 // baseline as well.
-                surface_rgb*=1.0-0.6*incidence*(1.0-visibility);
+                float applied=incidence*sun_fade;
+                surface_rgb*=1.0-0.6*applied*(1.0-visibility);
                 vec3 sun_light=pigment*sun_shadow_color_intensity.rgb*
-                    sun_shadow_color_intensity.a*incidence*visibility;
+                    sun_shadow_color_intensity.a*applied*visibility;
                 surface_rgb+=sun_light*(vec3(1.0)-clamp(surface_rgb,0.0,1.0));
             }
         }

@@ -322,6 +322,19 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         }
         if(rv->sun_shadow_far_distance<=rv->sun_shadow_near_distance)
             throw std::runtime_error("sun_shadow_far_distance must exceed sun_shadow_near_distance");
+        if(j.contains("sun_max_distance")) {
+            auto const &v=j.at("sun_max_distance");
+            if(!v.is_number())
+                throw std::runtime_error("sun_max_distance must be numeric (0 or 4..512)");
+            double const distance=v.get<double>();
+            if(!std::isfinite(distance) || distance<0.0 || distance>512.0 ||
+               (distance>0.0 && distance<4.0))
+                throw std::runtime_error("sun_max_distance must be 0 (unlimited) or between 4 and 512");
+            rv->sun_max_distance=static_cast<float>(distance);
+        }
+        if(rv->sun_max_distance>0.0f &&
+           rv->sun_max_distance<=rv->sun_shadow_near_distance)
+            throw std::runtime_error("sun_max_distance must exceed sun_shadow_near_distance");
         if(j.contains("sun_shadow_resolution")) {
             auto const &v = j.at("sun_shadow_resolution");
             if(!v.is_number_integer()) {

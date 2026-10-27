@@ -12,6 +12,22 @@ using namespace jkgm;
 
 int main()
 {
+    // Optional sun range: zero keeps the old unlimited behaviour; a positive
+    // range clamps the far cascade and fades added sun out completely.
+    assert(sun_shadow_effective_far_distance(128.0f,0.0f)==128.0f);
+    assert(sun_shadow_effective_far_distance(128.0f,64.0f)==64.0f);
+    assert(sun_shadow_effective_far_distance(128.0f,256.0f)==128.0f);
+    assert(sun_shadow_effective_far_distance(
+        128.0f,std::numeric_limits<float>::quiet_NaN())==128.0f);
+    assert(sun_range_fade(5000.0f,0.0f)==1.0f);
+    assert(sun_range_fade(0.0f,100.0f)==1.0f);
+    assert(sun_range_fade(85.0f,100.0f)==1.0f);
+    assert(sun_range_fade(92.5f,100.0f)>0.49f &&
+           sun_range_fade(92.5f,100.0f)<0.51f);
+    assert(sun_range_fade(100.0f,100.0f)==0.0f);
+    assert(sun_range_fade(250.0f,100.0f)==0.0f);
+    assert(sun_range_fade(90.0f,100.0f)>sun_range_fade(95.0f,100.0f));
+
     // Two buildings can share one immutable 3DO mesh, but must have
     // independent static shadow entries. Likewise for two nodes of a Thing.
     std::array<float,12> fixed_placement{};

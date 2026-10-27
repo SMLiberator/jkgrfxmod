@@ -492,6 +492,7 @@ uniform vec3 translucent_sun_direction;
 uniform vec4 translucent_sun_color; // RGB, positive direct intensity
 uniform float translucent_sun_split;
 uniform float translucent_sun_bias_scale;
+uniform float translucent_sun_max_distance; // 0=unlimited
 uniform vec4 translucent_sun_map_x[10];
 uniform vec4 translucent_sun_map_y[10];
 uniform vec4 translucent_sun_map_z[10];
@@ -598,10 +599,20 @@ vec3 illuminate_translucent_sun(vec3 baked,vec3 pigment,float opacity,
     // independently of that incidence. Direct added sunlight still respects
     // the geometric incidence for ordinary translucent surfaces.
     vec3 world=translucent_spotlight_world_pos(depth);
+    // Same range limit as the opaque composite: no added sun or shadow past
+    // the configured distance, with a smooth fade over the last 15%.
+    float range_fade=1.0;
+    if(translucent_sun_max_distance>0.0) {
+        float forward=dot(world-translucent_spotlight_camera_origin.xyz,
+                          translucent_spotlight_camera_forward.xyz);
+        range_fade=1.0-smoothstep(translucent_sun_max_distance*0.85,
+                                  translucent_sun_max_distance,forward);
+        if(range_fade<=0.0)return baked;
+    }
     float visibility=translucent_sun_visibility(world,max(incidence,0.35));
-    vec3 dimmed=baked*(1.0-0.75*(1.0-visibility));
+    vec3 dimmed=baked*(1.0-0.75*range_fade*(1.0-visibility));
     vec3 radiance=pigment*translucent_sun_color.rgb*
-                  translucent_sun_color.a*incidence*visibility*opacity;
+                  translucent_sun_color.a*incidence*visibility*opacity*range_fade;
     return dimmed+radiance*(vec3(1.0)-clamp(dimmed,vec3(0.0),vec3(1.0)));
 }
 

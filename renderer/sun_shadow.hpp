@@ -59,6 +59,27 @@ inline decal_volume_aabb sun_shadow_transformed_aabb(
     return bounds;
 }
 
+// Optional hard range for added sunlight and its shadows. Zero disables it.
+// Beyond the range JK's authored lighting is left untouched, so the far
+// cascade never needs to reach past it.
+inline float sun_shadow_effective_far_distance(float far_distance,
+                                               float max_distance)
+{
+    if(!(max_distance>0.0f) || !std::isfinite(max_distance))return far_distance;
+    return std::min(far_distance,max_distance);
+}
+
+// CPU mirror of sun_range_fade() in the lighting shaders: full strength to
+// 85% of the range, smooth fade to zero at the range, zero beyond it.
+inline float sun_range_fade(float camera_depth,float max_distance)
+{
+    if(!(max_distance>0.0f) || !std::isfinite(max_distance))return 1.0f;
+    float const begin=0.85f*max_distance;
+    float t=(camera_depth-begin)/(max_distance-begin);
+    t=std::min(1.0f,std::max(0.0f,t));
+    return 1.0f-t*t*(3.0f-2.0f*t);
+}
+
 // Two nested camera-depth regions. The far cascade overlaps the near
 // cascade, so near receivers can fall back if a light-space edge is crossed.
 constexpr float sun_shadow_near_distance=16.0f;
