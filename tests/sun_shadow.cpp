@@ -100,7 +100,7 @@ int main()
     reconstruct.update(2.1,2.1,2.0,1);
     for(auto const &tile:reconstruct.pending_tiles())
         assert(reconstruct.mark_rendered(tile));
-    blits=sun_shadow_scroll_blits(reconstruct,-4.0,-4.0,8.0,8.0,512);
+    blits=sun_shadow_scroll_blits(reconstruct,14.0,14.0,4.0,4.0,512);
     assert(blits.size()==4);
     assert(sun_shadow_scroll_blits(reconstruct,-50.0,-4.0,8.0,8.0,512).empty());
     assert(sun_shadow_scroll_blits(reconstruct,-2.0,-4.0,8.0,8.0,500).empty());
