@@ -5070,8 +5070,9 @@ namespace jkgm {
                         sun_shadow_static_directions[cascade]);
                     if(static_signature!=sun_shadow_static_signatures[cascade])
                         ++miss.static_casters;
-                    if(!the_config->enable_sun_static_cache ||
-                       !map.static_complete)++miss.cold;
+                    if((!the_config->enable_sun_static_cache ||
+                        !map.static_complete) &&
+                       sun_shadow_static_cached[cascade])++miss.cold;
                 }
             }
             auto const &cascade_target=cascade==0 ? map.fbo : map.far_fbo;
@@ -5412,10 +5413,6 @@ namespace jkgm {
                     sun_profile_static_redraws[1],"/",
                     sun_profile_working_redraws[1],
                     " NOTE=full_hits_skip_all_shadow_draws; static_hits_still_blit_static_and_render_movers");
-                sun_profile_full_hits.fill(0);
-                sun_profile_static_hits.fill(0);
-                sun_profile_static_redraws.fill(0);
-                sun_profile_working_redraws.fill(0);
                 // Orthogonal miss reasons: totals can exceed the miss count.
                 // No implicit GPU synchronization; these timings are CPU
                 // planning/GL submission only, not GPU rasterization costs.
@@ -5466,6 +5463,10 @@ namespace jkgm {
                 sun_profile_candidate_us=0;
                 sun_profile_candidate_groups=0;
                 sun_profile_atlas_us=0;
+                sun_profile_full_hits.fill(0);
+                sun_profile_static_hits.fill(0);
+                sun_profile_static_redraws.fill(0);
+                sun_profile_working_redraws.fill(0);
             }
         }
 
