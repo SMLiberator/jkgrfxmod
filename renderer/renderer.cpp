@@ -4755,6 +4755,7 @@ namespace jkgm {
                 map.scroll_complete && map.static_complete &&
                 map.world.receivers.empty();
             std::vector<sun_shadow_scroll_blit> scroll_blits;
+            std::vector<sun_shadow_scroll_tile> needed_tiles;
             if(scroll_possible) {
                 auto &grid=sun_scroll_live[cascade];
                 float const start_z=decal_dot(world_view.origin,world_view.forward);
@@ -4795,13 +4796,18 @@ namespace jkgm {
                 grid.update(decal_dot(camera.position,world_view.right),
                             decal_dot(camera.position,world_view.up),
                             units,1U);
+                double const vx=decal_dot(view.origin,view.right);
+                double const vy=decal_dot(view.origin,view.up);
                 scroll_blits=sun_shadow_scroll_blits(grid,
-                    decal_dot(view.origin,view.right),
-                    decal_dot(view.origin,view.up),view.width,view.height,
-                    int(map.resolution));
+                    vx,vy,view.width,view.height,int(map.resolution));
+                if(!scroll_blits.empty())
+                    needed_tiles=sun_shadow_scroll_visible_pending(
+                        grid,vx,vy,view.width,view.height,17);
             }
+            // Atlas residency is per camera footprint, not all 256 physical
+            // slots. Unseen static tiles remain dirty until first requested.
             bool const will_scroll=scroll_possible && !scroll_blits.empty() &&
-                sun_scroll_live[cascade].pending_tiles(17).size()<=16;
+                needed_tiles.size()<=16;
             if(will_scroll) {
                 // The reconstructed shadow map and saved depth atlas MUST
                 // share identical Z normalization for shadow comparisons.
@@ -4827,7 +4833,7 @@ namespace jkgm {
             if(scroll_possible)
                 unchanged=unchanged &&
                     will_scroll && sun_scroll_working_active[cascade] &&
-                    sun_scroll_live[cascade].pending_tiles().empty();
+                    needed_tiles.empty();
             if(unchanged) {
                 if(the_config->profile_renderer)
                     ++sun_profile_full_hits[cascade];
@@ -4957,7 +4963,8 @@ namespace jkgm {
                 auto const &scroll_target=cascade==0
                     ?map.scroll_fbo:map.scroll_far_fbo;
                 auto const tile_pixels=int(map.resolution)/grid.count;
-                auto const pending=grid.pending_tiles(16);
+                auto pending=needed_tiles;
+                if(pending.size()>16)pending.resize(16);
                 gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                                      scroll_target);
                 glEnable(GL_SCISSOR_TEST);
@@ -5012,9 +5019,13 @@ namespace jkgm {
                 prog.set_orthographic_light(vec(view.origin),vec(view.right),
                     vec(view.up),vec(view.forward),
                     make_point(view.width,view.height,view.range,0.0f));
-                // No static depth from an incompletely populated atlas can
-                // reach the lighting shaders. Revert to exact legacy pass.
-                use_scroll=grid.pending_tiles(1).empty();
+                // It is safe to use the atlas as soon as all tiles sampled
+                // by this camera-local projection are ready. Tiles beyond
+                // the footprint can stay dirty indefinitely.
+                use_scroll=sun_shadow_scroll_visible_pending(grid,
+                    decal_dot(view.origin,view.right),
+                    decal_dot(view.origin,view.up),view.width,view.height,
+                    1).empty();
             }
             if(the_config->profile_renderer && use_scroll) {
                 sun_scroll_depth_blits[cascade]+=scroll_blits.size();
