@@ -33,6 +33,7 @@
     "optimize_hud_uploads": true,
     "use_model_cache": false,
     "mesh_revision_tracking": false,
+    "gpu_cache_native_memory_regions": false,
     "enable_spotlights": false,
     "enable_spotlight_shadows": false,
     "spotlight_shadow_resolution": 256,
