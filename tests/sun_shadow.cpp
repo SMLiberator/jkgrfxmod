@@ -72,6 +72,10 @@ int main()
     assert(grid.pending_tiles().size()==256);
     // Depth atlas reconstruction: no tile wrap may reinterpret an unrelated
     // physical slot, and the destination region remains wholly covered.
+    assert(sun_shadow_scroll_depth_contains(0.0f,100.0f,3.0f,90.0f));
+    assert(sun_shadow_scroll_depth_contains(0.0f,100.0f,0.0f,100.0f));
+    assert(!sun_shadow_scroll_depth_contains(0.0f,100.0f,-1.0f,100.0f));
+    assert(!sun_shadow_scroll_depth_contains(0.0f,100.0f,1.0f,101.0f));
     sun_shadow_scroll_grid reconstruct(16);
     assert(reconstruct.update(0.0,0.0,2.0,1).size()==256);
     for(auto const &tile:reconstruct.pending_tiles())

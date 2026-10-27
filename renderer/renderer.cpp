@@ -4672,14 +4672,20 @@ namespace jkgm {
                 if(sun_scroll_live_world[cascade]!=world ||
                    sun_scroll_live_revision[cascade]!=map.revision ||
                    sun_scroll_live_signature[cascade]!=scroll_static_signature ||
-                   std::fabs(sun_scroll_live_z[cascade]-start_z)>0.0001f ||
-                   std::fabs(sun_scroll_live_range[cascade]-world_view.range)>0.0001f)
+                   !sun_shadow_scroll_depth_contains(
+                       sun_scroll_live_z[cascade],
+                       sun_scroll_live_range[cascade],
+                       start_z,world_view.range)) {
                     grid.invalidate();
+                    // Reset depth normalization ONLY with an actual atlas
+                    // invalidation; otherwise all previous stored texels
+                    // would suddenly refer to the wrong world-space Z.
+                    sun_scroll_live_z[cascade]=start_z;
+                    sun_scroll_live_range[cascade]=world_view.range;
+                }
                 sun_scroll_live_world[cascade]=world;
                 sun_scroll_live_revision[cascade]=map.revision;
                 sun_scroll_live_signature[cascade]=scroll_static_signature;
-                sun_scroll_live_z[cascade]=start_z;
-                sun_scroll_live_range[cascade]=world_view.range;
                 // A rotation-independent square encloses the camera frustum
                 // plus two guard columns. Use identical units for every
                 // physical slot in the circular depth texture.
@@ -4697,6 +4703,15 @@ namespace jkgm {
             }
             bool const will_scroll=scroll_possible && !scroll_blits.empty() &&
                 sun_scroll_live[cascade].pending_tiles(17).size()<=16;
+            if(will_scroll) {
+                // The reconstructed shadow map and saved depth atlas MUST
+                // share identical Z normalization for shadow comparisons.
+                float const current_z=decal_dot(view.origin,view.forward);
+                float const z_shift=sun_scroll_live_z[cascade]-current_z;
+                for(int axis=0;axis<3;++axis)
+                    view.origin[axis]+=view.forward[axis]*z_shift;
+                view.range=sun_scroll_live_range[cascade];
+            }
             bool unchanged=sun_shadow_cascade_cached[cascade] &&
                 sun_shadow_worlds[cascade]==world &&
                 sun_shadow_revisions[cascade]==map.revision &&
@@ -4863,6 +4878,7 @@ namespace jkgm {
                     sun_shadow_projection tile_view=world_view;
                     tile_view.width=tile_extent;
                     tile_view.height=tile_extent;
+                    tile_view.range=sun_scroll_live_range[cascade];
                     for(int axis=0;axis<3;++axis)
                         tile_view.origin[axis]=
                             tile_view.right[axis]*light_x+

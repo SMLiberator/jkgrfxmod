@@ -197,6 +197,22 @@ struct sun_shadow_scroll_grid {
 // values remain comparable because all tiles have the same light-space Z.
 // This is the first GPU implementation; direct tiled shader sampling will
 // eventually eliminate these full-resolution depth reconstructions.
+// Cached light-space Z stays valid when the current scene AABB contracts,
+// grows inside existing coverage, or changes because moving Things were
+// temporarily captured. Reuse the same normalized depth convention until a
+// genuinely new caster extends outside the cached depth interval.
+inline bool sun_shadow_scroll_depth_contains(
+    float cached_start,float cached_range,float current_start,
+    float current_range)
+{
+    if(!std::isfinite(cached_start) || !std::isfinite(cached_range) ||
+       !std::isfinite(current_start) || !std::isfinite(current_range) ||
+       !(cached_range>0.0f) || !(current_range>0.0f))return false;
+    float const eps=std::max(0.0001f,cached_range*0.000001f);
+    return current_start>=cached_start-eps &&
+        current_start+current_range<=cached_start+cached_range+eps;
+}
+
 struct sun_shadow_scroll_blit {
     int source_x0=0,source_y0=0,source_x1=0,source_y1=0;
     int target_x0=0,target_y0=0,target_x1=0,target_y1=0;
