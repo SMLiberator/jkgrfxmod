@@ -15,12 +15,29 @@ uniform vec3 shadow_model_right;
 uniform vec3 shadow_model_forward;
 uniform vec3 shadow_model_up;
 uniform vec3 shadow_model_origin;
+// GL 3.3 core instancing: a single mesh group, multiple independent
+// Thing transforms. The ordinary spotlight/dynamic atlas path keeps using
+// shadow_model_* with shadow_instance_count==0.
+uniform int shadow_instance_count;
+uniform vec3 shadow_instance_right[16];
+uniform vec3 shadow_instance_forward[16];
+uniform vec3 shadow_instance_up[16];
+uniform vec3 shadow_instance_origin[16];
 void main()
 {
     shadow_material_uv=world_uv;
-    vec3 world=shadow_model_right*world_position.x+
-               shadow_model_forward*world_position.y+
-               shadow_model_up*world_position.z+shadow_model_origin;
+    vec3 world;
+    if(shadow_instance_count>0) {
+        int n=min(gl_InstanceID,shadow_instance_count-1);
+        world=shadow_instance_right[n]*world_position.x+
+              shadow_instance_forward[n]*world_position.y+
+              shadow_instance_up[n]*world_position.z+
+              shadow_instance_origin[n];
+    } else {
+        world=shadow_model_right*world_position.x+
+              shadow_model_forward*world_position.y+
+              shadow_model_up*world_position.z+shadow_model_origin;
+    }
     vec3 relative=world-shadow_origin;
     if(shadow_orthographic!=0) {
         gl_Position=vec4(
