@@ -319,6 +319,9 @@ namespace jkgm {
             gl::uniform_location_id shadow_orthographic;
             gl::uniform_location_id shadow_model_right,shadow_model_forward;
             gl::uniform_location_id shadow_model_up,shadow_model_origin;
+            gl::uniform_location_id shadow_instance_count;
+            gl::uniform_location_id shadow_instance_right,shadow_instance_forward;
+            gl::uniform_location_id shadow_instance_up,shadow_instance_origin;
             gl::uniform_location_id shadow_use_alpha,shadow_alpha_texture;
             gl::uniform_location_id shadow_alpha_texture_next;
             gl::uniform_location_id shadow_alpha_uv_scale,shadow_alpha_uv_scroll;
@@ -336,6 +339,11 @@ namespace jkgm {
                                         point<4,float> limits);
             void set_model(point<3,float> right,point<3,float> forward,
                            point<3,float> up,point<3,float> origin);
+            static constexpr size_t max_shadow_instances=16;
+            // Packed original node transforms for glDrawElementsInstanced.
+            void set_instanced_models(
+                std::array<std::array<float,12>,max_shadow_instances> const &models,
+                size_t count);
             void set_shadow_alpha(bool enabled,point<2,float> uv_scale,
                                   point<2,float> uv_scroll,float cutoff,
                                   float factor,bool has_next,float progress);
