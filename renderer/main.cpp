@@ -301,13 +301,16 @@ namespace {
         };
         static thread_local std::array<readable_region,2048> regions{};
         bool const fast=the_config && the_config->gpu_cache_native_memory_regions;
-        uintptr_t const page=start>>12;
-        auto &entry=regions[(page*2654435761U)&(regions.size()-1)];
-        if(fast && entry.frame==gpu_frame_serial && entry.page==page &&
-           start>=entry.begin && start<entry.end) {
-            if(the_config->profile_renderer)
-                ++gpu_native_stats.native_span_cache_hits;
-            return start+len<=entry.end;
+        readable_region *entry=nullptr;
+        if(fast) {
+            uintptr_t const page=start>>12;
+            entry=&regions[(page*2654435761U)&(regions.size()-1)];
+            if(entry->frame==gpu_frame_serial && entry->page==page &&
+               start>=entry->begin && start<entry->end) {
+                if(the_config->profile_renderer)
+                    ++gpu_native_stats.native_span_cache_hits;
+                return start+len<=entry->end;
+            }
         }
         MEMORY_BASIC_INFORMATION mbi{};
         if(the_config && the_config->profile_renderer)
@@ -316,8 +319,8 @@ namespace {
            (mbi.Protect&(PAGE_GUARD|PAGE_NOACCESS))) return false;
         auto const begin=reinterpret_cast<uintptr_t>(mbi.BaseAddress);
         auto const end=begin+mbi.RegionSize;
-        if(fast && end>begin) {
-            entry={gpu_frame_serial,page,begin,end};
+        if(entry && end>begin) {
+            *entry={gpu_frame_serial,start>>12,begin,end};
         }
         return start+len<=end;
     }
