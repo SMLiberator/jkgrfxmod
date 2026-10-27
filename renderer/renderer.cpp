@@ -4683,9 +4683,9 @@ namespace jkgm {
                     // The identity includes the immutable mesh and group
                     // address, while the content signature detects a changed
                     // transform, MAT/cel or alpha-cutout state.
-                    uint64_t key=instance.id;
-                    key^=uint64_t(group.offset)+0x9e3779b97f4a7c15ULL+
-                        (key<<6)+(key>>2);
+                    uint64_t const key=sun_shadow_scroll_static_group_key(
+                        instance.id,instance.shadow_owner,group.offset,
+                        instance.transform);
                     uint64_t fingerprint=14695981039346656037ULL;
                     auto fingerprint_u32=[&](uint32_t v) {
                         for(int b=0;b<4;++b) {
