@@ -4191,11 +4191,15 @@ namespace jkgm {
                            tex.opacity<0.999f ||
                            (cutout && tex.albedo_source!=1))continue;
                         if(the_config->sun_shadow_two_sided_models ||
+                           (!the_config->sun_shadow_cull_back_faces &&
+                            !the_config->sun_shadow_cull_front_faces) ||
                            (g.face_type&1U) || g.nonplanar)
                             gl::disable(gl::capability::cull_face);
                         else {
                             gl::enable(gl::capability::cull_face);
-                            gl::set_face_cull_mode(gpu_3do_reversed_winding(m)
+                            bool const cull_front=the_config->sun_shadow_cull_front_faces;
+                            bool const mirrored=gpu_3do_reversed_winding(m);
+                            gl::set_face_cull_mode(cull_front!=mirrored
                                 ?gl::face_mode::front:gl::face_mode::back);
                         }
                         shadow_material(tex,cutout);
@@ -4665,11 +4669,15 @@ namespace jkgm {
                         make_point(m[3],m[4],m[5]),make_point(m[6],m[7],m[8]),
                         make_point(m[9],m[10],m[11]));
                     if(the_config->sun_shadow_two_sided_models ||
+                       (!the_config->sun_shadow_cull_back_faces &&
+                        !the_config->sun_shadow_cull_front_faces) ||
                        (group.face_type&0x1U)!=0 || group.nonplanar)
                         gl::disable(gl::capability::cull_face);
                     else {
                         gl::enable(gl::capability::cull_face);
-                        gl::set_face_cull_mode(gpu_3do_reversed_winding(m)
+                        bool const cull_front=the_config->sun_shadow_cull_front_faces;
+                        bool const mirrored=gpu_3do_reversed_winding(m);
+                        gl::set_face_cull_mode(cull_front!=mirrored
                             ?gl::face_mode::front:gl::face_mode::back);
                     }
                     gl::bind_vertex_array(it->second->vao);

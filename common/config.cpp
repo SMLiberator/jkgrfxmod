@@ -239,6 +239,14 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("sun_shadow_two_sided_models")) {
             j.at("sun_shadow_two_sided_models").get_to(rv->sun_shadow_two_sided_models);
         }
+        if(j.contains("sun_shadow_cull_back_faces")) {
+            j.at("sun_shadow_cull_back_faces").get_to(rv->sun_shadow_cull_back_faces);
+        }
+        if(j.contains("sun_shadow_cull_front_faces")) {
+            j.at("sun_shadow_cull_front_faces").get_to(rv->sun_shadow_cull_front_faces);
+        }
+        if(rv->sun_shadow_cull_back_faces && rv->sun_shadow_cull_front_faces)
+            throw std::runtime_error("sun_shadow_cull_back_faces and sun_shadow_cull_front_faces cannot both be true");
         if(j.contains("sun_dynamic_shadow_resolution")) {
             auto const &v=j.at("sun_dynamic_shadow_resolution");
             if(!v.is_number_integer())
