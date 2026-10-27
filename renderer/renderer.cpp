@@ -658,6 +658,10 @@ namespace jkgm {
         std::array<uint64_t,2> sun_profile_moving_gl_calls{{0,0}};
         std::array<uint64_t,2> sun_profile_static_multi_calls{{0,0}};
         std::array<uint64_t,2> sun_profile_moving_multi_calls{{0,0}};
+        std::array<uint64_t,2> sun_profile_static_instanced_calls{{0,0}};
+        std::array<uint64_t,2> sun_profile_moving_instanced_calls{{0,0}};
+        std::array<uint64_t,2> sun_profile_static_instanced_ranges{{0,0}};
+        std::array<uint64_t,2> sun_profile_moving_instanced_ranges{{0,0}};
         uint64_t sun_profile_candidate_us=0,sun_profile_candidate_groups=0;
         uint64_t sun_profile_atlas_us=0;
         uint64_t sun_profile_atlas_mat_hits=0,sun_profile_atlas_mat_misses=0;
