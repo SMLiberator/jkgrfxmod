@@ -6,6 +6,7 @@
 
 #include "engine_camera.hpp"
 #include <Windows.h>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -102,6 +103,7 @@ struct snapshot {
     std::string level_name;
     size_t visited_materials = 0;
     size_t rejected_materials = 0;
+    size_t region_cache_hits = 0, region_queries = 0;
     std::vector<texture_link> textures;
 };
 
@@ -172,13 +174,52 @@ inline bool load_world(uintptr_t global, uint32_t &address, world_header &world)
            world.capacity_materials <= 16384 && world.materials != 0;
 }
 
-inline void scan_world(snapshot &out, bool shared, world_header const &world)
+// Every native MAT scan accesses many consecutive 0xb4-byte materials and
+// often many cel/texture headers allocated in the same virtual-memory region.
+// Rather than asking Wine's VirtualQuery about each field, memoize only
+// successfully validated regions for this ONE scan. No cached pointers or
+// memory contents escape the call, and an invalid/unreadable address is always
+// checked normally on its next use. This does not change source freshness.
+struct scan_region_reader {
+    struct region { uintptr_t first=0,last=0; };
+    std::array<region,128> regions{};
+    size_t next=0,hits=0,queries=0;
+    bool read_bytes(uintptr_t addr,void *dest,size_t len) {
+        if(addr<0x10000U || addr>0x7fffffffU || len>0x100000U ||
+           addr+len<addr) return false;
+        for(auto const &r:regions) {
+            if(addr>=r.first && addr+len<=r.last) {
+                std::memcpy(dest,reinterpret_cast<void const *>(addr),len);
+                ++hits;
+                return true;
+            }
+        }
+        MEMORY_BASIC_INFORMATION mbi{};
+        ++queries;
+        if(VirtualQuery(reinterpret_cast<void const *>(addr),&mbi,
+                        sizeof(mbi))==0 ||
+           mbi.State!=MEM_COMMIT ||
+           (mbi.Protect&(PAGE_NOACCESS|PAGE_GUARD))!=0) return false;
+        uintptr_t const begin=reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+        uintptr_t const end=begin+mbi.RegionSize;
+        if(end<begin || addr+len>end) return false;
+        regions[next++%regions.size()]={begin,end};
+        std::memcpy(dest,reinterpret_cast<void const *>(addr),len);
+        return true;
+    }
+    template<typename T> bool read_object(uintptr_t addr,T &out) {
+        return read_bytes(addr,&out,sizeof(out));
+    }
+};
+
+inline void scan_world(snapshot &out, bool shared, world_header const &world,
+                       scan_region_reader &reader)
 {
     for(int32_t index = 0; index < world.num_materials; ++index) {
         native_material mat{};
         uintptr_t const address =
             static_cast<uintptr_t>(world.materials) + size_t(index) * sizeof(mat);
-        if(!read_object(address, mat)) {
+        if(!reader.read_object(address, mat)) {
             ++out.rejected_materials;
             continue;
         }
@@ -200,7 +241,7 @@ inline void scan_world(snapshot &out, bool shared, world_header const &world)
                 continue;
             }
             native_texinfo info{};
-            if(!read_object(mat.texinfo[cel], info) || !info.texture ||
+            if(!reader.read_object(mat.texinfo[cel], info) || !info.texture ||
                info.texture < mat.textures) {
                 continue;
             }
@@ -210,7 +251,7 @@ inline void scan_world(snapshot &out, bool shared, world_header const &world)
                 continue;
             }
             native_texture texture{};
-            if(!read_object(info.texture, texture)) {
+            if(!reader.read_object(info.texture, texture)) {
                 continue;
             }
             uint32_t const mip_count = texture.header[6];
@@ -241,17 +282,20 @@ inline snapshot scan()
     }
     out.supported_build = true;
     world_header world{};
+    scan_region_reader reader{};
     if(load_world(current_world_global, out.current_world, world)) {
         out.current_materials = world.materials;
         out.current_count = uint32_t(world.num_materials);
         out.level_name = printable_name(world.level_name, sizeof(world.level_name));
-        scan_world(out, false, world);
+        scan_world(out, false, world, reader);
     }
     if(load_world(static_world_global, out.static_world, world)) {
         out.static_materials = world.materials;
         out.static_count = uint32_t(world.num_materials);
-        scan_world(out, true, world);
+        scan_world(out, true, world, reader);
     }
+    out.region_cache_hits=reader.hits;
+    out.region_queries=reader.queries;
     return out;
 }
 
