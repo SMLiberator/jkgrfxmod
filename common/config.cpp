@@ -235,6 +235,15 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("sun_shadow_two_sided_models")) {
             j.at("sun_shadow_two_sided_models").get_to(rv->sun_shadow_two_sided_models);
         }
+        if(j.contains("sun_shadow_caster_expand_texels")) {
+            auto const &v=j.at("sun_shadow_caster_expand_texels");
+            if(!v.is_number())
+                throw std::runtime_error("sun_shadow_caster_expand_texels must be numeric (0..6)");
+            double const x=v.get<double>();
+            if(!std::isfinite(x) || x<0.0 || x>6.0)
+                throw std::runtime_error("sun_shadow_caster_expand_texels must be between 0 and 6");
+            rv->sun_shadow_caster_expand_texels=static_cast<float>(x);
+        }
         if(j.contains("sun_dynamic_shadow_resolution")) {
             auto const &v=j.at("sun_dynamic_shadow_resolution");
             if(!v.is_number_integer())

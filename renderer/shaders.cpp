@@ -796,6 +796,8 @@ jkgm::shaders::spotlight_shadow_depth_shader::spotlight_shadow_depth_shader(
     , shadow_forward(gl::get_uniform_location(the_program,"shadow_forward"))
     , shadow_limits(gl::get_uniform_location(the_program,"shadow_limits"))
     , shadow_orthographic(gl::get_uniform_location(the_program,"shadow_orthographic"))
+    , shadow_caster_padding(gl::get_uniform_location(the_program,"shadow_caster_padding"))
+    , shadow_caster_model_center(gl::get_uniform_location(the_program,"shadow_caster_model_center"))
     , shadow_model_right(gl::get_uniform_location(the_program,"shadow_model_right"))
     , shadow_model_forward(gl::get_uniform_location(the_program,"shadow_model_forward"))
     , shadow_model_up(gl::get_uniform_location(the_program,"shadow_model_up"))
@@ -816,6 +818,9 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_light(
     point<3,float> forward,point<4,float> limits)
 {
     gl::set_uniform_integer(shadow_orthographic,0);
+    // Spotlight silhouettes stay exact, regardless of the previous sun pass.
+    gl::set_uniform_vector(shadow_caster_padding,
+                           make_point(0.0f,0.0f,0.0f,0.0f));
     gl::set_uniform_vector(shadow_origin,origin);
     gl::set_uniform_vector(shadow_right,right);
     gl::set_uniform_vector(shadow_up,up);
@@ -843,6 +848,16 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_model(
     gl::set_uniform_vector(shadow_model_forward,forward);
     gl::set_uniform_vector(shadow_model_up,up);
     gl::set_uniform_vector(shadow_model_origin,origin);
+}
+
+void jkgm::shaders::spotlight_shadow_depth_shader::set_caster_padding(
+    float texels,float ndc_per_texel,bool world_centers,
+    point<3,float> model_center)
+{
+    gl::set_uniform_vector(shadow_caster_padding,
+        make_point(texels,ndc_per_texel,world_centers?1.0f:0.0f,0.0f));
+    if(texels>0.0f && !world_centers)
+        gl::set_uniform_vector(shadow_caster_model_center,model_center);
 }
 
 void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(

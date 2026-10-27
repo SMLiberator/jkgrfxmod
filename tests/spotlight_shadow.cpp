@@ -58,6 +58,15 @@ int main()
     spotlight_shadow_static_mesh mesh{};
     assert(build_spotlight_shadow_static_mesh(world,mesh));
     assert(mesh.vertices.size()==12);
+    for(auto const &v:mesh.vertices) {
+        assert(near(v.polygon_center[0],
+            v.position[0]<20.0f && v.position[0]>-0.5f ?
+                (v.position[0]<-0.5f?-1.0f:0.0f) : 25.0f) ||
+               near(v.polygon_center[0],-1.0f));
+        assert(near(v.polygon_center[1],
+                    v.position[1]<6.0f?5.0f:7.0f));
+        assert(near(v.polygon_center[2],0.0f));
+    }
     assert(mesh.indices.size()==18);
     assert(mesh.surfaces.size()==3);
     assert(mesh.surfaces[0].first_index==0 && mesh.surfaces[0].count==6);

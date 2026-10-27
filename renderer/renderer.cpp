@@ -4199,6 +4199,12 @@ namespace jkgm {
                                 ?gl::face_mode::front:gl::face_mode::back);
                         }
                         shadow_material(tex,cutout);
+                        float const padding=cutout?0.0f:
+                            the_config->sun_shadow_caster_expand_texels;
+                        prog.set_caster_padding(padding,2.0f/float(inner),false,
+                            make_point(0.5f*(g.bounds_min[0]+g.bounds_max[0]),
+                                       0.5f*(g.bounds_min[1]+g.bounds_max[1]),
+                                       0.5f*(g.bounds_min[2]+g.bounds_max[2])));
                         gl::bind_vertex_array(it->second->vao);
                         gl::draw_elements(gl::element_type::triangles,g.count,
                             gl::index_type::uint32,static_cast<ptrdiff_t>(
@@ -4589,6 +4595,8 @@ namespace jkgm {
                            make_point(0.0f,0.0f,1.0f),make_point(0.0f,0.0f,0.0f));
             prog.set_shadow_alpha(false,make_point(1.0f,1.0f),make_point(0.0f,0.0f),
                                   0.5f,1.0f,false,0.0f);
+            prog.set_caster_padding(the_config->sun_shadow_caster_expand_texels,
+                2.0f/float(map.resolution),true,make_point(0.0f,0.0f,0.0f));
             auto set_cutout=[&](gpu_3do_texture const &tex,bool world_uv) {
                 float const width=world_uv?tex.width:gpu_3do_model_uv_extent(tex.width);
                 float const height=world_uv?tex.height:gpu_3do_model_uv_extent(tex.height);
@@ -4610,6 +4618,10 @@ namespace jkgm {
                 gl::bind_vertex_array(map.vao);
                 if(!counts.empty())glMultiDrawElements(GL_TRIANGLES,counts.data(),
                     GL_UNSIGNED_INT,offsets.data(),static_cast<GLsizei>(counts.size()));
+                // Alpha cutout borders must not inflate opaque silhouette
+                // vertices: that would stretch UVs, filling real holes.
+                prog.set_caster_padding(0.0f,0.0f,true,
+                    make_point(0.0f,0.0f,0.0f));
                 for(auto const &draw:world_cutouts) {
                     set_cutout(draw.texture,true);
                     gl::bind_vertex_array(map.vao);
@@ -4641,6 +4653,14 @@ namespace jkgm {
                             ?gl::face_mode::front:gl::face_mode::back);
                     }
                     gl::bind_vertex_array(it->second->vao);
+                    float const padding=draw.cutout?0.0f:
+                        the_config->sun_shadow_caster_expand_texels;
+                    prog.set_caster_padding(padding,
+                        2.0f/float(map.resolution),false,
+                        make_point(
+                            0.5f*(group.bounds_min[0]+group.bounds_max[0]),
+                            0.5f*(group.bounds_min[1]+group.bounds_max[1]),
+                            0.5f*(group.bounds_min[2]+group.bounds_max[2])));
                     if(draw.cutout)set_cutout(draw.texture,false);
                     else prog.set_shadow_alpha(false,
                         make_point(1.0f,1.0f),make_point(0.0f,0.0f),
@@ -4677,6 +4697,8 @@ namespace jkgm {
             }
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,cascade_target);
             draw_models(models);
+            prog.set_caster_padding(0.0f,0.0f,false,
+                make_point(0.0f,0.0f,0.0f));
             glDisable(GL_POLYGON_OFFSET_FILL);
             gl::disable(gl::capability::cull_face);
             gl::set_face_cull_mode(gl::face_mode::back);

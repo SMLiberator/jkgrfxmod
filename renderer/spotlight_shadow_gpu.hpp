@@ -77,6 +77,12 @@ struct spotlight_shadow_gpu {
         gl::vertex_attrib_pointer(1,2,gl::vertex_element_type::float32,
                                   false,sizeof(spotlight_shadow_vertex),
                                   offsetof(spotlight_shadow_vertex,uv));
+        // Extra immutable per-polygon center for optional light-space
+        // sun shadow caster padding. Not used in spotlight depth passes.
+        gl::enable_vertex_attrib_array(2);
+        gl::vertex_attrib_pointer(2,3,gl::vertex_element_type::float32,
+                                  false,sizeof(spotlight_shadow_vertex),
+                                  offsetof(spotlight_shadow_vertex,polygon_center));
         gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
         gl::bind_vertex_array(gl::vertex_array_view(0U));
     }

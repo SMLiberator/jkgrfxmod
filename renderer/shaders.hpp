@@ -316,6 +316,8 @@ namespace jkgm {
             gl::uniform_location_id shadow_origin,shadow_right,shadow_up;
             gl::uniform_location_id shadow_forward,shadow_limits;
             gl::uniform_location_id shadow_orthographic;
+            gl::uniform_location_id shadow_caster_padding;
+            gl::uniform_location_id shadow_caster_model_center;
             gl::uniform_location_id shadow_model_right,shadow_model_forward;
             gl::uniform_location_id shadow_model_up,shadow_model_origin;
             gl::uniform_location_id shadow_use_alpha,shadow_alpha_texture;
@@ -335,6 +337,8 @@ namespace jkgm {
                                         point<4,float> limits);
             void set_model(point<3,float> right,point<3,float> forward,
                            point<3,float> up,point<3,float> origin);
+            void set_caster_padding(float texels,float ndc_per_texel,
+                                    bool world_centers,point<3,float> model_center);
             void set_shadow_alpha(bool enabled,point<2,float> uv_scale,
                                   point<2,float> uv_scroll,float cutoff,
                                   float factor,bool has_next,float progress);

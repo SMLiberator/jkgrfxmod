@@ -3,6 +3,7 @@
 // are original JK world XYZ, independent of the player's camera/frustum.
 layout(location=0) in vec3 world_position;
 layout(location=1) in vec2 world_uv;
+layout(location=2) in vec3 shadow_polygon_center; // only world shadow VAOs
 out vec2 shadow_material_uv;
 uniform vec3 shadow_origin;
 uniform vec3 shadow_right;
@@ -10,6 +11,8 @@ uniform vec3 shadow_up;
 uniform vec3 shadow_forward;
 uniform vec4 shadow_limits; // width at far plane, height, range, near
 uniform int shadow_orthographic;
+uniform vec4 shadow_caster_padding; // texels, texel-to-NDC scale, centroid mode, unused
+uniform vec3 shadow_caster_model_center; // 3DO mesh-group center in local coordinates
 // Identity for static SithWorld, instance matrix for GPU-cached 3DOs.
 uniform vec3 shadow_model_right;
 uniform vec3 shadow_model_forward;
@@ -28,6 +31,24 @@ void main()
             2.0*dot(relative,shadow_up)/shadow_limits.y-1.0,
             2.0*dot(relative,shadow_forward)/shadow_limits.z-1.0,
             1.0);
+        // Expand only the shadow caster silhouette in light-space, without
+        // moving its depth or visible model. This helps small raster cracks
+        // at touching wall/floor edges and costs no extra shadow lookups.
+        if(shadow_caster_padding.x>0.0) {
+            vec3 local_center=shadow_caster_padding.z>0.5
+                ? shadow_polygon_center : shadow_caster_model_center;
+            vec3 center_world=shadow_model_right*local_center.x+
+                              shadow_model_forward*local_center.y+
+                              shadow_model_up*local_center.z+
+                              shadow_model_origin;
+            vec3 from_center=world-center_world;
+            vec2 radial=vec2(dot(from_center,shadow_right)/shadow_limits.x,
+                             dot(from_center,shadow_up)/shadow_limits.y);
+            float radius=length(radial);
+            if(radius>0.0000001)
+                gl_Position.xy+=(radial/radius)*
+                    shadow_caster_padding.x*shadow_caster_padding.y;
+        }
         return;
     }
     float distance=dot(relative,shadow_forward);
