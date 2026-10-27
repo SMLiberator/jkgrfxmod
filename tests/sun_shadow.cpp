@@ -1,4 +1,5 @@
 #include "renderer/sun_shadow.hpp"
+#include "renderer/sun_shadow_scroll.hpp"
 #include "renderer/sun_skybox_thing.hpp"
 #include <cassert>
 #include <array>
@@ -10,6 +11,41 @@ using namespace jkgm;
 
 int main()
 {
+    // Circular tile addressing: 32x32 JK units, 2x2-unit tiles.
+    sun_shadow_scroll_grid grid(16);
+    auto dirty=grid.update(0.0,0.0,2.0,10);
+    assert(dirty.size()==256);
+    assert(grid.origin_x==-8 && grid.origin_y==-8);
+    assert(grid.physical_slot(-8,-8).atlas_x==0);
+    assert(grid.physical_slot(7,7).atlas_x==15);
+    assert(grid.update(0.8,0.5,2.0,10).empty());
+    dirty=grid.update(2.01,0.0,2.0,10);
+    assert(dirty.size()==16);
+    assert(grid.origin_x==-7 && grid.ring_x==1);
+    for(auto const &tile:dirty) {
+        assert(tile.world_x==8);
+        assert(tile.atlas_x==0);
+    }
+    assert(grid.physical_slot(-7,0).atlas_x==1);
+    dirty=grid.update(2.01,2.01,2.0,10);
+    assert(dirty.size()==16);
+    for(auto const &tile:dirty)assert(tile.world_y==8);
+    // Diagonal shift has 31 unique new cells, not 32 duplicates.
+    dirty=grid.update(4.01,4.01,2.0,10);
+    assert(dirty.size()==31);
+    dirty=grid.update(0.0,0.0,2.0,10);
+    assert(dirty.size()==60); // two columns + two rows, no duplication
+    assert(grid.physical_slot(-8,-8).atlas_x==0);
+    assert(grid.physical_slot(-8,-8).atlas_y==0);
+    // A camera teleport or a sun/caster revision needs every tile refreshed.
+    dirty=grid.update(100.0,100.0,2.0,10);
+    assert(dirty.size()==256);
+    assert(grid.update(100.0,100.0,2.0,11).size()==256);
+    assert(grid.update(100.0,100.0,4.0,11).size()==256);
+    grid.invalidate();
+    assert(grid.update(-0.1,-0.1,2.0,11).size()==256);
+    assert(grid.origin_x==-9 && grid.origin_y==-9);
+    assert(sun_shadow_scroll_grid::wrap(-1,16)==15);
     std::unordered_set<uint64_t> owners{0x1111222233334444ULL};
     assert(!sun_shadow_caster_in_static_cascades(
         0x1111222233334444ULL,owners));

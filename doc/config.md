@@ -1,5 +1,7 @@
 # Editing configuration file (`jkgm.json`)
 
+Scrolling sunlight shadows are being prototyped in stages. Currently, `profile_renderer=true` runs a tested CPU-only 16×16 circular light-space tile planner and reports `SUN scroll PREVIEW` dirty-tile estimates versus a full 256-tile redraw. **No shadow depth-map tiles are rendered or reused by this planner yet**, so these numbers are theoretical and do not imply GPU savings. Live rolling GPU atlas updates and tile-aware sampling are a separate implementation step.
+
 | Variable | Explanation | Syntax | Default value |
 |----------------|------------------------------|--------|---------------|
 | **resolution** | What resolution to output at. | ordered pair (`[ x, y ]`) | `[ 1024, 768 ]` |

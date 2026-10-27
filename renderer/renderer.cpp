@@ -56,6 +56,7 @@
 #include "primary_surface.hpp"
 #include "renderer_ao.hpp"
 #include "renderer_compositor.hpp"
+#include "sun_shadow_scroll.hpp"
 #include "renderer_screen.hpp"
 #include "sysmem_texture.hpp"
 #include "texture_cache.hpp"
@@ -586,6 +587,14 @@ namespace jkgm {
         std::array<uint64_t,2> sun_shadow_revisions{};
         std::array<uint64_t,2> sun_shadow_caster_signatures{};
         std::array<bool,2> sun_shadow_static_cached{{false,false}};
+        // Non-rendering prototype: estimate partial tile updates before
+        // changing the depth-map atlas and all forward/opaque samplers.
+        std::array<sun_shadow_scroll_grid,2> sun_scroll_preview{};
+        std::array<uint64_t,2> sun_scroll_preview_new_tiles{{0,0}};
+        std::array<uint64_t,2> sun_scroll_preview_frames{{0,0}};
+        std::array<float,3> sun_scroll_preview_direction{};
+        uint32_t sun_scroll_preview_world=0;
+        uint64_t sun_scroll_preview_revision=0;
         std::array<uint64_t,2> sun_profile_full_hits{{0,0}};
         std::array<uint64_t,2> sun_profile_static_hits{{0,0}};
         std::array<uint64_t,2> sun_profile_static_redraws{{0,0}};
@@ -927,6 +936,11 @@ namespace jkgm {
                 sun_shadow_cascade_ready={{false,false}};
                 sun_shadow_cascade_cached={{false,false}};
                 sun_shadow_static_cached={{false,false}};
+                for(auto &grid:sun_scroll_preview)grid.invalidate();
+                sun_scroll_preview_new_tiles={{0,0}};
+                sun_scroll_preview_frames={{0,0}};
+                sun_scroll_preview_world=0;
+                sun_scroll_preview_revision=0;
                 sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
             sun_dynamic_caster_end_depth.clear();
@@ -4346,10 +4360,53 @@ namespace jkgm {
                 (3.14159265358979323846f/360.0f));
             float const vertical=horizontal*float(get<y>(conf_scr_res))/
                 float(get<x>(conf_scr_res));
+            // Prototype the scrolling light-space tile addresses while
+            // retaining today's correct full-map rasterization. The preview
+            // reports theoretical dirty tile counts, never claims GPU gains.
+            if(the_config->profile_renderer) {
+                bool changed=(sun_scroll_preview_world!=world ||
+                    sun_scroll_preview_revision!=map.revision);
+                for(int axis=0;axis<3;++axis)
+                    changed=changed ||
+                        std::fabs(sun_scroll_preview_direction[axis]-
+                                  direction[axis])>1.e-5f;
+                if(changed) {
+                    for(auto &grid:sun_scroll_preview)grid.invalidate();
+                    sun_scroll_preview_world=world;
+                    sun_scroll_preview_revision=map.revision;
+                    sun_scroll_preview_direction=direction;
+                }
+            }
             for(int cascade=0;cascade<2;++cascade) {
             sun_shadow_projection view=world_view;
             float const distance=cascade==0
                 ? the_config->sun_shadow_near_distance : the_config->sun_shadow_far_distance;
+            if(the_config->profile_renderer) {
+                // A rotation-invariant square around the player's origin.
+                // Reserve two tile columns as guards so the view remains
+                // covered when its orientation changes.
+                double const radius=double(distance)*std::sqrt(
+                    1.0+double(horizontal)*horizontal+
+                        double(vertical)*vertical);
+                double const units=std::max(2.0,(2.0*radius+4.0)/12.0);
+                double const px=decal_dot(camera.position,world_view.right);
+                double const py=decal_dot(camera.position,world_view.up);
+                auto const dirty=sun_scroll_preview[cascade].update(
+                    px,py,units,1U);
+                sun_scroll_preview_new_tiles[cascade]+=dirty.size();
+                ++sun_scroll_preview_frames[cascade];
+                if(gpu_3do_present_serial%120U==0U) {
+                    LOG_INFO("SUN scroll PREVIEW cascade=",cascade,
+                             " frames=",sun_scroll_preview_frames[cascade],
+                             " tile_grid=16x16 tile_units=",std::to_string(units),
+                             " dirty_tiles=",sun_scroll_preview_new_tiles[cascade],
+                             " full_redraw_tiles_if_uncached=",
+                                 sun_scroll_preview_frames[cascade]*256U,
+                             " NOTE=CPU planner only; NO GPU tile reuse yet");
+                    sun_scroll_preview_new_tiles[cascade]=0;
+                    sun_scroll_preview_frames[cascade]=0;
+                }
+            }
             if(!fit_sun_shadow_to_camera(view,camera.position,camera.right,
                     camera.up,camera.forward,horizontal,vertical,distance)) {
                 sun_failure("camera-local cascade projection invalid");
