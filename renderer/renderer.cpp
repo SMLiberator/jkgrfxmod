@@ -3861,6 +3861,7 @@ namespace jkgm {
                 bool cutout=false;
             };
             std::vector<shadow_3do_range> model_casters;
+            size_t excluded_source_ranges=0;
             auto const light_bounds=spotlight_shadow_volume_bounds(view);
             {
                 for(auto const &instance:frame_gpu_3do_instances) {
@@ -3869,6 +3870,16 @@ namespace jkgm {
                     if(!instance.geometry || instance.is_projected_decal ||
                        !instance.casts_sun_shadows)
                         continue;
+                    // Exclude the projector's owning vehicle/Thing from its
+                    // own spotlight depth map. The previous origin-inside-AABB
+                    // check alone failed for cars with many small mesh groups.
+                    // This also handles a separate light marker attached to
+                    // a parent car's model node (validated parent-chain key).
+                    if(chosen.shadow_owner!=0 &&
+                       instance.shadow_owner==chosen.shadow_owner) {
+                        excluded_source_ranges+=instance.geometry->groups.size();
+                        continue;
+                    }
                     auto const &m=instance.transform;
                     for(auto const &group:instance.geometry->groups) {
                         if(group.count<3U)continue;
@@ -4047,6 +4058,8 @@ namespace jkgm {
                (gpu_3do_present_serial%120U)==0U) {
                 LOG_INFO("SHADOW spotlight: world_surfaces=",map.mesh.surfaces.size(),
                          " model_ranges=",model_casters.size(),
+                         " excluded_source_ranges=",excluded_source_ranges,
+                         " source_owner=",chosen.shadow_owner,
                          " model_cache=",the_config->use_model_cache?1:0,
                          " reused=",spotlight_shadow_cached &&
                                     caster_signature==spotlight_shadow_3do_signature?1:0);
@@ -4063,6 +4076,7 @@ namespace jkgm {
                 spotlight_shadow_world==world &&
                 spotlight_shadow_revision==map.revision &&
                 chosen.material==spotlight_shadow_light.material &&
+                chosen.shadow_owner==spotlight_shadow_light.shadow_owner &&
                 same(chosen.origin,spotlight_shadow_light.origin) &&
                 same(chosen.right,spotlight_shadow_light.right) &&
                 same(chosen.up,spotlight_shadow_light.up) &&
