@@ -591,10 +591,15 @@ vec3 illuminate_translucent_sun(vec3 baked,vec3 pigment,float opacity,
        depth<=0.0 || depth>=65500.0)return baked;
     vec3 normal=translucent_spotlight_world_normal(view_normal);
     float incidence=abs(dot(normal,translucent_sun_direction));
-    if(incidence<=0.001)return baked;
+    // Billboard sprites face the camera, NOT the sun. Their arbitrary quad
+    // normal must not make them immune to shadows. Evaluate the light-space
+    // visibility even when the quad's dot(N,sun) is close to zero, and
+    // remove the shadowed component of the baked/native vertex brightness
+    // independently of that incidence. Direct added sunlight still respects
+    // the geometric incidence for ordinary translucent surfaces.
     vec3 world=translucent_spotlight_world_pos(depth);
-    float visibility=translucent_sun_visibility(world,incidence);
-    vec3 dimmed=baked*(1.0-0.6*incidence*(1.0-visibility));
+    float visibility=translucent_sun_visibility(world,max(incidence,0.35));
+    vec3 dimmed=baked*(1.0-0.75*(1.0-visibility));
     vec3 radiance=pigment*translucent_sun_color.rgb*
                   translucent_sun_color.a*incidence*visibility*opacity;
     return dimmed+radiance*(vec3(1.0)-clamp(dimmed,vec3(0.0),vec3(1.0)));
