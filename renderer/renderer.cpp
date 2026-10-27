@@ -656,6 +656,7 @@ namespace jkgm {
         std::array<uint64_t,2> sun_profile_moving_submitted{{0,0}};
         uint64_t sun_profile_candidate_us=0,sun_profile_candidate_groups=0;
         uint64_t sun_profile_atlas_us=0;
+        uint64_t sun_profile_atlas_mat_hits=0,sun_profile_atlas_mat_misses=0;
         std::array<uint64_t,2> sun_shadow_static_signatures{};
         std::array<uint64_t,2> sun_shadow_static_revisions{};
         std::array<uintptr_t,2> sun_shadow_static_worlds{};
@@ -4261,7 +4262,20 @@ namespace jkgm {
                                 *inst->geometry)).first;
                     for(auto const &g:inst->geometry->groups) {
                         if(g.count<3U || (g.face_type&2U))continue;
-                        auto tex=resolve_gpu_3do_material(g);
+                        // Share the same MAT/cel snapshot with both sun
+                        // cascades. This avoids repeating native MAT lookups
+                        // and VirtualQuery work per dynamic Thing/group.
+                        uint64_t const key=(uint64_t(g.material)<<32)|
+                            uint32_t(g.cel);
+                        auto found=gpu_frame_material_cache.find(key);
+                        if(found==gpu_frame_material_cache.end()) {
+                            found=gpu_frame_material_cache.emplace(
+                                key,resolve_gpu_3do_material(g)).first;
+                            if(the_config->profile_renderer)
+                                ++sun_profile_atlas_mat_misses;
+                        } else if(the_config->profile_renderer)
+                            ++sun_profile_atlas_mat_hits;
+                        auto const &tex=found->second;
                         bool cutout=tex.masked||tex.alpha||tex.dithered;
                         if(tex.albedo_source==0 || tex.special ||
                            tex.emissive_only || tex.post_exempt ||
@@ -4643,16 +4657,30 @@ namespace jkgm {
             // Keep the stable world state and add stationary 3DOs, but
             // NEVER include moving/unknown Thing geometry in this key.
             uint64_t static_signature=caster_signature;
-            auto hash_static_u32=[&](uint32_t value) {
-                for(int b=0;b<4;++b) {
-                    static_signature^=uint64_t((value>>(b*8))&255U);
-                    static_signature*=1099511628211ULL;
-                }
+            // Shadow-map depth is independent of the order of model draws.
+            // Native JK/COG can resubmit the same Things in a different
+            // order across frames. Never invalidate a depth cache merely
+            // because enumeration order changed: hash the *multiset* of
+            // groups using two independently aggregated 64-bit quantities.
+            // Keep group count so identical duplicate groups are preserved.
+            uint64_t all_sum=0,all_sum_sq=0,static_sum=0,static_sum_sq=0;
+            uint64_t all_count=0,static_count=0;
+            auto mix_model_signature=[](uint64_t h) {
+                h^=h>>30;h*=0xbf58476d1ce4e5b9ULL;
+                h^=h>>27;h*=0x94d049bb133111ebULL;
+                return h^(h>>31);
             };
-            auto hash_static_float=[&](float value) {
-                uint32_t bits=0;
-                std::memcpy(&bits,&value,sizeof(bits));
-                hash_static_u32(bits);
+            auto append_model_set=[&](uint64_t &signature,uint64_t count,
+                                      uint64_t sum,uint64_t squared) {
+                auto append=[&](uint32_t v) {
+                    for(int b=0;b<4;++b) {
+                        signature^=uint64_t((v>>(b*8))&255U);
+                        signature*=1099511628211ULL;
+                    }
+                };
+                for(uint64_t v:{count,sum,squared}) {
+                    append(uint32_t(v));append(uint32_t(v>>32));
+                }
             };
 
             // Include submitted 3DO transforms. The native hook is enabled
@@ -4859,9 +4887,32 @@ namespace jkgm {
                 if(!in_cascade)continue;
                 (stable?static_models:models).push_back(
                     {&instance,&group,tex,cutout,prepared.bounds});
-                hash_model(hash_u32,hash_float);
-                if(stable)hash_model(hash_static_u32,hash_static_float);
+                uint64_t member=14695981039346656037ULL;
+                auto member_u32=[&](uint32_t v) {
+                    for(int b=0;b<4;++b) {
+                        member^=uint64_t((v>>(b*8))&255U);
+                        member*=1099511628211ULL;
+                    }
+                };
+                auto member_float=[&](float v) {
+                    uint32_t bits=0;
+                    std::memcpy(&bits,&v,sizeof(bits));
+                    member_u32(bits);
+                };
+                hash_model(member_u32,member_float);
+                member=mix_model_signature(member);
+                all_sum+=member;
+                all_sum_sq+=member*member;
+                ++all_count;
+                if(stable) {
+                    static_sum+=member;
+                    static_sum_sq+=member*member;
+                    ++static_count;
+                }
             }
+            append_model_set(caster_signature,all_count,all_sum,all_sum_sq);
+            append_model_set(static_signature,static_count,static_sum,
+                             static_sum_sq);
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN shadow caster batches world=",
@@ -5454,6 +5505,10 @@ namespace jkgm {
                     sun_profile_candidate_us,
                     " candidate_groups_total=",sun_profile_candidate_groups,
                     " dynamic_atlas_submit_us_total=",sun_profile_atlas_us,
+                    " dynamic_atlas_material_hits=",
+                        sun_profile_atlas_mat_hits,
+                    " dynamic_atlas_material_misses=",
+                        sun_profile_atlas_mat_misses,
                     " NOTE=CPU_only_no_GPU_wait");
                 sun_profile_prepare_us.fill(0);
                 sun_profile_static_submit_us.fill(0);
@@ -5463,6 +5518,8 @@ namespace jkgm {
                 sun_profile_candidate_us=0;
                 sun_profile_candidate_groups=0;
                 sun_profile_atlas_us=0;
+                sun_profile_atlas_mat_hits=0;
+                sun_profile_atlas_mat_misses=0;
                 sun_profile_full_hits.fill(0);
                 sun_profile_static_hits.fill(0);
                 sun_profile_static_redraws.fill(0);
