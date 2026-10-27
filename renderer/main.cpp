@@ -1125,6 +1125,12 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
        !gpu_span_readable(matrix,sizeof(float)*12)) return false;
     native_mesh m{};
     std::memcpy(&m,mesh,sizeof(m));
+    // Empty 3DO hierarchy nodes still reach the native mesh callback,
+    // but the GPU path cannot submit a draw for them. Count them explicitly
+    // to distinguish engine traversal overhead from OpenGL draw calls.
+    if(the_config->profile_renderer &&
+       (m.num_vertices<=0 || m.num_faces<=0))
+        ++gpu_native_stats.empty_mesh_native;
     float const *vertex_rgb=nullptr;
     if(has_rgb_mesh_extension) {
         auto const *bytes=static_cast<uint8_t const *>(mesh);
