@@ -14,6 +14,17 @@ int main()
 {
     // Optional sun range: zero keeps the old unlimited behaviour; a positive
     // range clamps the far cascade and fades added sun out completely.
+    assert(thing_casts_sun_shadows(0U));
+    assert(!thing_casts_sun_shadows(0x10U));
+    assert(!thing_casts_sun_shadows(0x20U));
+    assert(!thing_casts_sun_shadows(0x80000U));
+    assert(!thing_casts_sun_shadows(0x10U|0x80000U));
+    assert(thing_casts_sun_shadows(0x8U|0x4000000U));
+    assert(!thing_shadow_geomode_visible(0,4));
+    assert(!thing_shadow_geomode_visible(2,4));
+    assert(!thing_shadow_geomode_visible(4,2));
+    assert(thing_shadow_geomode_visible(3,3));
+    assert(thing_shadow_geomode_visible(4,4));
     assert(sun_shadow_effective_far_distance(128.0f,0.0f)==128.0f);
     assert(sun_shadow_effective_far_distance(128.0f,64.0f)==64.0f);
     assert(sun_shadow_effective_far_distance(128.0f,256.0f)==128.0f);
