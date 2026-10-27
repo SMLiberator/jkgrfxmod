@@ -5233,6 +5233,80 @@ namespace jkgm {
                             });
                     i=end;
                 }
+                // Optional GL 3.3 instancing for repeated identical 3DO
+                // mesh ranges. Render states and index ranges match exactly,
+                // while each Thing supplies its own model transform.
+                size_t instanced_calls=0,instanced_ranges=0;
+                std::vector<uint8_t> batched(scheduled.size(),0);
+                if(the_config->sun_shadow_instance_batches) {
+                    using key=std::tuple<uint64_t,uintptr_t,uint32_t,uint32_t,
+                                         bool,bool,bool,uintptr_t,int32_t>;
+                    std::map<key,std::vector<size_t>> occurrences;
+                    for(size_t i=0;i<scheduled.size();++i) {
+                        auto const &d=*scheduled[i];
+                        bool const flipped=gpu_3do_reversed_winding(
+                            d.instance->transform);
+                        occurrences[std::make_tuple(
+                            d.instance->id,
+                            reinterpret_cast<uintptr_t>(d.instance->geometry.get()),
+                            d.group->offset,d.group->count,d.cutout,
+                            shadow_no_cull(d),flipped,
+                            d.cutout?d.group->material:uintptr_t(0),
+                            d.cutout?d.group->cel:int32_t(0))].push_back(i);
+                    }
+                    for(auto const &entry:occurrences) {
+                        auto const &members=entry.second;
+                        if(members.size()<2)continue;
+                        for(size_t start=0;start+1<members.size();) {
+                            size_t const amount=std::min(
+                                size_t(shaders::spotlight_shadow_depth_shader::
+                                       max_shadow_instances),
+                                members.size()-start);
+                            if(amount<2)break;
+                            auto const &d=*scheduled[members[start]];
+                            auto const &g=*d.group;
+                            auto const &inst=*d.instance;
+                            auto mesh=gpu_3do_gl_cache.find(inst.id);
+                            if(mesh==gpu_3do_gl_cache.end())
+                                mesh=gpu_3do_gl_cache.emplace(inst.id,
+                                    std::make_unique<gpu_3do_gl_mesh>(
+                                        *inst.geometry)).first;
+                            if(shadow_no_cull(d))
+                                gl::disable(gl::capability::cull_face);
+                            else {
+                                gl::enable(gl::capability::cull_face);
+                                bool const front=the_config->sun_shadow_cull_front_faces;
+                                bool const flipped=gpu_3do_reversed_winding(
+                                    inst.transform);
+                                gl::set_face_cull_mode(front!=flipped
+                                    ?gl::face_mode::front:gl::face_mode::back);
+                            }
+                            gl::bind_vertex_array(mesh->second->vao);
+                            if(d.cutout)set_cutout(d.texture,false);
+                            else prog.set_shadow_alpha(false,
+                                make_point(1.0f,1.0f),make_point(0.0f,0.0f),
+                                0.5f,1.0f,false,0.0f);
+                            std::array<std::array<float,12>,
+                                shaders::spotlight_shadow_depth_shader::
+                                    max_shadow_instances> transforms{};
+                            for(size_t k=0;k<amount;++k) {
+                                size_t const index=members[start+k];
+                                transforms[k]=scheduled[index]->instance->transform;
+                                batched[index]=1;
+                            }
+                            prog.set_instanced_models(transforms,amount);
+                            glDrawElementsInstanced(GL_TRIANGLES,
+                                static_cast<GLsizei>(g.count),GL_UNSIGNED_INT,
+                                reinterpret_cast<void const *>(
+                                    uintptr_t(g.offset)*sizeof(uint32_t)),
+                                static_cast<GLsizei>(amount));
+                            ++gl_calls;
+                            ++instanced_calls;
+                            instanced_ranges+=amount;
+                            start+=amount;
+                        }
+                    }
+                }
                 std::vector<GLsizei> batch_counts;
                 std::vector<void const *> batch_offsets;
                 batch_counts.reserve(32);
