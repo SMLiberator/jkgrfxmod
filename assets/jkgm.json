@@ -34,6 +34,7 @@
     "use_model_cache": false,
     "mesh_revision_tracking": false,
     "gpu_cache_native_memory_regions": false,
+    "gpu_3do_cache_filter_state": false,
     "enable_spotlights": false,
     "enable_spotlight_shadows": false,
     "spotlight_shadow_resolution": 256,
