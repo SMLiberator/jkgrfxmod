@@ -4893,6 +4893,12 @@ namespace jkgm {
                 sun_scroll_tiles_rendered[cascade]=0;
             }
             if(!static_same) {
+                // Tile warmup temporarily bound the scrolling atlas FBO.
+                // Resume the original static target before this fallback
+                // draw; otherwise we'd overwrite unrelated cached tiles.
+                gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                    (the_config->enable_sun_static_cache &&
+                     map.static_complete) ? static_target : cascade_target);
                 draw_models(static_models);
                 if(map.static_complete &&
                    the_config->enable_sun_static_cache) {
