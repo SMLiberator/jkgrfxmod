@@ -26,6 +26,10 @@ struct profile_sample {
   uint64_t native_model_calls=0, native_model_drawn=0, native_mesh_calls=0;
   uint64_t native_face_calls=0, native_face_emitted=0;
   uint64_t native_model_ns=0, native_mesh_ns=0, native_face_ns=0;
+  uint64_t native_model_hook_ns=0,native_model_engine_ns=0;
+  uint64_t native_model_engine_self_ns=0;
+  uint64_t native_mesh_queue_ns=0,native_mesh_native_ns=0,native_mesh_decal_ns=0;
+  uint64_t native_mesh_gpu_calls=0,native_mesh_native_calls=0;
   std::array<uint64_t,5> sprite_type_calls{};
   uint64_t sprite_other_type_calls=0,sprite_hidden_calls=0;
   uint64_t sprite_native_calls=0,sprite_native_success=0,sprite_native_ns=0;
@@ -65,6 +69,14 @@ struct profile_sample {
     native_model_ns+=o.native_model_ns;
     native_mesh_ns+=o.native_mesh_ns;
     native_face_ns+=o.native_face_ns;
+    native_model_hook_ns+=o.native_model_hook_ns;
+    native_model_engine_ns+=o.native_model_engine_ns;
+    native_model_engine_self_ns+=o.native_model_engine_self_ns;
+    native_mesh_queue_ns+=o.native_mesh_queue_ns;
+    native_mesh_native_ns+=o.native_mesh_native_ns;
+    native_mesh_decal_ns+=o.native_mesh_decal_ns;
+    native_mesh_gpu_calls+=o.native_mesh_gpu_calls;
+    native_mesh_native_calls+=o.native_mesh_native_calls;
     for(size_t i=0;i<sprite_type_calls.size();++i)
       sprite_type_calls[i]+=o.sprite_type_calls[i];
     sprite_other_type_calls+=o.sprite_other_type_calls;
