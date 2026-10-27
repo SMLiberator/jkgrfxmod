@@ -874,6 +874,17 @@ namespace jkgm {
                          " material_resolves_avg=",profile_window.gpu_material_resolves/frames,
                          " uploads_total=",profile_window.gpu_uploads,
                          " NOTE=CPU_submission_not_GPU_time");
+                LOG_INFO("PERF gpu_3do visible_breakdown_us opaque_collect=",
+                         profile_window.gpu_preview_collect_us[0]/frames,
+                         " opaque_sort=",profile_window.gpu_preview_sort_us[0]/frames,
+                         " opaque_submit=",profile_window.gpu_preview_submit_us[0]/frames,
+                         " alpha_collect=",profile_window.gpu_preview_collect_us[1]/frames,
+                         " alpha_sort=",profile_window.gpu_preview_sort_us[1]/frames,
+                         " alpha_submit=",profile_window.gpu_preview_submit_us[1]/frames,
+                         " calls_opaque_alpha=",
+                         profile_window.gpu_preview_calls[0]/frames,"/",
+                         profile_window.gpu_preview_calls[1]/frames,
+                         " NOTE=setup_and_gl_state_restoration_in_total_not_substages");
                 LOG_INFO("PERF gpu_3do batch GL_calls_avg=",
                          profile_window.gpu_draw_calls/frames,
                          " source_ranges_avg=",
@@ -2843,8 +2854,11 @@ namespace jkgm {
                std::none_of(instances.begin(),instances.end(),
                    [](gpu_3do_instance const &inst){return inst.is_projected_decal;}))
                 return;
-            profile_scope gpu_profiler(the_config->profile_renderer,
+            bool const gpu_profiling=the_config->profile_renderer;
+            profile_scope gpu_profiler(gpu_profiling,
                                        profile_frame.gpu_preview_cpu_us);
+            size_t const pass_index=transparent?1U:0U;
+            if(gpu_profiling)++profile_frame.gpu_preview_calls[pass_index];
             auto const cam=read_active_render_camera();
             if(!cam.valid) return;
             gpu_3do_matrix34 native_view{};
@@ -2964,10 +2978,18 @@ namespace jkgm {
                 float depth;
                 size_t order;
             };
-            std::vector<pending_draw> draws;
+            // Reuse pass-local CPU workspaces. Busy JkGR scenes may have
+            // thousands of ranges in both opaque and alpha passes, so
+            // rebuilding these vectors every frame only adds allocator work.
+            // They are consumed entirely in this non-recursive draw call.
+            static thread_local std::vector<pending_draw> draws;
+            static thread_local std::vector<gpu_3do_matrix34> modelviews;
+            draws.clear();
+            modelviews.clear();
             // Keep composed matrices stable across sorting and draw submission.
-            std::vector<gpu_3do_matrix34> modelviews;
             modelviews.reserve(instances.size());
+            auto const collect_begin=gpu_profiling
+                ?profile_clock::now():profile_clock::time_point{};
             for(auto const &inst:instances) {
                 if(!inst.geometry || inst.shadow_only ||
                    (!post_exempt && inst.is_projected_decal!=decals_only))
@@ -3060,6 +3082,11 @@ namespace jkgm {
                                      depth,draws.size()});
                 }
             }
+            if(gpu_profiling)
+                profile_frame.gpu_preview_collect_us[pass_index]+=
+                    elapsed_profile_us(collect_begin,profile_clock::now());
+            auto const sort_begin=gpu_profiling
+                ?profile_clock::now():profile_clock::time_point{};
             if(!transparent) {
                 // Opaque GPU 3DO draw ranges have no painter-order dependency.
                 // Native JK batches faces by material before D3D submission;
@@ -3097,13 +3124,18 @@ namespace jkgm {
                         return a.depth>b.depth; // back to front
                     });
             }
+            if(gpu_profiling)
+                profile_frame.gpu_preview_sort_us[pass_index]+=
+                    elapsed_profile_us(sort_begin,profile_clock::now());
             gpu_3do_instance const *active_instance=nullptr;
             bool prev_specular_active=false;
             bool prev_albedo_transition=false;
             bool prev_advanced_material=false;
             bool prev_parallax=false;
-            std::vector<GLsizei> multidraw_counts;
-            std::vector<void const *> multidraw_offsets;
+            static thread_local std::vector<GLsizei> multidraw_counts;
+            static thread_local std::vector<void const *> multidraw_offsets;
+            auto const submit_begin=gpu_profiling
+                ?profile_clock::now():profile_clock::time_point{};
             for(size_t draw_start=0;draw_start<draws.size();) {
                 auto const &draw=draws[draw_start];
                 auto const &inst=*draw.instance;
@@ -3360,6 +3392,9 @@ namespace jkgm {
                 }
                 draw_start=draw_end;
             }
+            if(gpu_profiling)
+                profile_frame.gpu_preview_submit_us[pass_index]+=
+                    elapsed_profile_us(submit_begin,profile_clock::now());
             // The transparency pass's following JK batches assume normal
             // premultiplied alpha blending, unit 0 and disabled face culling.
             gl::disable(gl::capability::cull_face);
