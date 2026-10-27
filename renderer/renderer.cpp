@@ -5845,7 +5845,9 @@ namespace jkgm {
         bool shadow_matches_light(spotlight_instance const &spot) const
         {
             if(!spotlight_shadow_ready ||
-               spot.material!=spotlight_shadow_light.material)return false;
+               spot.material!=spotlight_shadow_light.material ||
+               spot.shadow_owner!=spotlight_shadow_light.shadow_owner)
+                return false;
             auto same=[](std::array<float,3> const &a,
                          std::array<float,3> const &b) {
                 for(int i=0;i<3;++i)
