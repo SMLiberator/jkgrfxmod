@@ -19,6 +19,9 @@ struct sun_shadow_gpu {
     gl::framebuffer static_fbo,static_far_fbo;
     gl::texture static_depth,static_far_depth;
     bool static_complete=false;
+    gl::framebuffer scroll_fbo,scroll_far_fbo;
+    gl::texture scroll_depth,scroll_far_depth;
+    bool scroll_complete=false;
     gl::vertex_array vao;
     gl::buffer vertices,indices;
     decal_world_geometry world{};
@@ -29,7 +32,7 @@ struct sun_shadow_gpu {
     uintptr_t loaded_world=0;
     uint64_t revision=0;
 
-    explicit sun_shadow_gpu(unsigned pixels=512U)
+    explicit sun_shadow_gpu(unsigned pixels=512U,bool scrolling=false)
     {
         resolution=std::max(64U,std::min(pixels,4096U));
         gl::set_active_texture_unit(0);
@@ -131,6 +134,14 @@ struct sun_shadow_gpu {
         static_complete=static_complete && far_static_ok;
         if(!static_complete)
             LOG_WARNING("Sun world depth layer cache unavailable; full cascade fallback");
+        if(scrolling) {
+            bool const scroll_near=setup_static(scroll_fbo,scroll_depth);
+            bool const scroll_far=setup_static(scroll_far_fbo,scroll_far_depth);
+            scroll_complete=scroll_near && scroll_far && resolution>=256U &&
+                (resolution%16U)==0U;
+            if(!scroll_complete)
+                LOG_WARNING("Sun scrolling depth atlas incomplete or resolution is not divisible by 16");
+        }
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                              gl::default_framebuffer);
         gl::bind_vertex_array(vao);

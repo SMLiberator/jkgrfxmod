@@ -56,6 +56,7 @@ namespace jkgm {
         bool enable_sun_shadows = false;
         bool enable_sun_static_cache = true; // world-only depth layers, independently cached per cascade // directional sunlight + world shadow map
         bool sun_shadow_stable_projection_cache = false; // opt-in reuse while camera frustum stays inside map
+        bool enable_sun_scrolling_shadows = false; // experimental 3DO-only static tiled atlas, fallback while warming
         bool enable_sun_dynamic_shadows = false; // eight-Thing atlas
         bool sun_shadow_cull_back_faces = false; // 3DO sunlight: back-face culling is opt-in
         bool sun_shadow_cull_front_faces = true; // 3DO sunlight: front-face culling by default

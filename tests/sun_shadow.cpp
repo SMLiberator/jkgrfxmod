@@ -70,6 +70,29 @@ int main()
         std::numeric_limits<double>::quiet_NaN(),0.0,0.0,0.0);
     assert(bad_bounds.size()==256);
     assert(grid.pending_tiles().size()==256);
+    // Depth atlas reconstruction: no tile wrap may reinterpret an unrelated
+    // physical slot, and the destination region remains wholly covered.
+    sun_shadow_scroll_grid reconstruct(16);
+    assert(reconstruct.update(0.0,0.0,2.0,1).size()==256);
+    for(auto const &tile:reconstruct.pending_tiles())
+        assert(reconstruct.mark_rendered(tile));
+    auto blits=sun_shadow_scroll_blits(reconstruct,-4.0,-4.0,8.0,8.0,512);
+    assert(blits.size()==16);
+    int area=0;
+    for(auto const &blit:blits) {
+        assert(blit.source_x0>=0 && blit.source_x1<=512);
+        assert(blit.source_y0>=0 && blit.source_y1<=512);
+        area+=(blit.target_x1-blit.target_x0)*
+              (blit.target_y1-blit.target_y0);
+    }
+    assert(area==512*512);
+    reconstruct.update(2.1,0.0,2.0,1);
+    for(auto const &tile:reconstruct.pending_tiles())
+        assert(reconstruct.mark_rendered(tile));
+    blits=sun_shadow_scroll_blits(reconstruct,-2.0,-4.0,8.0,8.0,512);
+    assert(blits.size()==16);
+    assert(sun_shadow_scroll_blits(reconstruct,-50.0,-4.0,8.0,8.0,512).empty());
+    assert(sun_shadow_scroll_blits(reconstruct,-2.0,-4.0,8.0,8.0,500).empty());
     std::unordered_set<uint64_t> owners{0x1111222233334444ULL};
     assert(!sun_shadow_caster_in_static_cascades(
         0x1111222233334444ULL,owners));

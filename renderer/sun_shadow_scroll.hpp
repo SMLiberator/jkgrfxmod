@@ -192,4 +192,70 @@ struct sun_shadow_scroll_grid {
     }
 };
 
+// Reconstruct a conventional, camera-fitted depth image from circular
+// sunlight depth tiles. The read blits can be scaled (GL_NEAREST); depth
+// values remain comparable because all tiles have the same light-space Z.
+// This is the first GPU implementation; direct tiled shader sampling will
+// eventually eliminate these full-resolution depth reconstructions.
+struct sun_shadow_scroll_blit {
+    int source_x0=0,source_y0=0,source_x1=0,source_y1=0;
+    int target_x0=0,target_y0=0,target_x1=0,target_y1=0;
+};
+
+inline std::vector<sun_shadow_scroll_blit> sun_shadow_scroll_blits(
+    sun_shadow_scroll_grid const &grid,
+    double view_min_x,double view_min_y,double view_width,double view_height,
+    int resolution)
+{
+    std::vector<sun_shadow_scroll_blit> result;
+    if(!grid.valid || grid.count<2 || resolution<grid.count ||
+       resolution%grid.count!=0 || !(view_width>0.0) ||
+       !(view_height>0.0) || !(grid.tile_units>0.0) ||
+       !std::isfinite(view_min_x) || !std::isfinite(view_min_y) ||
+       !std::isfinite(view_width) || !std::isfinite(view_height))
+        return result;
+    double const units=grid.tile_units;
+    double const x0=double(grid.origin_x)*units;
+    double const y0=double(grid.origin_y)*units;
+    double const x1=x0+double(grid.count)*units;
+    double const y1=y0+double(grid.count)*units;
+    // A missing portion of the depth image must not be silently treated as
+    // sunlight. Fall back to the legacy complete cascade in that case.
+    double const eps=units*1.0e-5;
+    if(view_min_x<x0-eps || view_min_y<y0-eps ||
+       view_min_x+view_width>x1+eps ||
+       view_min_y+view_height>y1+eps)return result;
+    int const tile_pixels=resolution/grid.count;
+    auto coord=[](double fraction,int dimension) {
+        return std::max(0,std::min(dimension,
+            int(std::lround(fraction*double(dimension)))));
+    };
+    for(int row=grid.origin_y;row<grid.origin_y+grid.count;++row)
+        for(int col=grid.origin_x;col<grid.origin_x+grid.count;++col) {
+            double const min_x=std::max(view_min_x,double(col)*units);
+            double const min_y=std::max(view_min_y,double(row)*units);
+            double const max_x=std::min(view_min_x+view_width,
+                                        double(col+1)*units);
+            double const max_y=std::min(view_min_y+view_height,
+                                        double(row+1)*units);
+            if(!(max_x>min_x && max_y>min_y))continue;
+            auto const slot=grid.physical_slot(col,row);
+            int const dx0=coord((min_x-view_min_x)/view_width,resolution);
+            int const dy0=coord((min_y-view_min_y)/view_height,resolution);
+            int const dx1=coord((max_x-view_min_x)/view_width,resolution);
+            int const dy1=coord((max_y-view_min_y)/view_height,resolution);
+            int const sx0=slot.atlas_x*tile_pixels+
+                coord((min_x-double(col)*units)/units,tile_pixels);
+            int const sy0=slot.atlas_y*tile_pixels+
+                coord((min_y-double(row)*units)/units,tile_pixels);
+            int const sx1=slot.atlas_x*tile_pixels+
+                coord((max_x-double(col)*units)/units,tile_pixels);
+            int const sy1=slot.atlas_y*tile_pixels+
+                coord((max_y-double(row)*units)/units,tile_pixels);
+            if(dx1<=dx0 || dy1<=dy0 || sx1<=sx0 || sy1<=sy0)continue;
+            result.push_back({sx0,sy0,sx1,sy1,dx0,dy0,dx1,dy1});
+        }
+    return result;
+}
+
 } // namespace jkgm

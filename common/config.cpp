@@ -233,6 +233,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("sun_shadow_stable_projection_cache").get_to(
                 rv->sun_shadow_stable_projection_cache);
         }
+        if(j.contains("enable_sun_scrolling_shadows")) {
+            j.at("enable_sun_scrolling_shadows").get_to(
+                rv->enable_sun_scrolling_shadows);
+        }
         if(j.contains("enable_sun_dynamic_shadows")) {
             j.at("enable_sun_dynamic_shadows").get_to(rv->enable_sun_dynamic_shadows);
         }

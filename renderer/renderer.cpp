@@ -587,6 +587,13 @@ namespace jkgm {
         std::array<uint64_t,2> sun_shadow_revisions{};
         std::array<uint64_t,2> sun_shadow_caster_signatures{};
         std::array<bool,2> sun_shadow_static_cached{{false,false}};
+        std::array<sun_shadow_scroll_grid,2> sun_scroll_live{};
+        std::array<uint64_t,2> sun_scroll_live_signature{};
+        std::array<uintptr_t,2> sun_scroll_live_world{};
+        std::array<uint64_t,2> sun_scroll_live_revision{};
+        std::array<float,2> sun_scroll_live_z{},sun_scroll_live_range{};
+        std::array<bool,2> sun_scroll_working_active{{false,false}};
+        std::array<uint64_t,2> sun_scroll_tiles_rendered{{0,0}};
         // Non-rendering prototype: estimate partial tile updates before
         // changing the depth-map atlas and all forward/opaque samplers.
         std::array<sun_shadow_scroll_grid,2> sun_scroll_preview{};
@@ -936,6 +943,8 @@ namespace jkgm {
                 sun_shadow_cascade_ready={{false,false}};
                 sun_shadow_cascade_cached={{false,false}};
                 sun_shadow_static_cached={{false,false}};
+                for(auto &grid:sun_scroll_live)grid.invalidate();
+                sun_scroll_working_active={{false,false}};
                 for(auto &grid:sun_scroll_preview)grid.invalidate();
                 sun_scroll_preview_new_tiles={{0,0}};
                 sun_scroll_preview_frames={{0,0}};
@@ -4305,7 +4314,8 @@ namespace jkgm {
             };
             if(!sun_shadow_target)
                 sun_shadow_target=std::make_unique<sun_shadow_gpu>(
-                    the_config->sun_shadow_resolution);
+                    the_config->sun_shadow_resolution,
+                    the_config->enable_sun_scrolling_shadows);
             auto &map=*sun_shadow_target;
             if(!map.update_world(safe_read,world)) {
                 sun_failure("SithWorld shadow snapshot failed");
@@ -4547,7 +4557,8 @@ namespace jkgm {
             auto const bounds=world_bounds;
             struct sun_model_draw {gpu_3do_instance const *instance;
                                    gpu_3do_group const *group;
-                                   gpu_3do_texture texture;bool cutout;};
+                                   gpu_3do_texture texture;bool cutout;
+                                   decal_volume_aabb bounds;};
             std::vector<sun_model_draw> models,static_models;
             // The expensive group-box transforms were computed once before
             // fitting the sun projection; both cascades use those exact AABBs.
@@ -4583,7 +4594,7 @@ namespace jkgm {
                     instance.shadow_owner,instance.dynamic_sun_caster,
                     the_config->enable_sun_static_cache,map.static_complete);
                 (stable?static_models:models).push_back(
-                    {&instance,&group,tex,cutout});
+                    {&instance,&group,tex,cutout,prepared.bounds});
                 auto hash_model=[&](auto &&integer,auto &&floating) {
                     integer(uint32_t(instance.id));
                     integer(uint32_t(instance.id>>32));
@@ -4616,6 +4627,49 @@ namespace jkgm {
                          " backfacing_world=",world_backfacing,
                          " material_skipped_world=",world_material_skipped,
                          " two_sided_world=1");
+            // First working GPU tile mode: static 3DO casters only. Native
+            // world polygons deliberately retain the proven old path until
+            // their material/GeoMode invalidation can be indexed per tile.
+            // Every tile shares a sun-aligned 24-bit depth axis. Projection
+            // never rotates with the camera, only the virtual tile window
+            // advances by whole world-space cells.
+            bool const scroll_possible=
+                the_config->enable_sun_scrolling_shadows &&
+                the_config->enable_sun_static_cache &&
+                map.scroll_complete && map.static_complete &&
+                map.world.receivers.empty();
+            std::vector<sun_shadow_scroll_blit> scroll_blits;
+            if(scroll_possible) {
+                auto &grid=sun_scroll_live[cascade];
+                float const start_z=decal_dot(world_view.origin,world_view.forward);
+                if(sun_scroll_live_world[cascade]!=world ||
+                   sun_scroll_live_revision[cascade]!=map.revision ||
+                   sun_scroll_live_signature[cascade]!=static_signature ||
+                   std::fabs(sun_scroll_live_z[cascade]-start_z)>0.0001f ||
+                   std::fabs(sun_scroll_live_range[cascade]-world_view.range)>0.0001f)
+                    grid.invalidate();
+                sun_scroll_live_world[cascade]=world;
+                sun_scroll_live_revision[cascade]=map.revision;
+                sun_scroll_live_signature[cascade]=static_signature;
+                sun_scroll_live_z[cascade]=start_z;
+                sun_scroll_live_range[cascade]=world_view.range;
+                // A rotation-independent square encloses the camera frustum
+                // plus two guard columns. Use identical units for every
+                // physical slot in the circular depth texture.
+                double const radius=double(distance)*std::sqrt(
+                    1.0+double(horizontal)*horizontal+
+                    double(vertical)*vertical);
+                double const units=std::max(2.0,(2.0*radius+4.0)/12.0);
+                grid.update(decal_dot(camera.position,world_view.right),
+                            decal_dot(camera.position,world_view.up),
+                            units,1U);
+                scroll_blits=sun_shadow_scroll_blits(grid,
+                    decal_dot(view.origin,view.right),
+                    decal_dot(view.origin,view.up),view.width,view.height,
+                    int(map.resolution));
+            }
+            bool const will_scroll=scroll_possible && !scroll_blits.empty() &&
+                sun_scroll_live[cascade].pending_tiles(17).size()<=16;
             bool unchanged=sun_shadow_cascade_cached[cascade] &&
                 sun_shadow_worlds[cascade]==world &&
                 sun_shadow_revisions[cascade]==map.revision &&
@@ -4626,6 +4680,13 @@ namespace jkgm {
                 sun_shadow_same_projection(view,sun_shadow_views[cascade]);
             for(int i=0;i<3 && unchanged;++i)
                 unchanged=std::fabs(direction[i]-sun_shadow_directions[cascade][i])<1.0e-5f;
+            // Never skip tile warmup or a transition between classic and
+            // reconstructed working maps, even if legacy caster signatures
+            // and camera projection happen to match.
+            if(scroll_possible)
+                unchanged=unchanged &&
+                    will_scroll && sun_scroll_working_active[cascade] &&
+                    sun_scroll_live[cascade].pending_tiles().empty();
             if(unchanged) {
                 if(the_config->profile_renderer)
                     ++sun_profile_full_hits[cascade];
@@ -4648,6 +4709,7 @@ namespace jkgm {
             for(int i=0;i<3 && static_same;++i)
                 static_same=std::fabs(direction[i]-
                     sun_shadow_static_directions[cascade][i])<1.0e-5f;
+            if(will_scroll)static_same=true;
             if(the_config->profile_renderer) {
                 ++sun_profile_working_redraws[cascade];
                 if(static_same) ++sun_profile_static_hits[cascade];
@@ -4745,6 +4807,91 @@ namespace jkgm {
                             group.offset*sizeof(uint32_t)));
                 }
             };
+            // Populate only the pending PHYSICAL circular slots. A partial
+            // warmup never affects the visible working map: the conventional
+            // cascade remains in service until all required tiles are valid.
+            bool use_scroll=false;
+            if(scroll_possible && !scroll_blits.empty()) {
+                auto &grid=sun_scroll_live[cascade];
+                auto const &scroll_target=cascade==0
+                    ?map.scroll_fbo:map.scroll_far_fbo;
+                auto const tile_pixels=int(map.resolution)/grid.count;
+                auto const pending=grid.pending_tiles(16);
+                gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                     scroll_target);
+                glEnable(GL_SCISSOR_TEST);
+                std::vector<sun_model_draw> tile_models;
+                tile_models.reserve(static_models.size());
+                float const start_z=sun_scroll_live_z[cascade];
+                for(auto const &tile:pending) {
+                    int const x=tile.atlas_x*tile_pixels;
+                    int const y=tile.atlas_y*tile_pixels;
+                    glScissor(x,y,tile_pixels,tile_pixels);
+                    gl::set_viewport(make_box(make_point(x,y),
+                        make_size(tile_pixels,tile_pixels)));
+                    gl::clear_buffer_depth(1.0f);
+                    float const light_x=float(double(tile.world_x)*grid.tile_units);
+                    float const light_y=float(double(tile.world_y)*grid.tile_units);
+                    float const tile_extent=float(grid.tile_units);
+                    sun_shadow_projection tile_view=world_view;
+                    tile_view.width=tile_extent;
+                    tile_view.height=tile_extent;
+                    for(int axis=0;axis<3;++axis)
+                        tile_view.origin[axis]=
+                            tile_view.right[axis]*light_x+
+                            tile_view.up[axis]*light_y+
+                            tile_view.forward[axis]*start_z;
+                    prog.set_orthographic_light(vec(tile_view.origin),
+                        vec(tile_view.right),vec(tile_view.up),
+                        vec(tile_view.forward),
+                        make_point(tile_view.width,tile_view.height,
+                                   tile_view.range,0.0f));
+                    tile_models.clear();
+                    // Skip groups whose static transformed AABBs cannot
+                    // intersect this light-space ray column, including
+                    // geometry physically behind or above the receiver.
+                    float const guard=2.0f*tile_extent/float(tile_pixels);
+                    for(auto const &draw:static_models) {
+                        float min_x=std::numeric_limits<float>::max();
+                        float min_y=min_x,max_x=-min_x,max_y=-min_y;
+                        for(int corner=0;corner<8;++corner) {
+                            decal_vec3 q{{
+                                (corner&1)?draw.bounds.high[0]:draw.bounds.low[0],
+                                (corner&2)?draw.bounds.high[1]:draw.bounds.low[1],
+                                (corner&4)?draw.bounds.high[2]:draw.bounds.low[2]}};
+                            float const u=decal_dot(q,world_view.right);
+                            float const v=decal_dot(q,world_view.up);
+                            min_x=std::min(min_x,u);max_x=std::max(max_x,u);
+                            min_y=std::min(min_y,v);max_y=std::max(max_y,v);
+                        }
+                        if(max_x<light_x-guard || min_x>light_x+tile_extent+guard ||
+                           max_y<light_y-guard || min_y>light_y+tile_extent+guard)
+                            continue;
+                        tile_models.push_back(draw);
+                    }
+                    draw_models(tile_models);
+                    grid.mark_rendered(tile);
+                    ++sun_scroll_tiles_rendered[cascade];
+                }
+                glDisable(GL_SCISSOR_TEST);
+                gl::set_viewport(make_box(make_point(0,0),dimensions));
+                prog.set_orthographic_light(vec(view.origin),vec(view.right),
+                    vec(view.up),vec(view.forward),
+                    make_point(view.width,view.height,view.range,0.0f));
+                // No static depth from an incompletely populated atlas can
+                // reach the lighting shaders. Revert to exact legacy pass.
+                use_scroll=grid.pending_tiles(1).empty();
+            }
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U &&
+               scroll_possible) {
+                LOG_INFO("SUN scroll GPU cascade=",cascade,
+                    " tiles_rendered_window=",sun_scroll_tiles_rendered[cascade],
+                    " pending=",sun_scroll_live[cascade].pending_tiles().size(),
+                    " active=",use_scroll?1:0,
+                    " NOTE=static tiles; camera working-map depth blits remain");
+                sun_scroll_tiles_rendered[cascade]=0;
+            }
             if(!static_same) {
                 draw_models(static_models);
                 if(map.static_complete &&
@@ -4757,7 +4904,32 @@ namespace jkgm {
                     sun_shadow_static_directions[cascade]=direction;
                 }
             }
-            if(map.static_complete &&
+            if(use_scroll) {
+                // The existing receiver shaders still expect a conventional
+                // camera-fitted near/far depth map. Depth-only GPU blits
+                // reconstruct it from the circular static atlas (GL_NEAREST),
+                // then dynamic 3DOs draw directly into this working texture.
+                gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                     cascade_target);
+                gl::clear_buffer_depth(1.0f);
+                auto const &scroll_target=cascade==0
+                    ?map.scroll_fbo:map.scroll_far_fbo;
+                gl::bind_framebuffer(gl::framebuffer_bind_target::read,
+                                     scroll_target);
+                gl::bind_framebuffer(gl::framebuffer_bind_target::draw,
+                                     cascade_target);
+                for(auto const &part:scroll_blits) {
+                    gl::blit_framebuffer(
+                        make_box(make_point(part.source_x0,part.source_y0),
+                            make_size(part.source_x1-part.source_x0,
+                                      part.source_y1-part.source_y0)),
+                        make_box(make_point(part.target_x0,part.target_y0),
+                            make_size(part.target_x1-part.target_x0,
+                                      part.target_y1-part.target_y0)),
+                        {gl::framebuffer_blit_buffer::depth},
+                        gl::framebuffer_blit_filter::nearest);
+                }
+            } else if(map.static_complete &&
                the_config->enable_sun_static_cache) {
                 // Copy the static depth on GPU (no readback) and depth-test
                 // current 3DOs against it. Even dynamic Thing updates no
@@ -4792,6 +4964,7 @@ namespace jkgm {
             sun_shadow_revisions[cascade]=map.revision;
             sun_shadow_cascade_cached[cascade]=true;
             sun_shadow_caster_signatures[cascade]=caster_signature;
+            sun_scroll_working_active[cascade]=use_scroll;
             sun_shadow_cascade_ready[cascade]=true;
             } // cascade
             sun_shadow_ready=sun_shadow_cascade_ready[0] &&
