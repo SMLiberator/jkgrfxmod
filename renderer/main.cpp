@@ -2281,14 +2281,11 @@ namespace {
         jkgm::gpu_3do_matrix34 transform{};
         std::memcpy(transform.data(),placement,sizeof(transform));
         if(!jkgm::gpu_3do_matrix_finite(transform))return;
-        native_mesh source{};
-        std::memcpy(&source,mesh,sizeof(source));
-        if(source.num_faces<1 || source.num_faces>8192 ||
-           source.num_vertices<3 || source.num_vertices>65536 ||
-           !gpu_span_readable(source.vertices,
-                     size_t(source.num_vertices)*3U*sizeof(float)) ||
-           !gpu_span_readable(source.faces,
-                     size_t(source.num_faces)*sizeof(native_face)))return;
+        // Static architecture normally keeps the same Thing, mesh and
+        // transform for thousands of frames. Check the receiver cache
+        // BEFORE traversing its vertex/face memory. In a cache hit these
+        // expensive VirtualQuery validations and buffer reads are redundant.
+        // The existing world/signature/transform checks are unchanged.
         uint64_t const key=(uint64_t(owner)<<32) |
             uint32_t(reinterpret_cast<uintptr_t>(mesh));
         auto existing=sprite_static_meshes.find(key);
@@ -2298,6 +2295,14 @@ namespace {
            existing->second.transform==transform)return;
         if(existing==sprite_static_meshes.end() &&
            sprite_static_meshes.size()>=4096U)return;
+        native_mesh source{};
+        std::memcpy(&source,mesh,sizeof(source));
+        if(source.num_faces<1 || source.num_faces>8192 ||
+           source.num_vertices<3 || source.num_vertices>65536 ||
+           !gpu_span_readable(source.vertices,
+                     size_t(source.num_vertices)*3U*sizeof(float)) ||
+           !gpu_span_readable(source.faces,
+                     size_t(source.num_faces)*sizeof(native_face)))return;
         static_sprite_decal_mesh updated{};
         updated.world=world;
         updated.signature=signature;
