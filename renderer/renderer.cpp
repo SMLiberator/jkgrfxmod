@@ -3609,7 +3609,8 @@ namespace jkgm {
                 make_point(rgb[0],rgb[1],rgb[2],intensity),
                 the_config->sun_shadow_near_distance,
                 the_config->sun_shadow_receiver_bias_scale,
-                the_config->sun_dynamic_shadow_distance_softness);
+                the_config->sun_dynamic_shadow_distance_softness,
+                the_config->sun_max_distance);
             auto set_projection=[&](int slot,sun_shadow_projection const &p,
                                     point<4,float> rect,float caster_end=0.0f) {
                 auto row=[&](decal_vec3 const &axis,float size) {
@@ -4439,7 +4440,10 @@ namespace jkgm {
             for(int cascade=0;cascade<2;++cascade) {
             sun_shadow_projection view=world_view;
             float const distance=cascade==0
-                ? the_config->sun_shadow_near_distance : the_config->sun_shadow_far_distance;
+                ? the_config->sun_shadow_near_distance
+                : sun_shadow_effective_far_distance(
+                      the_config->sun_shadow_far_distance,
+                      the_config->sun_max_distance);
             if(the_config->profile_renderer) {
                 // A rotation-invariant square around the player's origin.
                 // Reserve two tile columns as guards so the view remains
@@ -4534,13 +4538,34 @@ namespace jkgm {
             for(float v:direction)hash_float(v);
             // Read live geomodes and MAT coverage each frame. COG changes to
             // a surface therefore invalidate the cached depth image.
+            //
+            // engine_material_debug::read_object() performs a VirtualQuery()
+            // system call for every read. In an open level thousands of
+            // surfaces are selected, and this loop runs once per cascade per
+            // frame with two reads per surface. Validate the native surface
+            // table as ONE block per frame, then read the two fields directly.
+            // If the table cannot be validated as a single readable block the
+            // original per-read checked path is used unchanged.
+            bool const surface_table_ok=map.world.surfaces_addr!=0U &&
+                map.world.surface_count>0U &&
+                engine_camera_detail::readable(map.world.surfaces_addr,
+                    size_t(map.world.surface_count)*0x5cU);
+            auto read_surface_field=[&](uint32_t surface_index,
+                                        uintptr_t field_offset,auto &out) {
+                uintptr_t const address=map.world.surfaces_addr+
+                    uintptr_t(surface_index)*0x5cU+field_offset;
+                if(surface_table_ok && surface_index<map.world.surface_count) {
+                    std::memcpy(&out,reinterpret_cast<void const *>(address),
+                                sizeof(out));
+                    return true;
+                }
+                return engine_material_debug::read_object(address,out);
+            };
             for(auto const &range:map.selected) {
                 if(range.source_index>=map.world.receivers.size())continue;
                 auto const &surface=map.world.receivers[range.source_index];
                 uint32_t geomode=0;
-                uintptr_t const address=map.world.surfaces_addr+
-                    uintptr_t(surface.surface_index)*0x5cU;
-                engine_material_debug::read_object(address+0x1cU,geomode);
+                read_surface_field(surface.surface_index,0x1cU,geomode);
                 hash_u32(surface.surface_index);hash_u32(geomode);
                 if(geomode<2U || !decal_finite(surface.normal)) {
                     ++world_hidden;
@@ -4549,7 +4574,7 @@ namespace jkgm {
                 gpu_3do_group group{};group.material=surface.material;
                 group.cel=surface.cel;
                 int32_t cel=group.cel;
-                engine_material_debug::read_object(address+0x38U,cel);
+                read_surface_field(surface.surface_index,0x38U,cel);
                 group.cel=cel;
                 uint64_t const key=(uint64_t(surface.material)<<32)|uint32_t(cel);
                 auto found=gpu_frame_material_cache.find(key);
@@ -5307,6 +5332,7 @@ namespace jkgm {
                 the_config->sun_shadow_far_soft_filter);
             prog.set_sun_shadow_receiver_bias_scale(
                 the_config->sun_shadow_receiver_bias_scale);
+            prog.set_sun_max_distance(the_config->sun_max_distance);
             prog.set_spotlight_shadow(-1,0.0f,0.0f);
             prog.set_sun_shadow(false,false,make_point(0.0f,0.0f,1.0f),
                 make_point(0.0f,0.0f,0.0f,0.0f),

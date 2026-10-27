@@ -1,7 +1,9 @@
 #include "triangle_batch.hpp"
 #include "base/log.hpp"
 #include "triangle_sort_budget.hpp"
+#include <algorithm>
 #include <cmath>
+#include <utility>
 
 jkgm::triangle_vertex::triangle_vertex()
     : pos(point<4, float>::zero())
@@ -102,6 +104,19 @@ namespace jkgm {
                    (finite_w(get<w>(tri.v2.pos)) / 3.0f);
         }
 
+        // Three-way split by num_sup (-1, 0, +1) in two linear passes.
+        // Replaces a full comparison std::sort of ~240-byte triangles that
+        // was run once per recursion level only to separate three groups.
+        template <class ItT>
+        std::pair<ItT,ItT> partition_by_num_sup(ItT it_begin, ItT it_end)
+        {
+            auto const split_it = std::partition(it_begin, it_end,
+                [](auto const &t) { return t.num_sup < 0; });
+            auto const split_jt = std::partition(split_it, it_end,
+                [](auto const &t) { return t.num_sup == 0; });
+            return {split_it, split_jt};
+        }
+
         template <class ItT>
         bool guard_sort(ItT begin,ItT end,triangle_sort_budget &budget,
                         unsigned depth,unsigned stalled)
@@ -171,24 +186,9 @@ namespace jkgm {
                 }
             }
 
-            std::sort(it_begin, it_end, [](auto const &a, auto const &b) {
-                return a.num_sup < b.num_sup;
-            });
-
-            // Process each partition in order
-            auto split_it = it_begin;
-            for(; split_it != it_end; ++split_it) {
-                if(split_it->num_sup != -1) {
-                    break;
-                }
-            }
-
-            auto split_jt = split_it;
-            for(; split_jt != it_end; ++split_jt) {
-                if(split_jt->num_sup != 0) {
-                    break;
-                }
-            }
+            auto const splits = partition_by_num_sup(it_begin, it_end);
+            auto const split_it = splits.first;
+            auto const split_jt = splits.second;
 
             int segs_remaining = ((it_begin != split_it) ? 1 : 0) +
                                  ((split_it != split_jt) ? 1 : 0) + ((split_jt != it_end) ? 1 : 0);
@@ -246,24 +246,9 @@ namespace jkgm {
                 }
             }
 
-            std::sort(it_begin, it_end, [](auto const &a, auto const &b) {
-                return a.num_sup < b.num_sup;
-            });
-
-            // Process each partition in order
-            auto split_it = it_begin;
-            for(; split_it != it_end; ++split_it) {
-                if(split_it->num_sup != -1) {
-                    break;
-                }
-            }
-
-            auto split_jt = split_it;
-            for(; split_jt != it_end; ++split_jt) {
-                if(split_jt->num_sup != 0) {
-                    break;
-                }
-            }
+            auto const splits = partition_by_num_sup(it_begin, it_end);
+            auto const split_it = splits.first;
+            auto const split_jt = splits.second;
 
             int segs_remaining = ((it_begin != split_it) ? 1 : 0) +
                                  ((split_it != split_jt) ? 1 : 0) + ((split_jt != it_end) ? 1 : 0);
@@ -330,23 +315,9 @@ namespace jkgm {
                 }
             }
 
-            std::sort(it_begin, it_end, [](auto const &a, auto const &b) {
-                return a.num_sup < b.num_sup;
-            });
-
-            auto split_it = it_begin;
-            for(; split_it != it_end; ++split_it) {
-                if(split_it->num_sup != -1) {
-                    break;
-                }
-            }
-
-            auto split_jt = split_it;
-            for(; split_jt != it_end; ++split_jt) {
-                if(split_jt->num_sup != 0) {
-                    break;
-                }
-            }
+            auto const splits = partition_by_num_sup(it_begin, it_end);
+            auto const split_it = splits.first;
+            auto const split_jt = splits.second;
 
             int segs_remaining = ((it_begin != split_it) ? 1 : 0) +
                                  ((split_it != split_jt) ? 1 : 0) + ((split_jt != it_end) ? 1 : 0);
