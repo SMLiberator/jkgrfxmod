@@ -1465,6 +1465,12 @@ namespace jkgm {
             last_matlink_scan = now;
 
             auto const snapshot = engine_material_debug::scan();
+            if(the_config->profile_renderer && snapshot.supported_build)
+                LOG_INFO("PERF native_MAT_table_scan region_cache_hits=",
+                         snapshot.region_cache_hits,
+                         " VirtualQuery_calls=",snapshot.region_queries,
+                         " materials_valid=",snapshot.visited_materials,
+                         " NOTE=scan_local_positive_regions_only");
             if(!snapshot.supported_build) {
                 if(!matlink_build_warning_logged) {
                     LOG_WARNING("JK MAT link diagnostic disabled: unknown engine build");
