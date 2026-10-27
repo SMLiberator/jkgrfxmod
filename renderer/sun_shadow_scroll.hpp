@@ -241,36 +241,61 @@ inline std::vector<sun_shadow_scroll_blit> sun_shadow_scroll_blits(
     if(view_min_x<x0-eps || view_min_y<y0-eps ||
        view_min_x+view_width>x1+eps ||
        view_min_y+view_height>y1+eps)return result;
-    int const tile_pixels=resolution/grid.count;
     auto coord=[](double fraction,int dimension) {
         return std::max(0,std::min(dimension,
             int(std::lround(fraction*double(dimension)))));
     };
-    for(int row=grid.origin_y;row<grid.origin_y+grid.count;++row)
-        for(int col=grid.origin_x;col<grid.origin_x+grid.count;++col) {
-            double const min_x=std::max(view_min_x,double(col)*units);
-            double const min_y=std::max(view_min_y,double(row)*units);
-            double const max_x=std::min(view_min_x+view_width,
-                                        double(col+1)*units);
-            double const max_y=std::min(view_min_y+view_height,
-                                        double(row+1)*units);
-            if(!(max_x>min_x && max_y>min_y))continue;
-            auto const slot=grid.physical_slot(col,row);
-            int const dx0=coord((min_x-view_min_x)/view_width,resolution);
-            int const dy0=coord((min_y-view_min_y)/view_height,resolution);
-            int const dx1=coord((max_x-view_min_x)/view_width,resolution);
-            int const dy1=coord((max_y-view_min_y)/view_height,resolution);
-            int const sx0=slot.atlas_x*tile_pixels+
-                coord((min_x-double(col)*units)/units,tile_pixels);
-            int const sy0=slot.atlas_y*tile_pixels+
-                coord((min_y-double(row)*units)/units,tile_pixels);
-            int const sx1=slot.atlas_x*tile_pixels+
-                coord((max_x-double(col)*units)/units,tile_pixels);
-            int const sy1=slot.atlas_y*tile_pixels+
-                coord((max_y-double(row)*units)/units,tile_pixels);
-            if(dx1<=dx0 || dy1<=dy0 || sx1<=sx0 || sy1<=sy0)continue;
-            result.push_back({sx0,sy0,sx1,sy1,dx0,dy0,dx1,dy1});
-        }
+    // All tiles form a continuous image in physical atlas memory except
+    // where the circular ring wraps. Split at most once along each axis:
+    // 1-4 depth blits, no matter how many virtual tiles overlap the camera.
+    struct axis_span {
+        double min_world=0.0,max_world=0.0;
+        int min_physical=0;
+    };
+    auto spans=[&](int logical_origin,int ring) {
+        std::vector<axis_span> spans_out;
+        int const before_wrap=grid.count-ring;
+        if(before_wrap>0)
+            spans_out.push_back({double(logical_origin)*units,
+                double(logical_origin+before_wrap)*units,
+                ring*(resolution/grid.count)});
+        if(ring>0)
+            spans_out.push_back({double(logical_origin+before_wrap)*units,
+                double(logical_origin+grid.count)*units,0});
+        return spans_out;
+    };
+    auto const xs=spans(grid.origin_x,grid.ring_x);
+    auto const ys=spans(grid.origin_y,grid.ring_y);
+    double const pixels_per_unit=double(resolution)/(double(grid.count)*units);
+    for(auto const &x:xs)for(auto const &y:ys) {
+        double const left=std::max(view_min_x,x.min_world);
+        double const right=std::min(view_min_x+view_width,x.max_world);
+        double const bottom=std::max(view_min_y,y.min_world);
+        double const top=std::min(view_min_y+view_height,y.max_world);
+        if(right<=left || top<=bottom)continue;
+        sun_shadow_scroll_blit part{};
+        part.source_x0=x.min_physical+
+            coord((left-x.min_world)*pixels_per_unit/double(resolution),
+                  resolution);
+        part.source_x1=x.min_physical+
+            coord((right-x.min_world)*pixels_per_unit/double(resolution),
+                  resolution);
+        part.source_y0=y.min_physical+
+            coord((bottom-y.min_world)*pixels_per_unit/double(resolution),
+                  resolution);
+        part.source_y1=y.min_physical+
+            coord((top-y.min_world)*pixels_per_unit/double(resolution),
+                  resolution);
+        part.target_x0=coord((left-view_min_x)/view_width,resolution);
+        part.target_x1=coord((right-view_min_x)/view_width,resolution);
+        part.target_y0=coord((bottom-view_min_y)/view_height,resolution);
+        part.target_y1=coord((top-view_min_y)/view_height,resolution);
+        if(part.source_x1<=part.source_x0 ||
+           part.source_y1<=part.source_y0 ||
+           part.target_x1<=part.target_x0 ||
+           part.target_y1<=part.target_y0)continue;
+        result.push_back(part);
+    }
     return result;
 }
 

@@ -81,7 +81,7 @@ int main()
     for(auto const &tile:reconstruct.pending_tiles())
         assert(reconstruct.mark_rendered(tile));
     auto blits=sun_shadow_scroll_blits(reconstruct,-4.0,-4.0,8.0,8.0,512);
-    assert(blits.size()==16);
+    assert(blits.size()>=1 && blits.size()<=4);
     int area=0;
     for(auto const &blit:blits) {
         assert(blit.source_x0>=0 && blit.source_x1<=512);
@@ -94,7 +94,14 @@ int main()
     for(auto const &tile:reconstruct.pending_tiles())
         assert(reconstruct.mark_rendered(tile));
     blits=sun_shadow_scroll_blits(reconstruct,-2.0,-4.0,8.0,8.0,512);
-    assert(blits.size()==16);
+    assert(blits.size()>=1 && blits.size()<=4);
+    // Cross BOTH wrap boundaries; the circular atlas must require exactly
+    // four physical regions, regardless of its 256 logical tiles.
+    reconstruct.update(2.1,2.1,2.0,1);
+    for(auto const &tile:reconstruct.pending_tiles())
+        assert(reconstruct.mark_rendered(tile));
+    blits=sun_shadow_scroll_blits(reconstruct,-4.0,-4.0,8.0,8.0,512);
+    assert(blits.size()==4);
     assert(sun_shadow_scroll_blits(reconstruct,-50.0,-4.0,8.0,8.0,512).empty());
     assert(sun_shadow_scroll_blits(reconstruct,-2.0,-4.0,8.0,8.0,500).empty());
     std::unordered_set<uint64_t> owners{0x1111222233334444ULL};
