@@ -832,7 +832,9 @@ namespace jkgm {
                          " geometry=",profile_window.gpu_geometry_native/frames,
                          " snapshot=",profile_window.gpu_snapshot_native/frames,
                          " material=",profile_window.gpu_material_native/frames,
-                         " lighting_or_camera=",profile_window.gpu_lighting_native/frames);
+                         " lighting_or_camera=",profile_window.gpu_lighting_native/frames,
+                         " empty_mesh_nodes=",profile_window.gpu_empty_mesh_native/frames,
+                         " NOTE=empty_nodes_do_not_generate_GPU_draws");
                 auto const &current_fog=get_fog_settings();
                 auto const fog_params=current_fog.info.value();
                 // The lightweight logger only formats integral values and
@@ -6602,6 +6604,7 @@ namespace jkgm {
                 profile_frame.gpu_ready_material_refs+=stats.ready_material_refs;
                 profile_frame.gpu_ready_ns+=stats.ready_ns;
                 profile_frame.gpu_ready_cache_hits+=stats.ready_cache_hits;
+                profile_frame.gpu_empty_mesh_native+=stats.empty_mesh_native;
                 profile_frame.gpu_text_native+=stats.text_native;
                 profile_frame.gpu_geometry_native+=stats.geometry_native;
                 profile_frame.gpu_snapshot_native+=stats.snapshot_native;
