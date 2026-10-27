@@ -181,6 +181,15 @@ namespace {
     thread_local uint32_t active_native_model_thing_flags=0U;
     thread_local uint64_t active_native_shadow_owner=0;
     thread_local bool active_native_shadow_dynamic=false;
+    // Pose-based shadow classification: moveType describes how a Thing CAN
+    // move, not whether it currently moves. Keep per-Thing poses independently
+    // of the currently selected rendering/cascade mode.
+    struct native_shadow_pose_state {
+        std::array<float,12> pose{};
+        uint64_t last_seen=0;
+        uint64_t last_moved=0;
+    };
+    std::unordered_map<uint64_t,native_shadow_pose_state> native_shadow_poses;
     native_mesh_func RealNativeMesh =
         reinterpret_cast<native_mesh_func>(native_mesh_addr);
     native_face_func RealNativeFace =
@@ -829,25 +838,80 @@ namespace {
                                    : std::chrono::steady_clock::time_point{};
         uint32_t flags=0;
         uint64_t owner_key=0;
-        bool moving=false;
-        if(the_config && the_config->enable_sun_shadows) {
+        bool moving=true; // Unverified owners cannot safely enter static cache.
+        bool const shadow_enabled=the_config &&
+            (the_config->enable_sun_shadows ||
+             (the_config->enable_spotlights &&
+              the_config->enable_spotlight_shadows));
+        if(shadow_enabled) {
             auto const read=[](uintptr_t address,void *dst,size_t n) {
                 if(!gpu_span_readable(reinterpret_cast<void const *>(address),n))
                     return false;
                 std::memcpy(dst,reinterpret_cast<void const *>(address),n);
                 return true;
             };
-            if(jkgm::read_native_model_thing_flags(
-                  read,reinterpret_cast<uintptr_t>(thing),flags) &&
-               the_config->enable_sun_dynamic_shadows) {
-                uint32_t owner=0,signature=0,move_type=0;
-                uintptr_t const rd=reinterpret_cast<uintptr_t>(thing);
+            uintptr_t const rd=reinterpret_cast<uintptr_t>(thing);
+            if(jkgm::read_native_model_thing_flags(read,rd,flags)) {
+                uint32_t owner=0,signature=0;
                 if(read(rd+0x44U,&owner,4) &&
-                   read(uintptr_t(owner)+0x74U,&signature,4) &&
-                   read(uintptr_t(owner)+0x10U,&move_type,4)) {
+                   read(uintptr_t(owner)+0x74U,&signature,4)) {
                     owner_key=(uint64_t(owner)<<32)|signature;
-                    // Native SithThing.moveType: 0=stationary, 1=physics, 2=path.
-                    moving=move_type!=0U;
+                    // Verified JK23 SithThing layout: orient +0x88, position
+                    // +0xb8, linked animation class +0x128, puppet +0x12c.
+                    // rdThing.puppet is +0x14 relative to embedded rdThing.
+                    std::array<uint8_t,0xa8> state{};
+                    if(read(uintptr_t(owner)+0x88U,
+                            state.data(),state.size())) {
+                        std::array<float,12> pose{};
+                        std::memcpy(pose.data(),state.data(),9*sizeof(float));
+                        std::memcpy(pose.data()+9,state.data()+0x30U,
+                                    3*sizeof(float));
+                        uint32_t animation_class=0,puppet=0,rd_puppet=0;
+                        std::memcpy(&animation_class,state.data()+0xa0U,4);
+                        std::memcpy(&puppet,state.data()+0xa4U,4);
+                        std::memcpy(&rd_puppet,state.data()+0x50U,4);
+                        bool finite=true;
+                        for(float v:pose)finite=finite && std::isfinite(v);
+                        if(finite) {
+                            auto const stamp=gpu_frame_serial;
+                            auto found=native_shadow_poses.find(owner_key);
+                            bool changed=false;
+                            if(found==native_shadow_poses.end()) {
+                                native_shadow_pose_state record{};
+                                record.pose=pose;
+                                record.last_seen=stamp;
+                                found=native_shadow_poses.emplace(
+                                    owner_key,std::move(record)).first;
+                            } else if(found->second.last_seen!=stamp) {
+                                for(size_t n=0;n<pose.size();++n)
+                                    if(std::fabs(found->second.pose[n]-pose[n])>
+                                       0.0001f) {
+                                        changed=true;
+                                        break;
+                                    }
+                                found->second.pose=pose;
+                                found->second.last_seen=stamp;
+                                if(changed)found->second.last_moved=stamp;
+                            }
+                            // A one-frame tail prevents rapidly changing
+                            // static/dynamic membership on tiny pose jitter.
+                            bool const recent_motion=changed ||
+                                (found->second.last_moved!=0 &&
+                                 stamp-found->second.last_moved<=1U);
+                            moving=animation_class!=0 || puppet!=0 ||
+                                   rd_puppet!=0 || recent_motion;
+                            // Bound long sessions with rapidly recycled Things.
+                            if((stamp%1024U)==0U &&
+                               native_shadow_poses.size()>4096) {
+                                for(auto it=native_shadow_poses.begin();
+                                    it!=native_shadow_poses.end();) {
+                                    if(stamp>it->second.last_seen+1024U)
+                                        it=native_shadow_poses.erase(it);
+                                    else ++it;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1021,11 +1085,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
         shadow_enabled;
     bool const casts_sun_shadows=jkgm::thing_casts_sun_shadows(
         active_native_model_thing_flags);
-    // Don't capture huge skybox meshes solely for the directional map.
-    // Spotlight shadows, when enabled, retain their existing behavior.
-    if(shadow_only && !casts_sun_shadows &&
-       !(the_config->enable_spotlights && the_config->enable_spotlight_shadows))
-        return false;
+    // Excluded/invisible Things never enter either shadow map; they still
+    // render normally through JK or the visible GPU 3DO path.
+    if(shadow_only && !casts_sun_shadows)return false;
     if(!the_config || (!the_config->use_model_cache && !shadow_only) ||
        !mesh || !matrix || pending_gpu_instances.size()>=16384 ||
        // Single VirtualQuery per candidate, including the optional RGB
@@ -1061,7 +1123,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     std::memcpy(&current_geo_mode,
                 reinterpret_cast<void const *>(effective_geo_mode),
                 sizeof(current_geo_mode));
-    if(!jkgm::gpu_3do_supports_geo_mode(current_geo_mode,m.geometry_mode)) {
+    if(!(shadow_only
+          ? jkgm::thing_shadow_geomode_visible(current_geo_mode,m.geometry_mode)
+          : jkgm::gpu_3do_supports_geo_mode(current_geo_mode,m.geometry_mode))) {
         if(the_config->profile_renderer) ++gpu_native_stats.geometry_native;
         gpu_log_fallback(m,"geometry_mode_not_full");
         return false; // Preserve JK vertex/wire/solid/invisible rendering.
