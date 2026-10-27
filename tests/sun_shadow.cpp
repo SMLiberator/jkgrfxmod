@@ -29,6 +29,21 @@ int main()
         sun_shadow_scroll_fixed_tile_units(40.0f),1);
     assert(strip.size()==16);
     assert(stable.pending_tiles().size()==16);
+    // No 256-tile warmup barrier: only cells inside the current projection
+    // (plus its filter guard) need depth before the atlas becomes usable.
+    sun_shadow_scroll_grid demand(16);
+    assert(demand.update(0.0,0.0,2.0,1).size()==256);
+    auto required=sun_shadow_scroll_visible_pending(
+        demand,-4.0,-4.0,8.0,8.0,17,0);
+    assert(required.size()==16);
+    for(auto const &tile:required)assert(demand.mark_rendered(tile));
+    assert(sun_shadow_scroll_visible_pending(
+        demand,-4.0,-4.0,8.0,8.0,1,0).empty());
+    assert(demand.pending_tiles().size()==240);
+    assert(sun_shadow_scroll_visible_pending(
+        demand,-2.0,-4.0,8.0,8.0,17,0).size()==4);
+    assert(sun_shadow_scroll_visible_pending(
+        demand,-4.0,-4.0,8.0,8.0,17,1).size()==17);
     // Circular tile addressing: 32x32 JK units, 2x2-unit tiles.
     sun_shadow_scroll_grid grid(16);
     auto dirty=grid.update(0.0,0.0,2.0,10);
