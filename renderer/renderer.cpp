@@ -609,6 +609,9 @@ namespace jkgm {
         std::array<uint64_t,2> sun_scroll_tiles_rendered{{0,0}};
         std::array<uint64_t,2> sun_scroll_depth_blits{{0,0}};
         std::array<uint64_t,2> sun_scroll_active_frames{{0,0}};
+        std::array<uint64_t,2> sun_scroll_depth_resets{{0,0}};
+        std::array<uint64_t,2> sun_scroll_key_resets{{0,0}};
+        std::array<uint64_t,2> sun_scroll_model_dirty_tiles{{0,0}};
         // Non-rendering prototype: estimate partial tile updates before
         // changing the depth-map atlas and all forward/opaque samplers.
         std::array<sun_shadow_scroll_grid,2> sun_scroll_preview{};
@@ -4370,6 +4373,17 @@ namespace jkgm {
                     }
                 }
             }
+            // A stationary 3DO remains part of the architectural shadow
+            // extent after JK stops submitting its chunk. Otherwise camera
+            // culling changes the global depth normalization and resets the
+            // entire scrolling atlas even when no geometry actually changed.
+            if(the_config->enable_sun_scrolling_shadows) {
+                if(sun_scroll_live_world[0]!=world ||
+                   sun_scroll_live_revision[0]!=map.revision)
+                    for(auto &registry:sun_scroll_static_casters)registry.clear();
+                for(auto const &entry:sun_scroll_static_casters[0])
+                    model_bounds.push_back(entry.second.bounds);
+            }
             sun_shadow_projection world_view{};
             if(!make_sun_shadow_projection(map.world,direction,world_view,model_bounds)) {
                 sun_failure("no world receivers or captured 3DO casters");
@@ -4615,8 +4629,9 @@ namespace jkgm {
                 return r;
             };
             auto invalidate_rect=[&](std::array<float,4> const &r) {
-                sun_scroll_live[cascade].invalidate_light_rect(
+                auto const dirty=sun_scroll_live[cascade].invalidate_light_rect(
                     r[0],r[1],r[2],r[3]);
+                sun_scroll_model_dirty_tiles[cascade]+=dirty.size();
             };
             auto cached_material=[&](gpu_3do_group const &group)
                 ->gpu_3do_texture const & {
@@ -4743,19 +4758,32 @@ namespace jkgm {
             if(scroll_possible) {
                 auto &grid=sun_scroll_live[cascade];
                 float const start_z=decal_dot(world_view.origin,world_view.forward);
-                if(sun_scroll_live_world[cascade]!=world ||
-                   sun_scroll_live_revision[cascade]!=map.revision ||
-                   sun_scroll_live_signature[cascade]!=scroll_static_signature ||
-                   !sun_shadow_scroll_depth_contains(
-                       sun_scroll_live_z[cascade],
-                       sun_scroll_live_range[cascade],
-                       start_z,world_view.range)) {
+                bool const reset_key=
+                    sun_scroll_live_world[cascade]!=world ||
+                    sun_scroll_live_revision[cascade]!=map.revision ||
+                    sun_scroll_live_signature[cascade]!=scroll_static_signature;
+                bool const reset_depth=!sun_shadow_scroll_depth_contains(
+                    sun_scroll_live_z[cascade],
+                    sun_scroll_live_range[cascade],
+                    start_z,world_view.range);
+                if(reset_key || reset_depth) {
+                    if(grid.valid) {
+                        if(reset_key)++sun_scroll_key_resets[cascade];
+                        else ++sun_scroll_depth_resets[cascade];
+                    }
                     grid.invalidate();
-                    // Reset depth normalization ONLY with an actual atlas
-                    // invalidation; otherwise all previous stored texels
-                    // would suddenly refer to the wrong world-space Z.
-                    sun_scroll_live_z[cascade]=start_z;
-                    sun_scroll_live_range[cascade]=world_view.range;
+                    // The depth axis must be identical in all physical slots.
+                    // Allocate generous, quantized world-space headroom so
+                    // minor variation in camera-submitted model bounds does
+                    // not renormalize the atlas on the next frame.
+                    constexpr float depth_block=128.0f;
+                    constexpr float depth_guard=128.0f;
+                    sun_scroll_live_z[cascade]=
+                        std::floor((start_z-depth_guard)/depth_block)*depth_block;
+                    float const end_z=start_z+world_view.range+depth_guard;
+                    float const high_z=std::ceil(end_z/depth_block)*depth_block;
+                    sun_scroll_live_range[cascade]=std::max(
+                        depth_block,high_z-sun_scroll_live_z[cascade]);
                 }
                 sun_scroll_live_world[cascade]=world;
                 sun_scroll_live_revision[cascade]=map.revision;
@@ -5001,10 +5029,17 @@ namespace jkgm {
                     " active_frames=",sun_scroll_active_frames[cascade],
                     " pending=",sun_scroll_live[cascade].pending_tiles().size(),
                     " active=",use_scroll?1:0,
+                    " captured_static_groups=",persistent.size(),
+                    " caster_dirty_tiles=",sun_scroll_model_dirty_tiles[cascade],
+                    " key_resets=",sun_scroll_key_resets[cascade],
+                    " depth_resets=",sun_scroll_depth_resets[cascade],
                     " NOTE=atlas depth tiles and camera reconstruction blits; GPU timings not measured");
                 sun_scroll_tiles_rendered[cascade]=0;
                 sun_scroll_depth_blits[cascade]=0;
                 sun_scroll_active_frames[cascade]=0;
+                sun_scroll_model_dirty_tiles[cascade]=0;
+                sun_scroll_key_resets[cascade]=0;
+                sun_scroll_depth_resets[cascade]=0;
             }
             if(!static_same) {
                 // Tile warmup temporarily bound the scrolling atlas FBO.
