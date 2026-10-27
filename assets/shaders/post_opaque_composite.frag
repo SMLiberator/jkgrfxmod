@@ -55,9 +55,6 @@ uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
 uniform int sun_shadow_far_soft_filter; // 1: nine PCF lookups; 0: single bilinear PCF
 uniform float sun_shadow_receiver_bias_scale; // diagnostic multiplier, 0..2
-uniform int sun_contact_shadows_enabled;
-uniform vec4 sun_contact_shadow_params; // trace length, thickness, max camera distance, steps
-uniform int sun_contact_shadow_max_screen_pixels; // maximum screen offset from receiving pixel
 // 4x2 tiles with independently configurable resolution and 2px guard.
 uniform int sun_dynamic_count;
 uniform sampler2DShadow sun_dynamic_image;
@@ -238,101 +235,6 @@ vec3 reconstruct_scene_world(float depth)
 }
 
 
-// Contact shadows are an *edge repair* for existing real shadow maps, not
-// an independent screen-space shadowcaster. A depth ray by itself can match
-// arbitrary foreground geometry and produce incomplete, camera-dependent
-// body shadows (especially when only a character's upper half is visible).
-// Confirm a candidate against nearby already-shadowed real receivers before
-// darkening it, and never extend the shadow more than a few screen pixels.
-float sun_contact_supported_shadow(vec3 world_position,
-                                   float incidence,float trace_length)
-{
-    ivec2 dims=textureSize(depth_image,0);
-    ivec2 base=ivec2(gl_FragCoord.xy);
-    float supported=1.0;
-    // Query only the four direct neighbors of a possible contact hit.
-    // A missing sun-map edge may be one or two screen pixels wide; using
-    // scene depths ensures we compare actual world receivers, not offsets
-    // accidentally moved through a nearby wall.
-    for(int i=0;i<4;++i) {
-        ivec2 delta=i==0?ivec2(-2,0):
-                     i==1?ivec2(2,0):
-                     i==2?ivec2(0,-2):ivec2(0,2);
-        ivec2 p=base+delta;
-        if(any(lessThan(p,ivec2(0))) ||
-           any(greaterThanEqual(p,dims)))continue;
-        float z=texelFetch(depth_image,p,0).r;
-        if(z<=0.0 || z>=65500.0)continue;
-        vec2 uv=(vec2(p)+vec2(0.5))/vec2(dims);
-        vec2 ndc=uv*2.0-1.0;
-        vec3 neighbor=camera_origin.xyz+z/32.0*(
-            camera_forward.xyz+
-            ndc.x*camera_right.w*camera_right.xyz+
-            ndc.y*camera_up.w*camera_up.xyz);
-        if(distance(neighbor,world_position)>max(trace_length,0.12))
-            continue;
-        float shadow=min(sun_shadow_visibility(neighbor,incidence),
-                         sun_dynamic_shadow_visibility(neighbor,incidence));
-        supported=min(supported,shadow);
-        if(supported<=0.02)break;
-    }
-    return supported;
-}
-
-// A bounded ray along the world-space direction *toward* the sunlight.
-// Project each point through the same camera used for the normal opaque
-// depth buffer. The near-depth-only intersection is NOT authoritative:
-// it must also be backed by nearby sun-map occlusion, so it cannot invent
-// a separate silhouette from a partially visible character.
-float sun_contact_shadow_visibility(vec3 world_position,float camera_depth,
-                                    float incidence)
-{
-    if(sun_contact_shadows_enabled==0 || sun_shadow_active==0)return 1.0;
-    float max_distance=sun_contact_shadow_params.z;
-    if(camera_depth<=0.0 || camera_depth>=max_distance)return 1.0;
-    float trace_length=sun_contact_shadow_params.x;
-    float thickness=sun_contact_shadow_params.y;
-    int steps=int(sun_contact_shadow_params.w);
-    ivec2 dims=textureSize(depth_image,0);
-    ivec2 receiver_pixel=ivec2(gl_FragCoord.xy);
-    float max_radius=float(sun_contact_shadow_max_screen_pixels);
-    bool hit=false;
-    for(int i=0;i<12;++i) {
-        if(i>=steps)break;
-        float t=(float(i)+1.0)/float(steps);
-        vec3 sample_world=world_position+
-            sun_shadow_direction*(0.04+t*trace_length);
-        vec3 rel=sample_world-camera_origin.xyz;
-        float ray_depth=dot(rel,camera_forward.xyz);
-        if(ray_depth<=0.001)break;
-        vec2 ndc=vec2(
-            dot(rel,camera_right.xyz)/
-                max(ray_depth*camera_right.w,0.0001),
-            dot(rel,camera_up.xyz)/
-                max(ray_depth*camera_up.w,0.0001));
-        vec2 ray_pixel=(ndc*0.5+0.5)*vec2(dims);
-        if(any(lessThan(ray_pixel,vec2(0.0))) ||
-           any(greaterThanEqual(ray_pixel,vec2(dims))))break;
-        // Long visible silhouettes are a job for the proper shadow maps.
-        // Camera-space contact is limited to the immediate edge.
-        if(length(ray_pixel-gl_FragCoord.xy)>max_radius)break;
-        ivec2 pixel=ivec2(ray_pixel);
-        if(all(equal(pixel,receiver_pixel)))continue;
-        float scene_depth=texelFetch(depth_image,pixel,0).r;
-        if(scene_depth<=0.0 || scene_depth>=65500.0)continue;
-        float separation=ray_depth-scene_depth/32.0;
-        if(separation>0.025 && separation<thickness) {
-            hit=true;
-            break;
-        }
-    }
-    if(!hit)return 1.0;
-    float supported=sun_contact_supported_shadow(
-        world_position,incidence,trace_length);
-    float strength=1.0-smoothstep(max_distance*0.75,max_distance,camera_depth);
-    return mix(1.0,supported,strength);
-}
-
 // Evaluate cookie radiance once per light and route it into two
 // independently controlled channels. Diffuse is later multiplied by the
 // UNLIT receiver pigment, so dark framebuffer colors retain surface detail.
@@ -407,53 +309,61 @@ void project_spotlights(float depth,ivec2 pixel,
     }
 }
 
-// Fill only truly uncovered pixels bracketed by geometry. Search for the
-// nearest valid opaque depth independently in both directions of each axis;
-// the configurable radius tolerates asymmetric T-junction cracks. Never
-// alter real surfaces, and never sample previous-frame image history.
-bool covered_gbuffer_pixel(ivec2 p)
+// Reuse the scene depth once per candidate; do not re-fetch depth values
+// after finding bracketed neighbors. A sky pixel with no nearby opaque
+// geometry still needs tests when repair is enabled, so favor an early exit
+// and a small configured radius over additional full-screen passes.
+float gap_depth_or_empty(ivec2 p,ivec2 dims)
 {
-    ivec2 dims=textureSize(depth_image,0);
     if(any(lessThan(p,ivec2(0))) || any(greaterThanEqual(p,dims)))
-        return false;
-    float z=texelFetch(depth_image,p,0).r;
-    return z>0.0 && z<65500.0;
+        return 65504.0;
+    return texelFetch(depth_image,p,0).r;
 }
 
 void main()
 {
-    ivec2 tc = ivec2(gl_FragCoord.xy);
+    ivec2 tc=ivec2(gl_FragCoord.xy);
     float depth=texelFetch(depth_image,tc,0).r;
     if(fill_tjunction_gaps!=0 && tjunction_gap_fill_size>0 &&
        (depth<=0.0 || depth>=65500.0)) {
+        ivec2 dims=textureSize(depth_image,0);
         ivec2 selected=tc;
         int best_span=100;
         float best_depth=65504.0;
         for(int axis=0;axis<2;++axis) {
+            // A one-pixel gap bracketed on both sides is already optimal.
+            // Avoid even starting the perpendicular search in that case.
+            if(best_span==2)break;
             ivec2 step_dir=axis==0?ivec2(1,0):ivec2(0,1);
             ivec2 before=tc,after=tc;
             int dist_before=0,dist_after=0;
-            for(int d=1;d<=8;++d) {
-                if(d>tjunction_gap_fill_size)break;
-                if(dist_before==0 && covered_gbuffer_pixel(tc-step_dir*d)) {
-                    before=tc-step_dir*d;
-                    dist_before=d;
+            float z_before=65504.0,z_after=65504.0;
+            for(int d=1;d<=tjunction_gap_fill_size;++d) {
+                if(dist_before==0) {
+                    float z=gap_depth_or_empty(tc-step_dir*d,dims);
+                    if(z>0.0 && z<65500.0) {
+                        before=tc-step_dir*d;
+                        dist_before=d;
+                        z_before=z;
+                    }
                 }
-                if(dist_after==0 && covered_gbuffer_pixel(tc+step_dir*d)) {
-                    after=tc+step_dir*d;
-                    dist_after=d;
+                if(dist_after==0) {
+                    float z=gap_depth_or_empty(tc+step_dir*d,dims);
+                    if(z>0.0 && z<65500.0) {
+                        after=tc+step_dir*d;
+                        dist_after=d;
+                        z_after=z;
+                    }
                 }
                 if(dist_before>0 && dist_after>0)break;
             }
-            // A legitimate open void has no nearby geometry on both sides.
+            // No filled geometry on both sides: leave true voids untouched.
             if(dist_before==0 || dist_after==0)continue;
             int span=dist_before+dist_after;
-            float z_before=texelFetch(depth_image,before,0).r;
-            float z_after=texelFetch(depth_image,after,0).r;
-            float closest=min(z_before,z_after);
-            if(span<best_span || (span==best_span && closest<best_depth)) {
+            float nearest=min(z_before,z_after);
+            if(span<best_span || (span==best_span && nearest<best_depth)) {
                 best_span=span;
-                best_depth=closest;
+                best_depth=nearest;
                 selected=z_before<=z_after?before:after;
             }
         }
@@ -516,11 +426,6 @@ void main()
                 float visibility=min(
                     sun_shadow_visibility(world_position,incidence),
                     sun_dynamic_shadow_visibility(world_position,incidence));
-                // Screen-space contact is supplemental: skip its depth
-                // reads when the maps already report complete occlusion.
-                if(visibility>0.001 && sun_contact_shadows_enabled!=0)
-                    visibility=min(visibility,
-                        sun_contact_shadow_visibility(world_position,depth/32.0,incidence));
                 // JK's vertex colors already contain authored lighting. If
                 // only the newly added sun term is shadowed, a bright baked
                 // floor barely changes under a caster. Keep a generous

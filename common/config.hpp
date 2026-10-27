@@ -36,7 +36,7 @@ namespace jkgm {
         bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
         bool enable_ssao = true;
         bool fill_tjunction_gaps = false; // opt-in G-buffer gap repair
-        unsigned int tjunction_gap_fill_size = 1U; // max opposing-neighbor reach, 0..8 pixels
+        unsigned int tjunction_gap_fill_size = 2U; // proven useful screen-pixel radius, 0..8; disabled unless fill_tjunction_gaps
         bool debug_void_pixels = false; // show raw unresolved empty-depth pixels as neon checkerboard
         bool retain_hom_pixels = true; // vanilla JK HOM default; false = Clear Display
         bool enable_parallax = true;
@@ -57,12 +57,6 @@ namespace jkgm {
         bool enable_sun_static_cache = true; // world-only depth layers, independently cached per cascade // directional sunlight + world shadow map
         bool enable_sun_dynamic_shadows = false; // eight-Thing atlas
         bool sun_shadow_two_sided_models = false; // experimental: disable face culling on 3DO sun-shadow casters
-        bool enable_sun_contact_shadows = false; // opt-in short screen-depth ray traces in sunlight compositor
-        float sun_contact_shadow_length = 0.75f; // JK world units, 0.05..4
-        float sun_contact_shadow_thickness = 0.20f; // view-depth tolerance, 0.01..1
-        float sun_contact_shadow_max_distance = 24.0f; // camera forward units, 1..128
-        unsigned int sun_contact_shadow_steps = 6U; // maximum per-pixel depth tests, 1..12
-        unsigned int sun_contact_shadow_max_screen_pixels = 6U; // avoid detached screen-space silhouettes, 1..32
         unsigned int sun_dynamic_shadow_resolution = 256U; // baseline 64..1024
         bool sun_dynamic_shadow_adaptive_resolution = false; // opt-in per-Thing pixel density
         float sun_dynamic_shadow_distance_softness = 0.0f; // optional receiver-distance PCF penumbra, 0..0.5
