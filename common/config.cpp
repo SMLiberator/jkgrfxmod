@@ -236,15 +236,20 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_sun_dynamic_shadows")) {
             j.at("enable_sun_dynamic_shadows").get_to(rv->enable_sun_dynamic_shadows);
         }
-        if(j.contains("sun_shadow_two_sided_models")) {
-            j.at("sun_shadow_two_sided_models").get_to(rv->sun_shadow_two_sided_models);
-        }
-        if(j.contains("sun_shadow_cull_back_faces")) {
+        bool const has_sun_cull_back=j.contains("sun_shadow_cull_back_faces");
+        bool const has_sun_cull_front=j.contains("sun_shadow_cull_front_faces");
+        if(has_sun_cull_back) {
             j.at("sun_shadow_cull_back_faces").get_to(rv->sun_shadow_cull_back_faces);
         }
-        if(j.contains("sun_shadow_cull_front_faces")) {
+        if(has_sun_cull_front) {
             j.at("sun_shadow_cull_front_faces").get_to(rv->sun_shadow_cull_front_faces);
         }
+        // Back-culling-only legacy configurations must continue to work now
+        // that the front-face default is enabled. Explicitly setting both
+        // switches still takes priority (false/false = two-sided).
+        if(has_sun_cull_back && !has_sun_cull_front &&
+           rv->sun_shadow_cull_back_faces)
+            rv->sun_shadow_cull_front_faces=false;
         if(rv->sun_shadow_cull_back_faces && rv->sun_shadow_cull_front_faces)
             throw std::runtime_error("sun_shadow_cull_back_faces and sun_shadow_cull_front_faces cannot both be true");
         if(j.contains("sun_dynamic_shadow_resolution")) {
