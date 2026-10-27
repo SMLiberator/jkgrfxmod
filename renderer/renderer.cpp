@@ -835,6 +835,12 @@ namespace jkgm {
                          " lighting_or_camera=",profile_window.gpu_lighting_native/frames,
                          " empty_mesh_nodes=",profile_window.gpu_empty_mesh_native/frames,
                          " NOTE=empty_nodes_do_not_generate_GPU_draws");
+                LOG_INFO("PERF native_memory_checks avg_cache_hits=",
+                         profile_window.gpu_native_span_cache_hits/frames,
+                         " avg_VirtualQuery=",
+                         profile_window.gpu_native_span_queries/frames,
+                         " enabled=",the_config->gpu_cache_native_memory_regions,
+                         " NOTE=positive_regions_only_per_frame");
                 auto const &current_fog=get_fog_settings();
                 auto const fog_params=current_fog.info.value();
                 // The lightweight logger only formats integral values and
@@ -6605,6 +6611,8 @@ namespace jkgm {
                 profile_frame.gpu_ready_ns+=stats.ready_ns;
                 profile_frame.gpu_ready_cache_hits+=stats.ready_cache_hits;
                 profile_frame.gpu_empty_mesh_native+=stats.empty_mesh_native;
+                profile_frame.gpu_native_span_cache_hits+=stats.native_span_cache_hits;
+                profile_frame.gpu_native_span_queries+=stats.native_span_queries;
                 profile_frame.gpu_text_native+=stats.text_native;
                 profile_frame.gpu_geometry_native+=stats.geometry_native;
                 profile_frame.gpu_snapshot_native+=stats.snapshot_native;
