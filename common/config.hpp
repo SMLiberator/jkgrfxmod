@@ -51,6 +51,7 @@ namespace jkgm {
         bool use_model_cache = false; // cache 3DO meshes as persistent GPU geometry
         bool mesh_revision_tracking = false; // experimental JK.dll COG mutation tracking
         bool gpu_cache_native_memory_regions = false; // experimental per-frame VirtualQuery fast path (A/B test)
+        bool gpu_3do_cache_filter_state = false; // opt-in per-pass texture filter state reuse (A/B test)
         bool enable_spotlights = false; // COG MAT-based screen-space spotlights
         bool enable_spotlight_shadows = false; // experimental, one static-world shadow map
         unsigned int spotlight_shadow_resolution = 256U; // depth-map width and height (64..1024)
