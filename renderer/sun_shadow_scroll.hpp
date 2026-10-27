@@ -22,6 +22,9 @@ struct sun_shadow_scroll_grid {
     double tile_units=2.0;
     std::uint64_t revision=0;
     bool valid=false;
+    // Physical slot dirty flags survive scrolling until the GPU confirms a
+    // successful depth render. Planning a tile does NOT mean it is valid.
+    std::vector<std::uint8_t> pending;
 
     sun_shadow_scroll_grid() = default;
     explicit sun_shadow_scroll_grid(int tiles):count(tiles) {}
@@ -31,7 +34,99 @@ struct sun_shadow_scroll_grid {
         return r<0?r+modulus:r;
     }
 
-    void invalidate() { valid=false; }
+    void invalidate() { valid=false; pending.clear(); }
+
+    bool in_window(int wx,int wy) const {
+        return valid && wx>=origin_x && wx-origin_x<count &&
+            wy>=origin_y && wy-origin_y<count;
+    }
+
+    std::size_t slot_index(int atlas_x,int atlas_y) const {
+        return std::size_t(atlas_y)*std::size_t(count)+std::size_t(atlas_x);
+    }
+
+    // Only call this AFTER successfully drawing and storing the tile depth.
+    // A stale completion from an earlier grid position must not validate
+    // a recycled physical slot assigned to a different world tile.
+    bool mark_rendered(sun_shadow_scroll_tile const &tile) {
+        if(!in_window(tile.world_x,tile.world_y))return false;
+        auto const current=physical_slot(tile.world_x,tile.world_y);
+        if(tile.atlas_x!=current.atlas_x || tile.atlas_y!=current.atlas_y)
+            return false;
+        auto const slot=slot_index(tile.atlas_x,tile.atlas_y);
+        if(slot>=pending.size())return false;
+        pending[slot]=0;
+        return true;
+    }
+
+    std::vector<sun_shadow_scroll_tile> pending_tiles(
+        std::size_t budget=std::numeric_limits<std::size_t>::max()) const
+    {
+        std::vector<sun_shadow_scroll_tile> result;
+        if(!valid)return result;
+        for(int y=origin_y;y<origin_y+count;++y)
+            for(int x=origin_x;x<origin_x+count;++x) {
+                auto const tile=physical_slot(x,y);
+                auto const slot=slot_index(tile.atlas_x,tile.atlas_y);
+                if(slot<pending.size() && pending[slot]) {
+                    result.push_back(tile);
+                    if(result.size()>=budget)return result;
+                }
+            }
+        return result;
+    }
+
+    // Invalidate only sunlight-ray columns intersecting a geometry change.
+    // Call for BOTH old and new bounds of a moved or GeoMode-changed caster.
+    // Values are absolute light-space coordinates (not world X/Y).
+    std::vector<sun_shadow_scroll_tile> invalidate_light_rect(
+        double min_x,double max_x,double min_y,double max_y)
+    {
+        std::vector<sun_shadow_scroll_tile> added;
+        if(!valid)return added;
+        if(!std::isfinite(min_x) || !std::isfinite(max_x) ||
+           !std::isfinite(min_y) || !std::isfinite(max_y) ||
+           min_x>max_x || min_y>max_y) {
+            // Unsafe geometry bounds must never leave an apparently valid
+            // cached image: conservatively invalidate every atlas slot.
+            for(int row=0;row<count;++row)
+                for(int col=0;col<count;++col) {
+                    auto const tile=physical_slot(origin_x+col,origin_y+row);
+                    auto const slot=slot_index(tile.atlas_x,tile.atlas_y);
+                    if(slot<pending.size() && !pending[slot]) {
+                        pending[slot]=1;
+                        added.push_back(tile);
+                    }
+                }
+            return added;
+        }
+        double const first_x=double(origin_x)*tile_units;
+        double const first_y=double(origin_y)*tile_units;
+        double const last_x=first_x+double(count)*tile_units;
+        double const last_y=first_y+double(count)*tile_units;
+        if(max_x<first_x || min_x>last_x ||
+           max_y<first_y || min_y>last_y)return added;
+        // Include touching neighbors: the actual depth rasterizer and PCF
+        // have nonzero footprints on tile borders.
+        int const lo_x=std::max(origin_x,int(std::floor(
+            std::max(min_x,first_x)/tile_units))-1);
+        int const hi_x=std::min(origin_x+count-1,int(std::floor(
+            std::min(max_x,last_x-1.0e-9)/tile_units))+1);
+        int const lo_y=std::max(origin_y,int(std::floor(
+            std::max(min_y,first_y)/tile_units))-1);
+        int const hi_y=std::min(origin_y+count-1,int(std::floor(
+            std::min(max_y,last_y-1.0e-9)/tile_units))+1);
+        for(int row=lo_y;row<=hi_y;++row)
+            for(int col=lo_x;col<=hi_x;++col) {
+                auto const tile=physical_slot(col,row);
+                auto const slot=slot_index(tile.atlas_x,tile.atlas_y);
+                if(slot<pending.size() && !pending[slot]) {
+                    pending[slot]=1;
+                    added.push_back(tile);
+                }
+            }
+        return added;
+    }
 
     // Return only tiles whose PHYSICAL atlas slots need depth regeneration.
     // For 16x16, shifting one grid cell draws only 16 tiles, not 256.
@@ -62,6 +157,7 @@ struct sun_shadow_scroll_grid {
         if(full) {
             ring_x=0;
             ring_y=0;
+            pending.assign(std::size_t(count)*std::size_t(count),1U);
         } else {
             ring_x=wrap(ring_x+dx,count);
             ring_y=wrap(ring_y+dy,count);
@@ -81,8 +177,11 @@ struct sun_shadow_scroll_grid {
                     wx>=old_x && wx<old_x+count &&
                     wy>=old_y && wy<old_y+count;
                 if(cached)continue;
-                dirty.push_back({wx,wy,wrap(col+ring_x,count),
-                                       wrap(row+ring_y,count)});
+                sun_shadow_scroll_tile const tile{
+                    wx,wy,wrap(col+ring_x,count),wrap(row+ring_y,count)};
+                dirty.push_back(tile);
+                if(slot_index(tile.atlas_x,tile.atlas_y)<pending.size())
+                    pending[slot_index(tile.atlas_x,tile.atlas_y)]=1U;
             }
         return dirty;
     }

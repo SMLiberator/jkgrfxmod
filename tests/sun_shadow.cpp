@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <unordered_set>
 
 using namespace jkgm;
@@ -15,6 +16,13 @@ int main()
     sun_shadow_scroll_grid grid(16);
     auto dirty=grid.update(0.0,0.0,2.0,10);
     assert(dirty.size()==256);
+    assert(grid.pending_tiles().size()==256);
+    assert(grid.pending_tiles(10).size()==10);
+    // Planning isn't rendering; all tiles stay pending until acknowledged.
+    assert(grid.update(0.8,0.5,2.0,10).empty());
+    assert(grid.pending_tiles().size()==256);
+    for(auto const &tile:grid.pending_tiles())assert(grid.mark_rendered(tile));
+    assert(grid.pending_tiles().empty());
     assert(grid.origin_x==-8 && grid.origin_y==-8);
     assert(grid.physical_slot(-8,-8).atlas_x==0);
     assert(grid.physical_slot(7,7).atlas_x==15);
@@ -26,6 +34,15 @@ int main()
         assert(tile.world_x==8);
         assert(tile.atlas_x==0);
     }
+    assert(grid.pending_tiles().size()==16);
+    assert(!grid.mark_rendered({-8,0,0,8})); // old world address
+    // Sub-tile static geometry changes invalidate only nearby ray columns.
+    auto overlap=grid.invalidate_light_rect(0.25,0.75,0.25,0.75);
+    assert(!overlap.empty() && overlap.size()<=9);
+    assert(grid.pending_tiles().size()==16+overlap.size());
+    assert(grid.invalidate_light_rect(0.25,0.75,0.25,0.75).empty());
+    for(auto const &tile:grid.pending_tiles())assert(grid.mark_rendered(tile));
+    assert(grid.pending_tiles().empty());
     assert(grid.physical_slot(-7,0).atlas_x==1);
     dirty=grid.update(2.01,2.01,2.0,10);
     assert(dirty.size()==16);
@@ -46,6 +63,13 @@ int main()
     assert(grid.update(-0.1,-0.1,2.0,11).size()==256);
     assert(grid.origin_x==-9 && grid.origin_y==-9);
     assert(sun_shadow_scroll_grid::wrap(-1,16)==15);
+    // Unknown/NaN geometry conservatively invalidates the full cache.
+    for(auto const &tile:grid.pending_tiles())assert(grid.mark_rendered(tile));
+    assert(grid.pending_tiles().empty());
+    auto bad_bounds=grid.invalidate_light_rect(
+        std::numeric_limits<double>::quiet_NaN(),0.0,0.0,0.0);
+    assert(bad_bounds.size()==256);
+    assert(grid.pending_tiles().size()==256);
     std::unordered_set<uint64_t> owners{0x1111222233334444ULL};
     assert(!sun_shadow_caster_in_static_cascades(
         0x1111222233334444ULL,owners));
