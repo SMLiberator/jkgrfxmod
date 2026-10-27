@@ -847,7 +847,10 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_model(
     point<3,float> right,point<3,float> forward,
     point<3,float> up,point<3,float> origin)
 {
-    gl::set_uniform_integer(shadow_instance_count,0);
+    if(shadow_instance_active) {
+        gl::set_uniform_integer(shadow_instance_count,0);
+        shadow_instance_active=false;
+    }
     gl::set_uniform_vector(shadow_model_right,right);
     gl::set_uniform_vector(shadow_model_forward,forward);
     gl::set_uniform_vector(shadow_model_up,up);
@@ -862,7 +865,10 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_instanced_models(
     // per Thing and a draw call per material group. Count is capped so the
     // GLSL 3.3 implementation stays within minimum vertex-uniform limits.
     if(count==0 || count>max_shadow_instances) {
-        gl::set_uniform_integer(shadow_instance_count,0);
+        if(shadow_instance_active) {
+            gl::set_uniform_integer(shadow_instance_count,0);
+            shadow_instance_active=false;
+        }
         return;
     }
     std::array<float,3*max_shadow_instances> right{},forward{},up{},origin{};
@@ -884,6 +890,7 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_instanced_models(
     glUniform3fv(shadow_instance_origin.get(),static_cast<GLsizei>(count),
                  origin.data());
     gl::set_uniform_integer(shadow_instance_count,static_cast<int>(count));
+    shadow_instance_active=true;
 }
 
 void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(
