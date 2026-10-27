@@ -752,6 +752,23 @@ namespace jkgm {
                          " mesh_calls_avg=", profile_window.native_mesh_calls / frames,
                          " face_calls_avg=", profile_window.native_face_calls / frames,
                          " face_emitted_avg=", profile_window.native_face_emitted / frames);
+                LOG_INFO("PERF native_3do breakdown_us model_hook=",
+                         (profile_window.native_model_hook_ns/1000)/frames,
+                         " model_engine_inclusive=",
+                         (profile_window.native_model_engine_ns/1000)/frames,
+                         " model_engine_excluding_mesh=",
+                         (profile_window.native_model_engine_self_ns/1000)/frames,
+                         " mesh_queue=",
+                         (profile_window.native_mesh_queue_ns/1000)/frames,
+                         " mesh_native_fallback=",
+                         (profile_window.native_mesh_native_ns/1000)/frames,
+                         " mesh_decal_capture=",
+                         (profile_window.native_mesh_decal_ns/1000)/frames,
+                         " cached_mesh_calls_avg=",
+                         profile_window.native_mesh_gpu_calls/frames,
+                         " fallback_mesh_calls_avg=",
+                         profile_window.native_mesh_native_calls/frames,
+                         " NOTE=model_includes_mesh; engine_excluding_mesh_is_estimate");
             }
             if(native_sprite_available()) {
                 LOG_INFO("PERF native_sprite calls_avg type0/1/2/3/4=",
@@ -6599,6 +6616,14 @@ namespace jkgm {
                 profile_frame.native_model_ns += native.model_ns;
                 profile_frame.native_mesh_ns += native.mesh_ns;
                 profile_frame.native_face_ns += native.face_ns;
+                profile_frame.native_model_hook_ns += native.model_hook_ns;
+                profile_frame.native_model_engine_ns += native.model_engine_ns;
+                profile_frame.native_model_engine_self_ns += native.model_engine_self_ns;
+                profile_frame.native_mesh_queue_ns += native.mesh_queue_ns;
+                profile_frame.native_mesh_native_ns += native.mesh_native_ns;
+                profile_frame.native_mesh_decal_ns += native.mesh_decal_ns;
+                profile_frame.native_mesh_gpu_calls += native.mesh_gpu_calls;
+                profile_frame.native_mesh_native_calls += native.mesh_native_calls;
                 auto const sprites=consume_native_sprite_sample();
                 for(size_t i=0;i<sprites.type_calls.size();++i)
                     profile_frame.sprite_type_calls[i]+=sprites.type_calls[i];
