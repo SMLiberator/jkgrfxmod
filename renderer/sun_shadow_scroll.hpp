@@ -23,7 +23,8 @@ struct sun_shadow_scroll_grid {
     std::uint64_t revision=0;
     bool valid=false;
 
-    explicit sun_shadow_scroll_grid(int tiles=16):count(tiles) {}
+    sun_shadow_scroll_grid() = default;
+    explicit sun_shadow_scroll_grid(int tiles):count(tiles) {}
 
     static int wrap(int n,int modulus) {
         int const r=n%modulus;
