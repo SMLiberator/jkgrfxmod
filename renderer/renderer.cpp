@@ -623,6 +623,9 @@ namespace jkgm {
         std::array<uint64_t,2> sun_scroll_depth_resets{{0,0}};
         std::array<uint64_t,2> sun_scroll_key_resets{{0,0}};
         std::array<uint64_t,2> sun_scroll_model_dirty_tiles{{0,0}};
+        std::array<uint64_t,2> sun_scroll_tile_model_draws{{0,0}};
+        std::array<uint64_t,2> sun_scroll_tile_cpu_us{{0,0}};
+        std::array<uint64_t,2> sun_scroll_blit_cpu_us{{0,0}};
         // Non-rendering prototype: estimate partial tile updates before
         // changing the depth-map atlas and all forward/opaque samplers.
         std::array<sun_shadow_scroll_grid,2> sun_scroll_preview{};
@@ -5031,6 +5034,7 @@ namespace jkgm {
             // cascade remains in service until all required tiles are valid.
             bool use_scroll=false;
             if(scroll_possible && !scroll_blits.empty()) {
+                auto const tile_begin=std::chrono::steady_clock::now();
                 auto &grid=sun_scroll_live[cascade];
                 auto const &scroll_target=cascade==0
                     ?map.scroll_fbo:map.scroll_far_fbo;
@@ -5101,6 +5105,7 @@ namespace jkgm {
                             if(found==spatial.end())continue;
                             for(auto const key:found->second)include_record(key);
                         }
+                    sun_scroll_tile_model_draws[cascade]+=tile_models.size();
                     draw_models(tile_models);
                     grid.mark_rendered(tile);
                     ++sun_scroll_tiles_rendered[cascade];
@@ -5117,6 +5122,10 @@ namespace jkgm {
                     decal_dot(view.origin,view.right),
                     decal_dot(view.origin,view.up),view.width,view.height,
                     1).empty();
+                if(the_config->profile_renderer)
+                    sun_scroll_tile_cpu_us[cascade]+=
+                        std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now()-tile_begin).count();
             }
             if(the_config->profile_renderer && use_scroll) {
                 sun_scroll_depth_blits[cascade]+=scroll_blits.size();
@@ -5134,6 +5143,9 @@ namespace jkgm {
                     " captured_static_groups=",persistent.size(),
                     " spatial_bins=",spatial.size(),
                     " spatial_large_groups=",large_casters.size(),
+                    " tile_model_draws=",sun_scroll_tile_model_draws[cascade],
+                    " tile_cpu_us=",sun_scroll_tile_cpu_us[cascade],
+                    " blit_cpu_us=",sun_scroll_blit_cpu_us[cascade],
                     " caster_dirty_tiles=",sun_scroll_model_dirty_tiles[cascade],
                     " key_resets=",sun_scroll_key_resets[cascade],
                     " depth_resets=",sun_scroll_depth_resets[cascade],
@@ -5142,6 +5154,9 @@ namespace jkgm {
                 sun_scroll_depth_blits[cascade]=0;
                 sun_scroll_active_frames[cascade]=0;
                 sun_scroll_model_dirty_tiles[cascade]=0;
+                sun_scroll_tile_model_draws[cascade]=0;
+                sun_scroll_tile_cpu_us[cascade]=0;
+                sun_scroll_blit_cpu_us[cascade]=0;
                 sun_scroll_key_resets[cascade]=0;
                 sun_scroll_depth_resets[cascade]=0;
             }
@@ -5164,6 +5179,7 @@ namespace jkgm {
                 }
             }
             if(use_scroll) {
+                auto const blit_begin=std::chrono::steady_clock::now();
                 // The existing receiver shaders still expect a conventional
                 // camera-fitted near/far depth map. Depth-only GPU blits
                 // reconstruct it from the circular static atlas (GL_NEAREST),
@@ -5188,6 +5204,10 @@ namespace jkgm {
                         {gl::framebuffer_blit_buffer::depth},
                         gl::framebuffer_blit_filter::nearest);
                 }
+                if(the_config->profile_renderer)
+                    sun_scroll_blit_cpu_us[cascade]+=
+                        std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now()-blit_begin).count();
             } else if(map.static_complete &&
                the_config->enable_sun_static_cache) {
                 // Copy the static depth on GPU (no readback) and depth-test
