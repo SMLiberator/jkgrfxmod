@@ -3,6 +3,8 @@
 // This deliberately DOES NOT manipulate live depth maps: the GPU pass must
 // use matching tile transforms, wrapped sampling and guarded PCF first.
 #include <algorithm>
+#include <array>
+#include <cstring>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -18,6 +20,30 @@ inline double sun_shadow_scroll_fixed_tile_units(float distance)
 {
     if(!std::isfinite(distance) || distance<=0.0f)return 2.0;
     return std::max(2.0,std::ceil(double(distance)*0.4));
+}
+
+// A mesh buffer ID is shared by many Things. Distinguish each placed static
+// 3DO (and separate nodes of the same Thing) using its owner and fixed pose.
+inline std::uint64_t sun_shadow_scroll_static_group_key(
+    std::uint64_t mesh_id,std::uint64_t owner,std::uint32_t offset,
+    std::array<float,12> const &transform)
+{
+    std::uint64_t hash=14695981039346656037ULL;
+    auto mix=[&](std::uint32_t v) {
+        for(int b=0;b<4;++b) {
+            hash^=std::uint64_t((v>>(b*8))&255U);
+            hash*=1099511628211ULL;
+        }
+    };
+    mix(std::uint32_t(mesh_id));mix(std::uint32_t(mesh_id>>32));
+    mix(std::uint32_t(owner));mix(std::uint32_t(owner>>32));
+    mix(offset);
+    for(float f:transform) {
+        std::uint32_t bits=0;
+        std::memcpy(&bits,&f,sizeof(bits));
+        mix(bits);
+    }
+    return hash;
 }
 
 struct sun_shadow_scroll_tile {
