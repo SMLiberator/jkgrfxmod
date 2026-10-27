@@ -4763,7 +4763,9 @@ namespace jkgm {
             prog.set_sun_shadow_edge_correction(
                 the_config->sun_shadow_edge_correction,
                 the_config->sun_shadow_edge_radius,
-                the_config->sun_shadow_edge_strength);
+                the_config->sun_shadow_edge_strength,
+                int(the_config->sun_shadow_edge_screen_radius),
+                int(the_config->sun_shadow_edge_debug));
             prog.set_spotlight_shadow(-1,0.0f,0.0f);
             prog.set_sun_shadow(false,false,make_point(0.0f,0.0f,1.0f),
                 make_point(0.0f,0.0f,0.0f,0.0f),

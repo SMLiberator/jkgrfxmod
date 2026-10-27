@@ -57,6 +57,8 @@ uniform int sun_shadow_far_soft_filter; // 1: nine PCF lookups; 0: single biline
 uniform float sun_shadow_receiver_bias_scale; // diagnostic multiplier, 0..2
 uniform int sun_shadow_edge_correction;
 uniform vec2 sun_shadow_edge_params; // radius in shadow texels, correction strength
+uniform int sun_shadow_edge_screen_radius; // screen pixel radius for detecting wall/floor edges
+uniform int sun_shadow_edge_debug; // 0=normal, 1=edge candidates, 2=actual corrections
 // 4x2 tiles with independently configurable resolution and 2px guard.
 uniform int sun_dynamic_count;
 uniform sampler2DShadow sun_dynamic_image;
@@ -142,34 +144,57 @@ float sun_shadow_visibility(vec3 world_position,float incidence)
 }
 
 
-// Conservative shadow-map undersampling repair. Only an *actual current-frame
-// G-buffer discontinuity* and a nearly lit receiver can reach this function.
-// Sample a four-way cross in the same shadow cascade, with the same receiver
-// comparison bias. This can fill small bright slivers where a hard shadow
-// ends short of a wall/floor intersection, without tracing screen-space rays,
-// adding geometry draws, or touching unrelated smooth surfaces.
+// Shadow coverage repair: a deliberately conservative "min-PCF" footprint.
+// Unlike regular PCF, averaging four neighbor visibilities leaves a narrow
+// bright gap when one or two texels see the adjacent wall caster. On a
+// confirmed wall/floor seam, use the DARKEST neighbor instead. This cannot
+// invent a caster when the shadow map contains no nearby caster at all.
 float sun_shadow_edge_pcf(sampler2DShadow map,vec3 coord,float range,
                           float incidence)
 {
     if(!sun_shadow_inside(coord))return 1.0;
-    vec2 dims=vec2(textureSize(map,0));
-    vec2 delta=sun_shadow_edge_params.x/dims;
+    vec2 delta=sun_shadow_edge_params.x/vec2(textureSize(map,0));
+    if(any(lessThan(coord.xy,delta)) ||
+       any(greaterThan(coord.xy,vec2(1.0)-delta)))return 1.0;
     float grazing=1.0-clamp(incidence,0.0,1.0);
     float bias_world=(0.008+0.027*grazing*grazing)*
                      sun_shadow_receiver_bias_scale;
     float bias=max(4.0/16777215.0,bias_world/max(range,0.001));
     float compare=coord.z-bias;
-    // Do not clamp off-map samples to the texture edge, which could smear
-    // unrelated shadows into the edge of a cascade's coverage.
-    if(any(lessThan(coord.xy,delta)) ||
-       any(greaterThan(coord.xy,vec2(1.0)-delta)))return 1.0;
     vec2 uv=coord.xy;
-    float near_shadow=0.0;
-    near_shadow+=texture(map,vec3(uv+vec2(delta.x,0.0),compare));
-    near_shadow+=texture(map,vec3(uv-vec2(delta.x,0.0),compare));
-    near_shadow+=texture(map,vec3(uv+vec2(0.0,delta.y),compare));
-    near_shadow+=texture(map,vec3(uv-vec2(0.0,delta.y),compare));
-    return mix(1.0,near_shadow*0.25,sun_shadow_edge_params.y);
+    float darkest=1.0;
+    darkest=min(darkest,texture(map,vec3(uv+vec2(delta.x,0.0),compare)));
+    darkest=min(darkest,texture(map,vec3(uv-vec2(delta.x,0.0),compare)));
+    darkest=min(darkest,texture(map,vec3(uv+vec2(0.0,delta.y),compare)));
+    darkest=min(darkest,texture(map,vec3(uv-vec2(0.0,delta.y),compare)));
+    return mix(1.0,darkest,sun_shadow_edge_params.y);
+}
+
+// Explicit neighbor normals make the contact *region* a few screen pixels
+// wide instead of relying on fwidth(), which sees only a 2x2 quad and was
+// not firing on bright strips that were already several pixels across.
+// Check depth too, to avoid treating distant visible geometry as a seam.
+bool sun_shadow_receiver_near_geometry_edge(ivec2 pixel,float depth,vec3 vn)
+{
+    ivec2 dims=textureSize(depth_image,0);
+    float camera_depth=depth/32.0;
+    float tolerance=max(1.5,camera_depth*0.15);
+    for(int i=0;i<4;++i) {
+        ivec2 step=i==0?ivec2(1,0):
+                   i==1?ivec2(-1,0):
+                   i==2?ivec2(0,1):ivec2(0,-1);
+        ivec2 p=pixel+step*sun_shadow_edge_screen_radius;
+        if(any(lessThan(p,ivec2(0))) ||
+           any(greaterThanEqual(p,dims)))continue;
+        float z=texelFetch(depth_image,p,0).r;
+        if(z<=0.0 || z>=65500.0 ||
+           abs(z-depth)>32.0*tolerance)continue;
+        vec3 neighbor=texelFetch(normal_image,p,0).rgb;
+        if(dot(neighbor,neighbor)<0.0001)continue;
+        if(dot(normalize(vn),normalize(neighbor))<0.80)
+            return true;
+    }
+    return false;
 }
 
 float sun_shadow_edge_visibility(vec3 world_position,float incidence)
@@ -443,30 +468,9 @@ void main()
     if(retain_hom_pixels!=0 && (depth<=0.0 || depth>=65500.0))
         discard;
 
-    // Derivatives use the current G-buffer, never prior-frame HOM colors.
-    // Evaluate before per-receiver sunlight branches: divergent derivatives
-    // would otherwise be undefined on a mixture of walls and floors.
-    // Smooth faces pay only a pair of quad-lane derivatives; the four extra
-    // shadow comparisons are reserved for actual geometry discontinuities.
-    float shadow_geometry_edge=0.0;
-    vec3 edge_normal_view=vec3(0.0);
-    if(sun_shadow_edge_correction!=0 && sun_shadow_active!=0) {
-        edge_normal_view=texelFetch(normal_image,tc,0).rgb;
-        float jump_depth=fwidth(depth)/32.0;
-        float jump_normal=length(dFdx(edge_normal_view))+
-                          length(dFdy(edge_normal_view));
-        ivec2 dims=textureSize(depth_image,0);
-        float approx_pixel_world=max(depth/32.0,0.001)*
-            max(2.0*camera_right.w/float(dims.x),
-                2.0*camera_up.w/float(dims.y));
-        // Ignore huge depth jumps (silhouettes against empty sky or
-        // unrelated background). Geometrically nearby normals or depth
-        // steps are a plausible wall/floor or mesh intersection.
-        if(depth>0.0 && depth<65500.0 && jump_depth<3.0 &&
-           (jump_normal>0.45 ||
-            jump_depth>max(0.025,approx_pixel_world*3.0)))
-            shadow_geometry_edge=1.0;
-    }
+    // A debug mask shows whether the tested wall/floor intersection actually
+    // reaches the shadow repair path; 0=no candidate, 1=seam, 2=darkened.
+    int shadow_edge_debug_result=0;
 
     vec4 albedo = texelFetch(color_image, tc, 0);
     vec4 emissive = texelFetch(emissive_image, tc, 0);
@@ -493,8 +497,7 @@ void main()
         ? max(texelFetch(depth_image,tc,0).gba,vec3(0.0))
         : vec3(0.0);
     if(sun_lighting_active!=0 && depth>0.0 && depth<65500.0) {
-        vec3 vn=sun_shadow_edge_correction!=0 && sun_shadow_active!=0
-            ? edge_normal_view : texelFetch(normal_image,tc,0).rgb;
+        vec3 vn=texelFetch(normal_image,tc,0).rgb;
         if(dot(vn,vn)>0.0001) {
             vec3 normal=normalize(camera_right.xyz*(vn.x/camera_right.w)+
                                   camera_up.xyz*(vn.y/camera_up.w)+
@@ -505,9 +508,18 @@ void main()
                 float visibility=min(
                     sun_shadow_visibility(world_position,incidence),
                     sun_dynamic_shadow_visibility(world_position,incidence));
-                if(shadow_geometry_edge>0.0 && visibility>0.6)
-                    visibility=min(visibility,
-                        sun_shadow_edge_visibility(world_position,incidence));
+                // Screen-space geometry detection happens AFTER the ordinary
+                // sunlight shadow lookup. Completely shadowed pixels are not
+                // candidates and therefore incur no additional depth reads.
+                if(sun_shadow_edge_correction!=0 && sun_shadow_active!=0 &&
+                   visibility>0.6 &&
+                   sun_shadow_receiver_near_geometry_edge(tc,depth,vn)) {
+                    shadow_edge_debug_result=1;
+                    float corrected=sun_shadow_edge_visibility(world_position,incidence);
+                    if(corrected<visibility-0.02)
+                        shadow_edge_debug_result=2;
+                    visibility=min(visibility,corrected);
+                }
                 // JK's vertex colors already contain authored lighting. If
                 // only the newly added sun term is shadowed, a bright baked
                 // floor barely changes under a caster. Keep a generous
@@ -526,5 +538,17 @@ void main()
     // Artist-controlled additive spill retains cookie color without albedo
     // multiplication. Both contributions sit beneath distance fog.
     vec3 lit=mix(screened+add_rgb,fog_color,fog);
+    if(sun_shadow_edge_correction!=0 && sun_shadow_edge_debug!=0) {
+        if(sun_shadow_edge_debug==1) {
+            out_color=vec4(shadow_edge_debug_result!=0
+                ?vec3(8.0,0.0,8.0):vec3(0.0),1.0);
+            return;
+        }
+        if(shadow_edge_debug_result!=0) {
+            out_color=vec4(shadow_edge_debug_result==2
+                ?vec3(0.0,8.0,0.0):vec3(8.0,0.0,8.0),1.0);
+            return;
+        }
+    }
     out_color=vec4(emissive.rgb+lit,albedo.a);
 }

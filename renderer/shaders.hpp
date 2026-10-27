@@ -371,6 +371,8 @@ namespace jkgm {
             gl::uniform_location_id sun_shadow_receiver_bias_scale;
             gl::uniform_location_id sun_shadow_edge_correction;
             gl::uniform_location_id sun_shadow_edge_params;
+            gl::uniform_location_id sun_shadow_edge_screen_radius;
+            gl::uniform_location_id sun_shadow_edge_debug;
             gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
             gl::uniform_location_id sun_dynamic_shadow_distance_softness;
             std::vector<gl::uniform_location_id> sun_dynamic_atlas_rects;
@@ -417,7 +419,7 @@ namespace jkgm {
             void set_sun_shadow_far_soft_filter(bool soft);
             void set_sun_shadow_receiver_bias_scale(float scale);
             void set_sun_shadow_edge_correction(bool enabled,
-                                                float radius,float strength);
+                float radius,float strength,int screen_radius,int debug);
             void set_sun_dynamic_count(int count);
             void set_sun_dynamic_shadow_distance_softness(float amount);
             void set_sun_dynamic_caster_depth(int slot,float normalized_depth);

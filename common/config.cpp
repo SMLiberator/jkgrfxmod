@@ -297,9 +297,24 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             dest=static_cast<float>(x);
         };
         edge_setting("sun_shadow_edge_radius",
-            rv->sun_shadow_edge_radius,0.25,2.0);
+            rv->sun_shadow_edge_radius,0.25,8.0);
         edge_setting("sun_shadow_edge_strength",
             rv->sun_shadow_edge_strength,0.0,1.0);
+        auto edge_integer=[&](char const *key,unsigned int &dest,
+                              long long minimum,long long maximum) {
+            if(!j.contains(key))return;
+            auto const &v=j.at(key);
+            if(!v.is_number_integer())
+                throw std::runtime_error(std::string(key)+" must be an integer");
+            auto const x=v.get<long long>();
+            if(x<minimum || x>maximum)
+                throw std::runtime_error(std::string(key)+" is out of range");
+            dest=static_cast<unsigned int>(x);
+        };
+        edge_integer("sun_shadow_edge_screen_radius",
+                     rv->sun_shadow_edge_screen_radius,1,12);
+        edge_integer("sun_shadow_edge_debug",
+                     rv->sun_shadow_edge_debug,0,2);
         if(j.contains("sun_shadow_near_distance")) {
             auto const &v=j.at("sun_shadow_near_distance");
             if(!v.is_number())
