@@ -49,6 +49,12 @@ struct profile_sample {
   uint64_t gpu_draw_triangles=0,gpu_material_resolves=0,gpu_uploads=0;
   uint64_t gpu_groups_considered=0,gpu_groups_frustum_culled=0,gpu_groups_backface_culled=0;
   uint64_t gpu_preview_cpu_us=0;
+  // Separate opaque/transparent visible 3DO CPU work. These are subsets
+  // of gpu_preview_cpu_us (which also includes shader/pipeline setup).
+  std::array<uint64_t,2> gpu_preview_collect_us{};
+  std::array<uint64_t,2> gpu_preview_sort_us{};
+  std::array<uint64_t,2> gpu_preview_submit_us{};
+  std::array<uint64_t,2> gpu_preview_calls{};
   void add(profile_sample const &o) {
     for(size_t i=0;i<timings.size();++i) timings[i]+=o.timings[i];
     period_us+=o.period_us; present_us+=o.present_us; tris+=o.tris;
@@ -120,6 +126,12 @@ struct profile_sample {
     gpu_groups_frustum_culled+=o.gpu_groups_frustum_culled;
     gpu_groups_backface_culled+=o.gpu_groups_backface_culled;
     gpu_preview_cpu_us+=o.gpu_preview_cpu_us;
+    for(size_t i=0;i<2;++i) {
+      gpu_preview_collect_us[i]+=o.gpu_preview_collect_us[i];
+      gpu_preview_sort_us[i]+=o.gpu_preview_sort_us[i];
+      gpu_preview_submit_us[i]+=o.gpu_preview_submit_us[i];
+      gpu_preview_calls[i]+=o.gpu_preview_calls[i];
+    }
   }
 };
 class profile_scope {
