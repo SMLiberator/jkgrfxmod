@@ -4739,7 +4739,8 @@ namespace jkgm {
                 the_config->sun_contact_shadow_length,
                 the_config->sun_contact_shadow_thickness,
                 the_config->sun_contact_shadow_max_distance,
-                int(the_config->sun_contact_shadow_steps));
+                int(the_config->sun_contact_shadow_steps),
+                int(the_config->sun_contact_shadow_max_screen_pixels));
             prog.set_spotlight_shadow(-1,0.0f,0.0f);
             prog.set_sun_shadow(false,false,make_point(0.0f,0.0f,1.0f),
                 make_point(0.0f,0.0f,0.0f,0.0f),

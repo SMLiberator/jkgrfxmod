@@ -264,6 +264,15 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                 throw std::runtime_error("sun_contact_shadow_steps must be between 1 and 12");
             rv->sun_contact_shadow_steps=static_cast<unsigned>(steps);
         }
+        if(j.contains("sun_contact_shadow_max_screen_pixels")) {
+            auto const &v=j.at("sun_contact_shadow_max_screen_pixels");
+            if(!v.is_number_integer())
+                throw std::runtime_error("sun_contact_shadow_max_screen_pixels must be an integer (1..32)");
+            auto const pixels=v.get<long long>();
+            if(pixels<1 || pixels>32)
+                throw std::runtime_error("sun_contact_shadow_max_screen_pixels must be between 1 and 32");
+            rv->sun_contact_shadow_max_screen_pixels=static_cast<unsigned>(pixels);
+        }
         if(j.contains("sun_dynamic_shadow_resolution")) {
             auto const &v=j.at("sun_dynamic_shadow_resolution");
             if(!v.is_number_integer())

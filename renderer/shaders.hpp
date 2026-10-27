@@ -371,6 +371,7 @@ namespace jkgm {
             gl::uniform_location_id sun_shadow_receiver_bias_scale;
             gl::uniform_location_id sun_contact_shadows_enabled;
             gl::uniform_location_id sun_contact_shadow_params;
+            gl::uniform_location_id sun_contact_shadow_max_screen_pixels;
             gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
             gl::uniform_location_id sun_dynamic_shadow_distance_softness;
             std::vector<gl::uniform_location_id> sun_dynamic_atlas_rects;
@@ -417,7 +418,7 @@ namespace jkgm {
             void set_sun_shadow_far_soft_filter(bool soft);
             void set_sun_shadow_receiver_bias_scale(float scale);
             void set_sun_contact_shadows(bool enabled,float length,
-                float thickness,float max_view_distance,int steps);
+                float thickness,float max_view_distance,int steps,int max_screen_pixels);
             void set_sun_dynamic_count(int count);
             void set_sun_dynamic_shadow_distance_softness(float amount);
             void set_sun_dynamic_caster_depth(int slot,float normalized_depth);

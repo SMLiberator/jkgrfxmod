@@ -57,6 +57,7 @@ uniform int sun_shadow_far_soft_filter; // 1: nine PCF lookups; 0: single biline
 uniform float sun_shadow_receiver_bias_scale; // diagnostic multiplier, 0..2
 uniform int sun_contact_shadows_enabled;
 uniform vec4 sun_contact_shadow_params; // trace length, thickness, max camera distance, steps
+uniform int sun_contact_shadow_max_screen_pixels; // maximum screen offset from receiving pixel
 // 4x2 tiles with independently configurable resolution and 2px guard.
 uniform int sun_dynamic_count;
 uniform sampler2DShadow sun_dynamic_image;
@@ -237,14 +238,56 @@ vec3 reconstruct_scene_world(float depth)
 }
 
 
-// Short screen-space ray toward the sun, searching the *already resolved*
-// opaque depth for nearby blockers missed by finite-resolution sun maps.
-// Limited to nearby receivers and disabled by default. Unlike SSAO this is
-// directional; unlike a shadow map it cannot find occluders outside the
-// camera image or behind visible geometry.
-float sun_contact_shadow_visibility(vec3 world_position,float camera_depth)
+// Contact shadows are an *edge repair* for existing real shadow maps, not
+// an independent screen-space shadowcaster. A depth ray by itself can match
+// arbitrary foreground geometry and produce incomplete, camera-dependent
+// body shadows (especially when only a character's upper half is visible).
+// Confirm a candidate against nearby already-shadowed real receivers before
+// darkening it, and never extend the shadow more than a few screen pixels.
+float sun_contact_supported_shadow(vec3 world_position,
+                                   float incidence,float trace_length)
 {
-    if(sun_contact_shadows_enabled==0)return 1.0;
+    ivec2 dims=textureSize(depth_image,0);
+    ivec2 base=ivec2(gl_FragCoord.xy);
+    float supported=1.0;
+    // Query only the four direct neighbors of a possible contact hit.
+    // A missing sun-map edge may be one or two screen pixels wide; using
+    // scene depths ensures we compare actual world receivers, not offsets
+    // accidentally moved through a nearby wall.
+    for(int i=0;i<4;++i) {
+        ivec2 delta=i==0?ivec2(-2,0):
+                     i==1?ivec2(2,0):
+                     i==2?ivec2(0,-2):ivec2(0,2);
+        ivec2 p=base+delta;
+        if(any(lessThan(p,ivec2(0))) ||
+           any(greaterThanEqual(p,dims)))continue;
+        float z=texelFetch(depth_image,p,0).r;
+        if(z<=0.0 || z>=65500.0)continue;
+        vec2 uv=(vec2(p)+vec2(0.5))/vec2(dims);
+        vec2 ndc=uv*2.0-1.0;
+        vec3 neighbor=camera_origin.xyz+z/32.0*(
+            camera_forward.xyz+
+            ndc.x*camera_right.w*camera_right.xyz+
+            ndc.y*camera_up.w*camera_up.xyz);
+        if(distance(neighbor,world_position)>max(trace_length,0.12))
+            continue;
+        float shadow=min(sun_shadow_visibility(neighbor,incidence),
+                         sun_dynamic_shadow_visibility(neighbor,incidence));
+        supported=min(supported,shadow);
+        if(supported<=0.02)break;
+    }
+    return supported;
+}
+
+// A bounded ray along the world-space direction *toward* the sunlight.
+// Project each point through the same camera used for the normal opaque
+// depth buffer. The near-depth-only intersection is NOT authoritative:
+// it must also be backed by nearby sun-map occlusion, so it cannot invent
+// a separate silhouette from a partially visible character.
+float sun_contact_shadow_visibility(vec3 world_position,float camera_depth,
+                                    float incidence)
+{
+    if(sun_contact_shadows_enabled==0 || sun_shadow_active==0)return 1.0;
     float max_distance=sun_contact_shadow_params.z;
     if(camera_depth<=0.0 || camera_depth>=max_distance)return 1.0;
     float trace_length=sun_contact_shadow_params.x;
@@ -252,8 +295,8 @@ float sun_contact_shadow_visibility(vec3 world_position,float camera_depth)
     int steps=int(sun_contact_shadow_params.w);
     ivec2 dims=textureSize(depth_image,0);
     ivec2 receiver_pixel=ivec2(gl_FragCoord.xy);
-    // Probe only a short distance beyond the surface, avoiding the first
-    // few centimeters of unavoidable self-intersection/depth roundoff.
+    float max_radius=float(sun_contact_shadow_max_screen_pixels);
+    bool hit=false;
     for(int i=0;i<12;++i) {
         if(i>=steps)break;
         float t=(float(i)+1.0)/float(steps);
@@ -267,25 +310,27 @@ float sun_contact_shadow_visibility(vec3 world_position,float camera_depth)
                 max(ray_depth*camera_right.w,0.0001),
             dot(rel,camera_up.xyz)/
                 max(ray_depth*camera_up.w,0.0001));
-        vec2 uv=ndc*0.5+0.5;
-        if(any(lessThanEqual(uv,vec2(0.0))) ||
-           any(greaterThanEqual(uv,vec2(1.0))))break;
-        ivec2 pixel=ivec2(uv*vec2(dims));
-        // Treat unchanged raster pixels as the same receiving surface,
-        // not as an occluder (particularly important at grazing angles).
+        vec2 ray_pixel=(ndc*0.5+0.5)*vec2(dims);
+        if(any(lessThan(ray_pixel,vec2(0.0))) ||
+           any(greaterThanEqual(ray_pixel,vec2(dims))))break;
+        // Long visible silhouettes are a job for the proper shadow maps.
+        // Camera-space contact is limited to the immediate edge.
+        if(length(ray_pixel-gl_FragCoord.xy)>max_radius)break;
+        ivec2 pixel=ivec2(ray_pixel);
         if(all(equal(pixel,receiver_pixel)))continue;
         float scene_depth=texelFetch(depth_image,pixel,0).r;
         if(scene_depth<=0.0 || scene_depth>=65500.0)continue;
         float separation=ray_depth-scene_depth/32.0;
-        // Only a nearby depth crossing is a plausible contact blocker.
-        // Farther foreground geometry is likely unrelated to the ray.
         if(separation>0.025 && separation<thickness) {
-            // Fade to zero at the configured distance to avoid hard LOD
-            // boundaries around distant scene architecture.
-            return smoothstep(max_distance*0.75,max_distance,camera_depth);
+            hit=true;
+            break;
         }
     }
-    return 1.0;
+    if(!hit)return 1.0;
+    float supported=sun_contact_supported_shadow(
+        world_position,incidence,trace_length);
+    float strength=1.0-smoothstep(max_distance*0.75,max_distance,camera_depth);
+    return mix(1.0,supported,strength);
 }
 
 // Evaluate cookie radiance once per light and route it into two
@@ -475,7 +520,7 @@ void main()
                 // reads when the maps already report complete occlusion.
                 if(visibility>0.001 && sun_contact_shadows_enabled!=0)
                     visibility=min(visibility,
-                        sun_contact_shadow_visibility(world_position,depth/32.0));
+                        sun_contact_shadow_visibility(world_position,depth/32.0,incidence));
                 // JK's vertex colors already contain authored lighting. If
                 // only the newly added sun term is shadowed, a bright baked
                 // floor barely changes under a caster. Keep a generous

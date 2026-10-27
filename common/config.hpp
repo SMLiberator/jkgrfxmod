@@ -62,6 +62,7 @@ namespace jkgm {
         float sun_contact_shadow_thickness = 0.20f; // view-depth tolerance, 0.01..1
         float sun_contact_shadow_max_distance = 24.0f; // camera forward units, 1..128
         unsigned int sun_contact_shadow_steps = 6U; // maximum per-pixel depth tests, 1..12
+        unsigned int sun_contact_shadow_max_screen_pixels = 6U; // avoid detached screen-space silhouettes, 1..32
         unsigned int sun_dynamic_shadow_resolution = 256U; // baseline 64..1024
         bool sun_dynamic_shadow_adaptive_resolution = false; // opt-in per-Thing pixel density
         float sun_dynamic_shadow_distance_softness = 0.0f; // optional receiver-distance PCF penumbra, 0..0.5

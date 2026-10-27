@@ -910,6 +910,8 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
         the_program,"sun_contact_shadows_enabled"))
     , sun_contact_shadow_params(gl::get_uniform_location(
         the_program,"sun_contact_shadow_params"))
+    , sun_contact_shadow_max_screen_pixels(gl::get_uniform_location(
+        the_program,"sun_contact_shadow_max_screen_pixels"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
     , sun_dynamic_shadow_distance_softness(gl::get_uniform_location(
@@ -1076,12 +1078,14 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_receiver_b
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_contact_shadows(
-    bool enabled,float length,float thickness,float max_view_distance,int steps)
+    bool enabled,float length,float thickness,float max_view_distance,
+    int steps,int max_screen_pixels)
 {
     gl::set_uniform_integer(sun_contact_shadows_enabled,enabled?1:0);
     if(!enabled)return;
     gl::set_uniform_vector(sun_contact_shadow_params,
         make_point(length,thickness,max_view_distance,float(steps)));
+    gl::set_uniform_integer(sun_contact_shadow_max_screen_pixels,max_screen_pixels);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_count(
