@@ -598,9 +598,15 @@ namespace jkgm {
             float min_x=0.0f,max_x=0.0f,min_y=0.0f,max_y=0.0f;
             uint64_t signature=0;
             bool cutout=false;
+            // Coarse world-space light bins, not the moving 16x16 ring.
+            std::vector<uint64_t> spatial_bins;
+            bool spatial_global=false;
         };
         std::array<std::unordered_map<uint64_t,sun_scroll_cached_model>,2>
             sun_scroll_static_casters{};
+        std::array<std::unordered_map<uint64_t,std::vector<uint64_t>>,2>
+            sun_scroll_spatial_bins{};
+        std::array<std::vector<uint64_t>,2> sun_scroll_spatial_global{};
         // Keep a conservative union of all static architecture seen in this
         // SithWorld. A single AABB replaces re-projecting thousands of
         // persistent group bounds into light space on every frame.
@@ -4386,6 +4392,8 @@ namespace jkgm {
                 if(sun_scroll_live_world[0]!=world ||
                    sun_scroll_live_revision[0]!=map.revision) {
                     for(auto &registry:sun_scroll_static_casters)registry.clear();
+                    for(auto &bins:sun_scroll_spatial_bins)bins.clear();
+                    for(auto &global:sun_scroll_spatial_global)global.clear();
                     sun_scroll_static_union_valid=false;
                 }
                 if(sun_scroll_static_union_valid)
@@ -4609,11 +4617,21 @@ namespace jkgm {
             // Share one per-frame material lookup across world and 3DOs,
             // rather than re-reading the native MAT for each cascade.
             auto &persistent=sun_scroll_static_casters[cascade];
+            auto &spatial=sun_scroll_spatial_bins[cascade];
+            auto &large_casters=sun_scroll_spatial_global[cascade];
             if(!collect_scroll_casters ||
                sun_scroll_live_world[cascade]!=world ||
                sun_scroll_live_revision[cascade]!=map.revision ||
-               sun_scroll_live_signature[cascade]!=scroll_static_signature)
+               sun_scroll_live_signature[cascade]!=scroll_static_signature) {
                 persistent.clear();
+                spatial.clear();
+                large_casters.clear();
+                if(cascade==0) sun_scroll_static_union_valid=false;
+            }
+            constexpr double spatial_units=32.0;
+            auto spatial_key=[](int32_t bx,int32_t by) {
+                return (uint64_t(uint32_t(bx))<<32)|uint32_t(by);
+            };
             // Project static AABBs just once. Tile lookup can then cheaply
             // reject distant casters without transforming eight corners for
             // every cached group on each newly exposed tile.
@@ -4711,10 +4729,23 @@ namespace jkgm {
                     auto found=persistent.find(key);
                     if(found==persistent.end() ||
                        found->second.signature!=fingerprint) {
-                        if(found!=persistent.end())
-                            invalidate_rect({{found->second.min_x,
-                                found->second.max_x,found->second.min_y,
-                                found->second.max_y}});
+                        if(found!=persistent.end()) {
+                            auto const &prior=found->second;
+                            invalidate_rect({{prior.min_x,prior.max_x,
+                                prior.min_y,prior.max_y}});
+                            if(prior.spatial_global) {
+                                large_casters.erase(std::remove(
+                                    large_casters.begin(),large_casters.end(),
+                                    key),large_casters.end());
+                            } else for(auto const bin:prior.spatial_bins) {
+                                auto indexed=spatial.find(bin);
+                                if(indexed==spatial.end())continue;
+                                auto &items=indexed->second;
+                                items.erase(std::remove(
+                                    items.begin(),items.end(),key),items.end());
+                                if(items.empty())spatial.erase(indexed);
+                            }
+                        }
                         auto const rect=light_rect(prepared.bounds);
                         invalidate_rect(rect);
                         sun_scroll_cached_model record{};
@@ -4726,6 +4757,25 @@ namespace jkgm {
                         record.min_y=rect[2];record.max_y=rect[3];
                         record.signature=fingerprint;
                         record.cutout=cutout;
+                        // Coarse 32-unit bins keep the common one/two-cell
+                        // shadow query O(nearby geometry), not O(all level
+                        // geometry) for each dirty physical atlas tile.
+                        // Very large meshes take a conservative global path.
+                        int const bx0=int(std::floor(double(rect[0])/spatial_units));
+                        int const bx1=int(std::floor(double(rect[1])/spatial_units));
+                        int const by0=int(std::floor(double(rect[2])/spatial_units));
+                        int const by1=int(std::floor(double(rect[3])/spatial_units));
+                        if(int64_t(bx1)-bx0>=8 ||
+                           int64_t(by1)-by0>=8 ||
+                           (int64_t(bx1)-bx0+1)*(int64_t(by1)-by0+1)>32) {
+                            record.spatial_global=true;
+                            large_casters.push_back(key);
+                        } else for(int by=by0;by<=by1;++by)
+                            for(int bx=bx0;bx<=bx1;++bx) {
+                                auto const bin=spatial_key(bx,by);
+                                record.spatial_bins.push_back(bin);
+                                spatial[bin].push_back(key);
+                            }
                         persistent[key]=std::move(record);
                         if(cascade==0) {
                             if(!sun_scroll_static_union_valid) {
@@ -4991,7 +5041,7 @@ namespace jkgm {
                                      scroll_target);
                 glEnable(GL_SCISSOR_TEST);
                 std::vector<sun_model_draw> tile_models;
-                tile_models.reserve(persistent.size());
+                tile_models.reserve(128);
                 float const start_z=sun_scroll_live_z[cascade];
                 for(auto const &tile:pending) {
                     int const x=tile.atlas_x*tile_pixels;
@@ -5022,16 +5072,35 @@ namespace jkgm {
                     // intersect this light-space ray column, including
                     // geometry physically behind or above the receiver.
                     float const guard=2.0f*tile_extent/float(tile_pixels);
-                    for(auto const &entry:persistent) {
-                        auto const &rec=entry.second;
+                    std::unordered_set<uint64_t> seen;
+                    auto include_record=[&](uint64_t key) {
+                        if(!seen.insert(key).second)return;
+                        auto const found=persistent.find(key);
+                        if(found==persistent.end())return;
+                        auto const &rec=found->second;
                         if(rec.max_x<light_x-guard ||
                            rec.min_x>light_x+tile_extent+guard ||
                            rec.max_y<light_y-guard ||
                            rec.min_y>light_y+tile_extent+guard)
-                            continue;
+                            return;
                         tile_models.push_back({&rec.instance,&rec.group,
                             rec.texture,rec.cutout,rec.bounds});
-                    }
+                    };
+                    for(auto const key:large_casters)include_record(key);
+                    int const bx0=int(std::floor(
+                        (double(light_x)-guard)/spatial_units));
+                    int const bx1=int(std::floor(
+                        (double(light_x)+tile_extent+guard)/spatial_units));
+                    int const by0=int(std::floor(
+                        (double(light_y)-guard)/spatial_units));
+                    int const by1=int(std::floor(
+                        (double(light_y)+tile_extent+guard)/spatial_units));
+                    for(int by=by0;by<=by1;++by)
+                        for(int bx=bx0;bx<=bx1;++bx) {
+                            auto const found=spatial.find(spatial_key(bx,by));
+                            if(found==spatial.end())continue;
+                            for(auto const key:found->second)include_record(key);
+                        }
                     draw_models(tile_models);
                     grid.mark_rendered(tile);
                     ++sun_scroll_tiles_rendered[cascade];
@@ -5063,6 +5132,8 @@ namespace jkgm {
                     " pending=",sun_scroll_live[cascade].pending_tiles().size(),
                     " active=",use_scroll?1:0,
                     " captured_static_groups=",persistent.size(),
+                    " spatial_bins=",spatial.size(),
+                    " spatial_large_groups=",large_casters.size(),
                     " caster_dirty_tiles=",sun_scroll_model_dirty_tiles[cascade],
                     " key_resets=",sun_scroll_key_resets[cascade],
                     " depth_resets=",sun_scroll_depth_resets[cascade],
