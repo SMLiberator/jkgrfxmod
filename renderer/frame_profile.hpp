@@ -47,6 +47,9 @@ struct profile_sample {
   uint64_t gpu_opaque_draw_calls=0,gpu_transparent_draw_calls=0;
   uint64_t gpu_opaque_draw_ranges=0,gpu_transparent_draw_ranges=0;
   uint64_t gpu_draw_triangles=0,gpu_material_resolves=0,gpu_uploads=0;
+  // Visible 3DO material filter state: a "skip" avoids three glTexParameter
+  // calls, tracked per pass using actual texture object IDs.
+  uint64_t gpu_filter_state_sets=0,gpu_filter_state_skips=0;
   uint64_t gpu_groups_considered=0,gpu_groups_frustum_culled=0,gpu_groups_backface_culled=0;
   uint64_t gpu_preview_cpu_us=0;
   // Separate opaque/transparent visible 3DO CPU work. These are subsets
@@ -122,6 +125,8 @@ struct profile_sample {
     gpu_draw_triangles+=o.gpu_draw_triangles;
     gpu_material_resolves+=o.gpu_material_resolves;
     gpu_uploads+=o.gpu_uploads;
+    gpu_filter_state_sets+=o.gpu_filter_state_sets;
+    gpu_filter_state_skips+=o.gpu_filter_state_skips;
     gpu_groups_considered+=o.gpu_groups_considered;
     gpu_groups_frustum_culled+=o.gpu_groups_frustum_culled;
     gpu_groups_backface_culled+=o.gpu_groups_backface_culled;
