@@ -4560,6 +4560,26 @@ namespace jkgm {
                                    gpu_3do_texture texture;bool cutout;
                                    decal_volume_aabb bounds;};
             std::vector<sun_model_draw> models,static_models;
+            std::vector<sun_model_draw> scroll_static_models;
+            // Unlike the camera-fitted cascade signature, this key includes
+            // every captured stationary model (even outside current view).
+            // Camera motion alone must not invalidate the entire tiled atlas.
+            uint64_t scroll_static_signature=caster_signature;
+            auto hash_scroll_u32=[&](uint32_t value) {
+                for(int b=0;b<4;++b) {
+                    scroll_static_signature^=uint64_t((value>>(b*8))&255U);
+                    scroll_static_signature*=1099511628211ULL;
+                }
+            };
+            auto hash_scroll_float=[&](float value) {
+                uint32_t bits=0;
+                std::memcpy(&bits,&value,sizeof(bits));
+                hash_scroll_u32(bits);
+            };
+            bool const collect_scroll_casters=
+                the_config->enable_sun_scrolling_shadows &&
+                map.scroll_complete && map.static_complete &&
+                map.world.receivers.empty();
             // The expensive group-box transforms were computed once before
             // fitting the sun projection; both cascades use those exact AABBs.
             // Share one per-frame material lookup across world and 3DOs,
@@ -4579,9 +4599,10 @@ namespace jkgm {
                 auto const &group=*prepared.group;
                 if(!sun_shadow_caster_in_static_cascades(
                        instance.shadow_owner,sun_dynamic_atlas_owners))continue;
-                if(!decal_aabbs_overlap(
-                       prepared.bounds.low,prepared.bounds.high,
-                       bounds.low,bounds.high))continue;
+                bool const in_cascade=decal_aabbs_overlap(
+                    prepared.bounds.low,prepared.bounds.high,
+                    bounds.low,bounds.high);
+                if(!in_cascade && !collect_scroll_casters)continue;
                 auto const &tex=cached_material(group);
                 bool const cutout=tex.masked||tex.alpha||tex.dithered;
                 if(tex.albedo_source==0 || tex.special || tex.emissive_only ||
@@ -4593,8 +4614,6 @@ namespace jkgm {
                 bool const stable=sun_shadow_cache_stationary_model(
                     instance.shadow_owner,instance.dynamic_sun_caster,
                     the_config->enable_sun_static_cache,map.static_complete);
-                (stable?static_models:models).push_back(
-                    {&instance,&group,tex,cutout,prepared.bounds});
                 auto hash_model=[&](auto &&integer,auto &&floating) {
                     integer(uint32_t(instance.id));
                     integer(uint32_t(instance.id>>32));
@@ -4611,6 +4630,14 @@ namespace jkgm {
                     }
                     for(float v:instance.transform)floating(v);
                 };
+                if(stable && collect_scroll_casters) {
+                    scroll_static_models.push_back(
+                        {&instance,&group,tex,cutout,prepared.bounds});
+                    hash_model(hash_scroll_u32,hash_scroll_float);
+                }
+                if(!in_cascade)continue;
+                (stable?static_models:models).push_back(
+                    {&instance,&group,tex,cutout,prepared.bounds});
                 hash_model(hash_u32,hash_float);
                 if(stable)hash_model(hash_static_u32,hash_static_float);
             }
@@ -4644,13 +4671,13 @@ namespace jkgm {
                 float const start_z=decal_dot(world_view.origin,world_view.forward);
                 if(sun_scroll_live_world[cascade]!=world ||
                    sun_scroll_live_revision[cascade]!=map.revision ||
-                   sun_scroll_live_signature[cascade]!=static_signature ||
+                   sun_scroll_live_signature[cascade]!=scroll_static_signature ||
                    std::fabs(sun_scroll_live_z[cascade]-start_z)>0.0001f ||
                    std::fabs(sun_scroll_live_range[cascade]-world_view.range)>0.0001f)
                     grid.invalidate();
                 sun_scroll_live_world[cascade]=world;
                 sun_scroll_live_revision[cascade]=map.revision;
-                sun_scroll_live_signature[cascade]=static_signature;
+                sun_scroll_live_signature[cascade]=scroll_static_signature;
                 sun_scroll_live_z[cascade]=start_z;
                 sun_scroll_live_range[cascade]=world_view.range;
                 // A rotation-independent square encloses the camera frustum
@@ -4821,7 +4848,7 @@ namespace jkgm {
                                      scroll_target);
                 glEnable(GL_SCISSOR_TEST);
                 std::vector<sun_model_draw> tile_models;
-                tile_models.reserve(static_models.size());
+                tile_models.reserve(scroll_static_models.size());
                 float const start_z=sun_scroll_live_z[cascade];
                 for(auto const &tile:pending) {
                     int const x=tile.atlas_x*tile_pixels;
@@ -4851,7 +4878,7 @@ namespace jkgm {
                     // intersect this light-space ray column, including
                     // geometry physically behind or above the receiver.
                     float const guard=2.0f*tile_extent/float(tile_pixels);
-                    for(auto const &draw:static_models) {
+                    for(auto const &draw:scroll_static_models) {
                         float min_x=std::numeric_limits<float>::max();
                         float min_y=min_x,max_x=-min_x,max_y=-min_y;
                         for(int corner=0;corner<8;++corner) {
