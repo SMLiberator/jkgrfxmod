@@ -2281,9 +2281,7 @@ namespace {
     void capture_static_sprite_decal_mesh(void *mesh,void *placement)
     {
         if(!the_config || !the_config->enable_sprite_decals ||
-           !mesh || !placement ||
-           !gpu_span_readable(mesh,sizeof(native_mesh)) ||
-           !gpu_span_readable(placement,12*sizeof(float)))
+           !mesh || !placement)
             return;
         constexpr uintptr_t current_rdmodel_thing=0x0073C320U;
         if(!gpu_span_readable(reinterpret_cast<void const *>(
@@ -2313,6 +2311,10 @@ namespace {
         if(!jkgm::decal_native_address_ok(world))return;
         if(sprite_static_world!=world)
             reset_static_sprite_decal_meshes(world);
+        // Mesh header is read only on a miss. Don't validate the mesh
+        // allocation merely to locate an existing receiver cache entry.
+        // For nonstatic Things avoid validating the placement altogether.
+        if(!gpu_span_readable(placement,12*sizeof(float)))return;
         jkgm::gpu_3do_matrix34 transform{};
         std::memcpy(transform.data(),placement,sizeof(transform));
         if(!jkgm::gpu_3do_matrix_finite(transform))return;
@@ -2330,6 +2332,7 @@ namespace {
            existing->second.transform==transform)return;
         if(existing==sprite_static_meshes.end() &&
            sprite_static_meshes.size()>=4096U)return;
+        if(!gpu_span_readable(mesh,sizeof(native_mesh)))return;
         native_mesh source{};
         std::memcpy(&source,mesh,sizeof(source));
         if(source.num_faces<1 || source.num_faces>8192 ||
