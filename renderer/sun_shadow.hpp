@@ -202,6 +202,43 @@ inline bool fit_sun_shadow_to_camera(
            std::isfinite(projection.height);
 }
 
+// Keep a previously rendered directional map unchanged while the current
+// camera's complete near/far frustum remains safely inside its light-space
+// coverage. This saves costly depth clears/draws without imposing a fixed
+// update rate or allowing the view to outgrow a stale texture.
+inline bool sun_shadow_projection_covers_camera(
+    sun_shadow_projection const &p,
+    std::array<float,3> const &position,
+    std::array<float,3> const &camera_right,
+    std::array<float,3> const &camera_up,
+    std::array<float,3> const &camera_forward,
+    float horizontal,float vertical,float distance,
+    float margin=0.03f)
+{
+    if(!(p.width>0.0f && p.height>0.0f &&
+         std::isfinite(p.width) && std::isfinite(p.height) &&
+         std::isfinite(horizontal) && horizontal>0.0f &&
+         std::isfinite(vertical) && vertical>0.0f &&
+         std::isfinite(distance) && distance>0.0f &&
+         std::isfinite(margin) && margin>=0.0f && margin<0.5f))
+        return false;
+    for(float d:{0.0f,distance})
+        for(int x:{-1,1})for(int y:{-1,1}) {
+            decal_vec3 point{};
+            for(int axis=0;axis<3;++axis)
+                point[axis]=position[axis]+d*(
+                    camera_forward[axis]+x*horizontal*camera_right[axis]+
+                    y*vertical*camera_up[axis]);
+            auto const rel=decal_sub(point,p.origin);
+            float const u=decal_dot(rel,p.right)/p.width;
+            float const v=decal_dot(rel,p.up)/p.height;
+            if(!std::isfinite(u) || !std::isfinite(v) ||
+               u<margin || u>1.0f-margin ||
+               v<margin || v>1.0f-margin)return false;
+        }
+    return true;
+}
+
 // A per-Thing light-space crop. Include receiver positions a few units down
 // each ray without inflating to the entire camera frustum. Keep the full
 // depth range of the level to avoid clipping the source geometry.

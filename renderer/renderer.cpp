@@ -4353,9 +4353,41 @@ namespace jkgm {
             float const distance=cascade==0
                 ? the_config->sun_shadow_near_distance : the_config->sun_shadow_far_distance;
             if(!fit_sun_shadow_to_camera(view,camera.position,camera.right,
-                    camera.up,camera.forward,horizontal,vertical,distance) ||
-               !stabilize_sun_shadow_projection(view,map.resolution)) {
+                    camera.up,camera.forward,horizontal,vertical,distance)) {
                 sun_failure("camera-local cascade projection invalid");
+                continue;
+            }
+            // Reuse an already rendered projection whenever the ACTUAL
+            // camera frustum still fits within its coverage. Rotation and
+            // translation no longer force redundant 4096px shadow redraws.
+            // Keep the same sunlight depth-axis origin/range too: an updated
+            // world AABB must never silently clip new casters in Z.
+            bool locked_view=false;
+            if(the_config->sun_shadow_stable_projection_cache &&
+               sun_shadow_cascade_cached[cascade] &&
+               sun_shadow_worlds[cascade]==world &&
+               sun_shadow_revisions[cascade]==map.revision) {
+                auto const &previous=sun_shadow_views[cascade];
+                bool same_axes=true;
+                for(int axis=0;axis<3;++axis)
+                    same_axes=same_axes &&
+                        std::fabs(previous.forward[axis]-world_view.forward[axis])<1.e-5f &&
+                        std::fabs(previous.right[axis]-world_view.right[axis])<1.e-5f &&
+                        std::fabs(previous.up[axis]-world_view.up[axis])<1.e-5f;
+                same_axes=same_axes &&
+                    std::fabs(previous.range-world_view.range)<1.e-4f &&
+                    std::fabs(decal_dot(previous.origin,previous.forward)-
+                              decal_dot(world_view.origin,world_view.forward))<1.e-4f;
+                if(same_axes && sun_shadow_projection_covers_camera(
+                       previous,camera.position,camera.right,camera.up,
+                       camera.forward,horizontal,vertical,distance)) {
+                    view=previous;
+                    locked_view=true;
+                }
+            }
+            if(!locked_view &&
+               !stabilize_sun_shadow_projection(view,map.resolution)) {
+                sun_failure("camera-local cascade stabilization failed");
                 continue;
             }
 

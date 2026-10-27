@@ -55,6 +55,7 @@ namespace jkgm {
         unsigned int spotlight_shadow_resolution = 256U; // depth-map width and height (64..1024)
         bool enable_sun_shadows = false;
         bool enable_sun_static_cache = true; // world-only depth layers, independently cached per cascade // directional sunlight + world shadow map
+        bool sun_shadow_stable_projection_cache = false; // opt-in reuse while camera frustum stays inside map
         bool enable_sun_dynamic_shadows = false; // eight-Thing atlas
         bool sun_shadow_two_sided_models = false; // experimental: disable face culling on 3DO sun-shadow casters
         float sun_shadow_caster_expand_texels = 0.0f; // opt-in rasterized opaque sun caster silhouette expansion (0..6)

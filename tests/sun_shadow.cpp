@@ -111,6 +111,14 @@ int main()
     assert(fit_sun_shadow_to_camera(far_projection,{{105.0f,205.0f,2.0f}},
         {{1.0f,0.0f,0.0f}},{{0.0f,0.0f,1.0f}},
         {{0.0f,1.0f,0.0f}},0.5f,0.4f,sun_shadow_far_distance));
+    assert(sun_shadow_projection_covers_camera(
+        near_projection,{{105.0f,205.0f,2.0f}},
+        {{1.0f,0.0f,0.0f}},{{0.0f,0.0f,1.0f}},
+        {{0.0f,1.0f,0.0f}},0.5f,0.4f,sun_shadow_near_distance));
+    assert(!sun_shadow_projection_covers_camera(
+        near_projection,{{205.0f,305.0f,2.0f}},
+        {{1.0f,0.0f,0.0f}},{{0.0f,0.0f,1.0f}},
+        {{0.0f,1.0f,0.0f}},0.5f,0.4f,sun_shadow_near_distance));
     assert(near_projection.width<far_projection.width);
     assert(near_projection.height<far_projection.height);
     assert(near_projection.range==far_projection.range);
