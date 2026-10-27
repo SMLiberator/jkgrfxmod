@@ -12,6 +12,23 @@ using namespace jkgm;
 
 int main()
 {
+    // Fixed light-space units are independent of any camera FOV changes:
+    // changing zoom must not reset a previously populated static atlas.
+    assert(sun_shadow_scroll_fixed_tile_units(4.0f)==2.0);
+    assert(sun_shadow_scroll_fixed_tile_units(40.0f)==16.0);
+    sun_shadow_scroll_grid stable(16);
+    auto stable_dirty=stable.update(0.0,0.0,
+        sun_shadow_scroll_fixed_tile_units(40.0f),1);
+    assert(stable_dirty.size()==256);
+    for(auto const &tile:stable.pending_tiles())
+        assert(stable.mark_rendered(tile));
+    assert(stable.update(1.0,0.0,
+        sun_shadow_scroll_fixed_tile_units(40.0f),1).empty());
+    assert(stable.pending_tiles().empty());
+    auto strip=stable.update(16.1,0.0,
+        sun_shadow_scroll_fixed_tile_units(40.0f),1);
+    assert(strip.size()==16);
+    assert(stable.pending_tiles().size()==16);
     // Circular tile addressing: 32x32 JK units, 2x2-unit tiles.
     sun_shadow_scroll_grid grid(16);
     auto dirty=grid.update(0.0,0.0,2.0,10);
