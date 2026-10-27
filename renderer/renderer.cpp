@@ -586,6 +586,10 @@ namespace jkgm {
         std::array<uint64_t,2> sun_shadow_revisions{};
         std::array<uint64_t,2> sun_shadow_caster_signatures{};
         std::array<bool,2> sun_shadow_static_cached{{false,false}};
+        std::array<uint64_t,2> sun_profile_full_hits{{0,0}};
+        std::array<uint64_t,2> sun_profile_static_hits{{0,0}};
+        std::array<uint64_t,2> sun_profile_static_redraws{{0,0}};
+        std::array<uint64_t,2> sun_profile_working_redraws{{0,0}};
         std::array<uint64_t,2> sun_shadow_static_signatures{};
         std::array<uint64_t,2> sun_shadow_static_revisions{};
         std::array<uintptr_t,2> sun_shadow_static_worlds{};
@@ -4531,6 +4535,8 @@ namespace jkgm {
             for(int i=0;i<3 && unchanged;++i)
                 unchanged=std::fabs(direction[i]-sun_shadow_directions[cascade][i])<1.0e-5f;
             if(unchanged) {
+                if(the_config->profile_renderer)
+                    ++sun_profile_full_hits[cascade];
                 sun_shadow_cascade_ready[cascade]=true;
                 if(the_config->profile_renderer &&
                    gpu_3do_present_serial%120U==0U)
@@ -4550,6 +4556,11 @@ namespace jkgm {
             for(int i=0;i<3 && static_same;++i)
                 static_same=std::fabs(direction[i]-
                     sun_shadow_static_directions[cascade][i])<1.0e-5f;
+            if(the_config->profile_renderer) {
+                ++sun_profile_working_redraws[cascade];
+                if(static_same) ++sun_profile_static_hits[cascade];
+                else ++sun_profile_static_redraws[cascade];
+            }
             auto const &cascade_target=cascade==0 ? map.fbo : map.far_fbo;
             auto const &static_target=cascade==0 ? map.static_fbo : map.static_far_fbo;
             auto const dimensions=make_size(int(map.resolution),int(map.resolution));
@@ -4690,6 +4701,24 @@ namespace jkgm {
             } // cascade
             sun_shadow_ready=sun_shadow_cascade_ready[0] &&
                              sun_shadow_cascade_ready[1];
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U) {
+                LOG_INFO("SUN cache 120-frame-window near(full/static_hit/static_redraw/composite_redraw)=",
+                    sun_profile_full_hits[0],"/",
+                    sun_profile_static_hits[0],"/",
+                    sun_profile_static_redraws[0],"/",
+                    sun_profile_working_redraws[0],
+                    " far=",
+                    sun_profile_full_hits[1],"/",
+                    sun_profile_static_hits[1],"/",
+                    sun_profile_static_redraws[1],"/",
+                    sun_profile_working_redraws[1],
+                    " NOTE=full_hits_skip_all_shadow_draws; static_hits_still_blit_static_and_render_movers");
+                sun_profile_full_hits.fill(0);
+                sun_profile_static_hits.fill(0);
+                sun_profile_static_redraws.fill(0);
+                sun_profile_working_redraws.fill(0);
+            }
         }
 
         bool shadow_matches_light(spotlight_instance const &spot) const
