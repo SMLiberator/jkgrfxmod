@@ -4919,8 +4919,41 @@ std::vector<jkgm::spotlight_instance> jkgm::collect_spotlights_for_frame()
         // pointers remain readable. Resolve only currently resident images;
         // native MAT loading remains an explicit SetSpotlight-time attempt.
         spotlight_instance instance{};
-        if(spotlight_make_instance(request,pose,instance,GetTickCount()))
+        if(spotlight_make_instance(request,pose,instance,GetTickCount())) {
+            // A spotlight can be a separate invisible Thing attached to a
+            // vehicle's headlight node. The car, not merely the marker Thing,
+            // must be excluded from the spotlight's own depth map.
+            //
+            // Walk verified native SITH_ATTACH_THING parents. These pointers
+            // can be recycled, so validate both the parent layout and its
+            // identity before changing the shadow-owner key. An unattached
+            // source keeps the original Thing+identity key.
+            uintptr_t owner=request.thing;
+            uint32_t owner_identity=request.identity;
+            for(unsigned depth=0;depth<16U;++depth) {
+                if(!gpu_span_readable(reinterpret_cast<void const *>(owner),0x78U))
+                    break;
+                uint32_t flags=0,parent=0;
+                std::memcpy(&flags,reinterpret_cast<void const *>(owner+0x34U),4);
+                if((flags&native_attach_thing)==0U)break;
+                std::memcpy(&parent,reinterpret_cast<void const *>(owner+0x58U),4);
+                if(parent<0x10000U || uintptr_t(parent)==owner ||
+                   !gpu_span_readable(reinterpret_cast<void const *>(
+                       uintptr_t(parent)),0x78U))
+                    break;
+                uint32_t kind=0,signature=0;
+                std::memcpy(&kind,reinterpret_cast<void const *>(
+                    uintptr_t(parent)+0x0cU),4);
+                std::memcpy(&signature,reinterpret_cast<void const *>(
+                    uintptr_t(parent)+0x74U),4);
+                if(kind==0U || kind>15U || signature==0U)break;
+                owner=uintptr_t(parent);
+                owner_identity=signature;
+            }
+            instance.shadow_owner=
+                (uint64_t(uint32_t(owner))<<32)|owner_identity;
             instances.push_back(instance);
+        }
     }
     return instances;
 }
