@@ -5192,34 +5192,60 @@ namespace jkgm {
             // material/cel, mesh instance and validated SithThing owner.
             auto draw_models=[&](std::vector<sun_model_draw> const &draws) {
                 size_t gl_calls=0,multi_calls=0;
-                std::vector<GLsizei> batch_counts;
-                std::vector<void const *> batch_offsets;
-                batch_counts.reserve(32);
-                batch_offsets.reserve(32);
-                // Depth-only opaque groups ignore their visible MAT identity.
-                // Merge adjacent ranges only when they share the SAME 3DO
-                // instance (and therefore VAO/model transform), cutout state
-                // and face-culling behavior. Cutouts additionally require the
-                // same MAT/cel, since their alpha-test texture is sampled.
-                // Never reorder groups: COG, UV or depth-edge behavior stays
-                // identical to the old per-group draw sequence.
-                auto no_cull=[&](sun_model_draw const &d) {
+                std::vector<sun_model_draw const *> scheduled;
+                scheduled.reserve(draws.size());
+                for(auto const &draw:draws)scheduled.push_back(&draw);
+                // Opaque and alpha-tested shadow casters only write DEPTH.
+                // Within each model instance their order is irrelevant, so
+                // cluster like depth states instead of breaking a batch every
+                // time another MAT/culling group interrupts it. Preserve the
+                // order of *instances* and never mix their model matrices.
+                // In particular, we cannot use this reordering in the
+                // alpha-BLENDED visible 3DO pass.
+                auto shadow_no_cull=[&](sun_model_draw const &d) {
                     return (!the_config->sun_shadow_cull_back_faces &&
                             !the_config->sun_shadow_cull_front_faces) ||
                            (d.group->face_type&0x1U)!=0 ||
                            d.group->nonplanar;
                 };
-                for(size_t first=0;first<draws.size();) {
-                    auto const &draw=draws[first];
+                for(size_t i=0;i<scheduled.size();) {
+                    size_t end=i+1;
+                    while(end<scheduled.size() &&
+                          scheduled[end]->instance==scheduled[i]->instance)
+                        ++end;
+                    if(end>i+1)
+                        std::stable_sort(scheduled.begin()+i,
+                            scheduled.begin()+end,
+                            [&](sun_model_draw const *a,sun_model_draw const *b) {
+                                if(a->cutout!=b->cutout)
+                                    return a->cutout<b->cutout;
+                                bool const ca=shadow_no_cull(*a);
+                                bool const cb=shadow_no_cull(*b);
+                                if(ca!=cb)return ca<cb;
+                                if(!a->cutout)return false;
+                                if(a->group->material!=b->group->material)
+                                    return a->group->material<b->group->material;
+                                return a->group->cel<b->group->cel;
+                            });
+                    i=end;
+                }
+                std::vector<GLsizei> batch_counts;
+                std::vector<void const *> batch_offsets;
+                batch_counts.reserve(32);
+                batch_offsets.reserve(32);
+                // All ranges in each batch have the same VAO/model matrix,
+                // depth-culling state and (for alpha cutouts) MAT/cel.
+                for(size_t first=0;first<scheduled.size();) {
+                    auto const &draw=*scheduled[first];
                     auto const &instance=*draw.instance;
                     auto const &group=*draw.group;
-                    bool const uncullable=no_cull(draw);
+                    bool const uncullable=shadow_no_cull(draw);
                     size_t last=first+1;
-                    while(last<draws.size()) {
-                        auto const &other=draws[last];
+                    while(last<scheduled.size()) {
+                        auto const &other=*scheduled[last];
                         if(other.instance!=draw.instance ||
                            other.cutout!=draw.cutout ||
-                           no_cull(other)!=uncullable)break;
+                           shadow_no_cull(other)!=uncullable)break;
                         if(draw.cutout &&
                            (other.group->material!=group.material ||
                             other.group->cel!=group.cel))break;
@@ -5256,7 +5282,7 @@ namespace jkgm {
                         batch_counts.clear();
                         batch_offsets.clear();
                         for(size_t k=first;k<last;++k) {
-                            auto const &g=*draws[k].group;
+                            auto const &g=*scheduled[k]->group;
                             batch_counts.push_back(static_cast<GLsizei>(g.count));
                             batch_offsets.push_back(reinterpret_cast<void const *>(
                                 uintptr_t(g.offset)*sizeof(uint32_t)));
