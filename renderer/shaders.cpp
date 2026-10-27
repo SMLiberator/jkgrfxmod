@@ -3,6 +3,7 @@
 #include "base/log.hpp"
 #include "base/memory_block.hpp"
 #include "common/error_reporter.hpp"
+#include "glad/gl.h"
 
 namespace jkgm {
 
@@ -802,6 +803,11 @@ jkgm::shaders::spotlight_shadow_depth_shader::spotlight_shadow_depth_shader(
     , shadow_model_forward(gl::get_uniform_location(the_program,"shadow_model_forward"))
     , shadow_model_up(gl::get_uniform_location(the_program,"shadow_model_up"))
     , shadow_model_origin(gl::get_uniform_location(the_program,"shadow_model_origin"))
+    , shadow_instance_count(gl::get_uniform_location(the_program,"shadow_instance_count"))
+    , shadow_instance_right(gl::get_uniform_location(the_program,"shadow_instance_right[0]"))
+    , shadow_instance_forward(gl::get_uniform_location(the_program,"shadow_instance_forward[0]"))
+    , shadow_instance_up(gl::get_uniform_location(the_program,"shadow_instance_up[0]"))
+    , shadow_instance_origin(gl::get_uniform_location(the_program,"shadow_instance_origin[0]"))
     , shadow_use_alpha(gl::get_uniform_location(the_program,"shadow_use_alpha"))
     , shadow_alpha_texture(gl::get_uniform_location(the_program,"shadow_alpha_texture"))
     , shadow_alpha_texture_next(gl::get_uniform_location(the_program,"shadow_alpha_texture_next"))
@@ -841,10 +847,43 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_model(
     point<3,float> right,point<3,float> forward,
     point<3,float> up,point<3,float> origin)
 {
+    gl::set_uniform_integer(shadow_instance_count,0);
     gl::set_uniform_vector(shadow_model_right,right);
     gl::set_uniform_vector(shadow_model_forward,forward);
     gl::set_uniform_vector(shadow_model_up,up);
     gl::set_uniform_vector(shadow_model_origin,origin);
+}
+
+void jkgm::shaders::spotlight_shadow_depth_shader::set_instanced_models(
+    std::array<std::array<float,12>,max_shadow_instances> const &models,
+    size_t count)
+{
+    // One uniform-array upload per axis, rather than four uniform updates
+    // per Thing and a draw call per material group. Count is capped so the
+    // GLSL 3.3 implementation stays within minimum vertex-uniform limits.
+    if(count==0 || count>max_shadow_instances) {
+        gl::set_uniform_integer(shadow_instance_count,0);
+        return;
+    }
+    std::array<float,3*max_shadow_instances> right{},forward{},up{},origin{};
+    for(size_t i=0;i<count;++i) {
+        auto const &m=models[i];
+        for(size_t axis=0;axis<3;++axis) {
+            right[i*3+axis]=m[axis];
+            forward[i*3+axis]=m[axis+3];
+            up[i*3+axis]=m[axis+6];
+            origin[i*3+axis]=m[axis+9];
+        }
+    }
+    glUniform3fv(shadow_instance_right.get(),static_cast<GLsizei>(count),
+                 right.data());
+    glUniform3fv(shadow_instance_forward.get(),static_cast<GLsizei>(count),
+                 forward.data());
+    glUniform3fv(shadow_instance_up.get(),static_cast<GLsizei>(count),
+                 up.data());
+    glUniform3fv(shadow_instance_origin.get(),static_cast<GLsizei>(count),
+                 origin.data());
+    gl::set_uniform_integer(shadow_instance_count,static_cast<int>(count));
 }
 
 void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(
