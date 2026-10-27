@@ -594,6 +594,8 @@ namespace jkgm {
         std::array<float,2> sun_scroll_live_z{},sun_scroll_live_range{};
         std::array<bool,2> sun_scroll_working_active{{false,false}};
         std::array<uint64_t,2> sun_scroll_tiles_rendered{{0,0}};
+        std::array<uint64_t,2> sun_scroll_depth_blits{{0,0}};
+        std::array<uint64_t,2> sun_scroll_active_frames{{0,0}};
         // Non-rendering prototype: estimate partial tile updates before
         // changing the depth-map atlas and all forward/opaque samplers.
         std::array<sun_shadow_scroll_grid,2> sun_scroll_preview{};
@@ -945,6 +947,9 @@ namespace jkgm {
                 sun_shadow_static_cached={{false,false}};
                 for(auto &grid:sun_scroll_live)grid.invalidate();
                 sun_scroll_working_active={{false,false}};
+                sun_scroll_tiles_rendered={{0,0}};
+                sun_scroll_depth_blits={{0,0}};
+                sun_scroll_active_frames={{0,0}};
                 for(auto &grid:sun_scroll_preview)grid.invalidate();
                 sun_scroll_preview_new_tiles={{0,0}};
                 sun_scroll_preview_frames={{0,0}};
@@ -4925,15 +4930,23 @@ namespace jkgm {
                 // reach the lighting shaders. Revert to exact legacy pass.
                 use_scroll=grid.pending_tiles(1).empty();
             }
+            if(the_config->profile_renderer && use_scroll) {
+                sun_scroll_depth_blits[cascade]+=scroll_blits.size();
+                ++sun_scroll_active_frames[cascade];
+            }
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U &&
                scroll_possible) {
                 LOG_INFO("SUN scroll GPU cascade=",cascade,
                     " tiles_rendered_window=",sun_scroll_tiles_rendered[cascade],
+                    " full_depth_blits_window=",sun_scroll_depth_blits[cascade],
+                    " active_frames=",sun_scroll_active_frames[cascade],
                     " pending=",sun_scroll_live[cascade].pending_tiles().size(),
                     " active=",use_scroll?1:0,
-                    " NOTE=static tiles; camera working-map depth blits remain");
+                    " NOTE=atlas depth tiles and camera reconstruction blits; GPU timings not measured");
                 sun_scroll_tiles_rendered[cascade]=0;
+                sun_scroll_depth_blits[cascade]=0;
+                sun_scroll_active_frames[cascade]=0;
             }
             if(!static_same) {
                 // Tile warmup temporarily bound the scrolling atlas FBO.
