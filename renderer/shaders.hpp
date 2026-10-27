@@ -316,8 +316,6 @@ namespace jkgm {
             gl::uniform_location_id shadow_origin,shadow_right,shadow_up;
             gl::uniform_location_id shadow_forward,shadow_limits;
             gl::uniform_location_id shadow_orthographic;
-            gl::uniform_location_id shadow_caster_padding;
-            gl::uniform_location_id shadow_caster_model_center;
             gl::uniform_location_id shadow_model_right,shadow_model_forward;
             gl::uniform_location_id shadow_model_up,shadow_model_origin;
             gl::uniform_location_id shadow_use_alpha,shadow_alpha_texture;
@@ -337,8 +335,6 @@ namespace jkgm {
                                         point<4,float> limits);
             void set_model(point<3,float> right,point<3,float> forward,
                            point<3,float> up,point<3,float> origin);
-            void set_caster_padding(float texels,float ndc_per_texel,
-                                    bool world_centers,point<3,float> model_center);
             void set_shadow_alpha(bool enabled,point<2,float> uv_scale,
                                   point<2,float> uv_scroll,float cutoff,
                                   float factor,bool has_next,float progress);
@@ -373,10 +369,6 @@ namespace jkgm {
             gl::uniform_location_id sun_shadow_far_forward,sun_shadow_far_limits;
             gl::uniform_location_id sun_shadow_split,sun_shadow_far_soft_filter;
             gl::uniform_location_id sun_shadow_receiver_bias_scale;
-            gl::uniform_location_id sun_shadow_edge_correction;
-            gl::uniform_location_id sun_shadow_edge_params;
-            gl::uniform_location_id sun_shadow_edge_screen_radius;
-            gl::uniform_location_id sun_shadow_edge_debug;
             gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
             gl::uniform_location_id sun_dynamic_shadow_distance_softness;
             std::vector<gl::uniform_location_id> sun_dynamic_atlas_rects;
@@ -422,8 +414,6 @@ namespace jkgm {
                                     point<3,float> limits,float split);
             void set_sun_shadow_far_soft_filter(bool soft);
             void set_sun_shadow_receiver_bias_scale(float scale);
-            void set_sun_shadow_edge_correction(bool enabled,
-                float radius,float strength,int screen_radius,int debug);
             void set_sun_dynamic_count(int count);
             void set_sun_dynamic_shadow_distance_softness(float amount);
             void set_sun_dynamic_caster_depth(int slot,float normalized_depth);

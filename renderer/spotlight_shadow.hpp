@@ -32,7 +32,6 @@ struct spotlight_shadow_surface_range {
 struct spotlight_shadow_vertex {
     decal_vec3 position{};
     std::array<float,2> uv{};
-    decal_vec3 polygon_center{}; // world shadow only: precomputed once per level
 };
 struct spotlight_shadow_static_mesh {
     // Indexed vertices, retaining each native polygon vertex just once.
@@ -166,14 +165,9 @@ inline bool build_spotlight_shadow_static_mesh(
     for(auto const &surface:world.receivers) {
         uint32_t const base=static_cast<uint32_t>(out.vertices.size());
         uint32_t const offset=static_cast<uint32_t>(out.indices.size());
-        decal_vec3 center{};
-        for(auto const &point:surface.polygon)
-            for(int axis=0;axis<3;++axis)center[axis]+=point[axis];
-        for(float &v:center)v/=float(surface.polygon.size());
         for(size_t v=0;v<surface.polygon.size();++v) {
             spotlight_shadow_vertex vertex{};
             vertex.position=surface.polygon[v];
-            vertex.polygon_center=center;
             if(surface.has_shadow_uv &&
                surface.shadow_uv.size()==surface.polygon.size())
                 vertex.uv=surface.shadow_uv[v];
