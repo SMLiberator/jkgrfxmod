@@ -75,6 +75,7 @@ namespace jkgm {
         uint64_t source_checks=0,source_ns=0,source_invalidations=0;
         uint64_t failed_snapshot_reuses=0;
         uint64_t text_native=0,geometry_native=0,snapshot_native=0;
+        uint64_t empty_mesh_native=0; // mesh callback with no drawable vertices/faces
         uint64_t material_native=0,lighting_native=0;
         uint64_t ready_material_refs=0,ready_ns=0,ready_cache_hits=0;
     };
