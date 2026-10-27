@@ -12,6 +12,21 @@ using namespace jkgm;
 
 int main()
 {
+    // Two buildings can share one immutable 3DO mesh, but must have
+    // independent static shadow entries. Likewise for two nodes of a Thing.
+    std::array<float,12> fixed_placement{};
+    fixed_placement[0]=fixed_placement[4]=fixed_placement[8]=1.0f;
+    auto const first_static_key=sun_shadow_scroll_static_group_key(
+        100,0x120000001U,0,fixed_placement);
+    assert(first_static_key==sun_shadow_scroll_static_group_key(
+        100,0x120000001U,0,fixed_placement));
+    assert(first_static_key!=sun_shadow_scroll_static_group_key(
+        100,0x130000001U,0,fixed_placement));
+    assert(first_static_key!=sun_shadow_scroll_static_group_key(
+        100,0x120000001U,10,fixed_placement));
+    fixed_placement[9]=10.0f;
+    assert(first_static_key!=sun_shadow_scroll_static_group_key(
+        100,0x120000001U,0,fixed_placement));
     // Fixed light-space units are independent of any camera FOV changes:
     // changing zoom must not reset a previously populated static atlas.
     assert(sun_shadow_scroll_fixed_tile_units(4.0f)==2.0);
