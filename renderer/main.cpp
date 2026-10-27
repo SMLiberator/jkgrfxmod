@@ -921,12 +921,27 @@ namespace {
         active_native_model_thing_flags=flags;
         active_native_shadow_owner=owner_key;
         active_native_shadow_dynamic=moving;
+        auto const engine_start=profiling ? std::chrono::steady_clock::now()
+                                          : std::chrono::steady_clock::time_point{};
+        uint64_t const mesh_before=profiling?native_totals.mesh_ns:0;
         int const result=RealNativeModel(thing,placement);
+        uint64_t const engine_ns=profiling?elapsed_native_ns(engine_start):0;
         active_native_model_thing_flags=previous_flags;
         active_native_shadow_owner=previous_owner;
         active_native_shadow_dynamic=previous_moving;
         if(profiling) {
-            native_totals.model_ns+=elapsed_native_ns(start);
+            // The native model timer includes nested mesh-hook work.
+            // Report that overlap explicitly rather than attributing it
+            // to hierarchy traversal. This is approximate if a model
+            // recursively calls another model, but does not change rendering.
+            uint64_t const nested_mesh_ns=native_totals.mesh_ns-mesh_before;
+            uint64_t const total_ns=elapsed_native_ns(start);
+            native_totals.model_engine_ns+=engine_ns;
+            native_totals.model_engine_self_ns+=
+                engine_ns>nested_mesh_ns?engine_ns-nested_mesh_ns:0;
+            native_totals.model_hook_ns+=
+                total_ns>engine_ns?total_ns-engine_ns:0;
+            native_totals.model_ns+=total_ns;
             ++native_totals.model_calls;
             if(result!=0)++native_totals.model_drawn;
         }
@@ -935,18 +950,32 @@ namespace {
     void capture_static_sprite_decal_mesh(void *mesh,void *placement);
     void __cdecl HookedNativeMesh(void *mesh, void *placement)
     {
-        if(the_config && the_config->enable_sprite_decals)
-            capture_static_sprite_decal_mesh(mesh,placement);
-        auto const profiling=the_config->profile_renderer;
+        auto const profiling=the_config && the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
+        if(the_config && the_config->enable_sprite_decals) {
+            capture_static_sprite_decal_mesh(mesh,placement);
+            if(profiling)
+                native_totals.mesh_decal_ns+=elapsed_native_ns(start);
+        }
+        auto const queue_begin=profiling ? std::chrono::steady_clock::now()
+                                        : std::chrono::steady_clock::time_point{};
         bool const queued=jkgm::queue_gpu_3do_mesh(mesh,placement);
+        if(profiling)
+            native_totals.mesh_queue_ns+=elapsed_native_ns(queue_begin);
         if(!queued) {
-            RealNativeMesh(mesh, placement);
+            auto const fallback_begin=profiling ? std::chrono::steady_clock::now()
+                                                : std::chrono::steady_clock::time_point{};
+            RealNativeMesh(mesh,placement);
+            if(profiling) {
+                native_totals.mesh_native_ns+=elapsed_native_ns(fallback_begin);
+                ++native_totals.mesh_native_calls;
+            }
         }
         else {
             // First side effect of rdModel3_DrawMesh, normally set at 0x446371.
             *reinterpret_cast<void **>(0x0073C1E8U)=mesh;
+            if(profiling)++native_totals.mesh_gpu_calls;
         }
         if(profiling) {
             native_totals.mesh_ns+=elapsed_native_ns(start);
