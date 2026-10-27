@@ -56,6 +56,9 @@ inline spotlight_intensities spotlight_sample_intensities(
 }
 
 struct spotlight_instance {
+    // Owning SithThing (or the validated root Thing of an attached
+    // headlight). Same pointer+identity encoding as GPU 3DO shadow_owner.
+    uint64_t shadow_owner=0;
     uint32_t material=0;
     float width=1.0f,height=1.0f,range=8.0f;
     float light_intensity=1.0f,add_intensity=0.12f;
@@ -192,6 +195,7 @@ inline bool spotlight_make_instance(spotlight_request const &request,
     if(std::fabs(dot(right,up))>0.1f ||
        std::fabs(dot(right,forward))>0.1f ||
        std::fabs(dot(up,forward))>0.1f)return false;
+    out.shadow_owner=(uint64_t(uint32_t(request.thing))<<32)|request.identity;
     out.material=request.material;
     out.width=request.width;out.height=request.height;
     out.range=request.range;
