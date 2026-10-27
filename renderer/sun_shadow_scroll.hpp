@@ -202,6 +202,52 @@ struct sun_shadow_scroll_grid {
     }
 };
 
+// Only tiles contributing to the current camera-fitted shadow rectangle
+// need to be resident before its depth can be reconstructed. The rest of the
+// static world stays lazily unrendered until the camera reaches those cells.
+// Add one neighboring tile for bilinear comparisons near tile boundaries.
+inline std::vector<sun_shadow_scroll_tile> sun_shadow_scroll_visible_pending(
+    sun_shadow_scroll_grid const &grid,
+    double min_x,double min_y,double width,double height,
+    std::size_t budget=std::numeric_limits<std::size_t>::max(),
+    int guard=1)
+{
+    std::vector<sun_shadow_scroll_tile> result;
+    if(!grid.valid || budget==0 || !(grid.tile_units>0.0) ||
+       !(width>0.0) || !(height>0.0) ||
+       !std::isfinite(min_x) || !std::isfinite(min_y) ||
+       !std::isfinite(width) || !std::isfinite(height))
+        return result;
+    double const units=grid.tile_units;
+    auto const grid_min_x=double(grid.origin_x)*units;
+    auto const grid_min_y=double(grid.origin_y)*units;
+    auto const grid_max_x=grid_min_x+double(grid.count)*units;
+    auto const grid_max_y=grid_min_y+double(grid.count)*units;
+    if(min_x+width<=grid_min_x || min_x>=grid_max_x ||
+       min_y+height<=grid_min_y || min_y>=grid_max_y)return result;
+    int const extra=std::max(0,guard);
+    // Clamp the floating input *before* integer conversion: the camera may
+    // legitimately be far from the currently resident atlas window.
+    int const lo_x=std::max(grid.origin_x,
+        int(std::floor(std::max(min_x,grid_min_x)/units))-extra);
+    int const lo_y=std::max(grid.origin_y,
+        int(std::floor(std::max(min_y,grid_min_y)/units))-extra);
+    int const hi_x=std::min(grid.origin_x+grid.count-1,
+        int(std::ceil(std::min(min_x+width,grid_max_x)/units))+extra-1);
+    int const hi_y=std::min(grid.origin_y+grid.count-1,
+        int(std::ceil(std::min(min_y+height,grid_max_y)/units))+extra-1);
+    for(int y=lo_y;y<=hi_y;++y)
+        for(int x=lo_x;x<=hi_x;++x) {
+            auto const tile=grid.physical_slot(x,y);
+            auto const slot=grid.slot_index(tile.atlas_x,tile.atlas_y);
+            if(slot<grid.pending.size() && grid.pending[slot]) {
+                result.push_back(tile);
+                if(result.size()>=budget)return result;
+            }
+        }
+    return result;
+}
+
 // Reconstruct a conventional, camera-fitted depth image from circular
 // sunlight depth tiles. The read blits can be scaled (GL_NEAREST); depth
 // values remain comparable because all tiles have the same light-space Z.
