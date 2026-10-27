@@ -63,6 +63,9 @@ namespace jkgm {
         float sun_shadow_receiver_bias_scale = 1.0f; // A/B contact-gap tuning (0..2)
         float sun_shadow_caster_bias_scale = 1.0f; // A/B shadow polygon offset (0..2)
         bool sun_shadow_far_soft_filter = true; // nine-tap PCF in far cascade; false: one hardware PCF
+        bool sun_shadow_edge_correction = false; // opt-in, 4-tap edge correction only near G-buffer geometric seams
+        float sun_shadow_edge_radius = 1.0f; // shadow texels, 0.25..2
+        float sun_shadow_edge_strength = 0.65f; // correction blend, 0..1
         unsigned int sun_shadow_resolution = 512U; // per-cascade 24-bit depth map (64..4096)
         float sun_shadow_near_distance = 16.0f; // camera-local near cascade, 2..128
         float sun_shadow_far_distance = 128.0f; // outer cascade coverage, 4..512

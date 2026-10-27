@@ -906,6 +906,10 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
         the_program,"sun_shadow_far_soft_filter"))
     , sun_shadow_receiver_bias_scale(gl::get_uniform_location(
         the_program,"sun_shadow_receiver_bias_scale"))
+    , sun_shadow_edge_correction(gl::get_uniform_location(
+        the_program,"sun_shadow_edge_correction"))
+    , sun_shadow_edge_params(gl::get_uniform_location(
+        the_program,"sun_shadow_edge_params"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
     , sun_dynamic_shadow_distance_softness(gl::get_uniform_location(
@@ -1069,6 +1073,15 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_receiver_b
     float scale)
 {
     gl::set_uniform_float(sun_shadow_receiver_bias_scale,scale);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_edge_correction(
+    bool enabled,float radius,float strength)
+{
+    gl::set_uniform_integer(sun_shadow_edge_correction,enabled?1:0);
+    if(enabled)
+        gl::set_uniform_vector(sun_shadow_edge_params,
+                               make_point(radius,strength));
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_count(

@@ -4731,6 +4731,10 @@ namespace jkgm {
                 the_config->sun_shadow_far_soft_filter);
             prog.set_sun_shadow_receiver_bias_scale(
                 the_config->sun_shadow_receiver_bias_scale);
+            prog.set_sun_shadow_edge_correction(
+                the_config->sun_shadow_edge_correction,
+                the_config->sun_shadow_edge_radius,
+                the_config->sun_shadow_edge_strength);
             prog.set_spotlight_shadow(-1,0.0f,0.0f);
             prog.set_sun_shadow(false,false,make_point(0.0f,0.0f,1.0f),
                 make_point(0.0f,0.0f,0.0f,0.0f),

@@ -281,6 +281,25 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("sun_shadow_far_soft_filter").get_to(
                 rv->sun_shadow_far_soft_filter);
         }
+        if(j.contains("sun_shadow_edge_correction")) {
+            j.at("sun_shadow_edge_correction").get_to(
+                rv->sun_shadow_edge_correction);
+        }
+        auto edge_setting=[&](char const *key,float &dest,
+                              double minimum,double maximum) {
+            if(!j.contains(key))return;
+            auto const &v=j.at(key);
+            if(!v.is_number())
+                throw std::runtime_error(std::string(key)+" must be numeric");
+            double const x=v.get<double>();
+            if(!std::isfinite(x) || x<minimum || x>maximum)
+                throw std::runtime_error(std::string(key)+" is out of range");
+            dest=static_cast<float>(x);
+        };
+        edge_setting("sun_shadow_edge_radius",
+            rv->sun_shadow_edge_radius,0.25,2.0);
+        edge_setting("sun_shadow_edge_strength",
+            rv->sun_shadow_edge_strength,0.0,1.0);
         if(j.contains("sun_shadow_near_distance")) {
             auto const &v=j.at("sun_shadow_near_distance");
             if(!v.is_number())
