@@ -588,6 +588,19 @@ namespace jkgm {
         std::array<uint64_t,2> sun_shadow_caster_signatures{};
         std::array<bool,2> sun_shadow_static_cached{{false,false}};
         std::array<sun_shadow_scroll_grid,2> sun_scroll_live{};
+        // Persistent static caster snapshots, independent of the set submitted
+        // by JK's camera/COG visibility culling on any given frame.
+        struct sun_scroll_cached_model {
+            gpu_3do_instance instance;
+            gpu_3do_group group;
+            gpu_3do_texture texture;
+            decal_volume_aabb bounds;
+            float min_x=0.0f,max_x=0.0f,min_y=0.0f,max_y=0.0f;
+            uint64_t signature=0;
+            bool cutout=false;
+        };
+        std::array<std::unordered_map<uint64_t,sun_scroll_cached_model>,2>
+            sun_scroll_static_casters{};
         std::array<uint64_t,2> sun_scroll_live_signature{};
         std::array<uintptr_t,2> sun_scroll_live_world{};
         std::array<uint64_t,2> sun_scroll_live_revision{};
@@ -4399,10 +4412,7 @@ namespace jkgm {
                 // A rotation-invariant square around the player's origin.
                 // Reserve two tile columns as guards so the view remains
                 // covered when its orientation changes.
-                double const radius=double(distance)*std::sqrt(
-                    1.0+double(horizontal)*horizontal+
-                        double(vertical)*vertical);
-                double const units=std::max(2.0,(2.0*radius+4.0)/12.0);
+                double const units=sun_shadow_scroll_fixed_tile_units(distance);
                 double const px=decal_dot(camera.position,world_view.right);
                 double const py=decal_dot(camera.position,world_view.up);
                 auto const dirty=sun_scroll_preview[cascade].update(
@@ -4565,22 +4575,10 @@ namespace jkgm {
                                    gpu_3do_texture texture;bool cutout;
                                    decal_volume_aabb bounds;};
             std::vector<sun_model_draw> models,static_models;
-            std::vector<sun_model_draw> scroll_static_models;
-            // Unlike the camera-fitted cascade signature, this key includes
-            // every captured stationary model (even outside current view).
-            // Camera motion alone must not invalidate the entire tiled atlas.
-            uint64_t scroll_static_signature=caster_signature;
-            auto hash_scroll_u32=[&](uint32_t value) {
-                for(int b=0;b<4;++b) {
-                    scroll_static_signature^=uint64_t((value>>(b*8))&255U);
-                    scroll_static_signature*=1099511628211ULL;
-                }
-            };
-            auto hash_scroll_float=[&](float value) {
-                uint32_t bits=0;
-                std::memcpy(&bits,&value,sizeof(bits));
-                hash_scroll_u32(bits);
-            };
+            // The atlas-wide key contains only the native world/light state.
+            // Static 3DO additions and edits invalidate their own ray columns;
+            // camera/COG visibility changes must NEVER reset the whole grid.
+            uint64_t const scroll_static_signature=caster_signature;
             bool const collect_scroll_casters=
                 the_config->enable_sun_scrolling_shadows &&
                 map.scroll_complete && map.static_complete &&
@@ -4589,6 +4587,37 @@ namespace jkgm {
             // fitting the sun projection; both cascades use those exact AABBs.
             // Share one per-frame material lookup across world and 3DOs,
             // rather than re-reading the native MAT for each cascade.
+            auto &persistent=sun_scroll_static_casters[cascade];
+            if(!collect_scroll_casters ||
+               sun_scroll_live_world[cascade]!=world ||
+               sun_scroll_live_revision[cascade]!=map.revision ||
+               sun_scroll_live_signature[cascade]!=scroll_static_signature)
+                persistent.clear();
+            // Project static AABBs just once. Tile lookup can then cheaply
+            // reject distant casters without transforming eight corners for
+            // every cached group on each newly exposed tile.
+            auto light_rect=[&](decal_volume_aabb const &b) {
+                std::array<float,4> r{{
+                    std::numeric_limits<float>::max(),
+                    -std::numeric_limits<float>::max(),
+                    std::numeric_limits<float>::max(),
+                    -std::numeric_limits<float>::max()}};
+                for(int corner=0;corner<8;++corner) {
+                    decal_vec3 q{{
+                        (corner&1)?b.high[0]:b.low[0],
+                        (corner&2)?b.high[1]:b.low[1],
+                        (corner&4)?b.high[2]:b.low[2]}};
+                    float const u=decal_dot(q,world_view.right);
+                    float const v=decal_dot(q,world_view.up);
+                    r[0]=std::min(r[0],u);r[1]=std::max(r[1],u);
+                    r[2]=std::min(r[2],v);r[3]=std::max(r[3],v);
+                }
+                return r;
+            };
+            auto invalidate_rect=[&](std::array<float,4> const &r) {
+                sun_scroll_live[cascade].invalidate_light_rect(
+                    r[0],r[1],r[2],r[3]);
+            };
             auto cached_material=[&](gpu_3do_group const &group)
                 ->gpu_3do_texture const & {
                 uint64_t const key=(uint64_t(group.material)<<32)|
@@ -4636,9 +4665,49 @@ namespace jkgm {
                     for(float v:instance.transform)floating(v);
                 };
                 if(stable && collect_scroll_casters) {
-                    scroll_static_models.push_back(
-                        {&instance,&group,tex,cutout,prepared.bounds});
-                    hash_model(hash_scroll_u32,hash_scroll_float);
+                    // The identity includes the immutable mesh and group
+                    // address, while the content signature detects a changed
+                    // transform, MAT/cel or alpha-cutout state.
+                    uint64_t key=instance.id;
+                    key^=uint64_t(group.offset)+0x9e3779b97f4a7c15ULL+
+                        (key<<6)+(key>>2);
+                    uint64_t fingerprint=14695981039346656037ULL;
+                    auto fingerprint_u32=[&](uint32_t v) {
+                        for(int b=0;b<4;++b) {
+                            fingerprint^=uint64_t((v>>(b*8))&255U);
+                            fingerprint*=1099511628211ULL;
+                        }
+                    };
+                    auto fingerprint_float=[&](float v) {
+                        uint32_t bits=0;
+                        std::memcpy(&bits,&v,sizeof(bits));
+                        fingerprint_u32(bits);
+                    };
+                    hash_model(fingerprint_u32,fingerprint_float);
+                    for(float v:prepared.bounds.low)fingerprint_float(v);
+                    for(float v:prepared.bounds.high)fingerprint_float(v);
+                    auto found=persistent.find(key);
+                    if(found==persistent.end() ||
+                       found->second.signature!=fingerprint) {
+                        if(found!=persistent.end())
+                            invalidate_rect({{found->second.min_x,
+                                found->second.max_x,found->second.min_y,
+                                found->second.max_y}});
+                        auto const rect=light_rect(prepared.bounds);
+                        invalidate_rect(rect);
+                        sun_scroll_cached_model record{};
+                        record.instance=instance;
+                        record.group=group;
+                        record.texture=tex;
+                        record.bounds=prepared.bounds;
+                        record.min_x=rect[0];record.max_x=rect[1];
+                        record.min_y=rect[2];record.max_y=rect[3];
+                        record.signature=fingerprint;
+                        record.cutout=cutout;
+                        persistent[key]=std::move(record);
+                    }
+                    // Missing submissions do not remove the record: distant
+                    // JK chunks are hidden for performance, not destroyed.
                 }
                 if(!in_cascade)continue;
                 (stable?static_models:models).push_back(
@@ -4694,10 +4763,7 @@ namespace jkgm {
                 // A rotation-independent square encloses the camera frustum
                 // plus two guard columns. Use identical units for every
                 // physical slot in the circular depth texture.
-                double const radius=double(distance)*std::sqrt(
-                    1.0+double(horizontal)*horizontal+
-                    double(vertical)*vertical);
-                double const units=std::max(2.0,(2.0*radius+4.0)/12.0);
+                double const units=sun_shadow_scroll_fixed_tile_units(distance);
                 grid.update(decal_dot(camera.position,world_view.right),
                             decal_dot(camera.position,world_view.up),
                             units,1U);
@@ -4868,7 +4934,7 @@ namespace jkgm {
                                      scroll_target);
                 glEnable(GL_SCISSOR_TEST);
                 std::vector<sun_model_draw> tile_models;
-                tile_models.reserve(scroll_static_models.size());
+                tile_models.reserve(persistent.size());
                 float const start_z=sun_scroll_live_z[cascade];
                 for(auto const &tile:pending) {
                     int const x=tile.atlas_x*tile_pixels;
@@ -4899,23 +4965,15 @@ namespace jkgm {
                     // intersect this light-space ray column, including
                     // geometry physically behind or above the receiver.
                     float const guard=2.0f*tile_extent/float(tile_pixels);
-                    for(auto const &draw:scroll_static_models) {
-                        float min_x=std::numeric_limits<float>::max();
-                        float min_y=min_x,max_x=-min_x,max_y=-min_y;
-                        for(int corner=0;corner<8;++corner) {
-                            decal_vec3 q{{
-                                (corner&1)?draw.bounds.high[0]:draw.bounds.low[0],
-                                (corner&2)?draw.bounds.high[1]:draw.bounds.low[1],
-                                (corner&4)?draw.bounds.high[2]:draw.bounds.low[2]}};
-                            float const u=decal_dot(q,world_view.right);
-                            float const v=decal_dot(q,world_view.up);
-                            min_x=std::min(min_x,u);max_x=std::max(max_x,u);
-                            min_y=std::min(min_y,v);max_y=std::max(max_y,v);
-                        }
-                        if(max_x<light_x-guard || min_x>light_x+tile_extent+guard ||
-                           max_y<light_y-guard || min_y>light_y+tile_extent+guard)
+                    for(auto const &entry:persistent) {
+                        auto const &rec=entry.second;
+                        if(rec.max_x<light_x-guard ||
+                           rec.min_x>light_x+tile_extent+guard ||
+                           rec.max_y<light_y-guard ||
+                           rec.min_y>light_y+tile_extent+guard)
                             continue;
-                        tile_models.push_back(draw);
+                        tile_models.push_back({&rec.instance,&rec.group,
+                            rec.texture,rec.cutout,rec.bounds});
                     }
                     draw_models(tile_models);
                     grid.mark_rendered(tile);
