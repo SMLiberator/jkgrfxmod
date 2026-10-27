@@ -1,6 +1,5 @@
 #pragma once
-// JKGM-only skybox convention used by COG levels: SithThing.flags bit 0x20.
-// This excludes directional sunlight and spotlight shadow casting.
+// Shadow-caster exclusions for verified SithThing flags and GeoModes.
 // GPU-cached 3DOs additionally skip mod sunlight/specular, spotlights, and
 // SSAO as receivers. Native-D3D 3DO rendering still needs per-Thing G-buffer
 // tagging for receiver exclusion. Visibility and JK authored light remain.
@@ -9,9 +8,19 @@
 
 namespace jkgm {
     constexpr uint32_t thingflag_skybox=0x20U;
+    // Native SithThing exclusions: invisible, skybox/unlit and non-casting
+    // decoration. These Things remain visible wherever JK normally draws
+    // them; only their depth contribution to shadow maps is suppressed.
+    constexpr uint32_t thingflag_shadow_exclusions=
+        0x10U | thingflag_skybox | 0x80000U;
     inline bool thing_casts_sun_shadows(uint32_t thing_flags)
     {
-        return (thing_flags&thingflag_skybox)==0U;
+        return (thing_flags&thingflag_shadow_exclusions)==0U;
+    }
+    inline bool thing_shadow_geomode_visible(int effective_mode,
+                                              int mesh_mode)
+    {
+        return effective_mode>=3 && mesh_mode>=3;
     }
 
     // rdThing.pThing at +0x44 points to the containing SithThing.
