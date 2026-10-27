@@ -285,12 +285,41 @@ namespace {
     bool gpu_span_readable(void const *p,size_t len) {
         if(!p || len==0 || len>4*1024*1024) return false;
         uintptr_t const start=reinterpret_cast<uintptr_t>(p);
-        if(start<0x10000U || start>0x7fffffffU) return false;
+        if(start<0x10000U || start>0x7fffffffU ||
+           start+len<start) return false;
+        // Experimental (off by default): native 3DOs reference the same
+        // immutable vertex, face, matrix and Thing allocations thousands of
+        // times within one render frame. Checking each pointer with Wine's
+        // VirtualQuery is particularly costly. Reuse only positive region
+        // checks WITHIN the same GPU frame; unsuccessful checks are never
+        // cached (resources can be allocated later). No cross-frame reuse.
+        // Direct-mapped slots bound memory and avoid a map allocation.
+        // Disabled mode remains byte-for-byte equivalent in return values.
+        struct readable_region {
+            uint64_t frame=0;
+            uintptr_t page=0,begin=0,end=0;
+        };
+        static thread_local std::array<readable_region,2048> regions{};
+        bool const fast=the_config && the_config->gpu_cache_native_memory_regions;
+        uintptr_t const page=start>>12;
+        auto &entry=regions[(page*2654435761U)&(regions.size()-1)];
+        if(fast && entry.frame==gpu_frame_serial && entry.page==page &&
+           start>=entry.begin && start<entry.end) {
+            if(the_config->profile_renderer)
+                ++gpu_native_stats.native_span_cache_hits;
+            return start+len<=entry.end;
+        }
         MEMORY_BASIC_INFORMATION mbi{};
+        if(the_config && the_config->profile_renderer)
+            ++gpu_native_stats.native_span_queries;
         if(VirtualQuery(p,&mbi,sizeof(mbi))==0 || mbi.State!=MEM_COMMIT ||
            (mbi.Protect&(PAGE_GUARD|PAGE_NOACCESS))) return false;
-        auto const end=reinterpret_cast<uintptr_t>(mbi.BaseAddress)+mbi.RegionSize;
-        return start+len>=start && start+len<=end;
+        auto const begin=reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+        auto const end=begin+mbi.RegionSize;
+        if(fast && end>begin) {
+            entry={gpu_frame_serial,page,begin,end};
+        }
+        return start+len<=end;
     }
 
     // An unflagged 3DO face can still have translucency in its MAT cel.
