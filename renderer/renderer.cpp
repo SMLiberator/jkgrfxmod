@@ -601,6 +601,11 @@ namespace jkgm {
         };
         std::array<std::unordered_map<uint64_t,sun_scroll_cached_model>,2>
             sun_scroll_static_casters{};
+        // Keep a conservative union of all static architecture seen in this
+        // SithWorld. A single AABB replaces re-projecting thousands of
+        // persistent group bounds into light space on every frame.
+        decal_volume_aabb sun_scroll_static_union{};
+        bool sun_scroll_static_union_valid=false;
         std::array<uint64_t,2> sun_scroll_live_signature{};
         std::array<uintptr_t,2> sun_scroll_live_world{};
         std::array<uint64_t,2> sun_scroll_live_revision{};
@@ -4379,10 +4384,12 @@ namespace jkgm {
             // entire scrolling atlas even when no geometry actually changed.
             if(the_config->enable_sun_scrolling_shadows) {
                 if(sun_scroll_live_world[0]!=world ||
-                   sun_scroll_live_revision[0]!=map.revision)
+                   sun_scroll_live_revision[0]!=map.revision) {
                     for(auto &registry:sun_scroll_static_casters)registry.clear();
-                for(auto const &entry:sun_scroll_static_casters[0])
-                    model_bounds.push_back(entry.second.bounds);
+                    sun_scroll_static_union_valid=false;
+                }
+                if(sun_scroll_static_union_valid)
+                    model_bounds.push_back(sun_scroll_static_union);
             }
             sun_shadow_projection world_view{};
             if(!make_sun_shadow_projection(map.world,direction,world_view,model_bounds)) {
@@ -4720,6 +4727,21 @@ namespace jkgm {
                         record.signature=fingerprint;
                         record.cutout=cutout;
                         persistent[key]=std::move(record);
+                        if(cascade==0) {
+                            if(!sun_scroll_static_union_valid) {
+                                sun_scroll_static_union=prepared.bounds;
+                                sun_scroll_static_union_valid=true;
+                            } else {
+                                for(int axis=0;axis<3;++axis) {
+                                    sun_scroll_static_union.low[axis]=std::min(
+                                        sun_scroll_static_union.low[axis],
+                                        prepared.bounds.low[axis]);
+                                    sun_scroll_static_union.high[axis]=std::max(
+                                        sun_scroll_static_union.high[axis],
+                                        prepared.bounds.high[axis]);
+                                }
+                            }
+                        }
                     }
                     // Missing submissions do not remove the record: distant
                     // JK chunks are hidden for performance, not destroyed.
