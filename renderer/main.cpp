@@ -333,19 +333,35 @@ namespace {
         if((face.type&0x2U)!=0) return true;
         if(!face.material) return false;
         using namespace jkgm::engine_material_debug;
+        // The snapshot builder runs this for EVERY face. Use the same
+        // per-frame native-memory validation as ordinary GPU mesh reads:
+        // native MAT/texinfo/texture objects often share memory regions.
+        // Preserve the original full-struct readability requirements and
+        // conservative alpha fallback on invalid data.
+        auto const read_cached=[](uintptr_t ptr,auto &out) {
+            if(!gpu_span_readable(reinterpret_cast<void const *>(ptr),
+                                  sizeof(out)))return false;
+            std::memcpy(&out,reinterpret_cast<void const *>(ptr),sizeof(out));
+            return true;
+        };
         native_material mat{};
-        if(!read_object(reinterpret_cast<uintptr_t>(face.material),mat) ||
+        if(!read_cached(reinterpret_cast<uintptr_t>(face.material),mat) ||
            mat.num_texinfo==0 || mat.num_texinfo>16)
             return true; // uncertain: don't join its faces
         int32_t cel=static_cast<int32_t>(face.cel);
         if(cel<0) cel=static_cast<int32_t>(mat.current_cel);
         cel=std::max(0,std::min(cel,static_cast<int32_t>(mat.num_texinfo)-1));
         native_texinfo info{};
-        if(!read_object(mat.texinfo[cel],info) || !info.texture)
+        if(!read_cached(mat.texinfo[cel],info) || !info.texture)
             return true;
-        native_texture tex{};
-        if(!read_object(info.texture,tex)) return true;
-        return (tex.header[0]&1U)!=0;
+        // Only the first native_texture header word is needed for alpha,
+        // but validate the complete struct just as read_object did.
+        if(!gpu_span_readable(reinterpret_cast<void const *>(
+                uintptr_t(info.texture)),sizeof(native_texture)))return true;
+        uint32_t texture_flags=0;
+        std::memcpy(&texture_flags,reinterpret_cast<void const *>(
+                        uintptr_t(info.texture)),sizeof(texture_flags));
+        return (texture_flags&1U)!=0;
     }
 
     // JK23 rdColormap_SetCurrent (0x442760) stores current/identity CMP
