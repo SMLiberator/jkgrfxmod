@@ -855,6 +855,35 @@ for the material and reset COG verbs, even if it is `0.0`.
 Repeated set/reset sequences are exercised by the lightweight native
 `tests/runtime_material_state.cpp` regression test in Windows CI.
 
+## Camera Things as unlit 3D HUD objects (experimental)
+
+Use `type=camera` (SithThing type 1) together with an ordinary `model3d`
+on a Thing intended to be part of a 3D HUD. This is distinct from the
+active game camera and **does not** use ThingFlag `0x20`; skyboxes and other
+ordinary 3DOs retain their existing post-processing behavior.
+
+On the GPU-cached 3DO path, all faces of a Camera-type Thing are rendered
+in the final overlay **after** bloom, HDR, depth/peripheral blur, noise,
+vignette, grading, Retro quantization and frame-trail history. This HUD
+rendering ignores JK vertex lighting, the active colormap and native
+per-camera color filter, scene fog, SSAO, sunlight, shadow casting,
+reflections and material specular/emission. The albedo texture, MAT
+alpha/mask and normal/additive/multiply blend modes remain available.
+Camera Things are composited over the world (no world-depth occlusion),
+but before the traditional DirectDraw 2D HUD.
+
+The HUD classification belongs to each **Thing instance**, not its mesh or
+MAT. The same 3DO and MAT used on a normal Thing render normally in the
+world. No replacement-material metadata is required, and the Camera layer
+also works when `enable_post` is false. The GPU model cache is the intended
+path. An unsupported 3DO or unready native MAT may temporarily use the
+original D3D renderer, so `profile_renderer=true` logs
+`Camera Thing HUD 3DO native fallback` to identify incomplete coverage.
+No hard-coded model, mesh or MAT names are used.
+
+The old per-material `skip_post_processing` functionality described below
+is retained for existing content, but `type=camera` is preferred for HUDs.
+
 ## Post-processing-exempt 3D materials (experimental)
 
 Add `"skip_post_processing": true` to an individual material in the
