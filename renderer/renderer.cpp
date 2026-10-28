@@ -4297,25 +4297,24 @@ namespace jkgm {
                 }
             }
             std::vector<candidate *> sorted;
-            // Dynamic shadow slots belong only to the near-sun region.
-            // Test the nearest point on the full Thing AABB, not its center,
-            // so long cars crossing the cutoff are not discarded early.
-            float const near_radius=std::max(0.0f,
+            // Match the cascades' camera-forward near distance. Project
+            // the closest AABB corner along the camera axis, not its center,
+            // so long cars and objects near a wide-FOV edge survive.
+            float const near_depth=std::max(0.0f,
                 the_config->sun_shadow_near_distance);
-            float const near_radius2=near_radius*near_radius;
             size_t atlas_distance_culled=0;
             for(auto &entry:keyed) {
                 auto &c=entry.second;
                 if(!c.has_bounds)continue;
                 auto const &lo=c.bounds.low,&hi=c.bounds.high;
-                float nearest2=0.0f;
+                float closest_depth=0.0f;
                 for(int axis=0;axis<3;++axis) {
-                    float const separation=std::max(
-                        std::max(lo[axis]-camera.position[axis],
-                                 camera.position[axis]-hi[axis]),0.0f);
-                    nearest2+=separation*separation;
+                    float const edge=camera.forward[axis]>=0.0f
+                        ? lo[axis] : hi[axis];
+                    closest_depth+=camera.forward[axis]*
+                        (edge-camera.position[axis]);
                 }
-                if(nearest2>near_radius2) {
+                if(near_depth<=0.0f || closest_depth>near_depth) {
                     ++atlas_distance_culled;
                     continue;
                 }
@@ -4539,7 +4538,7 @@ namespace jkgm {
                 LOG_INFO("SUN dynamic shadow atlas Things=",
                     sun_dynamic_views.size()," candidates=",sorted.size(),
                     " outside_near_distance=",atlas_distance_culled,
-                    " near_distance=",near_radius,
+                    " near_distance=",near_depth,
                     " base_tile=",tile_size,
                     " adaptive=",the_config->sun_dynamic_shadow_adaptive_resolution?1:0,
                     " tile_sizes=[",tile_sizes.str(),"]",
@@ -4962,10 +4961,8 @@ namespace jkgm {
                                    decal_volume_aabb bounds;};
             std::vector<sun_model_draw> models,static_models;
             size_t dynamic_far_skipped=0,dynamic_near_distance_skipped=0;
-            float const dynamic_near_radius=std::max(0.0f,
+            float const dynamic_near_depth=std::max(0.0f,
                 the_config->sun_shadow_near_distance);
-            float const dynamic_near_radius2=
-                dynamic_near_radius*dynamic_near_radius;
             // The atlas-wide key contains only the native world/light state.
             // Static 3DO additions and edits invalidate their own ray columns;
             // camera/COG visibility changes must NEVER reset the whole grid.
@@ -5041,15 +5038,16 @@ namespace jkgm {
                         ++dynamic_far_skipped;
                         continue;
                     }
-                    float nearest2=0.0f;
+                    float closest_depth=0.0f;
                     for(int axis=0;axis<3;++axis) {
-                        float const d=std::max(std::max(
-                            prepared.bounds.low[axis]-camera.position[axis],
-                            camera.position[axis]-prepared.bounds.high[axis]),
-                            0.0f);
-                        nearest2+=d*d;
+                        float const edge=camera.forward[axis]>=0.0f
+                            ? prepared.bounds.low[axis]
+                            : prepared.bounds.high[axis];
+                        closest_depth+=camera.forward[axis]*
+                            (edge-camera.position[axis]);
                     }
-                    if(nearest2>dynamic_near_radius2) {
+                    if(dynamic_near_depth<=0.0f ||
+                       closest_depth>dynamic_near_depth) {
                         ++dynamic_near_distance_skipped;
                         continue;
                     }
