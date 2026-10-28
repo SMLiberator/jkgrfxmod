@@ -43,8 +43,7 @@ namespace jkgm {
                            float split_distance,float receiver_bias,
                            float max_distance=0.0f);
             void set_map(int slot,point<4,float> row_x,point<4,float> row_y,
-                         point<4,float> row_z,point<4,float> tile_rect,
-);
+                         point<4,float> row_z,point<4,float> tile_rect);
         };
 
         class menu_shader : public opengl_shader {
