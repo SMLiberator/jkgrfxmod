@@ -3501,9 +3501,12 @@ namespace {
                 auto const camera=jkgm::read_active_render_camera();
                 jkgm::decal_vec3 const incoming=camera.valid
                     ?camera.forward:jkgm::decal_vec3{{0,0,0}};
+                float const depth=jkgm::sprite_decal_projection_depth_for_size(
+                    size[0]*info.width,size[1]*info.height);
+                float const radius=jkgm::sprite_decal_receiver_search_radius(depth);
                 auto const nearby=jkgm::find_nearest_decal_surface(
                     sprite_world_geometry,sprite_static_receiver_world,
-                    position,incoming);
+                    position,incoming,radius);
                 if(nearby.valid) {
                     chosen_normal=nearby.normal;
                     aligned_to_receiver=true;
