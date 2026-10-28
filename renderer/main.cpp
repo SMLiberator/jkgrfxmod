@@ -183,6 +183,10 @@ namespace {
     thread_local uint64_t active_native_spotlight_family=0;
     thread_local bool active_native_shadow_dynamic=false;
 
+    // Defined below by the per-frame native memory-query cache. The
+    // attachment-family resolver runs earlier in this translation unit.
+    bool gpu_span_readable(void const *p,size_t len);
+
     // Resolve validated SITH_ATTACH_THING ancestry. Use this exact helper
     // for both spotlight registrations and rdModel3 casters, so headlights
     // attached to a node and other separately drawn attached car parts
