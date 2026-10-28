@@ -427,7 +427,7 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     // Projected sprite decals share the GPU 3DO shader, even when
     // native 3DO model caching is disabled. A decal can be successfully
     // clipped and queued without ever drawing if this shader is absent.
-    if(the_config->use_model_cache || the_config->enable_sprite_decals) {
+    if(the_config->use_model_cache || the_config->enable_decals) {
         gpu_3do_preview_program =
             std::make_unique<shaders::gpu_3do_preview_shader>(data_root);
     }
