@@ -1319,42 +1319,6 @@ bool native_mesh_overlaps_shadow_light(native_mesh const &mesh,
 }
 }
 
-// Experimental, geometry-based near-HUD classification. Work from the
-// same native rdCamera*rdMesh matrix as GPU projection; do not use Thing,
-// material or mesh names. A pivot-only test would mistake a large wall or
-// weapon model for a HUD element when its origin passes near the camera.
-//
-// Test *every* vertex's camera-forward (rdCamera Y) depth. For distant world
-// geometry the first vertex normally rejects immediately. On invalid source
-// data, preserve regular rendering rather than changing the cache policy.
-namespace {
-bool native_mesh_inside_hud_depth(native_mesh const &mesh,void const *matrix,
-                                  float threshold)
-{
-    if(!(threshold>0.0f) || !std::isfinite(threshold) ||
-       mesh.num_vertices<3 || mesh.num_vertices>65536 ||
-       !gpu_span_readable(mesh.vertices,size_t(mesh.num_vertices)*3*sizeof(float)) ||
-       !gpu_span_readable(matrix,12*sizeof(float)))
-        return false;
-    jkgm::gpu_3do_matrix34 view{},model{};
-    if(!jkgm::read_active_rd_camera_view(view))return false;
-    std::memcpy(model.data(),matrix,sizeof(float)*model.size());
-    if(!jkgm::gpu_3do_matrix_finite(model))return false;
-    auto const mv=jkgm::gpu_3do_native_modelview(view,model);
-    if(!jkgm::gpu_3do_matrix_finite(mv))return false;
-    auto const *vertices=static_cast<float const *>(mesh.vertices);
-    for(int i=0;i<mesh.num_vertices;++i) {
-        size_t const idx=size_t(i)*3;
-        float const depth=(mv[1]*vertices[idx]+
-                           mv[4]*vertices[idx+1]+
-                           mv[7]*vertices[idx+2])+mv[10];
-        if(!std::isfinite(depth) || depth<0.0f || depth>threshold)
-            return false;
-    }
-    return true;
-}
-}
-
 bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                               bool force_shadow_only)
 {
@@ -1402,28 +1366,6 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     // Only filled geometry is eligible for caching. Preserve native handling
     // for points, wireframe, or faces with ambiguous polygon outlines.
     if(the_config->profile_renderer) ++gpu_native_stats.attempted;
-    // Optional native camera-close HUD compatibility. The normal GPU cache
-    // remains unrestricted at threshold 0. No names, materials, Thing types,
-    // or parent nodes are inspected. Native JK handles the matched geometry;
-    // a shadow-only capture must not add a second shadow for HUD pixels.
-    if(the_config->hud_near_depth_threshold>0.0f &&
-       native_mesh_inside_hud_depth(m,matrix,
-                                    the_config->hud_near_depth_threshold)) {
-        if(the_config->profile_renderer) {
-            static bool hud_near_logged=false;
-            if(!hud_near_logged) {
-                auto const name_end=std::find(
-                    m.name,m.name+sizeof(m.name),'\0');
-                std::string const mesh_name(m.name,name_end);
-                LOG_INFO("GPU 3DO native near-HUD mesh=",mesh_name,
-                         " max_depth=",
-                         std::to_string(the_config->hud_near_depth_threshold),
-                         " NOTE=all_mesh_vertices_within_threshold");
-                hud_near_logged=true;
-            }
-        }
-        return false;
-    }
     // rdModel3_Draw at 0x44612c-0x446144 stores the *effective* Thing/
     // global GeoMode in this JK23-specific native global before it visits
     // any hierarchy meshes. Our hook otherwise ignores COG GeoMode changes.
