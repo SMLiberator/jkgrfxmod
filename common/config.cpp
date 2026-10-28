@@ -231,6 +231,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("retain_hom_pixels")) {
             j.at("retain_hom_pixels").get_to(rv->retain_hom_pixels);
         }
+        if(j.contains("enable_sun")) {
+            j.at("enable_sun").get_to(rv->enable_sun);
+        }
         if(j.contains("enable_sun_shadows")) {
             j.at("enable_sun_shadows").get_to(rv->enable_sun_shadows);
         }
@@ -360,8 +363,13 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             }
             rv->sun_shadow_resolution = static_cast<unsigned int>(pixels);
         }
-        if(j.contains("enable_sprite_decals")) {
-            j.at("enable_sprite_decals").get_to(rv->enable_sprite_decals);
+        // Old packs may still ship enable_sprite_decals. Prefer the new
+        // enable_decals when both keys are supplied.
+        if(j.contains("enable_decals")) {
+            j.at("enable_decals").get_to(rv->enable_decals);
+        }
+        else if(j.contains("enable_sprite_decals")) {
+            j.at("enable_sprite_decals").get_to(rv->enable_decals);
         }
         if(j.contains("enable_mesh_collision")) {
             j.at("enable_mesh_collision").get_to(rv->enable_mesh_collision);
