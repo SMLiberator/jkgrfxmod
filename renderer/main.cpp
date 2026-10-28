@@ -2605,6 +2605,7 @@ namespace {
         uint64_t sprite_thing=0; // native SithThing address + signature
         jkgm::sprite_decal_receiver_identity receiver{};
         uint32_t occurrence=0; // distinguish repeated rdMesh in hierarchy
+        bool native_fallback=false;
         uint64_t id=0;
         uint64_t last_visible_frame=0;
         float opacity=1.0f;
@@ -2688,6 +2689,8 @@ namespace {
         std::memcpy(&model,reinterpret_cast<void const *>(owner+0xc8U),4);
         if(type==0 || current_sig!=signature || render_type!=1 ||
            model!=entry.receiver.model)return false;
+        if(entry.native_fallback)
+            return entry.receiver.mesh_revision==mesh_revision::current();
         auto const cached=gpu_mesh_cache.find(
             reinterpret_cast<void const *>(entry.receiver.mesh));
         return cached!=gpu_mesh_cache.end() &&
@@ -2776,14 +2779,32 @@ namespace {
                             decal.receiver.mesh_revision &&
                         instance.decal_receiver_occurrence==decal.occurrence;
                 });
-            if(receiver==pending_gpu_instances.end() ||
-               !decal.geometry ||
+            jkgm::gpu_3do_matrix34 transform{};
+            bool found=false;
+            if(receiver!=pending_gpu_instances.end() && !decal.native_fallback) {
+                transform=receiver->transform;
+                found=true;
+            }
+            if(decal.native_fallback) {
+                for(auto const &native:native_moving_decal_receivers) {
+                    if(native.thing==decal.receiver.thing_key &&
+                       native.model==decal.receiver.model &&
+                       native.mesh==decal.receiver.mesh &&
+                       native.revision==decal.receiver.mesh_revision &&
+                       native.occurrence==decal.occurrence) {
+                        transform=native.transform;
+                        found=true;
+                        break;
+                    }
+                }
+            }
+            if(!found || !decal.geometry ||
                !gpu_mesh_materials_ready(*decal.geometry))
                 continue;
             jkgm::gpu_3do_instance inst{};
             inst.id=decal.id;
             inst.geometry=decal.geometry;
-            inst.transform=receiver->transform;
+            inst.transform=transform;
             inst.is_projected_decal=true;
             inst.decal_opacity=decal.opacity;
             inst.effective_light_mode=0.0f;
