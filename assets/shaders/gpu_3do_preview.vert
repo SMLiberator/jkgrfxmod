@@ -20,6 +20,7 @@ uniform vec4 jk_color_tint;
 uniform vec4 jk_color_add_fade; // RGB additive/255, A fade
 uniform float attenuation_min;
 uniform int num_lights;
+uniform int nonrigid_light_transform; // use transformed distances for scaled R/L/U
 uniform vec4 light_position_radius[16]; // local XYZ and JK light radius
 uniform float light_intensity[16];
 // Native D3D applies the RGB multiplier to each *vertex* after gamma
@@ -58,13 +59,25 @@ void main() {
     float mode=local_light_mode>3.5 ? 1.0
         : min(local_light_mode,effective_light_mode);
     float l=mode>=2.5 ? local_static_light : 0.0;
-    if(mode>=1.5) {
+    if(mode>=1.5 && num_lights>0) {
+        vec3 anchor=mode>=2.5 ? local_position : local_face_anchor;
+        vec3 normal=mode>=2.5 ? local_light_normal : local_normal;
+        // The local-space shortcut assumes orthonormal R/L/U. For scaled
+        // animation nodes, evaluate distance and incidence in the camera's
+        // rigid basis (a rotation of world space). Compute the inverse-
+        // transpose normal once per vertex, not once per affecting light.
+        if(nonrigid_light_transform!=0) {
+            vec3 r=view_right.xyz,f=view_forward.xyz,u=view_up.xyz;
+            vec3 cr=cross(f,u),cf=cross(u,r),cu=cross(r,f);
+            float determinant=dot(r,cr);
+            normal=normalize(sign(determinant)*
+                (cr*normal.x+cf*normal.y+cu*normal.z));
+        }
         for(int i=0;i<num_lights;i++) {
-            vec3 anchor=mode>=2.5
-                ? local_position : local_face_anchor;
-            vec3 normal=mode>=2.5
-                ? local_light_normal : local_normal;
             vec3 delta=light_position_radius[i].xyz-anchor;
+            if(nonrigid_light_transform!=0)
+                delta=view_right.xyz*delta.x+
+                      view_forward.xyz*delta.y+view_up.xyz*delta.z;
             float dist=length(delta);
             float along=dot(normal,delta/max(dist,0.00001));
             float range_distance=mode>=2.5
