@@ -1122,6 +1122,24 @@ namespace {
         }
         return result;
     }
+    // The global mesh_revision counter advances on edits to ANY 3DO.
+    // Native-fallback decals must instead track their receiving rdMesh's
+    // identity: pointer/count changes indicate a replaced mesh, while
+    // unrelated model edits must not invalidate an existing decal.
+    uint64_t native_decal_mesh_structure_signature(void const *mesh)
+    {
+        if(!mesh || !gpu_span_readable(mesh,sizeof(native_mesh)))return 0;
+        native_mesh m{};
+        std::memcpy(&m,mesh,sizeof(m));
+        if(m.num_vertices<3 || m.num_vertices>65536 ||
+           m.num_faces<1 || m.num_faces>65536)return 0;
+        jkgm::gpu_3do_byte_signature hash;
+        hash.add(m.vertices);
+        hash.add(m.faces);
+        hash.add(m.num_vertices);
+        hash.add(m.num_faces);
+        return hash.value;
+    }
     void capture_static_sprite_decal_mesh(void *mesh,void *placement);
     void __cdecl HookedNativeMesh(void *mesh, void *placement)
     {
@@ -1151,11 +1169,12 @@ namespace {
             item.thing=active_native_shadow_owner;
             item.model=active_native_decal_model;
             item.mesh=reinterpret_cast<uintptr_t>(mesh);
-            item.revision=mesh_revision::current();
+            item.revision=native_decal_mesh_structure_signature(mesh);
             item.occurrence=++moving_mesh_occurrences[
                 {item.thing,item.mesh}];
             std::memcpy(item.transform.data(),placement,12U*sizeof(float));
-            if(jkgm::gpu_3do_matrix_finite(item.transform))
+            if(item.revision!=0 &&
+               jkgm::gpu_3do_matrix_finite(item.transform))
                 native_moving_decal_receivers.push_back(std::move(item));
         }
         // Inspect native RLU matrices BEFORE GPU eligibility filters can
@@ -2707,7 +2726,9 @@ namespace {
         if(type==0 || current_sig!=signature || render_type!=1 ||
            model!=entry.receiver.model)return false;
         if(entry.native_fallback)
-            return entry.receiver.mesh_revision==mesh_revision::current();
+            return entry.receiver.mesh_revision==
+                native_decal_mesh_structure_signature(
+                    reinterpret_cast<void const *>(entry.receiver.mesh));
         auto const cached=gpu_mesh_cache.find(
             reinterpret_cast<void const *>(entry.receiver.mesh));
         return cached!=gpu_mesh_cache.end() &&
