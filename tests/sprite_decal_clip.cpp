@@ -42,6 +42,32 @@ int main() {
         auto const uv=projected_decal_uv(v,p);
         assert(uv[0]>=0.5f-0.0001f && uv[0]<=1.0001f);
     }
+    // A clipped 3DO quad split into two triangles used to produce a
+    // repeated corner in EACH clipped polygon, and the GPU builder then
+    // rejected the whole decal because a triangle fan had zero-area pieces.
+    decal_projector square{};
+    square.origin={{3,4,5.175f}};
+    square.right={{1,0,0}};
+    square.up={{0,1,0}};
+    square.look={{0,0,-1}};
+    square.width=1.0f;square.height=1.0f;square.depth=0.25f;
+    std::vector<decal_vec3> triangle_a={
+        {{2,3,5}},{{4,3,5}},{{4,5,5}}};
+    std::vector<decal_vec3> triangle_b={
+        {{2,3,5}},{{4,5,5}},{{2,5,5}}};
+    auto const no_duplicates=[&](std::vector<decal_vertex> const &vertices) {
+        assert(vertices.size()==3);
+        for(size_t i=0;i<vertices.size();++i) {
+            auto const &a=vertices[i];
+            auto const &b=vertices[(i+1)%vertices.size()];
+            float const dx=a.u-b.u,dy=a.v-b.v,dz=a.depth-b.depth;
+            assert(dx*dx+dy*dy+dz*dz>1.e-8f);
+        }
+    };
+    no_duplicates(clip_projected_decal(
+        square,triangle_a,{{0,0,1}},0.05f,false));
+    no_duplicates(clip_projected_decal(
+        square,triangle_b,{{0,0,1}},0.05f,false));
     // Depth-volume rejection prevents projecting onto a wall far behind.
     for(auto &v:wall)v[1]=1;
     assert(clip_projected_decal(p,wall,{{0,-1,0}}).empty());
