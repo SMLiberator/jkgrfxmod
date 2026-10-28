@@ -69,13 +69,24 @@ int main() {
     assert(near(new_pos[1],first.y-2));
     assert(near(new_pos[2],first.z));
 
-    // Nonuniform scaling and shearing still round-trip correctly.
-    moved={{2,0,0, 0.25f,1,0, 0,0,0.75f, 3,4,5}};
+    // Nonuniform scaling and shearing still round-trip correctly on a
+    // newly projected decal; the receiver's nodes may use arbitrary RLU.
+    inst.transform={{2,0,0, 0.25f,1,0, 0,0,0.75f, 3,4,5}};
     auto scaled=sprite_decal_moving_receiver_world(inst);
     assert(scaled.receivers.size()==2);
-    assert(sprite_decal_geometry_to_receiver_local(*output.geometry,moved));
-    // Validate the same invariant on a new projection built in world space.
-    auto another=output;
-    (void)another;
+    auto scan2=project_cached_decal_world(scaled,projector,2048);
+    assert(!scan2.triangles.empty());
+    sprite_decal_mesh output2{};
+    assert(make_sprite_decal_gpu_mesh(
+        scan2,projector,0x100000,uv,1.0f,output2));
+    auto const first2=output2.geometry->vertices[0];
+    assert(sprite_decal_geometry_to_receiver_local(
+        *output2.geometry,inst.transform));
+    auto const &loc2=output2.geometry->vertices[0];
+    auto world2=gpu_3do_native_transform_point(
+        inst.transform,{{loc2.x,loc2.y,loc2.z}});
+    assert(near(world2[0],first2.x));
+    assert(near(world2[1],first2.y));
+    assert(near(world2[2],first2.z));
     return 0;
 }
