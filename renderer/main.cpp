@@ -1148,8 +1148,29 @@ namespace {
            active_native_shadow_owner!=0 &&
            jkgm::thing_casts_sun_shadows(active_native_model_thing_flags)) {
             size_t const prior=pending_gpu_instances.size();
+            uint64_t const geo_before=gpu_native_stats.geometry_native;
+            uint64_t const snapshot_before=gpu_native_stats.snapshot_native;
+            uint64_t const source_before=
+                gpu_native_stats.snapshot_source_rejected;
+            uint64_t const face_before=
+                gpu_native_stats.snapshot_face_rejected;
+            uint64_t const tri_before=
+                gpu_native_stats.snapshot_triangulation_rejected;
+            uint64_t const lighting_before=gpu_native_stats.lighting_native;
             jkgm::queue_gpu_3do_mesh(mesh,placement,true);
             bool const captured=pending_gpu_instances.size()>prior;
+            char const *shadow_failure=captured?"captured":
+                gpu_native_stats.geometry_native>geo_before?"geometry_mode":
+                gpu_native_stats.snapshot_source_rejected>source_before
+                    ?"source_unreadable":
+                gpu_native_stats.snapshot_face_rejected>face_before
+                    ?"snapshot_face":
+                gpu_native_stats.snapshot_triangulation_rejected>tri_before
+                    ?"triangulation":
+                gpu_native_stats.snapshot_native>snapshot_before
+                    ?"snapshot_other":
+                gpu_native_stats.lighting_native>lighting_before
+                    ?"camera_or_lighting":"other_early_exit";
             if(profiling && gpu_frame_serial%120U==0U) {
                 static thread_local uint64_t sample_frame=0;
                 static thread_local unsigned sample_logged=0;
@@ -1167,6 +1188,7 @@ namespace {
                     LOG_INFO("SUN native fallback sidecar mesh=",name,
                              " owner=",active_native_shadow_owner,
                              " captured=",captured?1:0,
+                             " reason=",shadow_failure,
                              " vertices=",m.num_vertices,
                              " faces=",m.num_faces);
                     ++sample_logged;
