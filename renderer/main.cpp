@@ -1597,7 +1597,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         inst.decal_receiver_thing=active_native_shadow_owner;
         inst.decal_receiver_model=active_native_decal_model;
         inst.decal_receiver_mesh=reinterpret_cast<uintptr_t>(mesh);
-        inst.decal_receiver_revision=mesh_revision::current();
+        inst.decal_receiver_revision=it->second.source_signature;
         inst.decal_receiver_occurrence=++moving_mesh_occurrences[
             {active_native_shadow_owner,reinterpret_cast<uintptr_t>(mesh)}];
     }
@@ -2609,9 +2609,12 @@ namespace {
         std::memcpy(&current_sig,reinterpret_cast<void const *>(owner+0x74U),4);
         std::memcpy(&render_type,reinterpret_cast<void const *>(owner+0xc4U),4);
         std::memcpy(&model,reinterpret_cast<void const *>(owner+0xc8U),4);
-        return type!=0 && current_sig==signature && render_type==1 &&
-            model==entry.receiver.model &&
-            entry.receiver.mesh_revision==mesh_revision::current();
+        if(type==0 || current_sig!=signature || render_type!=1 ||
+           model!=entry.receiver.model)return false;
+        auto const cached=gpu_mesh_cache.find(
+            reinterpret_cast<void const *>(entry.receiver.mesh));
+        return cached!=gpu_mesh_cache.end() &&
+            cached->second.source_signature==entry.receiver.mesh_revision;
     }
 
     void append_moving_sprite_decals()
@@ -2626,7 +2629,13 @@ namespace {
                 it=moving_sprite_decals.erase(it);
                 continue;
             }
+            // Continue sampling native sprite fades even if its original
+            // world position is culled.
+            auto const native=current_sprite_info(
+                reinterpret_cast<void const *>(uintptr_t(uint32_t(it->first))));
+            decal.opacity=native.opacity;
             ++it;
+            if(!(decal.opacity>0.0f))continue;
             // The same rdMesh can be shared by several Things or repeated
             // within one hierarchy. Match the full receiver identity.
             auto const receiver=std::find_if(
@@ -2676,7 +2685,10 @@ namespace {
     void reset_static_sprite_decal_meshes(uint32_t world)
     {
         sprite_static_meshes.clear();
-        clear_moving_sprite_decals();
+        // Initial static-receiver setup can follow a moving decal created
+        // in the same level. Do not discard it unless the world changed.
+        if(sprite_static_world!=0 && sprite_static_world!=world)
+            clear_moving_sprite_decals();
         sprite_static_receiver_world.clear();
         sprite_static_projection_logs=0;
         sprite_static_mesh_logs=0;
