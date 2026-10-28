@@ -985,11 +985,13 @@ namespace {
                    read(uintptr_t(owner)+0x74U,&signature,4)) {
                     owner_key=(uint64_t(owner)<<32)|signature;
                     if(the_config && the_config->enable_decals) {
-                        uint32_t model=0,move_type=0,collision=0;
-                        read(rd+4U,&model,4);
-                        read(uintptr_t(owner)+0x10U,&move_type,4);
-                        read(uintptr_t(owner)+0x28U,&collision,4);
-                        if(model>=0x10000U && (move_type!=0 || collision==2)) {
+                        uint32_t model=0;
+                        // Every rendered 3DO may receive a decal: parked cars
+                        // and script-driven actors often have move_type=0.
+                        // Receiver identity is verified by owner + model,
+                        // not by collision mode or hard-coded model names.
+                        if(read(rd+4U,&model,4) &&
+                           model>=0x10000U && model<0x7ff00000U) {
                             decal_model=model;
                             decal_receiver=true;
                         }
