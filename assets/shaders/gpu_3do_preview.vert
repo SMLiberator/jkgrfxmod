@@ -95,8 +95,22 @@ void main() {
     // Match the patched native 3DO normal sideband. Non-Gouraud faces can
     // still carry smooth vertex normals for SSAO; lighting-mode selection
     // must not force the AO G-buffer back to flat polygon normals.
-    vec3 vn=view_right.xyz*local_light_normal.x+
-            view_forward.xyz*local_light_normal.y+
-            view_up.xyz*local_light_normal.z;
-    view_normal=normalize(vec3(vn.x*h,vn.z*v,vn.y));
+    // An animated 3DO node can have non-unit R/L/U columns (including
+    // per-axis scale and mirroring). Positions use the native affine matrix,
+    // but normals must use its inverse transpose, never the raw columns.
+    // The sign of the determinant preserves the orientation of reflected
+    // node normals. Fall back for collapsed/singular nodes.
+    vec3 r=view_right.xyz, f=view_forward.xyz, u=view_up.xyz;
+    vec3 cr=cross(f,u), cf=cross(u,r), cu=cross(r,f);
+    float det=dot(r,cr);
+    vec3 vn=abs(det)>1e-8
+        ? sign(det)*(cr*local_light_normal.x+
+                     cf*local_light_normal.y+
+                     cu*local_light_normal.z)
+        : (r*local_light_normal.x+
+           f*local_light_normal.y+
+           u*local_light_normal.z);
+    vec3 projected=vec3(vn.x*h,vn.z*v,vn.y);
+    view_normal=dot(projected,projected)>1e-16
+        ? normalize(projected) : vec3(0.0,0.0,1.0);
 }
