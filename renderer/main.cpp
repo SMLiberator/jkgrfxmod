@@ -3190,7 +3190,6 @@ namespace {
             ?camera.forward:jkgm::decal_vec3{{0,0,0}};
         size_t const invalid=std::numeric_limits<size_t>::max();
         size_t best_gpu=invalid,best_native=invalid;
-        jkgm::decal_world_geometry best_world{};
         float best_score=std::numeric_limits<float>::infinity();
         jkgm::decal_vec3 best_normal{};
         for(size_t i=0;i<pending_gpu_instances.size();++i) {
@@ -3208,7 +3207,6 @@ namespace {
             best_native=invalid;
             best_score=hit.distance;
             best_normal=hit.normal;
-            best_world=std::move(receivers);
         }
         for(size_t i=0;i<native_moving_decal_receivers.size();++i) {
             auto const &candidate=native_moving_decal_receivers[i];
@@ -3222,7 +3220,6 @@ namespace {
             best_gpu=invalid;
             best_score=hit.distance;
             best_normal=hit.normal;
-            best_world=std::move(receivers);
         }
         if(best_gpu==invalid && best_native==invalid) {
             trace_probe("no_near_receiver");
