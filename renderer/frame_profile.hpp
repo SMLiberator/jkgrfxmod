@@ -38,7 +38,7 @@ struct profile_sample {
   uint64_t gpu_candidates=0,gpu_culled=0,gpu_queued=0,gpu_snapshots=0,gpu_ready_checks=0;
   uint64_t gpu_source_checks=0,gpu_source_ns=0,gpu_source_invalidations=0;
   uint64_t gpu_failed_snapshot_reuses=0;
-  uint64_t gpu_text_native=0,gpu_geometry_native=0,gpu_snapshot_native=0;
+  uint64_t gpu_geometry_native=0,gpu_snapshot_native=0;
   uint64_t gpu_empty_mesh_native=0;
   uint64_t gpu_native_span_cache_hits=0,gpu_native_span_queries=0;
   uint64_t gpu_material_native=0,gpu_lighting_native=0;
@@ -107,7 +107,6 @@ struct profile_sample {
     gpu_empty_mesh_native+=o.gpu_empty_mesh_native;
     gpu_native_span_cache_hits+=o.gpu_native_span_cache_hits;
     gpu_native_span_queries+=o.gpu_native_span_queries;
-    gpu_text_native+=o.gpu_text_native;
     gpu_geometry_native+=o.gpu_geometry_native;
     gpu_snapshot_native+=o.gpu_snapshot_native;
     gpu_material_native+=o.gpu_material_native;
