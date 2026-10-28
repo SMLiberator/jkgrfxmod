@@ -4956,80 +4956,6 @@ namespace jkgm {
                          " backfacing_world=",world_backfacing,
                          " material_skipped_world=",world_material_skipped,
                          " two_sided_world=1");
-            // First working GPU tile mode: static 3DO casters only. Native
-            // world polygons deliberately retain the proven old path until
-            // their material/GeoMode invalidation can be indexed per tile.
-            // Every tile shares a sun-aligned 24-bit depth axis. Projection
-            // never rotates with the camera, only the virtual tile window
-            // advances by whole world-space cells.
-            bool const scroll_possible=
-                the_config->enable_sun_scrolling_shadows &&
-                the_config->enable_sun_static_cache &&
-                map.scroll_complete && map.static_complete &&
-                map.world.receivers.empty();
-            std::vector<sun_shadow_scroll_blit> scroll_blits;
-            std::vector<sun_shadow_scroll_tile> needed_tiles;
-            if(scroll_possible) {
-                auto &grid=sun_scroll_live[cascade];
-                float const start_z=decal_dot(world_view.origin,world_view.forward);
-                bool const reset_key=
-                    sun_scroll_live_world[cascade]!=world ||
-                    sun_scroll_live_revision[cascade]!=map.revision ||
-                    sun_scroll_live_signature[cascade]!=scroll_static_signature;
-                bool const reset_depth=!sun_shadow_scroll_depth_contains(
-                    sun_scroll_live_z[cascade],
-                    sun_scroll_live_range[cascade],
-                    start_z,world_view.range);
-                if(reset_key || reset_depth) {
-                    if(grid.valid) {
-                        if(reset_key)++sun_scroll_key_resets[cascade];
-                        else ++sun_scroll_depth_resets[cascade];
-                    }
-                    grid.invalidate();
-                    // The depth axis must be identical in all physical slots.
-                    // Allocate generous, quantized world-space headroom so
-                    // minor variation in camera-submitted model bounds does
-                    // not renormalize the atlas on the next frame.
-                    constexpr float depth_block=128.0f;
-                    constexpr float depth_guard=128.0f;
-                    sun_scroll_live_z[cascade]=
-                        std::floor((start_z-depth_guard)/depth_block)*depth_block;
-                    float const end_z=start_z+world_view.range+depth_guard;
-                    float const high_z=std::ceil(end_z/depth_block)*depth_block;
-                    sun_scroll_live_range[cascade]=std::max(
-                        depth_block,high_z-sun_scroll_live_z[cascade]);
-                }
-                sun_scroll_live_world[cascade]=world;
-                sun_scroll_live_revision[cascade]=map.revision;
-                sun_scroll_live_signature[cascade]=scroll_static_signature;
-                // A rotation-independent square encloses the camera frustum
-                // plus two guard columns. Use identical units for every
-                // physical slot in the circular depth texture.
-                double const units=sun_shadow_scroll_fixed_tile_units(distance);
-                grid.update(decal_dot(camera.position,world_view.right),
-                            decal_dot(camera.position,world_view.up),
-                            units,1U);
-                double const vx=decal_dot(view.origin,view.right);
-                double const vy=decal_dot(view.origin,view.up);
-                scroll_blits=sun_shadow_scroll_blits(grid,
-                    vx,vy,view.width,view.height,int(map.resolution));
-                if(!scroll_blits.empty())
-                    needed_tiles=sun_shadow_scroll_visible_pending(
-                        grid,vx,vy,view.width,view.height,17);
-            }
-            // Atlas residency is per camera footprint, not all 256 physical
-            // slots. Unseen static tiles remain dirty until first requested.
-            bool const will_scroll=scroll_possible && !scroll_blits.empty() &&
-                needed_tiles.size()<=16;
-            if(will_scroll) {
-                // The reconstructed shadow map and saved depth atlas MUST
-                // share identical Z normalization for shadow comparisons.
-                float const current_z=decal_dot(view.origin,view.forward);
-                float const z_shift=sun_scroll_live_z[cascade]-current_z;
-                for(int axis=0;axis<3;++axis)
-                    view.origin[axis]+=view.forward[axis]*z_shift;
-                view.range=sun_scroll_live_range[cascade];
-            }
             // Explain WHY a cache miss occurred, not just whether a draw
             // happened. This is diagnostic-only and cannot change reuse.
             auto note_projection_miss=[&](sun_shadow_miss_profile &p,
@@ -5089,13 +5015,6 @@ namespace jkgm {
                 sun_shadow_same_projection(view,sun_shadow_views[cascade]);
             for(int i=0;i<3 && unchanged;++i)
                 unchanged=std::fabs(direction[i]-sun_shadow_directions[cascade][i])<1.0e-5f;
-            // Never skip tile warmup or a transition between classic and
-            // reconstructed working maps, even if legacy caster signatures
-            // and camera projection happen to match.
-            if(scroll_possible)
-                unchanged=unchanged &&
-                    will_scroll && sun_scroll_working_active[cascade] &&
-                    needed_tiles.empty();
             if(unchanged) {
                 if(the_config->profile_renderer) {
                     ++sun_profile_full_hits[cascade];
@@ -5118,9 +5037,6 @@ namespace jkgm {
                 if(caster_signature!=sun_shadow_caster_signatures[cascade] &&
                    static_signature==sun_shadow_static_signatures[cascade])
                     ++miss.dynamic_casters;
-                if(scroll_possible &&
-                   (!will_scroll || !sun_scroll_working_active[cascade] ||
-                    !needed_tiles.empty()))++miss.scroll;
             }
             // Reusing a depth texture requires the exact same stabilized
             // light projection, not merely the same sun and static casters.
@@ -5135,7 +5051,6 @@ namespace jkgm {
             for(int i=0;i<3 && static_same;++i)
                 static_same=std::fabs(direction[i]-
                     sun_shadow_static_directions[cascade][i])<1.0e-5f;
-            if(will_scroll)static_same=true;
             if(the_config->profile_renderer) {
                 ++sun_profile_working_redraws[cascade];
                 sun_profile_prepare_us[cascade]+=elapsed_profile_us(
@@ -5678,7 +5593,6 @@ namespace jkgm {
                             " projection_basis=",p.projection_basis,
                             " static_signature=",p.static_casters,
                             " dynamic_signature_only=",p.dynamic_casters,
-                            " scroll=",p.scroll,
                             " other_projection=",p.unclassified,
                             " NOTE=overlapping_causes");
                     };
