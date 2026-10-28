@@ -500,7 +500,7 @@ float translucent_sun_visibility(vec3 world,float incidence)
             world-translucent_spotlight_camera_origin.xyz,
             translucent_spotlight_camera_forward.xyz);
         if(distance<translucent_sun_split) {
-            // Match the opaque composite's radial near-only cutoff and
+            // Match the opaque composite's forward-depth near-only cutoff and
             // fade the last 15 percent to avoid a hard shadow ring.
             float near_fade=1.0-smoothstep(
                 translucent_sun_split*0.85,translucent_sun_split,distance);
