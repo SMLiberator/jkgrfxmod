@@ -574,7 +574,6 @@ namespace jkgm {
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
         std::vector<sun_dynamic_shadow_tile> sun_dynamic_tiles;
-        std::vector<float> sun_dynamic_caster_end_depth; // normalized depth of each caster's farthest AABB point
         // Track only owners with a successfully rasterized atlas tile.
         std::unordered_set<uint64_t> sun_dynamic_atlas_owners;
         std::array<sun_shadow_projection,2> sun_shadow_views{};
@@ -996,7 +995,6 @@ namespace jkgm {
                 sun_shadow_static_cached={{false,false}};
                 sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
-            sun_dynamic_caster_end_depth.clear();
                 sun_dynamic_atlas_owners.clear();
                 // Pausing/menu transitions may evict and reload D3D textures.
                 // Refresh the native MAT resolver on the next game frame,
@@ -3684,7 +3682,7 @@ namespace jkgm {
                 the_config->sun_shadow_receiver_bias_scale,
                 the_config->sun_max_distance);
             auto set_projection=[&](int slot,sun_shadow_projection const &p,
-                                    point<4,float> rect,float caster_end=0.0f) {
+                                    point<4,float> rect) {
                 auto row=[&](decal_vec3 const &axis,float size) {
                     float const inv=1.0f/std::max(size,0.00001f);
                     float const origin_projection=
@@ -3694,7 +3692,7 @@ namespace jkgm {
                                       axis[2]*inv,origin_projection);
                 };
                 uniforms.set_map(slot,row(p.right,p.width),
-                    row(p.up,p.height),row(p.forward,p.range),rect,caster_end);
+                    row(p.up,p.height),row(p.forward,p.range),rect);
             };
             auto const null_rect=make_point(0.0f,0.0f,0.0f,0.0f);
             if(shadows) {
@@ -3712,8 +3710,7 @@ namespace jkgm {
                     auto const &tile=sun_dynamic_tiles[i];
                     set_projection(i+2,sun_dynamic_views[i],
                         make_point(float(tile.x),float(tile.y),
-                                   float(tile.size),float(tile.size)),
-                        sun_dynamic_caster_end_depth[i]);
+                                   float(tile.size),float(tile.size)));
                 }
                 gl::set_active_texture_unit(18);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
@@ -4182,7 +4179,6 @@ namespace jkgm {
         {
             sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
-            sun_dynamic_caster_end_depth.clear();
             sun_dynamic_atlas_owners.clear();
             if(!the_config->enable_sun_shadows ||
                !the_config->enable_sun_dynamic_shadows ||
@@ -4420,18 +4416,6 @@ namespace jkgm {
                 if(any) {
                     sun_dynamic_views.push_back(view);
                     sun_dynamic_tiles.push_back(tile);
-                    // A receiver's distance beyond the caster's light-space
-                    // rear boundary approximates shadow separation. Use the
-                    // entire Thing bounds, rather than one arbitrary mesh.
-                    float caster_end_world=0.0f;
-                    for(int k=0;k<3;++k)
-                        caster_end_world+=view.forward[k]*
-                            (view.forward[k]>=0.0f
-                                ? object->bounds.high[k] : object->bounds.low[k]);
-                    float origin_depth=decal_dot(view.origin,view.forward);
-                    sun_dynamic_caster_end_depth.push_back(
-                        (caster_end_world-origin_depth)/
-                        std::max(view.range,0.001f));
                     sun_dynamic_atlas_owners.insert(object->key);
                     if(the_config->profile_renderer &&
                        gpu_3do_present_serial%120U==0U) {
@@ -4486,7 +4470,6 @@ namespace jkgm {
             sun_shadow_cascade_ready={{false,false}};
             sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
-            sun_dynamic_caster_end_depth.clear();
             sun_dynamic_atlas_owners.clear();
             if(!the_config->enable_sun_shadows)return;
             auto sun_failure=[&](char const *reason) {
@@ -5650,8 +5633,6 @@ namespace jkgm {
                             prog.set_sun_dynamic_atlas_rect(int(i),
                                 make_point(float(tile.x),float(tile.y),
                                            float(tile.size),float(tile.size)));
-                            prog.set_sun_dynamic_caster_depth(int(i),
-                                sun_dynamic_caster_end_depth[i]);
                             prog.set_sun_dynamic(int(i),
                                 make_point(v.origin[0],v.origin[1],v.origin[2]),
                                 make_point(v.right[0],v.right[1],v.right[2]),
