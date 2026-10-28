@@ -495,12 +495,23 @@ float translucent_sun_visibility(vec3 world,float incidence)
             }
         } else if(use_far)visible=translucent_sun_sample(1,far_uv,incidence);
     }
-    for(int i=0;i<8;++i) {
-        if(i>=translucent_sun_dynamic_count)break;
-        vec3 uv=translucent_sun_coordinates(i+2,world);
-        if(!translucent_sun_inside(uv))continue;
-        visible=min(visible,translucent_sun_sample(i+2,uv,incidence));
-        if(visible<=0.001)break;
+    if(translucent_sun_dynamic_count>0 && translucent_sun_split>0.0) {
+        float distance=length(
+            world-translucent_spotlight_camera_origin.xyz);
+        if(distance<translucent_sun_split) {
+            // Match the opaque composite's radial near-only cutoff and
+            // fade the last 15 percent to avoid a hard shadow ring.
+            float near_fade=1.0-smoothstep(
+                translucent_sun_split*0.85,translucent_sun_split,distance);
+            for(int i=0;i<8;++i) {
+                if(i>=translucent_sun_dynamic_count)break;
+                vec3 uv=translucent_sun_coordinates(i+2,world);
+                if(!translucent_sun_inside(uv))continue;
+                float shadow=translucent_sun_sample(i+2,uv,incidence);
+                visible=min(visible,mix(1.0,shadow,near_fade));
+                if(visible<=0.001)break;
+            }
+        }
     }
     return visible;
 }
