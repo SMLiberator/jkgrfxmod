@@ -838,7 +838,6 @@ namespace jkgm {
                          profile_window.gpu_native_span_cache_hits/frames,
                          " avg_VirtualQuery=",
                          profile_window.gpu_native_span_queries/frames,
-                         " enabled=",the_config->gpu_cache_native_memory_regions,
                          " NOTE=positive_regions_only_per_frame");
                 auto const &current_fog=get_fog_settings();
                 auto const fog_params=current_fog.info.value();
@@ -884,9 +883,8 @@ namespace jkgm {
                          profile_window.gpu_preview_calls[0]/frames,"/",
                          profile_window.gpu_preview_calls[1]/frames,
                          " NOTE=setup_and_gl_state_restoration_in_total_not_substages");
-                LOG_INFO("PERF gpu_3do filter_state enabled=",
-                         the_config->gpu_3do_cache_filter_state,
-                         " updates_avg=",profile_window.gpu_filter_state_sets/frames,
+                LOG_INFO("PERF gpu_3do filter_state updates_avg=",
+                         profile_window.gpu_filter_state_sets/frames,
                          " skipped_updates_avg=",profile_window.gpu_filter_state_skips/frames,
                          " avoided_glTexParameter_calls_avg=",
                          (profile_window.gpu_filter_state_skips*3U)/frames,
@@ -3154,15 +3152,8 @@ namespace jkgm {
             // If the same texture is used once filtered and once pixelated,
             // apply the change again: preserving per-MAT filtering is vital.
             static thread_local std::unordered_map<unsigned int,bool> filter_states;
-            bool const cache_filter_state=the_config->gpu_3do_cache_filter_state;
-            if(cache_filter_state) filter_states.clear();
+            filter_states.clear();
             auto bind_preview_color=[&](gl::texture_view tex,int unit,bool filtered) {
-                if(!cache_filter_state) {
-                    bind_color_texture(tex,unit,filtered);
-                    if(gpu_profiling && tex.value()!=0U)
-                        ++profile_frame.gpu_filter_state_sets;
-                    return;
-                }
                 gl::set_active_texture_unit(unit);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,tex);
                 if(tex.value()==0U)return;
