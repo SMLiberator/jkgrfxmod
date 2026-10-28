@@ -1398,9 +1398,19 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     }
     if((m.name[0]=='c' && m.name[1]=='\0' &&
         m.num_faces==1 && m.num_vertices<=8) || hud_char_glyph) {
-        if(the_config->profile_renderer) ++gpu_native_stats.text_native;
-        if(hud_char_glyph)
-            gpu_log_fallback(m,"HUD_char_glyph_native_camera_parity");
+        if(the_config->profile_renderer) {
+            ++gpu_native_stats.text_native;
+            if(hud_char_glyph) {
+                // Emit one unambiguous confirmation even when the regular
+                // fallback-name diagnostic has reached its 80-entry cap.
+                static bool hud_glyph_reported=false;
+                if(!hud_glyph_reported) {
+                    LOG_INFO("GPU HUD char glyphs use native rendering; first mesh=",
+                             m.name);
+                    hud_glyph_reported=true;
+                }
+            }
+        }
         return false;
     }
     // rdModel3_Draw at 0x44612c-0x446144 stores the *effective* Thing/
