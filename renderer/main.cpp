@@ -470,24 +470,31 @@ namespace {
             return false;
         instance.ambient=std::max(0.0f,std::min(ambient,1.0f));
         instance.attenuation=attenuation;
+        // With no dynamic point lights the shader uses the authored JK
+        // vertex intensity/ambient only. There is no distance attenuation
+        // to miscompute, so a nonuniform or mirrored node is safe to cache.
+        if(count==0)return true;
 
         float const rx=placement[0],ry=placement[1],rz=placement[2];
         float const fx=placement[3],fy=placement[4],fz=placement[5];
         float const ux=placement[6],uy=placement[7],uz=placement[8];
         float const cfx=fy*uz-fz*uy, cfy=fz*ux-fx*uz, cfz=fx*uy-fy*ux;
         float const determinant=rx*cfx+ry*cfy+rz*cfz;
-        // Native lights use Euclidean world distances. For non-unit scaling
-        // local-space evaluation would change attenuation; let JK handle it.
-        if(!std::isfinite(determinant) ||
-           std::fabs(std::fabs(determinant)-1.0f)>0.05f)
-            return false;
+        // A non-unit transform only needs native lighting when an actual
+        // dynamic light can reach the mesh. Test all the lights first; most
+        // characters/scenery have none within their influence radius.
+        // Keep a conservative scaled bounding sphere for that decision.
+        bool light_transform_safe=std::isfinite(determinant) &&
+            std::fabs(std::fabs(determinant)-1.0f)<=0.05f;
+        float max_axis_scale=1.0f;
         for(int axis=0;axis<3;axis++) {
             int const i=axis*3;
             float const len=placement[i]*placement[i]+
                             placement[i+1]*placement[i+1]+
                             placement[i+2]*placement[i+2];
-            if(!std::isfinite(len) || std::fabs(len-1.0f)>0.05f)
-                return false;
+            if(!std::isfinite(len))return false;
+            if(std::fabs(len-1.0f)>0.05f)light_transform_safe=false;
+            max_axis_scale=std::max(max_axis_scale,std::sqrt(len));
         }
 
         for(int i=0;i<count;i++) {
@@ -514,8 +521,13 @@ namespace {
             float const dx=pos[0]-placement[9];
             float const dy=pos[1]-placement[10];
             float const dz=pos[2]-placement[11];
-            float const reach=radius+std::max(0.0f,m.radius);
+            float const reach=radius+std::max(0.0f,m.radius)*
+                max_axis_scale;
             if(dx*dx+dy*dy+dz*dz>reach*reach) continue;
+            // Exact native light attenuation is not representable by the
+            // current local-space shader when the node is scaled/sheared.
+            // Preserve the native fallback ONLY for affected mesh parts.
+            if(!light_transform_safe)return false;
             // Spot/other light types need the original cone/angle logic.
             // Do not misrender them as omnidirectional point lights.
             if(type<0 || type>2) return false;
