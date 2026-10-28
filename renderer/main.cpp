@@ -2960,9 +2960,94 @@ namespace {
         sprite_static_receivers_dirty=false;
     }
 
-    // Automatically prefer an intersected moving 3DO over a static world
-    // receiver. This is intentionally a first-stage path for GPU-cached
-    // moving models; the existing static projection remains unchanged.
+    // When a model is visible through the native fallback path, reuse the
+    // original rdMesh/rdFace geometry solely as temporary decal receivers.
+    // Only called for candidates near a NEW impact, never every frame for
+    // existing decals. The game's native draw and geometry remain untouched.
+    bool build_native_moving_decal_receiver_world(
+        native_moving_decal_receiver const &candidate,
+        jkgm::decal_vec3 const &impact,jkgm::decal_world_geometry &out)
+    {
+        if(!candidate.mesh ||
+           !gpu_span_readable(reinterpret_cast<void const *>(candidate.mesh),
+                              sizeof(native_mesh)))return false;
+        native_mesh source{};
+        std::memcpy(&source,
+                    reinterpret_cast<void const *>(candidate.mesh),
+                    sizeof(source));
+        if(source.num_vertices<3 || source.num_vertices>65536 ||
+           source.num_faces<1 || source.num_faces>8192 ||
+           !gpu_span_readable(source.vertices,
+               size_t(source.num_vertices)*3U*sizeof(float)) ||
+           !gpu_span_readable(source.faces,
+               size_t(source.num_faces)*sizeof(native_face)))
+            return false;
+        // Native mesh bounds are conservative; only reject extremely far
+        // meshes when their native radius is trustworthy. A zero or invalid
+        // radius means "unknown", not "no receiver".
+        if(std::isfinite(source.radius) && source.radius>0.0f) {
+            float scale=0.0f;
+            for(int axis=0;axis<3;++axis) {
+                int const k=axis*3;
+                float const len=std::sqrt(
+                    candidate.transform[k]*candidate.transform[k]+
+                    candidate.transform[k+1]*candidate.transform[k+1]+
+                    candidate.transform[k+2]*candidate.transform[k+2]);
+                scale+=len;
+            }
+            float dist2=0.0f;
+            for(int axis=0;axis<3;++axis) {
+                float const d=impact[axis]-candidate.transform[9+axis];
+                dist2+=d*d;
+            }
+            float const radius=source.radius*scale+1.0f;
+            if(std::isfinite(radius) && std::isfinite(dist2) &&
+               dist2>radius*radius)return false;
+        }
+        jkgm::decal_world_geometry world{};
+        world.valid_world=true;
+        world.receivers.reserve(
+            static_cast<size_t>(std::min(source.num_faces,128)));
+        for(int fi=0;fi<source.num_faces;++fi) {
+            native_face face{};
+            std::memcpy(&face,source.faces+
+                        size_t(fi)*sizeof(face),sizeof(face));
+            if(face.geo<2 || face.count<3 || face.count>128 ||
+               !gpu_span_readable(face.pos_indices,
+                                  size_t(face.count)*sizeof(int)))
+                continue;
+            std::vector<jkgm::decal_vec3> vertices;
+            vertices.reserve(face.count);
+            bool valid=true;
+            for(unsigned k=0;k<face.count;++k) {
+                int index=0;
+                std::memcpy(&index,face.pos_indices+k,sizeof(index));
+                if(index<0 || index>=source.num_vertices) {
+                    valid=false;break;
+                }
+                jkgm::decal_vec3 vertex{};
+                std::memcpy(vertex.data(),source.vertices+size_t(index)*3U,
+                            sizeof(float)*3U);
+                if(!jkgm::decal_finite(vertex)) {
+                    valid=false;break;
+                }
+                vertices.push_back(vertex);
+            }
+            if(!valid)continue;
+            jkgm::decal_world_surface_geometry receiver{};
+            if(jkgm::build_static_sprite_receiver(
+                   candidate.transform,vertices,static_cast<uint32_t>(fi),
+                   receiver))
+                world.receivers.push_back(std::move(receiver));
+        }
+        world.surface_count=static_cast<uint32_t>(world.receivers.size());
+        if(world.receivers.empty())return false;
+        out=std::move(world);
+        return true;
+    }
+
+    // Select the nearest actual face in either GPU-cached or native-fallback
+    // 3DOs. No collision-mode or filename rules are involved.
     bool try_submit_moving_sprite_decal(
         uint64_t sprite_key,uint32_t world,uintptr_t sprite,
         void const *rd_thing,std::array<float,12> const &pose,
