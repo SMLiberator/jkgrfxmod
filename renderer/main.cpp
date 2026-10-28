@@ -2676,6 +2676,7 @@ namespace {
     void reset_static_sprite_decal_meshes(uint32_t world)
     {
         sprite_static_meshes.clear();
+        clear_moving_sprite_decals();
         sprite_static_receiver_world.clear();
         sprite_static_projection_logs=0;
         sprite_static_mesh_logs=0;
@@ -2820,6 +2821,124 @@ namespace {
         sprite_static_receivers_dirty=false;
     }
 
+    // Automatically prefer an intersected moving 3DO over a static world
+    // receiver. This is intentionally a first-stage path for GPU-cached
+    // moving models; the existing static projection remains unchanged.
+    bool try_submit_moving_sprite_decal(
+        uint64_t sprite_key,uint32_t world,uintptr_t sprite,
+        void const *rd_thing,std::array<float,12> const &pose,
+        float const *size,float const *offset,float roll,
+        jkgm::sprite_instance_info const &info,
+        jkgm::sprite_decal_resource const &resource,
+        uint32_t sprite_owner,uint32_t sprite_signature)
+    {
+        auto existing=moving_sprite_decals.find(sprite_key);
+        if(existing!=moving_sprite_decals.end()) {
+            auto &old=existing->second;
+            if(old.world==world && old.sprite_resource==sprite &&
+               old.sprite_thing==((uint64_t(sprite_owner)<<32)|
+                                   sprite_signature) &&
+               moving_sprite_decal_source_alive(old,sprite_key) &&
+               moving_sprite_decal_receiver_alive(old)) {
+                old.opacity=info.opacity;
+                return old.geometry &&
+                    gpu_mesh_materials_ready(*old.geometry);
+            }
+            moving_sprite_decals.erase(existing);
+        }
+        if(sprite_owner<0x10000U || sprite_signature==0 ||
+           pending_gpu_instances.empty() ||
+           moving_sprite_decals.size()>=1024U)
+            return false;
+        jkgm::sprite_axes const source_axes{
+            {{pose[0],pose[1],pose[2]}},
+            {{pose[3],pose[4],pose[5]}},
+            {{pose[6],pose[7],pose[8]}}
+        };
+        jkgm::decal_vec3 impact{{
+            pose[9]+offset[0]*source_axes.right[0]+
+                     offset[1]*source_axes.look[0]+
+                     offset[2]*source_axes.up[0],
+            pose[10]+offset[0]*source_axes.right[1]+
+                      offset[1]*source_axes.look[1]+
+                      offset[2]*source_axes.up[1],
+            pose[11]+offset[0]*source_axes.right[2]+
+                      offset[1]*source_axes.look[2]+
+                      offset[2]*source_axes.up[2]
+        }};
+        if(!jkgm::decal_finite(impact))return false;
+        auto const camera=jkgm::read_active_render_camera();
+        auto const incoming=camera.valid
+            ?camera.forward:jkgm::decal_vec3{{0,0,0}};
+        size_t best=std::numeric_limits<size_t>::max();
+        jkgm::decal_world_geometry best_world{};
+        float best_score=std::numeric_limits<float>::infinity();
+        jkgm::decal_vec3 best_normal{};
+        for(size_t i=0;i<pending_gpu_instances.size();++i) {
+            auto const &inst=pending_gpu_instances[i];
+            if(!inst.decal_receiver_thing || !inst.decal_receiver_model ||
+               !inst.decal_receiver_mesh ||
+               !jkgm::sprite_decal_moving_receiver_near(inst,impact,0.75f))
+                continue;
+            auto receivers=jkgm::sprite_decal_moving_receiver_world(inst);
+            if(!receivers.valid_world || receivers.receivers.empty())continue;
+            auto const hit=jkgm::find_nearest_decal_surface(
+                jkgm::decal_world_geometry{},receivers,impact,incoming,0.25f);
+            if(!hit.valid || hit.distance>=best_score)continue;
+            best=i;
+            best_score=hit.distance;
+            best_normal=hit.normal;
+            best_world=std::move(receivers);
+        }
+        if(best==std::numeric_limits<size_t>::max())return false;
+        auto const &receiver=pending_gpu_instances[best];
+        jkgm::sprite_axes aligned{};
+        if(!jkgm::sprite_decal_attachment_axes(
+                source_axes,best_normal,aligned))return false;
+        jkgm::decal_projector projector{};
+        if(!jkgm::make_sprite_decal_projector(
+                aligned,{{pose[9],pose[10],pose[11]}},
+                {{offset[0],offset[1],offset[2]}},
+                size[0],size[1],info.width,info.height,roll,projector))
+            return false;
+        auto scan=jkgm::project_cached_decal_world(
+            best_world,projector,2048U);
+        jkgm::sprite_decal_mesh mesh{};
+        if(!jkgm::make_sprite_decal_gpu_mesh(
+                scan,projector,resource.material,resource.texcoords,
+                info.opacity,mesh) || !mesh.geometry ||
+           !jkgm::sprite_decal_geometry_to_receiver_local(
+                *mesh.geometry,receiver.transform))
+            return false;
+
+        moving_sprite_decal entry{};
+        entry.world=world;
+        entry.sprite_resource=sprite;
+        entry.sprite_thing=(uint64_t(sprite_owner)<<32)|sprite_signature;
+        entry.receiver={receiver.decal_receiver_thing,
+                        receiver.decal_receiver_model,
+                        receiver.decal_receiver_mesh,
+                        receiver.decal_receiver_revision};
+        entry.occurrence=receiver.decal_receiver_occurrence;
+        entry.id=next_gpu_id++;
+        entry.last_visible_frame=gpu_frame_serial;
+        entry.opacity=info.opacity;
+        entry.geometry=std::move(mesh.geometry);
+        auto it=moving_sprite_decals.emplace(sprite_key,std::move(entry)).first;
+        if(the_config->profile_renderer) {
+            static uint32_t logged=0;
+            if(logged++<24U)
+                LOG_INFO("SPR moving decal created sprite=",sprite_key,
+                         " receiver=",it->second.receiver.thing_key,
+                         " mesh=",it->second.receiver.mesh,
+                         " node=",it->second.occurrence,
+                         " triangles=",scan.triangles.size());
+        }
+        // A decal SPR must still go through native MAT warm-up if its cel
+        // has not reached OpenGL yet. The cached projection survives that.
+        return gpu_mesh_materials_ready(*it->second.geometry);
+    }
+
     bool submit_native_sprite_decal(
         void const *rd_thing,void const *orientation,
         jkgm::sprite_instance_info const &info)
@@ -2877,6 +2996,13 @@ namespace {
         }
         uint64_t const key=(uint64_t(world)<<32) |
             uint32_t(reinterpret_cast<uintptr_t>(rd_thing));
+        if(try_submit_moving_sprite_decal(
+                key,world,sprite,rd_thing,m,size,offset,roll,info,
+                resource,owner,thing_signature))
+            return true;
+        // If a moving decal was projected but its native MAT still needs
+        // warming, never accidentally reproject it onto nearby static faces.
+        if(moving_sprite_decals.count(key))return false;
         auto it=sprite_gpu_decals.find(key);
         bool const hit=it!=sprite_gpu_decals.end() &&
             it->second.object_revision==sprite_static_revision &&
@@ -5503,6 +5629,7 @@ bool detach_hooks()
         sprite_instances.clear();
         sprite_decal_diagnostic_keys.clear();
         sprite_gpu_decals.clear();
+        clear_moving_sprite_decals();
         reset_static_sprite_decal_meshes(0);
         sprite_world_geometry.clear();
     }
