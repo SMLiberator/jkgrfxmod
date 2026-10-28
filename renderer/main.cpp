@@ -1377,9 +1377,28 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     // Each JK text character is a distinct ephemeral 3DO, often one quad.
     // Uploading a new VAO/VBO/EBO for each glyph is costlier than native
     // rendering, and the persistent cache otherwise retains every glyph.
-    if(m.name[0]=='c' && m.name[1]=='\0' &&
-       m.num_faces==1 && m.num_vertices<=8) {
+    // HUD/nametag glyphs in JkGR use meshes named char0..charNN, one
+    // tiny quad each. Their parent 3DO can mix native status/overlay meshes
+    // with GPU-cached glyphs, which then follow a different camera/pass
+    // transform and visibly detach during camera motion. Preserve JK's
+    // native path for these tiny, shadow-exempt glyphs; ordinary world
+    // models and the rest of the HUD keep using the GPU cache.
+    bool hud_char_glyph=false;
+    if(!casts_sun_shadows && m.num_faces==1 && m.num_vertices<=8 &&
+       m.name[0]=='c' && m.name[1]=='h' &&
+       m.name[2]=='a' && m.name[3]=='r') {
+        unsigned index=4;
+        while(index<sizeof(m.name) &&
+              m.name[index]>='0' && m.name[index]<='9')
+            ++index;
+        hud_char_glyph=index>4 && index<sizeof(m.name) &&
+                       m.name[index]=='\0';
+    }
+    if((m.name[0]=='c' && m.name[1]=='\0' &&
+        m.num_faces==1 && m.num_vertices<=8) || hud_char_glyph) {
         if(the_config->profile_renderer) ++gpu_native_stats.text_native;
+        if(hud_char_glyph)
+            gpu_log_fallback(m,"HUD_char_glyph_native_camera_parity");
         return false;
     }
     // rdModel3_Draw at 0x44612c-0x446144 stores the *effective* Thing/
