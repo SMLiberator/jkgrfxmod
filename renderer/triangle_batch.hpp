@@ -9,9 +9,12 @@
 
 namespace jkgm {
     struct triangle_vertex {
+        // Member order is deliberate. The 16-byte SIMD members come first so
+        // the 8- and 4-byte members share one trailing 16-byte slot instead
+        // of each forcing its own padding: 48 bytes per vertex, not 64.
         point<4, float> pos;
-        point<2, float> texcoords;
         jkgm::color color;
+        point<2, float> texcoords;
         uint32_t nativeNormal = 0U;  // packed JK per-vertex view normal (0 = unavailable)
 
         triangle_vertex();
@@ -21,8 +24,12 @@ namespace jkgm {
 
     struct triangle {
         triangle_vertex v0, v1, v2;
-        material_instance_id material = material_instance_id(0U);
+        // SIMD member before the 4-byte ones: 176 bytes per triangle, not 240.
+        // Sorting and the per-frame upload move these structs around, so the
+        // size matters. (Constructed only through constructors; no code
+        // depends on the member order or on sizeof(triangle).)
         direction<3, float> normal;
+        material_instance_id material = material_instance_id(0U);
         int num_sup = 0;
 
         triangle();
@@ -31,6 +38,10 @@ namespace jkgm {
                  triangle_vertex v2,
                  material_instance_id material);
     };
+
+    // Guard against accidental padding regressions (see member order above).
+    static_assert(sizeof(triangle_vertex) <= 48, "triangle_vertex grew: check member order");
+    static_assert(sizeof(triangle) <= 176, "triangle grew: check member order");
 
     class triangle_batch {
     protected:
