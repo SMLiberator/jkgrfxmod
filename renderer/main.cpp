@@ -1597,15 +1597,6 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     inst.shadow_owner=active_native_shadow_owner;
     inst.spotlight_shadow_family=active_native_spotlight_family;
     inst.dynamic_sun_caster=active_native_shadow_dynamic;
-    if(!shadow_only && active_native_decal_receiver &&
-       active_native_shadow_owner && active_native_decal_model) {
-        inst.decal_receiver_thing=active_native_shadow_owner;
-        inst.decal_receiver_model=active_native_decal_model;
-        inst.decal_receiver_mesh=reinterpret_cast<uintptr_t>(mesh);
-        inst.decal_receiver_revision=it->second.source_signature;
-        inst.decal_receiver_occurrence=++moving_mesh_occurrences[
-            {active_native_shadow_owner,reinterpret_cast<uintptr_t>(mesh)}];
-    }
     // Depth-only casters need no native MAT residency, point lights,
     // colormap or per-Thing lighting cap. Preserve the native render call.
     std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
@@ -1632,6 +1623,17 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             gpu_log_fallback(m,"unsupported_dynamic_lighting_or_light_count");
             return false;
         }
+    }
+    // Register identity only for a successfully enqueued visible mesh;
+    // native fallback/invalid lighting must not consume node occurrences.
+    if(!shadow_only && active_native_decal_receiver &&
+       active_native_shadow_owner && active_native_decal_model) {
+        inst.decal_receiver_thing=active_native_shadow_owner;
+        inst.decal_receiver_model=active_native_decal_model;
+        inst.decal_receiver_mesh=reinterpret_cast<uintptr_t>(mesh);
+        inst.decal_receiver_revision=it->second.source_signature;
+        inst.decal_receiver_occurrence=++moving_mesh_occurrences[
+            {active_native_shadow_owner,reinterpret_cast<uintptr_t>(mesh)}];
     }
     if(!shadow_only && the_config->profile_renderer &&
        inst.nonrigid_light_transform)
