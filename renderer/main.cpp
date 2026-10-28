@@ -3249,7 +3249,7 @@ namespace {
         entry.last_visible_frame=gpu_frame_serial;
         entry.opacity=info.opacity;
         constexpr uint32_t max_decal_triangles=2048U;
-        constexpr size_t max_decal_mesh_fragments=32U;
+        constexpr size_t max_decal_mesh_fragments=64U;
         uint32_t remaining=max_decal_triangles;
         uint32_t total_triangles=0;
         auto add_fragment=[&](
