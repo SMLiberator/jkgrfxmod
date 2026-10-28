@@ -4592,62 +4592,45 @@ namespace jkgm {
             if(the_config->profile_renderer)
                 sun_profile_atlas_us+=elapsed_profile_us(
                     atlas_begin,profile_clock::now());
-            // Diagnose SetModelNodeRLUVecs-style scaling/mirroring without
-            // assuming the node basis is orthonormal. Per-mesh placement is
-            // already authoritative for visible and shadow GPU rendering.
-            // Record atlas membership to distinguish missing capture from
-            // a depth-pass / receiver issue on particular character models.
+            // Diagnose non-unit or mirrored SetModelNodeRLUVecs placements.
+            // These are valid Sith transforms; do not normalize their axes.
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U) {
-                size_t transformed_parts=0,dynamic_parts=0;
-                size_t atlas_parts=0,unknown_owner_parts=0;
-                std::unordered_set<uint64_t> reported_owners;
-                size_t reported=0;
-                for(int dynamic_first=0;dynamic_first<2;++dynamic_first)
-                    for(auto const &inst:frame_gpu_3do_instances) {
-                        if(!inst.geometry || !inst.casts_sun_shadows ||
-                           inst.is_projected_decal)continue;
-                        if((inst.dynamic_sun_caster?0:1)!=dynamic_first)
-                            continue;
-                        auto const &m=inst.transform;
-                        auto axis_length=[&](int j) {
-                            return std::sqrt(m[j]*m[j]+m[j+1]*m[j+1]+
+                size_t transformed=0,moving=0,in_atlas=0;
+                size_t logged=0;
+                for(auto const &inst:frame_gpu_3do_instances) {
+                    if(!inst.geometry || !inst.casts_sun_shadows ||
+                       inst.is_projected_decal)continue;
+                    auto const &m=inst.transform;
+                    float lengths[3]{};
+                    for(int i=0;i<3;++i) {
+                        int const j=3*i;
+                        lengths[i]=std::sqrt(m[j]*m[j]+m[j+1]*m[j+1]+
                                              m[j+2]*m[j+2]);
-                        };
-                        float const right=axis_length(0);
-                        float const forward=axis_length(3);
-                        float const up=axis_length(6);
-                        float const determinant=gpu_3do_transform_determinant(m);
-                        bool const scaled=std::fabs(right-1.0f)>0.005f ||
-                            std::fabs(forward-1.0f)>0.005f ||
-                            std::fabs(up-1.0f)>0.005f;
-                        bool const mirrored=determinant<0.0f;
-                        if(!scaled && !mirrored)continue;
-                        ++transformed_parts;
-                        if(inst.dynamic_sun_caster)++dynamic_parts;
-                        bool const in_atlas=inst.shadow_owner!=0 &&
-                            sun_dynamic_atlas_owners.count(inst.shadow_owner)!=0;
-                        if(in_atlas)++atlas_parts;
-                        if(inst.shadow_owner==0)++unknown_owner_parts;
-                        if(reported<12 &&
-                           reported_owners.insert(inst.shadow_owner).second) {
-                            ++reported;
-                            LOG_INFO("SUN transformed caster owner=",
-                                inst.shadow_owner," mesh_id=",inst.id,
-                                " dynamic=",inst.dynamic_sun_caster?1:0,
-                                " atlas=",in_atlas?1:0,
-                                " groups=",inst.geometry->groups.size(),
-                                " RLU_lengths=",right,",",forward,",",up,
-                                " determinant=",determinant,
-                                " origin=",m[9],",",m[10],",",m[11]);
-                        }
                     }
-                LOG_INFO("SUN transformed caster summary parts=",
-                    transformed_parts," moving_parts=",dynamic_parts,
-                    " atlas_parts=",atlas_parts,
-                    " unknown_owner_parts=",unknown_owner_parts,
-                    " atlas_owners=",sun_dynamic_atlas_owners.size(),
-                    " NOTE=diagnostic_only; nonunit RLU is supported");
+                    float const determinant=gpu_3do_transform_determinant(m);
+                    if(std::fabs(lengths[0]-1.0f)<0.005f &&
+                       std::fabs(lengths[1]-1.0f)<0.005f &&
+                       std::fabs(lengths[2]-1.0f)<0.005f &&
+                       determinant>=0.0f)continue;
+                    ++transformed;
+                    if(inst.dynamic_sun_caster)++moving;
+                    bool const atlas=inst.shadow_owner!=0 &&
+                        sun_dynamic_atlas_owners.count(inst.shadow_owner)!=0;
+                    if(atlas)++in_atlas;
+                    if(logged++<8U) {
+                        LOG_INFO("SUN RLU owner=",inst.shadow_owner,
+                                 " mesh=",inst.id,
+                                 " moving=",inst.dynamic_sun_caster?1:0,
+                                 " atlas=",atlas?1:0,
+                                 " axis_lengths=",lengths[0],",",lengths[1],
+                                 ",",lengths[2],
+                                 " determinant=",determinant);
+                    }
+                }
+                LOG_INFO("SUN RLU total=",transformed,
+                         " moving=",moving," atlas=",in_atlas,
+                         " atlas_owners=",sun_dynamic_atlas_owners.size());
             }
             float const horizontal=std::tan(camera.fov*
                 (3.14159265358979323846f/360.0f));
