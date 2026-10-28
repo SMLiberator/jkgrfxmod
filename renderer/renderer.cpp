@@ -4448,6 +4448,18 @@ namespace jkgm {
                         (caster_end_world-origin_depth)/
                         std::max(view.range,0.001f));
                     sun_dynamic_atlas_owners.insert(object->key);
+                    if(the_config->profile_renderer &&
+                       gpu_3do_present_serial%120U==0U) {
+                        auto const &lo=object->bounds.low;
+                        auto const &hi=object->bounds.high;
+                        LOG_INFO("SUN atlas caster owner=",object->key,
+                                 " parts=",object->parts.size(),
+                                 " tile=",tile.size,
+                                 " center=",
+                                 std::to_string((lo[0]+hi[0])*0.5f),",",
+                                 std::to_string((lo[1]+hi[1])*0.5f),",",
+                                 std::to_string((lo[2]+hi[2])*0.5f));
+                    }
                 } else if(the_config->sun_dynamic_shadow_adaptive_resolution) {
                     tile_layout.undo_last();
                 }
