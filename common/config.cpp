@@ -177,15 +177,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("use_model_cache")) {
             j.at("use_model_cache").get_to(rv->use_model_cache);
         }
-        if(j.contains("hud_near_depth_threshold")) {
-            auto const &v=j.at("hud_near_depth_threshold");
-            if(!v.is_number())
-                throw std::runtime_error("hud_near_depth_threshold must be numeric (0..10)");
-            double const depth=v.get<double>();
-            if(!std::isfinite(depth) || depth<0.0 || depth>10.0)
-                throw std::runtime_error("hud_near_depth_threshold must be between 0 and 10");
-            rv->hud_near_depth_threshold=static_cast<float>(depth);
-        }
         if(j.contains("mesh_revision_tracking")) {
             j.at("mesh_revision_tracking").get_to(rv->mesh_revision_tracking);
         }
