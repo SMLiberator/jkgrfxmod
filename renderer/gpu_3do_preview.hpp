@@ -66,6 +66,9 @@ namespace jkgm {
         bool shadow_only=false; // native 3DO remains JK-rendered; cache is for depth only
         bool casts_sun_shadows=true; // SithThing 0x20: no sun/spot shadows; GPU skips extra light/SSAO
         uint64_t shadow_owner=0; // pointer + signature, not shared rdMesh id
+        // Attachment-root owner for spotlight self-shadow suppression only.
+        // Keep shadow_owner unchanged for sun atlas grouping.
+        uint64_t spotlight_shadow_family=0;
         bool dynamic_sun_caster=false;
         float decal_opacity=1.0f; // separate from the native MAT's alpha
         float effective_light_mode=3.0f; // JK's effective per-Thing lighting cap
