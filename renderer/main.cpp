@@ -2848,7 +2848,7 @@ namespace {
                     uintptr_t(uint32_t(it->first)))).opacity;
             ++it;
             if(!(decal.opacity>0.0f))continue;
-            for(auto const &fragment:decal.fragments) {
+            for(auto &fragment:decal.fragments) {
                 jkgm::gpu_3do_matrix34 transform{};
                 bool found=false;
                 if(!fragment.native_fallback) {
@@ -2907,8 +2907,7 @@ namespace {
                 decal.last_visible_frame=gpu_frame_serial;
                 // Keep frame-by-frame diagnostics independent per fragment.
                 // Geometry is shared but this metadata belongs to the decal.
-                const_cast<moving_sprite_decal_fragment &>(fragment)
-                    .last_drawn_frame=gpu_frame_serial;
+                fragment.last_drawn_frame=gpu_frame_serial;
                 pending_gpu_instances.push_back(std::move(inst));
             }
         }
