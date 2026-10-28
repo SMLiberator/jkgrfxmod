@@ -203,11 +203,6 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             mat->texture_filtering = static_cast<bool>(em["texture_filtering"]);
         }
 
-        if(em.contains("skip_post_processing")) {
-            if(!em["skip_post_processing"].is_boolean())
-                throw std::runtime_error("skip_post_processing must be boolean");
-            mat->skip_post_processing=em["skip_post_processing"].get<bool>();
-        }
         if(em.contains("alpha_mode")) {
             auto const &am = em["alpha_mode"];
             if(am == "mask") {

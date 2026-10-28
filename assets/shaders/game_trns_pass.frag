@@ -18,7 +18,6 @@ uniform float alpha_cutoff;
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
 uniform float fluid_thickness; // Beer-Lambert absorption per game unit
 uniform int flare_mode; // SPR type 0x40: center-only depth occlusion
-uniform int post_exempt_mode; // 0 normal, 1 deferred 3D world, 2 deferred weapon overlay
 uniform sampler2D scene_depth; // Resolved opaque linear view depth (R16F)
 
 uniform sampler2D displacement_map;
@@ -666,13 +665,6 @@ vec3 light_translucent_spotlight(float depth, vec3 view_normal,
 
 void main()
 {
-    // Late-post geometry has no hardware depth attachment in the final
-    // framebuffer. Reuse the original opaque view-depth image per pixel.
-    // Gun overlays are depth-cleared in the native renderer and stay on top.
-    if(post_exempt_mode==1) {
-        float behind=texelFetch(scene_depth,ivec2(gl_FragCoord.xy),0).r;
-        if(behind<65500.0 && vp_z>behind+max(0.05,behind*0.0005)) discard;
-    }
     float flare_visibility=1.0;
     if(flare_mode!=0) {
         flare_visibility=flare_center_visibility();
@@ -749,8 +741,8 @@ void main()
                          mix(1.0, albedo.a, TRANSLUCENT_COLOR_ALPHA_WEIGHT);
     // Only ordinary blended faces/sprites receive sunlight here. Opaque
     // cutouts are already lit by the deferred pass; flares, fluids,
-    // additive/multiply and post-exempt materials preserve their behavior.
-    if(blend_mode==0 && flare_mode==0 && post_exempt_mode==0 &&
+    // additive/multiply effects preserve their behavior.
+    if(blend_mode==0 && flare_mode==0 &&
        features.z<0.5) {
         surface_color=illuminate_translucent_sun(
             surface_color,unlit_base_color,clamp(albedo.a,0.0,1.0),
@@ -761,7 +753,7 @@ void main()
     vec3 projected_light = vec3(0.0);
     if(translucent_spotlight_count > 0 &&
        blend_mode != 1 && blend_mode != 2 && flare_mode == 0 &&
-       post_exempt_mode == 0 && features.z < 0.5) {
+       features.z < 0.5) {
         projected_light = light_translucent_spotlight(
             vp_z, vp_normal, unlit_base_color, clamp(albedo.a, 0.0, 1.0)) *
             (1.0 - fog_amount);

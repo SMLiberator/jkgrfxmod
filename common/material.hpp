@@ -80,8 +80,6 @@ namespace jkgm {
 
         material_alpha_mode alpha_mode = material_alpha_mode::blend;
         material_blend_mode blend_mode = material_blend_mode::normal;
-        // Draw after final screen-space postprocessing (3D world UI, nametags).
-        bool skip_post_processing = false;
         // Native raster depth preference in OpenGL polygon-offset units.
         // Positive pulls geometry toward the camera; 0 preserves vanilla depth.
         float depth_bias = 0.0f;

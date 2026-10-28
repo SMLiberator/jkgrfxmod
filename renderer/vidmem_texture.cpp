@@ -133,7 +133,6 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
 
         surf->alpha_mode = (*repl_map)->alpha_mode;
         surf->blend_mode = (*repl_map)->blend_mode;
-        surf->skip_post_processing = (*repl_map)->skip_post_processing;
         surf->depth_bias = (*repl_map)->depth_bias;
         surf->fluid_thickness = (*repl_map)->fluid_thickness;
         surf->alpha_cutoff = (*repl_map)->alpha_cutoff;
@@ -241,7 +240,6 @@ void jkgm::vidmem_texture_surface::clear()
     displacement_factor = 0.0f;
     alpha_mode = material_alpha_mode::blend;
     blend_mode = material_blend_mode::normal;
-    skip_post_processing = false;
     depth_bias = 0.0f;
     fluid_thickness = 0.25f;
     alpha_cutoff = 0.5f;

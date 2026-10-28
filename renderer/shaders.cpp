@@ -168,7 +168,6 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , features(gl::get_uniform_location(the_program, "features"))
     , blend_mode(gl::get_uniform_location(the_program, "blend_mode"))
     , flare_mode(gl::get_uniform_location(the_program, "flare_mode"))
-    , post_exempt_mode(gl::get_uniform_location(the_program,"post_exempt_mode"))
     , scene_depth(gl::get_uniform_location(the_program, "scene_depth"))
     , fluid_thickness(gl::get_uniform_location(the_program, "fluid_thickness"))
     , albedo_map(gl::get_uniform_location(the_program, "albedo_map"))
@@ -625,11 +624,6 @@ void jkgm::shaders::game_pass_shader::set_fluid_thickness(float absorption)
 void jkgm::shaders::game_pass_shader::set_flare_mode(bool enabled)
 {
     gl::set_uniform_integer(flare_mode,enabled ? 1 : 0);
-}
-
-void jkgm::shaders::game_pass_shader::set_post_exempt_mode(int mode)
-{
-    gl::set_uniform_integer(post_exempt_mode,mode);
 }
 
 void jkgm::shaders::game_pass_shader::set_scene_depth_sampler(int sampler)

@@ -448,7 +448,6 @@ namespace jkgm {
             int albedo_source=0;
             bool has_image=false, alpha=false, masked=false, dithered=false, special=false;
             bool has_emission=false, emissive_only=false;
-            bool post_exempt=false;
             bool filtered=true;
             material_blend_mode blend=material_blend_mode::normal;
             point<4,float> tint=make_point(1.0f,1.0f,1.0f,1.0f);
@@ -511,7 +510,7 @@ namespace jkgm {
         std::vector<gpu_3do_instance> frame_gpu_3do_instances;
         // The scene is rendered AFTER the prior scene is presented. Retain
         // the camera used to transform these 3DOs, not the live rdCamera from
-        // the next frame when skip_post_processing is composited.
+        // the next frame when Camera Thing HUDs are composited.
         struct gpu_preview_frame_camera {
             engine_camera camera{};
             gpu_3do_matrix34 native_view{};
@@ -525,16 +524,6 @@ namespace jkgm {
         // Retained across the one-frame render/present boundary.
         std::vector<gpu_3do_instance> deferred_gpu_3do_instances;
         bool frame_has_exempt_gpu=false;
-        bool frame_has_exempt_native=false;
-        std::set<uint64_t> frame_exempt_gpu_meshes;
-        enum class exempt_buffer { world, world_alpha, gun, gun_alpha };
-        struct exempt_range {
-            exempt_buffer source;
-            material_instance_id material;
-            size_t first_vertex;
-            size_t vertex_count;
-        };
-        std::vector<exempt_range> deferred_native_ranges;
         std::unique_ptr<renderer_compositor> frame_compositor;
         std::unique_ptr<renderer_ao> frame_ao;
         std::unique_ptr<renderer_screen> frame_screen;
@@ -1498,14 +1487,12 @@ namespace jkgm {
             }
         }
 
-        // Execute AFTER the complete post/trail/Retro presentation, directly
-        // into the final sRGB framebuffer. No extra full-resolution mask/FBO.
-        // The opaque G-buffer view-depth texture still belongs to this frame;
-        // world-space UI tests against it in the fragment shader.
+        // Composite Camera-type HUD Things after all post-processing, but
+        // before the traditional DirectDraw HUD. Only GPU-cached Thing
+        // instances participate; no material-specific exemption remains.
         void draw_post_exempt()
         {
-            if(deferred_native_ranges.empty() &&
-               deferred_gpu_3do_instances.empty()) return;
+            if(deferred_gpu_3do_instances.empty()) return;
 
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                                  gl::default_framebuffer);
@@ -1517,60 +1504,8 @@ namespace jkgm {
             gl::set_blend_function(gl::blend_function::one,
                                    gl::blend_function::one_minus_source_alpha);
 
-            if(!deferred_native_ranges.empty()) {
-                auto *trimdl=ogs->tribuf.get_current();
-                auto &prog=ogs->game_transparency_pass_program;
-                prog.use_program();
-                prog.set_screen_resolution(static_cast<size<2,float>>(conf_scr_res));
-                prog.set_albedo_map_sampler(0);
-                prog.set_emissive_map_sampler(1);
-                prog.set_displacement_map_sampler(2);
-                prog.set_surface_map_sampler(3);
-                prog.set_env_map_sampler(4);
-                prog.set_normal_map_samplers(6,7);
-                prog.set_scene_depth_sampler(5);
-                prog.set_flare_mode(false);
-                prog.set_translucent_spotlight_count(0);
-                apply_engine_camera(prog);
-                auto const &fog=get_fog_settings();
-                auto const fog_color=fog.color.value();
-                auto const fog_info=fog.info.value();
-                prog.set_fog(make_point(fog_info[0],fog_info[1],
-                    the_config->enable_fog?fog_info[2]:0.0f,0.0f),
-                    color_rgb(fog_color[0],fog_color[1],fog_color[2]));
-                gl::set_active_texture_unit(5);
-                gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                 frame_screen->get_resolved_depth_texture());
-                gl::set_active_texture_unit(0);
-
-                for(auto const &range:deferred_native_ranges) {
-                    triangle_buffer_model *model=nullptr;
-                    int mode=1;
-                    switch(range.source) {
-                    case exempt_buffer::world:
-                        model=&trimdl->world_trimdl;break;
-                    case exempt_buffer::world_alpha:
-                        model=&trimdl->world_transparent_trimdl;break;
-                    case exempt_buffer::gun:
-                        model=&trimdl->gun_trimdl;mode=2;break;
-                    case exempt_buffer::gun_alpha:
-                        model=&trimdl->gun_transparent_trimdl;mode=2;break;
-                    }
-                    prog.set_post_exempt_mode(mode);
-                    bind_material(&prog,range.material,false,
-                                  the_config->enable_posterized_lighting);
-                    gl::bind_vertex_array(model->vao);
-                    gl::draw_arrays(gl::element_type::triangles,
-                                    range.first_vertex,range.vertex_count);
-                }
-                prog.set_post_exempt_mode(0);
-                set_native_depth_bias(0.0f);
-            }
-
-            // Cached mesh instances retain their transform and face/UV groups;
-            // the existing range renderer sorts/blends them without re-upload.
-            if(!deferred_gpu_3do_instances.empty())
-                draw_gpu_3do_preview(true,true);
+            // Retain per-instance transforms and the originating frame camera.
+            draw_gpu_3do_preview(true,true);
 
             gl::set_blend_function(gl::blend_function::one,
                                    gl::blend_function::one_minus_source_alpha);
@@ -1610,7 +1545,6 @@ namespace jkgm {
             gl::texture_view scene = frame_screen->get_resolved_final_texture();
 
             if(presenting_menu) {
-                deferred_native_ranges.clear();
                 deferred_gpu_3do_instances.clear();
                 deferred_gpu_3do_camera={};
                 // Menus are palette-sRGB imagery drawn into our linear screen
@@ -1770,7 +1704,7 @@ namespace jkgm {
                 // Vanilla DirectDraw HUD is 2D screen-space UI, not a scene
                 // light source. Keep it out of HDR exposure, bloom, grading,
                 // spatial blur, Retro quantization and frame-trail history.
-                // Draw last so it also overlays 3D post-exempt materials.
+                // Draw last so it also overlays Camera Thing 3D HUDs.
                 if(mode==renderer_mode::ingame) {
                     profile_scope hud_cpu(measure,profile_frame.timings[
                         profile_idx(profile_stage::hud_draw)]);
@@ -2106,37 +2040,6 @@ namespace jkgm {
             }
             auto const &mat = vidmem_texture_surfaces.at(id.get() - 1);
             return mat->blend_mode != material_blend_mode::normal;
-        }
-
-        bool is_post_exempt_material(material_instance_id id) const
-        {
-            if(!the_config->enable_post || id.get()==0U ||
-               id.get()>vidmem_texture_surfaces.size()) return false;
-            auto const &surface=vidmem_texture_surfaces[id.get()-1];
-            return the_config->enable_post && surface &&
-                   surface->skip_post_processing;
-        }
-
-        // Preserve original GPU buffer offsets: no geometry duplication or
-        // additional upload. Adjacent same-MAT glyphs form one draw range.
-        void capture_exempt_ranges(exempt_buffer src,triangle_batch const &batch)
-        {
-            size_t offset=0;
-            for(auto const &tri:batch) {
-                if(is_post_exempt_material(tri.material)) {
-                    if(!deferred_native_ranges.empty()) {
-                        auto &last=deferred_native_ranges.back();
-                        if(last.source==src && last.material==tri.material &&
-                           last.first_vertex+last.vertex_count==offset) {
-                            last.vertex_count+=3;
-                            offset+=3;
-                            continue;
-                        }
-                    }
-                    deferred_native_ranges.push_back({src,tri.material,offset,3U});
-                }
-                offset+=3;
-            }
         }
 
         // Compute UV offsets in double precision before reducing them to
@@ -2501,10 +2404,6 @@ namespace jkgm {
                 bool special = is_special_material(tri.material);
                 bool selected = filter == batch_blend_filter::all ||
                                 (filter == batch_blend_filter::special ? special : !special);
-                if(is_post_exempt_material(tri.material)) {
-                    selected=false;
-                    frame_has_exempt_native=true;
-                }
                 // All native world/gun transparent batches are initially
                 // classified by JK, not by replacement metadata. A dithered
                 // replacement was already drawn depth-writing in the opaque
@@ -2699,7 +2598,6 @@ namespace jkgm {
             out.masked=surface->alpha_mode==material_alpha_mode::mask;
             out.dithered=surface->alpha_mode==material_alpha_mode::dithered;
             out.blend=surface->blend_mode;
-            out.post_exempt=the_config->enable_post && surface->skip_post_processing;
             out.fluid_thickness=surface->fluid_thickness;
             if(the_config->enable_parallax && surface->displacement_map &&
                surface->displacement_factor!=0.0f) {
@@ -3039,16 +2937,9 @@ namespace jkgm {
                     auto const &tex=found->second;
                     // Camera Things are an instance-level HUD layer. The
                     // same 3DO and MAT on an ordinary Thing remain in-scene.
-                    bool const exempt=inst.camera_hud || tex.post_exempt;
-                    if(!post_exempt && exempt) {
+                    if(!post_exempt && inst.camera_hud)
                         frame_has_exempt_gpu=true;
-                        // Legacy MAT skip_post_processing still applies to
-                        // every instance sharing that material. Camera type
-                        // must NEVER mark the mesh ID for other Things.
-                        if(tex.post_exempt)
-                            frame_exempt_gpu_meshes.insert(inst.id);
-                    }
-                    if(exempt!=post_exempt) continue;
+                    if(inst.camera_hud!=post_exempt) continue;
                     // Projected SPRs are always alpha-composited over
                     // the existing opaque architecture and depth-tested.
                     // The MAT may be fully opaque; its native SPR instance
@@ -3923,7 +3814,7 @@ namespace jkgm {
                         auto const tex=resolve_gpu_3do_material(group);
                         bool const cutout=tex.masked||tex.alpha||tex.dithered;
                         if(tex.albedo_source==0 || tex.special ||
-                           tex.emissive_only || tex.post_exempt ||
+                           tex.emissive_only ||
                            tex.opacity<0.999f || (group.face_type&0x2U) ||
                            (cutout && tex.albedo_source!=1))
                             continue;
@@ -3990,7 +3881,7 @@ namespace jkgm {
                 auto const &tex=found->second;
                 bool const cutout=tex.masked||tex.alpha||tex.dithered;
                 if(tex.albedo_source==0 || tex.special ||
-                   tex.emissive_only || tex.post_exempt ||
+                   tex.emissive_only ||
                    tex.opacity<0.999f ||
                    (cutout && (tex.albedo_source!=1 ||
                                !surface.has_shadow_uv)) ||
@@ -4438,7 +4329,7 @@ namespace jkgm {
                         auto const &tex=found->second;
                         bool cutout=tex.masked||tex.alpha||tex.dithered;
                         if(tex.albedo_source==0 || tex.special ||
-                           tex.emissive_only || tex.post_exempt ||
+                           tex.emissive_only ||
                            tex.opacity<0.999f ||
                            (cutout && tex.albedo_source!=1))continue;
                         if((!the_config->sun_shadow_cull_back_faces &&
@@ -4806,8 +4697,7 @@ namespace jkgm {
                 auto const &tex=found->second;
                 bool const cutout=tex.masked||tex.alpha||tex.dithered;
                 // Keep cutout MAT silhouettes using their shadow UVs.
-                if(tex.albedo_source==0 || tex.special || tex.emissive_only ||
-                   tex.post_exempt || tex.opacity<0.999f ||
+                if(tex.albedo_source==0 || tex.special || tex.emissive_only || tex.opacity<0.999f ||
                    (cutout && (tex.albedo_source!=1 || !surface.has_shadow_uv)) ||
                    range.count>uint32_t(std::numeric_limits<GLsizei>::max())) {
                     ++world_material_skipped;
@@ -4914,8 +4804,7 @@ namespace jkgm {
                 if(!in_cascade)continue;
                 auto const &tex=cached_material(group);
                 bool const cutout=tex.masked||tex.alpha||tex.dithered;
-                if(tex.albedo_source==0 || tex.special || tex.emissive_only ||
-                   tex.post_exempt || tex.opacity<0.999f ||
+                if(tex.albedo_source==0 || tex.special || tex.emissive_only || tex.opacity<0.999f ||
                    (cutout && tex.albedo_source!=1))continue;
                 // Verified non-moving SithThings may join the cached static
                 // layer. An unknown owner stays dynamic (conservative), and
@@ -5753,7 +5642,6 @@ namespace jkgm {
             gl::set_depth_function(gl::comparison_function::less);
 
             ogs->game_transparency_pass_program.use_program();
-            ogs->game_transparency_pass_program.set_post_exempt_mode(0);
             ogs->game_transparency_pass_program.set_screen_resolution(
                 static_cast<size<2, float>>(conf_scr_res));
             ogs->game_transparency_pass_program.set_albedo_map_sampler(0);
@@ -6322,29 +6210,17 @@ namespace jkgm {
             // DirectDraw HUD is composited AFTER post-processing in end_frame,
             // when this rendered scene is presented on the following frame.
 
-            // Present this frame's exempt ranges next time end_frame runs.
-            deferred_native_ranges.clear();
-            if(frame_has_exempt_native && the_config->enable_post) {
-                capture_exempt_ranges(exempt_buffer::world,world_batch);
-                capture_exempt_ranges(exempt_buffer::world_alpha,world_transparent_batch);
-                capture_exempt_ranges(exempt_buffer::gun,gun_batch);
-                capture_exempt_ranges(exempt_buffer::gun_alpha,gun_transparent_batch);
-            }
+            // Preserve only Camera Thing instances for the next presentation.
             deferred_gpu_3do_instances.clear();
             deferred_gpu_3do_camera={};
             if(frame_has_exempt_gpu) {
                 deferred_gpu_3do_camera=frame_gpu_3do_camera;
-                // Carry a Camera Thing by INSTANCE even when its rdMesh ID
-                // and MATs are shared with an ordinary world Thing.
+                // HUD is per instance, never per mesh or material.
                 for(auto &inst:frame_gpu_3do_instances)
-                    if(inst.camera_hud ||
-                       (the_config->enable_post &&
-                        frame_exempt_gpu_meshes.count(inst.id)))
+                    if(inst.camera_hud)
                         deferred_gpu_3do_instances.push_back(std::move(inst));
             }
             frame_has_exempt_gpu=false;
-            frame_has_exempt_native=false;
-            frame_exempt_gpu_meshes.clear();
 
             // Transient 3DOs (text, HUD, effects) may have already been freed
             // by JK. Expire their GPU resources, keeping recently reused meshes
