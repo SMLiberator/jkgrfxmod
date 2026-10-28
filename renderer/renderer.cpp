@@ -4841,60 +4841,6 @@ namespace jkgm {
             size_t dynamic_far_skipped=0,dynamic_near_distance_skipped=0;
             float const dynamic_near_depth=std::max(0.0f,
                 the_config->sun_shadow_near_distance);
-            // The atlas-wide key contains only the native world/light state.
-            // Static 3DO additions and edits invalidate their own ray columns;
-            // camera/COG visibility changes must NEVER reset the whole grid.
-            uint64_t const scroll_static_signature=caster_signature;
-            bool const collect_scroll_casters=
-                the_config->enable_sun_scrolling_shadows &&
-                map.scroll_complete && map.static_complete &&
-                map.world.receivers.empty();
-            // The expensive group-box transforms were computed once before
-            // fitting the sun projection; both cascades use those exact AABBs.
-            // Share one per-frame material lookup across world and 3DOs,
-            // rather than re-reading the native MAT for each cascade.
-            auto &persistent=sun_scroll_static_casters[cascade];
-            auto &spatial=sun_scroll_spatial_bins[cascade];
-            auto &large_casters=sun_scroll_spatial_global[cascade];
-            if(!collect_scroll_casters ||
-               sun_scroll_live_world[cascade]!=world ||
-               sun_scroll_live_revision[cascade]!=map.revision ||
-               sun_scroll_live_signature[cascade]!=scroll_static_signature) {
-                persistent.clear();
-                spatial.clear();
-                large_casters.clear();
-                if(cascade==0) sun_scroll_static_union_valid=false;
-            }
-            constexpr double spatial_units=32.0;
-            auto spatial_key=[](int32_t bx,int32_t by) {
-                return (uint64_t(uint32_t(bx))<<32)|uint32_t(by);
-            };
-            // Project static AABBs just once. Tile lookup can then cheaply
-            // reject distant casters without transforming eight corners for
-            // every cached group on each newly exposed tile.
-            auto light_rect=[&](decal_volume_aabb const &b) {
-                std::array<float,4> r{{
-                    std::numeric_limits<float>::max(),
-                    -std::numeric_limits<float>::max(),
-                    std::numeric_limits<float>::max(),
-                    -std::numeric_limits<float>::max()}};
-                for(int corner=0;corner<8;++corner) {
-                    decal_vec3 q{{
-                        (corner&1)?b.high[0]:b.low[0],
-                        (corner&2)?b.high[1]:b.low[1],
-                        (corner&4)?b.high[2]:b.low[2]}};
-                    float const u=decal_dot(q,world_view.right);
-                    float const v=decal_dot(q,world_view.up);
-                    r[0]=std::min(r[0],u);r[1]=std::max(r[1],u);
-                    r[2]=std::min(r[2],v);r[3]=std::max(r[3],v);
-                }
-                return r;
-            };
-            auto invalidate_rect=[&](std::array<float,4> const &r) {
-                auto const dirty=sun_scroll_live[cascade].invalidate_light_rect(
-                    r[0],r[1],r[2],r[3]);
-                sun_scroll_model_dirty_tiles[cascade]+=dirty.size();
-            };
             auto cached_material=[&](gpu_3do_group const &group)
                 ->gpu_3do_texture const & {
                 uint64_t const key=(uint64_t(group.material)<<32)|
@@ -4935,7 +4881,7 @@ namespace jkgm {
                 bool const in_cascade=decal_aabbs_overlap(
                     prepared.bounds.low,prepared.bounds.high,
                     bounds.low,bounds.high);
-                if(!in_cascade && !collect_scroll_casters)continue;
+                if(!in_cascade)continue;
                 auto const &tex=cached_material(group);
                 bool const cutout=tex.masked||tex.alpha||tex.dithered;
                 if(tex.albedo_source==0 || tex.special || tex.emissive_only ||
@@ -4963,98 +4909,7 @@ namespace jkgm {
                     }
                     for(float v:instance.transform)floating(v);
                 };
-                if(stable && collect_scroll_casters) {
-                    // The identity includes the immutable mesh and group
-                    // address, while the content signature detects a changed
-                    // transform, MAT/cel or alpha-cutout state.
-                    uint64_t const key=sun_shadow_scroll_static_group_key(
-                        instance.id,instance.shadow_owner,group.offset,
-                        instance.transform);
-                    uint64_t fingerprint=14695981039346656037ULL;
-                    auto fingerprint_u32=[&](uint32_t v) {
-                        for(int b=0;b<4;++b) {
-                            fingerprint^=uint64_t((v>>(b*8))&255U);
-                            fingerprint*=1099511628211ULL;
-                        }
-                    };
-                    auto fingerprint_float=[&](float v) {
-                        uint32_t bits=0;
-                        std::memcpy(&bits,&v,sizeof(bits));
-                        fingerprint_u32(bits);
-                    };
-                    hash_model(fingerprint_u32,fingerprint_float);
-                    for(float v:prepared.bounds.low)fingerprint_float(v);
-                    for(float v:prepared.bounds.high)fingerprint_float(v);
-                    auto found=persistent.find(key);
-                    if(found==persistent.end() ||
-                       found->second.signature!=fingerprint) {
-                        if(found!=persistent.end()) {
-                            auto const &prior=found->second;
-                            invalidate_rect({{prior.min_x,prior.max_x,
-                                prior.min_y,prior.max_y}});
-                            if(prior.spatial_global) {
-                                large_casters.erase(std::remove(
-                                    large_casters.begin(),large_casters.end(),
-                                    key),large_casters.end());
-                            } else for(auto const bin:prior.spatial_bins) {
-                                auto indexed=spatial.find(bin);
-                                if(indexed==spatial.end())continue;
-                                auto &items=indexed->second;
-                                items.erase(std::remove(
-                                    items.begin(),items.end(),key),items.end());
-                                if(items.empty())spatial.erase(indexed);
-                            }
-                        }
-                        auto const rect=light_rect(prepared.bounds);
-                        invalidate_rect(rect);
-                        sun_scroll_cached_model record{};
-                        record.instance=instance;
-                        record.group=group;
-                        record.texture=tex;
-                        record.bounds=prepared.bounds;
-                        record.min_x=rect[0];record.max_x=rect[1];
-                        record.min_y=rect[2];record.max_y=rect[3];
-                        record.signature=fingerprint;
-                        record.cutout=cutout;
-                        // Coarse 32-unit bins keep the common one/two-cell
-                        // shadow query O(nearby geometry), not O(all level
-                        // geometry) for each dirty physical atlas tile.
-                        // Very large meshes take a conservative global path.
-                        int const bx0=int(std::floor(double(rect[0])/spatial_units));
-                        int const bx1=int(std::floor(double(rect[1])/spatial_units));
-                        int const by0=int(std::floor(double(rect[2])/spatial_units));
-                        int const by1=int(std::floor(double(rect[3])/spatial_units));
-                        if(int64_t(bx1)-bx0>=8 ||
-                           int64_t(by1)-by0>=8 ||
-                           (int64_t(bx1)-bx0+1)*(int64_t(by1)-by0+1)>32) {
-                            record.spatial_global=true;
-                            large_casters.push_back(key);
-                        } else for(int by=by0;by<=by1;++by)
-                            for(int bx=bx0;bx<=bx1;++bx) {
-                                auto const bin=spatial_key(bx,by);
-                                record.spatial_bins.push_back(bin);
-                                spatial[bin].push_back(key);
-                            }
-                        persistent[key]=std::move(record);
-                        if(cascade==0) {
-                            if(!sun_scroll_static_union_valid) {
-                                sun_scroll_static_union=prepared.bounds;
-                                sun_scroll_static_union_valid=true;
-                            } else {
-                                for(int axis=0;axis<3;++axis) {
-                                    sun_scroll_static_union.low[axis]=std::min(
-                                        sun_scroll_static_union.low[axis],
-                                        prepared.bounds.low[axis]);
-                                    sun_scroll_static_union.high[axis]=std::max(
-                                        sun_scroll_static_union.high[axis],
-                                        prepared.bounds.high[axis]);
-                                }
-                            }
-                        }
-                    }
-                    // Missing submissions do not remove the record: distant
-                    // JK chunks are hidden for performance, not destroyed.
-                }
+
                 if(!in_cascade)continue;
                 (stable?static_models:models).push_back(
                     {&instance,&group,tex,cutout,prepared.bounds});
