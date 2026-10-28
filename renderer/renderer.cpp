@@ -509,6 +509,19 @@ namespace jkgm {
         // frame; share costly native memory reads across both GPU passes.
         std::unordered_map<uint64_t,gpu_3do_texture> gpu_frame_material_cache;
         std::vector<gpu_3do_instance> frame_gpu_3do_instances;
+        // The scene is rendered AFTER the prior scene is presented. Retain
+        // the camera used to transform these 3DOs, not the live rdCamera from
+        // the next frame when skip_post_processing is composited.
+        struct gpu_preview_frame_camera {
+            engine_camera camera{};
+            gpu_3do_matrix34 native_view{};
+            gpu_3do_native_frustum frustum{};
+            float far_plane=1000.0f;
+            bool perspective=false;
+            bool valid=false;
+        };
+        gpu_preview_frame_camera frame_gpu_3do_camera{};
+        gpu_preview_frame_camera deferred_gpu_3do_camera{};
         // Retained across the one-frame render/present boundary.
         std::vector<gpu_3do_instance> deferred_gpu_3do_instances;
         bool frame_has_exempt_gpu=false;
@@ -1599,6 +1612,7 @@ namespace jkgm {
             if(presenting_menu) {
                 deferred_native_ranges.clear();
                 deferred_gpu_3do_instances.clear();
+                deferred_gpu_3do_camera={};
                 // Menus are palette-sRGB imagery drawn into our linear screen
                 // buffer. Present directly: GL_FRAMEBUFFER_SRGB performs the
                 // usual linear->sRGB conversion, but there is no game bloom,
@@ -2099,7 +2113,8 @@ namespace jkgm {
             if(!the_config->enable_post || id.get()==0U ||
                id.get()>vidmem_texture_surfaces.size()) return false;
             auto const &surface=vidmem_texture_surfaces[id.get()-1];
-            return surface && surface->skip_post_processing;
+            return the_config->enable_post && surface &&
+                   surface->skip_post_processing;
         }
 
         // Preserve original GPU buffer offsets: no geometry duplication or
@@ -2791,6 +2806,48 @@ namespace jkgm {
             return out;
         }
 
+        // Snapshot the rdCamera that rendered THIS scene. The exempt pass
+        // executes at the next present_game() (after post processing), when
+        // the engine may already have advanced the camera or switched modes.
+        // Reusing that live camera would project retained 3DO GUI geometry
+        // against the previous scene's depth with a different view matrix.
+        gpu_preview_frame_camera capture_gpu_preview_camera()
+        {
+            gpu_preview_frame_camera frame{};
+            frame.camera=read_active_render_camera();
+            if(!frame.camera.valid ||
+               !read_active_rd_camera_view(frame.native_view))
+                return frame;
+
+            constexpr uintptr_t current_camera=0x0073A418U;
+            if(engine_camera_detail::readable(current_camera,sizeof(uintptr_t))) {
+                auto const camera_ptr=*reinterpret_cast<uintptr_t const *>(current_camera);
+                if(camera_ptr>=0x10000U &&
+                   engine_camera_detail::readable(camera_ptr+0x48,sizeof(uintptr_t))) {
+                    auto const frustum_ptr=*reinterpret_cast<uintptr_t const *>(camera_ptr+0x48);
+                    if(frustum_ptr>=0x10000U &&
+                       engine_camera_detail::readable(
+                           frustum_ptr,sizeof(frame.frustum))) {
+                        std::memcpy(&frame.frustum,
+                                    reinterpret_cast<void const *>(frustum_ptr),
+                                    sizeof(frame.frustum));
+                        if(std::isfinite(frame.frustum.far_plane) &&
+                           frame.frustum.far_plane>0.1f)
+                            frame.far_plane=frame.frustum.far_plane;
+                        if(engine_camera_detail::readable(camera_ptr,sizeof(int32_t))) {
+                            int32_t project_type=0;
+                            std::memcpy(&project_type,
+                                        reinterpret_cast<void const *>(camera_ptr),
+                                        sizeof(project_type));
+                            frame.perspective=project_type==1;
+                        }
+                    }
+                }
+            }
+            frame.valid=true;
+            return frame;
+        }
+
         // Separate opaque and alpha passes. Native JK no longer processes
         // individual faces in either path: only GPU indexed ranges remain.
         void draw_gpu_3do_preview(bool transparent,bool post_exempt=false,
@@ -2809,39 +2866,19 @@ namespace jkgm {
                                        profile_frame.gpu_preview_cpu_us);
             size_t const pass_index=transparent?1U:0U;
             if(gpu_profiling)++profile_frame.gpu_preview_calls[pass_index];
-            auto const cam=read_active_render_camera();
-            if(!cam.valid) return;
-            gpu_3do_matrix34 native_view{};
-            if(!read_active_rd_camera_view(native_view)) return;
-
-            float far_plane=1000.0f;
-            gpu_3do_native_frustum native_frustum{};
-            bool have_perspective_frustum=false;
-            constexpr uintptr_t current_camera=0x0073A418U;
-            if(engine_camera_detail::readable(current_camera,sizeof(uintptr_t))) {
-                auto const camera_ptr=*reinterpret_cast<uintptr_t const *>(current_camera);
-                if(camera_ptr>=0x10000U &&
-                   engine_camera_detail::readable(camera_ptr+0x48,sizeof(uintptr_t))) {
-                    auto const frustum_ptr=*reinterpret_cast<uintptr_t const *>(camera_ptr+0x48);
-                    if(frustum_ptr>=0x10000U &&
-                       engine_camera_detail::readable(
-                           frustum_ptr,sizeof(native_frustum))) {
-                        std::memcpy(&native_frustum,
-                                    reinterpret_cast<void const *>(frustum_ptr),
-                                    sizeof(native_frustum));
-                        if(std::isfinite(native_frustum.far_plane) &&
-                           native_frustum.far_plane>0.1f)
-                            far_plane=native_frustum.far_plane;
-                        if(engine_camera_detail::readable(camera_ptr,sizeof(int32_t))) {
-                            int32_t project_type=0;
-                            std::memcpy(&project_type,
-                                        reinterpret_cast<void const *>(camera_ptr),
-                                        sizeof(project_type));
-                            have_perspective_frustum=project_type==1;
-                        }
-                    }
-                }
-            }
+            // Ordinary opaque/alpha passes share one camera snapshot.
+            // Post-exempt ranges use exactly THAT frame's camera, although
+            // they are presented after post-processing on the next tick.
+            if(!post_exempt && !frame_gpu_3do_camera.valid)
+                frame_gpu_3do_camera=capture_gpu_preview_camera();
+            auto const &frame_camera=post_exempt
+                ? deferred_gpu_3do_camera : frame_gpu_3do_camera;
+            if(!frame_camera.valid) return;
+            auto const &cam=frame_camera.camera;
+            auto const &native_view=frame_camera.native_view;
+            float const far_plane=frame_camera.far_plane;
+            auto const &native_frustum=frame_camera.frustum;
+            bool const have_perspective_frustum=frame_camera.perspective;
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
             set_translucent_spotlights(prog,transparent && !post_exempt &&
@@ -6184,6 +6221,9 @@ namespace jkgm {
                     profile_frame.timings[profile_idx(profile_stage::present_swap)]);
                 end_frame();
             }
+            // end_frame presented the prior snapshot; prepare a fresh one
+            // for the 3DOs that are about to populate this scene.
+            frame_gpu_3do_camera={};
             {
                 profile_scope timer(profiling,
                     profile_frame.timings[profile_idx(profile_stage::hud_upload)]);
@@ -6280,7 +6320,9 @@ namespace jkgm {
                 capture_exempt_ranges(exempt_buffer::gun_alpha,gun_transparent_batch);
             }
             deferred_gpu_3do_instances.clear();
+            deferred_gpu_3do_camera={};
             if(frame_has_exempt_gpu && the_config->enable_post) {
+                deferred_gpu_3do_camera=frame_gpu_3do_camera;
                 // Only retain meshes that actually contain flagged materials,
                 // not every car/NPC in a level with one GUI font.
                 for(auto &inst:frame_gpu_3do_instances)
