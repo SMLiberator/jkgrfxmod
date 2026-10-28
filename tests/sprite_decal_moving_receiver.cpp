@@ -88,5 +88,68 @@ int main() {
     assert(near(world2[0],first2.x));
     assert(near(world2[1],first2.y));
     assert(near(world2[2],first2.z));
+    // A single projected SPR must cross a node boundary rather than
+    // selecting whichever triangle/mesh lies closest to the impact.
+    // Model two separately transformed mesh nodes that share a plane.
+    gpu_3do_instance left{},right{};
+    left.transform={{1,0,0, 0,1,0, 0,0,1, 0,0,0}};
+    right.transform=left.transform;
+    auto left_mesh=std::make_shared<gpu_3do_geometry>();
+    auto right_mesh=std::make_shared<gpu_3do_geometry>();
+    auto set_triangle=[&](std::shared_ptr<gpu_3do_geometry> const &m,
+                          std::array<gpu_3do_vertex,3> const &v) {
+        m->vertices.assign(v.begin(),v.end());
+        m->indices={0,1,2};
+        gpu_3do_group g{};
+        g.count=3;
+        for(int axis=0;axis<3;++axis) {
+            g.bounds_min[axis]=100.0f;
+            g.bounds_max[axis]=-100.0f;
+        }
+        for(auto const &vertex:v) {
+            float const xyz[]={vertex.x,vertex.y,vertex.z};
+            for(int axis=0;axis<3;++axis) {
+                g.bounds_min[axis]=std::min(g.bounds_min[axis],xyz[axis]);
+                g.bounds_max[axis]=std::max(g.bounds_max[axis],xyz[axis]);
+            }
+        }
+        m->groups.push_back(g);
+    };
+    set_triangle(left_mesh,{{vertex(-1,-1),vertex(0,-1),vertex(0,1)}});
+    set_triangle(right_mesh,{{vertex(0,-1),vertex(1,-1),vertex(0,1)}});
+    left.geometry=left_mesh;right.geometry=right_mesh;
+    decal_projector split{};
+    assert(make_sprite_decal_projector(
+        axes,{{0,0,0.05f}},{{0,0,0}},0.8f,0.8f,1,1,0,split));
+    auto left_world=sprite_decal_moving_receiver_world(left);
+    auto right_world=sprite_decal_moving_receiver_world(right);
+    auto left_clip=project_cached_decal_world(left_world,split);
+    auto right_clip=project_cached_decal_world(right_world,split);
+    assert(!left_clip.triangles.empty());
+    assert(!right_clip.triangles.empty());
+    sprite_decal_mesh left_fragment{},right_fragment{};
+    assert(make_sprite_decal_gpu_mesh(
+        left_clip,split,0x100000,uv,1,left_fragment));
+    assert(make_sprite_decal_gpu_mesh(
+        right_clip,split,0x100000,uv,1,right_fragment));
+    assert(sprite_decal_geometry_to_receiver_local(
+        *left_fragment.geometry,left.transform));
+    assert(sprite_decal_geometry_to_receiver_local(
+        *right_fragment.geometry,right.transform));
+    auto const lv=left_fragment.geometry->vertices[0];
+    auto const rv=right_fragment.geometry->vertices[0];
+    right.transform[9]+=3.0f;
+    auto const changed_left=gpu_3do_native_transform_point(
+        left.transform,{{lv.x,lv.y,lv.z}});
+    auto const changed_right=gpu_3do_native_transform_point(
+        right.transform,{{rv.x,rv.y,rv.z}});
+    assert(near(changed_left[0],lv.x));
+    assert(near(changed_right[0],rv.x+3.0f));
+    // The bounding query must consider actual mesh geometry, including a
+    // distant protruding node whose vertices sit beyond a Thing's ordinary
+    // collision sphere.
+    right.transform[9]=0;
+    right.transform[9]=20;
+    assert(sprite_decal_moving_receiver_near(right,{{20,0,0.05f}},1.0f));
     return 0;
 }
