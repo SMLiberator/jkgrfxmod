@@ -159,5 +159,54 @@ int main() {
     right.transform[9]=0;
     right.transform[9]=20;
     assert(sprite_decal_moving_receiver_near(right,{{20,0,0.05f}},1.0f));
+
+    // JK's blocky models frequently have hard 90-degree corners. An edge-on
+    // side face previously had no UV-area and disappeared completely.
+    // The wrapping path must both keep the surface and give its depth axis
+    // a nonzero texture span; the regular projector stays unchanged.
+    gpu_3do_instance side{};
+    side.transform={{1,0,0, 0,1,0, 0,0,1, 0,0,0}};
+    auto side_mesh=std::make_shared<gpu_3do_geometry>();
+    auto side_vertex=[](float y,float z) {
+        gpu_3do_vertex v{};
+        v.x=0.1f;v.y=y;v.z=z;
+        v.nx=1;v.ny=0;v.nz=0;
+        return v;
+    };
+    side_mesh->vertices={
+        side_vertex(0,-0.5f),side_vertex(0.25f,-0.5f),
+        side_vertex(0.25f,0.5f),side_vertex(0,0.5f)};
+    side_mesh->indices={0,1,2,0,2,3};
+    gpu_3do_group sg{};
+    sg.count=6;
+    sg.bounds_min={{0.1f,0,-0.5f}};
+    sg.bounds_max={{0.1f,0.25f,0.5f}};
+    side_mesh->groups.push_back(sg);
+    side.geometry=side_mesh;
+    auto side_world=sprite_decal_moving_receiver_world(side);
+    assert(side_world.valid_world && side_world.receivers.size()==2);
+    decal_projector sideways{}; // look=+Y; the receiver normal is +X.
+    auto const old_clip=project_cached_decal_world(
+        side_world,sideways,2048,false,false);
+    assert(old_clip.triangles.empty());
+    auto const wrapped_clip=project_cached_decal_world(
+        side_world,sideways,2048,false,true);
+    assert(wrapped_clip.valid_world && !wrapped_clip.truncated &&
+           !wrapped_clip.triangles.empty());
+    sprite_decal_mesh side_decal{};
+    assert(make_sprite_decal_gpu_mesh(
+        wrapped_clip,sideways,0x100000,uv,1.0f,side_decal,true));
+    assert(side_decal.geometry);
+    float u_min=10000.0f,u_max=-10000.0f;
+    for(auto const &v:side_decal.geometry->vertices) {
+        u_min=std::min(u_min,v.u);
+        u_max=std::max(u_max,v.u);
+    }
+    assert(u_max-u_min>1.0f); // Texture is not a collapsed edge-on line.
+    // Do not let reverse-facing slab undersides receive the same decal.
+    for(auto &face:side_world.receivers)
+        face.normal={{0,1,0}};
+    assert(project_cached_decal_world(
+        side_world,sideways,2048,false,true).triangles.empty());
     return 0;
 }
