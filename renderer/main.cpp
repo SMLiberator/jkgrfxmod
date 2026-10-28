@@ -1009,6 +1009,62 @@ namespace {
         auto const queue_begin=profiling ? std::chrono::steady_clock::now()
                                         : std::chrono::steady_clock::time_point{};
         bool const queued=jkgm::queue_gpu_3do_mesh(mesh,placement);
+        // Inspect native RLU matrices BEFORE GPU eligibility filters can
+        // discard a mesh. A zero in the renderer-side RLU diagnostic does
+        // not establish that Sith never supplied a scaled node.
+        if(profiling && gpu_frame_serial%120U==0U) {
+            static thread_local uint64_t sample_frame=0;
+            static thread_local unsigned sample_logged=0;
+            if(sample_frame!=gpu_frame_serial) {
+                sample_frame=gpu_frame_serial;
+                sample_logged=0;
+            }
+            if(sample_logged<12U &&
+               gpu_span_readable(mesh,sizeof(native_mesh)) &&
+               gpu_span_readable(placement,12U*sizeof(float))) {
+                std::array<float,12> native_transform{};
+                std::memcpy(native_transform.data(),placement,
+                            12U*sizeof(float));
+                float axes[3]{};
+                bool finite=true;
+                for(int i=0;i<3;++i) {
+                    int const j=3*i;
+                    axes[i]=std::sqrt(native_transform[j]*
+                                      native_transform[j]+
+                                      native_transform[j+1]*
+                                      native_transform[j+1]+
+                                      native_transform[j+2]*
+                                      native_transform[j+2]);
+                    finite=finite && std::isfinite(axes[i]);
+                }
+                if(finite) {
+                    float const det=jkgm::gpu_3do_transform_determinant(
+                        native_transform);
+                    if(std::fabs(axes[0]-1.0f)>0.005f ||
+                       std::fabs(axes[1]-1.0f)>0.005f ||
+                       std::fabs(axes[2]-1.0f)>0.005f || det<0.0f) {
+                        native_mesh m{};
+                        std::memcpy(&m,mesh,sizeof(m));
+                        auto const name_end=std::find(
+                            m.name,m.name+sizeof(m.name),'\0');
+                        std::string name(m.name,name_end);
+                        ++sample_logged;
+                        LOG_INFO("SUN native RLU mesh=",name,
+                                 " owner=",active_native_shadow_owner,
+                                 " dynamic=",active_native_shadow_dynamic?1:0,
+                                 " casts=",jkgm::thing_casts_sun_shadows(
+                                     active_native_model_thing_flags)?1:0,
+                                 " GPU=",queued?1:0,
+                                 " vertices=",m.num_vertices,
+                                 " faces=",m.num_faces,
+                                 " axes=",std::to_string(axes[0]),",",
+                                 std::to_string(axes[1]),",",
+                                 std::to_string(axes[2]),
+                                 " det=",std::to_string(det));
+                    }
+                }
+            }
+        }
         if(profiling)
             native_totals.mesh_queue_ns+=elapsed_native_ns(queue_begin);
         if(!queued) {
