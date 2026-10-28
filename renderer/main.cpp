@@ -32,6 +32,7 @@
 #include "sprite_decal_pose_cache.hpp"
 #include "sprite_decal_resource.hpp"
 #include "sprite_decal_attachment.hpp"
+#include "sprite_decal_follow.hpp"
 #include "sprite_alpha_tag.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
@@ -182,6 +183,8 @@ namespace {
     thread_local uint64_t active_native_shadow_owner=0;
     thread_local uint64_t active_native_spotlight_family=0;
     thread_local bool active_native_shadow_dynamic=false;
+    thread_local uintptr_t active_native_decal_model=0;
+    thread_local bool active_native_decal_receiver=false;
 
     // Defined below by the per-frame native memory-query cache. The
     // attachment-family resolver runs earlier in this translation unit.
@@ -311,6 +314,24 @@ namespace {
     };
     std::unordered_map<void const *,cached_gpu_mesh> gpu_mesh_cache;
     std::vector<jkgm::gpu_3do_instance> pending_gpu_instances;
+    struct moving_mesh_occurrence_key {
+        uint64_t thing=0;
+        uintptr_t mesh=0;
+        bool operator==(moving_mesh_occurrence_key const &r) const {
+            return thing==r.thing && mesh==r.mesh;
+        }
+    };
+    struct moving_mesh_occurrence_hash {
+        size_t operator()(moving_mesh_occurrence_key const &v) const {
+            size_t const a=std::hash<uint64_t>{}(v.thing);
+            size_t const b=std::hash<uintptr_t>{}(v.mesh);
+            return a^(b+size_t(0x9e3779b9U)+(a<<6)+(a>>2));
+        }
+    };
+    std::unordered_map<moving_mesh_occurrence_key,uint32_t,
+        moving_mesh_occurrence_hash> moving_mesh_occurrences;
+    void append_moving_sprite_decals();
+    void clear_moving_sprite_decals();
     uint64_t next_gpu_id=1;
     uint64_t gpu_frame_serial=1;
     jkgm::gpu_3do_native_stats gpu_native_stats;
@@ -947,7 +968,9 @@ namespace {
             (the_config->enable_sun_shadows ||
              (the_config->enable_spotlights &&
               the_config->enable_spotlight_shadows));
-        if(shadow_enabled) {
+        uintptr_t decal_model=0;
+        bool decal_receiver=false;
+        if(shadow_enabled || (the_config && the_config->enable_decals)) {
             auto const read=[](uintptr_t address,void *dst,size_t n) {
                 if(!gpu_span_readable(reinterpret_cast<void const *>(address),n))
                     return false;
@@ -960,6 +983,16 @@ namespace {
                 if(read(rd+0x44U,&owner,4) &&
                    read(uintptr_t(owner)+0x74U,&signature,4)) {
                     owner_key=(uint64_t(owner)<<32)|signature;
+                    if(the_config && the_config->enable_decals) {
+                        uint32_t model=0,move_type=0,collision=0;
+                        read(rd+4U,&model,4);
+                        read(uintptr_t(owner)+0x10U,&move_type,4);
+                        read(uintptr_t(owner)+0x28U,&collision,4);
+                        if(model>=0x10000U && (move_type!=0 || collision==2)) {
+                            decal_model=model;
+                            decal_receiver=true;
+                        }
+                    }
                     // Verified JK23 SithThing layout: orient +0x88, position
                     // +0xb8, linked animation class +0x128, puppet +0x12c.
                     // rdThing.puppet is +0x14 relative to embedded rdThing.
@@ -1023,6 +1056,10 @@ namespace {
         uint64_t const previous_owner=active_native_shadow_owner;
         uint64_t const previous_family=active_native_spotlight_family;
         bool const previous_moving=active_native_shadow_dynamic;
+        uintptr_t const previous_decal_model=active_native_decal_model;
+        bool const previous_decal_receiver=active_native_decal_receiver;
+        active_native_decal_model=decal_model;
+        active_native_decal_receiver=decal_receiver;
         active_native_model_thing_flags=flags;
         active_native_shadow_owner=owner_key;
         active_native_spotlight_family=owner_key &&
@@ -1039,6 +1076,8 @@ namespace {
         active_native_shadow_owner=previous_owner;
         active_native_spotlight_family=previous_family;
         active_native_shadow_dynamic=previous_moving;
+        active_native_decal_model=previous_decal_model;
+        active_native_decal_receiver=previous_decal_receiver;
         if(profiling) {
             // The native model timer includes nested mesh-hook work.
             // Report that overlap explicitly rather than attributing it
@@ -1234,7 +1273,8 @@ namespace {
         error = DetourUpdateThread(GetCurrentThread());
         // Sun shadows need rdThing ownership even when profiling is off:
         // the mesh callback has no reliable SithThing pointer of its own.
-        if(error == NO_ERROR && (profiling || the_config->enable_sun_shadows))
+        if(error == NO_ERROR && (profiling || the_config->enable_sun_shadows ||
+                                 the_config->enable_decals))
             error = DetourAttach(&(PVOID &)RealNativeModel, HookedNativeModel);
         if(error == NO_ERROR)
             error = DetourAttach(&(PVOID &)RealNativeMesh, HookedNativeMesh);
@@ -1260,7 +1300,8 @@ namespace {
         if(the_config->profile_renderer)
             DetourDetach(&(PVOID &)RealNativeFace, HookedNativeFace);
         DetourDetach(&(PVOID &)RealNativeMesh, HookedNativeMesh);
-        if(the_config->profile_renderer || the_config->enable_sun_shadows)
+        if(the_config->profile_renderer || the_config->enable_sun_shadows ||
+           the_config->enable_decals)
             DetourDetach(&(PVOID &)RealNativeModel, HookedNativeModel);
         DetourTransactionCommit();
     }
@@ -1550,6 +1591,15 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     inst.shadow_owner=active_native_shadow_owner;
     inst.spotlight_shadow_family=active_native_spotlight_family;
     inst.dynamic_sun_caster=active_native_shadow_dynamic;
+    if(!shadow_only && active_native_decal_receiver &&
+       active_native_shadow_owner && active_native_decal_model) {
+        inst.decal_receiver_thing=active_native_shadow_owner;
+        inst.decal_receiver_model=active_native_decal_model;
+        inst.decal_receiver_mesh=reinterpret_cast<uintptr_t>(mesh);
+        inst.decal_receiver_revision=mesh_revision::current();
+        inst.decal_receiver_occurrence=++moving_mesh_occurrences[
+            {active_native_shadow_owner,reinterpret_cast<uintptr_t>(mesh)}];
+    }
     // Depth-only casters need no native MAT residency, point lights,
     // colormap or per-Thing lighting cap. Preserve the native render call.
     std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
@@ -1628,13 +1678,17 @@ jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
 std::vector<jkgm::gpu_3do_instance> jkgm::consume_gpu_3do_instances()
 {
     std::vector<gpu_3do_instance> out;
+    append_moving_sprite_decals();
     out.swap(pending_gpu_instances);
+    moving_mesh_occurrences.clear();
     ++gpu_frame_serial;
     return out;
 }
 void jkgm::reset_gpu_3do_instances()
 {
     pending_gpu_instances.clear();
+    moving_mesh_occurrences.clear();
+    clear_moving_sprite_decals();
     gpu_mesh_cache.clear();
     gpu_mat_residency.clear();
     ++gpu_frame_serial;
