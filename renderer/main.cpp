@@ -1164,7 +1164,8 @@ namespace {
         // use_model_cache=false, leaving some characters without shadows.
         // Restrict the second attempt to moving sun casters: don't double
         // snapshot the many static/HUD/native-fallback meshes each frame.
-        if(!queued && the_config && the_config->use_model_cache &&
+        if(!queued && !active_native_model_camera_hud &&
+           the_config && the_config->use_model_cache &&
            the_config->enable_sun_shadows && active_native_shadow_dynamic &&
            active_native_shadow_owner!=0 &&
            jkgm::thing_casts_sun_shadows(active_native_model_thing_flags)) {
@@ -1374,6 +1375,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                std::memcmp(reinterpret_cast<void const *>(code),init_bytes,
                            sizeof(init_bytes))==0;
     }();
+    if(force_shadow_only && active_native_model_camera_hud)
+        return false; // HUD meshes may never be depth-only sun casters.
     bool const shadow_enabled=the_config &&
         ((the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
          the_config->enable_sun_shadows);
