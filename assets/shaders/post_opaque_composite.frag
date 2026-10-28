@@ -155,7 +155,7 @@ float sun_dynamic_shadow_visibility(vec3 position,float incidence)
     if(sun_dynamic_count==0 || sun_shadow_split<=0.0)return 1.0;
     // The dynamic atlas is near-only even when a Thing's projected shadow
     // footprint extends much farther than its caster bounds.
-    float distance=length(position-camera_origin.xyz);
+    float distance=dot(position-camera_origin.xyz,camera_forward.xyz);
     if(distance>=sun_shadow_split)return 1.0;
     float near_fade=1.0-smoothstep(
         sun_shadow_split*0.85,sun_shadow_split,distance);
