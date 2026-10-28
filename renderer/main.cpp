@@ -998,7 +998,12 @@ namespace {
                     // +0xb8, linked animation class +0x128, puppet +0x12c.
                     // rdThing.puppet is +0x14 relative to embedded rdThing.
                     std::array<uint8_t,0xa8> state{};
-                    if(read(uintptr_t(owner)+0x88U,
+                    // Moving-decal ownership only needs the native Thing
+                    // signature, movement/collision class and rdModel. Avoid
+                    // the expensive sun motion-history tracking when shadow
+                    // rendering is disabled.
+                    if(shadow_enabled &&
+                       read(uintptr_t(owner)+0x88U,
                             state.data(),state.size())) {
                         std::array<float,12> pose{};
                         std::memcpy(pose.data(),state.data(),9*sizeof(float));
