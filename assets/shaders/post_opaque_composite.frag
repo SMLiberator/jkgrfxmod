@@ -53,7 +53,6 @@ uniform sampler2DShadow sun_shadow_far_image;
 uniform vec3 sun_shadow_far_origin,sun_shadow_far_right;
 uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
-uniform int sun_shadow_far_soft_filter; // 1: nine PCF lookups; 0: single bilinear PCF
 uniform float sun_shadow_receiver_bias_scale; // diagnostic multiplier, 0..2
 uniform float sun_max_distance; // 0=unlimited; JK forward distance where added sun ends
 
@@ -69,7 +68,6 @@ float sun_range_fade(float forward_distance)
 // 4x2 tiles with independently configurable resolution and 2px guard.
 uniform int sun_dynamic_count;
 uniform sampler2DShadow sun_dynamic_image;
-uniform float sun_dynamic_shadow_distance_softness;
 uniform float sun_dynamic_caster_depth[8]; // caster far bound in [0,1] light depth
 uniform vec4 sun_dynamic_atlas_rects[8]; // xy=tile origin, zw=tile size in pixels
 uniform vec3 sun_dynamic_origin[8],sun_dynamic_right[8];
@@ -89,7 +87,7 @@ bool sun_shadow_inside(vec3 coord)
            all(lessThanEqual(coord,vec3(1.0)));
 }
 float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
-                        float incidence,bool soft)
+                        float incidence)
 {
     // A 24-bit normalized orthographic depth map avoids quantizing the
     // world's full light-axis range into only 65536 possible distances.
@@ -100,21 +98,8 @@ float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
     float bias_world=(0.008+0.027*grazing*grazing)*
                      sun_shadow_receiver_bias_scale;
     float bias=max(4.0/16777215.0,bias_world/max(range,0.001));
-    vec2 texel=1.0/vec2(textureSize(map,0));
-    float receiver=coordinate.z-bias;
-    // A single hardware PCF lookup preserves small character silhouettes:
-    // the existing 3x3 filter makes close-range details vanish.
-    if(!soft)return texture(map,vec3(coordinate.xy,receiver));
-    float visible=0.0;
-    // GL_LINEAR on a comparison sampler performs bilinear comparison PCF
-    // *before* these samples are averaged. Previously nearest depth reads
-    // produced only ten discrete levels across the full 3x3 kernel.
-    // Keep the same nine fetches and let hardware interpolate sub-texels.
-    for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++) {
-        vec2 uv=coordinate.xy+vec2(x,y)*texel;
-        visible+=texture(map,vec3(uv,receiver));
-    }
-    return visible/9.0;
+    // Use one hardware bilinear comparison PCF sample in both cascades.
+    return texture(map,vec3(coordinate.xy,coordinate.z-bias));
 }
 float sun_shadow_visibility(vec3 world_position,float incidence)
 {
@@ -132,20 +117,19 @@ float sun_shadow_visibility(vec3 world_position,float incidence)
     float transition_end=sun_shadow_split*0.9375;
     if(use_near && camera_depth<transition_start)
         return sun_shadow_filter(sun_shadow_image,near_uv,
-                                 sun_shadow_limits.z,incidence,false);
+                                 sun_shadow_limits.z,incidence);
     vec3 far_uv=sun_shadow_coordinates(world_position,sun_shadow_far_origin,
         sun_shadow_far_right,sun_shadow_far_up,
         sun_shadow_far_forward,sun_shadow_far_limits);
     if(!sun_shadow_inside(far_uv))
         return use_near
-            ? sun_shadow_filter(sun_shadow_image,near_uv,sun_shadow_limits.z,incidence,false)
+            ? sun_shadow_filter(sun_shadow_image,near_uv,sun_shadow_limits.z,incidence)
             : 1.0;
     float far_visibility=sun_shadow_filter(sun_shadow_far_image,
-        far_uv,sun_shadow_far_limits.z,incidence,
-        sun_shadow_far_soft_filter!=0);
+        far_uv,sun_shadow_far_limits.z,incidence);
     if(!use_near)return far_visibility;
     float near_visibility=sun_shadow_filter(sun_shadow_image,
-        near_uv,sun_shadow_limits.z,incidence,false);
+        near_uv,sun_shadow_limits.z,incidence);
     float blend=smoothstep(transition_start,transition_end,camera_depth);
     return mix(near_visibility,far_visibility,blend);
 }
@@ -176,31 +160,9 @@ float sun_dynamic_shadow_visibility(vec3 position,float incidence)
         float bias=max(4.0/16777215.0,
                        bias_world/max(sun_dynamic_limits[i].z,0.001));
         float comparison=uv.z-bias;
-        float separation=max(0.0,uv.z-sun_dynamic_caster_depth[i])*
-                         sun_dynamic_limits[i].z;
-        // Wider PCF footprint with increasing caster/receiver separation;
-        // the object map retains its original detail and contact remains crisp.
-        float density=min((rect.z-4.0)/max(sun_dynamic_limits[i].x,0.001),
-                          (rect.w-4.0)/max(sun_dynamic_limits[i].y,0.001));
-        float radius=clamp(separation*sun_dynamic_shadow_distance_softness*
-                           density,0.0,5.0);
-        float object_visibility=1.0;
-        if(radius<0.5) {
-            object_visibility=texture(sun_dynamic_image,
-                vec3(atlas_uv,comparison));
-        } else {
-            vec2 tex_size=vec2(textureSize(sun_dynamic_image,0));
-            vec2 center=rect.xy+vec2(2.0)+uv.xy*(rect.zw-vec2(4.0));
-            vec2 lo=rect.xy+vec2(3.0),hi=rect.xy+rect.zw-vec2(3.0);
-            object_visibility=0.0;
-            for(int y=0;y<2;++y)for(int x=0;x<2;++x) {
-                vec2 offset=vec2(x==0?-0.7:0.7,y==0?-0.7:0.7)*radius;
-                vec2 texel=clamp(center+offset,lo,hi)/tex_size;
-                object_visibility+=texture(sun_dynamic_image,
-                    vec3(texel,comparison));
-            }
-            object_visibility*=0.25;
-        }
+        // Fixed single-sample hardware PCF; no separation-dependent taps.
+        float object_visibility=texture(sun_dynamic_image,
+            vec3(atlas_uv,comparison));
         visibility=min(visibility,object_visibility);
         if(visibility<=0.001)break;
     }
