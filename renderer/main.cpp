@@ -1058,6 +1058,11 @@ namespace {
                 }
             }
         }
+        // A nominally static collide=3 Thing may still be moved/animated
+        // by COG. When the sun pose tracker already detects that motion,
+        // allow it to receive moving decals too.
+        if(decal_model && shadow_enabled && moving)
+            decal_receiver=true;
         uint32_t const previous_flags=active_native_model_thing_flags;
         uint64_t const previous_owner=active_native_shadow_owner;
         uint64_t const previous_family=active_native_spotlight_family;
