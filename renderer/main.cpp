@@ -3118,19 +3118,48 @@ namespace {
             (!attached_to_face ||
              jkgm::sprite_decal_normals_stable(
                  it->second.attached_normal,attached_normal));
-        // Preserve the static decal cache's O(1) steady state. Only search
-        // moving 3DO receivers when this SPR has no valid static projection,
-        // or when it already owns a moving receiver. Otherwise every blood
-        // splat on the level would rescan cars on EVERY render frame.
-        bool const had_moving=moving_sprite_decals.count(key)!=0;
-        if((!hit || had_moving) &&
-           try_submit_moving_sprite_decal(
-               key,world,sprite,rd_thing,m,size,offset,roll,info,
-               resource,owner,thing_signature))
-            return true;
-        // Keep native MAT warm-up without accidentally projecting an
-        // attached moving decal onto stationary level geometry.
-        if(had_moving || moving_sprite_decals.count(key))return false;
+        // A cached moving decal is rendered from its receiver even if its
+        // original SPR is culled. Never additionally draw a static copy.
+        auto moving=moving_sprite_decals.find(key);
+        if(moving!=moving_sprite_decals.end()) {
+            if(moving->second.world==world &&
+               moving->second.sprite_resource==sprite &&
+               moving->second.sprite_thing==
+                   ((uint64_t(owner)<<32)|thing_signature) &&
+               moving_sprite_decal_source_alive(moving->second,key) &&
+               moving_sprite_decal_receiver_alive(moving->second)) {
+                moving->second.opacity=info.opacity;
+                return moving->second.geometry &&
+                    gpu_mesh_materials_ready(*moving->second.geometry);
+            }
+            moving_sprite_decals.erase(moving);
+        }
+        // Registration only: the frame-end pass resolves the request against
+        // the COMPLETE visible model list. This avoids drawing-order bugs
+        // where a sprite arrives before its actor/car model.
+        if(owner>=0x10000U && thing_signature!=0 &&
+           pending_moving_decal_requests.size()<2048U) {
+            auto const trial=moving_decal_trials.find(key);
+            bool const may_retry=trial==moving_decal_trials.end() ||
+                trial->second.signature!=thing_signature ||
+                trial->second.sprite_resource!=sprite ||
+                trial->second.attempts<4;
+            if(may_retry) {
+                moving_sprite_decal_request request{};
+                request.key=key;
+                request.world=world;
+                request.sprite=sprite;
+                request.pose=m;
+                request.size={{size[0],size[1],size[2],size[3]}};
+                request.offset={{offset[0],offset[1],offset[2]}};
+                request.roll=roll;
+                request.info=info;
+                request.resource=resource;
+                request.owner=owner;
+                request.signature=thing_signature;
+                pending_moving_decal_requests.push_back(std::move(request));
+            }
+        }
         if(!hit) {
             // Surface normals are needed BEFORE constructing the projector.
             // Unattached impact sprites generally retain UP=(0,0,1), even
