@@ -2608,17 +2608,22 @@ namespace {
     // Movable SPR decals are permanently projected into their receiving
     // 3DO node's LOCAL coordinates. Unlike static sprites, their visibility
     // follows the receiver, not the original sprite's world-space position.
+    struct moving_sprite_decal_fragment {
+        jkgm::sprite_decal_receiver_identity receiver{};
+        uint32_t occurrence=0; // distinguish repeated rdMesh hierarchy nodes
+        bool native_fallback=false;
+        uint64_t id=0;
+        std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
+    };
     struct moving_sprite_decal {
         uint32_t world=0;
         uintptr_t sprite_resource=0;
         uint64_t sprite_thing=0; // native SithThing address + signature
-        jkgm::sprite_decal_receiver_identity receiver{};
-        uint32_t occurrence=0; // distinguish repeated rdMesh in hierarchy
-        bool native_fallback=false;
-        uint64_t id=0;
         uint64_t last_visible_frame=0;
         float opacity=1.0f;
-        std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
+        // One projected SPR can span several independently transformed nodes
+        // of the SAME Thing. All fragments share sprite lifetime/opacity.
+        std::vector<moving_sprite_decal_fragment> fragments;
     };
     std::unordered_map<uint64_t,moving_sprite_decal> moving_sprite_decals;
 
@@ -2686,7 +2691,8 @@ namespace {
         return resource==entry.sprite_resource && owner==sprite_owner;
     }
 
-    bool moving_sprite_decal_receiver_alive(moving_sprite_decal const &entry)
+    bool moving_sprite_decal_receiver_alive(
+        moving_sprite_decal_fragment const &entry)
     {
         uint32_t const owner=uint32_t(entry.receiver.thing_key>>32);
         uint32_t const signature=uint32_t(entry.receiver.thing_key);
@@ -2763,7 +2769,13 @@ namespace {
         }
         native_decal_following=std::any_of(
             moving_sprite_decals.begin(),moving_sprite_decals.end(),
-            [](auto const &entry){return entry.second.native_fallback;});
+            [](auto const &entry){
+                return std::any_of(entry.second.fragments.begin(),
+                    entry.second.fragments.end(),
+                    [](moving_sprite_decal_fragment const &fragment) {
+                        return fragment.native_fallback;
+                    });
+            });
         if(moving_sprite_decals.empty())return;
         for(auto it=moving_sprite_decals.begin();
             it!=moving_sprite_decals.end();) {
@@ -2827,7 +2839,13 @@ namespace {
         }
         native_decal_following=std::any_of(
             moving_sprite_decals.begin(),moving_sprite_decals.end(),
-            [](auto const &entry){return entry.second.native_fallback;});
+            [](auto const &entry){
+                return std::any_of(entry.second.fragments.begin(),
+                    entry.second.fragments.end(),
+                    [](moving_sprite_decal_fragment const &fragment) {
+                        return fragment.native_fallback;
+                    });
+            });
     }
     jkgm::decal_world_geometry sprite_world_geometry;
     unsigned sprite_decal_submit_logs=0;
