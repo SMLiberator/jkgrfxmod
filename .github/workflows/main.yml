@@ -18,6 +18,12 @@ jobs:
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
 
+    - name: Pure COG math verbs regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_math.cpp /Fe:cog_math_test.exe
+        cog_math_test.exe
+
     - name: Bounded transparency sorter regression tests
       shell: cmd
       run: |
