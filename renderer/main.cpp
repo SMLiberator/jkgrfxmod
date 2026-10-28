@@ -1092,7 +1092,7 @@ namespace {
                     native_mesh m{};
                     std::memcpy(&m,mesh,sizeof(m));
                     auto const name_end=std::find(
-                        m.name,m.name+sizeof(m.name),'\\0');
+                        m.name,m.name+sizeof(m.name),'\0');
                     std::string const name(m.name,name_end);
                     LOG_INFO("SUN native fallback sidecar mesh=",name,
                              " owner=",active_native_shadow_owner,
