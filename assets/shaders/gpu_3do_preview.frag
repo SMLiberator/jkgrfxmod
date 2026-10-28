@@ -496,8 +496,9 @@ float translucent_sun_visibility(vec3 world,float incidence)
         } else if(use_far)visible=translucent_sun_sample(1,far_uv,incidence);
     }
     if(translucent_sun_dynamic_count>0 && translucent_sun_split>0.0) {
-        float distance=length(
-            world-translucent_spotlight_camera_origin.xyz);
+        float distance=dot(
+            world-translucent_spotlight_camera_origin.xyz,
+            translucent_spotlight_camera_forward.xyz);
         if(distance<translucent_sun_split) {
             // Match the opaque composite's radial near-only cutoff and
             // fade the last 15 percent to avoid a hard shadow ring.
