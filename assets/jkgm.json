@@ -32,7 +32,6 @@
     "profile_auto_exposure": false,
     "optimize_hud_uploads": true,
     "use_model_cache": false,
-    "hud_near_depth_threshold": 0.0,
     "mesh_revision_tracking": false,
     "enable_spotlights": false,
     "enable_spotlight_shadows": false,
