@@ -238,7 +238,7 @@ namespace jkgm {
             translucent_sun_uniforms translucent_sun;
         private:
             gl::uniform_location_id ambient_light,attenuation_min,num_lights,
-                                    effective_light_mode;
+                                    nonrigid_light_transform,effective_light_mode;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity;
         public:
             explicit gpu_3do_preview_shader(fs::path const &data_root);
