@@ -4538,7 +4538,7 @@ namespace jkgm {
                 LOG_INFO("SUN dynamic shadow atlas Things=",
                     sun_dynamic_views.size()," candidates=",sorted.size(),
                     " outside_near_distance=",atlas_distance_culled,
-                    " near_distance=",near_depth,
+                    " near_distance=",std::to_string(near_depth),
                     " base_tile=",tile_size,
                     " adaptive=",the_config->sun_dynamic_shadow_adaptive_resolution?1:0,
                     " tile_sizes=[",tile_sizes.str(),"]",
