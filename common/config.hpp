@@ -49,7 +49,6 @@ namespace jkgm {
         bool profile_auto_exposure = false; // optional blocking 1px readback diagnostics
         bool optimize_hud_uploads = true; // upload only changed HUD rows (disable for A/B test)
         bool use_model_cache = false; // cache 3DO meshes as persistent GPU geometry
-        float hud_near_depth_threshold = 0.0f; // opt-in native HUD treatment for meshes wholly within 0..threshold camera-forward depth
         bool mesh_revision_tracking = false; // experimental JK.dll COG mutation tracking
         bool enable_spotlights = false; // COG MAT-based screen-space spotlights
         bool enable_spotlight_shadows = false; // experimental, one static-world shadow map
