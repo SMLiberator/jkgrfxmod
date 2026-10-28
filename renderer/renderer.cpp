@@ -898,7 +898,7 @@ namespace jkgm {
                          profile_window.gpu_draw_ranges/frames,
                          " multi_calls_avg=",
                          profile_window.gpu_multidraw_calls/frames,
-                         " NOTE=only_opaque_ranges_combined");
+                         " NOTE=opaque_material_sorted_alpha_consecutive_order_preserved");
                 LOG_INFO("PERF gpu_3do passes opaque_GL_calls_avg=",
                          profile_window.gpu_opaque_draw_calls/frames,
                          " opaque_ranges_avg=",
