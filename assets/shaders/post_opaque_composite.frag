@@ -68,7 +68,6 @@ float sun_range_fade(float forward_distance)
 // 4x2 tiles with independently configurable resolution and 2px guard.
 uniform int sun_dynamic_count;
 uniform sampler2DShadow sun_dynamic_image;
-uniform float sun_dynamic_caster_depth[8]; // caster far bound in [0,1] light depth
 uniform vec4 sun_dynamic_atlas_rects[8]; // xy=tile origin, zw=tile size in pixels
 uniform vec3 sun_dynamic_origin[8],sun_dynamic_right[8];
 uniform vec3 sun_dynamic_up[8],sun_dynamic_forward[8],sun_dynamic_limits[8];
