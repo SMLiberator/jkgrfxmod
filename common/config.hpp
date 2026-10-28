@@ -55,6 +55,7 @@ namespace jkgm {
         bool enable_spotlights = false; // COG MAT-based screen-space spotlights
         bool enable_spotlight_shadows = false; // experimental, one static-world shadow map
         unsigned int spotlight_shadow_resolution = 256U; // depth-map width and height (64..1024)
+        bool enable_sun = true; // diffuse sunlight from SetSunInfo; independent of shadow rendering
         bool enable_sun_shadows = false;
         bool enable_sun_static_cache = true; // world-only depth layers, independently cached per cascade // directional sunlight + world shadow map
         bool sun_shadow_stable_projection_cache = false; // opt-in reuse while camera frustum stays inside map
@@ -73,7 +74,7 @@ namespace jkgm {
         float sun_shadow_near_distance = 16.0f; // camera-local near cascade, 2..128
         float sun_shadow_far_distance = 128.0f; // outer cascade coverage, 4..512
         float sun_max_distance = 0.0f; // 0=unlimited; else sun light+shadows fade out and stop at this camera distance
-        bool enable_sprite_decals = false; // opt-in type-3 SPR projection onto level geometry
+        bool enable_decals = true; // type-3 SPR projection; false hides decal SPRs, not native billboards
         bool enable_mesh_collision = false; // experimental JKGM collide=2 Detour (off by default)
         bool use_vanilla_renderer = false; // native EXE bootstrap: skip JKGM hooks
         std::string data_path = "jkgm";
