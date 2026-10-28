@@ -3142,10 +3142,17 @@ namespace {
                old.sprite_thing==((uint64_t(sprite_owner)<<32)|
                                    sprite_signature) &&
                moving_sprite_decal_source_alive(old,sprite_key) &&
-               moving_sprite_decal_receiver_alive(old)) {
+               !old.fragments.empty() &&
+               std::all_of(old.fragments.begin(),old.fragments.end(),
+                    [](moving_sprite_decal_fragment const &f) {
+                        return moving_sprite_decal_receiver_alive(f);
+                    })) {
                 old.opacity=info.opacity;
-                return old.geometry &&
-                    gpu_mesh_materials_ready(*old.geometry);
+                return std::all_of(old.fragments.begin(),old.fragments.end(),
+                    [](moving_sprite_decal_fragment const &f) {
+                        return f.geometry &&
+                            gpu_mesh_materials_ready(*f.geometry);
+                    });
             }
             moving_sprite_decals.erase(existing);
         }
@@ -3364,10 +3371,19 @@ namespace {
                moving->second.sprite_thing==
                    ((uint64_t(owner)<<32)|thing_signature) &&
                moving_sprite_decal_source_alive(moving->second,key) &&
-               moving_sprite_decal_receiver_alive(moving->second)) {
+               !moving->second.fragments.empty() &&
+               std::all_of(moving->second.fragments.begin(),
+                           moving->second.fragments.end(),
+                   [](moving_sprite_decal_fragment const &fragment) {
+                       return moving_sprite_decal_receiver_alive(fragment);
+                   })) {
                 moving->second.opacity=info.opacity;
-                return moving->second.geometry &&
-                    gpu_mesh_materials_ready(*moving->second.geometry);
+                return std::all_of(moving->second.fragments.begin(),
+                                   moving->second.fragments.end(),
+                   [](moving_sprite_decal_fragment const &fragment) {
+                       return fragment.geometry &&
+                           gpu_mesh_materials_ready(*fragment.geometry);
+                   });
             }
             moving_sprite_decals.erase(moving);
         }
