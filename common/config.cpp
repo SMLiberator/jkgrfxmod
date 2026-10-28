@@ -287,15 +287,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("sun_dynamic_shadow_adaptive_resolution").get_to(
                 rv->sun_dynamic_shadow_adaptive_resolution);
         }
-        if(j.contains("sun_dynamic_shadow_distance_softness")) {
-            auto const &v=j.at("sun_dynamic_shadow_distance_softness");
-            if(!v.is_number())
-                throw std::runtime_error("sun_dynamic_shadow_distance_softness must be numeric (0..0.5)");
-            double const amount=v.get<double>();
-            if(!std::isfinite(amount) || amount<0.0 || amount>0.5)
-                throw std::runtime_error("sun_dynamic_shadow_distance_softness must be between 0 and 0.5");
-            rv->sun_dynamic_shadow_distance_softness=static_cast<float>(amount);
-        }
         if(j.contains("sun_shadow_receiver_bias_scale")) {
             auto const &value=j.at("sun_shadow_receiver_bias_scale");
             if(!value.is_number())
@@ -313,10 +304,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             if(!std::isfinite(factor) || factor<0.0 || factor>2.0)
                 throw std::runtime_error("sun_shadow_caster_bias_scale must be between 0 and 2");
             rv->sun_shadow_caster_bias_scale=static_cast<float>(factor);
-        }
-        if(j.contains("sun_shadow_far_soft_filter")) {
-            j.at("sun_shadow_far_soft_filter").get_to(
-                rv->sun_shadow_far_soft_filter);
         }
         if(j.contains("sun_shadow_near_distance")) {
             auto const &v=j.at("sun_shadow_near_distance");
