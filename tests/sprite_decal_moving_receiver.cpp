@@ -41,8 +41,16 @@ int main() {
     decal_projector projector{};
     assert(make_sprite_decal_projector(
         axes,{{3,4,5.05f}},{{0,0,0}},1,1,1,1,0,projector));
-    auto scan=project_cached_decal_world(surfaces,projector,2048);
+    auto scan=project_cached_decal_world(surfaces,projector,2048,false);
     assert(scan.valid_world && !scan.truncated && !scan.triangles.empty());
+    // Moving nodes must not be displaced along each separate face normal:
+    // those displacements separate otherwise shared triangle boundaries.
+    for(auto const &tri:scan.triangles)
+        for(auto const &v:tri.vertices)assert(near(v.world[2],5.0f));
+    auto const static_bias=project_cached_decal_world(surfaces,projector,2048);
+    assert(!static_bias.triangles.empty());
+    assert(static_bias.triangles[0].vertices[0].world[2]>
+           scan.triangles[0].vertices[0].world[2]);
     sprite_decal_mesh output{};
     sprite_decal_texture_coords const uv{0.5f,63.5f,0.5f,63.5f};
     assert(make_sprite_decal_gpu_mesh(
@@ -74,7 +82,7 @@ int main() {
     inst.transform={{2,0,0, 0.25f,1,0, 0,0,0.75f, 3,4,5}};
     auto scaled=sprite_decal_moving_receiver_world(inst);
     assert(scaled.receivers.size()==2);
-    auto scan2=project_cached_decal_world(scaled,projector,2048);
+    auto scan2=project_cached_decal_world(scaled,projector,2048,false);
     assert(!scan2.triangles.empty());
     sprite_decal_mesh output2{};
     assert(make_sprite_decal_gpu_mesh(
@@ -123,8 +131,8 @@ int main() {
         axes,{{0,0,0.05f}},{{0,0,0}},0.8f,0.8f,1,1,0,split));
     auto left_world=sprite_decal_moving_receiver_world(left);
     auto right_world=sprite_decal_moving_receiver_world(right);
-    auto left_clip=project_cached_decal_world(left_world,split);
-    auto right_clip=project_cached_decal_world(right_world,split);
+    auto left_clip=project_cached_decal_world(left_world,split,2048,false);
+    auto right_clip=project_cached_decal_world(right_world,split,2048,false);
     assert(!left_clip.triangles.empty());
     assert(!right_clip.triangles.empty());
     sprite_decal_mesh left_fragment{},right_fragment{};
