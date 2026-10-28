@@ -2582,9 +2582,42 @@ namespace {
     };
     std::unordered_map<uint64_t,moving_sprite_decal> moving_sprite_decals;
 
+    // Sprite callbacks may run before their receiving model draws. Defer
+    // automatic moving receiver discovery until the frame is complete, when
+    // pending_gpu_instances contains all visible model meshes.
+    struct moving_sprite_decal_request {
+        uint64_t key=0;
+        uint32_t world=0;
+        uintptr_t sprite=0;
+        std::array<float,12> pose{};
+        std::array<float,4> size{};
+        std::array<float,3> offset{};
+        float roll=0;
+        jkgm::sprite_instance_info info{};
+        jkgm::sprite_decal_resource resource{};
+        uint32_t owner=0,signature=0;
+    };
+    struct moving_decal_trial {
+        uint32_t signature=0;
+        uintptr_t sprite_resource=0;
+        unsigned attempts=0;
+        uint64_t last_frame=0;
+    };
+    std::vector<moving_sprite_decal_request> pending_moving_decal_requests;
+    std::unordered_map<uint64_t,moving_decal_trial> moving_decal_trials;
+    bool try_submit_moving_sprite_decal(
+        uint64_t sprite_key,uint32_t world,uintptr_t sprite,
+        void const *rd_thing,std::array<float,12> const &pose,
+        float const *size,float const *offset,float roll,
+        jkgm::sprite_instance_info const &info,
+        jkgm::sprite_decal_resource const &resource,
+        uint32_t sprite_owner,uint32_t sprite_signature);
+
     void clear_moving_sprite_decals()
     {
         moving_sprite_decals.clear();
+        pending_moving_decal_requests.clear();
+        moving_decal_trials.clear();
     }
 
     bool moving_sprite_decal_source_alive(moving_sprite_decal const &entry,
