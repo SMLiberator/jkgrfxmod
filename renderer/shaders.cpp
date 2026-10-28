@@ -19,7 +19,6 @@ jkgm::shaders::translucent_sun_uniforms::translucent_sun_uniforms(
     , near_depth(gl::get_uniform_location(program,"translucent_sun_near_depth"))
     , far_depth(gl::get_uniform_location(program,"translucent_sun_far_depth"))
     , dynamic_depth(gl::get_uniform_location(program,"translucent_sun_dynamic_depth"))
-    , distance_softness(gl::get_uniform_location(program,"translucent_sun_distance_softness"))
     , max_distance(gl::get_uniform_location(program,"translucent_sun_max_distance"))
 {
     for(int i=0;i<10;++i) {
@@ -39,7 +38,7 @@ jkgm::shaders::translucent_sun_uniforms::translucent_sun_uniforms(
 void jkgm::shaders::translucent_sun_uniforms::set_state(
     bool active,bool ready,int dynamic,point<3,float> sun_dir,
     point<4,float> sun_color,float split_distance,float receiver_bias,
-    float shadow_distance_softness,float max_range)
+    float max_range)
 {
     gl::set_uniform_integer(enabled,active?1:0);
     gl::set_uniform_integer(maps_ready,ready?1:0);
@@ -49,7 +48,6 @@ void jkgm::shaders::translucent_sun_uniforms::set_state(
     gl::set_uniform_vector(color,sun_color);
     gl::set_uniform_float(split,split_distance);
     gl::set_uniform_float(bias_scale,receiver_bias);
-    gl::set_uniform_float(distance_softness,shadow_distance_softness);
     gl::set_uniform_float(max_distance,max_range);
     if(ready) {
         gl::set_uniform_integer(near_depth,16);
@@ -954,15 +952,11 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , sun_shadow_far_forward(gl::get_uniform_location(the_program,"sun_shadow_far_forward"))
     , sun_shadow_far_limits(gl::get_uniform_location(the_program,"sun_shadow_far_limits"))
     , sun_shadow_split(gl::get_uniform_location(the_program,"sun_shadow_split"))
-    , sun_shadow_far_soft_filter(gl::get_uniform_location(
-        the_program,"sun_shadow_far_soft_filter"))
     , sun_shadow_receiver_bias_scale(gl::get_uniform_location(
         the_program,"sun_shadow_receiver_bias_scale"))
     , sun_max_distance(gl::get_uniform_location(the_program,"sun_max_distance"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
-    , sun_dynamic_shadow_distance_softness(gl::get_uniform_location(
-        the_program,"sun_dynamic_shadow_distance_softness"))
  
 {
     for(int i=0;i<8;++i) {
@@ -1112,12 +1106,6 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_far(
     gl::set_uniform_float(sun_shadow_split,split);
 }
 
-void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_far_soft_filter(
-    bool soft)
-{
-    gl::set_uniform_integer(sun_shadow_far_soft_filter,soft?1:0);
-}
-
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_receiver_bias_scale(
     float scale)
 {
@@ -1135,12 +1123,6 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_count(
 {
     gl::set_uniform_integer(sun_dynamic_count,count);
     if(count>0)gl::set_uniform_integer(sun_dynamic_image,15);
-}
-
-void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_shadow_distance_softness(
-    float amount)
-{
-    gl::set_uniform_float(sun_dynamic_shadow_distance_softness,amount);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_caster_depth(
