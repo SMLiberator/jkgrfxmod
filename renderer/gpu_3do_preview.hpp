@@ -80,7 +80,7 @@ namespace jkgm {
         uint64_t attempted=0,culled=0,queued=0,snapshots=0,ready_checks=0;
         uint64_t source_checks=0,source_ns=0,source_invalidations=0;
         uint64_t failed_snapshot_reuses=0;
-        uint64_t text_native=0,geometry_native=0,snapshot_native=0;
+        uint64_t geometry_native=0,snapshot_native=0;
         // Diagnostic taxonomy for the native 3DO fallback hot path.
         uint64_t geo_thing_not_full=0,geo_mesh_not_full=0;
         uint64_t snapshot_source_rejected=0,snapshot_face_rejected=0;
