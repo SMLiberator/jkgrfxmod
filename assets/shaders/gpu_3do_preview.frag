@@ -61,6 +61,22 @@ uniform float attenuation_min;
 in vec3 local_fragment_position;
 in vec3 local_fragment_normal;
 
+// Transform shaded normals with the node's inverse transpose. Raw
+// R/L/U columns are valid for vertex positions but not for normals on a
+// nonuniformly scaled 3DO node. Mirrored nodes retain their signed parity.
+vec3 gpu_view_normal_from_local(vec3 local_n)
+{
+    vec3 r=view_right.xyz, f=view_forward.xyz, u=view_up.xyz;
+    vec3 cr=cross(f,u), cf=cross(u,r), cu=cross(r,f);
+    float det=dot(r,cr);
+    vec3 n=abs(det)>1e-8
+        ? sign(det)*(cr*local_n.x+cf*local_n.y+cu*local_n.z)
+        : r*local_n.x+f*local_n.y+u*local_n.z;
+    vec3 projected=vec3(n.x,n.z,n.y);
+    return dot(projected,projected)>1e-16
+        ? normalize(projected) : vec3(0.0,0.0,1.0);
+}
+
 vec3 mapped_local_normal(vec2 uv)
 {
     vec3 n=normalize(local_fragment_normal);
@@ -148,9 +164,7 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     metalness=clamp(specular_params.z*surf.b,0.0,1.0)*
               mix(environment_info.x,environment_info.z,environment_info.w);
     vec3 n_local=mapped_local_normal(uv);
-    vec3 nv=view_right.xyz*n_local.x+
-            view_forward.xyz*n_local.y+view_up.xyz*n_local.z;
-    vec3 n=normalize(vec3(nv.x,nv.z,nv.y));
+    vec3 n=gpu_view_normal_from_local(n_local);
     vec3 vp=view_origin.xyz+
             view_right.xyz*local_fragment_position.x+
             view_forward.xyz*local_fragment_position.y+
@@ -200,9 +214,7 @@ vec3 gpu_sun_specular(vec3 base_color,vec2 uv)
     float roughness=clamp(specular_params.y*surface.g,0.08,1.0);
     float metalness=clamp(specular_params.z*surface.b,0.0,1.0);
     vec3 n_local=mapped_local_normal(uv);
-    vec3 vnorm=view_right.xyz*n_local.x+
-               view_forward.xyz*n_local.y+view_up.xyz*n_local.z;
-    vec3 N=normalize(vec3(vnorm.x,vnorm.z,vnorm.y));
+    vec3 N=gpu_view_normal_from_local(n_local);
     vec3 vp=view_origin.xyz+
             view_right.xyz*local_fragment_position.x+
             view_forward.xyz*local_fragment_position.y+
