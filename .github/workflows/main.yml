@@ -18,6 +18,12 @@ jobs:
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
 
+    - name: Camera Thing HUD type regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\camera_hud_thing.cpp /Fe:camera_hud_thing_test.exe
+        camera_hud_thing_test.exe
+
     - name: Pure COG math verbs regression tests
       shell: cmd
       run: |
