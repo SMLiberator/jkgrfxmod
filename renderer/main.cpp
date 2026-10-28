@@ -2751,14 +2751,19 @@ namespace {
         std::memcpy(&model,reinterpret_cast<void const *>(owner+0xc8U),4);
         if(type==0 || current_sig!=signature || render_type!=1 ||
            model!=entry.receiver.model)return false;
+        // Keep the receiver alive across native/GPU renderer transitions.
         if(entry.native_fallback)
             return entry.receiver.mesh_revision==
                 native_decal_mesh_structure_signature(
                     reinterpret_cast<void const *>(entry.receiver.mesh));
         auto const cached=gpu_mesh_cache.find(
             reinterpret_cast<void const *>(entry.receiver.mesh));
-        return cached!=gpu_mesh_cache.end() &&
-            cached->second.source_signature==entry.receiver.mesh_revision;
+        if(cached!=gpu_mesh_cache.end())
+            return cached->second.source_signature==
+                entry.receiver.mesh_revision;
+        return entry.native_structure!=0 &&
+            entry.native_structure==native_decal_mesh_structure_signature(
+                reinterpret_cast<void const *>(entry.receiver.mesh));
     }
 
     void append_moving_sprite_decals()
@@ -2799,15 +2804,7 @@ namespace {
                 else ++it;
             }
         }
-        native_decal_following=std::any_of(
-            moving_sprite_decals.begin(),moving_sprite_decals.end(),
-            [](auto const &entry){
-                return std::any_of(entry.second.fragments.begin(),
-                    entry.second.fragments.end(),
-                    [](moving_sprite_decal_fragment const &fragment) {
-                        return fragment.native_fallback;
-                    });
-            });
+        native_decal_following=!moving_sprite_decals.empty();
         if(moving_sprite_decals.empty())return;
         for(auto it=moving_sprite_decals.begin();
             it!=moving_sprite_decals.end();) {
@@ -2856,33 +2853,34 @@ namespace {
             for(auto &fragment:decal.fragments) {
                 jkgm::gpu_3do_matrix34 transform{};
                 bool found=false;
-                if(!fragment.native_fallback) {
-                    auto const receiver=std::find_if(
-                        pending_gpu_instances.begin(),
-                        pending_gpu_instances.end(),
-                        [&](jkgm::gpu_3do_instance const &instance) {
-                            return !instance.is_projected_decal &&
-                                instance.decal_receiver_thing==
-                                    fragment.receiver.thing_key &&
-                                instance.decal_receiver_model==
-                                    fragment.receiver.model &&
-                                instance.decal_receiver_mesh==
-                                    fragment.receiver.mesh &&
-                                instance.decal_receiver_revision==
-                                    fragment.receiver.mesh_revision &&
-                                instance.decal_receiver_occurrence==
-                                    fragment.occurrence;
-                        });
-                    if(receiver!=pending_gpu_instances.end()) {
-                        transform=receiver->transform;
-                        found=true;
-                    }
-                } else {
+                // Both render paths refer to the SAME native Thing+mesh.
+                // Material warm-up may change rendering path frame-to-frame.
+                auto const receiver=std::find_if(
+                    pending_gpu_instances.begin(),pending_gpu_instances.end(),
+                    [&](jkgm::gpu_3do_instance const &instance) {
+                        return !instance.is_projected_decal &&
+                            instance.decal_receiver_thing==
+                                fragment.receiver.thing_key &&
+                            instance.decal_receiver_model==
+                                fragment.receiver.model &&
+                            instance.decal_receiver_mesh==
+                                fragment.receiver.mesh &&
+                            (fragment.native_fallback ||
+                             instance.decal_receiver_revision==
+                                 fragment.receiver.mesh_revision) &&
+                            instance.decal_receiver_occurrence==
+                                fragment.occurrence;
+                    });
+                if(receiver!=pending_gpu_instances.end()) {
+                    transform=receiver->transform;
+                    found=true;
+                }
+                if(!found && fragment.native_structure!=0) {
                     for(auto const &native:native_moving_decal_receivers) {
                         if(native.thing==fragment.receiver.thing_key &&
                            native.model==fragment.receiver.model &&
                            native.mesh==fragment.receiver.mesh &&
-                           native.revision==fragment.receiver.mesh_revision &&
+                           native.revision==fragment.native_structure &&
                            native.occurrence==fragment.occurrence) {
                             transform=native.transform;
                             found=true;
@@ -2916,15 +2914,11 @@ namespace {
                 pending_gpu_instances.push_back(std::move(inst));
             }
         }
-        native_decal_following=std::any_of(
-            moving_sprite_decals.begin(),moving_sprite_decals.end(),
-            [](auto const &entry){
-                return std::any_of(entry.second.fragments.begin(),
-                    entry.second.fragments.end(),
-                    [](moving_sprite_decal_fragment const &fragment) {
-                        return fragment.native_fallback;
-                    });
-            });
+        native_decal_active_things.clear();
+        for(auto const &pair:moving_sprite_decals)
+            for(auto const &fragment:pair.second.fragments)
+                native_decal_active_things.insert(fragment.receiver.thing_key);
+        native_decal_following=!native_decal_active_things.empty();
     }
     jkgm::decal_world_geometry sprite_world_geometry;
     unsigned sprite_decal_submit_logs=0;
@@ -3355,6 +3349,8 @@ namespace {
             fragment.occurrence=occurrence;
             fragment.native_fallback=native_fallback;
             fragment.id=next_gpu_id++;
+            fragment.native_structure=native_decal_mesh_structure_signature(
+                reinterpret_cast<void const *>(id.mesh));
             fragment.last_drawn_frame=gpu_frame_serial;
             fragment.geometry=std::move(mesh.geometry);
             total_triangles+=static_cast<uint32_t>(scan.triangles.size());
