@@ -3092,7 +3092,8 @@ namespace {
             moving_sprite_decals.erase(existing);
         }
         if(sprite_owner<0x10000U || sprite_signature==0 ||
-           pending_gpu_instances.empty() ||
+           (pending_gpu_instances.empty() &&
+            native_moving_decal_receivers.empty()) ||
            moving_sprite_decals.size()>=1024U)
             return false;
         jkgm::sprite_axes const source_axes{
@@ -3115,7 +3116,8 @@ namespace {
         auto const camera=jkgm::read_active_render_camera();
         auto const incoming=camera.valid
             ?camera.forward:jkgm::decal_vec3{{0,0,0}};
-        size_t best=std::numeric_limits<size_t>::max();
+        size_t const invalid=std::numeric_limits<size_t>::max();
+        size_t best_gpu=invalid,best_native=invalid;
         jkgm::decal_world_geometry best_world{};
         float best_score=std::numeric_limits<float>::infinity();
         jkgm::decal_vec3 best_normal{};
@@ -3130,13 +3132,45 @@ namespace {
             auto const hit=jkgm::find_nearest_decal_surface(
                 jkgm::decal_world_geometry{},receivers,impact,incoming,0.25f);
             if(!hit.valid || hit.distance>=best_score)continue;
-            best=i;
+            best_gpu=i;
+            best_native=invalid;
             best_score=hit.distance;
             best_normal=hit.normal;
             best_world=std::move(receivers);
         }
-        if(best==std::numeric_limits<size_t>::max())return false;
-        auto const &receiver=pending_gpu_instances[best];
+        for(size_t i=0;i<native_moving_decal_receivers.size();++i) {
+            auto const &candidate=native_moving_decal_receivers[i];
+            jkgm::decal_world_geometry receivers{};
+            if(!build_native_moving_decal_receiver_world(
+                   candidate,impact,receivers))continue;
+            auto const hit=jkgm::find_nearest_decal_surface(
+                jkgm::decal_world_geometry{},receivers,impact,incoming,0.25f);
+            if(!hit.valid || hit.distance>=best_score)continue;
+            best_native=i;
+            best_gpu=invalid;
+            best_score=hit.distance;
+            best_normal=hit.normal;
+            best_world=std::move(receivers);
+        }
+        if(best_gpu==invalid && best_native==invalid)return false;
+        bool const native_fallback=best_native!=invalid;
+        auto const &native_receiver=native_fallback
+            ?native_moving_decal_receivers[best_native]
+            :native_moving_decal_receiver{};
+        jkgm::gpu_3do_matrix34 const receiver_transform=native_fallback
+            ?native_receiver.transform:pending_gpu_instances[best_gpu].transform;
+        jkgm::sprite_decal_receiver_identity const receiver_id=native_fallback
+            ?jkgm::sprite_decal_receiver_identity{
+                native_receiver.thing,native_receiver.model,
+                native_receiver.mesh,native_receiver.revision}
+            :jkgm::sprite_decal_receiver_identity{
+                pending_gpu_instances[best_gpu].decal_receiver_thing,
+                pending_gpu_instances[best_gpu].decal_receiver_model,
+                pending_gpu_instances[best_gpu].decal_receiver_mesh,
+                pending_gpu_instances[best_gpu].decal_receiver_revision};
+        uint32_t const receiver_occurrence=native_fallback
+            ?native_receiver.occurrence:
+            pending_gpu_instances[best_gpu].decal_receiver_occurrence;
         jkgm::sprite_axes aligned{};
         if(!jkgm::sprite_decal_attachment_axes(
                 source_axes,best_normal,aligned))return false;
@@ -3153,18 +3187,16 @@ namespace {
                 scan,projector,resource.material,resource.texcoords,
                 info.opacity,mesh) || !mesh.geometry ||
            !jkgm::sprite_decal_geometry_to_receiver_local(
-                *mesh.geometry,receiver.transform))
+                *mesh.geometry,receiver_transform))
             return false;
 
         moving_sprite_decal entry{};
         entry.world=world;
         entry.sprite_resource=sprite;
         entry.sprite_thing=(uint64_t(sprite_owner)<<32)|sprite_signature;
-        entry.receiver={receiver.decal_receiver_thing,
-                        receiver.decal_receiver_model,
-                        receiver.decal_receiver_mesh,
-                        receiver.decal_receiver_revision};
-        entry.occurrence=receiver.decal_receiver_occurrence;
+        entry.receiver=receiver_id;
+        entry.occurrence=receiver_occurrence;
+        entry.native_fallback=native_fallback;
         entry.id=next_gpu_id++;
         entry.last_visible_frame=gpu_frame_serial;
         entry.opacity=info.opacity;
@@ -3177,6 +3209,7 @@ namespace {
                          " receiver=",it->second.receiver.thing_key,
                          " mesh=",it->second.receiver.mesh,
                          " node=",it->second.occurrence,
+                         " native=",native_fallback?1:0,
                          " triangles=",scan.triangles.size());
         }
         // A decal SPR must still go through native MAT warm-up if its cel
