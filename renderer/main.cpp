@@ -20,6 +20,7 @@
 #include "native_earth_hit_sound.hpp"
 #include "mots_native_collision_bridge.hpp"
 #include "mots_collision_snapshot_cache.hpp"
+#include "cog_math.hpp"
 #include "sprite_orientation.hpp"
 #include "sprite_type_registry.hpp"
 #include "sprite_variants.hpp"
@@ -3584,6 +3585,45 @@ namespace {
         return v < lo ? lo : (v > hi ? hi : v);
     }
 
+    // Pure math COG extensions. Numeric parameters are popped in reverse
+    // order, and all non-Sign results return flex. Lerp is intentionally
+    // UNCLAMPED, so t outside [0,1] extrapolates.
+    void __cdecl cog_math_min(void *ctx)
+    {
+        float const b=cog_pop_float(ctx);
+        float const a=cog_pop_float(ctx);
+        cog_push_float(ctx,jkgm::cog_math_min(a,b));
+    }
+
+    void __cdecl cog_math_max(void *ctx)
+    {
+        float const b=cog_pop_float(ctx);
+        float const a=cog_pop_float(ctx);
+        cog_push_float(ctx,jkgm::cog_math_max(a,b));
+    }
+
+    void __cdecl cog_math_clamp(void *ctx)
+    {
+        float const upper=cog_pop_float(ctx);
+        float const lower=cog_pop_float(ctx);
+        float const value=cog_pop_float(ctx);
+        cog_push_float(ctx,jkgm::cog_math_clamp(value,lower,upper));
+    }
+
+    void __cdecl cog_math_sign(void *ctx)
+    {
+        float const value=cog_pop_float(ctx);
+        cog_push_int(ctx,jkgm::cog_math_sign(value));
+    }
+
+    void __cdecl cog_math_lerp(void *ctx)
+    {
+        float const t=cog_pop_float(ctx);
+        float const b=cog_pop_float(ctx);
+        float const a=cog_pop_float(ctx);
+        cog_push_float(ctx,jkgm::cog_math_lerp(a,b,t));
+    }
+
     // Confirmed in JK23 jkgm.exe: Thing.controlType is +0x14,
     // Thing.actor is +0x278; AIControlBlock goalLVec +0x194,
     // movePos +0x1a0, pDistractor +0x1d0, and movepos +0x218.
@@ -5030,6 +5070,11 @@ namespace {
     // The array size is deduced from the list, so adding or removing a verb can never leave
     // empty entries behind (those would be registered with a null name and handler).
     constexpr std::array fx_verbs = {
+        cog_verb_entry{"min", cog_math_min},
+        cog_verb_entry{"max", cog_math_max},
+        cog_verb_entry{"clamp", cog_math_clamp},
+        cog_verb_entry{"sign", cog_math_sign},
+        cog_verb_entry{"lerp", cog_math_lerp},
         cog_verb_entry{"setfogcolor", cog_set_fog_color},
         cog_verb_entry{"getfogcolor", cog_get_fog_color},
         cog_verb_entry{"setfoginfo", cog_set_fog_info},
@@ -5114,7 +5159,7 @@ namespace {
             register_verb(ctx, verb.handler, verb.name);
         }
 
-        LOG_DEBUG("Registered fog, sun, spotlight, post-processing, material, SPR, AI and ThingNode attachment COG verbs");
+        LOG_DEBUG("Registered math, fog, sun, spotlight, post-processing, material, SPR, AI and ThingNode attachment COG verbs");
     }
 }
 
