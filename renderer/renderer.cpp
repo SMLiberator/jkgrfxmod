@@ -4596,11 +4596,10 @@ namespace jkgm {
             // These are valid Sith transforms; do not normalize their axes.
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U) {
-                size_t transformed=0,moving=0,in_atlas=0;
+                size_t transformed=0,moving=0,in_atlas=0,excluded=0;
                 size_t logged=0;
                 for(auto const &inst:frame_gpu_3do_instances) {
-                    if(!inst.geometry || !inst.casts_sun_shadows ||
-                       inst.is_projected_decal)continue;
+                    if(!inst.geometry || inst.is_projected_decal)continue;
                     auto const &m=inst.transform;
                     float lengths[3]{};
                     for(int i=0;i<3;++i) {
@@ -4614,6 +4613,7 @@ namespace jkgm {
                        std::fabs(lengths[2]-1.0f)<0.005f &&
                        determinant>=0.0f)continue;
                     ++transformed;
+                    if(!inst.casts_sun_shadows)++excluded;
                     if(inst.dynamic_sun_caster)++moving;
                     bool const atlas=inst.shadow_owner!=0 &&
                         sun_dynamic_atlas_owners.count(inst.shadow_owner)!=0;
@@ -4622,6 +4622,7 @@ namespace jkgm {
                         LOG_INFO("SUN RLU owner=",inst.shadow_owner,
                                  " mesh=",inst.id,
                                  " moving=",inst.dynamic_sun_caster?1:0,
+                                 " casts=",inst.casts_sun_shadows?1:0,
                                  " atlas=",atlas?1:0,
                                  " axis_lengths=",std::to_string(lengths[0]),
                                  ",",std::to_string(lengths[1]),
@@ -4630,7 +4631,33 @@ namespace jkgm {
                     }
                 }
                 LOG_INFO("SUN RLU total=",transformed,
-                         " moving=",moving," atlas=",in_atlas,
+                         " moving=",moving," excluded=",excluded,
+                         " atlas=",in_atlas,
+                         " atlas_owners=",sun_dynamic_atlas_owners.size());
+                // Some moving Things never reach the atlas. Report their
+                // source owner, not just the number of successful tiles.
+                std::unordered_set<uint64_t> moving_owners;
+                size_t moving_parts=0,unknown_owner_parts=0,listed=0;
+                for(auto const &inst:frame_gpu_3do_instances) {
+                    if(!inst.geometry || !inst.casts_sun_shadows ||
+                       !inst.dynamic_sun_caster || inst.is_projected_decal)
+                        continue;
+                    ++moving_parts;
+                    if(!inst.shadow_owner)++unknown_owner_parts;
+                    if(!moving_owners.insert(inst.shadow_owner).second ||
+                       listed>=8U)continue;
+                    ++listed;
+                    auto const &m=inst.transform;
+                    LOG_INFO("SUN moving owner=",inst.shadow_owner,
+                             " mesh=",inst.id,
+                             " atlas=",sun_dynamic_atlas_owners.count(
+                                 inst.shadow_owner)?1:0,
+                             " origin=",std::to_string(m[9]),",",
+                             std::to_string(m[10]),",",std::to_string(m[11]));
+                }
+                LOG_INFO("SUN moving coverage parts=",moving_parts,
+                         " owners=",moving_owners.size(),
+                         " unknown_owner_parts=",unknown_owner_parts,
                          " atlas_owners=",sun_dynamic_atlas_owners.size());
             }
             float const horizontal=std::tan(camera.fov*
