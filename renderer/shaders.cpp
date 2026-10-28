@@ -29,8 +29,6 @@ jkgm::shaders::translucent_sun_uniforms::translucent_sun_uniforms(
         if(i<8) {
             rect.push_back(gl::get_uniform_location(
                 program,"translucent_sun_tile_rect["+slot));
-            caster_depth.push_back(gl::get_uniform_location(
-                program,"translucent_sun_caster_depth["+slot));
         }
     }
 }
@@ -58,7 +56,7 @@ void jkgm::shaders::translucent_sun_uniforms::set_state(
 
 void jkgm::shaders::translucent_sun_uniforms::set_map(
     int slot,point<4,float> row_x,point<4,float> row_y,
-    point<4,float> row_z,point<4,float> tile_rect,float caster_end)
+    point<4,float> row_z,point<4,float> tile_rect)
 {
     if(slot<0 || slot>=10)return;
     gl::set_uniform_vector(x[slot],row_x);
@@ -66,7 +64,6 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
     gl::set_uniform_vector(z[slot],row_z);
     if(slot>=2) {
         gl::set_uniform_vector(rect[slot-2],tile_rect);
-        gl::set_uniform_float(caster_depth[slot-2],caster_end);
     }
 }
 
@@ -962,8 +959,6 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     for(int i=0;i<8;++i) {
         sun_dynamic_atlas_rects.push_back(gl::get_uniform_location(
             the_program,"sun_dynamic_atlas_rects["+std::to_string(i)+"]"));
-        sun_dynamic_caster_depth.push_back(gl::get_uniform_location(
-            the_program,"sun_dynamic_caster_depth["+std::to_string(i)+"]"));
         sun_dynamic_origin.push_back(gl::get_uniform_location(
             the_program,"sun_dynamic_origin["+std::to_string(i)+"]"));
         sun_dynamic_right.push_back(gl::get_uniform_location(
@@ -1123,13 +1118,6 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_count(
 {
     gl::set_uniform_integer(sun_dynamic_count,count);
     if(count>0)gl::set_uniform_integer(sun_dynamic_image,15);
-}
-
-void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_caster_depth(
-    int slot,float normalized_depth)
-{
-    if(slot<0 || slot>=8)return;
-    gl::set_uniform_float(sun_dynamic_caster_depth[slot],normalized_depth);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_atlas_rect(
