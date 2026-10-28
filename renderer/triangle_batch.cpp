@@ -7,8 +7,8 @@
 
 jkgm::triangle_vertex::triangle_vertex()
     : pos(point<4, float>::zero())
-    , texcoords(point<2, float>::zero())
     , color(jkgm::color::zero())
+    , texcoords(point<2, float>::zero())
 {
 }
 
@@ -17,8 +17,8 @@ jkgm::triangle_vertex::triangle_vertex(point<4, float> pos,
                                        jkgm::color color,
                                        uint32_t normalPacked)
     : pos(pos)
-    , texcoords(texcoords)
     , color(color)
+    , texcoords(texcoords)
     , nativeNormal(normalPacked)
 {
 }
@@ -35,8 +35,8 @@ jkgm::triangle::triangle(triangle_vertex v0,
     : v0(v0)
     , v1(v1)
     , v2(v2)
-    , material(material)
     , normal(direction<3, float>::zero())
+    , material(material)
 {
     auto p0 = make_point(get<x>(v0.pos), get<y>(v0.pos), get<w>(v0.pos));
     auto p1 = make_point(get<x>(v1.pos), get<y>(v1.pos), get<w>(v1.pos));
