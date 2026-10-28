@@ -54,6 +54,7 @@ uniform vec2 normal_specular_scroll;
 uniform vec2 normal_specular_scroll2;
 uniform vec3 local_eye;
 uniform int num_lights;
+uniform int nonrigid_light_transform;
 uniform int dynamic_light_specular_enabled;
 uniform vec4 light_position_radius[16];
 uniform float light_intensity[16];
@@ -111,7 +112,17 @@ vec3 point_light_specular(vec3 base_color,vec2 uv)
 {
     if(specular_params.x<=0.0 || num_lights==0) return vec3(0.0);
     vec3 N=mapped_local_normal(uv);
-    vec3 V=normalize(local_eye-local_fragment_position);
+    vec3 V=local_eye-local_fragment_position;
+    if(nonrigid_light_transform!=0) {
+        // Match scaled-mesh diffuse light attenuation: an affine local
+        // distance is not a world distance. Normal and directions must
+        // share a rigid camera-space basis for correct specular response.
+        N=gpu_view_normal_from_local(N);
+        vec3 v=view_right.xyz*V.x+
+               view_forward.xyz*V.y+view_up.xyz*V.z;
+        V=vec3(v.x,v.z,v.y);
+    }
+    V=normalize(V);
     if(dot(N,V)<0.0) N=-N;
     float NdotV=max(dot(N,V),0.0001);
     vec3 map_value=specular_params.w>0.5
@@ -128,6 +139,11 @@ vec3 point_light_specular(vec3 base_color,vec2 uv)
     vec3 sum=vec3(0.0);
     for(int i=0;i<num_lights;i++) {
         vec3 delta=light_position_radius[i].xyz-local_fragment_position;
+        if(nonrigid_light_transform!=0) {
+            vec3 d=view_right.xyz*delta.x+
+                   view_forward.xyz*delta.y+view_up.xyz*delta.z;
+            delta=vec3(d.x,d.z,d.y);
+        }
         float dist=length(delta);
         if(dist>=light_position_radius[i].w || dist<0.00001) continue;
         vec3 L=delta/dist;
