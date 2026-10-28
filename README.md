@@ -81,6 +81,26 @@ Test rotating the camera without changing the sun position, changing sun
 color/intensity over time, normal-mapped water ripples, rough/dull surfaces,
 and reflections with no environment image.
 
+### Additional COG math verbs (JK23)
+
+JkGRfxMod registers five pure numeric verbs through JK.dll's
+`InitNewCogVerbs` entry point. They work with COG numeric arguments and
+do not depend on the renderer being enabled:
+
+| Verb | Returns | Meaning |
+| --- | --- | --- |
+| `Min(a, b)` | flex | The smaller of two numbers |
+| `Max(a, b)` | flex | The larger of two numbers |
+| `Clamp(value, low, high)` | flex | Limit a value to the inclusive range; reversed bounds are swapped |
+| `Sign(value)` | int | `-1` for negative, `0` for zero, `1` for positive |
+| `Lerp(a, b, t)` | flex | `a + (b - a) * t`, **unclamped** |
+
+For example, `Clamp(15, 0, 10)` returns `10`, and
+`Lerp(10, 20, 1.5)` returns `25` (extrapolation). `Lerp` does not
+restrict `t` to the range 0–1; use `Clamp` explicitly if desired.
+JK23 already supplies `Absolute`, `Floor`, `Ceiling`,
+`SquareRoot`, `Power` and the `%` operator; they are not reimplemented.
+
 ### Fog COG changes
 
 Fog no longer has separate enabled state. `SetFogInfo(vector(start, end, opacity), fadeTime)` uses opacity alone, where `0` disables fog. `GetFogInfo()`, `SetFogColor()`, `GetFogColor()`, and `ResetFog()` remain. The old `SetFogEnabled` and `GetFogEnabled` verbs have been removed; existing COGs using those verbs must be updated.
