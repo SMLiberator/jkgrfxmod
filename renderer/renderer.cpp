@@ -4623,9 +4623,10 @@ namespace jkgm {
                                  " mesh=",inst.id,
                                  " moving=",inst.dynamic_sun_caster?1:0,
                                  " atlas=",atlas?1:0,
-                                 " axis_lengths=",lengths[0],",",lengths[1],
-                                 ",",lengths[2],
-                                 " determinant=",determinant);
+                                 " axis_lengths=",std::to_string(lengths[0]),
+                                 ",",std::to_string(lengths[1]),
+                                 ",",std::to_string(lengths[2]),
+                                 " determinant=",std::to_string(determinant));
                     }
                 }
                 LOG_INFO("SUN RLU total=",transformed,
