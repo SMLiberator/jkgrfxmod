@@ -56,7 +56,6 @@
 #include "primary_surface.hpp"
 #include "renderer_ao.hpp"
 #include "renderer_compositor.hpp"
-#include "sun_shadow_scroll.hpp"
 #include "renderer_screen.hpp"
 #include "sysmem_texture.hpp"
 #include "texture_cache.hpp"
@@ -587,53 +586,6 @@ namespace jkgm {
         std::array<uint64_t,2> sun_shadow_revisions{};
         std::array<uint64_t,2> sun_shadow_caster_signatures{};
         std::array<bool,2> sun_shadow_static_cached{{false,false}};
-        std::array<sun_shadow_scroll_grid,2> sun_scroll_live{};
-        // Persistent static caster snapshots, independent of the set submitted
-        // by JK's camera/COG visibility culling on any given frame.
-        struct sun_scroll_cached_model {
-            gpu_3do_instance instance;
-            gpu_3do_group group;
-            gpu_3do_texture texture;
-            decal_volume_aabb bounds;
-            float min_x=0.0f,max_x=0.0f,min_y=0.0f,max_y=0.0f;
-            uint64_t signature=0;
-            bool cutout=false;
-            // Coarse world-space light bins, not the moving 16x16 ring.
-            std::vector<uint64_t> spatial_bins;
-            bool spatial_global=false;
-        };
-        std::array<std::unordered_map<uint64_t,sun_scroll_cached_model>,2>
-            sun_scroll_static_casters{};
-        std::array<std::unordered_map<uint64_t,std::vector<uint64_t>>,2>
-            sun_scroll_spatial_bins{};
-        std::array<std::vector<uint64_t>,2> sun_scroll_spatial_global{};
-        // Keep a conservative union of all static architecture seen in this
-        // SithWorld. A single AABB replaces re-projecting thousands of
-        // persistent group bounds into light space on every frame.
-        decal_volume_aabb sun_scroll_static_union{};
-        bool sun_scroll_static_union_valid=false;
-        std::array<uint64_t,2> sun_scroll_live_signature{};
-        std::array<uintptr_t,2> sun_scroll_live_world{};
-        std::array<uint64_t,2> sun_scroll_live_revision{};
-        std::array<float,2> sun_scroll_live_z{},sun_scroll_live_range{};
-        std::array<bool,2> sun_scroll_working_active{{false,false}};
-        std::array<uint64_t,2> sun_scroll_tiles_rendered{{0,0}};
-        std::array<uint64_t,2> sun_scroll_depth_blits{{0,0}};
-        std::array<uint64_t,2> sun_scroll_active_frames{{0,0}};
-        std::array<uint64_t,2> sun_scroll_depth_resets{{0,0}};
-        std::array<uint64_t,2> sun_scroll_key_resets{{0,0}};
-        std::array<uint64_t,2> sun_scroll_model_dirty_tiles{{0,0}};
-        std::array<uint64_t,2> sun_scroll_tile_model_draws{{0,0}};
-        std::array<uint64_t,2> sun_scroll_tile_cpu_us{{0,0}};
-        std::array<uint64_t,2> sun_scroll_blit_cpu_us{{0,0}};
-        // Non-rendering prototype: estimate partial tile updates before
-        // changing the depth-map atlas and all forward/opaque samplers.
-        std::array<sun_shadow_scroll_grid,2> sun_scroll_preview{};
-        std::array<uint64_t,2> sun_scroll_preview_new_tiles{{0,0}};
-        std::array<uint64_t,2> sun_scroll_preview_frames{{0,0}};
-        std::array<float,3> sun_scroll_preview_direction{};
-        uint32_t sun_scroll_preview_world=0;
-        uint64_t sun_scroll_preview_revision=0;
         std::array<uint64_t,2> sun_profile_full_hits{{0,0}};
         std::array<uint64_t,2> sun_profile_static_hits{{0,0}};
         std::array<uint64_t,2> sun_profile_static_redraws{{0,0}};
@@ -645,7 +597,7 @@ namespace jkgm {
             uint64_t cold=0,world=0,revision=0,direction=0;
             uint64_t projection_xy=0,projection_size=0,projection_depth=0;
             uint64_t projection_basis=0,static_casters=0,dynamic_casters=0;
-            uint64_t scroll=0,unclassified=0;
+            uint64_t unclassified=0;
         };
         std::array<sun_shadow_miss_profile,2> sun_profile_full_misses{};
         std::array<sun_shadow_miss_profile,2> sun_profile_static_misses{};
@@ -1042,16 +994,6 @@ namespace jkgm {
                 sun_shadow_cascade_ready={{false,false}};
                 sun_shadow_cascade_cached={{false,false}};
                 sun_shadow_static_cached={{false,false}};
-                for(auto &grid:sun_scroll_live)grid.invalidate();
-                sun_scroll_working_active={{false,false}};
-                sun_scroll_tiles_rendered={{0,0}};
-                sun_scroll_depth_blits={{0,0}};
-                sun_scroll_active_frames={{0,0}};
-                for(auto &grid:sun_scroll_preview)grid.invalidate();
-                sun_scroll_preview_new_tiles={{0,0}};
-                sun_scroll_preview_frames={{0,0}};
-                sun_scroll_preview_world=0;
-                sun_scroll_preview_revision=0;
                 sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
             sun_dynamic_caster_end_depth.clear();
@@ -4574,8 +4516,7 @@ namespace jkgm {
             };
             if(!sun_shadow_target)
                 sun_shadow_target=std::make_unique<sun_shadow_gpu>(
-                    the_config->sun_shadow_resolution,
-                    the_config->enable_sun_scrolling_shadows);
+                    the_config->sun_shadow_resolution);
             auto &map=*sun_shadow_target;
             if(!map.update_world(safe_read,world)) {
                 sun_failure("SithWorld shadow snapshot failed");
@@ -4618,21 +4559,6 @@ namespace jkgm {
                 sun_profile_candidate_us+=elapsed_profile_us(
                     candidate_begin,profile_clock::now());
                 sun_profile_candidate_groups+=model_candidates.size();
-            }
-            // A stationary 3DO remains part of the architectural shadow
-            // extent after JK stops submitting its chunk. Otherwise camera
-            // culling changes the global depth normalization and resets the
-            // entire scrolling atlas even when no geometry actually changed.
-            if(the_config->enable_sun_scrolling_shadows) {
-                if(sun_scroll_live_world[0]!=world ||
-                   sun_scroll_live_revision[0]!=map.revision) {
-                    for(auto &registry:sun_scroll_static_casters)registry.clear();
-                    for(auto &bins:sun_scroll_spatial_bins)bins.clear();
-                    for(auto &global:sun_scroll_spatial_global)global.clear();
-                    sun_scroll_static_union_valid=false;
-                }
-                if(sun_scroll_static_union_valid)
-                    model_bounds.push_back(sun_scroll_static_union);
             }
             sun_shadow_projection world_view{};
             if(!make_sun_shadow_projection(map.world,direction,world_view,model_bounds)) {
@@ -4724,23 +4650,6 @@ namespace jkgm {
                 (3.14159265358979323846f/360.0f));
             float const vertical=horizontal*float(get<y>(conf_scr_res))/
                 float(get<x>(conf_scr_res));
-            // Prototype the scrolling light-space tile addresses while
-            // retaining today's correct full-map rasterization. The preview
-            // reports theoretical dirty tile counts, never claims GPU gains.
-            if(the_config->profile_renderer) {
-                bool changed=(sun_scroll_preview_world!=world ||
-                    sun_scroll_preview_revision!=map.revision);
-                for(int axis=0;axis<3;++axis)
-                    changed=changed ||
-                        std::fabs(sun_scroll_preview_direction[axis]-
-                                  direction[axis])>1.e-5f;
-                if(changed) {
-                    for(auto &grid:sun_scroll_preview)grid.invalidate();
-                    sun_scroll_preview_world=world;
-                    sun_scroll_preview_revision=map.revision;
-                    sun_scroll_preview_direction=direction;
-                }
-            }
             for(int cascade=0;cascade<2;++cascade) {
             auto const cascade_begin=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
@@ -4750,29 +4659,6 @@ namespace jkgm {
                 : sun_shadow_effective_far_distance(
                       the_config->sun_shadow_far_distance,
                       the_config->sun_max_distance);
-            if(the_config->profile_renderer) {
-                // A rotation-invariant square around the player's origin.
-                // Reserve two tile columns as guards so the view remains
-                // covered when its orientation changes.
-                double const units=sun_shadow_scroll_fixed_tile_units(distance);
-                double const px=decal_dot(camera.position,world_view.right);
-                double const py=decal_dot(camera.position,world_view.up);
-                auto const dirty=sun_scroll_preview[cascade].update(
-                    px,py,units,1U);
-                sun_scroll_preview_new_tiles[cascade]+=dirty.size();
-                ++sun_scroll_preview_frames[cascade];
-                if(gpu_3do_present_serial%120U==0U) {
-                    LOG_INFO("SUN scroll PREVIEW cascade=",cascade,
-                             " frames=",sun_scroll_preview_frames[cascade],
-                             " tile_grid=16x16 tile_units=",std::to_string(units),
-                             " dirty_tiles=",sun_scroll_preview_new_tiles[cascade],
-                             " full_redraw_tiles_if_uncached=",
-                                 sun_scroll_preview_frames[cascade]*256U,
-                             " NOTE=CPU planner only; NO GPU tile reuse yet");
-                    sun_scroll_preview_new_tiles[cascade]=0;
-                    sun_scroll_preview_frames[cascade]=0;
-                }
-            }
             if(!fit_sun_shadow_to_camera(view,camera.position,camera.right,
                     camera.up,camera.forward,horizontal,vertical,distance)) {
                 sun_failure("camera-local cascade projection invalid");
