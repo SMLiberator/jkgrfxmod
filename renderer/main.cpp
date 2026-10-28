@@ -344,6 +344,8 @@ namespace {
     // of capture to handle draw-order differences.
     uint64_t native_decal_capture_until=0;
     bool native_decal_following=false;
+    // Capture fallback draws only for Things with existing decals.
+    std::unordered_set<uint64_t> native_decal_active_things;
     void append_moving_sprite_decals();
     void clear_moving_sprite_decals();
     uint64_t next_gpu_id=1;
@@ -1159,8 +1161,9 @@ namespace {
         // mesh identity and transform; extract geometry only if a nearby
         // SPR decal needs a receiver at frame end.
         if(!queued && the_config && the_config->enable_decals &&
-           (native_decal_following ||
-            gpu_frame_serial<=native_decal_capture_until) &&
+           (gpu_frame_serial<=native_decal_capture_until ||
+            (native_decal_following &&
+             native_decal_active_things.count(active_native_shadow_owner))) &&
            active_native_decal_receiver && active_native_shadow_owner &&
            active_native_decal_model && mesh && placement &&
            native_moving_decal_receivers.size()<16384U &&
@@ -2632,6 +2635,7 @@ namespace {
         uint32_t occurrence=0; // distinguish repeated rdMesh hierarchy nodes
         bool native_fallback=false;
         uint64_t id=0;
+        uint64_t native_structure=0;
         uint64_t last_drawn_frame=0;
         std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
     };
@@ -2705,6 +2709,7 @@ namespace {
         moving_decal_trials.clear();
         native_decal_following=false;
         native_decal_capture_until=0;
+        native_decal_active_things.clear();
     }
 
     bool moving_sprite_decal_source_alive(moving_sprite_decal const &entry,
