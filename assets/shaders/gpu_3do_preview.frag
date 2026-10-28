@@ -417,7 +417,6 @@ uniform vec4 translucent_sun_map_x[10];
 uniform vec4 translucent_sun_map_y[10];
 uniform vec4 translucent_sun_map_z[10];
 uniform vec4 translucent_sun_tile_rect[8];
-uniform float translucent_sun_distance_softness;
 uniform float translucent_sun_max_distance; // 0 = unlimited, native-pass parity
 uniform float translucent_sun_caster_depth[8]; // normalized light-space AABB max
 uniform sampler2DShadow translucent_sun_near_depth;
@@ -450,23 +449,10 @@ float translucent_sun_sample(int slot,vec3 uv,float incidence)
     vec4 tile=translucent_sun_tile_rect[slot-2];
     vec2 tex_size=vec2(textureSize(translucent_sun_dynamic_depth,0));
     vec2 center=tile.xy+vec2(2.0)+uv.xy*(tile.zw-vec2(4.0));
-    float range=1.0/max(length(translucent_sun_map_z[slot].xyz),0.000001);
-    float separation=max(0.0,uv.z-translucent_sun_caster_depth[slot-2])*range;
-    float density=min((tile.z-4.0)*length(translucent_sun_map_x[slot].xyz),
-                      (tile.w-4.0)*length(translucent_sun_map_y[slot].xyz));
-    float radius=clamp(separation*translucent_sun_distance_softness*
-                       density,0.0,5.0);
-    if(radius<0.5)
-        return texture(translucent_sun_dynamic_depth,
-                       vec3(center/tex_size,comparison));
-    vec2 lo=tile.xy+vec2(3.0),hi=tile.xy+tile.zw-vec2(3.0);
-    float visibility=0.0;
-    for(int y=0;y<2;++y)for(int x=0;x<2;++x) {
-        vec2 delta=vec2(x==0?-0.7:0.7,y==0?-0.7:0.7)*radius;
-        visibility+=texture(translucent_sun_dynamic_depth,
-            vec3(clamp(center+delta,lo,hi)/tex_size,comparison));
-    }
-    return visibility*0.25;
+    // Fixed one-sample hardware PCF for atlas tiles, without
+    // receiver-distance-dependent kernel expansion.
+    return texture(translucent_sun_dynamic_depth,
+                   vec3(center/tex_size,comparison));
 }
 float translucent_sun_visibility(vec3 world,float incidence)
 {
