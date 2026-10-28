@@ -2737,25 +2737,10 @@ namespace {
                 request.pose,request.size.data(),request.offset.data(),
                 request.roll,request.info,request.resource,
                 request.owner,request.signature);
-            if(moving_sprite_decals.count(request.key)) {
-                // The normal Sprite path may already have enqueued a
-                // static-world fallback earlier this same frame. Remove
-                // that fallback so the decal is not drawn twice.
-                auto const old=sprite_gpu_decals.find(request.key);
-                if(old!=sprite_gpu_decals.end()) {
-                    uint64_t const old_id=old->second.id;
-                    if(old_id!=0)
-                        pending_gpu_instances.erase(
-                            std::remove_if(pending_gpu_instances.begin(),
-                                pending_gpu_instances.end(),
-                                [old_id](jkgm::gpu_3do_instance const &inst) {
-                                    return inst.is_projected_decal &&
-                                           inst.id==old_id;
-                                }),
-                            pending_gpu_instances.end());
-                    sprite_gpu_decals.erase(old);
-                }
-            }
+            // Do not remove the independently projected STATIC geometry.
+            // A large SPR can overlap both a dropped gun and the floor.
+            // Each receiver owns its own clipped portion and lifetime;
+            // when the gun disappears the floor decal must remain.
         }
         pending_moving_decal_requests.clear();
         if((gpu_frame_serial%512U)==0U &&
