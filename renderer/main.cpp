@@ -3247,12 +3247,12 @@ namespace {
                !receiver_world.valid_world || receiver_world.receivers.empty())
                 return;
             auto scan=jkgm::project_cached_decal_world(
-                receiver_world,projector,remaining,false);
+                receiver_world,projector,remaining,false,true);
             if(scan.truncated || scan.triangles.empty())return;
             jkgm::sprite_decal_mesh mesh{};
             if(!jkgm::make_sprite_decal_gpu_mesh(
                     scan,projector,resource.material,resource.texcoords,
-                    info.opacity,mesh) || !mesh.geometry) {
+                    info.opacity,mesh,true) || !mesh.geometry) {
                 trace_probe("projection_or_gpu_mesh_failed",
                     static_cast<uint32_t>(scan.triangles.size()));
                 return;
