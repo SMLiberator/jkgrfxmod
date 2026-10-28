@@ -2997,12 +2997,7 @@ namespace {
                     reinterpret_cast<void const *>(candidate.mesh),
                     sizeof(source));
         if(source.num_vertices<3 || source.num_vertices>65536 ||
-           source.num_faces<1 || source.num_faces>8192 ||
-           !gpu_span_readable(source.vertices,
-               size_t(source.num_vertices)*3U*sizeof(float)) ||
-           !gpu_span_readable(source.faces,
-               size_t(source.num_faces)*sizeof(native_face)))
-            return false;
+           source.num_faces<1 || source.num_faces>8192)return false;
         // Native mesh bounds are conservative; only reject extremely far
         // meshes when their native radius is trustworthy. A zero or invalid
         // radius means "unknown", not "no receiver".
@@ -3025,6 +3020,13 @@ namespace {
             if(std::isfinite(radius) && std::isfinite(dist2) &&
                dist2>radius*radius)return false;
         }
+        // Read vertex and face allocations ONLY after the cheap radius
+        // rejection, avoiding unrelated actors/cars in large levels.
+        if(!gpu_span_readable(source.vertices,
+               size_t(source.num_vertices)*3U*sizeof(float)) ||
+           !gpu_span_readable(source.faces,
+               size_t(source.num_faces)*sizeof(native_face)))
+            return false;
         jkgm::decal_world_geometry world{};
         world.valid_world=true;
         world.receivers.reserve(
