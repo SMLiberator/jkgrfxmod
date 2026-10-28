@@ -4297,10 +4297,28 @@ namespace jkgm {
                 }
             }
             std::vector<candidate *> sorted;
+            // Dynamic shadow slots belong only to the near-sun region.
+            // Test the nearest point on the full Thing AABB, not its center,
+            // so long cars crossing the cutoff are not discarded early.
+            float const near_radius=std::max(0.0f,
+                the_config->sun_shadow_near_distance);
+            float const near_radius2=near_radius*near_radius;
+            size_t atlas_distance_culled=0;
             for(auto &entry:keyed) {
                 auto &c=entry.second;
                 if(!c.has_bounds)continue;
                 auto const &lo=c.bounds.low,&hi=c.bounds.high;
+                float nearest2=0.0f;
+                for(int axis=0;axis<3;++axis) {
+                    float const separation=std::max(
+                        std::max(lo[axis]-camera.position[axis],
+                                 camera.position[axis]-hi[axis]),0.0f);
+                    nearest2+=separation*separation;
+                }
+                if(nearest2>near_radius2) {
+                    ++atlas_distance_culled;
+                    continue;
+                }
                 c.distance2=0.0f;
                 for(int i=0;i<3;++i) {
                     float d=(lo[i]+hi[i])*0.5f-camera.position[i];
@@ -4520,6 +4538,8 @@ namespace jkgm {
                 }
                 LOG_INFO("SUN dynamic shadow atlas Things=",
                     sun_dynamic_views.size()," candidates=",sorted.size(),
+                    " outside_near_distance=",atlas_distance_culled,
+                    " near_distance=",near_radius,
                     " base_tile=",tile_size,
                     " adaptive=",the_config->sun_dynamic_shadow_adaptive_resolution?1:0,
                     " tile_sizes=[",tile_sizes.str(),"]",
@@ -4941,6 +4961,11 @@ namespace jkgm {
                                    gpu_3do_texture texture;bool cutout;
                                    decal_volume_aabb bounds;};
             std::vector<sun_model_draw> models,static_models;
+            size_t dynamic_far_skipped=0,dynamic_near_distance_skipped=0;
+            float const dynamic_near_radius=std::max(0.0f,
+                the_config->sun_shadow_near_distance);
+            float const dynamic_near_radius2=
+                dynamic_near_radius*dynamic_near_radius;
             // The atlas-wide key contains only the native world/light state.
             // Static 3DO additions and edits invalidate their own ray columns;
             // camera/COG visibility changes must NEVER reset the whole grid.
@@ -5008,6 +5033,27 @@ namespace jkgm {
             for(auto const &prepared:model_candidates) {
                 auto const &instance=*prepared.instance;
                 auto const &group=*prepared.group;
+                // Far cascades contain only stationary architecture. A
+                // moving Thing outside the dynamic atlas may still use the
+                // NEAR cascade as fallback, but never the distant one.
+                if(instance.dynamic_sun_caster) {
+                    if(cascade!=0) {
+                        ++dynamic_far_skipped;
+                        continue;
+                    }
+                    float nearest2=0.0f;
+                    for(int axis=0;axis<3;++axis) {
+                        float const d=std::max(std::max(
+                            prepared.bounds.low[axis]-camera.position[axis],
+                            camera.position[axis]-prepared.bounds.high[axis]),
+                            0.0f);
+                        nearest2+=d*d;
+                    }
+                    if(nearest2>dynamic_near_radius2) {
+                        ++dynamic_near_distance_skipped;
+                        continue;
+                    }
+                }
                 if(!sun_shadow_caster_in_static_cascades(
                        instance.shadow_owner,sun_dynamic_atlas_owners))continue;
                 bool const in_cascade=decal_aabbs_overlap(
@@ -5167,8 +5213,12 @@ namespace jkgm {
                 LOG_INFO("SUN shadow caster batches world=",
                          counts.size()+world_cutouts.size(),
                          " 3do=",models.size()+static_models.size(),
-                         " static_3do=",static_models.size()," skybox_skipped=",
-                         skipped_skybox_instances," cascade=",cascade,
+                         " static_3do=",static_models.size(),
+                         " dynamic_far_skipped=",dynamic_far_skipped,
+                         " dynamic_near_distance_skipped=",
+                             dynamic_near_distance_skipped,
+                         " skybox_skipped=",skipped_skybox_instances,
+                         " cascade=",cascade,
                          " map=",map.resolution,
                          " selected_world=",map.selected.size(),
                          " hidden_world=",world_hidden,
