@@ -480,12 +480,14 @@ namespace {
         float const ux=placement[6],uy=placement[7],uz=placement[8];
         float const cfx=fy*uz-fz*uy, cfy=fz*ux-fx*uz, cfz=fx*uy-fy*ux;
         float const determinant=rx*cfx+ry*cfy+rz*cfz;
-        // A non-unit transform only needs native lighting when an actual
-        // dynamic light can reach the mesh. Test all the lights first; most
-        // characters/scenery have none within their influence radius.
-        // Keep a conservative scaled bounding sphere for that decision.
-        bool light_transform_safe=std::isfinite(determinant) &&
-            std::fabs(std::fabs(determinant)-1.0f)<=0.05f;
+        // A nonrigid node is safe to cache with dynamic lights as long as
+        // its affine matrix is invertible. The preview shader evaluates
+        // light distances in transformed camera/world space for such nodes.
+        // Singular transforms must still use native JK lighting.
+        bool const matrix_invertible=std::isfinite(determinant) &&
+            std::fabs(determinant)>1.e-6f;
+        bool nonrigid_lighting=!matrix_invertible ||
+            std::fabs(std::fabs(determinant)-1.0f)>0.05f;
         float max_axis_scale=1.0f;
         for(int axis=0;axis<3;axis++) {
             int const i=axis*3;
@@ -493,7 +495,7 @@ namespace {
                             placement[i+1]*placement[i+1]+
                             placement[i+2]*placement[i+2];
             if(!std::isfinite(len))return false;
-            if(std::fabs(len-1.0f)>0.05f)light_transform_safe=false;
+            if(std::fabs(len-1.0f)>0.05f)nonrigid_lighting=true;
             max_axis_scale=std::max(max_axis_scale,std::sqrt(len));
         }
 
@@ -524,10 +526,11 @@ namespace {
             float const reach=radius+std::max(0.0f,m.radius)*
                 max_axis_scale;
             if(dx*dx+dy*dy+dz*dz>reach*reach) continue;
-            // Exact native light attenuation is not representable by the
-            // current local-space shader when the node is scaled/sheared.
-            // Preserve the native fallback ONLY for affected mesh parts.
-            if(!light_transform_safe)return false;
+            // Transform into the mesh's local basis as before; for
+            // nonrigid nodes the shader transforms the delta back into
+            // rigid camera space before measuring distance/angle.
+            if(!matrix_invertible)return false;
+            if(nonrigid_lighting)instance.nonrigid_light_transform=true;
             // Spot/other light types need the original cone/angle logic.
             // Do not misrender them as omnidirectional point lights.
             if(type<0 || type>2) return false;
