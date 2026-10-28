@@ -3740,7 +3740,6 @@ namespace jkgm {
                 make_point(rgb[0],rgb[1],rgb[2],intensity),
                 the_config->sun_shadow_near_distance,
                 the_config->sun_shadow_receiver_bias_scale,
-                the_config->sun_dynamic_shadow_distance_softness,
                 the_config->sun_max_distance);
             auto set_projection=[&](int slot,sun_shadow_projection const &p,
                                     point<4,float> rect,float caster_end=0.0f) {
@@ -6031,14 +6030,10 @@ namespace jkgm {
             auto &prog=ogs->game_post_opaque_composite_program;
             prog.set_spotlight_count(0);
             prog.set_sun_dynamic_count(0);
-            prog.set_sun_dynamic_shadow_distance_softness(
-                the_config->sun_dynamic_shadow_distance_softness);
             prog.set_fill_tjunction_gaps(the_config->fill_tjunction_gaps);
             prog.set_tjunction_gap_fill_size(int(the_config->tjunction_gap_fill_size));
             prog.set_debug_void_pixels(the_config->debug_void_pixels);
             prog.set_retain_hom_pixels(the_config->retain_hom_pixels);
-            prog.set_sun_shadow_far_soft_filter(
-                the_config->sun_shadow_far_soft_filter);
             prog.set_sun_shadow_receiver_bias_scale(
                 the_config->sun_shadow_receiver_bias_scale);
             prog.set_sun_max_distance(the_config->sun_max_distance);
