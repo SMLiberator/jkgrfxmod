@@ -3712,7 +3712,7 @@ namespace jkgm {
             auto &uniforms=prog.translucent_sun;
             uniforms.set_state(false,false,0,off,dark,
                                the_config->sun_shadow_near_distance,1.0f,0.0f);
-            if(!active || !the_config->enable_sun_shadows)return;
+            if(!active || !the_config->enable_sun)return;
             auto const cam=read_active_render_camera();
             if(!cam.valid)return;
             auto const sun=get_sun_settings();
@@ -6061,11 +6061,11 @@ namespace jkgm {
             // Direct sunlight must survive a failed/unavailable shadow map.
             auto const sun=get_sun_settings();
             float const sun_power=sun.intensity.value()[0];
-            bool const sun_lit=the_config->enable_sun_shadows &&
+            bool const sun_lit=the_config->enable_sun &&
                 std::isfinite(sun_power) && sun_power>0.0f;
             auto const cam=read_active_render_camera();
-            if(the_config->enable_sun_shadows && the_config->profile_renderer &&
-               gpu_3do_present_serial%120U==0U)
+            if((the_config->enable_sun || the_config->enable_sun_shadows) &&
+               the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN composite diffuse=",sun_lit && cam.valid?1:0,
                          " shadow=",sun_shadow_ready?1:0,
                          " intensity=",std::to_string(sun_power));
