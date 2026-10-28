@@ -69,7 +69,8 @@ inline std::vector<decal_vertex> clip_projected_decal(
     decal_projector const &projector,
     std::vector<decal_vec3> const &receiver,
     decal_vec3 receiver_normal,
-    float min_facing=0.05f,bool enforce_facing=true)
+    float min_facing=0.05f,bool enforce_facing=true,
+    bool allow_edge_on=false)
 {
     // Experimental corner decals may accept both perpendicular and
     // back-facing receivers. Keep the default facing test for other callers.
@@ -143,7 +144,27 @@ inline std::vector<decal_vertex> clip_projected_decal(
         auto const &a=clipped[i],&b=clipped[(i+1)%clipped.size()];
         area+=double(a.u)*b.v-double(b.u)*a.v;
     }
-    if(clipped.size()<3 || std::fabs(area)<1.e-8) return {};
+    if(clipped.size()<3)return {};
+    if(std::fabs(area)<1.e-8) {
+        if(!allow_edge_on)return {};
+        // A steep, perfectly perpendicular receiver can collapse to zero
+        // area in the projector's XY coordinates despite being a valid
+        // nondegenerate face in 3D. Edge-wrapping UVs recover its width from
+        // the projector depth axis, so preserve it only in wrapping mode.
+        auto const cross=[](decal_vec3 const &a,decal_vec3 const &b) {
+            return decal_vec3{{
+                a[1]*b[2]-a[2]*b[1],
+                a[2]*b[0]-a[0]*b[2],
+                a[0]*b[1]-a[1]*b[0]}};
+        };
+        double area3d=0.0;
+        for(size_t i=1;i+1<clipped.size();++i) {
+            auto const n=cross(decal_sub(clipped[i].world,clipped[0].world),
+                               decal_sub(clipped[i+1].world,clipped[0].world));
+            area3d+=std::sqrt(double(decal_dot(n,n)));
+        }
+        if(!std::isfinite(area3d) || area3d<1.e-8)return {};
+    }
     return clipped;
 }
 inline std::array<float,2> projected_decal_uv(decal_vertex const &v,
