@@ -3044,35 +3044,41 @@ namespace {
                     sizeof(source));
         if(source.num_vertices<3 || source.num_vertices>65536 ||
            source.num_faces<1 || source.num_faces>8192)return false;
-        // Native mesh bounds are conservative; only reject extremely far
-        // meshes when their native radius is trustworthy. A zero or invalid
-        // radius means "unknown", not "no receiver".
-        if(std::isfinite(source.radius) && source.radius>0.0f) {
-            float scale=0.0f;
-            for(int axis=0;axis<3;++axis) {
-                int const k=axis*3;
-                float const len=std::sqrt(
-                    candidate.transform[k]*candidate.transform[k]+
-                    candidate.transform[k+1]*candidate.transform[k+1]+
-                    candidate.transform[k+2]*candidate.transform[k+2]);
-                scale+=len;
-            }
-            float dist2=0.0f;
-            for(int axis=0;axis<3;++axis) {
-                float const d=impact[axis]-candidate.transform[9+axis];
-                dist2+=d*d;
-            }
-            float const radius=source.radius*scale+1.0f;
-            if(std::isfinite(radius) && std::isfinite(dist2) &&
-               dist2>radius*radius)return false;
-        }
-        // Read vertex and face allocations ONLY after the cheap radius
-        // rejection, avoiding unrelated actors/cars in large levels.
+        // The Thing's COLLISION sphere does not bound decal receivers.
+        // Native rdMesh.radius may also be stale for translated nodes or
+        // edited R/L/U geometry. Use actual transformed mesh vertices for a
+        // conservative broadphase, independent of both sphere radii.
         if(!gpu_span_readable(source.vertices,
-               size_t(source.num_vertices)*3U*sizeof(float)) ||
+                size_t(source.num_vertices)*3U*sizeof(float)) ||
            !gpu_span_readable(source.faces,
-               size_t(source.num_faces)*sizeof(native_face)))
+                size_t(source.num_faces)*sizeof(native_face)))
             return false;
+        jkgm::decal_vec3 low{{
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max()}};
+        jkgm::decal_vec3 high{{
+            -std::numeric_limits<float>::max(),
+            -std::numeric_limits<float>::max(),
+            -std::numeric_limits<float>::max()}};
+        for(int v=0;v<source.num_vertices;++v) {
+            jkgm::decal_vec3 local{};
+            std::memcpy(local.data(),source.vertices+size_t(v)*3U,
+                        sizeof(float)*3U);
+            if(!jkgm::decal_finite(local))return false;
+            auto const position=jkgm::gpu_3do_native_transform_point(
+                candidate.transform,local);
+            if(!jkgm::decal_finite(position))return false;
+            for(int axis=0;axis<3;++axis) {
+                low[axis]=std::min(low[axis],position[axis]);
+                high[axis]=std::max(high[axis],position[axis]);
+            }
+        }
+        constexpr float margin=0.75f;
+        for(int axis=0;axis<3;++axis)
+            if(impact[axis]<low[axis]-margin ||
+               impact[axis]>high[axis]+margin)
+                return false;
         jkgm::decal_world_geometry world{};
         world.valid_world=true;
         world.receivers.reserve(
