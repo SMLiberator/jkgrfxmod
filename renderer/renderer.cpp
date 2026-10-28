@@ -3191,18 +3191,22 @@ namespace jkgm {
                 auto const &inst=*draw.instance;
                 auto const &group=*draw.group;
                 size_t draw_end=draw_start+1;
-                if(!transparent) {
-                    while(draw_end<draws.size()) {
-                        auto const &other=draws[draw_end];
-                        if(other.instance!=draw.instance ||
-                           other.group->material!=group.material ||
-                           other.group->cel!=group.cel ||
-                           other.group->face_type!=group.face_type ||
-                           other.group->nonplanar!=group.nonplanar ||
-                           other.policy!=draw.policy)
-                            break;
-                        ++draw_end;
-                    }
+                // Transparent ranges have ALREADY been sorted back-to-front.
+                // Merge only consecutive entries with identical draw state:
+                // glMultiDrawElements preserves their index-range order,
+                // so the painter order, alpha blending and depth tests are
+                // unchanged. Never reorder alpha ranges by material as in
+                // the opaque path.
+                while(draw_end<draws.size()) {
+                    auto const &other=draws[draw_end];
+                    if(other.instance!=draw.instance ||
+                       other.group->material!=group.material ||
+                       other.group->cel!=group.cel ||
+                       other.group->face_type!=group.face_type ||
+                       other.group->nonplanar!=group.nonplanar ||
+                       other.policy!=draw.policy)
+                        break;
+                    ++draw_end;
                 }
                 auto it=gpu_3do_gl_cache.find(inst.id);
                 if(it==gpu_3do_gl_cache.end()) {
