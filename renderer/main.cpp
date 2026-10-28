@@ -10,6 +10,7 @@
 #include "native_3do_profile.hpp"
 #include "native_sprite_profile.hpp"
 #include "gpu_3do_preview.hpp"
+#include "camera_hud_thing.hpp"
 #include "gpu_mat_ready_cache.hpp"
 #include "gpu_3do_modelview.hpp"
 #include "thing_node_native.hpp"
@@ -963,7 +964,8 @@ namespace {
                     uintptr_t(hud_owner)+0x0cU),4);
                 std::memcpy(&native_render_type,reinterpret_cast<void const *>(
                     uintptr_t(hud_owner)+0xc4U),4);
-                camera_hud=(native_type==1U && native_render_type==1U);
+                camera_hud=jkgm::is_camera_hud_model(
+                    native_type,native_render_type);
             }
         }
         bool moving=true; // Unverified owners cannot safely enter static cache.
@@ -1213,6 +1215,17 @@ namespace {
                     ++sample_logged;
                 }
             }
+        }
+        if(profiling && !queued && active_native_model_camera_hud) {
+            // Native fallback is still handled by JK's existing path and
+            // cannot be composited as a per-Thing HUD without GPU geometry.
+            // Surface this explicitly rather than silently drawing icons
+            // inside the post-processed scene.
+            static unsigned hud_fallback_logs=0;
+            if(hud_fallback_logs++<40U)
+                LOG_WARNING("Camera Thing HUD 3DO native fallback; mesh=",
+                            reinterpret_cast<uintptr_t>(mesh),
+                            " cannot use post-exempt GPU pass this frame");
         }
         if(profiling)
             native_totals.mesh_queue_ns+=elapsed_native_ns(queue_begin);
