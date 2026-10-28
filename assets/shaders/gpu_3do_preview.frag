@@ -23,6 +23,7 @@ uniform int has_texture; // 0=unresolved diagnostic, 1=albedo map, 2=intentional
 uniform int has_emissive;
 uniform int transparent_pass;
 uniform int post_exempt_pass; // draw after post, depth-tested against opaque world
+uniform int camera_hud_thing; // type=camera: overlay all world pixels, unlit
 // Flag 0x20 on a GPU-cached Thing suppresses added sunlight/specular and
 // projected spotlights; a zero G-buffer normal also omits SSAO on this Thing.
 uniform int world_lighting_exempt;
@@ -616,7 +617,7 @@ void main() {
     // This is the exact native 1/rhw linear depth (32*Y) even on large
     // triangles crossing the camera near plane; no vertex-depth clamping.
     float view_depth=32.0/max(gl_FragCoord.w,0.00000001);
-    if(post_exempt_pass!=0) {
+    if(post_exempt_pass!=0 && camera_hud_thing==0) {
         float behind=texelFetch(scene_depth,ivec2(gl_FragCoord.xy),0).r;
         if(behind<65500.0 && view_depth>behind+max(0.05,behind*0.0005)) discard;
     }
@@ -649,6 +650,23 @@ void main() {
         if(alpha_mode==0 || alpha_mode==2 || alpha_mode==4) discard;
         if(albedo.a<=0.001 && emissive_only==0) discard;
         if(alpha_mode==1 && albedo.a>=0.999) discard;
+    }
+    if(camera_hud_thing!=0) {
+        // Flat HUD texture color in final output space. The Camera Thing is
+        // intentionally exempt from JK diffuse/colormap/color-filter effects,
+        // fog, sunlight, SSR/SSAO, HDR, bloom and reflection shading.
+        float a=clamp(albedo.a,0.0,1.0);
+        if(blend_mode==2) { // multiply uses (DST_COLOR, ZERO)
+            out_color=vec4(mix(vec3(1.0),albedo.rgb,a),0.0);
+        } else if(blend_mode==1) { // additive uses (ONE, ONE)
+            out_color=vec4(albedo.rgb*a,0.0);
+        } else {
+            out_color=vec4(albedo.rgb*a,a);
+        }
+        out_emissive=vec4(0.0);
+        out_normal=vec4(0.0);
+        out_depth=vec4(0.0);
+        return;
     }
     float fog=clamp((view_depth-fog_params.x)/
                     max(fog_params.y-fog_params.x,0.0001),0.0,1.0)*fog_params.z;
