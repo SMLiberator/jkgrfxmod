@@ -85,6 +85,7 @@ namespace jkgm {
         uint64_t empty_mesh_native=0; // mesh callback with no drawable vertices/faces
         uint64_t native_span_cache_hits=0,native_span_queries=0;
         uint64_t material_native=0,lighting_native=0;
+        uint64_t nonrigid_lit_cached=0; // visible GPU mesh with transformed lights
         uint64_t ready_material_refs=0,ready_ns=0,ready_cache_hits=0;
     };
     gpu_3do_native_stats consume_gpu_3do_native_stats();
