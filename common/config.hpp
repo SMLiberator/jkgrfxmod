@@ -65,10 +65,8 @@ namespace jkgm {
         bool sun_shadow_cull_front_faces = true; // 3DO sunlight: front-face culling by default
         unsigned int sun_dynamic_shadow_resolution = 256U; // baseline 64..1024
         bool sun_dynamic_shadow_adaptive_resolution = false; // opt-in per-Thing pixel density
-        float sun_dynamic_shadow_distance_softness = 0.0f; // optional receiver-distance PCF penumbra, 0..0.5
         float sun_shadow_receiver_bias_scale = 1.0f; // A/B contact-gap tuning (0..2)
         float sun_shadow_caster_bias_scale = 1.0f; // A/B shadow polygon offset (0..2)
-        bool sun_shadow_far_soft_filter = true; // nine-tap PCF in far cascade; false: one hardware PCF
         unsigned int sun_shadow_resolution = 512U; // per-cascade 24-bit depth map (64..4096)
         float sun_shadow_near_distance = 16.0f; // camera-local near cascade, 2..128
         float sun_shadow_far_distance = 128.0f; // outer cascade coverage, 4..512
