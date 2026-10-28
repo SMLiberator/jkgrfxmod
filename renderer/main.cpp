@@ -3033,7 +3033,8 @@ namespace {
     // existing decals. The game's native draw and geometry remain untouched.
     bool build_native_moving_decal_receiver_world(
         native_moving_decal_receiver const &candidate,
-        jkgm::decal_vec3 const &impact,jkgm::decal_world_geometry &out)
+        jkgm::decal_vec3 const &impact,jkgm::decal_world_geometry &out,
+        float margin=0.75f)
     {
         if(!candidate.mesh ||
            !gpu_span_readable(reinterpret_cast<void const *>(candidate.mesh),
@@ -3074,7 +3075,7 @@ namespace {
                 high[axis]=std::max(high[axis],position[axis]);
             }
         }
-        constexpr float margin=0.75f;
+        if(!std::isfinite(margin) || margin<0.0f)return false;
         for(int axis=0;axis<3;++axis)
             if(impact[axis]<low[axis]-margin ||
                impact[axis]>high[axis]+margin)
@@ -3318,7 +3319,7 @@ namespace {
                 continue;
             jkgm::decal_world_geometry receivers{};
             if(!build_native_moving_decal_receiver_world(
-                    native,impact,receivers))
+                    native,impact,receivers,extent))
                 continue;
             add_fragment({native.thing,native.model,
                           native.mesh,native.revision},
