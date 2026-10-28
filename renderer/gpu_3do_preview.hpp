@@ -59,6 +59,9 @@ namespace jkgm {
         // JK's rdCamera light list is Thing-dependent: snapshot when the mesh
         // hook runs, NOT at present(), after another Thing changes it.
         float ambient=1.0f, attenuation=0.0f;
+        // Lighting from scaled/sheared R/L/U nodes uses transformed world
+        // distances and inverse-transposed normals, not local distances.
+        bool nonrigid_light_transform=false;
         bool is_projected_decal=false; // world-space clipped type-3 SPR
         bool shadow_only=false; // native 3DO remains JK-rendered; cache is for depth only
         bool casts_sun_shadows=true; // SithThing 0x20: no sun/spot shadows; GPU skips extra light/SSAO
