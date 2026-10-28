@@ -3221,24 +3221,14 @@ namespace {
             trace_probe("no_near_receiver");
             return false;
         }
-        bool const native_fallback=best_native!=invalid;
-        auto const &native_receiver=native_fallback
-            ?native_moving_decal_receivers[best_native]
-            :native_moving_decal_receiver{};
-        jkgm::gpu_3do_matrix34 const receiver_transform=native_fallback
-            ?native_receiver.transform:pending_gpu_instances[best_gpu].transform;
-        jkgm::sprite_decal_receiver_identity const receiver_id=native_fallback
-            ?jkgm::sprite_decal_receiver_identity{
-                native_receiver.thing,native_receiver.model,
-                native_receiver.mesh,native_receiver.revision}
-            :jkgm::sprite_decal_receiver_identity{
-                pending_gpu_instances[best_gpu].decal_receiver_thing,
-                pending_gpu_instances[best_gpu].decal_receiver_model,
-                pending_gpu_instances[best_gpu].decal_receiver_mesh,
-                pending_gpu_instances[best_gpu].decal_receiver_revision};
-        uint32_t const receiver_occurrence=native_fallback
-            ?native_receiver.occurrence:
-            pending_gpu_instances[best_gpu].decal_receiver_occurrence;
+        // Select an entire receiving Thing, not a single rdMesh node.
+        // Multiple independently moving nodes may intersect one projector.
+        uint64_t const receiver_thing=best_native!=invalid
+            ?native_moving_decal_receivers[best_native].thing
+            :pending_gpu_instances[best_gpu].decal_receiver_thing;
+        uintptr_t const receiver_model=best_native!=invalid
+            ?native_moving_decal_receivers[best_native].model
+            :pending_gpu_instances[best_gpu].decal_receiver_model;
         jkgm::sprite_axes aligned{};
         if(!jkgm::sprite_decal_attachment_axes(
                 source_axes,best_normal,aligned))return false;
@@ -3248,48 +3238,107 @@ namespace {
                 {{offset[0],offset[1],offset[2]}},
                 size[0],size[1],info.width,info.height,roll,projector))
             return false;
-        auto scan=jkgm::project_cached_decal_world(
-            best_world,projector,2048U);
-        jkgm::sprite_decal_mesh mesh{};
-        if(!jkgm::make_sprite_decal_gpu_mesh(
-                scan,projector,resource.material,resource.texcoords,
-                info.opacity,mesh) || !mesh.geometry) {
-            trace_probe("projection_or_gpu_mesh_failed",
-                        static_cast<uint32_t>(scan.triangles.size()));
-            return false;
-        }
-        if(!jkgm::sprite_decal_geometry_to_receiver_local(
-                *mesh.geometry,receiver_transform)) {
-            trace_probe("receiver_transform_noninvertible",
-                        static_cast<uint32_t>(scan.triangles.size()));
-            return false;
-        }
-
         moving_sprite_decal entry{};
         entry.world=world;
         entry.sprite_resource=sprite;
         entry.sprite_thing=(uint64_t(sprite_owner)<<32)|sprite_signature;
-        entry.receiver=receiver_id;
-        entry.occurrence=receiver_occurrence;
-        entry.native_fallback=native_fallback;
-        entry.id=next_gpu_id++;
         entry.last_visible_frame=gpu_frame_serial;
         entry.opacity=info.opacity;
-        entry.geometry=std::move(mesh.geometry);
-        auto it=moving_sprite_decals.emplace(sprite_key,std::move(entry)).first;
+        constexpr uint32_t max_decal_triangles=2048U;
+        constexpr size_t max_decal_mesh_fragments=32U;
+        uint32_t remaining=max_decal_triangles;
+        uint32_t total_triangles=0;
+        auto add_fragment=[&](
+            jkgm::sprite_decal_receiver_identity const &id,
+            uint32_t occurrence,bool native_fallback,
+            jkgm::gpu_3do_matrix34 const &transform,
+            jkgm::decal_world_geometry const &receiver_world)
+        {
+            if(remaining==0 || entry.fragments.size()>=max_decal_mesh_fragments ||
+               !receiver_world.valid_world || receiver_world.receivers.empty())
+                return;
+            auto scan=jkgm::project_cached_decal_world(
+                receiver_world,projector,remaining);
+            if(scan.truncated || scan.triangles.empty())return;
+            jkgm::sprite_decal_mesh mesh{};
+            if(!jkgm::make_sprite_decal_gpu_mesh(
+                    scan,projector,resource.material,resource.texcoords,
+                    info.opacity,mesh) || !mesh.geometry) {
+                trace_probe("projection_or_gpu_mesh_failed",
+                    static_cast<uint32_t>(scan.triangles.size()));
+                return;
+            }
+            if(!jkgm::sprite_decal_geometry_to_receiver_local(
+                    *mesh.geometry,transform)) {
+                trace_probe("receiver_transform_noninvertible",
+                    static_cast<uint32_t>(scan.triangles.size()));
+                return;
+            }
+            moving_sprite_decal_fragment fragment{};
+            fragment.receiver=id;
+            fragment.occurrence=occurrence;
+            fragment.native_fallback=native_fallback;
+            fragment.id=next_gpu_id++;
+            fragment.geometry=std::move(mesh.geometry);
+            total_triangles+=static_cast<uint32_t>(scan.triangles.size());
+            remaining-=static_cast<uint32_t>(scan.triangles.size());
+            entry.fragments.push_back(std::move(fragment));
+        };
+        // All eligible GPU meshes of the same Thing share one projector.
+        // Per-node clipping/local conversion preserves the door/body split.
+        float const extent=0.5f*std::sqrt(
+            projector.width*projector.width+
+            projector.height*projector.height)+projector.depth;
+        for(auto const &inst:pending_gpu_instances) {
+            if(entry.fragments.size()>=max_decal_mesh_fragments || !remaining)
+                break;
+            if(inst.is_projected_decal ||
+               inst.decal_receiver_thing!=receiver_thing ||
+               inst.decal_receiver_model!=receiver_model ||
+               !jkgm::sprite_decal_moving_receiver_near(inst,impact,extent))
+                continue;
+            auto receivers=jkgm::sprite_decal_moving_receiver_world(inst);
+            add_fragment({inst.decal_receiver_thing,
+                          inst.decal_receiver_model,
+                          inst.decal_receiver_mesh,
+                          inst.decal_receiver_revision},
+                         inst.decal_receiver_occurrence,false,
+                         inst.transform,receivers);
+        }
+        for(auto const &native:native_moving_decal_receivers) {
+            if(entry.fragments.size()>=max_decal_mesh_fragments || !remaining)
+                break;
+            if(native.thing!=receiver_thing || native.model!=receiver_model)
+                continue;
+            jkgm::decal_world_geometry receivers{};
+            if(!build_native_moving_decal_receiver_world(
+                    native,impact,receivers))
+                continue;
+            add_fragment({native.thing,native.model,
+                          native.mesh,native.revision},
+                         native.occurrence,true,native.transform,receivers);
+        }
+        if(entry.fragments.empty()) {
+            trace_probe("no_projected_mesh_fragments");
+            return false;
+        }
+        auto inserted=moving_sprite_decals.emplace(
+            sprite_key,std::move(entry));
+        auto const &stored=inserted.first->second;
         if(the_config->profile_renderer) {
             static uint32_t logged=0;
             if(logged++<24U)
                 LOG_INFO("SPR moving decal created sprite=",sprite_key,
-                         " receiver=",it->second.receiver.thing_key,
-                         " mesh=",it->second.receiver.mesh,
-                         " node=",it->second.occurrence,
-                         " native=",native_fallback?1:0,
-                         " triangles=",scan.triangles.size());
+                         " receiver=",receiver_thing,
+                         " fragments=",stored.fragments.size(),
+                         " triangles=",total_triangles);
         }
-        // A decal SPR must still go through native MAT warm-up if its cel
-        // has not reached OpenGL yet. The cached projection survives that.
-        return gpu_mesh_materials_ready(*it->second.geometry);
+        // The MAT may be warming up; keep the projected pieces cached
+        // and submit them when texture residency becomes available.
+        return std::all_of(stored.fragments.begin(),stored.fragments.end(),
+            [](moving_sprite_decal_fragment const &f) {
+                return f.geometry && gpu_mesh_materials_ready(*f.geometry);
+            });
     }
 
     bool submit_native_sprite_decal(
