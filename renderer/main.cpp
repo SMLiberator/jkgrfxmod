@@ -180,6 +180,9 @@ namespace {
     // Set for the duration of a single rdModel3_Draw invocation. Nested
     // model calls restore their parent Thing's flags on return.
     thread_local uint32_t active_native_model_thing_flags=0U;
+    // Camera is SithThing type 1, distinct from the active rdCamera.
+    // This is a per-Thing choice, never a shared rdMesh/MAT property.
+    thread_local bool active_native_model_camera_hud=false;
     thread_local uint64_t active_native_shadow_owner=0;
     thread_local uint64_t active_native_spotlight_family=0;
     thread_local bool active_native_shadow_dynamic=false;
@@ -943,6 +946,26 @@ namespace {
                                    : std::chrono::steady_clock::time_point{};
         uint32_t flags=0;
         uint64_t owner_key=0;
+        // rdThing.pThing is +0x44. Read the linked SithThing TYPE even
+        // when sun/spotlight shadows are disabled. A type=camera Thing
+        // with a 3DO render type is our post-composited HUD layer.
+        bool camera_hud=false;
+        uintptr_t const native_rd=reinterpret_cast<uintptr_t>(thing);
+        uint32_t hud_owner=0;
+        if(gpu_span_readable(reinterpret_cast<void const *>(
+                native_rd+0x44U),4)) {
+            std::memcpy(&hud_owner,reinterpret_cast<void const *>(
+                native_rd+0x44U),4);
+            if(hud_owner>=0x10000U &&
+               gpu_span_readable(reinterpret_cast<void const *>(hud_owner),0xc8U)) {
+                uint32_t native_type=0,native_render_type=0;
+                std::memcpy(&native_type,reinterpret_cast<void const *>(
+                    uintptr_t(hud_owner)+0x0cU),4);
+                std::memcpy(&native_render_type,reinterpret_cast<void const *>(
+                    uintptr_t(hud_owner)+0xc4U),4);
+                camera_hud=(native_type==1U && native_render_type==1U);
+            }
+        }
         bool moving=true; // Unverified owners cannot safely enter static cache.
         bool const shadow_enabled=the_config &&
             (the_config->enable_sun_shadows ||
@@ -1021,10 +1044,12 @@ namespace {
             }
         }
         uint32_t const previous_flags=active_native_model_thing_flags;
+        bool const previous_camera_hud=active_native_model_camera_hud;
         uint64_t const previous_owner=active_native_shadow_owner;
         uint64_t const previous_family=active_native_spotlight_family;
         bool const previous_moving=active_native_shadow_dynamic;
         active_native_model_thing_flags=flags;
+        active_native_model_camera_hud=camera_hud;
         active_native_shadow_owner=owner_key;
         active_native_spotlight_family=owner_key &&
             the_config && the_config->enable_spotlights &&
@@ -1037,6 +1062,7 @@ namespace {
         int const result=RealNativeModel(thing,placement);
         uint64_t const engine_ns=profiling?elapsed_native_ns(engine_start):0;
         active_native_model_thing_flags=previous_flags;
+        active_native_model_camera_hud=previous_camera_hud;
         active_native_shadow_owner=previous_owner;
         active_native_spotlight_family=previous_family;
         active_native_shadow_dynamic=previous_moving;
@@ -1338,14 +1364,18 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     bool const shadow_enabled=the_config &&
         ((the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
          the_config->enable_sun_shadows);
-    bool const shadow_only=the_config && shadow_enabled &&
+    // Camera-HUD Things are visible-only and cannot enter shadow atlases.
+    // Permit their GPU path even when world model caching is disabled.
+    bool const shadow_only=!active_native_model_camera_hud &&
+        the_config && shadow_enabled &&
         (force_shadow_only || !the_config->use_model_cache);
-    bool const casts_sun_shadows=jkgm::thing_casts_sun_shadows(
-        active_native_model_thing_flags);
+    bool const casts_sun_shadows=!active_native_model_camera_hud &&
+        jkgm::thing_casts_sun_shadows(active_native_model_thing_flags);
     // Excluded/invisible Things never enter either shadow map; they still
     // render normally through JK or the visible GPU 3DO path.
     if(shadow_only && !casts_sun_shadows)return false;
-    if(!the_config || (!the_config->use_model_cache && !shadow_only) ||
+    if(!the_config || (!the_config->use_model_cache && !shadow_only &&
+                       !active_native_model_camera_hud) ||
        !mesh || !matrix || pending_gpu_instances.size()>=16384 ||
        // Single VirtualQuery per candidate, including the optional RGB
        // field; thousands of calls happen on busy scenes.
@@ -1547,6 +1577,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     inst.id=it->second.id;
     inst.geometry=it->second.geometry;
     inst.shadow_only=shadow_only;
+    inst.camera_hud=active_native_model_camera_hud;
     inst.casts_sun_shadows=casts_sun_shadows;
     inst.shadow_owner=active_native_shadow_owner;
     inst.spotlight_shadow_family=active_native_spotlight_family;
@@ -1555,7 +1586,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     // colormap or per-Thing lighting cap. Preserve the native render call.
     std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
     for(float v:inst.transform)if(!std::isfinite(v))return false;
-    if(!shadow_only) {
+    if(!shadow_only && !inst.camera_hud) {
         inst.colormap_tint=read_gpu_3do_colormap_tint();
         // curLightingMode (rdModel3_Draw's effective Thing/global cap):
         // the verified rdModel3 global block is +0x48 from original JK.
@@ -1578,7 +1609,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             return false;
         }
     }
-    if(!shadow_only && the_config->profile_renderer &&
+    if(!shadow_only && !inst.camera_hud &&
+       the_config->profile_renderer &&
        inst.nonrigid_light_transform)
         ++gpu_native_stats.nonrigid_lit_cached;
     pending_gpu_instances.emplace_back(std::move(inst));
