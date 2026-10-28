@@ -3170,6 +3170,10 @@ namespace {
                       offset[2]*source_axes.up[2]
         }};
         if(!jkgm::decal_finite(impact))return false;
+        float const depth=jkgm::sprite_decal_projection_depth_for_size(
+            size[0]*info.width,size[1]*info.height);
+        float const near_radius=jkgm::sprite_decal_receiver_search_radius(depth);
+        if(!(near_radius>0.0f))return false;
         auto const camera=jkgm::read_active_render_camera();
         auto const incoming=camera.valid
             ?camera.forward:jkgm::decal_vec3{{0,0,0}};
@@ -3181,12 +3185,12 @@ namespace {
             auto const &inst=pending_gpu_instances[i];
             if(!inst.decal_receiver_thing || !inst.decal_receiver_model ||
                !inst.decal_receiver_mesh ||
-               !jkgm::sprite_decal_moving_receiver_near(inst,impact,0.75f))
+               !jkgm::sprite_decal_moving_receiver_near(inst,impact,near_radius))
                 continue;
             auto receivers=jkgm::sprite_decal_moving_receiver_world(inst);
             if(!receivers.valid_world || receivers.receivers.empty())continue;
             auto const hit=jkgm::find_nearest_decal_surface(
-                jkgm::decal_world_geometry{},receivers,impact,incoming,0.25f);
+                jkgm::decal_world_geometry{},receivers,impact,incoming,near_radius);
             if(!hit.valid || hit.distance>=best_score)continue;
             best_gpu=i;
             best_native=invalid;
@@ -3199,7 +3203,7 @@ namespace {
             if(!build_native_moving_decal_receiver_world(
                    candidate,impact,receivers))continue;
             auto const hit=jkgm::find_nearest_decal_surface(
-                jkgm::decal_world_geometry{},receivers,impact,incoming,0.25f);
+                jkgm::decal_world_geometry{},receivers,impact,incoming,near_radius);
             if(!hit.valid || hit.distance>=best_score)continue;
             best_native=i;
             best_gpu=invalid;
