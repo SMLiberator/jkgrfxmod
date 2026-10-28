@@ -1065,6 +1065,44 @@ namespace {
                 }
             }
         }
+        // A mesh can be ineligible for visible GPU caching (its MAT cel is
+        // not resident, unsupported native lighting, etc.) yet still have
+        // valid immutable geometry for the directional depth pass. In that
+        // case preserve the exact native render below and append a separate
+        // shadow-only GPU instance. Previously this was possible ONLY with
+        // use_model_cache=false, leaving some characters without shadows.
+        // Restrict the second attempt to moving sun casters: don't double
+        // snapshot the many static/HUD/native-fallback meshes each frame.
+        if(!queued && the_config && the_config->use_model_cache &&
+           the_config->enable_sun_shadows && active_native_shadow_dynamic &&
+           active_native_shadow_owner!=0 &&
+           jkgm::thing_casts_sun_shadows(active_native_model_thing_flags)) {
+            size_t const prior=pending_gpu_instances.size();
+            jkgm::queue_gpu_3do_mesh(mesh,placement,true);
+            bool const captured=pending_gpu_instances.size()>prior;
+            if(profiling && gpu_frame_serial%120U==0U) {
+                static thread_local uint64_t sample_frame=0;
+                static thread_local unsigned sample_logged=0;
+                if(sample_frame!=gpu_frame_serial) {
+                    sample_frame=gpu_frame_serial;
+                    sample_logged=0;
+                }
+                if(sample_logged<12U &&
+                   gpu_span_readable(mesh,sizeof(native_mesh))) {
+                    native_mesh m{};
+                    std::memcpy(&m,mesh,sizeof(m));
+                    auto const name_end=std::find(
+                        m.name,m.name+sizeof(m.name),'\\0');
+                    std::string const name(m.name,name_end);
+                    LOG_INFO("SUN native fallback sidecar mesh=",name,
+                             " owner=",active_native_shadow_owner,
+                             " captured=",captured?1:0,
+                             " vertices=",m.num_vertices,
+                             " faces=",m.num_faces);
+                    ++sample_logged;
+                }
+            }
+        }
         if(profiling)
             native_totals.mesh_queue_ns+=elapsed_native_ns(queue_begin);
         if(!queued) {
@@ -1197,7 +1235,8 @@ bool native_mesh_overlaps_shadow_light(native_mesh const &mesh,
 }
 }
 
-bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
+bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
+                              bool force_shadow_only)
 {
     // The exact RGB/smooth-normal JK patch has an additional float3*
     // at rdMesh+0x6c, beyond the original 0x58-byte layout. Its loader
@@ -1214,8 +1253,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix)
     bool const shadow_enabled=the_config &&
         ((the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
          the_config->enable_sun_shadows);
-    bool const shadow_only=the_config && !the_config->use_model_cache &&
-        shadow_enabled;
+    bool const shadow_only=the_config && shadow_enabled &&
+        (force_shadow_only || !the_config->use_model_cache);
     bool const casts_sun_shadows=jkgm::thing_casts_sun_shadows(
         active_native_model_thing_flags);
     // Excluded/invisible Things never enter either shadow map; they still
