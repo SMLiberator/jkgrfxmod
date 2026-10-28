@@ -144,6 +144,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_follow.cpp /Fe:sprite_decal_follow_test.exe
         sprite_decal_follow_test.exe
+    - name: Moving SPR decal GPU receiver and follow tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_moving_receiver.cpp /Fe:sprite_decal_moving_receiver_test.exe
+        sprite_decal_moving_receiver_test.exe
     - name: SPR decal GPU mesh and MAT UV preparation tests
       shell: cmd
       run: |
