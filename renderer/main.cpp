@@ -2780,62 +2780,73 @@ namespace {
         for(auto it=moving_sprite_decals.begin();
             it!=moving_sprite_decals.end();) {
             auto &decal=it->second;
+            bool const valid_receivers=!decal.fragments.empty() &&
+                std::all_of(decal.fragments.begin(),decal.fragments.end(),
+                    [](moving_sprite_decal_fragment const &fragment) {
+                        return moving_sprite_decal_receiver_alive(fragment);
+                    });
             if(!moving_sprite_decal_source_alive(decal,it->first) ||
-               !moving_sprite_decal_receiver_alive(decal)) {
+               !valid_receivers) {
                 it=moving_sprite_decals.erase(it);
                 continue;
             }
-            // Continue sampling native sprite fades even if its original
-            // world position is culled.
-            auto const native=current_sprite_info(
-                reinterpret_cast<void const *>(uintptr_t(uint32_t(it->first))));
-            decal.opacity=native.opacity;
+            // Continue sampling SPR fades even when its original position
+            // is culled, but render each mesh-local piece at its node pose.
+            decal.opacity=current_sprite_info(
+                reinterpret_cast<void const *>(
+                    uintptr_t(uint32_t(it->first)))).opacity;
             ++it;
             if(!(decal.opacity>0.0f))continue;
-            // The same rdMesh can be shared by several Things or repeated
-            // within one hierarchy. Match the full receiver identity.
-            auto const receiver=std::find_if(
-                pending_gpu_instances.begin(),pending_gpu_instances.end(),
-                [&](jkgm::gpu_3do_instance const &instance) {
-                    return !instance.is_projected_decal &&
-                        instance.decal_receiver_thing==decal.receiver.thing_key &&
-                        instance.decal_receiver_model==decal.receiver.model &&
-                        instance.decal_receiver_mesh==decal.receiver.mesh &&
-                        instance.decal_receiver_revision==
-                            decal.receiver.mesh_revision &&
-                        instance.decal_receiver_occurrence==decal.occurrence;
-                });
-            jkgm::gpu_3do_matrix34 transform{};
-            bool found=false;
-            if(receiver!=pending_gpu_instances.end() && !decal.native_fallback) {
-                transform=receiver->transform;
-                found=true;
-            }
-            if(decal.native_fallback) {
-                for(auto const &native:native_moving_decal_receivers) {
-                    if(native.thing==decal.receiver.thing_key &&
-                       native.model==decal.receiver.model &&
-                       native.mesh==decal.receiver.mesh &&
-                       native.revision==decal.receiver.mesh_revision &&
-                       native.occurrence==decal.occurrence) {
-                        transform=native.transform;
+            for(auto const &fragment:decal.fragments) {
+                jkgm::gpu_3do_matrix34 transform{};
+                bool found=false;
+                if(!fragment.native_fallback) {
+                    auto const receiver=std::find_if(
+                        pending_gpu_instances.begin(),
+                        pending_gpu_instances.end(),
+                        [&](jkgm::gpu_3do_instance const &instance) {
+                            return !instance.is_projected_decal &&
+                                instance.decal_receiver_thing==
+                                    fragment.receiver.thing_key &&
+                                instance.decal_receiver_model==
+                                    fragment.receiver.model &&
+                                instance.decal_receiver_mesh==
+                                    fragment.receiver.mesh &&
+                                instance.decal_receiver_revision==
+                                    fragment.receiver.mesh_revision &&
+                                instance.decal_receiver_occurrence==
+                                    fragment.occurrence;
+                        });
+                    if(receiver!=pending_gpu_instances.end()) {
+                        transform=receiver->transform;
                         found=true;
-                        break;
+                    }
+                } else {
+                    for(auto const &native:native_moving_decal_receivers) {
+                        if(native.thing==fragment.receiver.thing_key &&
+                           native.model==fragment.receiver.model &&
+                           native.mesh==fragment.receiver.mesh &&
+                           native.revision==fragment.receiver.mesh_revision &&
+                           native.occurrence==fragment.occurrence) {
+                            transform=native.transform;
+                            found=true;
+                            break;
+                        }
                     }
                 }
+                if(!found || !fragment.geometry ||
+                   !gpu_mesh_materials_ready(*fragment.geometry))
+                    continue;
+                jkgm::gpu_3do_instance inst{};
+                inst.id=fragment.id;
+                inst.geometry=fragment.geometry;
+                inst.transform=transform;
+                inst.is_projected_decal=true;
+                inst.decal_opacity=decal.opacity;
+                inst.effective_light_mode=0.0f;
+                decal.last_visible_frame=gpu_frame_serial;
+                pending_gpu_instances.push_back(std::move(inst));
             }
-            if(!found || !decal.geometry ||
-               !gpu_mesh_materials_ready(*decal.geometry))
-                continue;
-            jkgm::gpu_3do_instance inst{};
-            inst.id=decal.id;
-            inst.geometry=decal.geometry;
-            inst.transform=transform;
-            inst.is_projected_decal=true;
-            inst.decal_opacity=decal.opacity;
-            inst.effective_light_mode=0.0f;
-            decal.last_visible_frame=gpu_frame_serial;
-            pending_gpu_instances.push_back(std::move(inst));
         }
         native_decal_following=std::any_of(
             moving_sprite_decals.begin(),moving_sprite_decals.end(),
