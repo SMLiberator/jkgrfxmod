@@ -1071,7 +1071,7 @@ namespace {
         auto const profiling=the_config && the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
-        if(the_config && the_config->enable_sprite_decals) {
+        if(the_config && the_config->enable_decals) {
             capture_static_sprite_decal_mesh(mesh,placement);
             if(profiling)
                 native_totals.mesh_decal_ns+=elapsed_native_ns(start);
@@ -2537,7 +2537,7 @@ namespace {
     // Only stationary collide=3 Things are eligible for long-lived caching.
     void capture_static_sprite_decal_mesh(void *mesh,void *placement)
     {
-        if(!the_config || !the_config->enable_sprite_decals ||
+        if(!the_config || !the_config->enable_decals ||
            !mesh || !placement)
             return;
         constexpr uintptr_t current_rdmodel_thing=0x0073C320U;
@@ -2673,7 +2673,7 @@ namespace {
         void const *rd_thing,void const *orientation,
         jkgm::sprite_instance_info const &info)
     {
-        if(!the_config || !the_config->enable_sprite_decals ||
+        if(!the_config || !the_config->enable_decals ||
            !rd_thing || !orientation ||
            !gpu_span_readable(rd_thing,8) ||
            !gpu_span_readable(orientation,12*sizeof(float)))
@@ -2955,11 +2955,10 @@ namespace {
         bool const profiling=the_config && the_config->profile_renderer;
         uint32_t authored_type=0;
         bool known_type=false;
-        // When decal projection is active, reuse this lookup for both
-        // classification and routing. Normal gameplay with both flags off
-        // skips it entirely.
-        if(the_config && (the_config->enable_sprite_decals || profiling) &&
-           gpu_span_readable(thing,8)) {
+        // Always identify authored SPR types: disabling decals must hide
+        // type-3 sprites rather than sending them through the vanilla
+        // camera-facing billboard path.
+        if(the_config && gpu_span_readable(thing,8)) {
             void const *resource=nullptr;
             std::memcpy(&resource,static_cast<uint8_t const *>(thing)+4,
                         sizeof(resource));
@@ -2973,6 +2972,13 @@ namespace {
             else
                 ++native_sprite_totals.other_type_calls;
         }
+        // A disabled decal is not a billboard: returning to native sprite
+        // drawing would make blood/skidmarks float and face the camera.
+        if(known_type && authored_type==jkgm::sprite_project_decal &&
+           the_config && !the_config->enable_decals) {
+            if(profiling)++native_sprite_totals.hidden_calls;
+            return 0;
+        }
         auto const info=current_sprite_info(thing);
         if(info.width==0.0f || info.height==0.0f || info.opacity==0.0f) {
             if(profiling)++native_sprite_totals.hidden_calls;
@@ -2980,7 +2986,7 @@ namespace {
         }
         // Type-3 decals keep their GPU path and masked native MAT warm-up.
         // Count these separately from regular native sprite submissions.
-        bool const projected=the_config && the_config->enable_sprite_decals &&
+        bool const projected=the_config && the_config->enable_decals &&
                              known_type &&
                              authored_type==jkgm::sprite_project_decal;
         if(projected) {
@@ -5431,7 +5437,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         renderer_hooks_active = true;
         native_node_attachment_hooks_active=attach_native_node_attachment_hooks();
         if(the_config->profile_renderer || the_config->use_model_cache ||
-           the_config->enable_sprite_decals ||
+           the_config->enable_decals ||
            (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
            the_config->enable_sun_shadows) {
             native_3do_hooks_active = attach_native_3do_hooks(the_config->profile_renderer);
