@@ -180,7 +180,52 @@ namespace {
     // model calls restore their parent Thing's flags on return.
     thread_local uint32_t active_native_model_thing_flags=0U;
     thread_local uint64_t active_native_shadow_owner=0;
+    thread_local uint64_t active_native_spotlight_family=0;
     thread_local bool active_native_shadow_dynamic=false;
+
+    // Resolve validated SITH_ATTACH_THING ancestry. Use this exact helper
+    // for both spotlight registrations and rdModel3 casters, so headlights
+    // attached to a node and other separately drawn attached car parts
+    // share the same shadow family. The original per-Thing sun owner remains
+    // unchanged (sun atlas allocation must not merge different Things).
+    uint64_t spotlight_shadow_family_key(uint64_t key)
+    {
+        uintptr_t owner=uintptr_t(uint32_t(key>>32));
+        uint32_t signature=uint32_t(key);
+        if(owner<0x10000U || signature==0U)return key;
+        uintptr_t visited[16]{};
+        unsigned visited_count=0;
+        for(unsigned depth=0;depth<16U;++depth) {
+            if(!gpu_span_readable(reinterpret_cast<void const *>(owner),0x78U))
+                break;
+            uint32_t kind=0,current_signature=0,flags=0,parent=0;
+            auto const *p=reinterpret_cast<uint8_t const *>(owner);
+            std::memcpy(&kind,p+0x0cU,4);
+            std::memcpy(&current_signature,p+0x74U,4);
+            if(kind==0U || kind>15U || current_signature!=signature)
+                break;
+            if(visited_count<16U)visited[visited_count++]=owner;
+            std::memcpy(&flags,p+0x34U,4);
+            if((flags&jkgm::native_attach_thing)==0U)break;
+            std::memcpy(&parent,p+0x58U,4);
+            if(parent<0x10000U || uintptr_t(parent)==owner ||
+               std::find(visited,visited+visited_count,uintptr_t(parent))!=
+                   visited+visited_count ||
+               !gpu_span_readable(reinterpret_cast<void const *>(
+                   uintptr_t(parent)),0x78U))
+                break;
+            uint32_t parent_kind=0,parent_signature=0;
+            std::memcpy(&parent_kind,reinterpret_cast<void const *>(
+                uintptr_t(parent)+0x0cU),4);
+            std::memcpy(&parent_signature,reinterpret_cast<void const *>(
+                uintptr_t(parent)+0x74U),4);
+            if(parent_kind==0U || parent_kind>15U ||
+               parent_signature==0U)break;
+            owner=uintptr_t(parent);
+            signature=parent_signature;
+        }
+        return (uint64_t(uint32_t(owner))<<32)|signature;
+    }
     // Pose-based shadow classification: moveType describes how a Thing CAN
     // move, not whether it currently moves. Keep per-Thing poses independently
     // of the currently selected rendering/cascade mode.
@@ -980,9 +1025,14 @@ namespace {
         }
         uint32_t const previous_flags=active_native_model_thing_flags;
         uint64_t const previous_owner=active_native_shadow_owner;
+        uint64_t const previous_family=active_native_spotlight_family;
         bool const previous_moving=active_native_shadow_dynamic;
         active_native_model_thing_flags=flags;
         active_native_shadow_owner=owner_key;
+        active_native_spotlight_family=owner_key &&
+            the_config && the_config->enable_spotlights &&
+            the_config->enable_spotlight_shadows
+            ? spotlight_shadow_family_key(owner_key) : owner_key;
         active_native_shadow_dynamic=moving;
         auto const engine_start=profiling ? std::chrono::steady_clock::now()
                                           : std::chrono::steady_clock::time_point{};
@@ -991,6 +1041,7 @@ namespace {
         uint64_t const engine_ns=profiling?elapsed_native_ns(engine_start):0;
         active_native_model_thing_flags=previous_flags;
         active_native_shadow_owner=previous_owner;
+        active_native_spotlight_family=previous_family;
         active_native_shadow_dynamic=previous_moving;
         if(profiling) {
             // The native model timer includes nested mesh-hook work.
@@ -1487,6 +1538,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     inst.shadow_only=shadow_only;
     inst.casts_sun_shadows=casts_sun_shadows;
     inst.shadow_owner=active_native_shadow_owner;
+    inst.spotlight_shadow_family=active_native_spotlight_family;
     inst.dynamic_sun_caster=active_native_shadow_dynamic;
     // Depth-only casters need no native MAT residency, point lights,
     // colormap or per-Thing lighting cap. Preserve the native render call.
@@ -5088,38 +5140,10 @@ std::vector<jkgm::spotlight_instance> jkgm::collect_spotlights_for_frame()
         // native MAT loading remains an explicit SetSpotlight-time attempt.
         spotlight_instance instance{};
         if(spotlight_make_instance(request,pose,instance,GetTickCount())) {
-            // A spotlight can be a separate invisible Thing attached to a
-            // vehicle's headlight node. The car, not merely the marker Thing,
-            // must be excluded from the spotlight's own depth map.
-            //
-            // Walk verified native SITH_ATTACH_THING parents. These pointers
-            // can be recycled, so validate both the parent layout and its
-            // identity before changing the shadow-owner key. An unattached
-            // source keeps the original Thing+identity key.
-            uintptr_t owner=request.thing;
-            uint32_t owner_identity=request.identity;
-            for(unsigned depth=0;depth<16U;++depth) {
-                if(!gpu_span_readable(reinterpret_cast<void const *>(owner),0x78U))
-                    break;
-                uint32_t flags=0,parent=0;
-                std::memcpy(&flags,reinterpret_cast<void const *>(owner+0x34U),4);
-                if((flags&native_attach_thing)==0U)break;
-                std::memcpy(&parent,reinterpret_cast<void const *>(owner+0x58U),4);
-                if(parent<0x10000U || uintptr_t(parent)==owner ||
-                   !gpu_span_readable(reinterpret_cast<void const *>(
-                       uintptr_t(parent)),0x78U))
-                    break;
-                uint32_t kind=0,signature=0;
-                std::memcpy(&kind,reinterpret_cast<void const *>(
-                    uintptr_t(parent)+0x0cU),4);
-                std::memcpy(&signature,reinterpret_cast<void const *>(
-                    uintptr_t(parent)+0x74U),4);
-                if(kind==0U || kind>15U || signature==0U)break;
-                owner=uintptr_t(parent);
-                owner_identity=signature;
-            }
-            instance.shadow_owner=
-                (uint64_t(uint32_t(owner))<<32)|owner_identity;
+            // Keep exactly the same verified attachment-root identity as
+            // the native rdModel3 GPU caster snapshot.
+            instance.shadow_owner=spotlight_shadow_family_key(
+                (uint64_t(uint32_t(request.thing))<<32)|request.identity);
             instances.push_back(instance);
         }
     }
