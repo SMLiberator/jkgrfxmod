@@ -152,6 +152,13 @@ float sun_shadow_visibility(vec3 world_position,float incidence)
 
 float sun_dynamic_shadow_visibility(vec3 position,float incidence)
 {
+    if(sun_dynamic_count==0 || sun_shadow_split<=0.0)return 1.0;
+    // The dynamic atlas is near-only even when a Thing's projected shadow
+    // footprint extends much farther than its caster bounds.
+    float distance=length(position-camera_origin.xyz);
+    if(distance>=sun_shadow_split)return 1.0;
+    float near_fade=1.0-smoothstep(
+        sun_shadow_split*0.85,sun_shadow_split,distance);
     float visibility=1.0;
     for(int i=0;i<8;++i) {
         if(i>=sun_dynamic_count)break;
@@ -197,7 +204,7 @@ float sun_dynamic_shadow_visibility(vec3 position,float incidence)
         visibility=min(visibility,object_visibility);
         if(visibility<=0.001)break;
     }
-    return visibility;
+    return mix(1.0,visibility,near_fade);
 }
 
 float spotlight_shadow_visibility(vec2 uv,float receiver_distance)
