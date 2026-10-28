@@ -5343,9 +5343,10 @@ namespace jkgm {
                                        instanced_calls,instanced_ranges);
             };
             if(!static_same) {
-                // Tile warmup temporarily bound the scrolling atlas FBO.
-                // Resume the original static target before this fallback
-                // draw; otherwise we'd overwrite unrelated cached tiles.
+                // Render static casters into the dedicated cached depth
+                // target when available, otherwise into the working cascade.
+                // The target must be explicit because earlier shadow passes
+                // may have changed the currently bound framebuffer.
                 gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                     (the_config->enable_sun_static_cache &&
                      map.static_complete) ? static_target : cascade_target);
