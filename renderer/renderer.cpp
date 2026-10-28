@@ -3278,7 +3278,8 @@ namespace jkgm {
                 else if(prev_advanced_material)
                     prog.set_advanced_material(false,0.25f);
                 prev_advanced_material=advanced;
-                bool const parallax=draw.texture.displacement_factor!=0.0f;
+                bool const parallax=!inst.camera_hud &&
+                    draw.texture.displacement_factor!=0.0f;
                 if(parallax) {
                     gl::set_active_texture_unit(9);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
@@ -3293,10 +3294,11 @@ namespace jkgm {
                 // Decals have no native point lights; ordinary per-vertex JK
                 // diffuse lighting is entirely unaffected by this switch.
                 bool const point_specular_active=
-                    the_config->enable_reflections &&
+                    !inst.camera_hud && the_config->enable_reflections &&
                     the_config->enable_dynamic_light_specular &&
                     !inst.is_projected_decal && inst.num_lights>0U;
-                bool const spec_active=draw.texture.reflection_strength>0 &&
+                bool const spec_active=!inst.camera_hud &&
+                    draw.texture.reflection_strength>0 &&
                     (draw.texture.has_environment ||
                      draw.texture.has_environment2 || sun_active ||
                      point_specular_active);
