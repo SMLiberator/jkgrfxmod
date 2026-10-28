@@ -2848,9 +2848,12 @@ namespace {
             }
             // Continue sampling SPR fades even when its original position
             // is culled, but render each mesh-local piece at its node pose.
+            float const previous_opacity=decal.opacity;
             decal.opacity=current_sprite_info(
                 reinterpret_cast<void const *>(
                     uintptr_t(uint32_t(it->first)))).opacity;
+            if(previous_opacity>0.0f && !(decal.opacity>0.0f))
+                log_moving_decal_state("sprite_opacity_zero",it->first);
             ++it;
             if(!(decal.opacity>0.0f))continue;
             for(auto &fragment:decal.fragments) {
