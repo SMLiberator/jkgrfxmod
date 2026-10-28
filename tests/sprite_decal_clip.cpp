@@ -32,6 +32,18 @@ int main() {
         {{0.1f,0.25f,0.5f}},{{0.1f,0.0f,0.5f}}
     };
     assert(clip_projected_decal(p,perpendicular,{{1,0,0}},0.05f,false).empty());
+    // Wrapping mode preserves a full-size perpendicular 3DO side face.
+    // Its XY projection has zero area, but depth supplies the missing UV
+    // direction; the 3D clipped polygon itself must remain nondegenerate.
+    auto const wrapped=clip_projected_decal(
+        p,perpendicular,{{1,0,0}},0.05f,false,true);
+    assert(wrapped.size()>=3);
+    float dmin=10.0f,dmax=-10.0f;
+    for(auto const &v:wrapped) {
+        dmin=std::min(dmin,v.depth);
+        dmax=std::max(dmax,v.depth);
+    }
+    assert(dmax-dmin>0.2f);
     // A neighboring wall crossing the box edge produces a partial polygon.
     std::vector<decal_vec3> half_wall={
         {{0,0.1f,-1}},{{0,0.1f,1}},{{1,0.1f,1}},{{1,0.1f,-1}}
