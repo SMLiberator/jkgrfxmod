@@ -1378,13 +1378,15 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     // Uploading a new VAO/VBO/EBO for each glyph is costlier than native
     // rendering, and the persistent cache otherwise retains every glyph.
     // HUD/nametag glyphs in JkGR use meshes named char0..charNN, one
-    // tiny quad each. Their parent 3DO can mix native status/overlay meshes
+    // tiny quad each. Detect by the mesh shape/name, not shadow flags, so
+    // the native fallback still works when sunlight shadows are disabled.
+    // Their parent 3DO can mix native status/overlay meshes
     // with GPU-cached glyphs, which then follow a different camera/pass
     // transform and visibly detach during camera motion. Preserve JK's
     // native path for these tiny, shadow-exempt glyphs; ordinary world
     // models and the rest of the HUD keep using the GPU cache.
     bool hud_char_glyph=false;
-    if(!casts_sun_shadows && m.num_faces==1 && m.num_vertices<=8 &&
+    if(m.num_faces==1 && m.num_vertices<=8 &&
        m.name[0]=='c' && m.name[1]=='h' &&
        m.name[2]=='a' && m.name[3]=='r') {
         unsigned index=4;
