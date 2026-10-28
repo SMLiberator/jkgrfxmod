@@ -4535,10 +4535,13 @@ namespace jkgm {
                     auto const inner=tile.size-2*sun_dynamic_shadow_inset;
                     shaded_pixels+=size_t(inner)*size_t(inner);
                 }
+                // LOG_INFO/formatter_numeric accepts integers and strings,
+                // but has no formatter<float> specialization.
+                std::string const near_distance_label=std::to_string(near_depth);
                 LOG_INFO("SUN dynamic shadow atlas Things=",
                     sun_dynamic_views.size()," candidates=",sorted.size(),
                     " outside_near_distance=",atlas_distance_culled,
-                    " near_distance=",std::to_string(near_depth),
+                    " near_distance=",near_distance_label,
                     " base_tile=",tile_size,
                     " adaptive=",the_config->sun_dynamic_shadow_adaptive_resolution?1:0,
                     " tile_sizes=[",tile_sizes.str(),"]",
