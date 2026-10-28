@@ -826,7 +826,7 @@ namespace jkgm {
                      " NOTE=delayed_nonblocking_GPU_timestamps_zero_if_no_samples");
             present_gpu_ns.fill(0U);
             present_gpu_samples=present_gpu_skipped=0U;
-            if(the_config->use_model_cache || the_config->enable_sprite_decals) {
+            if(the_config->use_model_cache || the_config->enable_decals) {
                 LOG_INFO("PERF gpu_3do fallback_native_per_frame text=",
                          profile_window.gpu_text_native/frames,
                          " geometry=",profile_window.gpu_geometry_native/frames,
@@ -1017,7 +1017,7 @@ namespace jkgm {
         void set_renderer_mode(renderer_mode mode) override
         {
             if(this->mode != mode) {
-                if(the_config->use_model_cache || the_config->enable_sprite_decals ||
+                if(the_config->use_model_cache || the_config->enable_decals ||
                    (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
                    the_config->enable_sun_shadows) {
                     // Levels recycle native mesh pointers; discard both copies.
@@ -6287,7 +6287,7 @@ namespace jkgm {
             // Material and UV caches are shared with the ordinary GPU 3DO path.
             gl::enable(gl::capability::blend);
             gl::set_depth_mask(false);
-            if(the_config->enable_sprite_decals) {
+            if(the_config->enable_decals) {
                 draw_gpu_3do_preview(true,false,true);
                 ogs->game_transparency_pass_program.use_program();
             }
@@ -6836,7 +6836,7 @@ namespace jkgm {
             // by JK. Expire their GPU resources, keeping recently reused meshes
             // without retaining every allocation for the entire level.
             // Sweep periodically to avoid iterating the cache on every frame.
-            if((the_config->use_model_cache || the_config->enable_sprite_decals ||
+            if((the_config->use_model_cache || the_config->enable_decals ||
                 (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
                 the_config->enable_sun_shadows) &&
                (gpu_3do_present_serial%16U)==0U) {
