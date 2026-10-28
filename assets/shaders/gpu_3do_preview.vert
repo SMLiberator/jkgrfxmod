@@ -13,6 +13,7 @@ layout(location=7) in float local_light_mode;
 layout(location=8) in vec3 local_vertex_rgb;
 uniform float ambient_light;
 uniform float effective_light_mode; // captured per Thing
+uniform int camera_hud_thing; // SithThing type=camera: unlit textured 3DO
 // Native JK applies these to RGB8 *vertex colors* before texturing.
 uniform vec3 colormap_tint; // nonidentity CMP header RGB multiplier
 uniform vec4 jk_color_filter; // XYZ selected channel mask, W active
@@ -53,6 +54,11 @@ void main() {
     pixel_uv=local_uv;
     local_fragment_position=local_position;
     local_fragment_normal=local_light_normal;
+    // A Camera-type Thing is a HUD overlay: no native ambient/dynamic
+    // lighting, colormap tint, palette fade or per-camera color effects.
+    if(camera_hud_thing!=0) {
+        jk_lit_rgb=vec3(1.0);
+    } else {
     // JK: FullyLit=0, NotLit=1, Diffuse=2, Gouraud=3.
     // Per-face ExtraLight and the camera's ambient floor are evaluated
     // before the gamma-1.8 vertex conversion (like the native D3D path).
@@ -104,6 +110,7 @@ void main() {
         v=clamp(v+jk_color_add_fade.xyz,0.0,1.0);
         v*=jk_color_add_fade.w;
         jk_lit_rgb=pow(clamp(v,0.0,1.0),vec3(1.8));
+    }
     }
     // Match the patched native 3DO normal sideband. Non-Gouraud faces can
     // still carry smooth vertex normals for SSAO; lighting-mode selection
