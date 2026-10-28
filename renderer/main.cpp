@@ -331,6 +331,14 @@ namespace {
     };
     std::unordered_map<moving_mesh_occurrence_key,uint32_t,
         moving_mesh_occurrence_hash> moving_mesh_occurrences;
+    struct native_moving_decal_receiver {
+        uint64_t thing=0;
+        uintptr_t model=0,mesh=0;
+        uint64_t revision=0;
+        uint32_t occurrence=0;
+        jkgm::gpu_3do_matrix34 transform{};
+    };
+    std::vector<native_moving_decal_receiver> native_moving_decal_receivers;
     void append_moving_sprite_decals();
     void clear_moving_sprite_decals();
     uint64_t next_gpu_id=1;
@@ -1123,6 +1131,26 @@ namespace {
         auto const queue_begin=profiling ? std::chrono::steady_clock::now()
                                         : std::chrono::steady_clock::time_point{};
         bool const queued=jkgm::queue_gpu_3do_mesh(mesh,placement);
+        // Actors and some vehicles can legitimately use native rendering
+        // (unsupported face/lighting mode or MAT warm-up). Retain just the
+        // mesh identity and transform; extract geometry only if a nearby
+        // SPR decal needs a receiver at frame end.
+        if(!queued && the_config && the_config->enable_decals &&
+           active_native_decal_receiver && active_native_shadow_owner &&
+           active_native_decal_model && mesh && placement &&
+           native_moving_decal_receivers.size()<16384U &&
+           gpu_span_readable(placement,12U*sizeof(float))) {
+            native_moving_decal_receiver item{};
+            item.thing=active_native_shadow_owner;
+            item.model=active_native_decal_model;
+            item.mesh=reinterpret_cast<uintptr_t>(mesh);
+            item.revision=mesh_revision::current();
+            item.occurrence=++moving_mesh_occurrences[
+                {item.thing,item.mesh}];
+            std::memcpy(item.transform.data(),placement,12U*sizeof(float));
+            if(jkgm::gpu_3do_matrix_finite(item.transform))
+                native_moving_decal_receivers.push_back(std::move(item));
+        }
         // Inspect native RLU matrices BEFORE GPU eligibility filters can
         // discard a mesh. A zero in the renderer-side RLU diagnostic does
         // not establish that Sith never supplied a scaled node.
@@ -1696,6 +1724,7 @@ std::vector<jkgm::gpu_3do_instance> jkgm::consume_gpu_3do_instances()
     append_moving_sprite_decals();
     out.swap(pending_gpu_instances);
     moving_mesh_occurrences.clear();
+    native_moving_decal_receivers.clear();
     ++gpu_frame_serial;
     return out;
 }
@@ -1703,6 +1732,7 @@ void jkgm::reset_gpu_3do_instances()
 {
     pending_gpu_instances.clear();
     moving_mesh_occurrences.clear();
+    native_moving_decal_receivers.clear();
     clear_moving_sprite_decals();
     gpu_mesh_cache.clear();
     gpu_mat_residency.clear();
