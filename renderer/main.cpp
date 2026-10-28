@@ -2996,13 +2996,6 @@ namespace {
         }
         uint64_t const key=(uint64_t(world)<<32) |
             uint32_t(reinterpret_cast<uintptr_t>(rd_thing));
-        if(try_submit_moving_sprite_decal(
-                key,world,sprite,rd_thing,m,size,offset,roll,info,
-                resource,owner,thing_signature))
-            return true;
-        // If a moving decal was projected but its native MAT still needs
-        // warming, never accidentally reproject it onto nearby static faces.
-        if(moving_sprite_decals.count(key))return false;
         auto it=sprite_gpu_decals.find(key);
         bool const hit=it!=sprite_gpu_decals.end() &&
             it->second.object_revision==sprite_static_revision &&
@@ -3016,6 +3009,19 @@ namespace {
             (!attached_to_face ||
              jkgm::sprite_decal_normals_stable(
                  it->second.attached_normal,attached_normal));
+        // Preserve the static decal cache's O(1) steady state. Only search
+        // moving 3DO receivers when this SPR has no valid static projection,
+        // or when it already owns a moving receiver. Otherwise every blood
+        // splat on the level would rescan cars on EVERY render frame.
+        bool const had_moving=moving_sprite_decals.count(key)!=0;
+        if((!hit || had_moving) &&
+           try_submit_moving_sprite_decal(
+               key,world,sprite,rd_thing,m,size,offset,roll,info,
+               resource,owner,thing_signature))
+            return true;
+        // Keep native MAT warm-up without accidentally projecting an
+        // attached moving decal onto stationary level geometry.
+        if(had_moving || moving_sprite_decals.count(key))return false;
         if(!hit) {
             // Surface normals are needed BEFORE constructing the projector.
             // Unattached impact sprites generally retain UP=(0,0,1), even
