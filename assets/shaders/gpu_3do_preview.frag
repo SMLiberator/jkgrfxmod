@@ -390,6 +390,7 @@ uniform vec4 translucent_sun_map_y[10];
 uniform vec4 translucent_sun_map_z[10];
 uniform vec4 translucent_sun_tile_rect[8];
 uniform float translucent_sun_distance_softness;
+uniform float translucent_sun_max_distance; // 0 = unlimited, native-pass parity
 uniform float translucent_sun_caster_depth[8]; // normalized light-space AABB max
 uniform sampler2DShadow translucent_sun_near_depth;
 uniform sampler2DShadow translucent_sun_far_depth;
@@ -491,10 +492,20 @@ vec3 illuminate_translucent_sun(vec3 baked,vec3 pigment,float opacity,
     // independently of that incidence. Direct added sunlight still respects
     // the geometric incidence for ordinary translucent surfaces.
     vec3 world=translucent_spotlight_world_pos(depth);
+    // Match the native alpha pass and opaque composite: smoothly fade
+    // sunlight over the final 15 percent of its configured distance.
+    float range_fade=1.0;
+    if(translucent_sun_max_distance>0.0) {
+        float forward=dot(world-translucent_spotlight_camera_origin.xyz,
+                          translucent_spotlight_camera_forward.xyz);
+        range_fade=1.0-smoothstep(translucent_sun_max_distance*0.85,
+                                  translucent_sun_max_distance,forward);
+        if(range_fade<=0.0)return baked;
+    }
     float visibility=translucent_sun_visibility(world,max(incidence,0.35));
-    vec3 dimmed=baked*(1.0-0.75*(1.0-visibility));
+    vec3 dimmed=baked*(1.0-0.75*range_fade*(1.0-visibility));
     vec3 radiance=pigment*translucent_sun_color.rgb*
-                  translucent_sun_color.a*incidence*visibility*opacity;
+                  translucent_sun_color.a*incidence*visibility*opacity*range_fade;
     return dimmed+radiance*(vec3(1.0)-clamp(dimmed,vec3(0.0),vec3(1.0)));
 }
 
