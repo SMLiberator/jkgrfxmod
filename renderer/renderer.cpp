@@ -5351,37 +5351,7 @@ namespace jkgm {
                     sun_shadow_static_directions[cascade]=direction;
                 }
             }
-            if(use_scroll) {
-                auto const blit_begin=std::chrono::steady_clock::now();
-                // The existing receiver shaders still expect a conventional
-                // camera-fitted near/far depth map. Depth-only GPU blits
-                // reconstruct it from the circular static atlas (GL_NEAREST),
-                // then dynamic 3DOs draw directly into this working texture.
-                gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                                     cascade_target);
-                gl::clear_buffer_depth(1.0f);
-                auto const &scroll_target=cascade==0
-                    ?map.scroll_fbo:map.scroll_far_fbo;
-                gl::bind_framebuffer(gl::framebuffer_bind_target::read,
-                                     scroll_target);
-                gl::bind_framebuffer(gl::framebuffer_bind_target::draw,
-                                     cascade_target);
-                for(auto const &part:scroll_blits) {
-                    gl::blit_framebuffer(
-                        make_box(make_point(part.source_x0,part.source_y0),
-                            make_size(part.source_x1-part.source_x0,
-                                      part.source_y1-part.source_y0)),
-                        make_box(make_point(part.target_x0,part.target_y0),
-                            make_size(part.target_x1-part.target_x0,
-                                      part.target_y1-part.target_y0)),
-                        {gl::framebuffer_blit_buffer::depth},
-                        gl::framebuffer_blit_filter::nearest);
-                }
-                if(the_config->profile_renderer)
-                    sun_scroll_blit_cpu_us[cascade]+=
-                        std::chrono::duration_cast<std::chrono::microseconds>(
-                            std::chrono::steady_clock::now()-blit_begin).count();
-            } else if(map.static_complete &&
+            if(map.static_complete &&
                the_config->enable_sun_static_cache) {
                 // Copy the static depth on GPU (no readback) and depth-test
                 // current 3DOs against it. Even dynamic Thing updates no
@@ -5427,7 +5397,6 @@ namespace jkgm {
             sun_shadow_revisions[cascade]=map.revision;
             sun_shadow_cascade_cached[cascade]=true;
             sun_shadow_caster_signatures[cascade]=caster_signature;
-            sun_scroll_working_active[cascade]=use_scroll;
             sun_shadow_cascade_ready[cascade]=true;
             } // cascade
             sun_shadow_ready=sun_shadow_cascade_ready[0] &&
