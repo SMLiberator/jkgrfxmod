@@ -3400,8 +3400,12 @@ namespace {
             (!attached_to_face ||
              jkgm::sprite_decal_normals_stable(
                  it->second.attached_normal,attached_normal));
-        // A cached moving decal is rendered from its receiver even if its
-        // original SPR is culled. Never additionally draw a static copy.
+        // A projected SPR may have TWO independently cached receivers:
+        // static world/3DO architecture and a moving Thing. Keep both
+        // surfaces visible; moving the Thing must not expose a blood pool
+        // that was incorrectly hidden underneath it.
+        bool moving_ready=false;
+        bool has_moving=false;
         auto moving=moving_sprite_decals.find(key);
         if(moving!=moving_sprite_decals.end()) {
             if(moving->second.world==world &&
@@ -3416,19 +3420,22 @@ namespace {
                        return moving_sprite_decal_receiver_alive(fragment);
                    })) {
                 moving->second.opacity=info.opacity;
-                return std::all_of(moving->second.fragments.begin(),
-                                   moving->second.fragments.end(),
-                   [](moving_sprite_decal_fragment const &fragment) {
-                       return fragment.geometry &&
-                           gpu_mesh_materials_ready(*fragment.geometry);
-                   });
+                has_moving=true;
+                moving_ready=std::all_of(
+                    moving->second.fragments.begin(),
+                    moving->second.fragments.end(),
+                    [](moving_sprite_decal_fragment const &fragment) {
+                        return fragment.geometry &&
+                            gpu_mesh_materials_ready(*fragment.geometry);
+                    });
+            } else {
+                moving_sprite_decals.erase(moving);
             }
-            moving_sprite_decals.erase(moving);
         }
         // Registration only: the frame-end pass resolves the request against
         // the COMPLETE visible model list. This avoids drawing-order bugs
         // where a sprite arrives before its actor/car model.
-        if(owner>=0x10000U && thing_signature!=0 &&
+        if(!has_moving && owner>=0x10000U && thing_signature!=0 &&
            pending_moving_decal_requests.size()<2048U) {
             auto const trial=moving_decal_trials.find(key);
             bool const may_retry=trial==moving_decal_trials.end() ||
@@ -3471,7 +3478,7 @@ namespace {
                        <<" build_us="<<micros;
                     LOG_INFO(msg.str());
                 }
-                if(!ok)return false;
+                if(!ok)return moving_ready;
             }
             rebuild_static_sprite_decal_receivers(world);
             jkgm::sprite_axes axes{
@@ -3510,7 +3517,7 @@ namespace {
             if(aligned_to_receiver) {
                 jkgm::sprite_axes aligned{};
                 if(!jkgm::sprite_decal_attachment_axes(
-                       axes,chosen_normal,aligned))return false;
+                       axes,chosen_normal,aligned))return moving_ready;
                 axes=aligned;
             }
             jkgm::decal_projector projector{};
@@ -3518,7 +3525,7 @@ namespace {
                 axes,{{m[9],m[10],m[11]}},
                 {{offset[0],offset[1],offset[2]}},
                 size[0],size[1],info.width,info.height,roll,projector))
-                return false;
+                return moving_ready;
             auto scan=jkgm::project_cached_decal_world(
                 sprite_world_geometry,projector,2048U);
             uint32_t object_triangles=0,object_receivers=0;
@@ -3566,7 +3573,7 @@ namespace {
             // invalidate the key, so impact recomputes the projected shape.
             if(!ready && (!scan.valid_world || scan.truncated ||
                           !scan.triangles.empty()))
-                return false;
+                return moving_ready;
             cached_runtime_sprite_decal entry{};
             entry.world=world;
             entry.resource=sprite;
@@ -3612,14 +3619,14 @@ namespace {
                          " id=",it->second.id);
         }
         it->second.last_seen_frame=gpu_frame_serial;
-        if(!it->second.geometry)return false; // Cached no-receiver.
+        if(!it->second.geometry)return moving_ready; // Cached no-receiver.
         if(!gpu_mesh_materials_ready(*it->second.geometry)) {
             if(the_config->profile_renderer &&
                sprite_decal_material_logs++<12U)
                 LOG_INFO("SPR decal GPU stage=mat_wait id=",it->second.id,
                          " native_proc_warmup=",
                          sprite_alpha_hook_active);
-            return false;
+            return moving_ready;
         }
         if(the_config->profile_renderer &&
            sprite_decal_material_logs++<12U)
