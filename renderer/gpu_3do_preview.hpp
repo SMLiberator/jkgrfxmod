@@ -64,6 +64,7 @@ namespace jkgm {
         bool nonrigid_light_transform=false;
         bool is_projected_decal=false; // world-space clipped type-3 SPR
         bool shadow_only=false; // native 3DO remains JK-rendered; cache is for depth only
+        bool camera_hud=false; // SithThing type=camera: composite unlit after post
         bool casts_sun_shadows=true; // SithThing 0x20: no sun/spot shadows; GPU skips extra light/SSAO
         uint64_t shadow_owner=0; // pointer + signature, not shared rdMesh id
         // Attachment-root owner for spotlight self-shadow suppression only.
