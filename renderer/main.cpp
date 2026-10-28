@@ -3079,6 +3079,16 @@ namespace {
         jkgm::sprite_decal_resource const &resource,
         uint32_t sprite_owner,uint32_t sprite_signature)
     {
+        auto trace_probe=[&](char const *outcome,uint32_t triangles=0U) {
+            if(!the_config || !the_config->profile_renderer)return;
+            static unsigned logs=0;
+            if(logs++>=80U)return;
+            LOG_INFO("SPR moving probe outcome=",outcome,
+                     " sprite=",sprite_key,
+                     " gpu_instances=",pending_gpu_instances.size(),
+                     " native_instances=",native_moving_decal_receivers.size(),
+                     " triangles=",triangles);
+        };
         auto existing=moving_sprite_decals.find(sprite_key);
         if(existing!=moving_sprite_decals.end()) {
             auto &old=existing->second;
@@ -3154,7 +3164,10 @@ namespace {
             best_normal=hit.normal;
             best_world=std::move(receivers);
         }
-        if(best_gpu==invalid && best_native==invalid)return false;
+        if(best_gpu==invalid && best_native==invalid) {
+            trace_probe("no_near_receiver");
+            return false;
+        }
         bool const native_fallback=best_native!=invalid;
         auto const &native_receiver=native_fallback
             ?native_moving_decal_receivers[best_native]
@@ -3187,10 +3200,17 @@ namespace {
         jkgm::sprite_decal_mesh mesh{};
         if(!jkgm::make_sprite_decal_gpu_mesh(
                 scan,projector,resource.material,resource.texcoords,
-                info.opacity,mesh) || !mesh.geometry ||
-           !jkgm::sprite_decal_geometry_to_receiver_local(
-                *mesh.geometry,receiver_transform))
+                info.opacity,mesh) || !mesh.geometry) {
+            trace_probe("projection_or_gpu_mesh_failed",
+                        static_cast<uint32_t>(scan.triangles.size()));
             return false;
+        }
+        if(!jkgm::sprite_decal_geometry_to_receiver_local(
+                *mesh.geometry,receiver_transform)) {
+            trace_probe("receiver_transform_noninvertible",
+                        static_cast<uint32_t>(scan.triangles.size()));
+            return false;
+        }
 
         moving_sprite_decal entry{};
         entry.world=world;
