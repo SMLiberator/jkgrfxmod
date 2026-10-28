@@ -237,7 +237,7 @@ namespace jkgm {
     inline decal_world_scan project_cached_decal_world(
         decal_world_geometry const &geometry,
         decal_projector const &projector,uint32_t max_output_triangles=2048,
-        bool offset_surface_geometry=true)
+        bool offset_surface_geometry=true,bool wrap_steep_faces=false)
     {
         decal_world_scan result{};
         if(!geometry.valid_world || !valid_decal_projector(projector) ||
@@ -265,12 +265,14 @@ namespace jkgm {
             // unrestricted acceptance painted bottom and top simultaneously.
             // Only reject normals that point meaningfully away from the
             // projector (no sharp angle limit on adjacent surfaces).
-            if(decal_dot(s.normal,projector.look)>0.05f) {
+            if(decal_dot(s.normal,projector.look)>
+                   (wrap_steep_faces?0.35f:0.05f)) {
                 ++result.skipped_backfaces;
                 continue;
             }
             auto clipped=clip_projected_decal(
-                projector,s.polygon,s.normal,0.05f,false);
+                projector,s.polygon,s.normal,0.05f,false,
+                wrap_steep_faces);
             if(clipped.size()<3) {
                 ++result.skipped_projection;
                 continue;
