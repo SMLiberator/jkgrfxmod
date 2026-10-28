@@ -339,6 +339,11 @@ namespace {
         jkgm::gpu_3do_matrix34 transform{};
     };
     std::vector<native_moving_decal_receiver> native_moving_decal_receivers;
+    // Don't add per-mesh sidecar traffic in ordinary gameplay with no
+    // moving decals. Late Sprite callbacks can still request several frames
+    // of capture to handle draw-order differences.
+    uint64_t native_decal_capture_until=0;
+    bool native_decal_following=false;
     void append_moving_sprite_decals();
     void clear_moving_sprite_decals();
     uint64_t next_gpu_id=1;
@@ -1136,6 +1141,8 @@ namespace {
         // mesh identity and transform; extract geometry only if a nearby
         // SPR decal needs a receiver at frame end.
         if(!queued && the_config && the_config->enable_decals &&
+           (native_decal_following ||
+            gpu_frame_serial<=native_decal_capture_until) &&
            active_native_decal_receiver && active_native_shadow_owner &&
            active_native_decal_model && mesh && placement &&
            native_moving_decal_receivers.size()<16384U &&
@@ -1733,6 +1740,8 @@ void jkgm::reset_gpu_3do_instances()
     pending_gpu_instances.clear();
     moving_mesh_occurrences.clear();
     native_moving_decal_receivers.clear();
+    native_decal_following=false;
+    native_decal_capture_until=0;
     clear_moving_sprite_decals();
     gpu_mesh_cache.clear();
     gpu_mat_residency.clear();
@@ -2649,6 +2658,8 @@ namespace {
         moving_sprite_decals.clear();
         pending_moving_decal_requests.clear();
         moving_decal_trials.clear();
+        native_decal_following=false;
+        native_decal_capture_until=0;
     }
 
     bool moving_sprite_decal_source_alive(moving_sprite_decal const &entry,
@@ -2750,6 +2761,9 @@ namespace {
                 else ++it;
             }
         }
+        native_decal_following=std::any_of(
+            moving_sprite_decals.begin(),moving_sprite_decals.end(),
+            [](auto const &entry){return entry.second.native_fallback;});
         if(moving_sprite_decals.empty())return;
         for(auto it=moving_sprite_decals.begin();
             it!=moving_sprite_decals.end();) {
@@ -2811,6 +2825,9 @@ namespace {
             decal.last_visible_frame=gpu_frame_serial;
             pending_gpu_instances.push_back(std::move(inst));
         }
+        native_decal_following=std::any_of(
+            moving_sprite_decals.begin(),moving_sprite_decals.end(),
+            [](auto const &entry){return entry.second.native_fallback;});
     }
     jkgm::decal_world_geometry sprite_world_geometry;
     unsigned sprite_decal_submit_logs=0;
@@ -3349,6 +3366,8 @@ namespace {
                 request.owner=owner;
                 request.signature=thing_signature;
                 pending_moving_decal_requests.push_back(std::move(request));
+                native_decal_capture_until=std::max(
+                    native_decal_capture_until,gpu_frame_serial+5U);
             }
         }
         if(!hit) {
