@@ -3037,11 +3037,18 @@ namespace jkgm {
                             ++profile_frame.gpu_material_resolves;
                     }
                     auto const &tex=found->second;
-                    if(!post_exempt && tex.post_exempt) {
+                    // Camera Things are an instance-level HUD layer. The
+                    // same 3DO and MAT on an ordinary Thing remain in-scene.
+                    bool const exempt=inst.camera_hud || tex.post_exempt;
+                    if(!post_exempt && exempt) {
                         frame_has_exempt_gpu=true;
-                        frame_exempt_gpu_meshes.insert(inst.id);
+                        // Legacy MAT skip_post_processing still applies to
+                        // every instance sharing that material. Camera type
+                        // must NEVER mark the mesh ID for other Things.
+                        if(tex.post_exempt)
+                            frame_exempt_gpu_meshes.insert(inst.id);
                     }
-                    if(tex.post_exempt!=post_exempt) continue;
+                    if(exempt!=post_exempt) continue;
                     // Projected SPRs are always alpha-composited over
                     // the existing opaque architecture and depth-tested.
                     // The MAT may be fully opaque; its native SPR instance
@@ -3197,6 +3204,7 @@ namespace jkgm {
                                          make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(it->second->vao);
                     prog.set_lighting(inst);
+                    prog.set_camera_hud_thing(inst.camera_hud);
                     // 0x20 suppresses JkGRfxMod light-reception effects on
                     // GPU-cached 3DOs, not the authored JK vertex lighting.
                     // Native D3D triangles do not carry per-Thing flags here.
@@ -6322,12 +6330,14 @@ namespace jkgm {
             }
             deferred_gpu_3do_instances.clear();
             deferred_gpu_3do_camera={};
-            if(frame_has_exempt_gpu && the_config->enable_post) {
+            if(frame_has_exempt_gpu) {
                 deferred_gpu_3do_camera=frame_gpu_3do_camera;
-                // Only retain meshes that actually contain flagged materials,
-                // not every car/NPC in a level with one GUI font.
+                // Carry a Camera Thing by INSTANCE even when its rdMesh ID
+                // and MATs are shared with an ordinary world Thing.
                 for(auto &inst:frame_gpu_3do_instances)
-                    if(frame_exempt_gpu_meshes.count(inst.id))
+                    if(inst.camera_hud ||
+                       (the_config->enable_post &&
+                        frame_exempt_gpu_meshes.count(inst.id)))
                         deferred_gpu_3do_instances.push_back(std::move(inst));
             }
             frame_has_exempt_gpu=false;
