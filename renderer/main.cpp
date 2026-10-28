@@ -3265,7 +3265,7 @@ namespace {
                !receiver_world.valid_world || receiver_world.receivers.empty())
                 return;
             auto scan=jkgm::project_cached_decal_world(
-                receiver_world,projector,remaining);
+                receiver_world,projector,remaining,false);
             if(scan.truncated || scan.triangles.empty())return;
             jkgm::sprite_decal_mesh mesh{};
             if(!jkgm::make_sprite_decal_gpu_mesh(
