@@ -1316,7 +1316,11 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     if(!(shadow_only
           ? jkgm::thing_shadow_geomode_visible(current_geo_mode,m.geometry_mode)
           : jkgm::gpu_3do_supports_geo_mode(current_geo_mode,m.geometry_mode))) {
-        if(the_config->profile_renderer) ++gpu_native_stats.geometry_native;
+        if(the_config->profile_renderer) {
+            ++gpu_native_stats.geometry_native;
+            if(current_geo_mode!=4)++gpu_native_stats.geo_thing_not_full;
+            else ++gpu_native_stats.geo_mesh_not_full;
+        }
         gpu_log_fallback(m,"geometry_mode_not_full");
         return false; // Preserve JK vertex/wire/solid/invisible rendering.
     }
@@ -1372,7 +1376,10 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             gpu_native_stats.source_ns+=elapsed_native_ns(start);
         }
         if(!readable) {
-            if(profiling) ++gpu_native_stats.snapshot_native;
+            if(profiling) {
+                ++gpu_native_stats.snapshot_native;
+                ++gpu_native_stats.snapshot_source_rejected;
+            }
             gpu_log_fallback(m,"invalid_mesh_source_memory");
             return false;
         }
@@ -1431,6 +1438,19 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             ++gpu_native_stats.snapshot_native;
             if(!snapshot_attempted_this_call)
                 ++gpu_native_stats.failed_snapshot_reuses;
+            char const *reason=it->second.snapshot_failure;
+            if(reason && std::strcmp(reason,"non_simple_or_degenerate_face")==0)
+                ++gpu_native_stats.snapshot_triangulation_rejected;
+            else if(reason && (
+                    std::strcmp(reason,"invalid_face_mode_or_face_indices")==0 ||
+                    std::strcmp(reason,"textured_face_missing_uv")==0 ||
+                    std::strcmp(reason,"invalid_mesh_or_face_light_mode")==0 ||
+                    std::strcmp(reason,"missing_gouraud_normals_or_lights")==0 ||
+                    std::strcmp(reason,"invalid_anchor_index")==0 ||
+                    std::strcmp(reason,"invalid_position_index")==0 ||
+                    std::strcmp(reason,"invalid_uv_index")==0))
+                ++gpu_native_stats.snapshot_face_rejected;
+            else ++gpu_native_stats.snapshot_other_rejected;
         }
         gpu_log_fallback(m,it->second.snapshot_failure ?
                          it->second.snapshot_failure : "unknown_snapshot_error");
@@ -1500,6 +1520,39 @@ jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
 {
     auto const sample=gpu_native_stats;
     gpu_native_stats={};
+    // Aggregate across scenes/frames rather than logging thousands of
+    // repeated fallback meshes. Distinguish unsupported render modes from
+    // fixable geometry snapshot failures using the exact native reason.
+    if(the_config && the_config->profile_renderer) {
+        static unsigned frames=0;
+        static gpu_3do_native_stats window{};
+        ++frames;
+        window.geometry_native+=sample.geometry_native;
+        window.geo_thing_not_full+=sample.geo_thing_not_full;
+        window.geo_mesh_not_full+=sample.geo_mesh_not_full;
+        window.snapshot_native+=sample.snapshot_native;
+        window.snapshot_source_rejected+=sample.snapshot_source_rejected;
+        window.snapshot_face_rejected+=sample.snapshot_face_rejected;
+        window.snapshot_triangulation_rejected+=
+            sample.snapshot_triangulation_rejected;
+        window.snapshot_other_rejected+=sample.snapshot_other_rejected;
+        window.material_native+=sample.material_native;
+        window.lighting_native+=sample.lighting_native;
+        if(frames>=120U) {
+            LOG_INFO("PERF GPU fallback taxonomy frames=",frames,
+                     " geometry_thing=",window.geo_thing_not_full,
+                     " geometry_mesh=",window.geo_mesh_not_full,
+                     " snapshot_source=",window.snapshot_source_rejected,
+                     " snapshot_face=",window.snapshot_face_rejected,
+                     " snapshot_triangulation=",
+                     window.snapshot_triangulation_rejected,
+                     " snapshot_other=",window.snapshot_other_rejected,
+                     " material=",window.material_native,
+                     " lighting=",window.lighting_native);
+            frames=0;
+            window={};
+        }
+    }
     return sample;
 }
 std::vector<jkgm::gpu_3do_instance> jkgm::consume_gpu_3do_instances()
