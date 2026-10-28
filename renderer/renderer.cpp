@@ -803,6 +803,15 @@ namespace jkgm {
                          " avg_VirtualQuery=",
                          profile_window.gpu_native_span_queries/frames,
                          " NOTE=positive_regions_only_per_frame");
+                {
+                    // Cumulative since start; subtract consecutive lines for a
+                    // rate. Every guarded native read goes through this cache.
+                    auto const &shared=
+                        engine_camera_detail::shared_readable_cache();
+                    LOG_INFO("PERF shared_readable_cache hits_total=",shared.hits,
+                             " VirtualQuery_total=",shared.queries,
+                             " NOTE=cumulative_render_thread");
+                }
                 auto const &current_fog=get_fog_settings();
                 auto const fog_params=current_fog.info.value();
                 // The lightweight logger only formats integral values and
