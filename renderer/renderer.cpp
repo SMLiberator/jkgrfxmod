@@ -827,9 +827,8 @@ namespace jkgm {
             present_gpu_ns.fill(0U);
             present_gpu_samples=present_gpu_skipped=0U;
             if(the_config->use_model_cache || the_config->enable_decals) {
-                LOG_INFO("PERF gpu_3do fallback_native_per_frame text=",
-                         profile_window.gpu_text_native/frames,
-                         " geometry=",profile_window.gpu_geometry_native/frames,
+                LOG_INFO("PERF gpu_3do fallback_native_per_frame geometry=",
+                         profile_window.gpu_geometry_native/frames,
                          " snapshot=",profile_window.gpu_snapshot_native/frames,
                          " material=",profile_window.gpu_material_native/frames,
                          " lighting_or_camera=",profile_window.gpu_lighting_native/frames,
@@ -6882,7 +6881,6 @@ namespace jkgm {
                 profile_frame.gpu_empty_mesh_native+=stats.empty_mesh_native;
                 profile_frame.gpu_native_span_cache_hits+=stats.native_span_cache_hits;
                 profile_frame.gpu_native_span_queries+=stats.native_span_queries;
-                profile_frame.gpu_text_native+=stats.text_native;
                 profile_frame.gpu_geometry_native+=stats.geometry_native;
                 profile_frame.gpu_snapshot_native+=stats.snapshot_native;
                 profile_frame.gpu_material_native+=stats.material_native;
