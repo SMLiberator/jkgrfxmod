@@ -313,6 +313,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , scene_depth_sampler(gl::get_uniform_location(the_program,"scene_depth"))
     , advanced_material_params(gl::get_uniform_location(the_program,"advanced_material_params"))
     , post_exempt_pass(gl::get_uniform_location(the_program,"post_exempt_pass"))
+    , camera_hud_thing(gl::get_uniform_location(the_program,"camera_hud_thing"))
     , world_lighting_exempt(gl::get_uniform_location(
         the_program,"world_lighting_exempt"))
     , decal_light_texture(gl::get_uniform_location(the_program,"decal_light_texture"))
@@ -531,6 +532,11 @@ void jkgm::shaders::gpu_3do_preview_shader::set_world_lighting_exempt(
 void jkgm::shaders::gpu_3do_preview_shader::set_post_exempt(bool enabled)
 {
     gl::set_uniform_integer(post_exempt_pass,enabled?1:0);
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_camera_hud_thing(bool enabled)
+{
+    gl::set_uniform_integer(camera_hud_thing,enabled?1:0);
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_decal_receiver_lighting(
