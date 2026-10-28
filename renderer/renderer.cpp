@@ -3866,6 +3866,11 @@ namespace jkgm {
             };
             std::vector<shadow_3do_range> model_casters;
             size_t excluded_source_ranges=0;
+            size_t excluded_source_exact=0;
+            size_t excluded_source_family=0;
+            size_t neighboring_other_ranges=0;
+            uint64_t nearest_other_owner=0;
+            float nearest_other_distance2=std::numeric_limits<float>::max();
             auto const light_bounds=spotlight_shadow_volume_bounds(view);
             {
                 for(auto const &instance:frame_gpu_3do_instances) {
@@ -3880,8 +3885,13 @@ namespace jkgm {
                     // This also handles a separate light marker attached to
                     // a parent car's model node (validated parent-chain key).
                     if(chosen.shadow_owner!=0 &&
-                       instance.shadow_owner==chosen.shadow_owner) {
-                        excluded_source_ranges+=instance.geometry->groups.size();
+                       (instance.shadow_owner==chosen.shadow_owner ||
+                        instance.spotlight_shadow_family==chosen.shadow_owner)) {
+                        size_t const ranges=instance.geometry->groups.size();
+                        excluded_source_ranges+=ranges;
+                        if(instance.shadow_owner==chosen.shadow_owner)
+                            excluded_source_exact+=ranges;
+                        else excluded_source_family+=ranges;
                         continue;
                     }
                     auto const &m=instance.transform;
@@ -3909,6 +3919,25 @@ namespace jkgm {
                         if(!decal_aabbs_overlap(low,high,
                                                 light_bounds.low,light_bounds.high))
                             continue;
+                        // Diagnostic only: nearby non-family casters may
+                        // represent separate COG-controlled car parts. Never
+                        // suppress them speculatively; they could be walls.
+                        float near2=0.0f;
+                        for(int axis=0;axis<3;++axis) {
+                            float const d=std::max(std::max(
+                                low[axis]-chosen.origin[axis],
+                                chosen.origin[axis]-high[axis]),0.0f);
+                            near2+=d*d;
+                        }
+                        float const radius=std::min(
+                            1.0f,std::max(0.1f,chosen.range*0.01f));
+                        if(near2<radius*radius) {
+                            ++neighboring_other_ranges;
+                            if(near2<nearest_other_distance2) {
+                                nearest_other_distance2=near2;
+                                nearest_other_owner=instance.shadow_owner;
+                            }
+                        }
                         // A spotlight mounted within its source 3DO must not
                         // have that mesh's inside/backside block its own beam.
                         if(spotlight_shadow_origin_inside(chosen.origin,low,high))
@@ -4063,6 +4092,10 @@ namespace jkgm {
                 LOG_INFO("SHADOW spotlight: world_surfaces=",map.mesh.surfaces.size(),
                          " model_ranges=",model_casters.size(),
                          " excluded_source_ranges=",excluded_source_ranges,
+                         " excluded_exact=",excluded_source_exact,
+                         " excluded_attached=",excluded_source_family,
+                         " nearby_other_ranges=",neighboring_other_ranges,
+                         " nearest_other_owner=",nearest_other_owner,
                          " source_owner=",chosen.shadow_owner,
                          " model_cache=",the_config->use_model_cache?1:0,
                          " reused=",spotlight_shadow_cached &&
