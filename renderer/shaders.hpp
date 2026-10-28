@@ -208,6 +208,7 @@ namespace jkgm {
             gl::uniform_location_id albedo2_sampler,albedo_transition_info;
             gl::uniform_location_id scene_depth_sampler,advanced_material_params;
             gl::uniform_location_id post_exempt_pass;
+            gl::uniform_location_id camera_hud_thing;
             gl::uniform_location_id world_lighting_exempt;
             gl::uniform_location_id decal_light_texture,decal_occlusion;
             gl::uniform_location_id decal_receiver_lighting;
@@ -272,6 +273,7 @@ namespace jkgm {
                 point<4,float> up,point<4,float> forward,
                 point<2,float> strengths,point<4,float> bounds);
             void set_post_exempt(bool enabled);
+            void set_camera_hud_thing(bool enabled);
             void set_world_lighting_exempt(bool enabled);
             void set_decal_receiver_lighting(bool enabled,int light,int ao);
             void set_advanced_material(bool clipped,float fluid_thickness);
