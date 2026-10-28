@@ -112,6 +112,31 @@ inline std::vector<decal_vertex> clip_projected_decal(
         clipped.swap(out);
         if(clipped.size()>256) return {}; // reject invalid/repeated geometry
     }
+    // Sutherland-Hodgman can insert the SAME corner twice when a model
+    // triangle intersects two adjacent projector planes, e.g. the two
+    // triangles of a square centered under a bullet-hole projector.
+    // Those duplicate vertices later create zero-area fan triangles and
+    // make the GPU decal mesh builder reject the *entire* projection.
+    //
+    // Compare all three projector coordinates: unlike comparing UV alone,
+    // this preserves distinct depth vertices on a perpendicular face.
+    auto const same_vertex=[](decal_vertex const &a,
+                              decal_vertex const &b) {
+        constexpr float epsilon=1.e-5f;
+        return std::fabs(a.u-b.u)<=epsilon &&
+               std::fabs(a.v-b.v)<=epsilon &&
+               std::fabs(a.depth-b.depth)<=epsilon;
+    };
+    std::vector<decal_vertex> unique;
+    unique.reserve(clipped.size());
+    for(auto const &v:clipped)
+        if(unique.empty() || !same_vertex(unique.back(),v))
+            unique.push_back(v);
+    if(unique.size()>1 && same_vertex(unique.front(),unique.back()))
+        unique.pop_back();
+    clipped.swap(unique);
+    if(clipped.size()<3)return {};
+
     // Filter degenerate polygons (UV area approximately zero).
     double area=0;
     for(size_t i=0;i<clipped.size();++i) {
