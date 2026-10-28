@@ -497,7 +497,6 @@ uniform vec4 translucent_sun_map_x[10];
 uniform vec4 translucent_sun_map_y[10];
 uniform vec4 translucent_sun_map_z[10];
 uniform vec4 translucent_sun_tile_rect[8];
-uniform float translucent_sun_caster_depth[8]; // normalized light-space AABB max
 uniform sampler2DShadow translucent_sun_near_depth;
 uniform sampler2DShadow translucent_sun_far_depth;
 uniform sampler2DShadow translucent_sun_dynamic_depth;
