@@ -336,30 +336,22 @@ namespace {
         uintptr_t const start=reinterpret_cast<uintptr_t>(p);
         if(start<0x10000U || start>0x7fffffffU ||
            start+len<start) return false;
-        // Experimental (off by default): native 3DOs reference the same
-        // immutable vertex, face, matrix and Thing allocations thousands of
-        // times within one render frame. Checking each pointer with Wine's
-        // VirtualQuery is particularly costly. Reuse only positive region
-        // checks WITHIN the same GPU frame; unsuccessful checks are never
-        // cached (resources can be allocated later). No cross-frame reuse.
+        // Native 3DOs repeatedly reference the same readable allocations.
+        // Cache only positively validated regions within the current GPU
+        // frame; never cache failures and never reuse across frames.
         // Direct-mapped slots bound memory and avoid a map allocation.
-        // Disabled mode remains byte-for-byte equivalent in return values.
         struct readable_region {
             uint64_t frame=0;
             uintptr_t page=0,begin=0,end=0;
         };
         static thread_local std::array<readable_region,2048> regions{};
-        bool const fast=the_config && the_config->gpu_cache_native_memory_regions;
-        readable_region *entry=nullptr;
-        if(fast) {
-            uintptr_t const page=start>>12;
-            entry=&regions[(page*2654435761U)&(regions.size()-1)];
-            if(entry->frame==gpu_frame_serial && entry->page==page &&
-               start>=entry->begin && start<entry->end) {
-                if(the_config->profile_renderer)
-                    ++gpu_native_stats.native_span_cache_hits;
-                return start+len<=entry->end;
-            }
+        uintptr_t const page=start>>12;
+        readable_region *entry=&regions[(page*2654435761U)&(regions.size()-1)];
+        if(entry->frame==gpu_frame_serial && entry->page==page &&
+           start>=entry->begin && start<entry->end) {
+            if(the_config && the_config->profile_renderer)
+                ++gpu_native_stats.native_span_cache_hits;
+            return start+len<=entry->end;
         }
         MEMORY_BASIC_INFORMATION mbi{};
         if(the_config && the_config->profile_renderer)
