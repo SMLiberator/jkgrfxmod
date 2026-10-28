@@ -2805,7 +2805,10 @@ namespace {
             }
         }
         native_decal_following=!moving_sprite_decals.empty();
-        if(moving_sprite_decals.empty())return;
+        if(moving_sprite_decals.empty()) {
+            native_decal_active_things.clear();
+            return;
+        }
         for(auto it=moving_sprite_decals.begin();
             it!=moving_sprite_decals.end();) {
             auto &decal=it->second;
