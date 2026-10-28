@@ -33,6 +33,7 @@
 #include "sprite_decal_resource.hpp"
 #include "sprite_decal_attachment.hpp"
 #include "sprite_decal_follow.hpp"
+#include "sprite_decal_moving_receiver.hpp"
 #include "sprite_alpha_tag.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
@@ -2550,6 +2551,110 @@ namespace {
         std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
     };
     std::unordered_map<uint64_t,cached_runtime_sprite_decal> sprite_gpu_decals;
+
+    // Movable SPR decals are permanently projected into their receiving
+    // 3DO node's LOCAL coordinates. Unlike static sprites, their visibility
+    // follows the receiver, not the original sprite's world-space position.
+    struct moving_sprite_decal {
+        uint32_t world=0;
+        uintptr_t sprite_resource=0;
+        uint64_t sprite_thing=0; // native SithThing address + signature
+        jkgm::sprite_decal_receiver_identity receiver{};
+        uint32_t occurrence=0; // distinguish repeated rdMesh in hierarchy
+        uint64_t id=0;
+        uint64_t last_visible_frame=0;
+        float opacity=1.0f;
+        std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
+    };
+    std::unordered_map<uint64_t,moving_sprite_decal> moving_sprite_decals;
+
+    void clear_moving_sprite_decals()
+    {
+        moving_sprite_decals.clear();
+    }
+
+    bool moving_sprite_decal_source_alive(moving_sprite_decal const &entry,
+                                          uint64_t sprite_key)
+    {
+        uint32_t const sprite_owner=uint32_t(entry.sprite_thing>>32);
+        uint32_t const expected_signature=uint32_t(entry.sprite_thing);
+        if(!sprite_owner || !expected_signature ||
+           !gpu_span_readable(reinterpret_cast<void const *>(sprite_owner),0x78))
+            return false;
+        uint32_t type=0,signature=0;
+        std::memcpy(&type,reinterpret_cast<void const *>(sprite_owner+0x0c),4);
+        std::memcpy(&signature,reinterpret_cast<void const *>(sprite_owner+0x74),4);
+        if(type==0 || signature!=expected_signature)return false;
+        // The sprite's rdThing must still point to its original SPR. A
+        // recycled Thing/rdThing allocation cannot inherit an old decal.
+        uintptr_t const rd=uintptr_t(uint32_t(sprite_key));
+        if(!gpu_span_readable(reinterpret_cast<void const *>(rd),8))return false;
+        uint32_t resource=0,owner=0;
+        std::memcpy(&resource,reinterpret_cast<void const *>(rd+4U),4);
+        if(!gpu_span_readable(reinterpret_cast<void const *>(rd+0x44U),4))
+            return false;
+        std::memcpy(&owner,reinterpret_cast<void const *>(rd+0x44U),4);
+        return resource==entry.sprite_resource && owner==sprite_owner;
+    }
+
+    bool moving_sprite_decal_receiver_alive(moving_sprite_decal const &entry)
+    {
+        uint32_t const owner=uint32_t(entry.receiver.thing_key>>32);
+        uint32_t const signature=uint32_t(entry.receiver.thing_key);
+        if(!owner || !signature ||
+           !gpu_span_readable(reinterpret_cast<void const *>(owner),0xccU))
+            return false;
+        uint32_t type=0,current_sig=0,render_type=0,model=0;
+        std::memcpy(&type,reinterpret_cast<void const *>(owner+0x0cU),4);
+        std::memcpy(&current_sig,reinterpret_cast<void const *>(owner+0x74U),4);
+        std::memcpy(&render_type,reinterpret_cast<void const *>(owner+0xc4U),4);
+        std::memcpy(&model,reinterpret_cast<void const *>(owner+0xc8U),4);
+        return type!=0 && current_sig==signature && render_type==1 &&
+            model==entry.receiver.model &&
+            entry.receiver.mesh_revision==mesh_revision::current();
+    }
+
+    void append_moving_sprite_decals()
+    {
+        if(!the_config || !the_config->enable_decals ||
+           moving_sprite_decals.empty())return;
+        for(auto it=moving_sprite_decals.begin();
+            it!=moving_sprite_decals.end();) {
+            auto &decal=it->second;
+            if(!moving_sprite_decal_source_alive(decal,it->first) ||
+               !moving_sprite_decal_receiver_alive(decal)) {
+                it=moving_sprite_decals.erase(it);
+                continue;
+            }
+            ++it;
+            // The same rdMesh can be shared by several Things or repeated
+            // within one hierarchy. Match the full receiver identity.
+            auto const receiver=std::find_if(
+                pending_gpu_instances.begin(),pending_gpu_instances.end(),
+                [&](jkgm::gpu_3do_instance const &instance) {
+                    return !instance.is_projected_decal &&
+                        instance.decal_receiver_thing==decal.receiver.thing_key &&
+                        instance.decal_receiver_model==decal.receiver.model &&
+                        instance.decal_receiver_mesh==decal.receiver.mesh &&
+                        instance.decal_receiver_revision==
+                            decal.receiver.mesh_revision &&
+                        instance.decal_receiver_occurrence==decal.occurrence;
+                });
+            if(receiver==pending_gpu_instances.end() ||
+               !decal.geometry ||
+               !gpu_mesh_materials_ready(*decal.geometry))
+                continue;
+            jkgm::gpu_3do_instance inst{};
+            inst.id=decal.id;
+            inst.geometry=decal.geometry;
+            inst.transform=receiver->transform;
+            inst.is_projected_decal=true;
+            inst.decal_opacity=decal.opacity;
+            inst.effective_light_mode=0.0f;
+            decal.last_visible_frame=gpu_frame_serial;
+            pending_gpu_instances.push_back(std::move(inst));
+        }
+    }
     jkgm::decal_world_geometry sprite_world_geometry;
     unsigned sprite_decal_submit_logs=0;
     unsigned sprite_decal_queued_logs=0;
