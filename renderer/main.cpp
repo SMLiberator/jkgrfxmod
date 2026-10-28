@@ -1515,6 +1515,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             return false;
         }
     }
+    if(!shadow_only && the_config->profile_renderer &&
+       inst.nonrigid_light_transform)
+        ++gpu_native_stats.nonrigid_lit_cached;
     pending_gpu_instances.emplace_back(std::move(inst));
     if(the_config->profile_renderer) ++gpu_native_stats.queued;
     return !shadow_only;
@@ -1541,6 +1544,7 @@ jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
         window.snapshot_other_rejected+=sample.snapshot_other_rejected;
         window.material_native+=sample.material_native;
         window.lighting_native+=sample.lighting_native;
+        window.nonrigid_lit_cached+=sample.nonrigid_lit_cached;
         if(frames>=120U) {
             LOG_INFO("PERF GPU fallback taxonomy frames=",frames,
                      " geometry_thing=",window.geo_thing_not_full,
@@ -1551,7 +1555,8 @@ jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
                      window.snapshot_triangulation_rejected,
                      " snapshot_other=",window.snapshot_other_rejected,
                      " material=",window.material_native,
-                     " lighting=",window.lighting_native);
+                     " lighting=",window.lighting_native,
+                     " nonrigid_lit_GPU=",window.nonrigid_lit_cached);
             frames=0;
             window={};
         }
