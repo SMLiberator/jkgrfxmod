@@ -81,7 +81,10 @@ namespace jkgm {
         uint64_t ready_material_refs=0,ready_ns=0,ready_cache_hits=0;
     };
     gpu_3do_native_stats consume_gpu_3do_native_stats();
-    bool queue_gpu_3do_mesh(void const *mesh,void const *matrix);
+    // force_shadow_only keeps the native visible draw while capturing a
+    // depth-only caster, including when the normal GPU render path falls back.
+    bool queue_gpu_3do_mesh(void const *mesh,void const *matrix,
+                            bool force_shadow_only=false);
     std::vector<gpu_3do_instance> consume_gpu_3do_instances();
     void reset_gpu_3do_instances();
     // Called after any D3D texture upload, including native MAT cel warm-up.
