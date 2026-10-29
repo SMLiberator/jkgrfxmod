@@ -533,9 +533,11 @@ void jkgm::shaders::gpu_3do_preview_shader::set_post_exempt(bool enabled)
     gl::set_uniform_integer(post_exempt_pass,enabled?1:0);
 }
 
-void jkgm::shaders::gpu_3do_preview_shader::set_camera_hud_thing(bool enabled)
+void jkgm::shaders::gpu_3do_preview_shader::set_camera_hud_thing(
+    bool enabled,bool world_depth)
 {
-    gl::set_uniform_integer(camera_hud_thing,enabled?1:0);
+    // 0=ordinary Thing, 1=always-on-top HUD, 2=HUD occluded by world.
+    gl::set_uniform_integer(camera_hud_thing,enabled?(world_depth?2:1):0);
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_decal_receiver_lighting(

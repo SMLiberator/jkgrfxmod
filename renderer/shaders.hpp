@@ -270,7 +270,7 @@ namespace jkgm {
                 point<4,float> up,point<4,float> forward,
                 point<2,float> strengths,point<4,float> bounds);
             void set_post_exempt(bool enabled);
-            void set_camera_hud_thing(bool enabled);
+            void set_camera_hud_thing(bool enabled,bool world_depth);
             void set_world_lighting_exempt(bool enabled);
             void set_decal_receiver_lighting(bool enabled,int light,int ao);
             void set_advanced_material(bool clipped,float fluid_thickness);

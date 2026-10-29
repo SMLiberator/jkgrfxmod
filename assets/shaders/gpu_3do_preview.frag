@@ -22,8 +22,8 @@ uniform float native_face_opacity;
 uniform int has_texture; // 0=unresolved diagnostic, 1=albedo map, 2=intentionally no albedo
 uniform int has_emissive;
 uniform int transparent_pass;
-uniform int post_exempt_pass; // draw after post, depth-tested against opaque world
-uniform int camera_hud_thing; // type=camera: overlay all world pixels, unlit
+uniform int post_exempt_pass; // Camera Thing pass after post-processing
+uniform int camera_hud_thing; // 0=world, 1=overlay HUD, 2=world-depth HUD
 // Flag 0x20 on a GPU-cached Thing suppresses added sunlight/specular and
 // projected spotlights; a zero G-buffer normal also omits SSAO on this Thing.
 uniform int world_lighting_exempt;
@@ -617,7 +617,10 @@ void main() {
     // This is the exact native 1/rhw linear depth (32*Y) even on large
     // triangles crossing the camera near plane; no vertex-depth clamping.
     float view_depth=32.0/max(gl_FragCoord.w,0.00000001);
-    if(post_exempt_pass!=0 && camera_hud_thing==0) {
+    // Camera + ThingFlag 0x20 behaves as a world-anchored GUI element:
+    // remain immune to all postFX, but disappear behind opaque scene depth.
+    // The final framebuffer has no attached scene depth after compositing.
+    if(post_exempt_pass!=0 && camera_hud_thing==2) {
         float behind=texelFetch(scene_depth,ivec2(gl_FragCoord.xy),0).r;
         if(behind<65500.0 && view_depth>behind+max(0.05,behind*0.0005)) discard;
     }

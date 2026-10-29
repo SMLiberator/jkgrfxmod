@@ -966,6 +966,14 @@ namespace {
                     uintptr_t(hud_owner)+0xc4U),4);
                 camera_hud=jkgm::is_camera_hud_model(
                     native_type,native_render_type);
+                // A HUD with ThingFlag 0x20 uses world-depth occlusion
+                // even if sun and spotlight shadows are disabled. The
+                // owner memory was already validated above; do not add
+                // per-frame VirtualQuery work for ordinary model Things.
+                if(camera_hud &&
+                   uintptr_t(hud_owner)+0xc4U==native_rd)
+                    std::memcpy(&flags,reinterpret_cast<void const *>(
+                                    uintptr_t(hud_owner)),sizeof(flags));
             }
         }
         bool moving=true; // Unverified owners cannot safely enter static cache.
@@ -1594,6 +1602,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     inst.geometry=it->second.geometry;
     inst.shadow_only=shadow_only;
     inst.camera_hud=active_native_model_camera_hud;
+    inst.camera_hud_world_depth=jkgm::camera_hud_uses_world_depth(
+        inst.camera_hud,active_native_model_thing_flags);
     inst.casts_sun_shadows=casts_sun_shadows;
     inst.shadow_owner=active_native_shadow_owner;
     inst.spotlight_shadow_family=active_native_spotlight_family;

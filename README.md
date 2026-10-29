@@ -859,8 +859,15 @@ Repeated set/reset sequences are exercised by the lightweight native
 
 Use `type=camera` (SithThing type 1) together with an ordinary `model3d`
 on a Thing intended to be part of a 3D HUD. This is distinct from the
-active game camera and **does not** use ThingFlag `0x20`; skyboxes and other
-ordinary 3DOs retain their existing post-processing behavior.
+active game camera. The Camera Thing's `thingflags` field selects two modes:
+
+- `type=camera` without ThingFlag `0x20`: **always-on-top HUD**, ignoring world occlusion.
+- `type=camera thingflags=0x20`: **world-anchored GUI** (nametags, target
+  indicators, objective markers), hidden behind opaque scene geometry.
+
+Ordinary non-Camera Things with `0x20` (including skyboxes) retain their
+light/shadow-exemption behavior and normal post-processing. The flag alone
+never causes late HUD rendering.
 
 On the GPU-cached 3DO path, all faces of a Camera-type Thing are rendered
 in the final overlay **after** bloom, HDR, depth/peripheral blur, noise,
@@ -869,12 +876,15 @@ rendering ignores JK vertex lighting, the active colormap and native
 per-camera color filter, scene fog, SSAO, sunlight, shadow casting,
 reflections and material specular/emission. The albedo texture, MAT
 alpha/mask and normal/additive/multiply blend modes remain available.
-Camera Things are composited over the world (no world-depth occlusion),
-but before the traditional DirectDraw 2D HUD.
+The default Camera HUD draws over world geometry. Camera Things carrying
+`0x20` instead compare each fragment against the resolved opaque view-depth
+buffer from the same frame: solid walls and opaque 3DOs occlude them, but glass,
+alpha-blended sprites and other transparent surfaces generally do not.
+Both modes draw before the traditional DirectDraw 2D HUD and after postFX.
 
-The HUD classification belongs to each **Thing instance**, not its mesh or
-MAT. The same 3DO and MAT used on a normal Thing render normally in the
-world. No replacement-material metadata is required, and the Camera layer
+The HUD classification and optional depth mode belong to each **Thing instance**,
+not its mesh or MAT. The same 3DO and MAT used on a normal Thing render normally
+in the world. No replacement-material metadata is required, and the Camera layer
 also works when `enable_post` is false. The GPU model cache is the intended
 path. An unsupported 3DO or unready native MAT may temporarily use the
 original D3D renderer, so `profile_renderer=true` logs

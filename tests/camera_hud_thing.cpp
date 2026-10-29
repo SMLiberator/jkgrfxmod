@@ -13,7 +13,13 @@ int main()
     assert(!is_camera_hud_model(2U,1U));
     assert(!is_camera_hud_model(9U,1U));
     assert(!is_camera_hud_model(10U,1U));
-    // ThingFlag 0x20 is independent: the classifier takes no ThingFlags.
-    assert(!is_camera_hud_model(2U,1U));
+    // 0x20 chooses depth occlusion ONLY for Camera-type Things.
+    assert(!camera_hud_uses_world_depth(true,0U));
+    assert(camera_hud_uses_world_depth(true,0x20U));
+    assert(camera_hud_uses_world_depth(true,0x21U));
+    assert(!camera_hud_uses_world_depth(false,0x20U));
+    assert(!camera_hud_uses_world_depth(true,0x40U));
+    assert(!camera_hud_uses_world_depth(
+        is_camera_hud_model(2U,1U),0x20U)); // ordinary skybox
     return 0;
 }

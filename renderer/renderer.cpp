@@ -1505,6 +1505,7 @@ namespace jkgm {
                                    gl::blend_function::one_minus_source_alpha);
 
             // Retain per-instance transforms and the originating frame camera.
+            // Each Camera Thing chooses overlay or depth-tested world UI.
             draw_gpu_3do_preview(true,true);
 
             gl::set_blend_function(gl::blend_function::one,
@@ -3095,7 +3096,8 @@ namespace jkgm {
                                          make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(it->second->vao);
                     prog.set_lighting(inst);
-                    prog.set_camera_hud_thing(inst.camera_hud);
+                    prog.set_camera_hud_thing(
+                        inst.camera_hud,inst.camera_hud_world_depth);
                     // 0x20 suppresses JkGRfxMod light-reception effects on
                     // GPU-cached 3DOs, not the authored JK vertex lighting.
                     // Native D3D triangles do not carry per-Thing flags here.
