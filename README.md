@@ -886,14 +886,26 @@ signature and material-map debug messages are no longer emitted.
 
 Set `"use_sprite_cache": true` to test shared GPU quad geometry for ordinary
 type-0 camera-facing, type-1 cylindrical billboard and type-2 fixed-plane SPRs.
-Only fully-lit textured faces qualify initially. Native SPRs frequently report
-face TexMode=0 despite having a valid MAT and UV quad: the GPU cache accepts
-this observed mode only when the sprite's actual MAT and UVs pass validation.
-Unverified TexMode=1, nonzero lighting modes, decals, flares and MATs awaiting
-native upload retain JK's existing renderer.
+Fully-lit geometry-mode 3 (solid MAT palette color) and mode 4 (textured MAT)
+sprites qualify. Mode 3 uses MAT solidColor without UVs or texture uploads.
+Native texture-mode values 0/1/2 are ignored for GPU eligibility: they only
+control the software renderer's affine/perspective sampling. Nonzero sprite
+lighting modes, decals, flares and unavailable MAT colors/textures retain JK's
+native renderer.
 Shared geometry eliminates duplicate quad uploads; **hardware-instanced draws
 are a separate next step** and are not yet implemented. The option defaults to
 false for A/B testing against the native sprite path.
+
+## Filled 3DO modes and GPU caching
+
+GeoMode 3 (solid color) and 4 (textured) are both GPU cache candidates.
+Effective Thing/mesh GeoMode 3 forces a solid draw regardless of an individual
+face's texture settings; individual mode-3 faces also render solid within
+mode-4 meshes. The solid RGB is resolved from the MAT cel's palette-indexed
+solidColor and the appropriate current or identity colormap. Native lighting
+continues through the cached shader. GeoModes 0..2 retain native rendering.
+Mesh and face TexMode values do not affect GPU cache eligibility or
+source-signature invalidation; OpenGL interpolates UVs perspective-correctly.
 
 ## Camera Things as unlit 3D HUD objects (experimental)
 

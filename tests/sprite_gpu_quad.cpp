@@ -4,12 +4,6 @@
 using namespace jkgm;
 inline bool near(float x,float y){return std::fabs(x-y)<0.0001f;}
 int main() {
-    // Captured JkGR SPRs: both classic and cylindrical textured sprites use
-    // rdFace TexMode=0. Mode 1 remains native until its semantics are known.
-    assert(sprite_gpu_texture_mode_supported(0U));
-    assert(!sprite_gpu_texture_mode_supported(1U));
-    assert(sprite_gpu_texture_mode_supported(2U));
-    assert(sprite_gpu_texture_mode_supported(3U));
     sprite_decal_texture_coords uv{0.5f,63.5f,0.5f,31.5f};
     auto mesh=make_gpu_sprite_quad(0x12340,uv,0);
     assert(mesh && mesh->vertices.size()==4 && mesh->indices.size()==6);
@@ -17,6 +11,11 @@ int main() {
     assert(mesh->vertices[2].u==uv.right && mesh->vertices[2].v==uv.top);
     assert(mesh->groups[0].face_type==1U && mesh->groups[0].count==6);
     assert(!make_gpu_sprite_quad(0,uv,0));
+    auto solid=make_gpu_sprite_quad(0x12340,uv,1,true);
+    assert(solid && solid->groups[0].solid_color);
+    assert(solid->material_refs.empty());
+    assert(solid->solid_material_refs.size()==1);
+    assert(!mesh->groups[0].solid_color);
     gpu_3do_matrix34 id{{1,0,0,0,1,0,0,0,1,0,0,0}},pose{};
     float size[4]{4,6,2,3},offset[3]{0,0,0};
     assert(make_gpu_sprite_pose(sprite_default,id,id,size,offset,1,1,0,pose));

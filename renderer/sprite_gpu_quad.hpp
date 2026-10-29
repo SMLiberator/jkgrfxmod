@@ -8,26 +8,21 @@
 #include <cmath>
 #include <memory>
 namespace jkgm {
-// Native rdSprite faces commonly store TexMode=0 even when the SPR has a
-// valid textured MAT and four UVs. For sprite quads, use the validated MAT
-// and UV resource as the authority rather than applying 3DO TexMode rules.
-// Mode 1 has not been observed/verified, so retain the native fallback.
-inline bool sprite_gpu_texture_mode_supported(uint32_t mode)
-{
-    return mode==0U || mode>=2U;
-}
 inline std::shared_ptr<gpu_3do_geometry const> make_gpu_sprite_quad(
-    uintptr_t mat,sprite_decal_texture_coords const &uv,uint32_t flags)
+    uintptr_t mat,sprite_decal_texture_coords const &uv,uint32_t flags,
+    bool solid_color=false)
 {
     if(!mat || !valid_sprite_decal_texture_coords(uv) || (flags&~3U))return {};
     auto g=std::make_shared<gpu_3do_geometry>();
     gpu_3do_group group{};
     group.material=mat;group.cel=-1;
     group.face_type=flags|1U;group.count=6;
+    group.solid_color=solid_color;
     group.bounds_min={{-1,0,-1}};
     group.bounds_max={{1,0,1}};
     g->groups.push_back(group);
-    g->material_refs.emplace_back(mat,-1);
+    if(solid_color)g->solid_material_refs.emplace_back(mat,-1);
+    else g->material_refs.emplace_back(mat,-1);
     constexpr std::array<std::array<float,3>,4> points{{
         {{-1,0,-1}},{{1,0,-1}},{{1,0,1}},{{-1,0,1}}
     }};

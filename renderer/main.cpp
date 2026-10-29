@@ -310,7 +310,7 @@ namespace {
         float const *rgb = nullptr;
         void const *uvs=nullptr,*normals=nullptr,*vertex_lights=nullptr;
         int num_vertices=0,num_faces=0,num_uvs=0;
-        int lighting_mode=0,texture_mode=0;
+        int lighting_mode=0;
         uint64_t source_signature=0,source_checked_frame=0;
         uint64_t source_checked_generation=0,last_audit_frame=0;
         char const *snapshot_failure=nullptr; // memoized failed snapshots
@@ -323,7 +323,7 @@ namespace {
     std::vector<jkgm::gpu_3do_instance> pending_gpu_instances;
     struct cached_gpu_sprite_quad {
         jkgm::sprite_decal_resource resource{};
-        uint32_t flags=0;
+        uint32_t flags=0,geometry_mode=4;
         uint64_t id=0;
         std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
     };
@@ -686,7 +686,7 @@ namespace {
         h.add(m.vertices);h.add(m.faces);h.add(m.uvs);
         h.add(m.vertex_lights);h.add(m.normals);h.add(vertex_rgb);
         h.add(m.num_vertices);h.add(m.num_faces);h.add(m.num_uvs);
-        h.add(m.geometry_mode);h.add(m.lighting_mode);h.add(m.texture_mode);
+        h.add(m.geometry_mode);h.add(m.lighting_mode);
         h.add_bytes(m.vertices,size_t(m.num_vertices)*3*sizeof(float));
         if(vertex_rgb)
             h.add_bytes(vertex_rgb,size_t(m.num_vertices)*3*sizeof(float));
@@ -713,7 +713,7 @@ namespace {
             native_face f{};
             std::memcpy(&f,m.faces+size_t(i)*sizeof(f),sizeof(f));
             h.add(f.num);h.add(f.type);h.add(f.geo);h.add(f.light);
-            h.add(f.tex);h.add(f.count);h.add(f.pos_indices);
+            h.add(f.count);h.add(f.pos_indices);
             h.add(f.uv_indices);h.add(f.material);h.add(f.cel);
             h.add(f.uv_x);h.add(f.uv_y);h.add(f.extra_light);
             h.add_bytes(f.normal,sizeof(f.normal));
@@ -768,12 +768,10 @@ namespace {
                !gpu_span_readable(face.pos_indices,size_t(face.count)*4) ||
                !std::isfinite(face.uv_x) || !std::isfinite(face.uv_y))
                 return reject("invalid_face_mode_or_face_indices");
-            bool const face_uv=uv_src && face.uv_indices &&
+            bool const face_uv=face.geo>=4 && uv_src && face.uv_indices &&
                 gpu_span_readable(face.uv_indices,size_t(face.count)*4);
-            // Fail open when a textured polygon lacks readable UVs.
-            // Avoid suppressing JK geometry that we cannot reproduce.
-            if(face.material && face.geo>=4 && !face_uv)
-                return reject("textured_face_missing_uv");
+            // Native JK switches to solid mode when UVs are absent.
+            bool const solid_face=face.geo==3 || !face_uv;
             // The native engine's per-face mode is capped by the mesh mode.
             // Faces with unknown modes fall back instead of rendering unlit.
             if(m.lighting_mode<0 || m.lighting_mode>3 ||
@@ -877,7 +875,8 @@ namespace {
             auto const ptr=reinterpret_cast<uintptr_t>(face.material);
             int32_t const cel=static_cast<int32_t>(face.cel);
             uint32_t const flags=face.type&0x3U;
-            bool const translucent=gpu_3do_face_may_have_alpha(face);
+            bool const translucent=(face.type&0x2U)!=0 ||
+                (!solid_face && gpu_3do_face_may_have_alpha(face));
             uint32_t const plane_start=static_cast<uint32_t>(g->face_planes.size());
             g->face_planes.push_back({{anchor[0],anchor[1],anchor[2]},
                                       {face.normal[0],face.normal[1],face.normal[2]}});
@@ -900,7 +899,8 @@ namespace {
                g->groups.back().material==ptr &&
                g->groups.back().cel==cel &&
                g->groups.back().face_type==flags &&
-               g->groups.back().nonplanar==nonplanar) {
+               g->groups.back().nonplanar==nonplanar &&
+               g->groups.back().solid_color==solid_face) {
                 auto &group=g->groups.back();
                 group.count+=added;
                 ++group.plane_count;
@@ -912,18 +912,24 @@ namespace {
                 }
             } else {
                 g->groups.push_back({first,added,ptr,cel,flags,center,
-                                     plane_start,1,bounds_lo,bounds_hi,nonplanar});
+                                     plane_start,1,bounds_lo,bounds_hi,
+                                     nonplanar,solid_face});
             }
         }
         // Avoid revalidating the same native MAT thousands of times in one
         // frame merely because its faces form many distinct draw groups.
         g->material_refs.reserve(g->groups.size());
-        for(auto const &group:g->groups)
-            if(group.material) g->material_refs.emplace_back(group.material,group.cel);
-        std::sort(g->material_refs.begin(),g->material_refs.end());
-        g->material_refs.erase(
-            std::unique(g->material_refs.begin(),g->material_refs.end()),
-            g->material_refs.end());
+        for(auto const &group:g->groups) {
+            if(!group.material)continue;
+            auto &refs=group.solid_color?g->solid_material_refs:g->material_refs;
+            refs.emplace_back(group.material,group.cel);
+        }
+        auto const deduplicate=[](auto &refs) {
+            std::sort(refs.begin(),refs.end());
+            refs.erase(std::unique(refs.begin(),refs.end()),refs.end());
+        };
+        deduplicate(g->material_refs);
+        deduplicate(g->solid_material_refs);
         return g->indices.empty() ? reject("no_drawable_indices")
                                   : g;
     }
@@ -931,10 +937,31 @@ namespace {
     // Native JK must warm MATs before a GPU-cached 3DO can draw them.
     // The experimental in-frame rdMaterial_AddToTextureCache call crashed
     // inside the std3D texture uploader during level loading.
-    bool gpu_mesh_materials_ready(jkgm::gpu_3do_geometry const &g)
+    bool gpu_mesh_materials_ready(jkgm::gpu_3do_geometry const &g,
+                                  bool all_solid=false)
     {
         using namespace jkgm::engine_material_debug;
         if(!matches_tested_executable()) return false;
+        // The solid-color path needs MAT palette metadata, not a GPU
+        // texture. Invalid metadata keeps the native draw as fallback.
+        auto const solid_ready=[](auto const &refs) {
+            for(auto const &ref:refs) {
+                native_material mat{};
+                if(!read_object(ref.first,mat) ||
+                   mat.num_texinfo==0 || mat.num_texinfo>16)return false;
+                int32_t cel=ref.second<0
+                    ?static_cast<int32_t>(mat.current_cel):ref.second;
+                cel=std::clamp(cel,0,static_cast<int>(mat.num_texinfo)-1);
+                native_texinfo info{};
+                if(!read_object(mat.texinfo[cel],info))return false;
+                uint32_t color=0;
+                std::memcpy(&color,info.header+4,sizeof(color));
+                if(color>=256U)return false;
+            }
+            return true;
+        };
+        if(!solid_ready(g.solid_material_refs))return false;
+        if(all_solid)return solid_ready(g.material_refs);
         auto const upload_generation=
             native_mat_upload_generation.load(std::memory_order_relaxed);
         for(auto const &ref:g.material_refs) {
@@ -1539,8 +1566,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         auto const *bytes=static_cast<uint8_t const *>(mesh);
         std::memcpy(&vertex_rgb,bytes+0x6cU,sizeof(vertex_rgb));
     }
-    // Only filled geometry is eligible for caching. Preserve native handling
-    // for points, wireframe, or faces with ambiguous polygon outlines.
+    // Filled geometry modes 3 (solid) and 4 (textured) are GPU drawable;
+    // leave hidden/point/wireframe modes with JK.
     if(the_config->profile_renderer) ++gpu_native_stats.attempted;
     // rdModel3_Draw at 0x44612c-0x446144 stores the *effective* Thing/
     // global GeoMode in this JK23-specific native global before it visits
@@ -1558,11 +1585,12 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
           : jkgm::gpu_3do_supports_geo_mode(current_geo_mode,m.geometry_mode))) {
         if(the_config->profile_renderer) {
             ++gpu_native_stats.geometry_native;
-            if(current_geo_mode!=4)++gpu_native_stats.geo_thing_not_full;
+            if(current_geo_mode<3 || current_geo_mode>4)
+                ++gpu_native_stats.geo_thing_not_full;
             else ++gpu_native_stats.geo_mesh_not_full;
         }
         gpu_log_fallback(m,"geometry_mode_not_full");
-        return false; // Preserve JK vertex/wire/solid/invisible rendering.
+        return false; // Preserve JK vertex/wire/invisible rendering.
     }
     auto const camera=jkgm::read_active_render_camera();
     if(!camera.valid) {
@@ -1594,8 +1622,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         it->second.num_vertices==m.num_vertices &&
         it->second.num_faces==m.num_faces &&
         it->second.num_uvs==m.num_uvs &&
-        it->second.lighting_mode==m.lighting_mode &&
-        it->second.texture_mode==m.texture_mode;
+        it->second.lighting_mode==m.lighting_mode;
     bool const revision_fastpath=the_config->mesh_revision_tracking &&
                                  mesh_revision::active();
     uint64_t const current_generation=mesh_revision::current();
@@ -1648,7 +1675,6 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             updated.num_faces=m.num_faces;
             updated.num_uvs=m.num_uvs;
             updated.lighting_mode=m.lighting_mode;
-            updated.texture_mode=m.texture_mode;
             updated.source_signature=signature;
             updated.source_checked_frame=gpu_frame_serial;
             updated.source_checked_generation=current_generation;
@@ -1700,7 +1726,16 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     // its native material cache. We can switch to GPU rendering next frame.
     // Many instances share this mesh. Check MAT handles once per mesh per
     // frame, refreshing next frame so animated cels still get a warm-up.
-    if(!shadow_only && it->second.ready_checked_frame!=gpu_frame_serial) {
+    bool const solid_thing=std::min(current_geo_mode,m.geometry_mode)==3;
+    // A shared mesh can be solid for one Thing and textured for another.
+    // Do not reuse texture residency checks for a solid-color instance.
+    if(!shadow_only && solid_thing &&
+       !gpu_mesh_materials_ready(*it->second.geometry,true)) {
+        if(the_config->profile_renderer)++gpu_native_stats.material_native;
+        return false;
+    }
+    if(!shadow_only && !solid_thing &&
+       it->second.ready_checked_frame!=gpu_frame_serial) {
         bool const profiling=the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
@@ -1713,7 +1748,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         if(profiling) gpu_native_stats.ready_ns+=elapsed_native_ns(start);
         it->second.ready_checked_frame=gpu_frame_serial;
     }
-    if(!shadow_only && !it->second.ready_for_frame) {
+    if(!shadow_only && !solid_thing && !it->second.ready_for_frame) {
         if(the_config->profile_renderer) ++gpu_native_stats.material_native;
         gpu_log_fallback(m,"native_MAT_cel_not_yet_resident");
         return false;
@@ -1722,6 +1757,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     inst.id=it->second.id;
     inst.geometry=it->second.geometry;
     inst.shadow_only=shadow_only;
+    inst.effective_geometry_mode=static_cast<uint32_t>(
+        std::min(current_geo_mode,m.geometry_mode));
     inst.camera_hud=active_native_model_camera_hud;
     inst.camera_hud_world_depth=jkgm::camera_hud_uses_world_depth(
         inst.camera_hud,active_native_model_thing_flags);
@@ -3883,12 +3920,8 @@ namespace {
                          " tex=",texture," flags=",flags);
             }
         }
-        if(geometry!=4U)return reject(1);
+        if(geometry!=3U && geometry!=4U)return reject(1);
         if(lighting!=0U)return reject(2);
-        // .SPR TexMode=0 is valid even for textured quads (the real MAT and
-        // rectangular UVs are validated below). Do not apply the ordinary
-        // 3DO texture-mode >=2 requirement to these resources.
-        if(!jkgm::sprite_gpu_texture_mode_supported(texture))return reject(3);
         if((flags&~3U)!=0U)return reject(4);
         if(!std::isfinite(info.opacity) || info.opacity<=0.0f ||
            info.opacity>1.0f)return reject(0);
@@ -3899,7 +3932,15 @@ namespace {
             return true;
         };
         jkgm::sprite_decal_resource resource{};
-        if(!jkgm::read_sprite_decal_resource(read,sprite,resource))
+        if(geometry==3U) {
+            // Native solid SPRs have no UV array at all. A MAT still
+            // supplies the palette-indexed solid color.
+            uint32_t mat=0;
+            if(!read(sprite+0x7cU,&mat,4) ||
+               !jkgm::decal_native_address_ok(mat))return reject(5);
+            resource.material=mat;
+            resource.texcoords={0.0f,1.0f,0.0f,1.0f};
+        } else if(!jkgm::read_sprite_decal_resource(read,sprite,resource))
             return reject(5);
         float size[4]{},offset[3]{};
         std::memcpy(size,src+0x4cU,sizeof(size));
@@ -3927,15 +3968,17 @@ namespace {
         };
         if(item==gpu_sprite_quads.end() ||
            item->second.flags!=flags ||
+           item->second.geometry_mode!=geometry ||
            !same(item->second.resource,resource)) {
             if(item==gpu_sprite_quads.end() && gpu_sprite_quads.size()>=4096U)
                 return reject(7);
             auto quad=jkgm::make_gpu_sprite_quad(
-                resource.material,resource.texcoords,flags);
+                resource.material,resource.texcoords,flags,geometry==3U);
             if(!quad)return reject(5);
             cached_gpu_sprite_quad entry{};
             entry.resource=resource;
             entry.flags=flags;
+            entry.geometry_mode=geometry;
             entry.id=next_gpu_id++;
             entry.geometry=std::move(quad);
             item=gpu_sprite_quads.insert_or_assign(

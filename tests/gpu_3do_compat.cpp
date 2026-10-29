@@ -7,10 +7,15 @@ int main() {
     assert(!gpu_3do_supports_geo_mode(0,4)); // COG hidden Thing
     assert(!gpu_3do_supports_geo_mode(1,4)); // vertex
     assert(!gpu_3do_supports_geo_mode(2,4)); // wireframe
-    assert(!gpu_3do_supports_geo_mode(3,4)); // solid
-    assert(!gpu_3do_supports_geo_mode(4,3)); // untextured mesh
+    assert(gpu_3do_supports_geo_mode(3,4)); // Thing solid
+    assert(gpu_3do_supports_geo_mode(4,3)); // Mesh solid
+    assert(gpu_3do_supports_geo_mode(3,3));
+    assert(!gpu_3do_supports_geo_mode(5,4));
+    assert(!gpu_3do_supports_geo_mode(4,2));
     assert(gpu_3do_supports_face_mode(4));
-    assert(!gpu_3do_supports_face_mode(3));
+    assert(gpu_3do_supports_face_mode(3));
+    assert(!gpu_3do_supports_face_mode(2));
+    assert(!gpu_3do_supports_face_mode(5));
     std::array<float,12> id{{1,0,0, 0,1,0, 0,0,1, 0,0,0}};
     assert(!gpu_3do_reversed_winding(id));
     auto flip_x=id; flip_x[0]=-1;

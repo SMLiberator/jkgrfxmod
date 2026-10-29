@@ -2544,6 +2544,53 @@ namespace jkgm {
 
 
 
+        gpu_3do_texture resolve_gpu_3do_solid_material(
+            gpu_3do_group const &group,bool camera_hud)
+        {
+            gpu_3do_texture out{};
+            out.albedo_source=2; // No texture; shader multiplies palette RGB.
+            if(!group.material)return out;
+            using namespace engine_material_debug;
+            native_material mat{};
+            if(!matches_tested_executable() ||
+               !read_object(group.material,mat) ||
+               mat.num_texinfo==0 || mat.num_texinfo>16) {
+                out.albedo_source=0;
+                return out;
+            }
+            int cel=group.cel<0?static_cast<int>(mat.current_cel):group.cel;
+            cel=std::clamp(cel,0,static_cast<int>(mat.num_texinfo)-1);
+            native_texinfo info{};
+            if(!read_object(mat.texinfo[cel],info)) {
+                out.albedo_source=0;
+                return out;
+            }
+            // rdTexinfoHeader::solidColor is word #1 (offset +4).
+            uint32_t index=0;
+            std::memcpy(&index,info.header+4,sizeof(index));
+            uint32_t cmp=0;
+            constexpr uintptr_t active_cmp=0x0073A410U;
+            constexpr uintptr_t identity_cmp=0x0073A414U;
+            if(index>=256U ||
+               !read_object(camera_hud?identity_cmp:active_cmp,cmp) ||
+               cmp<0x10000U) {
+                out.albedo_source=0;
+                return out;
+            }
+            uint8_t rgb[3]{};
+            if(!read_bytes(uintptr_t(cmp)+jk_cmp_colors_offset+
+                           uintptr_t(index)*3U,rgb,sizeof(rgb))) {
+                out.albedo_source=0;
+                return out;
+            }
+            // Native MAT solid colors are palette-indexed, not textured.
+            // Keep the COG/JK lighting path on the existing vertex shader.
+            out.tint=make_point(float(rgb[0])/255.0f,
+                                float(rgb[1])/255.0f,
+                                float(rgb[2])/255.0f,1.0f);
+            return out;
+        }
+
         gpu_3do_texture resolve_gpu_3do_material(gpu_3do_group const &group)
         {
             gpu_3do_texture out;
@@ -2971,12 +3018,21 @@ namespace jkgm {
                     // Cache MAT resolution per material/cel for the complete
                     // frame. Multiple cars using the same MAT no longer
                     // trigger thousands of redundant VirtualQuery lookups.
+                    bool const solid=inst.effective_geometry_mode==3 ||
+                        group.solid_color;
+                    // Reserve two high bits of the per-frame material key
+                    // for solid-mode and Camera HUD identity-CMP palette.
+                    // The same MAT may be drawn textured and solid in one frame.
                     uint64_t const mat_key=
                         (uint64_t(group.material)<<32) |
-                        uint32_t(group.cel);
+                        uint32_t(group.cel) |
+                        (solid?(uint64_t(1)<<63):0U) |
+                        (solid && inst.camera_hud?(uint64_t(1)<<62):0U);
                     auto found=gpu_frame_material_cache.find(mat_key);
                     if(found==gpu_frame_material_cache.end()) {
-                        auto item=resolve_gpu_3do_material(group);
+                        auto item=solid
+                            ?resolve_gpu_3do_solid_material(group,inst.camera_hud)
+                            :resolve_gpu_3do_material(group);
                         found=gpu_frame_material_cache.emplace(mat_key,std::move(item)).first;
                         if(the_config->profile_renderer)
                             ++profile_frame.gpu_material_resolves;
@@ -3047,6 +3103,8 @@ namespace jkgm {
                             return a.group->face_type<b.group->face_type;
                         if(a.group->nonplanar!=b.group->nonplanar)
                             return a.group->nonplanar<b.group->nonplanar;
+                        if(a.group->solid_color!=b.group->solid_color)
+                            return a.group->solid_color<b.group->solid_color;
                         return a.order<b.order;
                     });
             }
@@ -3123,6 +3181,7 @@ namespace jkgm {
                        other.group->cel!=group.cel ||
                        other.group->face_type!=group.face_type ||
                        other.group->nonplanar!=group.nonplanar ||
+                       other.group->solid_color!=group.solid_color ||
                        other.policy!=draw.policy)
                         break;
                     ++draw_end;
@@ -3870,7 +3929,11 @@ namespace jkgm {
                         // A blended effect never writes opaque shadow
                         // depth. Masked/mixed MATs cast cutout silhouettes
                         // using the same UVs/textures as visible geometry.
-                        auto const tex=resolve_gpu_3do_material(group);
+                        bool const solid=instance.effective_geometry_mode==3 ||
+                            group.solid_color;
+                        auto const tex=solid
+                            ?resolve_gpu_3do_solid_material(group,false)
+                            :resolve_gpu_3do_material(group);
                         bool const cutout=tex.masked||tex.alpha||tex.dithered;
                         if(tex.albedo_source==0 || tex.special ||
                            tex.emissive_only ||
@@ -4375,12 +4438,17 @@ namespace jkgm {
                         // Share the same MAT/cel snapshot with both sun
                         // cascades. This avoids repeating native MAT lookups
                         // and VirtualQuery work per dynamic Thing/group.
+                        bool const solid=inst->effective_geometry_mode==3 ||
+                            g.solid_color;
                         uint64_t const key=(uint64_t(g.material)<<32)|
-                            uint32_t(g.cel);
+                            uint32_t(g.cel)|(solid?(uint64_t(1)<<63):0U);
                         auto found=gpu_frame_material_cache.find(key);
                         if(found==gpu_frame_material_cache.end()) {
+                            auto mat=solid
+                                ?resolve_gpu_3do_solid_material(g,false)
+                                :resolve_gpu_3do_material(g);
                             found=gpu_frame_material_cache.emplace(
-                                key,resolve_gpu_3do_material(g)).first;
+                                key,std::move(mat)).first;
                             if(the_config->profile_renderer)
                                 ++sun_profile_atlas_mat_misses;
                         } else if(the_config->profile_renderer)
@@ -4820,14 +4888,21 @@ namespace jkgm {
             size_t dynamic_far_skipped=0,dynamic_near_distance_skipped=0;
             float const dynamic_near_depth=std::max(0.0f,
                 the_config->sun_shadow_near_distance);
-            auto cached_material=[&](gpu_3do_group const &group)
+            auto cached_material=[&](gpu_3do_group const &group,
+                                      gpu_3do_instance const &instance)
                 ->gpu_3do_texture const & {
+                bool const solid=instance.effective_geometry_mode==3 ||
+                    group.solid_color;
                 uint64_t const key=(uint64_t(group.material)<<32)|
-                    uint32_t(group.cel);
+                    uint32_t(group.cel)|(solid?(uint64_t(1)<<63):0U);
                 auto found=gpu_frame_material_cache.find(key);
-                if(found==gpu_frame_material_cache.end())
+                if(found==gpu_frame_material_cache.end()) {
+                    auto mat=solid
+                        ?resolve_gpu_3do_solid_material(group,false)
+                        :resolve_gpu_3do_material(group);
                     found=gpu_frame_material_cache.emplace(
-                        key,resolve_gpu_3do_material(group)).first;
+                        key,std::move(mat)).first;
+                }
                 return found->second;
             };
             for(auto const &prepared:model_candidates) {
@@ -4861,7 +4936,7 @@ namespace jkgm {
                     prepared.bounds.low,prepared.bounds.high,
                     bounds.low,bounds.high);
                 if(!in_cascade)continue;
-                auto const &tex=cached_material(group);
+                auto const &tex=cached_material(group,instance);
                 bool const cutout=tex.masked||tex.alpha||tex.dithered;
                 if(tex.albedo_source==0 || tex.special || tex.emissive_only || tex.opacity<0.999f ||
                    (cutout && tex.albedo_source!=1))continue;

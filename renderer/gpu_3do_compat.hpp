@@ -1,7 +1,8 @@
 #pragma once
 // Narrow native-equivalence checks for the experimental GPU 3DO path.
-// Never GPU-draw a mesh while Sith's effective GeoMode requests invisible,
-// vertices, wireframe or untextured solid rendering. Those go through JK.
+// Filled geometry modes 3 (solid color) and 4 (textured) are GPU drawable.
+// Modes 0..2 still require JK's hidden/point/line path. Software TexMode
+// (affine/perspective) does not affect GPU UV interpolation.
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -10,14 +11,12 @@ namespace jkgm {
     inline bool gpu_3do_supports_geo_mode(int effective_thing_mode,
                                            int mesh_mode)
     {
-        constexpr int RD_GEOMETRY_FULL=4;
-        return effective_thing_mode==RD_GEOMETRY_FULL &&
-               mesh_mode==RD_GEOMETRY_FULL;
+        return effective_thing_mode>=3 && effective_thing_mode<=4 &&
+               mesh_mode>=3 && mesh_mode<=4;
     }
     inline bool gpu_3do_supports_face_mode(int face_mode)
     {
-        constexpr int RD_GEOMETRY_FULL=4;
-        return face_mode==RD_GEOMETRY_FULL;
+        return face_mode==3 || face_mode==4;
     }
     // The cached shader uses R/F/U columns. Flipping an odd number of axes
     // reverses the handedness of the placement matrix and OpenGL winding.
