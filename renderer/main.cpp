@@ -377,12 +377,34 @@ namespace {
     {
         if(active_native_model_camera_hud)
             gpu_last_camera_hud_failure=reason;
-        if(!the_config || !the_config->profile_renderer_verbose ||
-           gpu_logged_fallbacks.size()>=80) return;
+        if(!the_config)return;
+        bool const verbose=the_config->profile_renderer_verbose;
+        // Ordinary profiling emits a small diagnostic sample once every
+        // 120 frames, including recurring failures that occurred long after
+        // the initial MAT warm-up. No mesh-name exclusions or hot-path log
+        // allocations on other frames.
+        bool const sample=the_config->profile_renderer &&
+            (gpu_frame_serial%120U)==0U;
+        if(!verbose && !sample)return;
         auto const end=std::find(m.name,m.name+sizeof(m.name),'\0');
         std::string const name(m.name,end);
-        if(name.empty()) return;
-        if(gpu_logged_fallbacks.insert(name+"|"+reason).second)
+        if(name.empty())return;
+        auto const key=name+"|"+reason;
+        if(sample) {
+            static uint64_t sampled_frame=0;
+            static std::unordered_set<std::string> sampled;
+            if(sampled_frame!=gpu_frame_serial) {
+                sampled.clear();
+                sampled_frame=gpu_frame_serial;
+            }
+            if(sampled.size()<12U && sampled.insert(key).second)
+                LOG_INFO("GPU 3DO periodic fallback mesh=",name,
+                         " reason=",reason," vertices=",m.num_vertices,
+                         " faces=",m.num_faces," geo=",m.geometry_mode,
+                         " light=",m.lighting_mode);
+        }
+        if(verbose && gpu_logged_fallbacks.size()<80U &&
+           gpu_logged_fallbacks.insert(key).second)
             LOG_INFO("GPU 3DO fallback mesh=",name," reason=",reason,
                      " vertices=",m.num_vertices," faces=",m.num_faces);
     }
@@ -679,14 +701,20 @@ namespace {
     // All array reads are guarded; the old cache never noticed writes when
     // allocations, face/vertex counts, and pointers stayed identical.
     bool gpu_mesh_source_signature(native_mesh const &m,
-                                   float const *vertex_rgb,uint64_t &value) {
+                                   float const *vertex_rgb,uint64_t &value,
+                                   char const **failure=nullptr) {
+        auto const reject=[&](char const *reason) {
+            if(failure)*failure=reason;
+            return false;
+        };
         if(m.num_vertices<3 || m.num_vertices>65536 ||
-           m.num_faces<1 || m.num_faces>65536 ||
-           !gpu_span_readable(m.vertices,size_t(m.num_vertices)*3*sizeof(float)) ||
+           m.num_faces<1 || m.num_faces>65536)
+            return reject("invalid_mesh_counts");
+        if(!gpu_span_readable(m.vertices,size_t(m.num_vertices)*3*sizeof(float)) ||
            !gpu_span_readable(m.faces,size_t(m.num_faces)*sizeof(native_face)) ||
            (vertex_rgb && !gpu_span_readable(
                vertex_rgb,size_t(m.num_vertices)*3*sizeof(float))))
-            return false;
+            return reject("unreadable_required_mesh_arrays");
 
         jkgm::gpu_3do_byte_signature h;
         h.add(m.vertices);h.add(m.faces);h.add(m.uvs);
@@ -697,22 +725,23 @@ namespace {
         if(vertex_rgb)
             h.add_bytes(vertex_rgb,size_t(m.num_vertices)*3*sizeof(float));
 
-        bool const has_uvs=m.uvs && m.num_uvs>0 && m.num_uvs<=65536;
-        if(has_uvs) {
-            size_t const bytes=size_t(m.num_uvs)*2*sizeof(float);
-            if(!gpu_span_readable(m.uvs,bytes)) return false;
-            h.add_bytes(m.uvs,bytes);
-        }
-        if(m.vertex_lights) {
-            size_t const bytes=size_t(m.num_vertices)*sizeof(float);
-            if(!gpu_span_readable(m.vertex_lights,bytes)) return false;
-            h.add_bytes(m.vertex_lights,bytes);
-        }
-        if(m.normals) {
-            size_t const bytes=size_t(m.num_vertices)*3*sizeof(float);
-            if(!gpu_span_readable(m.normals,bytes)) return false;
-            h.add_bytes(m.normals,bytes);
-        }
+        // Optional arrays must match snapshot_gpu_mesh's fallback rules.
+        // A missing/unreadable UV array produces a solid-color face; absent
+        // smooth normals use the face normal for non-Gouraud lighting.
+        // Hash usable bytes only, but always hash their source pointers and
+        // counts above: if an array becomes readable, the signature changes.
+        bool const has_uvs=m.uvs && m.num_uvs>0 && m.num_uvs<=65536 &&
+            gpu_span_readable(m.uvs,size_t(m.num_uvs)*2*sizeof(float));
+        if(has_uvs)
+            h.add_bytes(m.uvs,size_t(m.num_uvs)*2*sizeof(float));
+        if(m.vertex_lights &&
+           gpu_span_readable(m.vertex_lights,
+                             size_t(m.num_vertices)*sizeof(float)))
+            h.add_bytes(m.vertex_lights,
+                        size_t(m.num_vertices)*sizeof(float));
+        if(m.normals &&
+           gpu_span_readable(m.normals,size_t(m.num_vertices)*3*sizeof(float)))
+            h.add_bytes(m.normals,size_t(m.num_vertices)*3*sizeof(float));
 
         gpu_source_readable_regions readable;
         for(int i=0;i<m.num_faces;i++) {
@@ -726,14 +755,17 @@ namespace {
             // Modes 0..2 have no triangles in JK hardware rendering.
             // Their face arrays need not be readable until GeoMode changes.
             if(f.geo<=2U) continue;
-            if(f.count<3 || f.count>128) return false;
+            if(f.count<3 || f.count>128)
+                return reject("invalid_drawable_face_corner_count");
             size_t const bytes=size_t(f.count)*sizeof(int);
-            if(!readable.readable(f.pos_indices,bytes)) return false;
+            if(!readable.readable(f.pos_indices,bytes))
+                return reject("unreadable_drawable_face_indices");
             h.add_bytes(f.pos_indices,bytes);
-            if(has_uvs && f.uv_indices) {
-                if(!readable.readable(f.uv_indices,bytes)) return false;
+            // Invalid optional UVs downgrade this face to solid mode during
+            // the snapshot. Do not reject the entire source signature.
+            if(has_uvs && f.geo==4U && f.uv_indices &&
+               readable.readable(f.uv_indices,bytes))
                 h.add_bytes(f.uv_indices,bytes);
-            }
         }
         value=h.value;
         return true;
@@ -1593,9 +1625,13 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     // Empty 3DO hierarchy nodes still reach the native mesh callback,
     // but the GPU path cannot submit a draw for them. Count them explicitly
     // to distinguish engine traversal overhead from OpenGL draw calls.
-    if(the_config->profile_renderer &&
-       (m.num_vertices<=0 || m.num_faces<=0))
-        ++gpu_native_stats.empty_mesh_native;
+    if(m.num_vertices<=0 || m.num_faces<=0) {
+        if(the_config->profile_renderer)
+            ++gpu_native_stats.empty_mesh_native;
+        // JK has no faces or positions to draw for an empty hierarchy node.
+        // Avoid revalidating it as broken geometry on every frame.
+        return !shadow_only;
+    }
     float const *vertex_rgb=nullptr;
     if(has_rgb_mesh_extension) {
         auto const *bytes=static_cast<uint8_t const *>(mesh);
@@ -1679,7 +1715,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
         uint64_t signature=0;
-        bool const readable=gpu_mesh_source_signature(m,vertex_rgb,signature);
+        char const *source_failure=nullptr;
+        bool const readable=gpu_mesh_source_signature(
+            m,vertex_rgb,signature,&source_failure);
         if(profiling) {
             ++gpu_native_stats.source_checks;
             gpu_native_stats.source_ns+=elapsed_native_ns(start);
@@ -1689,7 +1727,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                 ++gpu_native_stats.snapshot_native;
                 ++gpu_native_stats.snapshot_source_rejected;
             }
-            gpu_log_fallback(m,"invalid_mesh_source_memory");
+            gpu_log_fallback(m,source_failure ?
+                std::string("invalid_mesh_source_memory/")+source_failure :
+                "invalid_mesh_source_memory");
             return false;
         }
         if(revision_fastpath && audit_frame && header_unchanged &&
