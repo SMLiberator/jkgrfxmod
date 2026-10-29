@@ -865,6 +865,14 @@ effects past roughly 2047 world units may still need a separate extended-range
 depth representation; this change intentionally avoids doubling depth texture
 bandwidth. Camera HUD texture placeholders are suppressed during menu swaps.
 
+## GPU sprite cache eligibility diagnostics
+
+`PERF sprite_gpu_reject_avg` reports average native fallbacks by reason:
+source read, face geometry/light/texture mode or flags, resource UVs,
+camera pose and cache capacity. The first eight distinct
+`SPR GPU face sample` lines print native mode numbers. These bounded
+diagnostics run with `profile_renderer` even when verbose tracing is off.
+
 ## Profiling and diagnostics
 
 `"profile_renderer": true` continues to report aggregate frame, GPU, native

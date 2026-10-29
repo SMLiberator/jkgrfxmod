@@ -755,6 +755,15 @@ namespace jkgm {
                      " mat_warmups_avg=",
                      profile_window.sprite_gpu_quad_mat_wait/frames,
                      " NOTE=shared_quads_not_hardware_instanced");
+            auto const &rejects=profile_window.sprite_gpu_quad_rejects;
+            LOG_INFO("PERF sprite_gpu_reject_avg source=",rejects[0]/frames,
+                     " geomode=",rejects[1]/frames,
+                     " lightmode=",rejects[2]/frames,
+                     " texmode=",rejects[3]/frames,
+                     " face_flags=",rejects[4]/frames,
+                     " resource_uv=",rejects[5]/frames,
+                     " camera_pose=",rejects[6]/frames,
+                     " capacity=",rejects[7]/frames);
             LOG_INFO("PERF sorting_us opaque=", avg(profile_stage::sort_opaque),
                      " transparent=", avg(profile_stage::sort_transparent),
                      " peaks=", peak_sort_opaque, "/", peak_sort_trans,
@@ -6363,6 +6372,9 @@ namespace jkgm {
                 profile_frame.sprite_gpu_quad_reuses+=sprites.gpu_quad_reuses;
                 profile_frame.sprite_gpu_quad_fallbacks+=sprites.gpu_quad_fallbacks;
                 profile_frame.sprite_gpu_quad_mat_wait+=sprites.gpu_quad_mat_wait;
+                for(size_t i=0;i<sprites.gpu_quad_rejects.size();++i)
+                    profile_frame.sprite_gpu_quad_rejects[i]+=
+                        sprites.gpu_quad_rejects[i];
             }
             record_profile(started, profile_clock::now());
             if(profiling) {

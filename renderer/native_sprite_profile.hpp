@@ -17,7 +17,9 @@ struct native_sprite_sample {
     uint64_t projected_gpu=0;         // type-3 projected GPU geometry queued
     uint64_t projected_warmups=0;
     uint64_t gpu_cached_quads=0,gpu_quad_reuses=0;
-    uint64_t gpu_quad_fallbacks=0,gpu_quad_mat_wait=0;     // masked native fallback for MAT residency
+    uint64_t gpu_quad_fallbacks=0,gpu_quad_mat_wait=0;
+    // source, geomode, lightmode, texmode, face flags, resource/UV, pose, capacity
+    std::array<uint64_t,8> gpu_quad_rejects{};
 
     void add(native_sprite_sample const &o) {
         for(size_t i=0;i<type_calls.size();i++)
@@ -34,6 +36,8 @@ struct native_sprite_sample {
         gpu_quad_reuses+=o.gpu_quad_reuses;
         gpu_quad_fallbacks+=o.gpu_quad_fallbacks;
         gpu_quad_mat_wait+=o.gpu_quad_mat_wait;
+        for(size_t i=0;i<gpu_quad_rejects.size();++i)
+            gpu_quad_rejects[i]+=o.gpu_quad_rejects[i];
     }
 };
 

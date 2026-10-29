@@ -3842,16 +3842,21 @@ namespace {
     bool submit_gpu_sprite_quad(void const *rd,void const *orientation,
                                 uint32_t type,jkgm::sprite_instance_info const &info)
     {
-        if(!the_config || !the_config->use_sprite_cache ||
-           type>jkgm::sprite_fixed ||
-           !gpu_span_readable(rd,0x48U) ||
-           !gpu_span_readable(orientation,12*sizeof(float)) ||
-           pending_gpu_instances.size()>=16384U)
+        auto const reject=[](size_t reason)->bool {
+            if(the_config && the_config->profile_renderer)
+                ++native_sprite_totals.gpu_quad_rejects[reason];
             return false;
+        };
+        if(!the_config || !the_config->use_sprite_cache ||
+           type>jkgm::sprite_fixed)return false;
+        if(!gpu_span_readable(rd,0x48U) ||
+           !gpu_span_readable(orientation,12*sizeof(float)))
+            return reject(0);
+        if(pending_gpu_instances.size()>=16384U)return reject(7);
         uintptr_t sprite=0;
         std::memcpy(&sprite,static_cast<uint8_t const *>(rd)+4,sizeof(sprite));
         if(!gpu_span_readable(reinterpret_cast<void const *>(sprite),0xacU))
-            return false;
+            return reject(0);
         auto const *src=reinterpret_cast<uint8_t const *>(sprite);
         // rdFace is embedded at rdSprite + 0x5c: type, GeoMode, LightMode,
         // TexMode at +4, +8, +12, +16, respectively.
@@ -3860,10 +3865,30 @@ namespace {
         std::memcpy(&geometry,src+0x64U,4);
         std::memcpy(&lighting,src+0x68U,4);
         std::memcpy(&texture,src+0x6cU,4);
-        if(geometry!=4U || lighting!=0U || texture<2U ||
-           (flags&~3U)!=0U || !std::isfinite(info.opacity) ||
-           info.opacity<=0.0f || info.opacity>1.0f)
-            return false;
+        // Emit at most eight distinct native face-mode samples per process.
+        if(the_config->profile_renderer) {
+            uint64_t const key=(uint64_t(type&255U)<<56) |
+                (uint64_t(geometry&255U)<<48) |
+                (uint64_t(lighting&255U)<<40) |
+                (uint64_t(texture&255U)<<32) | uint64_t(flags);
+            static std::array<uint64_t,8> sampled_modes{};
+            static size_t sampled_count=0;
+            bool seen=false;
+            for(size_t i=0;i<sampled_count;++i)
+                if(sampled_modes[i]==key)seen=true;
+            if(!seen && sampled_count<sampled_modes.size()) {
+                sampled_modes[sampled_count++]=key;
+                LOG_INFO("SPR GPU face sample type=",type,
+                         " geo=",geometry," light=",lighting,
+                         " tex=",texture," flags=",flags);
+            }
+        }
+        if(geometry!=4U)return reject(1);
+        if(lighting!=0U)return reject(2);
+        if(texture<2U)return reject(3);
+        if((flags&~3U)!=0U)return reject(4);
+        if(!std::isfinite(info.opacity) || info.opacity<=0.0f ||
+           info.opacity>1.0f)return reject(0);
         const auto read=[](uintptr_t at,void *dst,size_t bytes)->bool {
             if(!gpu_span_readable(reinterpret_cast<void const *>(at),bytes))
                 return false;
@@ -3872,7 +3897,7 @@ namespace {
         };
         jkgm::sprite_decal_resource resource{};
         if(!jkgm::read_sprite_decal_resource(read,sprite,resource))
-            return false;
+            return reject(5);
         float size[4]{},offset[3]{};
         std::memcpy(size,src+0x4cU,sizeof(size));
         std::memcpy(offset,src+0xa0U,sizeof(offset));
@@ -3881,13 +3906,13 @@ namespace {
         uint32_t camera=0;
         if(!read(0x0073A418U,&camera,4) ||
            !gpu_span_readable(reinterpret_cast<void const *>(camera),
-                              8U+sizeof(view)))return false;
+                              8U+sizeof(view)))return reject(6);
         std::memcpy(view.data(),reinterpret_cast<void const *>(
                         uintptr_t(camera)+8U),sizeof(view));
         if(!jkgm::make_gpu_sprite_pose(
                 type,pose,view,size,offset,info.width,info.height,
                 current_sprite_roll(rd),placement))
-            return false;
+            return reject(6);
         auto item=gpu_sprite_quads.find(sprite);
         auto const same=[](jkgm::sprite_decal_resource const &a,
                            jkgm::sprite_decal_resource const &b) {
@@ -3901,10 +3926,10 @@ namespace {
            item->second.flags!=flags ||
            !same(item->second.resource,resource)) {
             if(item==gpu_sprite_quads.end() && gpu_sprite_quads.size()>=4096U)
-                return false;
+                return reject(7);
             auto quad=jkgm::make_gpu_sprite_quad(
                 resource.material,resource.texcoords,flags);
-            if(!quad)return false;
+            if(!quad)return reject(5);
             cached_gpu_sprite_quad entry{};
             entry.resource=resource;
             entry.flags=flags;

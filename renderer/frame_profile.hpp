@@ -37,6 +37,7 @@ struct profile_sample {
   uint64_t sprite_projected_gpu=0,sprite_projected_warmups=0;
     uint64_t sprite_gpu_cached_quads=0,sprite_gpu_quad_reuses=0;
     uint64_t sprite_gpu_quad_fallbacks=0,sprite_gpu_quad_mat_wait=0;
+    std::array<uint64_t,8> sprite_gpu_quad_rejects{};
   uint64_t gpu_candidates=0,gpu_culled=0,gpu_queued=0,gpu_snapshots=0,gpu_ready_checks=0;
   uint64_t gpu_source_checks=0,gpu_source_ns=0,gpu_source_invalidations=0;
   uint64_t gpu_failed_snapshot_reuses=0;
@@ -104,6 +105,8 @@ struct profile_sample {
     sprite_gpu_quad_reuses+=o.sprite_gpu_quad_reuses;
     sprite_gpu_quad_fallbacks+=o.sprite_gpu_quad_fallbacks;
     sprite_gpu_quad_mat_wait+=o.sprite_gpu_quad_mat_wait;
+    for(size_t i=0;i<sprite_gpu_quad_rejects.size();++i)
+        sprite_gpu_quad_rejects[i]+=o.sprite_gpu_quad_rejects[i];
     gpu_candidates+=o.gpu_candidates; gpu_culled+=o.gpu_culled;
     gpu_queued+=o.gpu_queued; gpu_snapshots+=o.gpu_snapshots;
     gpu_source_checks+=o.gpu_source_checks;
