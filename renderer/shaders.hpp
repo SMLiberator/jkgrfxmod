@@ -399,6 +399,7 @@ namespace jkgm {
             void set_emissive_sampler(int sampler);
             void set_occlusion_sampler(int sampler);
             void set_depth_sampler(int sampler);
+            void set_coverage_normal_sampler(int sampler);
             void set_fill_tjunction_gaps(bool enabled);
             void set_tjunction_gap_fill_size(int pixels);
             void set_debug_void_pixels(bool enabled);

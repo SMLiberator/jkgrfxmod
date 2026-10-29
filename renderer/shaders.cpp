@@ -1010,6 +1010,12 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_depth_sampler(int sam
     gl::set_uniform_integer(depth_image, sampler);
 }
 
+void jkgm::shaders::game_post_opaque_composite_shader::set_coverage_normal_sampler(
+    int sampler)
+{
+    gl::set_uniform_integer(normal_image,sampler);
+}
+
 void jkgm::shaders::game_post_opaque_composite_shader::set_fill_tjunction_gaps(
     bool enabled)
 {
@@ -1045,9 +1051,7 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_projector_camera(
     point<4,float> origin,point<4,float> right,point<4,float> forward,
     point<4,float> up)
 {
-    // MAT spotlights reconstruct receiving normals from the shared G-buffer.
-    // Explicitly bind the normal sampler even with no spotlights active.
-    gl::set_uniform_integer(normal_image,5);
+    // The normal/coverage sampler is bound separately on every opaque pass.
     gl::set_uniform_vector(camera_origin,origin);
     gl::set_uniform_vector(camera_right,right);
     gl::set_uniform_vector(camera_forward,forward);

@@ -5490,6 +5490,8 @@ namespace jkgm {
             ogs->game_post_opaque_composite_program.set_emissive_sampler(1);
             ogs->game_post_opaque_composite_program.set_occlusion_sampler(2);
             ogs->game_post_opaque_composite_program.set_depth_sampler(3);
+            // Required even when no sun/spotlight camera is configured.
+            ogs->game_post_opaque_composite_program.set_coverage_normal_sampler(5);
             auto &prog=ogs->game_post_opaque_composite_program;
             prog.set_spotlight_count(0);
             prog.set_sun_dynamic_count(0);
