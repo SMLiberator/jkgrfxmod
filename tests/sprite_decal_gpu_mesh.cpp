@@ -110,6 +110,46 @@ int main() {
     assert(corner_vertices.size()==9);
     assert(corner_vertices[6].face_extra>
            corner_vertices[8].face_extra);
+
+    // A real 90-degree 3DO corner, sharing two vertices across front and
+    // side polygons. Under face-normal UV wrapping the two faces sampled
+    // DIFFERENT texels at the exact same world position (a hard painted
+    // band/seam). Per-corner normal wrapping must preserve both UVs.
+    decal_world_triangle front_corner{},side_corner{};
+    front_corner.vertices[0].world={{0.0f,0.1f,-0.2f}};
+    front_corner.vertices[1].world={{0.3f,0.1f,-0.2f}};
+    front_corner.vertices[2].world={{0.3f,0.1f,0.2f}};
+    side_corner.vertices[0].world=front_corner.vertices[1].world;
+    side_corner.vertices[1].world={{0.3f,0.20f,-0.2f}};
+    side_corner.vertices[2].world=front_corner.vertices[2].world;
+    for(auto *tri:{&front_corner,&side_corner}) {
+        for(auto &vertex:tri->vertices) {
+            vertex.u=vertex.world[0];
+            vertex.v=vertex.world[2];
+            vertex.depth=vertex.world[1];
+        }
+    }
+    decal_world_scan right_angle{};
+    right_angle.valid_world=true;
+    right_angle.triangles={front_corner,side_corner};
+    sprite_decal_mesh smooth_corner{};
+    assert(make_sprite_decal_gpu_mesh(
+        right_angle,projector,0x123456U,t,1.0f,smooth_corner,true,true));
+    auto const &cv=smooth_corner.geometry->vertices;
+    assert(cv.size()==6U);
+    // Front #1 and side #0: same world point, same sampled decal texel.
+    assert(eq(cv[1].u,cv[3].u) && eq(cv[1].v,cv[3].v));
+    // Front #2 and side #2: same second shared world point and texel.
+    assert(eq(cv[2].u,cv[5].u) && eq(cv[2].v,cv[5].v));
+    assert(eq(cv[1].face_extra,cv[3].face_extra));
+    assert(eq(cv[2].face_extra,cv[5].face_extra));
+    // Yet the perpendicular side has real texture extent along projector
+    // depth, not a degenerate single-color line.
+    assert(std::fabs(cv[4].u-cv[3].u)>0.05f);
+    // Standalone planar mapping must remain unchanged when wrapping off.
+    auto planar=decal_wrapped_projector_uv(
+        front_corner.vertices[1],projector,{{0,-1,0}},false);
+    assert(eq(planar[0],0.8f) && eq(planar[1],0.7f));
     assert(group.bounds_min[0]<=-0.5f);
     assert(group.bounds_max[2]>=0.5f);
     auto unchanged=gpu.geometry;

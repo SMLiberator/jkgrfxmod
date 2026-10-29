@@ -73,6 +73,34 @@ namespace jkgm {
         return t*t*(3.0f-2.0f*t);
     }
 
+    // UVs must use the SAME smoothed receiver normal used for opacity.
+    // The old face-normal displacement chose different texture coordinates
+    // for the identical world position on two sides of a model corner. That
+    // stretched the sprite into bands and introduced visible polygon seams.
+    // The shared projector coordinates and averaged corner normal make the
+    // mapping continuous without moving the receiving geometry.
+    inline std::array<float,2> decal_wrapped_projector_uv(
+        decal_vertex const &v,decal_projector const &projector,
+        decal_vec3 const &smooth_normal,bool wrap_steep_faces)
+    {
+        auto uv=projected_decal_uv(v,projector);
+        if(wrap_steep_faces) {
+            float const facing=-decal_dot(smooth_normal,projector.look);
+            float const blend=std::clamp(
+                (0.75f-facing)/0.75f,0.0f,1.0f);
+            float const shift=blend*(v.depth-projector.depth*0.5f);
+            uv[0]+=shift*decal_dot(smooth_normal,projector.right)/
+                   projector.width;
+            uv[1]-=shift*decal_dot(smooth_normal,projector.up)/
+                   projector.height;
+            // Retain native SPR's finite texture rectangle rather than
+            // sampling repeats beyond the projected decal's boundaries.
+            uv[0]=std::clamp(uv[0],0.0f,1.0f);
+            uv[1]=std::clamp(uv[1],0.0f,1.0f);
+        }
+        return uv;
+    }
+
     inline bool make_sprite_decal_gpu_mesh(
         decal_world_scan const &scan,decal_projector const &projector,
         uintptr_t material,sprite_decal_texture_coords const &texture,
@@ -155,32 +183,20 @@ namespace jkgm {
                 if(!decal_finite(v.world) ||
                    !std::isfinite(v.u)||!std::isfinite(v.v)||
                    !std::isfinite(v.depth))return false;
-                auto uv=projected_decal_uv(v,projector);
-                if(wrap_steep_faces) {
-                    // Planar UVs collapse to a line on a face whose normal
-                    // is perpendicular to the projector axis. Use projector
-                    // depth as the missing tangent coordinate, oriented by
-                    // that FACE's normal. The shift is zero at the middle
-                    // of the volume, preserving the existing planar mapping
-                    // around the impact and avoiding texture scale changes.
-                    float const facing=-decal_dot(
-                        {{normal[0],normal[1],normal[2]}},projector.look);
-                    float const blend=std::clamp(
-                        (0.75f-facing)/0.75f,0.0f,1.0f);
-                    float const depth_shift=
-                        blend*(v.depth-projector.depth*0.5f);
-                    uv[0]+=depth_shift*decal_dot(
-                        {{normal[0],normal[1],normal[2]}},
-                        projector.right)/projector.width;
-                    uv[1]-=depth_shift*decal_dot(
-                        {{normal[0],normal[1],normal[2]}},
-                        projector.up)/projector.height;
-                    // Clipped volumes can just touch an outer border;
-                    // clamp tiny overshoots instead of rejecting the whole
-                    // decal when a steep receiver crosses that border.
-                    uv[0]=std::clamp(uv[0],0.0f,1.0f);
-                    uv[1]=std::clamp(uv[1],0.0f,1.0f);
+                // Compute the shared corner normal before sampling the
+                // sprite. Both UV warping and angular fading must depend on
+                // this same continuous field, not individual face normals.
+                auto const &smooth=smoothed_normals.at(
+                    decal_projected_corner(v,projector));
+                float const smooth2=decal_dot(smooth,smooth);
+                decal_vec3 facing_normal{{normal[0],normal[1],normal[2]}};
+                if(smooth2>1e-8f && std::isfinite(smooth2)) {
+                    float const inv=1.0f/std::sqrt(smooth2);
+                    for(int i=0;i<3;++i)
+                        facing_normal[i]=smooth[i]*inv;
                 }
+                auto uv=decal_wrapped_projector_uv(
+                    v,projector,facing_normal,wrap_steep_faces);
                 if(!std::isfinite(uv[0])||!std::isfinite(uv[1])||
                    uv[0]<-0.001f||uv[0]>1.001f||
                    uv[1]<-0.001f||uv[1]>1.001f)return false;
@@ -201,13 +217,6 @@ namespace jkgm {
                 vert.fax=v.u/projector.width+0.5f;
                 vert.fay=0.5f-v.v/projector.height;
                 vert.faz=v.depth/projector.depth;
-                auto const &smooth=smoothed_normals.at(
-                    decal_projected_corner(v,projector));
-                float const smooth2=decal_dot(smooth,smooth);
-                decal_vec3 facing_normal{{normal[0],normal[1],normal[2]}};
-                if(smooth2>1e-8f && std::isfinite(smooth2))
-                    for(int i=0;i<3;++i)
-                        facing_normal[i]=smooth[i]/std::sqrt(smooth2);
                 // The old cutoff at facing=-0.25 discarded much of a
                 // low-poly actor's arm even when the clipped triangle was
                 // within the shallow projector. Moving models fade all
