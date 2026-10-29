@@ -5576,11 +5576,6 @@ namespace jkgm {
                     }
                 }
                 prog.set_spotlight_count(active);
-                if(active>0 || sun_lit) {
-                    gl::set_active_texture_unit(5);
-                    gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                     frame_screen->get_resolved_normal_texture());
-                }
                 if(sun_lit) {
                     bool const shadows=sun_shadow_ready && bool(sun_shadow_target);
                     auto const direction=normalized_sun_direction(sun.direction.value());
@@ -5639,6 +5634,13 @@ namespace jkgm {
                                the_config->enable_fog?info[2]:0.0f,0.0f),
                     color_rgb(rgb[0],rgb[1],rgb[2]));
             }
+
+            // HOM coverage reads normal.A on EVERY frame, including rooms
+            // without sunlight or active spotlights. Always bind this
+            // G-buffer attachment, not only when light shaders need RGB.
+            gl::set_active_texture_unit(5);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             frame_screen->get_resolved_normal_texture());
 
             gl::set_active_texture_unit(3);
             gl::bind_texture(gl::texture_bind_target::texture_2d,
