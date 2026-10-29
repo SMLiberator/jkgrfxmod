@@ -5370,7 +5370,7 @@ namespace {
         if((pointer-sectors.base)%native_sector_stride!=0)return -1;
         uint32_t id=0;
         std::memcpy(&id,reinterpret_cast<void const*>(pointer),4);
-        return id<=INT_MAX?int(id):-1;
+        return id<=uint32_t(std::numeric_limits<int>::max())?int(id):-1;
     }
     int cog_sector_match(int index,std::array<float,3> const& pos,
                          cog_sector_array const& sectors) {
