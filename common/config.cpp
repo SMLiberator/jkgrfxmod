@@ -235,6 +235,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_sun_shadows")) {
             j.at("enable_sun_shadows").get_to(rv->enable_sun_shadows);
         }
+        if(j.contains("enable_sprite_shadows")) {
+            j.at("enable_sprite_shadows").get_to(rv->enable_sprite_shadows);
+        }
         if(j.contains("enable_sun_static_cache")) {
             j.at("enable_sun_static_cache").get_to(rv->enable_sun_static_cache);
         }

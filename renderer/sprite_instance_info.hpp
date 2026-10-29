@@ -83,33 +83,15 @@ namespace jkgm {
             return evaluate_roll(it->second,now_ms);
         }
 
-        // Shadow casting is deliberately opt-in per SithThing. A separate
-        // signature prevents recycled Thing slots inheriting the setting.
-        bool set_cast_shadows(void const *thing,uint32_t signature,bool cast) {
-            if(!thing || !signature)return false;
-            if(cast)shadow_casters_[thing]=signature;
-            else shadow_casters_.erase(thing);
-            return true;
-        }
-        bool casts_shadows(void const *thing,uint32_t signature) const {
-            if(!thing || !signature)return false;
-            auto const it=shadow_casters_.find(thing);
-            return it!=shadow_casters_.end() && it->second==signature;
-        }
-
         void forget(void const *thing) {
             entries_.erase(thing);
             rolls_.erase(thing);
-            shadow_casters_.erase(thing);
         }
         void clear() {
             entries_.clear();
             rolls_.clear();
-            shadow_casters_.clear();
         }
-        size_t size() const {
-            return entries_.size()+rolls_.size()+shadow_casters_.size();
-        }
+        size_t size() const {return entries_.size()+rolls_.size();}
     private:
         struct animation {
             uint32_t signature=0;
@@ -136,6 +118,5 @@ namespace jkgm {
         }
         std::unordered_map<void const *,animation> entries_;
         std::unordered_map<void const *,roll_animation> rolls_;
-        std::unordered_map<void const *,uint32_t> shadow_casters_;
     };
 }

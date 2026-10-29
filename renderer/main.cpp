@@ -4332,6 +4332,7 @@ namespace {
         // Exclude HUDs, 0x20 light-exempt Things, decals/flares, translucent
         // face flags and partially faded SPRs from opaque cutout shadows.
         if(the_config->enable_sun_shadows &&
+           the_config->enable_sprite_shadows &&
            the_config->use_sprite_cache &&
            info.opacity>=0.999f && (flags&2U)==0U &&
            !instance.world_lighting_exempt &&
@@ -4344,9 +4345,7 @@ namespace {
                 read(uintptr_t(owner)+0x74U,&signature,4) &&
                 read(uintptr_t(owner)+0x10U,&move_type,4) &&
                 read(uintptr_t(owner)+0x34U,&attach_flags,4) &&
-                signature!=0U &&
-                sprite_instances.casts_shadows(
-                    reinterpret_cast<void const *>(uintptr_t(owner)),signature);
+                signature!=0U;
             if(identified) {
                 auto const &sun=jkgm::get_sun_settings();
                 float const intensity=sun.intensity.value()[0];
@@ -5861,28 +5860,6 @@ namespace {
             LOG_WARNING("SetSpriteInfo: invalid width, height, opacity or duration");
     }
 
-    // SetSpriteCastShadows(thing, bool): explicit per-Thing opt-in.
-    // Default is FALSE even when global sun shadows are enabled. This
-    // prevents large vegetation/smoke populations from flooding the cascades.
-    void __cdecl cog_set_sprite_cast_shadows(void *ctx)
-    {
-        int const enabled=cog_pop_int(ctx);
-        void *thing=cog_pop_thing(ctx);
-        uint32_t signature=0;
-        if(sprite_cog_thing_identity(thing,signature))
-            sprite_instances.set_cast_shadows(thing,signature,enabled!=0);
-    }
-
-    // GetSpriteCastShadows(thing): returns 1 iff the live Thing opted in.
-    void __cdecl cog_get_sprite_cast_shadows(void *ctx)
-    {
-        void *thing=cog_pop_thing(ctx);
-        uint32_t signature=0;
-        int const enabled=sprite_cog_thing_identity(thing,signature) &&
-            sprite_instances.casts_shadows(thing,signature) ? 1 : 0;
-        cog_push_int(ctx,enabled);
-    }
-
     // GetSpriteInfo(thing): current independently interpolated width, height,
     // and opacity (defaults to 1,1,1 when no override is active).
     void __cdecl cog_get_sprite_info(void *ctx)
@@ -6602,8 +6579,6 @@ namespace {
         cog_verb_entry{"resetmaterialcolor", cog_reset_material_color},
         cog_verb_entry{"setspriteinfo", cog_set_sprite_info},
         cog_verb_entry{"getspriteinfo", cog_get_sprite_info},
-        cog_verb_entry{"setspritecastshadows", cog_set_sprite_cast_shadows},
-        cog_verb_entry{"getspritecastshadows", cog_get_sprite_cast_shadows},
         cog_verb_entry{"setspriteroll", cog_set_sprite_roll},
         cog_verb_entry{"getspriteroll", cog_get_sprite_roll},
         cog_verb_entry{"aigetfiretarget", cog_ai_get_fire_target},

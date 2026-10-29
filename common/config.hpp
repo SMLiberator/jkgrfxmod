@@ -57,6 +57,7 @@ namespace jkgm {
         unsigned int spotlight_shadow_resolution = 256U; // depth-map width and height (64..1024)
         bool enable_sun = true; // diffuse sunlight from SetSunInfo; independent of shadow rendering
         bool enable_sun_shadows = false;
+        bool enable_sprite_shadows = false; // opt-in sun shadow casting for cached SPRs; reception unaffected
         bool enable_sun_static_cache = true; // world-only depth layers, independently cached per cascade // directional sunlight + world shadow map
         bool sun_shadow_stable_projection_cache = false; // opt-in reuse while camera frustum stays inside map
         bool sun_shadow_instance_batches = false; // opt-in GL instancing for repeated 3DO sunlight casters
