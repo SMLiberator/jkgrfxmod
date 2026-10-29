@@ -176,6 +176,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_gpu_mesh.cpp /Fe:sprite_decal_gpu_mesh_test.exe
         sprite_decal_gpu_mesh_test.exe
+    - name: Shared GPU SPR quad and pose regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_gpu_quad.cpp /Fe:sprite_gpu_quad_test.exe
+        sprite_gpu_quad_test.exe
     - name: Multi-entry SPR syntax and variant selection regression tests
       shell: cmd
       run: |

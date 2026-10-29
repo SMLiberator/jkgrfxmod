@@ -15,7 +15,9 @@ struct native_sprite_sample {
     uint64_t native_ns=0;
     uint64_t native_proc_faces=0;     // successfully appended SPR proc faces
     uint64_t projected_gpu=0;         // type-3 projected GPU geometry queued
-    uint64_t projected_warmups=0;     // masked native fallback for MAT residency
+    uint64_t projected_warmups=0;
+    uint64_t gpu_cached_quads=0,gpu_quad_reuses=0;
+    uint64_t gpu_quad_fallbacks=0,gpu_quad_mat_wait=0;     // masked native fallback for MAT residency
 
     void add(native_sprite_sample const &o) {
         for(size_t i=0;i<type_calls.size();i++)
@@ -28,6 +30,10 @@ struct native_sprite_sample {
         native_proc_faces+=o.native_proc_faces;
         projected_gpu+=o.projected_gpu;
         projected_warmups+=o.projected_warmups;
+        gpu_cached_quads+=o.gpu_cached_quads;
+        gpu_quad_reuses+=o.gpu_quad_reuses;
+        gpu_quad_fallbacks+=o.gpu_quad_fallbacks;
+        gpu_quad_mat_wait+=o.gpu_quad_mat_wait;
     }
 };
 

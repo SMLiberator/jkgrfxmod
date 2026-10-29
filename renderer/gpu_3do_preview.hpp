@@ -63,6 +63,8 @@ namespace jkgm {
         // distances and inverse-transposed normals, not local distances.
         bool nonrigid_light_transform=false;
         bool is_projected_decal=false; // type-3 SPR, world- or receiver-local
+        bool is_sprite_quad=false; // ordinary SPR with shared GPU quad
+        float sprite_opacity=1.0f; // SetSpriteInfo opacity
         // Stable identity of the model mesh this instance came from.
         // Used by moving decals; zero when not captured or not an eligible
         // moving receiver. Never infer ownership from shared mesh pointers.

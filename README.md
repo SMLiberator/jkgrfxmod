@@ -855,6 +855,16 @@ for the material and reset COG verbs, even if it is `0.0`.
 Repeated set/reset sequences are exercised by the lightweight native
 `tests/runtime_material_state.cpp` regression test in Windows CI.
 
+## GPU-cached ordinary sprites (experimental)
+
+Set `"use_sprite_cache": true` to test shared GPU quad geometry for ordinary
+type-0 camera-facing, type-1 cylindrical billboard and type-2 fixed-plane SPRs.
+Only fully-lit textured faces qualify initially. Decals, flares, unsupported
+lighting modes and MATs awaiting native upload retain JK's existing renderer.
+Shared geometry eliminates duplicate quad uploads; **hardware-instanced draws
+are a separate next step** and are not yet implemented. The option defaults to
+false for A/B testing against the native sprite path.
+
 ## Camera Things as unlit 3D HUD objects (experimental)
 
 Use `type=camera` (SithThing type 1) together with an ordinary `model3d`

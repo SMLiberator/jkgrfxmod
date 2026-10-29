@@ -746,6 +746,15 @@ namespace jkgm {
                          profile_window.sprite_projected_warmups/frames,
                          " NOTE=inclusive_native_only_not_gpu_or_decal_projection");
             }
+            LOG_INFO("PERF sprite_gpu cached_avg=",
+                     profile_window.sprite_gpu_cached_quads/frames,
+                     " geometry_reuses_avg=",
+                     profile_window.sprite_gpu_quad_reuses/frames,
+                     " fallback_avg=",
+                     profile_window.sprite_gpu_quad_fallbacks/frames,
+                     " mat_warmups_avg=",
+                     profile_window.sprite_gpu_quad_mat_wait/frames,
+                     " NOTE=shared_quads_not_hardware_instanced");
             LOG_INFO("PERF sorting_us opaque=", avg(profile_stage::sort_opaque),
                      " transparent=", avg(profile_stage::sort_transparent),
                      " peaks=", peak_sort_opaque, "/", peak_sort_trans,
@@ -779,7 +788,8 @@ namespace jkgm {
                      " NOTE=delayed_nonblocking_GPU_timestamps_zero_if_no_samples");
             present_gpu_ns.fill(0U);
             present_gpu_samples=present_gpu_skipped=0U;
-            if(the_config->use_model_cache || the_config->enable_decals) {
+            if(the_config->use_model_cache || the_config->use_sprite_cache ||
+               the_config->enable_decals) {
                 LOG_INFO("PERF gpu_3do fallback_native_per_frame geometry=",
                          profile_window.gpu_geometry_native/frames,
                          " snapshot=",profile_window.gpu_snapshot_native/frames,
@@ -976,7 +986,8 @@ namespace jkgm {
         void set_renderer_mode(renderer_mode mode) override
         {
             if(this->mode != mode) {
-                if(the_config->use_model_cache || the_config->enable_decals ||
+                if(the_config->use_model_cache || the_config->use_sprite_cache ||
+                   the_config->enable_decals ||
                    (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
                    the_config->enable_sun_shadows) {
                     // Levels recycle native mesh pointers; discard both copies.
@@ -2967,7 +2978,8 @@ namespace jkgm {
                     auto const policy=inst.is_projected_decal
                         ? gpu_3do_alpha_mode::blend_only
                         : choose_gpu_3do_alpha_mode(
-                            (group.face_type&0x2U)!=0,
+                            (group.face_type&0x2U)!=0 ||
+                                (inst.is_sprite_quad && inst.sprite_opacity<0.999f),
                             tex.alpha,tex.masked,
                             tex.special||tex.emissive_only,
                             tex.opacity,tex.dithered);
@@ -3146,7 +3158,8 @@ namespace jkgm {
                 // its MAT texture is fully opaque (JK uses alpha=90/255).
                 float const face_opacity=inst.is_projected_decal
                     ? inst.decal_opacity
-                    : ((group.face_type&0x2U)!=0 ? 90.0f/255.0f : 1.0f);
+                    : (inst.is_sprite_quad ? inst.sprite_opacity : 1.0f) *
+                      ((group.face_type&0x2U)!=0 ? 90.0f/255.0f : 1.0f);
                 if(transparent) {
                     switch(draw.texture.blend) {
                     case material_blend_mode::additive:
@@ -3265,10 +3278,10 @@ namespace jkgm {
                 // the same UV span covers one complete texture.
                 // Type-3 SPR decal UVs come from rdSprite and must continue
                 // to use their original native dimensions.
-                float const uv_width=inst.is_projected_decal
+                float const uv_width=(inst.is_projected_decal || inst.is_sprite_quad)
                     ? draw.texture.width
                     : gpu_3do_model_uv_extent(draw.texture.width);
-                float const uv_height=inst.is_projected_decal
+                float const uv_height=(inst.is_projected_decal || inst.is_sprite_quad)
                     ? draw.texture.height
                     : gpu_3do_model_uv_extent(draw.texture.height);
                 prog.set_surface(draw.texture.albedo_source,uv_width,
@@ -6250,7 +6263,8 @@ namespace jkgm {
             // by JK. Expire their GPU resources, keeping recently reused meshes
             // without retaining every allocation for the entire level.
             // Sweep periodically to avoid iterating the cache on every frame.
-            if((the_config->use_model_cache || the_config->enable_decals ||
+            if((the_config->use_model_cache || the_config->use_sprite_cache ||
+                 the_config->enable_decals ||
                 (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
                 the_config->enable_sun_shadows) &&
                (gpu_3do_present_serial%16U)==0U) {
@@ -6328,6 +6342,10 @@ namespace jkgm {
                 profile_frame.sprite_native_proc_faces+=sprites.native_proc_faces;
                 profile_frame.sprite_projected_gpu+=sprites.projected_gpu;
                 profile_frame.sprite_projected_warmups+=sprites.projected_warmups;
+                profile_frame.sprite_gpu_cached_quads+=sprites.gpu_cached_quads;
+                profile_frame.sprite_gpu_quad_reuses+=sprites.gpu_quad_reuses;
+                profile_frame.sprite_gpu_quad_fallbacks+=sprites.gpu_quad_fallbacks;
+                profile_frame.sprite_gpu_quad_mat_wait+=sprites.gpu_quad_mat_wait;
             }
             record_profile(started, profile_clock::now());
             if(profiling) {

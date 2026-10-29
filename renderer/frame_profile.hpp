@@ -35,6 +35,8 @@ struct profile_sample {
   uint64_t sprite_native_calls=0,sprite_native_success=0,sprite_native_ns=0;
   uint64_t sprite_native_proc_faces=0;
   uint64_t sprite_projected_gpu=0,sprite_projected_warmups=0;
+    uint64_t sprite_gpu_cached_quads=0,sprite_gpu_quad_reuses=0;
+    uint64_t sprite_gpu_quad_fallbacks=0,sprite_gpu_quad_mat_wait=0;
   uint64_t gpu_candidates=0,gpu_culled=0,gpu_queued=0,gpu_snapshots=0,gpu_ready_checks=0;
   uint64_t gpu_source_checks=0,gpu_source_ns=0,gpu_source_invalidations=0;
   uint64_t gpu_failed_snapshot_reuses=0;
@@ -98,6 +100,10 @@ struct profile_sample {
     sprite_native_proc_faces+=o.sprite_native_proc_faces;
     sprite_projected_gpu+=o.sprite_projected_gpu;
     sprite_projected_warmups+=o.sprite_projected_warmups;
+    sprite_gpu_cached_quads+=o.sprite_gpu_cached_quads;
+    sprite_gpu_quad_reuses+=o.sprite_gpu_quad_reuses;
+    sprite_gpu_quad_fallbacks+=o.sprite_gpu_quad_fallbacks;
+    sprite_gpu_quad_mat_wait+=o.sprite_gpu_quad_mat_wait;
     gpu_candidates+=o.gpu_candidates; gpu_culled+=o.gpu_culled;
     gpu_queued+=o.gpu_queued; gpu_snapshots+=o.gpu_snapshots;
     gpu_source_checks+=o.gpu_source_checks;

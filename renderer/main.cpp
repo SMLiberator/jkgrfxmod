@@ -33,6 +33,7 @@
 #include "sprite_decal_auto_align.hpp"
 #include "sprite_decal_pose_cache.hpp"
 #include "sprite_decal_resource.hpp"
+#include "sprite_gpu_quad.hpp"
 #include "sprite_decal_attachment.hpp"
 #include "sprite_decal_follow.hpp"
 #include "sprite_decal_moving_receiver.hpp"
@@ -320,6 +321,13 @@ namespace {
     };
     std::unordered_map<void const *,cached_gpu_mesh> gpu_mesh_cache;
     std::vector<jkgm::gpu_3do_instance> pending_gpu_instances;
+    struct cached_gpu_sprite_quad {
+        jkgm::sprite_decal_resource resource{};
+        uint32_t flags=0;
+        uint64_t id=0;
+        std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
+    };
+    std::unordered_map<uintptr_t,cached_gpu_sprite_quad> gpu_sprite_quads;
     struct moving_mesh_occurrence_key {
         uint64_t thing=0;
         uintptr_t mesh=0;
@@ -1825,6 +1833,7 @@ void jkgm::reset_gpu_3do_instances()
     native_decal_capture_until=0;
     clear_moving_sprite_decals();
     gpu_mesh_cache.clear();
+    gpu_sprite_quads.clear();
     gpu_mat_residency.clear();
     ++gpu_frame_serial;
     gpu_native_stats={};
@@ -2139,11 +2148,13 @@ namespace {
     }
     void __cdecl HookedSpriteFreeEntry(void *sprite)
     {
+        gpu_sprite_quads.erase(reinterpret_cast<uintptr_t>(sprite));
         sprite_types.forget(sprite);
         RealNativeSpriteFreeEntry(sprite);
     }
     void __cdecl HookedSpriteFree(void *sprite)
     {
+        gpu_sprite_quads.erase(reinterpret_cast<uintptr_t>(sprite));
         sprite_types.forget(sprite);
         RealNativeSpriteFree(sprite);
     }
@@ -3823,6 +3834,118 @@ namespace {
         return result;
     }
 
+    // Ordinary SPRs reuse the existing GPU 3DO shader/material pipeline.
+    // Geometry is immutable per .SPR resource; pose, size, roll and alpha
+    // are per Thing. Only fully-lit textured quads are eligible initially.
+    bool submit_gpu_sprite_quad(void const *rd,void const *orientation,
+                                uint32_t type,jkgm::sprite_instance_info const &info)
+    {
+        if(!the_config || !the_config->use_sprite_cache ||
+           type>jkgm::sprite_fixed ||
+           !gpu_span_readable(rd,0x48U) ||
+           !gpu_span_readable(orientation,12*sizeof(float)) ||
+           pending_gpu_instances.size()>=16384U)
+            return false;
+        uintptr_t sprite=0;
+        std::memcpy(&sprite,static_cast<uint8_t const *>(rd)+4,sizeof(sprite));
+        if(!gpu_span_readable(reinterpret_cast<void const *>(sprite),0xacU))
+            return false;
+        auto const *src=reinterpret_cast<uint8_t const *>(sprite);
+        // rdFace is embedded at rdSprite + 0x5c: type, GeoMode, LightMode,
+        // TexMode at +4, +8, +12, +16, respectively.
+        uint32_t flags=0,geometry=0,lighting=0,texture=0;
+        std::memcpy(&flags,src+0x60U,4);
+        std::memcpy(&geometry,src+0x64U,4);
+        std::memcpy(&lighting,src+0x68U,4);
+        std::memcpy(&texture,src+0x6cU,4);
+        if(geometry!=4U || lighting!=0U || texture<2U ||
+           (flags&~3U)!=0U || !std::isfinite(info.opacity) ||
+           info.opacity<=0.0f || info.opacity>1.0f)
+            return false;
+        const auto read=[](uintptr_t at,void *dst,size_t bytes)->bool {
+            if(!gpu_span_readable(reinterpret_cast<void const *>(at),bytes))
+                return false;
+            std::memcpy(dst,reinterpret_cast<void const *>(at),bytes);
+            return true;
+        };
+        jkgm::sprite_decal_resource resource{};
+        if(!jkgm::read_sprite_decal_resource(read,sprite,resource))
+            return false;
+        float size[4]{},offset[3]{};
+        std::memcpy(size,src+0x4cU,sizeof(size));
+        std::memcpy(offset,src+0xa0U,sizeof(offset));
+        jkgm::gpu_3do_matrix34 pose{},view{},placement{};
+        std::memcpy(pose.data(),orientation,sizeof(pose));
+        uint32_t camera=0;
+        if(!read(0x0073A418U,&camera,4) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(camera),
+                              8U+sizeof(view)))return false;
+        std::memcpy(view.data(),reinterpret_cast<void const *>(
+                        uintptr_t(camera)+8U),sizeof(view));
+        if(!jkgm::make_gpu_sprite_pose(
+                type,pose,view,size,offset,info.width,info.height,
+                current_sprite_roll(rd),placement))
+            return false;
+        auto item=gpu_sprite_quads.find(sprite);
+        auto const same=[](jkgm::sprite_decal_resource const &a,
+                           jkgm::sprite_decal_resource const &b) {
+            return a.material==b.material &&
+                   a.texcoords.left==b.texcoords.left &&
+                   a.texcoords.right==b.texcoords.right &&
+                   a.texcoords.top==b.texcoords.top &&
+                   a.texcoords.bottom==b.texcoords.bottom;
+        };
+        if(item==gpu_sprite_quads.end() ||
+           item->second.flags!=flags ||
+           !same(item->second.resource,resource)) {
+            if(item==gpu_sprite_quads.end() && gpu_sprite_quads.size()>=4096U)
+                return false;
+            auto quad=jkgm::make_gpu_sprite_quad(
+                resource.material,resource.texcoords,flags);
+            if(!quad)return false;
+            cached_gpu_sprite_quad entry{};
+            entry.resource=resource;
+            entry.flags=flags;
+            entry.id=next_gpu_id++;
+            entry.geometry=std::move(quad);
+            item=gpu_sprite_quads.insert_or_assign(
+                sprite,std::move(entry)).first;
+        } else if(the_config->profile_renderer) {
+            ++native_sprite_totals.gpu_quad_reuses;
+        }
+        // Let JK perform ordinary sprite rendering to warm missing MAT cels.
+        // The next frame can reuse the already-resident texture safely.
+        if(!gpu_mesh_materials_ready(*item->second.geometry)) {
+            if(the_config->profile_renderer)
+                ++native_sprite_totals.gpu_quad_mat_wait;
+            return false;
+        }
+        jkgm::gpu_3do_instance instance{};
+        instance.id=item->second.id;
+        instance.geometry=item->second.geometry;
+        instance.transform=placement;
+        instance.is_sprite_quad=true;
+        instance.sprite_opacity=info.opacity;
+        instance.casts_sun_shadows=false; // do not introduce sprite casters
+        instance.effective_light_mode=0.0f;
+        // A Camera type sprite participates in the same post-FX overlay as
+        // Camera type 3DOs, including optional 0x20 world-depth occlusion.
+        uint32_t owner=0,thing_type=0,render_type=0,thingflags=0;
+        if(read(reinterpret_cast<uintptr_t>(rd)+0x44U,&owner,4) &&
+           owner>=0x10000U &&
+           uintptr_t(owner)+0xc4U==reinterpret_cast<uintptr_t>(rd) &&
+           read(uintptr_t(owner)+0x0cU,&thing_type,4) &&
+           read(uintptr_t(owner)+0xc4U,&render_type,4) &&
+           read(uintptr_t(owner),&thingflags,4)) {
+            instance.camera_hud=thing_type==1U && render_type==4U;
+            instance.camera_hud_world_depth=jkgm::camera_hud_uses_world_depth(
+                instance.camera_hud,thingflags);
+        }
+        pending_gpu_instances.emplace_back(std::move(instance));
+        if(the_config->profile_renderer)++native_sprite_totals.gpu_cached_quads;
+        return true;
+    }
+
     int __cdecl HookedNativeSprite(void *thing,void *orientation)
     {
         bool const profiling=the_config && the_config->profile_renderer;
@@ -3875,6 +3998,12 @@ namespace {
                 if(profiling)++native_sprite_totals.projected_warmups;
             }
             return 1;
+        }
+        if(known_type && the_config && the_config->use_sprite_cache &&
+           authored_type<=jkgm::sprite_fixed) {
+            if(submit_gpu_sprite_quad(thing,orientation,authored_type,info))
+                return 1;
+            if(profiling)++native_sprite_totals.gpu_quad_fallbacks;
         }
         if(profiling && known_type && jkgm::sprite_is_flare(authored_type) &&
            flare_draw_trace_count++<6U) {
