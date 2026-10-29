@@ -3748,13 +3748,15 @@ namespace {
             static uint32_t snap_logs=0;
             if(snap_logs++<32U) {
                 auto const delta=jkgm::decal_sub(best_position,impact);
-                LOG_INFO("SPR moving mesh_snap method=",
-                         best_contact.valid
-                             ?(best_contact.ray_hit?"ray":"closest_path")
-                             :"legacy_nearest",
-                         " displacement=",std::sqrt(jkgm::decal_dot(delta,delta)),
-                         " miss=",best_contact.valid?best_contact.miss:0.0f,
-                         " travel=",best_contact.valid?best_contact.travel:0.0f);
+                std::ostringstream msg;
+                msg<<"SPR moving mesh_snap method="
+                   <<(best_contact.valid
+                       ?(best_contact.ray_hit?"ray":"closest_path")
+                       :"legacy_nearest")
+                   <<" displacement="<<std::sqrt(jkgm::decal_dot(delta,delta))
+                   <<" miss="<<(best_contact.valid?best_contact.miss:0.0f)
+                   <<" travel="<<(best_contact.valid?best_contact.travel:0.0f);
+                LOG_INFO(msg.str());
             }
         }
         // Select an entire receiving Thing, not a single rdMesh node.
