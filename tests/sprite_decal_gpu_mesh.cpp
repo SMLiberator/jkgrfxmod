@@ -78,6 +78,13 @@ int main() {
     assert(wrapped.geometry->vertices[0].face_extra>0.0f);
     assert(wrapped.geometry->vertices[0].face_extra<0.5f);
     assert(wrapped.geometry->vertices[0].fax==0.5f);
+    sprite_decal_mesh moving_wrap{};
+    assert(make_sprite_decal_gpu_mesh(
+        steep_scan,projector,0x123456U,t,1.0f,moving_wrap,true,true));
+    assert(moving_wrap.geometry->vertices[0].face_extra>0.5f);
+    assert(moving_wrap.geometry->groups[0].face_type==0U);
+    assert(decal_smooth_opacity(-0.98f,0.50f,-0.6f)>0.0f);
+    assert(eq(decal_smooth_opacity(-0.98f,0.50f,-1.0f),0.0f));
     // Face boundary feathering is fragment-based: a wholly clipped quad
     // whose corners touch the volume walls must not disappear entirely.
     assert(gpu.geometry->vertices[0].face_extra==1.0f);

@@ -237,7 +237,8 @@ namespace jkgm {
     inline decal_world_scan project_cached_decal_world(
         decal_world_geometry const &geometry,
         decal_projector const &projector,uint32_t max_output_triangles=2048,
-        bool offset_surface_geometry=true,bool wrap_steep_faces=false)
+        bool offset_surface_geometry=true,bool wrap_steep_faces=false,
+        bool allow_backfacing_receivers=false)
     {
         decal_world_scan result{};
         if(!geometry.valid_world || !valid_decal_projector(projector) ||
@@ -260,12 +261,14 @@ namespace jkgm {
         // Candidate indices are ordered as in SithWorld for stable results.
         for(uint32_t const index:candidates) {
             auto const &s=geometry.receivers[index];
-            // Keep corner wrapping onto perpendicular faces, but never
-            // project onto the opposite side of a slab. The previous
-            // unrestricted acceptance painted bottom and top simultaneously.
-            // Only reject normals that point meaningfully away from the
-            // projector (no sharp angle limit on adjacent surfaces).
-            if(decal_dot(s.normal,projector.look)>
+            // Static architecture retains the opposite-face safeguard:
+            // thin slabs and adjoins must not paint both sides. Moving
+            // 3DOs instead rely on their shallow finite projector and a
+            // smooth per-fragment angular fade, letting decals wrap across
+            // shoulders, limbs and other closed model surfaces. This
+            // affects projection eligibility, NOT GL back-face culling.
+            if(!allow_backfacing_receivers &&
+               decal_dot(s.normal,projector.look)>
                    (wrap_steep_faces?0.35f:0.05f)) {
                 ++result.skipped_backfaces;
                 continue;

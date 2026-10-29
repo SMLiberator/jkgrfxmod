@@ -99,6 +99,13 @@ int main(){
     auto backside=project_cached_decal_world(index,p);
     assert(backside.receivers==2 && backside.triangles.size()==4);
     assert(backside.skipped_backfaces==1);
+    // Only moving model receivers relax the projection-facing check:
+    // no change to the GL winding/backface state, nor to static slabs.
+    auto moving_wrap=project_cached_decal_world(
+        index,p,2048U,false,true,true);
+    assert(moving_wrap.receivers==3 &&
+           moving_wrap.triangles.size()==6);
+    assert(moving_wrap.skipped_backfaces==0);
     index.receivers[0].normal={{0,-1,0}};
     assert(project_cached_decal_world(index,p).triangles.size()==6);
     p.origin[0]=10;

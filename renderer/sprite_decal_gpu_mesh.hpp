@@ -77,7 +77,8 @@ namespace jkgm {
         decal_world_scan const &scan,decal_projector const &projector,
         uintptr_t material,sprite_decal_texture_coords const &texture,
         float opacity,sprite_decal_mesh &result,
-        bool wrap_steep_faces=false)
+        bool wrap_steep_faces=false,
+        bool allow_backfacing_receivers=false)
     {
         if(!scan.valid_world || scan.truncated || scan.triangles.empty() ||
            scan.triangles.size()>32768 || !material ||
@@ -207,11 +208,16 @@ namespace jkgm {
                 if(smooth2>1e-8f && std::isfinite(smooth2))
                     for(int i=0;i<3;++i)
                         facing_normal[i]=smooth[i]/std::sqrt(smooth2);
-                // Full on the impact-facing surface, gradually reduce
-                // side-wall opacity instead of cutting it at the first
-                // perpendicular or slightly back-facing polygon.
+                // The old cutoff at facing=-0.25 discarded much of a
+                // low-poly actor's arm even when the clipped triangle was
+                // within the shallow projector. Moving models fade all
+                // the way around the contour; a directly opposite-facing
+                // surface still fades to zero, helping prevent bleed-through.
+                // Keep the conservative fade for level architecture.
                 float const facing=-decal_dot(facing_normal,projector.look);
-                vert.face_extra=decal_smooth_opacity(-0.25f,0.50f,facing);
+                vert.face_extra=decal_smooth_opacity(
+                    allow_backfacing_receivers?-0.98f:-0.25f,
+                    0.50f,facing);
                 mesh->vertices.push_back(vert);
                 mesh->indices.push_back(uint32_t(mesh->indices.size()));
                 for(int axis=0;axis<3;axis++) {

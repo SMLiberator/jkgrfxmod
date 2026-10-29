@@ -26,6 +26,23 @@ int main() {
     auto const floorhit=find_nearest_decal_surface(
         scene,empty,{{0,-0.1f,0.02f}},{{0,0,-1}});
     assert(floorhit.valid && floorhit.normal[2]>0.9f);
+    // A camera-facing scoring preference previously picked the farther
+    // side of a thin limb (0.018 away) over its true closest surface
+    // (0.002 away). Moving decals use zero incoming bias.
+    decal_world_geometry limb{};
+    limb.valid_world=true;
+    auto back=floor;
+    back.normal={{0,0,-1}};
+    for(auto &point:back.polygon)point[2]+=0.02f;
+    back.bounds_min[2]=back.bounds_max[2]=0.02f;
+    limb.receivers={floor,back};
+    limb.acceleration.build(limb.receivers);
+    auto biased=find_nearest_decal_surface(
+        limb,empty,{{0,0,0.002f}},{{0,0,1}},0.05f);
+    assert(biased.valid && biased.normal[2]<0.0f);
+    auto unbiased=find_nearest_decal_surface(
+        limb,empty,{{0,0,0.002f}},{{0,0,0}},0.05f);
+    assert(unbiased.valid && unbiased.normal[2]>0.0f);
     assert(!find_nearest_decal_surface(scene,empty,{{10,10,10}},
                                      {{0,1,0}}).valid);
     sprite_axes axes{};

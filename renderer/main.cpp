@@ -3677,9 +3677,12 @@ namespace {
             size[0]*info.width,size[1]*info.height);
         float const near_radius=jkgm::sprite_decal_receiver_search_radius(depth);
         if(!(near_radius>0.0f))return false;
-        auto const camera=jkgm::read_active_render_camera();
-        auto const incoming=camera.valid
-            ?camera.forward:jkgm::decal_vec3{{0,0,0}};
+        // The camera's forward direction is not the projectile's impact
+        // direction. Its former 0.04-unit preference could outweigh the
+        // distance between the front and rear faces of a thin actor limb.
+        // Choose the geometrically closest receiver instead. We can use
+        // an actual impact normal later, when one is available.
+        jkgm::decal_vec3 const incoming{{0,0,0}};
         size_t const invalid=std::numeric_limits<size_t>::max();
         size_t best_gpu=invalid,best_native=invalid;
         float best_score=std::numeric_limits<float>::infinity();
@@ -3753,13 +3756,16 @@ namespace {
             if(remaining==0 || entry.fragments.size()>=max_decal_mesh_fragments ||
                !receiver_world.valid_world || receiver_world.receivers.empty())
                 return;
+            // A moving character's shallow decal is allowed to span
+            // back-facing receiver polygons. Raster back-face culling stays
+            // enabled, and the mesh applies a smooth angular opacity fade.
             auto scan=jkgm::project_cached_decal_world(
-                receiver_world,projector,remaining,false,true);
+                receiver_world,projector,remaining,false,true,true);
             if(scan.truncated || scan.triangles.empty())return;
             jkgm::sprite_decal_mesh mesh{};
             if(!jkgm::make_sprite_decal_gpu_mesh(
                     scan,projector,resource.material,resource.texcoords,
-                    info.opacity,mesh,true) || !mesh.geometry) {
+                    info.opacity,mesh,true,true) || !mesh.geometry) {
                 trace_probe("projection_or_gpu_mesh_failed",
                     static_cast<uint32_t>(scan.triangles.size()));
                 return;
