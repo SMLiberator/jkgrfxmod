@@ -2875,7 +2875,8 @@ namespace jkgm {
             prog.use_program();
             set_translucent_spotlights(prog,transparent && !post_exempt &&
                                       !decals_only);
-            set_translucent_sun(prog,transparent && !post_exempt && !decals_only);
+            // Mask directional GGX in both opaque and translucent passes.
+            set_translucent_sun(prog,!post_exempt && !decals_only);
             prog.set_scene_depth(8);
             prog.set_post_exempt(post_exempt);
             prog.set_decal_receiver_lighting(decals_only,10,11);
@@ -3467,6 +3468,8 @@ namespace jkgm {
             ogs->game_opaque_pass_program.set_env_map_sampler(4);
             ogs->game_opaque_pass_program.set_normal_map_samplers(6, 7);
             apply_engine_camera(ogs->game_opaque_pass_program);
+            // Resolve sun GGX visibility before it is mixed into emissive.
+            set_translucent_sun(ogs->game_opaque_pass_program,true);
 
             {
                 auto const &fog = get_fog_settings();
@@ -3494,6 +3497,9 @@ namespace jkgm {
                        /*force opaque*/ true,
                        posterize_lighting);
 
+            // First-person gun rendering uses a separate depth transform:
+            // never sample world shadow maps for its artificial placement.
+            set_translucent_sun(ogs->game_opaque_pass_program,false);
             // Draw fourth pass (opaque gun geometry)
             draw_batch(&ogs->game_opaque_pass_program,
                        gun_batch,

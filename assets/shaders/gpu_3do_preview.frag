@@ -220,6 +220,8 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
 
 // The same view-space GGX/Schlick/Smith sun term used by the native
 // opaque material shader; independent of the existing Gouraud diffuse.
+float sun_specular_shadow_factor(float depth,float incidence);
+
 vec3 gpu_sun_specular(vec3 base_color,vec2 uv)
 {
     if(world_lighting_exempt!=0 || specular_params.x<=0.0 ||
@@ -254,7 +256,7 @@ vec3 gpu_sun_specular(vec3 base_color,vec2 uv)
     vec3 F=F0+(vec3(1.0)-F0)*pow(1.0-Vh,5.0);
     return min(F*(D*Gv*Gl/max(4.0*NdotV,0.0001))*
                sun_color_intensity.rgb*sun_color_intensity.w*strength,
-               vec3(32.0));
+               vec3(32.0)) * sun_specular_shadow_factor(vp.y*32.0,NdotL);
 }
 
 
@@ -503,6 +505,24 @@ float translucent_sun_visibility(vec3 world,float incidence)
     }
     return visible;
 }
+// Share the cascade/dynamic atlas visibility of transparent sun receivers
+// with directional GGX. Environment reflections and emissive light are not
+// direct sunlight and must remain visible beneath a sun shadow.
+float sun_specular_shadow_factor(float depth,float incidence)
+{
+    if(translucent_sun_enabled==0)return 1.0;
+    float fade=1.0;
+    if(translucent_sun_max_distance>0.0) {
+        fade=1.0-smoothstep(translucent_sun_max_distance*0.85,
+                            translucent_sun_max_distance,depth/32.0);
+        if(fade<=0.0)return 0.0;
+    }
+    if(translucent_sun_maps_ready==0 && translucent_sun_dynamic_count==0)
+        return fade;
+    vec3 world=translucent_spotlight_world_pos(depth);
+    return fade*translucent_sun_visibility(world,max(incidence,0.35));
+}
+
 // Normal is evaluated on the TRANSLUCENT fragment, not from the opaque
 // G-buffer. Glass and billboard sprites are illuminated from both sides.
 vec3 illuminate_translucent_sun(vec3 baked,vec3 pigment,float opacity,

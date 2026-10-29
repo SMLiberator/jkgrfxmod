@@ -235,6 +235,138 @@ vec3 compute_reflection(vec3 base_color, vec2 texcoords, vec3 view_normal,
     return env * fresnel * strength;
 }
 
+// Shared sun shadow samplers; no additional G-buffer attachment or pass.
+uniform vec2 translucent_spotlight_resolution;
+uniform vec4 translucent_spotlight_camera_origin;
+uniform vec4 translucent_spotlight_camera_right;
+uniform vec4 translucent_spotlight_camera_forward;
+uniform vec4 translucent_spotlight_camera_up;
+vec3 translucent_spotlight_world_pos(float depth)
+{
+    vec2 ndc = gl_FragCoord.xy / translucent_spotlight_resolution * 2.0 - 1.0;
+    return translucent_spotlight_camera_origin.xyz + (depth / 32.0) * (
+        translucent_spotlight_camera_forward.xyz +
+        ndc.x * translucent_spotlight_camera_right.w *
+                translucent_spotlight_camera_right.xyz +
+        ndc.y * translucent_spotlight_camera_up.w *
+                translucent_spotlight_camera_up.xyz);
+}
+
+
+uniform int translucent_sun_enabled;
+uniform int translucent_sun_maps_ready;
+uniform int translucent_sun_dynamic_count;
+uniform vec3 translucent_sun_direction;
+uniform vec4 translucent_sun_color; // RGB, positive direct intensity
+uniform float translucent_sun_split;
+uniform float translucent_sun_bias_scale;
+uniform vec4 translucent_sun_map_x[10];
+uniform vec4 translucent_sun_map_y[10];
+uniform vec4 translucent_sun_map_z[10];
+uniform vec4 translucent_sun_tile_rect[8];
+uniform float translucent_sun_max_distance; // 0 = unlimited, native-pass parity
+uniform sampler2DShadow translucent_sun_near_depth;
+uniform sampler2DShadow translucent_sun_far_depth;
+uniform sampler2DShadow translucent_sun_dynamic_depth;
+
+vec3 translucent_sun_coordinates(int slot,vec3 world)
+{
+    vec4 p=vec4(world,1.0);
+    return vec3(dot(translucent_sun_map_x[slot],p),
+                dot(translucent_sun_map_y[slot],p),
+                dot(translucent_sun_map_z[slot],p));
+}
+bool translucent_sun_inside(vec3 uv)
+{
+    return all(greaterThanEqual(uv,vec3(0.0))) &&
+           all(lessThanEqual(uv,vec3(1.0)));
+}
+float translucent_sun_sample(int slot,vec3 uv,float incidence)
+{
+    float grazing=1.0-clamp(incidence,0.0,1.0);
+    float offset=(0.008+0.027*grazing*grazing)*
+                 translucent_sun_bias_scale*
+                 length(translucent_sun_map_z[slot].xyz);
+    float comparison=uv.z-max(4.0/16777215.0,offset);
+    if(slot==0)
+        return texture(translucent_sun_near_depth,vec3(uv.xy,comparison));
+    if(slot==1)
+        return texture(translucent_sun_far_depth,vec3(uv.xy,comparison));
+    vec4 tile=translucent_sun_tile_rect[slot-2];
+    vec2 tex_size=vec2(textureSize(translucent_sun_dynamic_depth,0));
+    vec2 center=tile.xy+vec2(2.0)+uv.xy*(tile.zw-vec2(4.0));
+    // Fixed one-sample hardware PCF for atlas tiles, without
+    // receiver-distance-dependent kernel expansion.
+    return texture(translucent_sun_dynamic_depth,
+                   vec3(center/tex_size,comparison));
+}
+float translucent_sun_visibility(vec3 world,float incidence)
+{
+    float visible=1.0;
+    if(translucent_sun_maps_ready!=0) {
+        vec3 near_uv=translucent_sun_coordinates(0,world);
+        vec3 far_uv=translucent_sun_coordinates(1,world);
+        float camera_distance=dot(world-translucent_spotlight_camera_origin.xyz,
+                                  translucent_spotlight_camera_forward.xyz);
+        bool use_near=camera_distance<translucent_sun_split &&
+                      translucent_sun_inside(near_uv);
+        bool use_far=translucent_sun_inside(far_uv);
+        if(use_near && !use_far) {
+            visible=translucent_sun_sample(0,near_uv,incidence);
+        } else if(use_near && use_far) {
+            float begin_blend=translucent_sun_split*0.8125;
+            float end_blend=translucent_sun_split*0.9375;
+            if(camera_distance<=begin_blend)
+                visible=translucent_sun_sample(0,near_uv,incidence);
+            else {
+                float far_visibility=translucent_sun_sample(1,far_uv,incidence);
+                if(camera_distance>=end_blend)visible=far_visibility;
+                else
+                    visible=mix(translucent_sun_sample(0,near_uv,incidence),
+                                far_visibility,smoothstep(begin_blend,end_blend,camera_distance));
+            }
+        } else if(use_far)visible=translucent_sun_sample(1,far_uv,incidence);
+    }
+    if(translucent_sun_dynamic_count>0 && translucent_sun_split>0.0) {
+        float distance=dot(
+            world-translucent_spotlight_camera_origin.xyz,
+            translucent_spotlight_camera_forward.xyz);
+        if(distance<translucent_sun_split) {
+            // Match the opaque composite's forward-depth near-only cutoff and
+            // fade the last 15 percent to avoid a hard shadow ring.
+            float near_fade=1.0-smoothstep(
+                translucent_sun_split*0.85,translucent_sun_split,distance);
+            for(int i=0;i<8;++i) {
+                if(i>=translucent_sun_dynamic_count)break;
+                vec3 uv=translucent_sun_coordinates(i+2,world);
+                if(!translucent_sun_inside(uv))continue;
+                float shadow=translucent_sun_sample(i+2,uv,incidence);
+                visible=min(visible,mix(1.0,shadow,near_fade));
+                if(visible<=0.001)break;
+            }
+        }
+    }
+    return visible;
+}
+
+// Share the cascade/dynamic atlas visibility of transparent sun receivers
+// with directional GGX. Environment reflections and emissive light are not
+// direct sunlight and must remain visible beneath a sun shadow.
+float sun_specular_shadow_factor(float depth,float incidence)
+{
+    if(translucent_sun_enabled==0)return 1.0;
+    float fade=1.0;
+    if(translucent_sun_max_distance>0.0) {
+        fade=1.0-smoothstep(translucent_sun_max_distance*0.85,
+                            translucent_sun_max_distance,depth/32.0);
+        if(fade<=0.0)return 0.0;
+    }
+    if(translucent_sun_maps_ready==0 && translucent_sun_dynamic_count==0)
+        return fade;
+    vec3 world=translucent_spotlight_world_pos(depth);
+    return fade*translucent_sun_visibility(world,max(incidence,0.35));
+}
+
 // One global COG-controlled directional sun. Only the specular term is
 // affected: the original Jedi Knight vertex lighting stays unchanged.
 uniform vec4 sun_direction;       // xyz unit view-space direction, w camera valid
@@ -292,7 +424,8 @@ vec3 compute_sun_specular(vec3 base_color, vec2 texcoords, vec3 mapped_normal)
     vec3 spec = F * (D*Gv*Gl / max(4.0*NdotV,0.0001));
     // NdotL is already cancelled out from BRDF*incoming radiance.
     return min(spec * sun_color_intensity.rgb *
-               sun_color_intensity.w * strength, vec3(32.0));
+               sun_color_intensity.w * strength, vec3(32.0)) *
+           sun_specular_shadow_factor(vp_z,NdotL);
 }
 
 mat3 construct_tbn()

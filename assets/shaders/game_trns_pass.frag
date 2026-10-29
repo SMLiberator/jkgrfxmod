@@ -567,6 +567,24 @@ float translucent_sun_visibility(vec3 world,float incidence)
     }
     return visible;
 }
+// Share the cascade/dynamic atlas visibility of transparent sun receivers
+// with directional GGX. Environment reflections and emissive light are not
+// direct sunlight and must remain visible beneath a sun shadow.
+float sun_specular_shadow_factor(float depth,float incidence)
+{
+    if(translucent_sun_enabled==0)return 1.0;
+    float fade=1.0;
+    if(translucent_sun_max_distance>0.0) {
+        fade=1.0-smoothstep(translucent_sun_max_distance*0.85,
+                            translucent_sun_max_distance,depth/32.0);
+        if(fade<=0.0)return 0.0;
+    }
+    if(translucent_sun_maps_ready==0 && translucent_sun_dynamic_count==0)
+        return fade;
+    vec3 world=translucent_spotlight_world_pos(depth);
+    return fade*translucent_sun_visibility(world,max(incidence,0.35));
+}
+
 // Normal is evaluated on the TRANSLUCENT fragment, not from the opaque
 // G-buffer. Glass and billboard sprites are illuminated from both sides.
 vec3 illuminate_translucent_sun(vec3 baked,vec3 pigment,float opacity,
@@ -731,6 +749,9 @@ void main()
         if(has_sun_specular) {
             sun_specular = compute_sun_specular(unlit_base_color, adj_texcoords,
                                                mapped_normal);
+            float incidence=max(dot(normalize(mapped_normal),
+                                    normalize(sun_direction.xyz)),0.0);
+            sun_specular*=sun_specular_shadow_factor(vp_z,incidence);
         }
     }
 
