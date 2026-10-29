@@ -723,6 +723,9 @@ namespace {
             h.add(f.uv_indices);h.add(f.material);h.add(f.cel);
             h.add(f.uv_x);h.add(f.uv_y);h.add(f.extra_light);
             h.add_bytes(f.normal,sizeof(f.normal));
+            // Modes 0..2 have no triangles in JK hardware rendering.
+            // Their face arrays need not be readable until GeoMode changes.
+            if(f.geo<=2U) continue;
             if(f.count<3 || f.count>128) return false;
             size_t const bytes=size_t(f.count)*sizeof(int);
             if(!readable.readable(f.pos_indices,bytes)) return false;
@@ -769,8 +772,14 @@ namespace {
         for(int f=0;f<m.num_faces;f++) {
             native_face face{};
             std::memcpy(&face,m.faces+size_t(f)*sizeof(face),sizeof(face));
+            if(!jkgm::gpu_3do_supports_face_mode(static_cast<int>(face.geo)))
+                return reject("invalid_face_mode_or_face_indices");
+            // Invisible/point/wireframe faces contribute no hardware
+            // geometry, materials, decals or shadow casters. Never let them
+            // invalidate the rest of a mixed-GeoMode mesh.
+            if(!jkgm::gpu_3do_face_mode_draws_filled(
+                   static_cast<int>(face.geo))) continue;
             if(face.count<3 || face.count>128 ||
-               !jkgm::gpu_3do_supports_face_mode(static_cast<int>(face.geo)) ||
                !gpu_span_readable(face.pos_indices,size_t(face.count)*4) ||
                !std::isfinite(face.uv_x) || !std::isfinite(face.uv_y))
                 return reject("invalid_face_mode_or_face_indices");
@@ -936,8 +945,9 @@ namespace {
         };
         deduplicate(g->material_refs);
         deduplicate(g->solid_material_refs);
-        return g->indices.empty() ? reject("no_drawable_indices")
-                                  : g;
+        // An all-hidden mesh is a valid cached snapshot, not a failure.
+        // The submission path avoids uploading/drawing empty geometry.
+        return g;
     }
 
     // Native JK must warm MATs before a GPU-cached 3DO can draw them.
@@ -1591,8 +1601,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         auto const *bytes=static_cast<uint8_t const *>(mesh);
         std::memcpy(&vertex_rgb,bytes+0x6cU,sizeof(vertex_rgb));
     }
-    // Filled geometry modes 3 (solid) and 4 (textured) are GPU drawable;
-    // leave hidden/point/wireframe modes with JK.
+    // All JK GeoModes 0..4 are valid. In hardware mode 0..2 draw nothing;
+    // only filled modes 3/4 need a cached GPU draw.
     if(the_config->profile_renderer) ++gpu_native_stats.attempted;
     // rdModel3_Draw at 0x44612c-0x446144 stores the *effective* Thing/
     // global GeoMode in this JK23-specific native global before it visits
@@ -1608,18 +1618,22 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     std::memcpy(&current_geo_mode,
                 reinterpret_cast<void const *>(effective_geo_mode),
                 sizeof(current_geo_mode));
-    if(!(shadow_only
-          ? jkgm::thing_shadow_geomode_visible(current_geo_mode,m.geometry_mode)
-          : jkgm::gpu_3do_supports_geo_mode(current_geo_mode,m.geometry_mode))) {
+    if(!jkgm::gpu_3do_supports_geo_mode(
+           current_geo_mode,m.geometry_mode)) {
         if(the_config->profile_renderer) {
             ++gpu_native_stats.geometry_native;
-            if(current_geo_mode<3 || current_geo_mode>4)
+            if(current_geo_mode<0 || current_geo_mode>4)
                 ++gpu_native_stats.geo_thing_not_full;
             else ++gpu_native_stats.geo_mesh_not_full;
         }
-        gpu_log_fallback(m,"geometry_mode_not_full");
-        return false; // Preserve JK vertex/wire/invisible rendering.
+        gpu_log_fallback(m,"geometry_mode_unsupported");
+        return false; // Unsupported mode: keep the native path.
     }
+    // These modes are valid but do not draw in JK's hardware renderer.
+    // Swapping modes with COG will be reflected on the next visible call.
+    if(!jkgm::gpu_3do_geo_mode_draws_filled(
+           current_geo_mode,m.geometry_mode))
+        return !shadow_only;
     auto const camera=jkgm::read_active_render_camera();
     if(!camera.valid) {
         if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
@@ -1750,6 +1764,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                          it->second.snapshot_failure : "unknown_snapshot_error");
         return false;
     }
+    // Models whose faces are all GeoMode 0..2 need no GL buffers or MATs.
+    if(it->second.geometry->groups.empty()) return !shadow_only;
     // If a cel has never been encountered, let JK handle this call to warm
     // its native material cache. We can switch to GPU rendering next frame.
     // Many instances share this mesh. Check MAT handles once per mesh per

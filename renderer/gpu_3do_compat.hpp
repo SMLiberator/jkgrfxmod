@@ -1,7 +1,7 @@
 #pragma once
-// Narrow native-equivalence checks for the experimental GPU 3DO path.
-// Filled geometry modes 3 (solid color) and 4 (textured) are GPU drawable.
-// Modes 0..2 still require JK's hidden/point/line path. Software TexMode
+// GeoModes 0..4 are valid in JK hardware mode. Modes 0..2 draw nothing;
+// 3 (solid) and 4 (textured) produce filled triangles. Software-only
+// vertex/wireframe drawing is not emulated by the GPU path. Software TexMode
 // (affine/perspective) does not affect GPU UV interpolation.
 #include <array>
 #include <cmath>
@@ -9,14 +9,23 @@
 
 namespace jkgm {
     inline bool gpu_3do_supports_geo_mode(int effective_thing_mode,
-                                           int mesh_mode)
+                                          int mesh_mode)
     {
-        return effective_thing_mode>=3 && effective_thing_mode<=4 &&
-               mesh_mode>=3 && mesh_mode<=4;
+        return effective_thing_mode>=0 && effective_thing_mode<=4 &&
+               mesh_mode>=0 && mesh_mode<=4;
     }
     inline bool gpu_3do_supports_face_mode(int face_mode)
     {
-        return face_mode==3 || face_mode==4;
+        return face_mode>=0 && face_mode<=4;
+    }
+    inline bool gpu_3do_geo_mode_draws_filled(int effective_thing_mode,
+                                              int mesh_mode)
+    {
+        return effective_thing_mode>=3 && mesh_mode>=3;
+    }
+    inline bool gpu_3do_face_mode_draws_filled(int face_mode)
+    {
+        return face_mode>=3 && face_mode<=4;
     }
     // The cached shader uses R/F/U columns. Flipping an odd number of axes
     // reverses the handedness of the placement matrix and OpenGL winding.

@@ -4,18 +4,30 @@
 int main() {
     using namespace jkgm;
     assert(gpu_3do_supports_geo_mode(4,4));
-    assert(!gpu_3do_supports_geo_mode(0,4)); // COG hidden Thing
-    assert(!gpu_3do_supports_geo_mode(1,4)); // vertex
-    assert(!gpu_3do_supports_geo_mode(2,4)); // wireframe
+    assert(gpu_3do_supports_geo_mode(0,4)); // hidden Thing: valid, no draw
+    assert(gpu_3do_supports_geo_mode(1,4)); // software-only vertices
+    assert(gpu_3do_supports_geo_mode(2,4)); // software-only wireframe
     assert(gpu_3do_supports_geo_mode(3,4)); // Thing solid
     assert(gpu_3do_supports_geo_mode(4,3)); // Mesh solid
     assert(gpu_3do_supports_geo_mode(3,3));
     assert(!gpu_3do_supports_geo_mode(5,4));
-    assert(!gpu_3do_supports_geo_mode(4,2));
-    assert(gpu_3do_supports_face_mode(4));
-    assert(gpu_3do_supports_face_mode(3));
-    assert(!gpu_3do_supports_face_mode(2));
+    assert(gpu_3do_supports_geo_mode(4,2));
+    assert(gpu_3do_supports_geo_mode(4,0));
+    assert(!gpu_3do_supports_geo_mode(-1,4));
+    assert(!gpu_3do_supports_geo_mode(4,-1));
+    assert(!gpu_3do_supports_geo_mode(4,5));
+    for(int face_mode=0;face_mode<=4;++face_mode) {
+        assert(gpu_3do_supports_face_mode(face_mode));
+        assert(gpu_3do_face_mode_draws_filled(face_mode)==(face_mode>=3));
+    }
+    assert(!gpu_3do_supports_face_mode(-1));
     assert(!gpu_3do_supports_face_mode(5));
+    for(int thing_mode=0;thing_mode<=4;++thing_mode) {
+        for(int mesh_mode=0;mesh_mode<=4;++mesh_mode) {
+            assert(gpu_3do_geo_mode_draws_filled(thing_mode,mesh_mode)==
+                   (thing_mode>=3 && mesh_mode>=3));
+        }
+    }
     std::array<float,12> id{{1,0,0, 0,1,0, 0,0,1, 0,0,0}};
     assert(!gpu_3do_reversed_winding(id));
     auto flip_x=id; flip_x[0]=-1;
