@@ -79,9 +79,12 @@ jkgm::render_gbuffer::render_gbuffer(size<2, int> dims, render_depthbuffer *rbo,
     gl::bind_texture(gl::texture_bind_target::texture_2d, normal_tex);
     gl::tex_image_2d(gl::texture_bind_target::texture_2d,
                      /*level*/ 0,
-                     gl::texture_internal_format::rgb16f,
+                     // Alpha is the coverage bit for HOM. A skybox Thing
+                     // deliberately has a zero normal but still writes a
+                     // pixel, so RGB length cannot indicate valid geometry.
+                     gl::texture_internal_format::rgba16f,
                      dims,
-                     gl::texture_pixel_format::rgb,
+                     gl::texture_pixel_format::rgba,
                      gl::texture_pixel_type::float32,
                      make_span((char const *)nullptr, 0U));
     gl::set_texture_max_level(gl::texture_bind_target::texture_2d, 0U);

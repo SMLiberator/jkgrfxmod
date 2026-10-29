@@ -78,7 +78,9 @@ jkgm::render_gbuffer_msaa::render_gbuffer_msaa(size<2, int> dims,
     gl::bind_texture(gl::texture_bind_target::texture_2d_multisample, normal_tex);
     gl::tex_image_2d_multisample(gl::texture_bind_target::texture_2d_multisample,
                                  num_samples,
-                                 gl::texture_internal_format::rgb16f,
+                                 // Preserve an opaque-coverage marker through
+                                 // multisample resolve, independently of depth.
+                                 gl::texture_internal_format::rgba16f,
                                  dims,
                                  /*fixed sample locations*/ true);
     gl::set_texture_max_level(gl::texture_bind_target::texture_2d_multisample, 0U);
@@ -205,8 +207,8 @@ jkgm::renderer_screen_msaa::renderer_screen_msaa(size<2, int> screen_res,
                                gl::texture_pixel_format::rgba,
                                gl::texture_pixel_type::float32)
     , gbuffer_normal_resolve(screen_res,
-                             gl::texture_internal_format::rgb16f,
-                             gl::texture_pixel_format::rgb,
+                             gl::texture_internal_format::rgba16f,
+                             gl::texture_pixel_format::rgba,
                              gl::texture_pixel_type::float32)
     , gbuffer_depth_resolve(screen_res,
                             spotlight_albedo ? gl::texture_internal_format::rgba16f :

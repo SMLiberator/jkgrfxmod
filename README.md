@@ -855,6 +855,16 @@ for the material and reset COG verbs, even if it is `0.0`.
 Repeated set/reset sequences are exercised by the lightweight native
 `tests/runtime_material_state.cpp` regression test in Windows CI.
 
+## Distant geometry and HOM
+
+`retain_hom_pixels` uses G-buffer normal alpha as an explicit opaque-pixel
+coverage signal instead of treating large linear-depth values as empty space.
+Large skyboxes and other distant opaque geometry can now replace retained
+background pixels even when half-float depth has saturated. Distance-dependent
+effects past roughly 2047 world units may still need a separate extended-range
+depth representation; this change intentionally avoids doubling depth texture
+bandwidth. Camera HUD texture placeholders are suppressed during menu swaps.
+
 ## GPU-cached ordinary sprites (experimental)
 
 Set `"use_sprite_cache": true` to test shared GPU quad geometry for ordinary

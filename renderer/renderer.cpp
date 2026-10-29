@@ -986,6 +986,13 @@ namespace jkgm {
         void set_renderer_mode(renderer_mode mode) override
         {
             if(this->mode != mode) {
+                // The previous scene's Camera HUD may still be waiting for
+                // present_game() when JK switches into its pause or end menu.
+                // Invalidate it before clearing GPU/MAT resources: otherwise
+                // a stale late-pass draw can briefly sample an unresolved MAT.
+                deferred_gpu_3do_instances.clear();
+                deferred_gpu_3do_camera={};
+                frame_has_exempt_gpu=false;
                 if(the_config->use_model_cache || the_config->use_sprite_cache ||
                    the_config->enable_decals ||
                    (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
@@ -2966,6 +2973,12 @@ namespace jkgm {
                             ++profile_frame.gpu_material_resolves;
                     }
                     auto const &tex=found->second;
+                    // Native MAT/D3D handles can be destroyed on the frame
+                    // entering a 2D menu. Never show the GPU debug-magenta
+                    // placeholder in a Camera HUD late pass: omit that
+                    // unresolved draw until the material is resident again.
+                    if(post_exempt && tex.albedo_source==0)
+                        continue;
                     // Camera Things are an instance-level HUD layer. The
                     // same 3DO and MAT on an ordinary Thing remain in-scene.
                     if(!post_exempt && inst.camera_hud)

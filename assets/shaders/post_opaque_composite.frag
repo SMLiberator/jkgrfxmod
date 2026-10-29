@@ -292,6 +292,14 @@ void project_spotlights(float depth,ivec2 pixel,
 // after finding bracketed neighbors. A sky pixel with no nearby opaque
 // geometry still needs tests when repair is enabled, so favor an early exit
 // and a small configured radius over additional full-screen passes.
+// RGBA16F normal.A records which opaque pixels were actually rasterized.
+ // Do not use depth >= 65500 as an occupancy test: depth is 32 times the
+ // forward distance and can overflow R16F on immense world/skybox geometry.
+ // Lit and skybox surfaces both mark coverage, even when normal RGB is zero.
+bool has_opaque_coverage(ivec2 p)
+{
+    return texelFetch(normal_image,p,0).a>0.5;
+}
 float gap_depth_or_empty(ivec2 p,ivec2 dims)
 {
     if(any(lessThan(p,ivec2(0))) || any(greaterThanEqual(p,dims)))
@@ -303,8 +311,8 @@ void main()
 {
     ivec2 tc=ivec2(gl_FragCoord.xy);
     float depth=texelFetch(depth_image,tc,0).r;
-    if(fill_tjunction_gaps!=0 && tjunction_gap_fill_size>0 &&
-       (depth<=0.0 || depth>=65500.0)) {
+    bool covered=has_opaque_coverage(tc);
+    if(fill_tjunction_gaps!=0 && tjunction_gap_fill_size>0 && !covered) {
         ivec2 dims=textureSize(depth_image,0);
         ivec2 selected=tc;
         int best_span=100;
@@ -349,13 +357,14 @@ void main()
         if(any(notEqual(selected,tc))) {
             tc=selected;
             depth=best_depth;
+            covered=has_opaque_coverage(tc);
         }
     }
 
     // Debug the ACTUAL remaining missing pixels after any gap repair,
     // regardless of HOM being enabled. Bright alternating neon colors make
     // subpixel edge cracks conspicuous even under sunlight/HDR processing.
-    if(debug_void_pixels!=0 && (depth<=0.0 || depth>=65500.0)) {
+    if(debug_void_pixels!=0 && !covered) {
         ivec2 pixel=ivec2(gl_FragCoord.xy);
         bool checker=(((pixel.x/2)+(pixel.y/2))&1)==0;
         out_color=vec4(checker?vec3(8.0,0.0,8.0):
@@ -363,10 +372,12 @@ void main()
         return;
     }
 
-    // No extra history texture or blit: the target scene color attachment
-    // already contains the previous frame. Keep it only where nothing in
-    // this frame wrote opaque depth. Alpha geometry then blends normally.
-    if(retain_hom_pixels!=0 && (depth<=0.0 || depth>=65500.0))
+    // Preserve the previous scene only if NO opaque fragment was drawn.
+    // In particular, a skybox beyond 65504/32 world units can overflow
+    // half-float scene depth while its color and coverage are still valid.
+    // Depth overflow may limit distant lighting/fog precision, but never
+    // turn a real opaque fragment into a HOM pixel.
+    if(retain_hom_pixels!=0 && !covered)
         discard;
 
     vec4 albedo = texelFetch(color_image, tc, 0);

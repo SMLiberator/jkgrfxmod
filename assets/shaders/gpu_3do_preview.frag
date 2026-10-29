@@ -762,7 +762,10 @@ void main() {
                       dot(jk_lit_rgb,vec3(0.2126,0.7152,0.0722)));
     // A zero normal is already rejected by the SSAO and sun receivers.
     // This costs no additional G-buffer attachment or fullscreen pass.
-    out_normal=world_lighting_exempt!=0 ? vec4(0.0) :
+    // A skybox/ThingFlag 0x20 skips SSAO and sunlight via zero RGB
+    // normals, but it STILL occupies a G-buffer pixel. Alpha is a separate
+    // coverage marker used by HOM; never couple it to lighting flags.
+    out_normal=world_lighting_exempt!=0 ? vec4(0.0,0.0,0.0,1.0) :
                                       vec4(normalize(view_normal),1.0);
     // Depth target optionally carries the unlit diffuse base in GBA.
     // This keeps projected lighting independent of baked JK vertex light.
