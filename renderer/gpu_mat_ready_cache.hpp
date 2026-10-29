@@ -6,6 +6,17 @@
 #include <unordered_set>
 
 namespace jkgm {
+// A native texture upload or reused D3D surface can invalidate a previously
+// positive mesh readiness decision *within* a frame. Negative results can
+// also become ready immediately after native texture warm-up.
+inline bool gpu_mat_mesh_needs_recheck(
+    uint64_t checked_frame,uint64_t checked_upload_generation,
+    uint64_t frame,uint64_t upload_generation)
+{
+    return checked_frame!=frame ||
+           checked_upload_generation!=upload_generation;
+}
+
 class gpu_mat_ready_cache {
     uint64_t frame_=0,upload_generation_=0;
     std::unordered_set<uint64_t> ready_;

@@ -2015,9 +2015,10 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     auto const upload_generation=
         native_mat_upload_generation.load(std::memory_order_relaxed);
     if(!shadow_only && !solid_thing &&
-       (it->second.ready_checked_frame!=gpu_frame_serial ||
-        (!it->second.ready_for_frame &&
-         it->second.ready_checked_generation!=upload_generation))) {
+       jkgm::gpu_mat_mesh_needs_recheck(
+           it->second.ready_checked_frame,
+           it->second.ready_checked_generation,
+           gpu_frame_serial,upload_generation)) {
         bool const profiling=the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};

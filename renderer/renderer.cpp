@@ -6574,6 +6574,12 @@ namespace jkgm {
             auto get_matching_buffer = [&] {
                 for(auto &tex : vidmem_texture_surfaces) {
                     if(tex->refct <= 0) {
+                        // Recycled D3D material IDs can still be referenced by
+                        // a JK MAT until its next native cache update. Reject
+                        // all earlier positive residency and MAT associations,
+                        // even if the new surface is never uploaded.
+                        ++tex->texture_generation;
+                        notify_texture_uploaded();
                         tex->refct = 0;
                         tex->clear();
                         return tex.get();

@@ -15,5 +15,13 @@ int main() {
     c.mark_ready(2,2,0x10000,0);
     c.clear();
     assert(!c.contains(2,2,0x10000,0)); // world reset
+
+    // Positive readiness can become stale within the same frame when
+    // a texture handle is recycled or its backing D3D image is reloaded.
+    assert(!jkgm::gpu_mat_mesh_needs_recheck(20,100,20,100));
+    assert(jkgm::gpu_mat_mesh_needs_recheck(20,100,20,101));
+    assert(jkgm::gpu_mat_mesh_needs_recheck(20,100,21,100));
+    // Negative readiness also retries immediately after a native upload.
+    assert(jkgm::gpu_mat_mesh_needs_recheck(20,100,20,102));
     return 0;
 }

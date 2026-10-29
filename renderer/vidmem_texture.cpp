@@ -39,10 +39,11 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
         report_unimplemented_function("Direct3DTexture(vidmem)::Load with a non-sysmem texture");
     }
 
-    // Reset material to default state. Invalidates cached native MAT link.
+    // Texture replacement is synchronous. Invalidate the native MAT/GPU
+    // readiness caches AFTER the new surface is populated, so a ready
+    // decision made following Load() can never see an incomplete upload.
     ++surf->texture_generation;
     surf->clear();
-    surf->r->notify_texture_uploaded();
 
     auto *src = cast_tex->surf;
 
@@ -133,6 +134,7 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
         surf->alpha_cutoff = (*repl_map)->alpha_cutoff;
 
         if(!(*repl_map)->use_original_albedo || (*repl_map)->albedo_map.has_value()) {
+            surf->r->notify_texture_uploaded();
             return D3D_OK;
         }
 
@@ -167,6 +169,7 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
         surf->alpha_cutoff = (*repl_map)->alpha_cutoff;
     }
 
+    surf->r->notify_texture_uploaded();
     return D3D_OK;
 }
 
