@@ -46,7 +46,7 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
 
     auto *src = cast_tex->surf;
 
-    // Compute and report texture signature
+    // Compute the replacement signature; no per-upload diagnostic needed.
     uint32_t bound_width = src->desc.dwWidth;
     uint32_t bound_height = src->desc.dwHeight;
 
@@ -56,16 +56,11 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
     mh.add(make_span(src->buffer).as_const_bytes());
 
     auto sig = mh.finish();
-    LOG_DEBUG("Loaded texture with signature ", static_cast<std::string>(sig));
 
     auto repl_map = surf->r->texture_cache->get_replacement_material(sig);
 
     if(repl_map.has_value()) {
         surf->replacement_material = *repl_map;
-        LOG_DEBUG("Texture instance ", surf->material_id.get(),
-                  " (signature ", static_cast<std::string>(sig), ") maps to pack ",
-                  (*repl_map)->pack_root.generic_string(), " / material ",
-                  (*repl_map)->source_name);
         if((*repl_map)->albedo_map.has_value()) {
             surf->albedo_map =
                 surf->r->texture_cache->get_srgb_texture_from_filename(*(*repl_map)->albedo_map);
@@ -142,8 +137,6 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
         }
 
         // This material keeps the game's own texture as its albedo: carry on below to convert it.
-        LOG_DEBUG("Keeping original albedo for texture instance ", surf->material_id.get(),
-                  " (D3D source bit depth ", src->desc.ddpfPixelFormat.dwRGBBitCount, ")");
     }
 
     // No replacements found (or one that keeps the original albedo). Create standard material.

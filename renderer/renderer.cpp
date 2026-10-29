@@ -4405,7 +4405,7 @@ namespace jkgm {
                     sun_dynamic_views.push_back(view);
                     sun_dynamic_tiles.push_back(tile);
                     sun_dynamic_atlas_owners.insert(object->key);
-                    if(the_config->profile_renderer &&
+                    if(the_config->profile_renderer_verbose &&
                        gpu_3do_present_serial%120U==0U) {
                         auto const &lo=object->bounds.low;
                         auto const &hi=object->bounds.high;
@@ -4428,7 +4428,7 @@ namespace jkgm {
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                                  gl::default_framebuffer);
-            if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U) {
+            if(the_config->profile_renderer_verbose && gpu_3do_present_serial%120U==0U) {
                 size_t shaded_pixels=0;
                 std::ostringstream tile_sizes;
                 for(size_t i=0;i<sun_dynamic_tiles.size();++i) {
@@ -4461,7 +4461,7 @@ namespace jkgm {
             sun_dynamic_atlas_owners.clear();
             if(!the_config->enable_sun_shadows)return;
             auto sun_failure=[&](char const *reason) {
-                if(the_config->profile_renderer &&
+                if(the_config->profile_renderer_verbose &&
                    gpu_3do_present_serial%120U==0U)
                     LOG_INFO("SUN shadow unavailable: ",reason);
             };
@@ -4551,7 +4551,7 @@ namespace jkgm {
                     atlas_begin,profile_clock::now());
             // Diagnose non-unit or mirrored SetModelNodeRLUVecs placements.
             // These are valid Sith transforms; do not normalize their axes.
-            if(the_config->profile_renderer &&
+            if(the_config->profile_renderer_verbose &&
                gpu_3do_present_serial%120U==0U) {
                 size_t transformed=0,moving=0,in_atlas=0,excluded=0;
                 size_t logged=0;
@@ -4908,7 +4908,7 @@ namespace jkgm {
             append_model_set(caster_signature,all_count,all_sum,all_sum_sq);
             append_model_set(static_signature,static_count,static_sum,
                              static_sum_sq);
-            if(the_config->profile_renderer &&
+            if(the_config->profile_renderer_verbose &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN shadow caster batches world=",
                          counts.size()+world_cutouts.size(),
@@ -4991,7 +4991,7 @@ namespace jkgm {
                         cascade_begin,profile_clock::now());
                 }
                 sun_shadow_cascade_ready[cascade]=true;
-                if(the_config->profile_renderer &&
+                if(the_config->profile_renderer_verbose &&
                    gpu_3do_present_serial%120U==0U)
                     LOG_INFO("SUN cascade=",cascade," full_cache_hit=1");
                 continue;
@@ -5352,7 +5352,7 @@ namespace jkgm {
             gl::set_face_cull_mode(gl::face_mode::back);
             gl::set_active_texture_unit(0);
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
-            if(the_config->profile_renderer &&
+            if(the_config->profile_renderer_verbose &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN cascade=",cascade,
                          " static_cache_hit=",static_same?1:0,
@@ -5371,7 +5371,7 @@ namespace jkgm {
             } // cascade
             sun_shadow_ready=sun_shadow_cascade_ready[0] &&
                              sun_shadow_cascade_ready[1];
-            if(the_config->profile_renderer &&
+            if(the_config->profile_renderer_verbose &&
                gpu_3do_present_serial%120U==0U) {
                 LOG_INFO("SUN cache 120-frame-window near(full/static_hit/static_redraw/composite_redraw)=",
                     sun_profile_full_hits[0],"/",
@@ -5515,7 +5515,7 @@ namespace jkgm {
                 std::isfinite(sun_power) && sun_power>0.0f;
             auto const cam=read_active_render_camera();
             if((the_config->enable_sun || the_config->enable_sun_shadows) &&
-               the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
+               the_config->profile_renderer_verbose && gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN composite diffuse=",sun_lit && cam.valid?1:0,
                          " shadow=",sun_shadow_ready?1:0,
                          " intensity=",std::to_string(sun_power));

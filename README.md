@@ -865,6 +865,15 @@ effects past roughly 2047 world units may still need a separate extended-range
 depth representation; this change intentionally avoids doubling depth texture
 bandwidth. Camera HUD texture placeholders are suppressed during menu swaps.
 
+## Profiling and diagnostics
+
+`"profile_renderer": true` continues to report aggregate frame, GPU, native
+and sprite performance. Optional `"profile_renderer_verbose": true` restores
+per-Thing sun/RLU, shadow atlas, SPR pose and decal receiver diagnostics and
+individual GPU 3DO fallback names. Verbose diagnostics default to false, so
+log writes do not skew normal A/B performance runs. Repeated texture upload
+signature and material-map debug messages are no longer emitted.
+
 ## GPU-cached ordinary sprites (experimental)
 
 Set `"use_sprite_cache": true` to test shared GPU quad geometry for ordinary

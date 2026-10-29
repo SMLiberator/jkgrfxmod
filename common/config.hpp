@@ -45,6 +45,7 @@ namespace jkgm {
         bool enable_posterized_lighting = false;
         bool enable_vsync = false;
         bool profile_renderer = false; // opt-in CPU and async GPU frame timings
+        bool profile_renderer_verbose = false; // opt-in detailed renderer diagnostics
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics
         bool profile_auto_exposure = false; // optional blocking 1px readback diagnostics
         bool optimize_hud_uploads = true; // upload only changed HUD rows (disable for A/B test)

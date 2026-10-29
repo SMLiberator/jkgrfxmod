@@ -165,6 +165,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("profile_renderer")) {
             j.at("profile_renderer").get_to(rv->profile_renderer);
         }
+        if(j.contains("profile_renderer_verbose")) {
+            j.at("profile_renderer_verbose").get_to(rv->profile_renderer_verbose);
+        }
         if(j.contains("profile_audio")) {
             j.at("profile_audio").get_to(rv->profile_audio);
         }

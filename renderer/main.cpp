@@ -371,7 +371,7 @@ namespace {
     std::unordered_set<std::string> gpu_logged_fallbacks;
     void gpu_log_fallback(native_mesh const &m,std::string const &reason)
     {
-        if(!the_config || !the_config->profile_renderer ||
+        if(!the_config || !the_config->profile_renderer_verbose ||
            gpu_logged_fallbacks.size()>=80) return;
         auto const end=std::find(m.name,m.name+sizeof(m.name),'\0');
         std::string const name(m.name,end);
@@ -1228,7 +1228,8 @@ namespace {
         // Inspect native RLU matrices BEFORE GPU eligibility filters can
         // discard a mesh. A zero in the renderer-side RLU diagnostic does
         // not establish that Sith never supplied a scaled node.
-        if(profiling && gpu_frame_serial%120U==0U) {
+        if(profiling && the_config->profile_renderer_verbose &&
+           gpu_frame_serial%120U==0U) {
             static thread_local uint64_t sample_frame=0;
             static thread_local unsigned sample_logged=0;
             if(sample_frame!=gpu_frame_serial) {
@@ -1318,7 +1319,8 @@ namespace {
                     ?"snapshot_other":
                 gpu_native_stats.lighting_native>lighting_before
                     ?"camera_or_lighting":"other_early_exit";
-            if(profiling && gpu_frame_serial%120U==0U) {
+            if(profiling && the_config->profile_renderer_verbose &&
+               gpu_frame_serial%120U==0U) {
                 static thread_local uint64_t sample_frame=0;
                 static thread_local unsigned sample_logged=0;
                 if(sample_frame!=gpu_frame_serial) {
@@ -1348,7 +1350,7 @@ namespace {
             // Surface this explicitly rather than silently drawing icons
             // inside the post-processed scene.
             static unsigned hud_fallback_logs=0;
-            if(hud_fallback_logs++<40U)
+            if(hud_fallback_logs++<3U)
                 LOG_WARNING("Camera Thing HUD 3DO native fallback; mesh=",
                             reinterpret_cast<uintptr_t>(mesh),
                             " cannot use post-exempt GPU pass this frame");
@@ -2093,7 +2095,7 @@ namespace {
         sprite_variant_roots[base]=base;
         for(size_t i=1;i<group.choices.size();++i)
             sprite_variant_roots[group.choices[i]]=base;
-        if(the_config && the_config->profile_renderer)
+        if(the_config && the_config->profile_renderer_verbose)
             LOG_INFO("SPR variants name=",sprite_name,
                      " entries=",group.choices.size(),
                      " shared_resources=1");
@@ -2211,7 +2213,7 @@ namespace {
     std::unordered_map<std::string,int> sprite_trace_counts;
     void trace_sprite_skip(char const *name,uint32_t type,char const *reason)
     {
-        if(!the_config || !the_config->profile_renderer ||
+        if(!the_config || !the_config->profile_renderer_verbose ||
            sprite_trace_counts.size()>=128U) return;
         std::string const key(name);
         int &seen=sprite_trace_counts[key];
@@ -2224,7 +2226,7 @@ namespace {
                              jkgm::sprite_axes const &final_axes,
                              bool updated)
     {
-        if(!the_config || !the_config->profile_renderer ||
+        if(!the_config || !the_config->profile_renderer_verbose ||
            sprite_trace_counts.size()>=128U) return;
         std::string key(name);
         int &seen=sprite_trace_counts[key];
@@ -2320,7 +2322,7 @@ namespace {
         float const roll=current_sprite_roll(rd_thing);
         uint32_t type=0;
         if(!sprite_types.lookup(sprite,reinterpret_cast<char const *>(p),type)) {
-            if(the_config && the_config->profile_renderer &&
+            if(the_config && the_config->profile_renderer_verbose &&
                sprite_trace_counts.size()<128U) {
                 std::string const key(sprite_name);
                 int &seen=sprite_trace_counts[key];
@@ -2331,7 +2333,7 @@ namespace {
             return;
         }
         if(!jkgm::sprite_needs_custom_axes(type)) {
-            if(the_config && the_config->profile_renderer &&
+            if(the_config && the_config->profile_renderer_verbose &&
                sprite_trace_counts.size()<128U) {
                 auto const key=std::string(sprite_name);
                 int &seen=sprite_trace_counts[key];
@@ -3134,7 +3136,7 @@ namespace {
             sprite_static_meshes.emplace(key,std::move(updated));
         sprite_static_receivers_dirty=true;
         ++sprite_static_revision;
-        if(the_config->profile_renderer &&
+        if(the_config->profile_renderer_verbose &&
            sprite_static_mesh_logs++<12U)
             LOG_INFO("SPR decal static3do captured thing=",owner,
                      " mesh=",reinterpret_cast<uintptr_t>(mesh),
