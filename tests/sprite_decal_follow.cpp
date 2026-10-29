@@ -10,7 +10,10 @@ jkgm::gpu_3do_geometry triangle() {
     jkgm::gpu_3do_geometry g;
     jkgm::gpu_3do_vertex v{};
     v.x=12; v.y=24; v.z=36;
-    v.fax=12; v.fay=24; v.faz=36;
+    // Projector coordinates must survive arbitrary receiver translations,
+    // rotations, scale/mirroring and shear without being transformed.
+    v.fax=0.15f; v.fay=0.40f; v.faz=0.70f;
+    v.face_extra=0.65f;
     v.nx=0;v.ny=0;v.nz=1;
     v.lnx=0;v.lny=0;v.lnz=1;
     v.u=0.5f; v.v=63.5f;
@@ -27,16 +30,15 @@ void verify_round_trip(jkgm::gpu_3do_matrix34 const &m) {
     auto g=triangle();
     auto const original=g;
     assert(jkgm::sprite_decal_geometry_to_receiver_local(g,m));
-    // The receiver transform must reproduce the original world-space
-    // decal, including the face anchor used by the GPU shader.
+    // The receiver transform reproduces world-space POSITION, while
+    // projector UV/depth and angular fade remain in immutable decal space.
     for(size_t i=0;i<g.vertices.size();++i) {
         auto const &v=g.vertices[i];
         auto const &o=original.vertices[i];
         auto pos=jkgm::gpu_3do_native_transform_point(m,{{v.x,v.y,v.z}});
-        auto face=jkgm::gpu_3do_native_transform_point(
-            m,{{v.fax,v.fay,v.faz}});
         assert(close(pos[0],o.x)&&close(pos[1],o.y)&&close(pos[2],o.z));
-        assert(close(face[0],o.fax)&&close(face[1],o.fay)&&close(face[2],o.faz));
+        assert(v.fax==o.fax&&v.fay==o.fay&&v.faz==o.faz);
+        assert(v.face_extra==o.face_extra);
         assert(v.u==o.u&&v.v==o.v);
     }
     assert(g.groups.size()==1 && g.groups[0].count==3);

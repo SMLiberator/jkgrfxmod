@@ -104,8 +104,10 @@ struct inverse_affine {
 }
 
 // Input geometry comes from make_sprite_decal_gpu_mesh(), which produces
-// WORLD-space positions and face anchors. On success it becomes mesh-LOCAL.
-// On invalid/singular transforms, leave the original untouched.
+// WORLD-space positions. The face-anchor attribute stores normalized projector
+// UV/depth for fragment-level decal edge opacity, NOT a world-space position.
+// On success only positions and normals become mesh-LOCAL; projector values
+// and angle opacity stay unchanged. On invalid transforms, leave untouched.
 inline bool sprite_decal_geometry_to_receiver_local(
     gpu_3do_geometry &geometry,gpu_3do_matrix34 const &receiver_world)
 {
@@ -114,7 +116,6 @@ inline bool sprite_decal_geometry_to_receiver_local(
     gpu_3do_geometry converted=geometry;
     for(auto &v:converted.vertices) {
         if(!inverse.point(v.x,v.y,v.z) ||
-           !inverse.point(v.fax,v.fay,v.faz) ||
            !inverse.normal(v.nx,v.ny,v.nz) ||
            !inverse.normal(v.lnx,v.lny,v.lnz))return false;
     }
