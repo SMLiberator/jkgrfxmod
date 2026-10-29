@@ -2066,6 +2066,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     inst.camera_hud_world_depth=jkgm::camera_hud_uses_world_depth(
         inst.camera_hud,active_native_model_thing_flags);
     inst.casts_sun_shadows=casts_sun_shadows;
+    // Receiving sunlight/SSAO is distinct from writing shadow depth.
+    // SithThing flag 0x20 and Camera HUDs remain light-exempt.
+    inst.world_lighting_exempt=!casts_sun_shadows;
     inst.shadow_owner=active_native_shadow_owner;
     inst.spotlight_shadow_family=active_native_spotlight_family;
     inst.dynamic_sun_caster=active_native_shadow_dynamic;
@@ -4318,6 +4321,11 @@ namespace {
             instance.camera_hud_world_depth=jkgm::camera_hud_uses_world_depth(
                 instance.camera_hud,thingflags);
         }
+        // The displayed billboard is a normal shadow RECEIVER; it does not
+        // cast merely because it participates in lighting. 0x20 suppresses
+        // additional sun/shadow/SSAO contributions just as for a 3DO.
+        instance.world_lighting_exempt=instance.camera_hud ||
+            (thingflags&0x20U)!=0U;
         // A second, depth-only submission reuses this same quad/GL buffer,
         // but is built in sunlight space. No camera-dependent shadow geometry
         // enters the static cache, and the visible SPR remains unchanged.
@@ -4326,7 +4334,7 @@ namespace {
         if(the_config->enable_sun_shadows &&
            the_config->use_sprite_cache &&
            info.opacity>=0.999f && (flags&2U)==0U &&
-           !instance.camera_hud &&
+           !instance.world_lighting_exempt &&
            pending_gpu_instances.size()+1U<16384U) {
             uint32_t signature=0,move_type=0,attach_flags=0;
             bool const identified=owner>=0x10000U &&
@@ -4336,7 +4344,9 @@ namespace {
                 read(uintptr_t(owner)+0x74U,&signature,4) &&
                 read(uintptr_t(owner)+0x10U,&move_type,4) &&
                 read(uintptr_t(owner)+0x34U,&attach_flags,4) &&
-                signature!=0U;
+                signature!=0U &&
+                sprite_instances.casts_shadows(
+                    reinterpret_cast<void const *>(uintptr_t(owner)),signature);
             if(identified) {
                 auto const &sun=jkgm::get_sun_settings();
                 float const intensity=sun.intensity.value()[0];
@@ -5851,6 +5861,28 @@ namespace {
             LOG_WARNING("SetSpriteInfo: invalid width, height, opacity or duration");
     }
 
+    // SetSpriteCastShadows(thing, bool): explicit per-Thing opt-in.
+    // Default is FALSE even when global sun shadows are enabled. This
+    // prevents large vegetation/smoke populations from flooding the cascades.
+    void __cdecl cog_set_sprite_cast_shadows(void *ctx)
+    {
+        int const enabled=cog_pop_int(ctx);
+        void *thing=cog_pop_thing(ctx);
+        uint32_t signature=0;
+        if(sprite_cog_thing_identity(thing,signature))
+            sprite_instances.set_cast_shadows(thing,signature,enabled!=0);
+    }
+
+    // GetSpriteCastShadows(thing): returns 1 iff the live Thing opted in.
+    void __cdecl cog_get_sprite_cast_shadows(void *ctx)
+    {
+        void *thing=cog_pop_thing(ctx);
+        uint32_t signature=0;
+        int const enabled=sprite_cog_thing_identity(thing,signature) &&
+            sprite_instances.casts_shadows(thing,signature) ? 1 : 0;
+        cog_push_int(ctx,enabled);
+    }
+
     // GetSpriteInfo(thing): current independently interpolated width, height,
     // and opacity (defaults to 1,1,1 when no override is active).
     void __cdecl cog_get_sprite_info(void *ctx)
@@ -6570,6 +6602,8 @@ namespace {
         cog_verb_entry{"resetmaterialcolor", cog_reset_material_color},
         cog_verb_entry{"setspriteinfo", cog_set_sprite_info},
         cog_verb_entry{"getspriteinfo", cog_get_sprite_info},
+        cog_verb_entry{"setspritecastshadows", cog_set_sprite_cast_shadows},
+        cog_verb_entry{"getspritecastshadows", cog_get_sprite_cast_shadows},
         cog_verb_entry{"setspriteroll", cog_set_sprite_roll},
         cog_verb_entry{"getspriteroll", cog_get_sprite_roll},
         cog_verb_entry{"aigetfiretarget", cog_ai_get_fire_target},

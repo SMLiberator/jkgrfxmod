@@ -59,3 +59,19 @@ Recommend values for HUD scaling (based on 360p HUD size and Jedi Outcast/Academ
 -->
 
 Bloom brightness extraction now measures HDR-exposed linear scene luminance using the same fixed EV and adapted 1x1 EV as the final display pass. It still adds bloom before tone mapping and never double-exposes the bloom contribution. Bloom threshold and existing weights are unchanged when HDR is off.
+
+
+## Sprite sunlight and shadowing
+
+Cached world sprites receive direct sunlight and sample existing sun shadow maps,
+including alpha-blended smoke and alpha-cutout vegetation, without adding shadow
+casters. Camera-type sprites and sprites with ThingFlag `0x20` remain exempt.
+
+**Sprite casting is off by default for every Thing**, regardless of
+`enable_sun_shadows`. Use `SetSpriteCastShadows(thing, 1)` in COG to opt
+in an individual sprite Thing, and `SetSpriteCastShadows(thing, 0)` to turn
+it back off. `GetSpriteCastShadows(thing)` returns 1 or 0. Casting requires
+`use_sprite_cache`, `enable_sun_shadows`, a resident MAT, and an eligible
+opaque/cutout ordinary sprite (types 0, 1 or 2). Projected decals, flares,
+Camera HUD Things, ThingFlag `0x20` and partially transparent sprite instances
+do not cast. These verbs are per-Thing and do not modify shared .SPR resources.

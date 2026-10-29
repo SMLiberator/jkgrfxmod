@@ -409,26 +409,34 @@ void main()
     float sun_fade=(sun_lighting_active!=0 && depth>0.0 && depth<65500.0)
         ? sun_range_fade(depth/32.0) : 0.0;
     if(sun_fade>0.0) {
-        vec3 vn=texelFetch(normal_image,tc,0).rgb;
+        vec4 normal_pixel=texelFetch(normal_image,tc,0);
+        vec3 vn=normal_pixel.rgb;
         if(dot(vn,vn)>0.0001) {
             vec3 normal=normalize(camera_right.xyz*(vn.x/camera_right.w)+
                                   camera_up.xyz*(vn.y/camera_up.w)+
                                   camera_forward.xyz*vn.z);
-            float incidence=max(dot(normal,sun_shadow_direction),0.0);
+            // Normal.A=2 means a visible cutout SPR. Its face rotates to
+            // follow the camera; a tree's shadow must not disappear merely
+            // because the billboard happens to face away from the sun.
+            // Ordinary 3DO/world surfaces retain their existing response.
+            bool sprite=normal_pixel.a>1.5;
+            float incidence=sprite
+                ?max(abs(dot(normal,sun_shadow_direction)),0.35)
+                :max(dot(normal,sun_shadow_direction),0.0);
             if(incidence>0.0) {
                 vec3 world_position=reconstruct_scene_world(depth);
                 float visibility=min(
                     sun_shadow_visibility(world_position,incidence),
                     sun_dynamic_shadow_visibility(world_position,incidence));
-                // JK's vertex colors already contain authored lighting. If
-                // only the newly added sun term is shadowed, a bright baked
-                // floor barely changes under a caster. Keep a generous
-                // ambient floor while allowing the occluder to shade that
-                // baseline as well.
-                float applied=incidence*sun_fade;
-                surface_rgb*=1.0-0.6*applied*(1.0-visibility);
+                // Shade the baked brightness even in the absence of a
+                // direct sun highlight; the sprite's arbitrary view-facing
+                // normal must not decide whether the canopy shades it.
+                float sun_applied=incidence*sun_fade;
+                float shadowed_baseline=sprite ? 0.75*sun_fade
+                                              : 0.6*sun_applied;
+                surface_rgb*=1.0-shadowed_baseline*(1.0-visibility);
                 vec3 sun_light=pigment*sun_shadow_color_intensity.rgb*
-                    sun_shadow_color_intensity.a*applied*visibility;
+                    sun_shadow_color_intensity.a*sun_applied*visibility;
                 surface_rgb+=sun_light*(vec3(1.0)-clamp(surface_rgb,0.0,1.0));
             }
         }

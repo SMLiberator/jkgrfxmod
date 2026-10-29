@@ -86,7 +86,8 @@ namespace jkgm {
         uint32_t effective_geometry_mode=4; // min(Thing/mesh), face mode per group
         bool camera_hud=false; // SithThing type=camera: composite unlit after post
         bool camera_hud_world_depth=false; // Camera + ThingFlag 0x20: occlude behind opaque world
-        bool casts_sun_shadows=true; // SithThing 0x20: no sun/spot shadows; GPU skips extra light/SSAO
+        bool casts_sun_shadows=true; // writes depth into sun/spotlight shadow maps
+        bool world_lighting_exempt=false; // receives no sunlight/shadows/SSAO; independent of casting
         uint64_t shadow_owner=0; // pointer + signature, not shared rdMesh id
         // Attachment-root owner for spotlight self-shadow suppression only.
         // Keep shadow_owner unchanged for sun atlas grouping.

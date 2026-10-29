@@ -3213,7 +3213,8 @@ namespace jkgm {
                     // 0x20 suppresses JkGRfxMod light-reception effects on
                     // GPU-cached 3DOs, not the authored JK vertex lighting.
                     // Native D3D triangles do not carry per-Thing flags here.
-                    prog.set_world_lighting_exempt(!inst.casts_sun_shadows);
+                    prog.set_world_lighting_exempt(inst.world_lighting_exempt);
+                    prog.set_sprite_receiver(inst.is_sprite_quad);
                     prog.set_colormap_tint(inst.colormap_tint);
                     std::array<float,3> local_eye{};
                     bool const has_eye=gpu_3do_local_eye(m,local_eye);

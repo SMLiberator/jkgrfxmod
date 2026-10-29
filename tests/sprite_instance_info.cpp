@@ -31,6 +31,17 @@ int main() {
     assert(reg.set(thing,1,{0,0,0},0,0));
     v=reg.sample(thing,1,0);
     assert(eq(v.width,0) && eq(v.height,0) && eq(v.opacity,0));
+    // Casting is opt-in, independent of sprite dimensions/opacity.
+    assert(!reg.casts_shadows(thing,1));
+    assert(reg.set_cast_shadows(thing,1,true));
+    assert(reg.casts_shadows(thing,1));
+    assert(!reg.casts_shadows(thing,999)); // reused engine Thing slot
+    assert(reg.set_cast_shadows(thing,999,true));
+    assert(!reg.casts_shadows(thing,1));
+    assert(reg.casts_shadows(thing,999));
+    assert(reg.set_cast_shadows(thing,999,false));
+    assert(!reg.casts_shadows(thing,999));
+    assert(reg.set_cast_shadows(other,2,true));
     reg.forget(other);
     assert(reg.size()==1);
     reg.clear();

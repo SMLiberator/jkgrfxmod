@@ -27,6 +27,7 @@ uniform int camera_hud_thing; // 0=world, 1=overlay HUD, 2=world-depth HUD
 // Flag 0x20 on a GPU-cached Thing suppresses added sunlight/specular and
 // projected spotlights; a zero G-buffer normal also omits SSAO on this Thing.
 uniform int world_lighting_exempt;
+uniform int sprite_receiver; // 1=visible SPR; distinguish billboard receivers in G-buffer
 // Projected decal only: opaque G-buffer emissive.A stores diffuse JK light,
 // leaving emission RGB and all existing render targets unchanged.
 uniform int decal_receiver_lighting;
@@ -765,8 +766,13 @@ void main() {
     // A skybox/ThingFlag 0x20 skips SSAO and sunlight via zero RGB
     // normals, but it STILL occupies a G-buffer pixel. Alpha is a separate
     // coverage marker used by HOM; never couple it to lighting flags.
+    // Opaque/cutout sprites are thin, camera-facing billboards, not real
+    // one-sided surfaces. G-buffer normal.A=2 distinguishes them without
+    // another attachment; receiver lighting treats their shadow response as
+    // two-sided, independent of camera-facing normals. Coverage is still >0.
     out_normal=world_lighting_exempt!=0 ? vec4(0.0,0.0,0.0,1.0) :
-                                      vec4(normalize(view_normal),1.0);
+                          vec4(normalize(view_normal),
+                               sprite_receiver!=0 ? 2.0 : 1.0);
     // Depth target optionally carries the unlit diffuse base in GBA.
     // This keeps projected lighting independent of baked JK vertex light.
     out_depth=vec4(view_depth,albedo.rgb);
