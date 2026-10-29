@@ -369,8 +369,14 @@ namespace {
     // Debug-only fallback names, capped to avoid filling the performance log
     // with transient meshes. This never runs in normal gameplay.
     std::unordered_set<std::string> gpu_logged_fallbacks;
+    // A Camera 3DO that cannot be GPU cached falls into the native
+    // (post-processed) execute buffer. Record its failure independently of
+    // verbose profiling, so one-line HUD warnings name the real blocker.
+    thread_local std::string gpu_last_camera_hud_failure;
     void gpu_log_fallback(native_mesh const &m,std::string const &reason)
     {
+        if(active_native_model_camera_hud)
+            gpu_last_camera_hud_failure=reason;
         if(!the_config || !the_config->profile_renderer_verbose ||
            gpu_logged_fallbacks.size()>=80) return;
         auto const end=std::find(m.name,m.name+sizeof(m.name),'\0');
@@ -1371,16 +1377,31 @@ namespace {
                 }
             }
         }
-        if(profiling && !queued && active_native_model_camera_hud) {
-            // Native fallback is still handled by JK's existing path and
-            // cannot be composited as a per-Thing HUD without GPU geometry.
-            // Surface this explicitly rather than silently drawing icons
-            // inside the post-processed scene.
-            static unsigned hud_fallback_logs=0;
-            if(hud_fallback_logs++<3U)
-                LOG_WARNING("Camera Thing HUD 3DO native fallback; mesh=",
-                            reinterpret_cast<uintptr_t>(mesh),
-                            " cannot use post-exempt GPU pass this frame");
+        if(!queued && active_native_model_camera_hud &&
+           gpu_span_readable(mesh,sizeof(native_mesh))) {
+            // Ignore empty hierarchy nodes; they were responsible for some
+            // misleading "HUD fallback" warnings despite drawing no faces.
+            // Only report unique drawable failures, capped per session.
+            native_mesh hud_mesh{};
+            std::memcpy(&hud_mesh,mesh,sizeof(hud_mesh));
+            if(hud_mesh.num_faces>0 && hud_mesh.num_vertices>0) {
+                static std::unordered_set<std::string> logged;
+                auto const end=std::find(hud_mesh.name,
+                                         hud_mesh.name+sizeof(hud_mesh.name),'\0');
+                std::string const name(hud_mesh.name,end);
+                std::string const reason=gpu_last_camera_hud_failure.empty()
+                    ? "unspecified_early_exit" : gpu_last_camera_hud_failure;
+                std::string const key=name+"|"+reason;
+                if(logged.size()<16U && logged.insert(key).second)
+                    LOG_WARNING("Camera Thing HUD 3DO native fallback mesh=",
+                                name," reason=",reason,
+                                " geo=",hud_mesh.geometry_mode,
+                                " light=",hud_mesh.lighting_mode,
+                                " verts=",hud_mesh.num_vertices,
+                                " faces=",hud_mesh.num_faces,
+                                " uv=",hud_mesh.num_uvs,
+                                " (cannot bypass postFX while native)");
+            }
         }
         if(profiling)
             native_totals.mesh_queue_ns+=elapsed_native_ns(queue_begin);
@@ -1427,10 +1448,10 @@ namespace {
         LONG error = DetourTransactionBegin();
         if(error != NO_ERROR) return false;
         error = DetourUpdateThread(GetCurrentThread());
-        // Sun shadows need rdThing ownership even when profiling is off:
-        // the mesh callback has no reliable SithThing pointer of its own.
-        if(error == NO_ERROR && (profiling || the_config->enable_sun_shadows ||
-                                 the_config->enable_decals))
+        // Always attach the parent rdThing hook alongside the mesh hook.
+        // Camera-type HUD classification is a rendering contract, not an
+        // optional side effect of profiling, decals or shadows.
+        if(error == NO_ERROR)
             error = DetourAttach(&(PVOID &)RealNativeModel, HookedNativeModel);
         if(error == NO_ERROR)
             error = DetourAttach(&(PVOID &)RealNativeMesh, HookedNativeMesh);
@@ -1456,9 +1477,7 @@ namespace {
         if(the_config->profile_renderer)
             DetourDetach(&(PVOID &)RealNativeFace, HookedNativeFace);
         DetourDetach(&(PVOID &)RealNativeMesh, HookedNativeMesh);
-        if(the_config->profile_renderer || the_config->enable_sun_shadows ||
-           the_config->enable_decals)
-            DetourDetach(&(PVOID &)RealNativeModel, HookedNativeModel);
+        DetourDetach(&(PVOID &)RealNativeModel, HookedNativeModel);
         DetourTransactionCommit();
     }
 } // namespace
@@ -1519,6 +1538,8 @@ bool native_mesh_overlaps_shadow_light(native_mesh const &mesh,
 bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                               bool force_shadow_only)
 {
+    if(active_native_model_camera_hud)
+        gpu_last_camera_hud_failure.clear();
     // The exact RGB/smooth-normal JK patch has an additional float3*
     // at rdMesh+0x6c, beyond the original 0x58-byte layout. Its loader
     // at 0x9001c0 explicitly zeroes that field before allocating 12 bytes
@@ -1552,7 +1573,11 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
        // Single VirtualQuery per candidate, including the optional RGB
        // field; thousands of calls happen on busy scenes.
        !gpu_span_readable(mesh,has_rgb_mesh_extension?0x70U:sizeof(native_mesh)) ||
-       !gpu_span_readable(matrix,sizeof(float)*12)) return false;
+       !gpu_span_readable(matrix,sizeof(float)*12)) {
+        if(active_native_model_camera_hud)
+            gpu_last_camera_hud_failure="mesh_or_placement_not_readable";
+        return false;
+    }
     native_mesh m{};
     std::memcpy(&m,mesh,sizeof(m));
     // Empty 3DO hierarchy nodes still reach the native mesh callback,
@@ -1574,8 +1599,11 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     // any hierarchy meshes. Our hook otherwise ignores COG GeoMode changes.
     constexpr uintptr_t effective_geo_mode=0x0073A5D8U;
     if(!gpu_span_readable(reinterpret_cast<void const *>(effective_geo_mode),
-                          sizeof(int32_t)))
+                          sizeof(int32_t))) {
+        if(active_native_model_camera_hud)
+            gpu_last_camera_hud_failure="effective_geo_mode_unavailable";
         return false;
+    }
     int32_t current_geo_mode=0;
     std::memcpy(&current_geo_mode,
                 reinterpret_cast<void const *>(effective_geo_mode),
@@ -1732,6 +1760,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     if(!shadow_only && solid_thing &&
        !gpu_mesh_materials_ready(*it->second.geometry,true)) {
         if(the_config->profile_renderer)++gpu_native_stats.material_native;
+        gpu_log_fallback(m,"solid_MAT_palette_metadata_unavailable");
         return false;
     }
     if(!shadow_only && !solid_thing &&
