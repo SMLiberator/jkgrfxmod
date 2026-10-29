@@ -314,9 +314,10 @@ namespace {
         uint64_t source_signature=0,source_checked_frame=0;
         uint64_t source_checked_generation=0,last_audit_frame=0;
         char const *snapshot_failure=nullptr; // memoized failed snapshots
+        std::string snapshot_failure_detail;
         uint64_t id=0;
         std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
-        uint64_t ready_checked_frame=0;
+        uint64_t ready_checked_frame=0,ready_checked_generation=0;
         bool ready_for_frame=false;
     };
     std::unordered_map<void const *,cached_gpu_mesh> gpu_mesh_cache;
@@ -773,7 +774,7 @@ namespace {
 
     std::shared_ptr<jkgm::gpu_3do_geometry const>
     snapshot_gpu_mesh(native_mesh const &m, float const *vertex_rgb,
-                      char const **failure) {
+                      char const **failure,std::string *failure_detail=nullptr) {
         auto const reject=[&](char const *reason)
             ->std::shared_ptr<jkgm::gpu_3do_geometry const> {
             if(failure) *failure=reason;
@@ -902,8 +903,22 @@ namespace {
             bool nonplanar=false;
             if(!jkgm::gpu_3do_triangulate_face(
                    outline,{{face.normal[0],face.normal[1],face.normal[2]}},
-                   face_triangles,nonplanar))
+                   face_triangles,nonplanar)) {
+                if(failure_detail) {
+                    std::ostringstream details;
+                    details<<"face="<<f<<" corners="<<face.count
+                           <<" normal="<<face.normal[0]<<","
+                           <<face.normal[1]<<","<<face.normal[2];
+                    for(size_t corner=0;corner<outline.size() && corner<8U;
+                        ++corner) {
+                        auto const &p=outline[corner];
+                        details<<" vertex["<<corner<<"]="<<p[0]<<","
+                               <<p[1]<<","<<p[2];
+                    }
+                    *failure_detail=details.str();
+                }
                 return reject("non_simple_or_degenerate_face");
+            }
             for(auto const &tri:face_triangles) {
                 g->indices.push_back(base+tri[0]);
                 g->indices.push_back(base+tri[1]);
@@ -986,25 +1001,56 @@ namespace {
     // The experimental in-frame rdMaterial_AddToTextureCache call crashed
     // inside the std3D texture uploader during level loading.
     bool gpu_mesh_materials_ready(jkgm::gpu_3do_geometry const &g,
-                                  bool all_solid=false)
+                                  bool all_solid=false,
+                                  std::string *detail=nullptr)
     {
         using namespace jkgm::engine_material_debug;
-        if(!matches_tested_executable()) return false;
-        // The solid-color path needs MAT palette metadata, not a GPU
-        // texture. Invalid metadata keeps the native draw as fallback.
-        auto const solid_ready=[](auto const &refs) {
+        auto const fail=[&](char const *reason,uintptr_t address,int cel,
+                            native_material const *mat=nullptr,
+                            native_texture const *tex=nullptr) {
+            if(detail) {
+                std::ostringstream out;
+                out<<"stage="<<reason<<" mat_ptr="<<address<<" cel="<<cel;
+                if(mat) {
+                    auto const end=std::find(
+                        mat->name,mat->name+sizeof(mat->name),'\0');
+                    out<<" mat="<<std::string(mat->name,end)
+                       <<" id="<<mat->id<<" type="<<mat->tex_type
+                       <<" texinfos="<<mat->num_texinfo;
+                }
+                if(tex) {
+                    out<<" mip_count="<<tex->header[6]
+                       <<" alpha0_loaded="<<tex->alpha_mips[0].texture_loaded
+                       <<" alpha0_handle="<<tex->alpha_mips[0].texture_handle
+                       <<" opaque0_loaded="<<tex->opaque_mips[0].texture_loaded
+                       <<" opaque0_handle="<<tex->opaque_mips[0].texture_handle;
+                }
+                *detail=out.str();
+            }
+            return false;
+        };
+        if(!matches_tested_executable())
+            return fail("unsupported_executable",0,-1);
+        auto const solid_ready=[&](auto const &refs) {
             for(auto const &ref:refs) {
                 native_material mat{};
-                if(!read_object(ref.first,mat) ||
-                   mat.num_texinfo==0 || mat.num_texinfo>16)return false;
+                if(!read_object(ref.first,mat))
+                    return fail("unreadable_solid_mat",ref.first,ref.second);
+                if(mat.num_texinfo==0 || mat.num_texinfo>16)
+                    return fail("solid_mat_invalid_cel_count",
+                                ref.first,ref.second,&mat);
                 int32_t cel=ref.second<0
                     ?static_cast<int32_t>(mat.current_cel):ref.second;
                 cel=std::clamp(cel,0,static_cast<int>(mat.num_texinfo)-1);
                 native_texinfo info{};
-                if(!read_object(mat.texinfo[cel],info))return false;
+                if(!read_object(mat.texinfo[cel],info))
+                    return fail("unreadable_solid_texinfo",
+                                ref.first,cel,&mat);
                 uint32_t color=0;
                 std::memcpy(&color,info.header+4,sizeof(color));
-                if(color>=256U)return false;
+                if(color>=256U)
+                    return fail("invalid_palette_index",
+                                ref.first,cel,&mat);
             }
             return true;
         };
@@ -1014,14 +1060,15 @@ namespace {
             native_mat_upload_generation.load(std::memory_order_relaxed);
         for(auto const &ref:g.material_refs) {
             native_material mat{};
-            if(!read_object(ref.first,mat)) return false;
-            if((mat.tex_type&2U)==0) continue; // pure solid color
-            if(mat.num_texinfo==0 || mat.num_texinfo>16) return false;
+            if(!read_object(ref.first,mat))
+                return fail("unreadable_mat",ref.first,ref.second);
+            if((mat.tex_type&2U)==0)continue; // pure solid color
+            if(mat.num_texinfo==0 || mat.num_texinfo>16)
+                return fail("invalid_cel_count",ref.first,ref.second,&mat);
             int32_t cel=ref.second<0
-                ? static_cast<int32_t>(mat.current_cel) : ref.second;
+                ?static_cast<int32_t>(mat.current_cel):ref.second;
             cel=std::max(0,std::min(cel,static_cast<int32_t>(mat.num_texinfo)-1));
-            // Re-read current_cel on every query: SetMatCel and animated MATs
-            // must never reuse the previous cel's resident handle.
+            // Re-read current_cel every check: COG can animate MATs.
             if(gpu_mat_residency.contains(gpu_frame_serial,upload_generation,
                                           ref.first,static_cast<uint32_t>(cel))) {
                 if(the_config && the_config->profile_renderer)
@@ -1029,25 +1076,26 @@ namespace {
                 continue;
             }
             native_texinfo info{};
-            if(!read_object(mat.texinfo[cel],info)) return false;
+            if(!read_object(mat.texinfo[cel],info))
+                return fail("unreadable_texinfo",ref.first,cel,&mat);
             if((info.header[0]&8U)==0) {
                 gpu_mat_residency.mark_ready(gpu_frame_serial,upload_generation,
                                               ref.first,static_cast<uint32_t>(cel));
                 continue; // no texture for this cel
             }
             native_texture tex{};
-            if(!read_object(info.texture,tex)) return false;
+            if(!read_object(info.texture,tex))
+                return fail("unreadable_texture",ref.first,cel,&mat);
             unsigned const mips=std::min(tex.header[6],4U);
-            if(mips==0) return false;
+            if(mips==0)return fail("zero_mip_count",ref.first,cel,&mat,&tex);
             bool present=false;
             for(unsigned i=0;i<mips;i++) {
                 auto const &a=tex.alpha_mips[i],&o=tex.opaque_mips[i];
                 present|=(a.texture_loaded && a.texture_handle>0) ||
                          (o.texture_loaded && o.texture_handle>0);
             }
-            if(!present) return false; // native mesh fallback warms MAT
-            // Never cache a negative result: JK may make a cel resident
-            // later in this SAME frame via native drawing or D3D texture load.
+            if(!present)
+                return fail("unloaded_native_texture",ref.first,cel,&mat,&tex);
             gpu_mat_residency.mark_ready(gpu_frame_serial,upload_generation,
                                           ref.first,static_cast<uint32_t>(cel));
         }
@@ -1741,8 +1789,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         }
         if(!header_unchanged || it->second.source_signature!=signature) {
             char const *failure="unknown_snapshot_error";
+            std::string failure_detail;
             snapshot_attempted_this_call=true;
-            auto geom=snapshot_gpu_mesh(m,vertex_rgb,&failure);
+            auto geom=snapshot_gpu_mesh(m,vertex_rgb,&failure,&failure_detail);
             if(gpu_mesh_cache.size()>4096) gpu_mesh_cache.clear();
             if(profiling && header_unchanged)
                 ++gpu_native_stats.source_invalidations;
@@ -1770,6 +1819,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                 // Avoid repeating expensive failed triangulation/validation
                 // on every Thing instance and every subsequent frame.
                 updated.snapshot_failure=failure;
+                updated.snapshot_failure_detail=std::move(failure_detail);
                 gpu_log_fallback(m,failure);
             }
             gpu_mesh_cache[mesh]=std::move(updated);
@@ -1802,6 +1852,22 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         }
         gpu_log_fallback(m,it->second.snapshot_failure ?
                          it->second.snapshot_failure : "unknown_snapshot_error");
+        if(the_config->profile_renderer &&
+           (gpu_frame_serial%120U)==0U &&
+           !it->second.snapshot_failure_detail.empty()) {
+            static uint64_t sampled_frame=0;
+            static unsigned sampled_count=0;
+            if(sampled_frame!=gpu_frame_serial) {
+                sampled_frame=gpu_frame_serial;
+                sampled_count=0;
+            }
+            if(sampled_count++<4U) {
+                auto const end=std::find(m.name,m.name+sizeof(m.name),'\0');
+                LOG_INFO("GPU 3DO triangulation detail mesh=",
+                         std::string(m.name,end)," ",
+                         it->second.snapshot_failure_detail);
+            }
+        }
         return false;
     }
     // Models whose faces are all GeoMode 0..2 need no GL buffers or MATs.
@@ -1819,8 +1885,12 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         gpu_log_fallback(m,"solid_MAT_palette_metadata_unavailable");
         return false;
     }
+    auto const upload_generation=
+        native_mat_upload_generation.load(std::memory_order_relaxed);
     if(!shadow_only && !solid_thing &&
-       it->second.ready_checked_frame!=gpu_frame_serial) {
+       (it->second.ready_checked_frame!=gpu_frame_serial ||
+        (!it->second.ready_for_frame &&
+         it->second.ready_checked_generation!=upload_generation))) {
         bool const profiling=the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
@@ -1832,10 +1902,33 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         it->second.ready_for_frame=gpu_mesh_materials_ready(*it->second.geometry);
         if(profiling) gpu_native_stats.ready_ns+=elapsed_native_ns(start);
         it->second.ready_checked_frame=gpu_frame_serial;
+        it->second.ready_checked_generation=upload_generation;
     }
     if(!shadow_only && !solid_thing && !it->second.ready_for_frame) {
         if(the_config->profile_renderer) ++gpu_native_stats.material_native;
         gpu_log_fallback(m,"native_MAT_cel_not_yet_resident");
+        // Report the FIRST concrete problematic MAT, never just the mesh
+        // name. Safe read-only diagnostics; do not invoke native uploader.
+        if(the_config->profile_renderer && (gpu_frame_serial%120U)==0U) {
+            static uint64_t detail_frame=0;
+            static std::unordered_set<std::string> detail_names;
+            if(detail_frame!=gpu_frame_serial) {
+                detail_frame=gpu_frame_serial;
+                detail_names.clear();
+            }
+            auto const name_end=std::find(
+                m.name,m.name+sizeof(m.name),'\0');
+            std::string const name(m.name,name_end);
+            if(detail_names.size()<12U &&
+               detail_names.insert(name).second) {
+                std::string reason;
+                bool const ready=gpu_mesh_materials_ready(
+                    *it->second.geometry,false,&reason);
+                LOG_INFO("GPU 3DO MAT readiness mesh=",name,
+                         " ready_on_retry=",ready?1:0,
+                         " detail=",reason);
+            }
+        }
         return false;
     }
     gpu_3do_instance inst;
