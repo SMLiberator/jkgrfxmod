@@ -5127,6 +5127,28 @@ namespace {
         {push_vector_address, {0x83, 0xec, 0x10, 0x8b, 0x44, 0x24, 0x18, 0x53}},
     }};
 
+    // Verified against jkgm(5).exe (SHA-256 afb4605c...e50f).
+    // The third native argument selects adjoin movement permissions rather
+    // than visibility; preserve JK's original HasLOS collision traversal.
+    using native_has_los_type=int(__cdecl *)(void *origin,void *target,int mode);
+    constexpr uintptr_t native_has_los_addr=0x004E7790U;
+    constexpr std::array<uint8_t,19> native_has_los_prologue{{
+        0x83,0xec,0x10,0x8b,0x44,0x24,0x1c,0x53,0x55,0x56,0x57,
+        0xc7,0x44,0x24,0x10,0x01,0x00,0x00,0x00
+    }};
+    native_has_los_type native_has_los=nullptr;
+
+    bool native_has_los_matches()
+    {
+        return reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))==
+                   0x00400000U &&
+               gpu_span_readable(reinterpret_cast<void const *>(
+                   native_has_los_addr),native_has_los_prologue.size()) &&
+               std::memcmp(reinterpret_cast<void const *>(native_has_los_addr),
+                           native_has_los_prologue.data(),
+                           native_has_los_prologue.size())==0;
+    }
+
     bool cog_helpers_match()
     {
         for(auto const &sig : cog_helper_signatures) {
@@ -5207,6 +5229,20 @@ namespace {
         static std::uniform_real_distribution<float> unit(0.0f,1.0f);
         auto const direction=jkgm::cog_math_rand_dir(unit(rng),unit(rng));
         cog_push_vector(ctx,direction.data());
+    }
+
+    // HasReach(originThing,targetThing): physical line-of-reach using the
+    // engine's native HasLOS search with movement-permitted adjoins (mode 1).
+    // Invalid Things or an unsupported executable return -1, like HasLOS.
+    void __cdecl cog_has_reach(void *ctx)
+    {
+        void *target=cog_pop_thing(ctx);
+        void *origin=cog_pop_thing(ctx);
+        if(!origin || !target || !native_has_los) {
+            cog_push_int(ctx,-1);
+            return;
+        }
+        cog_push_int(ctx,native_has_los(origin,target,1)!=0 ? 1 : 0);
     }
 
     // Confirmed in JK23 jkgm.exe: Thing.controlType is +0x14,
@@ -6661,6 +6697,7 @@ namespace {
         cog_verb_entry{"sign", cog_math_sign},
         cog_verb_entry{"lerp", cog_math_lerp},
         cog_verb_entry{"randdir", cog_math_rand_dir},
+        cog_verb_entry{"hasreach", cog_has_reach},
         cog_verb_entry{"setfogcolor", cog_set_fog_color},
         cog_verb_entry{"getfogcolor", cog_get_fog_color},
         cog_verb_entry{"setfoginfo", cog_set_fog_info},
@@ -6740,6 +6777,14 @@ namespace {
                       "fog COG verbs not registered");
             return;
         }
+
+        // Resolve once at COG registration, not on each query.
+        native_has_los=native_has_los_matches()
+            ? reinterpret_cast<native_has_los_type>(native_has_los_addr)
+            : nullptr;
+        if(!native_has_los)
+            LOG_WARNING("HasReach native HasLOS signature mismatch; "
+                        "verb will return -1 on this executable");
 
         for(auto const &verb : fx_verbs) {
             register_verb(ctx, verb.handler, verb.name);
