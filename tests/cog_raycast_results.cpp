@@ -7,6 +7,7 @@ int main()
     jkgm::cog_raycast_hit hit{};
     hit.position={{1.0f,2.0f,3.0f}};
     hit.thing_index=42;
+    hit.sector_index=7;
     // No world, no insertion.
     assert(results.add(0x10,hit)==-1);
     results.set_world(0x1234);
@@ -22,6 +23,7 @@ int main()
     hit.distance=99.0f;
     assert(results.add(0x10,hit)==0);
     assert(results.get(0x10,0)->distance==99.0f);
+    assert(results.get(0x10,0)->sector_index==7);
     assert(results.get(0x10,1)->distance==2.0f);
     // Separate COG contexts have independent slot counters and results.
     assert(results.add(0x20,hit)==0);

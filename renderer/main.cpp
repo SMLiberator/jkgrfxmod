@@ -23,6 +23,7 @@
 #include "mots_collision_snapshot_cache.hpp"
 #include "cog_math.hpp"
 #include "cog_raycast_results.hpp"
+#include "cog_sector_queries.hpp"
 #include "sprite_orientation.hpp"
 #include "sprite_type_registry.hpp"
 #include "sprite_variants.hpp"
@@ -5313,6 +5314,115 @@ namespace {
         return cog_raycast_history.get(reinterpret_cast<uintptr_t>(ctx),id);
     }
 
+
+    // JKGM 1998 Sith engine, validated in jkgm(5).exe.
+    // sithIntersect_IsSphereInSector(pos,0,sector) is also used by WARP.
+    using native_sector_contains_fn=int(__cdecl *)(float const*,float,void*);
+    constexpr uintptr_t native_sector_contains_address=0x005081C0U;
+    constexpr uintptr_t native_sector_stride=0x98U;
+    native_sector_contains_fn native_sector_contains=nullptr;
+    jkgm::cog_sector_queries cog_sector_history;
+
+    bool cog_sector_native_matches() {
+        constexpr uint8_t signature[]={
+            0x8b,0x4c,0x24,0x0c,0x8b,0x54,0x24,0x04,0x53,0x55
+        };
+        return reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))==
+                   0x00400000U &&
+               jkgm::engine_material_debug::matches_tested_executable() &&
+               gpu_span_readable(reinterpret_cast<void const *>(
+                   native_sector_contains_address),sizeof(signature)) &&
+               std::memcmp(reinterpret_cast<void const *>(
+                   native_sector_contains_address),signature,
+                   sizeof(signature))==0;
+    }
+    uintptr_t cog_sector_world() {
+        uint32_t world=0;
+        if(!native_sector_contains ||
+           !jkgm::engine_material_debug::read_object(
+               jkgm::engine_material_debug::current_world_global,world))
+            return 0;
+        return uintptr_t(world);
+    }
+    struct cog_sector_array {
+        uintptr_t base=0;
+        int count=0;
+    };
+    bool cog_sector_array_read(uintptr_t world,cog_sector_array &out) {
+        if(!world || !gpu_span_readable(reinterpret_cast<void const*>(
+               world),0x54U))return false;
+        uint32_t count=0,base=0;
+        std::memcpy(&count,reinterpret_cast<void const*>(world+0x4cU),4);
+        std::memcpy(&base,reinterpret_cast<void const*>(world+0x50U),4);
+        if(count==0 || count>20000U || base<0x10000U ||
+           !gpu_span_readable(reinterpret_cast<void const*>(
+               uintptr_t(base)),size_t(count)*native_sector_stride))
+            return false;
+        out={uintptr_t(base),int(count)};
+        return true;
+    }
+    int cog_sector_id_at_ptr(cog_sector_array const& sectors,
+                             uintptr_t pointer) {
+        if(!sectors.base || pointer<sectors.base ||
+           pointer>=sectors.base+
+               uintptr_t(sectors.count)*native_sector_stride)
+            return -1;
+        if((pointer-sectors.base)%native_sector_stride!=0)return -1;
+        uint32_t id=0;
+        std::memcpy(&id,reinterpret_cast<void const*>(pointer),4);
+        return id<=INT_MAX?int(id):-1;
+    }
+    int cog_sector_match(int index,std::array<float,3> const& pos,
+                         cog_sector_array const& sectors) {
+        uintptr_t const sector=sectors.base+
+            uintptr_t(index)*native_sector_stride;
+        float low[3]{},high[3]{};
+        std::memcpy(low,reinterpret_cast<void const*>(sector+0x70U),12);
+        std::memcpy(high,reinterpret_cast<void const*>(sector+0x7cU),12);
+        for(int k=0;k<3;++k)
+            if(pos[k]<low[k] || pos[k]>high[k])return -1;
+        if(!native_sector_contains(pos.data(),0.0f,
+                                   reinterpret_cast<void*>(sector)))
+            return -1;
+        return cog_sector_id_at_ptr(sectors,sector);
+    }
+    void __cdecl cog_first_sector_at_pos(void *ctx) {
+        float pos[3]{};
+        cog_pop_vector(ctx,pos);
+        uintptr_t const world=cog_sector_world();
+        cog_sector_history.set_world(world);
+        cog_sector_array sectors{};
+        if(!world || !cog_sector_array_read(world,sectors) ||
+           !std::isfinite(pos[0]) || !std::isfinite(pos[1]) ||
+           !std::isfinite(pos[2])) {
+            cog_push_int(ctx,-1);
+            return;
+        }
+        int const result=cog_sector_history.first(
+            reinterpret_cast<uintptr_t>(ctx),
+            std::array<float,3>{{pos[0],pos[1],pos[2]}},sectors.count,
+            [&sectors](int index,std::array<float,3> const& p){
+                return cog_sector_match(index,p,sectors);
+            });
+        cog_push_int(ctx,result);
+    }
+    void __cdecl cog_next_sector_at_pos(void *ctx) {
+        int const previous=cog_pop_int(ctx);
+        uintptr_t const world=cog_sector_world();
+        cog_sector_history.set_world(world);
+        cog_sector_array sectors{};
+        if(!world || !cog_sector_array_read(world,sectors)) {
+            cog_push_int(ctx,-1);
+            return;
+        }
+        int const result=cog_sector_history.next(
+            reinterpret_cast<uintptr_t>(ctx),previous,sectors.count,
+            [&sectors](int index,std::array<float,3> const& p){
+                return cog_sector_match(index,p,sectors);
+            });
+        cog_push_int(ctx,result);
+    }
+
     // RayCast(sourceThing,localOffset): zero-radius finite line segment from
     // the Thing origin, oriented by Right/Look/Up. A vector of (0,4,0)
     // therefore casts 4 JK units along the Thing's Look axis. Hits advance
@@ -5421,6 +5531,20 @@ namespace {
                 std::memcpy(&index,hit->surface,4);
                 if(index<65536U)snapshot.surface_index=int(index);
             }
+            // Collision-geometry owner sector. For overlapping sectors,
+            // do not substitute the first arbitrary sector at the hit point.
+            cog_sector_array sectors{};
+            if(cog_sector_array_read(world,sectors)) {
+                void const* owner=surface_hit ? hit->surface : hit->thing;
+                uintptr_t const member=surface_hit?0x08U:0x5cU;
+                if(owner && gpu_span_readable(owner,member+4U)) {
+                    uint32_t ptr=0;
+                    std::memcpy(&ptr,
+                        static_cast<uint8_t const*>(owner)+member,4);
+                    snapshot.sector_index=cog_sector_id_at_ptr(
+                        sectors,uintptr_t(ptr));
+                }
+            }
             result_id=cog_raycast_history.add(
                 reinterpret_cast<uintptr_t>(ctx),snapshot);
             break;
@@ -5470,6 +5594,12 @@ namespace {
         int const id=cog_pop_int(ctx);
         auto const *hit=cog_raycast_lookup(ctx,id);
         cog_push_int(ctx,hit?hit->surface_index:-1);
+    }
+
+    void __cdecl cog_get_ray_hit_sector(void *ctx) {
+        int const id=cog_pop_int(ctx);
+        auto const* hit=cog_raycast_lookup(ctx,id);
+        cog_push_int(ctx,hit?hit->sector_index:-1);
     }
 
     void __cdecl cog_get_ray_hit_distance(void *ctx)
@@ -6937,6 +7067,9 @@ namespace {
         cog_verb_entry{"getrayhitnormal", cog_get_ray_hit_normal},
         cog_verb_entry{"getrayhitthing", cog_get_ray_hit_thing},
         cog_verb_entry{"getrayhitsurface", cog_get_ray_hit_surface},
+        cog_verb_entry{"getrayhitsector", cog_get_ray_hit_sector},
+        cog_verb_entry{"firstsectoratpos", cog_first_sector_at_pos},
+        cog_verb_entry{"nextsectoratpos", cog_next_sector_at_pos},
         cog_verb_entry{"getrayhitdistance", cog_get_ray_hit_distance},
         cog_verb_entry{"setfogcolor", cog_set_fog_color},
         cog_verb_entry{"getfogcolor", cog_get_fog_color},
@@ -7040,6 +7173,13 @@ namespace {
             LOG_WARNING("RayCast disabled: JKGM native collision "
                         "search signatures do not match");
         }
+        native_sector_contains=cog_sector_native_matches()
+            ? reinterpret_cast<native_sector_contains_fn>(
+                native_sector_contains_address) : nullptr;
+        if(!native_sector_contains)
+            LOG_WARNING("Sector query verbs disabled: incompatible "
+                        "JKGM native containment routine");
+        cog_sector_history.clear();
         cog_raycast_history.clear();
         for(auto const &verb : fx_verbs) {
             register_verb(ctx, verb.handler, verb.name);

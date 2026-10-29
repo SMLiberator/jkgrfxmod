@@ -12,6 +12,7 @@ struct cog_raycast_hit {
     float distance=0.0f;
     int thing_index=-1;
     int surface_index=-1;
+    int sector_index=-1;
     uintptr_t thing_address=0;
     uint32_t thing_signature=0;
 };
