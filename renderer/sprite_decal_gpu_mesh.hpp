@@ -39,7 +39,8 @@ namespace jkgm {
     inline bool make_sprite_decal_gpu_mesh(
         decal_world_scan const &scan,decal_projector const &projector,
         uintptr_t material,sprite_decal_texture_coords const &texture,
-        float opacity,sprite_decal_mesh &result)
+        float opacity,sprite_decal_mesh &result,
+        bool wrap_steep_faces=false)
     {
         if(!scan.valid_world || scan.truncated || scan.triangles.empty() ||
            scan.triangles.size()>32768 || !material ||
@@ -89,7 +90,32 @@ namespace jkgm {
                 if(!decal_finite(v.world) ||
                    !std::isfinite(v.u)||!std::isfinite(v.v)||
                    !std::isfinite(v.depth))return false;
-                auto const uv=projected_decal_uv(v,projector);
+                auto uv=projected_decal_uv(v,projector);
+                if(wrap_steep_faces) {
+                    // Planar UVs collapse to a line on a face whose normal
+                    // is perpendicular to the projector axis. Use projector
+                    // depth as the missing tangent coordinate, oriented by
+                    // that FACE's normal. The shift is zero at the middle
+                    // of the volume, preserving the existing planar mapping
+                    // around the impact and avoiding texture scale changes.
+                    float const facing=-decal_dot(
+                        {{normal[0],normal[1],normal[2]}},projector.look);
+                    float const blend=std::clamp(
+                        (0.75f-facing)/0.75f,0.0f,1.0f);
+                    float const depth_shift=
+                        blend*(v.depth-projector.depth*0.5f);
+                    uv[0]+=depth_shift*decal_dot(
+                        {{normal[0],normal[1],normal[2]}},
+                        projector.right)/projector.width;
+                    uv[1]-=depth_shift*decal_dot(
+                        {{normal[0],normal[1],normal[2]}},
+                        projector.up)/projector.height;
+                    // Clipped volumes can just touch an outer border;
+                    // clamp tiny overshoots instead of rejecting the whole
+                    // decal when a steep receiver crosses that border.
+                    uv[0]=std::clamp(uv[0],0.0f,1.0f);
+                    uv[1]=std::clamp(uv[1],0.0f,1.0f);
+                }
                 if(!std::isfinite(uv[0])||!std::isfinite(uv[1])||
                    uv[0]<-0.001f||uv[0]>1.001f||
                    uv[1]<-0.001f||uv[1]>1.001f)return false;

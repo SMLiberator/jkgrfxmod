@@ -236,7 +236,8 @@ namespace jkgm {
 
     inline decal_world_scan project_cached_decal_world(
         decal_world_geometry const &geometry,
-        decal_projector const &projector,uint32_t max_output_triangles=2048)
+        decal_projector const &projector,uint32_t max_output_triangles=2048,
+        bool offset_surface_geometry=true,bool wrap_steep_faces=false)
     {
         decal_world_scan result{};
         if(!geometry.valid_world || !valid_decal_projector(projector) ||
@@ -264,12 +265,14 @@ namespace jkgm {
             // unrestricted acceptance painted bottom and top simultaneously.
             // Only reject normals that point meaningfully away from the
             // projector (no sharp angle limit on adjacent surfaces).
-            if(decal_dot(s.normal,projector.look)>0.05f) {
+            if(decal_dot(s.normal,projector.look)>
+                   (wrap_steep_faces?0.35f:0.05f)) {
                 ++result.skipped_backfaces;
                 continue;
             }
             auto clipped=clip_projected_decal(
-                projector,s.polygon,s.normal,0.05f,false);
+                projector,s.polygon,s.normal,0.05f,false,
+                wrap_steep_faces);
             if(clipped.size()<3) {
                 ++result.skipped_projection;
                 continue;
@@ -280,7 +283,12 @@ namespace jkgm {
                 break;
             }
             ++result.receivers;
-            for(auto &v:clipped)offset_sprite_decal_receiver(v,s.normal);
+            // Static decals preserve their original outward bias. Moving
+            // 3DO decals instead rely on polygon depth offset at draw time:
+            // per-face normal displacement can separate adjacent triangles
+            // at a mesh seam or a bent/animated node boundary.
+            if(offset_surface_geometry)
+                for(auto &v:clipped)offset_sprite_decal_receiver(v,s.normal);
             for(size_t t=1;t+1<clipped.size();++t)
                 result.triangles.push_back(
                     {{{clipped[0],clipped[t],clipped[t+1]}},

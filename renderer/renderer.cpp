@@ -792,6 +792,15 @@ namespace jkgm {
                          " avg_VirtualQuery=",
                          profile_window.gpu_native_span_queries/frames,
                          " NOTE=positive_regions_only_per_frame");
+                {
+                    // Cumulative since start; subtract consecutive lines for a
+                    // rate. Every guarded native read goes through this cache.
+                    auto const &shared=
+                        engine_camera_detail::shared_readable_cache();
+                    LOG_INFO("PERF shared_readable_cache hits_total=",shared.hits,
+                             " VirtualQuery_total=",shared.queries,
+                             " NOTE=cumulative_render_thread");
+                }
                 auto const &current_fog=get_fog_settings();
                 auto const fog_params=current_fog.info.value();
                 // The lightweight logger only formats integral values and
@@ -2773,6 +2782,16 @@ namespace jkgm {
             auto const &frame_camera=post_exempt
                 ? deferred_gpu_3do_camera : frame_gpu_3do_camera;
             if(!frame_camera.valid) return;
+            // An SPR is coplanar with its receiver after clipping. Small
+            // numerical differences across 3DO triangle edges can cause
+            // the ordinary depth test to expose the receiver as thin seams.
+            // Prefer decal polygons by a couple of depth-buffer units only
+            // in the decal-only pass; the shader still rejects unrelated
+            // surfaces by comparing original receiver-plane depth.
+            if(decals_only) {
+                glEnable(GL_POLYGON_OFFSET_FILL);
+                glPolygonOffset(-1.0f,-2.0f);
+            }
             auto const &cam=frame_camera.camera;
             auto const &native_view=frame_camera.native_view;
             float const far_plane=frame_camera.far_plane;
@@ -3319,6 +3338,9 @@ namespace jkgm {
             if(gpu_profiling)
                 profile_frame.gpu_preview_submit_us[pass_index]+=
                     elapsed_profile_us(submit_begin,profile_clock::now());
+            // Preserve native/ordinary 3DO depth semantics; polygon
+            // offset is exclusively for projected decal triangles.
+            if(decals_only)glDisable(GL_POLYGON_OFFSET_FILL);
             // The transparency pass's following JK batches assume normal
             // premultiplied alpha blending, unit 0 and disabled face culling.
             gl::disable(gl::capability::cull_face);

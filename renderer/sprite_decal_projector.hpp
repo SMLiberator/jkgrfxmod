@@ -1,15 +1,34 @@
 #pragma once
 // Type-3 SPR: Thing UP is the surface normal; sprite image lies in its
 // Right/Look plane. Project INTO that surface (-Up) from a small box
-// centered on the Thing origin. The projection depth is fixed for now.
+// centered on the Thing origin. Depth follows the rendered sprite size.
 #include "sprite_decal_clip.hpp"
 #include "sprite_orientation.hpp"
 #include <array>
 #include <cmath>
+#include <algorithm>
 
 namespace jkgm {
-constexpr float sprite_decal_projection_depth=0.25f;
+// Limit pathological very large/small sprites; ordinary bullet holes
+// use their authored size instead of the previous fixed 0.25 JKU (2.5 m).
+constexpr float sprite_decal_projection_min_depth=0.002f;
+constexpr float sprite_decal_projection_max_depth=0.25f;
 constexpr float sprite_decal_surface_bias=0.001f;
+
+inline float sprite_decal_projection_depth_for_size(float width,float height)
+{
+    if(!std::isfinite(width) || !std::isfinite(height) ||
+       width<=0.0f || height<=0.0f)return 0.0f;
+    return std::clamp(0.5f*(width+height),
+                      sprite_decal_projection_min_depth,
+                      sprite_decal_projection_max_depth);
+}
+// The initial attachment search must not reach 0.25 JKU away when a
+// tiny bullet hole's entire projection only extends a few centimeters.
+inline float sprite_decal_receiver_search_radius(float projection_depth)
+{
+    return std::max(0.01f,0.5f*projection_depth+0.005f);
+}
 
 inline bool make_sprite_decal_projector(
     sprite_axes axes,
@@ -39,6 +58,9 @@ inline bool make_sprite_decal_projector(
                       0.01745329251994329577f;
     float const ca=std::cos(angle),sa=std::sin(angle);
     decal_projector projector{};
+    float const depth=sprite_decal_projection_depth_for_size(
+        source_width*scale_width,source_height*scale_height);
+    if(!(depth>0.0f))return false;
     // JK attachment convention: the Thing's Up vector points OUT of
     // the hit face. The volume projects inward, opposite to Up.
     // Right and Look remain the two tangent/image axes.
@@ -49,11 +71,11 @@ inline bool make_sprite_decal_projector(
         projector.up[axis]=ca*normalized.look[axis]-
                            sa*normalized.right[axis];
         projector.origin[axis]=position[axis]-
-                 projector.look[axis]*(sprite_decal_projection_depth*0.5f);
+                 projector.look[axis]*(depth*0.5f);
     }
     projector.width=source_width*scale_width;
     projector.height=source_height*scale_height;
-    projector.depth=sprite_decal_projection_depth;
+    projector.depth=depth;
     if(!valid_decal_projector(projector))return false;
     out=projector;
     return true;

@@ -3,6 +3,7 @@
 #include "base/log.hpp"
 #include "engine_camera_data.hpp"
 #include "gpu_3do_modelview.hpp"
+#include "readable_region_cache.hpp"
 #include "shaders.hpp"
 #include "sun.hpp"
 #include <Windows.h>
@@ -37,19 +38,38 @@ namespace jkgm {
             {0x443810, {0x8b, 0x4c, 0x24, 0x04, 0xd9, 0x44, 0x24, 0x08}},
         }};
 
+        // Per-thread memo of regions validated within the last few
+        // milliseconds. Nearly every native read in the mod funnels through
+        // readable(); JK keeps its data in a few large heap regions, so the
+        // same VirtualQuery() answer used to be requested thousands of times
+        // per frame (and a VirtualQuery() is much slower under Wine).
+        inline readable_region_cache &shared_readable_cache()
+        {
+            static thread_local readable_region_cache cache;
+            return cache;
+        }
+
         inline bool readable(uintptr_t address, size_t size)
         {
-            MEMORY_BASIC_INFORMATION mbi{};
-            if(VirtualQuery(reinterpret_cast<void const *>(address), &mbi, sizeof(mbi)) == 0) {
-                return false;
-            }
-
-            if(mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0) {
-                return false;
-            }
-
-            auto const region_end = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
-            return address + size <= region_end;
+            // 8 ms buckets: entries never outlive a fraction of a frame, so a
+            // region the engine frees is re-validated almost immediately.
+            auto const epoch = static_cast<uint32_t>(GetTickCount64() >> 3);
+            return shared_readable_cache().readable(
+                address, size, epoch,
+                [](uintptr_t query_address, uintptr_t &begin, uintptr_t &end) {
+                    MEMORY_BASIC_INFORMATION mbi{};
+                    if(VirtualQuery(reinterpret_cast<void const *>(query_address), &mbi,
+                                    sizeof(mbi)) == 0) {
+                        return false;
+                    }
+                    if(mbi.State != MEM_COMMIT ||
+                       (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0) {
+                        return false;
+                    }
+                    begin = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+                    end = begin + mbi.RegionSize;
+                    return true;
+                });
         }
 
         inline bool build_matches()

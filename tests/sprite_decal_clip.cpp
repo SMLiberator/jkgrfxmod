@@ -32,6 +32,18 @@ int main() {
         {{0.1f,0.25f,0.5f}},{{0.1f,0.0f,0.5f}}
     };
     assert(clip_projected_decal(p,perpendicular,{{1,0,0}},0.05f,false).empty());
+    // Wrapping mode preserves a full-size perpendicular 3DO side face.
+    // Its XY projection has zero area, but depth supplies the missing UV
+    // direction; the 3D clipped polygon itself must remain nondegenerate.
+    auto const wrapped=clip_projected_decal(
+        p,perpendicular,{{1,0,0}},0.05f,false,true);
+    assert(wrapped.size()>=3);
+    float dmin=10.0f,dmax=-10.0f;
+    for(auto const &v:wrapped) {
+        dmin=std::min(dmin,v.depth);
+        dmax=std::max(dmax,v.depth);
+    }
+    assert(dmax-dmin>0.2f);
     // A neighboring wall crossing the box edge produces a partial polygon.
     std::vector<decal_vec3> half_wall={
         {{0,0.1f,-1}},{{0,0.1f,1}},{{1,0.1f,1}},{{1,0.1f,-1}}
@@ -42,6 +54,32 @@ int main() {
         auto const uv=projected_decal_uv(v,p);
         assert(uv[0]>=0.5f-0.0001f && uv[0]<=1.0001f);
     }
+    // A clipped 3DO quad split into two triangles used to produce a
+    // repeated corner in EACH clipped polygon, and the GPU builder then
+    // rejected the whole decal because a triangle fan had zero-area pieces.
+    decal_projector square{};
+    square.origin={{3,4,5.175f}};
+    square.right={{1,0,0}};
+    square.up={{0,1,0}};
+    square.look={{0,0,-1}};
+    square.width=1.0f;square.height=1.0f;square.depth=0.25f;
+    std::vector<decal_vec3> triangle_a={
+        {{2,3,5}},{{4,3,5}},{{4,5,5}}};
+    std::vector<decal_vec3> triangle_b={
+        {{2,3,5}},{{4,5,5}},{{2,5,5}}};
+    auto const no_duplicates=[&](std::vector<decal_vertex> const &vertices) {
+        assert(vertices.size()==3);
+        for(size_t i=0;i<vertices.size();++i) {
+            auto const &a=vertices[i];
+            auto const &b=vertices[(i+1)%vertices.size()];
+            float const dx=a.u-b.u,dy=a.v-b.v,dz=a.depth-b.depth;
+            assert(dx*dx+dy*dy+dz*dz>1.e-8f);
+        }
+    };
+    no_duplicates(clip_projected_decal(
+        square,triangle_a,{{0,0,1}},0.05f,false));
+    no_duplicates(clip_projected_decal(
+        square,triangle_b,{{0,0,1}},0.05f,false));
     // Depth-volume rejection prevents projecting onto a wall far behind.
     for(auto &v:wall)v[1]=1;
     assert(clip_projected_decal(p,wall,{{0,-1,0}}).empty());

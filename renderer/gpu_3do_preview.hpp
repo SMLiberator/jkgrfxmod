@@ -62,7 +62,15 @@ namespace jkgm {
         // Lighting from scaled/sheared R/L/U nodes uses transformed world
         // distances and inverse-transposed normals, not local distances.
         bool nonrigid_light_transform=false;
-        bool is_projected_decal=false; // world-space clipped type-3 SPR
+        bool is_projected_decal=false; // type-3 SPR, world- or receiver-local
+        // Stable identity of the model mesh this instance came from.
+        // Used by moving decals; zero when not captured or not an eligible
+        // moving receiver. Never infer ownership from shared mesh pointers.
+        uint64_t decal_receiver_thing=0;
+        uintptr_t decal_receiver_model=0;
+        uintptr_t decal_receiver_mesh=0;
+        uint64_t decal_receiver_revision=0;
+        uint32_t decal_receiver_occurrence=0;
         bool shadow_only=false; // native 3DO remains JK-rendered; cache is for depth only
         bool camera_hud=false; // SithThing type=camera: composite unlit after post
         bool camera_hud_world_depth=false; // Camera + ThingFlag 0x20: occlude behind opaque world

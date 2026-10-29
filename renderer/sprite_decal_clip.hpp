@@ -69,7 +69,8 @@ inline std::vector<decal_vertex> clip_projected_decal(
     decal_projector const &projector,
     std::vector<decal_vec3> const &receiver,
     decal_vec3 receiver_normal,
-    float min_facing=0.05f,bool enforce_facing=true)
+    float min_facing=0.05f,bool enforce_facing=true,
+    bool allow_edge_on=false)
 {
     // Experimental corner decals may accept both perpendicular and
     // back-facing receivers. Keep the default facing test for other callers.
@@ -112,13 +113,58 @@ inline std::vector<decal_vertex> clip_projected_decal(
         clipped.swap(out);
         if(clipped.size()>256) return {}; // reject invalid/repeated geometry
     }
+    // Sutherland-Hodgman can insert the SAME corner twice when a model
+    // triangle intersects two adjacent projector planes, e.g. the two
+    // triangles of a square centered under a bullet-hole projector.
+    // Those duplicate vertices later create zero-area fan triangles and
+    // make the GPU decal mesh builder reject the *entire* projection.
+    //
+    // Compare all three projector coordinates: unlike comparing UV alone,
+    // this preserves distinct depth vertices on a perpendicular face.
+    auto const same_vertex=[](decal_vertex const &a,
+                              decal_vertex const &b) {
+        constexpr float epsilon=1.e-5f;
+        return std::fabs(a.u-b.u)<=epsilon &&
+               std::fabs(a.v-b.v)<=epsilon &&
+               std::fabs(a.depth-b.depth)<=epsilon;
+    };
+    std::vector<decal_vertex> unique;
+    unique.reserve(clipped.size());
+    for(auto const &v:clipped)
+        if(unique.empty() || !same_vertex(unique.back(),v))
+            unique.push_back(v);
+    if(unique.size()>1 && same_vertex(unique.front(),unique.back()))
+        unique.pop_back();
+    clipped.swap(unique);
+    if(clipped.size()<3)return {};
+
     // Filter degenerate polygons (UV area approximately zero).
     double area=0;
     for(size_t i=0;i<clipped.size();++i) {
         auto const &a=clipped[i],&b=clipped[(i+1)%clipped.size()];
         area+=double(a.u)*b.v-double(b.u)*a.v;
     }
-    if(clipped.size()<3 || std::fabs(area)<1.e-8) return {};
+    if(clipped.size()<3)return {};
+    if(std::fabs(area)<1.e-8) {
+        if(!allow_edge_on)return {};
+        // A steep, perfectly perpendicular receiver can collapse to zero
+        // area in the projector's XY coordinates despite being a valid
+        // nondegenerate face in 3D. Edge-wrapping UVs recover its width from
+        // the projector depth axis, so preserve it only in wrapping mode.
+        auto const cross=[](decal_vec3 const &a,decal_vec3 const &b) {
+            return decal_vec3{{
+                a[1]*b[2]-a[2]*b[1],
+                a[2]*b[0]-a[0]*b[2],
+                a[0]*b[1]-a[1]*b[0]}};
+        };
+        double area3d=0.0;
+        for(size_t i=1;i+1<clipped.size();++i) {
+            auto const n=cross(decal_sub(clipped[i].world,clipped[0].world),
+                               decal_sub(clipped[i+1].world,clipped[0].world));
+            area3d+=std::sqrt(double(decal_dot(n,n)));
+        }
+        if(!std::isfinite(area3d) || area3d<1.e-8)return {};
+    }
     return clipped;
 }
 inline std::array<float,2> projected_decal_uv(decal_vertex const &v,
