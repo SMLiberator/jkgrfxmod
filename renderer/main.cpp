@@ -4302,7 +4302,8 @@ namespace {
         instance.transform=placement;
         instance.is_sprite_quad=true;
         instance.sprite_opacity=info.opacity;
-        instance.casts_sun_shadows=false; // do not introduce sprite casters
+        // The visible billboard does not cast from its camera-facing pose.
+        instance.casts_sun_shadows=false;
         instance.effective_light_mode=0.0f;
         // A Camera type sprite participates in the same post-FX overlay as
         // Camera type 3DOs, including optional 0x20 world-depth occlusion.
@@ -4316,6 +4317,71 @@ namespace {
             instance.camera_hud=thing_type==1U && render_type==4U;
             instance.camera_hud_world_depth=jkgm::camera_hud_uses_world_depth(
                 instance.camera_hud,thingflags);
+        }
+        // A second, depth-only submission reuses this same quad/GL buffer,
+        // but is built in sunlight space. No camera-dependent shadow geometry
+        // enters the static cache, and the visible SPR remains unchanged.
+        // Exclude HUDs, 0x20 light-exempt Things, decals/flares, translucent
+        // face flags and partially faded SPRs from opaque cutout shadows.
+        if(the_config->enable_sun_shadows &&
+           the_config->use_sprite_cache &&
+           info.opacity>=0.999f && (flags&2U)==0U &&
+           !instance.camera_hud &&
+           pending_gpu_instances.size()+1U<16384U) {
+            uint32_t signature=0,move_type=0,attach_flags=0;
+            bool const identified=owner>=0x10000U &&
+                uintptr_t(owner)+0xc4U==reinterpret_cast<uintptr_t>(rd) &&
+                thing_type!=0U && thing_type!=1U &&
+                (thingflags&0x20U)==0U &&
+                read(uintptr_t(owner)+0x74U,&signature,4) &&
+                read(uintptr_t(owner)+0x10U,&move_type,4) &&
+                read(uintptr_t(owner)+0x34U,&attach_flags,4) &&
+                signature!=0U;
+            if(identified) {
+                auto const &sun=jkgm::get_sun_settings();
+                float const intensity=sun.intensity.value()[0];
+                if(std::isfinite(intensity) && intensity>0.0f) {
+                    auto const direction=jkgm::normalized_sun_direction(
+                        sun.direction.value());
+                    jkgm::gpu_3do_matrix34 sun_pose{};
+                    if(jkgm::make_gpu_sprite_sun_shadow_pose(
+                           pose,size,offset,info.width,info.height,
+                           current_sprite_roll(rd),direction,sun_pose)) {
+                        jkgm::gpu_3do_instance shadow{};
+                        shadow.id=item->second.id; // share immutable quad
+                        shadow.geometry=item->second.geometry;
+                        shadow.transform=sun_pose;
+                        shadow.shadow_only=true;
+                        shadow.is_sprite_quad=true;
+                        shadow.sprite_opacity=info.opacity;
+                        shadow.effective_geometry_mode=geometry;
+                        shadow.casts_sun_shadows=true;
+                        shadow.shadow_owner=(uint64_t(owner)<<32)|signature;
+                        // Stationary foliage joins the static cache. Moving
+                        // or attached Things use near-distance/dynamic atlas
+                        // rules; all motion is also part of caster hashing.
+                        shadow.dynamic_sun_caster=move_type!=0U ||
+                            (attach_flags&jkgm::native_attach_thing)!=0U;
+                        pending_gpu_instances.emplace_back(std::move(shadow));
+                        if(the_config->profile_renderer &&
+                           (gpu_frame_serial%120U)==0U) {
+                            static uint64_t logged_frame=0;
+                            static unsigned logged_count=0;
+                            if(logged_frame!=gpu_frame_serial) {
+                                logged_frame=gpu_frame_serial;
+                                logged_count=0;
+                            }
+                            if(logged_count++<6U)
+                                LOG_INFO("SPR sun-facing caster type=",type,
+                                         " mat=",resource.material,
+                                         " owner=",owner,
+                                         " dynamic=",move_type!=0U ||
+                                            (attach_flags&jkgm::native_attach_thing)!=0U,
+                                         " geometry=",geometry);
+                        }
+                    }
+                }
+            }
         }
         pending_gpu_instances.emplace_back(std::move(instance));
         if(the_config->profile_renderer)++native_sprite_totals.gpu_cached_quads;

@@ -26,4 +26,25 @@ int main() {
     assert(make_gpu_sprite_pose(sprite_default,id,id,size,offset,1,1,0,pose));
     assert(near(pose[9],2) && near(pose[11],1));
     assert(!make_gpu_sprite_pose(sprite_project_decal,id,id,size,offset,1,1,0,pose));
+
+    // Shadow orientation never depends on the viewing camera: face the sun,
+    // preserve sprite size, offset and roll with a stable up-reference.
+    float shadow_offset[3]{0,0,0};
+    std::array<float,3> const sun{{0.3f,0.4f,0.8660254f}};
+    gpu_3do_matrix34 caster{},second{};
+    assert(make_gpu_sprite_sun_shadow_pose(
+        id,size,shadow_offset,1,1,0,sun,caster));
+    assert(make_gpu_sprite_sun_shadow_pose(
+        id,size,shadow_offset,1,1,0,sun,second));
+    assert(caster==second);
+    sprite_vec3 caster_forward{{caster[3],caster[4],caster[5]}};
+    assert(sprite_normalize(caster_forward));
+    assert(sprite_dot(caster_forward,sun)>0.999f);
+    assert(near(caster[9],0) && near(caster[10],0) && near(caster[11],0));
+    assert(make_gpu_sprite_sun_shadow_pose(
+        id,size,shadow_offset,2,0.5f,30,sun,caster));
+    assert(make_gpu_sprite_sun_shadow_pose(
+        id,size,shadow_offset,1,1,0,{{0,0,1}},caster));
+    assert(!make_gpu_sprite_sun_shadow_pose(
+        id,size,shadow_offset,1,1,0,{{0,0,0}},caster));
 }

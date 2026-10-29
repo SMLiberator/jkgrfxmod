@@ -41,6 +41,17 @@ inline std::shared_ptr<gpu_3do_geometry const> make_gpu_sprite_quad(
     g->indices={0,1,2,0,2,3};
     return g;
 }
+// Build a separate light-facing caster, independent of the view camera.
+// Reuse the same dimensions/roll/SPR offsets and immutable quad as the
+// visible sprite. A fixed SPR also faces the sun in this depth-only pass:
+// this approximates volume rather than projecting the card edge-on.
+inline bool make_gpu_sprite_sun_shadow_pose(
+    gpu_3do_matrix34 const &thing,float const (&size)[4],
+    float const (&offset)[3],float width,float height,float roll,
+    std::array<float,3> const &sun_direction,
+    gpu_3do_matrix34 &out);
+
+// Regular visible sprite remains camera-facing.
 inline bool make_gpu_sprite_pose(
     uint32_t type,gpu_3do_matrix34 const &thing,
     gpu_3do_matrix34 const &view,float const (&size)[4],
@@ -76,5 +87,31 @@ inline bool make_gpu_sprite_pose(
                  offset[1]*axes.look[i]+offset[2]*axes.up[i];
     }
     return gpu_3do_matrix_finite(out);
+}
+
+// The directional ray is normalized once at the caller; validate again
+// so pure tests and unusual SetSunInfo values cannot produce NaNs.
+inline bool make_gpu_sprite_sun_shadow_pose(
+    gpu_3do_matrix34 const &thing,float const (&size)[4],
+    float const (&offset)[3],float width,float height,float roll,
+    std::array<float,3> const &sun_direction,
+    gpu_3do_matrix34 &out)
+{
+    sprite_vec3 look=sun_direction;
+    if(!sprite_normalize(look))return false;
+    sprite_vec3 reference=std::fabs(look[2])>0.95f
+        ?sprite_vec3{{0,1,0}}:sprite_vec3{{0,0,1}};
+    sprite_vec3 right=sprite_cross(look,reference);
+    if(!sprite_normalize(right))return false;
+    sprite_vec3 up=sprite_cross(right,look);
+    if(!sprite_normalize(up))return false;
+    gpu_3do_matrix34 sun_view{{
+        right[0],look[0],up[0],
+        right[1],look[1],up[1],
+        right[2],look[2],up[2],
+        0,0,0
+    }};
+    return make_gpu_sprite_pose(
+        sprite_default,thing,sun_view,size,offset,width,height,roll,out);
 }
 }

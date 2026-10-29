@@ -3860,7 +3860,10 @@ namespace jkgm {
                 for(auto const &instance:frame_gpu_3do_instances) {
                     // SithThing 0x20 skybox/UI meshes are visible but must
                     // never cost a spotlight depth pass or shadow the scene.
+                    // Shadow-only sprite quads are oriented toward the sun,
+                    // not toward arbitrary projected spotlight sources.
                     if(!instance.geometry || instance.is_projected_decal ||
+                       instance.is_sprite_quad ||
                        !instance.casts_sun_shadows)
                         continue;
                     // Exclude the projector's owning vehicle/Thing from its
@@ -4346,7 +4349,8 @@ namespace jkgm {
             auto vec=[](decal_vec3 const &p) {
                 return make_point(p[0],p[1],p[2]);
             };
-            auto shadow_material=[&](gpu_3do_texture const &tex,bool cutout) {
+            auto shadow_material=[&](gpu_3do_texture const &tex,
+                                     bool cutout,bool sprite_cutout) {
                 if(!cutout) {
                     prog.set_shadow_alpha(false,make_point(1.0f,1.0f),
                         make_point(0.0f,0.0f),0.5f,1.0f,false,0.0f);
@@ -4359,7 +4363,7 @@ namespace jkgm {
                     make_point(1.0f/std::max(w,1.0f),
                                1.0f/std::max(h,1.0f)),
                     tex.albedo_scroll,
-                    tex.masked?tex.alpha_cutoff:(tex.dithered?0.5f:0.998f),
+                    tex.masked?tex.alpha_cutoff:((tex.dithered||sprite_cutout)?0.5f:0.998f),
                     tex.opacity,second,tex.albedo_transition);
                 gl::set_active_texture_unit(11);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
@@ -4454,7 +4458,9 @@ namespace jkgm {
                         } else if(the_config->profile_renderer)
                             ++sun_profile_atlas_mat_hits;
                         auto const &tex=found->second;
-                        bool cutout=tex.masked||tex.alpha||tex.dithered;
+                        bool const cutout=tex.masked||tex.alpha||
+                            tex.dithered||
+                            (inst->is_sprite_quad && tex.albedo_source==1);
                         if(tex.albedo_source==0 || tex.special ||
                            tex.emissive_only ||
                            tex.opacity<0.999f ||
@@ -4470,7 +4476,7 @@ namespace jkgm {
                             gl::set_face_cull_mode(cull_front!=mirrored
                                 ?gl::face_mode::front:gl::face_mode::back);
                         }
-                        shadow_material(tex,cutout);
+                        shadow_material(tex,cutout,inst->is_sprite_quad);
                         gl::bind_vertex_array(it->second->vao);
                         gl::draw_elements(gl::element_type::triangles,g.count,
                             gl::index_type::uint32,static_cast<ptrdiff_t>(
@@ -4937,7 +4943,10 @@ namespace jkgm {
                     bounds.low,bounds.high);
                 if(!in_cascade)continue;
                 auto const &tex=cached_material(group,instance);
-                bool const cutout=tex.masked||tex.alpha||tex.dithered;
+                // The sprite's texture alpha is a cutout mask even if
+                // its MAT was not explicitly marked alpha/masked.
+                bool const cutout=tex.masked||tex.alpha||tex.dithered||
+                    (instance.is_sprite_quad && tex.albedo_source==1);
                 if(tex.albedo_source==0 || tex.special || tex.emissive_only || tex.opacity<0.999f ||
                    (cutout && tex.albedo_source!=1))continue;
                 // Verified non-moving SithThings may join the cached static
@@ -5152,7 +5161,8 @@ namespace jkgm {
                            make_point(0.0f,0.0f,1.0f),make_point(0.0f,0.0f,0.0f));
             prog.set_shadow_alpha(false,make_point(1.0f,1.0f),make_point(0.0f,0.0f),
                                   0.5f,1.0f,false,0.0f);
-            auto set_cutout=[&](gpu_3do_texture const &tex,bool world_uv) {
+            auto set_cutout=[&](gpu_3do_texture const &tex,
+                               bool world_uv,bool sprite_cutout=false) {
                 float const width=world_uv?tex.width:gpu_3do_model_uv_extent(tex.width);
                 float const height=world_uv?tex.height:gpu_3do_model_uv_extent(tex.height);
                 bool const second=tex.albedo_transition>0.0f && tex.albedo_source2==1;
@@ -5160,7 +5170,7 @@ namespace jkgm {
                     make_point(1.0f/std::max(width,1.0f),
                                1.0f/std::max(height,1.0f)),
                     tex.albedo_scroll,
-                    tex.masked?tex.alpha_cutoff:(tex.dithered?0.5f:0.998f),
+                    tex.masked?tex.alpha_cutoff:((tex.dithered||sprite_cutout)?0.5f:0.998f),
                     tex.opacity,second,tex.albedo_transition);
                 gl::set_active_texture_unit(11);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,tex.texture);
@@ -5272,7 +5282,8 @@ namespace jkgm {
                                     ?gl::face_mode::front:gl::face_mode::back);
                             }
                             gl::bind_vertex_array(mesh->second->vao);
-                            if(d.cutout)set_cutout(d.texture,false);
+                            if(d.cutout)set_cutout(
+                                d.texture,false,d.instance->is_sprite_quad);
                             else prog.set_shadow_alpha(false,
                                 make_point(1.0f,1.0f),make_point(0.0f,0.0f),
                                 0.5f,1.0f,false,0.0f);
@@ -5339,7 +5350,8 @@ namespace jkgm {
                             ?gl::face_mode::front:gl::face_mode::back);
                     }
                     gl::bind_vertex_array(it->second->vao);
-                    if(draw.cutout)set_cutout(draw.texture,false);
+                    if(draw.cutout)set_cutout(
+                        draw.texture,false,instance.is_sprite_quad);
                     else prog.set_shadow_alpha(false,
                         make_point(1.0f,1.0f),make_point(0.0f,0.0f),
                         0.5f,1.0f,false,0.0f);
