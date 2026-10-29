@@ -10,19 +10,19 @@
 namespace jkgm {
 inline std::shared_ptr<gpu_3do_geometry const> make_gpu_sprite_quad(
     uintptr_t mat,sprite_decal_texture_coords const &uv,uint32_t flags,
-    bool solid_color=false)
+    bool solid_color=false,int32_t cel=-1)
 {
     if(!mat || !valid_sprite_decal_texture_coords(uv) || (flags&~3U))return {};
     auto g=std::make_shared<gpu_3do_geometry>();
     gpu_3do_group group{};
-    group.material=mat;group.cel=-1;
+    group.material=mat;group.cel=cel;
     group.face_type=flags|1U;group.count=6;
     group.solid_color=solid_color;
     group.bounds_min={{-1,0,-1}};
     group.bounds_max={{1,0,1}};
     g->groups.push_back(group);
-    if(solid_color)g->solid_material_refs.emplace_back(mat,-1);
-    else g->material_refs.emplace_back(mat,-1);
+    if(solid_color)g->solid_material_refs.emplace_back(mat,cel);
+    else g->material_refs.emplace_back(mat,cel);
     constexpr std::array<std::array<float,3>,4> points{{
         {{-1,0,-1}},{{1,0,-1}},{{1,0,1}},{{-1,0,1}}
     }};

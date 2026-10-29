@@ -50,6 +50,59 @@ int main() {
     assert(eq(gpu.geometry->vertices[3].u,0.5f));
     assert(eq(gpu.geometry->vertices[0].static_light,1.0f));
     assert(eq(gpu.geometry->vertices[0].cr,1.0f));
+    // The clipped decal supplies interpolated projector coordinates and
+    // angle opacity through otherwise unused fully-lit vertex attributes.
+    assert(eq(gpu.geometry->vertices[0].fax,0.0f));
+    assert(eq(gpu.geometry->vertices[0].fay,1.0f));
+    assert(eq(gpu.geometry->vertices[0].faz,0.4f));
+    assert(eq(gpu.geometry->vertices[0].face_extra,1.0f));
+    assert(eq(decal_smooth_opacity(-0.25f,0.50f,1.0f),1.0f));
+    assert(eq(decal_smooth_opacity(-0.25f,0.50f,-1.0f),0.0f));
+    // Steep receivers should wrap and lose opacity gradually, instead of
+    // an all-or-nothing polygon-angle rejection.
+    decal_world_triangle steep{};
+    steep.vertices[0].world={{0.0f,0.0f,-0.25f}};
+    steep.vertices[1].world={{0.0f,0.20f,-0.25f}};
+    steep.vertices[2].world={{0.0f,0.0f,0.25f}};
+    for(auto &vertex:steep.vertices) {
+        vertex.u=vertex.world[0];
+        vertex.v=vertex.world[2];
+        vertex.depth=vertex.world[1];
+    }
+    decal_world_scan steep_scan{};
+    steep_scan.valid_world=true;
+    steep_scan.triangles={steep};
+    sprite_decal_mesh wrapped{};
+    assert(make_sprite_decal_gpu_mesh(
+        steep_scan,projector,0x123456U,t,1.0f,wrapped,true));
+    assert(wrapped.geometry->vertices[0].face_extra>0.0f);
+    assert(wrapped.geometry->vertices[0].face_extra<0.5f);
+    assert(wrapped.geometry->vertices[0].fax==0.5f);
+    // Face boundary feathering is fragment-based: a wholly clipped quad
+    // whose corners touch the volume walls must not disappear entirely.
+    assert(gpu.geometry->vertices[0].face_extra==1.0f);
+    // Two 3DO faces meeting at a corner must share the averaged normal
+    // where their projected coordinates coincide. The angle fade should
+    // graduate across the perpendicular side instead of ending at a seam.
+    decal_world_triangle side{};
+    side.vertices[0].world={{0.5f,0.1f,-0.5f}};
+    side.vertices[1].world={{0.5f,0.1f,0.5f}};
+    side.vertices[2].world={{0.5f,0.2f,-0.5f}};
+    for(auto &vertex:side.vertices) {
+        vertex.u=vertex.world[0];
+        vertex.v=vertex.world[2];
+        vertex.depth=vertex.world[1];
+    }
+    decal_world_scan corner_scan{};
+    corner_scan.valid_world=true;
+    corner_scan.triangles={a,b,side};
+    sprite_decal_mesh corner_mesh{};
+    assert(make_sprite_decal_gpu_mesh(
+        corner_scan,projector,0x123456U,t,1.0f,corner_mesh,true));
+    auto const &corner_vertices=corner_mesh.geometry->vertices;
+    assert(corner_vertices.size()==9);
+    assert(corner_vertices[6].face_extra>
+           corner_vertices[8].face_extra);
     assert(group.bounds_min[0]<=-0.5f);
     assert(group.bounds_max[2]>=0.5f);
     auto unchanged=gpu.geometry;

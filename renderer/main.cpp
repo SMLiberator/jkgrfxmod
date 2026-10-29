@@ -334,7 +334,11 @@ namespace {
         uint64_t id=0;
         std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
     };
-    std::unordered_map<uintptr_t,cached_gpu_sprite_quad> gpu_sprite_quads;
+    // Each shared .SPR can appear simultaneously at different rdThing.wallCel
+    // frames. Retain immutable quad geometry per resource AND per active cel.
+    // The outer resource key keeps native free hooks able to purge all cels.
+    std::unordered_map<uintptr_t,
+        std::unordered_map<int32_t,cached_gpu_sprite_quad>> gpu_sprite_quads;
     struct moving_mesh_occurrence_key {
         uint64_t thing=0;
         uintptr_t mesh=0;
@@ -4040,9 +4044,13 @@ namespace {
             uint32_t object_triangles=0,object_receivers=0;
             if(!sprite_static_receiver_world.receivers.empty() &&
                !scan.truncated && scan.triangles.size()<2048U) {
+                // Stationary 3DO corners need steep-face wrapping just
+                // like moving model decals; native sector receivers remain
+                // strict to avoid bleeding through thin slabs.
                 auto objects=jkgm::project_cached_decal_world(
                     sprite_static_receiver_world,projector,
-                    2048U-static_cast<uint32_t>(scan.triangles.size()));
+                    2048U-static_cast<uint32_t>(scan.triangles.size()),
+                    true,true);
                 object_triangles=static_cast<uint32_t>(objects.triangles.size());
                 object_receivers=objects.receivers;
                 scan.truncated|=objects.truncated;
@@ -4061,7 +4069,7 @@ namespace {
             jkgm::sprite_decal_mesh mesh{};
             bool const ready=jkgm::make_sprite_decal_gpu_mesh(
                 scan,projector,resource.material,resource.texcoords,
-                info.opacity,mesh);
+                info.opacity,mesh,true);
             if(!ready && the_config->profile_renderer &&
                sprite_decal_submit_logs++<12U) {
                 std::ostringstream msg;
@@ -4264,7 +4272,16 @@ namespace {
                 type,pose,view,size,offset,info.width,info.height,
                 current_sprite_roll(rd),placement))
             return reject(6);
-        auto item=gpu_sprite_quads.find(sprite);
+        // rdThing.wallCel (+0x30), NOT rdMaterial.current_cel, is what
+        // rdSprite_Draw sends to rdCache for the current Thing's animation.
+        // A shared SPR/MAT may have many Things showing different frames.
+        int32_t cel=-1;
+        if(!read(reinterpret_cast<uintptr_t>(rd)+0x30U,&cel,4) ||
+           cel < -1 || cel > 255)return reject(5);
+        auto resource_item=gpu_sprite_quads.find(sprite);
+        auto variant=resource_item==gpu_sprite_quads.end()
+            ? std::unordered_map<int32_t,cached_gpu_sprite_quad>::iterator{}
+            : resource_item->second.find(cel);
         auto const same=[](jkgm::sprite_decal_resource const &a,
                            jkgm::sprite_decal_resource const &b) {
             return a.material==b.material &&
@@ -4273,14 +4290,16 @@ namespace {
                    a.texcoords.top==b.texcoords.top &&
                    a.texcoords.bottom==b.texcoords.bottom;
         };
-        if(item==gpu_sprite_quads.end() ||
-           item->second.flags!=flags ||
-           item->second.geometry_mode!=geometry ||
-           !same(item->second.resource,resource)) {
-            if(item==gpu_sprite_quads.end() && gpu_sprite_quads.size()>=4096U)
-                return reject(7);
+        bool const have_variant=resource_item!=gpu_sprite_quads.end() &&
+            variant!=resource_item->second.end();
+        if(!have_variant ||
+           variant->second.flags!=flags ||
+           variant->second.geometry_mode!=geometry ||
+           !same(variant->second.resource,resource)) {
+            if(resource_item==gpu_sprite_quads.end() &&
+               gpu_sprite_quads.size()>=4096U)return reject(7);
             auto quad=jkgm::make_gpu_sprite_quad(
-                resource.material,resource.texcoords,flags,geometry==3U);
+                resource.material,resource.texcoords,flags,geometry==3U,cel);
             if(!quad)return reject(5);
             cached_gpu_sprite_quad entry{};
             entry.resource=resource;
@@ -4288,21 +4307,22 @@ namespace {
             entry.geometry_mode=geometry;
             entry.id=next_gpu_id++;
             entry.geometry=std::move(quad);
-            item=gpu_sprite_quads.insert_or_assign(
-                sprite,std::move(entry)).first;
+            // Emplace the resource only after a complete successful snapshot.
+            auto &cels=gpu_sprite_quads[sprite];
+            variant=cels.insert_or_assign(cel,std::move(entry)).first;
         } else if(the_config->profile_renderer) {
             ++native_sprite_totals.gpu_quad_reuses;
         }
         // Let JK perform ordinary sprite rendering to warm missing MAT cels.
         // The next frame can reuse the already-resident texture safely.
-        if(!gpu_mesh_materials_ready(*item->second.geometry)) {
+        if(!gpu_mesh_materials_ready(*variant->second.geometry)) {
             if(the_config->profile_renderer)
                 ++native_sprite_totals.gpu_quad_mat_wait;
             return false;
         }
         jkgm::gpu_3do_instance instance{};
-        instance.id=item->second.id;
-        instance.geometry=item->second.geometry;
+        instance.id=variant->second.id;
+        instance.geometry=variant->second.geometry;
         instance.transform=placement;
         instance.is_sprite_quad=true;
         instance.sprite_opacity=info.opacity;
@@ -4358,8 +4378,8 @@ namespace {
                            pose,size,offset,info.width,info.height,
                            current_sprite_roll(rd),direction,sun_pose)) {
                         jkgm::gpu_3do_instance shadow{};
-                        shadow.id=item->second.id; // share immutable quad
-                        shadow.geometry=item->second.geometry;
+                        shadow.id=variant->second.id; // share immutable quad
+                        shadow.geometry=variant->second.geometry;
                         shadow.transform=sun_pose;
                         shadow.shadow_only=true;
                         shadow.is_sprite_quad=true;

@@ -16,6 +16,15 @@ int main() {
     assert(solid->material_refs.empty());
     assert(solid->solid_material_refs.size()==1);
     assert(!mesh->groups[0].solid_color);
+    // JK animated SPRs select a per-Thing wallCel. Never substitute the
+    // MAT's shared current_cel or pin all copies to frame zero.
+    auto frame3=make_gpu_sprite_quad(0x12340,uv,0,false,3);
+    auto frame7=make_gpu_sprite_quad(0x12340,uv,0,false,7);
+    assert(frame3 && frame7);
+    assert(frame3->groups[0].cel==3 && frame7->groups[0].cel==7);
+    assert(frame3->material_refs[0].second==3);
+    assert(frame7->material_refs[0].second==7);
+    assert(mesh->groups[0].cel==-1);
     gpu_3do_matrix34 id{{1,0,0,0,1,0,0,0,1,0,0,0}},pose{};
     float size[4]{4,6,2,3},offset[3]{0,0,0};
     assert(make_gpu_sprite_pose(sprite_default,id,id,size,offset,1,1,0,pose));

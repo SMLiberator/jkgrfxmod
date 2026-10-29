@@ -39,6 +39,7 @@ uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blend only, 4 dithered
 in vec2 pixel_uv;
 in vec3 view_normal;
 in vec3 jk_lit_rgb;
+in vec4 decal_coverage; // projector U,V,depth,normal-based opacity
 
 uniform sampler2D surface_map; // linear RGB: reflectivity, roughness, metalness
 uniform sampler2D normal_map;  // tangent-space RGB
@@ -658,6 +659,15 @@ void main() {
     }
     vec4 albedo=texel*albedo_factor;
     albedo.a*=native_face_opacity;
+    if(decal_receiver_lighting!=0) {
+        // Feather the actual box boundary per pixel, not per vertex:
+        // clipped polygons often have ALL their vertices at the border.
+        vec3 edge=min(decal_coverage.xyz,vec3(1.0)-decal_coverage.xyz);
+        float feather=smoothstep(0.0,0.055,edge.x)*
+                      smoothstep(0.0,0.055,edge.y)*
+                      smoothstep(0.0,0.12,edge.z);
+        albedo.a*=clamp(decal_coverage.w,0.0,1.0)*feather;
+    }
     if(post_exempt_pass!=0) {
         // Render ALL coverage of the exempt material once, rather than
         // splitting mixed alpha between separate opaque/translucent passes.

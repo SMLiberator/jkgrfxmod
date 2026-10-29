@@ -34,7 +34,14 @@ uniform vec4 view_right, view_forward, view_up, view_origin;
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 out vec2 pixel_uv;
 out vec3 view_normal;
+// Decals reuse the existing light-anchor (xyz) and extra-light (w)
+// attributes as normalized projector coordinates and smooth angular alpha.
+uniform int decal_receiver_lighting;
+out vec4 decal_coverage;
 void main() {
+    decal_coverage=decal_receiver_lighting!=0
+        ? vec4(local_face_anchor,local_extra_light)
+        : vec4(0.5,0.5,0.5,1.0);
     // Preserve rdMatrix_TransformPoint34's additive operand order.
     float x = (view_forward.x*local_position.y+
                view_up.x*local_position.z+
