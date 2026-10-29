@@ -37,6 +37,7 @@
 #include "sprite_decal_attachment.hpp"
 #include "sprite_decal_follow.hpp"
 #include "sprite_decal_moving_receiver.hpp"
+#include "sprite_decal_mesh_hit.hpp"
 #include "sprite_alpha_tag.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
@@ -3677,48 +3678,84 @@ namespace {
             size[0]*info.width,size[1]*info.height);
         float const near_radius=jkgm::sprite_decal_receiver_search_radius(depth);
         if(!(near_radius>0.0f))return false;
-        // The camera's forward direction is not the projectile's impact
-        // direction. Its former 0.04-unit preference could outweigh the
-        // distance between the front and rear faces of a thin actor limb.
-        // Choose the geometrically closest receiver instead. We can use
-        // an actual impact normal later, when one is available.
-        jkgm::decal_vec3 const incoming{{0,0,0}};
+        // The SPR inherits its creator's Right/Look/Up basis via CreateThing.
+        // In projectile COGs, +Look is the direction of travel. Search this
+        // short trajectory against the actual ANIMATED receiver triangles,
+        // not just the spherical collision hull. Search reach is independent
+        // of the much smaller visible decal projection depth.
+        constexpr float ray_reach=0.25f;
+        constexpr float max_ray_miss=0.06f;
+        float const discovery_radius=std::max(
+            near_radius,ray_reach+max_ray_miss);
         size_t const invalid=std::numeric_limits<size_t>::max();
         size_t best_gpu=invalid,best_native=invalid;
         float best_score=std::numeric_limits<float>::infinity();
-        jkgm::decal_vec3 best_normal{};
+        jkgm::decal_vec3 best_normal{},best_position=impact;
+        jkgm::decal_mesh_contact best_contact{};
+        auto consider=[&](jkgm::decal_world_geometry const &receivers,
+                          size_t index,bool native) {
+            // Hits along the projectile path take priority; when the sphere
+            // is grazed and the ray misses, snap only within a bounded
+            // lateral distance. Geometry snapshots exist only on creation.
+            auto const contact=jkgm::find_decal_mesh_contact(
+                receivers,impact,source_axes.look,
+                ray_reach,ray_reach,max_ray_miss);
+            if(contact.valid) {
+                if(!jkgm::decal_mesh_contact_better(contact,best_contact))
+                    return;
+                best_contact=contact;
+                best_normal=contact.normal;
+                best_position=contact.position;
+            } else {
+                // Legacy decals may have default orientation rather than a
+                // projectile-derived Look. Keep the old near-face behavior
+                // when no directional contact has succeeded.
+                if(best_contact.valid)return;
+                auto const nearest=jkgm::find_nearest_decal_surface(
+                    jkgm::decal_world_geometry{},receivers,impact,
+                    jkgm::decal_vec3{{0,0,0}},near_radius);
+                if(!nearest.valid || nearest.distance>=best_score)return;
+                best_score=nearest.distance;
+                best_normal=nearest.normal;
+                best_position=impact;
+            }
+            best_native=native?index:invalid;
+            best_gpu=native?invalid:index;
+        };
         for(size_t i=0;i<pending_gpu_instances.size();++i) {
             auto const &inst=pending_gpu_instances[i];
             if(!inst.decal_receiver_thing || !inst.decal_receiver_model ||
                !inst.decal_receiver_mesh ||
-               !jkgm::sprite_decal_moving_receiver_near(inst,impact,near_radius))
+               !jkgm::sprite_decal_moving_receiver_near(
+                    inst,impact,discovery_radius))
                 continue;
             auto receivers=jkgm::sprite_decal_moving_receiver_world(inst);
             if(!receivers.valid_world || receivers.receivers.empty())continue;
-            auto const hit=jkgm::find_nearest_decal_surface(
-                jkgm::decal_world_geometry{},receivers,impact,incoming,near_radius);
-            if(!hit.valid || hit.distance>=best_score)continue;
-            best_gpu=i;
-            best_native=invalid;
-            best_score=hit.distance;
-            best_normal=hit.normal;
+            consider(receivers,i,false);
         }
         for(size_t i=0;i<native_moving_decal_receivers.size();++i) {
             auto const &candidate=native_moving_decal_receivers[i];
             jkgm::decal_world_geometry receivers{};
             if(!build_native_moving_decal_receiver_world(
-                   candidate,impact,receivers))continue;
-            auto const hit=jkgm::find_nearest_decal_surface(
-                jkgm::decal_world_geometry{},receivers,impact,incoming,near_radius);
-            if(!hit.valid || hit.distance>=best_score)continue;
-            best_native=i;
-            best_gpu=invalid;
-            best_score=hit.distance;
-            best_normal=hit.normal;
+                   candidate,impact,receivers,discovery_radius))continue;
+            consider(receivers,i,true);
         }
         if(best_gpu==invalid && best_native==invalid) {
-            trace_probe("no_near_receiver");
+            trace_probe("no_mesh_contact");
             return false;
+        }
+        if(the_config->profile_renderer) {
+            static uint32_t snap_logs=0;
+            if(snap_logs++<32U) {
+                auto const delta=jkgm::decal_sub(best_position,impact);
+                LOG_INFO("SPR moving mesh_snap method=",
+                         best_contact.valid
+                             ?(best_contact.ray_hit?"ray":"closest_path")
+                             :"legacy_nearest",
+                         " displacement=",std::sqrt(jkgm::decal_dot(delta,delta)),
+                         " miss=",best_contact.valid?best_contact.miss:0.0f,
+                         " travel=",best_contact.valid?best_contact.travel:0.0f);
+            }
         }
         // Select an entire receiving Thing, not a single rdMesh node.
         // Multiple independently moving nodes may intersect one projector.
@@ -3732,9 +3769,11 @@ namespace {
         if(!jkgm::sprite_decal_attachment_axes(
                 source_axes,best_normal,aligned))return false;
         jkgm::decal_projector projector{};
+        // Rebuild around the TRUE mesh contact rather than the sphere hit.
+        // The SPR resource's local offset was already included in impact;
+        // do not apply it a second time. Native Thing state stays untouched.
         if(!jkgm::make_sprite_decal_projector(
-                aligned,{{pose[9],pose[10],pose[11]}},
-                {{offset[0],offset[1],offset[2]}},
+                aligned,best_position,{{0,0,0}},
                 size[0],size[1],info.width,info.height,roll,projector))
             return false;
         moving_sprite_decal entry{};
@@ -3800,7 +3839,8 @@ namespace {
             if(inst.is_projected_decal ||
                inst.decal_receiver_thing!=receiver_thing ||
                inst.decal_receiver_model!=receiver_model ||
-               !jkgm::sprite_decal_moving_receiver_near(inst,impact,extent))
+               !jkgm::sprite_decal_moving_receiver_near(
+                    inst,best_position,extent))
                 continue;
             auto receivers=jkgm::sprite_decal_moving_receiver_world(inst);
             add_fragment({inst.decal_receiver_thing,
@@ -3817,7 +3857,7 @@ namespace {
                 continue;
             jkgm::decal_world_geometry receivers{};
             if(!build_native_moving_decal_receiver_world(
-                    native,impact,receivers,extent))
+                    native,best_position,receivers,extent))
                 continue;
             add_fragment({native.thing,native.model,
                           native.mesh,native.revision},
