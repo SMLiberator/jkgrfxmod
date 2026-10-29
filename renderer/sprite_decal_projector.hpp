@@ -13,7 +13,6 @@ namespace jkgm {
 // use their authored size instead of the previous fixed 0.25 JKU (2.5 m).
 constexpr float sprite_decal_projection_min_depth=0.002f;
 constexpr float sprite_decal_projection_max_depth=0.25f;
-constexpr float sprite_decal_surface_bias=0.001f;
 
 inline float sprite_decal_projection_depth_for_size(float width,float height)
 {
@@ -81,16 +80,4 @@ inline bool make_sprite_decal_projector(
     return true;
 }
 
-// Move the clipped triangle *outward* by a fixed tiny amount to avoid
-// z-fighting. The original UV/depth projector coordinates are unchanged.
-inline void offset_sprite_decal_receiver(
-    decal_vertex &v,decal_vec3 receiver_normal)
-{
-    if(!decal_finite(receiver_normal))return;
-    float const l2=decal_dot(receiver_normal,receiver_normal);
-    if(l2<1.e-8f || !std::isfinite(l2))return;
-    float const scale=sprite_decal_surface_bias/std::sqrt(l2);
-    for(int i=0;i<3;++i)
-        v.world[i]+=receiver_normal[i]*scale;
-}
 }

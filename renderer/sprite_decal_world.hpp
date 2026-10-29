@@ -154,10 +154,8 @@ namespace jkgm {
                 result.truncated=true;
                 break;
             }
-            // Apply the same tiny fixed z-fighting offset to every clipped
-            // vertex, preserving the UVs calculated on the receiver plane.
-            for(auto &v:clipped)
-                offset_sprite_decal_receiver(v,normal);
+            // Diagnostics also preserve receiver-plane geometry. The GPU
+            // draw path applies raster polygon offset instead.
             for(size_t t=1;t+1<clipped.size();++t)
                 result.triangles.push_back(
                     {{{clipped[0],clipped[t],clipped[t+1]}},i});

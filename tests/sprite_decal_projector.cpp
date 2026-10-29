@@ -51,10 +51,6 @@ int main() {
     bad_axes.look={{0,0,0}};
     assert(!make_sprite_decal_projector(
         bad_axes,{{0,0,0}},{{0,0,0}},1,1,1,1,0,p));
-    decal_vertex v{};
-    v.world={{0,0.1f,0}};
-    v.u=0.25f;v.v=-0.25f;v.depth=0.1f;
-    offset_sprite_decal_receiver(v,{{0,-1,0}});
-    assert(near(v.world[1],0.1f-sprite_decal_surface_bias));
-    assert(near(v.u,0.25f) && near(v.depth,0.1f));
+    // The sprite projector keeps its finite depth. Receiver geometry is
+    // never altered for z-fighting; draw-time polygon offset handles it.
 }

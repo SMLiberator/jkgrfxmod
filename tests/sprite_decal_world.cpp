@@ -72,6 +72,8 @@ int main() {
             assert(uv[0]>=-0.001f&&uv[0]<=1.001f);
             assert(uv[1]>=-0.001f&&uv[1]<=1.001f);
             assert(v.depth>=0&&v.depth<=p.depth);
+            // Native world faces remain coplanar with their receivers.
+            assert(std::fabs(v.world[1]-0.1f)<0.00001f);
         }
     }
     // Strict cap cannot drop half of an emitted surface's triangles.

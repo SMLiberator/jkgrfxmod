@@ -102,12 +102,36 @@ int main(){
     // Only moving model receivers relax the projection-facing check:
     // no change to the GL winding/backface state, nor to static slabs.
     auto moving_wrap=project_cached_decal_world(
-        index,p,2048U,false,true,true);
+        index,p,2048U,true,true);
     assert(moving_wrap.receivers==3 &&
            moving_wrap.triangles.size()==6);
     assert(moving_wrap.skipped_backfaces==0);
     index.receivers[0].normal={{0,-1,0}};
     assert(project_cached_decal_world(index,p).triangles.size()==6);
+    // A world wall perpendicular to the projector previously collapsed
+    // to zero UV area and vanished. Wrapping uses the projector depth as
+    // its second texture axis, without moving geometry off either wall.
+    decal_world_geometry corner{};
+    corner.valid_world=true;
+    decal_world_surface_geometry side{};
+    side.normal={{1,0,0}};
+    side.polygon={
+        {{0.0f,0.0f,-0.25f}},{{0.0f,0.25f,-0.25f}},
+        {{0.0f,0.25f,0.25f}},{{0.0f,0.0f,0.25f}}
+    };
+    side.bounds_min={{0.0f,0.0f,-0.25f}};
+    side.bounds_max={{0.0f,0.25f,0.25f}};
+    corner.receivers.push_back(side);
+    corner.acceleration.build(corner.receivers);
+    assert(project_cached_decal_world(corner,p).triangles.empty());
+    auto const wrapped_corner=project_cached_decal_world(corner,p,2048U,true);
+    assert(wrapped_corner.triangles.size()==2);
+    for(auto const &tri:wrapped_corner.triangles)
+        for(auto const &vertex:tri.vertices)
+            assert(std::fabs(vertex.world[0])<1.e-6f);
+    // The back of a thin slab must remain excluded even in wrapping mode.
+    corner.receivers[0].normal={{0,1,0}};
+    assert(project_cached_decal_world(corner,p,2048U,true).triangles.empty());
     p.origin[0]=10;
     auto far=project_cached_decal_world(index,p);
     assert(reads==after_load);

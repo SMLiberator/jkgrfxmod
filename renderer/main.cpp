@@ -3760,7 +3760,7 @@ namespace {
             // back-facing receiver polygons. Raster back-face culling stays
             // enabled, and the mesh applies a smooth angular opacity fade.
             auto scan=jkgm::project_cached_decal_world(
-                receiver_world,projector,remaining,false,true,true);
+                receiver_world,projector,remaining,true,true);
             if(scan.truncated || scan.triangles.empty())return;
             jkgm::sprite_decal_mesh mesh{};
             if(!jkgm::make_sprite_decal_gpu_mesh(
@@ -4045,18 +4045,19 @@ namespace {
                 {{offset[0],offset[1],offset[2]}},
                 size[0],size[1],info.width,info.height,roll,projector))
                 return moving_ready;
+            // Let world surfaces wrap perpendicular corners as 3DOs do,
+            // but keep rejecting strongly opposite-facing slab undersides.
             auto scan=jkgm::project_cached_decal_world(
-                sprite_world_geometry,projector,2048U);
+                sprite_world_geometry,projector,2048U,true);
             uint32_t object_triangles=0,object_receivers=0;
             if(!sprite_static_receiver_world.receivers.empty() &&
                !scan.truncated && scan.triangles.size()<2048U) {
-                // Stationary 3DO corners need steep-face wrapping just
-                // like moving model decals; native sector receivers remain
-                // strict to avoid bleeding through thin slabs.
+                // World and stationary 3DO receivers use matching corner
+                // wrapping and rely exclusively on draw-time depth bias.
                 auto objects=jkgm::project_cached_decal_world(
                     sprite_static_receiver_world,projector,
                     2048U-static_cast<uint32_t>(scan.triangles.size()),
-                    true,true);
+                    true);
                 object_triangles=static_cast<uint32_t>(objects.triangles.size());
                 object_receivers=objects.receivers;
                 scan.truncated|=objects.truncated;
