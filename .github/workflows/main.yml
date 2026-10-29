@@ -196,6 +196,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_mesh_hit.cpp /Fe:sprite_decal_mesh_hit_test.exe
         sprite_decal_mesh_hit_test.exe
+    - name: Moving 3DO multi-mesh decal projection tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_multimesh.cpp /Fe:sprite_decal_multimesh_test.exe
+        sprite_decal_multimesh_test.exe
     - name: Unattached decal wall/floor receiver selection
       shell: cmd
       run: |

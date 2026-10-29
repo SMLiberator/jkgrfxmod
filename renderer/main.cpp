@@ -38,6 +38,7 @@
 #include "sprite_decal_follow.hpp"
 #include "sprite_decal_moving_receiver.hpp"
 #include "sprite_decal_mesh_hit.hpp"
+#include "sprite_decal_multimesh.hpp"
 #include "sprite_alpha_tag.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
@@ -3786,84 +3787,127 @@ namespace {
         entry.opacity=info.opacity;
         constexpr uint32_t max_decal_triangles=2048U;
         constexpr size_t max_decal_mesh_fragments=64U;
-        uint32_t remaining=max_decal_triangles;
-        uint32_t total_triangles=0;
-        auto add_fragment=[&](
-            jkgm::sprite_decal_receiver_identity const &id,
-            uint32_t occurrence,bool native_fallback,
-            jkgm::gpu_3do_matrix34 const &transform,
-            jkgm::decal_world_geometry const &receiver_world)
-        {
-            if(remaining==0 || entry.fragments.size()>=max_decal_mesh_fragments ||
-               !receiver_world.valid_world || receiver_world.receivers.empty())
-                return;
-            // A moving character's shallow decal is allowed to span
-            // back-facing receiver polygons. Raster back-face culling stays
-            // enabled, and the mesh applies a smooth angular opacity fade.
-            auto scan=jkgm::project_cached_decal_world(
-                receiver_world,projector,remaining,true,true);
-            if(scan.truncated || scan.triangles.empty())return;
-            jkgm::sprite_decal_mesh mesh{};
-            if(!jkgm::make_sprite_decal_gpu_mesh(
-                    scan,projector,resource.material,resource.texcoords,
-                    info.opacity,mesh,true,true) || !mesh.geometry) {
-                trace_probe("projection_or_gpu_mesh_failed",
-                    static_cast<uint32_t>(scan.triangles.size()));
-                return;
-            }
-            if(!jkgm::sprite_decal_geometry_to_receiver_local(
-                    *mesh.geometry,transform)) {
-                trace_probe("receiver_transform_noninvertible",
-                    static_cast<uint32_t>(scan.triangles.size()));
-                return;
-            }
-            moving_sprite_decal_fragment fragment{};
-            fragment.receiver=id;
-            fragment.occurrence=occurrence;
-            fragment.native_fallback=native_fallback;
-            fragment.id=next_gpu_id++;
-            fragment.native_structure=native_decal_mesh_structure_signature(
-                reinterpret_cast<void const *>(id.mesh));
-            fragment.last_drawn_frame=gpu_frame_serial;
-            fragment.geometry=std::move(mesh.geometry);
-            total_triangles+=static_cast<uint32_t>(scan.triangles.size());
-            remaining-=static_cast<uint32_t>(scan.triangles.size());
-            entry.fragments.push_back(std::move(fragment));
+        struct receiver_piece {
+            jkgm::sprite_decal_receiver_identity identity{};
+            uint32_t occurrence=0;
+            bool native_fallback=false;
+            jkgm::gpu_3do_matrix34 transform{};
         };
-        // All eligible GPU meshes of the same Thing share one projector.
-        // Per-node clipping/local conversion preserves the door/body split.
+        // Stage every animated node of the chosen Thing before clipping any
+        // of them. This permits a single depth fit and a single smooth
+        // normal field across separate chest, belly, limb, etc. meshes.
+        // Geometry is still converted to EACH node's local coordinates for
+        // ordinary animation/following after the one-shot projection.
+        std::vector<receiver_piece> pieces;
+        std::vector<jkgm::decal_world_geometry> piece_worlds;
+        pieces.reserve(16);
+        piece_worlds.reserve(16);
         float const extent=0.5f*std::sqrt(
             projector.width*projector.width+
-            projector.height*projector.height)+projector.depth;
+            projector.height*projector.height)+
+            jkgm::sprite_decal_projection_max_depth;
         for(auto const &inst:pending_gpu_instances) {
-            if(entry.fragments.size()>=max_decal_mesh_fragments || !remaining)
-                break;
+            if(pieces.size()>=max_decal_mesh_fragments)break;
             if(inst.is_projected_decal ||
                inst.decal_receiver_thing!=receiver_thing ||
                inst.decal_receiver_model!=receiver_model ||
                !jkgm::sprite_decal_moving_receiver_near(
-                    inst,best_position,extent))
-                continue;
+                   inst,best_position,extent))continue;
             auto receivers=jkgm::sprite_decal_moving_receiver_world(inst);
-            add_fragment({inst.decal_receiver_thing,
-                          inst.decal_receiver_model,
-                          inst.decal_receiver_mesh,
-                          inst.decal_receiver_revision},
-                         inst.decal_receiver_occurrence,false,
-                         inst.transform,receivers);
+            if(!receivers.valid_world || receivers.receivers.empty())continue;
+            pieces.push_back({{inst.decal_receiver_thing,
+                               inst.decal_receiver_model,
+                               inst.decal_receiver_mesh,
+                               inst.decal_receiver_revision},
+                              inst.decal_receiver_occurrence,false,
+                              inst.transform});
+            piece_worlds.emplace_back(std::move(receivers));
         }
         for(auto const &native:native_moving_decal_receivers) {
-            if(entry.fragments.size()>=max_decal_mesh_fragments || !remaining)
-                break;
-            if(native.thing!=receiver_thing || native.model!=receiver_model)
-                continue;
+            if(pieces.size()>=max_decal_mesh_fragments)break;
+            if(native.thing!=receiver_thing ||
+               native.model!=receiver_model)continue;
             jkgm::decal_world_geometry receivers{};
             if(!build_native_moving_decal_receiver_world(
-                    native,best_position,receivers,extent))
+                   native,best_position,receivers,extent))continue;
+            pieces.push_back({{native.thing,native.model,
+                               native.mesh,native.revision},
+                              native.occurrence,true,native.transform});
+            piece_worlds.emplace_back(std::move(receivers));
+        }
+        float const initial_depth=projector.depth;
+        bool const expanded_depth=
+            jkgm::fit_moving_decal_multimesh_depth(projector,piece_worlds);
+        struct staged_piece {
+            size_t index=0;
+            jkgm::decal_world_scan scan{};
+        };
+        std::vector<staged_piece> staged;
+        staged.reserve(pieces.size());
+        uint32_t remaining=max_decal_triangles,total_triangles=0;
+        for(size_t i=0;i<pieces.size() && remaining>0;++i) {
+            auto scan=jkgm::project_cached_decal_world(
+                piece_worlds[i],projector,remaining,true,true);
+            if(!scan.valid_world || scan.truncated ||
+               scan.triangles.empty())continue;
+            uint32_t const count=static_cast<uint32_t>(
+                scan.triangles.size());
+            total_triangles+=count;
+            remaining-=count;
+            staged.push_back({i,std::move(scan)});
+        }
+        // UV wrapping and angular opacity both use averaged normals.
+        // Accumulate across ALL receiving nodes first: doing this for each
+        // mesh independently creates hard splits at animated node seams.
+        jkgm::decal_normal_map shared_normals;
+        shared_normals.reserve(size_t(total_triangles)*3U);
+        bool normals_ok=true;
+        for(auto const &piece:staged)
+            if(!jkgm::accumulate_sprite_decal_normals(
+                   piece.scan,projector,shared_normals)) {
+                normals_ok=false;
+                break;
+            }
+        if(normals_ok)for(auto const &part:staged) {
+            auto const &piece=pieces[part.index];
+            jkgm::sprite_decal_mesh mesh{};
+            if(!jkgm::make_sprite_decal_gpu_mesh(
+                    part.scan,projector,resource.material,
+                    resource.texcoords,info.opacity,mesh,true,true,
+                    &shared_normals) || !mesh.geometry) {
+                trace_probe("projection_or_gpu_mesh_failed",
+                    static_cast<uint32_t>(part.scan.triangles.size()));
                 continue;
-            add_fragment({native.thing,native.model,
-                          native.mesh,native.revision},
-                         native.occurrence,true,native.transform,receivers);
+            }
+            if(!jkgm::sprite_decal_geometry_to_receiver_local(
+                    *mesh.geometry,piece.transform)) {
+                trace_probe("receiver_transform_noninvertible",
+                    static_cast<uint32_t>(part.scan.triangles.size()));
+                continue;
+            }
+            moving_sprite_decal_fragment fragment{};
+            fragment.receiver=piece.identity;
+            fragment.occurrence=piece.occurrence;
+            fragment.native_fallback=piece.native_fallback;
+            fragment.id=next_gpu_id++;
+            fragment.native_structure=native_decal_mesh_structure_signature(
+                reinterpret_cast<void const *>(piece.identity.mesh));
+            fragment.last_drawn_frame=gpu_frame_serial;
+            fragment.geometry=std::move(mesh.geometry);
+            entry.fragments.push_back(std::move(fragment));
+        }
+        if(the_config->profile_renderer) {
+            static uint32_t multi_logs=0;
+            if(multi_logs++<48U) {
+                std::ostringstream msg;
+                msg<<"SPR moving multimesh candidate_nodes="<<pieces.size()
+                   <<" projected_nodes="<<staged.size()
+                   <<" fragments="<<entry.fragments.size()
+                   <<" depth="<<initial_depth
+                   <<" fitted_depth="<<projector.depth
+                   <<" adapted="<<expanded_depth;
+                LOG_INFO(msg.str());
+            }
         }
         if(entry.fragments.empty()) {
             trace_probe("no_projected_mesh_fragments");

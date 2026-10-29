@@ -101,12 +101,47 @@ namespace jkgm {
         return uv;
     }
 
+    // All fragments of a moving Thing use one world-space corner normal
+    // field. Independent per-rdMesh fields otherwise introduce hard UV and
+    // opacity seams exactly where the model's separate pieces join.
+    using decal_normal_map=std::unordered_map<
+        decal_corner_key,std::array<float,3>,decal_corner_hash>;
+
+    inline bool accumulate_sprite_decal_normals(
+        decal_world_scan const &scan,decal_projector const &projector,
+        decal_normal_map &out)
+    {
+        if(!valid_decal_projector(projector))return false;
+        for(auto const &tri:scan.triangles) {
+            auto const &p0=tri.vertices[0].world;
+            auto const &p1=tri.vertices[1].world;
+            auto const &p2=tri.vertices[2].world;
+            decal_vec3 const a=decal_sub(p1,p0),b=decal_sub(p2,p0);
+            decal_vec3 normal{{a[1]*b[2]-a[2]*b[1],
+                               a[2]*b[0]-a[0]*b[2],
+                               a[0]*b[1]-a[1]*b[0]}};
+            float const n2=decal_dot(normal,normal);
+            if(!std::isfinite(n2)||n2<1e-12f)return false;
+            float const inv=1.0f/std::sqrt(n2);
+            for(float &value:normal)value*=inv;
+            for(auto const &v:tri.vertices) {
+                if(!decal_finite(v.world)||!std::isfinite(v.u)||
+                   !std::isfinite(v.v)||!std::isfinite(v.depth))
+                    return false;
+                auto &acc=out[decal_projected_corner(v,projector)];
+                for(int axis=0;axis<3;++axis)acc[axis]+=normal[axis];
+            }
+        }
+        return true;
+    }
+
     inline bool make_sprite_decal_gpu_mesh(
         decal_world_scan const &scan,decal_projector const &projector,
         uintptr_t material,sprite_decal_texture_coords const &texture,
         float opacity,sprite_decal_mesh &result,
         bool wrap_steep_faces=false,
-        bool allow_backfacing_receivers=false)
+        bool allow_backfacing_receivers=false,
+        decal_normal_map const *shared_corner_normals=nullptr)
     {
         if(!scan.valid_world || scan.truncated || scan.triangles.empty() ||
            scan.triangles.size()>32768 || !material ||
@@ -137,33 +172,14 @@ namespace jkgm {
                            -std::numeric_limits<float>::max(),
                            -std::numeric_limits<float>::max()}};
         std::array<double,3> center{{0,0,0}};
-        using averaged_normal=std::array<float,3>;
-        std::unordered_map<decal_corner_key,averaged_normal,decal_corner_hash>
-            smoothed_normals;
-        smoothed_normals.reserve(count);
-        // All receiver fragments in this decal share one projector. Fold
-        // adjacent surface normals at coincident clipped corners. Keep
-        // per-triangle geometry and backface culling exactly as before.
-        for(auto const &tri:scan.triangles) {
-            auto const &p0=tri.vertices[0].world;
-            auto const &p1=tri.vertices[1].world;
-            auto const &p2=tri.vertices[2].world;
-            decal_vec3 a=decal_sub(p1,p0),b=decal_sub(p2,p0);
-            decal_vec3 n{{a[1]*b[2]-a[2]*b[1],
-                          a[2]*b[0]-a[0]*b[2],
-                          a[0]*b[1]-a[1]*b[0]}};
-            float const n2=decal_dot(n,n);
-            if(!std::isfinite(n2)||n2<1e-12f)return false;
-            float const inv=1.0f/std::sqrt(n2);
-            for(float &x:n)x*=inv;
-            for(auto const &vertex:tri.vertices) {
-                if(!decal_finite(vertex.world) ||
-                   !std::isfinite(vertex.u)||!std::isfinite(vertex.v)||
-                   !std::isfinite(vertex.depth))return false;
-                auto &acc=smoothed_normals[decal_projected_corner(vertex,projector)];
-                for(int j=0;j<3;++j)acc[j]+=n[j];
-            }
+        decal_normal_map local_smoothed_normals;
+        if(!shared_corner_normals) {
+            local_smoothed_normals.reserve(count);
+            if(!accumulate_sprite_decal_normals(
+                   scan,projector,local_smoothed_normals))return false;
         }
+        auto const &smoothed_normals=shared_corner_normals
+            ?*shared_corner_normals:local_smoothed_normals;
         for(auto const &tri:scan.triangles) {
             auto const &p0=tri.vertices[0].world;
             auto const &p1=tri.vertices[1].world;
