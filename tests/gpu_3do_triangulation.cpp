@@ -75,7 +75,10 @@ int main() {
     std::vector<point3> const bowtie{{
         {{0,0,0}},{{3,3,0}},{{0,3,0}},{{3,0,0}}
     }};
-    assert(!gpu_3do_triangulate_face(bowtie,normal,triangles,nonplanar));
+    char const *reject_reason=nullptr;
+    assert(!gpu_3do_triangulate_face(
+        bowtie,normal,triangles,nonplanar,&reject_reason));
+    assert(reject_reason!=nullptr);
     assert(triangles.empty());
     std::vector<point3> const line{{
         {{0,0,0}},{{1,0,0}},{{2,0,0}},{{3,0,0}}
@@ -83,6 +86,20 @@ int main() {
     assert(!gpu_3do_triangulate_face(line,normal,triangles,nonplanar));
     assert(triangles.empty());
 
+    // Collapsed faces contribute no filled-area pixels and should not cause
+    // native fallback of their entire mesh.
+    assert(jkgm::gpu_3do_zero_area_face(line));
+    std::vector<point3> const repeated{{
+        {{2,3,4}},{{2,3,4}},{{2,3,4}},{{2,3,4}}
+    }};
+    assert(jkgm::gpu_3do_zero_area_face(repeated));
+    std::vector<point3> const narrow{{
+        {{0,0,0}},{{100,0,0}},{{100,0.1f,0}},{{0,0.1f,0}}
+    }};
+    assert(!jkgm::gpu_3do_zero_area_face(narrow));
+    // Zero signed area does not mean zero geometric area: bow-ties are
+    // ambiguous and must continue falling back to native rendering.
+    assert(!jkgm::gpu_3do_zero_area_face(bowtie));
     // Collinear extra perimeter corners should not cause missing geometry.
     std::vector<point3> const collinear{{
         {{0,0,0}},{{2,0,0}},{{4,0,0}},{{4,4,0}},{{0,4,0}}

@@ -187,6 +187,12 @@ namespace {
     // Camera is SithThing type 1, distinct from the active rdCamera.
     // This is a per-Thing choice, never a shared rdMesh/MAT property.
     thread_local bool active_native_model_camera_hud=false;
+    // rdThing->model3 at +4 points to rdModel3, whose first 32 bytes
+    // contain the source 3DO filename. Keep this context for the nested
+    // rdModel3_DrawMesh callback and restore it on recursive model draws.
+    thread_local std::array<char,33> active_native_model_filename{{0}};
+    thread_local uintptr_t active_native_model_ptr=0U;
+    thread_local uintptr_t active_native_rdthing_ptr=0U;
     thread_local uint64_t active_native_shadow_owner=0;
     thread_local uint64_t active_native_spotlight_family=0;
     thread_local bool active_native_shadow_dynamic=false;
@@ -374,6 +380,19 @@ namespace {
     // (post-processed) execute buffer. Record its failure independently of
     // verbose profiling, so one-line HUD warnings name the real blocker.
     thread_local std::string gpu_last_camera_hud_failure;
+    std::string gpu_3do_source_detail(native_mesh const &m)
+    {
+        std::ostringstream out;
+        out<<"3do="<<(active_native_model_filename[0] ?
+                        active_native_model_filename.data() : "<unknown>")
+           <<" model_ptr="<<active_native_model_ptr
+           <<" mesh="<<std::string(
+                m.name,std::find(m.name,m.name+sizeof(m.name),'\0'))
+           <<" mesh_index="<<m.mesh_index
+           <<" mesh_faces_ptr="<<reinterpret_cast<uintptr_t>(m.faces)
+           <<" rdthing="<<active_native_rdthing_ptr;
+        return out.str();
+    }
     void gpu_log_fallback(native_mesh const &m,std::string const &reason)
     {
         if(active_native_model_camera_hud)
@@ -390,7 +409,10 @@ namespace {
         auto const end=std::find(m.name,m.name+sizeof(m.name),'\0');
         std::string const name(m.name,end);
         if(name.empty())return;
-        auto const key=name+"|"+reason;
+        // A mesh name is not unique, even within the same .3do.
+        auto const key=std::to_string(active_native_model_ptr)+"|"+
+            std::to_string(reinterpret_cast<uintptr_t>(m.faces))+"|"+
+            std::to_string(m.mesh_index)+"|"+reason;
         if(sample) {
             static uint64_t sampled_frame=0;
             static std::unordered_set<std::string> sampled;
@@ -399,15 +421,16 @@ namespace {
                 sampled_frame=gpu_frame_serial;
             }
             if(sampled.size()<12U && sampled.insert(key).second)
-                LOG_INFO("GPU 3DO periodic fallback mesh=",name,
+                LOG_INFO("GPU 3DO periodic fallback ",
+                         gpu_3do_source_detail(m),
                          " reason=",reason," vertices=",m.num_vertices,
                          " faces=",m.num_faces," geo=",m.geometry_mode,
                          " light=",m.lighting_mode);
         }
         if(verbose && gpu_logged_fallbacks.size()<80U &&
            gpu_logged_fallbacks.insert(key).second)
-            LOG_INFO("GPU 3DO fallback mesh=",name," reason=",reason,
-                     " vertices=",m.num_vertices," faces=",m.num_faces);
+            LOG_INFO("GPU 3DO fallback ",gpu_3do_source_detail(m),
+                     " reason=",reason," vertices=",m.num_vertices," faces=",m.num_faces);
     }
 
     bool gpu_span_readable(void const *p,size_t len) {
@@ -901,12 +924,25 @@ namespace {
             }
             std::vector<std::array<uint32_t,3>> face_triangles;
             bool nonplanar=false;
+            char const *tri_reason=nullptr;
             if(!jkgm::gpu_3do_triangulate_face(
                    outline,{{face.normal[0],face.normal[1],face.normal[2]}},
-                   face_triangles,nonplanar)) {
+                   face_triangles,nonplanar,&tri_reason)) {
+                // Truly zero-width faces produce no filled pixels. Keep
+                // caching the remaining mesh faces instead of throwing out
+                // an otherwise valid entire 3DO because of one bad face.
+                // Self-crossing polygons must NOT take this route.
+                if(jkgm::gpu_3do_zero_area_face(outline)) {
+                    ++g->zero_area_faces_skipped;
+                    if(g->zero_area_faces_skipped==1)
+                        g->first_zero_area_face=static_cast<uint32_t>(f);
+                    g->vertices.resize(base);
+                    continue;
+                }
                 if(failure_detail) {
                     std::ostringstream details;
                     details<<"face="<<f<<" corners="<<face.count
+                           <<" cause="<<(tri_reason?tri_reason:"unknown")
                            <<" normal="<<face.normal[0]<<","
                            <<face.normal[1]<<","<<face.normal[2];
                     for(size_t corner=0;corner<outline.size() && corner<8U;
@@ -1120,6 +1156,29 @@ namespace {
         // with a 3DO render type is our post-composited HUD layer.
         bool camera_hud=false;
         uintptr_t const native_rd=reinterpret_cast<uintptr_t>(thing);
+        uint32_t native_model_ptr=0;
+        std::array<char,33> native_model_filename{{0}};
+        if(gpu_span_readable(reinterpret_cast<void const *>(
+               native_rd+4U),sizeof(native_model_ptr))) {
+            std::memcpy(&native_model_ptr,reinterpret_cast<void const *>(
+                native_rd+4U),sizeof(native_model_ptr));
+            if(gpu_span_readable(reinterpret_cast<void const *>(
+                   uintptr_t(native_model_ptr)),32U)) {
+                std::memcpy(native_model_filename.data(),
+                            reinterpret_cast<void const *>(
+                                uintptr_t(native_model_ptr)),32U);
+                bool printable=native_model_filename[0]!=0;
+                for(size_t i=0;i<32 && native_model_filename[i];++i) {
+                    unsigned char const c=static_cast<unsigned char>(
+                        native_model_filename[i]);
+                    if(c<32 || c>126) {
+                        printable=false;
+                        break;
+                    }
+                }
+                if(!printable)native_model_filename.fill(0);
+            }
+        }
         uint32_t hud_owner=0;
         if(gpu_span_readable(reinterpret_cast<void const *>(
                 native_rd+0x44U),4)) {
@@ -1245,6 +1304,12 @@ namespace {
         // allow it to receive moving decals too.
         if(decal_model && shadow_enabled && moving)
             decal_receiver=true;
+        auto const previous_model_filename=active_native_model_filename;
+        uintptr_t const previous_model_ptr=active_native_model_ptr;
+        uintptr_t const previous_rdthing_ptr=active_native_rdthing_ptr;
+        active_native_model_filename=native_model_filename;
+        active_native_model_ptr=native_model_ptr;
+        active_native_rdthing_ptr=native_rd;
         uint32_t const previous_flags=active_native_model_thing_flags;
         bool const previous_camera_hud=active_native_model_camera_hud;
         uint64_t const previous_owner=active_native_shadow_owner;
@@ -1269,6 +1334,9 @@ namespace {
         uint64_t const engine_ns=profiling?elapsed_native_ns(engine_start):0;
         active_native_model_thing_flags=previous_flags;
         active_native_model_camera_hud=previous_camera_hud;
+        active_native_model_filename=previous_model_filename;
+        active_native_model_ptr=previous_model_ptr;
+        active_native_rdthing_ptr=previous_rdthing_ptr;
         active_native_shadow_owner=previous_owner;
         active_native_spotlight_family=previous_family;
         active_native_shadow_dynamic=previous_moving;
@@ -1483,8 +1551,9 @@ namespace {
                     ? "unspecified_early_exit" : gpu_last_camera_hud_failure;
                 std::string const key=name+"|"+reason;
                 if(logged.size()<16U && logged.insert(key).second)
-                    LOG_WARNING("Camera Thing HUD 3DO native fallback mesh=",
-                                name," reason=",reason,
+                    LOG_WARNING("Camera Thing HUD 3DO native fallback ",
+                                gpu_3do_source_detail(hud_mesh),
+                                " reason=",reason,
                                 " geo=",hud_mesh.geometry_mode,
                                 " light=",hud_mesh.lighting_mode,
                                 " verts=",hud_mesh.num_vertices,
@@ -1863,14 +1932,28 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             }
             if(sampled_count++<4U) {
                 auto const end=std::find(m.name,m.name+sizeof(m.name),'\0');
-                LOG_INFO("GPU 3DO triangulation detail mesh=",
-                         std::string(m.name,end)," ",
+                LOG_INFO("GPU 3DO triangulation detail ",
+                         gpu_3do_source_detail(m)," ",
                          it->second.snapshot_failure_detail);
             }
         }
         return false;
     }
-    // Models whose faces are all GeoMode 0..2 need no GL buffers or MATs.
+    // Report tolerated zero-area faces with full source/mesh identity.
+    // Sampling occurs at submission, not snapshot creation, so it also
+    // covers meshes cached long before the 120-frame diagnostic window.
+    if(the_config->profile_renderer && (gpu_frame_serial%120U)==0U &&
+       it->second.geometry->zero_area_faces_skipped>0) {
+        static uint64_t frame=0;
+        static unsigned count=0;
+        if(frame!=gpu_frame_serial) { frame=gpu_frame_serial; count=0; }
+        if(count++<8U)
+            LOG_INFO("GPU 3DO zero-area faces omitted ",
+                     gpu_3do_source_detail(m),
+                     " count=",it->second.geometry->zero_area_faces_skipped,
+                     " first_face=",it->second.geometry->first_zero_area_face);
+    }
+    // Models with no filled-area faces need no GL buffers or MATs.
     if(it->second.geometry->groups.empty()) return !shadow_only;
     // If a cel has never been encountered, let JK handle this call to warm
     // its native material cache. We can switch to GPU rendering next frame.
@@ -1916,15 +1999,13 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                 detail_frame=gpu_frame_serial;
                 detail_names.clear();
             }
-            auto const name_end=std::find(
-                m.name,m.name+sizeof(m.name),'\0');
-            std::string const name(m.name,name_end);
+            std::string const identity=gpu_3do_source_detail(m);
             if(detail_names.size()<12U &&
-               detail_names.insert(name).second) {
+               detail_names.insert(identity).second) {
                 std::string reason;
                 bool const ready=gpu_mesh_materials_ready(
                     *it->second.geometry,false,&reason);
-                LOG_INFO("GPU 3DO MAT readiness mesh=",name,
+                LOG_INFO("GPU 3DO MAT readiness ",identity,
                          " ready_on_retry=",ready?1:0,
                          " detail=",reason);
             }

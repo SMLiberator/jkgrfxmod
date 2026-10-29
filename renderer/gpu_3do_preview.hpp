@@ -49,6 +49,11 @@ namespace jkgm {
         std::vector<gpu_3do_face_plane> face_planes;
         std::vector<gpu_3do_vertex> vertices;
         std::vector<uint32_t> indices;
+        // A few authored 3DOs contain true zero-width faces. These are
+        // invisible to filled hardware rendering and safe to skip while
+        // keeping every valid face of their mesh GPU cached.
+        uint32_t zero_area_faces_skipped=0;
+        uint32_t first_zero_area_face=0;
         std::vector<gpu_3do_group> groups;
         // Unique material/cel pairs: checked once per mesh per frame.
         std::vector<std::pair<uintptr_t,int32_t>> material_refs;

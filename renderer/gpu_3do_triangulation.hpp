@@ -38,6 +38,48 @@ namespace jkgm {
                 (cd_a>=-area_epsilon && cd_b<=area_epsilon));
     }
 
+    // A fully collapsed/zero-width face has no filled-area contribution.
+    // Detect it independently of the stored face normal and the polygon's
+    // signed area: a bow-tie can have zero *signed* area but still has
+    // noncollinear points and must NOT be silently discarded.
+    inline bool gpu_3do_zero_area_face(
+        std::vector<std::array<float,3>> const &points)
+    {
+        if(points.empty())return false;
+        for(auto const &p:points)
+            for(float v:p)if(!std::isfinite(v))return false;
+        auto const &origin=points.front();
+        double largest=0.0;
+        size_t farthest=0;
+        for(size_t i=1;i<points.size();++i) {
+            double distance2=0;
+            for(int k=0;k<3;++k) {
+                double const delta=double(points[i][k])-origin[k];
+                distance2+=delta*delta;
+            }
+            if(distance2>largest) {
+                largest=distance2;
+                farthest=i;
+            }
+        }
+        if(largest==0.0)return true;
+        std::array<double,3> direction{};
+        for(int k=0;k<3;++k)
+            direction[k]=double(points[farthest][k])-origin[k];
+        double max_cross2=0.0;
+        for(auto const &point:points) {
+            double v[3]{};
+            for(int k=0;k<3;++k)v[k]=double(point[k])-origin[k];
+            double const x=direction[1]*v[2]-direction[2]*v[1];
+            double const y=direction[2]*v[0]-direction[0]*v[2];
+            double const z=direction[0]*v[1]-direction[1]*v[0];
+            max_cross2=std::max(max_cross2,x*x+y*y+z*z);
+        }
+        // Conservative, scale-independent test. The ordinary triangulator
+        // retains every face with appreciable nonzero surface area.
+        return max_cross2<=largest*largest*1e-20;
+    }
+
     // Triangles contain indices into the ORIGINAL polygon's face corners,
     // keeping independent MAT UVs, vertex colors and smooth normals intact.
     // Nonplanar but otherwise simple faces remain supported. The caller must
@@ -47,19 +89,24 @@ namespace jkgm {
         std::vector<std::array<float,3>> const &points,
         std::array<float,3> const &face_normal,
         std::vector<std::array<uint32_t,3>> &triangles,
-        bool &nonplanar)
+        bool &nonplanar,char const **failure_reason=nullptr)
     {
         triangles.clear();
         nonplanar=false;
-        if(points.size()<3 || points.size()>128) return false;
+        if(failure_reason)*failure_reason=nullptr;
+        auto const fail=[&](char const *reason) {
+            if(failure_reason)*failure_reason=reason;
+            return false;
+        };
+        if(points.size()<3 || points.size()>128) return fail("invalid_corner_count");
         for(auto const &p:points)
-            for(float x:p) if(!std::isfinite(x)) return false;
+            for(float x:p) if(!std::isfinite(x)) return fail("nonfinite_vertex");
         double normal_length2=0.0;
         for(float f:face_normal) {
-            if(!std::isfinite(f)) return false;
+            if(!std::isfinite(f)) return fail("nonfinite_face_normal");
             normal_length2+=double(f)*f;
         }
-        if(normal_length2<1e-20) return false;
+        if(normal_length2<1e-20) return fail("zero_face_normal");
 
         std::array<double,3> newell{};
         std::array<double,3> lo{{points[0][0],points[0][1],points[0][2]}};
@@ -75,10 +122,10 @@ namespace jkgm {
             }
         }
         double const span=std::max({hi[0]-lo[0],hi[1]-lo[1],hi[2]-lo[2]});
-        if(span<=1e-10) return false;
+        if(span<=1e-10) return fail("collapsed_spatial_bounds");
         double const nl=std::sqrt(newell[0]*newell[0]+
                                   newell[1]*newell[1]+newell[2]*newell[2]);
-        if(nl<=span*span*1e-10) return false;
+        if(nl<=span*span*1e-10) return fail("zero_newell_area_or_self_intersection");
         int const drop=std::abs(newell[0])>std::abs(newell[1])
             ? (std::abs(newell[0])>std::abs(newell[2])?0:2)
             : (std::abs(newell[1])>std::abs(newell[2])?1:2);
@@ -117,14 +164,14 @@ namespace jkgm {
             if(std::abs(a.x-b.x)<=length_eps &&
                std::abs(a.y-b.y)<=length_eps) contour.pop_back();
         }
-        if(contour.size()<3) return false;
+        if(contour.size()<3) return fail("collapsed_contour");
         double signed_area2=0.0;
         for(size_t i=0;i<contour.size();i++) {
             auto a=projected[contour[i]];
             auto b=projected[contour[(i+1)%contour.size()]];
             signed_area2+=a.x*b.y-a.y*b.x;
         }
-        if(std::abs(signed_area2)<=eps) return false;
+        if(std::abs(signed_area2)<=eps) return fail("zero_signed_area");
         double const sign=signed_area2>0.0?1.0:-1.0;
         // An intersecting ring has no unambiguous native-compatible cached
         // triangulation. Reject it rather than drawing accidental triangles.
@@ -135,7 +182,7 @@ namespace jkgm {
             auto c=projected[contour[j]];
             auto d=projected[contour[(j+1)%contour.size()]];
             if(gpu_3do_segments_intersect(a,b,c,d,length_eps,eps))
-                return false;
+                return fail("self_intersecting_outline");
         }
 
         // Ear clipping handles concave polygons; the old triangle fan didn't.
@@ -206,14 +253,15 @@ namespace jkgm {
                 clipped=true;
                 break;
             }
-            if(!clipped) return false;
+            if(!clipped) return fail("ear_clipping_stalled");
         }
         if(contour.size()!=3 ||
            sign*gpu_3do_cross(projected[contour[0]],
                              projected[contour[1]],
-                             projected[contour[2]])<=eps) return false;
+                             projected[contour[2]])<=eps) return fail("collapsed_final_triangle");
         emit(contour[0],contour[1],contour[2]);
         triangles=std::move(result);
-        return !triangles.empty();
+        return !triangles.empty() ||
+            fail("no_emitted_triangles");
     }
 }
