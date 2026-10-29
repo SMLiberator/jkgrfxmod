@@ -38,5 +38,19 @@ int main()
     assert(eq(cog_math_lerp(10.0f,20.0f,-0.5f),5.0f));
     assert(eq(cog_math_lerp(10.0f,20.0f,1.5f),25.0f));
     assert(eq(cog_math_lerp(20.0f,10.0f,1.5f),5.0f));
+    // Uniform spherical direction generation: cardinal axes and oblique case.
+    auto const pos_x=cog_math_rand_dir(0.0f,0.5f);
+    auto const pos_y=cog_math_rand_dir(0.25f,0.5f);
+    auto const neg_z=cog_math_rand_dir(0.0f,0.0f);
+    auto const pos_z=cog_math_rand_dir(0.0f,1.0f);
+    assert(eq(pos_x[0],1.0f)&&eq(pos_x[1],0.0f)&&eq(pos_x[2],0.0f));
+    assert(eq(pos_y[0],0.0f)&&eq(pos_y[1],1.0f)&&eq(pos_y[2],0.0f));
+    assert(eq(neg_z[0],0.0f)&&eq(neg_z[1],0.0f)&&eq(neg_z[2],-1.0f));
+    assert(eq(pos_z[0],0.0f)&&eq(pos_z[1],0.0f)&&eq(pos_z[2],1.0f));
+    for(int u=0;u<25;++u)for(int v=0;v<25;++v) {
+        auto const dir=cog_math_rand_dir((u+0.5f)/25.0f,(v+0.5f)/25.0f);
+        float const length=std::sqrt(dir[0]*dir[0]+dir[1]*dir[1]+dir[2]*dir[2]);
+        assert(eq(length,1.0f));
+    }
     return 0;
 }

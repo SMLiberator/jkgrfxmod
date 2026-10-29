@@ -5198,6 +5198,17 @@ namespace {
         cog_push_float(ctx,jkgm::cog_math_lerp(a,b,t));
     }
 
+    // RandDir(): uniformly random unit vector over the entire sphere.
+    void __cdecl cog_math_rand_dir(void *ctx)
+    {
+        static std::mt19937 rng{
+            static_cast<uint32_t>(GetTickCount()^GetCurrentProcessId()^0x52444952U)
+        };
+        static std::uniform_real_distribution<float> unit(0.0f,1.0f);
+        auto const direction=jkgm::cog_math_rand_dir(unit(rng),unit(rng));
+        cog_push_vector(ctx,direction.data());
+    }
+
     // Confirmed in JK23 jkgm.exe: Thing.controlType is +0x14,
     // Thing.actor is +0x278; AIControlBlock goalLVec +0x194,
     // movePos +0x1a0, pDistractor +0x1d0, and movepos +0x218.
@@ -6649,6 +6660,7 @@ namespace {
         cog_verb_entry{"clamp", cog_math_clamp},
         cog_verb_entry{"sign", cog_math_sign},
         cog_verb_entry{"lerp", cog_math_lerp},
+        cog_verb_entry{"randdir", cog_math_rand_dir},
         cog_verb_entry{"setfogcolor", cog_set_fog_color},
         cog_verb_entry{"getfogcolor", cog_get_fog_color},
         cog_verb_entry{"setfoginfo", cog_set_fog_info},
