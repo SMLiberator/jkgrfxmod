@@ -886,8 +886,11 @@ signature and material-map debug messages are no longer emitted.
 
 Set `"use_sprite_cache": true` to test shared GPU quad geometry for ordinary
 type-0 camera-facing, type-1 cylindrical billboard and type-2 fixed-plane SPRs.
-Only fully-lit textured faces qualify initially. Decals, flares, unsupported
-lighting modes and MATs awaiting native upload retain JK's existing renderer.
+Only fully-lit textured faces qualify initially. Native SPRs frequently report
+face TexMode=0 despite having a valid MAT and UV quad: the GPU cache accepts
+this observed mode only when the sprite's actual MAT and UVs pass validation.
+Unverified TexMode=1, nonzero lighting modes, decals, flares and MATs awaiting
+native upload retain JK's existing renderer.
 Shared geometry eliminates duplicate quad uploads; **hardware-instanced draws
 are a separate next step** and are not yet implemented. The option defaults to
 false for A/B testing against the native sprite path.

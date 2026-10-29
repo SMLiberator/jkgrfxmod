@@ -4,6 +4,12 @@
 using namespace jkgm;
 inline bool near(float x,float y){return std::fabs(x-y)<0.0001f;}
 int main() {
+    // Captured JkGR SPRs: both classic and cylindrical textured sprites use
+    // rdFace TexMode=0. Mode 1 remains native until its semantics are known.
+    assert(sprite_gpu_texture_mode_supported(0U));
+    assert(!sprite_gpu_texture_mode_supported(1U));
+    assert(sprite_gpu_texture_mode_supported(2U));
+    assert(sprite_gpu_texture_mode_supported(3U));
     sprite_decal_texture_coords uv{0.5f,63.5f,0.5f,31.5f};
     auto mesh=make_gpu_sprite_quad(0x12340,uv,0);
     assert(mesh && mesh->vertices.size()==4 && mesh->indices.size()==6);

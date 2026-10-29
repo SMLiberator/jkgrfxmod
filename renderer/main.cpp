@@ -3885,7 +3885,10 @@ namespace {
         }
         if(geometry!=4U)return reject(1);
         if(lighting!=0U)return reject(2);
-        if(texture<2U)return reject(3);
+        // .SPR TexMode=0 is valid even for textured quads (the real MAT and
+        // rectangular UVs are validated below). Do not apply the ordinary
+        // 3DO texture-mode >=2 requirement to these resources.
+        if(!jkgm::sprite_gpu_texture_mode_supported(texture))return reject(3);
         if((flags&~3U)!=0U)return reject(4);
         if(!std::isfinite(info.opacity) || info.opacity<=0.0f ||
            info.opacity>1.0f)return reject(0);
