@@ -22,6 +22,7 @@
 #include "mots_native_collision_bridge.hpp"
 #include "mots_collision_snapshot_cache.hpp"
 #include "cog_math.hpp"
+#include "cog_raycast_results.hpp"
 #include "sprite_orientation.hpp"
 #include "sprite_type_registry.hpp"
 #include "sprite_variants.hpp"
@@ -5245,6 +5246,239 @@ namespace {
         cog_push_int(ctx,native_has_los(origin,target,1)!=0 ? 1 : 0);
     }
 
+
+    // Read-only native JKGM collision query. Addresses and exact prologues
+    // verified against the user's SHA-locked jkgm(5).exe. Do not call these
+    // on other builds. The native stack is pushed by Search and popped by
+    // DecreaseStackLevel; PopStack enumerates hits in distance order.
+    using native_raycast_search_fn=float(__cdecl *)(void*,void*,
+        float const*,float const*,float,float,int);
+    using native_raycast_pop_fn=void*(__cdecl *)();
+    using native_raycast_decrease_fn=void(__cdecl *)();
+    constexpr uintptr_t native_raycast_search_addr=0x004E83F0U;
+    constexpr uintptr_t native_raycast_pop_addr=0x004E73B0U;
+    constexpr uintptr_t native_raycast_decrease_addr=0x004E86B0U;
+    native_raycast_search_fn native_raycast_search=nullptr;
+    native_raycast_pop_fn native_raycast_pop=nullptr;
+    native_raycast_decrease_fn native_raycast_decrease=nullptr;
+
+    // Native SithCollision is 0x28 bytes in the tested 32-bit executable.
+    struct native_raycast_collision {
+        uint32_t type;
+        void *thing;
+        void *surface;
+        void *mesh;
+        void *face;
+        float normal[3];
+        float distance;
+        uint32_t enumerated;
+    };
+    static_assert(sizeof(native_raycast_collision)==0x28,
+                  "JKGM native collision record must be 40 bytes");
+    jkgm::cog_raycast_results cog_raycast_history;
+
+    bool native_raycast_matches()
+    {
+        if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=
+               0x00400000U || !jkgm::engine_material_debug::
+               matches_tested_executable())return false;
+        auto const matches=[](uintptr_t address,
+                              std::initializer_list<uint8_t> signature) {
+            return gpu_span_readable(reinterpret_cast<void const *>(address),
+                                     signature.size()) &&
+                   std::memcmp(reinterpret_cast<void const *>(address),
+                               signature.begin(),signature.size())==0;
+        };
+        return matches(native_raycast_search_addr,
+                       {0x83,0xec,0x08,0xa1,0xa0,0xba,0x54,0x00}) &&
+               matches(native_raycast_pop_addr,
+                       {0x56,0x57,0x8b,0x3d,0xa0,0xba,0x54,0x00}) &&
+               matches(native_raycast_decrease_addr,
+                       {0xff,0x0d,0xa0,0xba,0x54,0x00,0xc3});
+    }
+
+    uintptr_t cog_raycast_current_world()
+    {
+        uint32_t world=0;
+        if(!native_raycast_search ||
+           !jkgm::engine_material_debug::read_object(
+               jkgm::engine_material_debug::current_world_global,world))
+            return 0;
+        return uintptr_t(world);
+    }
+
+    jkgm::cog_raycast_hit const* cog_raycast_lookup(void *ctx,int id)
+    {
+        cog_raycast_history.set_world(cog_raycast_current_world());
+        return cog_raycast_history.get(reinterpret_cast<uintptr_t>(ctx),id);
+    }
+
+    // RayCast(sourceThing,localOffset): zero-radius finite line segment from
+    // the Thing origin, oriented by Right/Look/Up. A vector of (0,4,0)
+    // therefore casts 4 JK units along the Thing's Look axis. Hits advance
+    // five rotating result handles PER COG, whereas misses return -1 without
+    // consuming a slot. Flags 0 mirror native instant-impact weapons.
+    void __cdecl cog_ray_cast(void *ctx)
+    {
+        float offset[3]{};
+        cog_pop_vector(ctx,offset);
+        void *source=cog_pop_thing(ctx);
+        int result_id=-1;
+        uintptr_t const world=cog_raycast_current_world();
+        cog_raycast_history.set_world(world);
+        if(!source || !world || !native_raycast_search ||
+           !gpu_span_readable(source,0xc4U)) {
+            cog_push_int(ctx,-1);
+            return;
+        }
+        auto const *src=static_cast<uint8_t const*>(source);
+        uint32_t type=0,sector=0;
+        std::memcpy(&type,src+0x0cU,4);
+        std::memcpy(&sector,src+0x5cU,4);
+        if(type==0 || type>11 || sector<0x10000U ||
+           !gpu_span_readable(reinterpret_cast<void const*>(
+               uintptr_t(sector)),4U)) {
+            cog_push_int(ctx,-1);
+            return;
+        }
+        float start[3]{},basis[9]{},ray[3]{};
+        std::memcpy(start,src+0xb8U,12);
+        std::memcpy(basis,src+0x88U,sizeof(basis));
+        double local_len2=0.0;
+        for(float v:offset) {
+            if(!std::isfinite(v)) {cog_push_int(ctx,-1);return;}
+            local_len2+=double(v)*v;
+        }
+        if(!(local_len2>1.e-16) ||
+           local_len2>1.e12) {cog_push_int(ctx,-1);return;}
+        for(int k=0;k<3;++k) {
+            if(!std::isfinite(start[k])) {
+                cog_push_int(ctx,-1);return;
+            }
+            for(int j=0;j<3;++j) {
+                if(!std::isfinite(basis[j*3+k])) {
+                    cog_push_int(ctx,-1);return;
+                }
+                ray[k]+=basis[j*3+k]*offset[j];
+            }
+        }
+        double world_len2=0.0;
+        for(float v:ray)world_len2+=double(v)*v;
+        if(!(world_len2>1.e-16) || !std::isfinite(world_len2)) {
+            cog_push_int(ctx,-1);return;
+        }
+        float const world_inv=float(1.0/std::sqrt(world_len2));
+        for(float &v:ray)v*=world_inv;
+        // Normalize the transformed ray, but preserve the authored offset
+        // length so non-unit R/L/U axes cannot change "4 JK units".
+        float const length=float(std::sqrt(local_len2));
+
+        native_raycast_search(reinterpret_cast<void*>(uintptr_t(sector)),
+                              source,start,ray,length,0.0f,0);
+        struct search_scope {
+            ~search_scope() {native_raycast_decrease();}
+        } scope;
+
+        for(;;) {
+            auto const *hit=static_cast<native_raycast_collision const *>(
+                native_raycast_pop());
+            if(!hit)break;
+            // The native search returns traversed adjoins too.
+            if((hit->type&0x20U)!=0)continue;
+            bool const thing_hit=(hit->type&0x01U)!=0;
+            bool const surface_hit=(hit->type&0x02U)!=0;
+            if(!thing_hit && !surface_hit)continue;
+            if(thing_hit && (!hit->thing || hit->thing==source))continue;
+            if(surface_hit && !hit->surface)continue;
+            if(!std::isfinite(hit->distance) || hit->distance<0.0f ||
+               hit->distance>length+0.001f)continue;
+            jkgm::cog_raycast_hit snapshot{};
+            snapshot.distance=hit->distance;
+            bool finite=true;
+            for(int k=0;k<3;++k) {
+                snapshot.position[k]=start[k]+ray[k]*hit->distance;
+                snapshot.normal[k]=hit->normal[k];
+                finite=finite&&std::isfinite(snapshot.position[k])&&
+                               std::isfinite(snapshot.normal[k]);
+            }
+            if(!finite)continue;
+
+            if(thing_hit && gpu_span_readable(hit->thing,0x78U)) {
+                auto const *thing=static_cast<uint8_t const*>(hit->thing);
+                uint32_t kind=0,signature=0,index=0;
+                std::memcpy(&kind,thing+0x0cU,4);
+                std::memcpy(&index,thing+0x04U,4);
+                std::memcpy(&signature,thing+0x74U,4);
+                if(kind>0 && kind<=11 && index<65536U) {
+                    snapshot.thing_index=int(index);
+                    snapshot.thing_address=reinterpret_cast<uintptr_t>(
+                        hit->thing);
+                    snapshot.thing_signature=signature;
+                }
+            }
+            if(surface_hit && gpu_span_readable(hit->surface,4U)) {
+                uint32_t index=0;
+                std::memcpy(&index,hit->surface,4);
+                if(index<65536U)snapshot.surface_index=int(index);
+            }
+            result_id=cog_raycast_history.add(
+                reinterpret_cast<uintptr_t>(ctx),snapshot);
+            break;
+        }
+        cog_push_int(ctx,result_id);
+    }
+
+    void __cdecl cog_get_ray_hit_pos(void *ctx)
+    {
+        int const id=cog_pop_int(ctx);
+        auto const *hit=cog_raycast_lookup(ctx,id);
+        float const none[3]{};
+        cog_push_vector(ctx,hit?hit->position.data():none);
+    }
+
+    void __cdecl cog_get_ray_hit_normal(void *ctx)
+    {
+        int const id=cog_pop_int(ctx);
+        auto const *hit=cog_raycast_lookup(ctx,id);
+        float const none[3]{};
+        cog_push_vector(ctx,hit?hit->normal.data():none);
+    }
+
+    void __cdecl cog_get_ray_hit_thing(void *ctx)
+    {
+        int const id=cog_pop_int(ctx);
+        auto const *hit=cog_raycast_lookup(ctx,id);
+        int result=-1;
+        if(hit && hit->thing_index>=0 && hit->thing_address!=0 &&
+           gpu_span_readable(reinterpret_cast<void const*>(
+               hit->thing_address),0x78U)) {
+            auto const *thing=reinterpret_cast<uint8_t const*>(
+                hit->thing_address);
+            uint32_t type=0,index=0,signature=0;
+            std::memcpy(&type,thing+0x0cU,4);
+            std::memcpy(&index,thing+0x04U,4);
+            std::memcpy(&signature,thing+0x74U,4);
+            if(type>0 && type<=11 && int(index)==hit->thing_index &&
+               signature==hit->thing_signature)
+                result=hit->thing_index;
+        }
+        cog_push_int(ctx,result);
+    }
+
+    void __cdecl cog_get_ray_hit_surface(void *ctx)
+    {
+        int const id=cog_pop_int(ctx);
+        auto const *hit=cog_raycast_lookup(ctx,id);
+        cog_push_int(ctx,hit?hit->surface_index:-1);
+    }
+
+    void __cdecl cog_get_ray_hit_distance(void *ctx)
+    {
+        int const id=cog_pop_int(ctx);
+        auto const *hit=cog_raycast_lookup(ctx,id);
+        cog_push_float(ctx,hit?hit->distance:-1.0f);
+    }
+
     // Confirmed in JK23 jkgm.exe: Thing.controlType is +0x14,
     // Thing.actor is +0x278; AIControlBlock goalLVec +0x194,
     // movePos +0x1a0, pDistractor +0x1d0, and movepos +0x218.
@@ -6698,6 +6932,12 @@ namespace {
         cog_verb_entry{"lerp", cog_math_lerp},
         cog_verb_entry{"randdir", cog_math_rand_dir},
         cog_verb_entry{"hasreach", cog_has_reach},
+        cog_verb_entry{"raycast", cog_ray_cast},
+        cog_verb_entry{"getrayhitpos", cog_get_ray_hit_pos},
+        cog_verb_entry{"getrayhitnormal", cog_get_ray_hit_normal},
+        cog_verb_entry{"getrayhitthing", cog_get_ray_hit_thing},
+        cog_verb_entry{"getrayhitsurface", cog_get_ray_hit_surface},
+        cog_verb_entry{"getrayhitdistance", cog_get_ray_hit_distance},
         cog_verb_entry{"setfogcolor", cog_set_fog_color},
         cog_verb_entry{"getfogcolor", cog_get_fog_color},
         cog_verb_entry{"setfoginfo", cog_set_fog_info},
@@ -6786,6 +7026,21 @@ namespace {
             LOG_WARNING("HasReach native HasLOS signature mismatch; "
                         "verb will return -1 on this executable");
 
+        if(native_raycast_matches()) {
+            native_raycast_search=reinterpret_cast<native_raycast_search_fn>(
+                native_raycast_search_addr);
+            native_raycast_pop=reinterpret_cast<native_raycast_pop_fn>(
+                native_raycast_pop_addr);
+            native_raycast_decrease=reinterpret_cast<
+                native_raycast_decrease_fn>(native_raycast_decrease_addr);
+        } else {
+            native_raycast_search=nullptr;
+            native_raycast_pop=nullptr;
+            native_raycast_decrease=nullptr;
+            LOG_WARNING("RayCast disabled: JKGM native collision "
+                        "search signatures do not match");
+        }
+        cog_raycast_history.clear();
         for(auto const &verb : fx_verbs) {
             register_verb(ctx, verb.handler, verb.name);
         }
