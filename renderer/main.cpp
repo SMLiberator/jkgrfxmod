@@ -22,6 +22,7 @@
 #include "mots_native_collision_bridge.hpp"
 #include "mots_collision_snapshot_cache.hpp"
 #include "cog_math.hpp"
+#include "cog_pyr_math.hpp"
 #include "cog_raycast_results.hpp"
 #include "cog_sector_queries.hpp"
 #include "sprite_orientation.hpp"
@@ -5233,6 +5234,39 @@ namespace {
         cog_push_vector(ctx,direction.data());
     }
 
+    // PYR conversions use the same Pitch/Yaw/Roll matrix convention as
+    // JK's rdMatrix_Build34. Input vectors are local to world coordinates;
+    // direction-to-PYR chooses a canonical rotation around the input axis.
+    void cog_direction_to_pyr(void *ctx,jkgm::cog_pyr_axis axis)
+    {
+        float vec[3]{};
+        cog_pop_vector(ctx,vec);
+        auto const result=jkgm::cog_pyr_from_direction(
+            {{vec[0],vec[1],vec[2]}},axis);
+        cog_push_vector(ctx,result.data());
+    }
+    void cog_pyr_to_direction(void *ctx,jkgm::cog_pyr_axis axis)
+    {
+        float pyr[3]{};
+        cog_pop_vector(ctx,pyr);
+        auto const result=jkgm::cog_pyr_direction(
+            {{pyr[0],pyr[1],pyr[2]}},axis);
+        cog_push_vector(ctx,result.data());
+    }
+
+    void __cdecl cog_get_lvec_pyr(void *ctx)
+    {cog_direction_to_pyr(ctx,jkgm::cog_pyr_axis::look);}
+    void __cdecl cog_get_rvec_pyr(void *ctx)
+    {cog_direction_to_pyr(ctx,jkgm::cog_pyr_axis::right);}
+    void __cdecl cog_get_uvec_pyr(void *ctx)
+    {cog_direction_to_pyr(ctx,jkgm::cog_pyr_axis::up);}
+    void __cdecl cog_get_pyr_lvec(void *ctx)
+    {cog_pyr_to_direction(ctx,jkgm::cog_pyr_axis::look);}
+    void __cdecl cog_get_pyr_rvec(void *ctx)
+    {cog_pyr_to_direction(ctx,jkgm::cog_pyr_axis::right);}
+    void __cdecl cog_get_pyr_uvec(void *ctx)
+    {cog_pyr_to_direction(ctx,jkgm::cog_pyr_axis::up);}
+
     // HasReach(originThing,targetThing): physical line-of-reach using the
     // engine's native HasLOS search with movement-permitted adjoins (mode 1).
     // Invalid Things or an unsupported executable return -1, like HasLOS.
@@ -7061,6 +7095,12 @@ namespace {
         cog_verb_entry{"sign", cog_math_sign},
         cog_verb_entry{"lerp", cog_math_lerp},
         cog_verb_entry{"randdir", cog_math_rand_dir},
+        cog_verb_entry{"getlvecpyr", cog_get_lvec_pyr},
+        cog_verb_entry{"getrvecpyr", cog_get_rvec_pyr},
+        cog_verb_entry{"getuvecpyr", cog_get_uvec_pyr},
+        cog_verb_entry{"getpyrlvec", cog_get_pyr_lvec},
+        cog_verb_entry{"getpyrrvec", cog_get_pyr_rvec},
+        cog_verb_entry{"getpyruvec", cog_get_pyr_uvec},
         cog_verb_entry{"hasreach", cog_has_reach},
         cog_verb_entry{"raycast", cog_ray_cast},
         cog_verb_entry{"getrayhitpos", cog_get_ray_hit_pos},
