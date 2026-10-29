@@ -922,12 +922,35 @@ namespace {
                 auto const &p=g->vertices[base+v];
                 outline.push_back({p.x,p.y,p.z});
             }
+            std::array<float,3> effective_normal{{
+                face.normal[0],face.normal[1],face.normal[2]}};
+            bool const missing_normal=
+                (double(face.normal[0])*face.normal[0]+
+                 double(face.normal[1])*face.normal[1]+
+                 double(face.normal[2])*face.normal[2])<1e-20;
+            bool const normal_valid=
+                jkgm::gpu_3do_resolve_face_normal(outline,effective_normal);
+            if(missing_normal&&normal_valid) {
+                // Correct flat lighting, SSAO fallback and shadow face plane
+                // together; only an unambiguous oriented area is repaired.
+                for(uint32_t v=0;v<face.count;++v) {
+                    auto &out=g->vertices[base+v];
+                    out.nx=effective_normal[0];
+                    out.ny=effective_normal[1];
+                    out.nz=effective_normal[2];
+                    if(!has_smooth_normals) {
+                        out.lnx=effective_normal[0];
+                        out.lny=effective_normal[1];
+                        out.lnz=effective_normal[2];
+                    }
+                }
+            }
             std::vector<std::array<uint32_t,3>> face_triangles;
-            bool nonplanar=false;
+            bool nonplanar=false,trimmed_prefix=false;
             char const *tri_reason=nullptr;
             if(!jkgm::gpu_3do_triangulate_face(
-                   outline,{{face.normal[0],face.normal[1],face.normal[2]}},
-                   face_triangles,nonplanar,&tri_reason)) {
+                   outline,effective_normal,face_triangles,nonplanar,
+                   &tri_reason,&trimmed_prefix)) {
                 // Truly zero-width faces produce no filled pixels. Keep
                 // caching the remaining mesh faces instead of throwing out
                 // an otherwise valid entire 3DO because of one bad face.
@@ -955,6 +978,8 @@ namespace {
                 }
                 return reject("non_simple_or_degenerate_face");
             }
+            if(missing_normal&&normal_valid)++g->repaired_zero_normals;
+            if(trimmed_prefix)++g->trimmed_repeated_prefix_faces;
             for(auto const &tri:face_triangles) {
                 g->indices.push_back(base+tri[0]);
                 g->indices.push_back(base+tri[1]);
@@ -977,7 +1002,9 @@ namespace {
                 (!solid_face && gpu_3do_face_may_have_alpha(face));
             uint32_t const plane_start=static_cast<uint32_t>(g->face_planes.size());
             g->face_planes.push_back({{anchor[0],anchor[1],anchor[2]},
-                                      {face.normal[0],face.normal[1],face.normal[2]}});
+                                      {effective_normal[0],
+                                       effective_normal[1],
+                                       effective_normal[2]}});
             std::array<float,3> bounds_lo{{g->vertices[base].x,
                                             g->vertices[base].y,
                                             g->vertices[base].z}};
@@ -1952,6 +1979,23 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                      gpu_3do_source_detail(m),
                      " count=",it->second.geometry->zero_area_faces_skipped,
                      " first_face=",it->second.geometry->first_zero_area_face);
+    }
+    if(the_config->profile_renderer &&
+       (gpu_frame_serial%120U)==0U &&
+       (it->second.geometry->repaired_zero_normals ||
+        it->second.geometry->trimmed_repeated_prefix_faces)) {
+        static uint64_t repair_frame=0;
+        static std::unordered_set<uint64_t> reported;
+        if(repair_frame!=gpu_frame_serial) {
+            repair_frame=gpu_frame_serial;
+            reported.clear();
+        }
+        if(reported.size()<8U&&reported.insert(it->second.id).second)
+            LOG_INFO("GPU 3DO repaired authored faces ",
+                     gpu_3do_source_detail(m),
+                     " missing_normals=",it->second.geometry->repaired_zero_normals,
+                     " repeated_closing_prefixes=",
+                     it->second.geometry->trimmed_repeated_prefix_faces);
     }
     // Models with no filled-area faces need no GL buffers or MATs.
     if(it->second.geometry->groups.empty()) return !shadow_only;

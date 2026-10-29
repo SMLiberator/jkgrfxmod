@@ -97,6 +97,28 @@ int main() {
         {{0,0,0}},{{100,0,0}},{{100,0.1f,0}},{{0,0.1f,0}}
     }};
     assert(!jkgm::gpu_3do_zero_area_face(narrow));
+    std::vector<point3> const menu_face{{
+        {{-0.3f,0,-0.2f}},{{-0.3f,0,0.2f}},
+        {{0.3f,0,0.2f}},{{0.3f,0,-0.2f}},
+        {{-0.3f,0,-0.2f}},{{-0.3f,0,0.2f}}
+    }};
+    bool trimmed=false;
+    assert(gpu_3do_triangulate_face(menu_face,{{0,1,0}},
+                                   triangles,nonplanar,nullptr,&trimmed));
+    assert(trimmed && triangles.size()==2);
+    for(auto const &tri:triangles)
+        for(uint32_t index:tri)assert(index<4);
+    std::vector<point3> const ring_face{{
+        {{0.001143f,0.017875f,0.018024f}},
+        {{0,0.006654f,0.024437f}},
+        {{0,0.006654f,0.024437f}},
+        {{-0.001143f,0.017875f,0.018024f}}
+    }};
+    point3 repaired{{0,0,0}};
+    assert(jkgm::gpu_3do_resolve_face_normal(ring_face,repaired));
+    assert(gpu_3do_triangulate_face(ring_face,{{0,0,0}},
+                                   triangles,nonplanar));
+    assert(triangles.size()==1);
     // Zero signed area does not mean zero geometric area: bow-ties are
     // ambiguous and must continue falling back to native rendering.
     assert(!jkgm::gpu_3do_zero_area_face(bowtie));

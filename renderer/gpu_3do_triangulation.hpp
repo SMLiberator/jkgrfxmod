@@ -80,6 +80,40 @@ namespace jkgm {
         return max_cross2<=largest*largest*1e-20;
     }
 
+    // Reconstruct a missing normal only when oriented polygon area is nonzero.
+    inline bool gpu_3do_resolve_face_normal(
+        std::vector<std::array<float,3>> const &points,
+        std::array<float,3> &normal)
+    {
+        double normal2=0.0;
+        for(float v:normal) {
+            if(!std::isfinite(v))return false;
+            normal2+=double(v)*v;
+        }
+        if(normal2>=1e-20)return true;
+        if(points.size()<3)return false;
+        std::array<double,3> n{};
+        std::array<double,3> low{{points[0][0],points[0][1],points[0][2]}};
+        auto high=low;
+        for(size_t i=0;i<points.size();++i) {
+            auto const &a=points[i],&b=points[(i+1)%points.size()];
+            for(int k=0;k<3;++k) {
+                if(!std::isfinite(a[k]))return false;
+                low[k]=std::min(low[k],double(a[k]));
+                high[k]=std::max(high[k],double(a[k]));
+            }
+            n[0]+=(double(a[1])-b[1])*(double(a[2])+b[2]);
+            n[1]+=(double(a[2])-b[2])*(double(a[0])+b[0]);
+            n[2]+=(double(a[0])-b[0])*(double(a[1])+b[1]);
+        }
+        double const span=std::max({
+            high[0]-low[0],high[1]-low[1],high[2]-low[2]});
+        double const len=std::sqrt(n[0]*n[0]+n[1]*n[1]+n[2]*n[2]);
+        if(span<=1e-10||len<=span*span*1e-10)return false;
+        for(int k=0;k<3;++k)normal[k]=float(n[k]/len);
+        return true;
+    }
+
     // Triangles contain indices into the ORIGINAL polygon's face corners,
     // keeping independent MAT UVs, vertex colors and smooth normals intact.
     // Nonplanar but otherwise simple faces remain supported. The caller must
@@ -89,11 +123,13 @@ namespace jkgm {
         std::vector<std::array<float,3>> const &points,
         std::array<float,3> const &face_normal,
         std::vector<std::array<uint32_t,3>> &triangles,
-        bool &nonplanar,char const **failure_reason=nullptr)
+        bool &nonplanar,char const **failure_reason=nullptr,
+        bool *trimmed_repeated_prefix=nullptr)
     {
         triangles.clear();
         nonplanar=false;
         if(failure_reason)*failure_reason=nullptr;
+        if(trimmed_repeated_prefix)*trimmed_repeated_prefix=false;
         auto const fail=[&](char const *reason) {
             if(failure_reason)*failure_reason=reason;
             return false;
@@ -101,12 +137,29 @@ namespace jkgm {
         if(points.size()<3 || points.size()>128) return fail("invalid_corner_count");
         for(auto const &p:points)
             for(float x:p) if(!std::isfinite(x)) return fail("nonfinite_vertex");
-        double normal_length2=0.0;
-        for(float f:face_normal) {
-            if(!std::isfinite(f)) return fail("nonfinite_face_normal");
-            normal_length2+=double(f)*f;
+        // A,B,C,D,A,B repeats a closing prefix, not a second outline.
+        // Keep the FIRST corners (and their original MAT UV indices).
+        for(size_t prefix=3;prefix<points.size();++prefix) {
+            bool matches=true;
+            for(size_t i=prefix;i<points.size();++i)
+                if(points[i]!=points[i-prefix]) {
+                    matches=false;
+                    break;
+                }
+            if(matches) {
+                std::vector<std::array<float,3>> const reduced(
+                    points.begin(),points.begin()+prefix);
+                bool const ok=gpu_3do_triangulate_face(
+                    reduced,face_normal,triangles,nonplanar,
+                    failure_reason,trimmed_repeated_prefix);
+                if(ok&&trimmed_repeated_prefix)
+                    *trimmed_repeated_prefix=true;
+                return ok;
+            }
         }
-        if(normal_length2<1e-20) return fail("zero_face_normal");
+        std::array<float,3> normal=face_normal;
+        if(!gpu_3do_resolve_face_normal(points,normal))
+            return fail("zero_or_invalid_face_normal");
 
         std::array<double,3> newell{};
         std::array<double,3> lo{{points[0][0],points[0][1],points[0][2]}};
@@ -195,9 +248,9 @@ namespace jkgm {
                          uz=double(b[2])-a[2];
             double const vx=double(c[0])-a[0],vy=double(c[1])-a[1],
                          vz=double(c[2])-a[2];
-            double const facing=(uy*vz-uz*vy)*face_normal[0]+
-                                (uz*vx-ux*vz)*face_normal[1]+
-                                (ux*vy-uy*vx)*face_normal[2];
+            double const facing=(uy*vz-uz*vy)*normal[0]+
+                                (uz*vx-ux*vz)*normal[1]+
+                                (ux*vy-uy*vx)*normal[2];
             if(facing<0.0) std::swap(ib,ic);
             result.push_back({ia,ib,ic});
         };

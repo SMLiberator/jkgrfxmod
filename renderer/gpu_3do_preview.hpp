@@ -54,6 +54,8 @@ namespace jkgm {
         // keeping every valid face of their mesh GPU cached.
         uint32_t zero_area_faces_skipped=0;
         uint32_t first_zero_area_face=0;
+        uint32_t repaired_zero_normals=0;
+        uint32_t trimmed_repeated_prefix_faces=0;
         std::vector<gpu_3do_group> groups;
         // Unique material/cel pairs: checked once per mesh per frame.
         std::vector<std::pair<uintptr_t,int32_t>> material_refs;
