@@ -5520,6 +5520,19 @@ namespace {
         cog_push_vector(ctx,result.data());
     }
 
+    // RotateVector(dirVec,PYR): local displacement to rotated displacement.
+    // Preserve non-unit lengths (e.g. 0/4/0 pitched 90 -> 0/0/4).
+    void __cdecl cog_rotate_vector(void *ctx)
+    {
+        float angles[3]{},direction[3]{};
+        cog_pop_vector(ctx,angles); // second argument, popped first
+        cog_pop_vector(ctx,direction);
+        auto const result=jkgm::cog_pyr_rotate_vector(
+            {{direction[0],direction[1],direction[2]}},
+            {{angles[0],angles[1],angles[2]}});
+        cog_push_vector(ctx,result.data());
+    }
+
     void __cdecl cog_get_lvec_pyr(void *ctx)
     {cog_direction_to_pyr(ctx,jkgm::cog_pyr_axis::look);}
     void __cdecl cog_get_rvec_pyr(void *ctx)
@@ -7582,6 +7595,7 @@ namespace {
         cog_verb_entry{"sign", cog_math_sign},
         cog_verb_entry{"lerp", cog_math_lerp},
         cog_verb_entry{"randdir", cog_math_rand_dir},
+        cog_verb_entry{"rotatevector", cog_rotate_vector},
         cog_verb_entry{"getlvecpyr", cog_get_lvec_pyr},
         cog_verb_entry{"getrvecpyr", cog_get_rvec_pyr},
         cog_verb_entry{"getuvecpyr", cog_get_uvec_pyr},
