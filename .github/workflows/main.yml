@@ -24,6 +24,9 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\native_particle_texture.cpp /Fe:native_particle_texture_test.exe
         native_particle_texture_test.exe
 
+    - name: COG RGB split post-FX regression tests
+      run: python3 tests/postfx_rgb_split.py
+
     - name: Camera HUD emissive-only shader regression tests
       run: python3 tests/camera_hud_emissive.py
 
