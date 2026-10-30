@@ -685,17 +685,29 @@ void main() {
         if(albedo.a<=0.001 && emissive_only==0) discard;
         if(alpha_mode==1 && albedo.a>=0.999) discard;
     }
+    // Emission is independent of albedo opacity. Evaluate it before the
+    // Camera HUD early return: zero-alpha emissive-only MATs would otherwise
+    // disappear in the final post-exempt pass. Use the same emissive image,
+    // scrolling, and strength as the ordinary world path.
+    vec3 emission=emissive_factor;
+    if(has_emissive!=0)
+        emission*=texture(emissive_map,uv+emissive_scroll).rgb;
     if(camera_hud_thing!=0) {
-        // Flat HUD texture color in final output space. The Camera Thing is
-        // intentionally exempt from JK diffuse/colormap/color-filter effects,
-        // fog, sunlight, SSR/SSAO, HDR, bloom and reflection shading.
+        // Flat HUD output, exempt from JK lighting, fog, sunlight, SSAO,
+        // bloom, HDR and other postFX. Add emissive RGB independently of
+        // albedo alpha, just as the world transparency pass does.
         float a=clamp(albedo.a,0.0,1.0);
         if(blend_mode==2) { // multiply uses (DST_COLOR, ZERO)
-            out_color=vec4(mix(vec3(1.0),albedo.rgb,a),0.0);
+            // In multiply mode emission can brighten the multiplier but
+            // does not become an independent additive contribution.
+            out_color=vec4(mix(vec3(1.0),
+                               clamp(albedo.rgb+emission,0.0,1.0),a),0.0);
         } else if(blend_mode==1) { // additive uses (ONE, ONE)
-            out_color=vec4(albedo.rgb*a,0.0);
+            out_color=vec4(albedo.rgb*a+emission,0.0);
         } else {
-            out_color=vec4(albedo.rgb*a,a);
+            // With (ONE, ONE_MINUS_SRC_ALPHA), alpha=0 preserves the
+            // destination while adding emission from a transparent base.
+            out_color=vec4(albedo.rgb*a+emission,a);
         }
         out_emissive=vec4(0.0);
         out_normal=vec4(0.0);
@@ -734,9 +746,6 @@ void main() {
         lit_rgb*=illumination*occlusion;
     }
     vec3 rgb=mix(lit_rgb,fog_color,fog);
-    vec3 emission=emissive_factor;
-    if(has_emissive!=0)
-        emission*=texture(emissive_map,uv+emissive_scroll).rgb;
     // Optional dynamic Thing point-light -> GGX highlights. JK currently
     // supplies scalar light intensity (not independent per-light RGB), so
     // these experimental highlights are neutral/white. Diffuse remains JK.
