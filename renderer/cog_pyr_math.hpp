@@ -64,6 +64,21 @@ inline bool cog_pyr_build(cog_pyr_vec pyr,cog_pyr_basis &basis)
     return true;
 }
 
+// Rotate without normalizing the input vector, preserving its length.
+inline cog_pyr_vec cog_pyr_rotate_vector(cog_pyr_vec vec,cog_pyr_vec pyr)
+{
+    cog_pyr_basis basis{};
+    for(float value:vec)if(!std::isfinite(value))return {};
+    if(!cog_pyr_build(pyr,basis))return {};
+    if(pyr[0]==0.0f && pyr[1]==0.0f && pyr[2]==0.0f)return vec;
+    cog_pyr_vec out{};
+    for(int i=0;i<3;++i)
+        out[i]=basis.right[i]*vec[0]+basis.look[i]*vec[1]+
+               basis.up[i]*vec[2];
+    for(float value:out)if(!std::isfinite(value))return {};
+    return out;
+}
+
 inline cog_pyr_vec cog_pyr_direction(cog_pyr_vec pyr,cog_pyr_axis axis)
 {
     cog_pyr_basis basis{};
