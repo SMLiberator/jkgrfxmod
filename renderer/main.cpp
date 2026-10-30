@@ -20,6 +20,7 @@
 #include "thing_attachment_normal.hpp"
 #include "native_thingface_friction.hpp"
 #include "native_earth_hit_sound.hpp"
+#include "compressed_sound_io.hpp"
 #include "mots_native_collision_bridge.hpp"
 #include "precise_type3_native.hpp"
 #include "precise_type3_pose_bulk.hpp"
@@ -7897,6 +7898,35 @@ std::vector<jkgm::spotlight_instance> jkgm::collect_spotlights_for_frame()
     return instances;
 }
 
+namespace {
+using sith_sound_load_fn=void* (__cdecl*)(char*,int);
+sith_sound_load_fn RealSithSoundLoad=
+    reinterpret_cast<sith_sound_load_fn>(0x004EF440U);
+bool native_compressed_sound_hook_active=false;
+
+void* __cdecl HookedSithSoundLoad(char* filename,int eager)
+{
+    // The HostServices globals are initialized once the original loader
+    // runs; they may not exist when the renderer is initially injected.
+    jkgm::install_compressed_sound_file_services();
+    return RealSithSoundLoad(filename,eager);
+}
+bool request_native_compressed_sound_hook()
+{
+    if(!jkgm::compressed_sound_executable_supported()) {
+        LOG_WARNING("JKGM compressed sound hook skipped: unsupported EXE");
+        return false;
+    }
+    LONG const err=DetourAttach(&(PVOID&)RealSithSoundLoad,
+                                HookedSithSoundLoad);
+    if(err!=NO_ERROR) {
+        LOG_WARNING("JKGM compressed sound hook attach failed: ",err);
+        return false;
+    }
+    return true;
+}
+} // anonymous
+
 bool attach_hooks()
 {
     DetourRestoreAfterWith();
@@ -8002,6 +8032,7 @@ bool attach_hooks()
     bool const mesh_collision_hook_requested=request_type2_intersection_hook();
     bool const ice_thing_hook_requested=request_native_thingface_friction_hook();
     bool const earth_sound_hook_requested=request_native_earth_sound_hook();
+    bool const sound_formats_hook_requested=request_native_compressed_sound_hook();
 
     LONG error = DetourTransactionCommit();
     if(error!=NO_ERROR) {
@@ -8023,6 +8054,10 @@ bool attach_hooks()
         LOG_INFO("JKGM native collision Detour installed: type2=",
                  the_config->enable_mesh_collision,
                  " precise_type3=RayCastEx-only");
+    }
+    if(error==NO_ERROR && sound_formats_hook_requested) {
+        native_compressed_sound_hook_active=true;
+        LOG_INFO("JKGM compressed OGG/FLAC/MP3 sound loader enabled");
     }
     if(error==NO_ERROR && earth_sound_hook_requested) {
         native_earth_hit_sound_hook_active=true;
@@ -8097,6 +8132,12 @@ bool detach_hooks()
         sprite_world_geometry.clear();
     }
     // Detach injected functions
+    if(native_compressed_sound_hook_active) {
+        DetourDetach(&(PVOID&)RealSithSoundLoad,HookedSithSoundLoad);
+        native_compressed_sound_hook_active=false;
+    }
+    // Restore the native GOB/loose-file callbacks before unloading DLL.
+    jkgm::uninstall_compressed_sound_file_services();
     if(native_earth_hit_sound_hook_active) {
         DetourDetach(&(PVOID &)RealNativeEarthSound,NativeEarthSoundThunk);
         native_earth_hit_sound_hook_active=false;
