@@ -231,7 +231,7 @@ public:
         best.distance=max_distance;
         bool found=false;
         for(size_t i=0;i<size;++i) {
-            if(!active[i] || chosen->faces[i].empty())continue;
+            if(!active_[i] || chosen->faces[i].empty())continue;
             ++metrics.nodes;
             gpu_3do_matrix34 world_pose{};
             if(!pose(uint32_t(i),world_pose))
