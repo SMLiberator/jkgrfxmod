@@ -5200,7 +5200,17 @@ namespace {
     {
         float const b=cog_pop_float(ctx);
         float const a=cog_pop_float(ctx);
-        cog_push_float(ctx,jkgm::cog_math_max(a,b));
+        float const result=jkgm::cog_math_max(a,b);
+        // The COG VM silently leaves arguments untouched when it resolves
+        // a name to a non-callable symbol. Log the first actual executions
+        // to distinguish such a name collision from broken arithmetic.
+        static unsigned traces=0;
+        if(traces<8U) {
+            ++traces;
+            LOG_INFO("COG Max handler executed: a=",a,
+                     " b=",b," result=",result);
+        }
+        cog_push_float(ctx,result);
     }
 
     void __cdecl cog_math_clamp(void *ctx)
@@ -7305,6 +7315,11 @@ namespace {
     constexpr std::array fx_verbs = {
         cog_verb_entry{"min", cog_math_min},
         cog_verb_entry{"max", cog_math_max},
+        // Explicit, less collision-prone aliases. The interpreter permits
+        // local COG symbols to shadow global verbs, and older JK.dll builds
+        // may have registered a symbol under a short generic name already.
+        cog_verb_entry{"mathmin", cog_math_min},
+        cog_verb_entry{"mathmax", cog_math_max},
         cog_verb_entry{"clamp", cog_math_clamp},
         cog_verb_entry{"sign", cog_math_sign},
         cog_verb_entry{"lerp", cog_math_lerp},

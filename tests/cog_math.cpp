@@ -11,6 +11,11 @@ int main()
 {
     assert(eq(cog_math_min(3.5f,7.0f),3.5f));
     assert(eq(cog_math_min(-5.0f,-2.0f),-5.0f));
+    // Reproduces the input from the in-game stack report. A correct
+    // COG handler consumes both arguments and pushes 6, not 1.
+    assert(eq(cog_math_max(6.0f,1.0f),6.0f));
+    assert(eq(cog_math_max(1.0f,6.0f),6.0f));
+    assert(eq(cog_math_min(6.0f,1.0f),1.0f));
     assert(eq(cog_math_max(3.5f,7.0f),7.0f));
     assert(eq(cog_math_max(-5.0f,-2.0f),-2.0f));
     assert(eq(cog_math_min(4.0f,4.0f),4.0f));
