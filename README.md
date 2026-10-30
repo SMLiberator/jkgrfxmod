@@ -2,6 +2,44 @@
 
 A modification of JkGfxMod specifically built for JkGR
 
+
+## Opt-in accurate COG raycasting: RayCastEx
+
+RayCastEx is a **COG-only** collision query. Native JK type-3 raycasts,
+projectiles, LOS, and physics are unchanged: the former experimental global
+precise collide-3 hook is disabled. No JSON toggle is necessary.
+
+\`\`\`c
+ray = RayCastEx(sourceThing, maxDistance);
+if (ray != -1)
+{
+    position = GetRayHitPos(ray);
+    normal = GetRayHitNormal(ray);
+    distance = GetRayHitDistance(ray);
+    thing = GetRayHitThing(ray);          // -1 for world-surface hits
+    surface = GetRayHitSurface(ray);      // -1 for model-Thing hits
+}
+\`\`\`
+
+The ray begins at the source Thing's position and travels along its **Look**
+vector for \`maxDistance\` world units. It returns the closest intersection,
+or -1 on miss or invalid arguments. Returned handles rotate through five
+slots per COG, shared with \`RayCast\`; consume the result before issuing many
+additional rays. **No temporary Ghost Thing is spawned.** To place an actual
+Thing at the hit location, use COG's normal Thing creation methods with
+\`GetRayHitPos(ray)\`.
+
+This independent ray path tests blocking static world polygons in double
+precision using the existing world-geometry BVH, and tests collide=2/3
+model Things with the preserved animated-node precise polygon solver. Sphere
+colliders use an analytic sphere intersection. It is deliberately not involved
+in ordinary gameplay collision and should be used sparingly. The initial
+implementation scans live Thing slots, using an expanded Thing collision
+sphere as a candidate filter; very badly off-center 3DOs with undersized
+\`collideSize\` can still be excluded. Portal/adjoin rules follow the
+static world receiver snapshot, not the engine's exact sector traversal,
+so compare hit semantics against your target levels during testing.
+
 ## Features
 
 - Cog controllable distance fog, includes new Cog verbs

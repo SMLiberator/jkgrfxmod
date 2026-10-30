@@ -36,6 +36,12 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_raycast_results.cpp /Fe:cog_raycast_results_test.exe
         cog_raycast_results_test.exe
 
+    - name: Explicit COG RayCastEx precision geometry regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_raycast_ex.cpp /Fe:cog_raycast_ex_test.exe
+        cog_raycast_ex_test.exe
+
     - name: COG PYR/direction conversion regression tests
       shell: cmd
       run: |
