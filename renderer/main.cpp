@@ -26,6 +26,7 @@
 #include "mots_collision_snapshot_cache.hpp"
 #include "cog_math.hpp"
 #include "cog_pyr_math.hpp"
+#include "cog_raycast_head.hpp"
 #include "cog_raycast_results.hpp"
 #include "cog_sector_queries.hpp"
 #include "sprite_orientation.hpp"
@@ -5803,8 +5804,9 @@ namespace {
     }
 
     // RayCast(sourceThing,localOffset): zero-radius finite line segment from
-    // the Thing origin, oriented by Right/Look/Up. A vector of (0,4,0)
-    // therefore casts 4 JK units along the Thing's Look axis. Hits advance
+    // the Thing origin, oriented by Right/Look/Up. Actors and players first
+    // apply their relative head PYR to this local vector (the same convention
+    // JK uses for aiming), so (0,4,0) follows looking up/down. Hits advance
     // five rotating result handles PER COG, whereas misses return -1 without
     // consuming a slot. Flags 0 mirror native instant-impact weapons.
     void cog_ray_cast_impl(void *ctx,bool precise_type3)
@@ -5842,6 +5844,24 @@ namespace {
         }
         if(!(local_len2>1.e-16) ||
            local_len2>1.e12) {cog_push_int(ctx,-1);return;}
+
+        // JKGM sithCogFunctionThing_GetEyePYR (0x005036E0) reads
+        // actorParams.headPYR at SithThing+0x15C for types 2 and 10.
+        // This is a *relative* head rotation: the original body basis
+        // must still be applied afterwards (rdMatrix_PreRotate34).
+        std::array<float,3> head_pyr{{0,0,0}};
+        if(type==2U || type==10U) {
+            if(!gpu_span_readable(source,0x168U)) {
+                cog_push_int(ctx,-1);return;
+            }
+            std::memcpy(head_pyr.data(),src+0x15cU,12);
+        }
+        std::array<float,3> aimed_offset{};
+        if(!jkgm::cog_raycast_head_local_offset(
+                type,{{offset[0],offset[1],offset[2]}},head_pyr,
+                aimed_offset)) {
+            cog_push_int(ctx,-1);return;
+        }
         for(int k=0;k<3;++k) {
             if(!std::isfinite(start[k])) {
                 cog_push_int(ctx,-1);return;
@@ -5850,7 +5870,7 @@ namespace {
                 if(!std::isfinite(basis[j*3+k])) {
                     cog_push_int(ctx,-1);return;
                 }
-                ray[k]+=basis[j*3+k]*offset[j];
+                ray[k]+=basis[j*3+k]*aimed_offset[j];
             }
         }
         double world_len2=0.0;
