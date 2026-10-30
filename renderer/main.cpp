@@ -5207,8 +5207,10 @@ namespace {
         static unsigned traces=0;
         if(traces<8U) {
             ++traces;
-            LOG_INFO("COG Max handler executed: a=",a,
-                     " b=",b," result=",result);
+            std::ostringstream line;
+            line<<"COG Max handler executed: a="<<a
+                <<" b="<<b<<" result="<<result;
+            LOG_INFO(line.str());
         }
         cog_push_float(ctx,result);
     }
