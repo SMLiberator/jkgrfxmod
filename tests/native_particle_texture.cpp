@@ -21,6 +21,43 @@ int main()
     assert(close(uv[2].u,63.5f) && close(uv[2].v,0.5f));
     assert(close(uv[3].u,0.5f) && close(uv[3].v,0.5f));
 
+    // The patched JKGM particle routine supplies a diamond, not a square.
+    // Only the textured path replaces its four camera-space vertices.
+    std::array<jkgm::particle_clip_vertex,4> diamond{{
+        {-1,4,0},{0,4,-1},{1,4,0},{0,4,1}
+    }};
+    auto const native_diamond=diamond;
+    jkgm::particle_clip_bounds diamond_bounds{};
+    assert(jkgm::particle_make_textured_square(
+        diamond.data(),diamond.size(),diamond_bounds));
+    assert(close(diamond[0].x,-1) && close(diamond[0].z,-1));
+    assert(close(diamond[1].x,1) && close(diamond[1].z,-1));
+    assert(close(diamond[2].x,1) && close(diamond[2].z,1));
+    assert(close(diamond[3].x,-1) && close(diamond[3].z,1));
+    for(auto const &p:diamond)assert(close(p.y,4));
+    assert(close(diamond_bounds.min_x,-1) && close(diamond_bounds.max_z,1));
+    assert(jkgm::particle_texture_clipped_uvs(
+        diamond_bounds,diamond.data(),4,64,32,uv.data()));
+    assert(close(uv[0].u,0.5f) && close(uv[0].v,31.5f));
+    assert(close(uv[1].u,63.5f) && close(uv[1].v,31.5f));
+    assert(close(uv[2].u,63.5f) && close(uv[2].v,0.5f));
+    assert(close(uv[3].u,0.5f) && close(uv[3].v,0.5f));
+    // The square conversion changes only the supplied mutable copy:
+    // untextured particles retain the engine's native diamond.
+    assert(close(native_diamond[0].z,0));
+    assert(close(native_diamond[1].x,0));
+
+    auto invalid= native_diamond;
+    invalid[2].y=6;
+    auto const before_invalid=invalid;
+    assert(!jkgm::particle_make_textured_square(
+        invalid.data(),invalid.size(),diamond_bounds));
+    for(size_t i=0;i<invalid.size();++i) {
+        assert(close(invalid[i].x,before_invalid[i].x));
+        assert(close(invalid[i].y,before_invalid[i].y));
+        assert(close(invalid[i].z,before_invalid[i].z));
+    }
+
     // A billboard clipped halfway through is NOT UV-stretched to 0..1:
     // both X endpoints cover only the middle half of the original texture.
     std::array<jkgm::particle_clip_vertex,4> cropped{{
