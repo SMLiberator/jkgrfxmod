@@ -1,7 +1,9 @@
 #include "renderer/compressed_sound_codec.hpp"
+#include "renderer/thirdparty/dr_mp3.h"
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -45,8 +47,20 @@ int main()
     // A real tiny mono 8-kHz MP3 generated with FFmpeg/LAME (not an
     // MP3 header stub). The WAV facade is what the native JK loader sees.
     auto mp3=from_base64(
-"SUQzBAAAAAAAIlRTU0UAAAAOAAADTGF2ZjYxLjcuMTAzAAAAAAAAAAAAAAD/4zjAAAAAAAAAAAAASW5mbwAAAA8AAAADAAABsACqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dX///////////////////////////////////////////8AAAAATGF2YzYxLjE5AAAAAAAAAAAAAAAAJANoAAAAAAAAAbAzaNGLAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/4xjEAAtwlq0ZSAAA4M4//Ad3d3e/hERE/3d7/SSw7BWAuC8Pz6ggcxOH+CDrv8McBv0hjl3850+7pUki8i55zbzEmTIvGqT/4xjEDQ4owrABkzAAXij4yxRAPQGqiUDUgBjDL1ZEiRaqEkCeqT4lOloMgYJCvt8IAQyAWf/Fm0JzZ9Eqcjsz6qvNVWzOHJH/4xjEDwwgzcgBxhABQCCrBQCElAxHP//8cijlEiosFRBUV/wvv//+R0XzgrorKkxBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqo=");
-    assert(jkgm::decode_compressed_sound_to_wave(".mp3",mp3,wave));
+"SUQzBAAAAAAAIlRTU0UAAAAOAAADTGF2ZjYxLjcuMTAzAAAAAAAAAAAAAAD/4zjAAAAAAAAAAAAASW5mbwAAAA8AAAAHAAAC0ABmZmZmZmZmZmZmZmZmZoCAgICAgICAgICAgICAmZmZmZmZmZmZmZmZmZmzs7Ozs7Ozs7Ozs7Ozs7PMzMzMzMzMzMzMzMzMzObm5ubm5ubm5ubm5ubm//////////////////8AAAAATGF2YzYxLjE5AAAAAAAAAAAAAAAAJAKQAAAAAAAAAtCkzxNZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/4xjEAArwBtW5QQAC/0dw22AGD4Pg+9QIAgcg+D5/E4Pg+iCBxEHwffgg67/DHAb9IY5d/OdPu6UmhzhZxDf8ZUQlHKELf4P/4xjEDxCZQpABlFAAbwfqB7kAGXEScA+JgOZHWB3qYe+AaAJAKisIoLr/8hHoqkQ+Hxpv//kKA0JQkDX/iU6DSv//////////4xjEBw5opjwB3gAA//////jSIRgDgBJJBcAowKwXjB/BqMIcUoxC6XDG+E2MNsFowPQPgUBeIQAwMAqhJbTt0//++BKlUCD/4xjECA2opiwAVrxgKYkUZ9AbJyeX0YgA25x36Hmn4KmYaoLxglALlADyBEGgAIBUvrH////f5T///1r/////3/////////v/4xjEDBAgpjQBXgAASy06ShgEAMGBmBCCgQzB4EGMTwcY4jn5zVFLZMWcM8wmwTUXGOGAiAuYBYA4QAHj/////pr+5UIuTBH/4xjEBg2BLqABlDgAb9lE6Qcg4syPwGJiEUQHSDWSUxjwviAk0BI//2wDwWFRJGRp//5g+hJguz/zIQaapEia2MYx/qSKSoX/4xjECwvQtnQByQgAQRaVFKHJSvFRSGSXJWQimZCCIZJcWRIgkeEpYOCIOrBV/O8GqkxBTUUzLjEwMKqqqqqqqqqqqqqqqqo=");
+    bool const mp3_ok=jkgm::decode_compressed_sound_to_wave(".mp3",mp3,wave);
+    if(!mp3_ok) {
+        drmp3_config config{};
+        drmp3_uint64 frames=0;
+        auto* pcm=drmp3_open_memory_and_read_pcm_frames_s16(
+            mp3.data(),mp3.size(),&config,&frames,nullptr);
+        std::fprintf(stderr,
+            "MP3 decoder diagnostic: input=%zu pcm=%p channels=%u rate=%u frames=%llu\\n",
+            mp3.size(),static_cast<void*>(pcm),config.channels,
+            config.sampleRate,static_cast<unsigned long long>(frames));
+        drmp3_free(pcm,nullptr);
+    }
+    assert(mp3_ok);
     assert(wave.size()>44);
     assert(std::memcmp(wave.data(),"RIFF",4)==0);
     assert(std::memcmp(wave.data()+8,"WAVEfmt ",8)==0);
