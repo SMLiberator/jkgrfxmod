@@ -54,6 +54,7 @@ namespace {
     struct virtual_file {
         std::shared_ptr<std::vector<uint8_t>> wav;
         size_t offset=0;
+        bool first_read_reported=false;
     };
     callbacks real{};
     std::mutex lock;
@@ -120,26 +121,38 @@ namespace {
             auto it=cached.find(key);
             if(it!=cached.end())return it->second;
         }
-        // Read via original HostServices callbacks, NEVER the host stdio
-        // API. This respects the same GOB/loose-file search priority as JK.
+        auto fail=[&](char const* reason)
+            ->std::shared_ptr<std::vector<uint8_t>> {
+            LOG_WARNING("JKGM compressed sound decode failed: ",path,
+                        " reason=",reason);
+            return {};
+        };
+        // Read via original HostServices callbacks, NEVER host stdio.
+        // This preserves JK's loose-file and GOB/GOO search behavior.
         int length=real.size?real.size(native_fd):-1;
         if(length<0) {
-            if(real.seek(native_fd,0,SEEK_END)!=0)return {};
+            if(real.seek(native_fd,0,SEEK_END)!=0)
+                return fail("size unavailable; seek end failed");
             length=real.tell(native_fd);
-            if(real.seek(native_fd,0,SEEK_SET)!=0)return {};
+            if(real.seek(native_fd,0,SEEK_SET)!=0)
+                return fail("size unavailable; seek start failed");
         }
-        if(length<=0 || uint64_t(length)>max_encoded_bytes)return {};
-        if(real.seek(native_fd,0,SEEK_SET)!=0)return {};
+        if(length<=0 || uint64_t(length)>max_encoded_bytes)
+            return fail("empty or larger than 64 MiB");
+        if(real.seek(native_fd,0,SEEK_SET)!=0)
+            return fail("seek start failed");
         std::vector<uint8_t> input(size_t(length),uint8_t(0));
         size_t read_count=0;
         while(read_count<input.size()) {
             size_t const got=real.read(native_fd,input.data()+read_count,
                                        input.size()-read_count);
-            if(got==0 || got>input.size()-read_count)return {};
+            if(got==0 || got>input.size()-read_count)
+                return fail("encoded file read failed");
             read_count+=got;
         }
         std::vector<uint8_t> wav;
-        if(!decode_compressed_sound_to_wave(ext,input,wav))return {};
+        if(!decode_compressed_sound_to_wave(ext,input,wav))
+            return fail("invalid codec data, unsupported channels or PCM limit");
         auto result=std::make_shared<std::vector<uint8_t>>(std::move(wav));
         {
             std::lock_guard<std::mutex> guard(lock);
@@ -178,34 +191,38 @@ namespace {
            std::strchr(mode,'+'))return real.open(path,mode);
         std::string const wanted(path);
         std::string const ext=extension(wanted);
-        if(ext==".wav") {
-            // Existing WAV always wins, including WAV files in GOB archives.
-            if(int const fd=real.open(path,mode))return fd;
-        } else if(ext!=".ogg" && ext!=".flac" && ext!=".mp3")
+        // Native WAV (and every other format) passes through unchanged.
+        // Compressed formats are requested by their actual filenames only.
+        if(ext!=".ogg" && ext!=".flac" && ext!=".mp3")
             return real.open(path,mode);
-        std::string base=ext==".wav"
-            ?wanted.substr(0,wanted.size()-4):wanted;
-        std::array<std::string,3> options{{".ogg",".flac",".mp3"}};
-        if(ext!=".wav")
-            options={{ext,"",""}};
-        for(auto const& candidate_ext:options) {
-            if(candidate_ext.empty())continue;
-            std::string const candidate=base+candidate_ext;
-            std::shared_ptr<std::vector<uint8_t>> wav;
-            {
-                std::lock_guard<std::mutex> guard(lock);
-                auto it=cached.find(lower(candidate));
-                if(it!=cached.end())wav=it->second;
-            }
-            if(!wav) {
-                int const fd=real.open(candidate.c_str(),"rb");
-                if(!fd)continue;
-                wav=read_and_decode(fd,candidate,candidate_ext);
-                real.close(fd);
-            }
-            if(wav)return virtual_open(std::move(wav));
+
+        LOG_INFO("JKGM compressed sound open requested: ",wanted,
+                 " mode=",mode);
+        std::shared_ptr<std::vector<uint8_t>> wav;
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            auto it=cached.find(lower(wanted));
+            if(it!=cached.end())wav=it->second;
         }
-        return 0;
+        if(!wav) {
+            int const fd=real.open(path,"rb");
+            if(!fd) {
+                LOG_WARNING("JKGM compressed sound file not found: ",wanted);
+                return 0;
+            }
+            wav=read_and_decode(fd,wanted,ext);
+            real.close(fd);
+        }
+        if(!wav)return 0;
+        int const virtual_fd=virtual_open(std::move(wav));
+        if(!virtual_fd) {
+            LOG_WARNING("JKGM compressed sound virtual handle exhausted: ",
+                        wanted);
+            return 0;
+        }
+        LOG_INFO("JKGM compressed sound virtual WAV opened: ",wanted,
+                 " handle=",virtual_fd);
+        return virtual_fd;
     }
     int __cdecl file_close(int fd)
     {
@@ -217,18 +234,32 @@ namespace {
     }
     size_t __cdecl file_read(int fd,void* dst,size_t bytes)
     {
+        bool is_virtual=false,first_read=false;
+        size_t count=0;
         {
             std::lock_guard<std::mutex> guard(lock);
             auto it=streams.find(fd);
             if(it!=streams.end()) {
                 auto &v=it->second;
                 size_t const avail=v.wav->size()-v.offset;
-                size_t const n=std::min(bytes,avail);
-                if(n && dst)std::memcpy(dst,v.wav->data()+v.offset,n);
-                else if(n)return 0;
-                v.offset+=n;
-                return n;
+                count=std::min(bytes,avail);
+                if(count && !dst)return 0;
+                if(count)std::memcpy(dst,v.wav->data()+v.offset,count);
+                v.offset+=count;
+                is_virtual=true;
+                if(!v.first_read_reported) {
+                    v.first_read_reported=true;
+                    first_read=true;
+                }
             }
+        }
+        // Never log while holding the virtual-stream mutex: logging may
+        // itself perform file I/O via the original engine callbacks.
+        if(is_virtual) {
+            if(first_read)
+                LOG_INFO("JKGM compressed PCM first read: handle=",fd,
+                         " requested=",bytes," returned=",count);
+            return count;
         }
         return real.read(fd,dst,bytes);
     }
