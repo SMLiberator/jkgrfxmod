@@ -18,6 +18,12 @@ jobs:
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
 
+    - name: Compressed MP3 OGG FLAC decoder regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\compressed_sound_codec.cpp renderer\\compressed_sound_codec.cpp /Fe:compressed_sound_codec_test.exe
+        compressed_sound_codec_test.exe
+
     - name: Native textured particle billboard UV regression tests
       shell: cmd
       run: |
