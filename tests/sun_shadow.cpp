@@ -65,6 +65,39 @@ int main()
     assert(std::fabs(xform.high[1]-24.0f)<0.0001f);
     assert(std::fabs(xform.low[2]-23.0f)<0.0001f);
     assert(std::fabs(xform.high[2]-33.0f)<0.0001f);
+    // Sun projection bounds must match actual depth-caster materials.
+    // Large non-orthonormal legacy VFX transforms are valid for rendering,
+    // but a non-casting emissive/blended MAT must never enlarge the global
+    // light-space Z span or invalidate the two cascades.
+    assert(sun_shadow_material_casts_depth(1,false,false,1.0f,false));
+    assert(sun_shadow_material_casts_depth(1,false,false,1.0f,true));
+    assert(!sun_shadow_material_casts_depth(1,false,true,1.0f,false));
+    assert(!sun_shadow_material_casts_depth(1,true,false,1.0f,false));
+    assert(!sun_shadow_material_casts_depth(1,false,false,0.6f,false));
+    assert(!sun_shadow_material_casts_depth(0,false,false,1.0f,false));
+    assert(!sun_shadow_material_casts_depth(0,false,false,1.0f,true));
+    decal_world_geometry projection_world{};
+    projection_world.valid_world=true;
+    decal_volume_aabb static_caster{{
+        {-4.0f,-4.0f,-4.0f}},{{4.0f,4.0f,4.0f}}};
+    auto const scaled_vfx=sun_shadow_transformed_aabb(
+        {{-1.0f,-1.0f,-1.0f}},{{1.0f,1.0f,1.0f}},
+        {{100.0f,0.0f,0.0f,0.0f,100.0f,0.0f,0.0f,0.0f,100.0f,
+          0.0f,0.0f,0.0f}});
+    std::vector<decal_volume_aabb> casters{static_caster};
+    if(sun_shadow_material_casts_depth(1,false,true,1.0f,false))
+        casters.push_back(scaled_vfx);
+    sun_shadow_projection baseline{},filtered{},polluted{};
+    assert(make_sun_shadow_projection(
+        projection_world,{{0.0f,0.0f,1.0f}},baseline,{static_caster}));
+    assert(make_sun_shadow_projection(
+        projection_world,{{0.0f,0.0f,1.0f}},filtered,casters));
+    assert(make_sun_shadow_projection(
+        projection_world,{{0.0f,0.0f,1.0f}},polluted,
+        {static_caster,scaled_vfx}));
+    assert(std::fabs(filtered.range-baseline.range)<1.0e-4f);
+    assert(polluted.range>baseline.range*10.0f);
+
     // Empty-world data is a valid shadow shell for 3DO-only levels.
     constexpr uintptr_t world_addr=0x120000U;
     std::array<unsigned char,0xb0> header{};
