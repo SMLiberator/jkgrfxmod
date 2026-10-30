@@ -5745,7 +5745,7 @@ namespace {
     struct raycast_ex_profile_counters {
         uint64_t rays=0,search_us=0,type3_checks=0,type3_hits=0;
         uint64_t model_rebuilds=0,polygon_tests=0,native_sphere_rejects=0;
-        uint64_t ineligible_things=0,native_fallbacks=0;
+        uint64_t ineligible_things=0,precision_unavailable=0;
     };
     thread_local raycast_ex_profile_counters raycast_ex_profile{};
 
@@ -5957,7 +5957,7 @@ namespace {
                          " native_sphere_rejects=",p.native_sphere_rejects,
                          " polygon_tests=",p.polygon_tests,
                          " ineligible_things=",p.ineligible_things,
-                         " native_fallbacks=",p.native_fallbacks);
+                         " precision_unavailable=",p.precision_unavailable);
                 p=raycast_ex_profile_counters{};
             }
         }
@@ -6369,7 +6369,7 @@ namespace {
             ++p.type3_checks;
             if(status==jkgm::precise_type3_status::hit)++p.type3_hits;
             if(status==jkgm::precise_type3_status::unavailable)
-                ++p.native_fallbacks;
+                ++p.precision_unavailable;
             if(stats.rebuilt)++p.model_rebuilds;
             p.polygon_tests+=stats.polygon_tests;
         }
@@ -6464,13 +6464,14 @@ namespace {
                                      status==jkgm::precise_type3_status::hit
                                          ?"model_hit":
                                      status==jkgm::precise_type3_status::miss
-                                         ?"sphere_rejected":"native_fallback");
+                                         ?"triangle_miss":"precision_unavailable");
                     }
                     if(status==jkgm::precise_type3_status::hit)
                         return 0x5; // native THING | THINGADJOINCROSS
-                    if(status==jkgm::precise_type3_status::miss)
-                        return 0;   // never return the false sphere hit
-                    // Unsupported 3DO data: preserve JK's native behavior.
+                    // Includes a true triangle miss or unavailable precision
+                    // data. Fail closed: falling back to native type-3 math
+                    // would reintroduce the false positives we're removing.
+                    return 0;
                 }
             }
             // Every other collision type uses vanilla behavior even when
