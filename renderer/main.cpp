@@ -7908,7 +7908,14 @@ void* __cdecl HookedSithSoundLoad(char* filename,int eager)
 {
     // The HostServices globals are initialized once the original loader
     // runs; they may not exist when the renderer is initially injected.
-    jkgm::install_compressed_sound_file_services();
+    if(!jkgm::install_compressed_sound_file_services()) {
+        static bool warned=false;
+        if(!warned) {
+            warned=true;
+            LOG_WARNING("JKGM compressed sound bridge unavailable: HostServices "
+                        "table mismatch or not yet initialized");
+        }
+    }
     return RealSithSoundLoad(filename,eager);
 }
 bool request_native_compressed_sound_hook()
