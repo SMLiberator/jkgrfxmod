@@ -47,6 +47,15 @@ inline bool particle_make_textured_square(particle_clip_vertex *vertices,
     float const tolerance=1.e-4f*std::max(1.0f,std::fabs(depth));
     for(size_t i=1;i<count;++i)
         if(std::fabs(vertices[i].y-depth)>tolerance)return false;
+    // Patched JKGM scales the diamond's horizontal radius by sqrt(2),
+    // leaving its vertical radius unchanged. Use the smaller radius so the
+    // final square has the vanilla particle's original 2*radius side length,
+    // instead of inheriting the diamond's wider bounding rectangle.
+    float const halfside=0.5f*std::min(out.max_x-out.min_x,
+                                      out.max_z-out.min_z);
+    float const cx=0.5f*(out.min_x+out.max_x);
+    float const cz=0.5f*(out.min_z+out.max_z);
+    out={cx-halfside,cx+halfside,cz-halfside,cz+halfside};
     // Same vertex order as the native particle, preserving triangle winding.
     vertices[0]={out.min_x,depth,out.min_z};
     vertices[1]={out.max_x,depth,out.min_z};
