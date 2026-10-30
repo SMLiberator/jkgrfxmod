@@ -585,6 +585,7 @@ namespace jkgm {
             gl::uniform_location_id fbuf_image;
             gl::uniform_location_id grain_params;
             gl::uniform_location_id vignette_params;
+            gl::uniform_location_id rgb_split_pixels;
             gl::uniform_location_id brightness;
             gl::uniform_location_id contrast;
             gl::uniform_location_id saturation;
@@ -608,6 +609,9 @@ namespace jkgm {
 
             // params = (red, green, blue, strength)
             void set_vignette(point<4, float> params);
+
+            // Pixel displacement of red and blue at the viewport corners.
+            void set_rgb_split(float pixels);
 
             void set_color_filter(float brightness_value, float contrast_value, float saturation_value);
         };
