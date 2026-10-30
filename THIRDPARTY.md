@@ -69,3 +69,20 @@ AUTHORS  OR COPYRIGHT  HOLDERS  BE  LIABLE FOR  ANY  CLAIM,  DAMAGES OR  OTHER
 LIABILITY, WHETHER IN AN ACTION OF  CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE  OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+## dr_mp3 and dr_flac
+
+Copyright (c) David Reid (mackron).
+Sources: https://github.com/mackron/dr_libs
+
+Vendored under the authors' public-domain / MIT-0 dual-license terms.
+The complete license statements are retained within the respective headers
+at `renderer/thirdparty/dr_mp3.h` and `renderer/thirdparty/dr_flac.h`.
+
+## stb_vorbis
+
+Copyright (c) Sean Barrett and contributors.
+Source: https://github.com/nothings/stb
+
+Vendored under the public-domain / MIT dual-license terms.
+The complete license statement is retained in
+`renderer/thirdparty/stb_vorbis.c`.
