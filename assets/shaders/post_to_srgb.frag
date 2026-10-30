@@ -22,6 +22,11 @@ uniform float brightness = 0.0; // [-1.0 to 1.0], 0 = no change
 uniform float contrast = 1.0;   // [0.0 to 4.0], 1 = no change
 uniform float saturation = 1.0; // [0.0 to 4.0], 1 = no change
 
+// SetRGBSplit(factor, fadeTime): radial red/blue displacement in pixels
+// at the viewport corners, clamped to 0..32. Zero is completely free:
+// no extra scene samples, and exactly the same center pixel as before.
+uniform float rgb_split_pixels = 0.0;
+
 // Vignette, set by the renderer from the SetVignette COG verb.
 // rgb = color the edges are pulled towards, w = strength:
 //   0       off
@@ -67,6 +72,27 @@ void main()
 {
     ivec2 sc = ivec2(gl_FragCoord.xy);
     vec4 samp = texelFetch(fbuf_image, sc, 0);
+
+    if(rgb_split_pixels > 0.0) {
+        // In native screen pixels rather than UV units, so horizontal and
+        // vertical channel offsets have the same length on wide screens.
+        // The center is stationary, with the requested displacement at
+        // each corner. Clamp sampling to avoid black/colored edge borders.
+        vec2 dims=vec2(textureSize(fbuf_image,0));
+        vec2 half_dims=0.5*dims;
+        vec2 from_center=(vec2(sc)+vec2(0.5))-half_dims;
+        vec2 shift_px=from_center/max(length(half_dims),1.0)*
+                      min(rgb_split_pixels,32.0);
+        vec2 center_uv=(vec2(sc)+vec2(0.5))/dims;
+        vec2 shift_uv=shift_px/dims;
+        samp.r=texture(fbuf_image,
+                       clamp(center_uv+shift_uv,vec2(0.0),vec2(1.0))).r;
+        samp.b=texture(fbuf_image,
+                       clamp(center_uv-shift_uv,vec2(0.0),vec2(1.0))).b;
+        // The existing center sample supplies green and alpha. Bloom stays
+        // on its existing single-sample path (no additional fullscreen pass
+        // or ten extra bloom reads when this effect is enabled).
+    }
 
     vec4 bloom_samp = vec4(0.0);
     // Each weight is uniform across the frame. Do not issue expensive
