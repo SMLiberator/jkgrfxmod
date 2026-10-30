@@ -362,6 +362,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("enable_precise_type3_collision").get_to(
                 rv->enable_precise_type3_collision);
         }
+        if(j.contains("precise_type3_use_node_transforms")) {
+            j.at("precise_type3_use_node_transforms").get_to(
+                rv->precise_type3_use_node_transforms);
+        }
         if(j.contains("use_vanilla_renderer")) {
             j.at("use_vanilla_renderer").get_to(rv->use_vanilla_renderer);
         }

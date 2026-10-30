@@ -5928,8 +5928,10 @@ namespace {
         // rather than calling the native accessor dozens of times per ray.
         // Do not retain poses between queries: COG/physics can modify them
         // even when the renderer frame counter has not advanced.
+        bool const use_node_transforms=
+            the_config && the_config->precise_type3_use_node_transforms;
         uint32_t model_ptr=0,node_count=0;
-        bool const known_count=
+        bool const known_count=use_node_transforms &&
             read(native.rd_thing+4,&model_ptr,4) &&
             jkgm::thing_node_valid_address(model_ptr+0x54U,4) &&
             read(uintptr_t(model_ptr)+0x54U,&node_count,4) &&
@@ -5969,7 +5971,8 @@ namespace {
             mesh_revision::current(),mesh_revision::active(),
             GetTickCount64(),pose,
             {{start[0],start[1],start[2]}},
-            {{dir[0],dir[1],dir[2]}},max_distance,result,&stats);
+            {{dir[0],dir[1],dir[2]}},max_distance,result,&stats,
+            use_node_transforms,&native.world_placement);
         if(status==jkgm::precise_type3_status::hit) {
             *out_distance=result.distance;
             *out_mesh=reinterpret_cast<void*>(result.mesh);
@@ -5981,7 +5984,9 @@ namespace {
             static thread_local unsigned traces=0;
             if(traces++<20U) {
                 std::ostringstream message;
-                message<<"JKGM precise collide=3 stage="
+                message<<"JKGM precise collide=3 mode="
+                       <<(use_node_transforms?"nodes":"thing")
+                       <<" stage="
                        <<(status==jkgm::precise_type3_status::hit?"hit":
                           status==jkgm::precise_type3_status::miss?"miss":
                           "fallback")
@@ -6070,7 +6075,10 @@ namespace {
                        profile_data.queries) {
                         double const n=double(profile_data.queries);
                         std::ostringstream line;
-                        line<<"JKGM collide=3 PERF queries="
+                        line<<"JKGM collide=3 PERF mode="
+                            <<(the_config->precise_type3_use_node_transforms?
+                               "nodes":"thing")
+                            <<" queries="
                             <<profile_data.queries
                             <<" hit/miss/fallback="
                             <<profile_data.hits<<"/"
@@ -7605,7 +7613,8 @@ bool attach_hooks()
         native_mesh_collision_hook_active=true;
         LOG_INFO("JKGM native collision Detour installed: type2=",
                  the_config->enable_mesh_collision,
-                 " precise_type3=",the_config->enable_precise_type3_collision);
+                 " precise_type3=",the_config->enable_precise_type3_collision,
+                 " type3_node_transforms=",the_config->precise_type3_use_node_transforms);
     }
     if(error==NO_ERROR && earth_sound_hook_requested) {
         native_earth_hit_sound_hook_active=true;

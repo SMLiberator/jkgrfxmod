@@ -113,6 +113,49 @@ int main()
     assert(cast({{10.5f,5.5f,6}},{{0,0,-1}})==
            precise_type3_status::miss);
 
+    // Vanilla-placement precise mode must use ONE Thing-level transform,
+    // ignore all node animation/offsets, and never call the pose provider.
+    // The collision polygon is local to the Thing, not to its node.
+    gpu_3do_matrix34 thing_pose{{
+        1,0,0, 0,1,0, 0,0,1, 20,7,0
+    }};
+    unsigned node_requests=0;
+    mots_native_pose_reader const reject_pose=[&](
+        uint32_t,gpu_3do_matrix34 &) {
+        ++node_requests;
+        return false;
+    };
+    auto cast_thing=[&](precise_type3::vec3 start,
+                        uint64_t revision=1) {
+        return cache.cast(reader,thing,base,revision,true,1001,
+            reject_pose,start,{{0,0,-1}},20,hit,&stats,
+            false,&thing_pose);
+    };
+    assert(cast_thing({{20.5f,7.5f,6}})==
+           precise_type3_status::hit);
+    assert(std::fabs(hit.distance-6.0f)<0.0001f);
+    assert(hit.mesh==meshes && hit.face==faces);
+    assert(node_requests==0 && stats.nodes==1 &&
+           stats.nodes_in_bounds==1 && stats.polygon_tests==1);
+    assert(cast_thing({{10.5f,5.5f,6}})==precise_type3_status::miss);
+    assert(stats.polygon_tests==0);
+
+    // In the no-node mode the authored node offset/rotation is irrelevant,
+    // but rotating the Thing itself must rotate the collision polygon.
+    thing_pose={{0,1,0, -1,0,0, 0,0,1, 20,7,0}};
+    assert(cast_thing({{19.5f,7.5f,6}})==precise_type3_status::hit);
+    assert(cast_thing({{20.5f,7.5f,6}})==precise_type3_status::miss);
+    assert(node_requests==0);
+
+    // Vanilla collide=3 ignores limb amputation as well as node matrices.
+    // This is deliberately a difference from the animated-node mode.
+    constexpr uintptr_t amputations=base+0x6000U;
+    u32(amputations,1);
+    u32(thing+0xec,uint32_t(amputations));
+    assert(cast_thing({{19.5f,7.5f,6}})==precise_type3_status::hit);
+    assert(node_requests==0);
+    u32(thing+0xec,0);
+
     // A geometry revision must replace cached vertices immediately.
     pose_matrix={{1,0,0, 0,1,0, 0,0,1, 10,5,0}};
     xyz(vertices+0,{{4,0,0}});

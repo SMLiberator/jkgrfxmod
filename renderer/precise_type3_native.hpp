@@ -149,10 +149,13 @@ public:
         precise_type3::vec3 const &start,
         precise_type3::vec3 const &unit_direction,
         float max_distance,precise_type3_hit &result,
-        precise_type3_stats *stats=nullptr)
+        precise_type3_stats *stats=nullptr,
+        bool use_node_transforms=true,
+        gpu_3do_matrix34 const *thing_pose=nullptr)
     {
         if(world_!=world) {entries_.clear();world_=world;}
-        if(!world || !read || !pose || !checked ||
+        if(!world || !read || (use_node_transforms && !pose) ||
+           (!use_node_transforms && !thing_pose) || !checked ||
            !(max_distance>0.0f) || !std::isfinite(max_distance) ||
            !precise_type3::finite(start) ||
            !precise_type3::finite(unit_direction))return precise_type3_status::unavailable;
@@ -199,64 +202,19 @@ public:
             } else *chosen=std::move(rebuilt);
         }
         chosen->last_used_ms=timestamp_ms;
-        // Live amputation flags, not cached across different Things.
         auto const size=chosen->geometry.nodes.size();
-        amputated_.assign(size,0);
-        if(identity.amputations &&
-           !read(identity.amputations,amputated_.data(),size*4U))
-            return precise_type3_status::unavailable;
-        // Reuse per-Thing active node decisions once per query instead of
-        // repeatedly traversing every parent chain for every leaf.
-        // Native snapshot validation has already ruled out cycles.
-        active_.assign(size,-1);
-        for(size_t i=0;i<size;++i) {
-            if(active_[i]>=0)continue;
-            chain_.clear();
-            int32_t at=int32_t(i);
-            while(at>=0) {
-                if(size_t(at)>=size || chain_.size()>=size)
-                    return precise_type3_status::unavailable;
-                if(active_[size_t(at)]>=0)break;
-                chain_.push_back(size_t(at));
-                at=chosen->geometry.nodes[size_t(at)].parent;
-            }
-            bool enabled=at<0 || active_[size_t(at)]!=0;
-            for(auto it=chain_.rbegin();it!=chain_.rend();++it) {
-                enabled=enabled && amputated_[*it]==0;
-                active_[*it]=enabled?1:0;
-            }
-        }
-
         precise_type3_hit best{};
         best.distance=max_distance;
         bool found=false;
-        for(size_t i=0;i<size;++i) {
-            if(!active_[i] || chosen->faces[i].empty())continue;
-            ++metrics.nodes;
-            gpu_3do_matrix34 world_pose{};
-            if(!pose(uint32_t(i),world_pose))
-                return precise_type3_status::unavailable;
-            auto const &mesh=chosen->geometry.nodes[i];
-            if(mesh.has_fitted_sphere &&
-               !precise_type3::ray_can_reach_mesh_sphere(
-                   start,unit_direction,max_distance,world_pose,
-                   mesh.fitted_sphere.center,mesh.fitted_sphere.radius))
-                continue;
-            ++metrics.spheres_passed;
-            auto const t=precise_type3::invert(world_pose);
-            if(!t.valid)return precise_type3_status::unavailable;
-            auto const ray=precise_type3::to_local(
-                t,start,unit_direction);
-            auto const &bounds=chosen->node_bounds[i];
-            if(bounds.valid && !precise_type3::ray_intersects_bounds(
-                ray,bounds.low,bounds.high,
-                found?double(best.distance):double(max_distance)))
-                continue;
-            ++metrics.nodes_in_bounds;
+        // The precise face test is identical in both modes. Only the
+        // transformation and node-level broad phase differ.
+        auto const test_faces=[&](
+            size_t i,precise_type3::transform const &inverse,
+            precise_type3::ray const &local)->bool {
             auto const &vertices=chosen->geometry.nodes[i].local_vertices;
             for(auto const &face:chosen->faces[i]) {
                 if(!precise_type3::ray_intersects_bounds(
-                    ray,face.low,face.high,
+                    local,face.low,face.high,
                     found?double(best.distance):double(max_distance)))
                     continue;
                 ++metrics.faces_in_bounds;
@@ -266,19 +224,98 @@ public:
                 };
                 ++metrics.polygon_tests;
                 if(!precise_type3::hit_face(
-                    ray,face.normal,face.indices.size(),vertex,
+                    local,face.normal,face.indices.size(),vertex,
                     found?double(best.distance):double(max_distance),
                     distance))
                     continue;
                 precise_type3::vec3 world_normal{};
                 if(!precise_type3::world_normal(
-                       t,face.normal,world_normal))
-                    return precise_type3_status::unavailable;
+                       inverse,face.normal,world_normal))
+                    return false;
                 best.distance=float(distance);
                 best.normal=world_normal;
                 best.mesh=face.mesh_address;
                 best.face=face.face_address;
                 found=true;
+            }
+            return true;
+        };
+
+        if(!use_node_transforms) {
+            // Vanilla collide=3 uses ONLY the Thing's orientation and
+            // position. It treats all geoset mesh vertices as Thing-local:
+            // authored hierarchy offsets, pivots, animation and amputation
+            // do not affect the collision faces.
+            //
+            // One inverse and one ray transform for the entire object.
+            // This intentionally keeps vanilla geometry placement while
+            // replacing its face mathematics with our precise solver.
+            auto const inverse=precise_type3::invert(*thing_pose);
+            if(!inverse.valid)return precise_type3_status::unavailable;
+            auto const local=precise_type3::to_local(
+                inverse,start,unit_direction);
+            for(size_t i=0;i<size;++i) {
+                if(chosen->faces[i].empty())continue;
+                ++metrics.nodes;
+                auto const &bounds=chosen->node_bounds[i];
+                if(bounds.valid && !precise_type3::ray_intersects_bounds(
+                    local,bounds.low,bounds.high,
+                    found?double(best.distance):double(max_distance)))
+                    continue;
+                ++metrics.nodes_in_bounds;
+                if(!test_faces(i,inverse,local))
+                    return precise_type3_status::unavailable;
+            }
+        } else {
+            // The opt-in animated-node path retains the original behavior.
+            // Read live amputations and independently check active nodes.
+            amputated_.assign(size,0);
+            if(identity.amputations &&
+               !read(identity.amputations,amputated_.data(),size*4U))
+                return precise_type3_status::unavailable;
+            active_.assign(size,-1);
+            for(size_t i=0;i<size;++i) {
+                if(active_[i]>=0)continue;
+                chain_.clear();
+                int32_t at=int32_t(i);
+                while(at>=0) {
+                    if(size_t(at)>=size || chain_.size()>=size)
+                        return precise_type3_status::unavailable;
+                    if(active_[size_t(at)]>=0)break;
+                    chain_.push_back(size_t(at));
+                    at=chosen->geometry.nodes[size_t(at)].parent;
+                }
+                bool enabled=at<0 || active_[size_t(at)]!=0;
+                for(auto it=chain_.rbegin();it!=chain_.rend();++it) {
+                    enabled=enabled && amputated_[*it]==0;
+                    active_[*it]=enabled?1:0;
+                }
+            }
+            for(size_t i=0;i<size;++i) {
+                if(!active_[i] || chosen->faces[i].empty())continue;
+                ++metrics.nodes;
+                gpu_3do_matrix34 world_pose{};
+                if(!pose(uint32_t(i),world_pose))
+                    return precise_type3_status::unavailable;
+                auto const &mesh=chosen->geometry.nodes[i];
+                if(mesh.has_fitted_sphere &&
+                   !precise_type3::ray_can_reach_mesh_sphere(
+                       start,unit_direction,max_distance,world_pose,
+                       mesh.fitted_sphere.center,mesh.fitted_sphere.radius))
+                    continue;
+                ++metrics.spheres_passed;
+                auto const inverse=precise_type3::invert(world_pose);
+                if(!inverse.valid)return precise_type3_status::unavailable;
+                auto const local=precise_type3::to_local(
+                    inverse,start,unit_direction);
+                auto const &bounds=chosen->node_bounds[i];
+                if(bounds.valid && !precise_type3::ray_intersects_bounds(
+                    local,bounds.low,bounds.high,
+                    found?double(best.distance):double(max_distance)))
+                    continue;
+                ++metrics.nodes_in_bounds;
+                if(!test_faces(i,inverse,local))
+                    return precise_type3_status::unavailable;
             }
         }
         if(stats)*stats=metrics;
