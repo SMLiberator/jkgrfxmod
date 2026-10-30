@@ -66,6 +66,18 @@ int main() {
     local=to_local(invert(mirrored),{{5,2,8}},down);
     assert(ray_intersects_bounds(local,{{-1,-1,0}},{{1,1,0}},10));
 
+    // A mesh whose authored vertices are away from the node origin must
+    // use its FITTED center; testing the origin would exclude valid hits.
+    assert(ray_can_reach_mesh_sphere(
+        {{10.5f,5.5f,6}},down,20,identity,{{10.5f,5.5f,0}},1));
+    assert(!ray_can_reach_mesh_sphere(
+        {{0.5f,0.5f,6}},down,20,identity,{{10.5f,5.5f,0}},1));
+    // Translation of the Thing + authored center, with arbitrary mirroring.
+    assert(ray_can_reach_mesh_sphere(
+        {{-16,17,5}},down,20,mirrored,{{10.5f,5,0}},1));
+    assert(!ray_can_reach_mesh_sphere(
+        {{30,0,5}},down,20,mirrored,{{10.5f,5,0}},1));
+
     // Zero-scale transforms and malformed inputs are rejected.
     matrix34 const collapsed{{0,0,0,0,1,0,0,0,1,0,0,0}};
     assert(!invert(collapsed).valid);

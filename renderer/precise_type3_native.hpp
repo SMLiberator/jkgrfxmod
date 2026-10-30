@@ -31,7 +31,7 @@ struct precise_type3_bounds {
 };
 struct precise_type3_stats {
     bool rebuilt=false;
-    uint32_t nodes=0,nodes_in_bounds=0;
+    uint32_t nodes=0,spheres_passed=0,nodes_in_bounds=0;
     uint32_t faces_in_bounds=0,polygon_tests=0;
 };
 struct precise_type3_cache_entry {
@@ -47,6 +47,10 @@ class precise_type3_native_cache {
     static constexpr uint32_t max_indices=524288;
     static constexpr uint32_t max_face_vertices=512;
     std::vector<precise_type3_cache_entry> entries_;
+    // Reused scratch buffers. This cache is thread-local at the hook.
+    std::vector<uint32_t> amputated_;
+    std::vector<int8_t> active_;
+    std::vector<size_t> chain_;
     uint64_t world_=0;
 
     static bool build(thing_node_reader const &read,uintptr_t thing,
@@ -197,28 +201,29 @@ public:
         chosen->last_used_ms=timestamp_ms;
         // Live amputation flags, not cached across different Things.
         auto const size=chosen->geometry.nodes.size();
-        std::vector<uint32_t> amputated(size,0);
+        amputated_.assign(size,0);
         if(identity.amputations &&
-           !read(identity.amputations,amputated.data(),size*4U))
+           !read(identity.amputations,amputated_.data(),size*4U))
             return precise_type3_status::unavailable;
         // Reuse per-Thing active node decisions once per query instead of
         // repeatedly traversing every parent chain for every leaf.
         // Native snapshot validation has already ruled out cycles.
-        std::vector<int8_t> active(size,-1);
+        active_.assign(size,-1);
         for(size_t i=0;i<size;++i) {
-            if(active[i]>=0)continue;
-            std::vector<size_t> chain;
+            if(active_[i]>=0)continue;
+            chain_.clear();
             int32_t at=int32_t(i);
-            while(at>=0 && active[size_t(at)]<0) {
-                if(size_t(at)>=size || chain.size()>=size)
+            while(at>=0) {
+                if(size_t(at)>=size || chain_.size()>=size)
                     return precise_type3_status::unavailable;
-                chain.push_back(size_t(at));
+                if(active_[size_t(at)]>=0)break;
+                chain_.push_back(size_t(at));
                 at=chosen->geometry.nodes[size_t(at)].parent;
             }
-            bool enabled=at<0 || active[size_t(at)]!=0;
-            for(auto it=chain.rbegin();it!=chain.rend();++it) {
-                enabled=enabled && amputated[*it]==0;
-                active[*it]=enabled?1:0;
+            bool enabled=at<0 || active_[size_t(at)]!=0;
+            for(auto it=chain_.rbegin();it!=chain_.rend();++it) {
+                enabled=enabled && amputated_[*it]==0;
+                active_[*it]=enabled?1:0;
             }
         }
 
@@ -231,6 +236,13 @@ public:
             gpu_3do_matrix34 world_pose{};
             if(!pose(uint32_t(i),world_pose))
                 return precise_type3_status::unavailable;
+            auto const &mesh=chosen->geometry.nodes[i];
+            if(mesh.has_fitted_sphere &&
+               !precise_type3::ray_can_reach_mesh_sphere(
+                   start,unit_direction,max_distance,world_pose,
+                   mesh.fitted_sphere.center,mesh.fitted_sphere.radius))
+                continue;
+            ++metrics.spheres_passed;
             auto const t=precise_type3::invert(world_pose);
             if(!t.valid)return precise_type3_status::unavailable;
             auto const ray=precise_type3::to_local(

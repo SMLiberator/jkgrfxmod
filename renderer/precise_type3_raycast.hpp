@@ -135,6 +135,43 @@ inline bool ray_intersects_bounds(ray const& r,vec3 const& lower,
     return true;
 }
 
+// Conservative world-space local-geometry sphere check.
+// Frobenius length upper-bounds the maximum scale of ANY affine 3x3,
+// even with shear and reflected axes. A radius too large only costs speed;
+// it cannot exclude a valid polygon hit.
+inline bool ray_can_reach_mesh_sphere(
+    vec3 const& origin,vec3 const& unit_direction,double max_distance,
+    matrix34 const& pose,vec3 const& center,float radius)
+{
+    if(!finite(origin)||!finite(unit_direction)||!finite(center)||
+       !(radius>=0.0f)||!std::isfinite(radius) ||
+       !(max_distance>=0.0)||!std::isfinite(max_distance))
+        return true;
+    std::array<double,3> c{{pose[9],pose[10],pose[11]}};
+    double scale2=0.0;
+    for(int axis=0;axis<3;++axis) {
+        for(int column=0;column<3;++column) {
+            double const v=pose[column*3+axis];
+            if(!std::isfinite(v))return true;
+            c[axis]+=v*double(center[column]);
+            scale2+=v*v;
+        }
+    }
+    double const bound=double(radius)*std::sqrt(scale2)+
+        std::max(1.e-5,double(radius)*1.e-5);
+    if(!std::isfinite(bound))return true;
+    std::array<double,3> to_center{{
+        c[0]-origin[0],c[1]-origin[1],c[2]-origin[2]}};
+    auto const d=to_double(unit_direction);
+    double const len2=dot(d,d);
+    if(!(len2>1.e-20))return true;
+    double projected=dot(to_center,d)/len2;
+    projected=std::max(0.0,std::min(projected,max_distance));
+    for(int axis=0;axis<3;++axis)
+        to_center[axis]-=projected*d[axis];
+    return dot(to_center,to_center)<=bound*bound;
+}
+
 // Even-odd polygon test works with nonconvex JK faces. Count true edge
 // contact as inside to avoid rejecting a collision due to float rounding.
 template<class Vertex>

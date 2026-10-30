@@ -21,6 +21,7 @@
 #include "native_earth_hit_sound.hpp"
 #include "mots_native_collision_bridge.hpp"
 #include "precise_type3_native.hpp"
+#include "precise_type3_pose_bulk.hpp"
 #include "mots_collision_snapshot_cache.hpp"
 #include "cog_math.hpp"
 #include "cog_pyr_math.hpp"
@@ -5893,7 +5894,8 @@ namespace {
     jkgm::precise_type3_status precise_type3_try_query(
         void *checked,float const *start,float const *dir,
         float max_distance,float *out_distance,
-        void **out_mesh,void **out_face,float *out_normal)
+        void **out_mesh,void **out_face,float *out_normal,
+        jkgm::precise_type3_stats *out_stats=nullptr)
     {
         if(!checked || !start || !dir || !out_distance ||
            !out_mesh || !out_face || !out_normal ||
@@ -5921,8 +5923,39 @@ namespace {
                jkgm::engine_material_debug::current_world_global,world))
             return jkgm::precise_type3_status::unavailable;
 
+        // One native matrix accessor call refreshes ALL rdThing joint
+        // matrices when stale. Copy the pose table once per collision query
+        // rather than calling the native accessor dozens of times per ray.
+        // Do not retain poses between queries: COG/physics can modify them
+        // even when the renderer frame counter has not advanced.
+        uint32_t model_ptr=0,node_count=0;
+        bool const known_count=
+            read(native.rd_thing+4,&model_ptr,4) &&
+            jkgm::thing_node_valid_address(model_ptr+0x54U,4) &&
+            read(uintptr_t(model_ptr)+0x54U,&node_count,4) &&
+            node_count>0 && node_count<=jkgm::mots_native_layout::max_nodes;
+        thread_local std::vector<jkgm::gpu_3do_matrix34> matrices;
+        bool batch_attempted=false,batch_valid=false;
         jkgm::mots_native_pose_reader const pose=[&](
             uint32_t index,jkgm::gpu_3do_matrix34 &matrix)->bool {
+            if(!batch_attempted) {
+                batch_attempted=true;
+                if(known_count)
+                    batch_valid=jkgm::precise_type3_read_pose_batch(
+                        read,native.rd_thing,node_count,
+                        [&](jkgm::gpu_3do_matrix34 &first)->bool {
+                            return jkgm_get_node_matrix(
+                                reinterpret_cast<void*>(native.rd_thing),
+                                native.world_placement.data(),0,
+                                first.data()) &&
+                                jkgm::gpu_3do_matrix_finite(first);
+                        },matrices);
+            }
+            if(batch_valid && index<matrices.size()) {
+                matrix=matrices[index];
+                return jkgm::gpu_3do_matrix_finite(matrix);
+            }
+            // Original individually refreshed path for unsupported memory.
             return jkgm_get_node_matrix(
                 reinterpret_cast<void*>(native.rd_thing),
                 native.world_placement.data(),index,matrix.data()) &&
@@ -5943,6 +5976,7 @@ namespace {
             *out_face=reinterpret_cast<void*>(result.face);
             std::memcpy(out_normal,result.normal.data(),12);
         }
+        if(out_stats)*out_stats=stats;
         if(the_config && the_config->profile_renderer) {
             static thread_local unsigned traces=0;
             if(traces++<20U) {
@@ -5956,6 +5990,7 @@ namespace {
                           result.distance:-1.0f)
                        <<" rebuilt="<<stats.rebuilt
                        <<" nodes="<<stats.nodes
+                       <<" spheres="<<stats.spheres_passed
                        <<" bounds="<<stats.nodes_in_bounds
                        <<" faces="<<stats.faces_in_bounds
                        <<" tested="<<stats.polygon_tests;
@@ -5986,9 +6021,77 @@ namespace {
             std::memcpy(&checked_mode,
                 static_cast<uint8_t const*>(checked)+0x28U,4);
             if(checked_mode==3U) {
+                bool const profile=the_config->profile_renderer;
+                LARGE_INTEGER before{},after{};
+                if(profile)QueryPerformanceCounter(&before);
+                jkgm::precise_type3_stats metrics{};
                 auto const status=precise_type3_try_query(
                     checked,start,dir,max_distance,out_distance,
-                    out_mesh,out_face,out_normal);
+                    out_mesh,out_face,out_normal,&metrics);
+                if(profile) {
+                    QueryPerformanceCounter(&after);
+                    struct summary {
+                        uint64_t queries=0,hits=0,misses=0,fallbacks=0;
+                        uint64_t rebuilds=0,nodes=0,spheres=0,bounds=0;
+                        uint64_t faces=0,polygon_tests=0;
+                        double total_us=0,peak_us=0;
+                        uint64_t started_ms=0;
+                    };
+                    static thread_local summary profile_data{};
+                    static LARGE_INTEGER frequency=[] {
+                        LARGE_INTEGER f{};
+                        QueryPerformanceFrequency(&f);
+                        return f;
+                    }();
+                    double const us=frequency.QuadPart>0
+                        ? double(after.QuadPart-before.QuadPart)*
+                          1000000.0/double(frequency.QuadPart):0.0;
+                    if(us>=0 && std::isfinite(us)) {
+                        ++profile_data.queries;
+                        profile_data.total_us+=us;
+                        profile_data.peak_us=std::max(profile_data.peak_us,us);
+                    }
+                    profile_data.hits+=
+                        status==jkgm::precise_type3_status::hit;
+                    profile_data.misses+=
+                        status==jkgm::precise_type3_status::miss;
+                    profile_data.fallbacks+=
+                        status==jkgm::precise_type3_status::unavailable;
+                    profile_data.rebuilds+=metrics.rebuilt;
+                    profile_data.nodes+=metrics.nodes;
+                    profile_data.spheres+=metrics.spheres_passed;
+                    profile_data.bounds+=metrics.nodes_in_bounds;
+                    profile_data.faces+=metrics.faces_in_bounds;
+                    profile_data.polygon_tests+=metrics.polygon_tests;
+                    uint64_t const now=GetTickCount64();
+                    if(!profile_data.started_ms)
+                        profile_data.started_ms=now;
+                    if(now-profile_data.started_ms>=2000U &&
+                       profile_data.queries) {
+                        double const n=double(profile_data.queries);
+                        std::ostringstream line;
+                        line<<"JKGM collide=3 PERF queries="
+                            <<profile_data.queries
+                            <<" hit/miss/fallback="
+                            <<profile_data.hits<<"/"
+                            <<profile_data.misses<<"/"
+                            <<profile_data.fallbacks
+                            <<" avg/peak_us="
+                            <<profile_data.total_us/n<<"/"
+                            <<profile_data.peak_us
+                            <<" geometry_rebuilds="
+                            <<profile_data.rebuilds
+                            <<" nodes_avg="<<profile_data.nodes/n
+                            <<" spheres_avg="<<profile_data.spheres/n
+                            <<" bounds_avg="<<profile_data.bounds/n
+                            <<" faces_avg="<<profile_data.faces/n
+                            <<" polygon_tests_avg="
+                            <<profile_data.polygon_tests/n;
+                        LOG_INFO(line.str());
+                        profile_data=summary{};
+                        profile_data.started_ms=now;
+                    }
+                }
                 if(status==jkgm::precise_type3_status::hit)
                     return 0x5; // native THING | THINGADJOINCROSS
                 if(status==jkgm::precise_type3_status::miss)
