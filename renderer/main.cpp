@@ -5930,12 +5930,13 @@ namespace {
         };
         static thread_local jkgm::precise_type3_native_cache cache;
         jkgm::precise_type3_hit result{};
+        jkgm::precise_type3_stats stats{};
         auto const status=cache.cast(
             read,reinterpret_cast<uintptr_t>(checked),world,
             mesh_revision::current(),mesh_revision::active(),
             GetTickCount64(),pose,
             {{start[0],start[1],start[2]}},
-            {{dir[0],dir[1],dir[2]}},max_distance,result);
+            {{dir[0],dir[1],dir[2]}},max_distance,result,&stats);
         if(status==jkgm::precise_type3_status::hit) {
             *out_distance=result.distance;
             *out_mesh=reinterpret_cast<void*>(result.mesh);
@@ -5952,7 +5953,12 @@ namespace {
                           "fallback")
                        <<" distance="
                        <<(status==jkgm::precise_type3_status::hit?
-                          result.distance:-1.0f);
+                          result.distance:-1.0f)
+                       <<" rebuilt="<<stats.rebuilt
+                       <<" nodes="<<stats.nodes
+                       <<" bounds="<<stats.nodes_in_bounds
+                       <<" faces="<<stats.faces_in_bounds
+                       <<" tested="<<stats.polygon_tests;
                 LOG_INFO(message.str());
             }
         }

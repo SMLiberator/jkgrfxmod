@@ -22,13 +22,24 @@ struct precise_type3_hit {
 struct precise_type3_face {
     uintptr_t face_address=0,mesh_address=0;
     precise_type3::vec3 normal{};
+    precise_type3::vec3 low{},high{};
     std::vector<uint32_t> indices;
+};
+struct precise_type3_bounds {
+    precise_type3::vec3 low{},high{};
+    bool valid=false;
+};
+struct precise_type3_stats {
+    bool rebuilt=false;
+    uint32_t nodes=0,nodes_in_bounds=0;
+    uint32_t faces_in_bounds=0,polygon_tests=0;
 };
 struct precise_type3_cache_entry {
     mots_collision_model_identity key{};
     uint64_t world=0,generation=0,built_ms=0,last_used_ms=0;
     mots_native_model_snapshot geometry{};
     std::vector<std::vector<precise_type3_face>> faces;
+    std::vector<precise_type3_bounds> node_bounds;
 };
 class precise_type3_native_cache {
     static constexpr size_t max_entries=16;
@@ -46,11 +57,28 @@ class precise_type3_native_cache {
         precise_type3_cache_entry candidate{};
         candidate.geometry=std::move(geometry);
         candidate.faces.resize(candidate.geometry.nodes.size());
+        candidate.node_bounds.resize(candidate.geometry.nodes.size());
         uint32_t face_count=0,index_count=0;
         for(size_t node_index=0;
             node_index<candidate.geometry.nodes.size();++node_index) {
             auto const &node=candidate.geometry.nodes[node_index];
             if(node.mesh_index<0 || node.local_vertices.size()<3)continue;
+            // Shared immutable vertex array bounds, in mesh-local space.
+            // They include authored offset vertices and do not depend on
+            // the Thing's original, often inaccurate collision sphere.
+            auto &bounds=candidate.node_bounds[node_index];
+            bounds.low={{std::numeric_limits<float>::max(),
+                         std::numeric_limits<float>::max(),
+                         std::numeric_limits<float>::max()}};
+            bounds.high={{-std::numeric_limits<float>::max(),
+                          -std::numeric_limits<float>::max(),
+                          -std::numeric_limits<float>::max()}};
+            for(auto const &vertex:node.local_vertices)
+                for(int axis=0;axis<3;++axis) {
+                    bounds.low[axis]=std::min(bounds.low[axis],vertex[axis]);
+                    bounds.high[axis]=std::max(bounds.high[axis],vertex[axis]);
+                }
+            bounds.valid=true;
             uintptr_t const mesh=entry.key.meshes+
                  uintptr_t(node.mesh_index)*mesh_stride;
             uint32_t faces_ptr=0,n_faces=0;
@@ -87,11 +115,25 @@ class precise_type3_native_cache {
                 for(uint32_t index:face.indices)
                     if(index>=node.local_vertices.size())return false;
                 if(!precise_type3::finite(face.normal))return false;
+                face.low={{std::numeric_limits<float>::max(),
+                           std::numeric_limits<float>::max(),
+                           std::numeric_limits<float>::max()}};
+                face.high={{-std::numeric_limits<float>::max(),
+                            -std::numeric_limits<float>::max(),
+                            -std::numeric_limits<float>::max()}};
+                for(uint32_t const index:face.indices) {
+                    auto const &v=node.local_vertices[index];
+                    for(int axis=0;axis<3;++axis) {
+                        face.low[axis]=std::min(face.low[axis],v[axis]);
+                        face.high[axis]=std::max(face.high[axis],v[axis]);
+                    }
+                }
                 output.push_back(std::move(face));
             }
         }
         entry.geometry=std::move(candidate.geometry);
         entry.faces=std::move(candidate.faces);
+        entry.node_bounds=std::move(candidate.node_bounds);
         return true;
     }
 public:
@@ -102,7 +144,8 @@ public:
         uint64_t timestamp_ms,mots_native_pose_reader const &pose,
         precise_type3::vec3 const &start,
         precise_type3::vec3 const &unit_direction,
-        float max_distance,precise_type3_hit &result)
+        float max_distance,precise_type3_hit &result,
+        precise_type3_stats *stats=nullptr)
     {
         if(world_!=world) {entries_.clear();world_=world;}
         if(!world || !read || !pose || !checked ||
@@ -122,12 +165,14 @@ public:
                 break;
             }
         }
+        precise_type3_stats metrics{};
         bool const refresh=chosen==nullptr ||
             chosen->generation!=generation ||
             (timestamp_ms<chosen->built_ms) ||
             (!reliable_revision &&
-             timestamp_ms-chosen->built_ms>250);
+             timestamp_ms-chosen->built_ms>1000);
         if(refresh) {
+            metrics.rebuilt=true;
             precise_type3_cache_entry rebuilt{};
             rebuilt.key=identity;
             rebuilt.world=world;
@@ -156,18 +201,25 @@ public:
         if(identity.amputations &&
            !read(identity.amputations,amputated.data(),size*4U))
             return precise_type3_status::unavailable;
-        std::vector<uint8_t> active(size,0);
+        // Reuse per-Thing active node decisions once per query instead of
+        // repeatedly traversing every parent chain for every leaf.
+        // Native snapshot validation has already ruled out cycles.
+        std::vector<int8_t> active(size,-1);
         for(size_t i=0;i<size;++i) {
-            bool enabled=true;
-            int32_t parent=int32_t(i);
-            for(size_t hops=0;parent>=0 && hops<size;++hops) {
-                if(amputated[size_t(parent)]!=0) {
-                    enabled=false;break;
-                }
-                parent=chosen->geometry.nodes[size_t(parent)].parent;
-                if(parent>=int32_t(size))return precise_type3_status::unavailable;
+            if(active[i]>=0)continue;
+            std::vector<size_t> chain;
+            int32_t at=int32_t(i);
+            while(at>=0 && active[size_t(at)]<0) {
+                if(size_t(at)>=size || chain.size()>=size)
+                    return precise_type3_status::unavailable;
+                chain.push_back(size_t(at));
+                at=chosen->geometry.nodes[size_t(at)].parent;
             }
-            active[i]=enabled?1:0;
+            bool enabled=at<0 || active[size_t(at)]!=0;
+            for(auto it=chain.rbegin();it!=chain.rend();++it) {
+                enabled=enabled && amputated[*it]==0;
+                active[*it]=enabled?1:0;
+            }
         }
 
         precise_type3_hit best{};
@@ -175,6 +227,7 @@ public:
         bool found=false;
         for(size_t i=0;i<size;++i) {
             if(!active[i] || chosen->faces[i].empty())continue;
+            ++metrics.nodes;
             gpu_3do_matrix34 world_pose{};
             if(!pose(uint32_t(i),world_pose))
                 return precise_type3_status::unavailable;
@@ -182,12 +235,24 @@ public:
             if(!t.valid)return precise_type3_status::unavailable;
             auto const ray=precise_type3::to_local(
                 t,start,unit_direction);
+            auto const &bounds=chosen->node_bounds[i];
+            if(bounds.valid && !precise_type3::ray_intersects_bounds(
+                ray,bounds.low,bounds.high,
+                found?double(best.distance):double(max_distance)))
+                continue;
+            ++metrics.nodes_in_bounds;
             auto const &vertices=chosen->geometry.nodes[i].local_vertices;
             for(auto const &face:chosen->faces[i]) {
+                if(!precise_type3::ray_intersects_bounds(
+                    ray,face.low,face.high,
+                    found?double(best.distance):double(max_distance)))
+                    continue;
+                ++metrics.faces_in_bounds;
                 double distance=0.0;
                 auto const vertex=[&](size_t v) {
                     return vertices[face.indices[v]];
                 };
+                ++metrics.polygon_tests;
                 if(!precise_type3::hit_face(
                     ray,face.normal,face.indices.size(),vertex,
                     found?double(best.distance):double(max_distance),
@@ -204,6 +269,7 @@ public:
                 found=true;
             }
         }
+        if(stats)*stats=metrics;
         if(!found)return precise_type3_status::miss;
         result=best;
         return precise_type3_status::hit;

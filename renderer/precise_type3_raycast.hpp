@@ -104,6 +104,37 @@ inline bool point_on_segment(double x,double y,double ax,double ay,
     return std::fabs(side)<=tolerance &&
            along>=-tolerance/len && along<=1.0+tolerance/len;
 }
+// Conservative local-space AABB, including rays parallel to an axis.
+// Deliberately preserve a small positive margin at face/mesh boundaries.
+// A failed/ambiguous bounds check must never suppress a real hit.
+inline bool ray_intersects_bounds(ray const& r,vec3 const& lower,
+                                  vec3 const& upper,double max_distance)
+{
+    if(!finite(lower)||!finite(upper)||!(max_distance>=0.0)||
+       !std::isfinite(max_distance))return true;
+    double enter=0.0,leave=max_distance;
+    for(int axis=0;axis<3;++axis) {
+        double const extent=double(upper[axis])-lower[axis];
+        if(extent<0.0)return true;
+        double const margin=std::max(1.e-5,extent*1.e-5);
+        double const lo=double(lower[axis])-margin;
+        double const hi=double(upper[axis])+margin;
+        double const position=r.start[axis],direction=r.direction[axis];
+        if(!std::isfinite(position)||!std::isfinite(direction))return true;
+        if(std::fabs(direction)<1.e-16) {
+            if(position<lo || position>hi)return false;
+            continue;
+        }
+        double a=(lo-position)/direction;
+        double b=(hi-position)/direction;
+        if(a>b)std::swap(a,b);
+        enter=std::max(enter,a);
+        leave=std::min(leave,b);
+        if(leave<enter)return false;
+    }
+    return true;
+}
+
 // Even-odd polygon test works with nonconvex JK faces. Count true edge
 // contact as inside to avoid rejecting a collision due to float rounding.
 template<class Vertex>

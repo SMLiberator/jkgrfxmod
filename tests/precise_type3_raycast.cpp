@@ -55,6 +55,17 @@ int main() {
     assert(approx(cast(square,normal,sheared,{{10,20,35}},down),5));
     assert(approx(cast(square,normal,sheared,{{10,20,35}},down,5),5));
     assert(cast(square,normal,sheared,{{10,20,35}},down,4.99)<0);
+    // Conservative ray bounds: tests parallel axes and tangential edges,
+    // and must never reject a valid ray just outside float precision.
+    ray local=to_local(invert(identity),{{0,0,2}},down);
+    assert(ray_intersects_bounds(local,{{-1,-1,0}},{{1,1,0}},10));
+    assert(!ray_intersects_bounds(local,{{2,2,0}},{{4,4,0}},10));
+    assert(!ray_intersects_bounds(local,{{-1,-1,0}},{{1,1,0}},1));
+    local=to_local(invert(identity),{{1.0000001f,0,2}},down);
+    assert(ray_intersects_bounds(local,{{-1,-1,0}},{{1,1,0}},10));
+    local=to_local(invert(mirrored),{{5,2,8}},down);
+    assert(ray_intersects_bounds(local,{{-1,-1,0}},{{1,1,0}},10));
+
     // Zero-scale transforms and malformed inputs are rejected.
     matrix34 const collapsed{{0,0,0,0,1,0,0,0,1,0,0,0}};
     assert(!invert(collapsed).valid);
