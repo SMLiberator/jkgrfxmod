@@ -41,6 +41,13 @@ namespace jkgm {
         animated_floats<3> params{std::array<float, 3>{0.0f, 1.0f, 1.0f}};
     };
 
+    struct rgb_split_settings {
+        // Red and blue channels shift outward/inward by this many pixels
+        // at the screen corners; green remains centered. 0 = disabled.
+        // Controlled by SetRGBSplit(factor, fadeTime), maximum 32 pixels.
+        animated_floats<1> pixels{std::array<float, 1>{0.0f}};
+    };
+
     // Recursive temporal accumulation. 0 = no trails, 1 = hold the previous
     // output indefinitely. The history must be invalidated on reset or scene changes.
     // Screen-space depth blur: distances are JK's world/view units.
@@ -102,6 +109,12 @@ namespace jkgm {
         return settings;
     }
 
+    inline rgb_split_settings &get_rgb_split_settings()
+    {
+        static rgb_split_settings settings;
+        return settings;
+    }
+
     // Call after post_to_srgb.use_program() and before drawing the final pass.
     inline void apply_post_fx(shaders::post_to_srgb_shader &shader, bool enable_post)
     {
@@ -110,6 +123,7 @@ namespace jkgm {
             shader.set_film_grain(make_point(0.0f, 1.0f, 0.0f, 0.0f));
             shader.set_vignette(make_point(0.0f, 0.0f, 0.0f, 0.0f));
             shader.set_color_filter(0.0f, 1.0f, 1.0f);
+            shader.set_rgb_split(0.0f);
             return;
         }
 
@@ -140,5 +154,11 @@ namespace jkgm {
         shader.set_color_filter(std::clamp(cf[0], -1.0f, 1.0f),
                                 std::clamp(cf[1], 0.0f, 4.0f),
                                 std::clamp(cf[2], 0.0f, 4.0f));
+
+        // Radial RGB channel split, integrated in the existing fullscreen
+        // presentation pass. Zero avoids all additional texture samples.
+        float const split = get_rgb_split_settings().pixels.value(now)[0];
+        shader.set_rgb_split(std::isfinite(split)
+                                 ? std::clamp(split,0.0f,32.0f) : 0.0f);
     }
 }
