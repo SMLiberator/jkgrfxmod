@@ -54,5 +54,15 @@ int main()
     assert(wave[20]==1 && wave[22]==1); // PCM, mono
     assert(wave[24]==0x40 && wave[25]==0x1f); // 8000 Hz
     assert(wave[34]==16 && wave[35]==0); // 16-bit
+
+    // Small real FLAC with the encoder's unused metadata padding stripped.
+    // Regression coverage for lossless PCM16 conversion as well.
+    auto flac=from_base64(
+"ZkxhQ4AAACICQAJAAACpAACpAfQA8AAAARgzLL5Nzr2tNbu1WS8tP3Zh//h0CAABF+VOAAAFawoyDcUPtg/NDgUKlOWZT70maqdkEPdehSHj/rSALc6hQEwKBDBDT3MRhJCCQspo/1JBIJCl8MQMRlCgiIkrTc6hIhEUEZPzIYQwLEJCSTQYg0MEMFCISEwjpnMtCgiIpUcc1ESBMBMLTR/0ihCQkk7fowsREFgjBBk3OoUBMCgQwQ09zEYSQgkLKaP9SQSCQpfDEDEZQoIiJKxN3A==");
+    assert(jkgm::decode_compressed_sound_to_wave(".flac",flac,wave));
+    assert(wave.size()>44);
+    assert(std::memcmp(wave.data(),"RIFF",4)==0);
+    assert(std::memcmp(wave.data()+36,"data",4)==0);
+    assert(wave[34]==16 && wave[22]==1);
     return 0;
 }
