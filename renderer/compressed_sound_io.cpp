@@ -10,6 +10,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -153,8 +154,10 @@ namespace {
                 cached_bytes+=result->size();
             }
         }
-        LOG_INFO("JKGM compressed sound decoded: ",path,
-                 " PCM wave bytes=",result->size());
+        std::ostringstream report;
+        report<<"JKGM compressed sound decoded: "<<path
+              <<" PCM wave bytes="<<result->size();
+        LOG_INFO(report.str());
         return result;
     }
     int virtual_open(std::shared_ptr<std::vector<uint8_t>> wav)
