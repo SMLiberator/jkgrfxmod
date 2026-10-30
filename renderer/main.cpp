@@ -6089,7 +6089,7 @@ namespace {
             best.distance=world_hit.distance;
             best.normal=world_hit.normal;
             best.surface_index=int(world_hit.surface_index);
-            jkgm::cog_sector_array sectors{};
+            cog_sector_array sectors{};
             if(cog_sector_array_read(world,sectors)) {
                 uint32_t base=0;
                 if(read(world+0xacU,&base,4)) {
@@ -6191,7 +6191,7 @@ namespace {
                 best.thing_index=int(index);
                 best.thing_address=at;
                 best.thing_signature=sig;
-                jkgm::cog_sector_array sectors{};
+                cog_sector_array sectors{};
                 if(cog_sector_array_read(world,sectors))
                     best.sector_index=cog_sector_id_at_ptr(
                         sectors,uintptr_t(sector));
