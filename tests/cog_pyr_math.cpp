@@ -57,8 +57,34 @@ int main()
         check_direction(basis.right,cog_pyr_axis::right);
         check_direction(basis.up,cog_pyr_axis::up);
     }
+    // RotateVector accepts displacements of any length, not just LVecs.
+    matches(cog_pyr_rotate_vector({{0,4,0}},{{90,0,0}}),
+            {{0,0,4}});
+    matches(cog_pyr_rotate_vector({{0,4,0}},{{-90,0,0}}),
+            {{0,0,-4}});
+    matches(cog_pyr_rotate_vector({{0,4,0}},{{0,90,0}}),
+            {{-4,0,0}});
+    matches(cog_pyr_rotate_vector({{2,-5,7}},{{0,0,0}}),
+            {{2,-5,7}});
+    matches(cog_pyr_rotate_vector({{0,0,0}},{{25,-40,70}}),
+            {{0,0,0}});
+    matches(cog_pyr_rotate_vector({{2,3,4}},{{0,0,90}}),
+            {{4,3,-2}});
+    // Rotation changes direction, not the vector's magnitude.
+    for(cog_pyr_vec v: {cog_pyr_vec{{0,4,0}},{{2,-3,7}},{{-11,5,0.25f}}}) {
+        float const len2=cog_pyr_dot(v,v);
+        for(cog_pyr_vec pyr: {cog_pyr_vec{{30,45,60}},
+                              {{-80,270,-35}},{{90,0,0}}}) {
+            auto const out=cog_pyr_rotate_vector(v,pyr);
+            assert(near(cog_pyr_dot(out,out),len2,0.001f));
+        }
+    }
     float const nan=std::numeric_limits<float>::quiet_NaN();
     matches(cog_pyr_from_direction({{0,0,0}},cog_pyr_axis::look),{{0,0,0}});
     matches(cog_pyr_from_direction({{nan,1,0}},cog_pyr_axis::right),{{0,0,0}});
     matches(cog_pyr_direction({{0,nan,0}},cog_pyr_axis::up),{{0,0,0}});
+    matches(cog_pyr_rotate_vector({{0,4,0}},{{nan,0,0}}),
+            {{0,0,0}});
+    matches(cog_pyr_rotate_vector({{nan,4,0}},{{0,0,0}}),
+            {{0,0,0}});
 }
