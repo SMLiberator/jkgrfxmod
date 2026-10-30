@@ -5944,13 +5944,17 @@ namespace {
         }
         if(the_config && the_config->profile_renderer) {
             static thread_local unsigned traces=0;
-            if(traces++<20U)
-                LOG_INFO("JKGM precise collide=3 stage=",
-                    status==jkgm::precise_type3_status::hit?"hit":
-                    status==jkgm::precise_type3_status::miss?"miss":
-                    "fallback", " distance=",
-                    status==jkgm::precise_type3_status::hit?
-                        result.distance:-1.0f);
+            if(traces++<20U) {
+                std::ostringstream message;
+                message<<"JKGM precise collide=3 stage="
+                       <<(status==jkgm::precise_type3_status::hit?"hit":
+                          status==jkgm::precise_type3_status::miss?"miss":
+                          "fallback")
+                       <<" distance="
+                       <<(status==jkgm::precise_type3_status::hit?
+                          result.distance:-1.0f);
+                LOG_INFO(message.str());
+            }
         }
         return status;
     }
