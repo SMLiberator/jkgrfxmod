@@ -43,6 +43,8 @@
     <ClCompile Include="primary_surface.cpp" />
     <ClCompile Include="dxguids.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="compressed_sound_codec.cpp" />
+    <ClCompile Include="compressed_sound_io.cpp" />
     <ClCompile Include="renderer.cpp" />
     <ClCompile Include="renderer_ao.cpp" />
     <ClCompile Include="renderer_ao_basic.cpp" />
@@ -81,6 +83,8 @@
     <ClInclude Include="primary_surface.hpp" />
     <ClInclude Include="dxguids.hpp" />
     <ClInclude Include="renderer.hpp" />
+    <ClInclude Include="compressed_sound_codec.hpp" />
+    <ClInclude Include="compressed_sound_io.hpp" />
     <ClInclude Include="renderer_ao.hpp" />
     <ClInclude Include="renderer_ao_basic.hpp" />
     <ClInclude Include="renderer_ao_ssao.hpp" />
