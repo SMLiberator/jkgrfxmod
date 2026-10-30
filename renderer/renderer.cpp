@@ -4672,10 +4672,13 @@ namespace jkgm {
                 return;
             }
             if(the_config->profile_renderer_verbose &&
-               gpu_3do_present_serial%120U==0U)
-                LOG_INFO("SUN fitted global depth range=",world_view.range,
-                         " depth_origin=",
-                         decal_dot(world_view.origin,world_view.forward));
+               gpu_3do_present_serial%120U==0U) {
+                std::ostringstream diag;
+                diag<<"SUN fitted global depth range="<<world_view.range
+                    <<" depth_origin="
+                    <<decal_dot(world_view.origin,world_view.forward);
+                LOG_INFO(diag.str());
+            }
             auto const camera=read_active_render_camera();
             if(!camera.valid) {
                 sun_failure("render camera unavailable");
