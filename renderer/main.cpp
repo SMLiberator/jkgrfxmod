@@ -2958,8 +2958,12 @@ namespace {
         bool const candidate=state.textured && vertices && count==4 &&
             gpu_span_readable(vertices,sizeof(jkgm::particle_clip_vertex)*4U);
         jkgm::particle_clip_bounds bounds{};
-        bool const valid=candidate && jkgm::particle_find_quad_bounds(
-            static_cast<jkgm::particle_clip_vertex const *>(vertices),4,bounds);
+        // JKGM's untextured particle billboard is a diamond. Textured
+        // particles need square corners, with UVs based on those corners.
+        // Modify only this particle's camera-space vertices before the native
+        // clipper runs. Solid-color particles remain completely untouched.
+        bool const valid=candidate && jkgm::particle_make_textured_square(
+            static_cast<jkgm::particle_clip_vertex *>(vertices),4,bounds);
         state.has_clipped_face=false;
         int const result=RealNativeParticleClip(frustum,vertices,count);
         if(valid && result>=3 && result<=16 &&
