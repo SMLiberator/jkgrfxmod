@@ -4668,9 +4668,16 @@ namespace jkgm {
                          noncaster_bounds_skipped);
             sun_shadow_projection world_view{};
             if(!make_sun_shadow_projection(map.world,direction,world_view,model_bounds)) {
-                sun_failure("no world receivers or captured 3DO casters");
+                sun_failure("no valid sun projection (world + casting 3DO bounds)");
                 return;
             }
+            if(the_config->profile_renderer_verbose &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("SUN fitted global depth range=",world_view.range,
+                         " depth_origin=",
+                         decal_dot(world_view.origin,world_view.forward),
+                         " eligible_model_bounds=",model_bounds.size(),
+                         " filtered_noncaster_groups=",noncaster_bounds_skipped);
             auto const camera=read_active_render_camera();
             if(!camera.valid) {
                 sun_failure("render camera unavailable");
