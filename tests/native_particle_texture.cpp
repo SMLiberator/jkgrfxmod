@@ -42,6 +42,34 @@ int main()
     assert(close(uv[1].u,63.5f) && close(uv[1].v,31.5f));
     assert(close(uv[2].u,63.5f) && close(uv[2].v,0.5f));
     assert(close(uv[3].u,0.5f) && close(uv[3].v,0.5f));
+    // The uploaded patched executable uses X radius sqrt(2)*R and
+    // Z radius R for its diamond. GeoMode 4 must NOT inherit that 1.414:1
+    // aspect ratio; the vanilla square has side length 2R in both axes.
+    float const root2=std::sqrt(2.f);
+    std::array<jkgm::particle_clip_vertex,4> stretched_diamond{{
+        {3.f,7.f,9.f},{3.f+root2,7.f,10.f},
+        {3.f,7.f,11.f},{3.f-root2,7.f,10.f}
+    }};
+    jkgm::particle_clip_bounds stretched_bounds{};
+    assert(jkgm::particle_make_textured_square(
+        stretched_diamond.data(),4,stretched_bounds));
+    assert(close(stretched_bounds.min_x,2.f));
+    assert(close(stretched_bounds.max_x,4.f));
+    assert(close(stretched_bounds.min_z,9.f));
+    assert(close(stretched_bounds.max_z,11.f));
+    assert(close(stretched_diamond[0].x,2.f) &&
+           close(stretched_diamond[0].z,9.f));
+    assert(close(stretched_diamond[1].x,4.f) &&
+           close(stretched_diamond[1].z,9.f));
+    assert(close(stretched_diamond[2].x,4.f) &&
+           close(stretched_diamond[2].z,11.f));
+    assert(close(stretched_diamond[3].x,2.f) &&
+           close(stretched_diamond[3].z,11.f));
+    assert(jkgm::particle_texture_clipped_uvs(
+        stretched_bounds,stretched_diamond.data(),4,64,32,uv.data()));
+    assert(close(uv[0].u,.5f) && close(uv[0].v,31.5f));
+    assert(close(uv[2].u,63.5f) && close(uv[2].v,.5f));
+
     // The square conversion changes only the supplied mutable copy:
     // untextured particles retain the engine's native diamond.
     assert(close(native_diamond[0].z,0));
