@@ -1,5 +1,6 @@
 #include "renderer/cog_raycast_target.hpp"
 #include <cassert>
+#include <initializer_list>
 using jkgm::cog_raycast_eligible_thing_pair;
 int main() {
     constexpr unsigned actor=2,weapon=3,item=5,cog=7,corpse=9,player=10;
