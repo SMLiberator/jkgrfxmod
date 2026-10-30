@@ -28,6 +28,7 @@
 #include "cog_pyr_math.hpp"
 #include "cog_raycast_head.hpp"
 #include "cog_raycast_target.hpp"
+#include "cog_raycast_native_sphere.hpp"
 #include "cog_raycast_results.hpp"
 #include "cog_sector_queries.hpp"
 #include "sprite_orientation.hpp"
@@ -5743,7 +5744,7 @@ namespace {
     thread_local uint32_t raycast_ex_source_type=0;
     struct raycast_ex_profile_counters {
         uint64_t rays=0,search_us=0,type3_checks=0,type3_hits=0;
-        uint64_t model_rebuilds=0,polygon_tests=0,model_fast_rejects=0;
+        uint64_t model_rebuilds=0,polygon_tests=0,native_sphere_rejects=0;
         uint64_t ineligible_things=0,native_fallbacks=0;
     };
     thread_local raycast_ex_profile_counters raycast_ex_profile{};
@@ -5953,7 +5954,7 @@ namespace {
                          " precise_checks=",p.type3_checks,
                          " precise_hits=",p.type3_hits,
                          " model_rebuilds=",p.model_rebuilds,
-                         " model_fast_rejects=",p.model_fast_rejects,
+                         " native_sphere_rejects=",p.native_sphere_rejects,
                          " polygon_tests=",p.polygon_tests,
                          " ineligible_things=",p.ineligible_things,
                          " native_fallbacks=",p.native_fallbacks);
@@ -6371,8 +6372,6 @@ namespace {
                 ++p.native_fallbacks;
             if(stats.rebuilt)++p.model_rebuilds;
             p.polygon_tests+=stats.polygon_tests;
-            if(status==jkgm::precise_type3_status::miss &&
-               stats.nodes==0U)++p.model_fast_rejects;
         }
         if(the_config && the_config->profile_renderer) {
             static thread_local unsigned traces=0;
@@ -6434,6 +6433,27 @@ namespace {
                 }
                 std::memcpy(&checked_mode,candidate+0x28U,4);
                 if(checked_mode==3U) {
+                    // JK first checks the Thing's own position/collideSize
+                    // sphere. RayCastEx intentionally keeps that candidate
+                    // selection, including its occasional false negatives.
+                    // Only sphere hits reach our costly exact face solver:
+                    // it exists to eliminate false positives, not to extend
+                    // the native collision volume.
+                    if(!gpu_span_readable(checked,0xc4U))
+                        return 0;
+                    float collide_size=0.0f;
+                    std::array<float,3> center{},origin{},direction{};
+                    std::memcpy(&collide_size,candidate+0x30U,4);
+                    std::memcpy(center.data(),candidate+0xb8U,12);
+                    std::memcpy(origin.data(),start,12);
+                    std::memcpy(direction.data(),dir,12);
+                    if(!jkgm::cog_raycast_native_sphere_candidate(
+                           origin,direction,max_distance,center,
+                           collide_size)) {
+                        if(the_config && the_config->profile_renderer)
+                            ++raycast_ex_profile.native_sphere_rejects;
+                        return 0;
+                    }
                     auto const status=precise_type3_try_query(
                         checked,start,dir,max_distance,out_distance,
                         out_mesh,out_face,out_normal,nullptr,false);
