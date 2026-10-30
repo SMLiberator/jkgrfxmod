@@ -2881,8 +2881,20 @@ namespace {
     // Solid-color MATs go through the untouched native rdCache path.
     using native_particle_draw_fn=int(__cdecl *)(void *,void *);
     using native_particle_clip_fn=int(__cdecl *)(void const *,void *,int);
-    constexpr uintptr_t particle_draw_addr=0x0046C750U;
-    constexpr uintptr_t particle_clip_addr=0x0046FAE0U;
+    // Exact entry points in the uploaded JKGM executable (SHA-256:
+    // afb4605c8259075c151ad6b034b98562be87ebe90369d4d9abaee09b396ed50f).
+    // OpenJKDF2 addresses 0x46C750/0x46FAE0 fall INSIDE unrelated
+    // functions here; detouring them corrupts level initialization.
+    constexpr uintptr_t particle_draw_addr=0x0046C9A0U;
+    constexpr uintptr_t particle_clip_addr=0x0046FD00U;
+    constexpr uint8_t particle_draw_bytes[]={
+        0xa1,0x18,0xa4,0x73,0x00,0x83,0xec,0x44,
+        0x83,0xc0,0x08,0x8d,0x54,0x24,0x08,0x53
+    };
+    constexpr uint8_t particle_clip_bytes[]={
+        0x8b,0x44,0x24,0x0c,0x8b,0x54,0x24,0x08,
+        0x83,0xec,0x08,0x89,0x15,0x98,0xec,0x82,0x00
+    };
     native_particle_draw_fn RealNativeParticleDraw=
         reinterpret_cast<native_particle_draw_fn>(particle_draw_addr);
     native_particle_clip_fn RealNativeParticleClip=
@@ -4750,29 +4762,28 @@ namespace {
 
     bool request_native_particle_hooks()
     {
-        // These entry points were inferred from OpenJKDF2 rather than
-        // validated against this project's patched JKGM executable.
-        // The first test build crashed at 0x0046C79C during level startup:
-        // don't detour unknown native code until exact function starts,
-        // calling convention and instructions have been verified.
-        LOG_WARNING("Textured particles temporarily disabled: native particle "
-                    "draw/clip hook addresses need JKGM signature verification");
-        return false;
-#if 0
-        // Gate the native addresses by the adjacent verified JK23 sprite and
-        // cache signatures. Do not patch incompatible executable layouts.
+        // Require the precise entry-point signatures of the tested patched
+        // JKGM executable. In particular, the older OpenJKDF2 entry points
+        // are NOT valid here and caused a privileged-instruction crash.
         if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=0x00400000U ||
-           !gpu_span_readable(reinterpret_cast<void const *>(particle_draw_addr),16U) ||
-           !gpu_span_readable(reinterpret_cast<void const *>(particle_clip_addr),16U) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(particle_draw_addr),
+                              sizeof(particle_draw_bytes)) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(particle_clip_addr),
+                              sizeof(particle_clip_bytes)) ||
            !gpu_span_readable(reinterpret_cast<void const *>(sprite_draw_addr),
                               sizeof(sprite_draw_bytes)) ||
            !gpu_span_readable(reinterpret_cast<void const *>(sprite_addproc_addr),
                               sizeof(sprite_addproc_bytes)) ||
+           std::memcmp(reinterpret_cast<void const *>(particle_draw_addr),
+                       particle_draw_bytes,sizeof(particle_draw_bytes))!=0 ||
+           std::memcmp(reinterpret_cast<void const *>(particle_clip_addr),
+                       particle_clip_bytes,sizeof(particle_clip_bytes))!=0 ||
            std::memcmp(reinterpret_cast<void const *>(sprite_draw_addr),
                        sprite_draw_bytes,sizeof(sprite_draw_bytes))!=0 ||
            std::memcmp(reinterpret_cast<void const *>(sprite_addproc_addr),
                        sprite_addproc_bytes,sizeof(sprite_addproc_bytes))!=0) {
-            LOG_WARNING("Textured particles disabled: unsupported native rdCache");
+            LOG_WARNING("Textured particles disabled: unknown native JKGM "
+                        "particle draw/clip entry-point signatures");
             return false;
         }
         // Sprite alpha may already own the same AddProcFace detour. Install it
@@ -4807,7 +4818,6 @@ namespace {
         particle_owns_addproc_hook=need_proc;
         LOG_INFO("Textured particle MAT billboards enabled (solid MATs unchanged)");
         return true;
-#endif // Unverified native particle hooks
     }
 
     bool request_native_sprite_hooks()
