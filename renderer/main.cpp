@@ -7065,6 +7065,31 @@ namespace {
         jkgm::get_film_grain_settings() = jkgm::film_grain_settings();
     }
 
+    // SetRGBSplit(float factor, float fadeTime)
+    //   factor: RGB channel separation in screen pixels at the corners (0..32).
+    //   Red/blue shift in opposite radial directions; green stays centered.
+    //   fadeTime: seconds; 0.0 is immediate.
+    void __cdecl cog_set_rgb_split(void *ctx)
+    {
+        float const fade_time=cog_pop_float(ctx);
+        float const factor=cog_pop_float(ctx);
+        jkgm::get_rgb_split_settings().pixels.fade_to(
+            {std::isfinite(factor)?clamp_float(factor,0.0f,32.0f):0.0f},
+            fade_time);
+    }
+
+    // float GetRGBSplit(): current effective separation, including fades.
+    void __cdecl cog_get_rgb_split(void *ctx)
+    {
+        cog_push_float(ctx,jkgm::get_rgb_split_settings().pixels.value()[0]);
+    }
+
+    // ResetRGBSplit(): turn off chromatic aberration immediately.
+    void __cdecl cog_reset_rgb_split(void * /*ctx*/)
+    {
+        jkgm::get_rgb_split_settings()=jkgm::rgb_split_settings();
+    }
+
     // SetVignette(vector rgb, float strength, float fadeTime)
     //   rgb:      color the screen edges are pulled towards, 0.0 - 1.0 each
     //             ('0 0 0' is the classic dark vignette, '1 0 0' a red damage flash)
@@ -7626,6 +7651,9 @@ namespace {
         cog_verb_entry{"setfilmgrain", cog_set_film_grain},
         cog_verb_entry{"getfilmgrain", cog_get_film_grain},
         cog_verb_entry{"resetfilmgrain", cog_reset_film_grain},
+        cog_verb_entry{"setrgbsplit", cog_set_rgb_split},
+        cog_verb_entry{"getrgbsplit", cog_get_rgb_split},
+        cog_verb_entry{"resetrgbsplit", cog_reset_rgb_split},
         cog_verb_entry{"setvignette", cog_set_vignette},
         cog_verb_entry{"getvignettergb", cog_get_vignette_rgb},
         cog_verb_entry{"getvignettestrength", cog_get_vignette_strength},
