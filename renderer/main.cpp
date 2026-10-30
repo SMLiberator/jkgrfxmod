@@ -5471,6 +5471,10 @@ namespace {
         cog_push_int(ctx,result);
     }
 
+    // RayCastEx alone enables this flag while executing JK's synchronous
+    // collision search. It never changes normal gameplay collisions.
+    thread_local bool raycast_ex_precise_active=false;
+
     // Common vanilla SithCollision search and hit-record conversion.
     // Both COG verbs use identical sector traversal and result handles.
     int cog_raycast_native(void *ctx,void *source,uint32_t sector,
@@ -5552,7 +5556,7 @@ namespace {
     // therefore casts 4 JK units along the Thing's Look axis. Hits advance
     // five rotating result handles PER COG, whereas misses return -1 without
     // consuming a slot. Flags 0 mirror native instant-impact weapons.
-    void __cdecl cog_ray_cast(void *ctx)
+    void cog_ray_cast_impl(void *ctx,bool precise_type3)
     {
         float offset[3]{};
         cog_pop_vector(ctx,offset);
@@ -5560,6 +5564,9 @@ namespace {
         uintptr_t const world=cog_raycast_current_world();
         cog_raycast_history.set_world(world);
         if(!source || !world || !native_raycast_search ||
+           (precise_type3 && (!native_raycast_pop ||
+                              !native_raycast_decrease ||
+                              !native_mesh_collision_hook_active)) ||
            !gpu_span_readable(source,0xc4U)) {
             cog_push_int(ctx,-1);
             return;
@@ -5606,8 +5613,25 @@ namespace {
         // length so non-unit R/L/U axes cannot change "4 JK units".
         float const length=float(std::sqrt(local_len2));
 
+        if(!precise_type3) {
+            cog_push_int(ctx,cog_raycast_native(ctx,source,sector,world,
+                                               start,ray,length));
+            return;
+        }
+        struct precise_scope {
+            bool previous;
+            precise_scope():previous(raycast_ex_precise_active) {
+                raycast_ex_precise_active=true;
+            }
+            ~precise_scope(){raycast_ex_precise_active=previous;}
+        } scope;
         cog_push_int(ctx,cog_raycast_native(ctx,source,sector,world,
                                            start,ray,length));
+    }
+
+    void __cdecl cog_ray_cast(void *ctx)
+    {
+        cog_ray_cast_impl(ctx,false);
     }
 
     void __cdecl cog_get_ray_hit_pos(void *ctx)
@@ -5880,8 +5904,6 @@ namespace {
     native_intersect_fn RealType2Intersection=reinterpret_cast<native_intersect_fn>(
         jkgm::jkgm_sphere_thing_intersect_address);
     thread_local bool type2_busy=false;
-    // Only the RayCastEx COG verb enables the precise type-3 narrow phase.
-    thread_local bool raycast_ex_precise_active=false;
     unsigned type2_trace_count=0;
 
     // Native engine collision candidates are valid SithThing pointers.
@@ -5953,9 +5975,9 @@ namespace {
         // rather than calling the native accessor dozens of times per ray.
         // Do not retain poses between queries: COG/physics can modify them
         // even when the renderer frame counter has not advanced.
-        bool const use_node_transforms=
-            force_node_transforms ||
-            (the_config && the_config->precise_type3_use_node_transforms);
+        // RayCastEx preserves vanilla collide=3 placement (Thing-only).
+        // Animated-node collision remains available for future opt-in use.
+        bool const use_node_transforms=force_node_transforms;
         uint32_t model_ptr=0,node_count=0;
         bool const known_count=use_node_transforms &&
             read(native.rd_thing+4,&model_ptr,4) &&
@@ -6031,60 +6053,12 @@ namespace {
         return status;
     }
 
-    // RayCastEx(sourceThing,distance): vanilla raycast traversal with one
-    // correction: collide=3 must intersect the actual animated 3DO model.
-    // No world geometry snapshot or global Thing scan is performed here.
+    // RayCastEx(sourceThing,localOffset): exactly the same ray/sector/offset
+    // handling as RayCast, with a precise, Thing-local collide=3 face test.
+    // Do not evaluate animated node poses: vanilla JK doesn't use them here.
     void __cdecl cog_ray_cast_ex(void *ctx)
     {
-        float const range=cog_pop_float(ctx);
-        void *source=cog_pop_thing(ctx);
-        uintptr_t const world=cog_raycast_current_world();
-        cog_raycast_history.set_world(world);
-        if(!source || !world || !native_raycast_search ||
-           !native_raycast_pop || !native_raycast_decrease ||
-           !native_mesh_collision_hook_active ||
-           !(range>0.0f) || !std::isfinite(range) ||
-           range>100000.0f || !gpu_span_readable(source,0xc4U)) {
-            cog_push_int(ctx,-1);
-            return;
-        }
-        auto const *src=static_cast<uint8_t const *>(source);
-        uint32_t type=0,sector=0;
-        std::memcpy(&type,src+0x0cU,4);
-        std::memcpy(&sector,src+0x5cU,4);
-        if(type==0 || type>11 || sector<0x10000U ||
-           !gpu_span_readable(reinterpret_cast<void const *>(
-               uintptr_t(sector)),4U)) {
-            cog_push_int(ctx,-1);
-            return;
-        }
-        float start[3]{},direction[3]{};
-        std::memcpy(start,src+0xb8U,12);
-        std::memcpy(direction,src+0x88U+12U,12); // Look
-        double norm2=0.0;
-        for(float x:direction)norm2+=double(x)*x;
-        if(!std::isfinite(norm2) || !(norm2>1.e-20)) {
-            cog_push_int(ctx,-1);
-            return;
-        }
-        for(float x:start)if(!std::isfinite(x)) {
-            cog_push_int(ctx,-1);
-            return;
-        }
-        float const inv=float(1.0/std::sqrt(norm2));
-        for(float &x:direction)x*=inv;
-
-        // The engine search calls the hooked narrow phase synchronously.
-        // Restore the previous flag even if this COG verb is called nested.
-        struct precise_scope {
-            bool previous;
-            precise_scope():previous(raycast_ex_precise_active) {
-                raycast_ex_precise_active=true;
-            }
-            ~precise_scope(){raycast_ex_precise_active=previous;}
-        } scope;
-        cog_push_int(ctx,cog_raycast_native(ctx,source,sector,world,
-                                           start,direction,range));
+        cog_ray_cast_impl(ctx,true);
     }
 
     int __cdecl HookedType2Intersection(
@@ -6109,7 +6083,7 @@ namespace {
                 if(checked_mode==3U) {
                     auto const status=precise_type3_try_query(
                         checked,start,dir,max_distance,out_distance,
-                        out_mesh,out_face,out_normal,nullptr,true);
+                        out_mesh,out_face,out_normal,nullptr,false);
                     if(the_config && the_config->profile_renderer) {
                         static thread_local unsigned traces=0;
                         if(traces++<12U)
