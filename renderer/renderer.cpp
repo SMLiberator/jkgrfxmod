@@ -4675,9 +4675,7 @@ namespace jkgm {
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN fitted global depth range=",world_view.range,
                          " depth_origin=",
-                         decal_dot(world_view.origin,world_view.forward),
-                         " eligible_model_bounds=",model_bounds.size(),
-                         " filtered_noncaster_groups=",noncaster_bounds_skipped);
+                         decal_dot(world_view.origin,world_view.forward));
             auto const camera=read_active_render_camera();
             if(!camera.valid) {
                 sun_failure("render camera unavailable");
