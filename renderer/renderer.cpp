@@ -4628,9 +4628,9 @@ namespace jkgm {
                 auto const &tex=sun_caster_material(group,instance);
                 bool const cutout=tex.masked||tex.alpha||tex.dithered||
                     (instance.is_sprite_quad && tex.albedo_source==1);
-                return tex.albedo_source!=0 && !tex.special &&
-                    !tex.emissive_only && tex.opacity>=0.999f &&
-                    (!cutout || tex.albedo_source==1);
+                return sun_shadow_material_casts_depth(
+                    tex.albedo_source,tex.special,tex.emissive_only,
+                    tex.opacity,cutout);
             };
             size_t noncaster_bounds_skipped=0;
             size_t skipped_skybox_instances=0;
@@ -4982,8 +4982,9 @@ namespace jkgm {
                 // its MAT was not explicitly marked alpha/masked.
                 bool const cutout=tex.masked||tex.alpha||tex.dithered||
                     (instance.is_sprite_quad && tex.albedo_source==1);
-                if(tex.albedo_source==0 || tex.special || tex.emissive_only || tex.opacity<0.999f ||
-                   (cutout && tex.albedo_source!=1))continue;
+                if(!sun_shadow_material_casts_depth(
+                       tex.albedo_source,tex.special,tex.emissive_only,
+                       tex.opacity,cutout))continue;
                 // Verified non-moving SithThings may join the cached static
                 // layer. An unknown owner stays dynamic (conservative), and
                 // even a path/physics Thing parked in place remains dynamic.
