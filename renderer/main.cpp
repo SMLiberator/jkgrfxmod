@@ -27,6 +27,7 @@
 #include "cog_math.hpp"
 #include "cog_pyr_math.hpp"
 #include "cog_raycast_head.hpp"
+#include "cog_raycast_target.hpp"
 #include "cog_raycast_results.hpp"
 #include "cog_sector_queries.hpp"
 #include "sprite_orientation.hpp"
@@ -5739,12 +5740,13 @@ namespace {
     // RayCastEx alone enables this flag while executing JK's synchronous
     // collision search. It never changes normal gameplay collisions.
     thread_local bool raycast_ex_precise_active=false;
+    thread_local uint32_t raycast_ex_source_type=0;
 
     // Common vanilla SithCollision search and hit-record conversion.
     // Both COG verbs use identical sector traversal and result handles.
     int cog_raycast_native(void *ctx,void *source,uint32_t sector,
                            uintptr_t world,float const *start,
-                           float const *ray,float length)
+                           float const *ray,float length,uint32_t source_type)
     {
         int result_id=-1;
         native_raycast_search(reinterpret_cast<void*>(uintptr_t(sector)),
@@ -5766,6 +5768,18 @@ namespace {
             if(surface_hit && !hit->surface)continue;
             if(!std::isfinite(hit->distance) || hit->distance<0.0f ||
                hit->distance>length+0.001f)continue;
+            if(thing_hit) {
+                // Preserve native Thing-type collision eligibility even if
+                // the collision search returns an extra candidate. Items
+                // interact with Players only; Corpses hit world only.
+                // Skip them BEFORE building a result or reading sectors.
+                if(!gpu_span_readable(hit->thing,0x10U))continue;
+                uint32_t target_type=0;
+                std::memcpy(&target_type,
+                    static_cast<uint8_t const*>(hit->thing)+0x0cU,4);
+                if(!jkgm::cog_raycast_eligible_thing_pair(
+                       source_type,target_type))continue;
+            }
             jkgm::cog_raycast_hit snapshot{};
             snapshot.distance=hit->distance;
             bool finite=true;
@@ -5899,18 +5913,25 @@ namespace {
 
         if(!precise_type3) {
             cog_push_int(ctx,cog_raycast_native(ctx,source,sector,world,
-                                               start,ray,length));
+                                               start,ray,length,type));
             return;
         }
         struct precise_scope {
             bool previous;
-            precise_scope():previous(raycast_ex_precise_active) {
+            uint32_t previous_type;
+            explicit precise_scope(uint32_t source_type)
+                :previous(raycast_ex_precise_active),
+                 previous_type(raycast_ex_source_type) {
                 raycast_ex_precise_active=true;
+                raycast_ex_source_type=source_type;
             }
-            ~precise_scope(){raycast_ex_precise_active=previous;}
-        } scope;
+            ~precise_scope(){
+                raycast_ex_precise_active=previous;
+                raycast_ex_source_type=previous_type;
+            }
+        } scope(type);
         cog_push_int(ctx,cog_raycast_native(ctx,source,sector,world,
-                                           start,ray,length));
+                                           start,ray,length,type));
     }
 
     void __cdecl cog_ray_cast(void *ctx)
@@ -6361,9 +6382,13 @@ namespace {
         if(raycast_ex_precise_active) {
             if(checked && moving_radius==0.0f && max_distance>0.0f &&
                (flags&0x480U)==0U && gpu_span_readable(checked,0x2cU)) {
-                uint32_t checked_mode=0;
-                std::memcpy(&checked_mode,
-                    static_cast<uint8_t const *>(checked)+0x28U,4);
+                uint32_t checked_mode=0,checked_type=0;
+                auto const *candidate=static_cast<uint8_t const *>(checked);
+                std::memcpy(&checked_type,candidate+0x0cU,4);
+                if(!jkgm::cog_raycast_eligible_thing_pair(
+                       raycast_ex_source_type,checked_type))
+                    return 0; // Do not run the expensive type-3 solver.
+                std::memcpy(&checked_mode,candidate+0x28U,4);
                 if(checked_mode==3U) {
                     auto const status=precise_type3_try_query(
                         checked,start,dir,max_distance,out_distance,
