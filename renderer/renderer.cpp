@@ -4598,6 +4598,41 @@ namespace jkgm {
             std::vector<sun_model_candidate> model_candidates;
             auto const candidate_begin=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
+            // Only ACTUAL depth casters are allowed to contribute to the
+            // light-space bounds. Previously an emissive-only / blended VFX
+            // Thing could enlarge the shared sun depth range while its faces
+            // were never submitted to the depth map. This was particularly
+            // destructive with non-unit Thing R/L/U axes (legacy VFX scale).
+            // Reuse the same per-frame MAT cache and policy in both phases:
+            // never resolve a material twice just to build the projection.
+            auto sun_caster_material=[&](
+                gpu_3do_group const &group,
+                gpu_3do_instance const &instance)->gpu_3do_texture const & {
+                bool const solid=instance.effective_geometry_mode==3 ||
+                    group.solid_color;
+                uint64_t const key=(uint64_t(group.material)<<32)|
+                    uint32_t(group.cel)|(solid?(uint64_t(1)<<63):0U);
+                auto found=gpu_frame_material_cache.find(key);
+                if(found==gpu_frame_material_cache.end()) {
+                    auto mat=solid
+                        ?resolve_gpu_3do_solid_material(group,false)
+                        :resolve_gpu_3do_material(group);
+                    found=gpu_frame_material_cache.emplace(
+                        key,std::move(mat)).first;
+                }
+                return found->second;
+            };
+            auto sun_group_depth_eligible=[&](
+                gpu_3do_group const &group,
+                gpu_3do_instance const &instance) {
+                auto const &tex=sun_caster_material(group,instance);
+                bool const cutout=tex.masked||tex.alpha||tex.dithered||
+                    (instance.is_sprite_quad && tex.albedo_source==1);
+                return tex.albedo_source!=0 && !tex.special &&
+                    !tex.emissive_only && tex.opacity>=0.999f &&
+                    (!cutout || tex.albedo_source==1);
+            };
+            size_t noncaster_bounds_skipped=0;
             size_t skipped_skybox_instances=0;
             for(auto const &instance:frame_gpu_3do_instances) {
                 if(!instance.casts_sun_shadows) {
@@ -4608,6 +4643,10 @@ namespace jkgm {
                 auto const &m=instance.transform;
                 for(auto const &group:instance.geometry->groups) {
                     if(group.count<3U || (group.face_type&0x2U))continue;
+                    if(!sun_group_depth_eligible(group,instance)) {
+                        ++noncaster_bounds_skipped;
+                        continue;
+                    }
                     auto const bounds=sun_shadow_transformed_aabb(
                         group.bounds_min,group.bounds_max,m);
                     if(decal_finite(bounds.low) && decal_finite(bounds.high)) {
@@ -4621,6 +4660,12 @@ namespace jkgm {
                     candidate_begin,profile_clock::now());
                 sun_profile_candidate_groups+=model_candidates.size();
             }
+            if(the_config->profile_renderer_verbose &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("SUN caster bounds depth_eligible_groups=",
+                         model_candidates.size(),
+                         " noncaster_material_groups_skipped=",
+                         noncaster_bounds_skipped);
             sun_shadow_projection world_view{};
             if(!make_sun_shadow_projection(map.world,direction,world_view,model_bounds)) {
                 sun_failure("no world receivers or captured 3DO casters");
@@ -4901,23 +4946,6 @@ namespace jkgm {
             size_t dynamic_far_skipped=0,dynamic_near_distance_skipped=0;
             float const dynamic_near_depth=std::max(0.0f,
                 the_config->sun_shadow_near_distance);
-            auto cached_material=[&](gpu_3do_group const &group,
-                                      gpu_3do_instance const &instance)
-                ->gpu_3do_texture const & {
-                bool const solid=instance.effective_geometry_mode==3 ||
-                    group.solid_color;
-                uint64_t const key=(uint64_t(group.material)<<32)|
-                    uint32_t(group.cel)|(solid?(uint64_t(1)<<63):0U);
-                auto found=gpu_frame_material_cache.find(key);
-                if(found==gpu_frame_material_cache.end()) {
-                    auto mat=solid
-                        ?resolve_gpu_3do_solid_material(group,false)
-                        :resolve_gpu_3do_material(group);
-                    found=gpu_frame_material_cache.emplace(
-                        key,std::move(mat)).first;
-                }
-                return found->second;
-            };
             for(auto const &prepared:model_candidates) {
                 auto const &instance=*prepared.instance;
                 auto const &group=*prepared.group;
@@ -4949,7 +4977,7 @@ namespace jkgm {
                     prepared.bounds.low,prepared.bounds.high,
                     bounds.low,bounds.high);
                 if(!in_cascade)continue;
-                auto const &tex=cached_material(group,instance);
+                auto const &tex=sun_caster_material(group,instance);
                 // The sprite's texture alpha is a cutout mask even if
                 // its MAT was not explicitly marked alpha/masked.
                 bool const cutout=tex.masked||tex.alpha||tex.dithered||
