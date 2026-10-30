@@ -33,6 +33,18 @@ inline bool sun_shadow_cache_stationary_model(
            !dynamic_motion;
 }
 
+// A material can affect the sun projection's depth range only when its
+// geometry actually writes shadow depth. In particular, legacy scaled VFX
+// with translucent, special or emissive-only MATs must not invalidate the
+// entire directional shadow map simply by entering the camera's view.
+inline bool sun_shadow_material_casts_depth(
+    uint32_t albedo_source,bool special,bool emissive_only,
+    float opacity,bool cutout)
+{
+    return albedo_source!=0U && !special && !emissive_only &&
+           opacity>=0.999f && (!cutout || albedo_source==1U);
+}
+
 // Exact world-space AABB of an affine-transformed 3DO mesh group, using its
 // center and half-extents. Computes nine absolute products instead of
 // transforming eight corners per group (and doing it once per cascade).
