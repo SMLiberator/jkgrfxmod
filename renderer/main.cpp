@@ -20,6 +20,7 @@
 #include "native_thingface_friction.hpp"
 #include "native_earth_hit_sound.hpp"
 #include "mots_native_collision_bridge.hpp"
+#include "precise_type3_native.hpp"
 #include "mots_collision_snapshot_cache.hpp"
 #include "cog_math.hpp"
 #include "cog_pyr_math.hpp"
@@ -5885,6 +5886,75 @@ namespace {
             LOG_INFO("JKGM collide=2 stage=",status," node=",node);
     }
 
+    // First-stage JK engine bugfix: override only checked collide=3
+    // zero-radius ray/segment queries. Preserve the native collision stack,
+    // sector filters, special flag behavior, and all swept-sphere calls.
+    // The same handler is reached by standard weapon queries and COG RayCast.
+    jkgm::precise_type3_status precise_type3_try_query(
+        void *checked,float const *start,float const *dir,
+        float max_distance,float *out_distance,
+        void **out_mesh,void **out_face,float *out_normal)
+    {
+        if(!checked || !start || !dir || !out_distance ||
+           !out_mesh || !out_face || !out_normal ||
+           !gpu_span_readable(checked,0xe8) ||
+           !gpu_span_readable(start,12) || !gpu_span_readable(dir,12) ||
+           !gpu_span_readable(out_distance,4) ||
+           !gpu_span_readable(out_mesh,4) ||
+           !gpu_span_readable(out_face,4) ||
+           !gpu_span_readable(out_normal,12))
+            return jkgm::precise_type3_status::unavailable;
+
+        auto const read=[](uintptr_t address,void *dst,size_t bytes)->bool {
+            if(!jkgm::thing_node_valid_address(address,bytes) ||
+               !gpu_span_readable(reinterpret_cast<void const *>(address),
+                                  bytes))return false;
+            std::memcpy(dst,reinterpret_cast<void const *>(address),bytes);
+            return true;
+        };
+        jkgm::thing_node_native_input native{};
+        if(!jkgm::resolve_native_thing_node(
+               read,reinterpret_cast<uintptr_t>(checked),0,native))
+            return jkgm::precise_type3_status::unavailable;
+        uint32_t world=0;
+        if(!jkgm::engine_material_debug::read_object(
+               jkgm::engine_material_debug::current_world_global,world))
+            return jkgm::precise_type3_status::unavailable;
+
+        jkgm::mots_native_pose_reader const pose=[&](
+            uint32_t index,jkgm::gpu_3do_matrix34 &matrix)->bool {
+            return jkgm_get_node_matrix(
+                reinterpret_cast<void*>(native.rd_thing),
+                native.world_placement.data(),index,matrix.data()) &&
+                jkgm::gpu_3do_matrix_finite(matrix);
+        };
+        static thread_local jkgm::precise_type3_native_cache cache;
+        jkgm::precise_type3_hit result{};
+        auto const status=cache.cast(
+            read,reinterpret_cast<uintptr_t>(checked),world,
+            mesh_revision::current(),mesh_revision::active(),
+            GetTickCount64(),pose,
+            {{start[0],start[1],start[2]}},
+            {{dir[0],dir[1],dir[2]}},max_distance,result);
+        if(status==jkgm::precise_type3_status::hit) {
+            *out_distance=result.distance;
+            *out_mesh=reinterpret_cast<void*>(result.mesh);
+            *out_face=reinterpret_cast<void*>(result.face);
+            std::memcpy(out_normal,result.normal.data(),12);
+        }
+        if(the_config && the_config->profile_renderer) {
+            static thread_local unsigned traces=0;
+            if(traces++<20U)
+                LOG_INFO("JKGM precise collide=3 stage=",
+                    status==jkgm::precise_type3_status::hit?"hit":
+                    status==jkgm::precise_type3_status::miss?"miss":
+                    "fallback", " distance=",
+                    status==jkgm::precise_type3_status::hit?
+                        result.distance:-1.0f);
+        }
+        return status;
+    }
+
     int __cdecl HookedType2Intersection(
         void* moving,float const* start,float const* dir,float max_distance,
         float moving_radius,void* checked,uint32_t flags,float* out_distance,
@@ -5895,6 +5965,27 @@ namespace {
                                          moving_radius,checked,flags,
                                          out_distance,out_mesh,out_face,out_normal);
         };
+        // Handle collide=3 before the separate experimental collide=2
+        // dispatch. The old native implementation remains available on
+        // unsupported models and for all nonzero-radius collisions.
+        if(the_config && the_config->enable_precise_type3_collision &&
+           checked && moving_radius==0.0f && max_distance>0.0f &&
+           (flags&0x480U)==0U &&
+           gpu_span_readable(checked,0x2cU)) {
+            uint32_t checked_mode=0;
+            std::memcpy(&checked_mode,
+                static_cast<uint8_t const*>(checked)+0x28U,4);
+            if(checked_mode==3U) {
+                auto const status=precise_type3_try_query(
+                    checked,start,dir,max_distance,out_distance,
+                    out_mesh,out_face,out_normal);
+                if(status==jkgm::precise_type3_status::hit)
+                    return 0x5; // native THING | THINGADJOINCROSS
+                if(status==jkgm::precise_type3_status::miss)
+                    return 0;   // do not resurrect a native false-positive
+                // Bad model data, unsupported transforms: call original.
+            }
+        }
         if(type2_busy || !the_config || !the_config->enable_mesh_collision ||
            (flags&(jkgm::mots_raycast_force_sphere|0x400U))!=0 ||
            !checked || !start || !dir || !out_distance ||
@@ -6010,7 +6101,9 @@ namespace {
 
     bool request_type2_intersection_hook()
     {
-        if(!the_config || !the_config->enable_mesh_collision)return false;
+        if(!the_config ||
+           (!the_config->enable_mesh_collision &&
+            !the_config->enable_precise_type3_collision))return false;
         auto const safe_read=[](uintptr_t at,void* dst,size_t len)->bool {
             if(!jkgm::thing_node_valid_address(at,len) ||
                !gpu_span_readable(reinterpret_cast<void const*>(at),len))
@@ -6025,13 +6118,13 @@ namespace {
                       signature.data(),signature.size()) ||
            signature!=jkgm::jkgm_sphere_thing_intersect_prologue ||
            !jkgm::validate_native_thing_node_accessor(safe_read)) {
-            LOG_WARNING("JKGM collide=2 hook skipped: unknown game executable");
+            LOG_WARNING("JKGM collision hook skipped: unknown game executable");
             return false;
         }
         LONG const err=DetourAttach(&(PVOID&)RealType2Intersection,
                                     HookedType2Intersection);
         if(err!=NO_ERROR) {
-            LOG_WARNING("JKGM collide=2 DetourAttach failed: ",err);
+            LOG_WARNING("JKGM native collision DetourAttach failed: ",err);
             return false;
         }
         return true;
@@ -7397,7 +7490,9 @@ bool attach_hooks()
     if(error==NO_ERROR) native_sprite_hook_active=sprite_hooks_requested;
     if(error==NO_ERROR && mesh_collision_hook_requested) {
         native_mesh_collision_hook_active=true;
-        LOG_INFO("JKGM experimental collide=2 Detour installed");
+        LOG_INFO("JKGM native collision Detour installed: type2=",
+                 the_config->enable_mesh_collision,
+                 " precise_type3=",the_config->enable_precise_type3_collision);
     }
     if(error==NO_ERROR && earth_sound_hook_requested) {
         native_earth_hit_sound_hook_active=true;

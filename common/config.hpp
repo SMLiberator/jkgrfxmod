@@ -74,6 +74,7 @@ namespace jkgm {
         float sun_max_distance = 0.0f; // 0=unlimited; else sun light+shadows fade out and stop at this camera distance
         bool enable_decals = true; // type-3 SPR projection; false hides decal SPRs, not native billboards
         bool enable_mesh_collision = false; // experimental JKGM collide=2 Detour (off by default)
+        bool enable_precise_type3_collision = false; // experimental engine-wide exact zero-radius collide=3 rays
         bool use_vanilla_renderer = false; // native EXE bootstrap: skip JKGM hooks
         std::string data_path = "jkgm";
         std::optional<std::string> log_path;

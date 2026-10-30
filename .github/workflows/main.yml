@@ -144,6 +144,12 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\thing_attachment_normal.cpp /Fe:thing_attachment_normal_test.exe
         thing_attachment_normal_test.exe
+    - name: Experimental precise collide-3 ray/face math regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\precise_type3_raycast.cpp /Fe:precise_type3_raycast_test.exe
+        precise_type3_raycast_test.exe
+
     - name: Native JKGM type-2 collision hit ABI tests
       shell: cmd
       run: |
