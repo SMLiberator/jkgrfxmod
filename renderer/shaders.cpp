@@ -1420,6 +1420,7 @@ jkgm::shaders::post_to_srgb_shader::post_to_srgb_shader(fs::path const &data_roo
     , fbuf_image(gl::get_uniform_location(the_program, "fbuf_image"))
     , grain_params(gl::get_uniform_location(the_program, "grain_params"))
     , vignette_params(gl::get_uniform_location(the_program, "vignette_params"))
+    , rgb_split_pixels(gl::get_uniform_location(the_program, "rgb_split_pixels"))
     , brightness(gl::get_uniform_location(the_program, "brightness"))
     , contrast(gl::get_uniform_location(the_program, "contrast"))
     , saturation(gl::get_uniform_location(the_program, "saturation"))
@@ -1484,6 +1485,11 @@ void jkgm::shaders::post_to_srgb_shader::set_film_grain(point<4, float> params)
 void jkgm::shaders::post_to_srgb_shader::set_vignette(point<4, float> params)
 {
     gl::set_uniform_vector(vignette_params, params);
+}
+
+void jkgm::shaders::post_to_srgb_shader::set_rgb_split(float pixels)
+{
+    gl::set_uniform_float(rgb_split_pixels,pixels);
 }
 
 void jkgm::shaders::post_to_srgb_shader::set_color_filter(float brightness_value,
