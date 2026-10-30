@@ -40,6 +40,9 @@ struct precise_type3_cache_entry {
     mots_native_model_snapshot geometry{};
     std::vector<std::vector<precise_type3_face>> faces;
     std::vector<precise_type3_bounds> node_bounds;
+    // Enclosing Thing-local bounds, derived from actual vertices and not
+    // the unreliable native collideSize sphere.
+    precise_type3_bounds model_bounds{};
 };
 class precise_type3_native_cache {
     static constexpr size_t max_entries=16;
@@ -83,6 +86,16 @@ class precise_type3_native_cache {
                     bounds.high[axis]=std::max(bounds.high[axis],vertex[axis]);
                 }
             bounds.valid=true;
+            if(!candidate.model_bounds.valid) {
+                candidate.model_bounds=bounds;
+            } else {
+                for(int axis=0;axis<3;++axis) {
+                    candidate.model_bounds.low[axis]=std::min(
+                        candidate.model_bounds.low[axis],bounds.low[axis]);
+                    candidate.model_bounds.high[axis]=std::max(
+                        candidate.model_bounds.high[axis],bounds.high[axis]);
+                }
+            }
             uintptr_t const mesh=entry.key.meshes+
                  uintptr_t(node.mesh_index)*mesh_stride;
             uint32_t faces_ptr=0,n_faces=0;
@@ -138,6 +151,7 @@ class precise_type3_native_cache {
         entry.geometry=std::move(candidate.geometry);
         entry.faces=std::move(candidate.faces);
         entry.node_bounds=std::move(candidate.node_bounds);
+        entry.model_bounds=candidate.model_bounds;
         return true;
     }
 public:
@@ -242,6 +256,28 @@ public:
         };
 
         if(!use_node_transforms) {
+            // The native collideSize broadphase may wrongly exclude actual
+            // polygons. Reject distant rays using an enclosing sphere of the
+            // cached real geometry instead. Its affine transform is
+            // conservative even for scaled/mirrored/sheared R/L/U axes.
+            if(chosen->model_bounds.valid) {
+                precise_type3::vec3 center{};
+                double radius_squared=0.0;
+                for(int k=0;k<3;++k) {
+                    double const lo=chosen->model_bounds.low[k];
+                    double const hi=chosen->model_bounds.high[k];
+                    double const half=(hi-lo)*0.5;
+                    center[k]=float(lo+(hi-lo)*0.5);
+                    radius_squared+=half*half;
+                }
+                float const radius=float(std::sqrt(radius_squared));
+                if(!precise_type3::ray_can_reach_mesh_sphere(
+                       start,unit_direction,max_distance,
+                       *thing_pose,center,radius)) {
+                    if(stats)*stats=metrics;
+                    return precise_type3_status::miss;
+                }
+            }
             // Vanilla collide=3 uses ONLY the Thing's orientation and
             // position. It treats all geoset mesh vertices as Thing-local:
             // authored hierarchy offsets, pivots, animation and amputation
