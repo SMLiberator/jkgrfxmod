@@ -147,6 +147,18 @@ int main()
     assert(cast_thing({{20.5f,7.5f,6}})==precise_type3_status::miss);
     assert(node_requests==0);
 
+    // With a cached model, distant rays should fail the new *model-level*
+    // conservative bound without even traversing individual mesh nodes.
+    thing_pose={{1,0,0, 0,1,0, 0,0,1, 20,7,0}};
+    assert(cast_thing({{60.5f,60.5f,6}})==precise_type3_status::miss);
+    assert(!stats.rebuilt && stats.nodes==0 && stats.polygon_tests==0);
+    // Do not rely on the native collision sphere: far-offset Thing-local
+    // polygons and non-unit placement transforms are still hittable.
+    thing_pose={{3,0,0, 0,2,0, 0,0,1, 20,7,0}};
+    assert(cast_thing({{21.5f,8.0f,6}})==precise_type3_status::hit);
+    assert(stats.nodes==1 && stats.polygon_tests==1);
+    thing_pose={{0,1,0, -1,0,0, 0,0,1, 20,7,0}};
+
     // Vanilla collide=3 ignores limb amputation as well as node matrices.
     // This is deliberately a difference from the animated-node mode.
     constexpr uintptr_t amputations=base+0x6000U;
