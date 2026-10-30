@@ -2895,6 +2895,13 @@ namespace {
         0x8b,0x44,0x24,0x0c,0x8b,0x54,0x24,0x08,
         0x83,0xec,0x08,0x89,0x15,0x98,0xec,0x82,0x00
     };
+    // Verified direct call in JKGM rdParticle_Draw -> rdClip_Face3S.
+    // Guarding the call-site catches a layout drift even if a later build
+    // happens to preserve the individual function prologues.
+    constexpr uintptr_t particle_clip_call_addr=0x0046CB7BU;
+    constexpr uint8_t particle_clip_call_bytes[]={
+        0xe8,0x80,0x31,0x00,0x00
+    };
     native_particle_draw_fn RealNativeParticleDraw=
         reinterpret_cast<native_particle_draw_fn>(particle_draw_addr);
     native_particle_clip_fn RealNativeParticleClip=
@@ -4776,6 +4783,11 @@ namespace {
                               sizeof(sprite_addproc_bytes)) ||
            std::memcmp(reinterpret_cast<void const *>(particle_draw_addr),
                        particle_draw_bytes,sizeof(particle_draw_bytes))!=0 ||
+           !gpu_span_readable(reinterpret_cast<void const *>(
+               particle_clip_call_addr),sizeof(particle_clip_call_bytes)) ||
+           std::memcmp(reinterpret_cast<void const *>(
+               particle_clip_call_addr),particle_clip_call_bytes,
+               sizeof(particle_clip_call_bytes))!=0 ||
            std::memcmp(reinterpret_cast<void const *>(particle_clip_addr),
                        particle_clip_bytes,sizeof(particle_clip_bytes))!=0 ||
            std::memcmp(reinterpret_cast<void const *>(sprite_draw_addr),
