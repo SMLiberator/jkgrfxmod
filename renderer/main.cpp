@@ -4750,6 +4750,15 @@ namespace {
 
     bool request_native_particle_hooks()
     {
+        // These entry points were inferred from OpenJKDF2 rather than
+        // validated against this project's patched JKGM executable.
+        // The first test build crashed at 0x0046C79C during level startup:
+        // don't detour unknown native code until exact function starts,
+        // calling convention and instructions have been verified.
+        LOG_WARNING("Textured particles temporarily disabled: native particle "
+                    "draw/clip hook addresses need JKGM signature verification");
+        return false;
+#if 0
         // Gate the native addresses by the adjacent verified JK23 sprite and
         // cache signatures. Do not patch incompatible executable layouts.
         if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=0x00400000U ||
@@ -4798,6 +4807,7 @@ namespace {
         particle_owns_addproc_hook=need_proc;
         LOG_INFO("Textured particle MAT billboards enabled (solid MATs unchanged)");
         return true;
+#endif // Unverified native particle hooks
     }
 
     bool request_native_sprite_hooks()
