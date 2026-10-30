@@ -24,6 +24,9 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\native_particle_texture.cpp /Fe:native_particle_texture_test.exe
         native_particle_texture_test.exe
 
+    - name: Spotlight lighting independent of sun shadow regression tests
+      run: python3 tests/spotlight_sun_shadow_independence.py
+
     - name: COG RGB split post-FX regression tests
       run: python3 tests/postfx_rgb_split.py
 
