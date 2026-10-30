@@ -32,6 +32,29 @@ inline bool particle_find_quad_bounds(particle_clip_vertex const* vertices,
            (out.max_z-out.min_z)>1.e-7f;
 }
 
+// Patched JKGM builds particles as diamonds (left, bottom, right, top).
+// For textured MATs only, turn the same camera-space extents into an ordinary
+// four-corner square BEFORE native Face3S clipping. Keep winding unchanged.
+// Native solid-color particle faces never call this helper.
+inline bool particle_make_textured_square(particle_clip_vertex *vertices,
+                                           size_t count,
+                                           particle_clip_bounds &out)
+{
+    if(!particle_find_quad_bounds(vertices,count,out))return false;
+    float const depth=vertices[0].y;
+    // The native camera-facing particle has constant depth. Reject unexpected
+    // non-coplanar data rather than flatten an unrelated primitive.
+    float const tolerance=1.e-4f*std::max(1.0f,std::fabs(depth));
+    for(size_t i=1;i<count;++i)
+        if(std::fabs(vertices[i].y-depth)>tolerance)return false;
+    // Same vertex order as the native particle, preserving triangle winding.
+    vertices[0]={out.min_x,depth,out.min_z};
+    vertices[1]={out.max_x,depth,out.min_z};
+    vertices[2]={out.max_x,depth,out.max_z};
+    vertices[3]={out.min_x,depth,out.max_z};
+    return true;
+}
+
 // The native Face3S clipper modifies camera-space XYZ in place. Recover UVs
 // from that clipped polygon, rather than stretching the image across its
 // new screen-space bounding box. This also handles near-plane clipping.
