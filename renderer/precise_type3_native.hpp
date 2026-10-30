@@ -26,7 +26,7 @@ struct precise_type3_face {
 };
 struct precise_type3_cache_entry {
     mots_collision_model_identity key{};
-    uint64_t world=0,generation=0,updated_ms=0;
+    uint64_t world=0,generation=0,built_ms=0,last_used_ms=0;
     mots_native_model_snapshot geometry{};
     std::vector<std::vector<precise_type3_face>> faces;
 };
@@ -124,15 +124,16 @@ public:
         }
         bool const refresh=chosen==nullptr ||
             chosen->generation!=generation ||
-            (timestamp_ms<chosen->updated_ms) ||
+            (timestamp_ms<chosen->built_ms) ||
             (!reliable_revision &&
-             timestamp_ms-chosen->updated_ms>250);
+             timestamp_ms-chosen->built_ms>250);
         if(refresh) {
             precise_type3_cache_entry rebuilt{};
             rebuilt.key=identity;
             rebuilt.world=world;
             rebuilt.generation=generation;
-            rebuilt.updated_ms=timestamp_ms;
+            rebuilt.built_ms=timestamp_ms;
+            rebuilt.last_used_ms=timestamp_ms;
             if(!build(read,checked,rebuilt))
                 return precise_type3_status::unavailable;
             if(!chosen) {
@@ -140,7 +141,7 @@ public:
                     auto const oldest=std::min_element(
                         entries_.begin(),entries_.end(),
                         [](auto const &a,auto const &b){
-                            return a.updated_ms<b.updated_ms;
+                            return a.last_used_ms<b.last_used_ms;
                         });
                     entries_.erase(oldest);
                 }
@@ -148,7 +149,7 @@ public:
                 chosen=&entries_.back();
             } else *chosen=std::move(rebuilt);
         }
-        chosen->updated_ms=timestamp_ms;
+        chosen->last_used_ms=timestamp_ms;
         // Live amputation flags, not cached across different Things.
         auto const size=chosen->geometry.nodes.size();
         std::vector<uint32_t> amputated(size,0);
