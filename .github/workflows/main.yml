@@ -57,6 +57,12 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_raycast_head.cpp /Fe:cog_raycast_head_test.exe
         cog_raycast_head_test.exe
 
+    - name: COG RayCast item and corpse collision eligibility tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\cog_raycast_target.cpp /Fe:cog_raycast_target_test.exe
+        cog_raycast_target_test.exe
+
     - name: Explicit COG RayCastEx precision geometry regression tests
       shell: cmd
       run: |
