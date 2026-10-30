@@ -7925,9 +7925,11 @@ void* __cdecl HookedSithSoundLoad(char* filename,int eager)
         }
     }
     void* const sound=RealSithSoundLoad(filename,eager);
-    if(trace)
+    if(trace) {
+        uintptr_t const sound_address=reinterpret_cast<uintptr_t>(sound);
         LOG_INFO("JKGM compressed sound native load returned: ",filename,
-                 " sound=",sound);
+                 " sound_address=",sound_address);
+    }
     return sound;
 }
 bool request_native_compressed_sound_hook()
