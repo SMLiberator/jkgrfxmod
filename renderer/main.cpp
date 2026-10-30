@@ -9,6 +9,7 @@
 #include "runtime_material.hpp"
 #include "native_3do_profile.hpp"
 #include "native_sprite_profile.hpp"
+#include "native_particle_texture.hpp"
 #include "gpu_3do_preview.hpp"
 #include "camera_hud_thing.hpp"
 #include "gpu_mat_ready_cache.hpp"
@@ -2874,8 +2875,170 @@ namespace {
         }
     }
 
+    // Native rdParticle_Draw produces exactly the same camera-facing quads
+    // for PAR resources and procedurally initialized particle Things. We
+    // keep its entire simulation, culling, lighting and CEL behavior intact.
+    // Solid-color MATs go through the untouched native rdCache path.
+    using native_particle_draw_fn=int(__cdecl *)(void *,void *);
+    using native_particle_clip_fn=int(__cdecl *)(void const *,void *,int);
+    constexpr uintptr_t particle_draw_addr=0x0046C750U;
+    constexpr uintptr_t particle_clip_addr=0x0046FAE0U;
+    native_particle_draw_fn RealNativeParticleDraw=
+        reinterpret_cast<native_particle_draw_fn>(particle_draw_addr);
+    native_particle_clip_fn RealNativeParticleClip=
+        reinterpret_cast<native_particle_clip_fn>(particle_clip_addr);
+    bool native_particle_hook_active=false;
+    bool particle_owns_addproc_hook=false;
+
+    struct particle_draw_context {
+        uint32_t material=0;
+        bool textured=false,has_clipped_face=false;
+        void const *clipped_vertices=nullptr;
+        unsigned clipped_count=0;
+        jkgm::particle_clip_bounds quad{};
+    };
+    thread_local particle_draw_context particle_draw_active{};
+
+    int __cdecl HookedNativeParticleDraw(void *rdthing,void *orientation)
+    {
+        particle_draw_context const previous=particle_draw_active;
+        particle_draw_active={};
+        // rdThing.particlecloud at +4; rdParticle.material at +0x38.
+        // Texture MATs have tex_type bit 1 (2). Solid-color MATs do not.
+        if(rdthing && gpu_span_readable(rdthing,8U)) {
+            uint32_t cloud=0;
+            std::memcpy(&cloud,static_cast<uint8_t const *>(rdthing)+4U,4);
+            if(cloud>=0x10000U &&
+               gpu_span_readable(reinterpret_cast<void const *>(uintptr_t(cloud)),
+                                 0x3CU)) {
+                uint32_t mat=0;
+                std::memcpy(&mat,reinterpret_cast<void const *>(
+                    uintptr_t(cloud)+0x38U),4);
+                if(mat>=0x10000U &&
+                   gpu_span_readable(reinterpret_cast<void const *>(uintptr_t(mat)),
+                                     0x6CU)) {
+                    uint32_t type=0,num_cels=0;
+                    std::memcpy(&type,reinterpret_cast<void const *>(
+                        uintptr_t(mat)),4);
+                    std::memcpy(&num_cels,reinterpret_cast<void const *>(
+                        uintptr_t(mat)+0x64U),4);
+                    if((type&2U)!=0U && num_cels>0U && num_cels<=16U)
+                        particle_draw_active={mat,true,false,nullptr,0U,{}};
+                }
+            }
+        }
+        int const result=RealNativeParticleDraw(rdthing,orientation);
+        particle_draw_active=previous;
+        return result;
+    }
+
+    int __cdecl HookedNativeParticleClip(void const *frustum,void *vertices,
+                                         int count)
+    {
+        auto &state=particle_draw_active;
+        bool const candidate=state.textured && vertices && count==4 &&
+            gpu_span_readable(vertices,sizeof(jkgm::particle_clip_vertex)*4U);
+        jkgm::particle_clip_bounds bounds{};
+        bool const valid=candidate && jkgm::particle_find_quad_bounds(
+            static_cast<jkgm::particle_clip_vertex const *>(vertices),4,bounds);
+        state.has_clipped_face=false;
+        int const result=RealNativeParticleClip(frustum,vertices,count);
+        if(valid && result>=3 && result<=16 &&
+           gpu_span_readable(vertices,sizeof(jkgm::particle_clip_vertex)*
+                                      size_t(result))) {
+            state.has_clipped_face=true;
+            state.clipped_vertices=vertices;
+            state.clipped_count=unsigned(result);
+            state.quad=bounds;
+        }
+        return result;
+    }
+
+    // Native rdMaterial's selected CEL is a pointer to a rdTexinfo, whose
+    // texture header stores width-1 and height-1 at offsets 0x10/0x14.
+    // Use the actual per-particle wallCel, retaining animated/random CELs.
+    bool particle_texture_dimensions(uint32_t material,uint32_t wall_cel,
+                                     unsigned &width,unsigned &height)
+    {
+        if(!gpu_span_readable(reinterpret_cast<void const *>(
+               uintptr_t(material)),0xb4U))return false;
+        auto const *base=reinterpret_cast<uint8_t const *>(uintptr_t(material));
+        uint32_t n=0,current=0;
+        std::memcpy(&n,base+0x64U,4);
+        std::memcpy(&current,base+0x68U,4);
+        if(n==0U || n>16U)return false;
+        uint32_t cel=wall_cel;
+        if(cel>=n)cel=current;
+        if(cel>=n)cel=0U;
+        uint32_t info=0;
+        std::memcpy(&info,base+0x6cU+cel*4U,4);
+        if(info<0x10000U ||
+           !gpu_span_readable(reinterpret_cast<void const *>(
+               uintptr_t(info)+0x1cU),4U))return false;
+        uint32_t tex=0;
+        std::memcpy(&tex,reinterpret_cast<void const *>(
+            uintptr_t(info)+0x1cU),4);
+        if(tex<0x10000U ||
+           !gpu_span_readable(reinterpret_cast<void const *>(
+               uintptr_t(tex)+0x10U),8U))return false;
+        uint32_t w=0,h=0;
+        std::memcpy(&w,reinterpret_cast<void const *>(
+            uintptr_t(tex)+0x10U),4);
+        std::memcpy(&h,reinterpret_cast<void const *>(
+            uintptr_t(tex)+0x14U),4);
+        if(w>=4096U || h>=4096U)return false;
+        width=w+1U;height=h+1U;
+        return true;
+    }
+
+    bool prepare_native_particle_texcoords(int extra,unsigned vertices,
+                                           int &flags)
+    {
+        auto &state=particle_draw_active;
+        if(!state.textured || !state.has_clipped_face || extra!=0 ||
+           vertices!=state.clipped_count)return false;
+        // A clipped face must be consumed only once, even if preparation
+        // fails. It is followed by another Face3S call for the next dot.
+        state.has_clipped_face=false;
+        uint32_t const index=*reinterpret_cast<uint32_t const *>(
+            sprite_proc_count_addr);
+        auto *entry=const_cast<uint8_t *>(static_cast<uint8_t const *>(
+            sprite_proc_entry(index)));
+        if(!entry || !gpu_span_readable(entry,sprite_proc_stride))
+            return false;
+        uint32_t material=0,cel=0,uv_ptr=0,geometry=0;
+        std::memcpy(&material,entry+0x2cU,4);
+        std::memcpy(&cel,entry+0x30U,4);
+        std::memcpy(&uv_ptr,entry+0x24U,4);
+        std::memcpy(&geometry,entry+8U,4);
+        if(material!=state.material || geometry!=3U || uv_ptr<0x10000U ||
+           !gpu_span_readable(reinterpret_cast<void *>(uintptr_t(uv_ptr)),
+                              vertices*sizeof(jkgm::particle_texture_uv)))
+            return false;
+        unsigned width=0,height=0;
+        if(!particle_texture_dimensions(material,cel,width,height))
+            return false;
+        std::array<jkgm::particle_texture_uv,16> coords{};
+        if(!jkgm::particle_texture_clipped_uvs(
+               state.quad,static_cast<jkgm::particle_clip_vertex const *>(
+                   state.clipped_vertices),vertices,width,height,
+               coords.data()))return false;
+        std::memcpy(reinterpret_cast<void *>(uintptr_t(uv_ptr)),
+                    coords.data(),vertices*sizeof(coords[0]));
+        // The renderer's textured proc-face path consumes the UV stream
+        // only when geometryMode==4 and AddProcFace flags contain bit 1.
+        uint32_t const textured_geo=4U;
+        uint32_t const perspective_texture=2U;
+        std::memcpy(entry+8U,&textured_geo,4);
+        std::memcpy(entry+0x10U,&perspective_texture,4);
+        flags|=2;
+        return true;
+    }
+
     int __cdecl HookedSpriteAddProc(int extra,unsigned int vertices,int flags)
     {
+        if(particle_draw_active.textured)
+            prepare_native_particle_texcoords(extra,vertices,flags);
         // Type-3 fallback must still append its native proc entry: JK's
         // rdCache processes that face to load its MAT cel into video memory.
         // Earlier returning 1 here suppressed BOTH the visible quad AND MAT
@@ -4583,6 +4746,58 @@ namespace {
             LOG_INFO(msg.str());
         }
         return profile_native_sprite_draw(thing,orientation);
+    }
+
+    bool request_native_particle_hooks()
+    {
+        // Gate the native addresses by the adjacent verified JK23 sprite and
+        // cache signatures. Do not patch incompatible executable layouts.
+        if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=0x00400000U ||
+           !gpu_span_readable(reinterpret_cast<void const *>(particle_draw_addr),16U) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(particle_clip_addr),16U) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(sprite_draw_addr),
+                              sizeof(sprite_draw_bytes)) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(sprite_addproc_addr),
+                              sizeof(sprite_addproc_bytes)) ||
+           std::memcmp(reinterpret_cast<void const *>(sprite_draw_addr),
+                       sprite_draw_bytes,sizeof(sprite_draw_bytes))!=0 ||
+           std::memcmp(reinterpret_cast<void const *>(sprite_addproc_addr),
+                       sprite_addproc_bytes,sizeof(sprite_addproc_bytes))!=0) {
+            LOG_WARNING("Textured particles disabled: unsupported native rdCache");
+            return false;
+        }
+        // Sprite alpha may already own the same AddProcFace detour. Install it
+        // ourselves only if not already present; always detach once.
+        bool const need_proc=!sprite_alpha_hook_active;
+        if(need_proc) {
+            LONG const err=DetourAttach(&(PVOID &)RealSpriteAddProc,
+                                        HookedSpriteAddProc);
+            if(err!=NO_ERROR) {
+                LOG_WARNING("Textured particle proc-face hook failed: ",err);
+                return false;
+            }
+        }
+        LONG const draw_err=DetourAttach(&(PVOID &)RealNativeParticleDraw,
+                                         HookedNativeParticleDraw);
+        if(draw_err!=NO_ERROR) {
+            if(need_proc)
+                DetourDetach(&(PVOID &)RealSpriteAddProc,HookedSpriteAddProc);
+            LOG_WARNING("Textured particle draw hook failed: ",draw_err);
+            return false;
+        }
+        LONG const clip_err=DetourAttach(&(PVOID &)RealNativeParticleClip,
+                                         HookedNativeParticleClip);
+        if(clip_err!=NO_ERROR) {
+            DetourDetach(&(PVOID &)RealNativeParticleDraw,
+                         HookedNativeParticleDraw);
+            if(need_proc)
+                DetourDetach(&(PVOID &)RealSpriteAddProc,HookedSpriteAddProc);
+            LOG_WARNING("Textured particle clipping hook failed: ",clip_err);
+            return false;
+        }
+        particle_owns_addproc_hook=need_proc;
+        LOG_INFO("Textured particle MAT billboards enabled (solid MATs unchanged)");
+        return true;
     }
 
     bool request_native_sprite_hooks()
@@ -7595,6 +7810,7 @@ bool attach_hooks()
     }
 
     bool const sprite_hooks_requested=request_native_sprite_hooks();
+    bool const particle_hooks_requested=request_native_particle_hooks();
     bool const mesh_collision_hook_requested=request_type2_intersection_hook();
     bool const ice_thing_hook_requested=request_native_thingface_friction_hook();
     bool const earth_sound_hook_requested=request_native_earth_sound_hook();
@@ -7607,11 +7823,13 @@ bool attach_hooks()
         sprite_frustum_hook_active=false;
         sprite_alpha_hook_active=false;
         sprite_variant_hooks_active=false;
+        particle_owns_addproc_hook=false;
         pending_sprite_flare_spans.clear();
         flare_draw_trace_count=flare_face_trace_count=flare_alpha_trace_count=
             flare_flush_trace_count=flare_bad_face_trace_count=0U;
     }
     if(error==NO_ERROR) native_sprite_hook_active=sprite_hooks_requested;
+    if(error==NO_ERROR) native_particle_hook_active=particle_hooks_requested;
     if(error==NO_ERROR && mesh_collision_hook_requested) {
         native_mesh_collision_hook_active=true;
         LOG_INFO("JKGM native collision Detour installed: type2=",
@@ -7639,6 +7857,18 @@ bool detach_hooks()
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
 
+    // A particle may share the sprite AddProcFace detour. Detach only the
+    // native particle callbacks first; the owner removes AddProcFace below.
+    if(native_particle_hook_active) {
+        DetourDetach(&(PVOID &)RealNativeParticleClip,HookedNativeParticleClip);
+        DetourDetach(&(PVOID &)RealNativeParticleDraw,HookedNativeParticleDraw);
+        native_particle_hook_active=false;
+        particle_draw_active={};
+    }
+    if(particle_owns_addproc_hook) {
+        DetourDetach(&(PVOID &)RealSpriteAddProc,HookedSpriteAddProc);
+        particle_owns_addproc_hook=false;
+    }
     // Revert all SPR detours before releasing the DLL.
     if(sprite_variant_hooks_active) {
         DetourDetach(&(PVOID &)RealSithThingClone,HookedSithThingClone);
