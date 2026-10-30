@@ -21,7 +21,6 @@
 #include "native_earth_hit_sound.hpp"
 #include "mots_native_collision_bridge.hpp"
 #include "precise_type3_native.hpp"
-#include "cog_raycast_ex_geometry.hpp"
 #include "precise_type3_pose_bulk.hpp"
 #include "mots_collision_snapshot_cache.hpp"
 #include "cog_math.hpp"
@@ -5472,66 +5471,13 @@ namespace {
         cog_push_int(ctx,result);
     }
 
-    // RayCast(sourceThing,localOffset): zero-radius finite line segment from
-    // the Thing origin, oriented by Right/Look/Up. A vector of (0,4,0)
-    // therefore casts 4 JK units along the Thing's Look axis. Hits advance
-    // five rotating result handles PER COG, whereas misses return -1 without
-    // consuming a slot. Flags 0 mirror native instant-impact weapons.
-    void __cdecl cog_ray_cast(void *ctx)
+    // Common vanilla SithCollision search and hit-record conversion.
+    // Both COG verbs use identical sector traversal and result handles.
+    int cog_raycast_native(void *ctx,void *source,uint32_t sector,
+                           uintptr_t world,float const *start,
+                           float const *ray,float length)
     {
-        float offset[3]{};
-        cog_pop_vector(ctx,offset);
-        void *source=cog_pop_thing(ctx);
         int result_id=-1;
-        uintptr_t const world=cog_raycast_current_world();
-        cog_raycast_history.set_world(world);
-        if(!source || !world || !native_raycast_search ||
-           !gpu_span_readable(source,0xc4U)) {
-            cog_push_int(ctx,-1);
-            return;
-        }
-        auto const *src=static_cast<uint8_t const*>(source);
-        uint32_t type=0,sector=0;
-        std::memcpy(&type,src+0x0cU,4);
-        std::memcpy(&sector,src+0x5cU,4);
-        if(type==0 || type>11 || sector<0x10000U ||
-           !gpu_span_readable(reinterpret_cast<void const*>(
-               uintptr_t(sector)),4U)) {
-            cog_push_int(ctx,-1);
-            return;
-        }
-        float start[3]{},basis[9]{},ray[3]{};
-        std::memcpy(start,src+0xb8U,12);
-        std::memcpy(basis,src+0x88U,sizeof(basis));
-        double local_len2=0.0;
-        for(float v:offset) {
-            if(!std::isfinite(v)) {cog_push_int(ctx,-1);return;}
-            local_len2+=double(v)*v;
-        }
-        if(!(local_len2>1.e-16) ||
-           local_len2>1.e12) {cog_push_int(ctx,-1);return;}
-        for(int k=0;k<3;++k) {
-            if(!std::isfinite(start[k])) {
-                cog_push_int(ctx,-1);return;
-            }
-            for(int j=0;j<3;++j) {
-                if(!std::isfinite(basis[j*3+k])) {
-                    cog_push_int(ctx,-1);return;
-                }
-                ray[k]+=basis[j*3+k]*offset[j];
-            }
-        }
-        double world_len2=0.0;
-        for(float v:ray)world_len2+=double(v)*v;
-        if(!(world_len2>1.e-16) || !std::isfinite(world_len2)) {
-            cog_push_int(ctx,-1);return;
-        }
-        float const world_inv=float(1.0/std::sqrt(world_len2));
-        for(float &v:ray)v*=world_inv;
-        // Normalize the transformed ray, but preserve the authored offset
-        // length so non-unit R/L/U axes cannot change "4 JK units".
-        float const length=float(std::sqrt(local_len2));
-
         native_raycast_search(reinterpret_cast<void*>(uintptr_t(sector)),
                               source,start,ray,length,0.0f,0);
         struct search_scope {
@@ -5598,7 +5544,70 @@ namespace {
                 reinterpret_cast<uintptr_t>(ctx),snapshot);
             break;
         }
-        cog_push_int(ctx,result_id);
+        return result_id;
+    }
+
+    // RayCast(sourceThing,localOffset): zero-radius finite line segment from
+    // the Thing origin, oriented by Right/Look/Up. A vector of (0,4,0)
+    // therefore casts 4 JK units along the Thing's Look axis. Hits advance
+    // five rotating result handles PER COG, whereas misses return -1 without
+    // consuming a slot. Flags 0 mirror native instant-impact weapons.
+    void __cdecl cog_ray_cast(void *ctx)
+    {
+        float offset[3]{};
+        cog_pop_vector(ctx,offset);
+        void *source=cog_pop_thing(ctx);
+        uintptr_t const world=cog_raycast_current_world();
+        cog_raycast_history.set_world(world);
+        if(!source || !world || !native_raycast_search ||
+           !gpu_span_readable(source,0xc4U)) {
+            cog_push_int(ctx,-1);
+            return;
+        }
+        auto const *src=static_cast<uint8_t const*>(source);
+        uint32_t type=0,sector=0;
+        std::memcpy(&type,src+0x0cU,4);
+        std::memcpy(&sector,src+0x5cU,4);
+        if(type==0 || type>11 || sector<0x10000U ||
+           !gpu_span_readable(reinterpret_cast<void const*>(
+               uintptr_t(sector)),4U)) {
+            cog_push_int(ctx,-1);
+            return;
+        }
+        float start[3]{},basis[9]{},ray[3]{};
+        std::memcpy(start,src+0xb8U,12);
+        std::memcpy(basis,src+0x88U,sizeof(basis));
+        double local_len2=0.0;
+        for(float v:offset) {
+            if(!std::isfinite(v)) {cog_push_int(ctx,-1);return;}
+            local_len2+=double(v)*v;
+        }
+        if(!(local_len2>1.e-16) ||
+           local_len2>1.e12) {cog_push_int(ctx,-1);return;}
+        for(int k=0;k<3;++k) {
+            if(!std::isfinite(start[k])) {
+                cog_push_int(ctx,-1);return;
+            }
+            for(int j=0;j<3;++j) {
+                if(!std::isfinite(basis[j*3+k])) {
+                    cog_push_int(ctx,-1);return;
+                }
+                ray[k]+=basis[j*3+k]*offset[j];
+            }
+        }
+        double world_len2=0.0;
+        for(float v:ray)world_len2+=double(v)*v;
+        if(!(world_len2>1.e-16) || !std::isfinite(world_len2)) {
+            cog_push_int(ctx,-1);return;
+        }
+        float const world_inv=float(1.0/std::sqrt(world_len2));
+        for(float &v:ray)v*=world_inv;
+        // Normalize the transformed ray, but preserve the authored offset
+        // length so non-unit R/L/U axes cannot change "4 JK units".
+        float const length=float(std::sqrt(local_len2));
+
+        cog_push_int(ctx,cog_raycast_native(ctx,source,sector,world,
+                                           start,ray,length));
     }
 
     void __cdecl cog_get_ray_hit_pos(void *ctx)
@@ -5871,6 +5880,8 @@ namespace {
     native_intersect_fn RealType2Intersection=reinterpret_cast<native_intersect_fn>(
         jkgm::jkgm_sphere_thing_intersect_address);
     thread_local bool type2_busy=false;
+    // Only the RayCastEx COG verb enables the precise type-3 narrow phase.
+    thread_local bool raycast_ex_precise_active=false;
     unsigned type2_trace_count=0;
 
     // Native engine collision candidates are valid SithThing pointers.
@@ -6020,204 +6031,60 @@ namespace {
         return status;
     }
 
-    // RayCastEx(sourceThing, distance): explicit precision ray, completely
-    // separate from native SithCollision and normal gameplay raycasts.
-    // Returns a 0..4 per-COG hit handle, or -1, compatible with the
-    // existing GetRayHitPos/Normal/Thing/Surface/Sector/Distance verbs.
-    // Unlike the old COG LOS/binary-search workaround, no ghost objects are
-    // created, no COG messages are fired, and one query returns the result.
+    // RayCastEx(sourceThing,distance): vanilla raycast traversal with one
+    // correction: collide=3 must intersect the actual animated 3DO model.
+    // No world geometry snapshot or global Thing scan is performed here.
     void __cdecl cog_ray_cast_ex(void *ctx)
     {
         float const range=cog_pop_float(ctx);
         void *source=cog_pop_thing(ctx);
-        int result_id=-1;
         uintptr_t const world=cog_raycast_current_world();
         cog_raycast_history.set_world(world);
-        if(!source || !world || !(range>0.0f) ||
-           !std::isfinite(range) || range>100000.0f ||
-           !gpu_span_readable(source,0xc4U)) {
+        if(!source || !world || !native_raycast_search ||
+           !native_raycast_pop || !native_raycast_decrease ||
+           !native_mesh_collision_hook_active ||
+           !(range>0.0f) || !std::isfinite(range) ||
+           range>100000.0f || !gpu_span_readable(source,0xc4U)) {
             cog_push_int(ctx,-1);
             return;
         }
         auto const *src=static_cast<uint8_t const *>(source);
-        uint32_t source_type=0;
-        std::memcpy(&source_type,src+0x0cU,4);
-        if(source_type==0 || source_type>11) {
+        uint32_t type=0,sector=0;
+        std::memcpy(&type,src+0x0cU,4);
+        std::memcpy(&sector,src+0x5cU,4);
+        if(type==0 || type>11 || sector<0x10000U ||
+           !gpu_span_readable(reinterpret_cast<void const *>(
+               uintptr_t(sector)),4U)) {
             cog_push_int(ctx,-1);
             return;
         }
-        jkgm::precise_type3::vec3 start{},direction{};
-        std::memcpy(start.data(),src+0xb8U,12);
-        std::memcpy(direction.data(),src+0x88U+12U,12); // Look
-        double norm2=0;
+        float start[3]{},direction[3]{};
+        std::memcpy(start,src+0xb8U,12);
+        std::memcpy(direction,src+0x88U+12U,12); // Look
+        double norm2=0.0;
         for(float x:direction)norm2+=double(x)*x;
-        if(!jkgm::precise_type3::finite(start) ||
-           !(norm2>1.e-20) || !std::isfinite(norm2)) {
+        if(!std::isfinite(norm2) || !(norm2>1.e-20)) {
             cog_push_int(ctx,-1);
             return;
         }
-        for(float &x:direction)x=float(double(x)/std::sqrt(norm2));
-        jkgm::cog_raycast_hit best{};
-        double closest=range;
-        bool found=false;
+        for(float x:start)if(!std::isfinite(x)) {
+            cog_push_int(ctx,-1);
+            return;
+        }
+        float const inv=float(1.0/std::sqrt(norm2));
+        for(float &x:direction)x*=inv;
 
-        // Static level architecture. The existing world geometry snapshot
-        // already separates passable adjoins from blocking polygons and
-        // indexes them in an AABB tree. Read once, then intersect in double.
-        static thread_local jkgm::decal_world_geometry geometry;
-        auto const read=[](uintptr_t addr,void *dst,size_t bytes)->bool {
-            if(!jkgm::thing_node_valid_address(addr,bytes) ||
-               !gpu_span_readable(reinterpret_cast<void const *>(addr),
-                                  bytes))return false;
-            std::memcpy(dst,reinterpret_cast<void const *>(addr),bytes);
-            return true;
-        };
-        if(!geometry.matches(read,world)) {
-            // shadow_include_hidden enables no-native-surface worlds, which
-            // JkGR uses extensively for Thing-based architecture.
-            // Skip hidden geometry only when normal world faces exist.
-            uint32_t surfaces=0;
-            bool const has_surfaces=read(world+0xa8U,&surfaces,4) &&
-                                    surfaces!=0;
-            geometry.load(read,world,250000U,!has_surfaces);
-        }
-        auto const world_hit=jkgm::cog_ray_ex_cast_world(
-            geometry,start,direction,range);
-        if(world_hit.hit) {
-            found=true;
-            closest=world_hit.distance;
-            best.distance=world_hit.distance;
-            best.normal=world_hit.normal;
-            best.surface_index=int(world_hit.surface_index);
-            cog_sector_array sectors{};
-            if(cog_sector_array_read(world,sectors)) {
-                uint32_t base=0;
-                if(read(world+0xacU,&base,4)) {
-                    uintptr_t const surf=uintptr_t(base)+
-                        uintptr_t(world_hit.surface_index)*0x5cU;
-                    uint32_t sector=0;
-                    if(read(surf+0x08U,&sector,4))
-                        best.sector_index=cog_sector_id_at_ptr(
-                            sectors,uintptr_t(sector));
-                }
+        // The engine search calls the hooked narrow phase synchronously.
+        // Restore the previous flag even if this COG verb is called nested.
+        struct precise_scope {
+            bool previous;
+            precise_scope():previous(raycast_ex_precise_active) {
+                raycast_ex_precise_active=true;
             }
-        }
-
-        // Live Things: the normal JK collision path is NOT involved.
-        // The well-known JKGM SithWorld layout has aThings at +0xc4,
-        // numThings at +0xc0 and 0x2b0-byte SithThing slots.
-        constexpr uintptr_t thing_stride=0x2b0U;
-        uint32_t count=0,base=0;
-        uint64_t checked_things=0,model_candidates=0;
-        if(read(world+0xc0U,&count,4) &&
-           read(world+0xc4U,&base,4) && base>=0x10000U &&
-           count<=32768U && jkgm::thing_node_valid_address(
-               base,size_t(count)*thing_stride)) {
-            for(uint32_t i=0;i<count;++i) {
-                uintptr_t const at=uintptr_t(base)+
-                                   uintptr_t(i)*thing_stride;
-                if(at==reinterpret_cast<uintptr_t>(source))continue;
-                // Check the entire native allocation once if possible,
-                // otherwise validate individual records conservatively.
-                if(!gpu_span_readable(reinterpret_cast<void const *>(at),
-                                      0xd0U))continue;
-                auto const *t=reinterpret_cast<uint8_t const *>(at);
-                uint32_t kind=0,collide=0,render=0,sector=0,index=0,sig=0;
-                float radius=0;
-                jkgm::precise_type3::vec3 center{};
-                std::memcpy(&kind,t+0x0cU,4);
-                std::memcpy(&collide,t+0x28U,4);
-                if(kind==0 || kind>11 || collide==0)continue;
-                std::memcpy(&render,t+0xc4U,4);
-                std::memcpy(&sector,t+0x5cU,4);
-                std::memcpy(&radius,t+0x30U,4);
-                std::memcpy(center.data(),t+0xb8U,12);
-                std::memcpy(&index,t+0x04U,4);
-                std::memcpy(&sig,t+0x74U,4);
-                if(index>=65536U)continue;
-                ++checked_things;
-                if(!jkgm::cog_ray_ex_near_sphere(
-                    start,direction,float(closest),center,radius))
-                    continue;
-                double d=std::numeric_limits<double>::infinity();
-                jkgm::precise_type3::vec3 normal{};
-                if((collide==2U || collide==3U) && render==1U) {
-                    ++model_candidates;
-                    float native_distance=0;
-                    void *mesh=nullptr,*face=nullptr;
-                    float native_normal[3]{};
-                    auto const status=precise_type3_try_query(
-                        reinterpret_cast<void *>(at),start.data(),
-                        direction.data(),float(closest),&native_distance,
-                        &mesh,&face,native_normal,nullptr,true);
-                    if(status!=jkgm::precise_type3_status::hit)continue;
-                    d=native_distance;
-                    normal={{native_normal[0],native_normal[1],
-                             native_normal[2]}};
-                } else if(collide==1U && radius>0.0f &&
-                          std::isfinite(radius)) {
-                    // Actual sphere collision Things: use an analytic
-                    // quadratic in double, not native SithCollision.
-                    auto const ray=jkgm::precise_type3::to_double(direction);
-                    auto const delta=jkgm::precise_type3::minus(
-                        jkgm::precise_type3::to_double(start),
-                        jkgm::precise_type3::to_double(center));
-                    double const a=jkgm::precise_type3::dot(ray,ray);
-                    double const b=jkgm::precise_type3::dot(delta,ray);
-                    double const c=jkgm::precise_type3::dot(delta,delta)-
-                                    double(radius)*radius;
-                    double const discr=b*b-a*c;
-                    if(discr<0 || !(a>0))continue;
-                    d=(-b-std::sqrt(discr))/a;
-                    if(d<0)d=(-b+std::sqrt(discr))/a;
-                    if(d<0 || d>=closest)continue;
-                    double length2=0;
-                    for(int k=0;k<3;++k) {
-                        double const component=(double(start[k])+d*ray[k]-
-                                                center[k])/radius;
-                        normal[k]=float(component);
-                        length2+=component*component;
-                    }
-                    if(length2>0)for(float &x:normal)
-                        x=float(double(x)/std::sqrt(length2));
-                } else continue;
-                if(!std::isfinite(d) || d<0 || d>=closest ||
-                   !jkgm::precise_type3::finite(normal))continue;
-                found=true;
-                closest=d;
-                best=jkgm::cog_raycast_hit{};
-                best.distance=float(d);
-                best.normal=normal;
-                best.thing_index=int(index);
-                best.thing_address=at;
-                best.thing_signature=sig;
-                cog_sector_array sectors{};
-                if(cog_sector_array_read(world,sectors))
-                    best.sector_index=cog_sector_id_at_ptr(
-                        sectors,uintptr_t(sector));
-            }
-        }
-        if(found) {
-            best.distance=float(closest);
-            for(int k=0;k<3;++k)
-                best.position[k]=float(double(start[k])+
-                                       closest*double(direction[k]));
-            result_id=cog_raycast_history.add(
-                reinterpret_cast<uintptr_t>(ctx),best);
-        }
-        if(the_config && the_config->profile_renderer) {
-            static unsigned traces=0;
-            if(traces++<12U) {
-                std::ostringstream line;
-                line<<"RayCastEx hit="<<found<<" length="<<range
-                    <<" distance="<<(found?float(closest):-1.0f)
-                    <<" things="<<checked_things
-                    <<" models_tested="<<model_candidates
-                    <<" world_faces="<<geometry.receivers.size();
-                LOG_INFO(line.str());
-            }
-        }
-        cog_push_int(ctx,result_id);
+            ~precise_scope(){raycast_ex_precise_active=previous;}
+        } scope;
+        cog_push_int(ctx,cog_raycast_native(ctx,source,sector,world,
+                                           start,direction,range));
     }
 
     int __cdecl HookedType2Intersection(
@@ -6230,103 +6097,39 @@ namespace {
                                          moving_radius,checked,flags,
                                          out_distance,out_mesh,out_face,out_normal);
         };
-        // Handle collide=3 before the separate experimental collide=2
-        // dispatch. The old native implementation remains available on
-        // unsupported models and for all nonzero-radius collisions.
-        // Legacy experimental global type-3 override is intentionally
-        // RETIRED. Leave native JK collision untouched; precise tests are
-        // opt-in exclusively via the RayCastEx COG verb.
-#if 0
-        if(the_config && the_config->enable_precise_type3_collision &&
-           checked && moving_radius==0.0f && max_distance>0.0f &&
-           (flags&0x480U)==0U &&
-           gpu_span_readable(checked,0x2cU)) {
-            uint32_t checked_mode=0;
-            std::memcpy(&checked_mode,
-                static_cast<uint8_t const*>(checked)+0x28U,4);
-            if(checked_mode==3U) {
-                bool const profile=the_config->profile_renderer;
-                LARGE_INTEGER before{},after{};
-                if(profile)QueryPerformanceCounter(&before);
-                jkgm::precise_type3_stats metrics{};
-                auto const status=precise_type3_try_query(
-                    checked,start,dir,max_distance,out_distance,
-                    out_mesh,out_face,out_normal,&metrics);
-                if(profile) {
-                    QueryPerformanceCounter(&after);
-                    struct summary {
-                        uint64_t queries=0,hits=0,misses=0,fallbacks=0;
-                        uint64_t rebuilds=0,nodes=0,spheres=0,bounds=0;
-                        uint64_t faces=0,polygon_tests=0;
-                        double total_us=0,peak_us=0;
-                        uint64_t started_ms=0;
-                    };
-                    static thread_local summary profile_data{};
-                    static LARGE_INTEGER frequency=[] {
-                        LARGE_INTEGER f{};
-                        QueryPerformanceFrequency(&f);
-                        return f;
-                    }();
-                    double const us=frequency.QuadPart>0
-                        ? double(after.QuadPart-before.QuadPart)*
-                          1000000.0/double(frequency.QuadPart):0.0;
-                    if(us>=0 && std::isfinite(us)) {
-                        ++profile_data.queries;
-                        profile_data.total_us+=us;
-                        profile_data.peak_us=std::max(profile_data.peak_us,us);
+        // During RayCastEx only, keep JK's native search, sectors, world
+        // surfaces and collision stack, but reject type-3 sphere false hits.
+        // Normal projectiles and the ordinary RayCast stay entirely native.
+        if(raycast_ex_precise_active) {
+            if(checked && moving_radius==0.0f && max_distance>0.0f &&
+               (flags&0x480U)==0U && gpu_span_readable(checked,0x2cU)) {
+                uint32_t checked_mode=0;
+                std::memcpy(&checked_mode,
+                    static_cast<uint8_t const *>(checked)+0x28U,4);
+                if(checked_mode==3U) {
+                    auto const status=precise_type3_try_query(
+                        checked,start,dir,max_distance,out_distance,
+                        out_mesh,out_face,out_normal,nullptr,true);
+                    if(the_config && the_config->profile_renderer) {
+                        static thread_local unsigned traces=0;
+                        if(traces++<12U)
+                            LOG_INFO("JKGM RayCastEx type3=",
+                                     status==jkgm::precise_type3_status::hit
+                                         ?"model_hit":
+                                     status==jkgm::precise_type3_status::miss
+                                         ?"sphere_rejected":"native_fallback");
                     }
-                    profile_data.hits+=
-                        status==jkgm::precise_type3_status::hit;
-                    profile_data.misses+=
-                        status==jkgm::precise_type3_status::miss;
-                    profile_data.fallbacks+=
-                        status==jkgm::precise_type3_status::unavailable;
-                    profile_data.rebuilds+=metrics.rebuilt;
-                    profile_data.nodes+=metrics.nodes;
-                    profile_data.spheres+=metrics.spheres_passed;
-                    profile_data.bounds+=metrics.nodes_in_bounds;
-                    profile_data.faces+=metrics.faces_in_bounds;
-                    profile_data.polygon_tests+=metrics.polygon_tests;
-                    uint64_t const now=GetTickCount64();
-                    if(!profile_data.started_ms)
-                        profile_data.started_ms=now;
-                    if(now-profile_data.started_ms>=2000U &&
-                       profile_data.queries) {
-                        double const n=double(profile_data.queries);
-                        std::ostringstream line;
-                        line<<"JKGM collide=3 PERF mode="
-                            <<(the_config->precise_type3_use_node_transforms?
-                               "nodes":"thing")
-                            <<" queries="
-                            <<profile_data.queries
-                            <<" hit/miss/fallback="
-                            <<profile_data.hits<<"/"
-                            <<profile_data.misses<<"/"
-                            <<profile_data.fallbacks
-                            <<" avg/peak_us="
-                            <<profile_data.total_us/n<<"/"
-                            <<profile_data.peak_us
-                            <<" geometry_rebuilds="
-                            <<profile_data.rebuilds
-                            <<" nodes_avg="<<profile_data.nodes/n
-                            <<" spheres_avg="<<profile_data.spheres/n
-                            <<" bounds_avg="<<profile_data.bounds/n
-                            <<" faces_avg="<<profile_data.faces/n
-                            <<" polygon_tests_avg="
-                            <<profile_data.polygon_tests/n;
-                        LOG_INFO(line.str());
-                        profile_data=summary{};
-                        profile_data.started_ms=now;
-                    }
+                    if(status==jkgm::precise_type3_status::hit)
+                        return 0x5; // native THING | THINGADJOINCROSS
+                    if(status==jkgm::precise_type3_status::miss)
+                        return 0;   // never return the false sphere hit
+                    // Unsupported 3DO data: preserve JK's native behavior.
                 }
-                if(status==jkgm::precise_type3_status::hit)
-                    return 0x5; // native THING | THINGADJOINCROSS
-                if(status==jkgm::precise_type3_status::miss)
-                    return 0;   // do not resurrect a native false-positive
-                // Bad model data, unsupported transforms: call original.
             }
+            // Every other collision type uses vanilla behavior even when
+            // the separate global collide=2 experiment is enabled.
+            return native();
         }
-#endif
         if(type2_busy || !the_config || !the_config->enable_mesh_collision ||
            (flags&(jkgm::mots_raycast_force_sphere|0x400U))!=0 ||
            !checked || !start || !dir || !out_distance ||
@@ -6442,8 +6245,9 @@ namespace {
 
     bool request_type2_intersection_hook()
     {
-        // No type-3 interception, regardless of stale JSON settings.
-        if(!the_config || !the_config->enable_mesh_collision)return false;
+        // Needed for RayCastEx even when experimental collide=2 is off.
+        // Outside the scoped COG query, all collisions remain unchanged.
+        if(!the_config)return false;
         auto const safe_read=[](uintptr_t at,void* dst,size_t len)->bool {
             if(!jkgm::thing_node_valid_address(at,len) ||
                !gpu_span_readable(reinterpret_cast<void const*>(at),len))
@@ -7838,7 +7642,7 @@ bool attach_hooks()
         native_mesh_collision_hook_active=true;
         LOG_INFO("JKGM native collision Detour installed: type2=",
                  the_config->enable_mesh_collision,
-                 " precise_type3=disabled (RayCastEx is COG-only)");
+                 " precise_type3=RayCastEx-only");
     }
     if(error==NO_ERROR && earth_sound_hook_requested) {
         native_earth_hit_sound_hook_active=true;
