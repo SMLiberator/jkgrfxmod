@@ -83,8 +83,9 @@ namespace {
     std::string extension(std::string const& path)
     {
         size_t const n=path.find_last_of('.');
-        if(n==std::string::npos || path.find_last_of("/\\")>n)
-            return {};
+        size_t const sep=path.find_last_of("/\\");
+        if(n==std::string::npos ||
+           (sep!=std::string::npos && sep>n))return {};
         return lower(path.substr(n));
     }
     // Only swap function table entries, not bytes in the engine's code.
