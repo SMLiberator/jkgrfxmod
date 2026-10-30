@@ -5741,6 +5741,12 @@ namespace {
     // collision search. It never changes normal gameplay collisions.
     thread_local bool raycast_ex_precise_active=false;
     thread_local uint32_t raycast_ex_source_type=0;
+    struct raycast_ex_profile_counters {
+        uint64_t rays=0,search_us=0,type3_checks=0,type3_hits=0;
+        uint64_t model_rebuilds=0,polygon_tests=0,model_fast_rejects=0;
+        uint64_t ineligible_things=0,native_fallbacks=0;
+    };
+    thread_local raycast_ex_profile_counters raycast_ex_profile{};
 
     // Common vanilla SithCollision search and hit-record conversion.
     // Both COG verbs use identical sector traversal and result handles.
@@ -5930,8 +5936,31 @@ namespace {
                 raycast_ex_source_type=previous_type;
             }
         } scope(type);
-        cog_push_int(ctx,cog_raycast_native(ctx,source,sector,world,
-                                           start,ray,length,type));
+        bool const profiling=the_config && the_config->profile_renderer;
+        auto const timer_start=profiling ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
+        int const result=cog_raycast_native(ctx,source,sector,world,
+                                           start,ray,length,type);
+        if(profiling) {
+            auto &p=raycast_ex_profile;
+            ++p.rays;
+            p.search_us+=uint64_t(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now()-timer_start).count());
+            if(p.rays>=128U) {
+                LOG_INFO("RAYCAST_EX perf rays=",p.rays,
+                         " native_search_us=",p.search_us,
+                         " precise_checks=",p.type3_checks,
+                         " precise_hits=",p.type3_hits,
+                         " model_rebuilds=",p.model_rebuilds,
+                         " model_fast_rejects=",p.model_fast_rejects,
+                         " polygon_tests=",p.polygon_tests,
+                         " ineligible_things=",p.ineligible_things,
+                         " native_fallbacks=",p.native_fallbacks);
+                p=raycast_ex_profile_counters{};
+            }
+        }
+        cog_push_int(ctx,result);
     }
 
     void __cdecl cog_ray_cast(void *ctx)
@@ -6333,6 +6362,18 @@ namespace {
             std::memcpy(out_normal,result.normal.data(),12);
         }
         if(out_stats)*out_stats=stats;
+        if(raycast_ex_precise_active && the_config &&
+           the_config->profile_renderer) {
+            auto &p=raycast_ex_profile;
+            ++p.type3_checks;
+            if(status==jkgm::precise_type3_status::hit)++p.type3_hits;
+            if(status==jkgm::precise_type3_status::unavailable)
+                ++p.native_fallbacks;
+            if(stats.rebuilt)++p.model_rebuilds;
+            p.polygon_tests+=stats.polygon_tests;
+            if(status==jkgm::precise_type3_status::miss &&
+               stats.nodes==0U)++p.model_fast_rejects;
+        }
         if(the_config && the_config->profile_renderer) {
             static thread_local unsigned traces=0;
             if(traces++<20U) {
@@ -6386,8 +6427,11 @@ namespace {
                 auto const *candidate=static_cast<uint8_t const *>(checked);
                 std::memcpy(&checked_type,candidate+0x0cU,4);
                 if(!jkgm::cog_raycast_eligible_thing_pair(
-                       raycast_ex_source_type,checked_type))
+                       raycast_ex_source_type,checked_type)) {
+                    if(the_config && the_config->profile_renderer)
+                        ++raycast_ex_profile.ineligible_things;
                     return 0; // Do not run the expensive type-3 solver.
+                }
                 std::memcpy(&checked_mode,candidate+0x28U,4);
                 if(checked_mode==3U) {
                     auto const status=precise_type3_try_query(
