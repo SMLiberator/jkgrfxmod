@@ -34,7 +34,8 @@ inline world_cache_portal_stats inspect_world_cache_portal_membership(
     std::vector<world_cache_draw_candidate> const &staged,
     uintptr_t visible_count_address,uintptr_t visible_list_address,
     std::vector<uint8_t> &membership,
-    std::vector<world_cache_sector_span> *validated_spans=nullptr)
+    std::vector<world_cache_sector_span> *validated_spans=nullptr,
+    std::vector<uint32_t> *visible_scratch=nullptr)
 {
     world_cache_portal_stats stats{};
     membership.clear();
@@ -76,7 +77,9 @@ inline world_cache_portal_stats inspect_world_cache_portal_membership(
         stats.reason="world_table_overflow";return stats;
     }
 
-    std::vector<uint32_t> visible(visible_count);
+    std::vector<uint32_t> temporary_visible;
+    auto &visible=visible_scratch ? *visible_scratch : temporary_visible;
+    visible.resize(visible_count);
     if(!read(visible_list_address,visible.data(),
              visible.size()*sizeof(uint32_t))) {
         stats.reason="unreadable_list";return stats;
