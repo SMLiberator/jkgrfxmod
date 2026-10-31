@@ -585,6 +585,7 @@ namespace jkgm {
         bool sun_shadow_observed=false;
         bool sun_shadow_previous_ready=false;
         size_t sun_shadow_previous_excluded=0;
+        char const *sun_shadow_frame_failure=nullptr;
         std::array<bool,2> sun_shadow_cascade_ready{{false,false}};
         std::array<bool,2> sun_shadow_cascade_cached{{false,false}};
         std::array<std::array<float,3>,2> sun_shadow_directions{};
@@ -4553,12 +4554,14 @@ namespace jkgm {
         void draw_sun_shadow_map()
         {
             sun_shadow_ready=false;
+            sun_shadow_frame_failure=nullptr;
             sun_shadow_cascade_ready={{false,false}};
             sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
             sun_dynamic_atlas_owners.clear();
             if(!the_config->enable_sun_shadows)return;
             auto sun_failure=[&](char const *reason) {
+                sun_shadow_frame_failure=reason;
                 if(the_config->profile_renderer_verbose &&
                    gpu_3do_present_serial%120U==0U)
                     LOG_INFO("SUN shadow unavailable: ",reason);
@@ -4572,12 +4575,18 @@ namespace jkgm {
             auto const direction=normalized_sun_direction(sun.direction.value());
             auto const rgb=sun.color.value();
             float const intensity=sun.intensity.value()[0];
-            if(!(intensity>0.0f) || !std::isfinite(intensity))return;
+            if(!(intensity>0.0f) || !std::isfinite(intensity)) {
+                sun_failure("sunlight intensity not positive");
+                return;
+            }
 
             uint32_t world=0;
             if(!engine_material_debug::read_object(
                    engine_material_debug::current_world_global,world) ||
-               !decal_native_address_ok(world))return;
+               !decal_native_address_ok(world)) {
+                sun_failure("SithWorld pointer not readable");
+                return;
+            }
             decal_native_read const safe_read=[](uintptr_t ptr,void *dst,size_t n) {
                 if(n==0 || !engine_camera_detail::readable(ptr,n))return false;
                 std::memcpy(dst,reinterpret_cast<void const *>(ptr),n);
@@ -5519,6 +5528,8 @@ namespace jkgm {
             } // cascade
             sun_shadow_ready=sun_shadow_cascade_ready[0] &&
                              sun_shadow_cascade_ready[1];
+            if(!sun_shadow_ready && !sun_shadow_frame_failure)
+                sun_shadow_frame_failure="one or both cascades incomplete";
             if(the_config->profile_renderer_verbose &&
                gpu_3do_present_serial%120U==0U) {
                 LOG_INFO("SUN cache 120-frame-window near(full/static_hit/static_redraw/composite_redraw)=",
@@ -6424,7 +6435,9 @@ namespace jkgm {
                             " casters=",casters," excluded_instances=",excluded,
                             " world_receivers=",
                                 sun_shadow_target
-                                ?sun_shadow_target->world.receivers.size():0U);
+                                ?sun_shadow_target->world.receivers.size():0U,
+                            " reason=",sun_shadow_frame_failure
+                                ?sun_shadow_frame_failure:"none");
                     }
                     sun_shadow_observed=true;
                     sun_shadow_previous_ready=sun_shadow_ready;
