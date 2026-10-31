@@ -99,6 +99,9 @@ int main()
     lu32(light_surfaces+2U*0x5cU+0x58U,0xDEADBEEFU);
     lf32(light_surfaces+2U*0x5cU+0x44U,0.10f);
     lf32(light_sector+0x08U,0.20f);
+    lf32(light_sector+0x10U,0.60f);
+    lf32(light_sector+0x14U,0.15f);
+    lf32(light_sector+0x18U,0.05f);
     for(uint32_t i=0;i<4;++i) {
         lu32(light_indices+i*4U,i+1U);
         lf32(light_intensities+i*4U,0.10f*float(i));
@@ -120,6 +123,32 @@ int main()
     assert(lit_sample.mode==3U && lit_sample.vertices==4U);
     assert(std::fabs(rgb[0][0]-std::pow(0.20f,1.8f))<0.0001f);
     assert(std::fabs(rgb[3][2]-std::pow(0.45f,1.8f))<0.0001f);
+    // Each surface uses its owning sector tint, independent of the camera.
+    std::vector<std::array<float,3>> face_tint(mesh.vertices.size());
+    assert(sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,
+        dynamic_lights,rgb,nullptr,nullptr,false,0.0f,&face_tint));
+    assert(face_tint[0][0]==0.60f && face_tint[3][1]==0.15f);
+    constexpr uintptr_t other_sector=light_base+0x900U;
+    lu32(light_surfaces+7U*0x5cU+0x08U,uint32_t(other_sector));
+    lu32(light_surfaces+7U*0x5cU+0x20U,0U);
+    lf32(other_sector+0x10U,0.0f);
+    lf32(other_sector+0x14U,0.0f);
+    lf32(other_sector+0x18U,0.90f);
+    world_cache_draw_candidate other_face{7U,
+        mesh.surfaces[1].first_index,mesh.surfaces[1].count,
+        mesh.surfaces[1].material,0};
+    assert(sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,other_face,8U,
+        dynamic_lights,rgb,nullptr,nullptr,false,0.0f,&face_tint));
+    assert(face_tint[4][2]==0.90f && face_tint[4][0]==0.0f);
+    assert(face_tint[0][0]==0.60f); // adjacent sector unchanged
+    // The tint is live (COG SetSectorTint), not baked into the VBO.
+    lf32(light_sector+0x10U,0.25f);
+    assert(sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,
+        dynamic_lights,rgb,nullptr,nullptr,false,0.0f,&face_tint));
+    assert(face_tint[0][0]==0.25f && face_tint[4][2]==0.90f);
     // Sector Ambient is only for Things; changing it must not touch faces.
     lf32(light_sector+0x04U,0.98f);
     std::vector<std::array<float,3>> pixel_state(mesh.vertices.size());
