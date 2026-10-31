@@ -3461,6 +3461,19 @@ namespace jkgm {
             gl::set_active_texture_unit(0);
         }
 
+        // Deliberate world-cache isolation test. The Direct3D "world"
+        // batches also contain native fallback Things and ordinary sprites.
+        // Suppress those mixed batches ONLY when our opt-in cache has
+        // produced usable visible-sector candidates. The independent gun,
+        // GPU-cached 3DO, projected decal and flare passes are unaffected.
+        bool isolate_native_world_batches() const
+        {
+            return the_config->world_cache_preview &&
+                   world_cache_target && world_cache_target->ready &&
+                   frame_world_cache_camera.valid &&
+                   !world_cache_target->sector_candidates.empty();
+        }
+
         void draw_game_opaque_into_gbuffer(triangle_buffer_models *trimdl, bool posterize_lighting)
         {
             // Draw batches
@@ -3498,23 +3511,26 @@ namespace jkgm {
                     color_rgb(current_color[0], current_color[1], current_color[2]));
             }
 
-            // Native fallback draws first. Cached faces then own the
-            // visible G-buffer pixels, preserving closer native Things.
-            // Mixed native batches still need per-surface ID tagging before
-            // their CPU work can be safely omitted.
-            // Draw first pass (opaque world geometry)
-            draw_batch(&ogs->game_opaque_pass_program,
-                       world_batch,
-                       &trimdl->world_trimdl,
-                       /*force opaque*/ true,
-                       posterize_lighting);
-
-            // Draw second pass (transparent world geometry with alpha testing)
-            draw_batch(&ogs->game_opaque_pass_program,
-                       world_transparent_batch,
-                       &trimdl->world_transparent_trimdl,
-                       /*force opaque*/ true,
-                       posterize_lighting);
+            // The native world has no separate batch from native fallback
+            // Things/sprites. For this experimental parity pass, skip BOTH
+            // mixed batches so any unsupported world faces become obvious.
+            // Restore native rendering automatically if no cache is ready.
+            if(!isolate_native_world_batches()) {
+                draw_batch(&ogs->game_opaque_pass_program,
+                           world_batch,&trimdl->world_trimdl,
+                           /*force opaque*/ true,posterize_lighting);
+                draw_batch(&ogs->game_opaque_pass_program,
+                           world_transparent_batch,
+                           &trimdl->world_transparent_trimdl,
+                           /*force opaque*/ true,posterize_lighting);
+            } else if(the_config->profile_renderer &&
+                      (gpu_3do_present_serial%120U)==0U) {
+                LOG_INFO("WORLD CACHE native_isolation=1 skipped_opaque_tris=",
+                         world_batch.size(),
+                         " skipped_alpha_test_tris=",
+                         world_transparent_batch.size(),
+                         " includes_native_Thing_and_sprite_fallback=1");
+            }
 
             draw_world_cache_preview();
             ogs->game_opaque_pass_program.use_program();
@@ -6301,22 +6317,20 @@ namespace jkgm {
                 ogs->game_transparency_pass_program.use_program();
             }
 
-            // Draw third pass (transparent world geometry with alpha blending)
-            draw_batch(&ogs->game_transparency_pass_program,
-                       world_transparent_batch,
-                       &trimdl->world_transparent_trimdl,
-                       /*force opaque*/ false,
-                       posterize_lighting,
-                       batch_blend_filter::all);
-
-            // Blended and depth-clipped materials from originally opaque
-            // world geometry render here, without writing G-buffer depth.
-            draw_batch(&ogs->game_transparency_pass_program,
-                       world_batch,
-                       &trimdl->world_trimdl,
-                       /*force opaque*/ false,
-                       posterize_lighting,
-                       batch_blend_filter::special);
+            // Isolate cached world in the transparency pass as well.
+            // This also exposes currently unsupported translucent world
+            // materials, which still need a separate GPU implementation.
+            if(!isolate_native_world_batches()) {
+                draw_batch(&ogs->game_transparency_pass_program,
+                           world_transparent_batch,
+                           &trimdl->world_transparent_trimdl,
+                           /*force opaque*/ false,posterize_lighting,
+                           batch_blend_filter::all);
+                draw_batch(&ogs->game_transparency_pass_program,
+                           world_batch,&trimdl->world_trimdl,
+                           /*force opaque*/ false,posterize_lighting,
+                           batch_blend_filter::special);
+            }
 
             // SPR 0x40 flare quads use center-only occlusion against the
             // resolved opaque depth texture. Never write or test ordinary
