@@ -5829,10 +5829,9 @@ namespace jkgm {
                 gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
         }
 
-        // Phase-0 world GPU cache: validate and upload immutable native
-        // surface geometry but never draw it. This preserves JK visibility,
-        // CPU world lighting, sky/portal rendering, and HOM until we have
-        // native surface-level visibility and material parity.
+        // Persistent native world mesh and sector-first staging. Optional
+        // wireframe preview never suppresses JK's native world geometry;
+        // native portals, surface lighting and HOM remain authoritative.
         void probe_world_cache()
         {
             frame_world_cache_camera.valid=false;

@@ -1,7 +1,7 @@
 #pragma once
-// Opt-in, non-rendering phase-0 visible SithWorld GPU mesh cache.
-// Native JK execute-buffer rendering stays active. No double-draws,
-// no suppression of sector portals, and no change to HOM behavior.
+// Opt-in persistent SithWorld geometry cache and sector-first staging.
+// Only an explicit debug flag renders a depth-tested wireframe overlay.
+// Native JK world rendering, visibility, and HOM remain authoritative.
 #include "world_cache.hpp"
 #include "world_cache_visibility.hpp"
 #include "world_cache_portals.hpp"
