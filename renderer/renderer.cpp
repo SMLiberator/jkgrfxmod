@@ -4589,6 +4589,11 @@ namespace jkgm {
             // playable architecture is made from 3DOs. Include submitted
             // model groups before fitting the sun map; otherwise both the
             // receiver lighting and model shadows fall outside the map.
+            // Separate stable scene geometry from per-frame Thing casters.
+            // Camera-local depth range must not be expanded by legacy scaled
+            // R/L/U VFX or moving Things, even if they have opaque MATs.
+            // These instances still appear in model_candidates and are drawn
+            // with their original transforms where their bounds overlap.
             std::vector<decal_volume_aabb> model_bounds;
             struct sun_model_candidate {
                 gpu_3do_instance const *instance;
@@ -4650,7 +4655,9 @@ namespace jkgm {
                     auto const bounds=sun_shadow_transformed_aabb(
                         group.bounds_min,group.bounds_max,m);
                     if(decal_finite(bounds.low) && decal_finite(bounds.high)) {
-                        model_bounds.push_back(bounds);
+                        if(sun_shadow_stable_reference_transform(
+                               m,instance.dynamic_sun_caster))
+                            model_bounds.push_back(bounds);
                         model_candidates.push_back({&instance,&group,bounds});
                     }
                 }
@@ -4664,6 +4671,9 @@ namespace jkgm {
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN caster bounds depth_eligible_groups=",
                          model_candidates.size(),
+                         " stable_reference_groups=",model_bounds.size(),
+                         " moving_or_scaled_reference_excluded=",
+                             model_candidates.size()-model_bounds.size(),
                          " noncaster_material_groups_skipped=",
                          noncaster_bounds_skipped);
             sun_shadow_projection world_view{};
