@@ -65,6 +65,31 @@ int main()
     assert(std::fabs(xform.high[1]-24.0f)<0.0001f);
     assert(std::fabs(xform.low[2]-23.0f)<0.0001f);
     assert(std::fabs(xform.high[2]-33.0f)<0.0001f);
+    // Stable 3DO architecture may define the common light-space depth
+    // range; moving or non-unit R/L/U Things must not, even if opaque.
+    std::array<float,12> const rigid{{
+        1.0f,0.0f,0.0f, 0.0f,1.0f,0.0f, 0.0f,0.0f,1.0f,
+        0.0f,0.0f,0.0f}};
+    auto scaled=rigid;
+    scaled[0]=100.0f;
+    auto mirrored=rigid;
+    mirrored[0]=-1.0f;
+    auto sheared=rigid;
+    sheared[3]=0.4f;
+    assert(sun_shadow_stable_reference_transform(rigid,false));
+    assert(sun_shadow_stable_reference_transform(mirrored,false));
+    assert(!sun_shadow_stable_reference_transform(rigid,true));
+    assert(!sun_shadow_stable_reference_transform(scaled,false));
+    assert(!sun_shadow_stable_reference_transform(scaled,true));
+    assert(!sun_shadow_stable_reference_transform(sheared,false));
+    auto invalid=rigid;
+    invalid[6]=std::numeric_limits<float>::infinity();
+    assert(!sun_shadow_stable_reference_transform(invalid,false));
+    // Filtering only changes projection *participation*; the source
+    // matrix and its correctly transformed bounds remain unmodified.
+    assert(scaled[0]==100.0f);
+    assert(xform.high[0]>xform.low[0]);
+
     // Sun projection bounds must match actual depth-caster materials.
     // Large non-orthonormal legacy VFX transforms are valid for rendering,
     // but a non-casting emissive/blended MAT must never enlarge the global
@@ -97,6 +122,21 @@ int main()
         {static_caster,scaled_vfx}));
     assert(std::fabs(filtered.range-baseline.range)<1.0e-4f);
     assert(polluted.range>baseline.range*10.0f);
+    // The old emissive-only test missed opaque VFX with scaled Thing
+    // orientation. These can CAST depth without becoming projection
+    // references: the shared depth projection must remain identical.
+    std::vector<decal_volume_aabb> stable_only;
+    for(auto const &candidate: std::array<
+            std::pair<std::array<float,12>,decal_volume_aabb>,2>{{
+                {rigid,static_caster},{scaled,scaled_vfx}}}) {
+        if(sun_shadow_material_casts_depth(1,false,false,1.0f,false) &&
+           sun_shadow_stable_reference_transform(candidate.first,false))
+            stable_only.push_back(candidate.second);
+    }
+    sun_shadow_projection fixed{};
+    assert(make_sun_shadow_projection(
+        projection_world,{{0.0f,0.0f,1.0f}},fixed,stable_only));
+    assert(sun_shadow_same_projection(baseline,fixed));
 
     // Empty-world data is a valid shadow shell for 3DO-only levels.
     constexpr uintptr_t world_addr=0x120000U;
@@ -221,6 +261,20 @@ int main()
     assert(make_sun_dynamic_shadow_projection(projection,actor,object_shadow));
     assert(object_shadow.width>0.0f && object_shadow.height>0.0f);
     assert(object_shadow.range==projection.range);
+    // A scaled Thing outside the global Z envelope still fits into
+    // its *own* atlas projection without expanding the shared cascades.
+    auto scaled_actor=actor;
+    scaled_actor.low[2]=projection.origin[2]+200.0f;
+    scaled_actor.high[2]=scaled_actor.low[2]+100.0f;
+    auto const shared_before=projection;
+    sun_shadow_projection local_scaled{};
+    assert(make_sun_dynamic_shadow_projection(
+        projection,scaled_actor,local_scaled));
+    assert(local_scaled.range>projection.range);
+    assert(sun_shadow_same_projection(shared_before,projection));
+    auto const scaled_point=sun_shadow_clip(local_scaled,
+        {{107.5f,208.5f,scaled_actor.low[2]+1.0f}});
+    assert(scaled_point.z>-1.0f && scaled_point.z<1.0f);
     auto actor_point=sun_shadow_clip(object_shadow,{{107.5f,208.5f,2.0f}});
     assert(actor_point.x>=-1.0f && actor_point.x<=1.0f);
     assert(actor_point.y>=-1.0f && actor_point.y<=1.0f);
