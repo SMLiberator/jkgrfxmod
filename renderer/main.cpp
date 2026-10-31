@@ -705,13 +705,16 @@ namespace {
                 // fallback, to correlate dense exhaust/light VFX with
                 // apparently vanishing scene shadows.
                 if(the_config && the_config->profile_renderer_verbose) {
-                    static uint64_t logged_frame=0;
+                    // Keep enough samples to capture intermittent
+                    // overflows without filling the log every frame.
+                    static uint64_t logged_window=~uint64_t(0);
                     static unsigned logged_count=0;
-                    if(logged_frame!=gpu_frame_serial) {
-                        logged_frame=gpu_frame_serial;
+                    uint64_t const window=gpu_frame_serial/30U;
+                    if(logged_window!=window) {
+                        logged_window=window;
                         logged_count=0;
                     }
-                    if(logged_count++<4U) {
+                    if(logged_count++<3U) {
                         auto const name_end=std::find(
                             m.name,m.name+sizeof(m.name),'\0');
                         LOG_INFO("GPU 3DO dynamic light overflow mesh=",
