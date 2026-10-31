@@ -4265,8 +4265,14 @@ namespace jkgm {
             std::map<uint64_t,candidate> keyed;
             for(auto const &inst:frame_gpu_3do_instances) {
                 if(!inst.geometry || !inst.casts_sun_shadows ||
-                   !inst.dynamic_sun_caster || !inst.shadow_owner ||
-                   inst.is_projected_decal)continue;
+                   !inst.shadow_owner || inst.is_projected_decal)continue;
+                // Unusually scaled/sheared Things need an isolated depth
+                // projection even if JK considers their owner stationary.
+                // A successful tile removes them from the broad cascades;
+                // failed/overflowed tiles retain the existing fallback.
+                if(!inst.dynamic_sun_caster &&
+                   sun_shadow_stable_reference_transform(
+                       inst.transform,false))continue;
                 auto &c=keyed[inst.shadow_owner];
                 c.key=inst.shadow_owner;c.parts.push_back(&inst);
                 auto const &m=inst.transform;
@@ -4661,6 +4667,14 @@ namespace jkgm {
                         model_candidates.push_back({&instance,&group,bounds});
                     }
                 }
+            }
+            // An entirely 3DO-built level may have no rigid stationary
+            // reference yet (e.g. all structural Things use authored scale).
+            // Preserve the old all-model fit rather than disabling *every*
+            // shadow in that corner case. Normal scenes isolate outliers.
+            if(model_bounds.empty() && map.world.receivers.empty()) {
+                for(auto const &candidate:model_candidates)
+                    model_bounds.push_back(candidate.bounds);
             }
             if(the_config->profile_renderer) {
                 sun_profile_candidate_us+=elapsed_profile_us(
