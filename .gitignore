@@ -1,12 +1,21 @@
-# Ignore Visual Studio artifacts
-
-## User specific files
+# Local Visual Studio / MSBuild artifacts
 *.user
-
-## Build results
+*.suo
+.vs/
 [Dd]ebug/
 [Rr]elease/
 x86/
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.tlog
 
-## Caches
-.vs/
+# Local CI/release staging artifacts (GitHub Actions uploads these separately)
+test-build/
+Artifacts/
+
+# Python test and utility caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
