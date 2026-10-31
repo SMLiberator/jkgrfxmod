@@ -19,9 +19,16 @@ for `music.ogg`, `music.flac`, or `music.mp3`. Likewise, a request for
 `music.ogg` looks for exactly that file. Ordinary WAV requests continue
 using JK's original native I/O and decoder without modification.
 
-Compressed resources should be placed where JK ordinarily finds sounds,
-including its GOB/GOO archives. Format selection uses the extension;
-renaming a WAV file to `.ogg` does not convert its contents into Ogg Vorbis.
+The native sound loader now searches three directories, in this order:
+`sound/`, `voice/`, then **`music/`**. This applies to WAV and
+compressed sounds, including resources in the game's usual GOB/GOO archives.
+Keep using the actual compressed extension in COG; there is no implicit
+extension fallback. The search-path expansion patches two audited operands
+in this specific `jkgm.exe`, for both the initial metadata lookup and the
+later lazy PCM read. The original addresses are restored when the DLL unloads.
+
+Format selection uses the extension; renaming a WAV file to `.ogg`
+does not convert its contents into Ogg Vorbis.
 
 ## Implementation
 
@@ -64,6 +71,13 @@ Use the log to trace the following sequence:
    requested bytes from that handle.
 6. `JKGM compressed sound native load returned:` — the native sound loader
    completed, with its resulting sound pointer in the log.
+
+If `JKGM sound HostServices live table` reports `bridge_active=0`,
+the adapter was not installed at the moment of the check. The bridge now
+verifies its original callback pointers and rebinds if JK resets them.
+Unlike the earlier diagnostic build, it never invokes JK's original
+fileOpen separately to probe resources; only the native sound loader
+performs these file-opening requests.
 
 A successful decoder test alone cannot prove the native Sith/DirectSound
 integration works in the game. The final check remains actual playback,
