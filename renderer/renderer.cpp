@@ -6213,8 +6213,9 @@ namespace jkgm {
                          " unresolved_material=",unresolved,
                          " deferred_special=",skipped_alpha,
                          " light_fallback=",light_fallback,
-                         " gouraud_faces=",gouraud_faces,
-                         " dynamic_lighting_ready=",dynamic_ready?1:0,
+                         " gouraud_faces=",gouraud_faces);
+                LOG_INFO("WORLD CACHE light_state dynamic_lighting_ready=",
+                         dynamic_ready?1:0,
                          " native_isolation=",isolate_native_world_batches()?1:0,
                          " global_extra=",global_extra,
                          " pixel_lights=",point_lights.size());
