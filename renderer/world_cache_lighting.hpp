@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace jkgm {
@@ -96,17 +97,24 @@ inline bool sample_world_cache_surface_light(
     uint32_t mode=0;
     if(!read_decal_u32(read,addr+0x20U,mode) || mode>3U)return false;
     if(sample) {*sample={mode,count};}
-    // Sector tint belongs to the face's own sector, not the camera sector.
-    // SithSector +0x10 is rdVector3 tint, independently live from Extra.
-    // The +0x08 SithSurface sector pointer is valid even in FullyLit mode.
+    // The owning sector is required for lit faces, and for tint even in
+    // FullyLit mode. Read live Extra + colormap + tint in one bounded span:
+    // +0x08 Extra, +0x0c colormap pointer, +0x10 tint[3]. That avoids an
+    // additional VirtualQuery for every world surface on every frame.
     uint32_t sector=0;
-    if(!read_decal_u32(read,addr+0x08U,sector) ||
-       !decal_native_address_ok(sector))return false;
+    if(mode!=0U || sector_tint) {
+        if(!read_decal_u32(read,addr+0x08U,sector) ||
+           !decal_native_address_ok(sector))return false;
+    }
+    float ambient=0.0f;
     if(sector_tint) {
         if(sector_tint->size()!=out.size())return false;
+        std::array<uint8_t,20> sector_state{};
+        if(!read(uintptr_t(sector)+0x08U,
+                 sector_state.data(),sector_state.size()))return false;
+        std::memcpy(&ambient,sector_state.data(),sizeof(ambient));
         std::array<float,3> tint{};
-        if(!read(uintptr_t(sector)+0x10U,tint.data(),sizeof(tint)))
-            return false;
+        std::memcpy(tint.data(),sector_state.data()+8U,sizeof(tint));
         for(float &v:tint) {
             if(!std::isfinite(v))return false;
             v=std::max(0.0f,std::min(v,1.0f));
@@ -120,9 +128,10 @@ inline bool sample_world_cache_surface_light(
         }
         return true;
     }
-    float extra=0.0f,ambient=0.0f;
+    float extra=0.0f;
     if(!read(addr+0x44U,&extra,sizeof(extra)) ||
-       !read(uintptr_t(sector)+0x08U,&ambient,sizeof(ambient)) ||
+       (!sector_tint &&
+        !read(uintptr_t(sector)+0x08U,&ambient,sizeof(ambient))) ||
        !std::isfinite(extra) || !std::isfinite(ambient))return false;
     // Native world faces use sector Extra, not the camera ambient value.
     // The camera value changes as JK processes each visible sector.
