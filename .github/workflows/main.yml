@@ -160,6 +160,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\spotlight_shadow.cpp /Fe:spotlight_shadow_test.exe
         spotlight_shadow_test.exe
+    - name: Native world GPU cache geometry and live surface state tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\world_cache.cpp /Fe:world_cache_test.exe
+        world_cache_test.exe
     - name: Directional sunlight and empty-world shadow regression tests
       shell: cmd
       run: |
