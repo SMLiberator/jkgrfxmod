@@ -5951,8 +5951,7 @@ namespace jkgm {
                     " not_textured=",state.not_textured,
                     " solid_adjoin=",state.solid_adjoin,
                     " translucent_face=",state.translucent_face,
-                    " zwrite_disabled=",state.zwrite_disabled,
-                    " special_candidates=",state.special_candidates,
+                     " special_candidates=",state.special_candidates,
                     " missing_uv=",state.missing_uv,
                     " missing_material=",state.missing_material,
                     " sky=",state.sky,
@@ -5980,8 +5979,7 @@ namespace jkgm {
                         sector_stage.faces.translucent_face,
                     " sector_stage_solid_adjoin=",
                         sector_stage.faces.solid_adjoin,
-                    " sector_stage_zwrite_disabled=",
-                        sector_stage.faces.zwrite_disabled,
+ 
                     " sector_stage_us=",sector_stage_us,
                     " sector_stage_native_surfaces=",sector_stage.unique_surfaces,
                     " sector_stage_cached_surfaces=",sector_stage.cached_surfaces,
@@ -6146,17 +6144,16 @@ namespace jkgm {
                          " deferred_special=",skipped_alpha,
                          " native_world_unchanged=1");
                 // Read-only material readiness survey for the special
-                // (translucent-flag/solid-adjoin/Z-write) candidates. Read
+                // (translucent-flag/solid-adjoin) candidates. Read
                 // once per unique MAT/cel, sampled just every 120 frames.
                 // Zero GPU submissions and no changes to native alpha draws.
                 std::map<std::pair<uintptr_t,int32_t>,gpu_3do_texture> materials;
                 size_t alpha_texels=0,masked=0,translucent=0,special_blend=0;
                 size_t opaque=0,unresolved_special=0,transition=0;
-                size_t native_translucent=0,solid_adjoins=0,no_zwrite=0;
+                size_t native_translucent=0,solid_adjoins=0;
                 for(auto const &c:cache.sector_special_candidates) {
                     if(c.face_type&0x2U)++native_translucent;
-                    if(c.face_type&0x20U)++no_zwrite;
-                    if(c.solid_adjoin)++solid_adjoins;
+                     if(c.solid_adjoin)++solid_adjoins;
                     auto const key=std::make_pair(c.material,c.cel);
                     auto it=materials.find(key);
                     if(it==materials.end()) {
@@ -6184,8 +6181,7 @@ namespace jkgm {
                          " unique_material_cels=",materials.size(),
                          " native_face_translucent=",native_translucent,
                          " solid_adjoin=",solid_adjoins,
-                         " zwrite_disabled=",no_zwrite,
-                         " alpha_texels=",alpha_texels,
+                          " alpha_texels=",alpha_texels,
                          " masked=",masked,
                          " translucent_texture=",translucent,
                          " special_blend=",special_blend,

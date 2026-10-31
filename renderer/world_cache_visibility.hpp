@@ -23,7 +23,7 @@ struct world_cache_frame_stats {
     uint32_t candidates=0,triangles=0;
     uint32_t frustum_rejected=0,hidden=0,not_textured=0;
     uint32_t missing_uv=0,solid_adjoin=0,sky=0,missing_material=0;
-    uint32_t translucent_face=0,zwrite_disabled=0,special_candidates=0;
+    uint32_t translucent_face=0,special_candidates=0;
     uint32_t changed_material=0,changed_cel=0,unreadable=0;
     bool frustum_available=false;
 };
@@ -89,15 +89,13 @@ inline void append_world_cache_candidate(
     if(geo!=4U) {++stats.not_textured;return;}
     if(!range.has_uv) {++stats.missing_uv;return;}
     if(!material) {++stats.missing_material;return;}
-    // Opaque-material faces may still have native translucent/zwrite flags.
-    // Keep those and solid adjoins outside the ordinary opaque preview,
-    // but retain them for a separately validated GPU alpha pathway.
+    // JK's native world path recognizes rdFace.type 0x2 as translucent.
+    // Do not borrow 0x20 Z-write semantics from other Sith-engine variants.
+    // The meaning of 0x4 in JK is not established, so do not infer it.
     bool const translucent=(face_type&0x2U)!=0U;
-    bool const no_zwrite=(face_type&0x20U)!=0U;
     if(range.solid_adjoin)++stats.solid_adjoin;
     if(translucent)++stats.translucent_face;
-    if(no_zwrite)++stats.zwrite_disabled;
-    if(range.solid_adjoin || translucent || no_zwrite) {
+    if(range.solid_adjoin || translucent) {
         ++stats.special_candidates;
         if(special && (!stats.frustum_available ||
             !gpu_3do_batch_outside_frustum(*frustum,*view,

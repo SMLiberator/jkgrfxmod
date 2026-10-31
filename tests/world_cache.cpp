@@ -243,13 +243,19 @@ int main()
            stage.faces.translucent_face==1U);
     parity=compare_world_cache_candidate_sets(full,membership,sector);
     assert(parity.exact);
-    // Disabled Z-writing is a separate native transparency policy.
+    // The 0x20 face flag is not confirmed for JK. Unlike the 0x2
+    // translucency flag, it must not change our draw classification.
     set_u32(2,0x18,0x20U);
     stage=collect_world_cache_sector_candidates(
         read,base,mesh,lookup,spans,epochs,epoch,sector,
         nullptr,nullptr,&special);
-    assert(stage.valid && sector.empty() && special.size()==1U &&
-           stage.faces.zwrite_disabled==1U);
+    assert(stage.valid && sector.size()==1U && special.empty());
+    // 0x4 is likewise not confirmed to affect rendering in JK.
+    set_u32(2,0x18,0x4U);
+    stage=collect_world_cache_sector_candidates(
+        read,base,mesh,lookup,spans,epochs,epoch,sector,
+        nullptr,nullptr,&special);
+    assert(stage.valid && sector.size()==1U && special.empty());
     // Opaque-textured, impassable adjoins also need separate validation.
     set_u32(2,0x18,0U);
     auto special_mesh=mesh;
