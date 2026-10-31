@@ -73,6 +73,11 @@ struct world_cache_gpu {
                  " surfaces=",mesh.surfaces.size(),
                  " uv_ready=",mesh.uv_ready_surfaces,
                  " missing_uv=",mesh.missing_uv_surfaces,
+                 " skipped_portals=",world.skipped_portals,
+                 " skipped_sky=",world.skipped_sky,
+                 " skipped_material=",world.skipped_material,
+                 " invalid_surfaces=",world.invalid_surfaces,
+                 " native_surface_count=",world.surface_count,
                  " vertices=",mesh.vertices.size(),
                  " triangles=",mesh.indices.size()/3U,
                  " bytes=",mesh.vertices.size()*sizeof(world_cache_vertex)+
