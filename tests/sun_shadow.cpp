@@ -19,6 +19,25 @@ int main()
     assert(!thing_casts_sun_shadows(0x80000U));
     assert(!thing_casts_sun_shadows(0x10U|0x80000U));
     assert(thing_casts_sun_shadows(0x8U|0x4000000U));
+    // More than 16 nearby dynamic lights can force a visible 3DO mesh
+    // back to JK's native path, without disqualifying it as a sun caster.
+    // Both stationary level architecture and moving models need their own
+    // GPU depth-only sidecar; 0x20 remains a strict caster exclusion.
+    assert(sun_shadow_native_sidecar_needed(
+        false,false,true,true,false,true,123U,0U));
+    assert(sun_shadow_native_sidecar_needed(
+        false,false,true,true,true,false,123U,0U));
+    assert(!sun_shadow_native_sidecar_needed(
+        false,false,true,true,false,false,123U,0U));
+    assert(!sun_shadow_native_sidecar_needed(
+        true,false,true,true,false,true,123U,0U));
+    assert(!sun_shadow_native_sidecar_needed(
+        false,false,true,true,false,true,123U,0x20U));
+    assert(!sun_shadow_native_sidecar_needed(
+        false,true,true,true,false,true,123U,0U));
+    assert(!sun_shadow_native_sidecar_needed(
+        false,false,true,true,false,true,0U,0U));
+
     assert(!thing_shadow_geomode_visible(0,4));
     assert(!thing_shadow_geomode_visible(2,4));
     assert(!thing_shadow_geomode_visible(4,2));
