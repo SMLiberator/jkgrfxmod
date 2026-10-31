@@ -36,8 +36,15 @@ assert 'j.contains("gpu_pixel_lighting")' in parser
 assert "the_config->gpu_pixel_lighting" in wiring
 assert "instance.num_lights" in program
 assert 'gl::set_uniform_integer(pixel_dynamic_lighting,pixel_lighting?1:0)' in program
-assert "camera_hud_thing!=0 || pixel_dynamic_lighting!=0" in vert
+# The original baked/static vertex color must not change just because
+# a dynamic light appears in JK's coarse per-mesh light list.
+assert "if(camera_hud_thing!=0) {" in vert
+assert "if(mode>=1.5 && num_lights>0 && pixel_dynamic_lighting==0)" in vert
 assert "jk_lit_rgb=vec3(1.0);" in vert
+assert "if(lit_bright==original_bright) return jk_lit_rgb;" in frag
+assert "return jk_lit_rgb +" in frag
+assert "pixel_jk_color_at_brightness(lit_bright)" in frag
+assert "pixel_jk_color_at_brightness(original_bright)" in frag
 assert "pixel_dynamic_lighting!=0" in frag
 assert "pixel_jk_diffuse_lighting()" in frag
 assert "jk_fragment_lit" in frag
@@ -46,6 +53,20 @@ assert "albedo.rgb*jk_fragment_lit" in frag
 assert "dot(jk_fragment_lit,vec3(0.2126" in frag
 assert "nonrigid_light_transform!=0" in frag
 assert "light_position_radius[i].xyz-anchor" in frag
+
+# This is why recomputing baked light at the pixel was visibly wrong:
+# gamma(interpolated brightness) != interpolated gamma(brightness).
+# With zero point-light contribution, the corrected result must be EXACTLY
+# the original interpolated vertex result.
+for left, right in [(0.1, 0.9), (0.0, 1.0), (0.3, 0.8)]:
+    for t in (0.25, 0.5, 0.75):
+        baked = (1.0-t) * left**1.8 + t * right**1.8
+        recomputed = ((1.0-t) * left + t * right)**1.8
+        if left != right:
+            assert abs(baked - recomputed) > 1e-5
+        base = (1.0-t) * left + t * right
+        no_effect = baked + (base**1.8 - base**1.8)
+        assert no_effect == baked
 
 compiler = shutil.which("glslangValidator")
 if compiler:
