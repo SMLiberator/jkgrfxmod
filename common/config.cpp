@@ -183,6 +183,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("use_model_cache")) {
             j.at("use_model_cache").get_to(rv->use_model_cache);
         }
+        if(j.contains("world_cache_probe")) {
+            j.at("world_cache_probe").get_to(rv->world_cache_probe);
+        }
         if(j.contains("use_sprite_cache")) {
             j.at("use_sprite_cache").get_to(rv->use_sprite_cache);
         }
