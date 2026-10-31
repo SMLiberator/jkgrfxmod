@@ -226,6 +226,47 @@ int main()
     assert(parity.exact && stage.faces.candidates==0U &&
            stage.faces.hidden==1U);
     set_u32(2,0x1c,4U);
+    // A native translucent face must not enter the ordinary opaque draw
+    // candidates just because its MAT has no translucent pixels.
+    std::vector<world_cache_draw_candidate> special;
+    set_u32(2,0x18,0x2U); // rdFace.type: RD_FF_TEX_TRANSLUCENT
+    auto alpha_stats=collect_world_cache_draw_candidates(
+        read,base,mesh,full);
+    assert(alpha_stats.candidates==0U &&
+           alpha_stats.translucent_face==1U &&
+           alpha_stats.special_candidates==1U);
+    stage=collect_world_cache_sector_candidates(
+        read,base,mesh,lookup,spans,epochs,epoch,sector,
+        nullptr,nullptr,&special);
+    assert(stage.valid && sector.empty() &&
+           special.size()==1U && special[0].face_type==0x2U &&
+           stage.faces.translucent_face==1U);
+    parity=compare_world_cache_candidate_sets(full,membership,sector);
+    assert(parity.exact);
+    // Disabled Z-writing is a separate native transparency policy.
+    set_u32(2,0x18,0x20U);
+    stage=collect_world_cache_sector_candidates(
+        read,base,mesh,lookup,spans,epochs,epoch,sector,
+        nullptr,nullptr,&special);
+    assert(stage.valid && sector.empty() && special.size()==1U &&
+           stage.faces.zwrite_disabled==1U);
+    // Opaque-textured, impassable adjoins also need separate validation.
+    set_u32(2,0x18,0U);
+    auto special_mesh=mesh;
+    special_mesh.surfaces[0].solid_adjoin=true;
+    stage=collect_world_cache_sector_candidates(
+        read,base,special_mesh,lookup,spans,epochs,epoch,sector,
+        nullptr,nullptr,&special);
+    assert(stage.valid && sector.empty() &&
+           special.size()==1U && special[0].solid_adjoin);
+    // Fail-closed invalid spans clear both candidate lists.
+    spans.push_back({9U,1U});
+    stage=collect_world_cache_sector_candidates(
+        read,base,mesh,lookup,spans,epochs,epoch,sector,
+        nullptr,nullptr,&special);
+    assert(!stage.valid && sector.empty() && special.empty());
+    spans.pop_back();
+    set_u32(2,0x18,0U);
     // Epoch wrap must not mistake old visits for current ones.
     epoch=std::numeric_limits<uint32_t>::max();
     stage=collect_world_cache_sector_candidates(
