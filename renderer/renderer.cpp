@@ -6077,6 +6077,13 @@ namespace jkgm {
                 safe_read,cache.loaded_world,cache.world.vertex_count,
                 cache.native_dynamic_light);
             float camera_ambient=0.0f,light_attenuation=0.0f;
+            // sithRender global Extra Light is a separate live world
+            // floor adjustment. Camera Ambient remains Thing-only.
+            float global_extra=0.0f;
+            if(!safe_read(0x008D4098U,&global_extra,sizeof(global_extra)) ||
+               !std::isfinite(global_extra) ||
+               std::fabs(global_extra)>8.0f)
+                global_extra=0.0f;
             std::vector<world_cache_point_light> point_lights;
             bool const camera_ready=read_world_cache_camera_lights(
                 safe_read,0x0073A418U,point_lights,camera_ambient,
@@ -6096,7 +6103,7 @@ namespace jkgm {
                        candidate,cache.world.vertex_count,
                        cache.native_dynamic_light,cache.frame_light_rgb,
                        &info,&cache.frame_light_state,
-                       pixel_lighting)) {
+                       pixel_lighting,global_extra)) {
                     ++light_fallback;
                     continue;
                 }
@@ -6208,7 +6215,9 @@ namespace jkgm {
                          " light_fallback=",light_fallback,
                          " gouraud_faces=",gouraud_faces,
                          " dynamic_lighting_ready=",dynamic_ready?1:0,
-                         " native_fallback=depth_less_no_overlay");
+                         " native_isolation=",isolate_native_world_batches()?1:0,
+                         " global_extra=",global_extra,
+                         " pixel_lights=",point_lights.size());
                 // Read-only material readiness survey for the special
                 // (translucent-flag/solid-adjoin) candidates. Read
                 // once per unique MAT/cel, sampled just every 120 frames.
