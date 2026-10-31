@@ -5858,7 +5858,11 @@ namespace jkgm {
                 auto const &cache=*world_cache_target;
                 auto const state=inspect_world_cache_live_state(
                     safe_read,cache.world.surfaces_addr,cache.mesh);
-                LOG_INFO("WORLD CACHE phase0 probe eligible=",
+                // These are geometry/UV candidates, not camera-visible
+                // SithSurfaces. Legacy world batches can also contain
+                // native-fallback Things, so never interpret their triangle
+                // count as exact world-sector visibility.
+                LOG_INFO("WORLD CACHE phase0 probe geo_uv_candidates=",
                     state.drawn_candidates,
                     " hidden=",state.hidden,
                     " missing_uv=",state.missing_uv,
@@ -5866,7 +5870,7 @@ namespace jkgm {
                     " changed_material=",state.changed_material,
                     " unreadable=",state.unreadable,
                     " all_cached_surfaces=",cache.mesh.surfaces.size(),
-                    " native_world_triangles=",world_batch.size()+
+                    " legacy_world_batch_tris=",world_batch.size()+
                         world_transparent_batch.size(),
                     " status=native_rendering_unchanged");
             }
