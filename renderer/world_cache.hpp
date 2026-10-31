@@ -25,6 +25,7 @@ struct world_cache_surface_range {
     uint32_t first_index=0, count=0;
     uintptr_t material=0; // native rdMaterial, read-only
     int32_t cel=-1;
+    uint32_t surface_flags=0; // snapshot only; live flags govern drawing
     bool solid_adjoin=false;
     bool has_uv=false;
     // Immutable world-space bounds for conservative Phase-1 frustum tests.
@@ -35,14 +36,15 @@ struct world_cache_mesh {
     std::vector<world_cache_vertex> vertices;
     std::vector<uint32_t> indices;
     std::vector<world_cache_surface_range> surfaces;
-    uint32_t uv_ready_surfaces=0,missing_uv_surfaces=0;
+    uint32_t uv_ready_surfaces=0,missing_uv_surfaces=0,sky_surfaces=0;
 };
 
 // Snapshot the static geometry only once per world topology. Surface state
 // (geomode, material cel, animation, scroll, visibility) is intentionally
 // NOT baked into the geometry; callers must query it live before rendering.
-// Shadow-world receivers omit sky/passable portals and other special faces:
-// never assume this mesh covers every native world polygon.
+// This snapshot may include sky geometry for future dedicated GPU drawing.
+// Passable adjoins still remain native; shadow/decal readers keep their
+// independent default policy of excluding sky surfaces.
 inline bool build_world_cache_mesh(decal_world_geometry const &world,
                                    world_cache_mesh &out)
 {
@@ -91,9 +93,10 @@ inline bool build_world_cache_mesh(decal_world_geometry const &world,
         out.surfaces.push_back({
             surf.surface_index,begin,
             static_cast<uint32_t>(out.indices.size())-begin,
-            surf.material,surf.cel,surf.solid_adjoin,valid_uv,
+            surf.material,surf.cel,surf.surface_flags,surf.solid_adjoin,valid_uv,
             surf.bounds_min,surf.bounds_max
         });
+        if(surf.surface_flags&0x600U)++out.sky_surfaces;
         if(valid_uv)++out.uv_ready_surfaces;
         else ++out.missing_uv_surfaces;
     }

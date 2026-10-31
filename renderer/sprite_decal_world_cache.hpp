@@ -17,6 +17,7 @@
 namespace jkgm {
     struct decal_world_surface_geometry {
         uint32_t surface_index=0;
+        uint32_t surface_flags=0; // retained for sky-specific GPU passes
         bool solid_adjoin=false; // may be a masked grate/glass surface
         uintptr_t material=0;
         int32_t cel=-1;
@@ -30,7 +31,7 @@ namespace jkgm {
         uintptr_t world=0,vertices_addr=0,surfaces_addr=0;
         uint32_t vertex_count=0,surface_count=0;
         uint32_t invalid_surfaces=0,skipped_portals=0;
-        uint32_t skipped_sky=0,skipped_material=0;
+        uint32_t skipped_sky=0,cached_sky=0,skipped_material=0;
         bool valid_world=false;
         bool include_hidden_faces=false; // shadow cache only
         std::vector<decal_world_surface_geometry> receivers;
@@ -52,7 +53,8 @@ namespace jkgm {
 
         bool load(decal_native_read const &read,uintptr_t current,
                   uint32_t max_surfaces=250000,
-                  bool shadow_include_hidden=false) {
+                  bool shadow_include_hidden=false,
+                  bool include_sky_surfaces=false) {
             clear();
             if(!read || !decal_native_address_ok(current))return false;
             uint32_t nverts=0,verts=0,nfaces=0,faces=0;
@@ -118,8 +120,12 @@ namespace jkgm {
                 if(adjoin_status==decal_adjoin_status::passable) {
                     ++skipped_portals;continue;
                 }
-                if(flags&0x600U) {++skipped_sky;continue;}
-                if((geo<2 && !shadow_include_hidden) || !mat ||
+                bool const is_sky=(flags&0x600U)!=0U;
+                if(is_sky && !include_sky_surfaces) {
+                    ++skipped_sky;continue;
+                }
+                if((geo<2 && !shadow_include_hidden) ||
+                   (!mat && !is_sky) ||
                    count<3 || count>128 ||
                    !decal_native_address_ok(indices)) {
                     ++skipped_material;continue;
@@ -130,6 +136,7 @@ namespace jkgm {
                 }
                 decal_world_surface_geometry surface{};
                 surface.surface_index=i;
+                surface.surface_flags=flags;
                 surface.solid_adjoin=(adjoin!=0U);
                 surface.material=mat;
                 uint32_t native_cel=0;
@@ -198,6 +205,7 @@ namespace jkgm {
                     if(!valid_uv)surface.shadow_uv.clear();
                 }
                 total_polygon_vertices+=count;
+                if(is_sky)++cached_sky;
                 receivers.emplace_back(std::move(surface));
             }
             acceleration.build(receivers);

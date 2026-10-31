@@ -49,6 +49,7 @@ int main()
     assert(mesh.vertices.size()==8 && mesh.indices.size()==12);
     assert(mesh.surfaces.size()==2U);
     assert(mesh.surfaces[0].surface_index==2U);
+    assert(mesh.sky_surfaces==0U);
     assert(mesh.surfaces[0].first_index==0U);
     assert(mesh.surfaces[0].count==6U);
     assert(mesh.surfaces[1].surface_index==7U);
@@ -64,6 +65,17 @@ int main()
     assert(mesh.vertices[2].uv[1]==64.0f);
     assert(mesh.vertices[5].uv[0]==0.0f); // missing source UV not fabricated
     assert(mesh.vertices[3].normal[1]==-1.0f);
+
+    // Cache sky geometry while keeping it out of ordinary world draws.
+    auto sky_world=world;
+    sky_world.receivers[0].surface_flags=0x200U;
+    sky_world.receivers[1].surface_flags=0x400U;
+    world_cache_mesh sky_mesh{};
+    assert(build_world_cache_mesh(sky_world,sky_mesh));
+    assert(sky_mesh.sky_surfaces==2U);
+    assert(sky_mesh.surfaces[0].surface_flags==0x200U);
+    assert(sky_mesh.surfaces[1].surface_flags==0x400U);
+    assert(sky_mesh.indices.size()==12U);
 
     // A snapshot is immutable, but COG-adjusted GeoMode/cel are read live.
     constexpr uintptr_t base=0x100000U;

@@ -67,10 +67,11 @@ struct world_cache_gpu {
         cached_surface_lookup.clear();
         sector_seen_epochs.clear();
         sector_seen_epoch=0;
-        // Reuse the verified shadow/decal world reader. Its receiver-only
-        // policy intentionally excludes sky, passable adjoins, etc. Those
-        // still render via native JK; parity comes before replacement.
-        if(!world.load(read,address,250000U,true) ||
+        // The renderer's private geometry snapshot includes sky faces,
+        // but candidate selection still excludes them until a dedicated
+        // sky render path matches JK. Other shadow/decal reader instances
+        // remain unchanged and continue to exclude sky geometry.
+        if(!world.load(read,address,250000U,true,true) ||
            !build_world_cache_mesh(world,mesh) ||
            !build_world_cache_surface_lookup(
                mesh,world.surface_count,cached_surface_lookup)) {
@@ -95,6 +96,7 @@ struct world_cache_gpu {
                  " surfaces=",mesh.surfaces.size(),
                  " uv_ready=",mesh.uv_ready_surfaces,
                  " missing_uv=",mesh.missing_uv_surfaces,
+                 " cached_sky=",mesh.sky_surfaces,
                  " skipped_portals=",world.skipped_portals,
                  " skipped_sky=",world.skipped_sky,
                  " skipped_material=",world.skipped_material,
