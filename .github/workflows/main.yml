@@ -26,6 +26,12 @@ jobs:
         link.exe /nologo compressed_sound_test_driver.obj compressed_sound_test_impl.obj /OUT:compressed_sound_codec_test.exe
         compressed_sound_codec_test.exe
 
+    - name: Compressed sound GOB forward-only read regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\compressed_sound_read.cpp /Fe:compressed_sound_read_test.exe
+        compressed_sound_read_test.exe
+
     - name: Native textured particle billboard UV regression tests
       shell: cmd
       run: |
