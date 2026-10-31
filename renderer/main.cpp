@@ -55,6 +55,7 @@
 #include "gpu_3do_triangulation.hpp"
 #include "gpu_3do_cache_signature.hpp"
 #include "gpu_3do_colormap.hpp"
+#include "thing_sector_tint.hpp"
 #include "jk_colormap_layout.hpp"
 #include "native_mat_mips.hpp"
 #include "engine_material_debug.hpp"
@@ -199,6 +200,8 @@ namespace {
     // Camera is SithThing type 1, distinct from the active rdCamera.
     // This is a per-Thing choice, never a shared rdMesh/MAT property.
     thread_local bool active_native_model_camera_hud=false;
+    thread_local bool active_native_model_sector_tint_valid=false;
+    thread_local std::array<float,3> active_native_model_sector_tint{};
     // rdThing->model3 at +4 points to rdModel3, whose first 32 bytes
     // contain the source 3DO filename. Keep this context for the nested
     // rdModel3_DrawMesh callback and restore it on recursive model draws.
@@ -1279,6 +1282,22 @@ namespace {
                                     uintptr_t(hud_owner)),sizeof(flags));
             }
         }
+        // Snapshot the linked SithThing's own sector while its rdModel3
+        // draw context is active; sibling Things using the same 3DO can
+        // have entirely different sector tints.
+        std::array<float,3> own_sector_tint{};
+        bool own_sector_tint_valid=false;
+        if(!camera_hud && the_config && the_config->use_model_cache &&
+           hud_owner>=0x10000U) {
+            auto const read=[](uintptr_t addr,void *out,size_t len) {
+                if(!gpu_span_readable(reinterpret_cast<void const *>(addr),len))
+                    return false;
+                std::memcpy(out,reinterpret_cast<void const *>(addr),len);
+                return true;
+            };
+            own_sector_tint_valid=jkgm::read_jk_thing_sector_tint(
+                read,hud_owner,own_sector_tint);
+        }
         bool moving=true; // Unverified owners cannot safely enter static cache.
         bool const shadow_enabled=the_config &&
             (the_config->enable_sun_shadows ||
@@ -1388,6 +1407,8 @@ namespace {
         active_native_rdthing_ptr=native_rd;
         uint32_t const previous_flags=active_native_model_thing_flags;
         bool const previous_camera_hud=active_native_model_camera_hud;
+        bool const previous_sector_tint_valid=active_native_model_sector_tint_valid;
+        auto const previous_sector_tint=active_native_model_sector_tint;
         uint64_t const previous_owner=active_native_shadow_owner;
         uint64_t const previous_family=active_native_spotlight_family;
         bool const previous_moving=active_native_shadow_dynamic;
@@ -1397,6 +1418,8 @@ namespace {
         active_native_decal_receiver=decal_receiver;
         active_native_model_thing_flags=flags;
         active_native_model_camera_hud=camera_hud;
+        active_native_model_sector_tint_valid=own_sector_tint_valid;
+        active_native_model_sector_tint=own_sector_tint;
         active_native_shadow_owner=owner_key;
         active_native_spotlight_family=owner_key &&
             the_config && the_config->enable_spotlights &&
@@ -1410,6 +1433,8 @@ namespace {
         uint64_t const engine_ns=profiling?elapsed_native_ns(engine_start):0;
         active_native_model_thing_flags=previous_flags;
         active_native_model_camera_hud=previous_camera_hud;
+        active_native_model_sector_tint_valid=previous_sector_tint_valid;
+        active_native_model_sector_tint=previous_sector_tint;
         active_native_model_filename=previous_model_filename;
         active_native_model_ptr=previous_model_ptr;
         active_native_rdthing_ptr=previous_rdthing_ptr;
@@ -2134,6 +2159,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     for(float v:inst.transform)if(!std::isfinite(v))return false;
     if(!shadow_only && !inst.camera_hud) {
         inst.colormap_tint=read_gpu_3do_colormap_tint();
+        inst.sector_tint=active_native_model_sector_tint;
+        inst.sector_tint_valid=active_native_model_sector_tint_valid;
         // curLightingMode (rdModel3_Draw's effective Thing/global cap):
         // the verified rdModel3 global block is +0x48 from original JK.
         // This is sampled per instance because COG can change it each frame.
