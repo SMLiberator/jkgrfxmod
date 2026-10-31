@@ -7,6 +7,7 @@ in vec2 material_uv;
 in vec3 cached_view_normal;
 in vec3 cached_lit_rgb;
 in vec3 cached_light_state; // authored+extra, ambient floor, light mode
+in vec3 cached_sector_tint; // the face's owning sector, not camera
 in vec3 cached_world_position;
 in vec3 cached_world_normal;
 uniform int num_lights;
@@ -38,7 +39,12 @@ void main() {
                        cached_light_state.y);
         float lit=max(clamp(cached_light_state.x+added,0.0,1.0),
                       cached_light_state.y);
-        lighting+=vec3(pow(lit,1.8)-pow(base,1.8));
+        // Match the sector tint applied to static lighting at vertices.
+        // Without this, a point light would wash out colored sectors.
+        vec3 t=cached_sector_tint;
+        vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
+        lighting+=pow(clamp(vec3(lit)*scale,0.0,1.0),vec3(1.8))-
+                  pow(clamp(vec3(base)*scale,0.0,1.0),vec3(1.8));
     }
     lighting=clamp(lighting,0.0,1.0);
     out_color=vec4(albedo*lighting,1.0);
