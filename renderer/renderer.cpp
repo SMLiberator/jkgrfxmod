@@ -580,6 +580,11 @@ namespace jkgm {
         std::unordered_set<uint64_t> sun_dynamic_atlas_owners;
         std::array<sun_shadow_projection,2> sun_shadow_views{};
         bool sun_shadow_ready=false;
+        // Diagnostics for transient shadow loss: compare successive complete
+        // shadow passes rather than sampling only one frame in 120.
+        bool sun_shadow_observed=false;
+        bool sun_shadow_previous_ready=false;
+        size_t sun_shadow_previous_excluded=0;
         std::array<bool,2> sun_shadow_cascade_ready{{false,false}};
         std::array<bool,2> sun_shadow_cascade_cached{{false,false}};
         std::array<std::array<float,3>,2> sun_shadow_directions{};
@@ -1028,6 +1033,9 @@ namespace jkgm {
                 spotlight_shadow_cached=false;
                 spotlight_shadow_3do_signature=0;
                 sun_shadow_ready=false;
+                sun_shadow_observed=false;
+                sun_shadow_previous_ready=false;
+                sun_shadow_previous_excluded=0;
                 sun_shadow_cascade_ready={{false,false}};
                 sun_shadow_cascade_cached={{false,false}};
                 sun_shadow_static_cached={{false,false}};
@@ -6394,6 +6402,34 @@ namespace jkgm {
                     profile_frame.timings[profile_idx(profile_stage::opaque_pass)]);
                 draw_spotlight_shadow_map();
                 draw_sun_shadow_map();
+                // A 0x20 Thing is expected to receive no added sunlight
+                // and contribute no shadow depth, but must never disable
+                // the shadow map for unrelated objects. Trace *transitions*
+                // on the very frame they happen, not the 120-frame sample.
+                if(the_config->enable_sun_shadows &&
+                   the_config->profile_renderer_verbose) {
+                    size_t excluded=0,casters=0;
+                    for(auto const &inst:frame_gpu_3do_instances) {
+                        if(!inst.geometry || inst.is_projected_decal)continue;
+                        if(inst.casts_sun_shadows)++casters;
+                        else ++excluded;
+                    }
+                    if(!sun_shadow_observed ||
+                       sun_shadow_previous_ready!=sun_shadow_ready ||
+                       sun_shadow_previous_excluded!=excluded) {
+                        LOG_INFO("SUN shadow frame state: ready=",
+                            sun_shadow_ready?1:0,
+                            " near=",sun_shadow_cascade_ready[0]?1:0,
+                            " far=",sun_shadow_cascade_ready[1]?1:0,
+                            " casters=",casters," excluded_instances=",excluded,
+                            " world_receivers=",
+                                sun_shadow_target
+                                ?sun_shadow_target->world.receivers.size():0U);
+                    }
+                    sun_shadow_observed=true;
+                    sun_shadow_previous_ready=sun_shadow_ready;
+                    sun_shadow_previous_excluded=excluded;
+                }
                 draw_game_gbuffer_pass(trimdl, posterize_lighting);
             }
             {
