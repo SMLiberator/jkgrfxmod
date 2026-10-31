@@ -163,6 +163,71 @@ int main()
     assert(!portal.valid && membership.empty());
     assert(std::strcmp(portal.reason,"count_or_table_out_of_range")==0);
 
+
+    // Sector-driven staging must agree with the whole-world collector
+    // after reading live GeoMode, material, and cel state.
+    put32(native_world+0x4cU,2U);
+    put32(count_addr,1U);
+    put32(list_addr,uint32_t(sector_table));
+    std::vector<world_cache_sector_span> spans;
+    portal=inspect_world_cache_portal_membership(
+        read,native_world,snapshot,possible,count_addr,list_addr,
+        membership,&spans);
+    assert(portal.valid && spans.size()==1U);
+    assert(spans[0].first_surface==2U && spans[0].surface_count==1U);
+    std::vector<uint32_t> lookup,epochs;
+    assert(build_world_cache_surface_lookup(
+        mesh,snapshot.surface_count,lookup));
+    assert(lookup.size()==9U && lookup[2]==0U && lookup[7]==1U &&
+           lookup[0]==std::numeric_limits<uint32_t>::max());
+    epochs.assign(lookup.size(),0U);
+    uint32_t epoch=0;
+    std::vector<world_cache_draw_candidate> full,sector;
+    auto full_stats=collect_world_cache_draw_candidates(read,base,mesh,full);
+    assert(full_stats.candidates==1U && full[0].surface_index==2U);
+    auto stage=collect_world_cache_sector_candidates(
+        read,base,mesh,lookup,spans,epochs,epoch,sector);
+    assert(stage.valid && stage.faces.candidates==1U &&
+           stage.faces.triangles==2U && stage.unique_surfaces==1U);
+    assert(sector[0].material==0x20000U && sector[0].cel==4);
+    auto parity=compare_world_cache_candidate_sets(full,membership,sector);
+    assert(parity.exact && parity.matched==1U);
+    // Visiting the same sector twice must not duplicate draw ranges.
+    spans.push_back(spans[0]);
+    stage=collect_world_cache_sector_candidates(
+        read,base,mesh,lookup,spans,epochs,epoch,sector);
+    assert(stage.valid && stage.faces.candidates==1U &&
+           stage.repeated_surfaces==1U);
+    // COG can hide faces without forcing a re-upload of the VBO.
+    set_u32(2,0x1c,0U);
+    collect_world_cache_draw_candidates(read,base,mesh,full);
+    stage=collect_world_cache_sector_candidates(
+        read,base,mesh,lookup,spans,epochs,epoch,sector);
+    parity=compare_world_cache_candidate_sets(full,membership,sector);
+    assert(parity.exact && stage.faces.candidates==0U &&
+           stage.faces.hidden==1U);
+    set_u32(2,0x1c,4U);
+    // Epoch wrap must not mistake old visits for current ones.
+    epoch=std::numeric_limits<uint32_t>::max();
+    stage=collect_world_cache_sector_candidates(
+        read,base,mesh,lookup,spans,epochs,epoch,sector);
+    assert(stage.valid && epoch==1U && stage.faces.candidates==1U);
+    // A malformed sector span or broken lookup must fail without output.
+    spans.push_back({9U,1U});
+    stage=collect_world_cache_sector_candidates(
+        read,base,mesh,lookup,spans,epochs,epoch,sector);
+    assert(!stage.valid && sector.empty());
+    spans.pop_back();
+    lookup[2]=99U;
+    stage=collect_world_cache_sector_candidates(
+        read,base,mesh,lookup,spans,epochs,epoch,sector);
+    assert(!stage.valid && sector.empty());
+    // Duplicate native indices in the immutable mesh cannot be mapped.
+    auto duplicate=mesh;
+    duplicate.surfaces.push_back(mesh.surfaces.front());
+    assert(!build_world_cache_surface_lookup(
+        duplicate,snapshot.surface_count,lookup) && lookup.empty());
+
     // Malformed/nonfinite geometry may not poison persistent GL buffers.
     world.receivers[0].polygon[0][0]=std::numeric_limits<float>::infinity();
     assert(!build_world_cache_mesh(world,mesh));

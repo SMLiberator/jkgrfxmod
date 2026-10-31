@@ -19,7 +19,11 @@ struct world_cache_gpu {
     decal_world_geometry world{};
     world_cache_mesh mesh{};
     std::vector<world_cache_draw_candidate> frame_candidates;
+    std::vector<world_cache_draw_candidate> sector_candidates;
     std::vector<uint8_t> portal_surface_membership;
+    std::vector<world_cache_sector_span> visible_sector_spans;
+    std::vector<uint32_t> cached_surface_lookup,sector_seen_epochs;
+    uint32_t sector_seen_epoch=0;
     uintptr_t loaded_world=0;
     uint64_t revision=0;
     bool ready=false;
@@ -55,15 +59,23 @@ struct world_cache_gpu {
         world.clear();
         mesh={};
         frame_candidates.clear();
+        sector_candidates.clear();
         portal_surface_membership.clear();
+        visible_sector_spans.clear();
+        cached_surface_lookup.clear();
+        sector_seen_epochs.clear();
+        sector_seen_epoch=0;
         // Reuse the verified shadow/decal world reader. Its receiver-only
         // policy intentionally excludes sky, passable adjoins, etc. Those
         // still render via native JK; parity comes before replacement.
         if(!world.load(read,address,250000U,true) ||
-           !build_world_cache_mesh(world,mesh)) {
+           !build_world_cache_mesh(world,mesh) ||
+           !build_world_cache_surface_lookup(
+               mesh,world.surface_count,cached_surface_lookup)) {
             world.clear();mesh={};
             return false;
         }
+        sector_seen_epochs.assign(world.surface_count,0U);
         gl::bind_vertex_array(vao);
         gl::bind_buffer(gl::buffer_bind_target::array,vertices);
         gl::buffer_data(gl::buffer_bind_target::array,
@@ -86,6 +98,7 @@ struct world_cache_gpu {
                  " skipped_material=",world.skipped_material,
                  " invalid_surfaces=",world.invalid_surfaces,
                  " native_surface_count=",world.surface_count,
+                 " lookup_entries=",cached_surface_lookup.size(),
                  " vertices=",mesh.vertices.size(),
                  " triangles=",mesh.indices.size()/3U,
                  " bytes=",mesh.vertices.size()*sizeof(world_cache_vertex)+

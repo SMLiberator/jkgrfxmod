@@ -5893,14 +5893,38 @@ namespace jkgm {
                     safe_read,address,cache.world,cache.frame_candidates,
                     world_cache_native_visible_count,
                     world_cache_native_visible_list,
-                    cache.portal_surface_membership);
+                    cache.portal_surface_membership,
+                    &cache.visible_sector_spans);
             }
             else {
                 cache.portal_surface_membership.clear();
+                cache.visible_sector_spans.clear();
                 portal.reason="jk_visibility_producer_signature_mismatch";
             }
             auto const portal_us=elapsed_profile_us(
                 portal_started,profile_clock::now());
+            // Sector-first staging and independent all-world staging must
+            // select identical surface/index/material/cel sets. This is
+            // still read-only, and executes only on diagnostic samples.
+            world_cache_sector_stage_stats sector_stage{};
+            world_cache_stage_parity parity{};
+            uint64_t sector_stage_us=0;
+            if(portal.valid) {
+                auto const sector_started=profile_clock::now();
+                sector_stage=collect_world_cache_sector_candidates(
+                    safe_read,cache.world.surfaces_addr,cache.mesh,
+                    cache.cached_surface_lookup,cache.visible_sector_spans,
+                    cache.sector_seen_epochs,cache.sector_seen_epoch,
+                    cache.sector_candidates,
+                    can_cull?&camera.frustum:nullptr,
+                    can_cull?&camera.native_view:nullptr);
+                sector_stage_us=elapsed_profile_us(
+                    sector_started,profile_clock::now());
+                if(sector_stage.valid)
+                    parity=compare_world_cache_candidate_sets(
+                        cache.frame_candidates,cache.portal_surface_membership,
+                        cache.sector_candidates);
+            } else cache.sector_candidates.clear();
             {
                 // These ranges have live material/cel and conservative
                 // frustum filtering, NOT native sector/portal visibility.
@@ -5931,6 +5955,22 @@ namespace jkgm {
                     " portal_member_surfaces=",portal.member_surfaces,
                     " portal_matched_candidates=",portal.matched_candidates,
                     " portal_rejected_candidates=",portal.rejected_candidates,
+                    " sector_stage_valid=",sector_stage.valid?1:0,
+                    " sector_stage_candidates=",sector_stage.faces.candidates,
+                    " sector_stage_tris=",sector_stage.faces.triangles,
+                    " sector_stage_us=",sector_stage_us,
+                    " sector_stage_native_surfaces=",sector_stage.unique_surfaces,
+                    " sector_stage_cached_surfaces=",sector_stage.cached_surfaces,
+                    " sector_stage_uncached_surfaces=",sector_stage.uncached_surfaces,
+                    " sector_stage_duplicate_visits=",sector_stage.repeated_surfaces,
+                    " sector_stage_frustum_rejected=",
+                        sector_stage.faces.frustum_rejected,
+                    " sector_stage_unreadable=",sector_stage.faces.unreadable,
+                    " sector_parity_exact=",parity.exact?1:0,
+                    " sector_parity_matched=",parity.matched,
+                    " sector_parity_missing=",parity.only_full_scan,
+                    " sector_parity_extra=",parity.only_sector_stage,
+                    " sector_parity_metadata_diff=",parity.changed_metadata,
                     " visibility=verified_jkgm_portal_list_read_only",
                     " status=native_rendering_unchanged");
             }
