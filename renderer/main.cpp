@@ -386,6 +386,10 @@ namespace {
     void clear_moving_sprite_decals();
     uint64_t next_gpu_id=1;
     uint64_t gpu_frame_serial=1;
+    // Per-mesh native fallback reason retained for the shadow-only sidecar.
+    // Visible GPU lighting is limited to 16 point lights, but the original
+    // opaque mesh must still contribute to sunlight depth if it falls back.
+    thread_local bool gpu_mesh_light_overflow=false;
     jkgm::gpu_3do_native_stats gpu_native_stats;
     jkgm::gpu_mat_ready_cache gpu_mat_residency;
     std::atomic<uint64_t> native_mat_upload_generation{1};
@@ -694,6 +698,7 @@ namespace {
             // Do not misrender them as omnidirectional point lights.
             if(type<0 || type>2) return false;
             if(instance.num_lights==instance.lights.size()) {
+                gpu_mesh_light_overflow=true;
                 // The native fallback can omit this mesh from the GPU sun
                 // caster submission even while both cascades remain ready.
                 // Log the actual threshold hit, not every generic lighting
@@ -1459,7 +1464,9 @@ namespace {
         }
         auto const queue_begin=profiling ? std::chrono::steady_clock::now()
                                         : std::chrono::steady_clock::time_point{};
+        gpu_mesh_light_overflow=false;
         bool const queued=jkgm::queue_gpu_3do_mesh(mesh,placement);
+        bool const lighting_capacity_fallback=!queued && gpu_mesh_light_overflow;
         // Actors and some vehicles can legitimately use native rendering
         // (unsupported face/lighting mode or MAT warm-up). Retain just the
         // mesh identity and transform; extract geometry only if a nearby
@@ -1547,11 +1554,15 @@ namespace {
         // case preserve the exact native render below and append a separate
         // shadow-only GPU instance. Previously this was possible ONLY with
         // use_model_cache=false, leaving some characters without shadows.
-        // Restrict the second attempt to moving sun casters: don't double
-        // snapshot the many static/HUD/native-fallback meshes each frame.
+        // Moving Things always need the existing sidecar. Static 3DO
+        // architecture ALSO needs one when >16 dynamic lights force its
+        // visible mesh to native rendering, or its otherwise valid depth
+        // caster disappears from the sun map for that frame. Do not double
+        // snapshot the many ordinary MAT warm-up / geometry fallbacks.
         if(!queued && !active_native_model_camera_hud &&
            the_config && the_config->use_model_cache &&
-           the_config->enable_sun_shadows && active_native_shadow_dynamic &&
+           the_config->enable_sun_shadows &&
+           (active_native_shadow_dynamic || lighting_capacity_fallback) &&
            active_native_shadow_owner!=0 &&
            jkgm::thing_casts_sun_shadows(active_native_model_thing_flags)) {
             size_t const prior=pending_gpu_instances.size();
@@ -1595,6 +1606,7 @@ namespace {
                     std::string const name(m.name,name_end);
                     LOG_INFO("SUN native fallback sidecar mesh=",name,
                              " owner=",active_native_shadow_owner,
+                             " light_overflow=",lighting_capacity_fallback?1:0,
                              " captured=",captured?1:0,
                              " reason=",shadow_failure,
                              " vertices=",m.num_vertices,
