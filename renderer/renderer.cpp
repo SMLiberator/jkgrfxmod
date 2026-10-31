@@ -6079,8 +6079,8 @@ namespace jkgm {
                        safe_read,cache.world.surfaces_addr,cache.mesh,
                        candidate,cache.world.vertex_count,
                        cache.native_dynamic_light,cache.frame_light_rgb,
-                       &info,camera_ambient,
-                       &cache.frame_light_state,pixel_lighting)) {
+                       &info,&cache.frame_light_state,
+                       pixel_lighting)) {
                     ++light_fallback;
                     continue;
                 }
