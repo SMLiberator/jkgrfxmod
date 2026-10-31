@@ -272,6 +272,8 @@ namespace {
                 LOG_WARNING("JKGM compressed sound file not found: ",wanted);
                 return 0;
             }
+            LOG_INFO("JKGM compressed sound native file opened: ",wanted,
+                     " native_handle=",fd);
             wav=read_and_decode(fd,wanted,ext);
             real.close(fd);
         }
