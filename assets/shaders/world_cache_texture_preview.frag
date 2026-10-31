@@ -1,16 +1,20 @@
 #version 330 core
-// Diagnostic overlay only. Native world remains visible and writes depth;
-// this pass checks the cache's MAT texture, source UVs and camera projection.
+// GPU-first opaque SithWorld G-buffer. Native depth-tested fallback follows.
+// Full native vertex lighting parity is not implemented in this preview.
 in vec2 material_uv;
+in vec3 cached_view_normal;
 uniform sampler2D albedo_map;
 uniform vec2 uv_scale,uv_scroll;
 uniform vec4 material_tint;
 layout(location=0) out vec4 out_color;
+layout(location=1) out vec4 out_emissive;
+layout(location=2) out vec4 out_normal;
+layout(location=3) out vec4 out_depth;
 void main() {
-    vec3 pigment=texture(albedo_map,material_uv*uv_scale+uv_scroll).rgb *
-                 material_tint.rgb;
-    // Distinct translucent fullbright preview: source texture is recognizable
-    // while native baked lighting remains visible underneath.
-    const float coverage=0.62;
-    out_color=vec4(clamp(pigment,0.0,1.0)*coverage,coverage);
+    vec3 albedo=clamp(texture(albedo_map,material_uv*uv_scale+uv_scroll).rgb*
+                      material_tint.rgb,0.0,1.0);
+    out_color=vec4(albedo,1.0);
+    out_emissive=vec4(0.0);
+    out_normal=vec4(normalize(cached_view_normal),1.0);
+    out_depth=vec4(32.0/max(gl_FragCoord.w,0.00000001),albedo);
 }

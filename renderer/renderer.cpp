@@ -3498,6 +3498,12 @@ namespace jkgm {
                     color_rgb(current_color[0], current_color[1], current_color[2]));
             }
 
+            // Draw GPU cached opaque faces FIRST into the actual G-buffer,
+            // writing their color/normal/depth. Native world follows using
+            // strict LESS depth testing and therefore fills missing faces
+            // without double-blending the same surfaces.
+            draw_world_cache_texture_preview();
+            ogs->game_opaque_pass_program.use_program();
             // Draw first pass (opaque world geometry)
             draw_batch(&ogs->game_opaque_pass_program,
                        world_batch,
@@ -5835,9 +5841,7 @@ namespace jkgm {
         void probe_world_cache()
         {
             frame_world_cache_camera.valid=false;
-            if((!the_config->world_cache_probe &&
-                !the_config->world_cache_preview &&
-                !the_config->world_cache_texture_preview) ||
+            if(!the_config->world_cache_preview ||
                mode!=renderer_mode::ingame)return;
             uint32_t address=0;
             if(!engine_material_debug::read_object(
@@ -6024,7 +6028,7 @@ namespace jkgm {
         // submission. No changes to JK world geometry, portals, sky or HOM.
         void draw_world_cache_texture_preview()
         {
-            if(!the_config->world_cache_texture_preview ||
+            if(!the_config->world_cache_preview ||
                !ogs->world_cache_texture_program || !world_cache_target ||
                !world_cache_target->ready ||
                !frame_world_cache_camera.valid ||
@@ -6041,8 +6045,8 @@ namespace jkgm {
                  std::isfinite(cam.far_plane) && cam.far_plane>0.1f))
                 return;
 
-            // Sorting only groups contiguous material/cel runs; with no
-            // native suppression, ordering between opaque faces is immaterial.
+            // Group GPU cache draws by native material and current cel.
+            // GPU G-buffer depth runs before the native LESS fallback.
             static thread_local std::vector<world_cache_draw_candidate const*> ordered;
             static thread_local std::vector<GLsizei> counts;
             static thread_local std::vector<void const*> offsets;
@@ -6075,13 +6079,12 @@ namespace jkgm {
             shader.set_projection(make_point(
                 half_fov,aspect,1.0f/cam.far_plane,0.0f));
             gl::enable(gl::capability::depth_test);
-            gl::set_depth_function(gl::comparison_function::less_equal);
-            gl::set_depth_mask(false);
-            gl::enable(gl::capability::blend);
-            gl::set_blend_function(gl::blend_function::one,
-                                   gl::blend_function::one_minus_source_alpha);
+            gl::set_depth_function(gl::comparison_function::less);
+            gl::set_depth_mask(true);
+            gl::disable(gl::capability::blend);
             gl::disable(gl::capability::cull_face);
-            // Bias preview toward its matching native opaque polygon.
+            // Bias only the GPU polygon towards the camera, allowing it to
+            // own its pixels while native fills unsupported/missing faces.
             glEnable(GL_POLYGON_OFFSET_FILL);
             glPolygonOffset(-1.0f,-1.0f);
             gl::bind_vertex_array(cache.vao);
@@ -6138,11 +6141,11 @@ namespace jkgm {
             gl::set_active_texture_unit(0);
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U) {
-                LOG_INFO("WORLD CACHE texture_preview ranges=",drawn,
+                LOG_INFO("WORLD CACHE gpu_first_opaque ranges=",drawn,
                          " multi_draw_calls=",groups,
                          " unresolved_material=",unresolved,
                          " deferred_special=",skipped_alpha,
-                         " native_world_unchanged=1");
+                         " native_fallback=depth_less_no_overlay");
                 // Read-only material readiness survey for the special
                 // (translucent-flag/solid-adjoin) candidates. Read
                 // once per unique MAT/cel, sampled just every 120 frames.
@@ -6324,11 +6327,8 @@ namespace jkgm {
             // Material and UV caches are shared with the ordinary GPU 3DO path.
             gl::enable(gl::capability::blend);
             gl::set_depth_mask(false);
-            // Textured GPU-world comparison belongs beneath translucent
-            // geometry and projected decals, not over the entire alpha pass.
-            // It overlays native opaque faces but contributes no depth.
-            draw_world_cache_texture_preview();
-            ogs->game_transparency_pass_program.use_program();
+            // Cached world geometry already owns depth in the opaque pass.
+            // Transparent native world rendering remains unchanged.
             if(the_config->enable_decals) {
                 draw_gpu_3do_preview(true,false,true);
                 ogs->game_transparency_pass_program.use_program();
@@ -6375,7 +6375,6 @@ namespace jkgm {
             // pass after native world geometry. Projected SPRs were submitted
             // earlier so translucent world pixels may correctly cover them.
             draw_gpu_3do_preview(true);
-            draw_world_cache_wireframe();
             ogs->game_transparency_pass_program.use_program();
 
             // Weapon/HUD depth is intentionally separate from world lights.

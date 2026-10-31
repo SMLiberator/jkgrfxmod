@@ -433,9 +433,6 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     }
     // Keep the debug shader completely uncompiled on ordinary installs.
     if(the_config->world_cache_preview)
-        world_cache_wireframe_program =
-            std::make_unique<shaders::world_cache_wireframe_shader>(data_root);
-    if(the_config->world_cache_texture_preview)
         world_cache_texture_program =
             std::make_unique<shaders::world_cache_wireframe_shader>(data_root,true);
 

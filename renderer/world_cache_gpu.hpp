@@ -1,7 +1,7 @@
 #pragma once
 // Opt-in persistent SithWorld geometry cache and sector-first staging.
-// Only an explicit debug flag renders a depth-tested wireframe overlay.
-// Native JK world rendering, visibility, and HOM remain authoritative.
+// Opt-in GPU-first opaque pass uses native depth-tested fallback.
+// Native JK portal visibility and HOM remain authoritative.
 #include "world_cache.hpp"
 #include "world_cache_visibility.hpp"
 #include "world_cache_portals.hpp"
@@ -113,7 +113,7 @@ struct world_cache_gpu {
                  " build_us=",std::chrono::duration_cast<
                      std::chrono::microseconds>(
                          std::chrono::steady_clock::now()-start).count(),
-                 " mode=nonrendering_native_world_unchanged");
+                 " mode=world_cache_gpu_first_optional");
         return true;
     }
 };

@@ -56,8 +56,8 @@ namespace jkgm {
             void set_menu_sampler(int sampler);
         };
 
-        // Explicitly opt-in debug draw: cached SithWorld indexed geometry
-        // as visible wireframe. No MATs, depth writes, or native suppression.
+        // GPU world G-buffer shader; legacy wireframe variant is retained
+        // for internal diagnostics but no longer enabled by preview.
         class world_cache_wireframe_shader : public opengl_shader {
             gl::uniform_location_id view_right,view_forward,view_up,view_origin;
             gl::uniform_location_id projection;
