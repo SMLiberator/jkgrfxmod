@@ -4695,6 +4695,9 @@ namespace {
             instance.camera_hud=thing_type==1U && render_type==4U;
             instance.camera_hud_world_depth=jkgm::camera_hud_uses_world_depth(
                 instance.camera_hud,thingflags);
+            if(!instance.camera_hud)
+                instance.sector_tint_valid=jkgm::read_jk_thing_sector_tint(
+                    read,owner,instance.sector_tint);
         }
         // The displayed billboard is a normal shadow RECEIVER; it does not
         // cast merely because it participates in lighting. 0x20 suppresses
