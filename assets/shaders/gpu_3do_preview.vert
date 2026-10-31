@@ -21,6 +21,7 @@ uniform vec4 jk_color_tint;
 uniform vec4 jk_color_add_fade; // RGB additive/255, A fade
 uniform float attenuation_min;
 uniform int num_lights;
+uniform int pixel_dynamic_lighting; // fragment handles JK diffuse when enabled
 uniform int nonrigid_light_transform; // use transformed distances for scaled R/L/U
 uniform vec4 light_position_radius[16]; // local XYZ and JK light radius
 uniform float light_intensity[16];
@@ -30,6 +31,12 @@ uniform float light_intensity[16];
 out vec3 jk_lit_rgb;
 out vec3 local_fragment_position;
 out vec3 local_fragment_normal;
+// Raw JK vertex attributes for opt-in smooth per-fragment light response.
+// Separate from jk_lit_rgb so native Gouraud remains the default/fallback.
+out vec3 pixel_light_face_anchor;
+out vec3 pixel_light_face_normal;
+out vec3 pixel_light_vertex_rgb;
+out vec3 pixel_light_state; // static light, face extra light, mode
 uniform vec4 view_right, view_forward, view_up, view_origin;
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 out vec2 pixel_uv;
@@ -61,9 +68,15 @@ void main() {
     pixel_uv=local_uv;
     local_fragment_position=local_position;
     local_fragment_normal=local_light_normal;
+    pixel_light_face_anchor=local_face_anchor;
+    pixel_light_face_normal=local_normal;
+    pixel_light_vertex_rgb=local_vertex_rgb;
+    pixel_light_state=vec3(local_static_light,local_extra_light,local_light_mode);
     // A Camera-type Thing is a HUD overlay: no native ambient/dynamic
     // lighting, colormap tint, palette fade or per-camera color effects.
-    if(camera_hud_thing!=0) {
+    if(camera_hud_thing!=0 || pixel_dynamic_lighting!=0) {
+        // Pixel mode replaces the complete native diffuse calculation in
+        // the fragment shader; never add vertex dynamic light a second time.
         jk_lit_rgb=vec3(1.0);
     } else {
     // JK: FullyLit=0, NotLit=1, Diffuse=2, Gouraud=3.
