@@ -8,6 +8,7 @@
 #include "glutil/vertex_array.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <chrono>
 
 namespace jkgm {
 struct world_cache_gpu {
@@ -44,6 +45,7 @@ struct world_cache_gpu {
         if(!address)return false;
         if(ready && loaded_world==address &&
            world.matches(read,address))return true;
+        auto const start=std::chrono::steady_clock::now();
         ready=false;
         loaded_world=0;
         world.clear();
@@ -83,6 +85,9 @@ struct world_cache_gpu {
                  " bytes=",mesh.vertices.size()*sizeof(world_cache_vertex)+
                            mesh.indices.size()*sizeof(uint32_t),
                  " revision=",revision,
+                 " build_us=",std::chrono::duration_cast<
+                     std::chrono::microseconds>(
+                         std::chrono::steady_clock::now()-start).count(),
                  " mode=nonrendering_native_world_unchanged");
         return true;
     }
