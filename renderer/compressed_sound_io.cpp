@@ -65,6 +65,7 @@ namespace {
     std::array<uintptr_t,2> host_tables{};
     size_t host_count=0;
     bool installed=false;
+    thread_local unsigned sound_open_trace_depth=0;
 
     bool readable(uintptr_t addr,size_t size)
     {
@@ -186,6 +187,9 @@ namespace {
     }
     int __cdecl file_open(char const* path,char const* mode)
     {
+        if(sound_open_trace_depth && path && mode)
+            LOG_INFO("JKGM sound HostServices fileOpen entered: ",path,
+                     " mode=",mode);
         if(!path || !mode)return 0;
         if(std::strchr(mode,'w') || std::strchr(mode,'a') ||
            std::strchr(mode,'+'))return real.open(path,mode);
@@ -385,6 +389,56 @@ bool install_compressed_sound_file_services()
     installed=true;
     LOG_INFO("JKGM compressed OGG/FLAC/MP3 HostServices WAV bridge installed");
     return true;
+}
+void begin_compressed_sound_open_trace()
+{
+    ++sound_open_trace_depth;
+}
+void end_compressed_sound_open_trace()
+{
+    if(sound_open_trace_depth)--sound_open_trace_depth;
+}
+void diagnose_compressed_sound_file_services(char const* filename)
+{
+    if(!filename)return;
+    LOG_INFO("JKGM sound bridge diagnostic: installed=",installed?1:0);
+    for(uintptr_t global:{sith_host_global,std_host_global}) {
+        if(!readable(global,4)) {
+            LOG_WARNING("JKGM sound HostServices global unreadable: ",global);
+            continue;
+        }
+        uint32_t table=0;
+        std::memcpy(&table,reinterpret_cast<void const*>(global),4);
+        if(!readable(table,0x54U)) {
+            LOG_WARNING("JKGM sound HostServices table unreadable: global=",
+                        global," table=",uintptr_t(table));
+            continue;
+        }
+        uintptr_t const open_ptr=slot(table,0x30U);
+        uintptr_t const expected=reinterpret_cast<uintptr_t>(&file_open);
+        LOG_INFO("JKGM sound HostServices live table: global=",global,
+                 " table=",uintptr_t(table),
+                 " fileOpen=",open_ptr,
+                 " bridge_active=",(open_ptr==expected?1:0));
+    }
+    if(!installed || !real.open || !real.close) {
+        LOG_WARNING("JKGM sound resource probe unavailable: bridge not installed");
+        return;
+    }
+    // Probe using the original JK callbacks. Do not decode, cache or open
+    // virtual handles here; this only establishes whether JK can find files.
+    for(char const* dir:{"sound\\","voice\\"}) {
+        std::string const path=std::string(dir)+filename;
+        int const fd=real.open(path.c_str(),"rb");
+        if(fd) {
+            int const size=real.size?real.size(fd):-1;
+            real.close(fd);
+            LOG_INFO("JKGM sound resource probe: ",path,
+                     " found=1 size=",size);
+        } else {
+            LOG_INFO("JKGM sound resource probe: ",path," found=0");
+        }
+    }
 }
 void uninstall_compressed_sound_file_services()
 {
