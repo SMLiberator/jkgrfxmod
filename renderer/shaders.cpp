@@ -358,6 +358,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , fog_color(gl::get_uniform_location(the_program,"fog_color"))
     , jk_color_filter(gl::get_uniform_location(the_program,"jk_color_filter"))
     , jk_color_tint(gl::get_uniform_location(the_program,"jk_color_tint"))
+    , thing_sector_tint_delta(gl::get_uniform_location(the_program,"thing_sector_tint_delta"))
     , jk_color_add_fade(gl::get_uniform_location(the_program,"jk_color_add_fade"))
     , colormap_tint(gl::get_uniform_location(the_program,"colormap_tint"))
     , specular_params(gl::get_uniform_location(the_program,"specular_params"))
@@ -531,6 +532,13 @@ void jkgm::shaders::gpu_3do_preview_shader::set_jk_color_effects(
     gl::set_uniform_vector(jk_color_filter,filter);
     gl::set_uniform_vector(jk_color_tint,tint);
     gl::set_uniform_vector(jk_color_add_fade,add_fade);
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_thing_sector_tint_delta(
+    std::array<float,3> const &delta)
+{
+    gl::set_uniform_vector(thing_sector_tint_delta,
+        make_point(delta[0],delta[1],delta[2]));
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_colormap_tint(
