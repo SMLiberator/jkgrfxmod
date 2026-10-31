@@ -2968,6 +2968,21 @@ namespace jkgm {
                 camera_sector_tint[2]==0.0f;
             bool const can_replace_sector_tint=camera_tint_valid &&
                 (effect.active || camera_tint_zero);
+            if(the_config->profile_renderer &&
+               !transparent && !post_exempt && !decals_only &&
+               gpu_3do_present_serial%120U==0U) {
+                size_t valid=0,eligible=0;
+                for(auto const &inst:instances) {
+                    if(inst.shadow_only || inst.camera_hud ||
+                       inst.is_projected_decal)continue;
+                    ++eligible;
+                    if(inst.sector_tint_valid)++valid;
+                }
+                LOG_INFO("THING SECTOR TINT camera_valid=",
+                         camera_tint_valid?1:0,
+                         " replace=",can_replace_sector_tint?1:0,
+                         " eligible=",eligible," local_valid=",valid);
+            }
             prog.set_jk_color_effects(
                 make_point(float(effect.filter[0]),float(effect.filter[1]),
                            float(effect.filter[2]),effect.active?1.0f:0.0f),
