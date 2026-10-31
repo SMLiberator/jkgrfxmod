@@ -256,5 +256,54 @@ int main()
         std::numeric_limits<float>::quiet_NaN();
     assert(build_world_cache_mesh(world,mesh));
     assert(mesh.uv_ready_surfaces==0U && mesh.missing_uv_surfaces==2U);
+
+    // Exercise the actual native-memory loader, not just a manually
+    // constructed mesh: the render cache includes sky even without a MAT,
+    // while the decal/shadow reader MUST continue excluding it by default.
+    constexpr uintptr_t sky_world_addr=base+0xb000U;
+    constexpr uintptr_t sky_vertices_addr=base+0xc000U;
+    constexpr uintptr_t sky_faces_addr=base+0xd000U;
+    constexpr uintptr_t sky_indices_addr=base+0xe000U;
+    put32(sky_world_addr+0x88U,4U);
+    put32(sky_world_addr+0x8cU,uint32_t(sky_vertices_addr));
+    put32(sky_world_addr+0xa0U,0U);
+    put32(sky_world_addr+0xa4U,0U);
+    put32(sky_world_addr+0xa8U,1U);
+    put32(sky_world_addr+0xacU,uint32_t(sky_faces_addr));
+    put32(sky_faces_addr+0x0cU,0U); // no adjoin
+    put32(sky_faces_addr+0x10U,0x200U);
+    put32(sky_faces_addr+0x1cU,4U);
+    put32(sky_faces_addr+0x28U,4U);
+    put32(sky_faces_addr+0x2cU,uint32_t(sky_indices_addr));
+    put32(sky_faces_addr+0x34U,0U); // sky needn't have a MAT
+    const float sky_quad[12]={0,0,0, 2,0,0, 2,0,2, 0,0,2};
+    const float sky_normal[3]={0,-1,0};
+    std::memcpy(storage.data()+(sky_vertices_addr-base),sky_quad,
+                sizeof(sky_quad));
+    std::memcpy(storage.data()+(sky_faces_addr-base)+0x48U,sky_normal,
+                sizeof(sky_normal));
+    for(uint32_t i=0;i<4U;++i)
+        put32(sky_indices_addr+i*4U,i);
+    decal_world_geometry sky_native{};
+    assert(sky_native.load(read,sky_world_addr,100U,true));
+    assert(sky_native.skipped_sky==1U &&
+           sky_native.receivers.empty());
+    assert(sky_native.load(read,sky_world_addr,100U,true,true));
+    assert(sky_native.cached_sky==1U && sky_native.skipped_sky==0U);
+    assert(sky_native.receivers.size()==1U &&
+           sky_native.receivers[0].surface_flags==0x200U);
+    world_cache_mesh cached_sky{};
+    assert(build_world_cache_mesh(sky_native,cached_sky));
+    assert(cached_sky.sky_surfaces==1U &&
+           cached_sky.surfaces[0].surface_flags==0x200U);
+    std::vector<world_cache_draw_candidate> no_sky_draw;
+    auto const sky_stats=collect_world_cache_draw_candidates(
+        read,sky_native.surfaces_addr,cached_sky,no_sky_draw);
+    assert(sky_stats.sky==1U && sky_stats.candidates==0U &&
+           no_sky_draw.empty());
+    put32(sky_faces_addr+0x10U,0x400U);
+    assert(sky_native.load(read,sky_world_addr,100U,true,true));
+    assert(sky_native.cached_sky==1U &&
+           sky_native.receivers[0].surface_flags==0x400U);
     return 0;
 }
