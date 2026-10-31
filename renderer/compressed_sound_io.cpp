@@ -186,18 +186,20 @@ namespace {
         };
         // Read via original HostServices callbacks, NEVER host stdio.
         // This preserves JK's loose-file and GOB/GOO search behavior.
-        int length=real.size?real.size(native_fd):-1;
-        if(length<0) {
-            if(real.seek(native_fd,0,SEEK_END)!=0)
-                return fail("size unavailable; seek end failed");
-            length=real.tell(native_fd);
-            if(real.seek(native_fd,0,SEEK_SET)!=0)
-                return fail("size unavailable; seek start failed");
-        }
+        // IMPORTANT: Do not call real.size(native_fd)! The original
+        // JK resource callback is not safe for all GOB/loose-file handles:
+        // on the audited executable it can treat a small handle (e.g. 1)
+        // as a filename pointer and crash inside CreateFileA/strlen.
+        // seek/tell are the operations the native sound loader already uses.
+        if(real.seek(native_fd,0,SEEK_END)!=0)
+            return fail("seek end failed");
+        int const length=real.tell(native_fd);
         if(length<=0 || uint64_t(length)>max_encoded_bytes)
-            return fail("empty or larger than 64 MiB");
+            return fail("length unavailable, empty or larger than 64 MiB");
         if(real.seek(native_fd,0,SEEK_SET)!=0)
             return fail("seek start failed");
+        LOG_INFO("JKGM compressed sound source opened: ",path,
+                 " encoded_bytes=",length);
         std::vector<uint8_t> input(size_t(length),uint8_t(0));
         size_t read_count=0;
         while(read_count<input.size()) {
