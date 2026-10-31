@@ -66,6 +66,7 @@ uniform float ambient_light;
 uniform float effective_light_mode;
 uniform vec3 colormap_tint;
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
+uniform vec3 thing_sector_tint_delta; // own SithSector - camera SithSector
 uniform int nonrigid_light_transform;
 uniform int dynamic_light_specular_enabled;
 uniform vec4 light_position_radius[16];
@@ -83,11 +84,13 @@ vec3 pixel_jk_color_at_brightness(float bright)
 {
     vec3 result=vec3(pow(clamp(bright,0.0,1.0),1.8)) *
                 pixel_light_vertex_rgb * colormap_tint;
-    if(jk_color_filter.w>0.5) {
+    if(jk_color_filter.w>0.5 ||
+       any(greaterThan(abs(thing_sector_tint_delta),vec3(0.00001)))) {
         vec3 v=pow(clamp(result,0.0,1.0),vec3(1.0/1.8));
         if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
             v*=step(vec3(0.5),jk_color_filter.xyz);
-        vec3 t=jk_color_tint.xyz;
+        vec3 t=clamp(jk_color_tint.xyz+thing_sector_tint_delta,
+                     vec3(-4.0),vec3(4.0));
         vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
         v=clamp(v*scale,0.0,1.0);
         v=clamp(v+jk_color_add_fade.xyz,0.0,1.0);
