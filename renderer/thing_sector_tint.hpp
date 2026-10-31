@@ -42,12 +42,22 @@ namespace jkgm {
     template <class Read>
     bool read_jk_camera_sector_tint(Read const &read,
                                     std::array<float,3> &out) {
-        // OpenJKDF2 symbols.syms: sithCamera_g_pCurCamera 0x0082F104.
-        constexpr uintptr_t camera_global=0x0082F104U;
-        uint32_t camera=0,sector=0;
-        if(!read(camera_global,&camera,sizeof(camera)) ||
-           !jk_tint_native_ptr(camera) ||
-           !read(uintptr_t(camera)+0x18U,&sector,sizeof(sector)))
+        // The OpenJKDF2 global SithCamera pointer (0x82f104) is NOT
+        // available at that address in jkgm.exe. Use this build's verified
+        // SithCamera array/index, also used by read_engine_camera().
+        // Only seven normal camera slots are supported; invalid/temporary
+        // camera selections retain vanilla tint instead of guessing.
+        constexpr uintptr_t camera_array=0x008EC2C0U;
+        constexpr uintptr_t camera_index=0x008EE4E8U;
+        constexpr uintptr_t camera_stride=0x4E0U;
+        constexpr int32_t camera_count=7;
+        int32_t index=-1;
+        if(!read(camera_index,&index,sizeof(index)) ||
+           index<0 || index>=camera_count)return false;
+        uintptr_t const camera=camera_array+
+            uintptr_t(index)*camera_stride;
+        uint32_t sector=0;
+        if(!read(camera+0x18U,&sector,sizeof(sector)))
             return false;
         return read_jk_sector_tint(read,sector,out);
     }
