@@ -5677,6 +5677,7 @@ namespace {
     constexpr uintptr_t native_sector_stride=0x98U;
     native_sector_contains_fn native_sector_contains=nullptr;
     jkgm::cog_sector_queries cog_sector_history;
+    jkgm::cog_sector_id_lookup cog_sector_ids;
 
     bool cog_sector_native_matches() {
         constexpr uint8_t signature[]={
@@ -5741,6 +5742,35 @@ namespace {
             return -1;
         return cog_sector_id_at_ptr(sectors,sector);
     }
+    // IsInSector(position,sectorId): exact native point-in-sector logic,
+    // but test only the requested sector, never the whole sector array.
+    // This query is independent of First/NextSectorAtPos's COG cursor.
+    void __cdecl cog_is_in_sector(void *ctx) {
+        int const id=cog_pop_int(ctx);
+        float pos[3]{};
+        cog_pop_vector(ctx,pos);
+        uintptr_t const world=cog_sector_world();
+        cog_sector_array sectors{};
+        if(!world || !cog_sector_array_read(world,sectors) ||
+           !std::isfinite(pos[0]) || !std::isfinite(pos[1]) ||
+           !std::isfinite(pos[2])) {
+            cog_push_int(ctx,0);
+            return;
+        }
+        int const index=cog_sector_ids.find(
+            world,sectors.base,sectors.count,id,
+            [&sectors](int candidate) {
+                uint32_t native_id=0;
+                std::memcpy(&native_id,reinterpret_cast<void const*>(
+                    sectors.base+uintptr_t(candidate)*native_sector_stride),4);
+                return native_id<=uint32_t(std::numeric_limits<int>::max())
+                    ? int(native_id):-1;
+            });
+        cog_push_int(ctx,index>=0 &&
+            cog_sector_match(index,{{pos[0],pos[1],pos[2]}},sectors)==id
+            ? 1:0);
+    }
+
     void __cdecl cog_first_sector_at_pos(void *ctx) {
         float pos[3]{};
         cog_pop_vector(ctx,pos);
@@ -7765,6 +7795,7 @@ namespace {
         cog_verb_entry{"getrayhitthing", cog_get_ray_hit_thing},
         cog_verb_entry{"getrayhitsurface", cog_get_ray_hit_surface},
         cog_verb_entry{"getrayhitsector", cog_get_ray_hit_sector},
+        cog_verb_entry{"isinsector", cog_is_in_sector},
         cog_verb_entry{"firstsectoratpos", cog_first_sector_at_pos},
         cog_verb_entry{"nextsectoratpos", cog_next_sector_at_pos},
         cog_verb_entry{"getrayhitdistance", cog_get_ray_hit_distance},
