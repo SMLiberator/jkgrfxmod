@@ -47,6 +47,9 @@ jobs:
     - name: Camera HUD emissive-only shader regression tests
       run: python3 tests/camera_hud_emissive.py
 
+    - name: GPU-cached per-pixel dynamic lighting regression checks
+      run: python3 tests/gpu_pixel_lighting.py
+
     - name: Camera Thing HUD type regression tests
       shell: cmd
       run: |
