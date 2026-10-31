@@ -175,6 +175,13 @@ int main()
         membership,&spans);
     assert(portal.valid && spans.size()==1U);
     assert(spans[0].first_surface==2U && spans[0].surface_count==1U);
+    // Callers can retain storage for the native list across frames.
+    std::vector<uint32_t> visible_scratch;
+    portal=inspect_world_cache_portal_membership(
+        read,native_world,snapshot,possible,count_addr,list_addr,
+        membership,&spans,&visible_scratch);
+    assert(portal.valid && visible_scratch.size()==1U &&
+           visible_scratch[0]==sector_table && spans.size()==1U);
     std::vector<uint32_t> lookup,epochs;
     assert(build_world_cache_surface_lookup(
         mesh,snapshot.surface_count,lookup));
