@@ -34,6 +34,7 @@ namespace jkgm {
         float hdr_color_crispness = 0.6f; // 0=hue-preserving, 1=original per-channel ACES
         bool enable_reflections = true;
         bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
+        bool gpu_pixel_lighting = false; // opt-in per-pixel native Thing lights for GPU-cached 3DOs only
         bool enable_ssao = true;
         bool fill_tjunction_gaps = false; // opt-in G-buffer gap repair
         unsigned int tjunction_gap_fill_size = 2U; // proven useful screen-pixel radius, 0..8; disabled unless fill_tjunction_gaps
