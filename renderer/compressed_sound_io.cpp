@@ -24,6 +24,11 @@ namespace {
     // tell +0x48, seek +0x4C, size +0x50).
     constexpr uintptr_t sith_host_global=0x0082F0ECU;
     constexpr uintptr_t std_host_global=0x00866BC0U;
+    // Verified in the supplied jkgm(5).exe at sithSound_Load 0x004EF440.
+    // The loader returns before fileOpen when sound_initialized is zero.
+    constexpr uintptr_t sound_initialized_global=0x0084DF7CU;
+    constexpr uintptr_t sound_hashtable_global=0x0084DF80U;
+    constexpr uintptr_t last_loaded_world_global=0x00833A18U;
     constexpr uintptr_t sith_load_entry=0x004EF440U;
     constexpr uintptr_t wav_parser_entry=0x00437A30U;
     constexpr uint8_t sith_signature[]{
@@ -402,6 +407,20 @@ void diagnose_compressed_sound_file_services(char const* filename)
 {
     if(!filename)return;
     LOG_INFO("JKGM sound bridge diagnostic: installed=",installed?1:0);
+    if(readable(sound_initialized_global,4) &&
+       readable(sound_hashtable_global,4) &&
+       readable(last_loaded_world_global,4)) {
+        uint32_t sound_initialized=0,hash_table=0,world=0;
+        std::memcpy(&sound_initialized,
+                    reinterpret_cast<void const*>(sound_initialized_global),4);
+        std::memcpy(&hash_table,
+                    reinterpret_cast<void const*>(sound_hashtable_global),4);
+        std::memcpy(&world,
+                    reinterpret_cast<void const*>(last_loaded_world_global),4);
+        LOG_INFO("JKGM sound native loader state: initialized=",
+                 sound_initialized," hashtable=",uintptr_t(hash_table),
+                 " last_world=",uintptr_t(world));
+    }
     for(uintptr_t global:{sith_host_global,std_host_global}) {
         if(!readable(global,4)) {
             LOG_WARNING("JKGM sound HostServices global unreadable: ",global);
