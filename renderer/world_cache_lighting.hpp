@@ -76,7 +76,6 @@ inline bool sample_world_cache_surface_light(
     std::vector<float> const &native_dynamic_light,
     std::vector<std::array<float,3>> &out,
     world_cache_light_sample *sample=nullptr,
-    float camera_ambient=0.0f,
     std::vector<std::array<float,3>> *pixel_state=nullptr,
     bool pixel_lighting=false)
 {
@@ -109,10 +108,8 @@ inline bool sample_world_cache_surface_light(
        !read(addr+0x44U,&extra,sizeof(extra)) ||
        !read(uintptr_t(sector)+0x08U,&ambient,sizeof(ambient)) ||
        !std::isfinite(extra) || !std::isfinite(ambient))return false;
-    // Match the native ambient floor: JKL sector extraLight and the
-    // active rdCamera's ambient light both apply to world geometry.
-    if(!std::isfinite(camera_ambient))return false;
-    ambient=std::max(ambient,camera_ambient);
+    // Native world faces use sector Extra, not the camera ambient value.
+    // The camera value changes as JK processes each visible sector.
     auto clamp01=[](float v) {
         return std::max(0.0f,std::min(v,1.0f));
     };
