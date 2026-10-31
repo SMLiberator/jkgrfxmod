@@ -521,6 +521,7 @@ namespace jkgm {
             bool valid=false;
         };
         gpu_preview_frame_camera frame_gpu_3do_camera{};
+        gpu_preview_frame_camera frame_world_cache_camera{};
         gpu_preview_frame_camera deferred_gpu_3do_camera{};
         // Retained across the one-frame render/present boundary.
         std::vector<gpu_3do_instance> deferred_gpu_3do_instances;
@@ -5834,7 +5835,9 @@ namespace jkgm {
         // native surface-level visibility and material parity.
         void probe_world_cache()
         {
-            if(!the_config->world_cache_probe ||
+            frame_world_cache_camera.valid=false;
+            if((!the_config->world_cache_probe &&
+                !the_config->world_cache_preview) ||
                mode!=renderer_mode::ingame)return;
             uint32_t address=0;
             if(!engine_material_debug::read_object(
@@ -5862,6 +5865,7 @@ namespace jkgm {
             // path. Frustum rejection is conservative; it cannot tell
             // us which sectors JK traversed through active adjoins.
             auto const camera=capture_gpu_preview_camera();
+            frame_world_cache_camera=camera;
             bool const can_cull=camera.valid && camera.perspective &&
                 camera.frustum.far_plane>0.1f;
             world_cache_frame_stats state{};
@@ -5998,6 +6002,86 @@ namespace jkgm {
             frame_screen->end_compose_opaque_pass();
         }
 
+        // First GPU world draw: an overlaid, depth-tested wireframe of
+        // visible *cached* SithWorld faces. Native world stays authoritative.
+        // The transparent-pass color target is already composited; this
+        // touches neither opaque G-buffer attachments nor scene depth.
+        void draw_world_cache_wireframe()
+        {
+            if(!the_config->world_cache_preview ||
+               !ogs->world_cache_wireframe_program ||
+               !world_cache_target || !world_cache_target->ready ||
+               !frame_world_cache_camera.valid ||
+               !frame_world_cache_camera.perspective)return;
+            auto const &cache=*world_cache_target;
+            if(cache.sector_candidates.empty())return;
+            auto const &cam=frame_world_cache_camera;
+            float const aspect=get<x>(internal_scr_res_f)/
+                               get<y>(internal_scr_res_f);
+            float const half_fov=std::tan(
+                cam.camera.fov*0.008726646259971648f);
+            if(!(std::isfinite(half_fov) && half_fov>0.0f &&
+                 std::isfinite(aspect) && aspect>0.0f &&
+                 std::isfinite(cam.far_plane) && cam.far_plane>0.1f))
+                return;
+            // One multidraw uses the existing immutable VBO/EBO ranges.
+            // No per-face uploads, native MAT texture sampling or GL draws
+            // for portal/sky/unsupported faces.
+            static thread_local std::vector<GLsizei> counts;
+            static thread_local std::vector<void const *> offsets;
+            counts.clear();
+            offsets.clear();
+            counts.reserve(cache.sector_candidates.size());
+            offsets.reserve(cache.sector_candidates.size());
+            for(auto const &c:cache.sector_candidates) {
+                if(!c.count || c.count%3U ||
+                   uint64_t(c.first_index)+c.count>cache.mesh.indices.size())
+                    continue;
+                counts.push_back(static_cast<GLsizei>(c.count));
+                offsets.push_back(reinterpret_cast<void const *>(
+                    uintptr_t(c.first_index)*sizeof(uint32_t)));
+            }
+            if(counts.empty())return;
+            auto &shader=*ogs->world_cache_wireframe_program;
+            shader.use_program();
+            auto const &m=cam.native_view;
+            shader.set_view_matrix(
+                make_point(m[0],m[1],m[2],0.0f),
+                make_point(m[3],m[4],m[5],0.0f),
+                make_point(m[6],m[7],m[8],0.0f),
+                make_point(m[9],m[10],m[11],1.0f));
+            shader.set_projection(make_point(
+                half_fov,aspect,1.0f/cam.far_plane,0.0f));
+            gl::enable(gl::capability::depth_test);
+            gl::set_depth_function(gl::comparison_function::less_equal);
+            gl::set_depth_mask(false);
+            gl::enable(gl::capability::blend);
+            gl::set_blend_function(
+                gl::blend_function::one,
+                gl::blend_function::one_minus_source_alpha);
+            gl::disable(gl::capability::cull_face);
+            gl::set_polygon_mode(gl::face_mode::front_and_back,
+                                 gl::polygon_mode::line);
+            // Bias only debug edges slightly toward the camera, so a
+            // coplanar native face does not cause flickering Z-fighting.
+            glEnable(GL_POLYGON_OFFSET_LINE);
+            glPolygonOffset(-1.0f,-1.0f);
+            gl::bind_vertex_array(cache.vao);
+            glMultiDrawElements(GL_TRIANGLES,counts.data(),GL_UNSIGNED_INT,
+                                offsets.data(),static_cast<GLsizei>(counts.size()));
+            gl::bind_vertex_array(gl::vertex_array_view(0U));
+            glDisable(GL_POLYGON_OFFSET_LINE);
+            gl::set_polygon_mode(gl::face_mode::front_and_back,
+                                 gl::polygon_mode::fill);
+            gl::set_depth_function(gl::comparison_function::less);
+            // The following gun pass must use its own original shader.
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("WORLD CACHE preview wireframe_ranges=",counts.size(),
+                         " gpu_calls=1 depth_test=less_equal",
+                         " native_world_unchanged=1");
+        }
+
         void draw_game_transparency_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
         {
             frame_screen->begin_transparency_pass();
@@ -6100,6 +6184,7 @@ namespace jkgm {
             // pass after native world geometry. Projected SPRs were submitted
             // earlier so translucent world pixels may correctly cover them.
             draw_gpu_3do_preview(true);
+            draw_world_cache_wireframe();
             ogs->game_transparency_pass_program.use_program();
 
             // Weapon/HUD depth is intentionally separate from world lights.

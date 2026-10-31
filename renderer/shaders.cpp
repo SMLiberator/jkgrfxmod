@@ -160,6 +160,32 @@ void jkgm::shaders::menu_shader::set_menu_sampler(int sampler)
     gl::set_uniform_integer(tex, sampler);
 }
 
+jkgm::shaders::world_cache_wireframe_shader::world_cache_wireframe_shader(
+    fs::path const &root)
+    : opengl_shader("world_cache_wireframe",
+                    root/"shaders/world_cache_wireframe.vert",
+                    root/"shaders/world_cache_wireframe.frag")
+    , view_right(gl::get_uniform_location(the_program,"view_right"))
+    , view_forward(gl::get_uniform_location(the_program,"view_forward"))
+    , view_up(gl::get_uniform_location(the_program,"view_up"))
+    , view_origin(gl::get_uniform_location(the_program,"view_origin"))
+    , projection(gl::get_uniform_location(the_program,"projection"))
+{
+}
+void jkgm::shaders::world_cache_wireframe_shader::set_view_matrix(
+    point<4,float> r,point<4,float> f,point<4,float> u,point<4,float> t)
+{
+    gl::set_uniform_vector(view_right,r);
+    gl::set_uniform_vector(view_forward,f);
+    gl::set_uniform_vector(view_up,u);
+    gl::set_uniform_vector(view_origin,t);
+}
+void jkgm::shaders::world_cache_wireframe_shader::set_projection(
+    point<4,float> p)
+{
+    gl::set_uniform_vector(projection,p);
+}
+
 jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
                                                   fs::path const &vertex_part,
                                                   fs::path const &fragment_part)
