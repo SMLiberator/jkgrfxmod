@@ -6,10 +6,12 @@ layout(location=1) in vec2 native_uv;
 layout(location=2) in vec3 native_normal;
 layout(location=3) in vec3 native_light_rgb;
 layout(location=4) in vec3 native_light_state;
+layout(location=5) in vec3 native_sector_tint;
 out vec2 material_uv;
 out vec3 cached_view_normal;
 out vec3 cached_lit_rgb;
 out vec3 cached_light_state;
+out vec3 cached_sector_tint;
 out vec3 cached_world_position;
 out vec3 cached_world_normal;
 uniform vec4 view_right,view_forward,view_up,view_origin;
@@ -18,8 +20,16 @@ void main() {
     material_uv=native_uv;
     // Gamma-correct per-vertex JK lighting must interpolate before texels.
     // RGB attribute will also support future MotS colored world lighting.
-    cached_lit_rgb=native_light_rgb;
+    // JK's palette tint changes vertex illumination, not the albedo.
+    // Apply it before Gouraud interpolation, matching the existing 3DO
+    // GPU path's gamma conversion and per-channel tint scaling.
+    vec3 t=native_sector_tint;
+    vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
+    cached_lit_rgb=pow(
+        clamp(pow(clamp(native_light_rgb,0.0,1.0),vec3(1.0/1.8))*
+              scale,0.0,1.0),vec3(1.8));
     cached_light_state=native_light_state;
+    cached_sector_tint=t;
     cached_world_position=world_position;
     cached_world_normal=native_normal;
     vec3 vn=view_right.xyz*native_normal.x+
