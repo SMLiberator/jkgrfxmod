@@ -594,15 +594,14 @@ enabled; disable `log_path` for performance benchmarking. Scene complexity,
 triangle sorting and uploads, transparency overdraw, and state-change
 frequency remain possible CPU/GPU bottlenecks that require measurements.
 
-### Installing the reflection fast-path test build
+### Installing the current development build
 
-The Windows CI artifact `jkgrfxmod-reflection-fastpath-test` contains
-`renderer.dll` **and** two updated fragment shaders:
-`jkgm/shaders/game_opaque_pass.frag` and
-`jkgm/shaders/game_trns_pass.frag`.
-Install them in the corresponding game directories after backing up the
-existing files. A DLL-only swap does **not** activate the shader fast path.
-Keep using your patched JK executable; this PR does not change it.
+The development CI artifact `jkgrfxmod-standalone-development` contains
+`renderer.dll`, the patched-executable bootstrap script, and the complete
+`jkgm/shaders/` directory. Install the supplied shaders alongside the DLL:
+shader updates are not necessarily compatible with older DLL builds.
+The original game executable is not redistributed; continue using your
+supported patched `jkgm.exe`.
 
 ## Native ThingNode attachments and MAT Spotlights (experimental)
 
@@ -857,11 +856,11 @@ EnvMaps in this renderer are equirectangular 2D images, not cubemap arrays.
 
 ### Testing installation
 
-The CI artifact `jkgrfxmod-material-runtime-test` includes `renderer.dll`,
-`compile.exe`, and both updated GLSL shaders under `jkgm/shaders`.
-Install the two shader files along with the DLL; otherwise the new image
-transition uniforms are unavailable. The test remains experimental until
-the shader paths and COG semantics are verified in game.
+Use the current `jkgrfxmod-standalone-development` artifact described
+above. It includes `renderer.dll` and the full `jkgm/shaders/` set;
+`compile.exe` is built by the solution but is not part of that runtime-only
+test artifact. Keep DLL and shaders from the same CI run when testing
+runtime material changes.
 
 ### Runtime material refresh/regression diagnostics
 
