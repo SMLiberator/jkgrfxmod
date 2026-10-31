@@ -1,4 +1,5 @@
 #include "renderer/sprite_decal_world_cache.hpp"
+#include "renderer/world_cache_visibility.hpp"
 #include "renderer/sprite_decal_pose_cache.hpp"
 #include <cassert>
 #include <cmath>
@@ -154,6 +155,45 @@ int main(){
     // No geometry rebuild is needed after 0 -> 4.
     u32(surfaces+1*0x5c+0x1c,4);
     assert(shadows_all.matches(reader,world));
+    // Phase-1 GPU world candidate list: immutable index ranges with live
+    // GeoMode/MAT/cel, still NOT a substitute for portal visibility.
+    world_cache_mesh mesh{};
+    assert(build_world_cache_mesh(shadows_all,mesh));
+    assert(mesh.surfaces.size()==3 && mesh.indices.size()==18);
+    assert(mesh.surfaces[0].bounds_min[0]<=mesh.surfaces[0].bounds_max[0]);
+    std::vector<world_cache_draw_candidate> stage;
+    auto staged=collect_world_cache_draw_candidates(
+        reader,shadows_all.surfaces_addr,mesh,stage);
+    assert(staged.candidates==2 && staged.triangles==4);
+    assert(staged.solid_adjoin==1 && stage.size()==2);
+    assert(stage[0].surface_index==0 && stage[1].surface_index==1);
+    // A COG can change MAT and cel without rebuilding vertex/index buffers.
+    u32(surfaces+1*0x5c+0x34,uint32_t(base+0x1840));
+    u32(surfaces+1*0x5c+0x38,2);
+    staged=collect_world_cache_draw_candidates(
+        reader,shadows_all.surfaces_addr,mesh,stage);
+    assert(staged.changed_material==1 && staged.changed_cel==1);
+    assert(stage[1].material==base+0x1840 && stage[1].cel==2);
+    // Hidden surfaces are removed immediately and restored without rebuild.
+    u32(surfaces+1*0x5c+0x1c,0);
+    staged=collect_world_cache_draw_candidates(
+        reader,shadows_all.surfaces_addr,mesh,stage);
+    assert(staged.hidden==1 && staged.candidates==1);
+    u32(surfaces+1*0x5c+0x1c,4);
+    // Frustum tests are conservative (no sector or adjoin assumptions).
+    gpu_3do_native_frustum frustum{};
+    frustum.clip_far=1;frustum.near_plane=0.01f;
+    frustum.far_plane=100.0f;frustum.far_top=1;
+    frustum.bottom=-1;frustum.far_left=-1;frustum.right=1;
+    gpu_3do_matrix34 view{{1,0,0,0,1,0,0,0,1,0,0,0}};
+    staged=collect_world_cache_draw_candidates(
+        reader,shadows_all.surfaces_addr,mesh,stage,&frustum,&view);
+    assert(staged.frustum_available && staged.candidates>0);
+    view[9]=100.0f; // All authored polygons lie far to the right.
+    staged=collect_world_cache_draw_candidates(
+        reader,shadows_all.surfaces_addr,mesh,stage,&frustum,&view);
+    assert(staged.candidates==0 && staged.frustum_rejected==2);
+    assert(stage.empty());
     // New world surfaces invalidate the model cache.
     u32(world+0xa8,3);
     assert(!index.matches(reader,world));

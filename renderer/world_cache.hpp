@@ -27,6 +27,8 @@ struct world_cache_surface_range {
     int32_t cel=-1;
     bool solid_adjoin=false;
     bool has_uv=false;
+    // Immutable world-space bounds for conservative Phase-1 frustum tests.
+    std::array<float,3> bounds_min{},bounds_max{};
 };
 
 struct world_cache_mesh {
@@ -89,7 +91,8 @@ inline bool build_world_cache_mesh(decal_world_geometry const &world,
         out.surfaces.push_back({
             surf.surface_index,begin,
             static_cast<uint32_t>(out.indices.size())-begin,
-            surf.material,surf.cel,surf.solid_adjoin,valid_uv
+            surf.material,surf.cel,surf.solid_adjoin,valid_uv,
+            surf.bounds_min,surf.bounds_max
         });
         if(valid_uv)++out.uv_ready_surfaces;
         else ++out.missing_uv_surfaces;

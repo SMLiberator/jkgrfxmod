@@ -5856,22 +5856,42 @@ namespace jkgm {
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U) {
                 auto const &cache=*world_cache_target;
-                auto const state=inspect_world_cache_live_state(
-                    safe_read,cache.world.surfaces_addr,cache.mesh);
-                // These are geometry/UV candidates, not camera-visible
-                // SithSurfaces. Legacy world batches can also contain
-                // native-fallback Things, so never interpret their triangle
-                // count as exact world-sector visibility.
-                LOG_INFO("WORLD CACHE phase0 probe geo_uv_candidates=",
-                    state.drawn_candidates,
+                // Read the SAME native camera/rdClipFrustum as the GPU 3DO
+                // path. Frustum rejection is conservative; it cannot tell
+                // us which sectors JK traversed through active adjoins.
+                auto const camera=capture_gpu_preview_camera();
+                bool const can_cull=camera.valid && camera.perspective &&
+                    camera.frustum.far_plane>0.1f;
+                auto const started=profile_clock::now();
+                auto const state=collect_world_cache_draw_candidates(
+                    safe_read,cache.world.surfaces_addr,cache.mesh,
+                    cache.frame_candidates,
+                    can_cull?&camera.frustum:nullptr,
+                    can_cull?&camera.native_view:nullptr);
+                auto const collect_us=elapsed_profile_us(
+                    started,profile_clock::now());
+                // These ranges have live material/cel and conservative
+                // frustum filtering, NOT native sector/portal visibility.
+                // The legacy world D3D batch also contains fallback Things.
+                LOG_INFO("WORLD CACHE phase1 staged_surfaces=",
+                    state.candidates,
+                    " staged_tris=",state.triangles,
+                    " frustum_rejected=",state.frustum_rejected,
+                    " frustum_available=",state.frustum_available?1:0,
                     " hidden=",state.hidden,
+                    " not_textured=",state.not_textured,
+                    " solid_adjoin=",state.solid_adjoin,
                     " missing_uv=",state.missing_uv,
+                    " missing_material=",state.missing_material,
+                    " sky=",state.sky,
                     " changed_cel=",state.changed_cel,
                     " changed_material=",state.changed_material,
                     " unreadable=",state.unreadable,
+                    " collect_us=",collect_us,
                     " all_cached_surfaces=",cache.mesh.surfaces.size(),
                     " legacy_world_batch_tris=",world_batch.size()+
                         world_transparent_batch.size(),
+                    " visibility=native_sector_submission_pending",
                     " status=native_rendering_unchanged");
             }
         }

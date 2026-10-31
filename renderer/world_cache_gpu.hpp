@@ -3,6 +3,7 @@
 // Native JK execute-buffer rendering stays active. No double-draws,
 // no suppression of sector portals, and no change to HOM behavior.
 #include "world_cache.hpp"
+#include "world_cache_visibility.hpp"
 #include "base/log.hpp"
 #include "glutil/buffer.hpp"
 #include "glutil/vertex_array.hpp"
@@ -16,6 +17,7 @@ struct world_cache_gpu {
     gl::buffer vertices,indices;
     decal_world_geometry world{};
     world_cache_mesh mesh{};
+    std::vector<world_cache_draw_candidate> frame_candidates;
     uintptr_t loaded_world=0;
     uint64_t revision=0;
     bool ready=false;
@@ -50,6 +52,7 @@ struct world_cache_gpu {
         loaded_world=0;
         world.clear();
         mesh={};
+        frame_candidates.clear();
         // Reuse the verified shadow/decal world reader. Its receiver-only
         // policy intentionally excludes sky, passable adjoins, etc. Those
         // still render via native JK; parity comes before replacement.
