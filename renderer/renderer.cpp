@@ -6139,10 +6139,14 @@ namespace jkgm {
             gl::set_depth_mask(true);
             gl::disable(gl::capability::blend);
             gl::disable(gl::capability::cull_face);
-            // Bias only the GPU polygon towards the camera, allowing it to
-            // own its pixels while native fills unsupported/missing faces.
-            glEnable(GL_POLYGON_OFFSET_FILL);
-            glPolygonOffset(-2.0f,-2.0f);
+            // The native opaque world batch is disabled for this isolation
+            // test, so no polygon offset is required or desirable.
+            if(isolate_native_world_batches()) {
+                glDisable(GL_POLYGON_OFFSET_FILL);
+            } else {
+                glEnable(GL_POLYGON_OFFSET_FILL);
+                glPolygonOffset(-2.0f,-2.0f);
+            }
             gl::bind_vertex_array(cache.vao);
             size_t drawn=0,unresolved=0,groups=0,skipped_alpha=0;
             for(size_t i=0;i<ordered.size();) {
