@@ -189,7 +189,7 @@ int main(){
     staged=collect_world_cache_draw_candidates(
         reader,shadows_all.surfaces_addr,mesh,stage,&frustum,&view);
     assert(staged.frustum_available && staged.candidates>0);
-    view[9]=100.0f; // All authored polygons lie far to the right.
+    view[9]=1000.0f; // Also excludes the test's deliberately moved 100-unit vertex.
     staged=collect_world_cache_draw_candidates(
         reader,shadows_all.surfaces_addr,mesh,stage,&frustum,&view);
     assert(staged.candidates==0 && staged.frustum_rejected==2);
