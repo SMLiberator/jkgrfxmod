@@ -7924,8 +7924,13 @@ void* __cdecl HookedSithSoundLoad(char* filename,int eager)
                         "table mismatch or not yet initialized");
         }
     }
+    if(trace) {
+        jkgm::diagnose_compressed_sound_file_services(filename);
+        jkgm::begin_compressed_sound_open_trace();
+    }
     void* const sound=RealSithSoundLoad(filename,eager);
     if(trace) {
+        jkgm::end_compressed_sound_open_trace();
         uintptr_t const sound_address=reinterpret_cast<uintptr_t>(sound);
         LOG_INFO("JKGM compressed sound native load returned: ",filename,
                  " sound_address=",sound_address);
