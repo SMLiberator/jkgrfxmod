@@ -39,7 +39,11 @@ uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blend only, 4 dithered
 in vec2 pixel_uv;
 in vec3 view_normal;
 in vec3 jk_lit_rgb;
-in vec4 decal_coverage; // projector U,V,depth,normal-based opacity
+in vec4 decal_coverage;
+in vec3 pixel_light_face_anchor;
+in vec3 pixel_light_face_normal;
+in vec3 pixel_light_vertex_rgb;
+in vec3 pixel_light_state; // original static light, face extra light, mode // projector U,V,depth,normal-based opacity
 
 uniform sampler2D surface_map; // linear RGB: reflectivity, roughness, metalness
 uniform sampler2D normal_map;  // tangent-space RGB
@@ -57,6 +61,11 @@ uniform vec2 normal_specular_scroll;
 uniform vec2 normal_specular_scroll2;
 uniform vec3 local_eye;
 uniform int num_lights;
+uniform int pixel_dynamic_lighting;
+uniform float ambient_light;
+uniform float effective_light_mode;
+uniform vec3 colormap_tint;
+uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
 uniform int nonrigid_light_transform;
 uniform int dynamic_light_specular_enabled;
 uniform vec4 light_position_radius[16];
@@ -64,6 +73,61 @@ uniform float light_intensity[16];
 uniform float attenuation_min;
 in vec3 local_fragment_position;
 in vec3 local_fragment_normal;
+
+// Opt-in JK-style point-light diffuse evaluated at the actual fragment.
+// This replaces, not adds to, the native Gouraud contribution. Pixel modes
+// preserve static vertex brightness, per-face extra light, ambient floor,
+// colormap tint and JK RGB8 hardware effects, with no duplicate lighting.
+// Face Diffuse mode remains constant-normal/anchor by JK convention.
+vec3 pixel_jk_diffuse_lighting()
+{
+    float mode=pixel_light_state.z>3.5 ? 1.0 :
+               min(pixel_light_state.z,effective_light_mode);
+    float brightness=mode>=2.5 ? pixel_light_state.x : 0.0;
+    if(mode>=1.5 && num_lights>0) {
+        vec3 anchor=mode>=2.5 ? local_fragment_position
+                              : pixel_light_face_anchor;
+        vec3 normal=normalize(mode>=2.5 ? local_fragment_normal
+                                        : pixel_light_face_normal);
+        if(nonrigid_light_transform!=0) {
+            vec3 r=view_right.xyz,f=view_forward.xyz,u=view_up.xyz;
+            vec3 cr=cross(f,u),cf=cross(u,r),cu=cross(r,f);
+            float determinant=dot(r,cr);
+            normal=normalize(sign(determinant)*
+                (cr*normal.x+cf*normal.y+cu*normal.z));
+        }
+        for(int i=0;i<num_lights;i++) {
+            vec3 delta=light_position_radius[i].xyz-anchor;
+            if(nonrigid_light_transform!=0)
+                delta=view_right.xyz*delta.x+
+                      view_forward.xyz*delta.y+view_up.xyz*delta.z;
+            float dist=length(delta);
+            float along=dot(normal,delta/max(dist,0.00001));
+            float range_distance=mode>=2.5
+                ? dist : abs(dot(normal,delta));
+            if(range_distance<light_position_radius[i].w && along>0.0)
+                brightness+=(light_intensity[i]-
+                    range_distance*attenuation_min)*along;
+            if(brightness>=1.0)break;
+        }
+    }
+    float bright=mode<0.5 ? 1.0 :
+        max(clamp(brightness+pixel_light_state.y,0.0,1.0),ambient_light);
+    vec3 result=vec3(pow(clamp(bright,0.0,1.0),1.8))*pixel_light_vertex_rgb;
+    result*=colormap_tint;
+    if(jk_color_filter.w>0.5) {
+        vec3 v=pow(clamp(result,0.0,1.0),vec3(1.0/1.8));
+        if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
+            v*=step(vec3(0.5),jk_color_filter.xyz);
+        vec3 t=jk_color_tint.xyz;
+        vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
+        v=clamp(v*scale,0.0,1.0);
+        v=clamp(v+jk_color_add_fade.xyz,0.0,1.0);
+        v*=jk_color_add_fade.w;
+        result=pow(clamp(v,0.0,1.0),vec3(1.8));
+    }
+    return result;
+}
 
 // Transform shaded normals with the node's inverse transpose. Raw
 // R/L/U columns are valid for vertex positions but not for normals on a
@@ -722,7 +786,9 @@ void main() {
     vec3 env_reflection=gpu_environment_reflection(albedo.rgb,uv,env_metalness);
     // Metal suppresses diffuse only when its environment contribution
     // actually exists; follows the native replacement shader.
-    vec3 lit_rgb=albedo.rgb*jk_lit_rgb*(1.0-env_metalness);
+    vec3 jk_fragment_lit=pixel_dynamic_lighting!=0
+        ? pixel_jk_diffuse_lighting() : jk_lit_rgb;
+    vec3 lit_rgb=albedo.rgb*jk_fragment_lit*(1.0-env_metalness);
     if(transparent_pass!=0 && post_exempt_pass==0 &&
        world_lighting_exempt==0 && decal_receiver_lighting==0 &&
        blend_mode==0 && (alpha_mode==1 || alpha_mode==3) &&
@@ -782,7 +848,7 @@ void main() {
         // premultiplied color. Alpha zero must multiply by WHITE (identity).
         // Match the native triangle path: emission biases the multiplier
         // toward white, but never adds light independently in Multiply mode.
-        vec3 tint=clamp(albedo.rgb*jk_lit_rgb+emission+specular*albedo.a,
+        vec3 tint=clamp(albedo.rgb*jk_fragment_lit+emission+specular*albedo.a,
                         0.0,1.0);
         out_color=vec4(mix(vec3(1.0),tint,albedo.a),0.0);
     } else {
@@ -799,7 +865,7 @@ void main() {
     out_emissive=vec4(transparent_pass!=0
                           ? vec3(0.0) : emission+specular,
                       transparent_pass!=0 ? a :
-                      dot(jk_lit_rgb,vec3(0.2126,0.7152,0.0722)));
+                      dot(jk_fragment_lit,vec3(0.2126,0.7152,0.0722)));
     // A zero normal is already rejected by the SSAO and sun receivers.
     // This costs no additional G-buffer attachment or fullscreen pass.
     // A skybox/ThingFlag 0x20 skips SSAO and sunlight via zero RGB
