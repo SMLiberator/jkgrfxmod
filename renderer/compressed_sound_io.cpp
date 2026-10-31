@@ -11,7 +11,6 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -25,11 +24,6 @@ namespace {
     // tell +0x48, seek +0x4C, size +0x50).
     constexpr uintptr_t sith_host_global=0x0082F0ECU;
     constexpr uintptr_t std_host_global=0x00866BC0U;
-    // Verified in the supplied jkgm(5).exe at sithSound_Load 0x004EF440.
-    // The loader returns before fileOpen when sound_initialized is zero.
-    constexpr uintptr_t sound_initialized_global=0x0084DF7CU;
-    constexpr uintptr_t sound_hashtable_global=0x0084DF80U;
-    constexpr uintptr_t last_loaded_world_global=0x00833A18U;
     constexpr uintptr_t sith_load_entry=0x004EF440U;
     constexpr uintptr_t wav_parser_entry=0x00437A30U;
     constexpr uint8_t sith_signature[]{
@@ -60,7 +54,6 @@ namespace {
     struct virtual_file {
         std::shared_ptr<std::vector<uint8_t>> wav;
         size_t offset=0;
-        bool first_read_reported=false;
     };
     callbacks real{};
     std::mutex lock;
@@ -80,7 +73,6 @@ namespace {
     constexpr uint32_t original_load_search=0x0054C3C4U;
     constexpr uint32_t original_data_search=0x0054C3E0U;
     char const extended_sound_search[]="sound;voice;music";
-    thread_local unsigned sound_open_trace_depth=0;
 
     bool readable(uintptr_t addr,size_t size)
     {
@@ -195,8 +187,6 @@ namespace {
                    return real.read(native_fd,dst,len);
                },max_encoded_bytes,input))
             return fail("empty, oversized, or invalid sequential read");
-        LOG_INFO("JKGM compressed sound source opened: ",path,
-                 " encoded_bytes=",input.size());
         std::vector<uint8_t> wav;
         if(!decode_compressed_sound_to_wave(ext,input,wav))
             return fail("invalid codec data, unsupported channels or PCM limit");
@@ -214,10 +204,8 @@ namespace {
                 cached_bytes+=result->size();
             }
         }
-        std::ostringstream report;
-        report<<"JKGM compressed sound decoded: "<<path
-              <<" PCM wave bytes="<<result->size();
-        LOG_INFO(report.str());
+        LOG_INFO("JKGM compressed sound decoded: ",path,
+                 " PCM wave bytes=",result->size());
         return result;
     }
     int virtual_open(std::shared_ptr<std::vector<uint8_t>> wav)
@@ -233,9 +221,6 @@ namespace {
     }
     int __cdecl file_open(char const* path,char const* mode)
     {
-        if(sound_open_trace_depth && path && mode)
-            LOG_INFO("JKGM sound HostServices fileOpen entered: ",path,
-                     " mode=",mode);
         if(!path || !mode)return 0;
         if(std::strchr(mode,'w') || std::strchr(mode,'a') ||
            std::strchr(mode,'+'))return real.open(path,mode);
@@ -246,8 +231,6 @@ namespace {
         if(ext!=".ogg" && ext!=".flac" && ext!=".mp3")
             return real.open(path,mode);
 
-        LOG_INFO("JKGM compressed sound open requested: ",wanted,
-                 " mode=",mode);
         std::shared_ptr<std::vector<uint8_t>> wav;
         {
             std::lock_guard<std::mutex> guard(lock);
@@ -256,12 +239,7 @@ namespace {
         }
         if(!wav) {
             int const fd=real.open(path,"rb");
-            if(!fd) {
-                LOG_WARNING("JKGM compressed sound file not found: ",wanted);
-                return 0;
-            }
-            LOG_INFO("JKGM compressed sound native file opened: ",wanted,
-                     " native_handle=",fd);
+            if(!fd)return 0; // Continue native sound/voice/music search.
             wav=read_and_decode(fd,wanted,ext);
             real.close(fd);
         }
@@ -272,8 +250,6 @@ namespace {
                         wanted);
             return 0;
         }
-        LOG_INFO("JKGM compressed sound virtual WAV opened: ",wanted,
-                 " handle=",virtual_fd);
         return virtual_fd;
     }
     int __cdecl file_close(int fd)
@@ -286,32 +262,18 @@ namespace {
     }
     size_t __cdecl file_read(int fd,void* dst,size_t bytes)
     {
-        bool is_virtual=false,first_read=false;
-        size_t count=0;
         {
             std::lock_guard<std::mutex> guard(lock);
             auto it=streams.find(fd);
             if(it!=streams.end()) {
                 auto &v=it->second;
                 size_t const avail=v.wav->size()-v.offset;
-                count=std::min(bytes,avail);
+                size_t const count=std::min(bytes,avail);
                 if(count && !dst)return 0;
                 if(count)std::memcpy(dst,v.wav->data()+v.offset,count);
                 v.offset+=count;
-                is_virtual=true;
-                if(!v.first_read_reported) {
-                    v.first_read_reported=true;
-                    first_read=true;
-                }
+                return count;
             }
-        }
-        // Never log while holding the virtual-stream mutex: logging may
-        // itself perform file I/O via the original engine callbacks.
-        if(is_virtual) {
-            if(first_read)
-                LOG_INFO("JKGM compressed PCM first read: handle=",fd,
-                         " requested=",bytes," returned=",count);
-            return count;
         }
         return real.read(fd,dst,bytes);
     }
@@ -420,20 +382,14 @@ bool install_compressed_sound_file_services()
                 }
             }
         }
-        size_t restored=0;
         for(uintptr_t table:{uintptr_t(a),uintptr_t(b)}) {
             for(auto const& h:hooks) {
-                if(slot(table,h.offset)==h.original) {
-                    if(!write_slot(table,h.offset,h.replacement))
-                        return false;
-                    ++restored;
-                }
+                if(slot(table,h.offset)==h.original &&
+                   !write_slot(table,h.offset,h.replacement))
+                    return false;
             }
             if(a==b)break;
         }
-        if(restored)
-            LOG_INFO("JKGM compressed sound HostServices bridge rebound: ",
-                     restored," callbacks restored");
         if(!install_sound_search_paths()) {
             static bool warned=false;
             if(!warned) {
@@ -489,55 +445,6 @@ bool install_compressed_sound_file_services()
         LOG_WARNING("JKGM music search path patch unavailable: ",
                     "native loader instructions differ");
     return true;
-}
-void begin_compressed_sound_open_trace()
-{
-    ++sound_open_trace_depth;
-}
-void end_compressed_sound_open_trace()
-{
-    if(sound_open_trace_depth)--sound_open_trace_depth;
-}
-void diagnose_compressed_sound_file_services(char const* filename)
-{
-    if(!filename)return;
-    LOG_INFO("JKGM sound bridge diagnostic: installed=",installed?1:0);
-    if(readable(sound_initialized_global,4) &&
-       readable(sound_hashtable_global,4) &&
-       readable(last_loaded_world_global,4)) {
-        uint32_t sound_initialized=0,hash_table=0,world=0;
-        std::memcpy(&sound_initialized,
-                    reinterpret_cast<void const*>(sound_initialized_global),4);
-        std::memcpy(&hash_table,
-                    reinterpret_cast<void const*>(sound_hashtable_global),4);
-        std::memcpy(&world,
-                    reinterpret_cast<void const*>(last_loaded_world_global),4);
-        LOG_INFO("JKGM sound native loader state: initialized=",
-                 sound_initialized," hashtable=",uintptr_t(hash_table),
-                 " last_world=",uintptr_t(world));
-    }
-    for(uintptr_t global:{sith_host_global,std_host_global}) {
-        if(!readable(global,4)) {
-            LOG_WARNING("JKGM sound HostServices global unreadable: ",global);
-            continue;
-        }
-        uint32_t table=0;
-        std::memcpy(&table,reinterpret_cast<void const*>(global),4);
-        if(!readable(table,0x54U)) {
-            LOG_WARNING("JKGM sound HostServices table unreadable: global=",
-                        global," table=",uintptr_t(table));
-            continue;
-        }
-        uintptr_t const open_ptr=slot(table,0x30U);
-        uintptr_t const expected=reinterpret_cast<uintptr_t>(&file_open);
-        LOG_INFO("JKGM sound HostServices live table: global=",global,
-                 " table=",uintptr_t(table),
-                 " fileOpen=",open_ptr,
-                 " bridge_active=",(open_ptr==expected?1:0));
-    }
-    // Never call real.open() for diagnostic probing: it traverses JK's
-    // resource manager outside the native loader and can crash under Wine.
-    // The hooked file_open() traces the engine's actual lookup safely.
 }
 void uninstall_compressed_sound_file_services()
 {
