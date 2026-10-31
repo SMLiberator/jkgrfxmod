@@ -260,7 +260,9 @@ int main()
     sun_shadow_projection object_shadow{};
     assert(make_sun_dynamic_shadow_projection(projection,actor,object_shadow));
     assert(object_shadow.width>0.0f && object_shadow.height>0.0f);
-    assert(object_shadow.range==projection.range);
+    // An atlas projection may need to extend Z even for an ordinary actor
+    // when the world-only shell is shallow.
+    assert(object_shadow.range>=projection.range);
     // A scaled Thing outside the global Z envelope still fits into
     // its *own* atlas projection without expanding the shared cascades.
     auto scaled_actor=actor;
