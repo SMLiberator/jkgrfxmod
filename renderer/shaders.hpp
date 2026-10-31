@@ -58,13 +58,12 @@ namespace jkgm {
 
         // GPU world G-buffer shader; legacy wireframe variant is retained
         // for internal diagnostics but no longer enabled by preview.
-        class world_cache_wireframe_shader : public opengl_shader {
+        class world_cache_preview_shader : public opengl_shader {
             gl::uniform_location_id view_right,view_forward,view_up,view_origin;
             gl::uniform_location_id projection;
             gl::uniform_location_id albedo_sampler,uv_scale,uv_scroll,material_tint;
         public:
-            explicit world_cache_wireframe_shader(fs::path const &data_root,
-                                                 bool textured=false);
+            explicit world_cache_preview_shader(fs::path const &data_root);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
                                  point<4,float> up,point<4,float> origin);
             void set_projection(point<4,float> params);

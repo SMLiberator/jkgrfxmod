@@ -433,8 +433,8 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     }
     // Keep the debug shader completely uncompiled on ordinary installs.
     if(the_config->world_cache_preview)
-        world_cache_texture_program =
-            std::make_unique<shaders::world_cache_wireframe_shader>(data_root,true);
+        world_cache_preview_program =
+            std::make_unique<shaders::world_cache_preview_shader>(data_root);
 
     gl::bind_texture(gl::texture_bind_target::texture_2d, menu_texture);
     gl::tex_image_2d(gl::texture_bind_target::texture_2d,
