@@ -70,6 +70,15 @@ namespace {
     std::array<uintptr_t,2> host_tables{};
     size_t host_count=0;
     bool installed=false;
+    bool sound_search_paths_installed=false;
+    // Two immediate operands in the audited x86 sound-loader routines.
+    // Both must agree: one is for the sound metadata pass, and the other
+    // is for the later, lazy PCM read when the DirectSound buffer is made.
+    constexpr uintptr_t load_search_operand=0x004EF4D8U;
+    constexpr uintptr_t data_search_operand=0x004EF71EU;
+    constexpr uint32_t original_load_search=0x0054C3C4U;
+    constexpr uint32_t original_data_search=0x0054C3E0U;
+    char const extended_sound_search[]="sound;voice;music";
     thread_local unsigned sound_open_trace_depth=0;
 
     bool readable(uintptr_t addr,size_t size)
@@ -117,6 +126,48 @@ namespace {
         uint32_t addr=0;
         std::memcpy(&addr,reinterpret_cast<void const*>(table+offset),4);
         return addr;
+    }
+    bool install_sound_search_paths()
+    {
+        if(sound_search_paths_installed)return true;
+        // These address+opcode pairs have been checked against jkgm(5).exe.
+        // Refuse unknown builds or already-modified native instructions.
+        if(!readable(load_search_operand-1,5) ||
+           !readable(data_search_operand-1,5) ||
+           *reinterpret_cast<uint8_t const*>(load_search_operand-1)!=0xBE ||
+           *reinterpret_cast<uint8_t const*>(data_search_operand-1)!=0xBD ||
+           slot(load_search_operand,0)!=original_load_search ||
+           slot(data_search_operand,0)!=original_data_search)
+            return false;
+        uintptr_t const path=reinterpret_cast<uintptr_t>(extended_sound_search);
+        if(!write_slot(load_search_operand,0,path))return false;
+        if(!write_slot(data_search_operand,0,path)) {
+            write_slot(load_search_operand,0,original_load_search);
+            return false;
+        }
+        FlushInstructionCache(GetCurrentProcess(),
+            reinterpret_cast<void const*>(load_search_operand-1),5);
+        FlushInstructionCache(GetCurrentProcess(),
+            reinterpret_cast<void const*>(data_search_operand-1),5);
+        sound_search_paths_installed=true;
+        LOG_INFO("JKGM sound search paths extended: sound;voice;music");
+        return true;
+    }
+    void uninstall_sound_search_paths()
+    {
+        if(!sound_search_paths_installed)return;
+        uintptr_t const path=reinterpret_cast<uintptr_t>(extended_sound_search);
+        if(readable(load_search_operand,4) &&
+           slot(load_search_operand,0)==path)
+            write_slot(load_search_operand,0,original_load_search);
+        if(readable(data_search_operand,4) &&
+           slot(data_search_operand,0)==path)
+            write_slot(data_search_operand,0,original_data_search);
+        FlushInstructionCache(GetCurrentProcess(),
+            reinterpret_cast<void const*>(load_search_operand-1),5);
+        FlushInstructionCache(GetCurrentProcess(),
+            reinterpret_cast<void const*>(data_search_operand-1),5);
+        sound_search_paths_installed=false;
     }
     std::shared_ptr<std::vector<uint8_t>> read_and_decode(
         int native_fd,std::string const& path,std::string const& ext)
@@ -351,7 +402,56 @@ bool compressed_sound_executable_supported()
 }
 bool install_compressed_sound_file_services()
 {
-    if(installed)return true;
+    if(installed) {
+        // Sith reinitializes its shared HostServices table after the initial
+        // sound loader call. The old "installed" flag could remain true
+        // while fileOpen was back to its vanilla callback.
+        if(!readable(sith_host_global,4) ||
+           !readable(std_host_global,4))return false;
+        uint32_t a=0,b=0;
+        std::memcpy(&a,reinterpret_cast<void const*>(sith_host_global),4);
+        std::memcpy(&b,reinterpret_cast<void const*>(std_host_global),4);
+        if(!readable(a,0x54U) || !readable(b,0x54U) ||
+           (a!=host_tables[0] && a!=host_tables[1]) ||
+           (b!=host_tables[0] && b!=host_tables[1]))
+            return false;
+        auto const hooks=entries();
+        // Never overwrite another mod's callback. Rebind only entries
+        // that JK replaced with our saved original function pointers.
+        for(uintptr_t table:{uintptr_t(a),uintptr_t(b)}) {
+            for(auto const& h:hooks) {
+                uintptr_t const current=slot(table,h.offset);
+                if(current!=h.replacement && current!=h.original) {
+                    LOG_WARNING("JKGM sound bridge callback changed unexpectedly: ",
+                                "offset=",h.offset," address=",current);
+                    return false;
+                }
+            }
+        }
+        size_t restored=0;
+        for(uintptr_t table:{uintptr_t(a),uintptr_t(b)}) {
+            for(auto const& h:hooks) {
+                if(slot(table,h.offset)==h.original) {
+                    if(!write_slot(table,h.offset,h.replacement))
+                        return false;
+                    ++restored;
+                }
+            }
+            if(a==b)break;
+        }
+        if(restored)
+            LOG_INFO("JKGM compressed sound HostServices bridge rebound: ",
+                     restored," callbacks restored");
+        if(!install_sound_search_paths()) {
+            static bool warned=false;
+            if(!warned) {
+                warned=true;
+                LOG_WARNING("JKGM music search path patch unavailable: ",
+                            "native loader instructions differ");
+            }
+        }
+        return true;
+    }
     if(!readable(sith_host_global,4) || !readable(std_host_global,4))
         return false;
     uint32_t a=0,b=0;
@@ -393,6 +493,9 @@ bool install_compressed_sound_file_services()
     }
     installed=true;
     LOG_INFO("JKGM compressed OGG/FLAC/MP3 HostServices WAV bridge installed");
+    if(!install_sound_search_paths())
+        LOG_WARNING("JKGM music search path patch unavailable: ",
+                    "native loader instructions differ");
     return true;
 }
 void begin_compressed_sound_open_trace()
@@ -440,27 +543,13 @@ void diagnose_compressed_sound_file_services(char const* filename)
                  " fileOpen=",open_ptr,
                  " bridge_active=",(open_ptr==expected?1:0));
     }
-    if(!installed || !real.open || !real.close) {
-        LOG_WARNING("JKGM sound resource probe unavailable: bridge not installed");
-        return;
-    }
-    // Probe using the original JK callbacks. Do not decode, cache or open
-    // virtual handles here; this only establishes whether JK can find files.
-    for(char const* dir:{"sound\\","voice\\"}) {
-        std::string const path=std::string(dir)+filename;
-        int const fd=real.open(path.c_str(),"rb");
-        if(fd) {
-            int const size=real.size?real.size(fd):-1;
-            real.close(fd);
-            LOG_INFO("JKGM sound resource probe: ",path,
-                     " found=1 size=",size);
-        } else {
-            LOG_INFO("JKGM sound resource probe: ",path," found=0");
-        }
-    }
+    // Never call real.open() for diagnostic probing: it traverses JK's
+    // resource manager outside the native loader and can crash under Wine.
+    // The hooked file_open() traces the engine's actual lookup safely.
 }
 void uninstall_compressed_sound_file_services()
 {
+    uninstall_sound_search_paths();
     if(!installed)return;
     auto const hooks=entries();
     for(size_t t=0;t<host_count;++t)
