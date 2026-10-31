@@ -23,7 +23,8 @@ inline bool sample_world_cache_surface_light(
     uint32_t native_vertex_count,
     std::vector<float> const &native_dynamic_light,
     std::vector<std::array<float,3>> &out,
-    world_cache_light_sample *sample=nullptr)
+    world_cache_light_sample *sample=nullptr,
+    float camera_ambient=0.0f)
 {
     if(!read || face.count<3U || face.count%3U!=0U ||
        uint64_t(face.first_index)+face.count>mesh.indices.size())
@@ -51,9 +52,10 @@ inline bool sample_world_cache_surface_light(
        !read(addr+0x44U,&extra,sizeof(extra)) ||
        !read(uintptr_t(sector)+0x08U,&ambient,sizeof(ambient)) ||
        !std::isfinite(extra) || !std::isfinite(ambient))return false;
-    // rdCache's world ambient floor uses sector.extraLight, not the
-    // sector's separate camera ambientLight. The global sithRender
-    // extra-light address still needs verification in JKGM.
+    // Match the native ambient floor: JKL sector extraLight and the
+    // active rdCamera's ambient light both apply to world geometry.
+    if(!std::isfinite(camera_ambient))return false;
+    ambient=std::max(ambient,camera_ambient);
     auto clamp01=[](float v) {
         return std::max(0.0f,std::min(v,1.0f));
     };

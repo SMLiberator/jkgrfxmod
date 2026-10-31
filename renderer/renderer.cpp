@@ -3498,12 +3498,10 @@ namespace jkgm {
                     color_rgb(current_color[0], current_color[1], current_color[2]));
             }
 
-            // Draw GPU cached opaque faces FIRST into the actual G-buffer,
-            // writing their color/normal/depth. Native world follows using
-            // strict LESS depth testing and therefore fills missing faces
-            // without double-blending the same surfaces.
-            draw_world_cache_preview();
-            ogs->game_opaque_pass_program.use_program();
+            // Native fallback draws first. Cached faces then own the
+            // visible G-buffer pixels, preserving closer native Things.
+            // Mixed native batches still need per-surface ID tagging before
+            // their CPU work can be safely omitted.
             // Draw first pass (opaque world geometry)
             draw_batch(&ogs->game_opaque_pass_program,
                        world_batch,
@@ -3517,6 +3515,9 @@ namespace jkgm {
                        &trimdl->world_transparent_trimdl,
                        /*force opaque*/ true,
                        posterize_lighting);
+
+            draw_world_cache_preview();
+            ogs->game_opaque_pass_program.use_program();
 
             // First-person gun rendering uses a separate depth transform:
             // never sample world shadow maps for its artificial placement.
@@ -6059,6 +6060,14 @@ namespace jkgm {
             bool const dynamic_ready=read_world_cache_dynamic_lights(
                 safe_read,cache.loaded_world,cache.world.vertex_count,
                 cache.native_dynamic_light);
+            float camera_ambient=0.0f;
+            uint32_t camera_ptr=0;
+            if(!read_decal_u32(safe_read,0x0073A418U,camera_ptr) ||
+               !decal_native_address_ok(camera_ptr) ||
+               !safe_read(uintptr_t(camera_ptr)+0x54U,
+                          &camera_ambient,sizeof(camera_ambient)) ||
+               !std::isfinite(camera_ambient))
+                camera_ambient=0.0f;
             cache.frame_light_rgb.assign(cache.mesh.vertices.size(),
                                          {{1.0f,1.0f,1.0f}});
             size_t light_fallback=0,gouraud_faces=0;
@@ -6068,7 +6077,7 @@ namespace jkgm {
                        safe_read,cache.world.surfaces_addr,cache.mesh,
                        candidate,cache.world.vertex_count,
                        cache.native_dynamic_light,cache.frame_light_rgb,
-                       &info)) {
+                       &info,camera_ambient)) {
                     ++light_fallback;
                     continue;
                 }
@@ -6108,7 +6117,7 @@ namespace jkgm {
             // Bias only the GPU polygon towards the camera, allowing it to
             // own its pixels while native fills unsupported/missing faces.
             glEnable(GL_POLYGON_OFFSET_FILL);
-            glPolygonOffset(-1.0f,-1.0f);
+            glPolygonOffset(-2.0f,-2.0f);
             gl::bind_vertex_array(cache.vao);
             size_t drawn=0,unresolved=0,groups=0,skipped_alpha=0;
             for(size_t i=0;i<ordered.size();) {

@@ -118,6 +118,10 @@ int main()
     assert(lit_sample.mode==3U && lit_sample.vertices==4U);
     assert(std::fabs(rgb[0][0]-std::pow(0.20f,1.8f))<0.0001f);
     assert(std::fabs(rgb[3][2]-std::pow(0.45f,1.8f))<0.0001f);
+    assert(sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,
+        dynamic_lights,rgb,nullptr,0.35f));
+    assert(std::fabs(rgb[0][0]-std::pow(0.35f,1.8f))<0.0001f);
     lu32(light_surfaces+2U*0x5cU+0x20U,0U);
     assert(sample_world_cache_surface_light(
         light_read,light_surfaces,mesh,lit_face,8U,dynamic_lights,rgb));
