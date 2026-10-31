@@ -97,6 +97,31 @@ namespace jkgm {
         }
     };
 
+    // Numeric diagnostics can contain fractional engine state (e.g. sector
+    // extra light). Keep the formatted text owned by this formatter so the
+    // sequence remains valid for the duration of log emission.
+    template <class T>
+    struct formatter<T, std::enable_if_t<std::is_floating_point_v<T>>> {
+    private:
+        std::string value;
+
+    public:
+        formatter(T value)
+            : value(std::to_string(value))
+        {
+        }
+
+        void fill_buffer(format_buffer *buffer) const
+        {
+            buffer->append(value);
+        }
+
+        size_t estimate_buffer() const
+        {
+            return value.size();
+        }
+    };
+
     template <>
     struct formatter<std::string> {
     private:
