@@ -6139,12 +6139,61 @@ namespace jkgm {
             gl::set_depth_function(gl::comparison_function::less);
             gl::set_active_texture_unit(0);
             if(the_config->profile_renderer &&
-               gpu_3do_present_serial%120U==0U)
+               gpu_3do_present_serial%120U==0U) {
                 LOG_INFO("WORLD CACHE texture_preview ranges=",drawn,
                          " multi_draw_calls=",groups,
                          " unresolved_material=",unresolved,
                          " deferred_special=",skipped_alpha,
                          " native_world_unchanged=1");
+                // Read-only material readiness survey for the special
+                // (translucent-flag/solid-adjoin/Z-write) candidates. Read
+                // once per unique MAT/cel, sampled just every 120 frames.
+                // Zero GPU submissions and no changes to native alpha draws.
+                std::map<std::pair<uintptr_t,int32_t>,gpu_3do_texture> materials;
+                size_t alpha_texels=0,masked=0,translucent=0,special_blend=0;
+                size_t opaque=0,unresolved_special=0,transition=0;
+                size_t native_translucent=0,solid_adjoins=0,no_zwrite=0;
+                for(auto const &c:cache.sector_special_candidates) {
+                    if(c.face_type&0x2U)++native_translucent;
+                    if(c.face_type&0x20U)++no_zwrite;
+                    if(c.solid_adjoin)++solid_adjoins;
+                    auto const key=std::make_pair(c.material,c.cel);
+                    auto it=materials.find(key);
+                    if(it==materials.end()) {
+                        gpu_3do_group group{};
+                        group.material=c.material;
+                        group.cel=c.cel;
+                        it=materials.emplace(key,
+                            resolve_gpu_3do_material(group)).first;
+                    }
+                    auto const &mat=it->second;
+                    if(mat.albedo_source!=1 || !mat.has_image) {
+                        ++unresolved_special;continue;
+                    }
+                    if(mat.alpha)++alpha_texels;
+                    if(mat.masked || mat.dithered)++masked;
+                    if(mat.special)++special_blend;
+                    if(mat.albedo_transition>0.0f)++transition;
+                    if(mat.alpha && !mat.masked && !mat.dithered)
+                        ++translucent;
+                    if(!mat.alpha && !mat.masked &&
+                       !mat.dithered && !mat.special)++opaque;
+                }
+                LOG_INFO("WORLD CACHE alpha_survey special_visible=",
+                         cache.sector_special_candidates.size(),
+                         " unique_material_cels=",materials.size(),
+                         " native_face_translucent=",native_translucent,
+                         " solid_adjoin=",solid_adjoins,
+                         " zwrite_disabled=",no_zwrite,
+                         " alpha_texels=",alpha_texels,
+                         " masked=",masked,
+                         " translucent_texture=",translucent,
+                         " special_blend=",special_blend,
+                         " opaque_material=",opaque,
+                         " animated_transition=",transition,
+                         " unresolved_material=",unresolved_special,
+                         " draw_calls=0 native_alpha_unchanged=1");
+            }
         }
 
         void draw_world_cache_wireframe()
