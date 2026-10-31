@@ -6264,6 +6264,11 @@ namespace jkgm {
             // Material and UV caches are shared with the ordinary GPU 3DO path.
             gl::enable(gl::capability::blend);
             gl::set_depth_mask(false);
+            // Textured GPU-world comparison belongs beneath translucent
+            // geometry and projected decals, not over the entire alpha pass.
+            // It overlays native opaque faces but contributes no depth.
+            draw_world_cache_texture_preview();
+            ogs->game_transparency_pass_program.use_program();
             if(the_config->enable_decals) {
                 draw_gpu_3do_preview(true,false,true);
                 ogs->game_transparency_pass_program.use_program();
@@ -6310,7 +6315,6 @@ namespace jkgm {
             // pass after native world geometry. Projected SPRs were submitted
             // earlier so translucent world pixels may correctly cover them.
             draw_gpu_3do_preview(true);
-            draw_world_cache_texture_preview();
             draw_world_cache_wireframe();
             ogs->game_transparency_pass_program.use_program();
 
