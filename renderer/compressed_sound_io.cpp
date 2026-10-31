@@ -1,5 +1,6 @@
 #include "compressed_sound_io.hpp"
 #include "compressed_sound_codec.hpp"
+#include "compressed_sound_read.hpp"
 #include "base/log.hpp"
 #include <Windows.h>
 #include <algorithm>
@@ -184,31 +185,18 @@ namespace {
                         " reason=",reason);
             return {};
         };
-        // Read via original HostServices callbacks, NEVER host stdio.
-        // This preserves JK's loose-file and GOB/GOO search behavior.
-        // IMPORTANT: Do not call real.size(native_fd)! The original
-        // JK resource callback is not safe for all GOB/loose-file handles:
-        // on the audited executable it can treat a small handle (e.g. 1)
-        // as a filename pointer and crash inside CreateFileA/strlen.
-        // seek/tell are the operations the native sound loader already uses.
-        if(real.seek(native_fd,0,SEEK_END)!=0)
-            return fail("seek end failed");
-        int const length=real.tell(native_fd);
-        if(length<=0 || uint64_t(length)>max_encoded_bytes)
-            return fail("length unavailable, empty or larger than 64 MiB");
-        if(real.seek(native_fd,0,SEEK_SET)!=0)
-            return fail("seek start failed");
+        // Only read from the newly opened resource's current position.
+        // GOB/GOO fseek(SEEK_END) has different success conventions from
+        // loose-file stdio, and native fileSize is unsafe for some handles.
+        // Repeated fileRead calls work on both and stop at a zero read.
+        std::vector<uint8_t> input;
+        if(!read_sound_source_sequential(
+               [&](uint8_t* dst,size_t len) {
+                   return real.read(native_fd,dst,len);
+               },max_encoded_bytes,input))
+            return fail("empty, oversized, or invalid sequential read");
         LOG_INFO("JKGM compressed sound source opened: ",path,
-                 " encoded_bytes=",length);
-        std::vector<uint8_t> input(size_t(length),uint8_t(0));
-        size_t read_count=0;
-        while(read_count<input.size()) {
-            size_t const got=real.read(native_fd,input.data()+read_count,
-                                       input.size()-read_count);
-            if(got==0 || got>input.size()-read_count)
-                return fail("encoded file read failed");
-            read_count+=got;
-        }
+                 " encoded_bytes=",input.size());
         std::vector<uint8_t> wav;
         if(!decode_compressed_sound_to_wave(ext,input,wav))
             return fail("invalid codec data, unsupported channels or PCM limit");
