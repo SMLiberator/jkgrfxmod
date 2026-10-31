@@ -344,6 +344,8 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , ambient_light(gl::get_uniform_location(the_program,"ambient_light"))
     , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
+    , pixel_dynamic_lighting(gl::get_uniform_location(
+          the_program,"pixel_dynamic_lighting"))
     , nonrigid_light_transform(gl::get_uniform_location(
           the_program,"nonrigid_light_transform"))
     , effective_light_mode(gl::get_uniform_location(the_program,"effective_light_mode"))
@@ -585,11 +587,12 @@ void jkgm::shaders::gpu_3do_preview_shader::set_camera_axes(
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_lighting(
-    gpu_3do_instance const &instance)
+    gpu_3do_instance const &instance,bool pixel_lighting)
 {
     gl::set_uniform_float(ambient_light,instance.ambient);
     gl::set_uniform_float(attenuation_min,instance.attenuation);
     gl::set_uniform_integer(num_lights,static_cast<int>(instance.num_lights));
+    gl::set_uniform_integer(pixel_dynamic_lighting,pixel_lighting?1:0);
     gl::set_uniform_integer(nonrigid_light_transform,
         instance.nonrigid_light_transform ? 1 : 0);
     gl::set_uniform_float(effective_light_mode,instance.effective_light_mode);
