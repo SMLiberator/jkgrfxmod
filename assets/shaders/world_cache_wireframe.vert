@@ -2,9 +2,12 @@
 // Same world -> rdCamera -> JK projected depth as gpu_3do_preview.vert.
 // Static SithWorld positions are already world space: no model matrix.
 layout(location=0) in vec3 world_position;
+layout(location=1) in vec2 native_uv;
+out vec2 material_uv;
 uniform vec4 view_right,view_forward,view_up,view_origin;
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 void main() {
+    material_uv=native_uv;
     float x=(view_forward.x*world_position.y+
              view_up.x*world_position.z+
              view_right.x*world_position.x)+view_origin.x;

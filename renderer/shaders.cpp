@@ -161,15 +161,20 @@ void jkgm::shaders::menu_shader::set_menu_sampler(int sampler)
 }
 
 jkgm::shaders::world_cache_wireframe_shader::world_cache_wireframe_shader(
-    fs::path const &root)
-    : opengl_shader("world_cache_wireframe",
+    fs::path const &root,bool textured)
+    : opengl_shader(textured?"world_cache_texture_preview":"world_cache_wireframe",
                     root/"shaders/world_cache_wireframe.vert",
-                    root/"shaders/world_cache_wireframe.frag")
+                    root/(textured?"shaders/world_cache_texture_preview.frag":
+                          "shaders/world_cache_wireframe.frag"))
     , view_right(gl::get_uniform_location(the_program,"view_right"))
     , view_forward(gl::get_uniform_location(the_program,"view_forward"))
     , view_up(gl::get_uniform_location(the_program,"view_up"))
     , view_origin(gl::get_uniform_location(the_program,"view_origin"))
     , projection(gl::get_uniform_location(the_program,"projection"))
+    , albedo_sampler(gl::get_uniform_location(the_program,"albedo_map"))
+    , uv_scale(gl::get_uniform_location(the_program,"uv_scale"))
+    , uv_scroll(gl::get_uniform_location(the_program,"uv_scroll"))
+    , material_tint(gl::get_uniform_location(the_program,"material_tint"))
 {
 }
 void jkgm::shaders::world_cache_wireframe_shader::set_view_matrix(
@@ -184,6 +189,14 @@ void jkgm::shaders::world_cache_wireframe_shader::set_projection(
     point<4,float> p)
 {
     gl::set_uniform_vector(projection,p);
+}
+void jkgm::shaders::world_cache_wireframe_shader::set_texture(
+    float width,float height,point<4,float> tint,point<2,float> scroll)
+{
+    gl::set_uniform_integer(albedo_sampler,0);
+    gl::set_uniform_vector(uv_scale,make_point(1.0f/width,1.0f/height));
+    gl::set_uniform_vector(uv_scroll,scroll);
+    gl::set_uniform_vector(material_tint,tint);
 }
 
 jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,

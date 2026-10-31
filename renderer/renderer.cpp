@@ -5836,7 +5836,8 @@ namespace jkgm {
         {
             frame_world_cache_camera.valid=false;
             if((!the_config->world_cache_probe &&
-                !the_config->world_cache_preview) ||
+                !the_config->world_cache_preview &&
+                !the_config->world_cache_texture_preview) ||
                mode!=renderer_mode::ingame)return;
             uint32_t address=0;
             if(!engine_material_debug::read_object(
@@ -6005,6 +6006,132 @@ namespace jkgm {
         // visible *cached* SithWorld faces. Native world stays authoritative.
         // The transparent-pass color target is already composited; this
         // touches neither opaque G-buffer attachments nor scene depth.
+        // Separate opt-in material/UV comparison. Reuses immutable world
+        // indices and the already-tested 3DO MAT resolver, not native world
+        // submission. No changes to JK world geometry, portals, sky or HOM.
+        void draw_world_cache_texture_preview()
+        {
+            if(!the_config->world_cache_texture_preview ||
+               !ogs->world_cache_texture_program || !world_cache_target ||
+               !world_cache_target->ready ||
+               !frame_world_cache_camera.valid ||
+               !frame_world_cache_camera.perspective)return;
+            auto const &cache=*world_cache_target;
+            if(cache.sector_candidates.empty())return;
+            auto const &cam=frame_world_cache_camera;
+            float const aspect=get<x>(internal_scr_res_f)/
+                               get<y>(internal_scr_res_f);
+            float const half_fov=std::tan(
+                cam.camera.fov*0.008726646259971648f);
+            if(!(std::isfinite(half_fov) && half_fov>0.0f &&
+                 std::isfinite(aspect) && aspect>0.0f &&
+                 std::isfinite(cam.far_plane) && cam.far_plane>0.1f))
+                return;
+
+            // Sorting only groups contiguous material/cel runs; with no
+            // native suppression, ordering between opaque faces is immaterial.
+            static thread_local std::vector<world_cache_draw_candidate const*> ordered;
+            static thread_local std::vector<GLsizei> counts;
+            static thread_local std::vector<void const*> offsets;
+            ordered.clear();
+            counts.clear();
+            offsets.clear();
+            ordered.reserve(cache.sector_candidates.size());
+            for(auto const &candidate:cache.sector_candidates)
+                if(candidate.count>0U && candidate.count%3U==0U &&
+                   uint64_t(candidate.first_index)+candidate.count<=
+                       cache.mesh.indices.size())
+                    ordered.push_back(&candidate);
+            if(ordered.empty())return;
+            std::sort(ordered.begin(),ordered.end(),
+                [](world_cache_draw_candidate const *a,
+                   world_cache_draw_candidate const *b) {
+                    if(a->material!=b->material)
+                        return a->material<b->material;
+                    if(a->cel!=b->cel)return a->cel<b->cel;
+                    return a->surface_index<b->surface_index;
+                });
+            auto &shader=*ogs->world_cache_texture_program;
+            shader.use_program();
+            auto const &m=cam.native_view;
+            shader.set_view_matrix(
+                make_point(m[0],m[1],m[2],0.0f),
+                make_point(m[3],m[4],m[5],0.0f),
+                make_point(m[6],m[7],m[8],0.0f),
+                make_point(m[9],m[10],m[11],1.0f));
+            shader.set_projection(make_point(
+                half_fov,aspect,1.0f/cam.far_plane,0.0f));
+            gl::enable(gl::capability::depth_test);
+            gl::set_depth_function(gl::comparison_function::less_equal);
+            gl::set_depth_mask(false);
+            gl::enable(gl::capability::blend);
+            gl::set_blend_function(gl::blend_function::one,
+                                   gl::blend_function::one_minus_source_alpha);
+            gl::disable(gl::capability::cull_face);
+            // Bias preview toward its matching native opaque polygon.
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(-1.0f,-1.0f);
+            gl::bind_vertex_array(cache.vao);
+            size_t drawn=0,unresolved=0,groups=0,skipped_alpha=0;
+            for(size_t i=0;i<ordered.size();) {
+                size_t end=i+1;
+                auto const *first=ordered[i];
+                while(end<ordered.size() &&
+                      ordered[end]->material==first->material &&
+                      ordered[end]->cel==first->cel)++end;
+                gpu_3do_group group{};
+                group.material=first->material;
+                group.cel=first->cel;
+                auto const material=resolve_gpu_3do_material(group);
+                // This early preview deliberately excludes all translucent,
+                // animated and alpha-tested materials. They still draw
+                // through JK's native rendering path as before.
+                bool const safe=material.albedo_source==1 &&
+                    material.has_image && !material.alpha &&
+                    !material.masked && !material.dithered &&
+                    !material.special && !material.emissive_only &&
+                    material.opacity>=0.999f &&
+                    material.albedo_transition==0.0f &&
+                    std::isfinite(material.width) &&
+                    std::isfinite(material.height) &&
+                    material.width>0.0f && material.height>0.0f;
+                if(safe) {
+                    gl::set_active_texture_unit(0);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.texture);
+                    shader.set_texture(material.width,material.height,
+                                       material.tint,material.albedo_scroll);
+                    counts.clear();
+                    offsets.clear();
+                    for(size_t j=i;j<end;++j) {
+                        auto const *c=ordered[j];
+                        counts.push_back(static_cast<GLsizei>(c->count));
+                        offsets.push_back(reinterpret_cast<void const *>(
+                            uintptr_t(c->first_index)*sizeof(uint32_t)));
+                    }
+                    glMultiDrawElements(GL_TRIANGLES,counts.data(),
+                        GL_UNSIGNED_INT,offsets.data(),
+                        static_cast<GLsizei>(counts.size()));
+                    drawn+=counts.size();
+                    ++groups;
+                } else if(material.albedo_source!=1 ||
+                          !material.has_image)unresolved+=end-i;
+                else skipped_alpha+=end-i;
+                i=end;
+            }
+            gl::bind_vertex_array(gl::vertex_array_view(0U));
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            gl::set_depth_function(gl::comparison_function::less);
+            gl::set_active_texture_unit(0);
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("WORLD CACHE texture_preview ranges=",drawn,
+                         " multi_draw_calls=",groups,
+                         " unresolved_material=",unresolved,
+                         " deferred_special=",skipped_alpha,
+                         " native_world_unchanged=1");
+        }
+
         void draw_world_cache_wireframe()
         {
             if(!the_config->world_cache_preview ||
@@ -6183,6 +6310,7 @@ namespace jkgm {
             // pass after native world geometry. Projected SPRs were submitted
             // earlier so translucent world pixels may correctly cover them.
             draw_gpu_3do_preview(true);
+            draw_world_cache_texture_preview();
             draw_world_cache_wireframe();
             ogs->game_transparency_pass_program.use_program();
 

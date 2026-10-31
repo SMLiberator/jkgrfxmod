@@ -34,6 +34,7 @@
     "use_model_cache": false,
     "world_cache_probe": false,
     "world_cache_preview": false,
+    "world_cache_texture_preview": false,
     "mesh_revision_tracking": false,
     "enable_spotlights": false,
     "enable_spotlight_shadows": false,
