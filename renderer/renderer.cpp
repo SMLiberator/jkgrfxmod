@@ -17,6 +17,7 @@
 #include "spotlight.hpp"
 #include "spotlight_shadow_gpu.hpp"
 #include "sun_shadow_gpu.hpp"
+#include "world_cache_gpu.hpp"
 #include "sun_dynamic_shadow_gpu.hpp"
 #include "backbuffer_menu_surface.hpp"
 #include "backbuffer_surface.hpp"
@@ -573,6 +574,7 @@ namespace jkgm {
         std::vector<translucent_spotlight_draw> translucent_spotlights_for_frame;
         std::unique_ptr<spotlight_shadow_gpu> spotlight_shadow_target;
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
+        std::unique_ptr<world_cache_gpu> world_cache_target;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
         std::vector<sun_dynamic_shadow_tile> sun_dynamic_tiles;
@@ -5826,6 +5828,50 @@ namespace jkgm {
                 gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
         }
 
+        // Phase-0 world GPU cache: validate and upload immutable native
+        // surface geometry but never draw it. This preserves JK visibility,
+        // CPU world lighting, sky/portal rendering, and HOM until we have
+        // native surface-level visibility and material parity.
+        void probe_world_cache()
+        {
+            if(!the_config->world_cache_probe ||
+               mode!=renderer_mode::ingame)return;
+            uint32_t address=0;
+            if(!engine_material_debug::read_object(
+                   engine_material_debug::current_world_global,address) ||
+               !decal_native_address_ok(address))return;
+            auto safe_read=[](uintptr_t ptr,void *dst,size_t len) {
+                if(!len || !engine_camera_detail::readable(ptr,len))
+                    return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(ptr),len);
+                return true;
+            };
+            if(!world_cache_target)
+                world_cache_target=std::make_unique<world_cache_gpu>();
+            if(!world_cache_target->update_world(safe_read,address)) {
+                if(gpu_3do_present_serial%120U==0U)
+                    LOG_WARNING("WORLD CACHE phase0 native world snapshot unavailable");
+                return;
+            }
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U) {
+                auto const &cache=*world_cache_target;
+                auto const state=inspect_world_cache_live_state(
+                    safe_read,cache.world.surfaces_addr,cache.mesh);
+                LOG_INFO("WORLD CACHE phase0 probe eligible=",
+                    state.drawn_candidates,
+                    " hidden=",state.hidden,
+                    " missing_uv=",state.missing_uv,
+                    " changed_cel=",state.changed_cel,
+                    " changed_material=",state.changed_material,
+                    " unreadable=",state.unreadable,
+                    " all_cached_surfaces=",cache.mesh.surfaces.size(),
+                    " native_world_triangles=",world_batch.size()+
+                        world_transparent_batch.size(),
+                    " status=native_rendering_unchanged");
+            }
+        }
+
         void draw_game_gbuffer_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
         {
             frame_screen->begin_opaque_pass();
@@ -6324,6 +6370,7 @@ namespace jkgm {
             gpu_frame_material_cache.clear();
             frame_gpu_3do_instances=consume_gpu_3do_instances();
             ++gpu_3do_present_serial;
+            probe_world_cache();
             animation_seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - animation_epoch).count();
             {
