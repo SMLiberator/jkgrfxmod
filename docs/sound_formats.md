@@ -1,95 +1,61 @@
 # Compressed audio support (JKGM renderer)
 
-Development builds can load Ogg Vorbis (`.ogg`), FLAC (`.flac`), and
-MP3 (`.mp3`) as ordinary Sith sound resources through the original
-DirectSound / DirectSound3D audio system. This does not replace JK's mixer,
-COG verbs, SoundClass behavior, pitch/panning, or spatial sound playback.
+JKGM supports Ogg Vorbis (`.ogg`), FLAC (`.flac`) and MP3 (`.mp3`)
+through the native Sith sound loader and DirectSound playback system.
+The codecs are built into renderer.dll; external decoders are not needed.
 
-## Filename rules
+## Using compressed sounds
 
-Use the **real filename and extension** in COG and sound resource lists:
+Reference the *actual* filename and extension in COG or sound lists:
 
 ```c
-sound = LoadSound("music.ogg");
+sound = LoadSound("sugar.ogg");
 PlaySoundLocal(sound, 1.0, 0.0, 0x0);
 ```
 
-`LoadSound("music.wav")` only opens `music.wav`. It will **not** search
-for `music.ogg`, `music.flac`, or `music.mp3`. Likewise, a request for
-`music.ogg` looks for exactly that file. Ordinary WAV requests continue
-using JK's original native I/O and decoder without modification.
-
-The native sound loader now searches three directories, in this order:
-`sound/`, `voice/`, then **`music/`**. This applies to WAV and
-compressed sounds, including resources in the game's usual GOB/GOO archives.
-Keep using the actual compressed extension in COG; there is no implicit
-extension fallback. The search-path expansion patches two audited operands
-in this specific `jkgm.exe`, for both the initial metadata lookup and the
-later lazy PCM read. The original addresses are restored when the DLL unloads.
-
-Format selection uses the extension; renaming a WAV file to `.ogg`
-does not convert its contents into Ogg Vorbis.
+JK's search order is `sound/`, then `voice/`, then `music/`,
+including resources stored in GOB/GOO archives. An explicit
+`LoadSound("sugar.ogg")` never substitutes a different extension.
+The native WAV path remains unchanged. Both the initial sound-metadata
+lookup and the later PCM-buffer load use the extended directory list.
 
 ## Implementation
 
-The verified JKGM sound loader is detoured to install virtual HostServices
-read/seek/size callbacks before invoking the native loader. When its file
-open callback receives `.ogg`, `.flac`, or `.mp3`, JKGM opens exactly
-the requested file through the game's original GOB/loose-file I/O,
-reads its bytes sequentially until EOF, decodes them to 16-bit interleaved
-PCM, and exposes the result as a virtual RIFF/WAVE stream. This is needed
-because GOB-backed streams do not follow ordinary stdio seek return-value
-conventions, and the native fileSize callback is unsafe for some resource
-handles. Native WAV parsing and DirectSound playback are otherwise unchanged.
-The same bounded sequential read works for loose files and GOB entries.
+A guarded detour of `sithSound_Load` ensures that JKGM's HostServices
+file callbacks are active before loading sounds. JK can reset those
+callbacks during resource initialization, so the bridge verifies and
+reattaches only its own original callbacks when necessary.
 
-The decoders are compiled into renderer.dll: stb_vorbis, dr_flac, and
-dr_mp3. No external codec DLL or FFmpeg executable is required. Only mono
-and stereo streams are supported. Source files are limited to 64 MiB and
-decoded PCM to 192 MiB; a bounded 128 MiB cache avoids repeated decoding.
-This is load-time decoding, not streaming playback or JK's CD-music subsystem.
+Compressed sources are opened through the original JK resource manager
+and read sequentially, in bounded chunks, until the reader returns
+zero bytes. This works for loose files and GOB-backed handles; it avoids
+the differing `fseek` success conventions and the unsafe native
+`fileSize` callback. The decoders turn the input into 16-bit
+interleaved mono/stereo PCM exposed as a virtual RIFF/WAVE file.
 
-The compatibility guard is specific to the audited `jkgm.exe`: loader at
-`0x004EF440`, WAV parser at `0x00437A30`, and HostServices globals at
-`0x0082F0EC` / `0x00866BC0`. Unknown executable builds remain unmodified.
+The existing sound loader then creates normal DirectSound buffers:
+there is no replacement mixer or change to the COG sound verbs.
+Looping and pitch shifting have been verified in-game. OGG, FLAC, MP3
+and OGG in `music/` inside a GOB have been verified in-game.
 
-## Diagnosing silent sounds
+Limits: compressed input up to 64 MiB, decoded PCM up to 192 MiB,
+and an eviction-bounded decoded-data cache of 128 MiB. Stereo
+and mono sources are supported; multichannel sources are rejected.
+This is load-time decoding, not incremental streaming or a replacement
+for the CD music subsystem. MP3 padding may complicate seamless loops;
+lossless FLAC or properly authored OGG are preferable for those.
 
-Start with a short known-working WAV in the same sound directory to
-confirm the existing JK sound call and audio device work. Replace it with
-a *genuinely encoded* `.ogg` or `.mp3` and reference that exact extension.
-Use the log to trace the following sequence:
+## Compatibility and tests
 
-1. `JKGM compressed sound native load requested:` — the native Sith
-   loader detour was reached. If this never appears, the request did not
-   enter that loader (or used another filename/entry path).
-2. `JKGM compressed sound open requested:` — the HostServices bridge
-   received an explicit compressed file-open request. If missing despite
-   step 1, investigate the native loader's path or early rejection.
-3. `JKGM compressed sound decoded:` — the encoded bytes were successfully
-   converted into a virtual PCM WAV. `file not found` and `decode failed`
-   warnings distinguish missing resources from invalid/unsupported data.
-4. `JKGM compressed sound virtual WAV opened:` — JKGM returned a virtual
-   file handle to the engine.
-5. `JKGM compressed PCM first read:` — the native WAV parser actually
-   requested bytes from that handle.
-6. `JKGM compressed sound native load returned:` — the native sound loader
-   completed, with its resulting sound pointer in the log.
+The native loader and WAV parser addresses, HostServices pointers, and
+two search-list instruction operands are guarded for the audited
+`jkgm.exe` build. Unsupported builds retain original sound behavior.
 
-If `JKGM sound HostServices live table` reports `bridge_active=0`,
-the adapter was not installed at the moment of the check. The bridge now
-verifies its original callback pointers and rebinds if JK resets them.
-Unlike the earlier diagnostic build, it never invokes JK's original
-fileOpen separately to probe resources; only the native sound loader
-performs these file-opening requests.
+Windows CI builds the renderer and runs regression tests for codec decoding
+and forward-only resource reads, including partial reads, empty streams,
+and the 64 MiB encoded-input limit.
 
-The regression suite also tests forward-only GOB-style reads, partial read
-callbacks, and the 64 MiB encoded-input limit, but actual archive playback
-must still be tested inside JKGM.
-
-A successful decoder test alone cannot prove the native Sith/DirectSound
-integration works in the game. The final check remains actual playback,
-volume, pitch, looping and spatialization in JKGM under Wine and Windows.
-
-MP3 may add encoder padding. For short seamless loops, consider OGG or
-FLAC. For positional 3D sounds, mono is generally preferred.
+For troubleshooting, the log retains warnings about unsupported
+executables, callback mismatches, failed decoding and virtual-handle
+exhaustion. Successful decoding is logged once per uncached source;
+the temporary per-open and live-HostServices diagnostics have been removed.
