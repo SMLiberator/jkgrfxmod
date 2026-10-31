@@ -693,8 +693,33 @@ namespace {
             // Spot/other light types need the original cone/angle logic.
             // Do not misrender them as omnidirectional point lights.
             if(type<0 || type>2) return false;
-            if(instance.num_lights==instance.lights.size())
-                return false; // Native path for light-heavy scenes; never drop lights.
+            if(instance.num_lights==instance.lights.size()) {
+                // The native fallback can omit this mesh from the GPU sun
+                // caster submission even while both cascades remain ready.
+                // Log the actual threshold hit, not every generic lighting
+                // fallback, to correlate dense exhaust/light VFX with
+                // apparently vanishing scene shadows.
+                if(the_config && the_config->profile_renderer_verbose) {
+                    static uint64_t logged_frame=0;
+                    static unsigned logged_count=0;
+                    if(logged_frame!=gpu_frame_serial) {
+                        logged_frame=gpu_frame_serial;
+                        logged_count=0;
+                    }
+                    if(logged_count++<4U) {
+                        auto const name_end=std::find(
+                            m.name,m.name+sizeof(m.name),'\0');
+                        LOG_INFO("GPU 3DO dynamic light overflow mesh=",
+                            std::string(m.name,name_end),
+                            " camera_lights=",count,
+                            " overlapping_lights=",instance.num_lights+1U,
+                            " capacity=",instance.lights.size(),
+                            " thing_flags=",active_native_model_thing_flags,
+                            " owner=",active_native_shadow_owner);
+                    }
+                }
+                return false; // Preserve native lighting rather than discard lights.
+            }
             auto &out=instance.lights[instance.num_lights++];
             out.local_position={
                 (dx*cfx+dy*cfy+dz*cfz)/determinant,
