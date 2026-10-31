@@ -23,6 +23,7 @@ struct world_cache_gpu {
     std::vector<uint8_t> portal_surface_membership;
     std::vector<world_cache_sector_span> visible_sector_spans;
     std::vector<uint32_t> cached_surface_lookup,sector_seen_epochs;
+    std::vector<uint32_t> native_visible_sector_scratch;
     uint32_t sector_seen_epoch=0;
     uintptr_t loaded_world=0;
     uint64_t revision=0;
@@ -62,6 +63,7 @@ struct world_cache_gpu {
         sector_candidates.clear();
         portal_surface_membership.clear();
         visible_sector_spans.clear();
+        native_visible_sector_scratch.clear();
         cached_surface_lookup.clear();
         sector_seen_epochs.clear();
         sector_seen_epoch=0;
