@@ -1559,12 +1559,11 @@ namespace {
         // visible mesh to native rendering, or its otherwise valid depth
         // caster disappears from the sun map for that frame. Do not double
         // snapshot the many ordinary MAT warm-up / geometry fallbacks.
-        if(!queued && !active_native_model_camera_hud &&
-           the_config && the_config->use_model_cache &&
-           the_config->enable_sun_shadows &&
-           (active_native_shadow_dynamic || lighting_capacity_fallback) &&
-           active_native_shadow_owner!=0 &&
-           jkgm::thing_casts_sun_shadows(active_native_model_thing_flags)) {
+        if(the_config && jkgm::sun_shadow_native_sidecar_needed(
+               queued,active_native_model_camera_hud,
+               the_config->use_model_cache,the_config->enable_sun_shadows,
+               active_native_shadow_dynamic,lighting_capacity_fallback,
+               active_native_shadow_owner,active_native_model_thing_flags)) {
             size_t const prior=pending_gpu_instances.size();
             uint64_t const geo_before=gpu_native_stats.geometry_native;
             uint64_t const snapshot_before=gpu_native_stats.snapshot_native;
