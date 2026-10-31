@@ -235,6 +235,7 @@ namespace jkgm {
             translucent_sun_uniforms translucent_sun;
         private:
             gl::uniform_location_id ambient_light,attenuation_min,num_lights,
+                                    pixel_dynamic_lighting,
                                     nonrigid_light_transform,effective_light_mode;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity;
         public:
@@ -249,7 +250,8 @@ namespace jkgm {
             void set_emissive(bool textured,point<4,float> intensity,
                               point<2,float> scroll);
             void set_fog(point<4,float> params,point<4,float> color);
-            void set_lighting(gpu_3do_instance const &instance);
+            void set_lighting(gpu_3do_instance const &instance,
+                              bool pixel_lighting);
             void set_colormap_tint(std::array<float,3> const &tint);
             void set_local_eye(std::array<float,3> const &eye);
             void set_dynamic_light_specular(bool enabled);
