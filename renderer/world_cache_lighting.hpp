@@ -77,7 +77,8 @@ inline bool sample_world_cache_surface_light(
     std::vector<std::array<float,3>> &out,
     world_cache_light_sample *sample=nullptr,
     std::vector<std::array<float,3>> *pixel_state=nullptr,
-    bool pixel_lighting=false)
+    bool pixel_lighting=false,
+    float global_extra=0.0f)
 {
     if(!read || face.count<3U || face.count%3U!=0U ||
        uint64_t(face.first_index)+face.count>mesh.indices.size())
@@ -110,6 +111,10 @@ inline bool sample_world_cache_surface_light(
        !std::isfinite(extra) || !std::isfinite(ambient))return false;
     // Native world faces use sector Extra, not the camera ambient value.
     // The camera value changes as JK processes each visible sector.
+    // sithRender's global extra light can additionally raise/lower the
+    // world floor (sithRender_RenderSectors parity).
+    if(!std::isfinite(global_extra))return false;
+    ambient=std::max(0.0f,std::min(ambient+global_extra,1.0f));
     auto clamp01=[](float v) {
         return std::max(0.0f,std::min(v,1.0f));
     };
