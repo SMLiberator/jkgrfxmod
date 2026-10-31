@@ -74,18 +74,21 @@ void main() {
     pixel_light_state=vec3(local_static_light,local_extra_light,local_light_mode);
     // A Camera-type Thing is a HUD overlay: no native ambient/dynamic
     // lighting, colormap tint, palette fade or per-camera color effects.
-    if(camera_hud_thing!=0 || pixel_dynamic_lighting!=0) {
-        // Pixel mode replaces the complete native diffuse calculation in
-        // the fragment shader; never add vertex dynamic light a second time.
+    if(camera_hud_thing!=0) {
         jk_lit_rgb=vec3(1.0);
     } else {
+    // Always compute the baked/static vertex result here, including the
+    // nonlinear gamma/color effects BEFORE raster interpolation. Moving
+    // this work to the fragment shader changes baked lighting on distant
+    // models even when a point light makes no actual contribution.
+    // Pixel mode suppresses only the dynamic-light loop below.
     // JK: FullyLit=0, NotLit=1, Diffuse=2, Gouraud=3.
     // Per-face ExtraLight and the camera's ambient floor are evaluated
     // before the gamma-1.8 vertex conversion (like the native D3D path).
     float mode=local_light_mode>3.5 ? 1.0
         : min(local_light_mode,effective_light_mode);
     float l=mode>=2.5 ? local_static_light : 0.0;
-    if(mode>=1.5 && num_lights>0) {
+    if(mode>=1.5 && num_lights>0 && pixel_dynamic_lighting==0) {
         vec3 anchor=mode>=2.5 ? local_position : local_face_anchor;
         vec3 normal=mode>=2.5 ? local_light_normal : local_normal;
         // The local-space shortcut assumes orthonormal R/L/U. For scaled
