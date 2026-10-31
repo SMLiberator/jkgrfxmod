@@ -5854,24 +5854,28 @@ namespace jkgm {
                 return;
             }
             auto &cache=*world_cache_target;
-            // This is a read-only diagnostic, not a rendering dependency:
-            // run expensive reads only for logged sampling frames.
-            if(!the_config->profile_renderer ||
-               gpu_3do_present_serial%120U!=0U)return;
+            // Maintain a sector-first candidate list each frame. The
+            // expensive whole-world parity scan remains diagnostic-only.
+            bool const sampled=the_config->profile_renderer &&
+                gpu_3do_present_serial%120U==0U;
             // Read the SAME native camera/rdClipFrustum as the GPU 3DO
             // path. Frustum rejection is conservative; it cannot tell
             // us which sectors JK traversed through active adjoins.
             auto const camera=capture_gpu_preview_camera();
             bool const can_cull=camera.valid && camera.perspective &&
                 camera.frustum.far_plane>0.1f;
-            auto const started=profile_clock::now();
-            auto const state=collect_world_cache_draw_candidates(
-                safe_read,cache.world.surfaces_addr,cache.mesh,
-                cache.frame_candidates,
-                can_cull?&camera.frustum:nullptr,
-                can_cull?&camera.native_view:nullptr);
-            auto const collect_us=elapsed_profile_us(
-                started,profile_clock::now());
+            world_cache_frame_stats state{};
+            uint64_t collect_us=0;
+            if(sampled) {
+                auto const started=profile_clock::now();
+                state=collect_world_cache_draw_candidates(
+                    safe_read,cache.world.surfaces_addr,cache.mesh,
+                    cache.frame_candidates,
+                    can_cull?&camera.frustum:nullptr,
+                    can_cull?&camera.native_view:nullptr);
+                collect_us=elapsed_profile_us(
+                    started,profile_clock::now());
+            } else cache.frame_candidates.clear();
             // Exact producer signature verified against jkgm(5).exe:
             // 0x4c6875: mov eax,[0x831938]; cmp eax,0x1b58
             // 0x4c6885: mov [eax*4+0x6bba88],ecx
@@ -5894,7 +5898,8 @@ namespace jkgm {
                     world_cache_native_visible_count,
                     world_cache_native_visible_list,
                     cache.portal_surface_membership,
-                    &cache.visible_sector_spans);
+                    &cache.visible_sector_spans,
+                    &cache.native_visible_sector_scratch);
             }
             else {
                 cache.portal_surface_membership.clear();
@@ -5903,9 +5908,9 @@ namespace jkgm {
             }
             auto const portal_us=elapsed_profile_us(
                 portal_started,profile_clock::now());
-            // Sector-first staging and independent all-world staging must
-            // select identical surface/index/material/cel sets. This is
-            // still read-only, and executes only on diagnostic samples.
+            // Sector-first staging runs every frame. Compare it to an
+            // independent whole-world scan only on diagnostic samples;
+            // JK native rendering is never suppressed.
             world_cache_sector_stage_stats sector_stage{};
             world_cache_stage_parity parity{};
             uint64_t sector_stage_us=0;
@@ -5920,12 +5925,12 @@ namespace jkgm {
                     can_cull?&camera.native_view:nullptr);
                 sector_stage_us=elapsed_profile_us(
                     sector_started,profile_clock::now());
-                if(sector_stage.valid)
+                if(sector_stage.valid && sampled)
                     parity=compare_world_cache_candidate_sets(
                         cache.frame_candidates,cache.portal_surface_membership,
                         cache.sector_candidates);
             } else cache.sector_candidates.clear();
-            {
+            if(sampled) {
                 // These ranges have live material/cel and conservative
                 // frustum filtering, NOT native sector/portal visibility.
                 // The legacy world D3D batch also contains fallback Things.
@@ -5972,6 +5977,7 @@ namespace jkgm {
                     " sector_parity_extra=",parity.only_sector_stage,
                     " sector_parity_metadata_diff=",parity.changed_metadata,
                     " visibility=verified_jkgm_portal_list_read_only",
+                    " staging=sector_first_every_frame",
                     " status=native_rendering_unchanged");
             }
         }
