@@ -7906,16 +7906,8 @@ bool native_compressed_sound_hook_active=false;
 
 void* __cdecl HookedSithSoundLoad(char* filename,int eager)
 {
-    // Trace explicit compressed sound requests even when the native loader
-    // rejects them before reaching the HostServices file-open callback.
-    char const* suffix=filename?std::strrchr(filename,'.'):nullptr;
-    bool const trace=suffix && (_stricmp(suffix,".ogg")==0 ||
-                                _stricmp(suffix,".flac")==0 ||
-                                _stricmp(suffix,".mp3")==0);
-    if(trace)
-        LOG_INFO("JKGM compressed sound native load requested: ",filename,
-                 " eager=",eager);
-    // HostServices may not exist until after the engine initializes.
+    // HostServices callbacks can be reset by JK's resource initialization.
+    // Revalidate/rebind on each load before calling the native loader.
     if(!jkgm::install_compressed_sound_file_services()) {
         static bool warned=false;
         if(!warned) {
@@ -7924,18 +7916,7 @@ void* __cdecl HookedSithSoundLoad(char* filename,int eager)
                         "table mismatch or not yet initialized");
         }
     }
-    if(trace) {
-        jkgm::diagnose_compressed_sound_file_services(filename);
-        jkgm::begin_compressed_sound_open_trace();
-    }
-    void* const sound=RealSithSoundLoad(filename,eager);
-    if(trace) {
-        jkgm::end_compressed_sound_open_trace();
-        uintptr_t const sound_address=reinterpret_cast<uintptr_t>(sound);
-        LOG_INFO("JKGM compressed sound native load returned: ",filename,
-                 " sound_address=",sound_address);
-    }
-    return sound;
+    return RealSithSoundLoad(filename,eager);
 }
 bool request_native_compressed_sound_hook()
 {
