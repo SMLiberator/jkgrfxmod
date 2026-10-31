@@ -94,7 +94,9 @@ int main()
     lu32(light_surfaces+2U*0x5cU+0x08U,uint32_t(light_sector));
     lu32(light_surfaces+2U*0x5cU+0x20U,3U);
     lu32(light_surfaces+2U*0x5cU+0x2cU,uint32_t(light_indices));
-    lu32(light_surfaces+2U*0x5cU+0x58U,uint32_t(light_intensities));
+    lu32(light_surfaces+2U*0x5cU+0x54U,uint32_t(light_intensities));
+    // SithSurface +0x58 is lastTouchedMs, NOT the light pointer.
+    lu32(light_surfaces+2U*0x5cU+0x58U,0xDEADBEEFU);
     lf32(light_surfaces+2U*0x5cU+0x44U,0.10f);
     lf32(light_sector+0x08U,0.20f);
     for(uint32_t i=0;i<4;++i) {
@@ -128,6 +130,15 @@ int main()
     assert(std::fabs(rgb[3][2]-std::pow(0.40f,1.8f))<0.0001f);
     assert(pixel_state[3][0]>0.39f && pixel_state[3][0]<0.41f);
     assert(pixel_state[0][1]==0.20f && pixel_state[3][2]==3.0f);
+    // Gouraud levels are authored independently for each world surface.
+    // Changing a single local intensity must affect its own vertex only.
+    lf32(light_intensities+2U*4U,0.85f);
+    assert(sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,
+        dynamic_lights,rgb,nullptr,&pixel_state,true));
+    assert(std::fabs(pixel_state[2][0]-0.95f)<0.00001f);
+    assert(std::fabs(pixel_state[1][0]-0.20f)<0.00001f);
+    lf32(light_intensities+2U*4U,0.20f);
     // Sector Extra must update live, including the fragment floor.
     lf32(light_sector+0x08U,0.55f);
     assert(sample_world_cache_surface_light(
