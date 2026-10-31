@@ -6095,6 +6095,8 @@ namespace jkgm {
                                          {{1.0f,1.0f,1.0f}});
             cache.frame_light_state.assign(cache.mesh.vertices.size(),
                                            {{1.0f,1.0f,0.0f}});
+            cache.frame_sector_tint.assign(cache.mesh.vertices.size(),
+                                            {{0.0f,0.0f,0.0f}});
             size_t light_fallback=0,gouraud_faces=0;
             for(auto const &candidate:cache.sector_candidates) {
                 world_cache_light_sample info{};
@@ -6103,7 +6105,7 @@ namespace jkgm {
                        candidate,cache.world.vertex_count,
                        cache.native_dynamic_light,cache.frame_light_rgb,
                        &info,&cache.frame_light_state,
-                       pixel_lighting,global_extra)) {
+                       pixel_lighting,global_extra,&cache.frame_sector_tint)) {
                     ++light_fallback;
                     continue;
                 }
@@ -6120,6 +6122,10 @@ namespace jkgm {
             gl::bind_buffer(gl::buffer_bind_target::array,cache.light_state);
             gl::buffer_data(gl::buffer_bind_target::array,
                 make_span(cache.frame_light_state).as_const_bytes(),
+                gl::buffer_usage::stream_draw);
+            gl::bind_buffer(gl::buffer_bind_target::array,cache.sector_tint);
+            gl::buffer_data(gl::buffer_bind_target::array,
+                make_span(cache.frame_sector_tint).as_const_bytes(),
                 gl::buffer_usage::stream_draw);
             std::sort(ordered.begin(),ordered.end(),
                 [](world_cache_draw_candidate const *a,
