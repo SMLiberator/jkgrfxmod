@@ -47,9 +47,22 @@ int main()
     put32(camera+0x18U,sector_a);
     putf(sector_a+0x10U,0.75f);
     putf(sector_b+0x14U,0.50f);
+    // The merged jkgm.exe keeps SithCamera objects in a verified array,
+    // not at OpenJKDF2's legacy sithCamera_g_pCurCamera symbol.
+    // Two different slots verify the camera index is used at runtime.
+    int32_t camera_index=0;
+    constexpr uintptr_t camera_array=0x008EC2C0U;
+    constexpr uintptr_t camera_index_addr=0x008EE4E8U;
+    constexpr uintptr_t camera_stride=0x4E0U;
     auto read=[&](uintptr_t addr,void *dst,size_t n) {
-        if(addr==0x0082F104U && n==4U) {
-            std::memcpy(dst,&camera,4);
+        if(addr==camera_index_addr && n==sizeof(camera_index)) {
+            std::memcpy(dst,&camera_index,sizeof(camera_index));
+            return true;
+        }
+        if(addr==camera_array+uintptr_t(camera_index)*camera_stride+0x18U &&
+           n==4U) {
+            auto const owning_sector=camera_index==0?sector_a:sector_b;
+            std::memcpy(dst,&owning_sector,4);
             return true;
         }
         if(addr<base || addr-base+n>bytes.size())return false;
@@ -58,12 +71,20 @@ int main()
     };
     std::array<float,3> tint_a{},tint_b{},camera_tint{};
     assert(read_jk_camera_sector_tint(read,camera_tint));
+    assert(camera_tint[0]==0.75f && camera_tint[1]==0.0f);
     assert(read_jk_thing_sector_tint(read,thing_a,tint_a));
     assert(read_jk_thing_sector_tint(read,thing_b,tint_b));
     auto delta_a=jk_thing_tint_delta(tint_a,camera_tint);
     auto delta_b=jk_thing_tint_delta(tint_b,camera_tint);
     assert(delta_a[0]==0.0f && delta_a[1]==0.0f);
     assert(delta_b[0]==-0.75f && delta_b[1]==0.5f);
+    camera_index=1;
+    assert(read_jk_camera_sector_tint(read,camera_tint));
+    assert(camera_tint[0]==0.0f && camera_tint[1]==0.5f);
+    camera_index=7; // out of bounds must fail closed
+    assert(!read_jk_camera_sector_tint(read,camera_tint));
+    camera_index=0;
+    assert(read_jk_camera_sector_tint(read,camera_tint));
     // A scripted/global tint remains unchanged when replacing only the
     // camera-sector portion with the Thing's own sector tint.
     float global_scripted=0.20f;
