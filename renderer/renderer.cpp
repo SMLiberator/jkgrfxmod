@@ -3217,7 +3217,10 @@ namespace jkgm {
                                          make_point(m[6],m[7],m[8],0.0f),
                                          make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(it->second->vao);
-                    prog.set_lighting(inst);
+                    prog.set_lighting(inst,
+                        the_config->gpu_pixel_lighting &&
+                        !inst.camera_hud && !inst.is_projected_decal &&
+                        inst.num_lights>0U);
                     prog.set_camera_hud_thing(
                         inst.camera_hud,inst.camera_hud_world_depth);
                     // 0x20 suppresses JkGRfxMod light-reception effects on
