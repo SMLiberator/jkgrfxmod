@@ -5926,14 +5926,18 @@ namespace jkgm {
                     cache.sector_seen_epochs,cache.sector_seen_epoch,
                     cache.sector_candidates,
                     can_cull?&camera.frustum:nullptr,
-                    can_cull?&camera.native_view:nullptr);
+                    can_cull?&camera.native_view:nullptr,
+                    &cache.sector_special_candidates);
                 sector_stage_us=elapsed_profile_us(
                     sector_started,profile_clock::now());
                 if(sector_stage.valid && sampled)
                     parity=compare_world_cache_candidate_sets(
                         cache.frame_candidates,cache.portal_surface_membership,
                         cache.sector_candidates);
-            } else cache.sector_candidates.clear();
+            } else {
+                cache.sector_candidates.clear();
+                cache.sector_special_candidates.clear();
+            }
             if(sampled) {
                 // These ranges have live material/cel and conservative
                 // frustum filtering, NOT native sector/portal visibility.
@@ -5946,6 +5950,9 @@ namespace jkgm {
                     " hidden=",state.hidden,
                     " not_textured=",state.not_textured,
                     " solid_adjoin=",state.solid_adjoin,
+                    " translucent_face=",state.translucent_face,
+                    " zwrite_disabled=",state.zwrite_disabled,
+                    " special_candidates=",state.special_candidates,
                     " missing_uv=",state.missing_uv,
                     " missing_material=",state.missing_material,
                     " sky=",state.sky,
@@ -5967,6 +5974,14 @@ namespace jkgm {
                     " sector_stage_valid=",sector_stage.valid?1:0,
                     " sector_stage_candidates=",sector_stage.faces.candidates,
                     " sector_stage_tris=",sector_stage.faces.triangles,
+                    " sector_stage_special_faces=",
+                        cache.sector_special_candidates.size(),
+                    " sector_stage_translucent_face=",
+                        sector_stage.faces.translucent_face,
+                    " sector_stage_solid_adjoin=",
+                        sector_stage.faces.solid_adjoin,
+                    " sector_stage_zwrite_disabled=",
+                        sector_stage.faces.zwrite_disabled,
                     " sector_stage_us=",sector_stage_us,
                     " sector_stage_native_surfaces=",sector_stage.unique_surfaces,
                     " sector_stage_cached_surfaces=",sector_stage.cached_surfaces,
