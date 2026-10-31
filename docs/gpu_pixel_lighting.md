@@ -21,13 +21,20 @@ It remains limited to 16 affecting lights per mesh in this first phase;
 an overflow retains the existing native rendering and separate sun-depth
 caster fallback. This does not add point-light shadows.
 
-When enabled, the cached GPU vertex shader passes raw local geometry and
-original JK light fields to the fragment shader instead of applying
-native point lights to its Gouraud color. The fragment shader reconstructs
-the authored static light, ambient floor, face extra light, RGB vertex color,
-colormap tint, and native palette/hardware color effects after evaluating
-point-light falloff at the fragment position. This avoids counting the
-same dynamic light both at the vertex and the fragment.
+When enabled, the cached GPU vertex shader still evaluates the
+authored static light, ambient floor, face extra light, RGB vertex color,
+colormap tint and native palette/hardware color effects **at vertices**.
+Those baked colors are interpolated exactly as in the existing renderer.
+Only the *point-light difference* is evaluated in the fragment shader.
+It adds the difference between the dynamically lit and unlit brightness,
+instead of recomputing the baked vertex lighting per pixel. This avoids
+counting lights twice and, importantly, preserves the original baked color
+exactly when a dynamic light is outside a given pixel's range.
+
+Moving the complete lighting calculation to the fragment shader was
+incorrect: applying the nonlinear gamma/color transform after interpolating
+vertex brightness changed baked lighting on distant meshes merely because
+a light appeared in JK's broad per-mesh candidate list.
 
 Lighting modes retain JK semantics: FullyLit/NotLit do not use the
 point lights, Diffuse uses the face anchor and face normal, and Gouraud
