@@ -78,7 +78,8 @@ inline bool sample_world_cache_surface_light(
     world_cache_light_sample *sample=nullptr,
     std::vector<std::array<float,3>> *pixel_state=nullptr,
     bool pixel_lighting=false,
-    float global_extra=0.0f)
+    float global_extra=0.0f,
+    std::vector<std::array<float,3>> *sector_tint=nullptr)
 {
     if(!read || face.count<3U || face.count%3U!=0U ||
        uint64_t(face.first_index)+face.count>mesh.indices.size())
@@ -95,6 +96,23 @@ inline bool sample_world_cache_surface_light(
     uint32_t mode=0;
     if(!read_decal_u32(read,addr+0x20U,mode) || mode>3U)return false;
     if(sample) {*sample={mode,count};}
+    // Sector tint belongs to the face's own sector, not the camera sector.
+    // SithSector +0x10 is rdVector3 tint, independently live from Extra.
+    // The +0x08 SithSurface sector pointer is valid even in FullyLit mode.
+    uint32_t sector=0;
+    if(!read_decal_u32(read,addr+0x08U,sector) ||
+       !decal_native_address_ok(sector))return false;
+    if(sector_tint) {
+        if(sector_tint->size()!=out.size())return false;
+        std::array<float,3> tint{};
+        if(!read(uintptr_t(sector)+0x10U,tint.data(),sizeof(tint)))
+            return false;
+        for(float &v:tint) {
+            if(!std::isfinite(v))return false;
+            v=std::max(0.0f,std::min(v,1.0f));
+        }
+        for(uint32_t i=0;i<count;++i)(*sector_tint)[base+i]=tint;
+    }
     if(mode==0U) {
         for(uint32_t i=0;i<count;++i) {
             out[base+i]={{1.0f,1.0f,1.0f}};
@@ -102,11 +120,8 @@ inline bool sample_world_cache_surface_light(
         }
         return true;
     }
-    uint32_t sector=0;
     float extra=0.0f,ambient=0.0f;
-    if(!read_decal_u32(read,addr+0x08U,sector) ||
-       !decal_native_address_ok(sector) ||
-       !read(addr+0x44U,&extra,sizeof(extra)) ||
+    if(!read(addr+0x44U,&extra,sizeof(extra)) ||
        !read(uintptr_t(sector)+0x08U,&ambient,sizeof(ambient)) ||
        !std::isfinite(extra) || !std::isfinite(ambient))return false;
     // Native world faces use sector Extra, not the camera ambient value.
