@@ -5868,6 +5868,16 @@ namespace jkgm {
                 can_cull?&camera.native_view:nullptr);
             auto const collect_us=elapsed_profile_us(
                 started,profile_clock::now());
+            // Original JKDF2 global locations, NOT yet verified for the
+            // patched JKGM executable. The probe validates every sector
+            // against the current world's sector table and surface spans.
+            // Failure never changes rendering or the normal cache list.
+            constexpr uintptr_t native_visible_count=0x008318F0U;
+            constexpr uintptr_t native_visible_list=0x0082F110U;
+            auto const portal=inspect_world_cache_portal_membership(
+                safe_read,address,cache.world,cache.frame_candidates,
+                native_visible_count,native_visible_list,
+                cache.portal_surface_membership);
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U) {
                 // These ranges have live material/cel and conservative
@@ -5891,7 +5901,13 @@ namespace jkgm {
                     " all_cached_surfaces=",cache.mesh.surfaces.size(),
                     " legacy_world_batch_tris=",world_batch.size()+
                         world_transparent_batch.size(),
-                    " visibility=native_sector_submission_pending",
+                    " portal_probe_valid=",portal.valid?1:0,
+                    " portal_probe_reason=",portal.reason,
+                    " portal_visible_sectors=",portal.visible_sector_count,
+                    " portal_member_surfaces=",portal.member_surfaces,
+                    " portal_matched_candidates=",portal.matched_candidates,
+                    " portal_rejected_candidates=",portal.rejected_candidates,
+                    " visibility=read_only_native_symbol_validation",
                     " status=native_rendering_unchanged");
             }
         }

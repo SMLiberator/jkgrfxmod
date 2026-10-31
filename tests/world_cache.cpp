@@ -1,4 +1,5 @@
 #include "renderer/world_cache.hpp"
+#include "renderer/world_cache_portals.hpp"
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -66,7 +67,7 @@ int main()
 
     // A snapshot is immutable, but COG-adjusted GeoMode/cel are read live.
     constexpr uintptr_t base=0x100000U;
-    std::array<uint8_t,0x5cU*9U> storage{};
+    std::array<uint8_t,0x6000U> storage{};
     auto set_u32=[&](uint32_t index,size_t offset,uint32_t value) {
         std::memcpy(storage.data()+size_t(index)*0x5cU+offset,
                     &value,sizeof(value));
@@ -97,6 +98,53 @@ int main()
     state=inspect_world_cache_live_state(
         decal_native_read{},base,mesh);
     assert(state.unreadable==2U);
+
+    // OpenJKDF2 sector-list membership: validate entire pointers and
+    // contiguous SithSurface spans before filtering any candidate.
+    auto put32=[&](uintptr_t addr,uint32_t value) {
+        assert(addr>=base && addr-base+4U<=storage.size());
+        std::memcpy(storage.data()+(addr-base),&value,4U);
+    };
+    constexpr uintptr_t native_world=base+0x1000U;
+    constexpr uintptr_t sector_table=base+0x2000U;
+    constexpr uintptr_t list_addr=base+0x3000U;
+    constexpr uintptr_t count_addr=base+0x4000U;
+    put32(native_world+0x4cU,2U);
+    put32(native_world+0x50U,uint32_t(sector_table));
+    put32(sector_table+0x24U,1U);
+    put32(sector_table+0x28U,uint32_t(base+2U*0x5cU));
+    put32(sector_table+0x98U+0x24U,1U);
+    put32(sector_table+0x98U+0x28U,uint32_t(base+7U*0x5cU));
+    put32(count_addr,1U);
+    put32(list_addr,uint32_t(sector_table));
+    decal_world_geometry snapshot{};
+    snapshot.valid_world=true;
+    snapshot.world=native_world;
+    snapshot.surface_count=9U;
+    snapshot.surfaces_addr=base;
+    std::vector<uint8_t> membership;
+    std::vector<world_cache_draw_candidate> possible{{
+        2U,0U,6U,0x10000U,0
+    },{
+        7U,6U,6U,0x10001U,0
+    }};
+    auto portal=inspect_world_cache_portal_membership(
+        read,native_world,snapshot,possible,count_addr,list_addr,membership);
+    assert(portal.valid && portal.visible_sector_count==1U);
+    assert(portal.member_surfaces==1U && portal.matched_candidates==1U);
+    assert(portal.rejected_candidates==1U);
+    assert(membership.size()==9U && membership[2U] && !membership[7U]);
+    // A stale/corrupt visible-sector pointer must fail closed, not return
+    // a partial membership mask.
+    put32(list_addr,uint32_t(sector_table+1U));
+    portal=inspect_world_cache_portal_membership(
+        read,native_world,snapshot,possible,count_addr,list_addr,membership);
+    assert(!portal.valid && membership.empty());
+    put32(list_addr,uint32_t(sector_table+0x98U));
+    portal=inspect_world_cache_portal_membership(
+        read,native_world,snapshot,possible,count_addr,list_addr,membership);
+    assert(portal.valid && portal.matched_candidates==1U &&
+           membership[7U] && !membership[2U]);
 
     // Malformed/nonfinite geometry may not poison persistent GL buffers.
     world.receivers[0].polygon[0][0]=std::numeric_limits<float>::infinity();
