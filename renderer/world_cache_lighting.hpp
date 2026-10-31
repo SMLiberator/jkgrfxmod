@@ -67,7 +67,7 @@ inline bool read_world_cache_camera_lights(
 
 // SithSurface: +0x08 sector; +0x20 rdFace lightingMode;
 // +0x2c vertex positions; +0x44 rdFace extraLight;
-// +0x58 per-surface vertex intensities. SithWorld: +0x98 dynamic lights.
+// +0x54 per-surface vertex intensities (+0x58 is lastTouchedMs). SithWorld: +0x98 dynamic lights.
 // Any unreadable lighting source fails closed so the native face is visible.
 inline bool sample_world_cache_surface_light(
     decal_native_read const &read,uintptr_t surfaces,
@@ -137,7 +137,7 @@ inline bool sample_world_cache_surface_light(
     if(pixel_state && pixel_state->size()!=out.size())return false;
     uint32_t indices=0,static_ptr=0;
     if(!read_decal_u32(read,addr+0x2cU,indices) ||
-       !read_decal_u32(read,addr+0x58U,static_ptr) ||
+       !read_decal_u32(read,addr+0x54U,static_ptr) ||
        !decal_native_address_ok(indices))return false;
     std::array<uint32_t,128> ids{};
     std::array<float,128> source{};
