@@ -122,6 +122,13 @@ int main()
         light_read,light_surfaces,mesh,lit_face,8U,
         dynamic_lights,rgb,nullptr,0.35f));
     assert(std::fabs(rgb[0][0]-std::pow(0.35f,1.8f))<0.0001f);
+    std::vector<std::array<float,3>> pixel_state(mesh.vertices.size());
+    assert(sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,
+        dynamic_lights,rgb,nullptr,0.35f,&pixel_state,true));
+    assert(std::fabs(rgb[3][2]-std::pow(0.40f,1.8f))<0.0001f);
+    assert(pixel_state[3][0]>0.39f && pixel_state[3][0]<0.41f);
+    assert(pixel_state[0][1]==0.35f && pixel_state[3][2]==3.0f);
     lu32(light_surfaces+2U*0x5cU+0x20U,0U);
     assert(sample_world_cache_surface_light(
         light_read,light_surfaces,mesh,lit_face,8U,dynamic_lights,rgb));

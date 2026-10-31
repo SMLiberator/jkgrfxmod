@@ -16,8 +16,8 @@
 namespace jkgm {
 struct world_cache_gpu {
     gl::vertex_array vao;
-    gl::buffer vertices,indices,lighting;
-    std::vector<std::array<float,3>> frame_light_rgb;
+    gl::buffer vertices,indices,lighting,light_state;
+    std::vector<std::array<float,3>> frame_light_rgb,frame_light_state;
     std::vector<float> native_dynamic_light;
     decal_world_geometry world{};
     world_cache_mesh mesh{};
@@ -53,6 +53,10 @@ struct world_cache_gpu {
         gl::enable_vertex_attrib_array(3);
         gl::vertex_attrib_pointer(3,3,gl::vertex_element_type::float32,
             false,sizeof(std::array<float,3>),0);
+        gl::bind_buffer(gl::buffer_bind_target::array,light_state);
+        gl::enable_vertex_attrib_array(4);
+        gl::vertex_attrib_pointer(4,3,gl::vertex_element_type::float32,
+            false,sizeof(std::array<float,3>),0);
         gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
         gl::bind_vertex_array(gl::vertex_array_view(0U));
     }
@@ -68,6 +72,7 @@ struct world_cache_gpu {
         world.clear();
         mesh={};
         frame_light_rgb.clear();
+        frame_light_state.clear();
         native_dynamic_light.clear();
         frame_candidates.clear();
         sector_candidates.clear();
@@ -100,6 +105,11 @@ struct world_cache_gpu {
         gl::buffer_data(gl::buffer_bind_target::array,
             make_span(frame_light_rgb).as_const_bytes(),
             gl::buffer_usage::stream_draw);
+        frame_light_state.assign(mesh.vertices.size(),{{1.0f,1.0f,0.0f}});
+        gl::bind_buffer(gl::buffer_bind_target::array,light_state);
+        gl::buffer_data(gl::buffer_bind_target::array,
+            make_span(frame_light_state).as_const_bytes(),
+            gl::buffer_usage::stream_draw);
         gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
         gl::buffer_data(gl::buffer_bind_target::element_array,
             make_span(mesh.indices).as_const_bytes(),
@@ -123,7 +133,8 @@ struct world_cache_gpu {
                  " triangles=",mesh.indices.size()/3U,
                  " bytes=",mesh.vertices.size()*sizeof(world_cache_vertex)+
                            mesh.indices.size()*sizeof(uint32_t)+
-                           frame_light_rgb.size()*sizeof(std::array<float,3>),
+                           (frame_light_rgb.size()+frame_light_state.size())*
+                               sizeof(std::array<float,3>),
                  " revision=",revision,
                  " build_us=",std::chrono::duration_cast<
                      std::chrono::microseconds>(

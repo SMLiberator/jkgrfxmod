@@ -174,7 +174,15 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , uv_scale(gl::get_uniform_location(the_program,"uv_scale"))
     , uv_scroll(gl::get_uniform_location(the_program,"uv_scroll"))
     , material_tint(gl::get_uniform_location(the_program,"material_tint"))
+    , num_lights(gl::get_uniform_location(the_program,"num_lights"))
+    , light_attenuation(gl::get_uniform_location(the_program,"light_attenuation"))
 {
+    for(unsigned i=0;i<16U;++i) {
+        light_position_radius.push_back(gl::get_uniform_location(
+            the_program,"light_position_radius["+std::to_string(i)+"]"));
+        light_intensity.push_back(gl::get_uniform_location(
+            the_program,"light_intensity["+std::to_string(i)+"]"));
+    }
 }
 void jkgm::shaders::world_cache_preview_shader::set_view_matrix(
     point<4,float> r,point<4,float> f,point<4,float> u,point<4,float> t)
@@ -196,6 +204,20 @@ void jkgm::shaders::world_cache_preview_shader::set_texture(
     gl::set_uniform_vector(uv_scale,make_point(1.0f/width,1.0f/height));
     gl::set_uniform_vector(uv_scroll,scroll);
     gl::set_uniform_vector(material_tint,tint);
+}
+
+void jkgm::shaders::world_cache_preview_shader::set_lights(
+    std::vector<world_cache_point_light> const &lights,float attenuation)
+{
+    gl::set_uniform_integer(num_lights,static_cast<int>(lights.size()));
+    gl::set_uniform_float(light_attenuation,attenuation);
+    for(size_t i=0;i<lights.size();++i) {
+        auto const &light=lights[i];
+        gl::set_uniform_vector(light_position_radius[i],
+            make_point(light.position[0],light.position[1],
+                       light.position[2],light.radius));
+        gl::set_uniform_float(light_intensity[i],light.intensity);
+    }
 }
 
 jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,

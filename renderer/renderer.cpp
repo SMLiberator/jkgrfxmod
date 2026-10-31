@@ -6060,16 +6060,18 @@ namespace jkgm {
             bool const dynamic_ready=read_world_cache_dynamic_lights(
                 safe_read,cache.loaded_world,cache.world.vertex_count,
                 cache.native_dynamic_light);
-            float camera_ambient=0.0f;
-            uint32_t camera_ptr=0;
-            if(!read_decal_u32(safe_read,0x0073A418U,camera_ptr) ||
-               !decal_native_address_ok(camera_ptr) ||
-               !safe_read(uintptr_t(camera_ptr)+0x54U,
-                          &camera_ambient,sizeof(camera_ambient)) ||
-               !std::isfinite(camera_ambient))
-                camera_ambient=0.0f;
+            float camera_ambient=0.0f,light_attenuation=0.0f;
+            std::vector<world_cache_point_light> point_lights;
+            bool const camera_ready=read_world_cache_camera_lights(
+                safe_read,0x0073A418U,point_lights,camera_ambient,
+                light_attenuation);
+            // The cached world uses pixel lights when rdCamera exposes a
+            // complete supported list. Otherwise preserve native shading.
+            bool const pixel_lighting=camera_ready && !point_lights.empty();
             cache.frame_light_rgb.assign(cache.mesh.vertices.size(),
                                          {{1.0f,1.0f,1.0f}});
+            cache.frame_light_state.assign(cache.mesh.vertices.size(),
+                                           {{1.0f,1.0f,0.0f}});
             size_t light_fallback=0,gouraud_faces=0;
             for(auto const &candidate:cache.sector_candidates) {
                 world_cache_light_sample info{};
@@ -6077,7 +6079,8 @@ namespace jkgm {
                        safe_read,cache.world.surfaces_addr,cache.mesh,
                        candidate,cache.world.vertex_count,
                        cache.native_dynamic_light,cache.frame_light_rgb,
-                       &info,camera_ambient)) {
+                       &info,camera_ambient,
+                       &cache.frame_light_state,pixel_lighting)) {
                     ++light_fallback;
                     continue;
                 }
@@ -6090,6 +6093,10 @@ namespace jkgm {
             gl::bind_buffer(gl::buffer_bind_target::array,cache.lighting);
             gl::buffer_data(gl::buffer_bind_target::array,
                 make_span(cache.frame_light_rgb).as_const_bytes(),
+                gl::buffer_usage::stream_draw);
+            gl::bind_buffer(gl::buffer_bind_target::array,cache.light_state);
+            gl::buffer_data(gl::buffer_bind_target::array,
+                make_span(cache.frame_light_state).as_const_bytes(),
                 gl::buffer_usage::stream_draw);
             std::sort(ordered.begin(),ordered.end(),
                 [](world_cache_draw_candidate const *a,
@@ -6109,6 +6116,8 @@ namespace jkgm {
                 make_point(m[9],m[10],m[11],1.0f));
             shader.set_projection(make_point(
                 half_fov,aspect,1.0f/cam.far_plane,0.0f));
+            if(!pixel_lighting)point_lights.clear();
+            shader.set_lights(point_lights,light_attenuation);
             gl::enable(gl::capability::depth_test);
             gl::set_depth_function(gl::comparison_function::less);
             gl::set_depth_mask(true);

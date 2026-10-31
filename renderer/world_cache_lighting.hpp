@@ -13,6 +13,58 @@ struct world_cache_light_sample {
     uint32_t mode=0,vertices=0;
 };
 
+// Validated live rdCamera lights; never turn an unsupported light into a
+// fake omni. Missing/overflowing descriptors fall back to native lighting.
+struct world_cache_point_light {
+    std::array<float,3> position{};
+    float radius=0.0f,intensity=0.0f;
+};
+inline bool read_world_cache_camera_lights(
+    decal_native_read const &read,uintptr_t camera_global,
+    std::vector<world_cache_point_light> &out,
+    float &ambient,float &attenuation)
+{
+    out.clear();
+    ambient=attenuation=0.0f;
+    uint32_t camera=0;
+    if(!read || !read_decal_u32(read,camera_global,camera) ||
+       !decal_native_address_ok(camera))return false;
+    int32_t count=0;
+    if(!read(uintptr_t(camera)+0x54U,&ambient,4) ||
+       !read(uintptr_t(camera)+0x58U,&count,4) ||
+       !read(uintptr_t(camera)+0x45cU,&attenuation,4) ||
+       !std::isfinite(ambient) || !std::isfinite(attenuation) ||
+       count<0 || count>64 || attenuation<0.0f || attenuation>100.0f)
+        return false;
+    ambient=std::max(0.0f,std::min(ambient,1.0f));
+    for(int32_t i=0;i<count;++i) {
+        uint32_t ptr=0;
+        if(!read_decal_u32(read,uintptr_t(camera)+0x5cU+
+                           uintptr_t(i)*4U,ptr) ||
+           !decal_native_address_ok(ptr))return false;
+        uint32_t id=0,enabled=0;
+        int32_t type=0;
+        world_cache_point_light light{};
+        if(!read_decal_u32(read,ptr,id) ||
+           !read(uintptr_t(ptr)+4U,&type,4) ||
+           !read_decal_u32(read,uintptr_t(ptr)+8U,enabled) ||
+           !read(uintptr_t(ptr)+0x18U,&light.intensity,4) ||
+           !read(uintptr_t(ptr)+0x28U,&light.radius,4) ||
+           id>=64 || !std::isfinite(light.intensity) ||
+           !std::isfinite(light.radius))return false;
+        if(!enabled || light.intensity<=0.0f || light.radius<=0.0f)
+            continue;
+        if(type<0 || type>2 || out.size()>=16U)return false;
+        if(!read(uintptr_t(camera)+0x15cU+uintptr_t(id)*12U,
+                 light.position.data(),12U) ||
+           !std::isfinite(light.position[0]) ||
+           !std::isfinite(light.position[1]) ||
+           !std::isfinite(light.position[2]))return false;
+        out.push_back(light);
+    }
+    return true;
+}
+
 // SithSurface: +0x08 sector; +0x20 rdFace lightingMode;
 // +0x2c vertex positions; +0x44 rdFace extraLight;
 // +0x58 per-surface vertex intensities. SithWorld: +0x98 dynamic lights.
@@ -24,7 +76,9 @@ inline bool sample_world_cache_surface_light(
     std::vector<float> const &native_dynamic_light,
     std::vector<std::array<float,3>> &out,
     world_cache_light_sample *sample=nullptr,
-    float camera_ambient=0.0f)
+    float camera_ambient=0.0f,
+    std::vector<std::array<float,3>> *pixel_state=nullptr,
+    bool pixel_lighting=false)
 {
     if(!read || face.count<3U || face.count%3U!=0U ||
        uint64_t(face.first_index)+face.count>mesh.indices.size())
@@ -42,7 +96,10 @@ inline bool sample_world_cache_surface_light(
     if(!read_decal_u32(read,addr+0x20U,mode) || mode>3U)return false;
     if(sample) {*sample={mode,count};}
     if(mode==0U) {
-        for(uint32_t i=0;i<count;++i)out[base+i]={{1.0f,1.0f,1.0f}};
+        for(uint32_t i=0;i<count;++i) {
+            out[base+i]={{1.0f,1.0f,1.0f}};
+            if(pixel_state)(*pixel_state)[base+i]={{1.0f,1.0f,0.0f}};
+        }
         return true;
     }
     uint32_t sector=0;
@@ -65,12 +122,17 @@ inline bool sample_world_cache_surface_light(
         float const bright=mode==1U?
             std::max(clamp01(extra),clamp01(ambient)):1.0f;
         float const gamma=std::pow(bright,1.8f);
-        for(uint32_t i=0;i<count;++i)
+        for(uint32_t i=0;i<count;++i) {
             out[base+i]={{gamma,gamma,gamma}};
+            if(pixel_state)(*pixel_state)[base+i]={{
+                mode==1U?extra:1.0f,clamp01(ambient),float(mode)}};
+        }
         return true;
     }
     if(native_vertex_count==0U ||
-       native_dynamic_light.size()!=native_vertex_count)return false;
+       (!pixel_lighting &&
+        native_dynamic_light.size()!=native_vertex_count))return false;
+    if(pixel_state && pixel_state->size()!=out.size())return false;
     uint32_t indices=0,static_ptr=0;
     if(!read_decal_u32(read,addr+0x2cU,indices) ||
        !read_decal_u32(read,addr+0x58U,static_ptr) ||
@@ -85,12 +147,16 @@ inline bool sample_world_cache_surface_light(
     for(uint32_t i=0;i<count;++i) {
         if(ids[i]>=native_vertex_count ||
            !std::isfinite(source[i]) ||
-           !std::isfinite(native_dynamic_light[ids[i]]))return false;
+           (!pixel_lighting &&
+            !std::isfinite(native_dynamic_light[ids[i]])))return false;
+        float const raw_brightness=source[i]+extra;
+        float const dynamic=pixel_lighting?0.0f:native_dynamic_light[ids[i]];
         float const brightness=std::max(
-            clamp01(clamp01(source[i]+native_dynamic_light[ids[i]])+extra),
-            clamp01(ambient));
+            clamp01(raw_brightness+dynamic),clamp01(ambient));
         float const gamma=std::pow(brightness,1.8f);
         result[i]={{gamma,gamma,gamma}};
+        if(pixel_state)(*pixel_state)[base+i]={{
+            raw_brightness,clamp01(ambient),3.0f}};
     }
     for(uint32_t i=0;i<count;++i)out[base+i]=result[i];
     return true;

@@ -3,6 +3,7 @@
 #include "base/filesystem.hpp"
 #include "base/span.hpp"
 #include "gpu_3do_preview.hpp"
+#include "world_cache_lighting.hpp"
 #include "glutil/program.hpp"
 #include <vector>
 
@@ -62,6 +63,8 @@ namespace jkgm {
             gl::uniform_location_id view_right,view_forward,view_up,view_origin;
             gl::uniform_location_id projection;
             gl::uniform_location_id albedo_sampler,uv_scale,uv_scroll,material_tint;
+            gl::uniform_location_id num_lights,light_attenuation;
+            std::vector<gl::uniform_location_id> light_position_radius,light_intensity;
         public:
             explicit world_cache_preview_shader(fs::path const &data_root);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
@@ -69,6 +72,8 @@ namespace jkgm {
             void set_projection(point<4,float> params);
             void set_texture(float width,float height,
                              point<4,float> tint,point<2,float> scroll);
+            void set_lights(std::vector<world_cache_point_light> const &lights,
+                            float attenuation);
         };
 
         class game_pass_shader : public opengl_shader {
