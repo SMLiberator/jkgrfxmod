@@ -51,6 +51,7 @@ namespace jkgm {
         bool profile_auto_exposure = false; // optional blocking 1px readback diagnostics
         bool optimize_hud_uploads = true; // upload only changed HUD rows (disable for A/B test)
         bool use_model_cache = false; // cache 3DO meshes as persistent GPU geometry
+        bool world_cache_probe = false; // phase-0 persistent SithWorld GPU mesh; native world still draws
         bool use_sprite_cache = false; // experimental shared GPU quad caching for SPRs
         bool mesh_revision_tracking = false; // experimental JK.dll COG mutation tracking
         bool enable_spotlights = false; // COG MAT-based screen-space spotlights
