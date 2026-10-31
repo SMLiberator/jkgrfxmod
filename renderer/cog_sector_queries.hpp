@@ -40,4 +40,32 @@ public:
         return advance(it->second,count,match);
     }
 };
+
+// Lookup by native sector ID. The common ID==index case is O(1);
+// sparse IDs use a cached mapping built once per level.
+class cog_sector_id_lookup {
+    uintptr_t world_=0, base_=0;
+    int count_=0;
+    bool built_=false;
+    std::unordered_map<int,int> ids_;
+public:
+    template<class IdAt>
+    int find(uintptr_t world,uintptr_t base,int count,int id,IdAt id_at) {
+        if(!world || !base || count<=0 || id<0)return -1;
+        if(world_!=world || base_!=base || count_!=count) {
+            world_=world; base_=base; count_=count;
+            ids_.clear(); built_=false;
+        }
+        if(id<count && id_at(id)==id)return id;
+        if(!built_) {
+            for(int i=0;i<count;++i) {
+                int n=id_at(i);
+                if(n>=0)ids_.emplace(n,i);
+            }
+            built_=true;
+        }
+        auto it=ids_.find(id);
+        return it==ids_.end()?-1:it->second;
+    }
+};
 }
