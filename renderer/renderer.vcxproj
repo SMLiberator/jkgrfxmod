@@ -85,6 +85,7 @@
     <ClInclude Include="renderer.hpp" />
     <ClInclude Include="compressed_sound_codec.hpp" />
     <ClInclude Include="compressed_sound_io.hpp" />
+    <ClInclude Include="compressed_sound_read.hpp" />
     <ClInclude Include="renderer_ao.hpp" />
     <ClInclude Include="renderer_ao_basic.hpp" />
     <ClInclude Include="renderer_ao_ssao.hpp" />
