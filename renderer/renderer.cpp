@@ -6425,9 +6425,17 @@ namespace jkgm {
                         if(inst.casts_sun_shadows)++casters;
                         else ++excluded;
                     }
+                    // Exempt VFX can be created/destroyed every frame.
+                    // Report actual readiness transitions immediately,
+                    // sample normal churn periodically, and highlight only
+                    // large changes in the number of excluded instances.
+                    bool const major_exclusion_change=
+                        excluded>sun_shadow_previous_excluded+8U ||
+                        sun_shadow_previous_excluded>excluded+8U;
                     if(!sun_shadow_observed ||
                        sun_shadow_previous_ready!=sun_shadow_ready ||
-                       sun_shadow_previous_excluded!=excluded) {
+                       major_exclusion_change ||
+                       (gpu_3do_present_serial%120U)==0U) {
                         LOG_INFO("SUN shadow frame state: ready=",
                             sun_shadow_ready?1:0,
                             " near=",sun_shadow_cascade_ready[0]?1:0,
