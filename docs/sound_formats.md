@@ -35,9 +35,13 @@ does not convert its contents into Ogg Vorbis.
 The verified JKGM sound loader is detoured to install virtual HostServices
 read/seek/size callbacks before invoking the native loader. When its file
 open callback receives `.ogg`, `.flac`, or `.mp3`, JKGM opens exactly
-the requested file through the game's original GOB/loose-file I/O, decodes
-it to 16-bit interleaved PCM, and exposes the result as a virtual RIFF/WAVE
-stream. Native WAV parsing and DirectSound playback are otherwise unchanged.
+the requested file through the game's original GOB/loose-file I/O,
+reads its bytes sequentially until EOF, decodes them to 16-bit interleaved
+PCM, and exposes the result as a virtual RIFF/WAVE stream. This is needed
+because GOB-backed streams do not follow ordinary stdio seek return-value
+conventions, and the native fileSize callback is unsafe for some resource
+handles. Native WAV parsing and DirectSound playback are otherwise unchanged.
+The same bounded sequential read works for loose files and GOB entries.
 
 The decoders are compiled into renderer.dll: stb_vorbis, dr_flac, and
 dr_mp3. No external codec DLL or FFmpeg executable is required. Only mono
@@ -78,6 +82,10 @@ verifies its original callback pointers and rebinds if JK resets them.
 Unlike the earlier diagnostic build, it never invokes JK's original
 fileOpen separately to probe resources; only the native sound loader
 performs these file-opening requests.
+
+The regression suite also tests forward-only GOB-style reads, partial read
+callbacks, and the 64 MiB encoded-input limit, but actual archive playback
+must still be tested inside JKGM.
 
 A successful decoder test alone cannot prove the native Sith/DirectSound
 integration works in the game. The final check remains actual playback,
