@@ -45,6 +45,35 @@ inline bool sun_shadow_material_casts_depth(
            opacity>=0.999f && (!cutout || albedo_source==1U);
 }
 
+// The global shadow projection must describe stable level geometry, not
+// moving Things or legacy VFX with scaled/sheared R/L/U axes. Those Things
+// remain perfectly valid depth casters and retain their exact affine matrices;
+// only their *contribution to the shared light-space depth range* is omitted.
+// Otherwise a single large scaled Thing can make both cascades lose precision
+// or fail when it enters the camera view. Mirrored rigid transforms are valid.
+inline bool sun_shadow_stable_reference_transform(
+    std::array<float,12> const &m,bool dynamic_caster)
+{
+    if(dynamic_caster)return false;
+    for(float x:m)if(!std::isfinite(x))return false;
+    // Columns are Right/Look/Up; allow normal floating-point pose drift,
+    // but don't reinterpret deliberate per-Thing scaling as camera/world
+    // extents. No modification or normalization of the matrix is performed.
+    for(int a=0;a<3;++a) {
+        float len2=0.0f;
+        for(int i=0;i<3;++i)len2+=m[3*a+i]*m[3*a+i];
+        if(!std::isfinite(len2) || std::fabs(len2-1.0f)>0.02f)
+            return false;
+        for(int b=0;b<a;++b) {
+            float dot=0.0f;
+            for(int i=0;i<3;++i)dot+=m[3*a+i]*m[3*b+i];
+            if(!std::isfinite(dot) || std::fabs(dot)>0.02f)
+                return false;
+        }
+    }
+    return true;
+}
+
 // Exact world-space AABB of an affine-transformed 3DO mesh group, using its
 // center and half-extents. Computes nine absolute products instead of
 // transforming eight corners per group (and doing it once per cascade).
@@ -286,6 +315,13 @@ inline bool make_sun_dynamic_shadow_projection(
     for(int i=0;i<3;++i)if(bounds.low[i]>bounds.high[i])return false;
     float lo_x=std::numeric_limits<float>::max(),lo_y=lo_x;
     float hi_x=-lo_x,hi_y=-lo_y;
+    // Keep the world reference range unchanged unless this particular
+    // atlas caster lies outside it. Extending the per-Thing range is safe:
+    // it cannot degrade the shared near/far shadow depth textures.
+    float const world_z=decal_dot(world.origin,world.forward);
+    if(!std::isfinite(world_z) ||
+       !std::isfinite(world_z+world.range))return false;
+    float lo_z=world_z,hi_z=world_z+world.range;
     for(int c=0;c<8;++c) {
         decal_vec3 p{{(c&1)?bounds.high[0]:bounds.low[0],
                       (c&2)?bounds.high[1]:bounds.low[1],
@@ -296,20 +332,29 @@ inline bool make_sun_dynamic_shadow_projection(
                           p[2]+world.forward[2]*t}};
             float const x=decal_dot(q,world.right);
             float const y=decal_dot(q,world.up);
+            float const z=decal_dot(q,world.forward);
+            if(!std::isfinite(x) || !std::isfinite(y) ||
+               !std::isfinite(z))return false;
             lo_x=std::min(lo_x,x);hi_x=std::max(hi_x,x);
             lo_y=std::min(lo_y,y);hi_y=std::max(hi_y,y);
+            lo_z=std::min(lo_z,z);hi_z=std::max(hi_z,z);
         }
     }
     float const margin=std::max(0.2f,0.05f*std::max(hi_x-lo_x,hi_y-lo_y));
     lo_x-=margin;lo_y-=margin;hi_x+=margin;hi_y+=margin;
+    // Include the casting Thing and any direct downstream receiver even
+    // when its scaled transform lies beyond the reference world range.
+    lo_z=std::min(lo_z,world_z);
+    hi_z=std::max(hi_z,world_z+world.range);
     out=world;
-    float const z=decal_dot(world.origin,world.forward);
     for(int i=0;i<3;++i)out.origin[i]=
-        world.right[i]*lo_x+world.up[i]*lo_y+world.forward[i]*z;
+        world.right[i]*lo_x+world.up[i]*lo_y+world.forward[i]*lo_z;
     out.width=std::max(0.5f,hi_x-lo_x);
     out.height=std::max(0.5f,hi_y-lo_y);
+    out.range=hi_z-lo_z;
     return decal_finite(out.origin) && std::isfinite(out.width) &&
-           std::isfinite(out.height);
+           std::isfinite(out.height) && std::isfinite(out.range) &&
+           out.range>0.0f;
 }
 
 // Cache keys must reject any change to a light-space orthographic mapping,
