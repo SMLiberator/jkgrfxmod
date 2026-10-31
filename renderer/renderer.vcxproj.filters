@@ -24,6 +24,12 @@
     <ClCompile Include="dxguids.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="compressed_sound_codec.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="compressed_sound_io.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="renderer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -123,6 +129,15 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="dxguids.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="compressed_sound_codec.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="compressed_sound_io.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="compressed_sound_read.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="renderer.hpp">
