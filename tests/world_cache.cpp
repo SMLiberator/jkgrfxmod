@@ -136,6 +136,16 @@ int main()
     assert(std::fabs(rgb[0][0]-std::pow(0.55f,1.8f))<0.0001f);
     assert(pixel_state[3][1]==0.55f);
     lf32(light_sector+0x08U,0.20f);
+    // Global Extra Light raises the sector minimum, independent of
+    // sector Ambient. Surface Extra is live and additive before the floor.
+    lf32(light_surfaces+2U*0x5cU+0x44U,0.30f);
+    assert(sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,
+        dynamic_lights,rgb,nullptr,&pixel_state,true,0.10f));
+    assert(std::fabs(pixel_state[0][1]-0.30f)<0.00001f);
+    assert(std::fabs(pixel_state[0][0]-0.30f)<0.00001f);
+    assert(std::fabs(rgb[0][0]-std::pow(0.30f,1.8f))<0.0001f);
+    lf32(light_surfaces+2U*0x5cU+0x44U,0.10f);
     lu32(light_surfaces+2U*0x5cU+0x20U,0U);
     assert(sample_world_cache_surface_light(
         light_read,light_surfaces,mesh,lit_face,8U,dynamic_lights,rgb));
