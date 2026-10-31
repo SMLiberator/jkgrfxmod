@@ -9,6 +9,7 @@
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_alpha.hpp"
 #include "native_jk_palette_effects.hpp"
+#include "thing_sector_tint.hpp"
 #include "retro_palette.hpp"
 #include "jk_colormap_layout.hpp"
 #include "gpu_3do_frustum.hpp"
@@ -2947,6 +2948,26 @@ namespace jkgm {
             // Native D3D has already applied this to per-vertex colors.
             // Apply only to the GPU-bypassed 3DO vertex shader.
             auto const effect=read_native_jk_hardware_color_effects();
+            // sithRender copies the CURRENT CAMERA sector tint into its
+            // global palette-effects slot. Keep other palette effects
+            // (damage flash, scripted tint, fade, add, filter) intact.
+            // A cached Thing substitutes ONLY this sector contribution.
+            std::array<float,3> camera_sector_tint{};
+            auto const tint_read=[](uintptr_t addr,void *dst,size_t len) {
+                if(!jk_palette_memory_readable(
+                       reinterpret_cast<void const *>(addr),len))
+                    return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(addr),len);
+                return true;
+            };
+            bool const camera_tint_valid=read_jk_camera_sector_tint(
+                tint_read,camera_sector_tint);
+            bool const camera_tint_zero=
+                camera_sector_tint[0]==0.0f &&
+                camera_sector_tint[1]==0.0f &&
+                camera_sector_tint[2]==0.0f;
+            bool const can_replace_sector_tint=camera_tint_valid &&
+                (effect.active || camera_tint_zero);
             prog.set_jk_color_effects(
                 make_point(float(effect.filter[0]),float(effect.filter[1]),
                            float(effect.filter[2]),effect.active?1.0f:0.0f),
@@ -3232,6 +3253,16 @@ namespace jkgm {
                     prog.set_world_lighting_exempt(inst.world_lighting_exempt);
                     prog.set_sprite_receiver(inst.is_sprite_quad);
                     prog.set_colormap_tint(inst.colormap_tint);
+                    // Shared 3DO geometry can have several instances in
+                    // different SithSectors. Do this per Thing, not per
+                    // material/mesh. Invalid native pointers preserve JK.
+                    std::array<float,3> tint_delta{};
+                    if(can_replace_sector_tint && inst.sector_tint_valid &&
+                       !inst.camera_hud && !inst.is_sprite_quad &&
+                       !inst.is_projected_decal)
+                        tint_delta=jk_thing_tint_delta(
+                            inst.sector_tint,camera_sector_tint);
+                    prog.set_thing_sector_tint_delta(tint_delta);
                     std::array<float,3> local_eye{};
                     bool const has_eye=gpu_3do_local_eye(m,local_eye);
                     prog.set_local_eye(has_eye?local_eye:
