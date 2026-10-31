@@ -67,7 +67,7 @@ int main()
 
     // A snapshot is immutable, but COG-adjusted GeoMode/cel are read live.
     constexpr uintptr_t base=0x100000U;
-    std::array<uint8_t,0x6000U> storage{};
+    std::array<uint8_t,0x10000U> storage{};
     auto set_u32=[&](uint32_t index,size_t offset,uint32_t value) {
         std::memcpy(storage.data()+size_t(index)*0x5cU+offset,
                     &value,sizeof(value));
@@ -107,8 +107,8 @@ int main()
     };
     constexpr uintptr_t native_world=base+0x1000U;
     constexpr uintptr_t sector_table=base+0x2000U;
-    constexpr uintptr_t list_addr=base+0x3000U;
-    constexpr uintptr_t count_addr=base+0x4000U;
+    constexpr uintptr_t list_addr=base+0x8000U;
+    constexpr uintptr_t count_addr=base+0xa000U;
     put32(native_world+0x4cU,2U);
     put32(native_world+0x50U,uint32_t(sector_table));
     put32(sector_table+0x24U,1U);
@@ -145,6 +145,23 @@ int main()
         read,native_world,snapshot,possible,count_addr,list_addr,membership);
     assert(portal.valid && portal.matched_candidates==1U &&
            membership[7U] && !membership[2U]);
+
+    // The patched JKGM limit is 7000, not vanilla's 128 sectors.
+    put32(native_world+0x4cU,129U);
+    put32(count_addr,129U);
+    for(uint32_t i=0;i<129U;++i)
+        put32(list_addr+uintptr_t(i)*4U,
+              uint32_t(sector_table+uintptr_t(i)*0x98U));
+    portal=inspect_world_cache_portal_membership(
+        read,native_world,snapshot,possible,count_addr,list_addr,membership);
+    assert(portal.valid && portal.visible_sector_count==129U);
+    assert(portal.member_surfaces==2U && portal.matched_candidates==2U);
+    put32(native_world+0x4cU,7002U);
+    put32(count_addr,7001U);
+    portal=inspect_world_cache_portal_membership(
+        read,native_world,snapshot,possible,count_addr,list_addr,membership);
+    assert(!portal.valid && membership.empty());
+    assert(std::strcmp(portal.reason,"count_or_table_out_of_range")==0);
 
     // Malformed/nonfinite geometry may not poison persistent GL buffers.
     world.receivers[0].polygon[0][0]=std::numeric_limits<float>::infinity();

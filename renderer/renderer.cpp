@@ -5854,6 +5854,10 @@ namespace jkgm {
                 return;
             }
             auto &cache=*world_cache_target;
+            // This is a read-only diagnostic, not a rendering dependency:
+            // run expensive reads only for logged sampling frames.
+            if(!the_config->profile_renderer ||
+               gpu_3do_present_serial%120U!=0U)return;
             // Read the SAME native camera/rdClipFrustum as the GPU 3DO
             // path. Frustum rejection is conservative; it cannot tell
             // us which sectors JK traversed through active adjoins.
@@ -5868,18 +5872,36 @@ namespace jkgm {
                 can_cull?&camera.native_view:nullptr);
             auto const collect_us=elapsed_profile_us(
                 started,profile_clock::now());
-            // Original JKDF2 global locations, NOT yet verified for the
-            // patched JKGM executable. The probe validates every sector
-            // against the current world's sector table and surface spans.
-            // Failure never changes rendering or the normal cache list.
-            constexpr uintptr_t native_visible_count=0x008318F0U;
-            constexpr uintptr_t native_visible_list=0x0082F110U;
-            auto const portal=inspect_world_cache_portal_membership(
-                safe_read,address,cache.world,cache.frame_candidates,
-                native_visible_count,native_visible_list,
-                cache.portal_surface_membership);
-            if(the_config->profile_renderer &&
-               gpu_3do_present_serial%120U==0U) {
+            // Exact producer signature verified against jkgm(5).exe:
+            // 0x4c6875: mov eax,[0x831938]; cmp eax,0x1b58
+            // 0x4c6885: mov [eax*4+0x6bba88],ecx
+            constexpr std::array<uint8_t,23> producer_bytes{{
+                0xA1,0x38,0x19,0x83,0x00,
+                0x3D,0x58,0x1B,0x00,0x00,
+                0x0F,0x83,0xAA,0x05,0x00,0x00,
+                0x89,0x0C,0x85,0x88,0xBA,0x6B,0x00
+            }};
+            std::array<uint8_t,23> producer_live{};
+            bool const producer_matches=
+                safe_read(0x004C6875U,producer_live.data(),
+                          producer_live.size()) &&
+                producer_live==producer_bytes;
+            auto const portal_started=profile_clock::now();
+            world_cache_portal_stats portal{};
+            if(producer_matches) {
+                portal=inspect_world_cache_portal_membership(
+                    safe_read,address,cache.world,cache.frame_candidates,
+                    world_cache_native_visible_count,
+                    world_cache_native_visible_list,
+                    cache.portal_surface_membership);
+            }
+            else {
+                cache.portal_surface_membership.clear();
+                portal.reason="jk_visibility_producer_signature_mismatch";
+            }
+            auto const portal_us=elapsed_profile_us(
+                portal_started,profile_clock::now());
+            {
                 // These ranges have live material/cel and conservative
                 // frustum filtering, NOT native sector/portal visibility.
                 // The legacy world D3D batch also contains fallback Things.
@@ -5901,13 +5923,15 @@ namespace jkgm {
                     " all_cached_surfaces=",cache.mesh.surfaces.size(),
                     " legacy_world_batch_tris=",world_batch.size()+
                         world_transparent_batch.size(),
-                    " portal_probe_valid=",portal.valid?1:0,
+                    " portal_lookup_us=",portal_us,
+                     " portal_producer_verified=",producer_matches?1:0,
+                     " portal_probe_valid=",portal.valid?1:0,
                     " portal_probe_reason=",portal.reason,
                     " portal_visible_sectors=",portal.visible_sector_count,
                     " portal_member_surfaces=",portal.member_surfaces,
                     " portal_matched_candidates=",portal.matched_candidates,
                     " portal_rejected_candidates=",portal.rejected_candidates,
-                    " visibility=read_only_native_symbol_validation",
+                    " visibility=verified_jkgm_portal_list_read_only",
                     " status=native_rendering_unchanged");
             }
         }

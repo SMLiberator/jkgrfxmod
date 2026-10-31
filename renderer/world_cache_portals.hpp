@@ -1,8 +1,9 @@
 #pragma once
 // Source: OpenJKDF2 sithRender_BuildVisibleSectorList/RenderSectors.
 // The portal-clipped list contains sectors, each with a contiguous native
-// SithSurface range. This is a *read-only validation probe*: old OpenJKDF2
-// absolute symbols are NOT guaranteed to match the patched JKGM executable.
+// SithSurface range. In the supplied JKGM binary the sector-list producer
+// is at 0x4c6850; it writes [eax*4+0x6bba88] and increments [0x831938].
+// The patched limit is 0x1b58 (7000), not the original 128.
 // Do not use a failed or even a successful probe to suppress native rendering
 // until runtime addresses and actual per-surface draw parity are established.
 #include "world_cache_visibility.hpp"
@@ -11,6 +12,11 @@
 #include <vector>
 
 namespace jkgm {
+// Verified from jkgm(5).exe, not OpenJKDF2's old symbol locations.
+constexpr uintptr_t world_cache_native_visible_count=0x00831938U;
+constexpr uintptr_t world_cache_native_visible_list=0x006BBA88U;
+constexpr uint32_t world_cache_native_visible_capacity=0x1B58U;
+
 struct world_cache_portal_stats {
     bool valid=false;
     char const *reason="unavailable";
@@ -46,10 +52,9 @@ inline world_cache_portal_stats inspect_world_cache_portal_membership(
     }
     stats.sector_count=sector_count;
     stats.visible_sector_count=visible_count;
-    // 128 is the original JK visible-sector capacity. If JKGM enlarged
-    // this table, we must verify its actual location/capacity first.
+    // The supplied JKGM image bounds its array to 0x1b58 entries.
     if(!sector_count || sector_count>65536U ||
-       !visible_count || visible_count>128U ||
+       !visible_count || visible_count>world_cache_native_visible_capacity ||
        visible_count>sector_count ||
        !decal_native_address_ok(sector_table)) {
         stats.reason="count_or_table_out_of_range";return stats;
@@ -77,11 +82,14 @@ inline world_cache_portal_stats inspect_world_cache_portal_membership(
            (uint64_t(sector_ptr)-table_start)%0x98U!=0U) {
             stats.reason="sector_pointer_not_in_world";break;
         }
-        uint32_t num_surfaces=0,surfaces_ptr=0;
-        if(!read_decal_u32(read,uintptr_t(sector_ptr)+0x24U,num_surfaces) ||
-           !read_decal_u32(read,uintptr_t(sector_ptr)+0x28U,surfaces_ptr)) {
+        // Adjacent numSurfaces/surfaces pointers: one validated read.
+        uint32_t surface_fields[2]{};
+        if(!read(uintptr_t(sector_ptr)+0x24U,surface_fields,
+                 sizeof(surface_fields))) {
             stats.reason="unreadable_sector";break;
         }
+        uint32_t const num_surfaces=surface_fields[0];
+        uint32_t const surfaces_ptr=surface_fields[1];
         if(!num_surfaces)continue;
         if(uint64_t(surfaces_ptr)<surface_start ||
            uint64_t(surfaces_ptr)>=surface_end ||
