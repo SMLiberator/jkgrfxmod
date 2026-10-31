@@ -6025,7 +6025,7 @@ namespace jkgm {
                !world_cache_target->ready ||
                !frame_world_cache_camera.valid ||
                !frame_world_cache_camera.perspective)return;
-            auto const &cache=*world_cache_target;
+            auto &cache=*world_cache_target;
             if(cache.sector_candidates.empty())return;
             auto const &cam=frame_world_cache_camera;
             float const aspect=get<x>(internal_scr_res_f)/
@@ -6046,12 +6046,42 @@ namespace jkgm {
             counts.clear();
             offsets.clear();
             ordered.reserve(cache.sector_candidates.size());
-            for(auto const &candidate:cache.sector_candidates)
-                if(candidate.count>0U && candidate.count%3U==0U &&
-                   uint64_t(candidate.first_index)+candidate.count<=
-                       cache.mesh.indices.size())
-                    ordered.push_back(&candidate);
+            auto safe_read=[](uintptr_t ptr,void *dst,size_t len) {
+                if(!len || !engine_camera_detail::readable(ptr,len))
+                    return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(ptr),len);
+                return true;
+            };
+            // JK populates visible-sector dynamic vertex lights before
+            // submitting world geometry. Capture once for the frame, then
+            // combine with live authored surface intensities. Failure on
+            // any surface leaves that surface entirely native-rendered.
+            bool const dynamic_ready=read_world_cache_dynamic_lights(
+                safe_read,cache.loaded_world,cache.world.vertex_count,
+                cache.native_dynamic_light);
+            cache.frame_light_rgb.assign(cache.mesh.vertices.size(),
+                                         {{1.0f,1.0f,1.0f}});
+            size_t light_fallback=0,gouraud_faces=0;
+            for(auto const &candidate:cache.sector_candidates) {
+                world_cache_light_sample info{};
+                if(!sample_world_cache_surface_light(
+                       safe_read,cache.world.surfaces_addr,cache.mesh,
+                       candidate,cache.world.vertex_count,
+                       cache.native_dynamic_light,cache.frame_light_rgb,
+                       &info)) {
+                    ++light_fallback;
+                    continue;
+                }
+                if(info.mode==3U)++gouraud_faces;
+                ordered.push_back(&candidate);
+            }
             if(ordered.empty())return;
+            // One streaming upload of live RGB lighting. World position,
+            // UV, normal and index buffers remain entirely immutable.
+            gl::bind_buffer(gl::buffer_bind_target::array,cache.lighting);
+            gl::buffer_data(gl::buffer_bind_target::array,
+                make_span(cache.frame_light_rgb).as_const_bytes(),
+                gl::buffer_usage::stream_draw);
             std::sort(ordered.begin(),ordered.end(),
                 [](world_cache_draw_candidate const *a,
                    world_cache_draw_candidate const *b) {
@@ -6137,6 +6167,9 @@ namespace jkgm {
                          " multi_draw_calls=",groups,
                          " unresolved_material=",unresolved,
                          " deferred_special=",skipped_alpha,
+                         " light_fallback=",light_fallback,
+                         " gouraud_faces=",gouraud_faces,
+                         " dynamic_lighting_ready=",dynamic_ready?1:0,
                          " native_fallback=depth_less_no_overlay");
                 // Read-only material readiness survey for the special
                 // (translucent-flag/solid-adjoin) candidates. Read
