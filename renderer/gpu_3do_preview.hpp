@@ -96,6 +96,10 @@ namespace jkgm {
         float decal_opacity=1.0f; // separate from the native MAT's alpha
         float effective_light_mode=3.0f; // JK's effective per-Thing lighting cap
         std::array<float,3> colormap_tint{{1.0f,1.0f,1.0f}};
+        // Live SithSector tint of the owning SithThing (not camera).
+        // Invalid/missing owner safely preserves native global effects.
+        std::array<float,3> sector_tint{{0.0f,0.0f,0.0f}};
+        bool sector_tint_valid=false;
         unsigned num_lights=0;
         std::array<gpu_3do_light,gpu_3do_max_lights> lights{};
     };
