@@ -151,10 +151,12 @@ inline world_cache_sector_stage_stats collect_world_cache_sector_candidates(
     std::vector<uint32_t> &seen_epochs,uint32_t &epoch,
     std::vector<world_cache_draw_candidate> &out,
     gpu_3do_native_frustum const *frustum=nullptr,
-    gpu_3do_matrix34 const *view=nullptr)
+    gpu_3do_matrix34 const *view=nullptr,
+    std::vector<world_cache_draw_candidate> *special=nullptr)
 {
     world_cache_sector_stage_stats stats{};
     out.clear();
+    if(special)special->clear();
     if(!read || !decal_native_address_ok(surfaces_address) ||
        seen_epochs.size()!=surface_lookup.size())return stats;
     for(auto const &span:validated_spans)
@@ -179,12 +181,14 @@ inline world_cache_sector_stage_stats collect_world_cache_sector_candidates(
             if(range_index==missing) {++stats.uncached_surfaces;continue;}
             if(range_index>=mesh.surfaces.size() ||
                mesh.surfaces[range_index].surface_index!=surface) {
-                out.clear();stats.valid=false;return stats;
+                out.clear();
+                if(special)special->clear();
+                stats.valid=false;return stats;
             }
             ++stats.cached_surfaces;
             append_world_cache_candidate(
                 read,surfaces_address,mesh.surfaces[range_index],
-                out,stats.faces,frustum,view);
+                out,stats.faces,frustum,view,special);
         }
     }
     return stats;
@@ -225,7 +229,9 @@ inline world_cache_stage_parity compare_world_cache_candidate_sets(
         } else {
             auto const &a=expected[i++],&b=actual[j++];
             if(a.first_index!=b.first_index || a.count!=b.count ||
-               a.material!=b.material || a.cel!=b.cel)
+               a.material!=b.material || a.cel!=b.cel ||
+               a.face_type!=b.face_type ||
+               a.solid_adjoin!=b.solid_adjoin)
                 ++r.changed_metadata;
             else ++r.matched;
         }

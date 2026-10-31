@@ -15,12 +15,15 @@ struct world_cache_draw_candidate {
     uint32_t first_index=0,count=0;
     uintptr_t material=0;
     int32_t cel=-1;
+    uint32_t face_type=0; // live native rdFace.type at surface +0x18
+    bool solid_adjoin=false;
 };
 
 struct world_cache_frame_stats {
     uint32_t candidates=0,triangles=0;
     uint32_t frustum_rejected=0,hidden=0,not_textured=0;
     uint32_t missing_uv=0,solid_adjoin=0,sky=0,missing_material=0;
+    uint32_t translucent_face=0,zwrite_disabled=0,special_candidates=0;
     uint32_t changed_material=0,changed_cel=0,unreadable=0;
     bool frustum_available=false;
 };
@@ -55,7 +58,8 @@ inline void append_world_cache_candidate(
     std::vector<world_cache_draw_candidate> &out,
     world_cache_frame_stats &stats,
     gpu_3do_native_frustum const *frustum,
-    gpu_3do_matrix34 const *view)
+    gpu_3do_matrix34 const *view,
+    std::vector<world_cache_draw_candidate> *special=nullptr)
 {
     // SithSurface stride 0x5c. Read the live 0x10-0x3b metadata together
     // rather than performing three/four separately validated native reads.
@@ -68,8 +72,9 @@ inline void append_world_cache_candidate(
     if(!read(uintptr_t(addr)+0x10U,raw.data(),raw.size())) {
         ++stats.unreadable;return;
     }
-    uint32_t flags=0,geo=0,material=0,cel=0;
-    std::memcpy(&flags,raw.data(),4);      // +0x10 surface flags
+    uint32_t flags=0,face_type=0,geo=0,material=0,cel=0;
+    std::memcpy(&flags,raw.data(),4);      // +0x10 SithSurface flags
+    std::memcpy(&face_type,raw.data()+8,4); // +0x18 rdFace.type
     std::memcpy(&geo,raw.data()+0x0c,4);   // +0x1c rdFace GeoMode
     std::memcpy(&material,raw.data()+0x24,4); // +0x34 rdMaterial
     std::memcpy(&cel,raw.data()+0x28,4);   // +0x38 wall cel
@@ -84,14 +89,32 @@ inline void append_world_cache_candidate(
     if(geo!=4U) {++stats.not_textured;return;}
     if(!range.has_uv) {++stats.missing_uv;return;}
     if(!material) {++stats.missing_material;return;}
-    if(range.solid_adjoin) {++stats.solid_adjoin;return;}
+    // Opaque-material faces may still have native translucent/zwrite flags.
+    // Keep those and solid adjoins outside the ordinary opaque preview,
+    // but retain them for a separately validated GPU alpha pathway.
+    bool const translucent=(face_type&0x2U)!=0U;
+    bool const no_zwrite=(face_type&0x20U)!=0U;
+    if(range.solid_adjoin)++stats.solid_adjoin;
+    if(translucent)++stats.translucent_face;
+    if(no_zwrite)++stats.zwrite_disabled;
+    if(range.solid_adjoin || translucent || no_zwrite) {
+        ++stats.special_candidates;
+        if(special && (!stats.frustum_available ||
+            !gpu_3do_batch_outside_frustum(*frustum,*view,
+                                           range.bounds_min,range.bounds_max)))
+            special->push_back({range.surface_index,range.first_index,
+                range.count,uintptr_t(material),static_cast<int32_t>(cel),
+                face_type,range.solid_adjoin});
+        return;
+    }
     if(stats.frustum_available &&
        gpu_3do_batch_outside_frustum(*frustum,*view,
                                     range.bounds_min,range.bounds_max)) {
         ++stats.frustum_rejected;return;
     }
     out.push_back({range.surface_index,range.first_index,range.count,
-                   uintptr_t(material),static_cast<int32_t>(cel)});
+                   uintptr_t(material),static_cast<int32_t>(cel),
+                   face_type,false});
     ++stats.candidates;
     stats.triangles+=range.count/3U;
 
