@@ -28,8 +28,8 @@ required_varyings = {
     "local_fragment_normal": "vec3",
 }
 for name, kind in required_varyings.items():
-    assert re.search(r"\\bout\\s+" + kind + r"\\s+" + name + r"\\s*;", vert), name
-    assert re.search(r"\\bin\\s+" + kind + r"\\s+" + name + r"\\s*;", frag), name
+    assert re.search(r"\bout\s+" + kind + r"\s+" + name + r"\s*;", vert), name
+    assert re.search(r"\bin\s+" + kind + r"\s+" + name + r"\s*;", frag), name
 
 assert "bool gpu_pixel_lighting = false" in config
 assert 'j.contains("gpu_pixel_lighting")' in parser
