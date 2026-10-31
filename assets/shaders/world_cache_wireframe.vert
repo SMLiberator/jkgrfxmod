@@ -4,12 +4,17 @@
 layout(location=0) in vec3 world_position;
 layout(location=1) in vec2 native_uv;
 layout(location=2) in vec3 native_normal;
+layout(location=3) in vec3 native_light_rgb;
 out vec2 material_uv;
 out vec3 cached_view_normal;
+out vec3 cached_lit_rgb;
 uniform vec4 view_right,view_forward,view_up,view_origin;
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 void main() {
     material_uv=native_uv;
+    // Gamma-correct per-vertex JK lighting must interpolate before texels.
+    // RGB attribute will also support future MotS colored world lighting.
+    cached_lit_rgb=native_light_rgb;
     vec3 vn=view_right.xyz*native_normal.x+
             view_forward.xyz*native_normal.y+
             view_up.xyz*native_normal.z;

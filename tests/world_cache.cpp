@@ -1,5 +1,6 @@
 #include "renderer/world_cache.hpp"
 #include "renderer/world_cache_portals.hpp"
+#include "renderer/world_cache_lighting.hpp"
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -65,6 +66,76 @@ int main()
     assert(mesh.vertices[2].uv[1]==64.0f);
     assert(mesh.vertices[5].uv[0]==0.0f); // missing source UV not fabricated
     assert(mesh.vertices[3].normal[1]==-1.0f);
+
+
+    // GPU JK world lighting follows the live surface's Gouraud array,
+    // native world-vertex dynamic contributions, face extra and ambient.
+    constexpr uintptr_t light_base=0x400000U;
+    std::array<uint8_t,0x4000> light_memory{};
+    auto put_light=[&](uintptr_t addr,void const *src,size_t n) {
+        assert(addr>=light_base &&
+               addr-light_base+n<=light_memory.size());
+        std::memcpy(light_memory.data()+(addr-light_base),src,n);
+    };
+    auto lu32=[&](uintptr_t addr,uint32_t v){put_light(addr,&v,4);};
+    auto lf32=[&](uintptr_t addr,float v){put_light(addr,&v,4);};
+    decal_native_read light_read=[&](uintptr_t addr,void *dst,size_t n) {
+        if(addr<light_base || addr-light_base+n>light_memory.size())
+            return false;
+        std::memcpy(dst,light_memory.data()+(addr-light_base),n);
+        return true;
+    };
+    constexpr uintptr_t light_surfaces=light_base+0x400U;
+    constexpr uintptr_t light_sector=light_base+0x800U;
+    constexpr uintptr_t light_world=light_base+0xc00U;
+    constexpr uintptr_t light_indices=light_base+0x1000U;
+    constexpr uintptr_t light_intensities=light_base+0x1100U;
+    constexpr uintptr_t light_dynamic=light_base+0x1200U;
+    lu32(light_surfaces+2U*0x5cU+0x08U,uint32_t(light_sector));
+    lu32(light_surfaces+2U*0x5cU+0x20U,3U);
+    lu32(light_surfaces+2U*0x5cU+0x2cU,uint32_t(light_indices));
+    lu32(light_surfaces+2U*0x5cU+0x58U,uint32_t(light_intensities));
+    lf32(light_surfaces+2U*0x5cU+0x44U,0.10f);
+    lf32(light_sector+0x08U,0.20f);
+    for(uint32_t i=0;i<4;++i) {
+        lu32(light_indices+i*4U,i+1U);
+        lf32(light_intensities+i*4U,0.10f*float(i));
+    }
+    lu32(light_world+0x88U,8U);
+    lu32(light_world+0x98U,uint32_t(light_dynamic));
+    for(uint32_t i=0;i<8;++i)
+        lf32(light_dynamic+i*4U,0.05f);
+    std::vector<float> dynamic_lights;
+    assert(read_world_cache_dynamic_lights(
+        light_read,light_world,8U,dynamic_lights));
+    std::vector<std::array<float,3>> rgb(mesh.vertices.size(),{{1,1,1}});
+    world_cache_draw_candidate lit_face{2U,mesh.surfaces[0].first_index,
+        mesh.surfaces[0].count,mesh.surfaces[0].material,3};
+    world_cache_light_sample lit_sample{};
+    assert(sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,
+        dynamic_lights,rgb,&lit_sample));
+    assert(lit_sample.mode==3U && lit_sample.vertices==4U);
+    assert(std::fabs(rgb[0][0]-std::pow(0.20f,1.8f))<0.0001f);
+    assert(std::fabs(rgb[3][2]-std::pow(0.45f,1.8f))<0.0001f);
+    lu32(light_surfaces+2U*0x5cU+0x20U,0U);
+    assert(sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,dynamic_lights,rgb));
+    assert(rgb[0][0]==1.0f && rgb[3][2]==1.0f);
+    lu32(light_surfaces+2U*0x5cU+0x20U,1U);
+    assert(sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,dynamic_lights,rgb));
+    assert(std::fabs(rgb[0][0]-std::pow(0.20f,1.8f))<0.0001f);
+    lu32(light_surfaces+2U*0x5cU+0x20U,3U);
+    lu32(light_surfaces+2U*0x5cU+0x2cU,0U);
+    assert(!sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,dynamic_lights,rgb));
+    lu32(light_surfaces+2U*0x5cU+0x2cU,uint32_t(light_indices));
+    lu32(light_indices,99U);
+    assert(!sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,dynamic_lights,rgb));
+    assert(!read_world_cache_dynamic_lights(
+        light_read,light_world,9U,dynamic_lights));
 
     // Cache sky geometry while keeping it out of ordinary world draws.
     auto sky_world=world;
