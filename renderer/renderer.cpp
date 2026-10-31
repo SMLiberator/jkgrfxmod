@@ -5853,23 +5853,23 @@ namespace jkgm {
                     LOG_WARNING("WORLD CACHE phase0 native world snapshot unavailable");
                 return;
             }
+            auto &cache=*world_cache_target;
+            // Read the SAME native camera/rdClipFrustum as the GPU 3DO
+            // path. Frustum rejection is conservative; it cannot tell
+            // us which sectors JK traversed through active adjoins.
+            auto const camera=capture_gpu_preview_camera();
+            bool const can_cull=camera.valid && camera.perspective &&
+                camera.frustum.far_plane>0.1f;
+            auto const started=profile_clock::now();
+            auto const state=collect_world_cache_draw_candidates(
+                safe_read,cache.world.surfaces_addr,cache.mesh,
+                cache.frame_candidates,
+                can_cull?&camera.frustum:nullptr,
+                can_cull?&camera.native_view:nullptr);
+            auto const collect_us=elapsed_profile_us(
+                started,profile_clock::now());
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U) {
-                auto const &cache=*world_cache_target;
-                // Read the SAME native camera/rdClipFrustum as the GPU 3DO
-                // path. Frustum rejection is conservative; it cannot tell
-                // us which sectors JK traversed through active adjoins.
-                auto const camera=capture_gpu_preview_camera();
-                bool const can_cull=camera.valid && camera.perspective &&
-                    camera.frustum.far_plane>0.1f;
-                auto const started=profile_clock::now();
-                auto const state=collect_world_cache_draw_candidates(
-                    safe_read,cache.world.surfaces_addr,cache.mesh,
-                    cache.frame_candidates,
-                    can_cull?&camera.frustum:nullptr,
-                    can_cull?&camera.native_view:nullptr);
-                auto const collect_us=elapsed_profile_us(
-                    started,profile_clock::now());
                 // These ranges have live material/cel and conservative
                 // frustum filtering, NOT native sector/portal visibility.
                 // The legacy world D3D batch also contains fallback Things.
