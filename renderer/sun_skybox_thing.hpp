@@ -17,6 +17,21 @@ namespace jkgm {
     {
         return (thing_flags&thingflag_shadow_exclusions)==0U;
     }
+    // Visible native rendering is the fallback whenever GPU mesh lighting
+    // exceeds the shader's light capacity. Its depth-only sidecar must still
+    // be queued for STATIC geometry in that case, otherwise previously
+    // shadow-casting 3DO architecture disappears from the sun map.
+    // Noncasting 0x20 Things never become casters through this fallback.
+    inline bool sun_shadow_native_sidecar_needed(
+        bool gpu_visible_queued,bool camera_hud,bool model_cache,
+        bool sun_shadows,bool dynamic_caster,bool light_overflow,
+        uint64_t shadow_owner,uint32_t flags)
+    {
+        return !gpu_visible_queued && !camera_hud && model_cache &&
+               sun_shadows && (dynamic_caster || light_overflow) &&
+               shadow_owner!=0U && thing_casts_sun_shadows(flags);
+    }
+
     inline bool thing_shadow_geomode_visible(int effective_mode,
                                               int mesh_mode)
     {
