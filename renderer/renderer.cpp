@@ -6222,7 +6222,12 @@ namespace jkgm {
             gl::set_depth_function(gl::comparison_function::less);
             gl::set_depth_mask(true);
             gl::disable(gl::capability::blend);
-            gl::disable(gl::capability::cull_face);
+            // World surfaces are unconditionally single-sided, including
+            // those marked 0x1 in native JK. Fan winding is normalized to
+            // each SithSurface's authored normal at cache build time.
+            glFrontFace(GL_CCW);
+            gl::set_face_cull_mode(gl::face_mode::back);
+            gl::enable(gl::capability::cull_face);
             // The native opaque world batch is disabled for this isolation
             // test, so no polygon offset is required or desirable.
             if(isolate_native_world_batches()) {
@@ -6280,6 +6285,7 @@ namespace jkgm {
                 i=end;
             }
             gl::bind_vertex_array(gl::vertex_array_view(0U));
+            gl::disable(gl::capability::cull_face);
             glDisable(GL_POLYGON_OFFSET_FILL);
             gl::set_depth_function(gl::comparison_function::less);
             gl::set_active_texture_unit(0);
