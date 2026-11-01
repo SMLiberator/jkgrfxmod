@@ -40,9 +40,9 @@ struct world_cache_mesh {
 };
 
 // Preserve the native surface's facing direction even when its stored
-// polygon order is reversed. Unlike JK's optional two-sided flag, GPU
-// world architecture is ALWAYS rendered single-sided. The cached surface
-// normal defines the front side for every triangle, including warped fans.
+// polygon order is reversed. JK world surfaces are single-sided even when
+// flagged 0x1; double-sided face rendering is a separate 3DO model feature.
+// The authored surface normal defines the front of each cached triangle.
 inline bool world_cache_reverse_fan_triangle(
     decal_vec3 const &a,decal_vec3 const &b,decal_vec3 const &c,
     decal_vec3 const &normal)
