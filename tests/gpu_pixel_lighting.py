@@ -47,20 +47,23 @@ assert "native_dynamic_ready=read_world_cache_dynamic_lights(" in wiring
 assert "if(!pixel_lighting)point_lights.clear();" in wiring
 assert "std::istringstream lines{std::string(mb.str())};" in program
 assert 'gl::set_uniform_integer(pixel_dynamic_lighting,pixel_lighting?1:0)' in program
-# Both GPU geometry paths use the same editable GLSL code for attenuation
-# AND gamma/saturation composition; no compiled renderer formula divergence.
+# Pixel-enabled GPU geometry paths share the editable attenuation and
+# gamma/saturation GLSL, but disabled mode keeps independent JK Gouraud.
 shared_path = root / "assets/shaders/jk_point_lighting.glsl"
 shared = shared_path.read_text(encoding="utf-8")
 world_vert_path = root / "assets/shaders/world_cache_wireframe.vert"
 world_frag_path = root / "assets/shaders/world_cache_texture_preview.frag"
 world_vert = world_vert_path.read_text(encoding="utf-8")
 world_frag = world_frag_path.read_text(encoding="utf-8")
-for stage in (vert, frag, world_frag):
+for stage in (frag, world_frag):
     assert '#include "jk_point_lighting.glsl"' in stage
+assert '#include "jk_point_lighting.glsl"' not in vert
+assert "pixel_dynamic_lighting==0" in vert
+assert "range_distance*attenuation_min,0.0)*along" in vert
 assert "load_shader_source(filename.parent_path()/name" in program
 assert "float jk_point_sample(" in shared
 assert "vec3 jk_point_compose(" in shared
-for stage in (vert, frag, world_frag):
+for stage in (frag, world_frag):
     assert "jk_point_sample(" in stage
 for stage in (frag, world_frag):
     assert "jk_point_compose(" in stage

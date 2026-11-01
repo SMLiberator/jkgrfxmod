@@ -27,8 +27,6 @@ uniform int nonrigid_light_transform; // use transformed distances for scaled R/
 uniform vec4 light_position_radius[16]; // local XYZ and JK light radius
 uniform float light_intensity[16];
 
-#include "jk_point_lighting.glsl"
-
 // Native D3D applies the RGB multiplier to each *vertex* after gamma
 // conversion, then rasterization interpolates the combined RGB. Multiplying
 // separately interpolated light and tint per pixel gives incorrect gradients.
@@ -111,9 +109,15 @@ void main() {
             if(nonrigid_light_transform!=0)
                 delta=view_right.xyz*delta.x+
                       view_forward.xyz*delta.y+view_up.xyz*delta.z;
-            l+=jk_point_sample(delta,normal,light_position_radius[i].w,
-                               light_intensity[i],attenuation_min,
-                               mode<2.5);
+            // Disabled pixel lighting must reproduce JK-style vertex
+            // Gouraud, independent of edits to jk_point_lighting.glsl.
+            float dist=length(delta);
+            float along=dot(normal,delta/max(dist,0.00001));
+            float range_distance=mode>=2.5
+                ? dist : abs(dot(normal,delta));
+            if(range_distance<light_position_radius[i].w && along>0.0)
+                l+=max(light_intensity[i]-
+                       range_distance*attenuation_min,0.0)*along;
             if(l>=1.0) break;
         }
     }
