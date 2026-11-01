@@ -2,11 +2,9 @@
 // Shared bloom/basic compositor GPU exposure pass. This shader renders
 // precisely one RGBA16F pixel and retains the previous EV in a ping-pong FBO.
 #include "opengl_state.hpp"
-#include "base/log.hpp"
 #include "glad/gl.h"
 #include <algorithm>
 #include <chrono>
-#include <sstream>
 
 namespace jkgm {
 
@@ -67,25 +65,6 @@ inline void update_auto_exposure(opengl_state *ogs,gl::texture_view scene)
         gl::index_type::uint32);
     if(had_scissor) glEnable(GL_SCISSOR_TEST);
 
-    // Debug once every 2s only with profile_auto_exposure=true. A single-pixel
-    // readback is intentionally not in the normal path: it synchronizes GL.
-    if(ogs->auto_exposure_diagnostics &&
-       (ogs->auto_exposure_last_log==std::chrono::steady_clock::time_point{} ||
-        now-ogs->auto_exposure_last_log>=std::chrono::seconds(2))) {
-        ogs->auto_exposure_last_log=now;
-        float diagnostic[4]={0.0f,0.0f,0.0f,0.0f};
-        glReadBuffer(GL_COLOR_ATTACHMENT0);
-        glReadPixels(0,0,1,1,GL_RGBA,GL_FLOAT,diagnostic);
-        std::ostringstream message;
-        message << "Auto exposure: adapted_ev=" << diagnostic[0]
-                << " target_ev=" << diagnostic[1]
-                << " luminance=" << diagnostic[2]
-                << " highlight_luminance=" << diagnostic[3]
-                << " dt=" << dt
-                << " sensitivity=" << ogs->auto_exposure_sensitivity
-                << " compensation_ev=" << ogs->hdr_exposure_compensation;
-        LOG_INFO(message.str());
-    }
     ogs->auto_exposure_history_valid=true;
     ogs->auto_exposure_next_a=!ogs->auto_exposure_next_a;
     gl::set_active_texture_unit(0);

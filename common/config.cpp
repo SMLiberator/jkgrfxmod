@@ -174,9 +174,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("profile_audio")) {
             j.at("profile_audio").get_to(rv->profile_audio);
         }
-        if(j.contains("profile_auto_exposure")) {
-            j.at("profile_auto_exposure").get_to(rv->profile_auto_exposure);
-        }
         if(j.contains("optimize_hud_uploads")) {
             j.at("optimize_hud_uploads").get_to(rv->optimize_hud_uploads);
         }

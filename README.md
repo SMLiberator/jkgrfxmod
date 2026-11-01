@@ -1323,13 +1323,10 @@ add them to it. GPU work may overlap CPU work and should not be added to
 CPU timings to estimate a frame period. The existing native 3DO timers
 are inclusive too.
 
-`"profile_auto_exposure": false` (default) disables the old periodic
-debug `glReadPixels` that previously ran automatically whenever
-`profile_renderer` was enabled. Set it to true only to inspect
-exposure EV/luminance; the readback synchronizes with GL and can distort
-timings. For A/B comparisons, keep VSync off, settings/resolution and
-camera view identical, and disable both profiling options for final FPS
-measurements.
+The retired `profile_auto_exposure` GPU readback option has been
+removed. Automatic exposure now stays entirely GPU-resident. For A/B
+comparisons, keep VSync off, settings/resolution and camera view identical,
+and disable `profile_renderer` for final FPS measurements.
 
 ## Faster JK vertex-color decoding (default)
 
@@ -1819,12 +1816,10 @@ same exposed brightness as the final image, then added in HDR before tone
 mapping, not double-exposed. Tone mapping precedes COG color grading and
 optional grain/vignette.
 
-`profile_auto_exposure: true` enables a blocking diagnostic readback every
-two seconds (meter luminance, capped highlight luminance, adapted and
-target EV, sensitivity and fixed compensation). Leave it off for frame-rate measurements. The exposure history
-is reset for menus, disabled postprocessing or Retro 256-color mode. Metering
-still includes center-screen HUD elements; bright/dark input calibration
-remains material-dependent. This feature does not change native JK vertex
+The exposure history resets for menus, disabled post-processing or
+Retro 256-color mode. The GPU meter samples the composed scene before the
+post-exempt HUD pass; bright/dark input calibration is still
+material-dependent. This feature does not change native JK vertex
 lighting limits.
 
 ## SPR projected decals — geometry and receiver discovery

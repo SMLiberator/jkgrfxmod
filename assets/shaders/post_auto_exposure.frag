@@ -55,6 +55,7 @@ void main()
     float rate = target_ev<previous ? 3.0 : 1.2;
     float weight = 1.0-exp(-rate*clamp(exposure_params.y,0.0,0.25));
     float adapted = mix(previous,target_ev,weight);
-    // R controls exposure; G/B/A carry opt-in metering diagnostics.
-    out_color = vec4(adapted,target_ev,meter_lum,highlight_average);
+    // Only R is consumed by HDR presentation/bloom and by temporal history.
+    // Other channels are unused, and no diagnostic GPU readback is performed.
+    out_color = vec4(adapted,0.0,0.0,1.0);
 }
