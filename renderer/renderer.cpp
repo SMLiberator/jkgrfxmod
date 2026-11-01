@@ -6190,7 +6190,14 @@ namespace jkgm {
                 make_point(m[9],m[10],m[11],1.0f));
             shader.set_projection(make_point(
                 half_fov,aspect,1.0f/cam.far_plane,0.0f));
-            auto const remaining_effect=read_native_jk_hardware_color_effects();
+            // If the native request-pool layout has not yet been
+            // validated, do NOT copy the unseparated camera-sector tint
+            // onto already locally tinted world faces. Preserve the
+            // previously working world-cache behavior until bridge ready.
+            jk_palette_effect remaining_effect{};
+            if(native_sector_palette_mode().load(
+                   std::memory_order_relaxed)!=0)
+                remaining_effect=read_native_jk_hardware_color_effects();
             shader.set_jk_color_effects(
                 make_point(float(remaining_effect.filter[0]),
                            float(remaining_effect.filter[1]),
