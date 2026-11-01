@@ -38,28 +38,35 @@ layout(location=3) out vec4 out_depth;
 void main() {
     vec3 albedo=clamp(texture(albedo_map,material_uv*uv_scale+uv_scroll).rgb*
                       material_tint.rgb,0.0,1.0);
+    // Match gpu_3do_preview.frag::pixel_jk_diffuse_lighting().
+    // Per-vertex authored light and sector effects are interpolated
+    // unchanged. ONLY the dynamic-light delta is evaluated per pixel.
     vec3 lighting=cached_lit_rgb;
     if(cached_light_state.z>2.5 && num_lights>0) {
-        // JK world dynamic lights are radial and independent of
-        // surface normals (sithRender_BuildDynamicLights). Thing/model
-        // lighting uses incidence; world architecture does not.
-        float added=0.0;
+        float base=cached_light_state.x;
+        float lit=base;
+        vec3 normal=normalize(cached_world_normal);
         for(int i=0;i<num_lights;i++) {
             vec3 delta=light_position_radius[i].xyz-cached_world_position;
             float dist=length(delta);
-            if(dist>=light_position_radius[i].w)continue;
-            added+=max(light_intensity[i]-dist*light_attenuation,0.0);
+            float along=dot(normal,delta/max(dist,0.00001));
+            if(dist<light_position_radius[i].w && along>0.0)
+                lit+=(light_intensity[i]-
+                      dist*light_attenuation)*along;
+            if(lit>=1.0)break;
         }
-        float base=max(clamp(cached_light_state.x,0.0,1.0),
-                       cached_light_state.y);
-        float lit=max(clamp(cached_light_state.x+added,0.0,1.0),
-                      cached_light_state.y);
-        // Same combined local-sector + global JK effect for the
-        // added pixel lighting, preserving Gouraud for the static base.
-        lighting+=world_jk_effect(vec3(pow(lit,1.8)),
-                                   cached_sector_tint)-
-                  world_jk_effect(vec3(pow(base,1.8)),
-                                   cached_sector_tint);
+        float original_bright=max(clamp(base,0.0,1.0),
+                                  cached_light_state.y);
+        float lit_bright=max(clamp(lit,0.0,1.0),
+                             cached_light_state.y);
+        // Absolutely no color change at pixels outside light influence.
+        // In particular do not reconstruct baked Gouraud colors from
+        // interpolated intensity: the gamma conversion is nonlinear.
+        if(lit_bright!=original_bright)
+            lighting+=world_jk_effect(vec3(pow(lit_bright,1.8)),
+                                      cached_sector_tint)-
+                      world_jk_effect(vec3(pow(original_bright,1.8)),
+                                      cached_sector_tint);
     }
     lighting=clamp(lighting,0.0,1.0);
     out_color=vec4(albedo*lighting,1.0);
