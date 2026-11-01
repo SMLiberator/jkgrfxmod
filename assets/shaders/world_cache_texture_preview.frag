@@ -40,14 +40,15 @@ void main() {
                       material_tint.rgb,0.0,1.0);
     vec3 lighting=cached_lit_rgb;
     if(cached_light_state.z>2.5 && num_lights>0) {
-        vec3 n=normalize(cached_world_normal);
+        // JK world dynamic lights are radial and independent of
+        // surface normals (sithRender_BuildDynamicLights). Thing/model
+        // lighting uses incidence; world architecture does not.
         float added=0.0;
         for(int i=0;i<num_lights;i++) {
             vec3 delta=light_position_radius[i].xyz-cached_world_position;
             float dist=length(delta);
-            if(dist>=light_position_radius[i].w || dist<0.000001)continue;
-            float facing=max(dot(n,delta/dist),0.0);
-            added+=max(light_intensity[i]-dist*light_attenuation,0.0)*facing;
+            if(dist>=light_position_radius[i].w)continue;
+            added+=max(light_intensity[i]-dist*light_attenuation,0.0);
         }
         float base=max(clamp(cached_light_state.x,0.0,1.0),
                        cached_light_state.y);
