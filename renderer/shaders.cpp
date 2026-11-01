@@ -217,6 +217,7 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , uv_scale(gl::get_uniform_location(the_program,"uv_scale"))
     , uv_scroll(gl::get_uniform_location(the_program,"uv_scroll"))
     , material_tint(gl::get_uniform_location(the_program,"material_tint"))
+    , solid_color(gl::get_uniform_location(the_program,"solid_color"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
     , light_attenuation(gl::get_uniform_location(the_program,"light_attenuation"))
     , jk_color_filter(gl::get_uniform_location(the_program,"jk_color_filter"))
@@ -246,9 +247,16 @@ void jkgm::shaders::world_cache_preview_shader::set_projection(
 void jkgm::shaders::world_cache_preview_shader::set_texture(
     float width,float height,point<4,float> tint,point<2,float> scroll)
 {
+    gl::set_uniform_integer(solid_color,0);
     gl::set_uniform_integer(albedo_sampler,0);
     gl::set_uniform_vector(uv_scale,make_point(1.0f/width,1.0f/height));
     gl::set_uniform_vector(uv_scroll,scroll);
+    gl::set_uniform_vector(material_tint,tint);
+}
+void jkgm::shaders::world_cache_preview_shader::set_solid_color(
+    point<4,float> tint)
+{
+    gl::set_uniform_integer(solid_color,1);
     gl::set_uniform_vector(material_tint,tint);
 }
 

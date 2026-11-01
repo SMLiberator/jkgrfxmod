@@ -152,8 +152,8 @@ inline world_cache_live_state inspect_world_cache_live_state(
            !read_decal_u32(read,uintptr_t(addr)+0x38U,cel)) {
             ++stats.unreadable;continue;
         }
-        if(geomode<2U) {++stats.hidden;continue;}
-        if(!range.has_uv) {++stats.missing_uv;continue;}
+        if(geomode<3U || geomode>4U) {++stats.hidden;continue;}
+        if(geomode==4U && !range.has_uv) {++stats.missing_uv;continue;}
         ++stats.drawn_candidates;
         if(uintptr_t(material)!=range.material)++stats.changed_material;
         if(range.cel>=0 && int32_t(cel)!=range.cel)++stats.changed_cel;

@@ -67,6 +67,9 @@ for stage in (frag, world_frag):
     assert "jk_point_sample(" in stage
 for stage in (frag, world_frag):
     assert "jk_point_compose(" in stage
+# Solid world faces use CMP palette RGB with no texture dependency.
+assert "uniform int solid_color;" in world_frag
+assert "solid_color!=0 ? clamp(material_tint.rgb" in world_frag
 assert "vec3 lighting=cached_lit_rgb;" in world_frag
 assert "if(added<=0.0) return jk_lit_rgb;" in frag
 assert "if(added<=0.0) return baked;" in shared

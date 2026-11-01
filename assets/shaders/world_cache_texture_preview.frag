@@ -18,6 +18,7 @@ uniform float light_intensity[16];
 uniform sampler2D albedo_map;
 uniform vec2 uv_scale,uv_scroll;
 uniform vec4 material_tint;
+uniform int solid_color; // GeoMode 3: native MAT/CMP RGB, no texture sampling
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
 
 #include "jk_point_lighting.glsl"
@@ -40,8 +41,9 @@ layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
 layout(location=3) out vec4 out_depth;
 void main() {
-    vec3 albedo=clamp(texture(albedo_map,material_uv*uv_scale+uv_scroll).rgb*
-                      material_tint.rgb,0.0,1.0);
+    vec3 albedo=solid_color!=0 ? clamp(material_tint.rgb,0.0,1.0) :
+        clamp(texture(albedo_map,material_uv*uv_scale+uv_scroll).rgb*
+              material_tint.rgb,0.0,1.0);
     // Keep authored Gouraud/sector lighting, already interpolated in RGB.
     // The same GLSL helpers calculate pixel light for both world and 3DO.
     vec3 lighting=cached_lit_rgb;

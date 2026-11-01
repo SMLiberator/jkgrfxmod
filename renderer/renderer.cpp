@@ -6006,6 +6006,7 @@ namespace jkgm {
                     " frustum_available=",state.frustum_available?1:0,
                     " hidden=",state.hidden,
                     " not_textured=",state.not_textured,
+                    " solid_color=",state.solid_color,
                     " solid_adjoin=",state.solid_adjoin,
                     " translucent_face=",state.translucent_face,
                      " special_candidates=",state.special_candidates,
@@ -6207,6 +6208,8 @@ namespace jkgm {
                     if(a->material!=b->material)
                         return a->material<b->material;
                     if(a->cel!=b->cel)return a->cel<b->cel;
+                    if(a->geometry_mode!=b->geometry_mode)
+                        return a->geometry_mode<b->geometry_mode;
                     return a->surface_index<b->surface_index;
                 });
             auto &shader=*ogs->world_cache_preview_program;
@@ -6260,35 +6263,44 @@ namespace jkgm {
                 glPolygonOffset(-2.0f,-2.0f);
             }
             gl::bind_vertex_array(cache.vao);
-            size_t drawn=0,unresolved=0,groups=0,skipped_alpha=0;
+            size_t drawn=0,solid_drawn=0,unresolved=0,groups=0,skipped_alpha=0;
             for(size_t i=0;i<ordered.size();) {
                 size_t end=i+1;
                 auto const *first=ordered[i];
                 while(end<ordered.size() &&
                       ordered[end]->material==first->material &&
-                      ordered[end]->cel==first->cel)++end;
+                      ordered[end]->cel==first->cel &&
+                      ordered[end]->geometry_mode==first->geometry_mode)++end;
                 gpu_3do_group group{};
                 group.material=first->material;
                 group.cel=first->cel;
-                auto const material=resolve_gpu_3do_material(group);
-                // This early preview deliberately excludes all translucent,
-                // animated and alpha-tested materials. They still draw
-                // through JK's native rendering path as before.
-                bool const safe=material.albedo_source==1 &&
-                    material.has_image && !material.alpha &&
-                    !material.masked && !material.dithered &&
-                    !material.special && !material.emissive_only &&
-                    material.opacity>=0.999f &&
-                    material.albedo_transition==0.0f &&
-                    std::isfinite(material.width) &&
-                    std::isfinite(material.height) &&
-                    material.width>0.0f && material.height>0.0f;
+                bool const solid=first->geometry_mode==3U;
+                auto const material=solid
+                    ?resolve_gpu_3do_solid_material(group,false)
+                    :resolve_gpu_3do_material(group);
+                // GeoMode 3 is palette-indexed and never samples a MAT
+                // texture. GeoMode 4 still requires an opaque ready image.
+                // Alpha/translucent faces and adjoins remain native.
+                bool const safe=solid
+                    ?material.albedo_source==2
+                    :(material.albedo_source==1 &&
+                      material.has_image && !material.alpha &&
+                      !material.masked && !material.dithered &&
+                      !material.special && !material.emissive_only &&
+                      material.opacity>=0.999f &&
+                      material.albedo_transition==0.0f &&
+                      std::isfinite(material.width) &&
+                      std::isfinite(material.height) &&
+                      material.width>0.0f && material.height>0.0f);
                 if(safe) {
-                    gl::set_active_texture_unit(0);
-                    gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                     material.texture);
-                    shader.set_texture(material.width,material.height,
-                                       material.tint,material.albedo_scroll);
+                    if(solid)shader.set_solid_color(material.tint);
+                    else {
+                        gl::set_active_texture_unit(0);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         material.texture);
+                        shader.set_texture(material.width,material.height,
+                                           material.tint,material.albedo_scroll);
+                    }
                     counts.clear();
                     offsets.clear();
                     for(size_t j=i;j<end;++j) {
@@ -6301,9 +6313,10 @@ namespace jkgm {
                         GL_UNSIGNED_INT,offsets.data(),
                         static_cast<GLsizei>(counts.size()));
                     drawn+=counts.size();
+                    if(solid)solid_drawn+=counts.size();
                     ++groups;
-                } else if(material.albedo_source!=1 ||
-                          !material.has_image)unresolved+=end-i;
+                } else if(material.albedo_source!=(solid?2:1) ||
+                          (!solid && !material.has_image))unresolved+=end-i;
                 else skipped_alpha+=end-i;
                 i=end;
             }
@@ -6315,6 +6328,7 @@ namespace jkgm {
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U) {
                 LOG_INFO("WORLD CACHE gpu_first_opaque ranges=",drawn,
+                         " solid_ranges=",solid_drawn,
                          " multi_draw_calls=",groups,
                          " unresolved_material=",unresolved,
                          " deferred_special=",skipped_alpha,

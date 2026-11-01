@@ -20,13 +20,14 @@ struct world_cache_draw_candidate {
     uint32_t face_type=0; // live native rdFace.type at surface +0x18
     bool solid_adjoin=false;
     std::array<float,2> uv_offset{}; // live rdFace.texVertOffset in MAT pixels
+    uint32_t geometry_mode=4; // live 3=palette-indexed solid, 4=textured
 };
 
 struct world_cache_frame_stats {
     uint32_t candidates=0,triangles=0;
     uint32_t frustum_rejected=0,hidden=0,not_textured=0;
     uint32_t missing_uv=0,solid_adjoin=0,sky=0,missing_material=0;
-    uint32_t translucent_face=0,special_candidates=0;
+    uint32_t translucent_face=0,special_candidates=0,solid_color=0;
     uint32_t changed_material=0,changed_cel=0,unreadable=0;
     bool frustum_available=false;
 };
@@ -91,11 +92,10 @@ inline void append_world_cache_candidate(
         ++stats.changed_cel;
     if(flags&0x600U) {++stats.sky;return;}
     if(geo<2U) {++stats.hidden;return;}
-    // Phase-1 list is intentionally textured/opaque-*candidate* only.
-    // GeoMode 2/3, solid adjoins (including grates), and non-UV faces
-    // still require a material/alpha parity path and remain native.
-    if(geo!=4U) {++stats.not_textured;return;}
-    if(!range.has_uv) {++stats.missing_uv;return;}
+    // Modes 0..2 do not draw filled polygons in hardware. Solid GeoMode
+    // 3 takes its RGB from the native MAT/CMP, not from texture UVs.
+    if(geo!=3U && geo!=4U) {++stats.not_textured;return;}
+    if(geo==4U && !range.has_uv) {++stats.missing_uv;return;}
     if(!material) {++stats.missing_material;return;}
     // JK's native world path recognizes rdFace.type 0x2 as translucent.
     // Do not borrow 0x20 Z-write semantics from other Sith-engine variants.
@@ -110,7 +110,7 @@ inline void append_world_cache_candidate(
                                            range.bounds_min,range.bounds_max)))
             special->push_back({range.surface_index,range.first_index,
                 range.count,uintptr_t(material),static_cast<int32_t>(cel),
-                face_type,range.solid_adjoin,uv_offset});
+                face_type,range.solid_adjoin,uv_offset,geo});
         return;
     }
     if(stats.frustum_available &&
@@ -120,8 +120,9 @@ inline void append_world_cache_candidate(
     }
     out.push_back({range.surface_index,range.first_index,range.count,
                    uintptr_t(material),static_cast<int32_t>(cel),
-                   face_type,false,uv_offset});
+                   face_type,false,uv_offset,geo});
     ++stats.candidates;
+    if(geo==3U)++stats.solid_color;
     stats.triangles+=range.count/3U;
 
 }

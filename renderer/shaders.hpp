@@ -63,7 +63,7 @@ namespace jkgm {
         class world_cache_preview_shader : public opengl_shader {
             gl::uniform_location_id view_right,view_forward,view_up,view_origin;
             gl::uniform_location_id projection;
-            gl::uniform_location_id albedo_sampler,uv_scale,uv_scroll,material_tint;
+            gl::uniform_location_id albedo_sampler,uv_scale,uv_scroll,material_tint,solid_color;
             gl::uniform_location_id num_lights,light_attenuation;
             gl::uniform_location_id jk_color_filter,jk_color_tint,jk_color_add_fade;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity;
@@ -74,6 +74,7 @@ namespace jkgm {
             void set_projection(point<4,float> params);
             void set_texture(float width,float height,
                              point<4,float> tint,point<2,float> scroll);
+            void set_solid_color(point<4,float> tint);
             void set_lights(std::vector<world_cache_point_light> const &lights,
                             float attenuation);
             void set_jk_color_effects(point<4,float> filter,point<4,float> tint,

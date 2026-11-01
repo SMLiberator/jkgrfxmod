@@ -537,6 +537,51 @@ int main()
     assert(!build_world_cache_surface_lookup(
         duplicate,snapshot.surface_count,lookup) && lookup.empty());
 
+    // GeoMode 3 retains native MAT/CMP solid RGB even without UVs.
+    // The same UV-less surface remains native if changed back to Mode 4.
+    auto solid_mesh=mesh;
+    solid_mesh.surfaces[1].solid_adjoin=false;
+    assert(!solid_mesh.surfaces[1].has_uv);
+    assert(build_world_cache_surface_lookup(
+        solid_mesh,snapshot.surface_count,lookup));
+    set_u32(7,0x1c,3U);
+    set_u32(7,0x18,0U);
+    auto solid_stats=collect_world_cache_draw_candidates(
+        read,base,solid_mesh,full);
+    assert(solid_stats.candidates==2U && solid_stats.solid_color==1U &&
+           solid_stats.missing_uv==0U);
+    assert(full.size()==2U && full[0].geometry_mode==4U &&
+           full[1].surface_index==7U && full[1].geometry_mode==3U);
+    std::vector<world_cache_sector_span> solid_spans{{7U,1U}};
+    auto solid_stage=collect_world_cache_sector_candidates(
+        read,base,solid_mesh,lookup,solid_spans,epochs,epoch,sector);
+    assert(solid_stage.valid && solid_stage.faces.solid_color==1U &&
+           sector.size()==1U && sector[0].geometry_mode==3U);
+    std::vector<uint8_t> solid_membership(snapshot.surface_count,0U);
+    solid_membership[7U]=1U;
+    assert(compare_world_cache_candidate_sets(
+        full,solid_membership,sector).exact);
+    // GeoMode is live metadata: COG switches do not rebuild the VBO.
+    set_u32(7,0x1c,4U);
+    auto textured_stats=collect_world_cache_draw_candidates(
+        read,base,solid_mesh,full);
+    assert(textured_stats.candidates==1U &&
+           textured_stats.missing_uv==1U);
+    set_u32(7,0x1c,2U);
+    auto wire_stats=collect_world_cache_draw_candidates(
+        read,base,solid_mesh,full);
+    assert(wire_stats.candidates==1U && wire_stats.not_textured==1U);
+    set_u32(7,0x1c,3U);
+    set_u32(7,0x18,0x2U);
+    std::vector<world_cache_draw_candidate> solid_special;
+    solid_stage=collect_world_cache_sector_candidates(
+        read,base,solid_mesh,lookup,solid_spans,epochs,epoch,sector,
+        nullptr,nullptr,&solid_special);
+    assert(solid_stage.valid && sector.empty() &&
+           solid_special.size()==1U &&
+           solid_special[0].geometry_mode==3U);
+    set_u32(7,0x18,0U);
+
     // Malformed/nonfinite geometry may not poison persistent GL buffers.
     world.receivers[0].polygon[0][0]=std::numeric_limits<float>::infinity();
     assert(!build_world_cache_mesh(world,mesh));
