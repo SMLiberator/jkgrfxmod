@@ -44,4 +44,60 @@ int main()
     assert(!jkgm::native_animated_explosion_sprite(read,0U));
     auto unreadable=[&](uintptr_t,void*,size_t)->bool {return false;};
     assert(!jkgm::native_animated_explosion_sprite(unreadable,rd));
+
+    // The explosion's 'timer' is stored as initial msecLifeLeft on
+    // sithExplosion_CreateThing; JK computes integer ms per cel from
+    // that value and the material's num_texinfo. No renderer clock exists.
+    constexpr uintptr_t mat=base+0x600U;
+    put(owner+0x130U,1U); // animate sprite
+    put(mat+0x64U,4U); // 4 MAT cels
+    put(owner+0x134U,1000U); // initial 1000 ms
+    int32_t selected=-1;
+    auto at=[&](int32_t remaining,int32_t native_cel,int32_t expected) {
+        put(owner+0x18U,static_cast<uint32_t>(remaining));
+        assert(jkgm::native_explosion_sprite_cel(
+            read,rd,mat,native_cel,selected));
+        assert(selected==expected);
+    };
+    at(1000,0,0); // first frame
+    at(751,0,0);
+    at(750,0,1); // 250 ms per cel
+    at(500,0,2);
+    at(250,0,3);
+    at(0,0,3); // final frame clamps
+    at(750,2,2); // real JK cel takes priority if it advanced
+    at(600,1,1); // no substitute if native already advanced
+
+    put(mat+0x64U,8U);
+    at(875,0,1);
+    at(125,0,7);
+    put(mat+0x64U,4U);
+    put(owner+0x134U,101U); // native interval truncates to 25 ms
+    at(76,0,1);
+    at(26,0,3);
+    put(owner+0x134U,1000U);
+    put(owner+0x18U,0U);
+    assert(!jkgm::native_explosion_sprite_cel(
+        read,rd,mat,4,selected)); // native out-of-bounds cel
+    put(mat+0x64U,1U);
+    assert(!jkgm::native_explosion_sprite_cel(
+        read,rd,mat,0,selected));
+    put(mat+0x64U,4U);
+    put(owner+0x134U,0U);
+    assert(!jkgm::native_explosion_sprite_cel(
+        read,rd,mat,0,selected));
+    put(owner+0x134U,1000U);
+    put(owner+0x18U,1001U);
+    assert(!jkgm::native_explosion_sprite_cel(
+        read,rd,mat,0,selected));
+    put(owner+0x18U,static_cast<uint32_t>(-1));
+    assert(!jkgm::native_explosion_sprite_cel(
+        read,rd,mat,0,selected));
+    put(owner+0x18U,500U);
+    put(owner+0x130U,0U);
+    assert(!jkgm::native_explosion_sprite_cel(
+        read,rd,mat,0,selected)); // non-animated explosions unaffected
+    put(owner+0x130U,1U);
+    assert(!jkgm::native_explosion_sprite_cel(
+        unreadable,rd,mat,0,selected));
 }

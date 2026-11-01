@@ -283,11 +283,13 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_gpu_quad.cpp /Fe:sprite_gpu_quad_test.exe
         sprite_gpu_quad_test.exe
-    - name: Native animated explosion SPR compatibility tests
+    - name: Native animated explosion SPR lifetime-to-cel regression tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_explosion_animation.cpp /Fe:sprite_explosion_animation_test.exe
         sprite_explosion_animation_test.exe
+    - name: GPU explosion animation renderer wiring checks
+      run: python3 tests/gpu_explosion_animation.py
     - name: Multi-entry SPR syntax and variant selection regression tests
       shell: cmd
       run: |

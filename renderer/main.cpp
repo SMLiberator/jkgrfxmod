@@ -4567,8 +4567,10 @@ namespace {
     // Geometry is immutable per .SPR resource; pose, size, roll and alpha
     // are per Thing. Only fully-lit textured quads are eligible initially.
     bool submit_gpu_sprite_quad(void const *rd,void const *orientation,
-                                uint32_t type,jkgm::sprite_instance_info const &info)
+                                uint32_t type,jkgm::sprite_instance_info const &info,
+                                int32_t *animated_cel=nullptr)
     {
+        if(animated_cel)*animated_cel=-1;
         auto const reject=[](size_t reason)->bool {
             if(the_config && the_config->profile_renderer)
                 ++native_sprite_totals.gpu_quad_rejects[reason];
@@ -4653,6 +4655,22 @@ namespace {
         int32_t cel=-1;
         if(!read(reinterpret_cast<uintptr_t>(rd)+0x30U,&cel,4) ||
            cel < -1 || cel > 255)return reject(5);
+        // A native explosion sprite starts at cel zero, with the native
+        // sithSurface slot advancing rdThing.wallCel based on the explosion
+        // duration and the MAT's number of frames. When the native cel
+        // remains at zero, recover its frame from the *same native lifetime*
+        // rather than introducing a new rendering timer. On unreadable
+        // state, leave the explosion to JK's native sprite path.
+        if(jkgm::native_animated_explosion_sprite(
+               read,reinterpret_cast<uintptr_t>(rd))) {
+            int32_t selected=0;
+            if(!jkgm::native_explosion_sprite_cel(
+                   read,reinterpret_cast<uintptr_t>(rd),
+                   resource.material,cel,selected))
+                return reject(5);
+            cel=selected;
+            if(animated_cel)*animated_cel=cel;
+        }
         auto resource_item=gpu_sprite_quads.find(sprite);
         auto variant=resource_item==gpu_sprite_quads.end()
             ? std::unordered_map<int32_t,cached_gpu_sprite_quad>::iterator{}
@@ -4851,44 +4869,32 @@ namespace {
         }
         if(known_type && the_config && the_config->use_sprite_cache &&
            authored_type<=jkgm::sprite_fixed) {
-            // Compatibility guard: JK's explosion typeflags 0x1 uses a
-            // native sithSurface animation slot to update rdThing.wallCel.
-            // Although ordinary GPU SPRs follow this cel, reports show
-            // animated explosions visibly pinned to their first frame.
-            // Until the live-cel trace identifies the mismatch, keep only
-            // these native (no replacement clock or fake cel progression).
-            auto const read_native=[](uintptr_t at,void *out,size_t size) {
-                if(!gpu_span_readable(reinterpret_cast<void const *>(at),size))
-                    return false;
-                std::memcpy(out,reinterpret_cast<void const *>(at),size);
-                return true;
-            };
-            if(jkgm::native_animated_explosion_sprite(
-                   read_native,reinterpret_cast<uintptr_t>(thing))) {
-                if(profiling) {
-                    static unsigned samples=0U;
-                    if(samples++<48U) {
-                        int32_t cel=-1;
-                        uint32_t sprite=0U,mat=0U,n=0U,current=0U;
-                        read_native(reinterpret_cast<uintptr_t>(thing)+0x30U,
-                                    &cel,sizeof(cel));
-                        if(read_native(reinterpret_cast<uintptr_t>(thing)+4U,
-                                       &sprite,4U) && sprite>=0x10000U &&
-                           read_native(uintptr_t(sprite)+0x7cU,&mat,4U) &&
-                           mat>=0x10000U) {
-                            read_native(uintptr_t(mat)+0x64U,&n,4U);
-                            read_native(uintptr_t(mat)+0x68U,&current,4U);
-                        }
-                        LOG_INFO("SPR animated explosion native parity ",
-                                 "rd_wall_cel=",cel,
-                                 " mat_cels=",n,
-                                 " mat_current_cel=",current);
-                    }
-                }
+            int32_t requested_animated_cel=-1;
+            if(submit_gpu_sprite_quad(
+                   thing,orientation,authored_type,info,
+                   &requested_animated_cel))
+                return 1;
+            // Native GPU texture residency can lag an animated explosion's
+            // requested MAT cel. The normal native submission warms it;
+            // scoped wallCel substitution ensures it warms the same cel
+            // our GPU quad will use (the native field is restored promptly).
+            if(requested_animated_cel>=0) {
+                if(profiling)++native_sprite_totals.gpu_quad_fallbacks;
+                if(!gpu_span_readable(thing,0x34U))
+                    return profile_native_sprite_draw(thing,orientation);
+                auto *wall_cel=reinterpret_cast<int32_t *>(
+                    static_cast<uint8_t *>(thing)+0x30U);
+                int32_t const saved=*wall_cel;
+                if(saved==requested_animated_cel)
+                    return profile_native_sprite_draw(thing,orientation);
+                struct scoped_cel {
+                    int32_t *field;
+                    int32_t previous;
+                    ~scoped_cel() { *field=previous; }
+                } restore{wall_cel,saved};
+                *wall_cel=requested_animated_cel;
                 return profile_native_sprite_draw(thing,orientation);
             }
-            if(submit_gpu_sprite_quad(thing,orientation,authored_type,info))
-                return 1;
             if(profiling)++native_sprite_totals.gpu_quad_fallbacks;
         }
         if(profiling && known_type && jkgm::sprite_is_flare(authored_type) &&
