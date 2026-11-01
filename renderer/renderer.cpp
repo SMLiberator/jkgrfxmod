@@ -3290,7 +3290,7 @@ namespace jkgm {
                     // material/mesh. Invalid native pointers preserve JK.
                     std::array<float,3> tint_delta{};
                     if(can_replace_sector_tint && inst.sector_tint_valid &&
-                       !inst.camera_hud && !inst.is_projected_decal)
+                       !inst.camera_hud)
                         tint_delta=inst.sector_tint;
                     prog.set_thing_sector_tint_delta(tint_delta);
                     std::array<float,3> local_eye{};
