@@ -2,6 +2,7 @@
 #include "renderer/world_cache_portals.hpp"
 #include "renderer/world_cache_lighting.hpp"
 #include <array>
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -66,6 +67,29 @@ int main()
     assert(mesh.vertices[2].uv[1]==64.0f);
     assert(mesh.vertices[5].uv[0]==0.0f); // missing source UV not fabricated
     assert(mesh.vertices[3].normal[1]==-1.0f);
+    // Backface culling is mandatory, including SithSurface flag 0x1.
+    // A clockwise authored polygon must be corrected at triangulation,
+    // so its visible front still matches the native face normal.
+    decal_world_geometry reversed_world{};
+    reversed_world.valid_world=true;
+    auto reverse_face=make_surface(9U,20.0f);
+    reverse_face.surface_flags=0x1U;
+    std::reverse(reverse_face.polygon.begin(),reverse_face.polygon.end());
+    assert(world_cache_reverse_fan_triangle(
+        reverse_face.polygon[0],reverse_face.polygon[1],
+        reverse_face.polygon[2],reverse_face.normal));
+    reversed_world.receivers.push_back(reverse_face);
+    world_cache_mesh reverse_mesh{};
+    assert(build_world_cache_mesh(reversed_world,reverse_mesh));
+    assert(reverse_mesh.surfaces[0].surface_flags==0x1U);
+    assert(reverse_mesh.indices[0]==0U &&
+           reverse_mesh.indices[1]==2U &&
+           reverse_mesh.indices[2]==1U);
+    assert(!world_cache_reverse_fan_triangle(
+        world.receivers[0].polygon[0],
+        world.receivers[0].polygon[1],
+        world.receivers[0].polygon[2],
+        world.receivers[0].normal));
 
 
     // GPU JK world lighting follows the live surface's Gouraud array,
@@ -124,13 +148,15 @@ int main()
     lu32(cam_global,uint32_t(cam));
     lf32(cam+0x54U,0.20f);
     lu32(cam+0x58U,0U);
-    lf32(cam+0x45cU,0.50f);
+    lf32(cam+0x45cU,0.90f); // attenuationMin: 3DO Things only
+    lf32(cam+0x460U,0.50f); // attenuationMax: JK world surfaces
     std::vector<world_cache_point_light> radial_lights;
     float cam_ambient=0.0f,cam_attenuation=0.0f;
     assert(read_world_cache_camera_lights(
         light_read,cam_global,radial_lights,
         cam_ambient,cam_attenuation));
     assert(radial_lights.empty());
+    assert(cam_attenuation==0.50f); // NOT attenuationMin 0.90
     assert(world_cache_use_pixel_lights(true)); // no-light frame
     lu32(cam+0x58U,1U);
     lu32(cam+0x5cU,uint32_t(native_light));
@@ -154,6 +180,16 @@ int main()
     assert(world_cache_radial_light(2.0f,4.0f,2.0f,0.5f)==1.0f);
     assert(world_cache_radial_light(4.0f,4.0f,2.0f,0.5f)==0.0f);
     assert(world_cache_radial_light(50.0f,4.0f,2.0f,0.5f)==0.0f);
+    // No abrupt inner/outer rings for unsaturated lights: attenuation
+    // progresses continuously until the physically consistent maxRadius.
+    assert(std::fabs(world_cache_radial_light(
+        0.0f,4.0f,0.8f,0.2f)-0.8f)<0.00001f);
+    assert(std::fabs(world_cache_radial_light(
+        1.0f,4.0f,0.8f,0.2f)-0.6f)<0.00001f);
+    assert(std::fabs(world_cache_radial_light(
+        2.0f,4.0f,0.8f,0.2f)-0.4f)<0.00001f);
+    assert(std::fabs(world_cache_radial_light(
+        3.0f,4.0f,0.8f,0.2f)-0.2f)<0.00001f);
     std::vector<std::array<float,3>> rgb(mesh.vertices.size(),{{1,1,1}});
     world_cache_draw_candidate lit_face{2U,mesh.surfaces[0].first_index,
         mesh.surfaces[0].count,mesh.surfaces[0].material,3};
