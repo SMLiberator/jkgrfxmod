@@ -113,6 +113,47 @@ int main()
     std::vector<float> dynamic_lights;
     assert(read_world_cache_dynamic_lights(
         light_read,light_world,8U,dynamic_lights));
+    // Native rdLight uses two DIFFERENT culling distances:
+    // +0x28 minRadius (Thing lighting), +0x2c maxRadius (world lights).
+    // A previously cached-world implementation read minRadius, cutting
+    // off point lights too early. A zero-light camera is still eligible
+    // for stable pixel lighting (no stale aVertDynamicLights fallback).
+    constexpr uintptr_t cam_global=light_base+0x1800U;
+    constexpr uintptr_t cam=light_base+0x1900U;
+    constexpr uintptr_t native_light=light_base+0x2200U;
+    lu32(cam_global,uint32_t(cam));
+    lf32(cam+0x54U,0.20f);
+    lu32(cam+0x58U,0U);
+    lf32(cam+0x45cU,0.50f);
+    std::vector<world_cache_point_light> radial_lights;
+    float cam_ambient=0.0f,cam_attenuation=0.0f;
+    assert(read_world_cache_camera_lights(
+        light_read,cam_global,radial_lights,
+        cam_ambient,cam_attenuation));
+    assert(radial_lights.empty());
+    assert(world_cache_use_pixel_lights(true)); // no-light frame
+    lu32(cam+0x58U,1U);
+    lu32(cam+0x5cU,uint32_t(native_light));
+    lu32(native_light,0U); // position index into rdCamera
+    lu32(native_light+4U,0U); // valid omni
+    lu32(native_light+8U,1U); // enabled
+    lf32(native_light+0x18U,2.0f);
+    lf32(native_light+0x28U,1.0f); // minRadius: MUST NOT be used
+    lf32(native_light+0x2cU,4.0f); // maxRadius: world cutoff
+    lf32(cam+0x15cU,0.0f);
+    lf32(cam+0x160U,0.0f);
+    lf32(cam+0x164U,0.0f);
+    assert(read_world_cache_camera_lights(
+        light_read,cam_global,radial_lights,
+        cam_ambient,cam_attenuation));
+    assert(radial_lights.size()==1U);
+    assert(radial_lights[0].radius==4.0f &&
+           radial_lights[0].intensity==2.0f);
+    assert(world_cache_use_pixel_lights(true)); // one-light frame
+    assert(world_cache_radial_light(0.5f,4.0f,2.0f,0.5f)>1.7f);
+    assert(world_cache_radial_light(2.0f,4.0f,2.0f,0.5f)==1.0f);
+    assert(world_cache_radial_light(4.0f,4.0f,2.0f,0.5f)==0.0f);
+    assert(world_cache_radial_light(50.0f,4.0f,2.0f,0.5f)==0.0f);
     std::vector<std::array<float,3>> rgb(mesh.vertices.size(),{{1,1,1}});
     world_cache_draw_candidate lit_face{2U,mesh.surfaces[0].first_index,
         mesh.surfaces[0].count,mesh.surfaces[0].material,3};
