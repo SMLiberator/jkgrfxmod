@@ -46,4 +46,7 @@ int main() {
     assert(close(world[0],0) && close(world[1],4) && close(world[2],4));
     assert(!cog_thing_offset_pos(identity,{{0,0,0}},{{nan,1,1}},world));
     assert(!cog_thing_offset_pos(identity,{{0,nan,0}},{{1,1,1}},world));
+    world={{42,43,44}};
+    assert(!cog_thing_offset_pos(identity,{{1,2,1.e11f}},{{1,1,1}},world));
+    assert(world[0]==42 && world[1]==43 && world[2]==44);
 }

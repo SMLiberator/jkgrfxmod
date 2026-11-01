@@ -66,6 +66,7 @@ inline bool cog_thing_offset_pos(
     for(float v:basis)if(!std::isfinite(v))return false;
     for(float v:origin)if(!std::isfinite(v))return false;
     for(float v:local)if(!std::isfinite(v))return false;
+    cog_thing_offset_vec transformed{};
     for(int axis=0;axis<3;++axis) {
         double const result=double(origin[axis])+
             double(basis[axis])*double(local[0])+
@@ -73,8 +74,9 @@ inline bool cog_thing_offset_pos(
             double(basis[axis+6])*double(local[2]);
         if(!std::isfinite(result) || std::fabs(result)>1.e10)
             return false;
-        world[axis]=float(result);
+        transformed[axis]=float(result);
     }
+    world=transformed; // never expose a partially transformed vector
     return true;
 }
 } // namespace jkgm
