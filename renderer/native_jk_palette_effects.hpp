@@ -4,6 +4,7 @@
 // supplied exe. Native D3D vertices already incorporate these effects:
 // only bypassed GPU 3DO lighting requires additional processing.
 #include "jk_palette_effects.hpp"
+#include "native_sector_palette_bridge.hpp"
 #include <Windows.h>
 #include <algorithm>
 #include <cmath>
@@ -28,7 +29,13 @@ namespace jkgm {
     };
     static_assert(sizeof(jk_hardware_color_effect)==40,"Incorrect rdroid effect layout");
     inline jk_palette_effect read_native_jk_hardware_color_effects() {
-        static bool const supported=[] {
+        // Our verified Detours hook replaces the native function prologue.
+        // Check the original signature only while there is no installed
+        // detour; otherwise we would incorrectly report every global effect
+        // as inactive merely because rdSetColorEffects is intercepted.
+        bool const detour_verified=native_sector_palette_hook_installed().load(
+            std::memory_order_acquire);
+        bool const supported=detour_verified || [] {
             constexpr uint8_t sig[]{
                 0x56,0x8b,0x74,0x24,0x08,0x57,0xb9,0x0a,
                 0x00,0x00,0x00,0xbf,0x00,0x9e,0x88,0x00
