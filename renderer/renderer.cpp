@@ -6133,7 +6133,8 @@ namespace jkgm {
             if(pixel_lighting) {
                 cache.native_dynamic_light.clear();
             } else if(camera_ready && point_lights.empty() &&
-                      cache.world.vertex_count>0U) {
+                      cache.world.vertex_count>0U &&
+                      cache.world.vertex_count<=1000000U) {
                 cache.native_dynamic_light.assign(
                     cache.world.vertex_count,0.0f);
                 native_dynamic_ready=true;

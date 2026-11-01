@@ -35,6 +35,17 @@ assert "bool gpu_pixel_lighting = false" in config
 assert 'j.contains("gpu_pixel_lighting")' in parser
 assert "the_config->gpu_pixel_lighting" in wiring
 assert "instance.num_lights" in program
+# Both cached geometry paths must obey the same opt-in, and disabled
+# world geometry must retain native Gouraud dynamic light intensities.
+assert "the_config->gpu_pixel_lighting &&" in wiring
+assert ("world_cache_use_pixel_lights(\n"
+        "                the_config->gpu_pixel_lighting,camera_ready);") in wiring
+assert "return enabled && camera_ready;" in (
+    root / "renderer/world_cache_lighting.hpp").read_text(encoding="utf-8")
+assert "cache.native_dynamic_light.assign(" in wiring
+assert "native_dynamic_ready=read_world_cache_dynamic_lights(" in wiring
+assert "if(!pixel_lighting)point_lights.clear();" in wiring
+assert "std::istringstream lines{std::string(mb.str())};" in program
 assert 'gl::set_uniform_integer(pixel_dynamic_lighting,pixel_lighting?1:0)' in program
 # Both GPU geometry paths use the same editable GLSL code for attenuation
 # AND gamma/saturation composition; no compiled renderer formula divergence.
