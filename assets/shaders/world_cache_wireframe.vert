@@ -41,7 +41,7 @@ void main() {
     // GPU path's gamma conversion and per-channel tint scaling.
     cached_lit_rgb=world_jk_effect(native_light_rgb,native_sector_tint);
     cached_light_state=native_light_state;
-    cached_sector_tint=t;
+    cached_sector_tint=native_sector_tint;
     cached_world_position=world_position;
     cached_world_normal=native_normal;
     vec3 vn=view_right.xyz*native_normal.x+
