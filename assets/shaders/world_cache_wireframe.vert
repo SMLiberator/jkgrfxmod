@@ -16,6 +16,22 @@ out vec3 cached_world_position;
 out vec3 cached_world_normal;
 uniform vec4 view_right,view_forward,view_up,view_origin;
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
+// Already neutralized native global palette: only COG/player effects remain.
+// The per-face sector tint is applied locally in the same color operation.
+uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
+vec3 world_jk_effect(vec3 raw,vec3 local_sector_tint)
+{
+    vec3 v=pow(clamp(raw,0.0,1.0),vec3(1.0/1.8));
+    if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
+        v*=step(vec3(0.5),jk_color_filter.xyz);
+    vec3 t=clamp(local_sector_tint+jk_color_tint.xyz,
+                 vec3(-4.0),vec3(4.0));
+    vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
+    v=clamp(v*scale,0.0,1.0);
+    v=clamp(v+jk_color_add_fade.xyz,0.0,1.0);
+    v*=jk_color_add_fade.w;
+    return pow(clamp(v,0.0,1.0),vec3(1.8));
+}
 void main() {
     material_uv=native_uv;
     // Gamma-correct per-vertex JK lighting must interpolate before texels.
@@ -23,11 +39,7 @@ void main() {
     // JK's palette tint changes vertex illumination, not the albedo.
     // Apply it before Gouraud interpolation, matching the existing 3DO
     // GPU path's gamma conversion and per-channel tint scaling.
-    vec3 t=native_sector_tint;
-    vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
-    cached_lit_rgb=pow(
-        clamp(pow(clamp(native_light_rgb,0.0,1.0),vec3(1.0/1.8))*
-              scale,0.0,1.0),vec3(1.8));
+    cached_lit_rgb=world_jk_effect(native_light_rgb,native_sector_tint);
     cached_light_state=native_light_state;
     cached_sector_tint=t;
     cached_world_position=world_position;
