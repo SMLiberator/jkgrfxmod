@@ -14,11 +14,10 @@ struct world_cache_light_sample {
     uint32_t mode=0,vertices=0;
 };
 
-// Validated live rdCamera lights; never turn an unsupported light into a
-// fake omni. JK rdLight +0x28 is minRadius (for 3DO Thing culling);
-// +0x2c is maxRadius, the actual world light cutoff.
-// rdCamera +0x45c is attenuationMin (3DO Thing lighting);
-// +0x460 is attenuationMax, used by sithRender_BuildDynamicLights.
+// GPU world pixel lighting uses the SAME live rdCamera light parameters
+// as GPU-cached 3DOs: rdLight.minRadius (+0x28) and camera.attenuationMin
+// (+0x45c). The native SithWorld Gouraud path has separate max variants;
+// they are intentionally NOT used by our independent per-pixel renderer.
 struct world_cache_point_light {
     std::array<float,3> position{};
     float radius=0.0f,intensity=0.0f;
@@ -33,16 +32,19 @@ inline bool world_cache_use_pixel_lights(bool camera_ready)
     return camera_ready;
 }
 
-inline float world_cache_radial_light(float distance,float max_radius,
-                                       float intensity,float attenuation)
+inline float world_cache_model_style_pixel_light(
+    float distance,float radius,float intensity,float attenuation,
+    float incidence)
 {
-    if(!std::isfinite(distance) || !std::isfinite(max_radius) ||
+    if(!std::isfinite(distance) || !std::isfinite(radius) ||
        !std::isfinite(intensity) || !std::isfinite(attenuation) ||
-       distance>=max_radius || distance<0.0f)
+       !std::isfinite(incidence) || distance<0.0f ||
+       distance>=radius || incidence<=0.0f)
         return 0.0f;
-    // sithRender_BuildDynamicLights: distance-only world-vertex falloff.
-    // No normal-facing term (unlike 3DO Thing lighting).
-    return std::max(intensity-distance*attenuation,0.0f);
+    // Mirror gpu_3do_preview.frag::pixel_jk_diffuse_lighting().
+    // World geometry uses a static face normal; models can interpolate
+    // their vertex normals. Both use distance and Lambert incidence.
+    return (intensity-distance*attenuation)*incidence;
 }
 
 inline bool read_world_cache_camera_lights(
@@ -58,7 +60,7 @@ inline bool read_world_cache_camera_lights(
     int32_t count=0;
     if(!read(uintptr_t(camera)+0x54U,&ambient,4) ||
        !read(uintptr_t(camera)+0x58U,&count,4) ||
-       !read(uintptr_t(camera)+0x460U,&attenuation,4) ||
+       !read(uintptr_t(camera)+0x45cU,&attenuation,4) ||
        !std::isfinite(ambient) || !std::isfinite(attenuation) ||
        count<0 || count>64 || attenuation<0.0f || attenuation>100.0f)
         return false;
@@ -75,7 +77,7 @@ inline bool read_world_cache_camera_lights(
            !read(uintptr_t(ptr)+4U,&type,4) ||
            !read_decal_u32(read,uintptr_t(ptr)+8U,enabled) ||
            !read(uintptr_t(ptr)+0x18U,&light.intensity,4) ||
-           !read(uintptr_t(ptr)+0x2cU,&light.radius,4) ||
+           !read(uintptr_t(ptr)+0x28U,&light.radius,4) ||
            id>=64 || !std::isfinite(light.intensity) ||
            !std::isfinite(light.radius))return false;
         if(!enabled || light.intensity<=0.0f || light.radius<=0.0f)
