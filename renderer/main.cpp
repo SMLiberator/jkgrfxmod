@@ -44,6 +44,7 @@
 #include "sprite_decal_pose_cache.hpp"
 #include "sprite_decal_resource.hpp"
 #include "sprite_gpu_quad.hpp"
+#include "sprite_explosion_animation.hpp"
 #include "sprite_decal_attachment.hpp"
 #include "sprite_decal_follow.hpp"
 #include "sprite_decal_moving_receiver.hpp"
@@ -4850,6 +4851,42 @@ namespace {
         }
         if(known_type && the_config && the_config->use_sprite_cache &&
            authored_type<=jkgm::sprite_fixed) {
+            // Compatibility guard: JK's explosion typeflags 0x1 uses a
+            // native sithSurface animation slot to update rdThing.wallCel.
+            // Although ordinary GPU SPRs follow this cel, reports show
+            // animated explosions visibly pinned to their first frame.
+            // Until the live-cel trace identifies the mismatch, keep only
+            // these native (no replacement clock or fake cel progression).
+            auto const read_native=[](uintptr_t at,void *out,size_t size) {
+                if(!gpu_span_readable(reinterpret_cast<void const *>(at),size))
+                    return false;
+                std::memcpy(out,reinterpret_cast<void const *>(at),size);
+                return true;
+            };
+            if(jkgm::native_animated_explosion_sprite(
+                   read_native,reinterpret_cast<uintptr_t>(thing))) {
+                if(profiling) {
+                    static unsigned samples=0U;
+                    if(samples++<48U) {
+                        int32_t cel=-1;
+                        uint32_t sprite=0U,mat=0U,n=0U,current=0U;
+                        read_native(reinterpret_cast<uintptr_t>(thing)+0x30U,
+                                    &cel,sizeof(cel));
+                        if(read_native(reinterpret_cast<uintptr_t>(thing)+4U,
+                                       &sprite,4U) && sprite>=0x10000U &&
+                           read_native(uintptr_t(sprite)+0x7cU,&mat,4U) &&
+                           mat>=0x10000U) {
+                            read_native(uintptr_t(mat)+0x64U,&n,4U);
+                            read_native(uintptr_t(mat)+0x68U,&current,4U);
+                        }
+                        LOG_INFO("SPR animated explosion native parity ",
+                                 "rd_wall_cel=",cel,
+                                 " mat_cels=",n,
+                                 " mat_current_cel=",current);
+                    }
+                }
+                return profile_native_sprite_draw(thing,orientation);
+            }
             if(submit_gpu_sprite_quad(thing,orientation,authored_type,info))
                 return 1;
             if(profiling)++native_sprite_totals.gpu_quad_fallbacks;

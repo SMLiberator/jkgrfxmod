@@ -283,6 +283,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_gpu_quad.cpp /Fe:sprite_gpu_quad_test.exe
         sprite_gpu_quad_test.exe
+    - name: Native animated explosion SPR compatibility tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_explosion_animation.cpp /Fe:sprite_explosion_animation_test.exe
+        sprite_explosion_animation_test.exe
     - name: Multi-entry SPR syntax and variant selection regression tests
       shell: cmd
       run: |
