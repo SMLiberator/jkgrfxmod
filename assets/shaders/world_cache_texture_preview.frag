@@ -38,37 +38,33 @@ layout(location=3) out vec4 out_depth;
 void main() {
     vec3 albedo=clamp(texture(albedo_map,material_uv*uv_scale+uv_scroll).rgb*
                       material_tint.rgb,0.0,1.0);
-    // Match gpu_3do_preview.frag::pixel_jk_diffuse_lighting().
-    // Per-vertex authored light and sector effects are interpolated
-    // unchanged. ONLY the dynamic-light delta is evaluated per pixel.
+    // Baked JK vertex lighting is gamma-corrected BEFORE interpolation.
+    // An independently interpolated raw vertex-intensity baseline is
+    // not equivalent, and using it to compute pixel-light differences
+    // imprints baked-light gradients onto dynamic lighting (false bands).
+    // Keep baked RGB untouched; accumulate point lights independently.
     vec3 lighting=cached_lit_rgb;
     if(cached_light_state.z>2.5 && num_lights>0) {
-        float base=cached_light_state.x;
-        float lit=base;
+        float added=0.0;
         vec3 normal=normalize(cached_world_normal);
         for(int i=0;i<num_lights;i++) {
             vec3 delta=light_position_radius[i].xyz-cached_world_position;
             float dist=length(delta);
             float along=dot(normal,delta/max(dist,0.00001));
-            // Radius is only a cutoff: real falloff may reach zero first.
-            // A dynamic light must never SUBTRACT baked vertex lighting.
             if(dist<light_position_radius[i].w && along>0.0)
-                lit+=max(light_intensity[i]-
-                         dist*light_attenuation,0.0)*along;
-            if(lit>=1.0)break;
+                added+=max(light_intensity[i]-
+                           dist*light_attenuation,0.0)*along;
+            if(added>=1.0)break;
         }
-        float original_bright=max(clamp(base,0.0,1.0),
-                                  cached_light_state.y);
-        float lit_bright=max(clamp(lit,0.0,1.0),
-                             cached_light_state.y);
-        // Absolutely no color change at pixels outside light influence.
-        // In particular do not reconstruct baked Gouraud colors from
-        // interpolated intensity: the gamma conversion is nonlinear.
-        if(lit_bright!=original_bright)
-            lighting+=world_jk_effect(vec3(pow(lit_bright,1.8)),
-                                      cached_sector_tint)-
-                      world_jk_effect(vec3(pow(original_bright,1.8)),
-                                      cached_sector_tint);
+        if(added>0.0) {
+            // The same live JK sector/palette transforms tint dynamic
+            // light, but never depend on the authored vertex brightness.
+            // Subtract the transform's black response to neutralize any
+            // global additive/fade term in the isolated light channel.
+            vec3 white=world_jk_effect(vec3(1.0),cached_sector_tint);
+            vec3 black=world_jk_effect(vec3(0.0),cached_sector_tint);
+            lighting+=min(added,1.0)*max(white-black,vec3(0.0));
+        }
     }
     lighting=clamp(lighting,0.0,1.0);
     out_color=vec4(albedo*lighting,1.0);
