@@ -461,3 +461,19 @@ The native intersection routine accepts general raycast flags; only
 distance convention. Those two special flags continue to use the
 original native function. Outer caller flags remain intact, including
 ordinary combinations used during movement.
+
+## GetThingRelativePos(thing, globalPositionVector)
+
+New COG vector verb: converts an absolute world-space point into Thing-local
+Right/Look/Up coordinates. The inverse of the full native orientation
+matrix is used, so inherited scaling, mirroring, and non-orthogonal legacy
+RLU vectors work correctly. This is NOT merely `worldPos-GetThingPos(thing)`
+and not the three normalized-axis dot products.
+
+Example: Thing position `(0,0,1)`, Look `(1,0,0)`, Right `(0,-1,0)`,
+Up `(0,0,1)`, target world position `(0,4,0)` returns `(-4,0,-1)`.
+
+Arguments are popped as vector and then Thing, and the result is a vector.
+Invalid or degenerate/noninvertible Things return `(0,0,0)`, consistent
+with other vector helper verbs. No allocations, engine mutation or new
+native address dependency.

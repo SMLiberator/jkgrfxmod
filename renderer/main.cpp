@@ -27,6 +27,7 @@
 #include "mots_collision_snapshot_cache.hpp"
 #include "cog_math.hpp"
 #include "cog_pyr_math.hpp"
+#include "cog_thing_relative.hpp"
 #include "cog_raycast_head.hpp"
 #include "cog_raycast_target.hpp"
 #include "cog_raycast_native_sphere.hpp"
@@ -5649,6 +5650,33 @@ namespace {
         cog_push_vector(ctx,result.data());
     }
 
+    // GetThingRelativePos(thing,worldPosition): world-space point to
+    // the Thing's own Right/Look/Up coordinates. Use the complete inverse
+    // basis, not dot products, so scaled/sheared legacy RLU values work.
+    void __cdecl cog_get_thing_relative_pos(void *ctx)
+    {
+        float position[3]{};
+        cog_pop_vector(ctx,position); // world-space target; popped first
+        void *thing=cog_pop_thing(ctx);
+        jkgm::cog_relative_vec local{};
+        if(thing && gpu_span_readable(thing,0xc4U)) {
+            auto const *src=static_cast<uint8_t const *>(thing);
+            uint32_t type=0;
+            std::memcpy(&type,src+0x0cU,sizeof(type));
+            if(type>=1U && type<=11U) {
+                jkgm::cog_relative_basis basis{};
+                jkgm::cog_relative_vec origin{};
+                // jkgm(5).exe SithThing +0x88: right/look/up; +0xb8: pos.
+                std::memcpy(basis.data(),src+0x88U,sizeof(basis));
+                std::memcpy(origin.data(),src+0xb8U,sizeof(origin));
+                jkgm::cog_thing_relative_pos(
+                    basis,origin,{{position[0],position[1],position[2]}},
+                    local);
+            }
+        }
+        cog_push_vector(ctx,local.data()); // zero on invalid/singular Thing
+    }
+
     // RotateVector(dirVec,PYR): local displacement to rotated displacement.
     // Preserve non-unit lengths (e.g. 0/4/0 pitched 90 -> 0/0/4).
     void __cdecl cog_rotate_vector(void *ctx)
@@ -7868,6 +7896,7 @@ namespace {
         cog_verb_entry{"lerp", cog_math_lerp},
         cog_verb_entry{"randdir", cog_math_rand_dir},
         cog_verb_entry{"rotatevector", cog_rotate_vector},
+        cog_verb_entry{"getthingrelativepos", cog_get_thing_relative_pos},
         cog_verb_entry{"getlvecpyr", cog_get_lvec_pyr},
         cog_verb_entry{"getrvecpyr", cog_get_rvec_pyr},
         cog_verb_entry{"getuvecpyr", cog_get_uvec_pyr},
