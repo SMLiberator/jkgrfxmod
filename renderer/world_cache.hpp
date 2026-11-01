@@ -39,6 +39,24 @@ struct world_cache_mesh {
     uint32_t uv_ready_surfaces=0,missing_uv_surfaces=0,sky_surfaces=0;
 };
 
+// Preserve the native surface's facing direction even when its stored
+// polygon order is reversed. Unlike JK's optional two-sided flag, GPU
+// world architecture is ALWAYS rendered single-sided. The cached surface
+// normal defines the front side for every triangle, including warped fans.
+inline bool world_cache_reverse_fan_triangle(
+    decal_vec3 const &a,decal_vec3 const &b,decal_vec3 const &c,
+    decal_vec3 const &normal)
+{
+    double const ux=double(b[0])-a[0],uy=double(b[1])-a[1],
+                 uz=double(b[2])-a[2];
+    double const vx=double(c[0])-a[0],vy=double(c[1])-a[1],
+                 vz=double(c[2])-a[2];
+    double const orientation=(uy*vz-uz*vy)*normal[0]+
+                             (uz*vx-ux*vz)*normal[1]+
+                             (ux*vy-uy*vx)*normal[2];
+    return orientation<0.0;
+}
+
 // Snapshot the static geometry only once per world topology. Surface state
 // (geomode, material cel, animation, scroll, visibility) is intentionally
 // NOT baked into the geometry; callers must query it live before rendering.
@@ -86,9 +104,14 @@ inline bool build_world_cache_mesh(decal_world_geometry const &world,
             out.vertices.push_back(vertex);
         }
         for(uint32_t t=1;t+1<surf.polygon.size();++t) {
+            // The normal, not the optional 0x1 two-sided face flag,
+            // determines which triangle side should survive GL culling.
+            bool const reversed=world_cache_reverse_fan_triangle(
+                surf.polygon[0],surf.polygon[t],surf.polygon[t+1],
+                surf.normal);
             out.indices.push_back(base);
-            out.indices.push_back(base+t);
-            out.indices.push_back(base+t+1);
+            out.indices.push_back(base+(reversed?t+1:t));
+            out.indices.push_back(base+(reversed?t:t+1));
         }
         out.surfaces.push_back({
             surf.surface_index,begin,
