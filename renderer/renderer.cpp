@@ -6106,13 +6106,10 @@ namespace jkgm {
                 std::memcpy(dst,reinterpret_cast<void const *>(ptr),len);
                 return true;
             };
-            // JK populates visible-sector dynamic vertex lights before
-            // submitting world geometry. Capture once for the frame, then
-            // combine with live authored surface intensities. Failure on
-            // any surface leaves that surface entirely native-rendered.
-            bool const dynamic_ready=read_world_cache_dynamic_lights(
-                safe_read,cache.loaded_world,cache.world.vertex_count,
-                cache.native_dynamic_light);
+            // JK's per-world-vertex dynamic-light buffer is only a
+            // fallback for unsupported camera descriptors. The validated
+            // GPU pixel path needs NO scratch-buffer copy, even with zero
+            // currently active lights.
             float camera_ambient=0.0f,light_attenuation=0.0f;
             // sithRender global Extra Light is a separate live world
             // floor adjustment. Camera Ambient remains Thing-only.
@@ -6132,6 +6129,11 @@ namespace jkgm {
             // scratch array on an empty list changes distant baked shading
             // and can consume stale data from a previous lit frame.
             bool const pixel_lighting=world_cache_use_pixel_lights(camera_ready);
+            bool native_dynamic_ready=false;
+            if(pixel_lighting)cache.native_dynamic_light.clear();
+            else native_dynamic_ready=read_world_cache_dynamic_lights(
+                safe_read,cache.loaded_world,cache.world.vertex_count,
+                cache.native_dynamic_light);
             cache.frame_light_rgb.assign(cache.mesh.vertices.size(),
                                          {{1.0f,1.0f,1.0f}});
             cache.frame_light_state.assign(cache.mesh.vertices.size(),
@@ -6289,8 +6291,10 @@ namespace jkgm {
                          " deferred_special=",skipped_alpha,
                          " light_fallback=",light_fallback,
                          " gouraud_faces=",gouraud_faces);
-                LOG_INFO("WORLD CACHE light_state dynamic_lighting_ready=",
-                         dynamic_ready?1:0,
+                LOG_INFO("WORLD CACHE light_state pixel_path_valid=",
+                         pixel_lighting?1:0,
+                         " native_dynamic_fallback_ready=",
+                         native_dynamic_ready?1:0,
                          " native_isolation=",isolate_native_world_batches()?1:0,
                          " global_extra=",global_extra,
                          " pixel_lights=",point_lights.size());
