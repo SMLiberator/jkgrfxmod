@@ -8227,6 +8227,8 @@ bool attach_hooks()
     }
     if(error==NO_ERROR && sector_color_hook_requested) {
         native_sector_effect_hook_active=true;
+        jkgm::native_sector_palette_hook_installed().store(
+            true,std::memory_order_release);
         LOG_INFO("SECTOR PALETTE global tint isolation attached; "
                  "other JK color effects unchanged");
     }
@@ -8319,6 +8321,8 @@ bool detach_hooks()
         DetourDetach(&(PVOID&)RealNativeColorEffects,
                      HookedNativeColorEffects);
         native_sector_effect_hook_active=false;
+        jkgm::native_sector_palette_hook_installed().store(
+            false,std::memory_order_release);
         jkgm::native_sector_palette_mode().store(0,std::memory_order_relaxed);
     }
     if(native_compressed_sound_hook_active) {
