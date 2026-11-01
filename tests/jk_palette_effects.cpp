@@ -149,5 +149,14 @@ int main()
     put(native_pool+sizeof(dynamic),&sector,sizeof(sector));
     snap=probe_native_sector_palette(read,native_effect);
     assert(snap.layout_valid && !snap.sector_request_active);
+    // A patched game may allocate the player sector request at a different
+    // position; request metadata, not a fixed index, identifies it.
+    dynamic.id=2;dynamic.tint[0]=0.3f;
+    sector.id=1;
+    put(native_pool,&dynamic,sizeof(dynamic));
+    put(native_pool+sizeof(dynamic),&sector,sizeof(sector));
+    snap=probe_native_sector_palette(read,native_effect);
+    assert(snap.layout_valid && snap.sector_request_active &&
+           snap.sector_slot==0U && snap.sector_tint[0]==0.3f);
     return 0;
 }
