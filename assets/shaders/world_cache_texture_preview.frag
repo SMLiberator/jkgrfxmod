@@ -17,6 +17,20 @@ uniform float light_intensity[16];
 uniform sampler2D albedo_map;
 uniform vec2 uv_scale,uv_scroll;
 uniform vec4 material_tint;
+uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
+vec3 world_jk_effect(vec3 raw,vec3 local_sector_tint)
+{
+    vec3 v=pow(clamp(raw,0.0,1.0),vec3(1.0/1.8));
+    if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
+        v*=step(vec3(0.5),jk_color_filter.xyz);
+    vec3 t=clamp(local_sector_tint+jk_color_tint.xyz,
+                 vec3(-4.0),vec3(4.0));
+    vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
+    v=clamp(v*scale,0.0,1.0);
+    v=clamp(v+jk_color_add_fade.xyz,0.0,1.0);
+    v*=jk_color_add_fade.w;
+    return pow(clamp(v,0.0,1.0),vec3(1.8));
+}
 layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
@@ -39,12 +53,12 @@ void main() {
                        cached_light_state.y);
         float lit=max(clamp(cached_light_state.x+added,0.0,1.0),
                       cached_light_state.y);
-        // Match the sector tint applied to static lighting at vertices.
-        // Without this, a point light would wash out colored sectors.
-        vec3 t=cached_sector_tint;
-        vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
-        lighting+=pow(clamp(vec3(lit)*scale,0.0,1.0),vec3(1.8))-
-                  pow(clamp(vec3(base)*scale,0.0,1.0),vec3(1.8));
+        // Same combined local-sector + global JK effect for the
+        // added pixel lighting, preserving Gouraud for the static base.
+        lighting+=world_jk_effect(vec3(pow(lit,1.8)),
+                                   cached_sector_tint)-
+                  world_jk_effect(vec3(pow(base,1.8)),
+                                   cached_sector_tint);
     }
     lighting=clamp(lighting,0.0,1.0);
     out_color=vec4(albedo*lighting,1.0);
