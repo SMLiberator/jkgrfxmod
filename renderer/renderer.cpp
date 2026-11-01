@@ -6127,7 +6127,11 @@ namespace jkgm {
                 light_attenuation);
             // The cached world uses pixel lights when rdCamera exposes a
             // complete supported list. Otherwise preserve native shading.
-            bool const pixel_lighting=camera_ready && !point_lights.empty();
+            // Remain in pixel-lighting mode even when zero Thing lights
+            // are active. Switching back to JK's mutable world-vertex
+            // scratch array on an empty list changes distant baked shading
+            // and can consume stale data from a previous lit frame.
+            bool const pixel_lighting=world_cache_use_pixel_lights(camera_ready);
             cache.frame_light_rgb.assign(cache.mesh.vertices.size(),
                                          {{1.0f,1.0f,1.0f}});
             cache.frame_light_state.assign(cache.mesh.vertices.size(),
