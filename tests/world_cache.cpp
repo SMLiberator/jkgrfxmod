@@ -1,4 +1,5 @@
 #include "renderer/world_cache.hpp"
+#include "renderer/world_cache_alpha.hpp"
 #include "renderer/world_cache_portals.hpp"
 #include "renderer/world_cache_lighting.hpp"
 #include "renderer/world_cache_uv_animation.hpp"
@@ -508,6 +509,59 @@ int main()
         nullptr,nullptr,&special);
     assert(stage.valid && sector.empty() &&
            special.size()==1U && special[0].solid_adjoin);
+
+    // Conservative solid-adjoin material policy: binary alpha masks
+    // write precise G-buffer depth, mixed/translucent faces stay native.
+    world_cache_draw_candidate grate{};
+    grate.geometry_mode=4U;
+    grate.solid_adjoin=true;
+    world_cache_material_info grate_mat{};
+    grate_mat.albedo_source=1;
+    grate_mat.has_image=true;
+    grate_mat.width=64.0f;
+    grate_mat.height=64.0f;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::textured);
+    grate_mat.alpha=true;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::native); // blended/mixed => no cutout
+    grate_mat.masked=true;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::masked);
+    grate.face_type=0x2U;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::native);
+    grate.face_type=0U;
+    grate_mat.transition=0.25f;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::native);
+    grate_mat.transition=0.0f;
+    grate_mat.alpha_cutoff=0.0f;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::native);
+    grate_mat.alpha_cutoff=0.5f;
+    grate_mat.special=true;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::native);
+    grate_mat.special=false;
+    grate_mat.opacity=0.5f;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::native);
+    grate_mat.opacity=1.0f;
+    grate.solid_adjoin=false;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::native); // ordinary masked not migrated
+    grate.solid_adjoin=true;
+    grate.geometry_mode=3U;
+    grate_mat.albedo_source=2;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::solid);
+    grate.geometry_mode=4U;
+    grate_mat.albedo_source=0;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::native);
+    // Geometry-stage special routing survives: only material policy
+    // decides whether a solid-adjoin candidate is submitted to GL.
     // Fail-closed invalid spans clear both candidate lists.
     spans.push_back({9U,1U});
     stage=collect_world_cache_sector_candidates(

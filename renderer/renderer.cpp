@@ -20,6 +20,7 @@
 #include "spotlight_shadow_gpu.hpp"
 #include "sun_shadow_gpu.hpp"
 #include "world_cache_gpu.hpp"
+#include "world_cache_alpha.hpp"
 #include "sun_dynamic_shadow_gpu.hpp"
 #include "backbuffer_menu_surface.hpp"
 #include "backbuffer_surface.hpp"
@@ -6081,7 +6082,8 @@ namespace jkgm {
                !frame_world_cache_camera.valid ||
                !frame_world_cache_camera.perspective)return;
             auto &cache=*world_cache_target;
-            if(cache.sector_candidates.empty())return;
+            if(cache.sector_candidates.empty() &&
+               cache.sector_special_candidates.empty())return;
             auto const &cam=frame_world_cache_camera;
             float const aspect=get<x>(internal_scr_res_f)/
                                get<y>(internal_scr_res_f);
@@ -6100,7 +6102,8 @@ namespace jkgm {
             ordered.clear();
             counts.clear();
             offsets.clear();
-            ordered.reserve(cache.sector_candidates.size());
+            ordered.reserve(cache.sector_candidates.size()+
+                            cache.sector_special_candidates.size());
             auto safe_read=[](uintptr_t ptr,void *dst,size_t len) {
                 if(!len || !engine_camera_detail::readable(ptr,len))
                     return false;
@@ -6153,7 +6156,7 @@ namespace jkgm {
             cache.frame_uv_offset.assign(cache.mesh.vertices.size(),
                                          {{0.0f,0.0f}});
             size_t light_fallback=0,gouraud_faces=0;
-            for(auto const &candidate:cache.sector_candidates) {
+            auto stage_candidate=[&](world_cache_draw_candidate const &candidate) {
                 world_cache_light_sample info{};
                 if(!sample_world_cache_surface_light(
                        safe_read,cache.world.surfaces_addr,cache.mesh,
@@ -6162,7 +6165,7 @@ namespace jkgm {
                        &info,&cache.frame_light_state,
                        pixel_lighting,global_extra,&cache.frame_sector_tint)) {
                     ++light_fallback;
-                    continue;
+                    return;
                 }
                 // Native JK has already advanced SlideSurface UV offsets.
                 // The GPU mesh retains its immutable authored coordinates.
@@ -6170,11 +6173,19 @@ namespace jkgm {
                        cache.mesh,cache.cached_surface_lookup,
                        candidate,cache.frame_uv_offset)) {
                     ++light_fallback;
-                    continue;
+                    return;
                 }
                 if(info.mode==3U)++gouraud_faces;
                 ordered.push_back(&candidate);
-            }
+            };
+            for(auto const &candidate:cache.sector_candidates)
+                stage_candidate(candidate);
+            // Only opaque-adjoin candidates are considered here. Faces with
+            // JK's 0x2 translucency bit are still native; material policy
+            // below excludes unsupported masks/mixed-alpha materials.
+            for(auto const &candidate:cache.sector_special_candidates)
+                if(candidate.solid_adjoin && !(candidate.face_type&0x2U))
+                    stage_candidate(candidate);
             if(ordered.empty())return;
             // FreeColorEffect(sector slot) disables the native request.
             // Honor that for all cached world surfaces, too, without
@@ -6210,6 +6221,8 @@ namespace jkgm {
                     if(a->cel!=b->cel)return a->cel<b->cel;
                     if(a->geometry_mode!=b->geometry_mode)
                         return a->geometry_mode<b->geometry_mode;
+                    if(a->solid_adjoin!=b->solid_adjoin)
+                        return a->solid_adjoin<b->solid_adjoin;
                     return a->surface_index<b->surface_index;
                 });
             auto &shader=*ogs->world_cache_preview_program;
@@ -6263,14 +6276,16 @@ namespace jkgm {
                 glPolygonOffset(-2.0f,-2.0f);
             }
             gl::bind_vertex_array(cache.vao);
-            size_t drawn=0,solid_drawn=0,unresolved=0,groups=0,skipped_alpha=0;
+            size_t drawn=0,solid_drawn=0,masked_drawn=0,adjoin_drawn=0;
+            size_t unresolved=0,groups=0,skipped_alpha=0;
             for(size_t i=0;i<ordered.size();) {
                 size_t end=i+1;
                 auto const *first=ordered[i];
                 while(end<ordered.size() &&
                       ordered[end]->material==first->material &&
                       ordered[end]->cel==first->cel &&
-                      ordered[end]->geometry_mode==first->geometry_mode)++end;
+                      ordered[end]->geometry_mode==first->geometry_mode &&
+                      ordered[end]->solid_adjoin==first->solid_adjoin)++end;
                 gpu_3do_group group{};
                 group.material=first->material;
                 group.cel=first->cel;
@@ -6278,28 +6293,31 @@ namespace jkgm {
                 auto const material=solid
                     ?resolve_gpu_3do_solid_material(group,false)
                     :resolve_gpu_3do_material(group);
-                // GeoMode 3 is palette-indexed and never samples a MAT
-                // texture. GeoMode 4 still requires an opaque ready image.
-                // Alpha/translucent faces and adjoins remain native.
-                bool const safe=solid
-                    ?material.albedo_source==2
-                    :(material.albedo_source==1 &&
-                      material.has_image && !material.alpha &&
-                      !material.masked && !material.dithered &&
-                      !material.special && !material.emissive_only &&
-                      material.opacity>=0.999f &&
-                      material.albedo_transition==0.0f &&
-                      std::isfinite(material.width) &&
-                      std::isfinite(material.height) &&
-                      material.width>0.0f && material.height>0.0f);
-                if(safe) {
-                    if(solid)shader.set_solid_color(material.tint);
+                world_cache_material_info info{};
+                info.albedo_source=material.albedo_source;
+                info.has_image=material.has_image;
+                info.alpha=material.alpha;
+                info.masked=material.masked;
+                info.dithered=material.dithered;
+                info.special=material.special;
+                info.emissive_only=material.emissive_only;
+                info.opacity=material.opacity;
+                info.transition=material.albedo_transition;
+                info.width=material.width;
+                info.height=material.height;
+                info.alpha_cutoff=material.alpha_cutoff;
+                auto const policy=choose_world_cache_draw_policy(*first,info);
+                if(policy!=world_cache_draw_policy::native) {
+                    if(policy==world_cache_draw_policy::solid)
+                        shader.set_solid_color(material.tint);
                     else {
                         gl::set_active_texture_unit(0);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          material.texture);
                         shader.set_texture(material.width,material.height,
                                            material.tint,material.albedo_scroll);
+                        if(policy==world_cache_draw_policy::masked)
+                            shader.set_alpha_cutout(material.alpha_cutoff);
                     }
                     counts.clear();
                     offsets.clear();
@@ -6314,6 +6332,9 @@ namespace jkgm {
                         static_cast<GLsizei>(counts.size()));
                     drawn+=counts.size();
                     if(solid)solid_drawn+=counts.size();
+                    if(policy==world_cache_draw_policy::masked)
+                        masked_drawn+=counts.size();
+                    if(first->solid_adjoin)adjoin_drawn+=counts.size();
                     ++groups;
                 } else if(material.albedo_source!=(solid?2:1) ||
                           (!solid && !material.has_image))unresolved+=end-i;
@@ -6329,6 +6350,8 @@ namespace jkgm {
                gpu_3do_present_serial%120U==0U) {
                 LOG_INFO("WORLD CACHE gpu_first_opaque ranges=",drawn,
                          " solid_ranges=",solid_drawn,
+                         " adjoin_ranges=",adjoin_drawn,
+                         " masked_ranges=",masked_drawn,
                          " multi_draw_calls=",groups,
                          " unresolved_material=",unresolved,
                          " deferred_special=",skipped_alpha,
