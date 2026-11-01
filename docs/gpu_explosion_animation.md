@@ -1,31 +1,30 @@
-# GPU-cached animated explosion sprites
+# GPU-cached animated explosion sprites: binary-verified native cel
 
-JK's native `sithExplosion_CreateThing` handles explosion Things with
-`typeflags & 0x1` by scheduling a MAT-cel animation with a rate of
-`num_texinfo / lifetime_seconds`. The initial lifetime comes from the
-Thing's `timer` template property and is copied into
-`explosionParams.msecLifeLeft`; native `sithSurface_Tick` writes
-the current cel to the *individual* `rdThing.wallCel`.
+**Reference executable:** user-supplied `jkgm(5).exe`, 32-bit PE.
 
-GPU-cached ordinary sprites already use per-Thing `wallCel` and
-per-cel immutable quad variants. For flagged explosion sprites, the
-renderer now additionally handles the case where the native cel remains
-zero: it obtains the original and remaining lifetime from the native
-Thing and derives the cel using the same integer-millisecond interval
-as JK (initial milliseconds / number of material cels). Once JK's
-`wallCel` becomes nonzero, the native value takes priority.
+At `0x0046D359`, the executable's native `rdSprite_Draw` copies
+`[rdThing+0x2C]` into `[rdProcEntry+0x30]`. The instruction sequence
+is `8B 51 2C 8B 4F 60 89 56 30`. The `+0x30` destination is on a
+*different struct* and must not be used as `rdThing.wallCel`.
 
-This is **not** a second animation timer and does not use real-world
-time or the renderer frame counter. It is computed only from current
-native Thing state and does not consume animation slots.
+The GPU SPR path now samples the live per-Thing cel from `+0x2C`.
+Explosion Things with `typeflags & 0x1` are animated by JK's own
+native animation system: their MAT cel count and duration determine
+the progression. The GPU renderer does not need to derive frames from
+a duplicate timer or guess any SithThing explosionParams offsets.
 
-A MAT cel not resident in the engine's texture cache still needs to
-be warmed by JK. The existing native sprite fallback is retained, and
-for animated explosions its one-call native `wallCel` is temporarily
-set to the same requested cel so the correct texture can upload.
-The field is restored immediately after native submission; native
-animation state and timing remain untouched across frames.
+The explicit cel is stored on the per-MAT/per-cel shared GPU quad and
+resolved through the existing native MAT texture cache. If a requested
+MAT cel is not yet resident, JK's normal sprite submission warms it
+and GPU drawing can resume later.
 
-Other sprite types, projected decals, and model/world cel animation
-retain their existing paths. This feature does not change the
-`use_sprite_cache` configuration default.
+An earlier temporary native-only workaround and lifetime-based cel
+estimator were removed. The cache toggles are unchanged. Runtime
+signature validation also checks the nine-byte native cel-copy
+instruction sequence to avoid silently trusting this offset on a
+different executable.
+
+For unrelated ordinary SPR native fallbacks, enable
+`profile_renderer`; the renderer emits a bounded sample of GPU
+eligibility failures, missing SPR authored-type registrations, and
+MAT readiness details (stage, material, cel).

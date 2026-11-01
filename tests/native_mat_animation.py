@@ -27,8 +27,8 @@ assert "ref.second<0" in native and "mat.current_cel" in native
 assert "int32_t const cel=static_cast<int32_t>(face.cel)" in native
 
 # Animated explosion sprites can share one SPR and show distinct cel frames.
-assert "rdThing.wallCel (+0x30)" in native
-assert "cel < -1 || cel > 255" in native
+assert "read_native_sprite_wall_cel(" in native
+assert "native_sprite_cel.hpp" in native
 assert "std::unordered_map<int32_t,cached_gpu_sprite_quad>" in native
 assert "group.material=mat;group.cel=cel;" in sprite
 

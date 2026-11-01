@@ -44,7 +44,7 @@
 #include "sprite_decal_pose_cache.hpp"
 #include "sprite_decal_resource.hpp"
 #include "sprite_gpu_quad.hpp"
-#include "sprite_explosion_animation.hpp"
+#include "native_sprite_cel.hpp"
 #include "sprite_decal_attachment.hpp"
 #include "sprite_decal_follow.hpp"
 #include "sprite_decal_moving_receiver.hpp"
@@ -2295,6 +2295,12 @@ namespace {
     using native_sprite_fn = int (__cdecl *)(void *,void *);
     using native_sprite_mid_fn = void (__cdecl *)();
     constexpr uintptr_t sprite_draw_addr=0x0046CF40U;
+    // Verified against jkgm(5).exe rdSprite_Draw: copy rdThing+0x2c
+    // into rdProcEntry+0x30. The two structures have different offsets.
+    constexpr uintptr_t sprite_native_cel_copy_addr=0x0046D359U;
+    constexpr uint8_t sprite_native_cel_copy_bytes[]{
+        0x8b,0x51,0x2c,0x8b,0x4f,0x60,0x89,0x56,0x30
+    };
     constexpr uintptr_t sprite_preclip_addr=0x0046D182U;
     // JK23: rdCache_AddProcFace records a completed proc-face at
     // [0x86ede0 + 0x6c*index]. The cache converter's 0x43b6f9 cmp
@@ -4567,13 +4573,17 @@ namespace {
     // Geometry is immutable per .SPR resource; pose, size, roll and alpha
     // are per Thing. Only fully-lit textured quads are eligible initially.
     bool submit_gpu_sprite_quad(void const *rd,void const *orientation,
-                                uint32_t type,jkgm::sprite_instance_info const &info,
-                                int32_t *animated_cel=nullptr)
+                                uint32_t type,jkgm::sprite_instance_info const &info)
     {
-        if(animated_cel)*animated_cel=-1;
-        auto const reject=[](size_t reason)->bool {
-            if(the_config && the_config->profile_renderer)
+        auto const reject=[&](size_t reason)->bool {
+            if(the_config && the_config->profile_renderer) {
                 ++native_sprite_totals.gpu_quad_rejects[reason];
+                static unsigned samples=0;
+                if(samples++<16U)
+                    LOG_INFO("SPR GPU reject stage=",reason,
+                             " authored_type=",type,
+                             " rdThing=",reinterpret_cast<uintptr_t>(rd));
+            }
             return false;
         };
         if(!the_config || !the_config->use_sprite_cache ||
@@ -4649,28 +4659,13 @@ namespace {
                 type,pose,view,size,offset,info.width,info.height,
                 current_sprite_roll(rd),placement))
             return reject(6);
-        // rdThing.wallCel (+0x30), NOT rdMaterial.current_cel, is what
-        // rdSprite_Draw sends to rdCache for the current Thing's animation.
-        // A shared SPR/MAT may have many Things showing different frames.
+        // jkgm(5).exe rdSprite_Draw at 0x46d359 reads [rdThing+0x2c].
+        // JK's native animation updates this per-Thing cel, including
+        // explosion typeflags 0x1. No renderer-side animation clock.
         int32_t cel=-1;
-        if(!read(reinterpret_cast<uintptr_t>(rd)+0x30U,&cel,4) ||
-           cel < -1 || cel > 255)return reject(5);
-        // A native explosion sprite starts at cel zero, with the native
-        // sithSurface slot advancing rdThing.wallCel based on the explosion
-        // duration and the MAT's number of frames. When the native cel
-        // remains at zero, recover its frame from the *same native lifetime*
-        // rather than introducing a new rendering timer. On unreadable
-        // state, leave the explosion to JK's native sprite path.
-        if(jkgm::native_animated_explosion_sprite(
-               read,reinterpret_cast<uintptr_t>(rd))) {
-            int32_t selected=0;
-            if(!jkgm::native_explosion_sprite_cel(
-                   read,reinterpret_cast<uintptr_t>(rd),
-                   resource.material,cel,selected))
-                return reject(5);
-            cel=selected;
-            if(animated_cel)*animated_cel=cel;
-        }
+        if(!jkgm::read_native_sprite_wall_cel(
+               read,reinterpret_cast<uintptr_t>(rd),cel))
+            return reject(5);
         auto resource_item=gpu_sprite_quads.find(sprite);
         auto variant=resource_item==gpu_sprite_quads.end()
             ? std::unordered_map<int32_t,cached_gpu_sprite_quad>::iterator{}
@@ -4708,9 +4703,18 @@ namespace {
         }
         // Let JK perform ordinary sprite rendering to warm missing MAT cels.
         // The next frame can reuse the already-resident texture safely.
-        if(!gpu_mesh_materials_ready(*variant->second.geometry)) {
-            if(the_config->profile_renderer)
+        std::string material_failure;
+        bool const mat_ready=gpu_mesh_materials_ready(
+            *variant->second.geometry,false,
+            the_config->profile_renderer?&material_failure:nullptr);
+        if(!mat_ready) {
+            if(the_config->profile_renderer) {
                 ++native_sprite_totals.gpu_quad_mat_wait;
+                static unsigned samples=0;
+                if(samples++<16U)
+                    LOG_INFO("SPR GPU MAT unavailable ",material_failure,
+                             " rd_cel=",cel," sprite_ptr=",sprite);
+            }
             return false;
         }
         jkgm::gpu_3do_instance instance{};
@@ -4830,6 +4834,12 @@ namespace {
                 sprite_types.lookup(resource,static_cast<char const *>(resource),
                                     authored_type);
         }
+        if(profiling && !known_type && the_config->use_sprite_cache) {
+            static unsigned samples=0;
+            if(samples++<12U)
+                LOG_INFO("SPR GPU unavailable: authored SPR type not registered",
+                         " rdThing=",reinterpret_cast<uintptr_t>(thing));
+        }
         if(profiling) {
             if(known_type && authored_type<native_sprite_totals.type_calls.size())
                 ++native_sprite_totals.type_calls[authored_type];
@@ -4869,32 +4879,8 @@ namespace {
         }
         if(known_type && the_config && the_config->use_sprite_cache &&
            authored_type<=jkgm::sprite_fixed) {
-            int32_t requested_animated_cel=-1;
-            if(submit_gpu_sprite_quad(
-                   thing,orientation,authored_type,info,
-                   &requested_animated_cel))
+            if(submit_gpu_sprite_quad(thing,orientation,authored_type,info))
                 return 1;
-            // Native GPU texture residency can lag an animated explosion's
-            // requested MAT cel. The normal native submission warms it;
-            // scoped wallCel substitution ensures it warms the same cel
-            // our GPU quad will use (the native field is restored promptly).
-            if(requested_animated_cel>=0) {
-                if(profiling)++native_sprite_totals.gpu_quad_fallbacks;
-                if(!gpu_span_readable(thing,0x34U))
-                    return profile_native_sprite_draw(thing,orientation);
-                auto *wall_cel=reinterpret_cast<int32_t *>(
-                    static_cast<uint8_t *>(thing)+0x30U);
-                int32_t const saved=*wall_cel;
-                if(saved==requested_animated_cel)
-                    return profile_native_sprite_draw(thing,orientation);
-                struct scoped_cel {
-                    int32_t *field;
-                    int32_t previous;
-                    ~scoped_cel() { *field=previous; }
-                } restore{wall_cel,saved};
-                *wall_cel=requested_animated_cel;
-                return profile_native_sprite_draw(thing,orientation);
-            }
             if(profiling)++native_sprite_totals.gpu_quad_fallbacks;
         }
         if(profiling && known_type && jkgm::sprite_is_flare(authored_type) &&
@@ -4979,6 +4965,13 @@ namespace {
                               sizeof(sprite_draw_bytes)) ||
            !gpu_span_readable(reinterpret_cast<void const *>(sprite_preclip_addr),
                               sizeof(sprite_preclip_bytes)) ||
+           !gpu_span_readable(
+               reinterpret_cast<void const *>(sprite_native_cel_copy_addr),
+               sizeof(sprite_native_cel_copy_bytes)) ||
+           std::memcmp(
+               reinterpret_cast<void const *>(sprite_native_cel_copy_addr),
+               sprite_native_cel_copy_bytes,
+               sizeof(sprite_native_cel_copy_bytes))!=0 ||
            std::memcmp(reinterpret_cast<void const *>(sprite_draw_addr),
                        sprite_draw_bytes,sizeof(sprite_draw_bytes))!=0 ||
            std::memcmp(reinterpret_cast<void const *>(sprite_preclip_addr),
@@ -5128,6 +5121,7 @@ namespace {
         if(error==NO_ERROR) sprite_frustum_hook_active=true;
         else LOG_WARNING("SPR instance frustum-radius hook unavailable: ",error);
         LOG_INFO("SPR authored-type capture attached (index at +0x20 ignored)");
+        LOG_INFO("SPR rdThing.wallCel verified at +0x2c (jkgm(5).exe)");
         return true;
     }
 }

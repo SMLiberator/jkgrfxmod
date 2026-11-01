@@ -2062,3 +2062,15 @@ The SPR loader patch is necessary before types higher than 2 can load.
 The newer type-3 SPR decal projection system is documented above. Textured
 particle rendering and other experimental sprite extensions remain separate.
 The patch script ships with CI test builds; the repository distributes no EXE.
+
+## Binary-verified GPU SPR cel handling
+
+The supported patched `jkgm(5).exe` uses `rdThing+0x2C` for sprite
+`wallCel`, as verified at native `rdSprite_Draw+0x419`
+(`0x0046D359`). The renderer's former `+0x30` read mistakenly
+read a different field, freezing GPU sprite cel animations. All SPRs,
+including `typeflags & 1` explosions, now follow the native cel
+without an independent lifetime-based animation approximation.
+The native sprite hook checks the actual cel-copy instruction bytes
+before attaching. If GPU sprites remain native, `profile_renderer`
+now reports bounded eligibility and material-residency reasons.
