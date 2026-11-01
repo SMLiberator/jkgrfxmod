@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstddef>
 
 namespace jkgm {
     struct native_sector_palette_probe {
@@ -47,14 +48,16 @@ namespace jkgm {
                               request_pool_offset;
         std::array<jk_palette_request,32> req{};
         if(!read(pool,req.data(),sizeof(req)))return result;
-        // Validated pool signature. Those first two ids are assigned
-        // immediately after FlushAllEffects; FreeRequest leaves the id
-        // unchanged, but an unrelated NewColorEffect reuses the vacant slot.
-        // Thus FreeColorEffect(sector slot) disables localization.
-        if(req[0].id!=1 || (req[0].valid!=0 && req[0].valid!=1) ||
-           (req[1].id!=2 && req[1].id!=1) ||
-           (req[1].valid!=0 && req[1].valid!=1))
-            return result;
+        // JK allocates player ids 1 and 2, but the request *slot*
+        // depends on what was previously freed/reallocated. Validate the
+        // native array itself, then locate id 2 by metadata, not by index.
+        // FreeRequest leaves id 2 behind with isValid=0 until reused.
+        bool player_slot_seen=false;
+        for(auto const &entry:req) {
+            if(entry.valid!=0 && entry.valid!=1)return result;
+            if(entry.id==1 || entry.id==2)player_slot_seen=true;
+        }
+        if(!player_slot_seen)return result;
         result.layout_valid=true;
         for(size_t i=0;i<req.size();++i) {
             auto const &entry=req[i];
