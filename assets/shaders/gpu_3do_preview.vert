@@ -113,8 +113,10 @@ void main() {
             float range_distance=mode>=2.5
                 ? dist : abs(dot(normal,delta));
             if(range_distance<light_position_radius[i].w && along>0.0) {
-                l+=(light_intensity[i]-
-                    range_distance*attenuation_min)*along;
+                // Match the pixel path; never turn a point light into
+                // negative vertex illumination at the falloff tail.
+                l+=max(light_intensity[i]-
+                       range_distance*attenuation_min,0.0)*along;
             }
             if(l>=1.0) break;
         }

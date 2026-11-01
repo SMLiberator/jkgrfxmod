@@ -187,6 +187,14 @@ int main()
     assert(model_pixel(20.0f,1.0f)==0.0f);
     assert(model_pixel(2.0f,-1.0f)==0.0f); // back-facing
     assert(std::fabs(model_pixel(2.0f,0.5f)-0.2f)<0.00001f);
+    // Regression: a broad radius must not subtract static light when
+    // intensity has already fallen to zero before the radius cutoff.
+    assert(world_cache_model_style_pixel_light(
+        3.0f,6.0f,0.4f,0.2f,1.0f)==0.0f);
+    assert(world_cache_model_style_pixel_light(
+        5.0f,6.0f,0.4f,0.2f,0.5f)==0.0f);
+    assert(std::fabs(world_cache_model_style_pixel_light(
+        1.0f,6.0f,0.4f,0.2f,0.5f)-0.1f)<0.00001f);
     std::vector<std::array<float,3>> rgb(mesh.vertices.size(),{{1,1,1}});
     world_cache_draw_candidate lit_face{2U,mesh.surfaces[0].first_index,
         mesh.surfaces[0].count,mesh.surfaces[0].material,3};

@@ -50,9 +50,11 @@ void main() {
             vec3 delta=light_position_radius[i].xyz-cached_world_position;
             float dist=length(delta);
             float along=dot(normal,delta/max(dist,0.00001));
+            // Radius is only a cutoff: real falloff may reach zero first.
+            // A dynamic light must never SUBTRACT baked vertex lighting.
             if(dist<light_position_radius[i].w && along>0.0)
-                lit+=(light_intensity[i]-
-                      dist*light_attenuation)*along;
+                lit+=max(light_intensity[i]-
+                         dist*light_attenuation,0.0)*along;
             if(lit>=1.0)break;
         }
         float original_bright=max(clamp(base,0.0,1.0),

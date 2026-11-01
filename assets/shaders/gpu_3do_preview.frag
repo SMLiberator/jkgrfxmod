@@ -132,9 +132,11 @@ vec3 pixel_jk_diffuse_lighting()
         float along=dot(normal,delta/max(dist,0.00001));
         float range_distance=mode>=2.5
             ? dist : abs(dot(normal,delta));
+        // Radius can exceed the positive falloff range; no darkening
+        // of baked Gouraud colors is permitted in that outer region.
         if(range_distance<light_position_radius[i].w && along>0.0)
-            lit+=(light_intensity[i]-
-                  range_distance*attenuation_min)*along;
+            lit+=max(light_intensity[i]-
+                     range_distance*attenuation_min,0.0)*along;
         if(lit>=1.0)break;
     }
     float original_bright=max(clamp(base+pixel_light_state.y,0.0,1.0),

@@ -44,7 +44,9 @@ inline float world_cache_model_style_pixel_light(
     // Mirror gpu_3do_preview.frag::pixel_jk_diffuse_lighting().
     // World geometry uses a static face normal; models can interpolate
     // their vertex normals. Both use distance and Lambert incidence.
-    return (intensity-distance*attenuation)*incidence;
+    // Radius is a conservative cutoff, not necessarily the zero-falloff
+    // distance. Negative dynamic contribution corrupts baked lighting.
+    return std::max(0.0f,intensity-distance*attenuation)*incidence;
 }
 
 inline bool read_world_cache_camera_lights(
