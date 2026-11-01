@@ -55,6 +55,8 @@
 #include "gpu_3do_triangulation.hpp"
 #include "gpu_3do_cache_signature.hpp"
 #include "gpu_3do_colormap.hpp"
+#include "native_jk_palette_effects.hpp"
+#include "native_sector_palette_bridge.hpp"
 #include "thing_sector_tint.hpp"
 #include "jk_colormap_layout.hpp"
 #include "native_mat_mips.hpp"
@@ -7999,6 +8001,74 @@ std::vector<jkgm::spotlight_instance> jkgm::collect_spotlights_for_frame()
 }
 
 namespace {
+// This build's rdSetColorEffects has been independently signature-verified
+// by read_native_jk_hardware_color_effects(). Detour the *copy* of the
+// combined native palette effects, not its 32 original COG requests.
+// Native geometry then receives all other global effects unchanged.
+using native_color_effect_fn=int (__cdecl*)(jkgm::jk_hardware_color_effect *);
+native_color_effect_fn RealNativeColorEffects=
+    reinterpret_cast<native_color_effect_fn>(0x0043AE60U);
+bool native_sector_effect_hook_active=false;
+
+int __cdecl HookedNativeColorEffects(jkgm::jk_hardware_color_effect *incoming)
+{
+    if(!incoming || !jkgm::jk_palette_memory_readable(
+           incoming,sizeof(*incoming)))
+        return RealNativeColorEffects(incoming);
+    auto const read=[](uintptr_t addr,void *dst,size_t len)->bool {
+        if(!jkgm::jk_palette_memory_readable(
+               reinterpret_cast<void const *>(addr),len))return false;
+        std::memcpy(dst,reinterpret_cast<void const *>(addr),len);
+        return true;
+    };
+    auto const probe=jkgm::probe_native_sector_palette(
+        read,reinterpret_cast<uintptr_t>(incoming));
+    jkgm::native_sector_palette_mode().store(
+        !probe.layout_valid?0:(probe.sector_request_active?2:1),
+        std::memory_order_relaxed);
+    static int last_mode=-1;
+    int const mode=jkgm::native_sector_palette_mode().load(
+        std::memory_order_relaxed);
+    if(mode!=last_mode) {
+        last_mode=mode;
+        LOG_INFO("SECTOR PALETTE bridge mode=",mode,
+                 " (0=unverified 1=freed 2=active)",
+                 " sector_slot=",probe.sector_slot);
+    }
+    if(!probe.layout_valid || !probe.sector_request_active)
+        return RealNativeColorEffects(incoming);
+    jkgm::jk_hardware_color_effect neutral=*incoming;
+    for(int ch=0;ch<3;++ch)
+        neutral.tint[ch]-=probe.sector_tint[ch];
+    // The native function copies all 40 bytes. It does NOT retain pointer.
+    // All other requests' tint, RGB filters/adds and fade stay intact.
+    return RealNativeColorEffects(&neutral);
+}
+
+bool request_native_sector_color_hook()
+{
+    if(!the_config || !the_config->world_cache_preview ||
+       !the_config->use_model_cache)return false;
+    constexpr uint8_t signature[]{
+        0x56,0x8b,0x74,0x24,0x08,0x57,0xb9,0x0a,
+        0x00,0x00,0x00,0xbf,0x00,0x9e,0x88,0x00
+    };
+    void const *fn=reinterpret_cast<void const *>(0x0043AE60U);
+    if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=0x00400000U ||
+       !jkgm::jk_palette_memory_readable(fn,sizeof(signature)) ||
+       std::memcmp(fn,signature,sizeof(signature))!=0) {
+        LOG_WARNING("SECTOR PALETTE hook skipped: unknown native rdSetColorEffects");
+        return false;
+    }
+    LONG const err=DetourAttach(&(PVOID&)RealNativeColorEffects,
+                                HookedNativeColorEffects);
+    if(err!=NO_ERROR) {
+        LOG_WARNING("SECTOR PALETTE native hook failed: ",err);
+        return false;
+    }
+    return true;
+}
+
 using sith_sound_load_fn=void* (__cdecl*)(char*,int);
 sith_sound_load_fn RealSithSoundLoad=
     reinterpret_cast<sith_sound_load_fn>(0x004EF440U);
@@ -8134,6 +8204,7 @@ bool attach_hooks()
         LOG_WARNING("Native MAT mip override disabled: unsupported executable");
     }
 
+    bool const sector_color_hook_requested=request_native_sector_color_hook();
     bool const sprite_hooks_requested=request_native_sprite_hooks();
     bool const particle_hooks_requested=request_native_particle_hooks();
     bool const mesh_collision_hook_requested=request_type2_intersection_hook();
@@ -8153,6 +8224,11 @@ bool attach_hooks()
         pending_sprite_flare_spans.clear();
         flare_draw_trace_count=flare_face_trace_count=flare_alpha_trace_count=
             flare_flush_trace_count=flare_bad_face_trace_count=0U;
+    }
+    if(error==NO_ERROR && sector_color_hook_requested) {
+        native_sector_effect_hook_active=true;
+        LOG_INFO("SECTOR PALETTE global tint isolation attached; "
+                 "other JK color effects unchanged");
     }
     if(error==NO_ERROR) native_sprite_hook_active=sprite_hooks_requested;
     if(error==NO_ERROR) native_particle_hook_active=particle_hooks_requested;
@@ -8239,6 +8315,12 @@ bool detach_hooks()
         sprite_world_geometry.clear();
     }
     // Detach injected functions
+    if(native_sector_effect_hook_active) {
+        DetourDetach(&(PVOID&)RealNativeColorEffects,
+                     HookedNativeColorEffects);
+        native_sector_effect_hook_active=false;
+        jkgm::native_sector_palette_mode().store(0,std::memory_order_relaxed);
+    }
     if(native_compressed_sound_hook_active) {
         DetourDetach(&(PVOID&)RealSithSoundLoad,HookedSithSoundLoad);
         native_compressed_sound_hook_active=false;
