@@ -15,11 +15,34 @@ struct world_cache_light_sample {
 };
 
 // Validated live rdCamera lights; never turn an unsupported light into a
-// fake omni. Missing/overflowing descriptors fall back to native lighting.
+// fake omni. JK rdLight +0x28 is minRadius (for 3DO Thing culling);
+// +0x2c is maxRadius, the actual world light cutoff.
 struct world_cache_point_light {
     std::array<float,3> position{};
     float radius=0.0f,intensity=0.0f;
 };
+// The renderer must never change between stale native per-vertex light
+// values and pixel lighting merely because the first light was added.
+// JK's world dynamic-light scratch buffer can retain previous-frame data
+// when sithRender_BuildDynamicLights() is not called. A validated camera
+// with zero lights is still a valid *zero dynamic light* pixel frame.
+inline bool world_cache_use_pixel_lights(bool camera_ready)
+{
+    return camera_ready;
+}
+
+inline float world_cache_radial_light(float distance,float max_radius,
+                                       float intensity,float attenuation)
+{
+    if(!std::isfinite(distance) || !std::isfinite(max_radius) ||
+       !std::isfinite(intensity) || !std::isfinite(attenuation) ||
+       distance>=max_radius || distance<0.0f)
+        return 0.0f;
+    // sithRender_BuildDynamicLights: distance-only world-vertex falloff.
+    // No normal-facing term (unlike 3DO Thing lighting).
+    return std::max(intensity-distance*attenuation,0.0f);
+}
+
 inline bool read_world_cache_camera_lights(
     decal_native_read const &read,uintptr_t camera_global,
     std::vector<world_cache_point_light> &out,
@@ -50,7 +73,7 @@ inline bool read_world_cache_camera_lights(
            !read(uintptr_t(ptr)+4U,&type,4) ||
            !read_decal_u32(read,uintptr_t(ptr)+8U,enabled) ||
            !read(uintptr_t(ptr)+0x18U,&light.intensity,4) ||
-           !read(uintptr_t(ptr)+0x28U,&light.radius,4) ||
+           !read(uintptr_t(ptr)+0x2cU,&light.radius,4) ||
            id>=64 || !std::isfinite(light.intensity) ||
            !std::isfinite(light.radius))return false;
         if(!enabled || light.intensity<=0.0f || light.radius<=0.0f)
