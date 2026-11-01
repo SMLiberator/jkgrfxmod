@@ -9,6 +9,7 @@
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_alpha.hpp"
 #include "native_jk_palette_effects.hpp"
+#include "native_sector_palette_bridge.hpp"
 #include "thing_sector_tint.hpp"
 #include "retro_palette.hpp"
 #include "jk_colormap_layout.hpp"
@@ -2966,8 +2967,14 @@ namespace jkgm {
                 camera_sector_tint[0]==0.0f &&
                 camera_sector_tint[1]==0.0f &&
                 camera_sector_tint[2]==0.0f;
-            bool const can_replace_sector_tint=camera_tint_valid &&
-                (effect.active || camera_tint_zero);
+            // Native rdSetColorEffects has already removed the validated
+            // sector request from the shared hardware effect. Everything
+            // else (filters, fade, RGB adds, other tints) remains global.
+            // Only apply local tint when the native bridge confirms that
+            // this exact request was active. When COG frees it, mode==1.
+            int const sector_palette_mode=native_sector_palette_mode().load(
+                std::memory_order_relaxed);
+            bool const can_replace_sector_tint=sector_palette_mode==2;
             if(the_config->profile_renderer &&
                !transparent && !post_exempt && !decals_only &&
                gpu_3do_present_serial%120U==0U) {
@@ -2985,6 +2992,7 @@ namespace jkgm {
                          " replace=",can_replace_sector_tint?1:0,
                          " eligible=",eligible," local_valid=",valid,
                          " slot=",camera_slot,
+                         " bridge_mode=",sector_palette_mode,
                          " effect_active=",effect.active?1:0);
                 LOG_INFO("THING SECTOR TINT sample camera_rgb=",
                          camera_sector_tint[0],",",camera_sector_tint[1],
@@ -3283,8 +3291,7 @@ namespace jkgm {
                     std::array<float,3> tint_delta{};
                     if(can_replace_sector_tint && inst.sector_tint_valid &&
                        !inst.camera_hud && !inst.is_projected_decal)
-                        tint_delta=jk_thing_tint_delta(
-                            inst.sector_tint,camera_sector_tint);
+                        tint_delta=inst.sector_tint;
                     prog.set_thing_sector_tint_delta(tint_delta);
                     std::array<float,3> local_eye{};
                     bool const has_eye=gpu_3do_local_eye(m,local_eye);
@@ -6167,6 +6174,14 @@ namespace jkgm {
                 ordered.push_back(&candidate);
             }
             if(ordered.empty())return;
+            // FreeColorEffect(sector slot) disables the native request.
+            // Honor that for all cached world surfaces, too, without
+            // touching their authored/COG SithSector.tint values.
+            if(native_sector_palette_mode().load(
+                   std::memory_order_relaxed)==1)
+                std::fill(cache.frame_sector_tint.begin(),
+                          cache.frame_sector_tint.end(),
+                          std::array<float,3>{{0.0f,0.0f,0.0f}});
             // One streaming upload of live RGB lighting. World position,
             // UV, normal and index buffers remain entirely immutable.
             gl::bind_buffer(gl::buffer_bind_target::array,cache.lighting);
