@@ -137,35 +137,33 @@ int main()
     std::vector<float> dynamic_lights;
     assert(read_world_cache_dynamic_lights(
         light_read,light_world,8U,dynamic_lights));
-    // Native rdLight uses two DIFFERENT culling distances:
-    // +0x28 minRadius (Thing lighting), +0x2c maxRadius (world lights).
-    // A previously cached-world implementation read minRadius, cutting
-    // off point lights too early. A zero-light camera is still eligible
-    // for stable pixel lighting (no stale aVertDynamicLights fallback).
+    // Both GPU pixel renderers MUST share the same dynamic-light model.
+    // Explicitly make attenuationMin differ from attenuationMax and
+    // minRadius differ from maxRadius to catch the previous regression.
+    // Zero lights must also preserve the pixel path (stable baked colors).
     constexpr uintptr_t cam_global=light_base+0x1800U;
     constexpr uintptr_t cam=light_base+0x1900U;
     constexpr uintptr_t native_light=light_base+0x2200U;
     lu32(cam_global,uint32_t(cam));
     lf32(cam+0x54U,0.20f);
     lu32(cam+0x58U,0U);
-    lf32(cam+0x45cU,0.90f); // attenuationMin: 3DO Things only
-    lf32(cam+0x460U,0.50f); // attenuationMax: JK world surfaces
+    lf32(cam+0x45cU,0.20f); // same attenuationMin as cached 3DOs
+    lf32(cam+0x460U,0.50f); // native Gouraud/world value, NOT pixel path
     std::vector<world_cache_point_light> radial_lights;
     float cam_ambient=0.0f,cam_attenuation=0.0f;
     assert(read_world_cache_camera_lights(
         light_read,cam_global,radial_lights,
         cam_ambient,cam_attenuation));
-    assert(radial_lights.empty());
-    assert(cam_attenuation==0.50f); // NOT attenuationMin 0.90
-    assert(world_cache_use_pixel_lights(true)); // no-light frame
+    assert(radial_lights.empty() && cam_attenuation==0.20f);
+    assert(world_cache_use_pixel_lights(true));
     lu32(cam+0x58U,1U);
     lu32(cam+0x5cU,uint32_t(native_light));
     lu32(native_light,0U); // position index into rdCamera
-    lu32(native_light+4U,0U); // valid omni
+    lu32(native_light+4U,0U); // valid point light
     lu32(native_light+8U,1U); // enabled
-    lf32(native_light+0x18U,2.0f);
-    lf32(native_light+0x28U,1.0f); // minRadius: MUST NOT be used
-    lf32(native_light+0x2cU,4.0f); // maxRadius: world cutoff
+    lf32(native_light+0x18U,0.8f);
+    lf32(native_light+0x28U,4.0f); // same minRadius as cached 3DOs
+    lf32(native_light+0x2cU,1.6f); // native Gouraud/world cutoff
     lf32(cam+0x15cU,0.0f);
     lf32(cam+0x160U,0.0f);
     lf32(cam+0x164U,0.0f);
@@ -174,22 +172,21 @@ int main()
         cam_ambient,cam_attenuation));
     assert(radial_lights.size()==1U);
     assert(radial_lights[0].radius==4.0f &&
-           radial_lights[0].intensity==2.0f);
-    assert(world_cache_use_pixel_lights(true)); // one-light frame
-    assert(world_cache_radial_light(0.5f,4.0f,2.0f,0.5f)>1.7f);
-    assert(world_cache_radial_light(2.0f,4.0f,2.0f,0.5f)==1.0f);
-    assert(world_cache_radial_light(4.0f,4.0f,2.0f,0.5f)==0.0f);
-    assert(world_cache_radial_light(50.0f,4.0f,2.0f,0.5f)==0.0f);
-    // No abrupt inner/outer rings for unsaturated lights: attenuation
-    // progresses continuously until the physically consistent maxRadius.
-    assert(std::fabs(world_cache_radial_light(
-        0.0f,4.0f,0.8f,0.2f)-0.8f)<0.00001f);
-    assert(std::fabs(world_cache_radial_light(
-        1.0f,4.0f,0.8f,0.2f)-0.6f)<0.00001f);
-    assert(std::fabs(world_cache_radial_light(
-        2.0f,4.0f,0.8f,0.2f)-0.4f)<0.00001f);
-    assert(std::fabs(world_cache_radial_light(
-        3.0f,4.0f,0.8f,0.2f)-0.2f)<0.00001f);
+           radial_lights[0].intensity==0.8f);
+    assert(cam_attenuation==0.20f);
+    assert(world_cache_use_pixel_lights(true));
+    auto model_pixel=[](float dist,float incidence) {
+        return world_cache_model_style_pixel_light(
+            dist,4.0f,0.8f,0.2f,incidence);
+    };
+    assert(std::fabs(model_pixel(0.0f,1.0f)-0.8f)<0.00001f);
+    assert(std::fabs(model_pixel(1.0f,1.0f)-0.6f)<0.00001f);
+    assert(std::fabs(model_pixel(2.0f,1.0f)-0.4f)<0.00001f);
+    assert(std::fabs(model_pixel(3.0f,1.0f)-0.2f)<0.00001f);
+    assert(model_pixel(4.0f,1.0f)==0.0f);
+    assert(model_pixel(20.0f,1.0f)==0.0f);
+    assert(model_pixel(2.0f,-1.0f)==0.0f); // back-facing
+    assert(std::fabs(model_pixel(2.0f,0.5f)-0.2f)<0.00001f);
     std::vector<std::array<float,3>> rgb(mesh.vertices.size(),{{1,1,1}});
     world_cache_draw_candidate lit_face{2U,mesh.surfaces[0].first_index,
         mesh.surfaces[0].count,mesh.surfaces[0].material,3};
