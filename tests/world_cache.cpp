@@ -561,6 +561,14 @@ int main()
     solid_membership[7U]=1U;
     assert(compare_world_cache_candidate_sets(
         full,solid_membership,sector).exact);
+    // UV offsets are irrelevant to GeoMode 3, even if no UV storage
+    // exists and the stale native offset contains nonfinite values.
+    float const invalid_uv=std::numeric_limits<float>::quiet_NaN();
+    std::memcpy(storage.data()+7U*0x5cU+0x3cU,&invalid_uv,4U);
+    solid_stats=collect_world_cache_draw_candidates(read,base,solid_mesh,full);
+    assert(solid_stats.candidates==2U && solid_stats.unreadable==0U &&
+           full[1].uv_offset[0]==0.0f && full[1].uv_offset[1]==0.0f);
+    std::memset(storage.data()+7U*0x5cU+0x3cU,0,8U);
     // GeoMode is live metadata: COG switches do not rebuild the VBO.
     set_u32(7,0x1c,4U);
     auto textured_stats=collect_world_cache_draw_candidates(

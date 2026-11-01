@@ -84,7 +84,11 @@ inline void append_world_cache_candidate(
     std::memcpy(&cel,raw.data()+0x28,4);   // +0x38 wall cel
     std::array<float,2> uv_offset{};
     std::memcpy(uv_offset.data(),raw.data()+0x2c,8); // +0x3c native UV offset
-    if(!std::isfinite(uv_offset[0]) || !std::isfinite(uv_offset[1])) {
+    // Mode 3 has no UV array; an unused native offset may be stale or
+    // nonfinite. Never reject its solid MAT color on texture-only data.
+    if(geo==3U)uv_offset={{0.0f,0.0f}};
+    else if(!std::isfinite(uv_offset[0]) ||
+            !std::isfinite(uv_offset[1])) {
         ++stats.unreadable;return;
     }
     if(uintptr_t(material)!=range.material)++stats.changed_material;
