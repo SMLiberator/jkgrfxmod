@@ -176,6 +176,9 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , material_tint(gl::get_uniform_location(the_program,"material_tint"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
     , light_attenuation(gl::get_uniform_location(the_program,"light_attenuation"))
+    , jk_color_filter(gl::get_uniform_location(the_program,"jk_color_filter"))
+    , jk_color_tint(gl::get_uniform_location(the_program,"jk_color_tint"))
+    , jk_color_add_fade(gl::get_uniform_location(the_program,"jk_color_add_fade"))
 {
     for(unsigned i=0;i<16U;++i) {
         light_position_radius.push_back(gl::get_uniform_location(
@@ -206,6 +209,13 @@ void jkgm::shaders::world_cache_preview_shader::set_texture(
     gl::set_uniform_vector(material_tint,tint);
 }
 
+void jkgm::shaders::world_cache_preview_shader::set_jk_color_effects(
+    point<4,float> filter,point<4,float> tint,point<4,float> add_fade)
+{
+    gl::set_uniform_vector(jk_color_filter,filter);
+    gl::set_uniform_vector(jk_color_tint,tint);
+    gl::set_uniform_vector(jk_color_add_fade,add_fade);
+}
 void jkgm::shaders::world_cache_preview_shader::set_lights(
     std::vector<world_cache_point_light> const &lights,float attenuation)
 {
