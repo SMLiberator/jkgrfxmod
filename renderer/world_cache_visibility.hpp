@@ -1,6 +1,7 @@
 #pragma once
-// Phase 1: read-only world draw staging. Full scan remains an independent
-// parity baseline for sector-first staging; the native renderer is unchanged.
+// Read-only world candidate staging from native SithWorld sectors/adjoins.
+// Full scans remain an independent visibility parity baseline; the separate
+// GPU-first opaque draw and native-batch isolation live in renderer.cpp.
 #include "world_cache.hpp"
 #include "gpu_3do_frustum.hpp"
 #include <array>

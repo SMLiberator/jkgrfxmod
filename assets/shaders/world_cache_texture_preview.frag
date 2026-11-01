@@ -1,8 +1,9 @@
 #version 330 core
 // GPU-first opaque SithWorld G-buffer. Native depth-tested fallback follows.
-// Static JK lighting is interpolated at vertices; the dynamic difference
-// is evaluated per fragment without double-counting native vertex lights.
-// MotS RGB light arrays and extra global light are not implemented yet.
+// Static JK lighting is evaluated at vertices and interpolated in RGB.
+// In pixel mode, a shared GLSL dynamic-light contribution is composed per
+// fragment without double-counting native per-vertex dynamic lights.
+// MotS RGB light arrays are not yet decoded; JK global extra is sampled.
 in vec2 material_uv;
 in vec3 cached_view_normal;
 in vec3 cached_lit_rgb;

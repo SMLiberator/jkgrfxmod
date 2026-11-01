@@ -1,66 +1,67 @@
-# Native world GPU cache: phase 0 (candidate mesh probe)
+# Cached SithWorld GPU rendering (experimental)
 
-This is deliberately a **non-rendering** prototype. It verifies that JKGM
-can retain native SithWorld surface geometry in OpenGL buffers without
-changing JK's existing sector visibility, Direct3D execute buffers, world
-light colors, sky and portal behavior, material animation, or HOM.
+The opt-in cached-world renderer submits eligible SithWorld architecture through
+persistent OpenGL geometry and a GPU-first opaque G-buffer pass. It is a
+rendering path, **not** the old non-rendering `world_cache_probe` prototype.
 
 Enable in `jkgm.json`:
 
 ```json
-"world_cache_probe": true,
-"profile_renderer": true
+{
+  "world_cache_preview": true,
+  "profile_renderer": true
+}
 ```
 
-It is independent of `use_model_cache`, which only controls cached 3DOs.
-The probe defaults to `false`.
+`world_cache_preview` defaults to `false`. It is independent of
+`use_model_cache` (which controls 3DO mesh caching). Both can be enabled.
+`profile_renderer` is optional and provides periodic WORLD CACHE statistics.
 
-At first successful world snapshot, watch for:
+## Geometry and visibility
 
-```
-WORLD CACHE phase0 built ... surfaces=... uv_ready=... missing_uv=...
-                        vertices=... triangles=... bytes=... revision=...
-                        mode=nonrendering_native_world_unchanged
-```
+- The world cache retains validated static surface vertices, MAT UVs, flat
+  surface normals and indexed triangles in GPU buffers. Surface IDs, native
+  material pointers and candidate bounds remain associated with each range.
+- Visibility/candidate staging uses SithWorld sector/adjoin information.
+  Native sector visibility and HOM conventions remain important inputs.
+- Live surface settings, sector tint, MAT/cel selection and lighting are
+  sampled at render time rather than frozen into the static geometry.
+- The cached pass currently targets supported opaque materials. Transparency,
+  sky/portal geometry, special materials, animated materials and invalid
+  resources are not generally handled by the opaque world cache.
 
-While profiling is enabled, every 120 rendered frames it also reports
-live eligible/hidden/unreadable surfaces and detected changed MAT cels or
-material pointers. None of those surfaces is submitted to the visible
-framebuffer by this prototype. The original native world continues rendering.
+**Caution:** The current GPU-first isolation path can suppress native
+mixed world batches when a valid cached-world candidate set exists. Do not
+assume every unsupported surface is automatically restored by a native
+fallback: missing or duplicated surfaces remain parity-test targets. The
+world renderer is still experimental.
 
-## What is cached
+## Dynamic and baked lighting
 
-- The same validated per-world static geometry snapshot used by projected
-  decals and the sun/spotlight shadows, including its stable SithSurface
-  index and source rdMaterial reference
-- Per-vertex world positions, available MAT UVs, and flat face normals
-- Persistent OpenGL indexed VBO/EBO/VAO with bounded allocations
-- Per-frame *optional diagnostic sampling* of live GeoMode and material-cel
-  state, not baked into the static mesh
+`gpu_pixel_lighting` is the single opt-in pixel-lighting method switch for
+**both** supported GPU-cached world and 3DO geometry:
 
-Only the existing receiver subset is included. Passable portals, sky
-surfaces, material-less surfaces and any other faces intentionally excluded
-by the shadow/decal snapshot remain native. Missing-UV surfaces may be
-stored for audit but are NOT considered ready for visible GPU rendering.
+- `false` (default): preserve JK-style vertex Gouraud lighting. Cached
+  world faces use native JK's per-world-vertex dynamic-light buffer,
+  combined with live authored surface lighting.
+- `true`: interpolate the original baked world vertex RGB at rasterization
+  and evaluate dynamic point lights per pixel, when a validated camera
+  light list is available. A validated list with zero lights contributes
+  zero rather than accidentally reusing stale vertex-light data.
 
-## Limitations and planned next step
+The world and GPU-cached 3DO **pixel** paths use the editable formulas in
+`assets/shaders/jk_point_lighting.glsl`. This source is included at shader
+load time. Per-pixel dynamic light calculations do not replace authored
+baked Gouraud colors; native non-cached geometry remains unaffected.
 
-The existing snapshot's `matches()` recognizes world pointer/topology
-changes, but not arbitrary in-place modifications of world vertex positions,
-UVs or material arrays. Such changes need explicit revision tracking or
-dirty-range updates before the cache can become an authoritative visible
-renderer. Live GeoMode and MAT cel changes are detected for diagnostics,
-not yet applied to GPU draws.
+## Diagnostics and limitations
 
-Phase 1 is to extract **visible-surface selection** from JK's sector/adjoin
-traversal without doing the rest of the CPU polygon pipeline. Use those
-surface IDs with this immutable index buffer and current material/lighting
-metadata to submit only supported opaque world surfaces; keep unsupported
-faces on the native path. Prevent double-rendering, preserve HOM and verify
-visual parity before extending coverage to alpha, sky, animation or
-pixel-point lighting.
+Set `profile_renderer` to inspect `WORLD CACHE` logs for current
+candidate/draw counts, lighting fallback, GPU pixel-path validity,
+and unresolved or special materials. No single counter proves pixel parity.
 
-**Important:** Enabling `world_cache_probe` itself cannot improve
-framerate; it allocates extra GPU storage for diagnostic validation.
-The future `use_world_cache` visible-rendering switch should be introduced
-only after surface-level visibility and single-path draw substitution work.
+Static geometry caching assumes that in-place changes to world vertex
+positions, UVs or topology are tracked or cause a suitable cache rebuild.
+Special surface paths and complete native visual parity are still work in
+progress. Preserve an A/B test with `world_cache_preview=false` when
+investigating missing faces, HOM or lighting differences.

@@ -32,23 +32,6 @@ inline bool world_cache_use_pixel_lights(bool enabled,bool camera_ready)
     return enabled && camera_ready;
 }
 
-inline float world_cache_model_style_pixel_light(
-    float distance,float radius,float intensity,float attenuation,
-    float incidence)
-{
-    if(!std::isfinite(distance) || !std::isfinite(radius) ||
-       !std::isfinite(intensity) || !std::isfinite(attenuation) ||
-       !std::isfinite(incidence) || distance<0.0f ||
-       distance>=radius || incidence<=0.0f)
-        return 0.0f;
-    // Mirror gpu_3do_preview.frag::pixel_jk_diffuse_lighting().
-    // World geometry uses a static face normal; models can interpolate
-    // their vertex normals. Both use distance and Lambert incidence.
-    // Radius is a conservative cutoff, not necessarily the zero-falloff
-    // distance. Negative dynamic contribution corrupts baked lighting.
-    return std::max(0.0f,intensity-distance*attenuation)*incidence;
-}
-
 inline bool read_world_cache_camera_lights(
     decal_native_read const &read,uintptr_t camera_global,
     std::vector<world_cache_point_light> &out,

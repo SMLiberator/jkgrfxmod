@@ -1,4 +1,4 @@
-"""Source-level checks for opt-in GPU-cached 3DO pixel diffuse lighting.
+"""Source and parity checks for GPU-cached world and 3DO pixel diffuse lights.
 
 This is not a GLSL compiler or an in-game visual regression. It validates
 stage interfaces and the explicit no-double-lighting switch. The optional
@@ -114,7 +114,30 @@ for left,right in ((0.0,1.0),(0.1,0.9),(0.3,0.8)):
             model=point_compose(baked,added,(1.0,)*3)
             assert world==model
             assert all(a>=b for a,b in zip(world,baked))
+# Preserve the previous C++ helper's numeric regression cases here, where
+# they are paired with the shader-source assertions for the real formula.
+assert "range_distance>=radius" in shared
+assert "max(intensity-range_distance*attenuation,0.0)*incidence" in shared
+assert "max(dot(surface_normal,delta/max(dist,0.00001)),0.0)" in shared
+for distance,incidence,want in (
+    (0.0,1.0,0.8),(1.0,1.0,0.6),(2.0,1.0,0.4),
+    (3.0,1.0,0.2),(4.0,1.0,0.0),(20.0,1.0,0.0),
+    (2.0,-1.0,0.0),(2.0,0.5,0.2)
+):
+    assert abs(point_sample(distance,4.0,0.8,0.2,incidence)-want)<1e-6
+# Cutoff radius can exceed the positive-falloff distance. In that
+# region lights must NEVER subtract baked Gouraud intensity.
 assert point_sample(3.0,6.0,0.4,0.2,1.0)==0.0
+assert point_sample(5.0,6.0,0.4,0.2,0.5)==0.0
+assert abs(point_sample(1.0,6.0,0.4,0.2,0.5)-0.1)<1e-6
+assert "world_cache_model_style_pixel_light(" not in (
+    root / "renderer/world_cache_lighting.hpp").read_text(encoding="utf-8")
+assert not (root / "assets/shaders/menu.vert").exists()
+assert not (root / "assets/shaders/world_cache_wireframe.frag").exists()
+# The world vertex shader is ACTIVE even though its filename says wireframe.
+assert 'root/"shaders/world_cache_wireframe.vert"' in program
+assert 'root/"shaders/world_cache_texture_preview.frag"' in program
+
 
 # The glslangValidator CLI cannot expand our runtime-local GLSL includes.
 # Materialize equivalent standalone sources for optional compile/link checks.

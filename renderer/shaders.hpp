@@ -57,8 +57,9 @@ namespace jkgm {
             void set_menu_sampler(int sampler);
         };
 
-        // GPU world G-buffer shader; legacy wireframe variant is retained
-        // for internal diagnostics but no longer enabled by preview.
+        // GPU-first cached-world G-buffer shader. Its vertex filename
+        // retains 'wireframe' for compatibility; no wireframe fragment
+        // debug shader is loaded.
         class world_cache_preview_shader : public opengl_shader {
             gl::uniform_location_id view_right,view_forward,view_up,view_origin;
             gl::uniform_location_id projection;

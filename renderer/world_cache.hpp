@@ -1,9 +1,8 @@
 #pragma once
-// Phase 0 of native SithWorld visible-geometry caching.
-// This is an immutable geometry candidate cache, NOT yet a replacement for
-// JK's sector/adjoin visibility, dynamic world lighting or transparency.
-// The native execute-buffer renderer remains authoritative until parity
-// (including sky, portals, material-less faces, and HOM) is demonstrated.
+// Persistent native SithWorld geometry snapshot for opt-in GPU-first
+// opaque world rendering. Native sector visibility/HOM feed candidate
+// selection; unsupported surface types still need parity verification.
+// World lighting and material state are sampled live, never frozen here.
 #include "sprite_decal_world_cache.hpp"
 #include <array>
 #include <cmath>
@@ -28,7 +27,7 @@ struct world_cache_surface_range {
     uint32_t surface_flags=0; // snapshot only; live flags govern drawing
     bool solid_adjoin=false;
     bool has_uv=false;
-    // Immutable world-space bounds for conservative Phase-1 frustum tests.
+    // Immutable world-space bounds for conservative candidate frustum tests.
     std::array<float,3> bounds_min{},bounds_max{};
 };
 
