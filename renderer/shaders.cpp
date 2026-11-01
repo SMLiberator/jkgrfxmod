@@ -4,6 +4,7 @@
 #include "base/memory_block.hpp"
 #include "common/error_reporter.hpp"
 #include "glad/gl.h"
+#include <sstream>
 
 namespace jkgm {
 
@@ -68,41 +69,81 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
 }
 
     namespace {
-        gl::shader compile_shader_from_file(fs::path const &filename, gl::shader_type type)
+        // GLSL 3.3 has no portable #include. Expand local quoted includes
+        // before submitting source to GL, keeping formulas as editable GLSL.
+        // Only same-directory names are accepted; avoid cyclic includes.
+        std::string load_shader_source(fs::path const &filename,
+                                       unsigned depth=0)
+        {
+            if(depth>8U) {
+                report_fatal_message(str(fmt(
+                    "JkGfxMod shader include nesting is too deep: ",
+                    filename.generic_string())));
+            }
+            memory_block mb;
+            try {
+                auto input=make_file_input_stream(filename);
+                memory_output_block mob(&mb);
+                input->copy_to(&mob);
+            }
+            catch(std::exception const &e) {
+                report_fatal_message(str(fmt(
+                    "JkGfxMod could not open an essential shader file: ",
+                    filename.generic_string(),"\n",e.what())));
+            }
+            std::istringstream lines(mb.str());
+            std::string line,output;
+            while(std::getline(lines,line)) {
+                auto const p=line.find_first_not_of(" \t");
+                if(p!=std::string::npos &&
+                   line.compare(p,8,"#include")==0 &&
+                   (p+8==line.size() || line[p+8]==' ' ||
+                    line[p+8]=='\t')) {
+                    auto const first=line.find('"',p+8);
+                    auto const last=first==std::string::npos
+                        ? std::string::npos : line.find('"',first+1);
+                    if(first==std::string::npos ||
+                       last==std::string::npos || last==first+1) {
+                        report_fatal_message(str(fmt(
+                            "Malformed shader #include in ",
+                            filename.generic_string(),": ",line)));
+                    }
+                    auto const name=line.substr(first+1,last-first-1);
+                    if(name=="." || name==".." ||
+                       name.find('/')!=std::string::npos ||
+                       name.find('\\')!=std::string::npos ||
+                       name.find(':')!=std::string::npos) {
+                        report_fatal_message(str(fmt(
+                            "Only local shader includes are permitted in ",
+                            filename.generic_string(),": ",name)));
+                    }
+                    output+=load_shader_source(filename.parent_path()/name,
+                                               depth+1U);
+                } else {
+                    output+=line;
+                    output+='\n';
+                }
+            }
+            return output;
+        }
+
+        gl::shader compile_shader_from_file(fs::path const &filename,
+                                            gl::shader_type type)
         {
             diagnostic_context dc(filename.generic_string());
             gl::shader rv(type);
-
-            memory_block mb;
-
-            try {
-                auto fs = make_file_input_stream(filename);
-                memory_output_block mob(&mb);
-                fs->copy_to(&mob);
-            }
-            catch(std::exception const &e) {
-                report_fatal_message(str(fmt("JkGfxMod could not open an essential file and cannot "
-                                             "continue.\n\nDetails: Error while opening ",
-                                             filename.generic_string(),
-                                             "\n",
-                                             e.what())));
-            }
-
-            gl::shader_source(rv, make_string_span(""), make_span(mb.str()));
+            auto const source=load_shader_source(filename);
+            gl::shader_source(rv,make_string_span(""),make_span(source));
             gl::compile_shader(rv);
             if(!gl::get_shader_compile_status(rv)) {
-                auto err_str = gl::get_shader_info_log(rv);
+                auto err_str=gl::get_shader_info_log(rv);
                 report_fatal_message(str(fmt(
-                    "JkGfxMod failed to compile an essential shader. This may have happened "
-                    "because your "
-                    "graphics device does not support OpenGL 3.3, because the shader file has been "
-                    "incorrectly modified, or because of a bug in JkGfxMod.\n\nDetails: Failed to "
-                    "compile ",
-                    filename.generic_string(),
-                    "\n",
-                    err_str)));
+                    "JkGfxMod failed to compile an essential shader. This may have "
+                    "happened because your graphics device does not support "
+                    "OpenGL 3.3, because a shader file has been incorrectly "
+                    "modified, or because of a JkGfxMod bug.\n\nDetails: Failed "
+                    "to compile ",filename.generic_string(),"\n",err_str)));
             }
-
             return rv;
         }
 

@@ -18,6 +18,9 @@ uniform sampler2D albedo_map;
 uniform vec2 uv_scale,uv_scroll;
 uniform vec4 material_tint;
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
+
+#include "jk_point_lighting.glsl"
+
 vec3 world_jk_effect(vec3 raw,vec3 local_sector_tint)
 {
     vec3 v=pow(clamp(raw,0.0,1.0),vec3(1.0/1.8));
@@ -38,32 +41,24 @@ layout(location=3) out vec4 out_depth;
 void main() {
     vec3 albedo=clamp(texture(albedo_map,material_uv*uv_scale+uv_scroll).rgb*
                       material_tint.rgb,0.0,1.0);
-    // Baked JK vertex lighting is gamma-corrected BEFORE interpolation.
-    // An independently interpolated raw vertex-intensity baseline is
-    // not equivalent, and using it to compute pixel-light differences
-    // imprints baked-light gradients onto dynamic lighting (false bands).
-    // Keep baked RGB untouched; accumulate point lights independently.
+    // Keep authored Gouraud/sector lighting, already interpolated in RGB.
+    // The same GLSL helpers calculate pixel light for both world and 3DO.
     vec3 lighting=cached_lit_rgb;
     if(cached_light_state.z>2.5 && num_lights>0) {
         float added=0.0;
         vec3 normal=normalize(cached_world_normal);
         for(int i=0;i<num_lights;i++) {
             vec3 delta=light_position_radius[i].xyz-cached_world_position;
-            float dist=length(delta);
-            float along=dot(normal,delta/max(dist,0.00001));
-            if(dist<light_position_radius[i].w && along>0.0)
-                added+=max(light_intensity[i]-
-                           dist*light_attenuation,0.0)*along;
+            added+=jk_point_sample(delta,normal,light_position_radius[i].w,
+                                   light_intensity[i],light_attenuation,
+                                   false);
             if(added>=1.0)break;
         }
         if(added>0.0) {
-            // The same live JK sector/palette transforms tint dynamic
-            // light, but never depend on the authored vertex brightness.
-            // Subtract the transform's black response to neutralize any
-            // global additive/fade term in the isolated light channel.
-            vec3 white=world_jk_effect(vec3(1.0),cached_sector_tint);
-            vec3 black=world_jk_effect(vec3(0.0),cached_sector_tint);
-            lighting+=min(added,1.0)*max(white-black,vec3(0.0));
+            vec3 light_color=max(
+                world_jk_effect(vec3(1.0),cached_sector_tint)-
+                world_jk_effect(vec3(0.0),cached_sector_tint),vec3(0.0));
+            lighting=jk_point_compose(lighting,added,light_color);
         }
     }
     lighting=clamp(lighting,0.0,1.0);

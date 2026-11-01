@@ -75,11 +75,11 @@ uniform float attenuation_min;
 in vec3 local_fragment_position;
 in vec3 local_fragment_normal;
 
-// The vertex shader still performs baked lighting and JK color effects
-// BEFORE raster interpolation. This helper reconstructs the *difference*
-// caused by native point lights, not the static/base color itself. Replacing
-// static lighting with a fragment calculation changes the appearance of
-// distant models because pow(gamma, vertex color) is nonlinear.
+#include "jk_point_lighting.glsl"
+
+// Evaluate a receiver's untinted-to-tinted response at a given brightness.
+// Called at white and black to obtain a light color independently of baked
+// brightness. Gouraud/static shading itself stays in the vertex shader.
 vec3 pixel_jk_color_at_brightness(float bright)
 {
     vec3 result=vec3(pow(clamp(bright,0.0,1.0),1.8)) *
@@ -100,18 +100,15 @@ vec3 pixel_jk_color_at_brightness(float bright)
     return result;
 }
 
-// The unlit/static vertex result is the exact same interpolated jk_lit_rgb
-// used by the native Gouraud path. A light outside its actual fragment
-// influence must leave that base untouched, even if JK's conservative mesh
-// radius caused the light to be included in the Thing's light list.
+// The baked vertex color stays authoritative. Dynamic lighting is evaluated
+// with precisely the same sample and composition formulas as world geometry.
+// 3DO-specific logic is limited to local-space transformations and light mode.
 vec3 pixel_jk_diffuse_lighting()
 {
     float mode=pixel_light_state.z>3.5 ? 1.0 :
                min(pixel_light_state.z,effective_light_mode);
     if(mode<1.5 || num_lights==0) return jk_lit_rgb;
 
-    float base=mode>=2.5 ? pixel_light_state.x : 0.0;
-    float lit=base;
     vec3 anchor=mode>=2.5 ? local_fragment_position
                           : pixel_light_face_anchor;
     vec3 normal=normalize(mode>=2.5 ? local_fragment_normal
@@ -123,33 +120,22 @@ vec3 pixel_jk_diffuse_lighting()
         normal=normalize(sign(determinant)*
             (cr*normal.x+cf*normal.y+cu*normal.z));
     }
+    float added=0.0;
     for(int i=0;i<num_lights;i++) {
         vec3 delta=light_position_radius[i].xyz-anchor;
         if(nonrigid_light_transform!=0)
             delta=view_right.xyz*delta.x+
                   view_forward.xyz*delta.y+view_up.xyz*delta.z;
-        float dist=length(delta);
-        float along=dot(normal,delta/max(dist,0.00001));
-        float range_distance=mode>=2.5
-            ? dist : abs(dot(normal,delta));
-        // Radius can exceed the positive falloff range; no darkening
-        // of baked Gouraud colors is permitted in that outer region.
-        if(range_distance<light_position_radius[i].w && along>0.0)
-            lit+=max(light_intensity[i]-
-                     range_distance*attenuation_min,0.0)*along;
-        if(lit>=1.0)break;
+        added+=jk_point_sample(delta,normal,light_position_radius[i].w,
+                               light_intensity[i],attenuation_min,
+                               mode<2.5);
+        if(added>=1.0)break;
     }
-    float original_bright=max(clamp(base+pixel_light_state.y,0.0,1.0),
-                              ambient_light);
-    float lit_bright=max(clamp(lit+pixel_light_state.y,0.0,1.0),
-                         ambient_light);
-    // In particular this is EXACTLY the native-interpolated baked color
-    // when a distant light reaches the mesh's broad sphere but no pixel.
-    // Never recompute static lighting for the no-contribution case.
-    if(lit_bright==original_bright) return jk_lit_rgb;
-    return jk_lit_rgb +
-        (pixel_jk_color_at_brightness(lit_bright) -
-         pixel_jk_color_at_brightness(original_bright));
+    if(added<=0.0) return jk_lit_rgb;
+    vec3 light_color=max(
+        pixel_jk_color_at_brightness(1.0)-
+        pixel_jk_color_at_brightness(0.0),vec3(0.0));
+    return jk_point_compose(jk_lit_rgb,added,light_color);
 }
 
 // Transform shaded normals with the node's inverse transpose. Raw

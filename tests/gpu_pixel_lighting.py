@@ -36,15 +36,26 @@ assert 'j.contains("gpu_pixel_lighting")' in parser
 assert "the_config->gpu_pixel_lighting" in wiring
 assert "instance.num_lights" in program
 assert 'gl::set_uniform_integer(pixel_dynamic_lighting,pixel_lighting?1:0)' in program
-# The original baked/static vertex color must not change just because
-# a dynamic light appears in JK's coarse per-mesh light list.
-assert "if(camera_hud_thing!=0) {" in vert
-assert "if(mode>=1.5 && num_lights>0 && pixel_dynamic_lighting==0)" in vert
-assert "jk_lit_rgb=vec3(1.0);" in vert
-assert "if(lit_bright==original_bright) return jk_lit_rgb;" in frag
-assert "return jk_lit_rgb +" in frag
-assert "pixel_jk_color_at_brightness(lit_bright)" in frag
-assert "pixel_jk_color_at_brightness(original_bright)" in frag
+# Both GPU geometry paths use the same editable GLSL code for attenuation
+# AND gamma/saturation composition; no compiled renderer formula divergence.
+shared_path = root / "assets/shaders/jk_point_lighting.glsl"
+shared = shared_path.read_text(encoding="utf-8")
+world_vert_path = root / "assets/shaders/world_cache_wireframe.vert"
+world_frag_path = root / "assets/shaders/world_cache_texture_preview.frag"
+world_vert = world_vert_path.read_text(encoding="utf-8")
+world_frag = world_frag_path.read_text(encoding="utf-8")
+for stage in (vert, frag, world_frag):
+    assert '#include "jk_point_lighting.glsl"' in stage
+assert "load_shader_source(filename.parent_path()/name" in program
+assert "float jk_point_sample(" in shared
+assert "vec3 jk_point_compose(" in shared
+for stage in (vert, frag, world_frag):
+    assert "jk_point_sample(" in stage
+for stage in (frag, world_frag):
+    assert "jk_point_compose(" in stage
+assert "vec3 lighting=cached_lit_rgb;" in world_frag
+assert "if(added<=0.0) return jk_lit_rgb;" in frag
+assert "if(added<=0.0) return baked;" in shared
 assert "pixel_dynamic_lighting!=0" in frag
 assert "pixel_jk_diffuse_lighting()" in frag
 assert "jk_fragment_lit" in frag
@@ -68,33 +79,45 @@ for left, right in [(0.1, 0.9), (0.0, 1.0), (0.3, 0.8)]:
         no_effect = baked + (base**1.8 - base**1.8)
         assert no_effect == baked
 
-# World faces: independent baked vertex RGB and pixel light contributions.
-# Never reconstruct a dynamic-light correction from interpolated raw
-# Gouraud intensities: interpolated(pow(x,1.8)) != pow(interpolated(x),1.8).
-world_vert_path = root / "assets/shaders/world_cache_wireframe.vert"
-world_frag_path = root / "assets/shaders/world_cache_texture_preview.frag"
-world_vert = world_vert_path.read_text(encoding="utf-8")
-world_frag = world_frag_path.read_text(encoding="utf-8")
-assert "cached_lit_rgb=world_jk_effect(native_light_rgb,native_sector_tint);" in world_vert
-assert "vec3 lighting=cached_lit_rgb;" in world_frag
-assert "float added=0.0;" in world_frag
-assert "added+=max(light_intensity[i]-" in world_frag
-assert "lighting+=min(added,1.0)*max(white-black,vec3(0.0));" in world_frag
-assert "float base=cached_light_state.x;" not in world_frag
-assert "float lit_bright=" not in world_frag
-for left, right in ((0.0, 1.0), (0.1, 0.9), (0.3, 0.8)):
-    for t in (0.0, 0.25, 0.5, 0.75, 1.0):
-        baked = (1.0-t)*left**1.8 + t*right**1.8
-        for light in (0.0, 0.05, 0.2):
-            dynamic = light*0.8  # a fixed, separately tinted light term
-            combined = baked + dynamic
-            assert abs((combined-baked)-dynamic) < 1e-12
-            if light == 0.0:
-                assert combined == baked
+# Reference math for the shared GLSL functions: zero contribution is
+# EXACTLY the existing Gouraud RGB, and world/3DO match on identical input.
+def point_sample(dist, radius, intensity, attenuation, incidence):
+    return max(intensity-dist*attenuation, 0.0)*max(incidence,0.0) if dist<radius else 0.0
+
+def point_compose(baked, added, light_color):
+    if added<=0.0:
+        return baked
+    return tuple(min(1.0,b**(1.0/1.8)+min(added,1.0)*c**(1.0/1.8))**1.8
+                 for b,c in zip(baked,light_color))
+
+for left,right in ((0.0,1.0),(0.1,0.9),(0.3,0.8)):
+    for t in (0.0,0.25,0.5,0.75,1.0):
+        baked=((1.0-t)*left**1.8+t*right**1.8,)*3
+        assert point_compose(baked,0.0,(1.0,)*3)==baked
+        for distance in (0.0,1.0,2.0,3.0,5.0):
+            added=point_sample(distance,4.0,0.8,0.2,1.0)
+            world=point_compose(baked,added,(1.0,)*3)
+            model=point_compose(baked,added,(1.0,)*3)
+            assert world==model
+            assert all(a>=b for a,b in zip(world,baked))
+assert point_sample(3.0,6.0,0.4,0.2,1.0)==0.0
+
+# The glslangValidator CLI cannot expand our runtime-local GLSL includes.
+# Materialize equivalent standalone sources for optional compile/link checks.
+def expand_includes(shader):
+    return shader.replace('#include "jk_point_lighting.glsl"',shared)
 
 compiler = shutil.which("glslangValidator")
 if compiler:
-    # Both shader stages are linked, so mismatched varyings are caught too.
-    subprocess.run([compiler, "-l", str(vert_path), str(frag_path)],
-                   check=True, cwd=root)
-print("GPU pixel lighting shader source/wiring checks passed")
+    import tempfile
+    with tempfile.TemporaryDirectory() as directory:
+        temp=Path(directory)
+        for name,source in (("gpu_3do.vert",vert),
+                            ("gpu_3do.frag",frag),
+                            ("world_cache.vert",world_vert),
+                            ("world_cache.frag",world_frag)):
+            (temp/name).write_text(expand_includes(source),encoding="utf-8")
+        for stem in ("gpu_3do","world_cache"):
+            subprocess.run([compiler,"-l",str(temp/(stem+".vert")),
+                            str(temp/(stem+".frag"))],check=True,cwd=root)
+print("Shared GPU pixel lighting source/parity checks passed")
