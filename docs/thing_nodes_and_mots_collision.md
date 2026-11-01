@@ -462,18 +462,27 @@ distance convention. Those two special flags continue to use the
 original native function. Outer caller flags remain intact, including
 ordinary combinations used during movement.
 
-## GetThingRelativePos(thing, globalPositionVector)
+## Thing local/world offset COG verbs
 
-New COG vector verb: converts an absolute world-space point into Thing-local
-Right/Look/Up coordinates. The inverse of the full native orientation
-matrix is used, so inherited scaling, mirroring, and non-orthogonal legacy
-RLU vectors work correctly. This is NOT merely `worldPos-GetThingPos(thing)`
-and not the three normalized-axis dot products.
+`GetThingOffsetPos(thing, localRLU)` converts a position offset in the
+Thing's own Right/Look/Up basis to an **absolute world XYZ position**,
+including the Thing's translation.
 
-Example: Thing position `(0,0,1)`, Look `(1,0,0)`, Right `(0,-1,0)`,
-Up `(0,0,1)`, target world position `(0,4,0)` returns `(-4,0,-1)`.
+`GetThingPosOffset(thing, worldXYZ)` performs the inverse, converting
+an **absolute world XYZ position** into local RLU coordinates. This
+replaces the older `GetThingRelativePos` name, which is no longer
+registered.
 
-Arguments are popped as vector and then Thing, and the result is a vector.
-Invalid or degenerate/noninvertible Things return `(0,0,0)`, consistent
-with other vector helper verbs. No allocations, engine mutation or new
-native address dependency.
+Example: Thing at `(0,0,1)`, Look `(1,0,0)`,
+Right `(0,-1,0)`, Up `(0,0,1)`:
+
+```c
+vector local = GetThingPosOffset(thing, '0 4 0');
+// local = '-4 0 -1'
+vector global = GetThingOffsetPos(thing, local);
+// global = '0 4 0'
+```
+
+Both calls preserve scaled, skewed, and mirrored native Thing bases.
+The inverse call returns `(0,0,0)` for non-invertible or invalid
+transforms. Invalid Thing inputs return `(0,0,0)`.

@@ -1,5 +1,5 @@
 #pragma once
-// World point -> Thing-local (Right, Look, Up) coordinates.
+// World XYZ <-> Thing-local RLU point transforms.
 // The JKGM native SithThing layout stores its 3x3 basis at +0x88 and
 // position at +0xb8. This pure helper inverts the ACTUAL basis, including
 // non-unit, mirrored and sheared R/L/U vectors; dot products only work for
@@ -8,12 +8,12 @@
 #include <cmath>
 
 namespace jkgm {
-using cog_relative_vec=std::array<float,3>;
-using cog_relative_basis=std::array<float,9>;
+using cog_thing_offset_vec=std::array<float,3>;
+using cog_thing_offset_basis=std::array<float,9>;
 
-inline bool cog_thing_relative_pos(
-    cog_relative_basis const &basis,cog_relative_vec const &origin,
-    cog_relative_vec const &world,cog_relative_vec &local)
+inline bool cog_thing_pos_offset(
+    cog_thing_offset_basis const &basis,cog_thing_offset_vec const &origin,
+    cog_thing_offset_vec const &world,cog_thing_offset_vec &local)
 {
     double r[3]{},l[3]{},u[3]{},delta[3]{};
     double rr=0.0,ll=0.0,uu=0.0;
@@ -55,5 +55,26 @@ inline bool cog_thing_relative_pos(
     local={{float(result[0]),float(result[1]),float(result[2])}};
     return std::isfinite(local[0]) && std::isfinite(local[1]) &&
            std::isfinite(local[2]);
+}
+
+// Inverse of GetThingPosOffset: apply the actual SithThing axes
+// (including scale, mirror and shear), then its world-space position.
+inline bool cog_thing_offset_pos(
+    cog_thing_offset_basis const &basis,cog_thing_offset_vec const &origin,
+    cog_thing_offset_vec const &local,cog_thing_offset_vec &world)
+{
+    for(float v:basis)if(!std::isfinite(v))return false;
+    for(float v:origin)if(!std::isfinite(v))return false;
+    for(float v:local)if(!std::isfinite(v))return false;
+    for(int axis=0;axis<3;++axis) {
+        double const result=double(origin[axis])+
+            double(basis[axis])*double(local[0])+
+            double(basis[axis+3])*double(local[1])+
+            double(basis[axis+6])*double(local[2]);
+        if(!std::isfinite(result) || std::fabs(result)>1.e10)
+            return false;
+        world[axis]=float(result);
+    }
+    return true;
 }
 } // namespace jkgm

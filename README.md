@@ -926,9 +926,11 @@ type-0 camera-facing, type-1 cylindrical billboard and type-2 fixed-plane SPRs.
 Fully-lit geometry-mode 3 (solid MAT palette color) and mode 4 (textured MAT)
 sprites qualify. Mode 3 uses MAT solidColor without UVs or texture uploads.
 Native texture-mode values 0/1/2 are ignored for GPU eligibility: they only
-control the software renderer's affine/perspective sampling. Nonzero sprite
-lighting modes, decals, flares and unavailable MAT colors/textures retain JK's
-native renderer.
+control the software renderer's affine/perspective sampling. Sprite LightModes 0–3 are cacheable: 0 remains fully bright;
+1 uses the native camera/sector ambient floor and face ExtraLight; 2 and 3
+temporarily share the same LightMode 1 response without dynamic diffuse or
+Gouraud lighting. Decals, flares and unavailable MAT colors/textures retain
+their existing dedicated/native paths.
 Shared geometry eliminates duplicate quad uploads; **hardware-instanced draws
 are a separate next step** and are not yet implemented. The option defaults to
 false for A/B testing against the native sprite path.

@@ -283,6 +283,8 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_gpu_mesh.cpp /Fe:sprite_decal_gpu_mesh_test.exe
         sprite_decal_gpu_mesh_test.exe
+    - name: GPU SPR LightModes and renamed Thing position COG wiring
+      run: python3 tests/sprite_lighting_modes.py
     - name: Shared GPU SPR quad and pose regression tests
       shell: cmd
       run: |

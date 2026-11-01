@@ -27,7 +27,7 @@
 #include "mots_collision_snapshot_cache.hpp"
 #include "cog_math.hpp"
 #include "cog_pyr_math.hpp"
-#include "cog_thing_relative.hpp"
+#include "cog_thing_offsets.hpp"
 #include "cog_raycast_head.hpp"
 #include "cog_raycast_target.hpp"
 #include "cog_raycast_native_sphere.hpp"
@@ -349,7 +349,8 @@ namespace {
     std::vector<jkgm::gpu_3do_instance> pending_gpu_instances;
     struct cached_gpu_sprite_quad {
         jkgm::sprite_decal_resource resource{};
-        uint32_t flags=0,geometry_mode=4;
+        uint32_t flags=0,geometry_mode=4,lighting_mode=0;
+        float face_extra_light=0.0f;
         uint64_t id=0;
         std::shared_ptr<jkgm::gpu_3do_geometry const> geometry;
     };
@@ -4605,6 +4606,11 @@ namespace {
         std::memcpy(&geometry,src+0x64U,4);
         std::memcpy(&lighting,src+0x68U,4);
         std::memcpy(&texture,src+0x6cU,4);
+        // Binary-verified native rdSprite_Draw 0x46D362 copies the
+        // face's ExtraLight from rdSprite+0x8c into rdProcEntry+0x3c.
+        float native_face_extra=0.0f;
+        std::memcpy(&native_face_extra,src+0x8cU,sizeof(native_face_extra));
+        if(!std::isfinite(native_face_extra))return reject(5);
         // Emit at most eight distinct native face-mode samples per process.
         if(the_config->profile_renderer) {
             uint64_t const key=(uint64_t(type&255U)<<56) |
@@ -4624,7 +4630,9 @@ namespace {
             }
         }
         if(geometry!=3U && geometry!=4U)return reject(1);
-        if(lighting!=0U)return reject(2);
+        // LightModes 0..3 all qualify. Modes 2/3 temporarily use
+        // mode 1's ambient/extra brightness without native dynamic lights.
+        if(lighting>3U)return reject(2);
         if((flags&~3U)!=0U)return reject(4);
         if(!std::isfinite(info.opacity) || info.opacity<=0.0f ||
            info.opacity>1.0f)return reject(0);
@@ -4656,6 +4664,14 @@ namespace {
                               8U+sizeof(view)))return reject(6);
         std::memcpy(view.data(),reinterpret_cast<void const *>(
                         uintptr_t(camera)+8U),sizeof(view));
+        // Native rdCamera ambient at +0x54 is sampled at this Thing's
+        // draw, so sector changes update the light floor per instance.
+        float native_ambient=1.0f;
+        if(lighting>0U) {
+            if(!read(uintptr_t(camera)+0x54U,&native_ambient,4) ||
+               !std::isfinite(native_ambient))return reject(6);
+            native_ambient=std::clamp(native_ambient,0.0f,1.0f);
+        }
         if(!jkgm::make_gpu_sprite_pose(
                 type,pose,view,size,offset,info.width,info.height,
                 current_sprite_roll(rd),placement))
@@ -4684,16 +4700,21 @@ namespace {
         if(!have_variant ||
            variant->second.flags!=flags ||
            variant->second.geometry_mode!=geometry ||
+           variant->second.lighting_mode!=lighting ||
+           variant->second.face_extra_light!=native_face_extra ||
            !same(variant->second.resource,resource)) {
             if(resource_item==gpu_sprite_quads.end() &&
                gpu_sprite_quads.size()>=4096U)return reject(7);
             auto quad=jkgm::make_gpu_sprite_quad(
-                resource.material,resource.texcoords,flags,geometry==3U,cel);
+                resource.material,resource.texcoords,flags,geometry==3U,
+                cel,lighting,native_face_extra);
             if(!quad)return reject(5);
             cached_gpu_sprite_quad entry{};
             entry.resource=resource;
             entry.flags=flags;
             entry.geometry_mode=geometry;
+            entry.lighting_mode=lighting;
+            entry.face_extra_light=native_face_extra;
             entry.id=next_gpu_id++;
             entry.geometry=std::move(quad);
             // Emplace the resource only after a complete successful snapshot.
@@ -4726,7 +4747,8 @@ namespace {
         instance.sprite_opacity=info.opacity;
         // The visible billboard does not cast from its camera-facing pose.
         instance.casts_sun_shadows=false;
-        instance.effective_light_mode=0.0f;
+        instance.effective_light_mode=lighting>0U?1.0f:0.0f;
+        instance.ambient=native_ambient;
         // A Camera type sprite participates in the same post-FX overlay as
         // Camera type 3DOs, including optional 0x20 world-depth occlusion.
         uint32_t owner=0,thing_type=0,render_type=0,thingflags=0;
@@ -5650,32 +5672,39 @@ namespace {
         cog_push_vector(ctx,result.data());
     }
 
-    // GetThingRelativePos(thing,worldPosition): world-space point to
-    // the Thing's own Right/Look/Up coordinates. Use the complete inverse
-    // basis, not dot products, so scaled/sheared legacy RLU values work.
-    void __cdecl cog_get_thing_relative_pos(void *ctx)
+    // Native SithThing +0x88 is the complete Right/Look/Up basis,
+    // +0xb8 is the world position. Preserve scale/skew/mirroring.
+    void cog_thing_position_transform(void *ctx,bool to_world)
     {
-        float position[3]{};
-        cog_pop_vector(ctx,position); // world-space target; popped first
+        float point[3]{};
+        cog_pop_vector(ctx,point);
         void *thing=cog_pop_thing(ctx);
-        jkgm::cog_relative_vec local{};
+        jkgm::cog_thing_offset_vec result{};
         if(thing && gpu_span_readable(thing,0xc4U)) {
             auto const *src=static_cast<uint8_t const *>(thing);
             uint32_t type=0;
             std::memcpy(&type,src+0x0cU,sizeof(type));
             if(type>=1U && type<=11U) {
-                jkgm::cog_relative_basis basis{};
-                jkgm::cog_relative_vec origin{};
-                // jkgm(5).exe SithThing +0x88: right/look/up; +0xb8: pos.
+                jkgm::cog_thing_offset_basis basis{};
+                jkgm::cog_thing_offset_vec origin{};
                 std::memcpy(basis.data(),src+0x88U,sizeof(basis));
                 std::memcpy(origin.data(),src+0xb8U,sizeof(origin));
-                jkgm::cog_thing_relative_pos(
-                    basis,origin,{{position[0],position[1],position[2]}},
-                    local);
+                jkgm::cog_thing_offset_vec const input{{
+                    point[0],point[1],point[2]}};
+                if(to_world)
+                    jkgm::cog_thing_offset_pos(basis,origin,input,result);
+                else
+                    jkgm::cog_thing_pos_offset(basis,origin,input,result);
             }
         }
-        cog_push_vector(ctx,local.data()); // zero on invalid/singular Thing
+        cog_push_vector(ctx,result.data()); // zero on invalid Thing
     }
+    // GetThingOffsetPos(thing,localRLU) -> absolute world XYZ.
+    void __cdecl cog_get_thing_offset_pos(void *ctx)
+    {cog_thing_position_transform(ctx,true);}
+    // GetThingPosOffset(thing,worldXYZ) -> local RLU.
+    void __cdecl cog_get_thing_pos_offset(void *ctx)
+    {cog_thing_position_transform(ctx,false);}
 
     // RotateVector(dirVec,PYR): local displacement to rotated displacement.
     // Preserve non-unit lengths (e.g. 0/4/0 pitched 90 -> 0/0/4).
@@ -7896,7 +7925,8 @@ namespace {
         cog_verb_entry{"lerp", cog_math_lerp},
         cog_verb_entry{"randdir", cog_math_rand_dir},
         cog_verb_entry{"rotatevector", cog_rotate_vector},
-        cog_verb_entry{"getthingrelativepos", cog_get_thing_relative_pos},
+        cog_verb_entry{"getthingoffsetpos", cog_get_thing_offset_pos},
+        cog_verb_entry{"getthingposoffset", cog_get_thing_pos_offset},
         cog_verb_entry{"getlvecpyr", cog_get_lvec_pyr},
         cog_verb_entry{"getrvecpyr", cog_get_rvec_pyr},
         cog_verb_entry{"getuvecpyr", cog_get_uvec_pyr},

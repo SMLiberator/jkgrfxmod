@@ -1,6 +1,7 @@
 #include "renderer/sprite_gpu_quad.hpp"
 #include <cassert>
 #include <cmath>
+#include <limits>
 using namespace jkgm;
 inline bool near(float x,float y){return std::fabs(x-y)<0.0001f;}
 int main() {
@@ -25,6 +26,24 @@ int main() {
     assert(frame3->material_refs[0].second==3);
     assert(frame7->material_refs[0].second==7);
     assert(mesh->groups[0].cel==-1);
+    // Native SPR LightMode 0 is fully bright, independent of sector.
+    assert(mesh->vertices[0].light_mode==0.0f);
+    assert(mesh->vertices[0].face_extra==0.0f);
+    for(uint32_t mode=1U;mode<=3U;++mode) {
+        auto lit=make_gpu_sprite_quad(
+            0x12340,uv,0,false,3,mode,0.35f);
+        assert(lit && lit->groups[0].cel==3);
+        for(auto const &v:lit->vertices) {
+            // Modes 2/3 use the native mode 1 sector floor for now.
+            assert(v.light_mode==1.0f);
+            assert(near(v.face_extra,0.35f));
+            assert(v.static_light==0.0f);
+        }
+    }
+    assert(!make_gpu_sprite_quad(0x12340,uv,0,false,0,4U));
+    assert(!make_gpu_sprite_quad(
+        0x12340,uv,0,false,0,1U,
+        std::numeric_limits<float>::quiet_NaN()));
     gpu_3do_matrix34 id{{1,0,0,0,1,0,0,0,1,0,0,0}},pose{};
     float size[4]{4,6,2,3},offset[3]{0,0,0};
     assert(make_gpu_sprite_pose(sprite_default,id,id,size,offset,1,1,0,pose));

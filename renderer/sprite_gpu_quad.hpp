@@ -10,9 +10,11 @@
 namespace jkgm {
 inline std::shared_ptr<gpu_3do_geometry const> make_gpu_sprite_quad(
     uintptr_t mat,sprite_decal_texture_coords const &uv,uint32_t flags,
-    bool solid_color=false,int32_t cel=-1)
+    bool solid_color=false,int32_t cel=-1,
+    uint32_t light_mode=0U,float extra_light=0.0f)
 {
-    if(!mat || !valid_sprite_decal_texture_coords(uv) || (flags&~3U))return {};
+    if(!mat || !valid_sprite_decal_texture_coords(uv) || (flags&~3U) ||
+       light_mode>3U || !std::isfinite(extra_light))return {};
     auto g=std::make_shared<gpu_3do_geometry>();
     gpu_3do_group group{};
     group.material=mat;group.cel=cel;
@@ -34,7 +36,11 @@ inline std::shared_ptr<gpu_3do_geometry const> make_gpu_sprite_quad(
         gpu_3do_vertex v{};
         v.x=points[i][0];v.y=points[i][1];v.z=points[i][2];
         v.u=uvpoints[i][0];v.v=uvpoints[i][1];
-        v.ny=-1.0f;v.lny=-1.0f;v.static_light=1.0f;
+        v.ny=-1.0f;v.lny=-1.0f;v.static_light=0.0f;
+        // LightMode 0: fully lit. 1: max(ambient,extra). For now
+        // 2/3 intentionally use 1's no-dynamic-light approximation.
+        v.light_mode=light_mode==0U?0.0f:1.0f;
+        v.face_extra=extra_light;
         v.cr=v.cg=v.cb=1.0f;
         g->vertices.push_back(v);
     }
