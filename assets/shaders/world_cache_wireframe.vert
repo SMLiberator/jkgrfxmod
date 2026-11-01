@@ -7,6 +7,7 @@ layout(location=2) in vec3 native_normal;
 layout(location=3) in vec3 native_light_rgb;
 layout(location=4) in vec3 native_light_state;
 layout(location=5) in vec3 native_sector_tint;
+layout(location=6) in vec2 native_uv_offset; // JK SlideSurface
 out vec2 material_uv;
 out vec3 cached_view_normal;
 out vec3 cached_lit_rgb;
@@ -33,7 +34,8 @@ vec3 world_jk_effect(vec3 raw,vec3 local_sector_tint)
     return pow(clamp(v,0.0,1.0),vec3(1.8));
 }
 void main() {
-    material_uv=native_uv;
+    // Native texVertOffset adds in MAT pixels, before dimension scaling.
+    material_uv=native_uv+native_uv_offset;
     // Gamma-correct per-vertex JK lighting must interpolate before texels.
     // RGB attribute will also support future MotS colored world lighting.
     // JK's palette tint changes vertex illumination, not the albedo.

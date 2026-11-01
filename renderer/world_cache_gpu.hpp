@@ -6,6 +6,7 @@
 #include "world_cache_visibility.hpp"
 #include "world_cache_portals.hpp"
 #include "world_cache_lighting.hpp"
+#include "world_cache_uv_animation.hpp"
 #include "base/log.hpp"
 #include "glutil/buffer.hpp"
 #include "glutil/vertex_array.hpp"
@@ -16,8 +17,9 @@
 namespace jkgm {
 struct world_cache_gpu {
     gl::vertex_array vao;
-    gl::buffer vertices,indices,lighting,light_state,sector_tint;
+    gl::buffer vertices,indices,lighting,light_state,sector_tint,uv_animation;
     std::vector<std::array<float,3>> frame_light_rgb,frame_light_state,frame_sector_tint;
+    std::vector<std::array<float,2>> frame_uv_offset;
     std::vector<float> native_dynamic_light;
     decal_world_geometry world{};
     world_cache_mesh mesh{};
@@ -61,6 +63,10 @@ struct world_cache_gpu {
         gl::enable_vertex_attrib_array(5);
         gl::vertex_attrib_pointer(5,3,gl::vertex_element_type::float32,
             false,sizeof(std::array<float,3>),0);
+        gl::bind_buffer(gl::buffer_bind_target::array,uv_animation);
+        gl::enable_vertex_attrib_array(6);
+        gl::vertex_attrib_pointer(6,2,gl::vertex_element_type::float32,
+            false,sizeof(std::array<float,2>),0);
         gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
         gl::bind_vertex_array(gl::vertex_array_view(0U));
     }
@@ -78,6 +84,7 @@ struct world_cache_gpu {
         frame_light_rgb.clear();
         frame_light_state.clear();
         frame_sector_tint.clear();
+        frame_uv_offset.clear();
         native_dynamic_light.clear();
         frame_candidates.clear();
         sector_candidates.clear();
@@ -120,6 +127,11 @@ struct world_cache_gpu {
         gl::buffer_data(gl::buffer_bind_target::array,
             make_span(frame_sector_tint).as_const_bytes(),
             gl::buffer_usage::stream_draw);
+        frame_uv_offset.assign(mesh.vertices.size(),{{0.0f,0.0f}});
+        gl::bind_buffer(gl::buffer_bind_target::array,uv_animation);
+        gl::buffer_data(gl::buffer_bind_target::array,
+            make_span(frame_uv_offset).as_const_bytes(),
+            gl::buffer_usage::stream_draw);
         gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
         gl::buffer_data(gl::buffer_bind_target::element_array,
             make_span(mesh.indices).as_const_bytes(),
@@ -146,6 +158,7 @@ struct world_cache_gpu {
                            (frame_light_rgb.size()+frame_light_state.size()+
                             frame_sector_tint.size())*
                                sizeof(std::array<float,3>),
+                 " uv_animation_bytes=",frame_uv_offset.size()*sizeof(std::array<float,2>),
                  " revision=",revision,
                  " build_us=",std::chrono::duration_cast<
                      std::chrono::microseconds>(

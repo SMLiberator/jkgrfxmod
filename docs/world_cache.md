@@ -65,3 +65,30 @@ positions, UVs or topology are tracked or cause a suitable cache rebuild.
 Special surface paths and complete native visual parity are still work in
 progress. Preserve an A/B test with `world_cache_preview=false` when
 investigating missing faces, HOM or lighting differences.
+
+
+## Native cel animations and surface scrolling
+
+JK retains complete ownership of `MaterialAnim()`, `SurfaceAnim()`,
+animated sprite frame progression, and `SlideSurface()` timing/IDs.
+GPU rendering reads live native cels and scroll offsets; it never
+advances a duplicate animation timer.
+
+A surface cel of `-1` follows `rdMaterial.curCelNum`; explicit face
+cels override it. Cached world draw candidates query the live cel every
+frame, just as GPU-cached 3DOs and sprites use their own native cel
+selection.
+
+`SlideSurface()` updates native `rdFace.texVertOffset`, stored at
+SithSurface offsets `+0x3c/+0x40` in the supported JK executable.
+World-candidate staging now captures those two offsets together with
+the live cel/material/GeoMode. A small streaming vec2 attribute passes
+the offsets to the world vertex shader; authored positions, UVs and
+index buffers remain immutable. The native offset is added in MAT
+pixel coordinates before normalization by the current cel dimensions.
+Material-pack scrolling remains separate.
+
+This does not change translucent-world eligibility or force native MAT
+textures to be uploaded. Frames missing from JK's existing texture
+cache can still be unavailable to GPU world rendering; resolving
+native cache residency and mixed-batch fallback is separate work.

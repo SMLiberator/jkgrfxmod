@@ -1,6 +1,7 @@
 #include "renderer/world_cache.hpp"
 #include "renderer/world_cache_portals.hpp"
 #include "renderer/world_cache_lighting.hpp"
+#include "renderer/world_cache_uv_animation.hpp"
 #include <array>
 #include <algorithm>
 #include <cassert>
@@ -297,6 +298,10 @@ int main()
     set_u32(2,0x1c,4U); // visible
     set_u32(2,0x34,uint32_t(world.receivers[0].material));
     set_u32(2,0x38,3U);
+    // Native rdFace.texVertOffset is +0x3c/+0x40 in pixel units.
+    float const scroll_x=8.0f,scroll_y=-4.0f;
+    std::memcpy(storage.data()+2U*0x5cU+0x3cU,&scroll_x,4U);
+    std::memcpy(storage.data()+2U*0x5cU+0x40U,&scroll_y,4U);
     set_u32(7,0x1c,0U); // hidden by COG
     set_u32(7,0x34,uint32_t(world.receivers[1].material));
     set_u32(7,0x38,3U);
@@ -414,11 +419,39 @@ int main()
     std::vector<world_cache_draw_candidate> full,sector;
     auto full_stats=collect_world_cache_draw_candidates(read,base,mesh,full);
     assert(full_stats.candidates==1U && full[0].surface_index==2U);
+    assert(full[0].uv_offset[0]==8.0f && full[0].uv_offset[1]==-4.0f);
+    // Per-face offset repeats on every vertex of that single polygon;
+    // neighboring surfaces remain unchanged.
+    std::vector<std::array<float,2>> frame_uv(mesh.vertices.size());
+    assert(write_world_cache_uv_animation(mesh,lookup,full[0],frame_uv));
+    for(size_t i=0;i<4U;++i)
+        assert(frame_uv[i][0]==8.0f && frame_uv[i][1]==-4.0f);
+    for(size_t i=4U;i<frame_uv.size();++i)
+        assert(frame_uv[i][0]==0.0f && frame_uv[i][1]==0.0f);
+    // MaterialAnim follows rdMaterial.curCelNum only for cel=-1.
+    // SurfaceAnim / explicit SetSurfaceCel may override the face cel.
+    set_u32(2,0x38,0xffffffffU);
+    collect_world_cache_draw_candidates(read,base,mesh,full);
+    assert(full.size()==1U && full[0].cel==-1);
+    set_u32(2,0x38,4U);
+    // A subsequent native SlideSurface tick can reverse scroll direction.
+    float const next_x=-16.0f,next_y=2.0f;
+    std::memcpy(storage.data()+2U*0x5cU+0x3cU,&next_x,4U);
+    std::memcpy(storage.data()+2U*0x5cU+0x40U,&next_y,4U);
+    collect_world_cache_draw_candidates(read,base,mesh,full);
+    assert(full[0].cel==4 && full[0].uv_offset[0]==-16.0f &&
+           full[0].uv_offset[1]==2.0f);
+    assert(write_world_cache_uv_animation(mesh,lookup,full[0],frame_uv));
+    assert(frame_uv[0][0]==-16.0f && frame_uv[3][1]==2.0f);
+    assert(mesh.vertices[0].uv[0]==0.0f &&
+           mesh.vertices[2].uv[0]==64.0f); // authored UVs immutable
     auto stage=collect_world_cache_sector_candidates(
         read,base,mesh,lookup,spans,epochs,epoch,sector);
     assert(stage.valid && stage.faces.candidates==1U &&
            stage.faces.triangles==2U && stage.unique_surfaces==1U);
     assert(sector[0].material==0x20000U && sector[0].cel==4);
+    assert(sector[0].uv_offset[0]==-16.0f &&
+           sector[0].uv_offset[1]==2.0f);
     auto parity=compare_world_cache_candidate_sets(full,membership,sector);
     assert(parity.exact && parity.matched==1U);
     // Visiting the same sector twice must not duplicate draw ranges.

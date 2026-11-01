@@ -5,6 +5,7 @@
 #include "world_cache.hpp"
 #include "gpu_3do_frustum.hpp"
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -18,6 +19,7 @@ struct world_cache_draw_candidate {
     int32_t cel=-1;
     uint32_t face_type=0; // live native rdFace.type at surface +0x18
     bool solid_adjoin=false;
+    std::array<float,2> uv_offset{}; // live rdFace.texVertOffset in MAT pixels
 };
 
 struct world_cache_frame_stats {
@@ -62,14 +64,14 @@ inline void append_world_cache_candidate(
     gpu_3do_matrix34 const *view,
     std::vector<world_cache_draw_candidate> *special=nullptr)
 {
-    // SithSurface stride 0x5c. Read the live 0x10-0x3b metadata together
+    // SithSurface stride 0x5c. Read the live 0x10-0x43 metadata together
     // rather than performing three/four separately validated native reads.
     // The cache contains only immutable geometry; do not trust its original
     // MAT or cel once a COG has modified the surface.
     uint64_t const addr=uint64_t(surfaces_address)+
                         uint64_t(range.surface_index)*0x5cU;
     if(addr>0x7ff00000U) {++stats.unreadable;return;}
-    std::array<uint8_t,0x2c> raw{};
+    std::array<uint8_t,0x34> raw{};
     if(!read(uintptr_t(addr)+0x10U,raw.data(),raw.size())) {
         ++stats.unreadable;return;
     }
@@ -79,6 +81,11 @@ inline void append_world_cache_candidate(
     std::memcpy(&geo,raw.data()+0x0c,4);   // +0x1c rdFace GeoMode
     std::memcpy(&material,raw.data()+0x24,4); // +0x34 rdMaterial
     std::memcpy(&cel,raw.data()+0x28,4);   // +0x38 wall cel
+    std::array<float,2> uv_offset{};
+    std::memcpy(uv_offset.data(),raw.data()+0x2c,8); // +0x3c native UV offset
+    if(!std::isfinite(uv_offset[0]) || !std::isfinite(uv_offset[1])) {
+        ++stats.unreadable;return;
+    }
     if(uintptr_t(material)!=range.material)++stats.changed_material;
     if(range.cel>=0 && static_cast<int32_t>(cel)!=range.cel)
         ++stats.changed_cel;
@@ -103,7 +110,7 @@ inline void append_world_cache_candidate(
                                            range.bounds_min,range.bounds_max)))
             special->push_back({range.surface_index,range.first_index,
                 range.count,uintptr_t(material),static_cast<int32_t>(cel),
-                face_type,range.solid_adjoin});
+                face_type,range.solid_adjoin,uv_offset});
         return;
     }
     if(stats.frustum_available &&
@@ -113,7 +120,7 @@ inline void append_world_cache_candidate(
     }
     out.push_back({range.surface_index,range.first_index,range.count,
                    uintptr_t(material),static_cast<int32_t>(cel),
-                   face_type,false});
+                   face_type,false,uv_offset});
     ++stats.candidates;
     stats.triangles+=range.count/3U;
 

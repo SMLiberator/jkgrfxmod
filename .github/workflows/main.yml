@@ -168,6 +168,8 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\world_cache.cpp /Fe:world_cache_test.exe
         world_cache_test.exe
+    - name: Native JK MAT cel and world UV animation parity
+      run: python3 tests/native_mat_animation.py
     - name: Directional sunlight and empty-world shadow regression tests
       shell: cmd
       run: |
