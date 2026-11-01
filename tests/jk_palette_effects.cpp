@@ -1,5 +1,6 @@
 #include "renderer/jk_palette_effects.hpp"
 #include "renderer/thing_sector_tint.hpp"
+#include "renderer/native_sector_palette_bridge.hpp"
 #include <cstring>
 #include <cstdint>
 #include <cmath>
@@ -96,5 +97,57 @@ int main()
            1e-6f);
     put32(thing_b+0x5cU,0U);
     assert(!read_jk_thing_sector_tint(read,thing_b,tint_b));
+
+    // A native rdSetColorEffects pointer targets stdPalEffects_state.effect,
+    // 0x14 into the state. The request pool follows at +0x60. Test
+    // script effects and sector requests coexisting without hard-coded
+    // absolute jk.exe addresses.
+    constexpr uintptr_t native_state=base+0x700U;
+    constexpr uintptr_t native_effect=native_state+0x14U;
+    constexpr uintptr_t native_pool=native_state+0x60U;
+    jk_palette_request dynamic{};
+    dynamic.valid=1;
+    dynamic.id=1;
+    dynamic.tint[0]=0.20f;
+    dynamic.add[2]=72;
+    dynamic.fade=0.90f;
+    jk_palette_request sector{};
+    sector.valid=1;
+    sector.id=2;
+    sector.tint[0]=0.75f;
+    sector.tint[1]=0.10f;
+    jk_palette_request script{};
+    script.valid=1;
+    script.id=1;
+    script.filter[1]=1;
+    script.tint[0]=0.15f;
+    script.add[0]=17;
+    script.fade=0.80f;
+    put(native_pool,&dynamic,sizeof(dynamic));
+    put(native_pool+sizeof(dynamic),&sector,sizeof(sector));
+    put(native_pool+2*sizeof(dynamic),&script,sizeof(script));
+    auto snap=probe_native_sector_palette(read,native_effect);
+    assert(snap.layout_valid && snap.sector_request_active);
+    assert(snap.sector_slot==1U);
+    std::array<jk_palette_request,32> full{};
+    full[0]=dynamic;full[1]=sector;full[2]=script;
+    auto combined=accumulate_jk_palette_effects(
+        full,3U,std::array<int32_t,4>{{1,1,1,1}});
+    auto remainder=without_native_sector_tint(combined,snap);
+    assert(std::fabs(remainder.tint[0]-0.35f)<0.00001f);
+    assert(std::fabs(remainder.tint[1])<0.00001f);
+    assert(remainder.filter[1] && remainder.add[0]==17);
+    assert(remainder.add[2]==72 && remainder.fade==0.80f);
+    // A COG FreeColorEffect(1) invalidates exactly the allocated sector
+    // request; the engine must not apply local sectors while it is free.
+    sector.valid=0;
+    put(native_pool+sizeof(dynamic),&sector,sizeof(sector));
+    snap=probe_native_sector_palette(read,native_effect);
+    assert(snap.layout_valid && !snap.sector_request_active);
+    // Reusing the slot for an ordinary scripted request is NOT sector tint.
+    sector.valid=1;sector.id=1;
+    put(native_pool+sizeof(dynamic),&sector,sizeof(sector));
+    snap=probe_native_sector_palette(read,native_effect);
+    assert(snap.layout_valid && !snap.sector_request_active);
     return 0;
 }
