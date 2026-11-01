@@ -3598,6 +3598,19 @@ namespace {
                 inst.is_projected_decal=true;
                 inst.decal_opacity=decal.opacity;
                 inst.effective_light_mode=0.0f;
+                // A moving decal receives the tint of the mesh it sticks
+                // to, not necessarily that of the source projectile.
+                auto const read=[](uintptr_t addr,void *dst,size_t len) {
+                    if(!gpu_span_readable(
+                           reinterpret_cast<void const *>(addr),len))
+                        return false;
+                    std::memcpy(dst,reinterpret_cast<void const *>(addr),len);
+                    return true;
+                };
+                uint32_t const receiver_thing=static_cast<uint32_t>(
+                    fragment.receiver.thing_key>>32U);
+                inst.sector_tint_valid=jkgm::read_jk_thing_sector_tint(
+                    read,receiver_thing,inst.sector_tint);
                 decal.last_visible_frame=gpu_frame_serial;
                 // Keep frame-by-frame diagnostics independent per fragment.
                 // Geometry is shared but this metadata belongs to the decal.
@@ -4511,6 +4524,11 @@ namespace {
         inst.is_projected_decal=true;
         inst.decal_opacity=info.opacity;
         inst.effective_light_mode=0.0f;
+        // World decals are authored Things, too. Their sector supplies
+        // the local tint; Camera-type HUD objects never reach this path.
+        if(jkgm::decal_native_address_ok(owner))
+            inst.sector_tint_valid=jkgm::read_jk_thing_sector_tint(
+                read,owner,inst.sector_tint);
         pending_gpu_instances.emplace_back(std::move(inst));
         if(the_config->profile_renderer &&
            sprite_decal_queued_logs++<12U) {
