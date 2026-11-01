@@ -68,6 +68,30 @@ for left, right in [(0.1, 0.9), (0.0, 1.0), (0.3, 0.8)]:
         no_effect = baked + (base**1.8 - base**1.8)
         assert no_effect == baked
 
+# World faces: independent baked vertex RGB and pixel light contributions.
+# Never reconstruct a dynamic-light correction from interpolated raw
+# Gouraud intensities: interpolated(pow(x,1.8)) != pow(interpolated(x),1.8).
+world_vert_path = root / "assets/shaders/world_cache_wireframe.vert"
+world_frag_path = root / "assets/shaders/world_cache_texture_preview.frag"
+world_vert = world_vert_path.read_text(encoding="utf-8")
+world_frag = world_frag_path.read_text(encoding="utf-8")
+assert "cached_lit_rgb=world_jk_effect(native_light_rgb,native_sector_tint);" in world_vert
+assert "vec3 lighting=cached_lit_rgb;" in world_frag
+assert "float added=0.0;" in world_frag
+assert "added+=max(light_intensity[i]-" in world_frag
+assert "lighting+=min(added,1.0)*max(white-black,vec3(0.0));" in world_frag
+assert "float base=cached_light_state.x;" not in world_frag
+assert "float lit_bright=" not in world_frag
+for left, right in ((0.0, 1.0), (0.1, 0.9), (0.3, 0.8)):
+    for t in (0.0, 0.25, 0.5, 0.75, 1.0):
+        baked = (1.0-t)*left**1.8 + t*right**1.8
+        for light in (0.0, 0.05, 0.2):
+            dynamic = light*0.8  # a fixed, separately tinted light term
+            combined = baked + dynamic
+            assert abs((combined-baked)-dynamic) < 1e-12
+            if light == 0.0:
+                assert combined == baked
+
 compiler = shutil.which("glslangValidator")
 if compiler:
     # Both shader stages are linked, so mismatched varyings are caught too.
