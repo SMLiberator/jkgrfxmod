@@ -2949,24 +2949,6 @@ namespace jkgm {
             // Native D3D has already applied this to per-vertex colors.
             // Apply only to the GPU-bypassed 3DO vertex shader.
             auto const effect=read_native_jk_hardware_color_effects();
-            // sithRender copies the CURRENT CAMERA sector tint into its
-            // global palette-effects slot. Keep other palette effects
-            // (damage flash, scripted tint, fade, add, filter) intact.
-            // A cached Thing substitutes ONLY this sector contribution.
-            std::array<float,3> camera_sector_tint{};
-            auto const tint_read=[](uintptr_t addr,void *dst,size_t len) {
-                if(!jk_palette_memory_readable(
-                       reinterpret_cast<void const *>(addr),len))
-                    return false;
-                std::memcpy(dst,reinterpret_cast<void const *>(addr),len);
-                return true;
-            };
-            bool const camera_tint_valid=read_jk_camera_sector_tint(
-                tint_read,camera_sector_tint);
-            bool const camera_tint_zero=
-                camera_sector_tint[0]==0.0f &&
-                camera_sector_tint[1]==0.0f &&
-                camera_sector_tint[2]==0.0f;
             // Native rdSetColorEffects has already removed the validated
             // sector request from the shared hardware effect. Everything
             // else (filters, fade, RGB adds, other tints) remains global.
@@ -2985,19 +2967,13 @@ namespace jkgm {
                     ++eligible;
                     if(inst.sector_tint_valid)++valid;
                 }
-                int32_t camera_slot=-1;
-                tint_read(0x008EE4E8U,&camera_slot,sizeof(camera_slot));
-                LOG_INFO("THING SECTOR TINT camera_valid=",
-                         camera_tint_valid?1:0,
+                LOG_INFO("THING SECTOR TINT bridge_mode=",
+                         sector_palette_mode,
                          " replace=",can_replace_sector_tint?1:0,
                          " eligible=",eligible," local_valid=",valid,
-                         " slot=",camera_slot,
-                         " bridge_mode=",sector_palette_mode,
-                         " effect_active=",effect.active?1:0);
-                LOG_INFO("THING SECTOR TINT sample camera_rgb=",
-                         camera_sector_tint[0],",",camera_sector_tint[1],
-                         ",",camera_sector_tint[2],
-                         " effect_rgb=",effect.tint[0],",",effect.tint[1],
+                         " remaining_effect_active=",effect.active?1:0);
+                LOG_INFO("THING SECTOR TINT remaining_effect_rgb=",
+                         effect.tint[0],",",effect.tint[1],
                          ",",effect.tint[2]);
             }
             prog.set_jk_color_effects(
