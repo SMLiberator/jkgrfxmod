@@ -26,6 +26,13 @@ namespace jkgm {
         static std::atomic<int> value{0};
         return value;
     }
+    // Detours replace the first bytes of rdSetColorEffects with a jump.
+    // The existing native hardware effect reader must recognize our
+    // verified installed detour instead of expecting the original prologue.
+    inline std::atomic<bool> &native_sector_palette_hook_installed() {
+        static std::atomic<bool> value{false};
+        return value;
+    }
 
     template<class Read>
     native_sector_palette_probe probe_native_sector_palette(
