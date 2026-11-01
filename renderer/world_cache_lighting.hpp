@@ -22,14 +22,14 @@ struct world_cache_point_light {
     std::array<float,3> position{};
     float radius=0.0f,intensity=0.0f;
 };
-// The renderer must never change between stale native per-vertex light
-// values and pixel lighting merely because the first light was added.
-// JK's world dynamic-light scratch buffer can retain previous-frame data
-// when sithRender_BuildDynamicLights() is not called. A validated camera
-// with zero lights is still a valid *zero dynamic light* pixel frame.
-inline bool world_cache_use_pixel_lights(bool camera_ready)
+// gpu_pixel_lighting is the ONE opt-in switch for all GPU-cached
+// geometry. A valid camera is also required to replace native JK's
+// dynamic-light vertex buffer with the per-fragment light list.
+// Zero active lights must remain in the requested pixel mode; it must
+// not silently switch to stale native dynamic vertex data.
+inline bool world_cache_use_pixel_lights(bool enabled,bool camera_ready)
 {
-    return camera_ready;
+    return enabled && camera_ready;
 }
 
 inline float world_cache_model_style_pixel_light(

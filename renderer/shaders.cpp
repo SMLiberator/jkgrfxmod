@@ -91,7 +91,9 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     "JkGfxMod could not open an essential shader file: ",
                     filename.generic_string(),"\n",e.what())));
             }
-            std::istringstream lines(mb.str());
+            // memory_block::str() is a string_view; MSVC's stream
+            // constructor requires a concrete std::string.
+            std::istringstream lines{std::string(mb.str())};
             std::string line,output;
             while(std::getline(lines,line)) {
                 auto const p=line.find_first_not_of(" \t");

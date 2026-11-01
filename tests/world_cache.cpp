@@ -155,7 +155,10 @@ int main()
         light_read,cam_global,radial_lights,
         cam_ambient,cam_attenuation));
     assert(radial_lights.empty() && cam_attenuation==0.20f);
-    assert(world_cache_use_pixel_lights(true));
+    assert(world_cache_use_pixel_lights(true,true));
+    assert(!world_cache_use_pixel_lights(false,true));
+    assert(!world_cache_use_pixel_lights(true,false));
+    assert(!world_cache_use_pixel_lights(false,false));
     lu32(cam+0x58U,1U);
     lu32(cam+0x5cU,uint32_t(native_light));
     lu32(native_light,0U); // position index into rdCamera
@@ -174,7 +177,10 @@ int main()
     assert(radial_lights[0].radius==4.0f &&
            radial_lights[0].intensity==0.8f);
     assert(cam_attenuation==0.20f);
-    assert(world_cache_use_pixel_lights(true));
+    assert(world_cache_use_pixel_lights(true,true));
+    assert(!world_cache_use_pixel_lights(false,true));
+    assert(!world_cache_use_pixel_lights(true,false));
+    assert(!world_cache_use_pixel_lights(false,false));
     auto model_pixel=[](float dist,float incidence) {
         return world_cache_model_style_pixel_light(
             dist,4.0f,0.8f,0.2f,incidence);

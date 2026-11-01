@@ -6106,10 +6106,10 @@ namespace jkgm {
                 std::memcpy(dst,reinterpret_cast<void const *>(ptr),len);
                 return true;
             };
-            // JK's per-world-vertex dynamic-light buffer is only a
-            // fallback for unsupported camera descriptors. The validated
-            // GPU pixel path needs NO scratch-buffer copy, even with zero
-            // currently active lights.
+            // GPU world geometry follows the SAME gpu_pixel_lighting
+            // switch as GPU-cached 3DOs. When disabled, preserve JK's
+            // native per-world-vertex Gouraud dynamic-light contributions.
+            // The independent per-pixel path uses no native light scratch.
             float camera_ambient=0.0f,light_attenuation=0.0f;
             // sithRender global Extra Light is a separate live world
             // floor adjustment. Camera Ambient remains Thing-only.
@@ -6122,18 +6122,26 @@ namespace jkgm {
             bool const camera_ready=read_world_cache_camera_lights(
                 safe_read,0x0073A418U,point_lights,camera_ambient,
                 light_attenuation);
-            // The cached world uses pixel lights when rdCamera exposes a
-            // complete supported list. Otherwise preserve native shading.
-            // Remain in pixel-lighting mode even when zero Thing lights
-            // are active. Switching back to JK's mutable world-vertex
-            // scratch array on an empty list changes distant baked shading
-            // and can consume stale data from a previous lit frame.
-            bool const pixel_lighting=world_cache_use_pixel_lights(camera_ready);
+            // With pixel lighting enabled, an empty valid light list
+            // still means zero pixel lights (never use stale native data).
+            // When disabled, use JK's native world-vertex Gouraud light
+            // buffer, except on verified zero-light frames: native JK
+            // may leave scratch values from the previous lit frame.
+            bool const pixel_lighting=world_cache_use_pixel_lights(
+                the_config->gpu_pixel_lighting,camera_ready);
             bool native_dynamic_ready=false;
-            if(pixel_lighting)cache.native_dynamic_light.clear();
-            else native_dynamic_ready=read_world_cache_dynamic_lights(
-                safe_read,cache.loaded_world,cache.world.vertex_count,
-                cache.native_dynamic_light);
+            if(pixel_lighting) {
+                cache.native_dynamic_light.clear();
+            } else if(camera_ready && point_lights.empty() &&
+                      cache.world.vertex_count>0U) {
+                cache.native_dynamic_light.assign(
+                    cache.world.vertex_count,0.0f);
+                native_dynamic_ready=true;
+            } else {
+                native_dynamic_ready=read_world_cache_dynamic_lights(
+                    safe_read,cache.loaded_world,cache.world.vertex_count,
+                    cache.native_dynamic_light);
+            }
             cache.frame_light_rgb.assign(cache.mesh.vertices.size(),
                                          {{1.0f,1.0f,1.0f}});
             cache.frame_light_state.assign(cache.mesh.vertices.size(),
