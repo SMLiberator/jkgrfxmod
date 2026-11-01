@@ -17,6 +17,8 @@ struct world_cache_light_sample {
 // Validated live rdCamera lights; never turn an unsupported light into a
 // fake omni. JK rdLight +0x28 is minRadius (for 3DO Thing culling);
 // +0x2c is maxRadius, the actual world light cutoff.
+// rdCamera +0x45c is attenuationMin (3DO Thing lighting);
+// +0x460 is attenuationMax, used by sithRender_BuildDynamicLights.
 struct world_cache_point_light {
     std::array<float,3> position{};
     float radius=0.0f,intensity=0.0f;
@@ -56,7 +58,7 @@ inline bool read_world_cache_camera_lights(
     int32_t count=0;
     if(!read(uintptr_t(camera)+0x54U,&ambient,4) ||
        !read(uintptr_t(camera)+0x58U,&count,4) ||
-       !read(uintptr_t(camera)+0x45cU,&attenuation,4) ||
+       !read(uintptr_t(camera)+0x460U,&attenuation,4) ||
        !std::isfinite(ambient) || !std::isfinite(attenuation) ||
        count<0 || count>64 || attenuation<0.0f || attenuation>100.0f)
         return false;
