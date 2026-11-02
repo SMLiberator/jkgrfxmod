@@ -30,13 +30,48 @@ assert "emissive_only=7" not in policy
 assert "emissive=7" in policy
 assert "policy==world_cache_draw_policy::emissive;" in policy
 assert "gl::set_uniform_integer(emissive_only,emission_only?1:0);" in world_api
-assert "out_emissive=vec4(emission," in world
-assert "out_color=vec4(premultiplied+emission," in world
+assert "out_emissive=vec4(emission+env_reflection," in world
+assert "out_color=vec4(premultiplied+emission+specular*coverage," in world
 # No second G-buffer composition of transparent emission, and the tested
 # 90/255 native alpha weighting must remain a world-only operation.
 assert "float vertex_rgb_alpha=pow(clamp(face_opacity,0.0,1.0),1.8);" in world
 assert "texture_material_alpha*vertex_rgb_alpha" in world
 assert "emission*=texture" not in world and "emission*=texture" not in model
+
+# World Fluid shares the 3DO depth-absorption law, using camera/world-space
+# position for the same ray-length correction and opaque R16F depth sampler.
+assert "(mat.special && mat.blend_mode!=1 && mat.blend_mode!=2 &&" in policy
+assert "mat.blend_mode!=3)" in policy
+assert "float world_fluid_absorption(float fragment_depth)" in world
+assert "float fluid_absorption(float fragment_depth)" in model
+assert "float thickness=max((opaque_depth-fragment_depth)/32.0,0.0)*ray_ratio;" in world
+assert "float thickness=max((opaque_depth-fragment_depth)/32.0,0.0)*ray_ratio;" in model
+assert "opacity=1.0-exp(-fluid_thickness*thickness);" in world
+assert "opacity=1.0-exp(-advanced_material_params.y*thickness);" in model
+assert "float opacity=coverage*world_fluid_absorption(depth);" in world
+assert "out_color=vec4(lit*opacity+emission+specular,opacity);" in world
+assert "gl::set_active_texture_unit(8);" in renderer
+assert "shader.set_scene_depth(8);" in renderer
+assert "shader.set_fluid_thickness(material.blend==material_blend_mode::fluid" in renderer
+assert "frame_screen->get_resolved_depth_texture()" in renderer
+assert "material.fluid_thickness" in renderer
+assert "if(material.blend==material_blend_mode::fluid)++fluid;" in renderer
+
+# Fluid opacity remains clear at zero thickness, more opaque with depth,
+# and fully opaque when no solid receiver exists behind positive absorption.
+from math import exp
+def fluid_absorption(coefficient, fragment_depth, opaque_depth, ray_ratio):
+    value=1.0 if coefficient>0 else 0.0
+    if opaque_depth<65500:
+        thickness=max((opaque_depth-fragment_depth)/32.0,0.0)*ray_ratio
+        value=1.0-exp(-coefficient*thickness)
+    return min(max(value,0.0),1.0)
+
+assert fluid_absorption(.25,32.0,65504.0,1.0)==1.0
+assert fluid_absorption(0.0,32.0,65504.0,1.0)==0.0
+assert fluid_absorption(.25,64.0,64.0,1.0)==0.0
+assert fluid_absorption(.25,64.0,96.0,1.0)<fluid_absorption(.25,64.0,128.0,1.0)
+assert fluid_absorption(.25,64.0,96.0,2.0)>fluid_absorption(.25,64.0,96.0,1.0)
 
 # Shader should never evaluate independent copies of these functions.
 assert "vec4 gpu_material_sample_albedo(" not in model
