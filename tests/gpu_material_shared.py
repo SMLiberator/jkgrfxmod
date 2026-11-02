@@ -39,16 +39,25 @@ assert "float vertex_rgb_alpha=pow(clamp(face_opacity,0.0,1.0),1.8);" in world
 assert "texture_material_alpha*vertex_rgb_alpha" in world
 assert "emission*=texture" not in world and "emission*=texture" not in model
 
-# World Fluid shares the 3DO depth-absorption law, using camera/world-space
-# position for the same ray-length correction and opaque R16F depth sampler.
+# The native path is the visual reference: 32x camera-forward view units
+# per JK world unit. All three paths share this EXACT absorption function,
+# preserving existing Fluid material values without per-renderer scaling.
+native=read("assets/shaders/game_trns_pass.frag")
+fluid=read("assets/shaders/fluid_absorption.glsl")
 assert "(mat.special && mat.blend_mode!=1 && mat.blend_mode!=2 &&" in policy
 assert "mat.blend_mode!=3)" in policy
 assert "float world_fluid_absorption(float fragment_depth)" in world
 assert "float fluid_absorption(float fragment_depth)" in model
-assert "float thickness=max((opaque_depth-fragment_depth)/32.0,0.0)*ray_ratio;" in world
-assert "float thickness=max((opaque_depth-fragment_depth)/32.0,0.0)*ray_ratio;" in model
-assert "opacity=1.0-exp(-fluid_thickness*thickness);" in world
-assert "opacity=1.0-exp(-advanced_material_params.y*thickness);" in model
+assert "float jk_fluid_absorption(" in fluid
+assert "float thickness=max(opaque_depth-fragment_depth,0.0)*ray_ratio;" in fluid
+assert "return clamp(1.0-exp(-coefficient*thickness),0.0,1.0);" in fluid
+assert "/32.0" not in fluid
+for stage in (native,world,model):
+    assert stage.count('#include "fluid_absorption.glsl"')==1
+    assert "jk_fluid_absorption(" in stage
+assert "opaque_depth,vp_z,ray_ratio,fluid_thickness" in native
+assert "opaque_depth,fragment_depth,ray_ratio," in world
+assert "opaque_depth,fragment_depth,ray_ratio," in model
 assert "float opacity=coverage*world_fluid_absorption(depth);" in world
 assert "out_color=vec4(lit*opacity+emission+specular,opacity);" in world
 assert "gl::set_active_texture_unit(8);" in renderer
@@ -70,21 +79,26 @@ assert 'stage="<<(has_albedo?"resident_with_albedo_but_unresolved"' in renderer
 assert re.search(r"if\s*\(\s*material\.blend\s*==\s*"
                  r"material_blend_mode::fluid\s*\)\s*\{\s*\+\+fluid\s*;", renderer)
 
-# Fluid opacity remains clear at zero thickness, more opaque with depth,
-# and fully opaque when no solid receiver exists behind positive absorption.
+# Numeric parity and stability: no receiver is infinitely deep; zero
+# thickness is optically clear; greater ray length increases absorption.
 from math import exp
 def fluid_absorption(coefficient, fragment_depth, opaque_depth, ray_ratio):
     value=1.0 if coefficient>0 else 0.0
     if opaque_depth<65500:
-        thickness=max((opaque_depth-fragment_depth)/32.0,0.0)*ray_ratio
+        thickness=max(opaque_depth-fragment_depth,0.0)*ray_ratio
         value=1.0-exp(-coefficient*thickness)
     return min(max(value,0.0),1.0)
 
 assert fluid_absorption(.25,32.0,65504.0,1.0)==1.0
 assert fluid_absorption(0.0,32.0,65504.0,1.0)==0.0
 assert fluid_absorption(.25,64.0,64.0,1.0)==0.0
-assert fluid_absorption(.25,64.0,96.0,1.0)<fluid_absorption(.25,64.0,128.0,1.0)
-assert fluid_absorption(.25,64.0,96.0,2.0)>fluid_absorption(.25,64.0,96.0,1.0)
+assert fluid_absorption(.025,64.0,66.0,1.0)<fluid_absorption(.025,64.0,68.0,1.0)
+assert fluid_absorption(.025,64.0,66.0,2.0)>fluid_absorption(.025,64.0,66.0,1.0)
+# Regression: the previous GPU /32 normalization made a material with
+# coefficient .25 and native depth difference 32 almost transparent.
+native_opaque=fluid_absorption(.25,64.0,96.0,1.0)
+old_gpu_opaque=1.0-exp(-.25*((96.0-64.0)/32.0))
+assert native_opaque>.999 and .20<old_gpu_opaque<.24
 
 # Shader should never evaluate independent copies of these functions.
 assert "vec4 gpu_material_sample_albedo(" not in model
