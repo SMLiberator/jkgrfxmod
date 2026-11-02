@@ -1,5 +1,6 @@
 #include "renderer/world_cache.hpp"
 #include "renderer/world_cache_alpha.hpp"
+#include "renderer/world_cache_sky.hpp"
 #include "renderer/world_cache_portals.hpp"
 #include "renderer/world_cache_lighting.hpp"
 #include "renderer/world_cache_uv_animation.hpp"
@@ -733,9 +734,64 @@ int main()
         read,sky_native.surfaces_addr,cached_sky,no_sky_draw);
     assert(sky_stats.sky==1U && sky_stats.candidates==0U &&
            no_sky_draw.empty());
+    // Sky draws are staged separately, even without native UV geometry.
+    // The same visible sector / material / cel metadata drives this path.
+    world_cache_frame_stats sky_frame{};
+    std::vector<world_cache_draw_candidate> sky_draws;
+    append_world_cache_candidate(read,sky_native.surfaces_addr,
+        cached_sky.surfaces[0],no_sky_draw,sky_frame,
+        nullptr,nullptr,nullptr,&sky_draws);
+    assert(no_sky_draw.empty() && sky_draws.size()==1U &&
+           sky_draws[0].sky_flags==0x200U &&
+           sky_frame.sky_horizon==1U && sky_frame.sky_ceiling==0U);
+    assert(world_cache_sky_type(0x200U)==world_cache_sky_kind::horizon);
+    assert(world_cache_sky_type(0x400U)==world_cache_sky_kind::ceiling);
+    assert(world_cache_sky_type(0x600U)==world_cache_sky_kind::horizon);
+    assert(world_cache_sky_type(0U)==world_cache_sky_kind::none);
+    float const native_sky_fields[7]{
+        100.0f,50.0f,768.0f,4.0f,5.0f,10.0f,11.0f};
+    std::memcpy(storage.data()+(sky_world_addr-base)+0xdcU,
+                native_sky_fields,sizeof(native_sky_fields));
+    world_cache_sky_info sky_info{};
+    assert(read_world_cache_sky_info(read,sky_world_addr,sky_info));
+    assert(sky_info.horizon_valid && sky_info.ceiling_valid);
+    assert(sky_info.horizon_distance==50.0f &&
+           sky_info.ceiling_height==100.0f &&
+           sky_info.pixels_per_revolution==768.0f &&
+           sky_info.ceiling_offset[1]==11.0f);
+    float invalid_sky_fields[7]{
+        std::numeric_limits<float>::quiet_NaN(),
+        -1.0f,0.0f,0.0f,0.0f,0.0f,0.0f};
+    std::memcpy(storage.data()+(sky_world_addr-base)+0xdcU,
+                invalid_sky_fields,sizeof(invalid_sky_fields));
+    assert(!read_world_cache_sky_info(read,sky_world_addr,sky_info));
+    assert(sky_info.horizon_valid && sky_info.ceiling_valid);
+    engine_camera sky_camera{};
+    sky_camera.valid=true;
+    std::array<float,3> sky_pyr{};
+    assert(world_cache_sky_angles(sky_camera,sky_pyr));
+    for(float angle:sky_pyr)assert(std::fabs(angle)<0.0001f);
+    sky_camera.valid=false;
+    assert(!world_cache_sky_angles(sky_camera,sky_pyr));
     put32(sky_faces_addr+0x10U,0x400U);
     assert(sky_native.load(read,sky_world_addr,100U,true,true));
     assert(sky_native.cached_sky==1U &&
            sky_native.receivers[0].surface_flags==0x400U);
+    sky_frame={};
+    sky_draws.clear();
+    append_world_cache_candidate(read,sky_native.surfaces_addr,
+        cached_sky.surfaces[0],no_sky_draw,sky_frame,
+        nullptr,nullptr,nullptr,&sky_draws);
+    assert(sky_draws.size()==1U &&
+           sky_draws[0].sky_flags==0x400U &&
+           sky_frame.sky_ceiling==1U && sky_frame.sky_horizon==0U);
+    put32(sky_faces_addr+0x10U,0x600U);
+    sky_frame={};
+    sky_draws.clear();
+    append_world_cache_candidate(read,sky_native.surfaces_addr,
+        cached_sky.surfaces[0],no_sky_draw,sky_frame,
+        nullptr,nullptr,nullptr,&sky_draws);
+    assert(sky_draws.size()==1U && sky_draws[0].sky_flags==0x600U &&
+           sky_frame.sky_horizon==1U && sky_frame.sky_ceiling==0U);
     return 0;
 }

@@ -6354,8 +6354,8 @@ namespace jkgm {
                     }
                     gl::draw_elements(gl::element_type::triangles,
                         static_cast<GLsizei>(face.count),gl::index_type::uint32,
-                        reinterpret_cast<void const *>(
-                            uintptr_t(face.first_index)*sizeof(uint32_t)));
+                        static_cast<ptrdiff_t>(
+                            face.first_index*sizeof(uint32_t)));
                     ++sky_drawn;
                     if(sky_type==world_cache_sky_kind::horizon)
                         ++sky_horizon_drawn;
