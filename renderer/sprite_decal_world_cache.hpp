@@ -18,7 +18,8 @@ namespace jkgm {
     struct decal_world_surface_geometry {
         uint32_t surface_index=0;
         uint32_t surface_flags=0; // retained for sky-specific GPU passes
-        bool solid_adjoin=false; // may be a masked grate/glass surface
+        bool solid_adjoin=false; // impassable grate/glass receiver
+        bool passable_adjoin=false; // world-render cache only; never a decal receiver by default
         uintptr_t material=0;
         int32_t cel=-1;
         bool has_shadow_uv=false;
@@ -54,7 +55,8 @@ namespace jkgm {
         bool load(decal_native_read const &read,uintptr_t current,
                   uint32_t max_surfaces=250000,
                   bool shadow_include_hidden=false,
-                  bool include_sky_surfaces=false) {
+                  bool include_sky_surfaces=false,
+                  bool include_passable_adjoins=false) {
             clear();
             if(!read || !decal_native_address_ok(current))return false;
             uint32_t nverts=0,verts=0,nfaces=0,faces=0;
@@ -111,13 +113,15 @@ namespace jkgm {
                    !read_decal_vec3(read,addr+0x48,normal)) {
                     ++invalid_surfaces;continue;
                 }
-                // Adjoin 0x2 is passable; a solid, masked grate is a
-                // valid receiver even when it has an adjoin pointer.
+                // Decal and shadow caches still exclude passable adjoins.
+                // Only the renderer's explicit world-cache snapshot opts
+                // into their geometry (opaque faces may be drawn on portals).
                 auto const adjoin_status=classify_decal_adjoin(read,adjoin);
                 if(adjoin_status==decal_adjoin_status::invalid) {
                     ++invalid_surfaces;continue;
                 }
-                if(adjoin_status==decal_adjoin_status::passable) {
+                if(adjoin_status==decal_adjoin_status::passable &&
+                   !include_passable_adjoins) {
                     ++skipped_portals;continue;
                 }
                 bool const is_sky=(flags&0x600U)!=0U;
@@ -137,7 +141,10 @@ namespace jkgm {
                 decal_world_surface_geometry surface{};
                 surface.surface_index=i;
                 surface.surface_flags=flags;
-                surface.solid_adjoin=(adjoin!=0U);
+                surface.solid_adjoin=(adjoin!=0U &&
+                    adjoin_status==decal_adjoin_status::solid);
+                surface.passable_adjoin=
+                    adjoin_status==decal_adjoin_status::passable;
                 surface.material=mat;
                 uint32_t native_cel=0;
                 if(read_decal_u32(read,addr+0x38,native_cel))

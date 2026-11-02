@@ -502,6 +502,9 @@ int main()
     assert(stage.valid && sector.size()==1U && special.empty());
     // Opaque-textured, impassable adjoins also need separate validation.
     set_u32(2,0x18,0U);
+    // Live native pointer/flags, not snapshot metadata, classify adjoins.
+    set_u32(2,0x0c,uint32_t(base+0xf000U));
+    put32(base+0xf000U,0x5U); // solid, rendered adjoin
     auto special_mesh=mesh;
     special_mesh.surfaces[0].solid_adjoin=true;
     stage=collect_world_cache_sector_candidates(
@@ -509,6 +512,38 @@ int main()
         nullptr,nullptr,&special);
     assert(stage.valid && sector.empty() &&
            special.size()==1U && special[0].solid_adjoin);
+    // Turning on passability keeps this face renderable as an opaque
+    // portal candidate, without changing cached geometry.
+    put32(base+0xf000U,0x7U);
+    stage=collect_world_cache_sector_candidates(
+        read,base,special_mesh,lookup,spans,epochs,epoch,sector,
+        nullptr,nullptr,&special);
+    assert(stage.valid && stage.faces.passable_adjoin==1U &&
+           sector.size()==1U && sector[0].passable_adjoin &&
+           !sector[0].solid_adjoin && special.empty());
+    // Cached MAT policy must not confuse movement passability with alpha.
+    world_cache_material_info opaque_portal_mat{};
+    opaque_portal_mat.albedo_source=1;
+    opaque_portal_mat.has_image=true;
+    opaque_portal_mat.width=64.0f;opaque_portal_mat.height=64.0f;
+    assert(choose_world_cache_draw_policy(sector[0],opaque_portal_mat)==
+           world_cache_draw_policy::textured);
+    opaque_portal_mat.alpha=true;
+    assert(choose_world_cache_draw_policy(sector[0],opaque_portal_mat)==
+           world_cache_draw_policy::native);
+    opaque_portal_mat.alpha=false;
+    opaque_portal_mat.masked=true;
+    assert(choose_world_cache_draw_policy(sector[0],opaque_portal_mat)==
+           world_cache_draw_policy::native);
+    // JK's translucent *face* flag still routes to the native path.
+    set_u32(2,0x18,0x2U);
+    stage=collect_world_cache_sector_candidates(
+        read,base,special_mesh,lookup,spans,epochs,epoch,sector,
+        nullptr,nullptr,&special);
+    assert(stage.valid && sector.empty() &&
+           special.size()==1U && special[0].passable_adjoin);
+    set_u32(2,0x18,0U);
+    set_u32(2,0x0c,0U);
 
     // Conservative solid-adjoin material policy: binary alpha masks
     // write precise G-buffer depth, mixed/translucent faces stay native.

@@ -6009,6 +6009,7 @@ namespace jkgm {
                     " not_textured=",state.not_textured,
                     " solid_color=",state.solid_color,
                     " solid_adjoin=",state.solid_adjoin,
+                    " passable_adjoin=",state.passable_adjoin,
                     " translucent_face=",state.translucent_face,
                      " special_candidates=",state.special_candidates,
                     " missing_uv=",state.missing_uv,
@@ -6038,6 +6039,8 @@ namespace jkgm {
                         sector_stage.faces.translucent_face,
                     " sector_stage_solid_adjoin=",
                         sector_stage.faces.solid_adjoin,
+                    " sector_stage_passable_adjoin=",
+                        sector_stage.faces.passable_adjoin,
  
                     " sector_stage_us=",sector_stage_us,
                     " sector_stage_native_surfaces=",sector_stage.unique_surfaces,
@@ -6223,6 +6226,8 @@ namespace jkgm {
                         return a->geometry_mode<b->geometry_mode;
                     if(a->solid_adjoin!=b->solid_adjoin)
                         return a->solid_adjoin<b->solid_adjoin;
+                    if(a->passable_adjoin!=b->passable_adjoin)
+                        return a->passable_adjoin<b->passable_adjoin;
                     return a->surface_index<b->surface_index;
                 });
             auto &shader=*ogs->world_cache_preview_program;
@@ -6277,7 +6282,7 @@ namespace jkgm {
             }
             gl::bind_vertex_array(cache.vao);
             size_t drawn=0,solid_drawn=0,masked_drawn=0,adjoin_drawn=0;
-            size_t unresolved=0,groups=0,skipped_alpha=0;
+            size_t passable_drawn=0,unresolved=0,groups=0,skipped_alpha=0;
             for(size_t i=0;i<ordered.size();) {
                 size_t end=i+1;
                 auto const *first=ordered[i];
@@ -6285,7 +6290,8 @@ namespace jkgm {
                       ordered[end]->material==first->material &&
                       ordered[end]->cel==first->cel &&
                       ordered[end]->geometry_mode==first->geometry_mode &&
-                      ordered[end]->solid_adjoin==first->solid_adjoin)++end;
+                      ordered[end]->solid_adjoin==first->solid_adjoin &&
+                      ordered[end]->passable_adjoin==first->passable_adjoin)++end;
                 gpu_3do_group group{};
                 group.material=first->material;
                 group.cel=first->cel;
@@ -6335,6 +6341,7 @@ namespace jkgm {
                     if(policy==world_cache_draw_policy::masked)
                         masked_drawn+=counts.size();
                     if(first->solid_adjoin)adjoin_drawn+=counts.size();
+                    if(first->passable_adjoin)passable_drawn+=counts.size();
                     ++groups;
                 } else if(material.albedo_source!=(solid?2:1) ||
                           (!solid && !material.has_image))unresolved+=end-i;
@@ -6351,6 +6358,7 @@ namespace jkgm {
                 LOG_INFO("WORLD CACHE gpu_first_opaque ranges=",drawn,
                          " solid_ranges=",solid_drawn,
                          " adjoin_ranges=",adjoin_drawn,
+                         " passable_adjoin_ranges=",passable_drawn,
                          " masked_ranges=",masked_drawn,
                          " multi_draw_calls=",groups,
                          " unresolved_material=",unresolved,

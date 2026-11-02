@@ -85,6 +85,50 @@ int main(){
     assert(std::fabs(index.receivers[0].shadow_uv[1][0]-64.0f)<0.0001f);
     assert(std::fabs(index.receivers[0].shadow_uv[0][1]-2.0f)<0.0001f);
     assert(index.receivers[2].solid_adjoin);
+    assert(!index.receivers[2].passable_adjoin);
+
+    // Only the *render* snapshot includes movement-passable adjoins.
+    // Default decal and shadow snapshots above must remain unchanged.
+    decal_world_geometry render_only{};
+    assert(render_only.load(reader,world,250000U,true,true,true));
+    assert(render_only.receivers.size()==5 &&
+           render_only.skipped_portals==0 &&
+           render_only.cached_sky==1);
+    assert(render_only.receivers[2].surface_index==2U &&
+           render_only.receivers[2].passable_adjoin &&
+           !render_only.receivers[2].solid_adjoin);
+    assert(render_only.receivers[4].solid_adjoin &&
+           !render_only.receivers[4].passable_adjoin);
+    world_cache_mesh render_mesh{};
+    assert(build_world_cache_mesh(render_only,render_mesh));
+    assert(render_mesh.surfaces.size()==5 &&
+           render_mesh.passable_adjoin_surfaces==1);
+    std::vector<world_cache_draw_candidate> render_stage,render_special;
+    auto render_stats=collect_world_cache_draw_candidates(
+        reader,render_only.surfaces_addr,render_mesh,render_stage);
+    assert(render_stats.passable_adjoin==1 &&
+           render_stats.candidates==3 && render_stats.sky==1);
+    assert(render_stage[2].surface_index==2U &&
+           render_stage[2].passable_adjoin);
+    // Native adjoin flags can change through COG. No VBO rebuild is needed.
+    u32(base+0x1900,0x5); // passable -> solid
+    render_stats=collect_world_cache_draw_candidates(
+        reader,render_only.surfaces_addr,render_mesh,render_stage);
+    assert(render_stats.passable_adjoin==0 &&
+           render_stats.solid_adjoin==2 &&
+           render_stats.candidates==2);
+    u32(base+0x1900,0x7); // solid -> passable
+    render_stats=collect_world_cache_draw_candidates(
+        reader,render_only.surfaces_addr,render_mesh,render_stage);
+    assert(render_stats.candidates==3 &&
+           render_stage[2].passable_adjoin);
+    // Missing/unreadable native adjoin flags must fail closed.
+    u32(surfaces+2*0x5c+0x0c,0xdeadbeefU);
+    render_stats=collect_world_cache_draw_candidates(
+        reader,render_only.surfaces_addr,render_mesh,render_stage);
+    assert(render_stats.unreadable==1 &&
+           render_stats.candidates==2);
+    u32(surfaces+2*0x5c+0x0c,uint32_t(base+0x1900));
 
     assert(index.acceleration.node_count()>0);
     decal_projector p{};

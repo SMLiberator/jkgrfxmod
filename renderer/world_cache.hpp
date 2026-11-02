@@ -29,6 +29,7 @@ struct world_cache_surface_range {
     bool has_uv=false;
     // Immutable world-space bounds for conservative candidate frustum tests.
     std::array<float,3> bounds_min{},bounds_max{};
+    bool passable_adjoin=false; // geometry, not a collision/decal receiver
 };
 
 struct world_cache_mesh {
@@ -36,6 +37,7 @@ struct world_cache_mesh {
     std::vector<uint32_t> indices;
     std::vector<world_cache_surface_range> surfaces;
     uint32_t uv_ready_surfaces=0,missing_uv_surfaces=0,sky_surfaces=0;
+    uint32_t passable_adjoin_surfaces=0;
 };
 
 // Preserve the native surface's facing direction even when its stored
@@ -59,9 +61,9 @@ inline bool world_cache_reverse_fan_triangle(
 // Snapshot the static geometry only once per world topology. Surface state
 // (geomode, material cel, animation, scroll, visibility) is intentionally
 // NOT baked into the geometry; callers must query it live before rendering.
-// This snapshot may include sky geometry for future dedicated GPU drawing.
-// Passable adjoins still remain native; shadow/decal readers keep their
-// independent default policy of excluding sky surfaces.
+// The render-only snapshot also retains passable-adjoin polygons and sky.
+// Native portal traversal/visibility stays authoritative. The independent
+// decal/shadow cache keeps excluding passable portals by default.
 inline bool build_world_cache_mesh(decal_world_geometry const &world,
                                    world_cache_mesh &out)
 {
@@ -116,9 +118,10 @@ inline bool build_world_cache_mesh(decal_world_geometry const &world,
             surf.surface_index,begin,
             static_cast<uint32_t>(out.indices.size())-begin,
             surf.material,surf.cel,surf.surface_flags,surf.solid_adjoin,valid_uv,
-            surf.bounds_min,surf.bounds_max
+            surf.bounds_min,surf.bounds_max,surf.passable_adjoin
         });
         if(surf.surface_flags&0x600U)++out.sky_surfaces;
+        if(surf.passable_adjoin)++out.passable_adjoin_surfaces;
         if(valid_uv)++out.uv_ready_surfaces;
         else ++out.missing_uv_surfaces;
     }

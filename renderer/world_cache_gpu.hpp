@@ -95,11 +95,10 @@ struct world_cache_gpu {
         cached_surface_lookup.clear();
         sector_seen_epochs.clear();
         sector_seen_epoch=0;
-        // The renderer's private geometry snapshot includes sky faces,
-        // but candidate selection still excludes them until a dedicated
-        // sky render path matches JK. Other shadow/decal reader instances
-        // remain unchanged and continue to exclude sky geometry.
-        if(!world.load(read,address,250000U,true,true) ||
+        // The render-only snapshot retains sky and passable-adjoin faces.
+        // Selection still excludes sky until dedicated rendering matches JK.
+        // Shadow/decal reader defaults still exclude pass-through portals.
+        if(!world.load(read,address,250000U,true,true,true) ||
            !build_world_cache_mesh(world,mesh) ||
            !build_world_cache_surface_lookup(
                mesh,world.surface_count,cached_surface_lookup)) {
@@ -145,6 +144,7 @@ struct world_cache_gpu {
                  " uv_ready=",mesh.uv_ready_surfaces,
                  " missing_uv=",mesh.missing_uv_surfaces,
                  " cached_sky=",mesh.sky_surfaces,
+                 " cached_passable_adjoins=",mesh.passable_adjoin_surfaces,
                  " skipped_portals=",world.skipped_portals,
                  " skipped_sky=",world.skipped_sky,
                  " skipped_material=",world.skipped_material,

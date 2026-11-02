@@ -233,7 +233,8 @@ inline world_cache_stage_parity compare_world_cache_candidate_sets(
                a.face_type!=b.face_type ||
                a.solid_adjoin!=b.solid_adjoin ||
                a.uv_offset!=b.uv_offset ||
-               a.geometry_mode!=b.geometry_mode)
+               a.geometry_mode!=b.geometry_mode ||
+               a.passable_adjoin!=b.passable_adjoin)
                 ++r.changed_metadata;
             else ++r.matched;
         }
