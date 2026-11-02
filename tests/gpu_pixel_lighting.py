@@ -78,13 +78,15 @@ assert "float coverage=clamp(texture_material_alpha*face_opacity,0.0,1.0);" in w
 assert "gpu_material_discard(coverage,alpha_mode,alpha_cutoff," in world_frag
 assert "gpu_material_emission(" in world_frag
 assert "gpu_material_sample_albedo(" in world_frag
-assert "out_emissive=vec4(emission," in world_frag
+# Opaque world reflections share the emissive attachment so SSAO does not dim them.
+assert "out_emissive=vec4(emission+env_reflection," in world_frag
 assert '#include "gpu_material_common.glsl"' in world_frag
 assert "if(transparent_pass!=0)" in world_frag
 assert "float vertex_rgb_alpha=pow(clamp(face_opacity,0.0,1.0),1.8);" in world_frag
 assert "texture_material_alpha*vertex_rgb_alpha" in world_frag
 assert "fog_color*(fog*coverage)" in world_frag
-assert "out_color=vec4(premultiplied+emission," in world_frag
+# Forward alpha keeps EnvMap specularity independent of the old diffuse alpha formula.
+assert "out_color=vec4(premultiplied+emission+specular*coverage," in world_frag
 # The native D3D bridge converts gamma(alpha-premultiplied diffuse),
 # retaining *linear* 90/255 alpha for the framebuffer's blend factors.
 # Changing the alpha itself instead of its RGB would be a regression.
