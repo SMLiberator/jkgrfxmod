@@ -6468,6 +6468,15 @@ namespace jkgm {
             size_t drawn=0,solid_drawn=0,masked_drawn=0,adjoin_drawn=0;
             size_t passable_drawn=0,unresolved=0,groups=0,skipped_alpha=0;
             size_t mixed_drawn=0,dithered_drawn=0;
+            // Report *visible* world MAT state, not only shader capability.
+            // A surface map and normal map alone cannot light a face:
+            // the current world shader needs an active material EnvMap.
+            size_t mat_probe_faces=0,mat_probe_reflective=0;
+            size_t mat_probe_normals=0,mat_probe_surface_maps=0;
+            size_t mat_probe_env=0,mat_probe_missing_env=0;
+            size_t mat_probe_no_strength=0;
+            bool const mat_probe=the_config->profile_renderer &&
+                                  gpu_3do_present_serial%120U==0U;
             for(size_t i=0;i<ordered.size();) {
                 size_t end=i+1;
                 auto const *first=ordered[i];
@@ -6500,6 +6509,21 @@ namespace jkgm {
                 info.height=material.height;
                 info.alpha_cutoff=material.alpha_cutoff;
                 auto const policy=choose_world_cache_draw_policy(*first,info);
+                if(mat_probe && world_cache_draws_in_pass(
+                    policy,world_cache_pass::opaque)) {
+                    size_t const faces=end-i;
+                    mat_probe_faces+=faces;
+                    if(material.has_normal || material.has_normal2)
+                        mat_probe_normals+=faces;
+                    if(material.has_surface)mat_probe_surface_maps+=faces;
+                    if(material.has_environment || material.has_environment2)
+                        mat_probe_env+=faces;
+                    if(material.reflection_strength>0.0f) {
+                        if(material.has_environment || material.has_environment2)
+                            mat_probe_reflective+=faces;
+                        else mat_probe_missing_env+=faces;
+                    } else mat_probe_no_strength+=faces;
+                }
                 if(world_cache_draws_in_pass(policy,world_cache_pass::opaque)) {
                     bind_world_cache_material(shader,material,
                                               first->geometry_mode);
@@ -6565,6 +6589,14 @@ namespace jkgm {
                          " deferred_special=",skipped_alpha,
                          " light_fallback=",light_fallback,
                          " gouraud_faces=",gouraud_faces);
+                LOG_INFO("WORLD CACHE material_effects_opaque visible=",mat_probe_faces,
+                         " reflective=",mat_probe_reflective,
+                         " env_maps=",mat_probe_env,
+                         " normal_maps=",mat_probe_normals,
+                         " surface_maps=",mat_probe_surface_maps,
+                         " strength_without_env=",mat_probe_missing_env,
+                         " zero_strength=",mat_probe_no_strength,
+                         " enable_reflections=",the_config->enable_reflections?1:0);
                 LOG_INFO("WORLD CACHE light_state pixel_path_valid=",
                          pixel_lighting?1:0,
                          " native_dynamic_fallback_ready=",
@@ -6726,6 +6758,12 @@ namespace jkgm {
             gl::enable(gl::capability::cull_face);
             gl::bind_vertex_array(cache.vao);
             size_t mixed=0,forced=0,fluid=0;
+            size_t normal_maps=0,surface_maps=0,env_maps=0;
+            size_t active_reflections=0,no_env=0,no_strength=0;
+            float fluid_thickness_min=std::numeric_limits<float>::max();
+            float fluid_thickness_max=0.0f;
+            bool const material_probe=the_config->profile_renderer &&
+                                      gpu_3do_present_serial%120U==0U;
             for(auto const *face:draws) {
                 auto const &material=resolve(*face);
                 auto const policy=policy_for(*face);
@@ -6760,7 +6798,26 @@ namespace jkgm {
                         face->first_index*sizeof(uint32_t)));
                 if(policy==world_cache_draw_policy::mixed)++mixed;
                 else ++forced;
-                if(material.blend==material_blend_mode::fluid)++fluid;
+                if(material.blend==material_blend_mode::fluid) {
+                    ++fluid;
+                    if(material_probe) {
+                        fluid_thickness_min=std::min(
+                            fluid_thickness_min,material.fluid_thickness);
+                        fluid_thickness_max=std::max(
+                            fluid_thickness_max,material.fluid_thickness);
+                    }
+                }
+                if(material_probe) {
+                    if(material.has_normal || material.has_normal2)++normal_maps;
+                    if(material.has_surface)++surface_maps;
+                    bool const has_env=material.has_environment ||
+                                       material.has_environment2;
+                    if(has_env)++env_maps;
+                    if(material.reflection_strength>0.0f) {
+                        if(has_env)++active_reflections;
+                        else ++no_env;
+                    } else ++no_strength;
+                }
             }
             gl::bind_vertex_array(gl::vertex_array_view(0U));
             shader.set_alpha_policy(false,0,0.5f,1.0f);
@@ -6768,12 +6825,24 @@ namespace jkgm {
             gl::set_blend_function(gl::blend_function::one,
                                    gl::blend_function::one_minus_source_alpha);
             gl::set_active_texture_unit(0);
-            if(the_config->profile_renderer &&
-               gpu_3do_present_serial%120U==0U)
+            if(material_probe) {
                 LOG_INFO("WORLD CACHE gpu_alpha ranges=",draws.size(),
                          " mixed=",mixed," forced_blend=",forced,
                          " fluid=",fluid,
                          " sorted=back_to_front depth_write=0");
+                LOG_INFO("WORLD CACHE material_effects_alpha visible=",draws.size(),
+                         " reflective=",active_reflections,
+                         " env_maps=",env_maps,
+                         " normal_maps=",normal_maps,
+                         " surface_maps=",surface_maps,
+                         " strength_without_env=",no_env,
+                         " zero_strength=",no_strength,
+                         " fluid_ranges=",fluid,
+                         " fluid_thickness_min=",fluid?
+                             fluid_thickness_min:0.0f,
+                         " fluid_thickness_max=",fluid_thickness_max,
+                         " enable_reflections=",the_config->enable_reflections?1:0);
+            }
         }
 
         void draw_game_transparency_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
