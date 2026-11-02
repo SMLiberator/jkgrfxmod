@@ -3004,11 +3004,8 @@ namespace {
             read(f+0x1cU,&uv_indices,4U) &&
             read(mi+0x0cU,&pos_ptr,4U) &&
             read(mi+0x10U,&uv_ptr,4U) &&
-            pos_ptr>=0x10000U && pos_indices>=0x10000U &&
-            read(pos_indices,&n,0U);
-        // Re-read the count after validating the index array. A zero-size
-        // read is never used to infer that index storage is long enough.
-        if(!ok || !read(f+0x14U,&n,4U) || n<3U || n>5U ||
+            pos_ptr>=0x10000U && pos_indices>=0x10000U;
+        if(!ok ||
            !gpu_span_readable(reinterpret_cast<void const *>(
                uintptr_t(pos_indices)),size_t(n)*sizeof(int32_t)) ||
            (geo==4U &&
