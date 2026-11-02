@@ -73,13 +73,30 @@ assert "solid_color!=0 ? clamp(material_tint.rgb" in world_frag
 assert "uniform int alpha_cutout;" in world_frag
 # Cutout alpha now shares the same coverage factor as masked, mixed-alpha,
 # forced-native translucency and dithered world faces.
-assert "float coverage=clamp(texel.a*material_tint.a*face_opacity" in world_frag
+assert "float texture_material_alpha=clamp(texel.a*material_tint.a,0.0,1.0);" in world_frag
+assert "float coverage=clamp(texture_material_alpha*face_opacity,0.0,1.0);" in world_frag
 assert "if(alpha_mode==2 && coverage<alpha_cutoff)discard;" in world_frag
 assert "if(alpha_mode==1 && coverage<0.999)discard;" in world_frag
 assert "if(alpha_mode==1 && coverage>=0.999)discard;" in world_frag
 assert "if(alpha_mode==4 && coverage<=dither_threshold())discard;" in world_frag
 assert "if(transparent_pass!=0)" in world_frag
-assert "out_color=vec4(lit*coverage,blend_mode==1?0.0:coverage);" in world_frag
+assert "float vertex_rgb_alpha=pow(clamp(face_opacity,0.0,1.0),1.8);" in world_frag
+assert "texture_material_alpha*vertex_rgb_alpha" in world_frag
+assert "fog_color*(fog*coverage)" in world_frag
+assert "out_color=vec4(premultiplied,blend_mode==1?0.0:coverage);" in world_frag
+# The native D3D bridge converts gamma(alpha-premultiplied diffuse),
+# retaining *linear* 90/255 alpha for the framebuffer's blend factors.
+# Changing the alpha itself instead of its RGB would be a regression.
+native_face_alpha=90.0/255.0
+native_rgb_factor=native_face_alpha**1.8
+assert abs(native_face_alpha-0.35294117647058826)<1e-12
+assert 0.15<native_rgb_factor<0.16
+assert native_rgb_factor<native_face_alpha
+for texture_alpha,material_alpha in ((1.0,1.0),(0.5,1.0),(1.0,0.7)):
+    actual_alpha=texture_alpha*material_alpha*native_face_alpha
+    expected_rgb=texture_alpha*material_alpha*native_rgb_factor
+    assert abs(actual_alpha-(texture_alpha*material_alpha*90/255))<1e-12
+    assert 0.0<=expected_rgb<=actual_alpha
 assert "discard;" in world_frag
 assert "vec3 lighting=cached_lit_rgb;" in world_frag
 assert "if(added<=0.0) return jk_lit_rgb;" in frag

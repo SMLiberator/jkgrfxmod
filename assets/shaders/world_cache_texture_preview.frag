@@ -97,7 +97,8 @@ void main() {
     vec4 texel=vec4(1.0);
     if(solid_color==0)
         texel=texture(albedo_map,uv*uv_scale+uv_scroll);
-    float coverage=clamp(texel.a*material_tint.a*face_opacity,0.0,1.0);
+    float texture_material_alpha=clamp(texel.a*material_tint.a,0.0,1.0);
+    float coverage=clamp(texture_material_alpha*face_opacity,0.0,1.0);
     if(alpha_cutout!=0 && coverage<alpha_cutoff)discard;
     if(transparent_pass==0) {
         if(alpha_mode==3)discard;
@@ -153,8 +154,24 @@ void main() {
             // (DST_COLOR, ZERO) needs a neutral multiplier at alpha zero.
             out_color=vec4(mix(vec3(1.0),lit,coverage),0.0);
         } else {
-            // Additive uses ONE+ONE and preserves the destination alpha.
-            out_color=vec4(lit*coverage,blend_mode==1?0.0:coverage);
+            // Native D3DTLVERTEX diffuse RGB premultiplies the *vertex*
+            // opacity BEFORE gamma-1.8 linearization. The native bridge
+            // uses pow(vertexRGB*vertexAlpha,1.8), not
+            // pow(vertexRGB,1.8)*vertexAlpha. For rdFace.type 0x2, the
+            // actual alpha coverage is 90/255, but its diffuse RGB weight
+            // is pow(90/255,1.8). MAT texture alpha / material opacity
+            // are applied separately, AFTER that conversion.
+            //
+            // Fog is different: JK's forward shader contributes fogColor
+            // multiplied by the actual (unmodified) coverage.
+            float vertex_rgb_alpha=pow(clamp(face_opacity,0.0,1.0),1.8);
+            vec3 premultiplied=
+                albedo*lighting*(1.0-fog)*
+                    (texture_material_alpha*vertex_rgb_alpha)
+                +fog_color*(fog*coverage);
+            // Normal blending: ONE, ONE_MINUS_SRC_ALPHA.
+            // Additive: ONE, ONE; alpha attachment remains unchanged.
+            out_color=vec4(premultiplied,blend_mode==1?0.0:coverage);
         }
         return;
     }

@@ -12,7 +12,11 @@ retaining JK's verified sector/portal visibility and persistent GPU geometry.
 - Mixed-alpha MAT: fully opaque texels write G-buffer depth; fractional
   texels blend later. Fully transparent texels render neither pass.
 - Native `rdFace.type & 0x2`: forced `90/255` opacity, even with
-  opaque MAT textures.
+  opaque MAT textures. Alpha coverage stays `90/255` while diffuse RGB
+  follows the original D3D bridge's premultiply-**before**-gamma-1.8
+  convention. Thus white diffuse RGB contributes `(90/255)^1.8`, while
+  the framebuffer still blends using `90/255` alpha. This is not
+  equivalent to multiplying already-linear RGB by `90/255`.
 - Native material opacity below one: blended, without depth writes.
 - Additive and multiplicative material blend modes: their appropriate
   framebuffer blend factors, rather than normal premultiplied blending.
