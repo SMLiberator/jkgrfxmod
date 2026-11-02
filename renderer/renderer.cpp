@@ -2658,6 +2658,7 @@ namespace jkgm {
                   <<" has_alpha_flag="<<((tex.header[0]&1U)?1:0);
             unsigned const max_mips=std::min(tex.header[6],4U);
             bool resident=false,valid_handle=false;
+            size_t selected_handle=0;
             for(unsigned i=0;i<max_mips;++i) {
                 auto const &alpha=tex.alpha_mips[i];
                 auto const &opaque=tex.opaque_mips[i];
@@ -2679,6 +2680,7 @@ namespace jkgm {
                 if(!chosen)continue;
                 resident=true;
                 auto const id=static_cast<size_t>(chosen->texture_handle);
+                selected_handle=id;
                 valid_handle=id>0 && id<=vidmem_texture_surfaces.size() &&
                              bool(vidmem_texture_surfaces[id-1]);
                 reason<<" chosen_mip="<<i<<" chosen_handle="<<id
@@ -2693,8 +2695,7 @@ namespace jkgm {
                 // because the replacement deliberately uses tint/reflection
                 // and Fluid absorption without an albedo map. Report the
                 // actual renderer material, not just the native D3D handle.
-                auto const id=static_cast<size_t>(chosen->texture_handle);
-                auto const &gpu=vidmem_texture_surfaces[id-1];
+                auto const &gpu=vidmem_texture_surfaces[selected_handle-1];
                 bool const has_albedo=gpu->albedo_map.has_value();
                 bool const replacement=gpu->replacement_material!=nullptr;
                 bool const intentionally_no_albedo=replacement &&
