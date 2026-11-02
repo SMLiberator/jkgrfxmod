@@ -16,6 +16,28 @@ for stage in (model,world):
     assert "gpu_material_sample_albedo(" in stage
     assert "gpu_material_emission(" in stage
     assert "gpu_material_discard(" in stage
+# Both world draw passes must bind the identical live MAT factors and maps.
+renderer=read("renderer/renderer.cpp")
+world_api=read("renderer/shaders.cpp")
+policy=read("renderer/world_cache_alpha.hpp")
+assert "void bind_world_cache_material(" in renderer
+assert "bind_world_cache_material(shader,material," in renderer
+assert "bind_world_cache_material(shader,material,face->geometry_mode);" in renderer
+assert "shader.set_emissive(material.has_emission," in renderer
+assert "shader.set_albedo_transition(material.albedo_source2," in renderer
+assert "material.emissive_only);" in renderer
+assert "emissive_only=7" not in policy
+assert "emissive=7" in policy
+assert "policy==world_cache_draw_policy::emissive;" in policy
+assert "gl::set_uniform_integer(emissive_only,emission_only?1:0);" in world_api
+assert "out_emissive=vec4(emission," in world
+assert "out_color=vec4(premultiplied+emission," in world
+# No second G-buffer composition of transparent emission, and the tested
+# 90/255 native alpha weighting must remain a world-only operation.
+assert "float vertex_rgb_alpha=pow(clamp(face_opacity,0.0,1.0),1.8);" in world
+assert "texture_material_alpha*vertex_rgb_alpha" in world
+assert "emission*=texture" not in world and "emission*=texture" not in model
+
 # Shader should never evaluate independent copies of these functions.
 assert "vec4 gpu_material_sample_albedo(" not in model
 assert "vec3 gpu_material_emission(" not in model
