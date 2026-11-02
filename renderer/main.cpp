@@ -11,6 +11,8 @@
 #include "native_sprite_profile.hpp"
 #include "native_particle_texture.hpp"
 #include "gpu_3do_preview.hpp"
+#include "gpu_polyline.hpp"
+#include "native_procedural_draw.hpp"
 #include "camera_hud_thing.hpp"
 #include "gpu_mat_ready_cache.hpp"
 #include "gpu_3do_modelview.hpp"
@@ -2954,6 +2956,168 @@ namespace {
             popfd
             jmp dword ptr [RealSpritePreclip]
         }
+    }
+
+    // JKGM rdPolyline_Draw (0x448D60) creates five view-space faces:
+    // three sides and two caps. Capture the native GENERATOR output, not
+    // its Direct3D triangles. The face detour replaces rdCache submission,
+    // so successful GPU blades never reach the legacy renderer.
+    using native_polyline_draw_fn=int(__cdecl *)(void *,void *);
+    using native_polyline_face_fn=void(__cdecl *)(void *,void *,void *,void *);
+    native_polyline_draw_fn RealNativePolylineDraw=
+        reinterpret_cast<native_polyline_draw_fn>(
+            jkgm::native_procedural_draw::rdpolyline_draw);
+    native_polyline_face_fn RealNativePolylineFace=
+        reinterpret_cast<native_polyline_face_fn>(
+            jkgm::native_procedural_draw::rdpolyline_draw_face);
+    bool native_polyline_hook_active=false;
+    thread_local jkgm::gpu_polyline_capture *active_gpu_polyline=nullptr;
+    unsigned polyline_gpu_logged=0,polyline_native_logged=0;
+
+    void __cdecl HookedNativePolylineFace(
+        void *rdthing,void *face,void *vertices,void *meshinfo)
+    {
+        auto *capture=active_gpu_polyline;
+        if(!capture) {
+            RealNativePolylineFace(rdthing,face,vertices,meshinfo);
+            return;
+        }
+        if(capture->failed)return;
+        // Exact rdFace and rdMeshinfo fields read at 0x449220..0x449244.
+        // The meshinfo holds the base pointer for THIS face's 3D points
+        // (the face generator offsets it for its three side/cap sets).
+        auto read=[](uintptr_t at,void *out,size_t bytes) {
+            if(!at || !gpu_span_readable(
+               reinterpret_cast<void const *>(at),bytes))return false;
+            std::memcpy(out,reinterpret_cast<void const *>(at),bytes);
+            return true;
+        };
+        uint32_t n=0,geo=0,type=0,material=0,pos_indices=0,uv_indices=0;
+        uint32_t pos_ptr=0,uv_ptr=0;
+        uintptr_t const f=reinterpret_cast<uintptr_t>(face);
+        uintptr_t const mi=reinterpret_cast<uintptr_t>(meshinfo);
+        bool ok=read(f+0x14U,&n,4U) && n>=3U && n<=5U &&
+            read(f+0x08U,&geo,4U) && (geo==3U || geo==4U) &&
+            read(f+0x04U,&type,4U) &&
+            read(f+0x20U,&material,4U) && material>=0x10000U &&
+            read(f+0x18U,&pos_indices,4U) &&
+            read(f+0x1cU,&uv_indices,4U) &&
+            read(mi+0x0cU,&pos_ptr,4U) &&
+            read(mi+0x10U,&uv_ptr,4U) &&
+            pos_ptr>=0x10000U && pos_indices>=0x10000U &&
+            read(pos_indices,&n,0U);
+        // Re-read the count after validating the index array. A zero-size
+        // read is never used to infer that index storage is long enough.
+        if(!ok || !read(f+0x14U,&n,4U) || n<3U || n>5U ||
+           !gpu_span_readable(reinterpret_cast<void const *>(
+               uintptr_t(pos_indices)),size_t(n)*sizeof(int32_t)) ||
+           (geo==4U &&
+            (uv_ptr<0x10000U || uv_indices<0x10000U ||
+             !gpu_span_readable(reinterpret_cast<void const *>(
+                 uintptr_t(uv_indices)),size_t(n)*sizeof(int32_t))))) {
+            capture->failed=true;return;
+        }
+        jkgm::gpu_polyline_face result{};
+        result.count=n;result.geo=geo;result.face_type=type;
+        result.material=material;
+        int32_t cel=-1;
+        read(reinterpret_cast<uintptr_t>(rdthing)+0x2cU,&cel,4U);
+        result.cel=cel;
+        for(uint32_t i=0;i<n;++i) {
+            int32_t pos=0,uv=0;
+            if(!read(uintptr_t(pos_indices)+i*4U,&pos,4U) ||
+               pos<0 || pos>31 ||
+               !read(uintptr_t(pos_ptr)+uintptr_t(pos)*12U,
+                     result.position[i].data(),12U)) {
+                capture->failed=true;return;
+            }
+            if(geo==4U &&
+               (!read(uintptr_t(uv_indices)+i*4U,&uv,4U) ||
+                uv<0 || uv>31 ||
+                !read(uintptr_t(uv_ptr)+uintptr_t(uv)*8U,
+                      result.uv[i].data(),8U))) {
+                capture->failed=true;return;
+            }
+        }
+        if(capture->faces.size()>=5U){capture->failed=true;return;}
+        capture->faces.emplace_back(result);
+    }
+
+    int __cdecl HookedNativePolylineDraw(void *rdthing,void *orientation)
+    {
+        // Capture all five faces in native camera coordinates, then submit
+        // them as GPU 3DO-compatible geometry. No native Face/rdCache call
+        // occurs on success. Unsupported material residency temporarily
+        // replays the unmodified native draw to warm the MAT safely.
+        jkgm::gpu_3do_matrix34 view{},inverse{};
+        bool const eligible=the_config && the_config->use_model_cache &&
+            pending_gpu_instances.size()<16384U &&
+            jkgm::read_active_rd_camera_view(view) &&
+            jkgm::gpu_polyline_inverse_view(view,inverse);
+        if(!eligible || active_gpu_polyline)
+            return RealNativePolylineDraw(rdthing,orientation);
+        jkgm::gpu_polyline_capture captured{};
+        auto *previous=active_gpu_polyline;
+        active_gpu_polyline=&captured;
+        int const generated=RealNativePolylineDraw(rdthing,orientation);
+        active_gpu_polyline=previous;
+        auto geom=jkgm::make_gpu_polyline_geometry(captured);
+        std::string failure;
+        if(generated && geom &&
+           gpu_mesh_materials_ready(*geom,false,
+               the_config->profile_renderer?&failure:nullptr)) {
+            jkgm::gpu_3do_instance inst{};
+            inst.id=next_gpu_id++;
+            inst.geometry=std::move(geom);
+            inst.transform=inverse;
+            inst.effective_light_mode=0.0f;
+            inst.ambient=1.0f;
+            inst.casts_sun_shadows=false;
+            inst.world_lighting_exempt=true;
+            pending_gpu_instances.emplace_back(std::move(inst));
+            if(the_config->profile_renderer && polyline_gpu_logged++<8U)
+                LOG_INFO("GPU POLYLINE five_face=1 submitted=1");
+            return generated;
+        }
+        if(the_config->profile_renderer && polyline_native_logged++<8U)
+            LOG_INFO("GPU POLYLINE capture unavailable faces=",
+                     captured.faces.size()," failed=",captured.failed,
+                     " material=",failure," native_warmup=1");
+        return RealNativePolylineDraw(rdthing,orientation);
+    }
+
+    bool request_native_polyline_hooks()
+    {
+        if(!the_config || !the_config->use_model_cache)return false;
+        // Exact uploaded executable, not OpenJKDF2. Guard both functions
+        // AND rdThing's polyline call-site before placing any detour.
+        auto const read=[](uintptr_t a,void *dst,size_t n) {
+            if(!gpu_span_readable(reinterpret_cast<void const *>(a),n))
+                return false;
+            std::memcpy(dst,reinterpret_cast<void const *>(a),n);
+            return true;
+        };
+        if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=0x00400000U ||
+           !jkgm::native_procedural_draw::verified(read)) {
+            LOG_WARNING("GPU polyline hook disabled: JKGM signature mismatch");
+            return false;
+        }
+        LONG err=DetourAttach(&(PVOID &)RealNativePolylineFace,
+                              HookedNativePolylineFace);
+        if(err!=NO_ERROR) {
+            LOG_WARNING("GPU polyline face hook failed: ",err);
+            return false;
+        }
+        err=DetourAttach(&(PVOID &)RealNativePolylineDraw,
+                         HookedNativePolylineDraw);
+        if(err!=NO_ERROR) {
+            DetourDetach(&(PVOID &)RealNativePolylineFace,
+                         HookedNativePolylineFace);
+            LOG_WARNING("GPU polyline draw hook failed: ",err);
+            return false;
+        }
+        LOG_INFO("GPU polyline: native five-face geometry generator captured");
+        return true;
     }
 
     // Native rdParticle_Draw produces exactly the same camera-facing quads
@@ -8349,6 +8513,7 @@ bool attach_hooks()
     bool const sector_color_hook_requested=request_native_sector_color_hook();
     bool const sprite_hooks_requested=request_native_sprite_hooks();
     bool const particle_hooks_requested=request_native_particle_hooks();
+    bool const polyline_hooks_requested=request_native_polyline_hooks();
     bool const mesh_collision_hook_requested=request_type2_intersection_hook();
     bool const ice_thing_hook_requested=request_native_thingface_friction_hook();
     bool const earth_sound_hook_requested=request_native_earth_sound_hook();
@@ -8376,6 +8541,7 @@ bool attach_hooks()
     }
     if(error==NO_ERROR) native_sprite_hook_active=sprite_hooks_requested;
     if(error==NO_ERROR) native_particle_hook_active=particle_hooks_requested;
+    if(error==NO_ERROR) native_polyline_hook_active=polyline_hooks_requested;
     if(error==NO_ERROR && mesh_collision_hook_requested) {
         native_mesh_collision_hook_active=true;
         LOG_INFO("JKGM native collision Detour installed: type2=",
@@ -8407,6 +8573,12 @@ bool detach_hooks()
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
 
+    if(native_polyline_hook_active) {
+        DetourDetach(&(PVOID &)RealNativePolylineDraw,HookedNativePolylineDraw);
+        DetourDetach(&(PVOID &)RealNativePolylineFace,HookedNativePolylineFace);
+        native_polyline_hook_active=false;
+        active_gpu_polyline=nullptr;
+    }
     // A particle may share the sprite AddProcFace detour. Detach only the
     // native particle callbacks first; the owner removes AddProcFace below.
     if(native_particle_hook_active) {
