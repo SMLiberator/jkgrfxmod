@@ -55,13 +55,29 @@ engine PYR conversion. Both entry points are protected by exact first-16-
 byte checks and the COG handlers additionally validate Thing, model,
 node range, world placement and output finiteness.
 
-**Five registered JKGM verbs in `renderer.dll` (development):**
+**Thing-node pose COG verbs in `renderer.dll` (development):**
 
     vector origin = GetThingNodePos(thing, node);
     vector rvec = GetThingNodeRVec(thing, node);
     vector lvec = GetThingNodeLVec(thing, node);
     vector uvec = GetThingNodeUVec(thing, node);
     vector pyr = GetThingNodePYR(thing, node);
+
+The same live accessor also supports two affine COG point conversions:
+
+    vector worldXYZ = GetThingNodeOffsetPos(thing, node, localRLU);
+    vector localRLU = GetThingNodePosOffset(thing, node, worldXYZ);
+
+These are node-relative equivalents of GetThingOffsetPos and
+GetThingPosOffset. The origin is the current **animated mesh-transform
+origin** returned by GetThingNodePos, not a separately computed joint
+pivot. The node's actual Right/Look/Up axes are used, including any
+nonuniform scale, shear and mirroring. World-to-node uses a
+double-precision full-basis inverse; a singular or invalid matrix,
+invalid node/Thing or unsupported binary returns (0, 0, 0).
+The node index is the second COG argument. No render-visibility or
+on-screen requirement applies; the engine accessor refreshes stale
+puppet matrices.
 
 Each returns the current world-space node transform; the getters return
 `(0, 0, 0)` on invalid Thing, unsupported executable, missing 3DO,

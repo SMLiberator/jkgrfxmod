@@ -6,6 +6,7 @@
 // rdModel3_GetMeshMatrix() builds one and refreshes puppet matrices if stale.
 // Do NOT pass the model's static hierarchy posRotMatrix here.
 #include "gpu_3do_modelview.hpp"
+#include "cog_thing_offsets.hpp"
 #include <array>
 
 namespace jkgm {
@@ -39,6 +40,34 @@ namespace jkgm {
         world=gpu_3do_native_transform_point(world_matrix,local);
         for(float value:world)if(!std::isfinite(value))return false;
         return true;
+    }
+
+    // GetThingNodeOffsetPos / GetThingNodePosOffset use the same
+    // full affine RLU inversion as the Thing-level COG verbs. The source
+    // matrix is already the current animated WORLD-space mesh-node pose,
+    // including the parent's transform and native pivot compensation.
+    // Its origin is the mesh-transform origin (GetThingNodePos), not an
+    // independently calculated hierarchy pivot.
+    inline bool get_thing_node_offset_pos(
+        gpu_3do_matrix34 const &matrix,
+        thing_node_vector const &local,thing_node_vector &world)
+    {
+        if(!gpu_3do_matrix_finite(matrix))return false;
+        cog_thing_offset_basis basis{};
+        for(size_t i=0;i<basis.size();++i)basis[i]=matrix[i];
+        cog_thing_offset_vec const origin{{matrix[9],matrix[10],matrix[11]}};
+        return cog_thing_offset_pos(basis,origin,local,world);
+    }
+
+    inline bool get_thing_node_pos_offset(
+        gpu_3do_matrix34 const &matrix,
+        thing_node_vector const &world,thing_node_vector &local)
+    {
+        if(!gpu_3do_matrix_finite(matrix))return false;
+        cog_thing_offset_basis basis{};
+        for(size_t i=0;i<basis.size();++i)basis[i]=matrix[i];
+        cog_thing_offset_vec const origin{{matrix[9],matrix[10],matrix[11]}};
+        return cog_thing_pos_offset(basis,origin,world,local);
     }
 
     // Compose with a local offset matrix. For node-bound sprites or lights,

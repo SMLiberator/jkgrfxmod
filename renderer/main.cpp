@@ -7129,6 +7129,32 @@ namespace {
     void __cdecl cog_get_thing_node_pos(void *ctx) {
         get_cog_thing_node_vector(ctx,cog_thing_node_channel::position);
     }
+    // The node index is the second argument, and COG arguments pop in
+    // reverse order. Always use the live animated rdModel3 world matrix.
+    void cog_thing_node_position_transform(void *ctx,bool to_world)
+    {
+        float input[3]{};
+        cog_pop_vector(ctx,input);
+        int const node=cog_pop_int(ctx);
+        void *thing=cog_pop_thing(ctx);
+        jkgm::thing_node_vector output{};
+        jkgm::gpu_3do_matrix34 matrix{};
+        if(get_cog_thing_node_matrix(thing,node,matrix)) {
+            jkgm::thing_node_vector const point{{
+                input[0],input[1],input[2]}};
+            if(to_world)
+                jkgm::get_thing_node_offset_pos(matrix,point,output);
+            else
+                jkgm::get_thing_node_pos_offset(matrix,point,output);
+        }
+        cog_push_vector(ctx,output.data()); // zero on invalid node/Thing
+    }
+    // GetThingNodeOffsetPos(thing,node,localRLU) -> absolute world XYZ.
+    void __cdecl cog_get_thing_node_offset_pos(void *ctx)
+    {cog_thing_node_position_transform(ctx,true);}
+    // GetThingNodePosOffset(thing,node,worldXYZ) -> node-local RLU.
+    void __cdecl cog_get_thing_node_pos_offset(void *ctx)
+    {cog_thing_node_position_transform(ctx,false);}
     void __cdecl cog_get_thing_node_rvec(void *ctx) {
         get_cog_thing_node_vector(ctx,cog_thing_node_channel::right);
     }
@@ -8003,6 +8029,8 @@ namespace {
         cog_verb_entry{"getthingattachnormal", cog_get_thing_attach_normal},
         cog_verb_entry{"attachthingtothingnode", cog_attach_thing_to_thing_node},
         cog_verb_entry{"getthingnodepos", cog_get_thing_node_pos},
+        cog_verb_entry{"getthingnodeoffsetpos", cog_get_thing_node_offset_pos},
+        cog_verb_entry{"getthingnodeposoffset", cog_get_thing_node_pos_offset},
         cog_verb_entry{"getthingnodervec", cog_get_thing_node_rvec},
         cog_verb_entry{"getthingnodelvec", cog_get_thing_node_lvec},
         cog_verb_entry{"getthingnodeuvec", cog_get_thing_node_uvec},
