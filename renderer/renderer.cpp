@@ -6302,6 +6302,7 @@ namespace jkgm {
                 for(auto const &face:cache.sector_sky_candidates) {
                     auto const sky_type=world_cache_sky_type(face.sky_flags);
                     if(sky_type==world_cache_sky_kind::none ||
+                       (face.face_type&0x2U)!=0U ||
                        (sky_type==world_cache_sky_kind::horizon &&
                         !sky_info.horizon_valid) ||
                        (sky_type==world_cache_sky_kind::ceiling &&
@@ -6448,6 +6449,13 @@ namespace jkgm {
                          " ceiling=",sky_ceiling_drawn,
                          " sky_stage=",cache.sector_sky_candidates.size(),
                          " sky_params_ready=",sky_params_ready?1:0,
+                         " sky_ceiling_z=",sky_info.ceiling_height,
+                         " sky_horizon_distance=",sky_info.horizon_distance,
+                         " sky_pixels_per_rev=",sky_info.pixels_per_revolution,
+                         " horizon_offset=",sky_info.horizon_offset[0],",",
+                                              sky_info.horizon_offset[1],
+                         " ceiling_offset=",sky_info.ceiling_offset[0],",",
+                                              sky_info.ceiling_offset[1],
                          " world_sky_fields_offset=0xdc");
                 LOG_INFO("WORLD CACHE gpu_first_opaque ranges=",drawn,
                          " solid_ranges=",solid_drawn,
