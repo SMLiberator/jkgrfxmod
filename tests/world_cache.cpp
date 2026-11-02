@@ -751,6 +751,10 @@ int main()
     assert(world_cache_sky_type(0x400U)==world_cache_sky_kind::ceiling);
     assert(world_cache_sky_type(0x600U)==world_cache_sky_kind::horizon);
     assert(world_cache_sky_type(0U)==world_cache_sky_kind::none);
+    // Each field is verified by the actual JKGM executable's JKL loader,
+    // not assumed from the OpenJKDF2 SithWorld declaration.
+    static_assert(world_cache_sky_fields_offset==0xDCU);
+    static_assert(world_cache_sky_fields_bytes==0x1cU);
     float const native_sky_fields[7]{
         100.0f,50.0f,768.0f,4.0f,5.0f,10.0f,11.0f};
     std::memcpy(storage.data()+(sky_world_addr-base)+0xdcU,
