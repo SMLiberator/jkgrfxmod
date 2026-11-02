@@ -100,6 +100,9 @@ make_gpu_polyline_geometry(gpu_polyline_capture const &capture)
             v.cr=v.cg=v.cb=1.0f;
             result->vertices.push_back(v);
             for(unsigned n=0;n<3;++n) {
+                group.centroid[n]+=p[n]/float(face.count);
+            }
+            for(unsigned n=0;n<3;++n) {
                 group.bounds_min[n]=std::min(group.bounds_min[n],p[n]);
                 group.bounds_max[n]=std::max(group.bounds_max[n],p[n]);
             }
