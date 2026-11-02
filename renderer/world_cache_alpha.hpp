@@ -15,6 +15,7 @@ struct world_cache_material_info {
     int albedo_source=0;
     bool has_image=false,alpha=false,masked=false,dithered=false;
     bool special=false,emissive_only=false;
+    int blend_mode=0; // normal 0; additive 1; multiply 2; fluid 3
     float opacity=1.0f,transition=0.0f;
     float width=1.0f,height=1.0f,alpha_cutoff=0.5f;
 };
@@ -23,12 +24,13 @@ inline world_cache_draw_policy choose_world_cache_draw_policy(
     world_cache_material_info const &mat)
 {
     if(!std::isfinite(mat.opacity) || mat.opacity<0.0f ||
-       mat.opacity>1.0f || mat.special || mat.emissive_only ||
+       mat.opacity>1.0f || mat.emissive_only ||
+       (mat.special && mat.blend_mode!=1 && mat.blend_mode!=2) ||
        !std::isfinite(mat.transition) || mat.transition!=0.0f)
         return world_cache_draw_policy::native;
     if(face.geometry_mode==3U) {
         if(mat.albedo_source!=2)return world_cache_draw_policy::native;
-        return (face.face_type&0x2U) || mat.opacity<0.999f
+        return mat.special || (face.face_type&0x2U) || mat.opacity<0.999f
             ?world_cache_draw_policy::blended:world_cache_draw_policy::solid;
     }
     if(face.geometry_mode!=4U || mat.albedo_source!=1 ||
@@ -38,7 +40,7 @@ inline world_cache_draw_policy choose_world_cache_draw_policy(
     // JK's rdFace.type 0x2 forces 90/255 alpha on the entire face even
     // when its MAT is opaque. A material opacity override also forces
     // blending, rather than writing opaque depth for its alpha=1 texels.
-    if((face.face_type&0x2U) || mat.opacity<0.999f)
+    if(mat.special || (face.face_type&0x2U) || mat.opacity<0.999f)
         return world_cache_draw_policy::blended;
     if(mat.masked) {
         if(!std::isfinite(mat.alpha_cutoff) ||

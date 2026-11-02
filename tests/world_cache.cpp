@@ -600,7 +600,16 @@ int main()
     grate_mat.alpha_cutoff=0.5f;
     grate_mat.special=true;
     assert(choose_world_cache_draw_policy(grate,grate_mat)==
-           world_cache_draw_policy::native);
+           world_cache_draw_policy::native); // unsupported unknown special
+    grate_mat.blend_mode=1;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::blended); // additive
+    grate_mat.blend_mode=2;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::blended); // multiply
+    grate_mat.blend_mode=3;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::native); // fluid needs scene depth
     grate_mat.special=false;
     grate_mat.opacity=0.5f;
     assert(choose_world_cache_draw_policy(grate,grate_mat)==

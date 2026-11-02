@@ -24,6 +24,7 @@ uniform float alpha_cutoff;
 uniform int transparent_pass; // 0 G-buffer, 1 sorted forward alpha
 uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blended, 4 dither
 uniform float face_opacity; // 90/255 when rdFace.type includes 0x2
+uniform int blend_mode; // normal=0, additive=1, multiply=2
 uniform vec4 fog_params; // native fog start/end/opacity
 uniform vec3 fog_color;
 uniform int sky_mode;
@@ -148,7 +149,13 @@ void main() {
                         max(fog_params.y-fog_params.x,0.0001),0.0,1.0)*
                   fog_params.z;
         vec3 lit=mix(albedo*lighting,fog_color,fog);
-        out_color=vec4(lit*coverage,coverage);
+        if(blend_mode==2) {
+            // (DST_COLOR, ZERO) needs a neutral multiplier at alpha zero.
+            out_color=vec4(mix(vec3(1.0),lit,coverage),0.0);
+        } else {
+            // Additive uses ONE+ONE and preserves the destination alpha.
+            out_color=vec4(lit*coverage,blend_mode==1?0.0:coverage);
+        }
         return;
     }
     out_color=vec4(albedo*lighting,1.0);

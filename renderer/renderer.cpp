@@ -6405,6 +6405,7 @@ namespace jkgm {
                 info.masked=material.masked;
                 info.dithered=material.dithered;
                 info.special=material.special;
+                info.blend_mode=static_cast<int>(material.blend);
                 info.emissive_only=material.emissive_only;
                 info.opacity=material.opacity;
                 info.transition=material.albedo_transition;
@@ -6580,6 +6581,7 @@ namespace jkgm {
                 info.has_image=mat.has_image;info.alpha=mat.alpha;
                 info.masked=mat.masked;info.dithered=mat.dithered;
                 info.special=mat.special;info.emissive_only=mat.emissive_only;
+                info.blend_mode=static_cast<int>(mat.blend);
                 info.opacity=mat.opacity;info.transition=mat.albedo_transition;
                 info.width=mat.width;info.height=mat.height;
                 info.alpha_cutoff=mat.alpha_cutoff;
@@ -6632,7 +6634,25 @@ namespace jkgm {
                 auto const policy=policy_for(*face);
                 shader.set_alpha_policy(true,world_cache_alpha_mode(policy),
                         material.alpha_cutoff,
-                        (face->face_type&0x2U)?90.0f/255.0f:1.0f);
+                        (face->face_type&0x2U)?90.0f/255.0f:1.0f,
+                        static_cast<int>(material.blend));
+                switch(material.blend) {
+                case material_blend_mode::additive:
+                    gl::set_blend_function_separate(
+                        gl::blend_function::one,gl::blend_function::one,
+                        gl::blend_function::zero,gl::blend_function::one);
+                    break;
+                case material_blend_mode::multiply:
+                    gl::set_blend_function_separate(
+                        gl::blend_function::destination_color,
+                        gl::blend_function::zero,
+                        gl::blend_function::zero,gl::blend_function::one);
+                    break;
+                default:
+                    gl::set_blend_function(gl::blend_function::one,
+                        gl::blend_function::one_minus_source_alpha);
+                    break;
+                }
                 if(face->geometry_mode==3U)
                     shader.set_solid_color(material.tint);
                 else {

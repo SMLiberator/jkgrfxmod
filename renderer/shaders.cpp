@@ -223,6 +223,7 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , transparent_pass(gl::get_uniform_location(the_program,"transparent_pass"))
     , alpha_mode(gl::get_uniform_location(the_program,"alpha_mode"))
     , face_opacity(gl::get_uniform_location(the_program,"face_opacity"))
+    , blend_mode(gl::get_uniform_location(the_program,"blend_mode"))
     , fog_params(gl::get_uniform_location(the_program,"fog_params"))
     , fog_color(gl::get_uniform_location(the_program,"fog_color"))
     , sky_mode(gl::get_uniform_location(the_program,"sky_mode"))
@@ -287,8 +288,9 @@ void jkgm::shaders::world_cache_preview_shader::set_alpha_cutout(
 }
 
 void jkgm::shaders::world_cache_preview_shader::set_alpha_policy(
-    bool transparent,int mode,float cutoff,float native_opacity)
+    bool transparent,int mode,float cutoff,float native_opacity,int blend)
 {
+    gl::set_uniform_integer(blend_mode,blend);
     gl::set_uniform_integer(transparent_pass,transparent?1:0);
     gl::set_uniform_integer(alpha_mode,mode);
     gl::set_uniform_float(alpha_cutoff,cutoff);
