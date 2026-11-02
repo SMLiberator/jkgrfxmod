@@ -38,6 +38,13 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\native_particle_texture.cpp /Fe:native_particle_texture_test.exe
         native_particle_texture_test.exe
 
+    - name: World-cache native particle and lightsaber fallback regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\world_cache_native_fallback.cpp /Fe:world_cache_native_fallback_test.exe
+        world_cache_native_fallback_test.exe
+        python3 tests/world_cache_native_fallback.py
+
     - name: Spotlight lighting independent of sun shadow regression tests
       run: python3 tests/spotlight_sun_shadow_independence.py
 
