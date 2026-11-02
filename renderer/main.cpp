@@ -12,6 +12,7 @@
 #include "native_particle_texture.hpp"
 #include "gpu_3do_preview.hpp"
 #include "gpu_polyline.hpp"
+#include "gpu_particle_cloud.hpp"
 #include "native_procedural_draw.hpp"
 #include "camera_hud_thing.hpp"
 #include "gpu_mat_ready_cache.hpp"
@@ -3160,8 +3161,121 @@ namespace {
     };
     thread_local particle_draw_context particle_draw_active{};
 
+    // Forward declared because native textured-particle support below also
+    // needs the same genuine per-CEL MAT dimensions.
+    bool particle_texture_dimensions(uint32_t material,uint32_t wall_cel,
+                                     unsigned &width,unsigned &height);
+    unsigned gpu_particle_logs=0,gpu_particle_reject_logs=0;
+    bool submit_gpu_particle_cloud(void *rdthing,void *orientation)
+    {
+        if(!the_config || !the_config->use_sprite_cache ||
+           !rdthing || !orientation ||
+           pending_gpu_instances.size()>=16384U ||
+           !gpu_span_readable(rdthing,8U) ||
+           !gpu_span_readable(orientation,sizeof(float)*12U))
+            return false;
+        auto const read=[](uintptr_t address,void *out,size_t n) {
+            if(address<0x10000U ||
+               !gpu_span_readable(reinterpret_cast<void const *>(address),n))
+                return false;
+            std::memcpy(out,reinterpret_cast<void const *>(address),n);
+            return true;
+        };
+        uint32_t cloud=0;
+        std::memcpy(&cloud,static_cast<uint8_t const *>(rdthing)+4,4);
+        uint32_t count=0,positions=0,cels=0,mat=0,light_mode=0;
+        float radius=0.0f;
+        if(!read(uintptr_t(cloud)+0x24U,&count,4) ||
+           count==0U || count>256U ||
+           !read(uintptr_t(cloud)+0x28U,&positions,4) ||
+           !read(uintptr_t(cloud)+0x2cU,&cels,4) ||
+           !read(uintptr_t(cloud)+0x34U,&radius,4) ||
+           !read(uintptr_t(cloud)+0x38U,&mat,4) ||
+           !read(uintptr_t(cloud)+0x40U,&light_mode,4) ||
+           light_mode>3U || !std::isfinite(radius) ||
+           radius<=0.0f || radius>1000.0f ||
+           !gpu_span_readable(
+               reinterpret_cast<void const *>(uintptr_t(positions)),
+               size_t(count)*12U) ||
+           !gpu_span_readable(
+               reinterpret_cast<void const *>(uintptr_t(cels)),
+               size_t(count)*4U))
+            return false;
+        uint32_t tex_type=0;
+        if(!read(uintptr_t(mat),&tex_type,4))return false;
+        bool const textured=(tex_type&2U)!=0U;
+        jkgm::gpu_3do_matrix34 view{},inverse{},placement{};
+        if(!jkgm::read_active_rd_camera_view(view) ||
+           !jkgm::gpu_polyline_inverse_view(view,inverse))
+            return false;
+        std::memcpy(placement.data(),orientation,sizeof(placement));
+        if(!jkgm::gpu_3do_matrix_finite(placement))return false;
+        auto const modelview=jkgm::gpu_3do_native_modelview(view,placement);
+        // JK Particle_Draw transforms every local particle point by exactly
+        // this camera*Thing matrix, then makes a view-plane-facing quad.
+        std::vector<jkgm::gpu_particle_dot> dots;
+        dots.reserve(count);
+        for(uint32_t i=0;i<count;++i) {
+            jkgm::gpu_particle_dot dot{};
+            std::array<float,3> local{};
+            int32_t cel=-1;
+            if(!read(uintptr_t(positions)+uintptr_t(i)*12U,
+                     local.data(),12U) ||
+               !read(uintptr_t(cels)+uintptr_t(i)*4U,&cel,4U))
+                return false;
+            dot.view_position=jkgm::gpu_3do_native_transform_point(
+                modelview,local);
+            dot.material=mat;
+            dot.cel=cel;
+            dot.radius=radius;
+            dot.light_mode=light_mode;
+            dot.textured=textured;
+            if(textured &&
+               !particle_texture_dimensions(mat,static_cast<uint32_t>(cel),
+                                             dot.width,dot.height))
+                return false;
+            dots.push_back(dot);
+        }
+        auto geometry=jkgm::make_gpu_particle_cloud(dots);
+        if(!geometry)return false;
+        std::string failure;
+        if(!gpu_mesh_materials_ready(*geometry,false,
+               the_config->profile_renderer?&failure:nullptr)) {
+            if(the_config->profile_renderer &&
+               gpu_particle_reject_logs++<8U)
+                LOG_INFO("GPU PARTICLE MAT unavailable count=",count,
+                         " detail=",failure);
+            return false;
+        }
+        jkgm::gpu_3do_instance inst{};
+        inst.id=next_gpu_id++;
+        inst.geometry=std::move(geometry);
+        inst.transform=inverse;
+        inst.effective_light_mode=light_mode==0U?0.0f:1.0f;
+        inst.ambient=1.0f;
+        if(light_mode>0U) {
+            uint32_t camera=0;
+            float ambient=1.0f;
+            if(read(0x0073A418U,&camera,4) &&
+               read(uintptr_t(camera)+0x54U,&ambient,4) &&
+               std::isfinite(ambient))
+                inst.ambient=std::clamp(ambient,0.0f,1.0f);
+        }
+        inst.is_sprite_quad=true;
+        inst.casts_sun_shadows=false;
+        inst.world_lighting_exempt=true;
+        pending_gpu_instances.emplace_back(std::move(inst));
+        if(the_config->profile_renderer && gpu_particle_logs++<8U)
+            LOG_INFO("GPU PARTICLE cloud submitted count=",count,
+                     " textured=",textured?1:0," radius=",radius);
+        return true;
+    }
+
     int __cdecl HookedNativeParticleDraw(void *rdthing,void *orientation)
     {
+        // No native D3D triangles on the successful GPU submission path.
+        // The old native call remains only as a MAT warm-up/unhandled case.
+        if(submit_gpu_particle_cloud(rdthing,orientation))return 1;
         particle_draw_context const previous=particle_draw_active;
         particle_draw_active={};
         // rdThing.particlecloud at +4; rdParticle.material at +0x38.
