@@ -37,7 +37,9 @@ uniform float alpha_cutoff;
 uniform int transparent_pass; // 0 G-buffer, 1 sorted forward alpha
 uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blended, 4 dither
 uniform float face_opacity; // 90/255 when rdFace.type includes 0x2
-uniform int blend_mode; // normal=0, additive=1, multiply=2
+uniform int blend_mode; // normal=0, additive=1, multiply=2, fluid=3
+uniform sampler2D scene_depth; // resolved opaque R16F depth, JK units 32*Y
+uniform float fluid_thickness; // Beer-Lambert absorption coefficient
 uniform vec4 fog_params; // native fog start/end/opacity
 uniform vec3 fog_color;
 uniform int sky_mode;
@@ -140,6 +142,23 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     return env*fresnel*strength;
 }
 
+// Match GPU 3DO's fluid opacity: compare the current surface with the
+// completed *opaque* depth, in JK's native 32*view-forward units. The
+// ray-length correction makes thickness independent of viewing angle.
+float world_fluid_absorption(float fragment_depth)
+{
+    float opacity=fluid_thickness>0.0?1.0:0.0;
+    float opaque_depth=texelFetch(scene_depth,ivec2(gl_FragCoord.xy),0).r;
+    if(opaque_depth<65500.0) {
+        vec3 delta=cached_world_position-camera_world_origin;
+        float ray_ratio=length(delta)/
+                        max(dot(delta,camera_forward_axis),0.0001);
+        float thickness=max((opaque_depth-fragment_depth)/32.0,0.0)*ray_ratio;
+        opacity=1.0-exp(-fluid_thickness*thickness);
+    }
+    return clamp(opacity,0.0,1.0);
+}
+
 layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
@@ -234,7 +253,13 @@ void main() {
                   fog_params.z;
         vec3 lit=mix(lit_diffuse,fog_color,fog);
         vec3 specular=env_reflection*(1.0-fog);
-        if(blend_mode==2) {
+        if(blend_mode==3) {
+            // Fluid absorption uses receiver depth, just like GPU-cached
+            // 3DO materials. Emission and reflections remain independent of
+            // pigment absorption, so shallow water can still reflect light.
+            float opacity=coverage*world_fluid_absorption(depth);
+            out_color=vec4(lit*opacity+emission+specular,opacity);
+        } else if(blend_mode==2) {
             // (DST_COLOR, ZERO) needs a neutral multiplier at alpha zero.
             out_color=vec4(mix(vec3(1.0),
                 clamp(lit+emission+specular*coverage,0.0,1.0),
