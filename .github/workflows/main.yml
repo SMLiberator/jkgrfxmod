@@ -32,6 +32,12 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\compressed_sound_read.cpp /Fe:compressed_sound_read_test.exe
         compressed_sound_read_test.exe
 
+    - name: Binary-verified JKGM procedural particle/polyline ABI tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_procedural_draw.cpp /Fe:native_procedural_draw_test.exe
+        native_procedural_draw_test.exe
+
     - name: Native textured particle billboard UV regression tests
       shell: cmd
       run: |
