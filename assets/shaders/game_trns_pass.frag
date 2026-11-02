@@ -16,7 +16,7 @@ uniform vec2 emissive_uv_offset;
 
 uniform float alpha_cutoff;
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
-uniform float fluid_thickness; // Beer-Lambert absorption per game unit
+uniform float fluid_thickness; // native depth-buffer units (32 per game unit)
 uniform int flare_mode; // SPR type 0x40: center-only depth occlusion
 uniform sampler2D scene_depth; // Resolved opaque linear view depth (R16F)
 
@@ -30,6 +30,8 @@ in vec3 vp_normal;
 in float vp_z;
 
 layout(location = 0) out vec4 out_color;
+
+#include "fluid_absorption.glsl"
 
 // ---------------------------------------------------------------------------
 // Dynamic fog: values are supplied by the runtime SetFog* COG verbs.
@@ -814,9 +816,10 @@ void main()
         // traverses more water than a perpendicular view. The depth buffer
         // stores camera-forward linear Z, not radial distance.
         float opaque_depth = texelFetch(scene_depth, ivec2(gl_FragCoord.xy), 0).r;
-        // Zero density means an optically clear fluid, even when no
-        // opaque receiving surface exists behind it.
-        float absorption = fluid_thickness > 0.0 ? 1.0 : 0.0;
+        // Existing native materials are calibrated to unnormalized JK
+        // depth-buffer units (32 per world unit). Share the precise law with
+        // GPU world and 3DO rather than independently rescaling thickness.
+        float ray_ratio = 1.0;
         if(opaque_depth < 65500.0) {
             float h_scale = camera_right.w > 0.5
                                 ? view_params.x
@@ -824,10 +827,10 @@ void main()
             float aspect = screen_resolution.x / max(screen_resolution.y, 1.0);
             vec3 view_ray = vec3(vp_pos.xy *
                                  vec2(h_scale, h_scale / aspect), vp_z);
-            float ray_ratio = length(view_ray) / max(vp_z, 0.0001);
-            float thickness = max(opaque_depth - vp_z, 0.0) * ray_ratio;
-            absorption = 1.0 - exp(-fluid_thickness * thickness);
+            ray_ratio = length(view_ray) / max(vp_z, 0.0001);
         }
+        float absorption=jk_fluid_absorption(
+            opaque_depth,vp_z,ray_ratio,fluid_thickness);
         // With no opaque surface behind the fluid, treat it as infinitely
         // deep. The shader does not discard those pixels like a decal.
         //
