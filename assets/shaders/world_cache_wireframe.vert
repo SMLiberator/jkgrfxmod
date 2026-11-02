@@ -17,6 +17,7 @@ out vec3 cached_world_position;
 out vec3 cached_world_normal;
 uniform vec4 view_right,view_forward,view_up,view_origin;
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
+uniform int sky_mode; // 0=ordinary world, 1=horizon, 2=ceiling
 // Already neutralized native global palette: only COG/player effects remain.
 // The per-face sector tint is applied locally in the same color operation.
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
@@ -63,5 +64,8 @@ void main() {
              view_right.z*world_position.x)+view_origin.z;
     float h=max(projection.x,0.0001);
     float v=h/max(projection.y,0.0001);
-    gl_Position=vec4(x/h,z/v,-projection.z,y);
+    // Sky uses the source SithSurface as the portal aperture, but sits
+    // at far depth regardless of its authored plane's distance.
+    gl_Position=vec4(x/h,z/v,
+        sky_mode!=0 ? y*(1.0-0.000002) : -projection.z,y);
 }

@@ -220,6 +220,17 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , solid_color(gl::get_uniform_location(the_program,"solid_color"))
     , alpha_cutout(gl::get_uniform_location(the_program,"alpha_cutout"))
     , alpha_cutoff(gl::get_uniform_location(the_program,"alpha_cutoff"))
+    , sky_mode(gl::get_uniform_location(the_program,"sky_mode"))
+    , sky_horizon(gl::get_uniform_location(the_program,"sky_horizon"))
+    , sky_angles(gl::get_uniform_location(the_program,"sky_angles"))
+    , sky_camera_origin(gl::get_uniform_location(the_program,"sky_camera_origin"))
+    , sky_camera_right(gl::get_uniform_location(the_program,"sky_camera_right"))
+    , sky_camera_forward(gl::get_uniform_location(the_program,"sky_camera_forward"))
+    , sky_camera_up(gl::get_uniform_location(the_program,"sky_camera_up"))
+    , sky_ceiling_height(gl::get_uniform_location(the_program,"sky_ceiling_height"))
+    , sky_offset(gl::get_uniform_location(the_program,"sky_offset"))
+    , sky_face_offset(gl::get_uniform_location(the_program,"sky_face_offset"))
+    , sky_viewport(gl::get_uniform_location(the_program,"sky_viewport"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
     , light_attenuation(gl::get_uniform_location(the_program,"light_attenuation"))
     , jk_color_filter(gl::get_uniform_location(the_program,"jk_color_filter"))
@@ -268,6 +279,27 @@ void jkgm::shaders::world_cache_preview_shader::set_alpha_cutout(
 {
     gl::set_uniform_integer(alpha_cutout,1);
     gl::set_uniform_float(alpha_cutoff,cutoff);
+}
+
+void jkgm::shaders::world_cache_preview_shader::set_sky(
+    int mode,point<4,float> horizon,point<3,float> angles,
+    point<3,float> camera_origin,point<3,float> right,
+    point<3,float> forward,point<3,float> up,
+    float ceiling_height,point<2,float> offset,
+    point<2,float> face_offset,point<2,float> viewport)
+{
+    gl::set_uniform_integer(sky_mode,mode);
+    if(mode==0)return;
+    gl::set_uniform_vector(sky_horizon,horizon);
+    gl::set_uniform_vector(sky_angles,angles);
+    gl::set_uniform_vector(sky_camera_origin,camera_origin);
+    gl::set_uniform_vector(sky_camera_right,right);
+    gl::set_uniform_vector(sky_camera_forward,forward);
+    gl::set_uniform_vector(sky_camera_up,up);
+    gl::set_uniform_float(sky_ceiling_height,ceiling_height);
+    gl::set_uniform_vector(sky_offset,offset);
+    gl::set_uniform_vector(sky_face_offset,face_offset);
+    gl::set_uniform_vector(sky_viewport,viewport);
 }
 
 void jkgm::shaders::world_cache_preview_shader::set_jk_color_effects(

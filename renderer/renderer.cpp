@@ -21,6 +21,7 @@
 #include "sun_shadow_gpu.hpp"
 #include "world_cache_gpu.hpp"
 #include "world_cache_alpha.hpp"
+#include "world_cache_sky.hpp"
 #include "sun_dynamic_shadow_gpu.hpp"
 #include "backbuffer_menu_surface.hpp"
 #include "backbuffer_surface.hpp"
@@ -5985,7 +5986,8 @@ namespace jkgm {
                     cache.sector_candidates,
                     can_cull?&camera.frustum:nullptr,
                     can_cull?&camera.native_view:nullptr,
-                    &cache.sector_special_candidates);
+                    &cache.sector_special_candidates,
+                    &cache.sector_sky_candidates);
                 sector_stage_us=elapsed_profile_us(
                     sector_started,profile_clock::now());
                 if(sector_stage.valid && sampled)
@@ -5995,6 +5997,7 @@ namespace jkgm {
             } else {
                 cache.sector_candidates.clear();
                 cache.sector_special_candidates.clear();
+                cache.sector_sky_candidates.clear();
             }
             if(sampled) {
                 // These ranges have live material/cel and conservative
@@ -6015,6 +6018,8 @@ namespace jkgm {
                     " missing_uv=",state.missing_uv,
                     " missing_material=",state.missing_material,
                     " sky=",state.sky,
+                    " sky_horizon=",state.sky_horizon,
+                    " sky_ceiling=",state.sky_ceiling,
                     " changed_cel=",state.changed_cel,
                     " changed_material=",state.changed_material,
                     " unreadable=",state.unreadable,
@@ -6035,6 +6040,8 @@ namespace jkgm {
                     " sector_stage_tris=",sector_stage.faces.triangles,
                     " sector_stage_special_faces=",
                         cache.sector_special_candidates.size(),
+                    " sector_stage_sky_faces=",
+                        cache.sector_sky_candidates.size(),
                     " sector_stage_translucent_face=",
                         sector_stage.faces.translucent_face,
                     " sector_stage_solid_adjoin=",
@@ -6086,7 +6093,8 @@ namespace jkgm {
                !frame_world_cache_camera.perspective)return;
             auto &cache=*world_cache_target;
             if(cache.sector_candidates.empty() &&
-               cache.sector_special_candidates.empty())return;
+               cache.sector_special_candidates.empty() &&
+               cache.sector_sky_candidates.empty())return;
             auto const &cam=frame_world_cache_camera;
             float const aspect=get<x>(internal_scr_res_f)/
                                get<y>(internal_scr_res_f);
@@ -6189,7 +6197,7 @@ namespace jkgm {
             for(auto const &candidate:cache.sector_special_candidates)
                 if(candidate.solid_adjoin && !(candidate.face_type&0x2U))
                     stage_candidate(candidate);
-            if(ordered.empty())return;
+            if(ordered.empty() && cache.sector_sky_candidates.empty())return;
             // FreeColorEffect(sector slot) disables the native request.
             // Honor that for all cached world surfaces, too, without
             // touching their authored/COG SithSector.tint values.
@@ -6281,6 +6289,86 @@ namespace jkgm {
                 glPolygonOffset(-2.0f,-2.0f);
             }
             gl::bind_vertex_array(cache.vao);
+            size_t sky_drawn=0,sky_horizon_drawn=0,sky_ceiling_drawn=0;
+            world_cache_sky_info sky_info{};
+            std::array<float,3> sky_angles{};
+            bool const sky_params_ready=read_world_cache_sky_info(
+                safe_read,cache.loaded_world,sky_info) &&
+                world_cache_sky_angles(cam.camera,sky_angles);
+            if(sky_params_ready) {
+                // Sky shader uses the same VBO but a camera-space UV and
+                // far-depth G-buffer policy. No shadow or light receiver.
+                shader.set_lights({},0.0f);
+                for(auto const &face:cache.sector_sky_candidates) {
+                    auto const sky_type=world_cache_sky_type(face.sky_flags);
+                    if(sky_type==world_cache_sky_kind::none ||
+                       (sky_type==world_cache_sky_kind::horizon &&
+                        !sky_info.horizon_valid) ||
+                       (sky_type==world_cache_sky_kind::ceiling &&
+                        !sky_info.ceiling_valid))continue;
+                    gpu_3do_group group{};
+                    group.material=face.material;
+                    group.cel=face.cel;
+                    bool const solid=face.geometry_mode==3U;
+                    auto const mat=solid
+                        ?resolve_gpu_3do_solid_material(group,false)
+                        :resolve_gpu_3do_material(group);
+                    // Mixed-alpha/special sky MATs need a later sky-alpha
+                    // pass. Do not silently turn their pixels opaque.
+                    if(mat.albedo_source!=(solid?2:1) ||
+                       (!solid && !mat.has_image) ||
+                       mat.alpha || mat.masked || mat.dithered ||
+                       mat.special || mat.emissive_only ||
+                       !std::isfinite(mat.opacity) || mat.opacity<0.999f ||
+                       mat.albedo_transition!=0.0f ||
+                       (!solid && (!(mat.width>0.0f) ||
+                                    !(mat.height>0.0f))))
+                        continue;
+                    auto const &sky_offset=
+                        sky_type==world_cache_sky_kind::horizon
+                            ?sky_info.horizon_offset:sky_info.ceiling_offset;
+                    shader.set_sky(static_cast<int>(sky_type),
+                        make_point(sky_info.horizon_distance*half_fov,
+                                   sky_info.pixels_per_revolution,half_fov,0.0f),
+                        make_point(sky_angles[0],sky_angles[1],sky_angles[2]),
+                        make_point(cam.camera.position[0],
+                                   cam.camera.position[1],cam.camera.position[2]),
+                        make_point(cam.camera.right[0],
+                                   cam.camera.right[1],cam.camera.right[2]),
+                        make_point(cam.camera.forward[0],
+                                   cam.camera.forward[1],cam.camera.forward[2]),
+                        make_point(cam.camera.up[0],cam.camera.up[1],
+                                   cam.camera.up[2]),
+                        sky_info.ceiling_height,
+                        make_point(sky_offset[0],sky_offset[1]),
+                        make_point(face.uv_offset[0],face.uv_offset[1]),
+                        make_point(float(get<x>(internal_scr_res_f)),
+                                   float(get<y>(internal_scr_res_f))));
+                    if(solid)shader.set_solid_color(mat.tint);
+                    else {
+                        gl::set_active_texture_unit(0);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         mat.texture);
+                        shader.set_texture(mat.width,mat.height,mat.tint,
+                                           mat.albedo_scroll);
+                    }
+                    gl::draw_elements(gl::element_type::triangles,
+                        static_cast<GLsizei>(face.count),gl::index_type::uint32,
+                        reinterpret_cast<void const *>(
+                            uintptr_t(face.first_index)*sizeof(uint32_t)));
+                    ++sky_drawn;
+                    if(sky_type==world_cache_sky_kind::horizon)
+                        ++sky_horizon_drawn;
+                    else ++sky_ceiling_drawn;
+                }
+            }
+            shader.set_sky(0,make_point(0.0f,0.0f,0.0f,0.0f),
+                make_point(0.0f,0.0f,0.0f),make_point(0.0f,0.0f,0.0f),
+                make_point(0.0f,0.0f,0.0f),make_point(0.0f,0.0f,0.0f),
+                make_point(0.0f,0.0f,0.0f),0.0f,
+                make_point(0.0f,0.0f),make_point(0.0f,0.0f),
+                make_point(1.0f,1.0f));
+            shader.set_lights(point_lights,light_attenuation);
             size_t drawn=0,solid_drawn=0,masked_drawn=0,adjoin_drawn=0;
             size_t passable_drawn=0,unresolved=0,groups=0,skipped_alpha=0;
             for(size_t i=0;i<ordered.size();) {
@@ -6355,6 +6443,12 @@ namespace jkgm {
             gl::set_active_texture_unit(0);
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U) {
+                LOG_INFO("WORLD CACHE gpu_sky ranges=",sky_drawn,
+                         " horizon=",sky_horizon_drawn,
+                         " ceiling=",sky_ceiling_drawn,
+                         " sky_stage=",cache.sector_sky_candidates.size(),
+                         " sky_params_ready=",sky_params_ready?1:0,
+                         " world_sky_fields_offset=0xdc");
                 LOG_INFO("WORLD CACHE gpu_first_opaque ranges=",drawn,
                          " solid_ranges=",solid_drawn,
                          " adjoin_ranges=",adjoin_drawn,

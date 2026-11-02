@@ -65,6 +65,11 @@ namespace jkgm {
             gl::uniform_location_id projection;
             gl::uniform_location_id albedo_sampler,uv_scale,uv_scroll,material_tint,solid_color;
             gl::uniform_location_id alpha_cutout,alpha_cutoff;
+            gl::uniform_location_id sky_mode,sky_horizon,sky_angles;
+            gl::uniform_location_id sky_camera_origin,sky_camera_right;
+            gl::uniform_location_id sky_camera_forward,sky_camera_up;
+            gl::uniform_location_id sky_ceiling_height,sky_offset;
+            gl::uniform_location_id sky_face_offset,sky_viewport;
             gl::uniform_location_id num_lights,light_attenuation;
             gl::uniform_location_id jk_color_filter,jk_color_tint,jk_color_add_fade;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity;
@@ -77,6 +82,11 @@ namespace jkgm {
                              point<4,float> tint,point<2,float> scroll);
             void set_solid_color(point<4,float> tint);
             void set_alpha_cutout(float cutoff);
+            void set_sky(int mode,point<4,float> horizon,point<3,float> angles,
+                         point<3,float> camera_origin,point<3,float> right,
+                         point<3,float> forward,point<3,float> up,
+                         float ceiling_height,point<2,float> offset,
+                         point<2,float> face_offset,point<2,float> viewport);
             void set_lights(std::vector<world_cache_point_light> const &lights,
                             float attenuation);
             void set_jk_color_effects(point<4,float> filter,point<4,float> tint,

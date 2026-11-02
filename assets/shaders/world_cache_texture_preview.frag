@@ -21,6 +21,13 @@ uniform vec4 material_tint;
 uniform int solid_color; // GeoMode 3: native MAT/CMP RGB, no texture sampling
 uniform int alpha_cutout; // explicit cutout MATs on solid adjoins
 uniform float alpha_cutoff;
+uniform int sky_mode;
+uniform vec4 sky_horizon; // x=horizonDistance*tanHalfFOV, y=pixels/rev, z=tanHalfFOV
+uniform vec3 sky_angles; // pitch/yaw/roll in JK degrees
+uniform vec3 sky_camera_origin,sky_camera_right;
+uniform vec3 sky_camera_forward,sky_camera_up;
+uniform float sky_ceiling_height;
+uniform vec2 sky_offset,sky_face_offset,sky_viewport;
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
 
 #include "jk_point_lighting.glsl"
@@ -45,13 +52,51 @@ layout(location=3) out vec4 out_depth;
 void main() {
     // Opaque grates need real holes in both depth and G-buffer color.
     // Sample the MAT once and discard *before* writing any attachment.
+    vec2 uv=material_uv;
+    if(sky_mode!=0) {
+        // Match sithRenderSky's image-space horizon UV calculation:
+        // canvas offsets, camera roll, minus yaw/pitch scaled by pixels/rev.
+        vec2 ndc=gl_FragCoord.xy*2.0/max(sky_viewport,vec2(1.0))-1.0;
+        if(sky_mode==1) {
+            float h=sky_horizon.x;
+            vec2 screen=vec2(ndc.x*h,-ndc.y*h*sky_viewport.y/sky_viewport.x);
+            float roll=radians(sky_angles.z);
+            float cr=cos(roll),sr=sin(roll);
+            uv=vec2(screen.x*cr-screen.y*sr,screen.y*cr+screen.x*sr);
+            uv-=sky_angles.yx*(sky_horizon.y/360.0);
+        } else {
+            // The camera ray intersects a fixed, horizontal sky plane.
+            // Native JK falls back to 1000 units on a missed intersection.
+            float hfov=sky_horizon.z;
+            vec3 ray=sky_camera_forward+
+                sky_camera_right*(ndc.x*hfov)+
+                sky_camera_up*(ndc.y*hfov*sky_viewport.y/sky_viewport.x);
+            vec3 dir=normalize(ray);
+            float distance_to_sky=1000.0;
+            if(abs(dir.z)>0.000001) {
+                float t=(sky_ceiling_height-sky_camera_origin.z)/dir.z;
+                if(t>=0.0 && t<=1000.0)distance_to_sky=t;
+            }
+            uv=(sky_camera_origin.xy+dir.xy*distance_to_sky)*16.0;
+        }
+        uv+=sky_offset+sky_face_offset;
+    }
     vec4 texel=vec4(1.0);
     if(solid_color==0)
-        texel=texture(albedo_map,material_uv*uv_scale+uv_scroll);
+        texel=texture(albedo_map,uv*uv_scale+uv_scroll);
     if(alpha_cutout!=0 && texel.a*material_tint.a<alpha_cutoff)
         discard;
     vec3 albedo=solid_color!=0 ? clamp(material_tint.rgb,0.0,1.0) :
         clamp(texel.rgb*material_tint.rgb,0.0,1.0);
+    if(sky_mode!=0) {
+        // Occupancy is normal.A, not geometric normal. A sky pixel
+        // covers the HOM background but receives no AO, sun or spotlights.
+        out_color=vec4(albedo,1.0);
+        out_emissive=vec4(0.0,0.0,0.0,1.0);
+        out_normal=vec4(0.0,0.0,0.0,1.0);
+        out_depth=vec4(65504.0,albedo);
+        return;
+    }
     // Keep authored Gouraud/sector lighting, already interpolated in RGB.
     // The same GLSL helpers calculate pixel light for both world and 3DO.
     vec3 lighting=cached_lit_rgb;
