@@ -3251,6 +3251,7 @@ namespace {
         jkgm::gpu_3do_instance inst{};
         inst.id=next_gpu_id++;
         inst.geometry=std::move(geometry);
+        inst.transient_procedural=true;
         inst.transform=inverse;
         inst.effective_light_mode=light_mode==0U?0.0f:1.0f;
         inst.ambient=1.0f;
