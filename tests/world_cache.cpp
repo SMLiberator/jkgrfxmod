@@ -646,6 +646,8 @@ int main()
            world_cache_draw_policy::native);
     grate_mat.albedo_source=1;
     grate_mat.has_image=true;
+    grate_mat.blend_mode=3;
+    grate_mat.special=true;
     // Fluid must remain a forward material even on GeoMode 3 color faces.
     grate.geometry_mode=3U;
     grate_mat.albedo_source=2;
