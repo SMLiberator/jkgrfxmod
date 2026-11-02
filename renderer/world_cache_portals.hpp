@@ -152,11 +152,13 @@ inline world_cache_sector_stage_stats collect_world_cache_sector_candidates(
     std::vector<world_cache_draw_candidate> &out,
     gpu_3do_native_frustum const *frustum=nullptr,
     gpu_3do_matrix34 const *view=nullptr,
-    std::vector<world_cache_draw_candidate> *special=nullptr)
+    std::vector<world_cache_draw_candidate> *special=nullptr,
+    std::vector<world_cache_draw_candidate> *sky=nullptr)
 {
     world_cache_sector_stage_stats stats{};
     out.clear();
     if(special)special->clear();
+    if(sky)sky->clear();
     if(!read || !decal_native_address_ok(surfaces_address) ||
        seen_epochs.size()!=surface_lookup.size())return stats;
     for(auto const &span:validated_spans)
@@ -183,12 +185,13 @@ inline world_cache_sector_stage_stats collect_world_cache_sector_candidates(
                mesh.surfaces[range_index].surface_index!=surface) {
                 out.clear();
                 if(special)special->clear();
+                if(sky)sky->clear();
                 stats.valid=false;return stats;
             }
             ++stats.cached_surfaces;
             append_world_cache_candidate(
                 read,surfaces_address,mesh.surfaces[range_index],
-                out,stats.faces,frustum,view,special);
+                out,stats.faces,frustum,view,special,sky);
         }
     }
     return stats;
@@ -234,7 +237,8 @@ inline world_cache_stage_parity compare_world_cache_candidate_sets(
                a.solid_adjoin!=b.solid_adjoin ||
                a.uv_offset!=b.uv_offset ||
                a.geometry_mode!=b.geometry_mode ||
-               a.passable_adjoin!=b.passable_adjoin)
+               a.passable_adjoin!=b.passable_adjoin ||
+               a.sky_flags!=b.sky_flags)
                 ++r.changed_metadata;
             else ++r.matched;
         }

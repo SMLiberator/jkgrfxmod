@@ -22,6 +22,7 @@ struct world_cache_draw_candidate {
     std::array<float,2> uv_offset{}; // live rdFace.texVertOffset in MAT pixels
     uint32_t geometry_mode=4; // live 3=palette-indexed solid, 4=textured
     bool passable_adjoin=false; // movement-through flag 0x2, not alpha
+    uint32_t sky_flags=0; // live 0x200 / 0x400, horizon takes priority
 };
 
 struct world_cache_frame_stats {
@@ -30,6 +31,7 @@ struct world_cache_frame_stats {
     uint32_t missing_uv=0,solid_adjoin=0,passable_adjoin=0,sky=0,missing_material=0;
     uint32_t translucent_face=0,special_candidates=0,solid_color=0;
     uint32_t changed_material=0,changed_cel=0,unreadable=0;
+    uint32_t sky_horizon=0,sky_ceiling=0;
     bool frustum_available=false;
 };
 
@@ -64,7 +66,8 @@ inline void append_world_cache_candidate(
     world_cache_frame_stats &stats,
     gpu_3do_native_frustum const *frustum,
     gpu_3do_matrix34 const *view,
-    std::vector<world_cache_draw_candidate> *special=nullptr)
+    std::vector<world_cache_draw_candidate> *special=nullptr,
+    std::vector<world_cache_draw_candidate> *sky=nullptr)
 {
     // SithSurface stride 0x5c. Read live adjoin pointer at +0x0c along
     // with +0x10..0x43 face metadata in one validated native read.
@@ -96,7 +99,19 @@ inline void append_world_cache_candidate(
     if(uintptr_t(material)!=range.material)++stats.changed_material;
     if(range.cel>=0 && static_cast<int32_t>(cel)!=range.cel)
         ++stats.changed_cel;
-    if(flags&0x600U) {++stats.sky;return;}
+    if(flags&0x600U) {
+        ++stats.sky;
+        if(flags&0x200U)++stats.sky_horizon;
+        else ++stats.sky_ceiling;
+        // Sky polygons retain ordinary world-space geometry as an aperture,
+        // but use shader-projected UVs and far depth at draw submission.
+        // No native surface-UV array is required.
+        if(sky && geo>=3U && geo<=4U && material)
+            sky->push_back({range.surface_index,range.first_index,
+                range.count,uintptr_t(material),static_cast<int32_t>(cel),
+                face_type,false,uv_offset,geo,false,flags&0x600U});
+        return;
+    }
     if(geo<2U) {++stats.hidden;return;}
     // Modes 0..2 do not draw filled polygons in hardware. Solid GeoMode
     // 3 takes its RGB from the native MAT/CMP, not from texture UVs.
