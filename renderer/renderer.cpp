@@ -3674,7 +3674,7 @@ namespace jkgm {
                          world_batch.size(),
                          " skipped_alpha_test_tris=",
                          world_transparent_batch.size(),
-                         " includes_native_Thing_and_sprite_fallback=1");
+                         " mixed_native_batches_may_contain_Things=1");
             }
 
             draw_world_cache_preview();
