@@ -624,30 +624,33 @@ int main()
     assert(!world_cache_albedo_ready(0,false));
     assert(!world_cache_albedo_ready(1,false));
     assert(!world_cache_albedo_ready(2,true));
-    grate.geometry_mode=4U;
-    grate_mat.albedo_source=2;
-    grate_mat.has_image=false;
-    grate_mat.blend_mode=3;
-    grate_mat.special=true;
-    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+    // Independent material: the preceding mask/alpha tests intentionally
+    // leave grate_mat.masked and grate_mat.alpha enabled. Reusing that
+    // object would classify an otherwise opaque tinted face as masked.
+    world_cache_material_info tinted_mat{};
+    tinted_mat.albedo_source=2;
+    tinted_mat.has_image=false;
+    tinted_mat.width=64.0f;
+    tinted_mat.height=64.0f;
+    tinted_mat.blend_mode=3;
+    tinted_mat.special=true;
+    assert(choose_world_cache_draw_policy(grate,tinted_mat)==
            world_cache_draw_policy::blended);
     assert(!world_cache_draws_in_pass(
-           choose_world_cache_draw_policy(grate,grate_mat),
+           choose_world_cache_draw_policy(grate,tinted_mat),
            world_cache_pass::opaque));
     assert(world_cache_draws_in_pass(
-           choose_world_cache_draw_policy(grate,grate_mat),
+           choose_world_cache_draw_policy(grate,tinted_mat),
            world_cache_pass::transparent));
-    grate_mat.blend_mode=0;
-    grate_mat.special=false;
-    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+    tinted_mat.blend_mode=0;
+    tinted_mat.special=false;
+    assert(choose_world_cache_draw_policy(grate,tinted_mat)==
            world_cache_draw_policy::textured);
-    grate_mat.albedo_source=0;
-    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+    tinted_mat.albedo_source=0;
+    assert(choose_world_cache_draw_policy(grate,tinted_mat)==
            world_cache_draw_policy::native);
-    grate_mat.albedo_source=1;
-    grate_mat.has_image=true;
-    grate_mat.blend_mode=3;
-    grate_mat.special=true;
+    // Returning to the original grate_mat below preserves its masked and
+    // alpha states for the later GeoMode and alpha regressions.
     // Fluid must remain a forward material even on GeoMode 3 color faces.
     grate.geometry_mode=3U;
     grate_mat.albedo_source=2;
