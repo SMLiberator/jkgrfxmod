@@ -47,6 +47,9 @@ jobs:
     - name: HDR auto-exposure invariants and retired diagnostic cleanup
       run: python3 tests/auto_exposure_cleanup.py
 
+    - name: Shared GPU material shader regression tests
+      run: python3 tests/gpu_material_shared.py
+
     - name: Camera HUD emissive-only shader regression tests
       run: python3 tests/camera_hud_emissive.py
 
