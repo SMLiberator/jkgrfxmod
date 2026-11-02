@@ -17,7 +17,8 @@ assert "make_gpu_particle_cloud(dots)" in main
 assert "gpu_mesh_materials_ready(*geometry" in main
 assert "inst.transient_procedural=true;" in main
 assert "gpu_3do_native_modelview(view,placement)" in main
-assert "particle_texture_dimensions(mat,static_cast<uint32_t>(cel)" in main
+assert "particle_texture_dimensions(" in main
+assert "cel_dimensions.emplace(" in main
 assert "isolate_native_world_batches()" in renderer
 assert "native_world_filter" not in renderer
 assert "gpu_3do_gl_cache.erase(inst.id)" in renderer
