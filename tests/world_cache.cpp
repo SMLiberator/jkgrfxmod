@@ -609,7 +609,24 @@ int main()
            world_cache_draw_policy::blended); // multiply
     grate_mat.blend_mode=3;
     assert(choose_world_cache_draw_policy(grate,grate_mat)==
-           world_cache_draw_policy::native); // fluid needs scene depth
+           world_cache_draw_policy::blended); // fluid depth absorption
+    assert(!world_cache_draws_in_pass(world_cache_draw_policy::blended,
+                                      world_cache_pass::opaque));
+    assert(world_cache_draws_in_pass(world_cache_draw_policy::blended,
+                                     world_cache_pass::transparent));
+    assert(world_cache_alpha_mode(world_cache_draw_policy::blended)==3);
+    // Fluid must remain a forward material even on GeoMode 3 color faces.
+    grate.geometry_mode=3U;
+    grate_mat.albedo_source=2;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::blended);
+    grate.geometry_mode=4U;
+    grate_mat.albedo_source=1;
+    // Unrecognized custom blend modes remain explicit native fallback.
+    grate_mat.blend_mode=4;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::native);
+    grate_mat.blend_mode=0;
     grate_mat.special=false;
     grate_mat.emissive_only=true; grate_mat.opacity=0.0f;
     assert(choose_world_cache_draw_policy(grate,grate_mat)==
