@@ -7580,6 +7580,16 @@ namespace jkgm {
             }
             frame_has_exempt_gpu=false;
 
+            // Procedural particle clouds and camera-facing polyline faces are
+            // generated anew every frame. Keep their GPU upload alive across
+            // opaque/transparent passes, then reclaim it immediately rather
+            // than retaining 64 frames of stale particle buffers.
+            for(auto const &inst:frame_gpu_3do_instances) {
+                if(!inst.transient_procedural)continue;
+                gpu_3do_gl_cache.erase(inst.id);
+                gpu_3do_last_drawn.erase(inst.id);
+            }
+
             // Transient 3DOs (text, HUD, effects) may have already been freed
             // by JK. Expire their GPU resources, keeping recently reused meshes
             // without retaining every allocation for the entire level.
