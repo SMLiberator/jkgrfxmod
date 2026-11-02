@@ -53,6 +53,7 @@ uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
 
 #include "jk_point_lighting.glsl"
 #include "gpu_material_common.glsl"
+#include "fluid_absorption.glsl"
 
 vec3 world_jk_effect(vec3 raw,vec3 local_sector_tint)
 {
@@ -142,21 +143,20 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     return env*fresnel*strength;
 }
 
-// Match GPU 3DO's fluid opacity: compare the current surface with the
-// completed *opaque* depth, in JK's native 32*view-forward units. The
-// ray-length correction makes thickness independent of viewing angle.
+// Follow the original JKGM Fluid opacity: use raw native depth differences
+// (both depths are 32*camera-forward units), not normalized JK world units.
+// This is the same shared law used for native triangles and GPU 3DOs.
 float world_fluid_absorption(float fragment_depth)
 {
-    float opacity=fluid_thickness>0.0?1.0:0.0;
     float opaque_depth=texelFetch(scene_depth,ivec2(gl_FragCoord.xy),0).r;
-    if(opaque_depth<65500.0) {
-        vec3 delta=cached_world_position-camera_world_origin;
-        float ray_ratio=length(delta)/
-                        max(dot(delta,camera_forward_axis),0.0001);
-        float thickness=max((opaque_depth-fragment_depth)/32.0,0.0)*ray_ratio;
-        opacity=1.0-exp(-fluid_thickness*thickness);
-    }
-    return clamp(opacity,0.0,1.0);
+    if(opaque_depth>=65500.0)
+        return jk_fluid_absorption(opaque_depth,fragment_depth,1.0,
+                                  fluid_thickness);
+    vec3 delta=cached_world_position-camera_world_origin;
+    float ray_ratio=length(delta)/
+                    max(dot(delta,camera_forward_axis),0.0001);
+    return jk_fluid_absorption(opaque_depth,fragment_depth,ray_ratio,
+                              fluid_thickness);
 }
 
 layout(location=0) out vec4 out_color;
