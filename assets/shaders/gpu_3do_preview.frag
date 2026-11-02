@@ -77,6 +77,7 @@ in vec3 local_fragment_normal;
 
 #include "jk_point_lighting.glsl"
 #include "gpu_material_common.glsl"
+#include "fluid_absorption.glsl"
 
 // Evaluate a receiver's untinted-to-tinted response at a given brightness.
 // Called at white and black to obtain a light color independently of baked
@@ -358,15 +359,14 @@ bool depth_clip_rejected(float fragment_depth)
 }
 float fluid_absorption(float fragment_depth)
 {
-    float opacity=advanced_material_params.y>0.0?1.0:0.0;
     float opaque_depth=texelFetch(scene_depth,ivec2(gl_FragCoord.xy),0).r;
-    if(opaque_depth<65500.0) {
-        vec3 pos=gpu_view_position();
-        float ray_ratio=length(pos)/max(pos.z,0.0001);
-        float thickness=max((opaque_depth-fragment_depth)/32.0,0.0)*ray_ratio;
-        opacity=1.0-exp(-advanced_material_params.y*thickness);
-    }
-    return clamp(opacity,0.0,1.0);
+    if(opaque_depth>=65500.0)
+        return jk_fluid_absorption(opaque_depth,fragment_depth,1.0,
+                                  advanced_material_params.y);
+    vec3 pos=gpu_view_position();
+    float ray_ratio=length(pos)/max(pos.z,0.0001);
+    return jk_fluid_absorption(opaque_depth,fragment_depth,ray_ratio,
+                              advanced_material_params.y);
 }
 
 
