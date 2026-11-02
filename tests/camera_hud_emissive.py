@@ -14,11 +14,11 @@ pre_hud = main.split("    if(camera_hud_thing!=0) {", 1)[0]
 post_hud = main.split("        return;", 1)[1]
 
 # Late pass must retain zero-alpha emissive-only fragments.
-assert "if(albedo.a<=0.001 && emissive_only==0) discard;" in pre_hud
+assert "gpu_material_discard(albedo.a,alpha_mode,alpha_cutoff," in pre_hud
 # Use the same emissive strength, texture and UV scrolling as the world.
-assert pre_hud.count("vec3 emission=emissive_factor;") == 1
-assert "emission*=texture(emissive_map,uv+emissive_scroll).rgb;" in pre_hud
-assert "vec3 emission=emissive_factor;" not in post_hud
+assert "vec3 emission=gpu_material_emission(" in pre_hud
+assert "emissive_map,uv,emissive_scroll,emissive_factor,has_emissive);" in pre_hud
+assert "gpu_material_emission(" not in post_hud
 
 # Ordinary and additive HUD pigment are premultiplied, but emission is
 # independent of albedo alpha; do not make it alpha * emission.

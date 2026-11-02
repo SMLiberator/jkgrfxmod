@@ -76,6 +76,7 @@ in vec3 local_fragment_position;
 in vec3 local_fragment_normal;
 
 #include "jk_point_lighting.glsl"
+#include "gpu_material_common.glsl"
 
 // Evaluate a receiver's untinted-to-tinted response at a given brightness.
 // Called at white and black to obtain a light color independently of baked
@@ -701,10 +702,7 @@ layout(location=3) out vec4 out_depth;
 // opaque and write ordinary depth/SSAO; no blend or per-face sort needed.
 float dither_threshold()
 {
-    ivec2 p=ivec2(gl_FragCoord.xy) & ivec2(3);
-    int lo=(((p.x^p.y)&1)<<1)|(p.y&1);
-    int hi=((((p.x>>1)^(p.y>>1))&1)<<1)|((p.y>>1)&1);
-    return (float(4*lo+hi)+0.5)/16.0;
+    return gpu_material_dither_threshold();
 }
 
 void main() {
@@ -722,14 +720,10 @@ void main() {
     if(transparent_pass!=0 && advanced_material_params.x>0.5 &&
        depth_clip_rejected(view_depth)) discard;
     vec2 uv=gpu_parallax_uv(pixel_uv*uv_scale);
-    vec4 texel=has_texture==1
-        ? texture(albedo_map,uv+albedo_scroll)
-        : (has_texture==2 ? vec4(1.0) : vec4(1.0,0.05,0.65,1.0));
-    if(albedo_transition.z>0.5) {
-        vec4 next_texel=albedo_transition.x>0.5
-            ? texture(albedo_map2,uv+albedo_scroll) : vec4(1.0);
-        texel=mix(texel,next_texel,albedo_transition.y);
-    }
+    vec4 texel=gpu_material_sample_albedo(
+        albedo_map,albedo_map2,uv,albedo_scroll,has_texture,
+        albedo_transition.x>0.5?1:2,
+        albedo_transition.z>0.5?albedo_transition.y:0.0);
     vec4 albedo=texel*albedo_factor;
     albedo.a*=native_face_opacity;
     if(decal_receiver_lighting!=0) {
@@ -741,30 +735,19 @@ void main() {
                       smoothstep(0.0,0.12,edge.z);
         albedo.a*=clamp(decal_coverage.w,0.0,1.0)*feather;
     }
-    if(post_exempt_pass!=0) {
-        // Render ALL coverage of the exempt material once, rather than
-        // splitting mixed alpha between separate opaque/translucent passes.
-        if(alpha_mode==2 && albedo.a<alpha_cutoff) discard;
-        if(alpha_mode==4 && albedo.a<=dither_threshold()) discard;
-        if(alpha_mode==0 || alpha_mode==2 || alpha_mode==4) albedo.a=1.0;
-        if(albedo.a<=0.001 && emissive_only==0) discard;
-    } else if(transparent_pass==0) {
-        if(alpha_mode==3) discard; // native translucent/additive/opacity<1
-        if(alpha_mode==1 && albedo.a<0.999) discard;
-        if(alpha_mode==2 && albedo.a<alpha_cutoff) discard;
-        if(alpha_mode==4 && albedo.a<=dither_threshold()) discard;
-    } else {
-        if(alpha_mode==0 || alpha_mode==2 || alpha_mode==4) discard;
-        if(albedo.a<=0.001 && emissive_only==0) discard;
-        if(alpha_mode==1 && albedo.a>=0.999) discard;
-    }
+    if(gpu_material_discard(albedo.a,alpha_mode,alpha_cutoff,
+                            emissive_only,transparent_pass!=0,
+                            post_exempt_pass!=0)) discard;
+    // For opaque masks/dither the surviving fragments write full coverage.
+    if(post_exempt_pass!=0 &&
+       (alpha_mode==0 || alpha_mode==2 || alpha_mode==4))
+        albedo.a=1.0;
     // Emission is independent of albedo opacity. Evaluate it before the
     // Camera HUD early return: zero-alpha emissive-only MATs would otherwise
     // disappear in the final post-exempt pass. Use the same emissive image,
     // scrolling, and strength as the ordinary world path.
-    vec3 emission=emissive_factor;
-    if(has_emissive!=0)
-        emission*=texture(emissive_map,uv+emissive_scroll).rgb;
+    vec3 emission=gpu_material_emission(
+        emissive_map,uv,emissive_scroll,emissive_factor,has_emissive);
     if(camera_hud_thing!=0) {
         // Flat HUD output, exempt from JK lighting, fog, sunlight, SSAO,
         // bloom, HDR and other postFX. Add emissive RGB independently of
