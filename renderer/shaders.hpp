@@ -5,6 +5,7 @@
 #include "gpu_3do_preview.hpp"
 #include "world_cache_lighting.hpp"
 #include "glutil/program.hpp"
+#include <array>
 #include <vector>
 
 namespace jkgm {
@@ -67,6 +68,13 @@ namespace jkgm {
             gl::uniform_location_id albedo2_sampler,albedo_source,albedo_source2,albedo_transition;
             gl::uniform_location_id emissive_sampler,emissive_factor,emissive_scroll,has_emissive;
             gl::uniform_location_id emissive_only;
+            gl::uniform_location_id reflection_surface_sampler,reflection_normal_sampler;
+            gl::uniform_location_id reflection_normal2_sampler,reflection_env_sampler;
+            gl::uniform_location_id reflection_env2_sampler;
+            gl::uniform_location_id reflection_params,reflection_normal_params;
+            gl::uniform_location_id reflection_scroll,reflection_scroll2,environment_info;
+            gl::uniform_location_id camera_world_origin,camera_right_axis;
+            gl::uniform_location_id camera_forward_axis,camera_up_axis;
             gl::uniform_location_id alpha_cutout,alpha_cutoff;
             gl::uniform_location_id transparent_pass,alpha_mode,face_opacity;
             gl::uniform_location_id blend_mode;
@@ -91,6 +99,13 @@ namespace jkgm {
             void set_emissive(bool textured,point<4,float> intensity,
                               point<2,float> scroll);
             void set_solid_color(point<4,float> tint);
+            void set_reflection(point<4,float> material,point<4,float> normals,
+                                point<2,float> scroll,point<2,float> scroll2,
+                                bool from,bool to,float weight,int mode);
+            void set_reflection_camera(std::array<float,3> const &position,
+                                       std::array<float,3> const &right,
+                                       std::array<float,3> const &forward,
+                                       std::array<float,3> const &up);
             void set_alpha_cutout(float cutoff);
             void set_alpha_policy(bool transparent,int mode,float cutoff,
                                   float native_opacity,int blend=0,
