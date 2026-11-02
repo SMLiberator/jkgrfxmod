@@ -75,15 +75,16 @@ assert "uniform int alpha_cutout;" in world_frag
 # forced-native translucency and dithered world faces.
 assert "float texture_material_alpha=clamp(texel.a*material_tint.a,0.0,1.0);" in world_frag
 assert "float coverage=clamp(texture_material_alpha*face_opacity,0.0,1.0);" in world_frag
-assert "if(alpha_mode==2 && coverage<alpha_cutoff)discard;" in world_frag
-assert "if(alpha_mode==1 && coverage<0.999)discard;" in world_frag
-assert "if(alpha_mode==1 && coverage>=0.999)discard;" in world_frag
-assert "if(alpha_mode==4 && coverage<=dither_threshold())discard;" in world_frag
+assert "gpu_material_discard(coverage,alpha_mode,alpha_cutoff," in world_frag
+assert "gpu_material_emission(" in world_frag
+assert "gpu_material_sample_albedo(" in world_frag
+assert "out_emissive=vec4(emission," in world_frag
+assert '#include "gpu_material_common.glsl"' in world_frag
 assert "if(transparent_pass!=0)" in world_frag
 assert "float vertex_rgb_alpha=pow(clamp(face_opacity,0.0,1.0),1.8);" in world_frag
 assert "texture_material_alpha*vertex_rgb_alpha" in world_frag
 assert "fog_color*(fog*coverage)" in world_frag
-assert "out_color=vec4(premultiplied,blend_mode==1?0.0:coverage);" in world_frag
+assert "out_color=vec4(premultiplied+emission," in world_frag
 # The native D3D bridge converts gamma(alpha-premultiplied diffuse),
 # retaining *linear* 90/255 alpha for the framebuffer's blend factors.
 # Changing the alpha itself instead of its RGB would be a regression.
@@ -172,8 +173,10 @@ assert 'root/"shaders/world_cache_texture_preview.frag"' in program
 
 # The glslangValidator CLI cannot expand our runtime-local GLSL includes.
 # Materialize equivalent standalone sources for optional compile/link checks.
+common_material=(root/"assets/shaders/gpu_material_common.glsl").read_text(encoding="utf-8")
 def expand_includes(shader):
-    return shader.replace('#include "jk_point_lighting.glsl"',shared)
+    return (shader.replace('#include "jk_point_lighting.glsl"',shared)
+                  .replace('#include "gpu_material_common.glsl"',common_material))
 
 compiler = shutil.which("glslangValidator")
 if compiler:

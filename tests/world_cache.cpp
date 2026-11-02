@@ -592,7 +592,7 @@ int main()
     grate.face_type=0U;
     grate_mat.transition=0.25f;
     assert(choose_world_cache_draw_policy(grate,grate_mat)==
-           world_cache_draw_policy::native);
+           world_cache_draw_policy::masked); // shared animated albedo
     grate_mat.transition=0.0f;
     grate_mat.alpha_cutoff=0.0f;
     assert(choose_world_cache_draw_policy(grate,grate_mat)==
@@ -611,6 +611,19 @@ int main()
     assert(choose_world_cache_draw_policy(grate,grate_mat)==
            world_cache_draw_policy::native); // fluid needs scene depth
     grate_mat.special=false;
+    grate_mat.emissive_only=true; grate_mat.opacity=0.0f;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::emissive);
+    assert(!world_cache_draws_in_pass(world_cache_draw_policy::emissive,
+                                     world_cache_pass::opaque));
+    assert(world_cache_draws_in_pass(world_cache_draw_policy::emissive,
+                                    world_cache_pass::transparent));
+    assert(world_cache_alpha_mode(world_cache_draw_policy::emissive)==3);
+    grate_mat.albedo_source=2; grate_mat.has_image=false;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::emissive);
+    grate_mat.albedo_source=1; grate_mat.has_image=true;
+    grate_mat.emissive_only=false;
     grate_mat.opacity=0.5f;
     assert(choose_world_cache_draw_policy(grate,grate_mat)==
            world_cache_draw_policy::blended);

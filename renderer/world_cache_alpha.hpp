@@ -8,7 +8,8 @@
 
 namespace jkgm {
 enum class world_cache_draw_policy : uint8_t {
-    native=0,solid=1,textured=2,masked=3,mixed=4,blended=5,dithered=6
+    native=0,solid=1,textured=2,masked=3,mixed=4,blended=5,dithered=6,
+    emissive=7
 };
 enum class world_cache_pass : uint8_t {opaque,transparent};
 struct world_cache_material_info {
@@ -24,10 +25,23 @@ inline world_cache_draw_policy choose_world_cache_draw_policy(
     world_cache_material_info const &mat)
 {
     if(!std::isfinite(mat.opacity) || mat.opacity<0.0f ||
-       mat.opacity>1.0f || mat.emissive_only ||
+       mat.opacity>1.0f ||
        (mat.special && mat.blend_mode!=1 && mat.blend_mode!=2) ||
-       !std::isfinite(mat.transition) || mat.transition!=0.0f)
+       !std::isfinite(mat.transition) ||
+       mat.transition<0.0f || mat.transition>1.0f)
         return world_cache_draw_policy::native;
+    if(mat.emissive_only) {
+        if(face.geometry_mode==3U && mat.albedo_source==2)
+            return world_cache_draw_policy::emissive;
+        // GeoMode 4 can omit the albedo image when it emits only light.
+        if(face.geometry_mode==4U &&
+           ((mat.albedo_source==1 && mat.has_image) ||
+            mat.albedo_source==2) &&
+           std::isfinite(mat.width) && std::isfinite(mat.height) &&
+           mat.width>0.0f && mat.height>0.0f)
+            return world_cache_draw_policy::emissive;
+        return world_cache_draw_policy::native;
+    }
     if(face.geometry_mode==3U) {
         if(mat.albedo_source!=2)return world_cache_draw_policy::native;
         return mat.special || (face.face_type&0x2U) || mat.opacity<0.999f
@@ -57,16 +71,19 @@ inline bool world_cache_draws_in_pass(world_cache_draw_policy policy,
 {
     if(pass==world_cache_pass::opaque)
         return policy!=world_cache_draw_policy::native &&
-               policy!=world_cache_draw_policy::blended;
+               policy!=world_cache_draw_policy::blended &&
+           policy!=world_cache_draw_policy::emissive;
     return policy==world_cache_draw_policy::mixed ||
-           policy==world_cache_draw_policy::blended;
+           policy==world_cache_draw_policy::blended ||
+           policy==world_cache_draw_policy::emissive;
 }
 inline int world_cache_alpha_mode(world_cache_draw_policy policy)
 {
     switch(policy) {
     case world_cache_draw_policy::mixed:return 1;
     case world_cache_draw_policy::masked:return 2;
-    case world_cache_draw_policy::blended:return 3;
+    case world_cache_draw_policy::blended:
+    case world_cache_draw_policy::emissive:return 3;
     case world_cache_draw_policy::dithered:return 4;
     default:return 0;
     }

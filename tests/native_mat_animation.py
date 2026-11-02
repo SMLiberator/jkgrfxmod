@@ -51,7 +51,8 @@ assert "material_uv=native_uv+native_uv_offset;" in vertex
 # World texture UVs remain unchanged for ordinary faces. Sky mode replaces
 # the source UV before the same MAT-pixel scaling and material scroll.
 assert "vec2 uv=material_uv;" in fragment
-assert "texel=texture(albedo_map,uv*uv_scale+uv_scroll)" in fragment
+assert "gpu_material_sample_albedo(" in fragment
+assert "material_texcoord=uv*uv_scale;" in fragment
 assert "uv+=sky_offset+sky_face_offset;" in fragment
 assert "glMultiDrawElements(" in renderer
 print("JK native cel and cached-world UV animation checks passed")

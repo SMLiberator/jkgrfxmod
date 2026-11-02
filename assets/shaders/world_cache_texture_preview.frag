@@ -16,6 +16,13 @@ uniform float light_attenuation;
 uniform vec4 light_position_radius[16];
 uniform float light_intensity[16];
 uniform sampler2D albedo_map;
+uniform sampler2D albedo_map2;
+uniform int albedo_source,albedo_source2;
+uniform float albedo_transition;
+uniform sampler2D emissive_map;
+uniform int has_emissive,emissive_only;
+uniform vec3 emissive_factor;
+uniform vec2 emissive_scroll;
 uniform vec2 uv_scale,uv_scroll;
 uniform vec4 material_tint;
 uniform int solid_color; // GeoMode 3: native MAT/CMP RGB, no texture sampling
@@ -37,6 +44,7 @@ uniform vec2 sky_offset,sky_face_offset,sky_viewport;
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
 
 #include "jk_point_lighting.glsl"
+#include "gpu_material_common.glsl"
 
 vec3 world_jk_effect(vec3 raw,vec3 local_sector_tint)
 {
@@ -55,13 +63,6 @@ layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
 layout(location=3) out vec4 out_depth;
-float dither_threshold()
-{
-    ivec2 pixel=ivec2(gl_FragCoord.xy)&ivec2(3);
-    int lo=(((pixel.x^pixel.y)&1)<<1)|(pixel.y&1);
-    int hi=((((pixel.x>>1)^(pixel.y>>1))&1)<<1)|((pixel.y>>1)&1);
-    return (float(4*lo+hi)+0.5)/16.0;
-}
 void main() {
     // World alpha coverage is split with the same rules as cached 3DOs.
     // Sample the MAT once and discard *before* writing any attachment.
@@ -94,22 +95,15 @@ void main() {
         }
         uv+=sky_offset+sky_face_offset;
     }
-    vec4 texel=vec4(1.0);
-    if(solid_color==0)
-        texel=texture(albedo_map,uv*uv_scale+uv_scroll);
+    vec2 material_texcoord=uv*uv_scale;
+    vec4 texel=gpu_material_sample_albedo(
+        albedo_map,albedo_map2,material_texcoord,uv_scroll,
+        solid_color!=0?2:albedo_source,albedo_source2,albedo_transition);
     float texture_material_alpha=clamp(texel.a*material_tint.a,0.0,1.0);
     float coverage=clamp(texture_material_alpha*face_opacity,0.0,1.0);
     if(alpha_cutout!=0 && coverage<alpha_cutoff)discard;
-    if(transparent_pass==0) {
-        if(alpha_mode==3)discard;
-        if(alpha_mode==1 && coverage<0.999)discard;
-        if(alpha_mode==2 && coverage<alpha_cutoff)discard;
-        if(alpha_mode==4 && coverage<=dither_threshold())discard;
-    } else {
-        if(alpha_mode!=1 && alpha_mode!=3)discard;
-        if(coverage<=0.001)discard;
-        if(alpha_mode==1 && coverage>=0.999)discard;
-    }
+    if(gpu_material_discard(coverage,alpha_mode,alpha_cutoff,
+                            emissive_only,transparent_pass!=0,false))discard;
     vec3 albedo=solid_color!=0 ? clamp(material_tint.rgb,0.0,1.0) :
         clamp(texel.rgb*material_tint.rgb,0.0,1.0);
     if(sky_mode!=0) {
@@ -121,6 +115,10 @@ void main() {
         out_depth=vec4(65504.0,albedo);
         return;
     }
+    // Shared GPU MAT emission is independent of diffuse opacity.
+    vec3 emission=gpu_material_emission(
+        emissive_map,material_texcoord,emissive_scroll,
+        emissive_factor,has_emissive);
     // Keep authored Gouraud/sector lighting, already interpolated in RGB.
     // The same GLSL helpers calculate pixel light for both world and 3DO.
     vec3 lighting=cached_lit_rgb;
@@ -152,7 +150,8 @@ void main() {
         vec3 lit=mix(albedo*lighting,fog_color,fog);
         if(blend_mode==2) {
             // (DST_COLOR, ZERO) needs a neutral multiplier at alpha zero.
-            out_color=vec4(mix(vec3(1.0),lit,coverage),0.0);
+            out_color=vec4(mix(vec3(1.0),clamp(lit+emission,0.0,1.0),
+                               coverage),0.0);
         } else {
             // Native D3DTLVERTEX diffuse RGB premultiplies the *vertex*
             // opacity BEFORE gamma-1.8 linearization. The native bridge
@@ -171,12 +170,13 @@ void main() {
                 +fog_color*(fog*coverage);
             // Normal blending: ONE, ONE_MINUS_SRC_ALPHA.
             // Additive: ONE, ONE; alpha attachment remains unchanged.
-            out_color=vec4(premultiplied,blend_mode==1?0.0:coverage);
+            out_color=vec4(premultiplied+emission,
+                           blend_mode==1?0.0:coverage);
         }
         return;
     }
     out_color=vec4(albedo*lighting,1.0);
-    out_emissive=vec4(0.0,0.0,0.0,
+    out_emissive=vec4(emission,
         dot(lighting,vec3(0.2126,0.7152,0.0722)));
     out_normal=vec4(normalize(cached_view_normal),1.0);
     out_depth=vec4(32.0/max(gl_FragCoord.w,0.00000001),albedo);

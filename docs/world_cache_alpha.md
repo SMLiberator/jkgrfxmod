@@ -18,6 +18,11 @@ retaining JK's verified sector/portal visibility and persistent GPU geometry.
   the framebuffer still blends using `90/255` alpha. This is not
   equivalent to multiplying already-linear RGB by `90/255`.
 - Native material opacity below one: blended, without depth writes.
+- Emissive maps, pulsing factors and scrolling; opaque emission writes
+  the G-buffer emissive target after SSAO, and blended emission contributes
+  independently of diffuse alpha.
+- Emissive-only zero-alpha surfaces, including materials without albedo images.
+- Animated albedo transitions (two MAT textures or fades to solid).
 - Additive and multiplicative material blend modes: their appropriate
   framebuffer blend factors, rather than normal premultiplied blending.
 - Sky types 0x200 / 0x400: retain their independent, in-game-confirmed
@@ -30,10 +35,17 @@ cached surface ranges, with no depth writes. Its forward fragment
 output is premultiplied; fog is applied there instead of in the
 opaque full-screen composite.
 
+## Shared material adapter
+Both GPU 3DO and world fragment shaders now include
+`gpu_material_common.glsl` for MAT texture sampling, animated albedo
+transitions, alpha-pass partition, Bayer dither and independent emission.
+The separate vertex shaders, per-geometry lighting and sky projection remain
+intact; specular, normal, environment and parallax code are not yet unified.
+
 ## Intentionally deferred
 
-Fluid thickness/refraction, MAT-to-MAT alpha transitions, and
-emissive-only faces still use the native-material fallback policy.
+Fluid thickness/refraction and full 3DO-style specular/normal/environment
+material evaluation still need the next shared-material expansion.
 Forward alpha does not yet receive world sunlight/spotlight shadows
 or environment specularity with full opaque-surface parity.
 Native world batches also contain fallback Things/sprites; isolation

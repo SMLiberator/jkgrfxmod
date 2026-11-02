@@ -8,12 +8,14 @@ common=read("assets/shaders/gpu_material_common.glsl")
 world=read("assets/shaders/world_cache_texture_preview.frag")
 model=read("assets/shaders/gpu_3do_preview.frag")
 assert '#include "gpu_material_common.glsl"' in model
+assert '#include "gpu_material_common.glsl"' in world
 assert "vec4 gpu_material_sample_albedo(" in common
 assert "vec3 gpu_material_emission(" in common
 assert "bool gpu_material_discard(" in common
-assert "gpu_material_sample_albedo(" in model
-assert "gpu_material_emission(" in model
-assert "gpu_material_discard(" in model
+for stage in (model,world):
+    assert "gpu_material_sample_albedo(" in stage
+    assert "gpu_material_emission(" in stage
+    assert "gpu_material_discard(" in stage
 # Shader should never evaluate independent copies of these functions.
 assert "vec4 gpu_material_sample_albedo(" not in model
 assert "vec3 gpu_material_emission(" not in model
