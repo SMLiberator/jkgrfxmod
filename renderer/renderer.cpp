@@ -2688,7 +2688,27 @@ namespace jkgm {
             if(max_mips==0)reason<<" stage=no_native_mips";
             else if(!resident)reason<<" stage=unloaded_native_texture";
             else if(!valid_handle)reason<<" stage=missing_GPU_texture_handle";
-            else reason<<" stage=resident_but_unresolved";
+            else {
+                // The native surface can be resident with no GPU albedo
+                // because the replacement deliberately uses tint/reflection
+                // and Fluid absorption without an albedo map. Report the
+                // actual renderer material, not just the native D3D handle.
+                auto const id=static_cast<size_t>(chosen->texture_handle);
+                auto const &gpu=vidmem_texture_surfaces[id-1];
+                bool const has_albedo=gpu->albedo_map.has_value();
+                bool const replacement=gpu->replacement_material!=nullptr;
+                bool const intentionally_no_albedo=replacement &&
+                    !gpu->replacement_material->use_original_albedo &&
+                    !gpu->replacement_material->albedo_map.has_value();
+                reason<<" gpu_albedo="<<(has_albedo?1:0)
+                      <<" replacement="<<(replacement?1:0)
+                      <<" replacement_no_albedo="<<(intentionally_no_albedo?1:0)
+                      <<" blend_mode="<<static_cast<int>(gpu->blend_mode)
+                      <<" fluid_thickness="<<gpu->fluid_thickness;
+                reason<<" stage="<<(has_albedo?"resident_with_albedo_but_unresolved"
+                    :(intentionally_no_albedo?"intentional_no_albedo":
+                      "missing_GPU_albedo"));
+            }
             return reason.str();
         }
 
@@ -6595,7 +6615,8 @@ namespace jkgm {
                 info.alpha_cutoff=material.alpha_cutoff;
                 auto const policy=choose_world_cache_draw_policy(*first,info);
                 if(mat_probe && first->geometry_mode==4U &&
-                   (material.albedo_source!=1 || !material.has_image) &&
+                   !world_cache_albedo_ready(material.albedo_source,
+                                              material.has_image) &&
                    mat_failures_logged.size()<8U &&
                    mat_failures_logged.insert({first->material,first->cel}).second)
                     LOG_INFO("WORLD CACHE unresolved MAT ",
@@ -6642,8 +6663,9 @@ namespace jkgm {
                     if(first->solid_adjoin)adjoin_drawn+=counts.size();
                     if(first->passable_adjoin)passable_drawn+=counts.size();
                     ++groups;
-                } else if(material.albedo_source!=(solid?2:1) ||
-                          (!solid && !material.has_image &&
+                } else if((solid && material.albedo_source!=2) ||
+                          (!solid && !world_cache_albedo_ready(
+                              material.albedo_source,material.has_image) &&
                            !material.emissive_only))unresolved+=end-i;
                 else skipped_alpha+=end-i;
                 i=end;
@@ -6716,7 +6738,8 @@ namespace jkgm {
                             resolve_gpu_3do_material(group)).first;
                     }
                     auto const &mat=it->second;
-                    if(mat.albedo_source!=1 || !mat.has_image) {
+                    if(!world_cache_albedo_ready(mat.albedo_source,
+                                                 mat.has_image)) {
                         ++unresolved_special;
                         if(mat_failures_logged.size()<8U &&
                            mat_failures_logged.insert(key).second)
