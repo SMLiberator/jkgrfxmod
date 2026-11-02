@@ -615,6 +615,37 @@ int main()
     assert(world_cache_draws_in_pass(world_cache_draw_policy::blended,
                                      world_cache_pass::transparent));
     assert(world_cache_alpha_mode(world_cache_draw_policy::blended)==3);
+    // Fluid replacements can deliberately omit albedo_map and
+    // use_original_albedo. The shared GPU material resolver then returns
+    // source 2 (neutral white), which is READY, not missing. Opaque-world
+    // suppression must not hide this valid transparent GPU face.
+    assert(world_cache_albedo_ready(1,true));
+    assert(world_cache_albedo_ready(2,false));
+    assert(!world_cache_albedo_ready(0,false));
+    assert(!world_cache_albedo_ready(1,false));
+    assert(!world_cache_albedo_ready(2,true));
+    grate.geometry_mode=4U;
+    grate_mat.albedo_source=2;
+    grate_mat.has_image=false;
+    grate_mat.blend_mode=3;
+    grate_mat.special=true;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::blended);
+    assert(!world_cache_draws_in_pass(
+           choose_world_cache_draw_policy(grate,grate_mat),
+           world_cache_pass::opaque));
+    assert(world_cache_draws_in_pass(
+           choose_world_cache_draw_policy(grate,grate_mat),
+           world_cache_pass::transparent));
+    grate_mat.blend_mode=0;
+    grate_mat.special=false;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::textured);
+    grate_mat.albedo_source=0;
+    assert(choose_world_cache_draw_policy(grate,grate_mat)==
+           world_cache_draw_policy::native);
+    grate_mat.albedo_source=1;
+    grate_mat.has_image=true;
     // Fluid must remain a forward material even on GeoMode 3 color faces.
     grate.geometry_mode=3U;
     grate_mat.albedo_source=2;
