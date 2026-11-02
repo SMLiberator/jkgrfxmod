@@ -32,6 +32,9 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\compressed_sound_read.cpp /Fe:compressed_sound_read_test.exe
         compressed_sound_read_test.exe
 
+    - name: GPU procedural Thing renderer integration checks
+      run: python3 tests/gpu_procedural_integration.py
+
     - name: GPU particle-cloud geometry and per-CEL material tests
       shell: cmd
       run: |
