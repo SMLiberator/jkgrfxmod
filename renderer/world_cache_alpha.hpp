@@ -20,6 +20,14 @@ struct world_cache_material_info {
     float opacity=1.0f,transition=0.0f;
     float width=1.0f,height=1.0f,alpha_cutoff=0.5f;
 };
+// The shared GPU resolver returns 2 when a material replacement intentionally
+// omits its albedo image (e.g. fluid with only a tint/normal/EnvMap). The
+// shader samples neutral white for source 2. It is NOT an unresolved texture:
+// only source 0 indicates failure after the native MAT/GPU lookup.
+inline bool world_cache_albedo_ready(int source,bool has_image)
+{
+    return (source==1 && has_image) || (source==2 && !has_image);
+}
 inline world_cache_draw_policy choose_world_cache_draw_policy(
     world_cache_draw_candidate const &face,
     world_cache_material_info const &mat)
@@ -48,10 +56,11 @@ inline world_cache_draw_policy choose_world_cache_draw_policy(
         return mat.special || (face.face_type&0x2U) || mat.opacity<0.999f
             ?world_cache_draw_policy::blended:world_cache_draw_policy::solid;
     }
-    if(face.geometry_mode!=4U || mat.albedo_source!=1 ||
-       !mat.has_image || !std::isfinite(mat.width) ||
-       !std::isfinite(mat.height) || mat.width<=0.0f ||
-       mat.height<=0.0f)return world_cache_draw_policy::native;
+    if(face.geometry_mode!=4U ||
+       !world_cache_albedo_ready(mat.albedo_source,mat.has_image) ||
+       !std::isfinite(mat.width) || !std::isfinite(mat.height) ||
+       mat.width<=0.0f || mat.height<=0.0f)
+        return world_cache_draw_policy::native;
     // JK's rdFace.type 0x2 forces 90/255 alpha on the entire face even
     // when its MAT is opaque. A material opacity override also forces
     // blending, rather than writing opaque depth for its alpha=1 texels.
