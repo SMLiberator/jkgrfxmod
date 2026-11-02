@@ -78,6 +78,7 @@
 #include <set>
 #include <string>
 #include <sstream>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -3510,7 +3511,8 @@ namespace jkgm {
             return the_config->world_cache_preview &&
                    world_cache_target && world_cache_target->ready &&
                    frame_world_cache_camera.valid &&
-                   !world_cache_target->sector_candidates.empty();
+                   (!world_cache_target->sector_candidates.empty() ||
+                    !world_cache_target->sector_special_candidates.empty());
         }
 
         void draw_game_opaque_into_gbuffer(triangle_buffer_models *trimdl, bool posterize_lighting)

@@ -568,8 +568,8 @@ int main()
     set_u32(2,0x18,0U);
     set_u32(2,0x0c,0U);
 
-    // Conservative solid-adjoin material policy: binary alpha masks
-    // write precise G-buffer depth, mixed/translucent faces stay native.
+    // Unified world material policy: masked faces write precise depth,
+    // mixed-alpha faces split pixels, and forced translucent faces blend.
     world_cache_draw_candidate grate{};
     grate.geometry_mode=4U;
     grate.solid_adjoin=true;
