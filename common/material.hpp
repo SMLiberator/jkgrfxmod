@@ -83,7 +83,9 @@ namespace jkgm {
         // Native raster depth preference in OpenGL polygon-offset units.
         // Positive pulls geometry toward the camera; 0 preserves vanilla depth.
         float depth_bias = 0.0f;
-        // Beer-Lambert absorption per game unit of thickness through a fluid.
+        // Beer-Lambert absorption in native JK depth units (32 per world
+        // unit), preserving existing native-rendered Fluid pack densities.
+        // World, model and native triangle shaders share the same law.
         // Higher values make the albedo opaque at shorter viewing distances.
         float fluid_thickness = 0.25f;
         float alpha_cutoff = 0.5f;
