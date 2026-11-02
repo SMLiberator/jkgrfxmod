@@ -32,6 +32,12 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\compressed_sound_read.cpp /Fe:compressed_sound_read_test.exe
         compressed_sound_read_test.exe
 
+    - name: GPU particle-cloud geometry and per-CEL material tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_particle_cloud.cpp /Fe:gpu_particle_cloud_test.exe
+        gpu_particle_cloud_test.exe
+
     - name: GPU five-face lightsaber polyline geometry and view tests
       shell: cmd
       run: |
