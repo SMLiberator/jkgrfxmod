@@ -71,7 +71,15 @@ for stage in (frag, world_frag):
 assert "uniform int solid_color;" in world_frag
 assert "solid_color!=0 ? clamp(material_tint.rgb" in world_frag
 assert "uniform int alpha_cutout;" in world_frag
-assert "if(alpha_cutout!=0 && texel.a*material_tint.a<alpha_cutoff)" in world_frag
+# Cutout alpha now shares the same coverage factor as masked, mixed-alpha,
+# forced-native translucency and dithered world faces.
+assert "float coverage=clamp(texel.a*material_tint.a*face_opacity" in world_frag
+assert "if(alpha_mode==2 && coverage<alpha_cutoff)discard;" in world_frag
+assert "if(alpha_mode==1 && coverage<0.999)discard;" in world_frag
+assert "if(alpha_mode==1 && coverage>=0.999)discard;" in world_frag
+assert "if(alpha_mode==4 && coverage<=dither_threshold())discard;" in world_frag
+assert "if(transparent_pass!=0)" in world_frag
+assert "out_color=vec4(lit*coverage,blend_mode==1?0.0:coverage);" in world_frag
 assert "discard;" in world_frag
 assert "vec3 lighting=cached_lit_rgb;" in world_frag
 assert "if(added<=0.0) return jk_lit_rgb;" in frag
