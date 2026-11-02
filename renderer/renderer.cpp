@@ -21,7 +21,6 @@
 #include "sun_shadow_gpu.hpp"
 #include "world_cache_gpu.hpp"
 #include "world_cache_alpha.hpp"
-#include "world_cache_native_fallback.hpp"
 #include "world_cache_sky.hpp"
 #include "sun_dynamic_shadow_gpu.hpp"
 #include "backbuffer_menu_surface.hpp"
@@ -582,7 +581,6 @@ namespace jkgm {
         std::unique_ptr<spotlight_shadow_gpu> spotlight_shadow_target;
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
         std::unique_ptr<world_cache_gpu> world_cache_target;
-        world_cache_native_fallback native_fallback;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
         std::vector<sun_dynamic_shadow_tile> sun_dynamic_tiles;
@@ -2155,7 +2153,6 @@ namespace jkgm {
         }
 
         enum class batch_blend_filter { regular, all, special };
-        enum class native_world_filter { all, nonworld };
 
         // Opaque screen-door coverage is meaningful only for ordinary
         // over/under compositing. Special blend modes remain translucent.
@@ -2447,8 +2444,7 @@ namespace jkgm {
                         triangle_buffer_model *trimdl,
                         bool force_opaque,
                         bool posterize_lighting,
-                        batch_blend_filter filter = batch_blend_filter::regular,
-                        native_world_filter world_filter=native_world_filter::all)
+                        batch_blend_filter filter = batch_blend_filter::regular)
         {
             gl::bind_vertex_array(trimdl->vao);
 
@@ -2462,12 +2458,6 @@ namespace jkgm {
                 bool special = is_special_material(tri.material);
                 bool selected = filter == batch_blend_filter::all ||
                                 (filter == batch_blend_filter::special ? special : !special);
-                // A native world batch is not exclusively SithWorld surfaces.
-                // Preserve material-distinct particle, polyline/saber and
-                // native-3DO triangles; GPU-cached world owns its own MATs.
-                if(world_filter==native_world_filter::nonworld &&
-                   !native_fallback.allows(static_cast<uint32_t>(tri.material.get())))
-                    selected=false;
                 // All native world/gun transparent batches are initially
                 // classified by JK, not by replacement metadata. A dithered
                 // replacement was already drawn depth-writing in the opaque
@@ -3609,73 +3599,6 @@ namespace jkgm {
                     !world_cache_target->sector_special_candidates.empty());
         }
 
-        void refresh_world_cache_native_fallback()
-        {
-            // Build from LIVE, visible SithWorld MAT/cel pointers, not the
-            // original world-snapshot state. In particular, COGs can change
-            // the material of a face without rebuilding cached geometry.
-            native_fallback={};
-            if(!isolate_native_world_batches())return;
-            auto const &cache=*world_cache_target;
-            std::set<std::pair<uintptr_t,int32_t>> seen;
-            auto visit=[&](world_cache_draw_candidate const &face) {
-                if(face.geometry_mode==3U) {
-                    native_fallback.world_uses_untextured=true;
-                    return;
-                }
-                if(face.geometry_mode!=4U ||
-                   !seen.insert({face.material,face.cel}).second)return;
-                using namespace engine_material_debug;
-                native_material mat{};
-                if(!read_object(face.material,mat) ||
-                   (mat.tex_type&2U)==0U ||
-                   mat.num_texinfo==0U || mat.num_texinfo>16U)return;
-                int const cel=std::clamp(face.cel<0
-                    ?static_cast<int>(mat.current_cel):face.cel,
-                    0,static_cast<int>(mat.num_texinfo)-1);
-                native_texinfo info{};
-                if(!read_object(mat.texinfo[cel],info) || !info.texture)
-                    return;
-                native_texture tex{};
-                if(!read_object(info.texture,tex))return;
-                // Native JK can upload either alpha or opaque mip surfaces.
-                // Protect both handles: don't mistake an opacity-mode change
-                // for a different Thing material. No upload is performed.
-                for(unsigned i=0;i<std::min(tex.header[6],4U);++i) {
-                    auto add=[&](native_surface const &sf) {
-                        if(sf.texture_loaded!=0 && sf.texture_handle>0 &&
-                           sf.width>0U && sf.height>0U &&
-                           sf.width<=8192U && sf.height<=8192U)
-                            native_fallback.world_texture_handles.insert(
-                                static_cast<uint32_t>(sf.texture_handle));
-                    };
-                    add(tex.alpha_mips[i]);
-                    add(tex.opaque_mips[i]);
-                }
-            };
-            for(auto const &face:cache.sector_candidates)visit(face);
-            for(auto const &face:cache.sector_special_candidates)visit(face);
-            for(auto const &face:cache.sector_sky_candidates)visit(face);
-            if(the_config->profile_renderer &&
-               gpu_3do_present_serial%120U==0U) {
-                auto count_nonworld=[&](triangle_batch const &batch) {
-                    size_t n=0;
-                    for(auto const &tri:batch)
-                        if(native_fallback.allows(
-                           static_cast<uint32_t>(tri.material.get())))++n;
-                    return n;
-                };
-                LOG_INFO("WORLD CACHE native_primitive_fallback world_handles=",
-                         native_fallback.world_texture_handles.size(),
-                         " world_uses_untextured=",
-                         native_fallback.world_uses_untextured?1:0,
-                         " nonworld_opaque_tris=",count_nonworld(world_batch),
-                         " nonworld_alpha_tris=",
-                         count_nonworld(world_transparent_batch),
-                         " preserved_flare_tris=",world_flare_batch.size());
-            }
-        }
-
         void draw_game_opaque_into_gbuffer(triangle_buffer_models *trimdl, bool posterize_lighting)
         {
             // Draw batches
@@ -3713,20 +3636,26 @@ namespace jkgm {
                     color_rgb(current_color[0], current_color[1], current_color[2]));
             }
 
-            // GPU architecture and legacy Things share JK's world D3D
-            // batches. Filter known world MAT handles rather than dropping
-            // particle, saber/polyline and non-cached Thing triangles.
-            auto const world_filter=isolate_native_world_batches()
-                ?native_world_filter::nonworld:native_world_filter::all;
-            draw_batch(&ogs->game_opaque_pass_program,
-                       world_batch,&trimdl->world_trimdl,
-                       /*force opaque*/ true,posterize_lighting,
-                       batch_blend_filter::regular,world_filter);
-            draw_batch(&ogs->game_opaque_pass_program,
-                       world_transparent_batch,
-                       &trimdl->world_transparent_trimdl,
-                       /*force opaque*/ true,posterize_lighting,
-                       batch_blend_filter::regular,world_filter);
+            // The native world has no separate batch from native fallback
+            // Things/sprites. For this experimental parity pass, skip BOTH
+            // mixed batches so any unsupported world faces become obvious.
+            // Restore native rendering automatically if no cache is ready.
+            if(!isolate_native_world_batches()) {
+                draw_batch(&ogs->game_opaque_pass_program,
+                           world_batch,&trimdl->world_trimdl,
+                           /*force opaque*/ true,posterize_lighting);
+                draw_batch(&ogs->game_opaque_pass_program,
+                           world_transparent_batch,
+                           &trimdl->world_transparent_trimdl,
+                           /*force opaque*/ true,posterize_lighting);
+            } else if(the_config->profile_renderer &&
+                      (gpu_3do_present_serial%120U)==0U) {
+                LOG_INFO("WORLD CACHE native_isolation=1 skipped_opaque_tris=",
+                         world_batch.size(),
+                         " skipped_alpha_test_tris=",
+                         world_transparent_batch.size(),
+                         " includes_native_Thing_and_sprite_fallback=1");
+            }
 
             draw_world_cache_preview();
             ogs->game_opaque_pass_program.use_program();
@@ -7080,20 +7009,19 @@ namespace jkgm {
             draw_world_cache_transparency();
             ogs->game_transparency_pass_program.use_program();
 
-            // The same non-world fallback applies to native alpha: particle
-            // clouds and lightsaber tip/blade MATs must blend, not vanish
-            // because GPU-cached SithWorld owns other triangles in the batch.
-            auto const world_filter=isolate_native_world_batches()
-                ?native_world_filter::nonworld:native_world_filter::all;
-            draw_batch(&ogs->game_transparency_pass_program,
-                       world_transparent_batch,
-                       &trimdl->world_transparent_trimdl,
-                       /*force opaque*/ false,posterize_lighting,
-                       batch_blend_filter::all,world_filter);
-            draw_batch(&ogs->game_transparency_pass_program,
-                       world_batch,&trimdl->world_trimdl,
-                       /*force opaque*/ false,posterize_lighting,
-                       batch_blend_filter::special,world_filter);
+            // Unsupported special-blend native batches remain an explicit
+            // world-cache isolation limitation until full native ownership.
+            if(!isolate_native_world_batches()) {
+                draw_batch(&ogs->game_transparency_pass_program,
+                           world_transparent_batch,
+                           &trimdl->world_transparent_trimdl,
+                           /*force opaque*/ false,posterize_lighting,
+                           batch_blend_filter::all);
+                draw_batch(&ogs->game_transparency_pass_program,
+                           world_batch,&trimdl->world_trimdl,
+                           /*force opaque*/ false,posterize_lighting,
+                           batch_blend_filter::special);
+            }
 
             // SPR 0x40 flare quads use center-only occlusion against the
             // resolved opaque depth texture. Never write or test ordinary
@@ -7500,7 +7428,6 @@ namespace jkgm {
             frame_gpu_3do_instances=consume_gpu_3do_instances();
             ++gpu_3do_present_serial;
             stage_world_cache();
-            refresh_world_cache_native_fallback();
             animation_seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - animation_epoch).count();
             {
