@@ -2608,6 +2608,90 @@ namespace jkgm {
             return out;
         }
 
+        // Diagnostics only: native MAT residency is required before the
+        // world-cache resolver can access Fluid/normal/EnvMap replacement data.
+        // Do NOT call JK's native MAT uploader from rendering: the uploader
+        // has its own device/cache lifetime and an unsafe frame-time path.
+        std::string world_cache_material_failure(
+            world_cache_draw_candidate const &face)
+        {
+            using namespace engine_material_debug;
+            std::ostringstream reason;
+            reason<<"surface="<<face.surface_index
+                  <<" mat_ptr="<<face.material<<" cel="<<face.cel
+                  <<" geo="<<face.geometry_mode
+                  <<" face_type="<<face.face_type;
+            if(!matches_tested_executable()) {
+                reason<<" stage=executable_signature_mismatch";
+                return reason.str();
+            }
+            native_material mat{};
+            if(!read_object(face.material,mat)) {
+                reason<<" stage=unreadable_native_MAT";
+                return reason.str();
+            }
+            reason<<" name="<<printable_name(mat.name,sizeof(mat.name))
+                  <<" id="<<mat.id<<" tex_type="<<mat.tex_type
+                  <<" num_texinfo="<<mat.num_texinfo;
+            if((mat.tex_type&2U)==0U) {
+                reason<<" stage=native_MAT_untextured";
+                return reason.str();
+            }
+            if(mat.num_texinfo==0 || mat.num_texinfo>16) {
+                reason<<" stage=invalid_texinfo_count";
+                return reason.str();
+            }
+            int const cel=std::clamp(face.cel<0
+                ?static_cast<int>(mat.current_cel):face.cel,
+                0,static_cast<int>(mat.num_texinfo)-1);
+            native_texinfo info{};
+            if(!read_object(mat.texinfo[cel],info) || !info.texture) {
+                reason<<" stage=missing_texinfo_texture cel_selected="<<cel;
+                return reason.str();
+            }
+            native_texture tex{};
+            if(!read_object(info.texture,tex)) {
+                reason<<" stage=unreadable_native_texture";
+                return reason.str();
+            }
+            reason<<" mip_count="<<tex.header[6]
+                  <<" has_alpha_flag="<<((tex.header[0]&1U)?1:0);
+            unsigned const max_mips=std::min(tex.header[6],4U);
+            bool resident=false,valid_handle=false;
+            for(unsigned i=0;i<max_mips;++i) {
+                auto const &alpha=tex.alpha_mips[i];
+                auto const &opaque=tex.opaque_mips[i];
+                if(i==0) {
+                    reason<<" alpha_loaded="<<alpha.texture_loaded
+                          <<" alpha_handle="<<alpha.texture_handle
+                          <<" opaque_loaded="<<opaque.texture_loaded
+                          <<" opaque_handle="<<opaque.texture_handle;
+                }
+                auto const valid=[](native_surface const &sf) {
+                    return sf.texture_loaded!=0 && sf.texture_handle>0 &&
+                           sf.width>0 && sf.height>0 &&
+                           sf.width<=8192 && sf.height<=8192;
+                };
+                native_surface const *chosen=nullptr;
+                if((tex.header[0]&1U)!=0 && valid(alpha))chosen=&alpha;
+                else if(valid(opaque))chosen=&opaque;
+                else if(valid(alpha))chosen=&alpha;
+                if(!chosen)continue;
+                resident=true;
+                auto const id=static_cast<size_t>(chosen->texture_handle);
+                valid_handle=id>0 && id<=vidmem_texture_surfaces.size() &&
+                             bool(vidmem_texture_surfaces[id-1]);
+                reason<<" chosen_mip="<<i<<" chosen_handle="<<id
+                      <<" gpu_handle_valid="<<(valid_handle?1:0);
+                break;
+            }
+            if(max_mips==0)reason<<" stage=no_native_mips";
+            else if(!resident)reason<<" stage=unloaded_native_texture";
+            else if(!valid_handle)reason<<" stage=missing_GPU_texture_handle";
+            else reason<<" stage=resident_but_unresolved";
+            return reason.str();
+        }
+
         gpu_3do_texture resolve_gpu_3do_material(gpu_3do_group const &group)
         {
             gpu_3do_texture out;
@@ -6477,6 +6561,7 @@ namespace jkgm {
             size_t mat_probe_no_strength=0;
             bool const mat_probe=the_config->profile_renderer &&
                                   gpu_3do_present_serial%120U==0U;
+            std::set<std::pair<uintptr_t,int32_t>> mat_failures_logged;
             for(size_t i=0;i<ordered.size();) {
                 size_t end=i+1;
                 auto const *first=ordered[i];
@@ -6509,6 +6594,12 @@ namespace jkgm {
                 info.height=material.height;
                 info.alpha_cutoff=material.alpha_cutoff;
                 auto const policy=choose_world_cache_draw_policy(*first,info);
+                if(mat_probe && first->geometry_mode==4U &&
+                   (material.albedo_source!=1 || !material.has_image) &&
+                   mat_failures_logged.size()<8U &&
+                   mat_failures_logged.insert({first->material,first->cel}).second)
+                    LOG_INFO("WORLD CACHE unresolved MAT ",
+                             world_cache_material_failure(*first));
                 if(mat_probe && world_cache_draws_in_pass(
                     policy,world_cache_pass::opaque)) {
                     size_t const faces=end-i;
@@ -6626,7 +6717,12 @@ namespace jkgm {
                     }
                     auto const &mat=it->second;
                     if(mat.albedo_source!=1 || !mat.has_image) {
-                        ++unresolved_special;continue;
+                        ++unresolved_special;
+                        if(mat_failures_logged.size()<8U &&
+                           mat_failures_logged.insert(key).second)
+                            LOG_INFO("WORLD CACHE unresolved MAT ",
+                                     world_cache_material_failure(c));
+                        continue;
                     }
                     if(mat.alpha)++alpha_texels;
                     if(mat.masked || mat.dithered)++masked;
