@@ -6876,7 +6876,7 @@ namespace jkgm {
             gl::set_face_cull_mode(gl::face_mode::back);
             gl::enable(gl::capability::cull_face);
             gl::bind_vertex_array(cache.vao);
-            size_t mixed=0,forced=0,fluid=0;
+            size_t mixed=0,forced=0,fluid=0,albedo_free=0;
             size_t normal_maps=0,surface_maps=0,env_maps=0;
             size_t active_reflections=0,no_env=0,no_strength=0;
             float fluid_thickness_min=std::numeric_limits<float>::max();
@@ -6927,6 +6927,7 @@ namespace jkgm {
                     }
                 }
                 if(material_probe) {
+                    if(material.albedo_source==2)++albedo_free;
                     if(material.has_normal || material.has_normal2)++normal_maps;
                     if(material.has_surface)++surface_maps;
                     bool const has_env=material.has_environment ||
@@ -6947,7 +6948,7 @@ namespace jkgm {
             if(material_probe) {
                 LOG_INFO("WORLD CACHE gpu_alpha ranges=",draws.size(),
                          " mixed=",mixed," forced_blend=",forced,
-                         " fluid=",fluid,
+                         " fluid=",fluid," albedo_free=",albedo_free,
                          " sorted=back_to_front depth_write=0");
                 LOG_INFO("WORLD CACHE material_effects_alpha visible=",draws.size(),
                          " reflective=",active_reflections,
