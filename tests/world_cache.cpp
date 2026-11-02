@@ -738,6 +738,9 @@ int main()
     // The same visible sector / material / cel metadata drives this path.
     world_cache_frame_stats sky_frame{};
     std::vector<world_cache_draw_candidate> sky_draws;
+    // The prior loader test deliberately used a sky without a MAT.
+    // A draw candidate, unlike the geometry snapshot, needs a live MAT.
+    put32(sky_faces_addr+0x34U,uint32_t(base+0x1880U));
     append_world_cache_candidate(read,sky_native.surfaces_addr,
         cached_sky.surfaces[0],no_sky_draw,sky_frame,
         nullptr,nullptr,nullptr,&sky_draws);
