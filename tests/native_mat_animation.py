@@ -33,9 +33,14 @@ assert "std::unordered_map<int32_t,cached_gpu_sprite_quad>" in native
 assert "group.material=mat;group.cel=cel;" in sprite
 
 # World staged surface metadata is live, including native UV scroll.
-assert "std::memcpy(&cel,raw.data()+0x28,4);" in world
-assert "std::array<uint8_t,0x34> raw{};" in world
-assert "std::memcpy(uv_offset.data(),raw.data()+0x2c,8);" in world
+# The live read now starts at SithSurface +0x0c (adjoin pointer),
+# rather than +0x10. Original absolute native offsets are unchanged:
+# wallCel +0x38, texVertOffset +0x3c, and adjoin +0x0c.
+assert "std::array<uint8_t,0x38> raw{};" in world
+assert "read(uintptr_t(addr)+0x0cU,raw.data(),raw.size())" in world
+assert "std::memcpy(&adjoin,raw.data(),4);" in world
+assert "std::memcpy(&cel,raw.data()+0x2c,4);" in world
+assert "std::memcpy(uv_offset.data(),raw.data()+0x30,8);" in world
 assert "face_type,false,uv_offset" in world
 assert "write_world_cache_uv_animation(" in renderer
 assert "frame_uv_offset.assign(cache.mesh.vertices.size()" in renderer
