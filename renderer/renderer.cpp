@@ -6115,6 +6115,52 @@ namespace jkgm {
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                                  material.texture2);
             }
+            // Use the same runtime global/per-MAT EnvMap resolution as 3DOs.
+            // Nonreflective world surfaces never bind auxiliary maps.
+            bool const reflective=the_config->enable_reflections &&
+                material.reflection_strength>0.0f &&
+                (material.has_environment || material.has_environment2);
+            if(reflective) {
+                if(material.has_surface) {
+                    gl::set_active_texture_unit(2);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.surface);
+                }
+                if(material.has_normal) {
+                    gl::set_active_texture_unit(3);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.normal);
+                }
+                if(material.has_normal2) {
+                    gl::set_active_texture_unit(5);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.normal2);
+                }
+                if(material.has_environment) {
+                    gl::set_active_texture_unit(4);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.environment);
+                }
+                if(material.has_environment2 &&
+                   material.environment_transition>0.0f) {
+                    gl::set_active_texture_unit(7);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.environment2);
+                }
+            }
+            shader.set_reflection(
+                make_point(reflective?material.reflection_strength:0.0f,
+                           material.roughness,material.metalness,
+                           reflective && material.has_surface?1.0f:0.0f),
+                make_point(reflective && material.has_normal?1.0f:0.0f,
+                           material.normal_strength,
+                           reflective && material.has_normal2?1.0f:0.0f,
+                           material.normal_strength2),
+                material.normal_scroll,material.normal_scroll2,
+                reflective && material.has_environment,
+                reflective && material.has_environment2,
+                reflective?material.environment_transition:0.0f,
+                material.reflection_mode);
             gl::set_active_texture_unit(0);
         }
 
@@ -6285,12 +6331,18 @@ namespace jkgm {
                 make_point(m[9],m[10],m[11],1.0f));
             shader.set_projection(make_point(
                 half_fov,aspect,1.0f/cam.far_plane,0.0f));
+            shader.set_reflection_camera(cam.camera.position,cam.camera.right,
+                                         cam.camera.forward,cam.camera.up);
             // Reset MAT state for sky aperture rendering; custom material
             // emission/transition is bound only on ordinary world faces.
             shader.set_alpha_policy(false,0,0.5f,1.0f);
             shader.set_albedo_transition(2,0.0f);
             shader.set_emissive(false,make_point(0.0f,0.0f,0.0f,0.0f),
                                 make_point(0.0f,0.0f));
+            shader.set_reflection(make_point(0.0f,0.0f,0.0f,0.0f),
+                                  make_point(0.0f,1.0f,0.0f,1.0f),
+                                  make_point(0.0f,0.0f),make_point(0.0f,0.0f),
+                                  false,false,0.0f,0);
             // If the native request-pool layout has not yet been
             // validated, do NOT copy the unseparated camera-sector tint
             // onto already locally tinted world faces. Preserve the
@@ -6642,6 +6694,8 @@ namespace jkgm {
                 });
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
+            shader.set_reflection_camera(cam.position,cam.right,
+                                         cam.forward,cam.up);
             auto const &fog=get_fog_settings();
             auto const info=fog.info.value(),color=fog.color.value();
             shader.set_fog(make_point(info[0],info[1],
