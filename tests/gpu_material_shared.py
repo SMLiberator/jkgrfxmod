@@ -2,6 +2,7 @@
 GLSL is expanded at load time; source tests catch accidental divergence.
 """
 from pathlib import Path
+import re
 root=Path(__file__).resolve().parents[1]
 read=lambda file:(root/file).read_text(encoding="utf-8")
 common=read("assets/shaders/gpu_material_common.glsl")
@@ -55,7 +56,10 @@ assert "shader.set_scene_depth(8);" in renderer
 assert "shader.set_fluid_thickness(material.blend==material_blend_mode::fluid" in renderer
 assert "frame_screen->get_resolved_depth_texture()" in renderer
 assert "material.fluid_thickness" in renderer
-assert "if(material.blend==material_blend_mode::fluid)++fluid;" in renderer
+# The profiling counter now gathers fluid thickness statistics in the
+# same branch; preserve the behavioral assertion without pinning its layout.
+assert re.search(r"if\s*\(\s*material\.blend\s*==\s*"
+                 r"material_blend_mode::fluid\s*\)\s*\{\s*\+\+fluid\s*;", renderer)
 
 # Fluid opacity remains clear at zero thickness, more opaque with depth,
 # and fully opaque when no solid receiver exists behind positive absorption.
