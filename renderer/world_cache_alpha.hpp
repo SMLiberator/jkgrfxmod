@@ -26,7 +26,8 @@ inline world_cache_draw_policy choose_world_cache_draw_policy(
 {
     if(!std::isfinite(mat.opacity) || mat.opacity<0.0f ||
        mat.opacity>1.0f ||
-       (mat.special && mat.blend_mode!=1 && mat.blend_mode!=2) ||
+       (mat.special && mat.blend_mode!=1 && mat.blend_mode!=2 &&
+        mat.blend_mode!=3) ||
        !std::isfinite(mat.transition) ||
        mat.transition<0.0f || mat.transition>1.0f)
         return world_cache_draw_policy::native;
