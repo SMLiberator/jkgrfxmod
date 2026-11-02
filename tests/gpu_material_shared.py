@@ -56,6 +56,15 @@ assert "shader.set_scene_depth(8);" in renderer
 assert "shader.set_fluid_thickness(material.blend==material_blend_mode::fluid" in renderer
 assert "frame_screen->get_resolved_depth_texture()" in renderer
 assert "material.fluid_thickness" in renderer
+# A resident MAT may deliberately have NO albedo image (not an unresolved
+# native texture). World GeoMode 4 Fluid must use the shared white-source
+# shader, remain in the transparent pass, and never request native warmup.
+assert "base_source==2 ? vec4(1.0)" in common
+assert "world_cache_albedo_ready(mat.albedo_source,mat.has_image)" in policy
+assert "world_cache_albedo_ready(material.albedo_source," in renderer
+assert "world_cache_albedo_ready(mat.albedo_source," in renderer
+assert "albedo_free=" in renderer
+assert 'stage="<<(has_albedo?"resident_with_albedo_but_unresolved"' in renderer
 # The profiling counter now gathers fluid thickness statistics in the
 # same branch; preserve the behavioral assertion without pinning its layout.
 assert re.search(r"if\s*\(\s*material\.blend\s*==\s*"
