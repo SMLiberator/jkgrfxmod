@@ -64,6 +64,9 @@ namespace jkgm {
             gl::uniform_location_id view_right,view_forward,view_up,view_origin;
             gl::uniform_location_id projection;
             gl::uniform_location_id albedo_sampler,uv_scale,uv_scroll,material_tint,solid_color;
+            gl::uniform_location_id albedo2_sampler,albedo_source,albedo_source2,albedo_transition;
+            gl::uniform_location_id emissive_sampler,emissive_factor,emissive_scroll,has_emissive;
+            gl::uniform_location_id emissive_only;
             gl::uniform_location_id alpha_cutout,alpha_cutoff;
             gl::uniform_location_id transparent_pass,alpha_mode,face_opacity;
             gl::uniform_location_id blend_mode;
@@ -82,11 +85,16 @@ namespace jkgm {
                                  point<4,float> up,point<4,float> origin);
             void set_projection(point<4,float> params);
             void set_texture(float width,float height,
-                             point<4,float> tint,point<2,float> scroll);
+                             point<4,float> tint,point<2,float> scroll,
+                             int source=1);
+            void set_albedo_transition(int source2,float weight);
+            void set_emissive(bool textured,point<4,float> intensity,
+                              point<2,float> scroll);
             void set_solid_color(point<4,float> tint);
             void set_alpha_cutout(float cutoff);
             void set_alpha_policy(bool transparent,int mode,float cutoff,
-                                  float native_opacity,int blend=0);
+                                  float native_opacity,int blend=0,
+                                  bool emission_only=false);
             void set_fog(point<4,float> params,point<3,float> color);
             void set_sky(int mode,point<4,float> horizon,point<3,float> angles,
                          point<3,float> camera_origin,point<3,float> right,

@@ -6088,6 +6088,36 @@ namespace jkgm {
             frame_screen->end_compose_opaque_pass();
         }
 
+        // One MAT binder shared by opaque and transparent world geometry.
+        // Matches the GPU 3DO sampler units and factors. Geometry-specific
+        // vertex transforms/lighting and sky apertures remain independent.
+        void bind_world_cache_material(
+            shaders::world_cache_preview_shader &shader,
+            gpu_3do_texture const &material,uint32_t geometry_mode)
+        {
+            gl::set_active_texture_unit(0);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             material.texture);
+            if(geometry_mode==3U)shader.set_solid_color(material.tint);
+            else shader.set_texture(material.width,material.height,
+                                    material.tint,material.albedo_scroll,
+                                    material.albedo_source);
+            gl::set_active_texture_unit(1);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             material.emission);
+            shader.set_emissive(material.has_emission,
+                                material.emission_factor,
+                                material.emissive_scroll);
+            shader.set_albedo_transition(material.albedo_source2,
+                                          material.albedo_transition);
+            if(material.albedo_transition>0.0f) {
+                gl::set_active_texture_unit(6);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 material.texture2);
+            }
+            gl::set_active_texture_unit(0);
+        }
+
         void draw_world_cache_preview()
         {
             if(!the_config->world_cache_preview ||
@@ -6255,9 +6285,12 @@ namespace jkgm {
                 make_point(m[9],m[10],m[11],1.0f));
             shader.set_projection(make_point(
                 half_fov,aspect,1.0f/cam.far_plane,0.0f));
-            // Always initialize the new alpha uniforms before sky draws:
-            // default GLSL face_opacity=0 would erase every sky texel.
+            // Reset MAT state for sky aperture rendering; custom material
+            // emission/transition is bound only on ordinary world faces.
             shader.set_alpha_policy(false,0,0.5f,1.0f);
+            shader.set_albedo_transition(2,0.0f);
+            shader.set_emissive(false,make_point(0.0f,0.0f,0.0f,0.0f),
+                                make_point(0.0f,0.0f));
             // If the native request-pool layout has not yet been
             // validated, do NOT copy the unseparated camera-sector tint
             // onto already locally tinted world faces. Preserve the
@@ -6416,15 +6449,8 @@ namespace jkgm {
                 info.alpha_cutoff=material.alpha_cutoff;
                 auto const policy=choose_world_cache_draw_policy(*first,info);
                 if(world_cache_draws_in_pass(policy,world_cache_pass::opaque)) {
-                    if(policy==world_cache_draw_policy::solid)
-                        shader.set_solid_color(material.tint);
-                    else {
-                        gl::set_active_texture_unit(0);
-                        gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                         material.texture);
-                        shader.set_texture(material.width,material.height,
-                                           material.tint,material.albedo_scroll);
-                    }
+                    bind_world_cache_material(shader,material,
+                                              first->geometry_mode);
                     shader.set_alpha_policy(false,world_cache_alpha_mode(policy),
                                             material.alpha_cutoff,1.0f);
                     counts.clear();
@@ -6450,7 +6476,8 @@ namespace jkgm {
                     if(first->passable_adjoin)passable_drawn+=counts.size();
                     ++groups;
                 } else if(material.albedo_source!=(solid?2:1) ||
-                          (!solid && !material.has_image))unresolved+=end-i;
+                          (!solid && !material.has_image &&
+                           !material.emissive_only))unresolved+=end-i;
                 else skipped_alpha+=end-i;
                 i=end;
             }
@@ -6637,7 +6664,8 @@ namespace jkgm {
                 shader.set_alpha_policy(true,world_cache_alpha_mode(policy),
                         material.alpha_cutoff,
                         (face->face_type&0x2U)?90.0f/255.0f:1.0f,
-                        static_cast<int>(material.blend));
+                        static_cast<int>(material.blend),
+                        material.emissive_only);
                 switch(material.blend) {
                 case material_blend_mode::additive:
                     gl::set_blend_function_separate(
@@ -6655,15 +6683,7 @@ namespace jkgm {
                         gl::blend_function::one_minus_source_alpha);
                     break;
                 }
-                if(face->geometry_mode==3U)
-                    shader.set_solid_color(material.tint);
-                else {
-                    gl::set_active_texture_unit(0);
-                    gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                     material.texture);
-                    shader.set_texture(material.width,material.height,
-                                       material.tint,material.albedo_scroll);
-                }
+                bind_world_cache_material(shader,material,face->geometry_mode);
                 gl::draw_elements(gl::element_type::triangles,
                     face->count,gl::index_type::uint32,
                     static_cast<ptrdiff_t>(

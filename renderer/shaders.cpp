@@ -218,6 +218,15 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , uv_scroll(gl::get_uniform_location(the_program,"uv_scroll"))
     , material_tint(gl::get_uniform_location(the_program,"material_tint"))
     , solid_color(gl::get_uniform_location(the_program,"solid_color"))
+    , albedo2_sampler(gl::get_uniform_location(the_program,"albedo_map2"))
+    , albedo_source(gl::get_uniform_location(the_program,"albedo_source"))
+    , albedo_source2(gl::get_uniform_location(the_program,"albedo_source2"))
+    , albedo_transition(gl::get_uniform_location(the_program,"albedo_transition"))
+    , emissive_sampler(gl::get_uniform_location(the_program,"emissive_map"))
+    , emissive_factor(gl::get_uniform_location(the_program,"emissive_factor"))
+    , emissive_scroll(gl::get_uniform_location(the_program,"emissive_scroll"))
+    , has_emissive(gl::get_uniform_location(the_program,"has_emissive"))
+    , emissive_only(gl::get_uniform_location(the_program,"emissive_only"))
     , alpha_cutout(gl::get_uniform_location(the_program,"alpha_cutout"))
     , alpha_cutoff(gl::get_uniform_location(the_program,"alpha_cutoff"))
     , transparent_pass(gl::get_uniform_location(the_program,"transparent_pass"))
@@ -264,9 +273,11 @@ void jkgm::shaders::world_cache_preview_shader::set_projection(
     gl::set_uniform_vector(projection,p);
 }
 void jkgm::shaders::world_cache_preview_shader::set_texture(
-    float width,float height,point<4,float> tint,point<2,float> scroll)
+    float width,float height,point<4,float> tint,point<2,float> scroll,
+    int source)
 {
     gl::set_uniform_integer(solid_color,0);
+    gl::set_uniform_integer(albedo_source,source);
     gl::set_uniform_integer(alpha_cutout,0);
     gl::set_uniform_integer(albedo_sampler,0);
     gl::set_uniform_vector(uv_scale,make_point(1.0f/width,1.0f/height));
@@ -277,8 +288,26 @@ void jkgm::shaders::world_cache_preview_shader::set_solid_color(
     point<4,float> tint)
 {
     gl::set_uniform_integer(solid_color,1);
+    gl::set_uniform_integer(albedo_source,2);
     gl::set_uniform_integer(alpha_cutout,0);
     gl::set_uniform_vector(material_tint,tint);
+}
+void jkgm::shaders::world_cache_preview_shader::set_albedo_transition(
+    int source2,float weight)
+{
+    gl::set_uniform_integer(albedo2_sampler,6);
+    gl::set_uniform_integer(albedo_source2,source2);
+    gl::set_uniform_float(albedo_transition,weight);
+}
+void jkgm::shaders::world_cache_preview_shader::set_emissive(
+    bool textured,point<4,float> intensity,point<2,float> scroll)
+{
+    gl::set_uniform_integer(emissive_sampler,1);
+    gl::set_uniform_integer(has_emissive,textured?1:0);
+    gl::set_uniform_vector(emissive_factor,
+        make_point(get<0>(intensity),get<1>(intensity),
+                   get<2>(intensity)));
+    gl::set_uniform_vector(emissive_scroll,scroll);
 }
 void jkgm::shaders::world_cache_preview_shader::set_alpha_cutout(
     float cutoff)
@@ -288,8 +317,10 @@ void jkgm::shaders::world_cache_preview_shader::set_alpha_cutout(
 }
 
 void jkgm::shaders::world_cache_preview_shader::set_alpha_policy(
-    bool transparent,int mode,float cutoff,float native_opacity,int blend)
+    bool transparent,int mode,float cutoff,float native_opacity,int blend,
+    bool emission_only)
 {
+    gl::set_uniform_integer(emissive_only,emission_only?1:0);
     gl::set_uniform_integer(blend_mode,blend);
     gl::set_uniform_integer(transparent_pass,transparent?1:0);
     gl::set_uniform_integer(alpha_mode,mode);
