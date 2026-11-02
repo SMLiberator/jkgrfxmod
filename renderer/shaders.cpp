@@ -220,6 +220,11 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , solid_color(gl::get_uniform_location(the_program,"solid_color"))
     , alpha_cutout(gl::get_uniform_location(the_program,"alpha_cutout"))
     , alpha_cutoff(gl::get_uniform_location(the_program,"alpha_cutoff"))
+    , transparent_pass(gl::get_uniform_location(the_program,"transparent_pass"))
+    , alpha_mode(gl::get_uniform_location(the_program,"alpha_mode"))
+    , face_opacity(gl::get_uniform_location(the_program,"face_opacity"))
+    , fog_params(gl::get_uniform_location(the_program,"fog_params"))
+    , fog_color(gl::get_uniform_location(the_program,"fog_color"))
     , sky_mode(gl::get_uniform_location(the_program,"sky_mode"))
     , sky_horizon(gl::get_uniform_location(the_program,"sky_horizon"))
     , sky_angles(gl::get_uniform_location(the_program,"sky_angles"))
@@ -279,6 +284,22 @@ void jkgm::shaders::world_cache_preview_shader::set_alpha_cutout(
 {
     gl::set_uniform_integer(alpha_cutout,1);
     gl::set_uniform_float(alpha_cutoff,cutoff);
+}
+
+void jkgm::shaders::world_cache_preview_shader::set_alpha_policy(
+    bool transparent,int mode,float cutoff,float native_opacity)
+{
+    gl::set_uniform_integer(transparent_pass,transparent?1:0);
+    gl::set_uniform_integer(alpha_mode,mode);
+    gl::set_uniform_float(alpha_cutoff,cutoff);
+    gl::set_uniform_float(face_opacity,native_opacity);
+    gl::set_uniform_integer(alpha_cutout,0);
+}
+void jkgm::shaders::world_cache_preview_shader::set_fog(
+    point<4,float> params,point<3,float> color)
+{
+    gl::set_uniform_vector(fog_params,params);
+    gl::set_uniform_vector(fog_color,color);
 }
 
 void jkgm::shaders::world_cache_preview_shader::set_sky(

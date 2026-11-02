@@ -531,11 +531,31 @@ int main()
            world_cache_draw_policy::textured);
     opaque_portal_mat.alpha=true;
     assert(choose_world_cache_draw_policy(sector[0],opaque_portal_mat)==
-           world_cache_draw_policy::native);
+           world_cache_draw_policy::mixed);
+    assert(world_cache_draws_in_pass(world_cache_draw_policy::mixed,
+                                    world_cache_pass::opaque));
+    assert(world_cache_draws_in_pass(world_cache_draw_policy::mixed,
+                                    world_cache_pass::transparent));
+    assert(world_cache_alpha_mode(world_cache_draw_policy::mixed)==1);
     opaque_portal_mat.alpha=false;
     opaque_portal_mat.masked=true;
     assert(choose_world_cache_draw_policy(sector[0],opaque_portal_mat)==
-           world_cache_draw_policy::native);
+           world_cache_draw_policy::masked);
+    assert(!world_cache_draws_in_pass(world_cache_draw_policy::masked,
+                                     world_cache_pass::transparent));
+    opaque_portal_mat.masked=false;
+    opaque_portal_mat.dithered=true;
+    assert(choose_world_cache_draw_policy(sector[0],opaque_portal_mat)==
+           world_cache_draw_policy::dithered);
+    opaque_portal_mat.dithered=false;
+    opaque_portal_mat.opacity=0.5f;
+    assert(choose_world_cache_draw_policy(sector[0],opaque_portal_mat)==
+           world_cache_draw_policy::blended);
+    assert(!world_cache_draws_in_pass(world_cache_draw_policy::blended,
+                                     world_cache_pass::opaque));
+    assert(world_cache_draws_in_pass(world_cache_draw_policy::blended,
+                                    world_cache_pass::transparent));
+    opaque_portal_mat.opacity=1.0f;
     // JK's translucent *face* flag still routes to the native path.
     set_u32(2,0x18,0x2U);
     stage=collect_world_cache_sector_candidates(
@@ -560,7 +580,7 @@ int main()
            world_cache_draw_policy::textured);
     grate_mat.alpha=true;
     assert(choose_world_cache_draw_policy(grate,grate_mat)==
-           world_cache_draw_policy::native); // blended/mixed => no cutout
+           world_cache_draw_policy::mixed);
     grate_mat.masked=true;
     assert(choose_world_cache_draw_policy(grate,grate_mat)==
            world_cache_draw_policy::masked);
@@ -586,7 +606,7 @@ int main()
     grate_mat.opacity=1.0f;
     grate.solid_adjoin=false;
     assert(choose_world_cache_draw_policy(grate,grate_mat)==
-           world_cache_draw_policy::native); // ordinary masked not migrated
+           world_cache_draw_policy::masked); // masked world now general
     grate.solid_adjoin=true;
     grate.geometry_mode=3U;
     grate_mat.albedo_source=2;

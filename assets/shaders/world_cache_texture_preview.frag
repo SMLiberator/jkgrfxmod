@@ -21,6 +21,11 @@ uniform vec4 material_tint;
 uniform int solid_color; // GeoMode 3: native MAT/CMP RGB, no texture sampling
 uniform int alpha_cutout; // explicit cutout MATs on solid adjoins
 uniform float alpha_cutoff;
+uniform int transparent_pass; // 0 G-buffer, 1 sorted forward alpha
+uniform int alpha_mode; // 0 solid, 1 mixed, 2 mask, 3 blended, 4 dither
+uniform float face_opacity; // 90/255 when rdFace.type includes 0x2
+uniform vec4 fog_params; // native fog start/end/opacity
+uniform vec3 fog_color;
 uniform int sky_mode;
 uniform vec4 sky_horizon; // x=horizonDistance*tanHalfFOV, y=pixels/rev, z=tanHalfFOV
 uniform vec3 sky_angles; // pitch/yaw/roll in JK degrees
@@ -49,8 +54,15 @@ layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
 layout(location=3) out vec4 out_depth;
+float dither_threshold()
+{
+    ivec2 pixel=ivec2(gl_FragCoord.xy)&ivec2(3);
+    int lo=(((pixel.x^pixel.y)&1)<<1)|(pixel.y&1);
+    int hi=((((pixel.x>>1)^(pixel.y>>1))&1)<<1)|((pixel.y>>1)&1);
+    return (float(4*lo+hi)+0.5)/16.0;
+}
 void main() {
-    // Opaque grates need real holes in both depth and G-buffer color.
+    // World alpha coverage is split with the same rules as cached 3DOs.
     // Sample the MAT once and discard *before* writing any attachment.
     vec2 uv=material_uv;
     if(sky_mode!=0) {
@@ -84,8 +96,18 @@ void main() {
     vec4 texel=vec4(1.0);
     if(solid_color==0)
         texel=texture(albedo_map,uv*uv_scale+uv_scroll);
-    if(alpha_cutout!=0 && texel.a*material_tint.a<alpha_cutoff)
-        discard;
+    float coverage=clamp(texel.a*material_tint.a*face_opacity,0.0,1.0);
+    if(alpha_cutout!=0 && coverage<alpha_cutoff)discard;
+    if(transparent_pass==0) {
+        if(alpha_mode==3)discard;
+        if(alpha_mode==1 && coverage<0.999)discard;
+        if(alpha_mode==2 && coverage<alpha_cutoff)discard;
+        if(alpha_mode==4 && coverage<=dither_threshold())discard;
+    } else {
+        if(alpha_mode!=1 && alpha_mode!=3)discard;
+        if(coverage<=0.001)discard;
+        if(alpha_mode==1 && coverage>=0.999)discard;
+    }
     vec3 albedo=solid_color!=0 ? clamp(material_tint.rgb,0.0,1.0) :
         clamp(texel.rgb*material_tint.rgb,0.0,1.0);
     if(sky_mode!=0) {
@@ -118,6 +140,17 @@ void main() {
         }
     }
     lighting=clamp(lighting,0.0,1.0);
+    if(transparent_pass!=0) {
+        // Only one color attachment exists in the forward alpha target.
+        // The framebuffer uses premultiplied (ONE, ONE_MINUS_SRC_ALPHA).
+        float depth=32.0/max(gl_FragCoord.w,0.00000001);
+        float fog=clamp((depth-fog_params.x)/
+                        max(fog_params.y-fog_params.x,0.0001),0.0,1.0)*
+                  fog_params.z;
+        vec3 lit=mix(albedo*lighting,fog_color,fog);
+        out_color=vec4(lit*coverage,coverage);
+        return;
+    }
     out_color=vec4(albedo*lighting,1.0);
     out_emissive=vec4(0.0,0.0,0.0,
         dot(lighting,vec3(0.2126,0.7152,0.0722)));
