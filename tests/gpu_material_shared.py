@@ -46,11 +46,14 @@ assert "bool gpu_material_discard(" not in model
 def discard(alpha,mode,emission_only=False,transparent=False,post=False):
     if post:
         if mode==2 and alpha<0.5:return True
+        if mode in (0,2,4):alpha=1.0
         return alpha<=.001 and not emission_only
     if not transparent:
         return mode==3 or mode==1 and alpha<.999 or mode==2 and alpha<.5
     return mode in (0,2,4) or alpha<=.001 and not emission_only or mode==1 and alpha>=.999
 
+assert not discard(0.0,0,False,False,True) # opaque HUD keeps solid coverage
+assert discard(0.0,1,False,False,True) # mixed HUD honors actual alpha
 assert discard(0.0,3,True,False)  # emissive-only never writes opaque depth
 assert not discard(0.0,3,True,True)  # but emits in the forward pass
 assert discard(0.0,3,False,True)

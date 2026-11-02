@@ -40,6 +40,10 @@ bool gpu_material_discard(
     if(post_exempt) {
         if(policy==2 && alpha<cutoff)return true;
         if(policy==4 && alpha<=gpu_material_dither_threshold())return true;
+        // The Camera HUD pass promotes solid/masked/dithered coverage
+        // to opaque *before* its zero-alpha rejection. Preserve native
+        // behavior, including zero-alpha solid HUD elements.
+        if(policy==0 || policy==2 || policy==4)alpha=1.0;
         return alpha<=0.001 && emission_only==0;
     }
     if(!transparent) {
