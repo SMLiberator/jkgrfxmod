@@ -556,13 +556,15 @@ int main()
     assert(world_cache_draws_in_pass(world_cache_draw_policy::blended,
                                     world_cache_pass::transparent));
     opaque_portal_mat.opacity=1.0f;
-    // JK's translucent *face* flag still routes to the native path.
+    // JK's translucent *face* flag forces alpha even with opaque MATs.
     set_u32(2,0x18,0x2U);
     stage=collect_world_cache_sector_candidates(
         read,base,special_mesh,lookup,spans,epochs,epoch,sector,
         nullptr,nullptr,&special);
     assert(stage.valid && sector.empty() &&
            special.size()==1U && special[0].passable_adjoin);
+    assert(choose_world_cache_draw_policy(
+        special[0],opaque_portal_mat)==world_cache_draw_policy::blended);
     set_u32(2,0x18,0U);
     set_u32(2,0x0c,0U);
 
@@ -586,7 +588,7 @@ int main()
            world_cache_draw_policy::masked);
     grate.face_type=0x2U;
     assert(choose_world_cache_draw_policy(grate,grate_mat)==
-           world_cache_draw_policy::native);
+           world_cache_draw_policy::blended);
     grate.face_type=0U;
     grate_mat.transition=0.25f;
     assert(choose_world_cache_draw_policy(grate,grate_mat)==
@@ -602,7 +604,7 @@ int main()
     grate_mat.special=false;
     grate_mat.opacity=0.5f;
     assert(choose_world_cache_draw_policy(grate,grate_mat)==
-           world_cache_draw_policy::native);
+           world_cache_draw_policy::blended);
     grate_mat.opacity=1.0f;
     grate.solid_adjoin=false;
     assert(choose_world_cache_draw_policy(grate,grate_mat)==

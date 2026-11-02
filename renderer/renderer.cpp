@@ -5896,6 +5896,8 @@ namespace jkgm {
         void stage_world_cache()
         {
             frame_world_cache_camera.valid=false;
+            if(world_cache_target)
+                world_cache_target->frame_render_candidates.clear();
             if(!the_config->world_cache_preview ||
                mode!=renderer_mode::ingame)return;
             uint32_t address=0;
@@ -6113,6 +6115,7 @@ namespace jkgm {
             ordered.clear();
             counts.clear();
             offsets.clear();
+            cache.frame_render_candidates.clear();
             ordered.reserve(cache.sector_candidates.size()+
                             cache.sector_special_candidates.size());
             auto safe_read=[](uintptr_t ptr,void *dst,size_t len) {
@@ -6188,15 +6191,15 @@ namespace jkgm {
                 }
                 if(info.mode==3U)++gouraud_faces;
                 ordered.push_back(&candidate);
+                cache.frame_render_candidates.push_back(candidate);
             };
             for(auto const &candidate:cache.sector_candidates)
                 stage_candidate(candidate);
-            // Only opaque-adjoin candidates are considered here. Faces with
-            // JK's 0x2 translucency bit are still native; material policy
-            // below excludes unsupported masks/mixed-alpha materials.
+            // Even exclusively translucent native faces need their live
+            // lighting, sector tint and animated UVs uploaded here.
+            // They are submitted only in the later forward-alpha pass.
             for(auto const &candidate:cache.sector_special_candidates)
-                if(candidate.solid_adjoin && !(candidate.face_type&0x2U))
-                    stage_candidate(candidate);
+                stage_candidate(candidate);
             if(ordered.empty() && cache.sector_sky_candidates.empty())return;
             // FreeColorEffect(sector slot) disables the native request.
             // Honor that for all cached world surfaces, too, without
@@ -6236,6 +6239,8 @@ namespace jkgm {
                         return a->solid_adjoin<b->solid_adjoin;
                     if(a->passable_adjoin!=b->passable_adjoin)
                         return a->passable_adjoin<b->passable_adjoin;
+                    if((a->face_type&0x2U)!=(b->face_type&0x2U))
+                        return (a->face_type&0x2U)<(b->face_type&0x2U);
                     return a->surface_index<b->surface_index;
                 });
             auto &shader=*ogs->world_cache_preview_program;
@@ -6248,6 +6253,9 @@ namespace jkgm {
                 make_point(m[9],m[10],m[11],1.0f));
             shader.set_projection(make_point(
                 half_fov,aspect,1.0f/cam.far_plane,0.0f));
+            // Always initialize the new alpha uniforms before sky draws:
+            // default GLSL face_opacity=0 would erase every sky texel.
+            shader.set_alpha_policy(false,0,0.5f,1.0f);
             // If the native request-pool layout has not yet been
             // validated, do NOT copy the unseparated camera-sector tint
             // onto already locally tinted world faces. Preserve the
@@ -6372,6 +6380,7 @@ namespace jkgm {
             shader.set_lights(point_lights,light_attenuation);
             size_t drawn=0,solid_drawn=0,masked_drawn=0,adjoin_drawn=0;
             size_t passable_drawn=0,unresolved=0,groups=0,skipped_alpha=0;
+            size_t mixed_drawn=0,dithered_drawn=0;
             for(size_t i=0;i<ordered.size();) {
                 size_t end=i+1;
                 auto const *first=ordered[i];
@@ -6380,7 +6389,8 @@ namespace jkgm {
                       ordered[end]->cel==first->cel &&
                       ordered[end]->geometry_mode==first->geometry_mode &&
                       ordered[end]->solid_adjoin==first->solid_adjoin &&
-                      ordered[end]->passable_adjoin==first->passable_adjoin)++end;
+                      ordered[end]->passable_adjoin==first->passable_adjoin &&
+                      ((ordered[end]->face_type^first->face_type)&0x2U)==0U)++end;
                 gpu_3do_group group{};
                 group.material=first->material;
                 group.cel=first->cel;
@@ -6402,7 +6412,7 @@ namespace jkgm {
                 info.height=material.height;
                 info.alpha_cutoff=material.alpha_cutoff;
                 auto const policy=choose_world_cache_draw_policy(*first,info);
-                if(policy!=world_cache_draw_policy::native) {
+                if(world_cache_draws_in_pass(policy,world_cache_pass::opaque)) {
                     if(policy==world_cache_draw_policy::solid)
                         shader.set_solid_color(material.tint);
                     else {
@@ -6411,9 +6421,9 @@ namespace jkgm {
                                          material.texture);
                         shader.set_texture(material.width,material.height,
                                            material.tint,material.albedo_scroll);
-                        if(policy==world_cache_draw_policy::masked)
-                            shader.set_alpha_cutout(material.alpha_cutoff);
                     }
+                    shader.set_alpha_policy(false,world_cache_alpha_mode(policy),
+                                            material.alpha_cutoff,1.0f);
                     counts.clear();
                     offsets.clear();
                     for(size_t j=i;j<end;++j) {
@@ -6429,6 +6439,10 @@ namespace jkgm {
                     if(solid)solid_drawn+=counts.size();
                     if(policy==world_cache_draw_policy::masked)
                         masked_drawn+=counts.size();
+                    if(policy==world_cache_draw_policy::mixed)
+                        mixed_drawn+=counts.size();
+                    if(policy==world_cache_draw_policy::dithered)
+                        dithered_drawn+=counts.size();
                     if(first->solid_adjoin)adjoin_drawn+=counts.size();
                     if(first->passable_adjoin)passable_drawn+=counts.size();
                     ++groups;
@@ -6462,6 +6476,8 @@ namespace jkgm {
                          " adjoin_ranges=",adjoin_drawn,
                          " passable_adjoin_ranges=",passable_drawn,
                          " masked_ranges=",masked_drawn,
+                         " mixed_opaque_ranges=",mixed_drawn,
+                         " dithered_ranges=",dithered_drawn,
                          " multi_draw_calls=",groups,
                          " unresolved_material=",unresolved,
                          " deferred_special=",skipped_alpha,
@@ -6521,6 +6537,129 @@ namespace jkgm {
                          " unresolved_material=",unresolved_special,
                          " draw_calls=0 native_alpha_unchanged=1");
             }
+        }
+
+        // GPU cached world faces with true alpha enter the same
+        // premultiplied scene transparency target as GPU 3DOs.
+        // This uses the *opaque pass's* vertex lighting and UV upload:
+        // never sample mutable JK native pointers after stage_world_cache().
+        void draw_world_cache_transparency()
+        {
+            if(!the_config->world_cache_preview ||
+               !ogs->world_cache_preview_program || !world_cache_target ||
+               !world_cache_target->ready || !frame_world_cache_camera.valid)
+                return;
+            auto &cache=*world_cache_target;
+            if(cache.frame_render_candidates.empty())return;
+            auto const &cam=frame_world_cache_camera.camera;
+            if(!cam.valid)return;
+            std::vector<world_cache_draw_candidate const *> draws;
+            draws.reserve(cache.frame_render_candidates.size());
+            // Cache material resolutions across the two passes; the same
+            // native MAT and cel can cover thousands of world surfaces.
+            std::map<std::tuple<uintptr_t,int32_t,uint32_t>,
+                     gpu_3do_texture> materials;
+            auto resolve=[&](world_cache_draw_candidate const &face)
+                -> gpu_3do_texture const & {
+                auto const key=std::make_tuple(face.material,face.cel,
+                                               face.geometry_mode);
+                auto it=materials.find(key);
+                if(it==materials.end()) {
+                    gpu_3do_group group{};
+                    group.material=face.material;group.cel=face.cel;
+                    it=materials.emplace(key,face.geometry_mode==3U
+                        ?resolve_gpu_3do_solid_material(group,false)
+                        :resolve_gpu_3do_material(group)).first;
+                }
+                return it->second;
+            };
+            auto policy_for=[&](world_cache_draw_candidate const &face) {
+                auto const &mat=resolve(face);
+                world_cache_material_info info{};
+                info.albedo_source=mat.albedo_source;
+                info.has_image=mat.has_image;info.alpha=mat.alpha;
+                info.masked=mat.masked;info.dithered=mat.dithered;
+                info.special=mat.special;info.emissive_only=mat.emissive_only;
+                info.opacity=mat.opacity;info.transition=mat.albedo_transition;
+                info.width=mat.width;info.height=mat.height;
+                info.alpha_cutoff=mat.alpha_cutoff;
+                return choose_world_cache_draw_policy(face,info);
+            };
+            for(auto const &face:cache.frame_render_candidates)
+                if(world_cache_draws_in_pass(
+                    policy_for(face),world_cache_pass::transparent))
+                    draws.push_back(&face);
+            if(draws.empty())return;
+            // Sort actual cached surface ranges back-to-front; no VBO
+            // reordering or CPU vertex transformation is required.
+            auto depth=[&](world_cache_draw_candidate const *face) {
+                auto const idx=cache.cached_surface_lookup[face->surface_index];
+                auto const &range=cache.mesh.surfaces[idx];
+                float d=0.0f;
+                for(int axis=0;axis<3;++axis) {
+                    float const center=(range.bounds_min[axis]+
+                                        range.bounds_max[axis])*0.5f;
+                    d+=(center-cam.position[axis])*cam.forward[axis];
+                }
+                return d;
+            };
+            std::sort(draws.begin(),draws.end(),
+                [&](auto const *a,auto const *b) {
+                    float const da=depth(a),db=depth(b);
+                    if(da==db)return a->surface_index<b->surface_index;
+                    return da>db;
+                });
+            auto &shader=*ogs->world_cache_preview_program;
+            shader.use_program();
+            auto const &fog=get_fog_settings();
+            auto const info=fog.info.value(),color=fog.color.value();
+            shader.set_fog(make_point(info[0],info[1],
+                               the_config->enable_fog?info[2]:0.0f,0.0f),
+                           make_point(color[0],color[1],color[2]));
+            gl::enable(gl::capability::blend);
+            gl::enable(gl::capability::depth_test);
+            gl::set_depth_function(gl::comparison_function::less);
+            gl::set_depth_mask(false);
+            gl::set_blend_function(gl::blend_function::one,
+                                   gl::blend_function::one_minus_source_alpha);
+            glFrontFace(GL_CCW);
+            gl::set_face_cull_mode(gl::face_mode::back);
+            gl::enable(gl::capability::cull_face);
+            gl::bind_vertex_array(cache.vao);
+            size_t mixed=0,forced=0;
+            for(auto const *face:draws) {
+                auto const &material=resolve(*face);
+                auto const policy=policy_for(*face);
+                shader.set_alpha_policy(true,world_cache_alpha_mode(policy),
+                        material.alpha_cutoff,
+                        (face->face_type&0x2U)?90.0f/255.0f:1.0f);
+                if(face->geometry_mode==3U)
+                    shader.set_solid_color(material.tint);
+                else {
+                    gl::set_active_texture_unit(0);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.texture);
+                    shader.set_texture(material.width,material.height,
+                                       material.tint,material.albedo_scroll);
+                }
+                gl::draw_elements(gl::element_type::triangles,
+                    face->count,gl::index_type::uint32,
+                    static_cast<ptrdiff_t>(
+                        face->first_index*sizeof(uint32_t)));
+                if(policy==world_cache_draw_policy::mixed)++mixed;
+                else ++forced;
+            }
+            gl::bind_vertex_array(gl::vertex_array_view(0U));
+            shader.set_alpha_policy(false,0,0.5f,1.0f);
+            gl::disable(gl::capability::cull_face);
+            gl::set_blend_function(gl::blend_function::one,
+                                   gl::blend_function::one_minus_source_alpha);
+            gl::set_active_texture_unit(0);
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("WORLD CACHE gpu_alpha ranges=",draws.size(),
+                         " mixed=",mixed," forced_blend=",forced,
+                         " sorted=back_to_front depth_write=0");
         }
 
         void draw_game_transparency_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
@@ -6586,9 +6725,13 @@ namespace jkgm {
                 ogs->game_transparency_pass_program.use_program();
             }
 
-            // Isolate cached world in the transparency pass as well.
-            // This also exposes currently unsupported translucent world
-            // materials, which still need a separate GPU implementation.
+            // Draw sorted GPU world translucency on the composed scene,
+            // after decals and before other translucent world/3DO overlays.
+            draw_world_cache_transparency();
+            ogs->game_transparency_pass_program.use_program();
+
+            // Unsupported special-blend native batches remain an explicit
+            // world-cache isolation limitation until full native ownership.
             if(!isolate_native_world_batches()) {
                 draw_batch(&ogs->game_transparency_pass_program,
                            world_transparent_batch,
