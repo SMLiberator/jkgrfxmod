@@ -227,6 +227,20 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , emissive_scroll(gl::get_uniform_location(the_program,"emissive_scroll"))
     , has_emissive(gl::get_uniform_location(the_program,"has_emissive"))
     , emissive_only(gl::get_uniform_location(the_program,"emissive_only"))
+    , reflection_surface_sampler(gl::get_uniform_location(the_program,"surface_map"))
+    , reflection_normal_sampler(gl::get_uniform_location(the_program,"normal_map"))
+    , reflection_normal2_sampler(gl::get_uniform_location(the_program,"normal_map2"))
+    , reflection_env_sampler(gl::get_uniform_location(the_program,"env_map"))
+    , reflection_env2_sampler(gl::get_uniform_location(the_program,"env_map2"))
+    , reflection_params(gl::get_uniform_location(the_program,"specular_params"))
+    , reflection_normal_params(gl::get_uniform_location(the_program,"normal_specular_params"))
+    , reflection_scroll(gl::get_uniform_location(the_program,"normal_specular_scroll"))
+    , reflection_scroll2(gl::get_uniform_location(the_program,"normal_specular_scroll2"))
+    , environment_info(gl::get_uniform_location(the_program,"environment_info"))
+    , camera_world_origin(gl::get_uniform_location(the_program,"camera_world_origin"))
+    , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
+    , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
+    , camera_up_axis(gl::get_uniform_location(the_program,"camera_up_axis"))
     , alpha_cutout(gl::get_uniform_location(the_program,"alpha_cutout"))
     , alpha_cutoff(gl::get_uniform_location(the_program,"alpha_cutoff"))
     , transparent_pass(gl::get_uniform_location(the_program,"transparent_pass"))
@@ -308,6 +322,39 @@ void jkgm::shaders::world_cache_preview_shader::set_emissive(
         make_point(get<0>(intensity),get<1>(intensity),
                    get<2>(intensity)));
     gl::set_uniform_vector(emissive_scroll,scroll);
+}
+void jkgm::shaders::world_cache_preview_shader::set_reflection(
+    point<4,float> material,point<4,float> normals,
+    point<2,float> scroll,point<2,float> scroll2,
+    bool from,bool to,float weight,int mode)
+{
+    gl::set_uniform_integer(reflection_surface_sampler,2);
+    gl::set_uniform_integer(reflection_normal_sampler,3);
+    gl::set_uniform_integer(reflection_normal2_sampler,5);
+    gl::set_uniform_integer(reflection_env_sampler,4);
+    gl::set_uniform_integer(reflection_env2_sampler,7);
+    gl::set_uniform_vector(reflection_params,material);
+    gl::set_uniform_vector(reflection_normal_params,normals);
+    gl::set_uniform_vector(reflection_scroll,scroll);
+    gl::set_uniform_vector(reflection_scroll2,scroll2);
+    gl::set_uniform_vector(environment_info,
+        make_point(from?1.0f:0.0f,static_cast<float>(mode),
+                   to?1.0f:0.0f,weight));
+}
+void jkgm::shaders::world_cache_preview_shader::set_reflection_camera(
+    std::array<float,3> const &position,
+    std::array<float,3> const &right,
+    std::array<float,3> const &forward,
+    std::array<float,3> const &up)
+{
+    gl::set_uniform_vector(camera_world_origin,
+                           make_point(position[0],position[1],position[2]));
+    gl::set_uniform_vector(camera_right_axis,
+                           make_point(right[0],right[1],right[2]));
+    gl::set_uniform_vector(camera_forward_axis,
+                           make_point(forward[0],forward[1],forward[2]));
+    gl::set_uniform_vector(camera_up_axis,
+                           make_point(up[0],up[1],up[2]));
 }
 void jkgm::shaders::world_cache_preview_shader::set_alpha_cutout(
     float cutoff)
