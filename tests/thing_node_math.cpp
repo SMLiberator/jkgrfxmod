@@ -21,13 +21,13 @@ int main() {
     assert(close(point[2],34));
     // Animated node-local RLU <-> absolute world XYZ uses the very same
     // affine conversion/inversion as GetThingOffsetPos/PosOffset.
-    thing_node_vector local{{2,3,4}};
+    thing_node_vector node_local{{2,3,4}};
     thing_node_vector transformed{{99,99,99}},back{{99,99,99}};
-    assert(get_thing_node_offset_pos(m,local,transformed));
+    assert(get_thing_node_offset_pos(m,node_local,transformed));
     assert(close(transformed[0],7) && close(transformed[1],22) &&
            close(transformed[2],34));
     assert(get_thing_node_pos_offset(m,transformed,back));
-    for(int i=0;i<3;++i)assert(close(back[i],local[i]));
+    for(int i=0;i<3;++i)assert(close(back[i],node_local[i]));
     assert(get_thing_node_pos_offset(m,{{10,20,30}},back));
     for(float value:back)assert(close(value,0.0f));
 
@@ -59,7 +59,7 @@ int main() {
     auto invalid_node=m;
     invalid_node[4]=std::numeric_limits<float>::infinity();
     transformed={{81,82,83}};
-    assert(!get_thing_node_offset_pos(invalid_node,local,transformed));
+    assert(!get_thing_node_offset_pos(invalid_node,node_local,transformed));
     assert(transformed[0]==81 && transformed[1]==82 &&
            transformed[2]==83);
 
