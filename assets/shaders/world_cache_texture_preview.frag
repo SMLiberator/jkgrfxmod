@@ -24,6 +24,12 @@ uniform int has_emissive,emissive_only;
 uniform vec3 emissive_factor;
 uniform vec2 emissive_scroll;
 uniform vec2 uv_scale,uv_scroll;
+// GPU 3DO-compatible EnvMap samplers, reflection modes, material parameters.
+uniform sampler2D surface_map,normal_map,normal_map2,env_map,env_map2;
+uniform vec4 specular_params,normal_specular_params,environment_info;
+uniform vec2 normal_specular_scroll,normal_specular_scroll2;
+uniform vec3 camera_world_origin,camera_right_axis;
+uniform vec3 camera_forward_axis,camera_up_axis;
 uniform vec4 material_tint;
 uniform int solid_color; // GeoMode 3: native MAT/CMP RGB, no texture sampling
 uniform int alpha_cutout; // explicit cutout MATs on solid adjoins
@@ -59,6 +65,81 @@ vec3 world_jk_effect(vec3 raw,vec3 local_sector_tint)
     v*=jk_color_add_fade.w;
     return pow(clamp(v,0.0,1.0),vec3(1.8));
 }
+// Reconstruct world-space tangent basis from the native UVs and geometry.
+// Reflection normals deliberately exclude the FOV scaling used for SSAO.
+vec3 world_mapped_normal(vec2 uv)
+{
+    vec3 n=normalize(cached_world_normal);
+    if(normal_specular_params.x<0.5 && normal_specular_params.z<0.5)
+        return n;
+    vec2 slope=vec2(0.0);
+    if(normal_specular_params.x>0.5) {
+        vec3 texn=texture(normal_map,uv+normal_specular_scroll).xyz*2.0-1.0;
+        slope+=texn.xy/max(texn.z,0.05)*normal_specular_params.y;
+    }
+    if(normal_specular_params.z>0.5) {
+        vec3 texn2=texture(normal_map2,uv+normal_specular_scroll2).xyz*2.0-1.0;
+        slope+=texn2.xy/max(texn2.z,0.05)*normal_specular_params.w;
+    }
+    vec3 dp1=dFdx(cached_world_position),dp2=dFdy(cached_world_position);
+    vec2 du1=dFdx(uv),du2=dFdy(uv);
+    vec3 t=cross(dp2,n)*du1.x+cross(n,dp1)*du2.x;
+    vec3 b=cross(dp2,n)*du1.y+cross(n,dp1)*du2.y;
+    float basis=max(dot(t,t),dot(b,b));
+    if(basis<1e-16)return n;
+    float inv_basis=inversesqrt(basis);
+    return normalize(mat3(t*inv_basis,b*inv_basis,n)*
+                     normalize(vec3(slope,1.0)));
+}
+
+// Match GPU-cached 3DO Fresnel, equirectangular/matcap UV, roughness LOD,
+// metalness and global/per-MAT environment transitions.
+vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
+{
+    metalness=0.0;
+    if((environment_info.x<0.5 && environment_info.z<0.5) ||
+       specular_params.x<=0.0)return vec3(0.0);
+    vec3 surf=specular_params.w>0.5?texture(surface_map,uv).rgb:vec3(1.0);
+    float strength=max(specular_params.x*surf.r,0.0);
+    if(strength<=0.0)return vec3(0.0);
+    float roughness=clamp(specular_params.y*surf.g,0.0,1.0);
+    metalness=clamp(specular_params.z*surf.b,0.0,1.0)*
+              mix(environment_info.x,environment_info.z,environment_info.w);
+    vec3 nw=world_mapped_normal(uv);
+    vec3 vw=normalize(cached_world_position-camera_world_origin);
+    vec3 n=normalize(vec3(dot(nw,camera_right_axis),
+                          dot(nw,camera_up_axis),dot(nw,camera_forward_axis)));
+    vec3 v=normalize(vec3(dot(vw,camera_right_axis),
+                          dot(vw,camera_up_axis),dot(vw,camera_forward_axis)));
+    if(dot(n,v)>0.0)n=-n;
+    vec3 reflection=reflect(v,n);
+    int mode=int(environment_info.y+0.5);
+    vec3 dir=reflection;
+    if(mode<=1) {
+        vec3 world=camera_right_axis*reflection.x+
+                   camera_forward_axis*reflection.z+
+                   camera_up_axis*reflection.y;
+        dir=vec3(world.x,world.z,world.y);
+    }
+    vec2 env_uv=mode==3
+        ?clamp(vec2(0.5+0.5*n.x,0.5-0.5*n.y),vec2(0.001),vec2(0.999))
+        :vec2(fract(atan(dir.x,dir.z)/6.28318530718+0.5),
+              0.5-asin(clamp(dir.y,-1.0,1.0))/3.14159265359);
+    ivec2 dims=environment_info.x>0.5?
+        textureSize(env_map,0):textureSize(env_map2,0);
+    float lod=roughness*log2(max(float(max(dims.x,dims.y)),1.0));
+    vec3 env_from=vec3(0.0),env_to=vec3(0.0);
+    if(environment_info.x>0.5 && environment_info.w<1.0)
+        env_from=textureLod(env_map,env_uv,lod).rgb;
+    if(environment_info.z>0.5 && environment_info.w>0.0)
+        env_to=textureLod(env_map2,env_uv,lod).rgb;
+    vec3 env=mix(env_from,env_to,environment_info.w);
+    vec3 f0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
+    float cos_theta=clamp(dot(n,-v),0.0,1.0);
+    vec3 fresnel=f0+(vec3(1.0)-f0)*pow(1.0-cos_theta,5.0);
+    return env*fresnel*strength;
+}
+
 layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
@@ -140,6 +221,10 @@ void main() {
         }
     }
     lighting=clamp(lighting,0.0,1.0);
+    float env_metalness=0.0;
+    vec3 env_reflection=world_environment_reflection(
+        albedo,material_texcoord,env_metalness);
+    vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness);
     if(transparent_pass!=0) {
         // Only one color attachment exists in the forward alpha target.
         // The framebuffer uses premultiplied (ONE, ONE_MINUS_SRC_ALPHA).
@@ -147,11 +232,13 @@ void main() {
         float fog=clamp((depth-fog_params.x)/
                         max(fog_params.y-fog_params.x,0.0001),0.0,1.0)*
                   fog_params.z;
-        vec3 lit=mix(albedo*lighting,fog_color,fog);
+        vec3 lit=mix(lit_diffuse,fog_color,fog);
+        vec3 specular=env_reflection*(1.0-fog);
         if(blend_mode==2) {
             // (DST_COLOR, ZERO) needs a neutral multiplier at alpha zero.
-            out_color=vec4(mix(vec3(1.0),clamp(lit+emission,0.0,1.0),
-                               coverage),0.0);
+            out_color=vec4(mix(vec3(1.0),
+                clamp(lit+emission+specular*coverage,0.0,1.0),
+                coverage),0.0);
         } else {
             // Native D3DTLVERTEX diffuse RGB premultiplies the *vertex*
             // opacity BEFORE gamma-1.8 linearization. The native bridge
@@ -170,13 +257,14 @@ void main() {
                 +fog_color*(fog*coverage);
             // Normal blending: ONE, ONE_MINUS_SRC_ALPHA.
             // Additive: ONE, ONE; alpha attachment remains unchanged.
-            out_color=vec4(premultiplied+emission,
+            out_color=vec4(premultiplied+emission+specular*coverage,
                            blend_mode==1?0.0:coverage);
         }
         return;
     }
-    out_color=vec4(albedo*lighting,1.0);
-    out_emissive=vec4(emission,
+    out_color=vec4(lit_diffuse,1.0);
+    // Opaque reflections are composited after SSAO, as for GPU 3DOs.
+    out_emissive=vec4(emission+env_reflection,
         dot(lighting,vec3(0.2126,0.7152,0.0722)));
     out_normal=vec4(normalize(cached_view_normal),1.0);
     out_depth=vec4(32.0/max(gl_FragCoord.w,0.00000001),albedo);
