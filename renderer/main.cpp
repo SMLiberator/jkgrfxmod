@@ -3216,6 +3216,9 @@ namespace {
         // this camera*Thing matrix, then makes a view-plane-facing quad.
         std::vector<jkgm::gpu_particle_dot> dots;
         dots.reserve(count);
+        // Many particles share the same CEL. Read native MAT dimensions
+        // once per distinct cel rather than VirtualQuery per billboard.
+        std::unordered_map<int32_t,std::pair<unsigned,unsigned>> cel_dimensions;
         for(uint32_t i=0;i<count;++i) {
             jkgm::gpu_particle_dot dot{};
             std::array<float,3> local{};
@@ -3231,10 +3234,19 @@ namespace {
             dot.radius=radius;
             dot.light_mode=light_mode;
             dot.textured=textured;
-            if(textured &&
-               !particle_texture_dimensions(mat,static_cast<uint32_t>(cel),
-                                             dot.width,dot.height))
-                return false;
+            if(textured) {
+                auto found=cel_dimensions.find(cel);
+                if(found==cel_dimensions.end()) {
+                    unsigned width=0,height=0;
+                    if(!particle_texture_dimensions(
+                           mat,static_cast<uint32_t>(cel),width,height))
+                        return false;
+                    found=cel_dimensions.emplace(
+                        cel,std::make_pair(width,height)).first;
+                }
+                dot.width=found->second.first;
+                dot.height=found->second.second;
+            }
             dots.push_back(dot);
         }
         auto geometry=jkgm::make_gpu_particle_cloud(dots);
