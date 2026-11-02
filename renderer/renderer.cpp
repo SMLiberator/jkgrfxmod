@@ -6701,6 +6701,20 @@ namespace jkgm {
             shader.set_fog(make_point(info[0],info[1],
                                the_config->enable_fog?info[2]:0.0f,0.0f),
                            make_point(color[0],color[1],color[2]));
+            // Fluid samples the completed opaque depth texture, never the
+            // framebuffer receiving translucent world fragments. The 3DO
+            // shader already uses texture unit 8 for this same image.
+            shader.set_scene_depth(8);
+            bool const has_fluid=std::any_of(draws.begin(),draws.end(),
+                [&](world_cache_draw_candidate const *face) {
+                    return resolve(*face).blend==material_blend_mode::fluid;
+                });
+            if(has_fluid) {
+                gl::set_active_texture_unit(8);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 frame_screen->get_resolved_depth_texture());
+                gl::set_active_texture_unit(0);
+            }
             gl::enable(gl::capability::blend);
             gl::enable(gl::capability::depth_test);
             gl::set_depth_function(gl::comparison_function::less);
@@ -6711,7 +6725,7 @@ namespace jkgm {
             gl::set_face_cull_mode(gl::face_mode::back);
             gl::enable(gl::capability::cull_face);
             gl::bind_vertex_array(cache.vao);
-            size_t mixed=0,forced=0;
+            size_t mixed=0,forced=0,fluid=0;
             for(auto const *face:draws) {
                 auto const &material=resolve(*face);
                 auto const policy=policy_for(*face);
@@ -6720,6 +6734,8 @@ namespace jkgm {
                         (face->face_type&0x2U)?90.0f/255.0f:1.0f,
                         static_cast<int>(material.blend),
                         material.emissive_only);
+                shader.set_fluid_thickness(material.blend==material_blend_mode::fluid
+                    ?material.fluid_thickness:0.0f);
                 switch(material.blend) {
                 case material_blend_mode::additive:
                     gl::set_blend_function_separate(
@@ -6744,6 +6760,7 @@ namespace jkgm {
                         face->first_index*sizeof(uint32_t)));
                 if(policy==world_cache_draw_policy::mixed)++mixed;
                 else ++forced;
+                if(material.blend==material_blend_mode::fluid)++fluid;
             }
             gl::bind_vertex_array(gl::vertex_array_view(0U));
             shader.set_alpha_policy(false,0,0.5f,1.0f);
@@ -6755,6 +6772,7 @@ namespace jkgm {
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("WORLD CACHE gpu_alpha ranges=",draws.size(),
                          " mixed=",mixed," forced_blend=",forced,
+                         " fluid=",fluid,
                          " sorted=back_to_front depth_write=0");
         }
 
