@@ -7,6 +7,7 @@ header=read("common/config.hpp")
 config=read("common/config.cpp")
 main=read("renderer/main.cpp")
 renderer=read("renderer/renderer.cpp")
+opengl=read("renderer/opengl_state.cpp")
 assert "bool use_gpu_cache = true;" in header
 assert "bool enable_gpu_mat_warmup = false;" in header
 assert 'j.at("use_gpu_cache").get_to(rv->use_gpu_cache);' in config
@@ -25,5 +26,7 @@ assert "the_config->enable_gpu_mat_warmup" in main
 assert "the_config->enable_gpu_mat_warmup" in renderer
 assert "the_config->use_gpu_cache" in main
 assert "the_config->use_gpu_cache" in renderer
+assert "if(the_config->use_gpu_cache || the_config->enable_decals)" in opengl
+assert "if(the_config->use_gpu_cache)" in opengl
 assert "enable_native_fallback" in renderer
 print("Unified GPU caching and permanent optimization integration checks passed")
