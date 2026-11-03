@@ -3614,6 +3614,7 @@ namespace jkgm {
         bool isolate_native_world_batches() const
         {
             return the_config->world_cache_preview &&
+                   !the_config->enable_native_fallback &&
                    world_cache_target && world_cache_target->ready &&
                    frame_world_cache_camera.valid &&
                    (!world_cache_target->sector_candidates.empty() ||
