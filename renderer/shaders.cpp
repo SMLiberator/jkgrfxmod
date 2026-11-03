@@ -227,6 +227,7 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , emissive_scroll(gl::get_uniform_location(the_program,"emissive_scroll"))
     , has_emissive(gl::get_uniform_location(the_program,"has_emissive"))
     , emissive_only(gl::get_uniform_location(the_program,"emissive_only"))
+    , solid_fullbright(gl::get_uniform_location(the_program,"solid_fullbright"))
     , reflection_surface_sampler(gl::get_uniform_location(the_program,"surface_map"))
     , reflection_normal_sampler(gl::get_uniform_location(the_program,"normal_map"))
     , reflection_normal2_sampler(gl::get_uniform_location(the_program,"normal_map2"))
@@ -307,6 +308,10 @@ void jkgm::shaders::world_cache_preview_shader::set_solid_color(
     gl::set_uniform_integer(albedo_source,2);
     gl::set_uniform_integer(alpha_cutout,0);
     gl::set_uniform_vector(material_tint,tint);
+}
+void jkgm::shaders::world_cache_preview_shader::set_solid_fullbright(bool enabled)
+{
+    gl::set_uniform_integer(solid_fullbright,enabled?1:0);
 }
 void jkgm::shaders::world_cache_preview_shader::set_albedo_transition(
     int source2,float weight)
@@ -576,6 +581,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , jk_color_add_fade(gl::get_uniform_location(the_program,"jk_color_add_fade"))
     , thing_sector_tint_delta(gl::get_uniform_location(the_program,"thing_sector_tint_delta"))
     , colormap_tint(gl::get_uniform_location(the_program,"colormap_tint"))
+    , solid_fullbright(gl::get_uniform_location(the_program,"solid_fullbright"))
     , specular_params(gl::get_uniform_location(the_program,"specular_params"))
     , dynamic_light_specular_enabled(gl::get_uniform_location(the_program,"dynamic_light_specular_enabled"))
     , specular_surface_sampler(gl::get_uniform_location(the_program,"surface_map"))
@@ -756,6 +762,10 @@ void jkgm::shaders::gpu_3do_preview_shader::set_thing_sector_tint_delta(
         make_point(delta[0],delta[1],delta[2]));
 }
 
+void jkgm::shaders::gpu_3do_preview_shader::set_solid_fullbright(bool enabled)
+{
+    gl::set_uniform_integer(solid_fullbright,enabled?1:0);
+}
 void jkgm::shaders::gpu_3do_preview_shader::set_colormap_tint(
     std::array<float,3> const &tint)
 {
