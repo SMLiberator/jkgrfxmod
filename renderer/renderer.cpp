@@ -6351,6 +6351,8 @@ namespace jkgm {
                                            {{1.0f,1.0f,0.0f}});
             cache.frame_sector_tint.assign(cache.mesh.vertices.size(),
                                             {{0.0f,0.0f,0.0f}});
+            cache.frame_sector_cmp_tint.assign(cache.mesh.vertices.size(),
+                                                {{1.0f,1.0f,1.0f}});
             cache.frame_uv_offset.assign(cache.mesh.vertices.size(),
                                          {{0.0f,0.0f}});
             size_t light_fallback=0,gouraud_faces=0;
@@ -6361,7 +6363,8 @@ namespace jkgm {
                        candidate,cache.world.vertex_count,
                        cache.native_dynamic_light,cache.frame_light_rgb,
                        &info,&cache.frame_light_state,
-                       pixel_lighting,global_extra,&cache.frame_sector_tint)) {
+                       pixel_lighting,global_extra,&cache.frame_sector_tint,
+                       &cache.frame_sector_cmp_tint)) {
                     ++light_fallback;
                     return;
                 }
@@ -6406,6 +6409,10 @@ namespace jkgm {
             gl::bind_buffer(gl::buffer_bind_target::array,cache.sector_tint);
             gl::buffer_data(gl::buffer_bind_target::array,
                 make_span(cache.frame_sector_tint).as_const_bytes(),
+                gl::buffer_usage::stream_draw);
+            gl::bind_buffer(gl::buffer_bind_target::array,cache.sector_cmp_tint);
+            gl::buffer_data(gl::buffer_bind_target::array,
+                make_span(cache.frame_sector_cmp_tint).as_const_bytes(),
                 gl::buffer_usage::stream_draw);
             gl::bind_buffer(gl::buffer_bind_target::array,cache.uv_animation);
             gl::buffer_data(gl::buffer_bind_target::array,
