@@ -8,6 +8,11 @@ assert "sprite_decal_geoset.hpp" in main
 assert "enumerate_sprite_decal_lod_meshes(" in main
 assert "read_sprite_decal_lod_node_pose(" in main
 assert "read_sprite_decal_active_geoset(" in main
+assert "read_sprite_decal_draw_geoset(" in main
+assert "decal_receiver_geoset" in main
+assert "native.geoset" in main
+assert "receiver_model,source_mesh,source_pose,hit_geoset" in main
+assert "read_sprite_decal_draw_geoset" in lod
 assert "fragment.node_index=node.node;" in main
 assert "fragment.geoset=node.geoset;" in main
 assert "fragment.geoset=hit_geoset;" in main
