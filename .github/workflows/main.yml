@@ -199,6 +199,13 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\jk_cmp_gpu.cpp /Fe:jk_cmp_gpu_test.exe
         jk_cmp_gpu_test.exe
+    - name: Animated moving decal GeoSet LOD enumeration regression
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_decal_geoset.cpp /Fe:sprite_decal_geoset_test.exe
+        sprite_decal_geoset_test.exe
+    - name: Dynamic SPR GeoSet integration checks
+      run: python3 tests/sprite_decal_geoset_integration.py
     - name: Native world GPU cache geometry and live surface state tests
       shell: cmd
       run: |
