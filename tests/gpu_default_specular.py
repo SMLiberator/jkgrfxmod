@@ -18,9 +18,9 @@ for fragment in (
     "float default_specular_roughness = 0.85f;",
 ):
     assert fragment in config
-for name in ("enable_default_specular","default_specular_strength",
-             "default_specular_roughness"):
-    assert f'j.contains("{name}")' in parser
+assert 'j.contains("enable_default_specular")' in parser
+for name in ("default_specular_strength","default_specular_roughness"):
+    assert f'read_specular_scalar("{name}",' in parser
 assert 'if(!std::isfinite(number) || number<0.0 || number>1.0)' in parser
 assert 'if(!v.is_number()) {' in parser
 assert "bool has_explicit_specular_settings = false;" in mat
