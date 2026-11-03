@@ -68,6 +68,9 @@ namespace jkgm {
         float reflection_strength = 0.0f;
         float roughness = 0.0f;
         float metalness = 0.0f;
+        // An explicitly authored 0 reflection strength is a deliberate
+        // override, unlike the implicit matte default of native JK MATs.
+        bool has_explicit_specular_settings = false;
 
         // Equirectangular environment image this material reflects. A material that does not set
         // one gets its own pack's default environment image (if the pack has one).

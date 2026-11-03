@@ -135,6 +135,29 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_reflections")) {
             j.at("enable_reflections").get_to(rv->enable_reflections);
         }
+        if(j.contains("enable_default_specular")) {
+            j.at("enable_default_specular").get_to(rv->enable_default_specular);
+        }
+        // Keep experimental tuning valid even when the feature is disabled:
+        // users can freely A/B the toggle without hiding invalid settings.
+        auto read_specular_scalar=[&](char const *key,float &target) {
+            if(!j.contains(key))return;
+            auto const &v=j.at(key);
+            if(!v.is_number()) {
+                throw std::runtime_error(std::string(key)+
+                    " must be a finite number between 0 and 1");
+            }
+            double const number=v.get<double>();
+            if(!std::isfinite(number) || number<0.0 || number>1.0) {
+                throw std::runtime_error(std::string(key)+
+                    " must be a finite number between 0 and 1");
+            }
+            target=static_cast<float>(number);
+        };
+        read_specular_scalar("default_specular_strength",
+                             rv->default_specular_strength);
+        read_specular_scalar("default_specular_roughness",
+                             rv->default_specular_roughness);
         if(j.contains("enable_dynamic_light_specular")) {
             j.at("enable_dynamic_light_specular").get_to(
                 rv->enable_dynamic_light_specular);

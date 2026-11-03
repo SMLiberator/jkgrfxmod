@@ -748,6 +748,37 @@ with `enable_reflections=false`; sun lighting itself retains its own
 emissive G-buffer attachment (after SSAO), or the sorted transparent
 forward path, without adding a framebuffer or another geometry draw.
 
+## Experimental default specular for unconfigured materials
+
+Set `"enable_default_specular": true` in `jkgm.json` to try weak,
+high-roughness dielectric highlights on ordinary GPU-cached 3DO and
+SithWorld surfaces that do not specify reflection properties:
+
+```json
+{
+  "use_gpu_cache": true,
+  "enable_reflections": true,
+  "enable_default_specular": true,
+  "default_specular_strength": 0.25,
+  "default_specular_roughness": 0.85
+}
+```
+
+Both scalar parameters accept finite `0..1` values. The default experiment
+is **off**, and `default_specular_strength: 0` also disables its visual
+contribution. Material-authored reflectivity, roughness, surface maps, and
+explicit zero-reflectivity overrides are preserved. These fallback
+parameters apply only to **direct** sun/optional Thing-light GGX; they never
+turn on EnvMap reflections. The existing `enable_sun`, positive
+`SetSunInfo` intensity, and `enable_dynamic_light_specular` gates still
+control the actual light sources. Camera HUDs, projected decals, SPR VFX,
+shadow/sun-exempt skyboxes, fully-bright CMP surfaces, emissive-only faces
+and additive/multiply blends do not receive the default fallback.
+
+This is a performance/appearance experiment: additional unconfigured
+surfaces evaluate the GGX lighting branch only when a direct-light
+source is active. Compare large outdoor scenes before making it standard.
+
 ## Standard sunlight shadow optimizations
 
 Four previously optional improvements are now unconditional whenever their

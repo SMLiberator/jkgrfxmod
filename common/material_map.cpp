@@ -163,6 +163,10 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
         // surface maps exist, unity scalar multipliers (1/1/1) preserve
         // the map's R/G/B reflectivity, roughness and metalness channels.
         bool const has_surface_map = em.contains("surface_map");
+        mat->has_explicit_specular_settings =
+            has_surface_map || em.contains("reflection_strength") ||
+            em.contains("roughness") || em.contains("metalness") ||
+            em.contains("environment_map") || em.contains("reflection_mode");
         if(has_surface_map) {
             mat->surface_map = data_dir / std::string(em["surface_map"]);
         }

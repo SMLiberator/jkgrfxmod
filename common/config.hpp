@@ -33,6 +33,10 @@ namespace jkgm {
         float hdr_shadow_softness = 0.3f; // 0=original crisp ACES toe, 1=softest
         float hdr_color_crispness = 0.6f; // 0=hue-preserving, 1=original per-channel ACES
         bool enable_reflections = true;
+        // Opt-in direct-light GGX for previously unconfigured GPU 3DO/world MATs.
+        bool enable_default_specular = false;
+        float default_specular_strength = 0.25f;
+        float default_specular_roughness = 0.85f;
         bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
         bool gpu_pixel_lighting = false; // opt-in pixel dynamic lighting for all cached world/3DO geometry; false=JK Gouraud
         bool enable_ssao = true;

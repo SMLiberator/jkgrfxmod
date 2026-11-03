@@ -28,7 +28,10 @@ assert "jk_cmp_read_lighttable(read_bytes,cmp,levels)" in renderer
 assert "out.solid_fullbright=jk_cmp_is_fullbright(" in renderer
 assert "prog.set_solid_fullbright(draw.texture.solid_fullbright);" in renderer
 assert "shader.set_solid_fullbright(material.solid_fullbright);" in renderer
-assert "solid_fullbright==0 && cached_light_state.z>2.5" in fragment
+# Pixel diffuse is now gated independently of the available native
+# point-light list, which can still be needed for optional GGX highlights.
+assert "world_pixel_dynamic_lighting!=0 && solid_fullbright==0" in fragment
+assert "cached_light_state.z>2.5 && num_lights>0" in fragment
 assert "solid_fullbright!=0 ? vec3(1.0) : clamp(lighting,0.0,1.0);" in fragment
 assert "jk_fragment_lit=solid_fullbright!=0" in model
 assert "out_normal=(world_lighting_exempt!=0 || solid_fullbright!=0)" in model

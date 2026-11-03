@@ -443,6 +443,8 @@ namespace jkgm {
             float environment_transition=0.0f;
             float width=1.0f, height=1.0f;
             float reflection_strength=0.0f,roughness=0.0f,metalness=0.0f;
+            // Preserve authored zero-strength specular overrides.
+            bool has_authored_specular=false;
             float normal_strength=1.0f,normal_strength2=1.0f;
             bool has_normal=false,has_normal2=false,has_surface=false,has_environment=false;
             int reflection_mode=0;
@@ -2901,6 +2903,8 @@ namespace jkgm {
             out.emissive_only=gpu_3do_emissive_only(
                 out.opacity,get<0>(out.emission_factor),
                 get<1>(out.emission_factor),get<2>(out.emission_factor));
+            out.has_authored_specular=surface->replacement_material &&
+                surface->replacement_material->has_explicit_specular_settings;
             // Opt-in GPU 3DO material specularity: compute only for
             // reflective replacements and active native Thing lights.
             auto env_from=surface->env_map;
@@ -2966,6 +2970,23 @@ namespace jkgm {
             out.width=static_cast<float>(chosen->width << mip);
             out.height=static_cast<float>(chosen->height << mip);
             return out;
+        }
+
+        // Direct-light default applies only to GPU caching and *only* to
+        // materials without authored specular settings. It never enables
+        // an EnvMap or alters an explicitly authored roughness/strength.
+        std::pair<float,float> gpu_specular_parameters(
+            gpu_3do_texture const &material,bool fallback_eligible) const
+        {
+            if(fallback_eligible && the_config->enable_reflections &&
+               the_config->enable_default_specular &&
+               the_config->default_specular_strength>0.0f &&
+               material.reflection_strength<=0.0f &&
+               !material.has_authored_specular) {
+                return {the_config->default_specular_strength,
+                        the_config->default_specular_roughness};
+            }
+            return {material.reflection_strength,material.roughness};
         }
 
         // Snapshot the rdCamera that rendered THIS scene. The exempt pass
@@ -3523,8 +3544,21 @@ namespace jkgm {
                     !inst.camera_hud && the_config->enable_reflections &&
                     the_config->enable_dynamic_light_specular &&
                     !inst.is_projected_decal && inst.num_lights>0U;
+                // Only unconfigured *ordinary* materials inherit this
+                // direct-light dielectric response. Keep VFX, sprites,
+                // Camera HUD, skybox flags, fully-bright CMP and decals out.
+                bool const default_eligible=
+                    !inst.camera_hud && !inst.is_projected_decal &&
+                    !inst.is_sprite_quad && !inst.world_lighting_exempt &&
+                    !draw.texture.solid_fullbright &&
+                    !draw.texture.emissive_only &&
+                    draw.texture.albedo_source!=0 &&
+                    draw.texture.blend!=material_blend_mode::additive &&
+                    draw.texture.blend!=material_blend_mode::multiply;
+                auto const specular=gpu_specular_parameters(
+                    draw.texture,default_eligible);
                 bool const spec_active=!inst.camera_hud &&
-                    draw.texture.reflection_strength>0 &&
+                    specular.first>0.0f &&
                     (draw.texture.has_environment ||
                      draw.texture.has_environment2 || sun_active ||
                      point_specular_active);
@@ -3556,8 +3590,8 @@ namespace jkgm {
                                          draw.texture.environment_transition,
                                          draw.texture.reflection_mode);
                     prog.set_point_specular(
-                        make_point(draw.texture.reflection_strength,
-                                   draw.texture.roughness,draw.texture.metalness,
+                        make_point(specular.first,
+                                   specular.second,draw.texture.metalness,
                                    draw.texture.has_surface?1.0f:0.0f),
                         make_point(draw.texture.has_normal?1.0f:0.0f,
                                    draw.texture.normal_strength,
@@ -6281,8 +6315,16 @@ namespace jkgm {
             bool const direct_sun=the_config->enable_sun &&
                 sun.intensity.value()[0]>0.0f;
             bool const direct_points=the_config->enable_dynamic_light_specular;
+            bool const default_eligible=(geometry_mode==3U ||
+                                          geometry_mode==4U) &&
+                material.albedo_source!=0 && !material.solid_fullbright &&
+                !material.emissive_only &&
+                material.blend!=material_blend_mode::additive &&
+                material.blend!=material_blend_mode::multiply;
+            auto const specular=gpu_specular_parameters(
+                material,default_eligible);
             bool const reflective=the_config->enable_reflections &&
-                material.reflection_strength>0.0f &&
+                specular.first>0.0f &&
                 (material.has_environment || material.has_environment2 ||
                  direct_sun || direct_points);
             if(reflective) {
@@ -6314,8 +6356,8 @@ namespace jkgm {
                 }
             }
             shader.set_reflection(
-                make_point(reflective?material.reflection_strength:0.0f,
-                           material.roughness,material.metalness,
+                make_point(reflective?specular.first:0.0f,
+                           specular.second,material.metalness,
                            reflective && material.has_surface?1.0f:0.0f),
                 make_point(reflective && material.has_normal?1.0f:0.0f,
                            material.normal_strength,
