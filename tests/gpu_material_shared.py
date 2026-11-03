@@ -31,7 +31,9 @@ assert "emissive_only=7" not in policy
 assert "emissive=7" in policy
 assert "policy==world_cache_draw_policy::emissive;" in policy
 assert "gl::set_uniform_integer(emissive_only,emission_only?1:0);" in world_api
-assert "out_emissive=vec4(emission+env_reflection," in world
+# Opaque shared material emission also carries environment and direct-light GGX.
+# Both belong in the post-SSAO emissive attachment, not the diffuse target.
+assert "out_emissive=vec4(emission+env_reflection+direct_specular," in world
 assert "out_color=vec4(premultiplied+emission+specular*coverage," in world
 # No second G-buffer composition of transparent emission, and the tested
 # 90/255 native alpha weighting must remain a world-only operation.
