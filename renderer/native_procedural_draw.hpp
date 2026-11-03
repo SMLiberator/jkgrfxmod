@@ -25,6 +25,8 @@ constexpr uintptr_t polyline_side_uv_offset=0xB8U;
 constexpr uintptr_t polyline_tip_uv_offset=0xBCU;
 // rdFace.material is +0x20 relative to either embedded face.
 constexpr uintptr_t polyline_face_material_offset=0x20U;
+// rdFace.texVertOffset is the two-float field following rdFace.wallCel.
+constexpr uintptr_t polyline_face_uv_offset_offset=0x28U;
 constexpr uintptr_t particle_count_offset=0x24U;
 constexpr uintptr_t particle_positions_offset=0x28U;
 constexpr uintptr_t particle_cels_offset=0x2CU;

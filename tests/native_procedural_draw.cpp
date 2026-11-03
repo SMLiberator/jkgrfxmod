@@ -26,4 +26,6 @@ int main()
     assert(particle_material_offset==0x38U);
     assert(polyline_side_face_offset+polyline_face_material_offset==0x58U);
     assert(polyline_tip_face_offset+polyline_face_material_offset==0x98U);
+    assert(polyline_side_face_offset+polyline_face_uv_offset_offset==0x60U);
+    assert(polyline_tip_face_offset+polyline_face_uv_offset_offset==0xA0U);
 }

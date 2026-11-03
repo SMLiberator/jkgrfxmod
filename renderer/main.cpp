@@ -3038,6 +3038,17 @@ namespace {
         jkgm::gpu_polyline_face result{};
         result.count=n;result.geo=geo;result.face_type=type;
         result.material=material;
+        // rdPolyline_DrawFace receives the original rdFace; JK's
+        // rdPrimit3_ClipFace adds texVertOffset to source UVs later.
+        // Our capture bypasses that clipper, so preserve the live offset.
+        if(!read(f+jkgm::native_procedural_draw::
+                 polyline_face_uv_offset_offset,
+                 result.uv_offset.data(),sizeof(float)*2U) ||
+           !std::isfinite(result.uv_offset[0]) ||
+           !std::isfinite(result.uv_offset[1])) {
+            capture->failed=true;
+            return;
+        }
         int32_t cel=-1;
         read(reinterpret_cast<uintptr_t>(rdthing)+0x2cU,&cel,4U);
         result.cel=cel;

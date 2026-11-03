@@ -19,6 +19,9 @@ struct gpu_polyline_face {
     int32_t cel=-1;
     std::array<std::array<float,3>,5> position{};
     std::array<std::array<float,2>,5> uv{};
+    // JK's rdFace.texVertOffset, in the same source MAT-pixel UV units.
+    // The native polyline generator advances this independently per face.
+    std::array<float,2> uv_offset{};
 };
 struct gpu_polyline_capture {
     std::vector<gpu_polyline_face> faces;
@@ -83,6 +86,8 @@ make_gpu_polyline_geometry(gpu_polyline_capture const &capture)
                 nx/=mag;ny/=mag;nz/=mag;
             } else {nx=0;ny=-1;nz=0;}
         }
+        for(float offset:face.uv_offset)
+            if(!std::isfinite(offset))return {};
         uint32_t const begin=static_cast<uint32_t>(result->vertices.size());
         for(uint32_t k=0;k<face.count;++k) {
             auto const &p=face.position[k];
@@ -91,7 +96,12 @@ make_gpu_polyline_geometry(gpu_polyline_capture const &capture)
             for(float v:uv)if(!std::isfinite(v))return {};
             gpu_3do_vertex v{};
             v.x=p[0];v.y=p[1];v.z=p[2];
-            v.u=uv[0];v.v=uv[1];
+            // Native rdPrimit3_ClipFace does this addition before clipping.
+            // Keep its sign and units (no extra normalization or random UV
+            // animation), so the ordinary GPU MAT path handles the rest.
+            v.u=uv[0]+face.uv_offset[0];
+            v.v=uv[1]+face.uv_offset[1];
+            if(!std::isfinite(v.u) || !std::isfinite(v.v))return {};
             v.nx=v.lnx=nx;v.ny=v.lny=ny;v.nz=v.lnz=nz;
             v.fax=face.position[0][0];
             v.fay=face.position[0][1];
