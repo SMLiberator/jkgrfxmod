@@ -2606,9 +2606,12 @@ namespace jkgm {
             // index. Detect unshaded entries from the owning CMP's full
             // 64-level software table; never guess fullbright from RGB.
             jk_cmp_lighttable levels{};
-            if(jk_cmp_read_lighttable(read_bytes,cmp,levels))
+            std::array<uint8_t,256U*3U> palette{};
+            if(jk_cmp_read_lighttable(read_bytes,cmp,levels) &&
+               read_bytes(uintptr_t(cmp)+jk_cmp_colors_offset,
+                          palette.data(),palette.size()))
                 out.solid_fullbright=jk_cmp_is_fullbright(
-                    levels,static_cast<uint8_t>(index));
+                    levels,palette,static_cast<uint8_t>(index));
             out.tint=make_point(float(rgb[0])/255.0f,
                                 float(rgb[1])/255.0f,
                                 float(rgb[2])/255.0f,1.0f);
