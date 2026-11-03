@@ -61,6 +61,22 @@ uint32_t read_sprite_decal_active_geoset(
     }
     return selected<num_geos?selected:0xffffffffU;
 }
+// During rdModel3_Draw, JKGM stores the SELECTED geoset pointer at
+// 0x73A420 before invoking any mesh callbacks (verified 0x446105..0x446118).
+// This is per draw, unlike a shared model's mutable default selection.
+template<class Read>
+uint32_t read_sprite_decal_draw_geoset(Read const &read,uintptr_t model)
+{
+    if(!decal_geoset_ptr(model))return 0xffffffffU;
+    uint32_t selected=0,count=0;
+    if(!read(0x0073A420U,&selected,4U) ||
+       !read(model+0x44U,&count,4U) ||
+       count==0U || count>4U)return 0xffffffffU;
+    uintptr_t const first=model+0x24U;
+    if(uintptr_t(selected)<first || uintptr_t(selected)>=first+count*8U ||
+       ((uintptr_t(selected)-first)%8U)!=0U)return 0xffffffffU;
+    return uint32_t((uintptr_t(selected)-first)/8U);
+}
 // Exact same composed node matrix consumed by rdModel3_DrawHNode.
 // Once the actor switches LOD, the rdMesh pointer changes but the skeleton
 // node index remains stable. Matching its CURRENT matrix prevents a decal
@@ -81,7 +97,8 @@ bool read_sprite_decal_lod_node_pose(
 template<class Read>
 std::vector<sprite_decal_geoset_mesh> enumerate_sprite_decal_lod_meshes(
     Read const &read,uintptr_t rdthing,uintptr_t model,
-    uintptr_t source_mesh,gpu_3do_matrix34 const &source_world)
+    uintptr_t source_mesh,gpu_3do_matrix34 const &source_world,
+    uint32_t captured_geoset=0xffffffffU)
 {
     std::vector<sprite_decal_geoset_mesh> result;
     if(!decal_geoset_ptr(rdthing) || !decal_geoset_ptr(model) ||
@@ -101,7 +118,9 @@ std::vector<sprite_decal_geoset_mesh> enumerate_sprite_decal_lod_meshes(
        num_geos<2U || num_geos>4U ||
        num_nodes==0U || num_nodes>256U)
         return result;
-    int32_t const current=forced_geo==-1?int32_t(default_geo):forced_geo;
+    int32_t const current=captured_geoset!=0xffffffffU
+        ?int32_t(captured_geoset)
+        :(forced_geo==-1?int32_t(default_geo):forced_geo);
     if(current<0 || current>=int32_t(num_geos))return result;
     struct geoset {uint32_t count=0,base=0;};
     std::array<geoset,4> sets{};
