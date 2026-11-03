@@ -383,7 +383,7 @@ namespace {
         uint64_t thing=0;
         uintptr_t model=0,mesh=0;
         uint64_t revision=0;
-        uint32_t occurrence=0;
+        uint32_t occurrence=0,geoset=0xffffffffU;
         jkgm::gpu_3do_matrix34 transform{};
     };
     std::vector<native_moving_decal_receiver> native_moving_decal_receivers;
