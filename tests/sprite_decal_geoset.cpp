@@ -41,6 +41,7 @@ int main() {
         set(nodes+0xb4U*i+0x44U,i);
         set(nodes+0xb4U*i+0x4cU,i);
     }
+    assert(read_sprite_decal_active_geoset(read,thing,model)==1U);
     auto candidates=enumerate_sprite_decal_lod_meshes(
         read,thing,model,active+0x70U,pose[1]);
     assert(candidates.size()==5U);
@@ -61,10 +62,12 @@ int main() {
     // The default GeoSet is used when the Thing has no explicit override.
     forced=-1;set(thing+0x30U,forced);
     default_geo=1U;set(model+0x50U,default_geo);
+    assert(read_sprite_decal_active_geoset(read,thing,model)==1U);
     assert(enumerate_sprite_decal_lod_meshes(
         read,thing,model,active+0x70U,pose[1]).size()==5U);
     // Wrong active LOD/mesh/node placement MUST fail closed.
     default_geo=0U;set(model+0x50U,default_geo);
+    assert(read_sprite_decal_active_geoset(read,thing,model)==0U);
     assert(enumerate_sprite_decal_lod_meshes(
         read,thing,model,active+0x70U,pose[1]).empty());
     default_geo=1U;set(model+0x50U,default_geo);
