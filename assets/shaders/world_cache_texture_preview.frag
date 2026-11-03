@@ -8,7 +8,8 @@ in vec2 material_uv;
 in vec3 cached_view_normal;
 in vec3 cached_lit_rgb;
 in vec3 cached_light_state; // authored+extra, ambient floor, light mode
-in vec3 cached_sector_tint; // the face's owning sector, not camera
+in vec3 cached_sector_tint; // SithSector.tint, not colormap
+in vec3 cached_sector_cmp_tint; // SithSector.colormap color multiplier
 in vec3 cached_world_position;
 in vec3 cached_world_normal;
 uniform int num_lights;
@@ -57,7 +58,8 @@ uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
 
 vec3 world_jk_effect(vec3 raw,vec3 local_sector_tint)
 {
-    vec3 v=pow(clamp(raw,0.0,1.0),vec3(1.0/1.8));
+    vec3 v=pow(clamp(raw*cached_sector_cmp_tint,0.0,1.0),
+               vec3(1.0/1.8));
     if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
         v*=step(vec3(0.5),jk_color_filter.xyz);
     vec3 t=clamp(local_sector_tint+jk_color_tint.xyz,
