@@ -50,7 +50,8 @@ namespace jkgm {
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics
         bool optimize_hud_uploads = true; // upload only changed HUD rows (disable for A/B test)
         bool use_model_cache = false; // cache 3DO meshes as persistent GPU geometry
-        bool world_cache_preview = false; // GPU-first opaque SithWorld G-buffer; depth-tested native fallback
+        bool world_cache_preview = false; // GPU-first SithWorld rendering
+        bool enable_native_fallback = true; // false: suppress mixed native world batches for cache gap diagnostics
         bool use_sprite_cache = false; // experimental shared GPU quad caching for SPRs
         bool mesh_revision_tracking = false; // experimental JK.dll COG mutation tracking
         bool enable_spotlights = false; // COG MAT-based screen-space spotlights
