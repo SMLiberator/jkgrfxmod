@@ -87,9 +87,11 @@ namespace jkgm {
             gl::uniform_location_id sky_ceiling_height,sky_offset;
             gl::uniform_location_id sky_face_offset,sky_viewport;
             gl::uniform_location_id num_lights,light_attenuation;
+            gl::uniform_location_id world_pixel_dynamic_lighting,world_dynamic_light_specular;
             gl::uniform_location_id jk_color_filter,jk_color_tint,jk_color_add_fade;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity;
         public:
+            translucent_sun_uniforms translucent_sun;
             explicit world_cache_preview_shader(fs::path const &data_root);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
                                  point<4,float> up,point<4,float> origin);
@@ -123,6 +125,13 @@ namespace jkgm {
                          point<2,float> face_offset,point<2,float> viewport);
             void set_lights(std::vector<world_cache_point_light> const &lights,
                             float attenuation);
+            void set_specular_lighting(bool pixel_diffuse,bool point_specular);
+            // World-cache world-space positions and camera axes are already
+            // supplied by set_reflection_camera(). The shared sun binder
+            // also calls the 3DO-specific camera setter: no extra state needed.
+            void set_translucent_spotlight_camera(
+                point<4,float>,point<4,float>,point<4,float>,
+                point<4,float>,point<2,float>) {}
             void set_jk_color_effects(point<4,float> filter,point<4,float> tint,
                                       point<4,float> add_fade);
         };

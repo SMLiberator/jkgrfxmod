@@ -265,9 +265,14 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , sky_viewport(gl::get_uniform_location(the_program,"sky_viewport"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
     , light_attenuation(gl::get_uniform_location(the_program,"light_attenuation"))
+    , world_pixel_dynamic_lighting(gl::get_uniform_location(
+          the_program,"world_pixel_dynamic_lighting"))
+    , world_dynamic_light_specular(gl::get_uniform_location(
+          the_program,"world_dynamic_light_specular"))
     , jk_color_filter(gl::get_uniform_location(the_program,"jk_color_filter"))
     , jk_color_tint(gl::get_uniform_location(the_program,"jk_color_tint"))
     , jk_color_add_fade(gl::get_uniform_location(the_program,"jk_color_add_fade"))
+    , translucent_sun(the_program)
 {
     for(unsigned i=0;i<16U;++i) {
         light_position_radius.push_back(gl::get_uniform_location(
@@ -425,6 +430,12 @@ void jkgm::shaders::world_cache_preview_shader::set_jk_color_effects(
     gl::set_uniform_vector(jk_color_filter,filter);
     gl::set_uniform_vector(jk_color_tint,tint);
     gl::set_uniform_vector(jk_color_add_fade,add_fade);
+}
+void jkgm::shaders::world_cache_preview_shader::set_specular_lighting(
+    bool pixel_diffuse,bool point_specular)
+{
+    gl::set_uniform_integer(world_pixel_dynamic_lighting,pixel_diffuse?1:0);
+    gl::set_uniform_integer(world_dynamic_light_specular,point_specular?1:0);
 }
 void jkgm::shaders::world_cache_preview_shader::set_lights(
     std::vector<world_cache_point_light> const &lights,float attenuation)

@@ -146,6 +146,8 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     return env*fresnel*strength;
 }
 
+#include "world_cache_direct_specular.glsl"
+
 // Follow the original JKGM Fluid opacity: use raw native depth differences
 // (both depths are 32*camera-forward units), not normalized JK world units.
 // This is the same shared law used for native triangles and GPU 3DOs.
@@ -225,7 +227,8 @@ void main() {
     // Keep authored Gouraud/sector lighting, already interpolated in RGB.
     // The same GLSL helpers calculate pixel light for both world and 3DO.
     vec3 lighting=cached_lit_rgb;
-    if(solid_fullbright==0 && cached_light_state.z>2.5 && num_lights>0) {
+    if(world_pixel_dynamic_lighting!=0 && solid_fullbright==0 &&
+       cached_light_state.z>2.5 && num_lights>0) {
         float added=0.0;
         vec3 normal=normalize(cached_world_normal);
         for(int i=0;i<num_lights;i++) {
@@ -246,6 +249,7 @@ void main() {
     float env_metalness=0.0;
     vec3 env_reflection=world_environment_reflection(
         albedo,material_texcoord,env_metalness);
+    vec3 direct_specular=world_direct_specular(albedo,material_texcoord);
     vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness);
     if(transparent_pass!=0) {
         // Only one color attachment exists in the forward alpha target.
@@ -255,7 +259,7 @@ void main() {
                         max(fog_params.y-fog_params.x,0.0001),0.0,1.0)*
                   fog_params.z;
         vec3 lit=mix(lit_diffuse,fog_color,fog);
-        vec3 specular=env_reflection*(1.0-fog);
+        vec3 specular=(env_reflection+direct_specular)*(1.0-fog);
         if(blend_mode==3) {
             // Fluid absorption uses receiver depth, just like GPU-cached
             // 3DO materials. Emission and reflections remain independent of
@@ -292,7 +296,7 @@ void main() {
     }
     out_color=vec4(lit_diffuse,1.0);
     // Opaque reflections are composited after SSAO, as for GPU 3DOs.
-    out_emissive=vec4(emission+env_reflection,
+    out_emissive=vec4(emission+env_reflection+direct_specular,
         dot(lighting,vec3(0.2126,0.7152,0.0722)));
     // Fullbright palette entries do not receive AO, sun or projected light.
     out_normal=solid_fullbright!=0 ? vec4(0.0,0.0,0.0,1.0) :

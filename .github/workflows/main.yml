@@ -38,6 +38,9 @@ jobs:
     - name: Retro final-frame presentation order and menu exclusion
       run: python3 tests/retro_final_presentation.py
 
+    - name: GPU world-cache specular integration and material gate checks
+      run: python3 tests/world_cache_direct_specular.py
+
     - name: GPU cache configuration unification and permanent optimizations
       run: python3 tests/gpu_cache_configuration.py
 

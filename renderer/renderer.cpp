@@ -6274,11 +6274,17 @@ namespace jkgm {
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                                  material.texture2);
             }
-            // Use the same runtime global/per-MAT EnvMap resolution as 3DOs.
-            // Nonreflective world surfaces never bind auxiliary maps.
+            // Like GPU 3DOs, direct sunlight and opt-in dynamic Thing
+            // lights produce GGX without requiring an EnvMap. Preserve the
+            // material's own strength, roughness, metalness and normal maps.
+            auto const sun=get_sun_settings();
+            bool const direct_sun=the_config->enable_sun &&
+                sun.intensity.value()[0]>0.0f;
+            bool const direct_points=the_config->enable_dynamic_light_specular;
             bool const reflective=the_config->enable_reflections &&
                 material.reflection_strength>0.0f &&
-                (material.has_environment || material.has_environment2);
+                (material.has_environment || material.has_environment2 ||
+                 direct_sun || direct_points);
             if(reflective) {
                 if(material.has_surface) {
                     gl::set_active_texture_unit(2);
@@ -6529,7 +6535,11 @@ namespace jkgm {
                            remaining_effect.add[1]/255.0f,
                            remaining_effect.add[2]/255.0f,
                            remaining_effect.fade));
-            if(!pixel_lighting)point_lights.clear();
+            bool const point_specular=the_config->enable_reflections &&
+                the_config->enable_dynamic_light_specular && camera_ready;
+            if(!pixel_lighting && !point_specular)point_lights.clear();
+            shader.set_specular_lighting(pixel_lighting,point_specular);
+            set_translucent_sun(shader,the_config->enable_reflections);
             shader.set_lights(point_lights,light_attenuation);
             gl::enable(gl::capability::depth_test);
             gl::set_depth_function(gl::comparison_function::less);
@@ -6634,9 +6644,8 @@ namespace jkgm {
             size_t drawn=0,solid_drawn=0,masked_drawn=0,adjoin_drawn=0;
             size_t passable_drawn=0,unresolved=0,groups=0,skipped_alpha=0;
             size_t mixed_drawn=0,dithered_drawn=0;
-            // Report *visible* world MAT state, not only shader capability.
-            // A surface map and normal map alone cannot light a face:
-            // the current world shader needs an active material EnvMap.
+            // Report visible world MAT state: sun/Thing GGX now works
+            // for reflective materials without a separate EnvMap.
             size_t mat_probe_faces=0,mat_probe_reflective=0;
             size_t mat_probe_normals=0,mat_probe_surface_maps=0;
             size_t mat_probe_env=0,mat_probe_missing_env=0;
@@ -6909,6 +6918,28 @@ namespace jkgm {
             shader.use_program();
             shader.set_reflection_camera(cam.position,cam.right,
                                          cam.forward,cam.up);
+            // Alpha-only worlds must initialize these independently of
+            // any opaque GPU world draws earlier in the frame.
+            float camera_ambient=0.0f,light_attenuation=0.0f;
+            std::vector<world_cache_point_light> point_lights;
+            auto const read_native=[](uintptr_t ptr,void *out,size_t size) {
+                if(!size || !engine_camera_detail::readable(ptr,size))
+                    return false;
+                std::memcpy(out,reinterpret_cast<void const *>(ptr),size);
+                return true;
+            };
+            bool const camera_lights_ready=read_world_cache_camera_lights(
+                read_native,0x0073A418U,point_lights,camera_ambient,
+                light_attenuation);
+            bool const pixel_lighting=world_cache_use_pixel_lights(
+                the_config->gpu_pixel_lighting,camera_lights_ready);
+            bool const point_specular=the_config->enable_reflections &&
+                the_config->enable_dynamic_light_specular &&
+                camera_lights_ready;
+            if(!pixel_lighting && !point_specular)point_lights.clear();
+            shader.set_specular_lighting(pixel_lighting,point_specular);
+            shader.set_lights(point_lights,light_attenuation);
+            set_translucent_sun(shader,the_config->enable_reflections);
             auto const &fog=get_fog_settings();
             auto const info=fog.info.value(),color=fog.color.value();
             shader.set_fog(make_point(info[0],info[1],

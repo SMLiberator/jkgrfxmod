@@ -732,6 +732,22 @@ Type-4 camera-facing flare SPRs are separate Things. Attach a flare
 Thing to a node, then assign that same Thing a Spotlight. Its independent
 `SetSpriteInfo` and `SetSpriteRoll` COG controls remain available.
 
+## GPU-cached world direct specular highlights
+
+World-cache surfaces now use the same per-material GGX microfacet response
+as GPU-cached 3DOs: reflectivity (surface map red), roughness (green),
+metalness (blue), and optional dual-layer tangent-space normal maps.
+Direct sunlight produces colored highlights with the existing sun
+cascade/dynamic-Thing shadow visibility; nearby native Thing lights can
+produce neutral highlights when `enable_dynamic_light_specular=true`.
+These effects no longer require a separate EnvMap. Existing EnvMap
+reflections, native Gouraud diffuse, sky, and fully-bright CMP colors retain
+their established behavior. Reflections can still be disabled globally
+with `enable_reflections=false`; sun lighting itself retains its own
+`enable_sun` control. The direct specular term goes into the opaque
+emissive G-buffer attachment (after SSAO), or the sorted transparent
+forward path, without adding a framebuffer or another geometry draw.
+
 ## Standard sunlight shadow optimizations
 
 Four previously optional improvements are now unconditional whenever their
