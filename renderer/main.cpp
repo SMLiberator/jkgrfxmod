@@ -1521,6 +1521,15 @@ namespace {
             item.model=active_native_decal_model;
             item.mesh=reinterpret_cast<uintptr_t>(mesh);
             item.revision=native_decal_mesh_structure_signature(mesh);
+            auto read_geo=[](uintptr_t p,void *dst,size_t bytes) {
+                if(!gpu_span_readable(
+                       reinterpret_cast<void const *>(p),bytes))
+                    return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(p),bytes);
+                return true;
+            };
+            item.geoset=jkgm::read_sprite_decal_draw_geoset(
+                read_geo,item.model);
             item.occurrence=++moving_mesh_occurrences[
                 {item.thing,item.mesh}];
             std::memcpy(item.transform.data(),placement,12U*sizeof(float));
@@ -2198,6 +2207,15 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         inst.decal_receiver_thing=active_native_shadow_owner;
         inst.decal_receiver_model=active_native_decal_model;
         inst.decal_receiver_mesh=reinterpret_cast<uintptr_t>(mesh);
+        auto read_geo=[](uintptr_t p,void *dst,size_t bytes) {
+            if(!gpu_span_readable(
+                   reinterpret_cast<void const *>(p),bytes))
+                return false;
+            std::memcpy(dst,reinterpret_cast<void const *>(p),bytes);
+            return true;
+        };
+        inst.decal_receiver_geoset=jkgm::read_sprite_decal_draw_geoset(
+            read_geo,active_native_decal_model);
         inst.decal_receiver_revision=it->second.source_signature;
         inst.decal_receiver_occurrence=++moving_mesh_occurrences[
             {active_native_shadow_owner,reinterpret_cast<uintptr_t>(mesh)}];
@@ -4419,9 +4437,15 @@ namespace {
             std::memcpy(dest,reinterpret_cast<void const *>(address),length);
             return true;
         };
-        uint32_t const hit_geoset=jkgm::read_sprite_decal_active_geoset(
-            read_current_geo,
-            uintptr_t(uint32_t(receiver_thing>>32U))+0xc4U,receiver_model);
+        uint32_t const captured_geo=best_native!=invalid
+            ?native_moving_decal_receivers[best_native].geoset
+            :pending_gpu_instances[best_gpu].decal_receiver_geoset;
+        uint32_t const hit_geoset=captured_geo!=0xffffffffU
+            ?captured_geo
+            :jkgm::read_sprite_decal_active_geoset(
+                read_current_geo,
+                uintptr_t(uint32_t(receiver_thing>>32U))+0xc4U,
+                receiver_model);
         constexpr uint32_t max_decal_triangles=2048U;
         constexpr size_t max_decal_mesh_fragments=64U;
         struct receiver_piece {
@@ -4562,7 +4586,7 @@ namespace {
                 :pending_gpu_instances[best_gpu].transform;
             auto const alternate=jkgm::enumerate_sprite_decal_lod_meshes(
                 read,uintptr_t(uint32_t(receiver_thing>>32U))+0xc4U,
-                receiver_model,source_mesh,source_pose);
+                receiver_model,source_mesh,source_pose,hit_geoset);
             size_t added_lod_fragments=0U;
             for(uint32_t lod=0;lod<4U;++lod) {
                 std::vector<jkgm::sprite_decal_geoset_mesh> lod_nodes;
