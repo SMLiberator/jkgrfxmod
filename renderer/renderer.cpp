@@ -3136,7 +3136,10 @@ namespace jkgm {
                 return sun_direction[0]*axis[0]+sun_direction[1]*axis[1]+
                        sun_direction[2]*axis[2];
             };
-            float const sun_power=the_config->enable_reflections
+            // Match cached-world direct specular: disabling the COG sun
+            // disables its GGX highlights too, independently of EnvMaps.
+            float const sun_power=(the_config->enable_reflections &&
+                                   the_config->enable_sun)
                 ? std::max(0.0f,sun.intensity.value()[0]) : 0.0f;
             bool const sun_active=sun_power>0.0f;
             prog.set_sun(make_point(sun_project(cam.right),

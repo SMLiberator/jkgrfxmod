@@ -61,6 +61,7 @@ assert "material.blend!=material_blend_mode::additive" in renderer
 assert "!material.solid_fullbright" in renderer
 assert "!material.emissive_only" in renderer
 assert "direct_sun || direct_points" in renderer
+assert "the_config->enable_reflections &&\n                                   the_config->enable_sun" in renderer
 assert "world_sun_visibility(cached_world_position" in world
 assert "specular_params.x<=0.0" in model
 # This roughness/strength pair only changes direct-light specular.
