@@ -39,6 +39,28 @@ inline bool decal_geoset_same_pose(gpu_3do_matrix34 const &a,
     }
     return true;
 }
+// Which GeoSet did rdModel3_Draw select for this particular Thing?
+// The Thing override wins over rdModel3.geosetSelect; -1 means default.
+template<class Read>
+uint32_t read_sprite_decal_active_geoset(
+    Read const &read,uintptr_t rdthing,uintptr_t model)
+{
+    if(!decal_geoset_ptr(rdthing) || !decal_geoset_ptr(model))
+        return 0xffffffffU;
+    int32_t forced=-1;
+    uint32_t selected=0,num_geos=0;
+    if(!read(rdthing+0x30U,&forced,4) ||
+       !read(model+0x50U,&selected,4) ||
+       !read(model+0x44U,&num_geos,4) ||
+       num_geos==0U || num_geos>4U)
+        return 0xffffffffU;
+    if(forced!=-1) {
+        if(forced<0 || forced>=int32_t(num_geos))
+            return 0xffffffffU;
+        selected=uint32_t(forced);
+    }
+    return selected<num_geos?selected:0xffffffffU;
+}
 // Exact same composed node matrix consumed by rdModel3_DrawHNode.
 // Once the actor switches LOD, the rdMesh pointer changes but the skeleton
 // node index remains stable. Matching its CURRENT matrix prevents a decal
@@ -79,7 +101,7 @@ std::vector<sprite_decal_geoset_mesh> enumerate_sprite_decal_lod_meshes(
        num_geos<2U || num_geos>4U ||
        num_nodes==0U || num_nodes>256U)
         return result;
-    int32_t const current=forced_geo>=0?forced_geo:int32_t(default_geo);
+    int32_t const current=forced_geo==-1?int32_t(default_geo):forced_geo;
     if(current<0 || current>=int32_t(num_geos))return result;
     struct geoset {uint32_t count=0,base=0;};
     std::array<geoset,4> sets{};
