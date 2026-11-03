@@ -46,13 +46,9 @@ namespace jkgm {
         bool profile_renderer = false; // opt-in CPU and async GPU frame timings
         bool profile_renderer_verbose = false; // opt-in detailed renderer diagnostics
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics
-        bool optimize_hud_uploads = true; // upload only changed HUD rows (disable for A/B test)
-        bool use_model_cache = false; // cache 3DO meshes as persistent GPU geometry
-        bool world_cache_preview = false; // GPU-first SithWorld rendering
+        bool use_gpu_cache = true; // unified GPU 3DO, sprite, and SithWorld rendering
         bool enable_native_fallback = true; // false: suppress mixed native world batches for cache gap diagnostics
         bool enable_gpu_mat_warmup = false; // experimental; direct JK std3D calls require verified native format/device state
-        bool use_sprite_cache = false; // experimental shared GPU quad caching for SPRs
-        bool mesh_revision_tracking = false; // experimental JK.dll COG mutation tracking
         bool enable_spotlights = false; // COG MAT-based screen-space spotlights
         bool enable_spotlight_shadows = false; // experimental, one static-world shadow map
         unsigned int spotlight_shadow_resolution = 256U; // depth-map width and height (64..1024)

@@ -174,26 +174,25 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("profile_audio")) {
             j.at("profile_audio").get_to(rv->profile_audio);
         }
-        if(j.contains("optimize_hud_uploads")) {
-            j.at("optimize_hud_uploads").get_to(rv->optimize_hud_uploads);
+        if(j.contains("use_gpu_cache")) {
+            j.at("use_gpu_cache").get_to(rv->use_gpu_cache);
         }
-        if(j.contains("use_model_cache")) {
-            j.at("use_model_cache").get_to(rv->use_model_cache);
-        }
-        if(j.contains("world_cache_preview")) {
-            j.at("world_cache_preview").get_to(rv->world_cache_preview);
+        // Retired toggles no longer override the single cache setting.
+        // Warn explicitly so old configs don't silently switch modes.
+        for(auto const *legacy:{
+                "use_model_cache","use_sprite_cache","world_cache_preview",
+                "mesh_revision_tracking","optimize_hud_uploads"}) {
+            if(j.contains(legacy))
+                LOG_WARNING("Deprecated jkgm.json option ignored: ",legacy,
+                            " (use_gpu_cache controls world/3DO/SPR caching; "
+                            "mesh revision tracking and optimized HUD uploads "
+                            "are now standard)");
         }
         if(j.contains("enable_native_fallback")) {
             j.at("enable_native_fallback").get_to(rv->enable_native_fallback);
         }
         if(j.contains("enable_gpu_mat_warmup")) {
             j.at("enable_gpu_mat_warmup").get_to(rv->enable_gpu_mat_warmup);
-        }
-        if(j.contains("use_sprite_cache")) {
-            j.at("use_sprite_cache").get_to(rv->use_sprite_cache);
-        }
-        if(j.contains("mesh_revision_tracking")) {
-            j.at("mesh_revision_tracking").get_to(rv->mesh_revision_tracking);
         }
         if(j.contains("gpu_mat_preload") &&
            j.at("gpu_mat_preload").is_boolean() &&

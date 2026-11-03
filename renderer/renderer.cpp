@@ -814,7 +814,7 @@ namespace jkgm {
                      " NOTE=delayed_nonblocking_GPU_timestamps_zero_if_no_samples");
             present_gpu_ns.fill(0U);
             present_gpu_samples=present_gpu_skipped=0U;
-            if(the_config->use_model_cache || the_config->use_sprite_cache ||
+            if(the_config->use_gpu_cache ||
                the_config->enable_decals) {
                 LOG_INFO("PERF gpu_3do fallback_native_per_frame geometry=",
                          profile_window.gpu_geometry_native/frames,
@@ -1019,7 +1019,7 @@ namespace jkgm {
                 deferred_gpu_3do_instances.clear();
                 deferred_gpu_3do_camera={};
                 frame_has_exempt_gpu=false;
-                if(the_config->use_model_cache || the_config->use_sprite_cache ||
+                if(the_config->use_gpu_cache ||
                    the_config->enable_decals ||
                    (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
                    the_config->enable_sun_shadows) {
@@ -1959,26 +1959,24 @@ namespace jkgm {
             int first_changed=start_row;
             int last_changed=stop_row;
 
-            if(the_config->optimize_hud_uploads) {
-                auto &mirror=hud_uploaded_pixels[hud_back_index];
-                if(mirror.size()!=ogs->hud_texture_data.size()) {
-                    mirror.resize(ogs->hud_texture_data.size(),color_rgba8::zero());
-                    hud_slab_valid[hud_back_index].fill(false);
-                }
-                if(hud_slab_valid[hud_back_index][curr_slab]) {
-                    // Find the first and last changed rows; keep exactly one
-                    // contiguous upload. This avoids making many tiny GL calls
-                    // for scattered UI pixels while shrinking unchanged slabs.
-                    first_changed=stop_row;
-                    last_changed=start_row;
-                    size_t const row_bytes=size_t(width)*sizeof(color_rgba8);
-                    for(int row=start_row;row<stop_row;++row) {
-                        size_t const offset=size_t(row)*size_t(width);
-                        if(std::memcmp(ogs->hud_texture_data.data()+offset,
-                                       mirror.data()+offset,row_bytes)!=0) {
-                            first_changed=std::min(first_changed,row);
-                            last_changed=row+1;
-                        }
+            auto &mirror=hud_uploaded_pixels[hud_back_index];
+            if(mirror.size()!=ogs->hud_texture_data.size()) {
+                mirror.resize(ogs->hud_texture_data.size(),color_rgba8::zero());
+                hud_slab_valid[hud_back_index].fill(false);
+            }
+            if(hud_slab_valid[hud_back_index][curr_slab]) {
+                // Find the first and last changed rows; keep exactly one
+                // contiguous upload. This avoids making many tiny GL calls
+                // for scattered UI pixels while shrinking unchanged slabs.
+                first_changed=stop_row;
+                last_changed=start_row;
+                size_t const row_bytes=size_t(width)*sizeof(color_rgba8);
+                for(int row=start_row;row<stop_row;++row) {
+                    size_t const offset=size_t(row)*size_t(width);
+                    if(std::memcmp(ogs->hud_texture_data.data()+offset,
+                                   mirror.data()+offset,row_bytes)!=0) {
+                        first_changed=std::min(first_changed,row);
+                        last_changed=row+1;
                     }
                 }
             }
@@ -2000,15 +1998,11 @@ namespace jkgm {
                     gl::texture_pixel_type::uint8,
                     make_span(ogs->hud_texture_data)
                         .subspan(offset,num_pixels).as_const_bytes());
-                if(the_config->optimize_hud_uploads) {
-                    auto &mirror=hud_uploaded_pixels[hud_back_index];
-                    std::memcpy(mirror.data()+offset,
-                                ogs->hud_texture_data.data()+offset,
-                                num_pixels*sizeof(color_rgba8));
-                }
+                std::memcpy(mirror.data()+offset,
+                            ogs->hud_texture_data.data()+offset,
+                            num_pixels*sizeof(color_rgba8));
             }
-            if(the_config->optimize_hud_uploads)
-                hud_slab_valid[hud_back_index][curr_slab]=true;
+            hud_slab_valid[hud_back_index][curr_slab]=true;
 
             ++curr_slab;
             if(curr_slab>=hud_texture_num_slabs) {
@@ -3631,7 +3625,7 @@ namespace jkgm {
         // GPU-cached 3DO, projected decal and flare passes are unaffected.
         bool isolate_native_world_batches() const
         {
-            return the_config->world_cache_preview &&
+            return the_config->use_gpu_cache &&
                    !the_config->enable_native_fallback &&
                    world_cache_target && world_cache_target->ready &&
                    frame_world_cache_camera.valid &&
@@ -4298,7 +4292,7 @@ namespace jkgm {
                          " nearby_other_ranges=",neighboring_other_ranges,
                          " nearest_other_owner=",nearest_other_owner,
                          " source_owner=",chosen.shadow_owner,
-                         " model_cache=",the_config->use_model_cache?1:0,
+                         " model_cache=",the_config->use_gpu_cache?1:0,
                          " reused=",spotlight_shadow_cached &&
                                     caster_signature==spotlight_shadow_3do_signature?1:0);
             }
@@ -6022,7 +6016,7 @@ namespace jkgm {
             frame_world_cache_camera.valid=false;
             if(world_cache_target)
                 world_cache_target->frame_render_candidates.clear();
-            if(!the_config->world_cache_preview ||
+            if(!the_config->use_gpu_cache ||
                mode!=renderer_mode::ingame)return;
             uint32_t address=0;
             if(!engine_material_debug::read_object(
@@ -6293,7 +6287,7 @@ namespace jkgm {
 
         void draw_world_cache_preview()
         {
-            if(!the_config->world_cache_preview ||
+            if(!the_config->use_gpu_cache ||
                !ogs->world_cache_preview_program || !world_cache_target ||
                !world_cache_target->ready ||
                !frame_world_cache_camera.valid ||
@@ -6808,7 +6802,7 @@ namespace jkgm {
         // never sample mutable JK native pointers after stage_world_cache().
         void draw_world_cache_transparency()
         {
-            if(!the_config->world_cache_preview ||
+            if(!the_config->use_gpu_cache ||
                !ogs->world_cache_preview_program || !world_cache_target ||
                !world_cache_target->ready || !frame_world_cache_camera.valid)
                 return;
@@ -7648,7 +7642,7 @@ namespace jkgm {
             // by JK. Expire their GPU resources, keeping recently reused meshes
             // without retaining every allocation for the entire level.
             // Sweep periodically to avoid iterating the cache on every frame.
-            if((the_config->use_model_cache || the_config->use_sprite_cache ||
+            if((the_config->use_gpu_cache ||
                  the_config->enable_decals ||
                 (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
                 the_config->enable_sun_shadows) &&

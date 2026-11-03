@@ -32,6 +32,9 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\compressed_sound_read.cpp /Fe:compressed_sound_read_test.exe
         compressed_sound_read_test.exe
 
+    - name: GPU cache configuration unification and permanent optimizations
+      run: python3 tests/gpu_cache_configuration.py
+
     - name: GPU procedural Thing renderer integration checks
       run: python3 tests/gpu_procedural_integration.py
 

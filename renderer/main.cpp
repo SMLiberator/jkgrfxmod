@@ -1303,7 +1303,7 @@ namespace {
         // have entirely different sector tints.
         std::array<float,3> own_sector_tint{};
         bool own_sector_tint_valid=false;
-        if(!camera_hud && the_config && the_config->use_model_cache &&
+        if(!camera_hud && the_config && the_config->use_gpu_cache &&
            hud_owner>=0x10000U) {
             auto const read=[](uintptr_t addr,void *out,size_t len) {
                 if(!gpu_span_readable(reinterpret_cast<void const *>(addr),len))
@@ -1606,7 +1606,7 @@ namespace {
         // valid immutable geometry for the directional depth pass. In that
         // case preserve the exact native render below and append a separate
         // shadow-only GPU instance. Previously this was possible ONLY with
-        // use_model_cache=false, leaving some characters without shadows.
+        // use_gpu_cache=false, leaving some characters without shadows.
         // Moving Things always need the existing sidecar. Static 3DO
         // architecture ALSO needs one when >16 dynamic lights force its
         // visible mesh to native rendering, or its otherwise valid depth
@@ -1614,7 +1614,7 @@ namespace {
         // snapshot the many ordinary MAT warm-up / geometry fallbacks.
         if(the_config && jkgm::sun_shadow_native_sidecar_needed(
                queued,active_native_model_camera_hud,
-               the_config->use_model_cache,the_config->enable_sun_shadows,
+               the_config->use_gpu_cache,the_config->enable_sun_shadows,
                active_native_shadow_dynamic,lighting_capacity_fallback,
                active_native_shadow_owner,active_native_model_thing_flags)) {
             size_t const prior=pending_gpu_instances.size();
@@ -1852,13 +1852,13 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     // Permit their GPU path even when world model caching is disabled.
     bool const shadow_only=!active_native_model_camera_hud &&
         the_config && shadow_enabled &&
-        (force_shadow_only || !the_config->use_model_cache);
+        (force_shadow_only || !the_config->use_gpu_cache);
     bool const casts_sun_shadows=!active_native_model_camera_hud &&
         jkgm::thing_casts_sun_shadows(active_native_model_thing_flags);
     // Excluded/invisible Things never enter either shadow map; they still
     // render normally through JK or the visible GPU 3DO path.
     if(shadow_only && !casts_sun_shadows)return false;
-    if(!the_config || (!the_config->use_model_cache && !shadow_only &&
+    if(!the_config || (!the_config->use_gpu_cache && !shadow_only &&
                        !active_native_model_camera_hud) ||
        !mesh || !matrix || pending_gpu_instances.size()>=16384 ||
        // Single VirtualQuery per candidate, including the optional RGB
@@ -1950,8 +1950,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         it->second.num_faces==m.num_faces &&
         it->second.num_uvs==m.num_uvs &&
         it->second.lighting_mode==m.lighting_mode;
-    bool const revision_fastpath=the_config->mesh_revision_tracking &&
-                                 mesh_revision::active();
+    bool const revision_fastpath=mesh_revision::active();
     uint64_t const current_generation=mesh_revision::current();
     bool const audit_frame=(gpu_frame_serial%32U)==0U;
     bool const should_hash=!header_unchanged ||
@@ -3085,7 +3084,7 @@ namespace {
         // occurs on success. Unsupported material residency temporarily
         // replays the unmodified native draw to warm the MAT safely.
         jkgm::gpu_3do_matrix34 view{},inverse{};
-        bool const eligible=the_config && the_config->use_model_cache &&
+        bool const eligible=the_config && the_config->use_gpu_cache &&
             pending_gpu_instances.size()<16384U &&
             jkgm::read_active_rd_camera_view(view) &&
             jkgm::gpu_polyline_inverse_view(view,inverse);
@@ -3124,7 +3123,7 @@ namespace {
 
     bool request_native_polyline_hooks()
     {
-        if(!the_config || !the_config->use_model_cache)return false;
+        if(!the_config || !the_config->use_gpu_cache)return false;
         // Exact uploaded executable, not OpenJKDF2. Guard both functions
         // AND rdThing's polyline call-site before placing any detour.
         auto const read=[](uintptr_t a,void *dst,size_t n) {
@@ -3206,7 +3205,7 @@ namespace {
     unsigned gpu_particle_logs=0,gpu_particle_reject_logs=0;
     bool submit_gpu_particle_cloud(void *rdthing,void *orientation)
     {
-        if(!the_config || !the_config->use_sprite_cache ||
+        if(!the_config || !the_config->use_gpu_cache ||
            !rdthing || !orientation ||
            pending_gpu_instances.size()>=16384U ||
            !gpu_span_readable(rdthing,8U) ||
@@ -5121,7 +5120,7 @@ namespace {
             }
             return false;
         };
-        if(!the_config || !the_config->use_sprite_cache ||
+        if(!the_config || !the_config->use_gpu_cache ||
            type>jkgm::sprite_fixed)return false;
         if(!gpu_span_readable(rd,0x48U) ||
            !gpu_span_readable(orientation,12*sizeof(float)))
@@ -5310,7 +5309,7 @@ namespace {
         // face flags and partially faded SPRs from opaque cutout shadows.
         if(the_config->enable_sun_shadows &&
            the_config->enable_sprite_shadows &&
-           the_config->use_sprite_cache &&
+           the_config->use_gpu_cache &&
            info.opacity>=0.999f && (flags&2U)==0U &&
            !instance.world_lighting_exempt &&
            pending_gpu_instances.size()+1U<16384U) {
@@ -5390,7 +5389,7 @@ namespace {
                 sprite_types.lookup(resource,static_cast<char const *>(resource),
                                     authored_type);
         }
-        if(profiling && !known_type && the_config->use_sprite_cache) {
+        if(profiling && !known_type && the_config->use_gpu_cache) {
             static unsigned samples=0;
             if(samples++<12U)
                 LOG_INFO("SPR GPU unavailable: authored SPR type not registered",
@@ -5433,7 +5432,7 @@ namespace {
             }
             return 1;
         }
-        if(known_type && the_config && the_config->use_sprite_cache &&
+        if(known_type && the_config && the_config->use_gpu_cache &&
            authored_type<=jkgm::sprite_fixed) {
             if(submit_gpu_sprite_quad(thing,orientation,authored_type,info))
                 return 1;
@@ -8808,8 +8807,7 @@ namespace {
 
     void __cdecl HookedJkInitNewCogVerbs(cog_register_verb_type register_verb, void *ctx)
     {
-        if(the_config && the_config->use_model_cache &&
-           the_config->mesh_revision_tracking && register_verb) {
+        if(the_config && the_config->use_gpu_cache && register_verb) {
             mesh_revision::begin(register_verb);
             TrueJkInitNewCogVerbs(mesh_revision::register_mutator,ctx);
             mesh_revision::finish();
@@ -8956,8 +8954,7 @@ int __cdecl HookedNativeColorEffects(jkgm::jk_hardware_color_effect *incoming)
 
 bool request_native_sector_color_hook()
 {
-    if(!the_config || !the_config->world_cache_preview ||
-       !the_config->use_model_cache)return false;
+    if(!the_config || !the_config->use_gpu_cache)return false;
     constexpr uint8_t signature[]{
         0x56,0x8b,0x74,0x24,0x08,0x57,0xb9,0x0a,
         0x00,0x00,0x00,0xbf,0x00,0x9e,0x88,0x00
@@ -9328,7 +9325,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
 
         renderer_hooks_active = true;
         native_node_attachment_hooks_active=attach_native_node_attachment_hooks();
-        if(the_config->profile_renderer || the_config->use_model_cache ||
+        if(the_config->profile_renderer || the_config->use_gpu_cache ||
            the_config->enable_decals ||
            (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
            the_config->enable_sun_shadows) {
