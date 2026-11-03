@@ -81,6 +81,7 @@ namespace jkgm {
         uint64_t decal_receiver_thing=0;
         uintptr_t decal_receiver_model=0;
         uintptr_t decal_receiver_mesh=0;
+        uint32_t decal_receiver_geoset=0xffffffffU; // exact GeoSet chosen by JK for this draw
         uint64_t decal_receiver_revision=0;
         uint32_t decal_receiver_occurrence=0;
         bool shadow_only=false; // native 3DO remains JK-rendered; cache is for depth only
