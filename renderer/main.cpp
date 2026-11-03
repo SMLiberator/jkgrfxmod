@@ -4535,6 +4535,10 @@ namespace {
             entry.fragments.push_back(std::move(fragment));
         }
 
+        if(entry.fragments.empty()) {
+            trace_probe("no_projected_mesh_fragments");
+            return false;
+        }
         // Project this SAME impact onto every other GeoSet, once, while
         // JK's animated joint matrices are still available. The current
         // fragments above continue to follow the exact native meshes.
@@ -4661,10 +4665,6 @@ namespace {
                    <<" adapted="<<expanded_depth;
                 LOG_INFO(msg.str());
             }
-        }
-        if(entry.fragments.empty()) {
-            trace_probe("no_projected_mesh_fragments");
-            return false;
         }
         auto inserted=moving_sprite_decals.emplace(
             sprite_key,std::move(entry));
