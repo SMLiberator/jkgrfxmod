@@ -20,6 +20,7 @@ uniform float displacement_factor;
 uniform float alpha_cutoff;
 uniform float native_face_opacity;
 uniform int has_texture; // 0=unresolved diagnostic, 1=albedo map, 2=intentionally no albedo
+uniform int solid_fullbright; // exact 8-bit CMP light-table invariant for GeoMode 3
 uniform int has_emissive;
 uniform int transparent_pass;
 uniform int post_exempt_pass; // Camera Thing pass after post-processing
@@ -778,11 +779,13 @@ void main() {
     vec3 env_reflection=gpu_environment_reflection(albedo.rgb,uv,env_metalness);
     // Metal suppresses diffuse only when its environment contribution
     // actually exists; follows the native replacement shader.
-    vec3 jk_fragment_lit=pixel_dynamic_lighting!=0
-        ? pixel_jk_diffuse_lighting() : jk_lit_rgb;
+    vec3 jk_fragment_lit=solid_fullbright!=0
+        ? vec3(1.0) : (pixel_dynamic_lighting!=0
+        ? pixel_jk_diffuse_lighting() : jk_lit_rgb);
     vec3 lit_rgb=albedo.rgb*jk_fragment_lit*(1.0-env_metalness);
     if(transparent_pass!=0 && post_exempt_pass==0 &&
        world_lighting_exempt==0 && decal_receiver_lighting==0 &&
+       solid_fullbright==0 &&
        blend_mode==0 && (alpha_mode==1 || alpha_mode==3) &&
        emissive_only==0) {
         // GPU alpha is applied when forming the premultiplied output below;
@@ -813,7 +816,7 @@ void main() {
     vec3 projected_light=vec3(0.0);
     if(translucent_spotlight_count>0 && transparent_pass!=0 &&
        post_exempt_pass==0 && world_lighting_exempt==0 &&
-       decal_receiver_lighting==0 &&
+       decal_receiver_lighting==0 && solid_fullbright==0 &&
        (alpha_mode==1 || alpha_mode==3) &&
        blend_mode!=1 && blend_mode!=2 && emissive_only==0) {
         projected_light=light_translucent_spotlight(
@@ -867,7 +870,8 @@ void main() {
     // one-sided surfaces. G-buffer normal.A=2 distinguishes them without
     // another attachment; receiver lighting treats their shadow response as
     // two-sided, independent of camera-facing normals. Coverage is still >0.
-    out_normal=world_lighting_exempt!=0 ? vec4(0.0,0.0,0.0,1.0) :
+    out_normal=(world_lighting_exempt!=0 || solid_fullbright!=0)
+                   ? vec4(0.0,0.0,0.0,1.0) :
                           vec4(normalize(view_normal),
                                sprite_receiver!=0 ? 2.0 : 1.0);
     // Depth target optionally carries the unlit diffuse base in GBA.
