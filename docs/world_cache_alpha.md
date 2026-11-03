@@ -1,6 +1,6 @@
 # GPU-cached SithWorld non-opaque drawing — first integration
 
-The `world_cache_preview` path now classifies native world geometry by
+The `use_gpu_cache` path now classifies native world geometry by
 **live SithSurface flags, GeoMode, MAT/cel and alpha properties**, while
 retaining JK's verified sector/portal visibility and persistent GPU geometry.
 
@@ -55,7 +55,7 @@ not reasons to recreate world geometry.
 
 ## In-game validation
 
-Enable `world_cache_preview` and `profile_renderer`.
+Enable `use_gpu_cache` and `profile_renderer`.
 Check `WORLD CACHE gpu_first_opaque` for `mixed_opaque_ranges` and
 `masked_ranges`, then `WORLD CACHE gpu_alpha` for `mixed` and
 `forced_blend`. Inspect an opaque window with alpha-painted holes,

@@ -1,21 +1,25 @@
-# Cached SithWorld GPU rendering (experimental)
+# Cached SithWorld GPU rendering
 
-The opt-in cached-world renderer submits eligible SithWorld architecture through
-persistent OpenGL geometry and a GPU-first opaque G-buffer pass. It is a
-rendering path, **not** the old non-rendering `world_cache_probe` prototype.
+The unified GPU renderer submits SithWorld architecture, 3DO models and
+ordinary sprites through their respective GPU caches. World geometry uses
+persistent OpenGL buffers and a GPU-first G-buffer pass. It is a rendering
+path, **not** the old non-rendering `world_cache_probe` prototype.
 
 Enable in `jkgm.json`:
 
 ```json
 {
-  "world_cache_preview": true,
+  "use_gpu_cache": true,
   "profile_renderer": true
 }
 ```
 
-`world_cache_preview` defaults to `false`. It is independent of
-`use_model_cache` (which controls 3DO mesh caching). Both can be enabled.
-`profile_renderer` is optional and provides periodic WORLD CACHE statistics.
+`use_gpu_cache` defaults to `true` and also controls GPU-cached 3DOs
+and ordinary sprites. The retired per-path switches are ignored with a
+warning. `profile_renderer` is optional and provides periodic WORLD CACHE
+statistics. `enable_native_fallback=false` remains useful for visual
+isolation tests; `enable_gpu_mat_warmup` is an independent experimental
+opt-in option (default `false`).
 
 ## Geometry and visibility
 
@@ -26,15 +30,17 @@ Enable in `jkgm.json`:
   Native sector visibility and HOM conventions remain important inputs.
 - Live surface settings, sector tint, MAT/cel selection and lighting are
   sampled at render time rather than frozen into the static geometry.
-- The cached pass currently targets supported opaque materials. Transparency,
-  sky/portal geometry, special materials, animated materials and invalid
-  resources are not generally handled by the opaque world cache.
+- Opaque, masked, translucent and special materials are split into the
+  appropriate opaque and transparent passes. Sky, scrolling UVs and animated
+  cels retain their dedicated rendering paths. Truly unreadable/unsupported
+  native resources still require error handling or fallback.
 
-**Caution:** The current GPU-first isolation path can suppress native
-mixed world batches when a valid cached-world candidate set exists. Do not
-assume every unsupported surface is automatically restored by a native
-fallback: missing or duplicated surfaces remain parity-test targets. The
-world renderer is still experimental.
+**Caution:** With `enable_native_fallback=false`, native mixed world
+batches are suppressed while a valid GPU world candidate set exists. That
+also hides native fallback Things that happen to share the same batch.
+Keep the default native fallback enabled unless explicitly testing GPU-only
+coverage. Missing MATs can require `enable_gpu_mat_warmup`, which is still
+experimental and disabled by default.
 
 ## Dynamic and baked lighting
 
@@ -62,9 +68,10 @@ and unresolved or special materials. No single counter proves pixel parity.
 
 Static geometry caching assumes that in-place changes to world vertex
 positions, UVs or topology are tracked or cause a suitable cache rebuild.
-Special surface paths and complete native visual parity are still work in
-progress. Preserve an A/B test with `world_cache_preview=false` when
-investigating missing faces, HOM or lighting differences.
+The ordinary cached rendering paths are now unified, but GPU-only coverage,
+dynamic native material residency and device-reset behavior still deserve
+regression testing. Set `use_gpu_cache=false` for a combined native
+comparison when investigating HOM, lighting, or missing surfaces.
 
 
 ## Native cel animations and surface scrolling

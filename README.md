@@ -747,11 +747,11 @@ available to cast shadows. Unchanged static shadows reuse the previous depth
 map without redrawing the world. Dynamic 3DO mesh ranges use their existing
 cached vertex/index data and updated Thing/node world transforms.
 
-**Native renderer compatibility:** with `"use_model_cache": false`, and
+**Native renderer compatibility:** with `"use_gpu_cache": false`, and
 shadows enabled, the verified native rdModel3 mesh hook copies bounded,
 near-spotlight geometry into a shadow-only cache but still lets JK draw the
 actual 3DO. This is not the GPU-cached model rendering option and is not
-enabled when shadow maps are off. With `"use_model_cache": true`, the
+enabled when shadow maps are off. With `"use_gpu_cache": true`, the
 existing indexed buffers are reused for rendering and shadows.
 
 **Current behavior and limitations:**
@@ -945,7 +945,7 @@ signature and material-map debug messages are no longer emitted.
 
 ## GPU-cached ordinary sprites (experimental)
 
-Set `"use_sprite_cache": true` to test shared GPU quad geometry for ordinary
+With `"use_gpu_cache": true` (default), shared GPU quad geometry is used for ordinary
 type-0 camera-facing, type-1 cylindrical billboard and type-2 fixed-plane SPRs.
 Fully-lit geometry-mode 3 (solid MAT palette color) and mode 4 (textured MAT)
 sprites qualify. Mode 3 uses MAT solidColor without UVs or texture uploads.
@@ -956,8 +956,8 @@ temporarily share the same LightMode 1 response without dynamic diffuse or
 Gouraud lighting. Decals, flares and unavailable MAT colors/textures retain
 their existing dedicated/native paths.
 Shared geometry eliminates duplicate quad uploads; **hardware-instanced draws
-are a separate next step** and are not yet implemented. The option defaults to
-false for A/B testing against the native sprite path.
+are a separate next step** and are not yet implemented. Set `use_gpu_cache=false`
+to compare the regular native sprite, model, and world draw paths together.
 
 ## Filled 3DO modes and GPU caching
 
@@ -1211,6 +1211,14 @@ change can follow later, so exports present the same 256-based convention.
 
 ## MAT residency and native fallback
 
+**Configuration migration:** `use_model_cache`, `use_sprite_cache`, and
+`world_cache_preview` have been replaced by `use_gpu_cache` (default
+`true`). `mesh_revision_tracking` and `optimize_hud_uploads` were
+retired; their optimized behaviors are standard. Legacy keys are ignored with
+a warning, so update existing `jkgm.json` files. Keep
+`enable_gpu_mat_warmup` separately disabled until its native uploader has
+been validated on the target machine.
+
 Direct native MAT preloading from GPU-cached 3DO interception has been
 **removed** after it caused a page fault in JKGM's std3D uploader during
 level loading. Older configs containing `"gpu_mat_preload": true` are
@@ -1396,11 +1404,11 @@ their preferred grade using `SetColorFilter(vector, fadeTime)`, and
 
 The replacement renderer's DirectDraw HUD overlay (shared by native and GPU
 3DO rendering) still uses the original four-frame double-buffer update cycle,
-but `"optimize_hud_uploads": true` (default) compares each slab against a
-CPU-side mirror of its **actual destination texture**. It skips unchanged
-slabs and uploads only the contiguous rows containing changes. It never
-alters geometry or shading and always clears/swaps the HUD at the same time.
-Set `"optimize_hud_uploads": false` for the previous full-slab behavior.
+and compares each slab against a CPU-side mirror of its **actual
+destination texture**. This optimization is now always enabled: unchanged
+slabs are skipped and only contiguous rows containing changes are uploaded.
+It does not alter geometry or shading, and the HUD still clears/swaps at
+the same time. The former `optimize_hud_uploads` option has been removed.
 With `"profile_renderer": true`, compare the `PERF passes_us HUDupload`
 value in identical locations. Note that this category includes both
 CPU RGBA conversion and the GPU driver call, and does not measure GPU time
@@ -1562,11 +1570,14 @@ tracked with targeted GPU mesh-cache invalidation.
 
 ## Experimental GPU-resident 3DO mesh path
 
-Set `"use_model_cache": true` in `jkgm.json` to draw **all supported
-filled 3DO meshes** from cached GPU vertex/index buffers. Set `false`
-(default) to use the previous JK-assisted 3DO renderer, while retaining
-JkGRfxMod's normal OpenGL world/sector rendering. This is not
-`use_vanilla_renderer`, which disables JkGRfxMod entirely.
+The unified `"use_gpu_cache": true` setting (default) draws supported
+3DO meshes, ordinary sprites, and SithWorld architecture through cached GPU
+geometry. Set it to `false` to disable the three ordinary cached drawing
+paths together, retaining the JK-assisted rendering path. This is not
+`use_vanilla_renderer`, which disables JkGRfxMod's hooks entirely. Features
+such as projected decals and shadow-only captures retain their own controls.
+`enable_native_fallback` is still available to diagnose unsupported world
+faces; experimental `enable_gpu_mat_warmup` remains opt-in and defaults false.
 
 The GPU renderer snapshots 3DO face-corner positions, UVs and face normals
 once and updates only world/joint matrices per frame. Simple concave face
@@ -1663,8 +1674,9 @@ Run workflow** on the `development` branch, not automatically on each push.
 The test artifact includes `post_opaque_composite.frag` along with the updated
 GPU and opaque-pass shaders. Always install the supplied shaders with the DLL.
 
-For performance diagnosis, compare `"use_model_cache": true` and `false`
+For performance diagnosis, compare `"use_gpu_cache": true` and `false`
 with `"profile_renderer": true`, `"enable_vsync": false`, and a `log_path`.
+This comparison now switches world, 3DO, and sprite caching together.
 The new `PERF gpu_3do` lines report candidate meshes, sphere rejections,
 instances, MAT residency checks, draw calls, triangle counts, texture
 resolutions and CPU-side GPU submission cost. These are CPU timings, *not*
@@ -1677,25 +1689,24 @@ build in `jkgm/shaders/`. Keep the native `jkgm.exe` bootstrap.
 
 
 
-### Experimental mesh revision tracking
+### Automatic mesh revision tracking
 
-With `"use_model_cache": true`, set `"mesh_revision_tracking": true` to
-enable experimental JK.dll COG mutation tracking. The renderer wraps 16
-mesh/material mutator verb registrations, preserving the original COG handlers
-and results. A mutation bumps a global generation: cached 3DOs only need a new
+With `use_gpu_cache` enabled, JK.dll COG mutation tracking is now standard,
+without a separate configuration option. The renderer wraps 16 mesh/material
+mutator verb registrations, preserving the original COG handlers and results. A mutation bumps a global generation: cached 3DOs only need a new
 source-byte signature when the generation changes, their mesh header changes, or
 once every 32 frames for an integrity audit. An audit mismatch permanently
 disables the shortcut for that session and restores original per-frame hashing.
 If the expected JK.dll registrations are missing, full hashing remains active.
 
-The setting defaults to false. **This is not yet a guarantee of instant
-invalidation for writes originating outside the known JK.dll verbs**; those
-can remain stale until the next audit. Texture pixel uploads/residency and
-per-Thing lighting are separate from geometry revision tracking. Benchmark
-with `"profile_renderer": true` and compare `PERF gpu_3do source_check_us_avg`,
-`checks_avg`, and `invalidations_total` with the setting off/on. For
-compatibility tests, exercise CloneModel, SetModelMesh, ReloadModel,
-ReplaceModelMaterial and ReplaceModelMeshMaterial, as well as animated cels.
+**This is not yet a guarantee of instant invalidation for writes originating
+outside the known JK.dll verbs**; those can remain stale until the next audit.
+Texture uploads/residency and per-Thing lighting are separate from mesh
+revision tracking. Use `"profile_renderer": true` to monitor
+`PERF gpu_3do source_check_us_avg`, `checks_avg`, and
+`invalidations_total`. For compatibility tests, exercise CloneModel,
+SetModelMesh, ReloadModel, ReplaceModelMaterial and
+ReplaceModelMeshMaterial, as well as animated cels.
 
 ## Native MAT mip selection
 
@@ -1969,7 +1980,7 @@ diagnostic-only `SPR decal probe` remains for comparison.
 must still be compared to actual JK world walls. The current receiver
 scanner supports **level architecture only**. Rigid 3DOs, animated
 3DOs, and receiver sector restrictions are future work. This mode
-does not need `use_model_cache` or `enable_mesh_collision`.
+does not need `use_gpu_cache` or `enable_mesh_collision`.
 
 ## Center-occluded SPR flares (experimental)
 
