@@ -3844,6 +3844,28 @@ namespace {
             for(auto &fragment:decal.fragments) {
                 jkgm::gpu_3do_matrix34 transform{};
                 bool found=false;
+                // LOD variants are tied to a skeleton node, not a
+                // particular rdMesh occurrence. Several hierarchy nodes
+                // may legally share one mesh pointer at another GeoSet.
+                jkgm::gpu_3do_matrix34 lod_node_pose{};
+                bool const node_variant=fragment.node_index!=0xffffffffU;
+                bool node_pose_ready=true;
+                if(node_variant) {
+                    auto read=[](uintptr_t at,void *dest,size_t count) {
+                        if(!gpu_span_readable(
+                               reinterpret_cast<void const *>(at),count))
+                            return false;
+                        std::memcpy(dest,
+                                    reinterpret_cast<void const *>(at),count);
+                        return true;
+                    };
+                    uint32_t const owner=static_cast<uint32_t>(
+                        fragment.receiver.thing_key>>32U);
+                    node_pose_ready=jkgm::read_sprite_decal_lod_node_pose(
+                        read,uintptr_t(owner)+0xc4U,
+                        fragment.node_index,lod_node_pose);
+                }
+                if(!node_pose_ready)continue;
                 // Both render paths refer to the SAME native Thing+mesh.
                 // Material warm-up may change rendering path frame-to-frame.
                 auto const receiver=std::find_if(
@@ -3859,8 +3881,11 @@ namespace {
                             (fragment.native_fallback ||
                              instance.decal_receiver_revision==
                                  fragment.receiver.mesh_revision) &&
-                            instance.decal_receiver_occurrence==
-                                fragment.occurrence;
+                            (node_variant
+                                ?jkgm::decal_geoset_same_pose(
+                                     instance.transform,lod_node_pose)
+                                :instance.decal_receiver_occurrence==
+                                     fragment.occurrence);
                     });
                 if(receiver!=pending_gpu_instances.end()) {
                     transform=receiver->transform;
@@ -3872,7 +3897,10 @@ namespace {
                            native.model==fragment.receiver.model &&
                            native.mesh==fragment.receiver.mesh &&
                            native.revision==fragment.native_structure &&
-                           native.occurrence==fragment.occurrence) {
+                           (node_variant
+                               ?jkgm::decal_geoset_same_pose(
+                                    native.transform,lod_node_pose)
+                               :native.occurrence==fragment.occurrence)) {
                             transform=native.transform;
                             found=true;
                             break;
