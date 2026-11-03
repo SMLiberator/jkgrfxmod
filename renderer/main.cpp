@@ -1185,6 +1185,10 @@ namespace {
         if(all_solid)return solid_ready(g.material_refs);
         auto const upload_generation=
             native_mat_upload_generation.load(std::memory_order_relaxed);
+        // Discover every missing MAT in this mesh in ONE inspection rather
+        // than serializing discovery over many frames while GPU-only rendering
+        // leaves the entire mesh invisible.
+        bool missing_native_texture=false;
         for(auto const &ref:g.material_refs) {
             native_material mat{};
             if(!read_object(ref.first,mat))
@@ -1225,12 +1229,17 @@ namespace {
                 if(the_config && the_config->enable_gpu_mat_warmup)
                     jkgm::get_native_mat_warm_queue().request(
                         ref.first,static_cast<int32_t>(cel));
-                return fail("unloaded_native_texture",ref.first,cel,&mat,&tex);
+                // Retain first missing-MAT detail, but queue the remaining
+                // independent materials before returning false.
+                if(!missing_native_texture)
+                    fail("unloaded_native_texture",ref.first,cel,&mat,&tex);
+                missing_native_texture=true;
+                continue;
             }
             gpu_mat_residency.mark_ready(gpu_frame_serial,upload_generation,
                                           ref.first,static_cast<uint32_t>(cel));
         }
-        return true;
+        return !missing_native_texture;
     }
 
     uint64_t elapsed_native_ns(std::chrono::steady_clock::time_point start)
@@ -8495,10 +8504,26 @@ namespace {
            !wglGetCurrentContext())return;
         uint32_t device=0;
         if(!read_object(0x0055C7ECU,device) || !device)return;
-        // At most four native uploads per tick, with a retry cooldown.
-        for(auto const &request:queue.due(4U))
+        // Allow more than four successful uploads per tick, but avoid long
+        // native D3D stalls. The first is always attempted, even if slow.
+        // Only ACTUALLY attempted failures receive the 30-tick cooldown.
+        constexpr size_t max_uploads_per_tick=12U;
+        constexpr auto time_budget=std::chrono::milliseconds(2);
+        auto const work=queue.due(max_uploads_per_tick);
+        auto const start=std::chrono::steady_clock::now();
+        bool attempted=false,over_budget=false;
+        for(auto const &request:work) {
+            if(over_budget ||
+               (attempted &&
+                std::chrono::steady_clock::now()-start>=time_budget)) {
+                over_budget=true;
+                queue.release_unattempted(request);
+                continue;
+            }
+            attempted=true;
             queue.finish(request,warm_gpu_mat_cel(
                 request.material,request.cel));
+        }
     }
     // SetSpotlight(thing,mat,vector(width,height,range),localOffset).
     // Use MAT indices like other COG material verbs; the renderer resolves

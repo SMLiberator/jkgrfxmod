@@ -66,6 +66,9 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\native_mat_warm_queue.cpp /Fe:native_mat_warm_queue_test.exe
         native_mat_warm_queue_test.exe
+    - name: Deferred MAT warmup responsiveness and safe service checks
+      run: python3 tests/native_mat_warmup_latency.py
+
     - name: GPU five-face lightsaber polyline geometry and view tests
       shell: cmd
       run: |

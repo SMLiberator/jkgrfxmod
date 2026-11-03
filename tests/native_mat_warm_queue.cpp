@@ -24,6 +24,20 @@ int main() {
     assert(work.size()==1 && work[0].material==0x13000);
     q.finish(work[0],true);
     assert(q.size()==0);
+    // When the soft per-tick time budget expires, omitted uploads
+    // remain immediately due; only attempted failures cool down.
+    q.request(0x13000,1);
+    q.request(0x14000,2);
+    work=q.due(2);
+    assert(work.size()==2);
+    q.finish(work[0],true);
+    q.release_unattempted(work[1]);
+    work=q.due(2);
+    assert(work.size()==1 && work[0].material==0x14000 &&
+           work[0].cel==2);
+    q.finish(work[0],true);
+    assert(q.size()==0);
+
     q.request(0x13000,-1);
     q.prepare_world(0x1111,0x2000);
     assert(q.size()==1);

@@ -748,6 +748,19 @@ with `enable_reflections=false`; sun lighting itself retains its own
 emissive G-buffer attachment (after SSAO), or the sorted transparent
 forward path, without adding a framebuffer or another geometry draw.
 
+## GPU MAT warmup responsiveness
+
+With `enable_gpu_mat_warmup=true`, GPU-cached 3DOs now queue **all**
+unavailable MAT/cels from a mesh in one inspection rather than only the first
+unloaded texture each frame. The safe post-native-Thing-tick uploader now
+attempts up to 12 MAT/cels per tick, with a ~2 ms soft time limit. Unattempted
+work stays eligible next tick; genuinely failed uploads retain a 30-tick
+retry cooldown. Verified native D3D device/format guards and the default
+upload variant remain unchanged. With native fallback disabled, geometry
+can still be invisible briefly, but multiple missing materials no longer
+require multiple frames merely to *discover*. A single native upload can
+exceed the soft 2ms budget; the guard limits extra work after that.
+
 ## Experimental default specular for unconfigured materials
 
 Set `"enable_default_specular": true` in `jkgm.json` to try weak,

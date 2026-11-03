@@ -49,6 +49,13 @@ public:
         }
         return result;
     }
+    // Return a time-slice-skipped request to the next native tick;
+    // it was never attempted and must not wait the failed-load cooldown.
+    void release_unattempted(native_mat_warm_request const &r) {
+        std::lock_guard<std::mutex> guard(lock_);
+        auto const it=pending_.find(key{r.material,r.cel});
+        if(it!=pending_.end())it->second=tick_;
+    }
     void finish(native_mat_warm_request const &r,bool loaded) {
         if(!loaded)return;
         std::lock_guard<std::mutex> guard(lock_);
