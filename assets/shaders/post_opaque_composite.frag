@@ -3,8 +3,6 @@
 uniform sampler2D color_image;
 uniform sampler2D emissive_image;
 uniform sampler2D occlusion_image;
-uniform int fill_tjunction_gaps; // opt-in: depth-bracketed G-buffer cracks
-uniform int tjunction_gap_fill_size; // 0..8 pixels to find geometry on EACH side
 uniform int debug_void_pixels; // unresolved raw empty-depth pixels, neon checkerboard
 uniform int retain_hom_pixels; // skip unwritten pixels, leaving prior scene buffer
 uniform sampler2D depth_image;
@@ -288,23 +286,11 @@ void project_spotlights(float depth,ivec2 pixel,
     }
 }
 
-// Reuse the scene depth once per candidate; do not re-fetch depth values
-// after finding bracketed neighbors. A sky pixel with no nearby opaque
-// geometry still needs tests when repair is enabled, so favor an early exit
-// and a small configured radius over additional full-screen passes.
-// RGBA16F normal.A records which opaque pixels were actually rasterized.
- // Do not use depth >= 65500 as an occupancy test: depth is 32 times the
- // forward distance and can overflow R16F on immense world/skybox geometry.
- // Lit and skybox surfaces both mark coverage, even when normal RGB is zero.
+// Opaque coverage is independent of the precision of the depth buffer.
+// Missing geometry intentionally follows HOM/clear-color behavior.
 bool has_opaque_coverage(ivec2 p)
 {
     return texelFetch(normal_image,p,0).a>0.5;
-}
-float gap_depth_or_empty(ivec2 p,ivec2 dims)
-{
-    if(any(lessThan(p,ivec2(0))) || any(greaterThanEqual(p,dims)))
-        return 65504.0;
-    return texelFetch(depth_image,p,0).r;
 }
 
 void main()
@@ -312,56 +298,7 @@ void main()
     ivec2 tc=ivec2(gl_FragCoord.xy);
     float depth=texelFetch(depth_image,tc,0).r;
     bool covered=has_opaque_coverage(tc);
-    if(fill_tjunction_gaps!=0 && tjunction_gap_fill_size>0 && !covered) {
-        ivec2 dims=textureSize(depth_image,0);
-        ivec2 selected=tc;
-        int best_span=100;
-        float best_depth=65504.0;
-        for(int axis=0;axis<2;++axis) {
-            // A one-pixel gap bracketed on both sides is already optimal.
-            // Avoid even starting the perpendicular search in that case.
-            if(best_span==2)break;
-            ivec2 step_dir=axis==0?ivec2(1,0):ivec2(0,1);
-            ivec2 before=tc,after=tc;
-            int dist_before=0,dist_after=0;
-            float z_before=65504.0,z_after=65504.0;
-            for(int d=1;d<=tjunction_gap_fill_size;++d) {
-                if(dist_before==0) {
-                    float z=gap_depth_or_empty(tc-step_dir*d,dims);
-                    if(z>0.0 && z<65500.0) {
-                        before=tc-step_dir*d;
-                        dist_before=d;
-                        z_before=z;
-                    }
-                }
-                if(dist_after==0) {
-                    float z=gap_depth_or_empty(tc+step_dir*d,dims);
-                    if(z>0.0 && z<65500.0) {
-                        after=tc+step_dir*d;
-                        dist_after=d;
-                        z_after=z;
-                    }
-                }
-                if(dist_before>0 && dist_after>0)break;
-            }
-            // No filled geometry on both sides: leave true voids untouched.
-            if(dist_before==0 || dist_after==0)continue;
-            int span=dist_before+dist_after;
-            float nearest=min(z_before,z_after);
-            if(span<best_span || (span==best_span && nearest<best_depth)) {
-                best_span=span;
-                best_depth=nearest;
-                selected=z_before<=z_after?before:after;
-            }
-        }
-        if(any(notEqual(selected,tc))) {
-            tc=selected;
-            depth=best_depth;
-            covered=has_opaque_coverage(tc);
-        }
-    }
-
-    // Debug the ACTUAL remaining missing pixels after any gap repair,
+    // Debug the ACTUAL remaining missing pixels,
     // regardless of HOM being enabled. Bright alternating neon colors make
     // subpixel edge cracks conspicuous even under sunlight/HDR processing.
     if(debug_void_pixels!=0 && !covered) {

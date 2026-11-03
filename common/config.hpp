@@ -36,8 +36,6 @@ namespace jkgm {
         bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
         bool gpu_pixel_lighting = false; // opt-in pixel dynamic lighting for all cached world/3DO geometry; false=JK Gouraud
         bool enable_ssao = true;
-        bool fill_tjunction_gaps = false; // opt-in G-buffer gap repair
-        unsigned int tjunction_gap_fill_size = 2U; // proven useful screen-pixel radius, 0..8; disabled unless fill_tjunction_gaps
         bool debug_void_pixels = false; // show raw unresolved empty-depth pixels as neon checkerboard
         bool retain_hom_pixels = true; // vanilla JK HOM default; false = Clear Display
         bool enable_parallax = true;

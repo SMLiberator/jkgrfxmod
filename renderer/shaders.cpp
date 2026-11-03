@@ -1221,8 +1221,6 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , emissive_image(gl::get_uniform_location(the_program, "emissive_image"))
     , occlusion_image(gl::get_uniform_location(the_program, "occlusion_image"))
     , depth_image(gl::get_uniform_location(the_program, "depth_image"))
-    , fill_tjunction_gaps(gl::get_uniform_location(the_program, "fill_tjunction_gaps"))
-    , tjunction_gap_fill_size(gl::get_uniform_location(the_program, "tjunction_gap_fill_size"))
     , debug_void_pixels(gl::get_uniform_location(the_program, "debug_void_pixels"))
     , retain_hom_pixels(gl::get_uniform_location(the_program, "retain_hom_pixels"))
     , fog_params(gl::get_uniform_location(the_program, "fog_params"))
@@ -1316,18 +1314,6 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_coverage_normal_sampl
     int sampler)
 {
     gl::set_uniform_integer(normal_image,sampler);
-}
-
-void jkgm::shaders::game_post_opaque_composite_shader::set_fill_tjunction_gaps(
-    bool enabled)
-{
-    gl::set_uniform_integer(fill_tjunction_gaps,enabled?1:0);
-}
-
-void jkgm::shaders::game_post_opaque_composite_shader::set_tjunction_gap_fill_size(
-    int pixels)
-{
-    gl::set_uniform_integer(tjunction_gap_fill_size,pixels);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_debug_void_pixels(
