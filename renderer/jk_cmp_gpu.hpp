@@ -15,11 +15,25 @@ static_assert(jk_cmp_lightlevel_offset==0x330U,
 using jk_cmp_lighttable=std::array<uint8_t,jk_cmp_lightlevel_bytes>;
 
 inline bool jk_cmp_is_fullbright(jk_cmp_lighttable const &levels,uint8_t index) {
-    // Detect actual unshaded entries, not particular palette-index ranges.
-    // A constant remapping also counts: software shading never changes it.
+    // Index-invariant case, useful even when the palette itself is absent.
     uint8_t const color=levels[index];
     for(size_t level=1;level<64U;++level)
         if(levels[level*256U+index]!=color)return false;
+    return true;
+}
+// Software rendering ultimately displays RGB, not the intermediate index.
+// Different palette entries can share exactly the same RGB triplet and
+// therefore remain visually fullbright despite table-index changes.
+inline bool jk_cmp_is_fullbright(
+    jk_cmp_lighttable const &levels,
+    std::array<uint8_t,256U*3U> const &palette,uint8_t index)
+{
+    size_t const first=size_t(levels[index])*3U;
+    for(size_t level=1;level<64U;++level) {
+        size_t const p=size_t(levels[level*256U+index])*3U;
+        if(palette[p]!=palette[first] || palette[p+1]!=palette[first+1] ||
+           palette[p+2]!=palette[first+2])return false;
+    }
     return true;
 }
 
