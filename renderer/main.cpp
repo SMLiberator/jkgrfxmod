@@ -3618,6 +3618,7 @@ namespace {
         jkgm::sprite_decal_receiver_identity receiver{};
         uint32_t occurrence=0; // distinguish repeated rdMesh hierarchy nodes
         uint32_t node_index=0xffffffffU; // LOD variant's stable hierarchy node
+        uint32_t geoset=0xffffffffU; // active LOD; unknown retains legacy mesh matching
         bool native_fallback=false;
         uint64_t id=0;
         uint64_t native_structure=0;
@@ -3841,7 +3842,28 @@ namespace {
                 log_moving_decal_state("sprite_opacity_zero",it->first);
             ++it;
             if(!(decal.opacity>0.0f))continue;
+            // The vast majority of LOD variants are dormant. Resolve the
+            // active set once per decal instead of searching all submitted
+            // models for every stored GeoSet on every animation frame.
+            auto read_lod=[](uintptr_t addr,void *out,size_t len) {
+                if(!gpu_span_readable(
+                       reinterpret_cast<void const *>(addr),len))
+                    return false;
+                std::memcpy(out,reinterpret_cast<void const *>(addr),len);
+                return true;
+            };
+            uint32_t active_lod=0xffffffffU;
+            if(!decal.fragments.empty()) {
+                auto const &root=decal.fragments.front();
+                uint32_t const owner=uint32_t(root.receiver.thing_key>>32U);
+                active_lod=jkgm::read_sprite_decal_active_geoset(
+                    read_lod,uintptr_t(owner)+0xc4U,root.receiver.model);
+            }
             for(auto &fragment:decal.fragments) {
+                if(active_lod!=0xffffffffU &&
+                   fragment.geoset!=0xffffffffU &&
+                   fragment.geoset!=active_lod)
+                    continue;
                 jkgm::gpu_3do_matrix34 transform{};
                 bool found=false;
                 // LOD variants are tied to a skeleton node, not a
@@ -4389,6 +4411,17 @@ namespace {
         entry.sprite_thing=(uint64_t(sprite_owner)<<32)|sprite_signature;
         entry.last_visible_frame=gpu_frame_serial;
         entry.opacity=info.opacity;
+        auto const read_current_geo=[](uintptr_t address,
+                                      void *dest,size_t length) {
+            if(!gpu_span_readable(
+                   reinterpret_cast<void const *>(address),length))
+                return false;
+            std::memcpy(dest,reinterpret_cast<void const *>(address),length);
+            return true;
+        };
+        uint32_t const hit_geoset=jkgm::read_sprite_decal_active_geoset(
+            read_current_geo,
+            uintptr_t(uint32_t(receiver_thing>>32U))+0xc4U,receiver_model);
         constexpr uint32_t max_decal_triangles=2048U;
         constexpr size_t max_decal_mesh_fragments=64U;
         struct receiver_piece {
@@ -4492,6 +4525,7 @@ namespace {
             moving_sprite_decal_fragment fragment{};
             fragment.receiver=piece.identity;
             fragment.occurrence=piece.occurrence;
+            fragment.geoset=hit_geoset;
             fragment.native_fallback=piece.native_fallback;
             fragment.id=next_gpu_id++;
             fragment.native_structure=native_decal_mesh_structure_signature(
@@ -4597,6 +4631,7 @@ namespace {
                     fragment.native_fallback=true;
                     fragment.occurrence=node.occurrence;
                     fragment.node_index=node.node;
+                    fragment.geoset=node.geoset;
                     fragment.id=next_gpu_id++;
                     fragment.native_structure=fragment.receiver.mesh_revision;
                     fragment.last_drawn_frame=gpu_frame_serial;
