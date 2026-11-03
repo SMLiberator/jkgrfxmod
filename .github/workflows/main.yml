@@ -41,6 +41,11 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_particle_cloud.cpp /Fe:gpu_particle_cloud_test.exe
         gpu_particle_cloud_test.exe
 
+    - name: Native MAT uploader default format selection regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_mat_upload_policy.cpp /Fe:native_mat_upload_policy_test.exe
+        native_mat_upload_policy_test.exe
     - name: Deferred GPU MAT warm-up queue lifetime and retry tests
       shell: cmd
       run: |

@@ -13,6 +13,7 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_polyline.hpp"
 #include "native_mat_warm_queue.hpp"
+#include "native_mat_upload_policy.hpp"
 #include "gpu_particle_cloud.hpp"
 #include "native_procedural_draw.hpp"
 #include "camera_hud_thing.hpp"
@@ -1221,8 +1222,9 @@ namespace {
                          (o.texture_loaded && o.texture_handle>0);
             }
             if(!present) {
-                jkgm::get_native_mat_warm_queue().request(
-                    ref.first,static_cast<int32_t>(cel));
+                if(the_config && the_config->enable_gpu_mat_warmup)
+                    jkgm::get_native_mat_warm_queue().request(
+                        ref.first,static_cast<int32_t>(cel));
                 return fail("unloaded_native_texture",ref.first,cel,&mat,&tex);
             }
             gpu_mat_residency.mark_ready(gpu_frame_serial,upload_generation,
@@ -7522,10 +7524,11 @@ namespace {
         saber_light_native_update_active=true;
         RealNativeThingUpdate(seconds,milliseconds);
         saber_light_native_update_active=previous_tick_state;
-        // Native std3D upload can crash here (jkgm.exe 0x42A546) even
-        // though the game tick and GL context exist. The native uploader
-        // requires additional JK-internal state; do not call it here.
-        // Keep requests queued for safe resolution; no direct uploads.
+        // The alternative native MAT format variant previously crashed at
+        // 0x42A546. Its corrected, descriptor-verified loader is experimental
+        // and disabled by default until tested in-game.
+        if(the_config && the_config->enable_gpu_mat_warmup)
+            service_native_mat_warm_queue();
         // Reapply exactly once after native JK's length/fade update, before
         // sithRender builds point lights. Both native and GPU paths agree.
         if(!saber.empty()) {
@@ -8306,6 +8309,31 @@ namespace {
         return verified;
     }
 
+
+    // 0x0042A4F5/0x0042A50F dereference native format descriptors.
+    // Merely checking the D3D device at 0x55C7EC is insufficient:
+    // the optional 0x55C7FC format was NULL in the 0x42A546 crash.
+    // Normal native rdCache uses variant 0 unless it explicitly opts into
+    // an alternate unsupported-device format (0x0043B48D/0x0043B717).
+    bool native_default_mat_uploader_ready(uint32_t texture_flags)
+    {
+        using namespace jkgm::engine_material_debug;
+        uint32_t device=0,device_alpha=0,d3d=0,format=0;
+        if(!read_object(0x0055C7ECU,device) ||
+           !device || !gpu_span_readable(
+               reinterpret_cast<void const *>(uintptr_t(device)),0x44U) ||
+           !read_object(uintptr_t(device)+0x10U,device_alpha) ||
+           !read_object(0x0055C828U,d3d) ||
+           !d3d || !gpu_span_readable(
+               reinterpret_cast<void const *>(uintptr_t(d3d)),sizeof(uint32_t)))
+            return false;
+        auto const slot=jkgm::native_mat_default_format_slot(
+            (texture_flags&1U)!=0U,device_alpha!=0U);
+        if(!read_object(slot,format) || format<0x10000U)return false;
+        // std3D copies 0x6C bytes at descriptor +0x38 via rep movsl.
+        return gpu_span_readable(
+            reinterpret_cast<void const *>(uintptr_t(format)+0x38U),0x6cU);
+    }
     // Called once when the COG message executes, or retried during opaque
     // composition if that message ran before OpenGL/native D3D was ready.
     // On success JKGM's existing DDraw intercept creates exactly the same
@@ -8350,12 +8378,12 @@ namespace {
            !gpu_span_readable(reinterpret_cast<void const *>(
                uintptr_t(texture.mipmap_buffers[0])),0x18))
             return false;
-        // Transparent MATs need the alpha texture cache; opaque ones
-        // select the native no_alpha path (arg 4 = 1).
         bool const has_alpha=(texture.header[0]&1U)!=0U;
-        auto const resident=[&](native_texture const &t)->bool {
-            auto const &surface=has_alpha?t.alpha_mips[0]:t.opaque_mips[0];
-            return surface.texture_loaded!=0 && surface.texture_handle>0;
+        auto const resident=[](native_texture const &t)->bool {
+            auto valid=[](native_surface const &surface) {
+                return surface.texture_loaded!=0 && surface.texture_handle>0;
+            };
+            return valid(t.alpha_mips[0]) || valid(t.opaque_mips[0]);
         };
         // Never invoke native std3D for an already-resident texture.
         // JK can temporarily detach its D3D device during pause/unpause
@@ -8364,14 +8392,15 @@ namespace {
         // std3D's uploader with a null internal device pointer.
         if(resident(texture))
             return true;
-        // Only the explicit SetSpotlight request can enter the native loader
-        // for an *unloaded* MAT. In particular, frame rendering must not
-        // refresh native texture-cache LRU: that was the unsafe call site.
+        // Use JK's default upload variant (0), not "opaque -> 1".
+        // Variant 1 requires a format descriptor absent on some devices.
+        if(!native_default_mat_uploader_ready(texture.header[0]))
+            return false;
         auto const native_load=reinterpret_cast<jkgm_rd_material_cache_fn>(
             jkgm_mat_cache_addr);
         if(!native_load(reinterpret_cast<void *>(mat_address),
                         reinterpret_cast<void *>(uintptr_t(info.texture)),
-                        0,has_alpha?0:1))
+                        0,jkgm::native_mat_default_upload_variant))
             return false;
         native_texture updated{};
         if(!read_object(info.texture,updated) || !resident(updated))
@@ -8431,16 +8460,19 @@ namespace {
                uintptr_t(tex.mipmap_buffers[0])),0x18U))
             return false;
         bool const alpha=(tex.header[0]&1U)!=0U;
-        auto const resident=[&](native_texture const &t) {
-            auto const &surface=alpha?t.alpha_mips[0]:t.opaque_mips[0];
-            return surface.texture_loaded!=0 && surface.texture_handle>0;
+        auto const resident=[](native_texture const &t) {
+            auto valid=[](native_surface const &surface) {
+                return surface.texture_loaded!=0 && surface.texture_handle>0;
+            };
+            return valid(t.alpha_mips[0]) || valid(t.opaque_mips[0]);
         };
         if(resident(tex))return true; // Avoid the native LRU refresh path.
+        if(!native_default_mat_uploader_ready(tex.header[0]))return false;
         auto const native_load=reinterpret_cast<jkgm_rd_material_cache_fn>(
             jkgm_mat_cache_addr);
         if(!native_load(reinterpret_cast<void *>(address),
                         reinterpret_cast<void *>(uintptr_t(info.texture)),
-                        0,alpha?0:1))return false;
+                        0,jkgm::native_mat_default_upload_variant))return false;
         native_texture updated{};
         if(!read_object(info.texture,updated) || !resident(updated))
             return false;

@@ -1222,6 +1222,15 @@ special switch is necessary.
 The separate explicit `SetSpotlight` MAT request remains available:
 its loader is *not* invoked from the per-frame GPU mesh interception path.
 
+An experimental deferred GPU material warm-up queue is available with
+`"enable_gpu_mat_warmup": true` (default **false**). This is opt-in after
+a startup crash from a wrongly selected native std3D texture format. The
+loader now passes JK's normal default upload variant (0), validates the
+native Direct3D device and selected texture-format descriptor, and limits
+uploads to four per game tick. With the switch disabled, the old native
+fallback behavior remains in effect. In-game verification is required
+before making automatic warm-up the default.
+
 ## Shared native MAT readiness checks
 
 GPU-cached 3DO meshes and GPU SPR decals now share confirmed native MAT/cel

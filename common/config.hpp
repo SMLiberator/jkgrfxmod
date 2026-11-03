@@ -50,6 +50,7 @@ namespace jkgm {
         bool use_model_cache = false; // cache 3DO meshes as persistent GPU geometry
         bool world_cache_preview = false; // GPU-first SithWorld rendering
         bool enable_native_fallback = true; // false: suppress mixed native world batches for cache gap diagnostics
+        bool enable_gpu_mat_warmup = false; // experimental; direct JK std3D calls require verified native format/device state
         bool use_sprite_cache = false; // experimental shared GPU quad caching for SPRs
         bool mesh_revision_tracking = false; // experimental JK.dll COG mutation tracking
         bool enable_spotlights = false; // COG MAT-based screen-space spotlights

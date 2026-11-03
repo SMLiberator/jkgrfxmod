@@ -186,6 +186,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_native_fallback")) {
             j.at("enable_native_fallback").get_to(rv->enable_native_fallback);
         }
+        if(j.contains("enable_gpu_mat_warmup")) {
+            j.at("enable_gpu_mat_warmup").get_to(rv->enable_gpu_mat_warmup);
+        }
         if(j.contains("use_sprite_cache")) {
             j.at("use_sprite_cache").get_to(rv->use_sprite_cache);
         }

@@ -2774,7 +2774,8 @@ namespace jkgm {
             if(!chosen) {
                 // Missing native MAT cels must not require a visible native
                 // fallback draw. Ask the tick-bound uploader to warm them.
-                jkgm::get_native_mat_warm_queue().request(group.material,cel);
+                if(the_config && the_config->enable_gpu_mat_warmup)
+                    jkgm::get_native_mat_warm_queue().request(group.material,cel);
                 return out;
             }
             auto const id=static_cast<size_t>(chosen->texture_handle);
