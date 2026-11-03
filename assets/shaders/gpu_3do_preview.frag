@@ -21,6 +21,8 @@ uniform float alpha_cutoff;
 uniform float native_face_opacity;
 uniform int has_texture; // 0=unresolved diagnostic, 1=albedo map, 2=intentionally no albedo
 uniform int solid_fullbright; // exact 8-bit CMP light-table invariant for GeoMode 3
+uniform sampler2D palette_fullbright_mask;
+uniform int has_palette_fullbright;
 uniform int has_emissive;
 uniform int transparent_pass;
 uniform int post_exempt_pass; // Camera Thing pass after post-processing
@@ -775,17 +777,24 @@ void main() {
                     max(fog_params.y-fog_params.x,0.0001),0.0,1.0)*fog_params.z;
     // Match the native vertex-by-vertex tint and lighting interpolation.
     // Keep it separate from alpha and from emissive output.
+    float fullbright=solid_fullbright!=0 ? 1.0 :
+        gpu_material_palette_fullbright(
+            palette_fullbright_mask,uv+albedo_scroll,has_palette_fullbright);
     float env_metalness=0.0;
     vec3 env_reflection=gpu_environment_reflection(albedo.rgb,uv,env_metalness);
+    // CMP fullbright is immune to lighting, not an extra HDR source.
+    // Author-provided emission stays separate.
+    env_metalness*=1.0-fullbright;
+    env_reflection*=1.0-fullbright;
     // Metal suppresses diffuse only when its environment contribution
     // actually exists; follows the native replacement shader.
-    vec3 jk_fragment_lit=solid_fullbright!=0
-        ? vec3(1.0) : (pixel_dynamic_lighting!=0
-        ? pixel_jk_diffuse_lighting() : jk_lit_rgb);
+    vec3 jk_fragment_lit=mix(
+        pixel_dynamic_lighting!=0 ? pixel_jk_diffuse_lighting() : jk_lit_rgb,
+        vec3(1.0),fullbright);
     vec3 lit_rgb=albedo.rgb*jk_fragment_lit*(1.0-env_metalness);
     if(transparent_pass!=0 && post_exempt_pass==0 &&
        world_lighting_exempt==0 && decal_receiver_lighting==0 &&
-       solid_fullbright==0 &&
+       fullbright<0.999 &&
        blend_mode==0 && (alpha_mode==1 || alpha_mode==3) &&
        emissive_only==0) {
         // GPU alpha is applied when forming the premultiplied output below;
@@ -816,7 +825,7 @@ void main() {
     vec3 projected_light=vec3(0.0);
     if(translucent_spotlight_count>0 && transparent_pass!=0 &&
        post_exempt_pass==0 && world_lighting_exempt==0 &&
-       decal_receiver_lighting==0 && solid_fullbright==0 &&
+       decal_receiver_lighting==0 && fullbright<0.999 &&
        (alpha_mode==1 || alpha_mode==3) &&
        blend_mode!=1 && blend_mode!=2 && emissive_only==0) {
         projected_light=light_translucent_spotlight(
@@ -826,7 +835,8 @@ void main() {
     if(dynamic_light_specular_enabled!=0 && num_lights>0 &&
        specular_params.x>0.0)
         specular+=point_light_specular(albedo.rgb,uv);
-    specular*=(1.0-fog);
+    specular*=(1.0-fog)*(1.0-fullbright);
+    projected_light*=1.0-fullbright;
     // The opaque pass composites this separate emissive attachment after
     // SSAO. The translucent pass has only the color target: emission must
     // therefore be added directly to premultiplied RGB, never multiplied
@@ -870,7 +880,7 @@ void main() {
     // one-sided surfaces. G-buffer normal.A=2 distinguishes them without
     // another attachment; receiver lighting treats their shadow response as
     // two-sided, independent of camera-facing normals. Coverage is still >0.
-    out_normal=(world_lighting_exempt!=0 || solid_fullbright!=0)
+    out_normal=(world_lighting_exempt!=0 || fullbright>=0.5)
                    ? vec4(0.0,0.0,0.0,1.0) :
                           vec4(normalize(view_normal),
                                sprite_receiver!=0 ? 2.0 : 1.0);

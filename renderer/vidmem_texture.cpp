@@ -199,6 +199,11 @@ void jkgm::vidmem_texture_surface::clear()
         r->texture_cache->release_srgb_texture(*emissive_map);
         emissive_map.reset();
     }
+    // Invalidate when JK uploads another cel or reuses this D3D handle.
+    for(auto const &entry:palette_fullbright_masks)
+        if(entry.second)
+            r->texture_cache->release_srgb_texture(*entry.second);
+    palette_fullbright_masks.clear();
 
     if(normal_map.has_value()) {
         r->texture_cache->release_linear_texture(*normal_map);

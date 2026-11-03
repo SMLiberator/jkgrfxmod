@@ -69,6 +69,7 @@ namespace jkgm {
             gl::uniform_location_id emissive_sampler,emissive_factor,emissive_scroll,has_emissive;
             gl::uniform_location_id emissive_only;
             gl::uniform_location_id solid_fullbright; // palette-indexed GeoMode 3
+            gl::uniform_location_id palette_fullbright_sampler,has_palette_fullbright;
             gl::uniform_location_id reflection_surface_sampler,reflection_normal_sampler;
             gl::uniform_location_id reflection_normal2_sampler,reflection_env_sampler;
             gl::uniform_location_id reflection_env2_sampler;
@@ -104,6 +105,7 @@ namespace jkgm {
                               point<2,float> scroll);
             void set_solid_color(point<4,float> tint);
             void set_solid_fullbright(bool enabled);
+            void set_palette_fullbright(bool enabled);
             void set_reflection(point<4,float> material,point<4,float> normals,
                                 point<2,float> scroll,point<2,float> scroll2,
                                 bool from,bool to,float weight,int mode);
@@ -279,6 +281,7 @@ namespace jkgm {
             gl::uniform_location_id thing_sector_tint_delta;
             gl::uniform_location_id colormap_tint;
             gl::uniform_location_id solid_fullbright;
+            gl::uniform_location_id palette_fullbright_sampler,has_palette_fullbright;
             gl::uniform_location_id specular_params,normal_specular_params;
             gl::uniform_location_id dynamic_light_specular_enabled;
             gl::uniform_location_id specular_surface_sampler,specular_normal_sampler;
@@ -336,6 +339,7 @@ namespace jkgm {
                               bool pixel_lighting);
             void set_colormap_tint(std::array<float,3> const &tint);
             void set_solid_fullbright(bool enabled);
+            void set_palette_fullbright(bool enabled);
             void set_thing_sector_tint_delta(std::array<float,3> const &delta);
             void set_local_eye(std::array<float,3> const &eye);
             void set_dynamic_light_specular(bool enabled);

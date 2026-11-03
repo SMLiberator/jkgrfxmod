@@ -232,6 +232,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\jk_cmp_gpu.cpp /Fe:jk_cmp_gpu_test.exe
         jk_cmp_gpu_test.exe
+    - name: Source-indexed MAT fullbright mask regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\jk_cmp_fullbright_mask.cpp /Fe:jk_cmp_fullbright_mask_test.exe
+        jk_cmp_fullbright_mask_test.exe
     - name: Animated moving decal GeoSet LOD enumeration regression
       shell: cmd
       run: |

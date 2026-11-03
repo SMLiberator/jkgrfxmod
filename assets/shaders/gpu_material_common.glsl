@@ -14,6 +14,13 @@ vec4 gpu_material_sample_albedo(
     }
     return base;
 }
+// Optional source-indexed fullbright mask shares normal albedo UVs.
+// No extra fragment lookup for materials without a valid source mask.
+float gpu_material_palette_fullbright(
+    sampler2D mask_image,vec2 albedo_uv,int enabled)
+{
+    return enabled!=0 ? texture(mask_image,albedo_uv).r : 0.0;
+}
 // Emission is independent of albedo opacity: essential for light sources
 // with albedo_factor 0 0 0 0, and for emissive-only glass/GUI materials.
 vec3 gpu_material_emission(

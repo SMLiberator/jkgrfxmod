@@ -34,6 +34,8 @@ uniform vec3 camera_forward_axis,camera_up_axis;
 uniform vec4 material_tint;
 uniform int solid_color; // GeoMode 3: native MAT/CMP RGB, no texture sampling
 uniform int solid_fullbright; // CMP index unchanged across the 64 light levels
+uniform sampler2D palette_fullbright_mask;
+uniform int has_palette_fullbright;
 uniform int alpha_cutout; // explicit cutout MATs on solid adjoins
 uniform float alpha_cutoff;
 uniform int transparent_pass; // 0 G-buffer, 1 sorted forward alpha
@@ -224,10 +226,14 @@ void main() {
     vec3 emission=gpu_material_emission(
         emissive_map,material_texcoord,emissive_scroll,
         emissive_factor,has_emissive);
+    float fullbright=solid_fullbright!=0 ? 1.0 :
+        gpu_material_palette_fullbright(
+            palette_fullbright_mask,material_texcoord+uv_scroll,
+            has_palette_fullbright);
     // Keep authored Gouraud/sector lighting, already interpolated in RGB.
     // The same GLSL helpers calculate pixel light for both world and 3DO.
     vec3 lighting=cached_lit_rgb;
-    if(world_pixel_dynamic_lighting!=0 && solid_fullbright==0 &&
+    if(world_pixel_dynamic_lighting!=0 && fullbright<0.999 &&
        cached_light_state.z>2.5 && num_lights>0) {
         float added=0.0;
         vec3 normal=normalize(cached_world_normal);
@@ -245,11 +251,14 @@ void main() {
             lighting=jk_point_compose(lighting,added,light_color);
         }
     }
-    lighting=solid_fullbright!=0 ? vec3(1.0) : clamp(lighting,0.0,1.0);
+    lighting=mix(clamp(lighting,0.0,1.0),vec3(1.0),fullbright);
     float env_metalness=0.0;
     vec3 env_reflection=world_environment_reflection(
         albedo,material_texcoord,env_metalness);
     vec3 direct_specular=world_direct_specular(albedo,material_texcoord);
+    env_metalness*=1.0-fullbright;
+    env_reflection*=1.0-fullbright;
+    direct_specular*=1.0-fullbright;
     vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness);
     if(transparent_pass!=0) {
         // Only one color attachment exists in the forward alpha target.
@@ -299,7 +308,7 @@ void main() {
     out_emissive=vec4(emission+env_reflection+direct_specular,
         dot(lighting,vec3(0.2126,0.7152,0.0722)));
     // Fullbright palette entries do not receive AO, sun or projected light.
-    out_normal=solid_fullbright!=0 ? vec4(0.0,0.0,0.0,1.0) :
+    out_normal=fullbright>=0.5 ? vec4(0.0,0.0,0.0,1.0) :
                vec4(normalize(cached_view_normal),1.0);
     out_depth=vec4(32.0/max(gl_FragCoord.w,0.00000001),albedo);
 }

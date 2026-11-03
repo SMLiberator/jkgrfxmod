@@ -15,6 +15,7 @@
 #include "retro_palette.hpp"
 #include "jk_colormap_layout.hpp"
 #include "jk_cmp_gpu.hpp"
+#include "jk_cmp_fullbright_mask.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
@@ -432,6 +433,7 @@ namespace jkgm {
             float albedo_transition=0.0f;
             int albedo_source2=2;
             gl::texture_view emission = gl::default_texture;
+            gl::texture_view palette_fullbright_mask = gl::default_texture;
             gl::texture_view normal = gl::default_texture;
             gl::texture_view normal2 = gl::default_texture;
             gl::texture_view surface = gl::default_texture;
@@ -458,6 +460,7 @@ namespace jkgm {
             int albedo_source=0;
             bool has_image=false, alpha=false, masked=false, dithered=false, special=false;
             bool solid_fullbright=false; // raw CMP index unchanged by all 64 software light levels
+            bool has_palette_fullbright=false; // exact source 8-bit MAT texels
             bool has_emission=false, emissive_only=false;
             bool filtered=true;
             material_blend_mode blend=material_blend_mode::normal;
@@ -2978,6 +2981,44 @@ namespace jkgm {
                     out.has_normal=true;
                 }
             }
+            // GPU upload has erased the original 8-bit MAT indices.
+            // Use the read-only rdTexture source mip; do NOT infer from
+            // RGB565/RGBA5551, which can alias multiple palette indices.
+            bool const original_indexed_albedo=
+                mat.format[0]==0U &&
+                (!surface->replacement_material ||
+                 (surface->replacement_material->use_original_albedo &&
+                  !surface->replacement_material->albedo_map.has_value())) &&
+                !(ctl && ctl->albedo) && from_albedo.has_value() &&
+                albedo_weight<=0.0f;
+            if(original_indexed_albedo && tex.mipmap_buffers[mip]!=0U) {
+                uint32_t cmp=0;
+                constexpr uintptr_t active_cmp=0x0073A410U;
+                if(read_object(active_cmp,cmp) &&
+                   cmp>=0x10000U && cmp<0x7ff00000U) {
+                    auto it=surface->palette_fullbright_masks.find(cmp);
+                    if(it==surface->palette_fullbright_masks.end()) {
+                        std::vector<char> mask;
+                        std::optional<srgb_texture_id> image;
+                        if(jk_cmp_build_fullbright_mask(
+                               read_bytes,cmp,tex.mipmap_buffers[mip],
+                               chosen->width,chosen->height,
+                               (tex.header[0]&1U)!=0U,
+                               static_cast<uint8_t>(tex.header[2]),mask))
+                            image=texture_cache->create_srgb_texture_from_buffer(
+                                make_size(static_cast<int>(chosen->width),
+                                          static_cast<int>(chosen->height)),
+                                make_span(mask).as_const_bytes());
+                        it=surface->palette_fullbright_masks.emplace(
+                            cmp,image).first;
+                    }
+                    if(it->second) {
+                        out.palette_fullbright_mask=
+                            texture_cache->get_texture_handle(*it->second);
+                        out.has_palette_fullbright=true;
+                    }
+                }
+            }
             // Preserve the native MAT's effective original mip-0 size.
             // Its UV reference size is clamped to 256 at draw submission,
             // rather than changing shared source geometry or decal UVs.
@@ -3520,6 +3561,14 @@ namespace jkgm {
                 }
                 bind_preview_color(draw.texture.texture,0,draw.texture.filtered);
                 bind_preview_color(draw.texture.emission,1,draw.texture.filtered);
+                // Unit 11 is the AO receiver on the projected-decal pass.
+                bool const indexed_fullbright=
+                    draw.texture.has_palette_fullbright &&
+                    !inst.is_projected_decal && !inst.camera_hud;
+                if(indexed_fullbright)
+                    bind_preview_color(draw.texture.palette_fullbright_mask,
+                                       11,draw.texture.filtered);
+                prog.set_palette_fullbright(indexed_fullbright);
                 bool const has_albedo_transition=
                     draw.texture.albedo_transition>0.0f;
                 if(has_albedo_transition) {
@@ -6308,6 +6357,14 @@ namespace jkgm {
             gl::bind_texture(gl::texture_bind_target::texture_2d,
                              material.texture);
             shader.set_solid_fullbright(material.solid_fullbright);
+            bool const indexed_fullbright=geometry_mode==4U &&
+                material.has_palette_fullbright;
+            if(indexed_fullbright) {
+                gl::set_active_texture_unit(11);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 material.palette_fullbright_mask);
+            }
+            shader.set_palette_fullbright(indexed_fullbright);
             if(geometry_mode==3U)shader.set_solid_color(material.tint);
             else shader.set_texture(material.width,material.height,
                                     material.tint,material.albedo_scroll,

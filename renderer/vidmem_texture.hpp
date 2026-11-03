@@ -7,6 +7,7 @@
 #include <d3d.h>
 #include <ddraw.h>
 #include <vector>
+#include <map>
 
 namespace jkgm {
     class vidmem_texture_surface;
@@ -48,6 +49,8 @@ namespace jkgm {
         std::optional<srgb_texture_id> albedo_map;
         color albedo_factor = color::fill(1.0f);
 
+        // Fullbright maps live with a native D3D texture generation.
+        std::map<uint32_t,std::optional<srgb_texture_id>> palette_fullbright_masks;
         std::optional<srgb_texture_id> emissive_map;
         color_rgb emissive_factor = color_rgb::fill(0.0f);
 

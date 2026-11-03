@@ -228,6 +228,8 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , has_emissive(gl::get_uniform_location(the_program,"has_emissive"))
     , emissive_only(gl::get_uniform_location(the_program,"emissive_only"))
     , solid_fullbright(gl::get_uniform_location(the_program,"solid_fullbright"))
+    , palette_fullbright_sampler(gl::get_uniform_location(the_program,"palette_fullbright_mask"))
+    , has_palette_fullbright(gl::get_uniform_location(the_program,"has_palette_fullbright"))
     , reflection_surface_sampler(gl::get_uniform_location(the_program,"surface_map"))
     , reflection_normal_sampler(gl::get_uniform_location(the_program,"normal_map"))
     , reflection_normal2_sampler(gl::get_uniform_location(the_program,"normal_map2"))
@@ -317,6 +319,11 @@ void jkgm::shaders::world_cache_preview_shader::set_solid_color(
 void jkgm::shaders::world_cache_preview_shader::set_solid_fullbright(bool enabled)
 {
     gl::set_uniform_integer(solid_fullbright,enabled?1:0);
+}
+void jkgm::shaders::world_cache_preview_shader::set_palette_fullbright(bool enabled)
+{
+    gl::set_uniform_integer(palette_fullbright_sampler,11);
+    gl::set_uniform_integer(has_palette_fullbright,enabled?1:0);
 }
 void jkgm::shaders::world_cache_preview_shader::set_albedo_transition(
     int source2,float weight)
@@ -593,6 +600,8 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , thing_sector_tint_delta(gl::get_uniform_location(the_program,"thing_sector_tint_delta"))
     , colormap_tint(gl::get_uniform_location(the_program,"colormap_tint"))
     , solid_fullbright(gl::get_uniform_location(the_program,"solid_fullbright"))
+    , palette_fullbright_sampler(gl::get_uniform_location(the_program,"palette_fullbright_mask"))
+    , has_palette_fullbright(gl::get_uniform_location(the_program,"has_palette_fullbright"))
     , specular_params(gl::get_uniform_location(the_program,"specular_params"))
     , dynamic_light_specular_enabled(gl::get_uniform_location(the_program,"dynamic_light_specular_enabled"))
     , specular_surface_sampler(gl::get_uniform_location(the_program,"surface_map"))
@@ -776,6 +785,11 @@ void jkgm::shaders::gpu_3do_preview_shader::set_thing_sector_tint_delta(
 void jkgm::shaders::gpu_3do_preview_shader::set_solid_fullbright(bool enabled)
 {
     gl::set_uniform_integer(solid_fullbright,enabled?1:0);
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_palette_fullbright(bool enabled)
+{
+    gl::set_uniform_integer(palette_fullbright_sampler,11);
+    gl::set_uniform_integer(has_palette_fullbright,enabled?1:0);
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_colormap_tint(
     std::array<float,3> const &tint)
