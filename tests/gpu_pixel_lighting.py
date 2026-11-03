@@ -44,7 +44,11 @@ assert "return enabled && camera_ready;" in (
     root / "renderer/world_cache_lighting.hpp").read_text(encoding="utf-8")
 assert "cache.native_dynamic_light.assign(" in wiring
 assert "native_dynamic_ready=read_world_cache_dynamic_lights(" in wiring
-assert "if(!pixel_lighting)point_lights.clear();" in wiring
+# Pixel diffuse can be disabled while opt-in GGX specular still needs the
+# native light list. The shader's independent uniform gates prevent that list
+# from re-lighting JK's baked/Gouraud diffuse.
+assert wiring.count("if(!pixel_lighting && !point_specular)point_lights.clear();")==2
+assert wiring.count("shader.set_specular_lighting(pixel_lighting,point_specular);")==2
 assert "std::istringstream lines{std::string(mb.str())};" in program
 assert 'gl::set_uniform_integer(pixel_dynamic_lighting,pixel_lighting?1:0)' in program
 # Pixel-enabled GPU geometry paths share the editable attenuation and
@@ -79,7 +83,12 @@ assert "gpu_material_discard(coverage,alpha_mode,alpha_cutoff," in world_frag
 assert "gpu_material_emission(" in world_frag
 assert "gpu_material_sample_albedo(" in world_frag
 # Opaque world reflections share the emissive attachment so SSAO does not dim them.
-assert "out_emissive=vec4(emission+env_reflection," in world_frag
+assert "out_emissive=vec4(emission+env_reflection+direct_specular," in world_frag
+assert "if(world_pixel_dynamic_lighting!=0" in world_frag
+world_specular=(root/"assets/shaders/world_cache_direct_specular.glsl").read_text(
+    encoding="utf-8")
+assert "if(world_dynamic_light_specular!=0)" in world_specular
+assert "vec3 world_direct_specular(" in world_specular
 assert '#include "gpu_material_common.glsl"' in world_frag
 assert "if(transparent_pass!=0)" in world_frag
 assert "float vertex_rgb_alpha=pow(clamp(face_opacity,0.0,1.0),1.8);" in world_frag
@@ -174,11 +183,17 @@ assert 'root/"shaders/world_cache_texture_preview.frag"' in program
 
 
 # The glslangValidator CLI cannot expand our runtime-local GLSL includes.
-# Materialize equivalent standalone sources for optional compile/link checks.
-common_material=(root/"assets/shaders/gpu_material_common.glsl").read_text(encoding="utf-8")
-def expand_includes(shader):
-    return (shader.replace('#include "jk_point_lighting.glsl"',shared)
-                  .replace('#include "gpu_material_common.glsl"',common_material))
+# Expand every local GLSL fragment (including the shared fluid law and the
+# new world direct-specular helper), just as the runtime shader loader does.
+shader_dir=root/"assets/shaders"
+def expand_includes(shader,stack=()):
+    def expand(match):
+        name=match.group(1)
+        assert "/" not in name and "\\" not in name and name not in (".","..")
+        assert name not in stack, ("recursive GLSL include",stack,name)
+        return expand_includes((shader_dir/name).read_text(encoding="utf-8"),
+                               stack+(name,))
+    return re.sub(r'(?m)^[ \t]*#include\s+"([^"]+)"[ \t]*$',expand,shader)
 
 compiler = shutil.which("glslangValidator")
 if compiler:
