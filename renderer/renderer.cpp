@@ -13,6 +13,7 @@
 #include "thing_sector_tint.hpp"
 #include "retro_palette.hpp"
 #include "jk_colormap_layout.hpp"
+#include "jk_cmp_gpu.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
@@ -453,6 +454,7 @@ namespace jkgm {
             // 2=intentionally no albedo map (neutral white).
             int albedo_source=0;
             bool has_image=false, alpha=false, masked=false, dithered=false, special=false;
+            bool solid_fullbright=false; // raw CMP index unchanged by all 64 software light levels
             bool has_emission=false, emissive_only=false;
             bool filtered=true;
             material_blend_mode blend=material_blend_mode::normal;
@@ -2600,8 +2602,13 @@ namespace jkgm {
                 out.albedo_source=0;
                 return out;
             }
-            // Native MAT solid colors are palette-indexed, not textured.
-            // Keep the COG/JK lighting path on the existing vertex shader.
+            // Native MAT solid colors retain their exact 8-bit palette
+            // index. Detect unshaded entries from the owning CMP's full
+            // 64-level software table; never guess fullbright from RGB.
+            jk_cmp_lighttable levels{};
+            if(jk_cmp_read_lighttable(read_bytes,cmp,levels))
+                out.solid_fullbright=jk_cmp_is_fullbright(
+                    levels,static_cast<uint8_t>(index));
             out.tint=make_point(float(rgb[0])/255.0f,
                                 float(rgb[1])/255.0f,
                                 float(rgb[2])/255.0f,1.0f);
@@ -3527,6 +3534,7 @@ namespace jkgm {
                 float const uv_height=(inst.is_projected_decal || inst.is_sprite_quad)
                     ? draw.texture.height
                     : gpu_3do_model_uv_extent(draw.texture.height);
+                prog.set_solid_fullbright(draw.texture.solid_fullbright);
                 prog.set_surface(draw.texture.albedo_source,uv_width,
                                  uv_height,transparent,
                                  static_cast<int>(draw.texture.blend),
@@ -6204,6 +6212,7 @@ namespace jkgm {
             gl::set_active_texture_unit(0);
             gl::bind_texture(gl::texture_bind_target::texture_2d,
                              material.texture);
+            shader.set_solid_fullbright(material.solid_fullbright);
             if(geometry_mode==3U)shader.set_solid_color(material.tint);
             else shader.set_texture(material.width,material.height,
                                     material.tint,material.albedo_scroll,
