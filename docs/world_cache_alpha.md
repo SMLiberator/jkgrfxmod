@@ -42,16 +42,24 @@ transitions, alpha-pass partition, Bayer dither and independent emission.
 The separate vertex shaders, per-geometry lighting and sky projection remain
 intact; specular, normal, environment and parallax code are not yet unified.
 
-## Intentionally deferred
+## Material effects and remaining limitations
 
-Fluid thickness/refraction and full 3DO-style specular/normal/environment
-material evaluation still need the next shared-material expansion.
-Forward alpha does not yet receive world sunlight/spotlight shadows
-or environment specularity with full opaque-surface parity.
-Native world batches also contain fallback Things/sprites; isolation
-still suppresses those mixed batches instead of preserving each
-unsupported object individually. These are known migration gaps,
-not reasons to recreate world geometry.
+Opaque and transparent world surfaces support fluid absorption, two normal-map
+slopes, surface-map reflectivity/roughness/metalness, environment mapping, and
+now per-pixel GGX highlights from the sun and optionally native Thing lights.
+The direct sunlight GGX term shares the existing near/far and moving-Thing
+shadow maps; material data no longer requires an EnvMap to be reflective.
+Opaque highlights are accumulated with the emissive G-buffer attachment, not
+attenuated by SSAO. Alpha surfaces compose highlights in their forward pass.
+
+The material **source** and alpha policy are shared with cached 3DOs, but
+per-geometry UV/normal transforms and some non-specular post effects still
+retain separate implementations. No new G-buffer attachment is necessary.
+
+Native world batches can contain fallback Things/sprites; GPU-only isolation
+still suppresses those mixed batches instead of preserving each unsupported
+object individually. Native world/Thing transparent depth sorting is also
+not globally unified. Those are remaining migration and ordering gaps.
 
 ## In-game validation
 
