@@ -192,6 +192,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\spotlight_shadow.cpp /Fe:spotlight_shadow_test.exe
         spotlight_shadow_test.exe
+    - name: JKGM sector CMP and fullbright palette lookup tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\jk_cmp_gpu.cpp /Fe:jk_cmp_gpu_test.exe
+        jk_cmp_gpu_test.exe
     - name: Native world GPU cache geometry and live surface state tests
       shell: cmd
       run: |
