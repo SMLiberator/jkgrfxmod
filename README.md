@@ -40,6 +40,30 @@ sphere as a candidate filter; very badly off-center 3DOs with undersized
 static world receiver snapshot, not the engine's exact sector traversal,
 so compare hit semantics against your target levels during testing.
 
+## Adjustable saber light (COG)
+
+`SetSaberLightIntensity(thing, maximum)` controls the native lightsaber
+point-light maximum on a **per-Thing** basis. Default `0.6` preserves JK
+lighting; `0` turns the light off completely (useful for sword mods), and
+`1.2` makes it twice as strong as vanilla. Valid range: `0..16`.
+
+```c
+SetSaberLightIntensity(player, 0.0); // Normal sword: no emitted light
+SetSaberLightIntensity(player, 0.6); // Restore original JK intensity
+```
+
+The original blade-extension light ramp is preserved. Changes apply instantly
+even on a fully extended saber and affect native and GPU-cached lighting alike.
+Blade MATs, procedural polyline rendering, damage, and hit detection are
+unchanged. Settings are isolated per actor/player and discarded when a new
+world is loaded or the Thing is recycled. Like the other COG extensions,
+this requires the community JK.dll `InitNewCogVerbs` hook and the
+signature-verified native Thing-update detour.
+
+**Deferred:** Higher-accuracy saber collision, including spatial sweep
+sampling and attacks whose damage-on/off keyframe markers both fall between
+updates. This is deliberately left untouched while we finish GPU caching.
+
 ## Features
 
 - Cog controllable distance fog, includes new Cog verbs

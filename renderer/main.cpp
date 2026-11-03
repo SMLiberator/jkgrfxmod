@@ -20,6 +20,7 @@
 #include "thing_node_native.hpp"
 #include "thing_node_attachment.hpp"
 #include "spotlight.hpp"
+#include "saber_light.hpp"
 #include "thing_attachment_normal.hpp"
 #include "native_thingface_friction.hpp"
 #include "native_earth_hit_sound.hpp"
@@ -6156,6 +6157,69 @@ namespace {
         cog_push_float(ctx,jkgm::cog_math_lerp(a,b,t));
     }
 
+    // SithThing's actorParams: native (JKGM) saber light is +0x1a4;
+    // identity +0x74, actor/player type +0x0c. Never touch a recycled Thing.
+    jkgm::saber_light::registry &saber_light_overrides()
+    {
+        static jkgm::saber_light::registry entries;
+        return entries;
+    }
+    void prepare_saber_light_world()
+    {
+        uint32_t world=0;
+        if(jkgm::engine_material_debug::matches_tested_executable() &&
+           jkgm::engine_material_debug::read_object(
+               jkgm::engine_material_debug::current_world_global,world))
+            saber_light_overrides().prepare_world(world);
+    }
+    bool read_saber_light_native(uintptr_t thing,uint32_t &signature,
+                                 float &light)
+    {
+        if(thing<0x10000U || !gpu_span_readable(
+                reinterpret_cast<void const *>(thing),0x1a8U))
+            return false;
+        auto const *raw=reinterpret_cast<uint8_t const *>(thing);
+        uint32_t kind=0;
+        std::memcpy(&kind,raw+0x0cU,4);
+        std::memcpy(&signature,raw+0x74U,4);
+        std::memcpy(&light,
+            raw+jkgm::saber_light::native_intensity_offset,4);
+        return (kind==2U || kind==10U) && signature!=0 &&
+            std::isfinite(light) && light>=0.0f;
+    }
+    void write_saber_light_native(uintptr_t thing,float intensity)
+    {
+        std::memcpy(reinterpret_cast<void *>(
+            thing+jkgm::saber_light::native_intensity_offset),
+            &intensity,sizeof(intensity));
+    }
+
+    // SetSaberLightIntensity(thing, maximum). Default: 0.6 (native JK).
+    // 0 disables only the saber light; it does not alter MAT or collision.
+    void __cdecl cog_set_saber_light_intensity(void *ctx)
+    {
+        float const maximum=cog_pop_float(ctx);
+        void *thing=cog_pop_thing(ctx);
+        if(!native_node_attachment_hooks_active) {
+            LOG_WARNING("SetSaberLightIntensity unavailable: native Thing update "
+                        "signature did not match this executable");
+            return;
+        }
+        uintptr_t const owner=reinterpret_cast<uintptr_t>(thing);
+        uint32_t identity=0;
+        float current=0.0f;
+        if(!read_saber_light_native(owner,identity,current))return;
+        prepare_saber_light_world();
+        float adjusted=current;
+        if(!saber_light_overrides().set(owner,identity,maximum,
+                                       current,adjusted)) {
+            LOG_WARNING("SetSaberLightIntensity rejected non-finite or "
+                        "out-of-range maximum (valid 0..16)");
+            return;
+        }
+        write_saber_light_native(owner,adjusted); // Immediate change.
+    }
+
     // RandDir(): uniformly random unit vector over the entire sphere.
     void __cdecl cog_math_rand_dir(void *ctx)
     {
@@ -7414,7 +7478,40 @@ namespace {
     // synchronized, not just a render-only sprite transform.
     void __cdecl HookedNativeThingUpdate(float seconds,int milliseconds)
     {
+        // JK recomputes saber intensity only while extending/retracting.
+        // Restore its ORIGINAL value before ticking, or a fully extended
+        // saber would compound our multiplier on every frame.
+        auto &saber=saber_light_overrides();
+        if(!saber.empty()) {
+            prepare_saber_light_world();
+            for(auto const &entry:saber.snapshot()) {
+                uint32_t actual=0;float native=0.0f;
+                if(!read_saber_light_native(entry.thing,actual,native) ||
+                   actual!=entry.identity) {
+                    saber.erase(entry.thing);
+                    continue;
+                }
+                write_saber_light_native(entry.thing,entry.unscaled_intensity);
+            }
+        }
         RealNativeThingUpdate(seconds,milliseconds);
+        // Reapply exactly once after native JK's length/fade update, before
+        // sithRender builds point lights. Both native and GPU paths agree.
+        if(!saber.empty()) {
+            prepare_saber_light_world();
+            for(auto const &entry:saber.snapshot()) {
+                uint32_t actual=0;float native=0.0f;
+                if(!read_saber_light_native(entry.thing,actual,native) ||
+                   actual!=entry.identity) {
+                    saber.erase(entry.thing);
+                    continue;
+                }
+                float adjusted=0.0f;
+                if(saber.capture_native(entry.thing,entry.identity,native,
+                                        adjusted))
+                    write_saber_light_native(entry.thing,adjusted);
+            }
+        }
         uint32_t world=0;
         if(jkgm::engine_material_debug::read_object(
              jkgm::engine_material_debug::current_world_global,world))
@@ -7526,6 +7623,8 @@ namespace {
     }
     void detach_native_node_attachment_hooks()
     {
+        // No sidecar state must survive DLL teardown or a new game session.
+        saber_light_overrides().clear();
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
         DetourDetach(&(PVOID&)RealNativeThingUpdate,HookedNativeThingUpdate);
@@ -8518,6 +8617,7 @@ namespace {
         cog_verb_entry{"setperipheralblur", cog_set_peripheral_blur},
         cog_verb_entry{"getperipheralblur", cog_get_peripheral_blur},
         cog_verb_entry{"resetperipheralblur", cog_reset_peripheral_blur},
+        cog_verb_entry{"setsaberlightintensity", cog_set_saber_light_intensity},
         cog_verb_entry{"setspotlight", cog_set_spotlight},
         cog_verb_entry{"setspotlightintensities", cog_set_spotlight_intensities},
         cog_verb_entry{"clearspotlight", cog_clear_spotlight},
@@ -8605,7 +8705,7 @@ namespace {
             register_verb(ctx, verb.handler, verb.name);
         }
 
-        LOG_DEBUG("Registered math, fog, sun, spotlight, post-processing, material, SPR, AI and ThingNode attachment COG verbs");
+        LOG_DEBUG("Registered math, fog, sun, spotlight, saber light, post-processing, material, SPR, AI and ThingNode attachment COG verbs");
     }
 }
 
