@@ -6159,6 +6159,9 @@ namespace {
 
     // SithThing's actorParams: native (JKGM) saber light is +0x1a4;
     // identity +0x74, actor/player type +0x0c. Never touch a recycled Thing.
+    // COG callbacks can run inside sithThing_Update while its native
+    // saber intensity is temporarily restored to the unscaled value.
+    thread_local bool saber_light_native_update_active=false;
     jkgm::saber_light::registry &saber_light_overrides()
     {
         static jkgm::saber_light::registry entries;
@@ -6217,7 +6220,11 @@ namespace {
                         "out-of-range maximum (valid 0..16)");
             return;
         }
-        write_saber_light_native(owner,adjusted); // Immediate change.
+        // If invoked from a Thing timer/COG during sithThing_Update,
+        // leave the native value alone. The post-update pass will scale it
+        // once; writing here would cause a second multiplication.
+        if(!saber_light_native_update_active)
+            write_saber_light_native(owner,adjusted);
     }
 
     // RandDir(): uniformly random unit vector over the entire sphere.
@@ -7494,7 +7501,10 @@ namespace {
                 write_saber_light_native(entry.thing,entry.unscaled_intensity);
             }
         }
+        bool const previous_tick_state=saber_light_native_update_active;
+        saber_light_native_update_active=true;
         RealNativeThingUpdate(seconds,milliseconds);
+        saber_light_native_update_active=previous_tick_state;
         // Reapply exactly once after native JK's length/fade update, before
         // sithRender builds point lights. Both native and GPU paths agree.
         if(!saber.empty()) {
