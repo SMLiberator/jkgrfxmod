@@ -1543,15 +1543,17 @@ namespace jkgm {
             }
         }
 
-        // Composite Camera-type HUD Things after all post-processing, but
-        // before the traditional DirectDraw HUD. Only GPU-cached Thing
-        // instances participate; no material-specific exemption remains.
+        // Composite Camera-type HUD Things after scene post-processing, but
+        // before DirectDraw HUD. In Retro Mode draw to the linear staging
+        // buffer so final palette quantization includes these Camera Things.
         void draw_post_exempt()
         {
             if(deferred_gpu_3do_instances.empty()) return;
 
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                                 gl::default_framebuffer);
+                 ogs->retro_mode_active && ogs->retro_present_buffer
+                     ? ogs->retro_present_buffer->fbo
+                     : gl::default_framebuffer);
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
             gl::disable(gl::capability::depth_test);
             gl::set_depth_mask(false);
@@ -1752,21 +1754,29 @@ namespace jkgm {
             // exact Retro CMP color presentation.
             ogs->auto_exposure_scene=(mode==renderer_mode::ingame) &&
                                       !ogs->retro_mode_active;
+            // Preserve the old fast direct-to-screen path unless Retro is
+            // active. One RGBA16F staging texture is allocated lazily only
+            // for Retro so the HUD stays exempt from all earlier effects.
+            if(ogs->retro_mode_active && !ogs->retro_present_buffer)
+                ogs->retro_present_buffer=std::make_unique<post_buffer>(
+                    conf_scr_res);
             {
                 profile_scope cpu(measure,profile_frame.timings[
                     profile_idx(profile_stage::present_composite)]);
                 if(gpu_timing)present_gpu_queries.timestamp(2U,true);
                 frame_compositor->end_frame(ogs.get(),conf_scr_res,scene);
                 draw_post_exempt();
-                // Vanilla DirectDraw HUD is 2D screen-space UI, not a scene
-                // light source. Keep it out of HDR exposure, bloom, grading,
-                // spatial blur, Retro quantization and frame-trail history.
-                // Draw last so it also overlays Camera Thing 3D HUDs.
+                // Keep DirectDraw HUD out of HDR, bloom, grading, blur and
+                // trails. It overlays Camera Thing HUDs, but Retro is the
+                // ONLY effect applied afterwards, to the complete image.
                 if(mode==renderer_mode::ingame) {
                     profile_scope hud_cpu(measure,profile_frame.timings[
                         profile_idx(profile_stage::hud_draw)]);
                     draw_hud();
                 }
+                // Never quantize menus (their independent presentation path
+                // returned earlier). Exactly one final LUT pass in gameplay.
+                present_retro_after_hud();
                 if(gpu_timing)present_gpu_queries.timestamp(2U,false);
             }
             if(gpu_timing)present_gpu_queries.end();
@@ -2019,10 +2029,13 @@ namespace jkgm {
 
         void draw_hud()
         {
-            // Composite the DirectDraw HUD over the final sRGB presentation,
-            // not into the linear 3D scene before tone mapping and bloom.
+            // Keep the DirectDraw HUD out of scene tone mapping, bloom and
+            // temporal history. In Retro Mode it *must* be included in the
+            // final CMP palette quantization, after Camera-type HUD Things.
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                                 gl::default_framebuffer);
+                 ogs->retro_mode_active && ogs->retro_present_buffer
+                     ? ogs->retro_present_buffer->fbo
+                     : gl::default_framebuffer);
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
             gl::enable(gl::capability::blend);
             gl::set_blend_function(gl::blend_function::one,
@@ -2039,6 +2052,40 @@ namespace jkgm {
             gl::bind_vertex_array(ogs->hudmdl.vao);
             gl::draw_elements(
                 gl::element_type::triangles, ogs->hudmdl.num_indices, gl::index_type::uint32);
+        }
+
+        // Retro quantization is the VERY LAST gameplay draw, following
+        // scene effects, trails, GPU Camera-type HUD and DirectDraw HUD.
+        // All pixels are sampled in linear light, converted to sRGB for the
+        // 64^3 LUT lookup, then written in the CMP's exact encoded RGB8.
+        void present_retro_after_hud()
+        {
+            if(!ogs->retro_mode_active || !ogs->retro_present_buffer)return;
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 gl::default_framebuffer);
+            gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+            gl::disable(gl::capability::blend);
+            gl::disable(gl::capability::depth_test);
+            gl::disable(gl::capability::cull_face);
+            gl::set_depth_mask(false);
+            ogs->post_frame_blend.use_program();
+            ogs->post_frame_blend.set_current_sampler(0);
+            ogs->post_frame_blend.set_history_sampler(1);
+            ogs->post_frame_blend.set_blend_strength(0.0f);
+            ogs->post_frame_blend.set_retro_palette(2,true);
+            gl::set_active_texture_unit(2);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             ogs->retro_lut_texture);
+            gl::set_active_texture_unit(0);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             ogs->retro_present_buffer->tex);
+            gl::bind_vertex_array(ogs->postmdl.vao);
+            // The LUT already stores sRGB8 encoded CMP colors.
+            gl::disable(gl::capability::framebuffer_srgb);
+            gl::draw_elements(gl::element_type::triangles,
+                ogs->postmdl.num_indices,gl::index_type::uint32);
+            gl::enable(gl::capability::framebuffer_srgb);
+            gl::set_depth_mask(true);
         }
 
         void update_current_batch()

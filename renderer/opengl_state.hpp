@@ -186,6 +186,9 @@ namespace jkgm {
 
         post_buffer screen_postbuffer1;
         post_buffer screen_postbuffer2;
+        // Allocate only when Retro is actually active. This buffer contains
+        // the linear scene PLUS both HUD layers before final CMP quantization.
+        std::unique_ptr<post_buffer> retro_present_buffer;
 
         // Fully GPU-resident 1x1 logarithmic luminance adaptation (no readback).
         post_buffer auto_exposure_a;

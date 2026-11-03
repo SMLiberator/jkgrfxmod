@@ -1,9 +1,11 @@
 #version 330 core
 
-// Both textures contain finished linear-light presentation frames, including
-// HUD, bloom, grain, vignette, and color grading. Non-Retro output relies on
-// hardware framebuffer sRGB conversion; Retro output uses the CMP's exact
-// sRGB bytes with framebuffer conversion disabled.
+// Blend operates on linear scene-only frames: bloom/grain/grading can be
+// present, but Camera and DirectDraw HUDs must NOT enter temporal history.
+// Normal output relies on framebuffer sRGB conversion. Retro output uses
+// this shader again, as the VERY LAST draw after both HUDs have been
+// composited into a separate linear staging image. Its CMP sRGB bytes
+// bypass framebuffer sRGB conversion.
 uniform sampler2D current_image;
 uniform sampler2D history_image;
 uniform float blend_strength;
@@ -35,8 +37,8 @@ void main()
         vec4 previous=texelFetch(history_image,pixel,0);
         current=mix(current,previous,clamp(blend_strength,0.0,1.0));
     }
-    // Only the default-framebuffer pass quantizes; trails accumulate before
-    // this, so they cannot generate any intermediate display colors.
+    // Only the final default-framebuffer Retro pass quantizes; trails and
+    // both HUD layers have been composited before it runs.
     if(retro_palette_enabled!=0)
         current.rgb=palette_quantize(current.rgb);
     out_color=current;

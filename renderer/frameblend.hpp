@@ -50,28 +50,24 @@ namespace jkgm {
         gl::draw_elements(
             gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
 
-        // Present the completed accumulated image. Normal mode uses hardware
-        // GL_FRAMEBUFFER_SRGB to encode the linear output. Retro Mode instead
-        // writes the CMP's RGB8 sRGB values directly, since a window pixel
-        // format is not guaranteed to support hardware sRGB conversion.
-        gl::bind_framebuffer(gl::framebuffer_bind_target::any, gl::default_framebuffer);
+        // Present the accumulated SCENE, without Retro quantization.
+        // Retro stages this linear result in a separate framebuffer so
+        // Camera-type HUDs and the DirectDraw HUD can be composited first.
+        // The final CMP pass happens in renderer::end_frame() AFTER both HUDs.
+        // The non-Retro path keeps its existing direct presentation.
+        if(ogs->retro_mode_active && ogs->retro_present_buffer)
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 ogs->retro_present_buffer->fbo);
+        else
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 gl::default_framebuffer);
         gl::set_viewport(make_box(make_point(0, 0), screen_size));
         ogs->post_frame_blend.set_blend_strength(0.0f);
-        ogs->post_frame_blend.set_retro_palette(2,ogs->retro_mode_active);
-        if(ogs->retro_mode_active) {
-            gl::set_active_texture_unit(2);
-            gl::bind_texture(gl::texture_bind_target::texture_2d,ogs->retro_lut_texture);
-            gl::set_active_texture_unit(0);
-        }
+        ogs->post_frame_blend.set_retro_palette(2,false);
+        gl::set_active_texture_unit(0);
         gl::bind_texture(gl::texture_bind_target::texture_2d, next.tex);
-        if(ogs->retro_mode_active) {
-            gl::disable(gl::capability::framebuffer_srgb);
-        }
         gl::draw_elements(
             gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
-        if(ogs->retro_mode_active) {
-            gl::enable(gl::capability::framebuffer_srgb);
-        }
 
         ogs->frame_blend_history_valid = true;
         ogs->frame_blend_use_a = !ogs->frame_blend_use_a;

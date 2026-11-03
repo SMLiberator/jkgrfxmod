@@ -35,6 +35,9 @@ jobs:
     - name: Standard sunlight shadow optimization configuration and code checks
       run: python3 tests/sun_shadow_standard_optimizations.py
 
+    - name: Retro final-frame presentation order and menu exclusion
+      run: python3 tests/retro_final_presentation.py
+
     - name: GPU cache configuration unification and permanent optimizations
       run: python3 tests/gpu_cache_configuration.py
 

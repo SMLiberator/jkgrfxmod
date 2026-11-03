@@ -1004,7 +1004,8 @@ never causes late HUD rendering.
 
 On the GPU-cached 3DO path, all faces of a Camera-type Thing are rendered
 in the final overlay **after** bloom, HDR, depth/peripheral blur, noise,
-vignette, grading, Retro quantization and frame-trail history. This HUD
+vignette, grading and frame-trail history, but **before** Retro CMP
+quantization when Retro Mode is enabled. This HUD
 rendering ignores JK vertex lighting, the active colormap and native
 per-camera color filter, scene fog, SSAO, sunlight, shadow casting,
 reflections and material specular/emission. The albedo texture, MAT
@@ -1486,6 +1487,11 @@ The palette is read from the JK23 identity CMP in game memory when entering
 a level, and a 64x64x64 nearest-RGB lookup is generated only if its contents
 change. CPU kd-tree construction makes lookup generation efficient, while
 the final presentation shader performs just one atlas fetch per pixel.
+Retro now composites both Camera-type GPU HUD geometry and the traditional
+DirectDraw HUD into the completed scene in linear light, then quantizes the
+whole frame exactly once immediately before SwapBuffers. Neither HUD layer
+is affected by scene HDR/bloom/trails. The additional framebuffer is
+allocated only when Retro Mode is actually active.
 Menus do not use this effect. If the known JK23 identity CMP pointer is
 unavailable the renderer automatically falls back to full-color output.
 This works with either the native or GPU-resident 3DO renderer and does not
