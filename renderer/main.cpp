@@ -54,6 +54,7 @@
 #include "sprite_decal_moving_receiver.hpp"
 #include "sprite_decal_mesh_hit.hpp"
 #include "sprite_decal_multimesh.hpp"
+#include "sprite_decal_geoset.hpp"
 #include "sprite_alpha_tag.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
@@ -3616,6 +3617,7 @@ namespace {
     struct moving_sprite_decal_fragment {
         jkgm::sprite_decal_receiver_identity receiver{};
         uint32_t occurrence=0; // distinguish repeated rdMesh hierarchy nodes
+        uint32_t node_index=0xffffffffU; // LOD variant's stable hierarchy node
         bool native_fallback=false;
         uint64_t id=0;
         uint64_t native_structure=0;
@@ -4469,6 +4471,120 @@ namespace {
             fragment.last_drawn_frame=gpu_frame_serial;
             fragment.geometry=std::move(mesh.geometry);
             entry.fragments.push_back(std::move(fragment));
+        }
+
+        // Project this SAME impact onto every other GeoSet, once, while
+        // JK's animated joint matrices are still available. The current
+        // fragments above continue to follow the exact native meshes.
+        // Alternative LODs are cached as separate receiver-local fragments,
+        // so switching GeoSets requires neither a new projectile nor
+        // reprojection on the render thread.
+        {
+            auto const read=[](uintptr_t address,void *dest,size_t length) {
+                if(!gpu_span_readable(
+                       reinterpret_cast<void const *>(address),length))
+                    return false;
+                std::memcpy(dest,reinterpret_cast<void const *>(address),
+                            length);
+                return true;
+            };
+            uintptr_t const source_mesh=best_native!=invalid
+                ?native_moving_decal_receivers[best_native].mesh
+                :pending_gpu_instances[best_gpu].decal_receiver_mesh;
+            auto const &source_pose=best_native!=invalid
+                ?native_moving_decal_receivers[best_native].transform
+                :pending_gpu_instances[best_gpu].transform;
+            auto const alternate=jkgm::enumerate_sprite_decal_lod_meshes(
+                read,uintptr_t(uint32_t(receiver_thing>>32U))+0xc4U,
+                receiver_model,source_mesh,source_pose);
+            size_t added_lod_fragments=0U;
+            for(uint32_t lod=0;lod<4U;++lod) {
+                std::vector<jkgm::sprite_decal_geoset_mesh> lod_nodes;
+                std::vector<jkgm::decal_world_geometry> lod_worlds;
+                lod_nodes.reserve(32U);
+                lod_worlds.reserve(32U);
+                for(auto const &alternate_node:alternate) {
+                    if(alternate_node.geoset!=lod ||
+                       lod_nodes.size()>=max_decal_mesh_fragments)
+                        continue;
+                    native_moving_decal_receiver candidate{};
+                    candidate.thing=receiver_thing;
+                    candidate.model=receiver_model;
+                    candidate.mesh=alternate_node.mesh;
+                    candidate.transform=alternate_node.transform;
+                    candidate.occurrence=alternate_node.occurrence;
+                    candidate.revision=native_decal_mesh_structure_signature(
+                        reinterpret_cast<void const *>(candidate.mesh));
+                    if(!candidate.revision)continue;
+                    jkgm::decal_world_geometry world_geometry{};
+                    if(!build_native_moving_decal_receiver_world(
+                            candidate,best_position,world_geometry,extent))
+                        continue;
+                    lod_nodes.push_back(alternate_node);
+                    lod_worlds.push_back(std::move(world_geometry));
+                }
+                if(lod_nodes.empty())continue;
+                jkgm::decal_projector lod_projector=projector;
+                jkgm::fit_moving_decal_multimesh_depth(
+                    lod_projector,lod_worlds);
+                struct lod_scan {
+                    size_t index=0;
+                    jkgm::decal_world_scan scan{};
+                };
+                std::vector<lod_scan> projected;
+                uint32_t lod_remaining=max_decal_triangles;
+                for(size_t i=0;i<lod_nodes.size() && lod_remaining>0U;++i) {
+                    auto scan=jkgm::project_cached_decal_world(
+                        lod_worlds[i],lod_projector,lod_remaining,true,true);
+                    if(!scan.valid_world || scan.truncated ||
+                       scan.triangles.empty())continue;
+                    lod_remaining-=static_cast<uint32_t>(
+                        scan.triangles.size());
+                    projected.push_back({i,std::move(scan)});
+                }
+                jkgm::decal_normal_map normals;
+                bool valid=true;
+                for(auto const &part:projected)
+                    if(!jkgm::accumulate_sprite_decal_normals(
+                           part.scan,lod_projector,normals)) {
+                        valid=false;break;
+                    }
+                if(!valid)continue;
+                for(auto const &part:projected) {
+                    auto const &node=lod_nodes[part.index];
+                    jkgm::sprite_decal_mesh projected_mesh{};
+                    if(!jkgm::make_sprite_decal_gpu_mesh(
+                           part.scan,lod_projector,resource.material,
+                           resource.texcoords,info.opacity,
+                           projected_mesh,true,true,&normals) ||
+                       !projected_mesh.geometry ||
+                       !jkgm::sprite_decal_geometry_to_receiver_local(
+                           *projected_mesh.geometry,node.transform))
+                        continue;
+                    moving_sprite_decal_fragment fragment{};
+                    fragment.receiver={receiver_thing,receiver_model,
+                        node.mesh,native_decal_mesh_structure_signature(
+                            reinterpret_cast<void const *>(node.mesh))};
+                    if(!fragment.receiver.mesh_revision)continue;
+                    fragment.native_fallback=true;
+                    fragment.occurrence=node.occurrence;
+                    fragment.node_index=node.node;
+                    fragment.id=next_gpu_id++;
+                    fragment.native_structure=fragment.receiver.mesh_revision;
+                    fragment.last_drawn_frame=gpu_frame_serial;
+                    fragment.geometry=std::move(projected_mesh.geometry);
+                    entry.fragments.push_back(std::move(fragment));
+                    ++added_lod_fragments;
+                }
+            }
+            if(the_config && the_config->profile_renderer &&
+               !alternate.empty()) {
+                static unsigned lod_logs=0;
+                if(lod_logs++<32U)
+                    LOG_INFO("SPR moving LOD preprojection alternate_nodes=",
+                             alternate.size()," fragments=",
+                             added_lod_fragments);
+            }
         }
         if(the_config->profile_renderer) {
             static uint32_t multi_logs=0;
