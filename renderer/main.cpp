@@ -7522,9 +7522,10 @@ namespace {
         saber_light_native_update_active=true;
         RealNativeThingUpdate(seconds,milliseconds);
         saber_light_native_update_active=previous_tick_state;
-        // Upload missing cache MATs before native rendering, never during
-        // the renderer pass or during level initialization.
-        service_native_mat_warm_queue();
+        // Native std3D upload can crash here (jkgm.exe 0x42A546) even
+        // though the game tick and GL context exist. The native uploader
+        // requires additional JK-internal state; do not call it here.
+        // Keep requests queued for safe resolution; no direct uploads.
         // Reapply exactly once after native JK's length/fade update, before
         // sithRender builds point lights. Both native and GPU paths agree.
         if(!saber.empty()) {
