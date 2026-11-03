@@ -192,6 +192,8 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\spotlight_shadow.cpp /Fe:spotlight_shadow_test.exe
         spotlight_shadow_test.exe
+    - name: GPU sector CMP and solid fullbright integration checks
+      run: python3 tests/gpu_cmp_integration.py
     - name: JKGM sector CMP and fullbright palette lookup tests
       shell: cmd
       run: |
