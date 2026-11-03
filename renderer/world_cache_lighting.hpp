@@ -2,6 +2,7 @@
 // Live JK world lighting; static world geometry remains immutable.
 // RGB output intentionally reserves a MotS-style three-channel light stream.
 #include "world_cache_visibility.hpp"
+#include "jk_cmp_gpu.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -92,7 +93,8 @@ inline bool sample_world_cache_surface_light(
     std::vector<std::array<float,3>> *pixel_state=nullptr,
     bool pixel_lighting=false,
     float global_extra=0.0f,
-    std::vector<std::array<float,3>> *sector_tint=nullptr)
+    std::vector<std::array<float,3>> *sector_tint=nullptr,
+    std::vector<std::array<float,3>> *sector_cmp_tint=nullptr)
 {
     if(!read || face.count<3U || face.count%3U!=0U ||
        uint64_t(face.first_index)+face.count>mesh.indices.size())
@@ -114,24 +116,41 @@ inline bool sample_world_cache_surface_light(
     // +0x08 Extra, +0x0c colormap pointer, +0x10 tint[3]. That avoids an
     // additional VirtualQuery for every world surface on every frame.
     uint32_t sector=0;
-    if(mode!=0U || sector_tint) {
+    if(mode!=0U || sector_tint || sector_cmp_tint) {
         if(!read_decal_u32(read,addr+0x08U,sector) ||
            !decal_native_address_ok(sector))return false;
     }
     float ambient=0.0f;
-    if(sector_tint) {
-        if(sector_tint->size()!=out.size())return false;
+    if(sector_tint || sector_cmp_tint) {
+        if((sector_tint && sector_tint->size()!=out.size()) ||
+           (sector_cmp_tint && sector_cmp_tint->size()!=out.size()))
+            return false;
         std::array<uint8_t,20> sector_state{};
         if(!read(uintptr_t(sector)+0x08U,
                  sector_state.data(),sector_state.size()))return false;
         std::memcpy(&ambient,sector_state.data(),sizeof(ambient));
-        std::array<float,3> tint{};
-        std::memcpy(tint.data(),sector_state.data()+8U,sizeof(tint));
-        for(float &v:tint) {
-            if(!std::isfinite(v))return false;
-            v=std::max(0.0f,std::min(v,1.0f));
+        if(sector_tint) {
+            std::array<float,3> tint{};
+            std::memcpy(tint.data(),sector_state.data()+8U,sizeof(tint));
+            for(float &v:tint) {
+                if(!std::isfinite(v))return false;
+                v=std::max(0.0f,std::min(v,1.0f));
+            }
+            for(uint32_t i=0;i<count;++i)(*sector_tint)[base+i]=tint;
         }
-        for(uint32_t i=0;i<count;++i)(*sector_tint)[base+i]=tint;
+        if(sector_cmp_tint) {
+            // The sector CMP is at +0x0c; this is neither the sector's
+            // tint (+0x10) nor the camera's currently active CMP.
+            uint32_t cmp=0;
+            std::memcpy(&cmp,sector_state.data()+4U,sizeof(cmp));
+            std::array<float,3> tint{{1.0f,1.0f,1.0f}};
+            // Invalid/unloaded sector colormaps use neutral color instead
+            // of losing visible world geometry during cache migration.
+            std::array<float,3> current{};
+            if(jk_cmp_read_tint(read,cmp,current))tint=current;
+            for(uint32_t i=0;i<count;++i)
+                (*sector_cmp_tint)[base+i]=tint;
+        }
     }
     if(mode==0U) {
         for(uint32_t i=0;i<count;++i) {
