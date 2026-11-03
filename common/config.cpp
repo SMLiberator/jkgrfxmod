@@ -183,6 +183,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("world_cache_preview")) {
             j.at("world_cache_preview").get_to(rv->world_cache_preview);
         }
+        if(j.contains("enable_native_fallback")) {
+            j.at("enable_native_fallback").get_to(rv->enable_native_fallback);
+        }
         if(j.contains("use_sprite_cache")) {
             j.at("use_sprite_cache").get_to(rv->use_sprite_cache);
         }
