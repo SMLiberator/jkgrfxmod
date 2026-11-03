@@ -16,7 +16,11 @@ int main() {
         assert(at+sizeof(value)<=mem.size());
         std::memcpy(mem.data()+at,&value,sizeof(value));
     };
+    uint32_t selected_geoset_address=model+0x2cU;
     auto read=[&](uintptr_t at,void* out,size_t n) {
+        if(at==0x0073A420U && n==4U) {
+            std::memcpy(out,&selected_geoset_address,4U);return true;
+        }
         if(at>mem.size() || n>mem.size()-at)return false;
         std::memcpy(out,mem.data()+at,n);return true;
     };
@@ -42,6 +46,7 @@ int main() {
         set(nodes+0xb4U*i+0x4cU,i);
     }
     assert(read_sprite_decal_active_geoset(read,thing,model)==1U);
+    assert(read_sprite_decal_draw_geoset(read,model)==1U);
     auto candidates=enumerate_sprite_decal_lod_meshes(
         read,thing,model,active+0x70U,pose[1]);
     assert(candidates.size()==5U);
@@ -70,10 +75,16 @@ int main() {
     assert(read_sprite_decal_active_geoset(read,thing,model)==0U);
     assert(enumerate_sprite_decal_lod_meshes(
         read,thing,model,active+0x70U,pose[1]).empty());
+    // Another enemy can update the shared model default after this Thing
+    // drew. The captured geoset (1) still projects the correct LOD.
+    assert(enumerate_sprite_decal_lod_meshes(
+        read,thing,model,active+0x70U,pose[1],1U).size()==5U);
     default_geo=1U;set(model+0x50U,default_geo);
     current=pose[1];current[10]+=0.1f;
     assert(enumerate_sprite_decal_lod_meshes(
         read,thing,model,active+0x70U,current).empty());
+    selected_geoset_address=model+0x2dU;
+    assert(read_sprite_decal_draw_geoset(read,model)==0xffffffffU);
     set(thing+4U,0U);
     assert(enumerate_sprite_decal_lod_meshes(
         read,thing,model,active+0x70U,pose[1]).empty());
