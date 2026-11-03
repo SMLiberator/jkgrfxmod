@@ -8,11 +8,13 @@ layout(location=3) in vec3 native_light_rgb;
 layout(location=4) in vec3 native_light_state;
 layout(location=5) in vec3 native_sector_tint;
 layout(location=6) in vec2 native_uv_offset; // JK SlideSurface
+layout(location=7) in vec3 native_sector_cmp_tint; // owning SithSector.colormap, NOT tint
 out vec2 material_uv;
 out vec3 cached_view_normal;
 out vec3 cached_lit_rgb;
 out vec3 cached_light_state;
 out vec3 cached_sector_tint;
+out vec3 cached_sector_cmp_tint;
 out vec3 cached_world_position;
 out vec3 cached_world_normal;
 uniform vec4 view_right,view_forward,view_up,view_origin;
@@ -21,9 +23,10 @@ uniform int sky_mode; // 0=ordinary world, 1=horizon, 2=ceiling
 // Already neutralized native global palette: only COG/player effects remain.
 // The per-face sector tint is applied locally in the same color operation.
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
-vec3 world_jk_effect(vec3 raw,vec3 local_sector_tint)
+vec3 world_jk_effect(vec3 raw,vec3 local_sector_tint,vec3 cmp_tint)
 {
-    vec3 v=pow(clamp(raw,0.0,1.0),vec3(1.0/1.8));
+    // Match GPU 3DO's colormap multiplication before native palette effects.
+    vec3 v=pow(clamp(raw*cmp_tint,0.0,1.0),vec3(1.0/1.8));
     if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
         v*=step(vec3(0.5),jk_color_filter.xyz);
     vec3 t=clamp(local_sector_tint+jk_color_tint.xyz,
@@ -42,9 +45,11 @@ void main() {
     // JK's palette tint changes vertex illumination, not the albedo.
     // Apply it before Gouraud interpolation, matching the existing 3DO
     // GPU path's gamma conversion and per-channel tint scaling.
-    cached_lit_rgb=world_jk_effect(native_light_rgb,native_sector_tint);
+    cached_lit_rgb=world_jk_effect(native_light_rgb,
+                                   native_sector_tint,native_sector_cmp_tint);
     cached_light_state=native_light_state;
     cached_sector_tint=native_sector_tint;
+    cached_sector_cmp_tint=native_sector_cmp_tint;
     cached_world_position=world_position;
     cached_world_normal=native_normal;
     vec3 vn=view_right.xyz*native_normal.x+
