@@ -39,6 +39,23 @@ inline bool decal_geoset_same_pose(gpu_3do_matrix34 const &a,
     }
     return true;
 }
+// Exact same composed node matrix consumed by rdModel3_DrawHNode.
+// Once the actor switches LOD, the rdMesh pointer changes but the skeleton
+// node index remains stable. Matching its CURRENT matrix prevents a decal
+// on a shared mesh from being replicated onto the wrong animated limb.
+template<class Read>
+bool read_sprite_decal_lod_node_pose(
+    Read const &read,uintptr_t rdthing,uint32_t index,
+    gpu_3do_matrix34 &out)
+{
+    if(!decal_geoset_ptr(rdthing) || index>=256U)return false;
+    uint32_t array=0;
+    if(!read(rdthing+0x20U,&array,4U) || !decal_geoset_ptr(array))
+        return false;
+    uintptr_t const at=uintptr_t(array)+uintptr_t(index)*48U;
+    return decal_geoset_ptr(at) && read(at,out.data(),48U) &&
+           gpu_3do_matrix_finite(out);
+}
 template<class Read>
 std::vector<sprite_decal_geoset_mesh> enumerate_sprite_decal_lod_meshes(
     Read const &read,uintptr_t rdthing,uintptr_t model,
