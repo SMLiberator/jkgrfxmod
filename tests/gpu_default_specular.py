@@ -66,4 +66,17 @@ assert "world_sun_visibility(cached_world_position" in world
 assert "specular_params.x<=0.0" in model
 # This roughness/strength pair only changes direct-light specular.
 assert "material.has_environment || material.has_environment2 ||" in renderer
+# The packaged sample must match the opt-in defaults and not reintroduce
+# retired cache or sun optimization toggles.
+import json
+sample=json.loads(read("assets/jkgm.json"))
+assert sample["use_gpu_cache"] is True
+assert sample["enable_native_fallback"] is True
+assert sample["enable_default_specular"] is False
+assert sample["default_specular_strength"] == 0.25
+assert sample["default_specular_roughness"] == 0.85
+for old in ("use_model_cache","use_sprite_cache","world_cache_preview",
+            "mesh_revision_tracking","optimize_hud_uploads",
+            "sun_shadow_instance_batches"):
+    assert old not in sample
 print("Experimental GPU default specular opt-in and authoring checks passed")
