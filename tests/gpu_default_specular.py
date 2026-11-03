@@ -9,6 +9,8 @@ mat_parser=read("common/material_map.cpp")
 renderer=read("renderer/renderer.cpp")
 world=read("assets/shaders/world_cache_direct_specular.glsl")
 model=read("assets/shaders/gpu_3do_preview.frag")
+vidmem=read("renderer/vidmem_texture.cpp")
+interface=read("renderer/renderer.hpp")
 
 for fragment in (
     "bool enable_default_specular = false;",
@@ -27,6 +29,14 @@ for name in ("surface_map","reflection_strength","roughness","metalness",
              "environment_map","reflection_mode"):
     assert f'em.contains("{name}")' in mat_parser
 assert "bool has_authored_specular=false;" in renderer
+assert "virtual bool is_default_specular_enabled() = 0;" in interface
+assert "bool is_default_specular_enabled() override" in renderer
+assert "bool const default_normals=is_default_specular_enabled() &&" in renderer
+assert "if(strength>0.0f && env_from)" in renderer
+assert "if(strength>0.0f && env_weight>0.0f)" in renderer
+assert "surf->r->is_default_specular_enabled()" in vidmem
+assert "if(authored_reflections || default_normals)" in vidmem
+assert "if(authored_reflections) {" in vidmem
 assert "surface->replacement_material->has_explicit_specular_settings" in renderer
 assert "std::pair<float,float> gpu_specular_parameters(" in renderer
 assert "material.reflection_strength<=0.0f &&" in renderer

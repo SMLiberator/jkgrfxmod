@@ -72,12 +72,16 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
                 surf->r->texture_cache->get_srgb_texture_from_filename(*(*repl_map)->emissive_map);
         }
 
-        // Load reflection-only resources only when the master switch and
-        // the material's reflection strength allow their use. This saves GPU
-        // texture allocations as well as draw-time work.
-        bool const reflections_enabled =
-            surf->r->is_reflections_enabled() && (*repl_map)->reflection_strength > 0.0f;
-        if(reflections_enabled) {
+        // Opt-in default direct specular can use a normal-only replacement,
+        // but must NEVER cause an inherited pack EnvMap or unused surface map
+        // to be loaded merely because the default dielectric is enabled.
+        bool const authored_reflections =
+            surf->r->is_reflections_enabled() &&
+            (*repl_map)->reflection_strength>0.0f;
+        bool const default_normals =
+            surf->r->is_default_specular_enabled() &&
+            !(*repl_map)->has_explicit_specular_settings;
+        if(authored_reflections || default_normals) {
             if((*repl_map)->normal_map.has_value()) {
                 surf->normal_map = surf->r->texture_cache->get_linear_texture_from_filename(
                     *(*repl_map)->normal_map);
@@ -86,13 +90,15 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
                 surf->normal_map2 = surf->r->texture_cache->get_linear_texture_from_filename(
                     *(*repl_map)->normal_map2);
             }
-            if((*repl_map)->surface_map.has_value()) {
-                surf->surface_map = surf->r->texture_cache->get_linear_texture_from_filename(
-                    *(*repl_map)->surface_map);
-            }
-            if((*repl_map)->env_map.has_value()) {
-                surf->env_map =
-                    surf->r->texture_cache->get_srgb_texture_from_filename(*(*repl_map)->env_map);
+            if(authored_reflections) {
+                if((*repl_map)->surface_map.has_value()) {
+                    surf->surface_map = surf->r->texture_cache->get_linear_texture_from_filename(
+                        *(*repl_map)->surface_map);
+                }
+                if((*repl_map)->env_map.has_value()) {
+                    surf->env_map =
+                        surf->r->texture_cache->get_srgb_texture_from_filename(*(*repl_map)->env_map);
+                }
             }
         }
 

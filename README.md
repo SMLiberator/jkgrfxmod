@@ -767,7 +767,9 @@ SithWorld surfaces that do not specify reflection properties:
 Both scalar parameters accept finite `0..1` values. The default experiment
 is **off**, and `default_specular_strength: 0` also disables its visual
 contribution. Material-authored reflectivity, roughness, surface maps, and
-explicit zero-reflectivity overrides are preserved. These fallback
+explicit zero-reflectivity overrides are preserved. A replacement with
+an authored normal map but no specular settings can use that normal map for
+the fallback GGX, without loading its inherited EnvMap. These fallback
 parameters apply only to **direct** sun/optional Thing-light GGX; they never
 turn on EnvMap reflections. The existing `enable_sun`, positive
 `SetSunInfo` intensity, and `enable_dynamic_light_specular` gates still

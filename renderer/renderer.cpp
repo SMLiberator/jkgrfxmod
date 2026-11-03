@@ -1086,6 +1086,13 @@ namespace jkgm {
             return the_config->enable_reflections;
         }
 
+        bool is_default_specular_enabled() override
+        {
+            return the_config->enable_reflections &&
+                   the_config->enable_default_specular &&
+                   the_config->default_specular_strength>0.0f;
+        }
+
         void notify_texture_uploaded() override
         {
             force_runtime_refresh = true;
@@ -2931,7 +2938,14 @@ namespace jkgm {
             float const strength=surface->reflection_strength>0
                 ? surface->reflection_strength :
                 ((env_command && has_env)?1.0f:0.0f);
-            if(the_config->enable_reflections && strength>0) {
+            // Default specularity can use authored *normal* maps even when
+            // no reflection strength/map is specified. Do not bind an
+            // inherited pack/global EnvMap just because this experiment
+            // enables a weak direct-light GGX term.
+            bool const default_normals=is_default_specular_enabled() &&
+                !out.has_authored_specular;
+            if(the_config->enable_reflections &&
+               (strength>0.0f || default_normals)) {
                 out.reflection_strength=strength;
                 out.roughness=surface->roughness;
                 out.metalness=surface->metalness;
@@ -2940,11 +2954,11 @@ namespace jkgm {
                 out.normal_scroll=scroll_offset(surface->normal_scroll);
                 out.normal_scroll2=scroll_offset(surface->normal_scroll2);
                 out.reflection_mode=static_cast<int>(surface->reflection_mode);
-                if(env_from) {
+                if(strength>0.0f && env_from) {
                     out.environment=texture_cache->get_texture_handle(*env_from);
                     out.has_environment=true;
                 }
-                if(env_weight>0.0f) {
+                if(strength>0.0f && env_weight>0.0f) {
                     out.environment_transition=env_weight;
                     if(env_to) {
                         out.environment2=texture_cache->get_texture_handle(*env_to);
