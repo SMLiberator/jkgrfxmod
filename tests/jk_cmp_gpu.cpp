@@ -19,6 +19,16 @@ int main() {
     // A constant remap is also software-unshaded.
     for(size_t light=0;light<64U;light++)levels[light*256U+18U]=19;
     assert(jk_cmp_is_fullbright(levels,18U));
+    // Index 30 alternates between two entries that have identical RGB.
+    // An index-only test rejects it, but software output stays fullbright.
+    std::array<uint8_t,256U*3U> colors{};
+    colors[30U*3U]=colors[31U*3U]=200U;
+    colors[30U*3U+1U]=colors[31U*3U+1U]=100U;
+    colors[30U*3U+2U]=colors[31U*3U+2U]=50U;
+    for(size_t level=0;level<64U;++level)
+        levels[level*256U+30U]=uint8_t(30U+(level&1U));
+    assert(!jk_cmp_is_fullbright(levels,30U));
+    assert(jk_cmp_is_fullbright(levels,colors,30U));
 
     constexpr uint32_t sector=0x20000U,cmp=0x30000U,table=0x40000U;
     std::vector<uint8_t> bytes(0x50000U,0);
