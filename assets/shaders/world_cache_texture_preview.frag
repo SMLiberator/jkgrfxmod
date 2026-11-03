@@ -33,6 +33,7 @@ uniform vec3 camera_world_origin,camera_right_axis;
 uniform vec3 camera_forward_axis,camera_up_axis;
 uniform vec4 material_tint;
 uniform int solid_color; // GeoMode 3: native MAT/CMP RGB, no texture sampling
+uniform int solid_fullbright; // CMP index unchanged across the 64 light levels
 uniform int alpha_cutout; // explicit cutout MATs on solid adjoins
 uniform float alpha_cutoff;
 uniform int transparent_pass; // 0 G-buffer, 1 sorted forward alpha
@@ -224,7 +225,7 @@ void main() {
     // Keep authored Gouraud/sector lighting, already interpolated in RGB.
     // The same GLSL helpers calculate pixel light for both world and 3DO.
     vec3 lighting=cached_lit_rgb;
-    if(cached_light_state.z>2.5 && num_lights>0) {
+    if(solid_fullbright==0 && cached_light_state.z>2.5 && num_lights>0) {
         float added=0.0;
         vec3 normal=normalize(cached_world_normal);
         for(int i=0;i<num_lights;i++) {
@@ -241,7 +242,7 @@ void main() {
             lighting=jk_point_compose(lighting,added,light_color);
         }
     }
-    lighting=clamp(lighting,0.0,1.0);
+    lighting=solid_fullbright!=0 ? vec3(1.0) : clamp(lighting,0.0,1.0);
     float env_metalness=0.0;
     vec3 env_reflection=world_environment_reflection(
         albedo,material_texcoord,env_metalness);
@@ -293,6 +294,8 @@ void main() {
     // Opaque reflections are composited after SSAO, as for GPU 3DOs.
     out_emissive=vec4(emission+env_reflection,
         dot(lighting,vec3(0.2126,0.7152,0.0722)));
-    out_normal=vec4(normalize(cached_view_normal),1.0);
+    // Fullbright palette entries do not receive AO, sun or projected light.
+    out_normal=solid_fullbright!=0 ? vec4(0.0,0.0,0.0,1.0) :
+               vec4(normalize(cached_view_normal),1.0);
     out_depth=vec4(32.0/max(gl_FragCoord.w,0.00000001),albedo);
 }
