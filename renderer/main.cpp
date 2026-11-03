@@ -3874,8 +3874,31 @@ namespace {
             if(!decal.fragments.empty()) {
                 auto const &root=decal.fragments.front();
                 uint32_t const owner=uint32_t(root.receiver.thing_key>>32U);
-                active_lod=jkgm::read_sprite_decal_active_geoset(
-                    read_lod,uintptr_t(owner)+0xc4U,root.receiver.model);
+                // Shared rdModel3::geosetSelect can change when another
+                // enemy using the same model draws later in the frame.
+                // Prefer the exact per-Thing selection captured inside
+                // rdModel3_DrawMesh; use the default only as a fallback.
+                for(auto const &inst:pending_gpu_instances) {
+                    if(inst.is_projected_decal ||
+                       inst.decal_receiver_thing!=root.receiver.thing_key ||
+                       inst.decal_receiver_model!=root.receiver.model ||
+                       inst.decal_receiver_geoset==0xffffffffU)
+                        continue;
+                    active_lod=inst.decal_receiver_geoset;
+                    break;
+                }
+                if(active_lod==0xffffffffU)
+                    for(auto const &native:native_moving_decal_receivers) {
+                        if(native.thing!=root.receiver.thing_key ||
+                           native.model!=root.receiver.model ||
+                           native.geoset==0xffffffffU)continue;
+                        active_lod=native.geoset;
+                        break;
+                    }
+                if(active_lod==0xffffffffU)
+                    active_lod=jkgm::read_sprite_decal_active_geoset(
+                        read_lod,uintptr_t(owner)+0xc4U,
+                        root.receiver.model);
             }
             for(auto &fragment:decal.fragments) {
                 if(active_lod!=0xffffffffU &&
