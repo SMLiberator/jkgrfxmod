@@ -55,14 +55,10 @@ namespace jkgm {
         bool enable_sun = true; // diffuse sunlight from SetSunInfo; independent of shadow rendering
         bool enable_sun_shadows = false;
         bool enable_sprite_shadows = false; // opt-in sun shadow casting for cached SPRs; reception unaffected
-        bool enable_sun_static_cache = true; // world-only depth layers, independently cached per cascade // directional sunlight + world shadow map
-        bool sun_shadow_stable_projection_cache = false; // opt-in reuse while camera frustum stays inside map
-        bool sun_shadow_instance_batches = false; // opt-in GL instancing for repeated 3DO sunlight casters
         bool enable_sun_dynamic_shadows = false; // eight-Thing atlas
         bool sun_shadow_cull_back_faces = false; // 3DO sunlight: back-face culling is opt-in
         bool sun_shadow_cull_front_faces = true; // 3DO sunlight: front-face culling by default
         unsigned int sun_dynamic_shadow_resolution = 256U; // baseline 64..1024
-        bool sun_dynamic_shadow_adaptive_resolution = false; // opt-in per-Thing pixel density
         float sun_shadow_receiver_bias_scale = 1.0f; // A/B contact-gap tuning (0..2)
         float sun_shadow_caster_bias_scale = 1.0f; // A/B shadow polygon offset (0..2)
         unsigned int sun_shadow_resolution = 512U; // per-cascade 24-bit depth map (64..4096)

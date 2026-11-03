@@ -181,12 +181,14 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         // Warn explicitly so old configs don't silently switch modes.
         for(auto const *legacy:{
                 "use_model_cache","use_sprite_cache","world_cache_preview",
-                "mesh_revision_tracking","optimize_hud_uploads"}) {
+                "mesh_revision_tracking","optimize_hud_uploads",
+                "sun_dynamic_shadow_adaptive_resolution",
+                "enable_sun_static_cache","sun_shadow_stable_projection_cache",
+                "sun_shadow_instance_batches"}) {
             if(j.contains(legacy))
                 LOG_WARNING("Deprecated jkgm.json option ignored: ",legacy,
-                            " (use_gpu_cache controls world/3DO/SPR caching; "
-                            "mesh revision tracking and optimized HUD uploads "
-                            "are now standard)");
+                            " (GPU caching and established mesh/HUD/sun-shadow "
+                            "optimizations now use their standard behavior)");
         }
         if(j.contains("enable_native_fallback")) {
             j.at("enable_native_fallback").get_to(rv->enable_native_fallback);
@@ -234,17 +236,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_sprite_shadows")) {
             j.at("enable_sprite_shadows").get_to(rv->enable_sprite_shadows);
         }
-        if(j.contains("enable_sun_static_cache")) {
-            j.at("enable_sun_static_cache").get_to(rv->enable_sun_static_cache);
-        }
-        if(j.contains("sun_shadow_stable_projection_cache")) {
-            j.at("sun_shadow_stable_projection_cache").get_to(
-                rv->sun_shadow_stable_projection_cache);
-        }
-        if(j.contains("sun_shadow_instance_batches")) {
-            j.at("sun_shadow_instance_batches").get_to(
-                rv->sun_shadow_instance_batches);
-        }
         if(j.contains("enable_sun_dynamic_shadows")) {
             j.at("enable_sun_dynamic_shadows").get_to(rv->enable_sun_dynamic_shadows);
         }
@@ -274,10 +265,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                 throw std::runtime_error(
                     "sun_dynamic_shadow_resolution must be between 64 and 1024");
             rv->sun_dynamic_shadow_resolution=static_cast<unsigned int>(pixels);
-        }
-        if(j.contains("sun_dynamic_shadow_adaptive_resolution")) {
-            j.at("sun_dynamic_shadow_adaptive_resolution").get_to(
-                rv->sun_dynamic_shadow_adaptive_resolution);
         }
         if(j.contains("sun_shadow_receiver_bias_scale")) {
             auto const &value=j.at("sun_shadow_receiver_bias_scale");

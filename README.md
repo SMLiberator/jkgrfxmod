@@ -732,6 +732,24 @@ Type-4 camera-facing flare SPRs are separate Things. Attach a flare
 Thing to a node, then assign that same Thing a Spotlight. Its independent
 `SetSpriteInfo` and `SetSpriteRoll` COG controls remain available.
 
+## Standard sunlight shadow optimizations
+
+Four previously optional improvements are now unconditional whenever their
+relevant sunlight shadow pass is enabled: persistent camera-frustum-contained
+cascade projections, cached static world/stationary-3DO depths, GL instance
+batching of compatible 3DO shadow casters, and adaptive tile sizes for the
+eight-Thing dynamic shadow atlas. The latter operates only when
+`enable_sun_dynamic_shadows` is enabled. Static depth automatically falls
+back to regular full redraws when its additional framebuffer resources are
+unavailable.
+
+Static shadow caching still assumes world vertices are unchanged unless the
+world cache is rebuilt or invalidated. Reusing a stable projection may also
+slightly reduce texel density until the camera moves outside the existing
+coverage. Resolution, cascade distance, bias, and shadow enable settings
+remain configurable. The four old optimization keys are deprecated and
+ignored with a warning.
+
 ## Experimental spotlight shadows
 
 Set `"enable_spotlights": true` and `"enable_spotlight_shadows": true`

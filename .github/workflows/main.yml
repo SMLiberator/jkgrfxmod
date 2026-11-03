@@ -32,6 +32,9 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\compressed_sound_read.cpp /Fe:compressed_sound_read_test.exe
         compressed_sound_read_test.exe
 
+    - name: Standard sunlight shadow optimization configuration and code checks
+      run: python3 tests/sun_shadow_standard_optimizations.py
+
     - name: GPU cache configuration unification and permanent optimizations
       run: python3 tests/gpu_cache_configuration.py
 

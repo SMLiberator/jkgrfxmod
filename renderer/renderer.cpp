@@ -4584,7 +4584,9 @@ namespace jkgm {
                 if(!make_sun_dynamic_shadow_projection(
                     world_view,object->bounds,view))continue;
                 sun_dynamic_shadow_tile tile{};
-                if(the_config->sun_dynamic_shadow_adaptive_resolution) {
+                {
+                    // Automatically size each dynamic shadow tile based on
+                    // its fitted light-space footprint and camera distance.
                     // Target shadow texels per screen pixel in LIGHT space,
                     // not from the 3DO AABB diagonal. The fitted shadow
                     // rectangle also contains the caster's projected reach;
@@ -4617,11 +4619,6 @@ namespace jkgm {
                     auto const requested=sun_dynamic_shadow_budget_tile(
                         desired,used_pixels,budget,remaining);
                     if(!tile_layout.allocate(int(requested),tile))continue;
-                } else {
-                    int const slot=int(sun_dynamic_views.size());
-                    tile={(slot%sun_dynamic_shadow_columns)*tile_size,
-                          (slot/sun_dynamic_shadow_columns)*tile_size,
-                          tile_size};
                 }
                 int const inner=tile.size-2*sun_dynamic_shadow_inset;
                 gl::set_viewport(make_box(make_point(
@@ -4704,7 +4701,7 @@ namespace jkgm {
                                  std::to_string((lo[1]+hi[1])*0.5f),",",
                                  std::to_string((lo[2]+hi[2])*0.5f));
                     }
-                } else if(the_config->sun_dynamic_shadow_adaptive_resolution) {
+                } else {
                     tile_layout.undo_last();
                 }
             }
@@ -4733,7 +4730,7 @@ namespace jkgm {
                     " outside_near_distance=",atlas_distance_culled,
                     " near_distance=",near_distance_label,
                     " base_tile=",tile_size,
-                    " adaptive=",the_config->sun_dynamic_shadow_adaptive_resolution?1:0,
+                    " adaptive=1",
                     " tile_sizes=[",tile_sizes.str(),"]",
                     " depth_viewport_pixels=",shaded_pixels);
             }
@@ -4989,8 +4986,7 @@ namespace jkgm {
             // Keep the same sunlight depth-axis origin/range too: an updated
             // world AABB must never silently clip new casters in Z.
             bool locked_view=false;
-            if(the_config->sun_shadow_stable_projection_cache &&
-               sun_shadow_cascade_cached[cascade] &&
+            if(sun_shadow_cascade_cached[cascade] &&
                sun_shadow_worlds[cascade]==world &&
                sun_shadow_revisions[cascade]==map.revision) {
                 auto const &previous=sun_shadow_views[cascade];
@@ -5203,7 +5199,7 @@ namespace jkgm {
                 // even a path/physics Thing parked in place remains dynamic.
                 bool const stable=sun_shadow_cache_stationary_model(
                     instance.shadow_owner,instance.dynamic_sun_caster,
-                    the_config->enable_sun_static_cache,map.static_complete);
+                    true,map.static_complete);
                 auto hash_model=[&](auto &&integer,auto &&floating) {
                     integer(uint32_t(instance.id));
                     integer(uint32_t(instance.id>>32));
@@ -5351,8 +5347,7 @@ namespace jkgm {
             }
             // Reusing a depth texture requires the exact same stabilized
             // light projection, not merely the same sun and static casters.
-            bool static_same=the_config->enable_sun_static_cache &&
-                map.static_complete &&
+            bool static_same=map.static_complete &&
                 sun_shadow_static_cached[cascade] &&
                 sun_shadow_static_worlds[cascade]==world &&
                 sun_shadow_static_revisions[cascade]==map.revision &&
@@ -5377,8 +5372,7 @@ namespace jkgm {
                         sun_shadow_static_directions[cascade]);
                     if(static_signature!=sun_shadow_static_signatures[cascade])
                         ++miss.static_casters;
-                    if((!the_config->enable_sun_static_cache ||
-                        !map.static_complete) &&
+                    if(!map.static_complete &&
                        sun_shadow_static_cached[cascade])++miss.cold;
                 }
             }
@@ -5393,8 +5387,7 @@ namespace jkgm {
             gl::set_depth_function(gl::comparison_function::less);
             if(!static_same) {
                 gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                    (the_config->enable_sun_static_cache &&
-                     map.static_complete) ? static_target : cascade_target);
+                    map.static_complete ? static_target : cascade_target);
                 gl::clear_buffer_depth(1.0f);
             }
             glEnable(GL_POLYGON_OFFSET_FILL);
@@ -5482,12 +5475,13 @@ namespace jkgm {
                             });
                     i=end;
                 }
-                // Optional GL 3.3 instancing for repeated identical 3DO
-                // mesh ranges. Render states and index ranges match exactly,
+                // Batch repeated identical 3DO shadow ranges using GL 3.3
+                // instancing. Singletons retain the normal draw path.
+                // Render states and index ranges match exactly,
                 // while each Thing supplies its own model transform.
                 size_t instanced_calls=0,instanced_ranges=0;
                 std::vector<uint8_t> batched(scheduled.size(),0);
-                if(the_config->sun_shadow_instance_batches) {
+                {
                     using key=std::tuple<uint64_t,uintptr_t,uint32_t,uint32_t,
                                          bool,bool,bool,uintptr_t,int32_t>;
                     std::map<key,std::vector<size_t>> occurrences;
@@ -5642,8 +5636,7 @@ namespace jkgm {
                 // The target must be explicit because earlier shadow passes
                 // may have changed the currently bound framebuffer.
                 gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                    (the_config->enable_sun_static_cache &&
-                     map.static_complete) ? static_target : cascade_target);
+                    map.static_complete ? static_target : cascade_target);
                 auto const static_begin=the_config->profile_renderer
                     ?profile_clock::now():profile_clock::time_point{};
                 auto const submitted=draw_models(static_models);
@@ -5656,8 +5649,7 @@ namespace jkgm {
                     sun_profile_static_instanced_calls[cascade]+=std::get<2>(submitted);
                     sun_profile_static_instanced_ranges[cascade]+=std::get<3>(submitted);
                 }
-                if(map.static_complete &&
-                   the_config->enable_sun_static_cache) {
+                if(map.static_complete) {
                     sun_shadow_static_cached[cascade]=true;
                     sun_shadow_static_worlds[cascade]=world;
                     sun_shadow_static_revisions[cascade]=map.revision;
@@ -5666,8 +5658,7 @@ namespace jkgm {
                     sun_shadow_static_directions[cascade]=direction;
                 }
             }
-            if(map.static_complete &&
-               the_config->enable_sun_static_cache) {
+            if(map.static_complete) {
                 // Copy the static depth on GPU (no readback) and depth-test
                 // current 3DOs against it. Even dynamic Thing updates no
                 // longer trigger a draw of the world architecture.
