@@ -41,6 +41,11 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_particle_cloud.cpp /Fe:gpu_particle_cloud_test.exe
         gpu_particle_cloud_test.exe
 
+    - name: Deferred GPU MAT warm-up queue lifetime and retry tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_mat_warm_queue.cpp /Fe:native_mat_warm_queue_test.exe
+        native_mat_warm_queue_test.exe
     - name: GPU five-face lightsaber polyline geometry and view tests
       shell: cmd
       run: |

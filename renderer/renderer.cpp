@@ -4,6 +4,7 @@
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_uv.hpp"
+#include "native_mat_warm_queue.hpp"
 #include "native_sprite_profile.hpp"
 #include "audio_module_probe.hpp"
 #include "gpu_3do_compat.hpp"
@@ -2770,7 +2771,12 @@ namespace jkgm {
                 else if(valid_surface(alpha)) chosen=&alpha;
                 if(chosen) { mip=i; break; }
             }
-            if(!chosen) return out;
+            if(!chosen) {
+                // Missing native MAT cels must not require a visible native
+                // fallback draw. Ask the tick-bound uploader to warm them.
+                jkgm::get_native_mat_warm_queue().request(group.material,cel);
+                return out;
+            }
             auto const id=static_cast<size_t>(chosen->texture_handle);
             if(id==0 || id>vidmem_texture_surfaces.size()) return out;
             auto const &surface=vidmem_texture_surfaces[id-1];
@@ -6037,6 +6043,10 @@ namespace jkgm {
                 return;
             }
             auto &cache=*world_cache_target;
+            engine_material_debug::world_header warm_world{};
+            if(engine_material_debug::read_object(address,warm_world))
+                jkgm::get_native_mat_warm_queue().prepare_world(
+                    address,warm_world.materials);
             // Maintain a sector-first candidate list each frame. The
             // expensive whole-world parity scan remains diagnostic-only.
             bool const sampled=the_config->profile_renderer &&

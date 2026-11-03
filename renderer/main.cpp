@@ -12,6 +12,7 @@
 #include "native_particle_texture.hpp"
 #include "gpu_3do_preview.hpp"
 #include "gpu_polyline.hpp"
+#include "native_mat_warm_queue.hpp"
 #include "gpu_particle_cloud.hpp"
 #include "native_procedural_draw.hpp"
 #include "camera_hud_thing.hpp"
@@ -1219,8 +1220,11 @@ namespace {
                 present|=(a.texture_loaded && a.texture_handle>0) ||
                          (o.texture_loaded && o.texture_handle>0);
             }
-            if(!present)
+            if(!present) {
+                jkgm::get_native_mat_warm_queue().request(
+                    ref.first,static_cast<int32_t>(cel));
                 return fail("unloaded_native_texture",ref.first,cel,&mat,&tex);
+            }
             gpu_mat_residency.mark_ready(gpu_frame_serial,upload_generation,
                                           ref.first,static_cast<uint32_t>(cel));
         }
@@ -7494,6 +7498,8 @@ namespace {
     // Advance native attachments AFTER Sith's normal Thing update and BEFORE
     // rendering/culling. Keep sector membership, COG position and render pose
     // synchronized, not just a render-only sprite transform.
+    void service_native_mat_warm_queue();
+
     void __cdecl HookedNativeThingUpdate(float seconds,int milliseconds)
     {
         // JK recomputes saber intensity only while extending/retracting.
@@ -7516,6 +7522,9 @@ namespace {
         saber_light_native_update_active=true;
         RealNativeThingUpdate(seconds,milliseconds);
         saber_light_native_update_active=previous_tick_state;
+        // Upload missing cache MATs before native rendering, never during
+        // the renderer pass or during level initialization.
+        service_native_mat_warm_queue();
         // Reapply exactly once after native JK's length/fade update, before
         // sithRender builds point lights. Both native and GPU paths agree.
         if(!saber.empty()) {
@@ -8369,6 +8378,95 @@ namespace {
         LOG_INFO("Native MAT loaded on demand: id=",mat_id,
                  " cel=",cel," alpha=",has_alpha);
         return true;
+    }
+
+    // Explicitly verified native JKGM rdMaterial_AddToTextureCache, used
+    // after the Thing tick when GL and the native D3D device are initialized.
+    // Do not load MATs while building the GPU draw or loading a world.
+    bool warm_gpu_mat_cel(uintptr_t address,int32_t requested_cel)
+    {
+        using namespace jkgm::engine_material_debug;
+        if(!spotlight_native_mat_cache_verified() ||
+           !wglGetCurrentContext())return false;
+        uint32_t device=0;
+        if(!read_object(0x0055C7ECU,device) || !device)return false;
+        bool canonical=false;
+        for(auto const global:{current_world_global,static_world_global}) {
+            uint32_t world_address=0;
+            world_header world{};
+            if(!load_world(global,world_address,world) ||
+               world.num_materials<=0 || !world.materials)continue;
+            uint64_t const base=world.materials;
+            uint64_t const bytes=uint64_t(world.num_materials)*
+                                 sizeof(native_material);
+            if(uint64_t(address)<base || uint64_t(address)-base>=bytes)
+                continue;
+            if((uint64_t(address)-base)%sizeof(native_material)!=0U)
+                continue;
+            canonical=true;break;
+        }
+        if(!canonical)return false;
+        native_material mat{};
+        if(!read_object(address,mat) || (mat.tex_type&2U)==0U ||
+           mat.num_texinfo==0U || mat.num_texinfo>16U ||
+           mat.num_textures==0U || mat.num_textures>256U ||
+           !mat.textures)return false;
+        uint32_t const cel=requested_cel<0
+            ?std::min(mat.current_cel,mat.num_texinfo-1U)
+            :std::min(uint32_t(requested_cel),mat.num_texinfo-1U);
+        native_texinfo info{};
+        if(!mat.texinfo[cel] || !read_object(mat.texinfo[cel],info) ||
+           (info.header[0]&8U)==0U || !info.texture ||
+           info.texture<mat.textures)return false;
+        uint64_t const tex_offset=uint64_t(info.texture)-mat.textures;
+        if(tex_offset%sizeof(native_texture)!=0U ||
+           tex_offset/sizeof(native_texture)>=mat.num_textures)
+            return false;
+        native_texture tex{};
+        if(!read_object(info.texture,tex) ||
+           tex.header[6]<1U || tex.header[6]>4U ||
+           !tex.mipmap_buffers[0] ||
+           !gpu_span_readable(reinterpret_cast<void const *>(
+               uintptr_t(tex.mipmap_buffers[0])),0x18U))
+            return false;
+        bool const alpha=(tex.header[0]&1U)!=0U;
+        auto const resident=[&](native_texture const &t) {
+            auto const &surface=alpha?t.alpha_mips[0]:t.opaque_mips[0];
+            return surface.texture_loaded!=0 && surface.texture_handle>0;
+        };
+        if(resident(tex))return true; // Avoid the native LRU refresh path.
+        auto const native_load=reinterpret_cast<jkgm_rd_material_cache_fn>(
+            jkgm_mat_cache_addr);
+        if(!native_load(reinterpret_cast<void *>(address),
+                        reinterpret_cast<void *>(uintptr_t(info.texture)),
+                        0,alpha?0:1))return false;
+        native_texture updated{};
+        if(!read_object(info.texture,updated) || !resident(updated))
+            return false;
+        LOG_INFO("GPU MAT native warm success id=",mat.id,
+                 " cel=",cel," alpha=",alpha?1:0);
+        return true;
+    }
+    void service_native_mat_warm_queue()
+    {
+        using namespace jkgm::engine_material_debug;
+        auto &queue=jkgm::get_native_mat_warm_queue();
+        uint32_t world_address=0;
+        world_header world{};
+        if(!load_world(current_world_global,world_address,world) ||
+           !world_address || !world.materials) {
+            queue.prepare_world(0U,0U);
+            return;
+        }
+        queue.prepare_world(world_address,world.materials);
+        if(queue.size()==0U || !spotlight_native_mat_cache_verified() ||
+           !wglGetCurrentContext())return;
+        uint32_t device=0;
+        if(!read_object(0x0055C7ECU,device) || !device)return;
+        // At most four native uploads per tick, with a retry cooldown.
+        for(auto const &request:queue.due(4U))
+            queue.finish(request,warm_gpu_mat_cel(
+                request.material,request.cel));
     }
     // SetSpotlight(thing,mat,vector(width,height,range),localOffset).
     // Use MAT indices like other COG material verbs; the renderer resolves
