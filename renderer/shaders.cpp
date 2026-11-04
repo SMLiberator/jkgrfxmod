@@ -253,6 +253,7 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , blend_mode(gl::get_uniform_location(the_program,"blend_mode"))
     , scene_depth_sampler(gl::get_uniform_location(the_program,"scene_depth"))
     , fluid_thickness(gl::get_uniform_location(the_program,"fluid_thickness"))
+    , fluid_debug_mode(gl::get_uniform_location(the_program,"fluid_debug_mode"))
     , fog_params(gl::get_uniform_location(the_program,"fog_params"))
     , fog_color(gl::get_uniform_location(the_program,"fog_color"))
     , sky_mode(gl::get_uniform_location(the_program,"sky_mode"))
@@ -396,6 +397,10 @@ void jkgm::shaders::world_cache_preview_shader::set_fluid_thickness(
     float thickness)
 {
     gl::set_uniform_float(fluid_thickness,thickness);
+}
+void jkgm::shaders::world_cache_preview_shader::set_fluid_debug_mode(int mode)
+{
+    gl::set_uniform_integer(fluid_debug_mode,mode);
 }
 void jkgm::shaders::world_cache_preview_shader::set_alpha_policy(
     bool transparent,int mode,float cutoff,float native_opacity,int blend,
