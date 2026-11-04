@@ -22,6 +22,11 @@ namespace jkgm {
     static_assert(sizeof(gpu_3do_vertex)==80,"Unexpected GPU vertex stride");
 
     constexpr unsigned gpu_3do_max_lights=16;
+    // Samplers in the 3DO fragment program must not alias different
+    // texture types. MATs/decals occupy 0..11, spotlight cookies 12..15,
+    // and translucent sun shadow maps 16..18. The sector plane buffer is
+    // the next unshared unit, even when the JSON option is disabled.
+    constexpr int gpu_3do_sector_plane_texture_unit=19;
     struct gpu_3do_light {
         std::array<float,3> local_position{};
         float radius=0.0f;

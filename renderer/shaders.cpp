@@ -805,7 +805,8 @@ void jkgm::shaders::gpu_3do_preview_shader::set_sector_crossing(
     // A samplerBuffer MUST have a different texture unit than sampler2D
     // even when the feature is off: GLSL draw validation checks sampler
     // type collisions before evaluating any conditional texture lookups.
-    gl::set_uniform_integer(sector_crossing_planes,12);
+    gl::set_uniform_integer(
+        sector_crossing_planes,gpu_3do_sector_plane_texture_unit);
     gl::set_uniform_integer(sector_crossing_count,count);
     if(!count)return;
     for(int i=0;i<count;++i) {

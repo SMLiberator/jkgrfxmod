@@ -3147,7 +3147,8 @@ namespace jkgm {
                 !post_exempt && !decals_only &&
                 sector_crossing_plane_texture!=0U;
             if(crossing_buffer_ready) {
-                glActiveTexture(GL_TEXTURE0+12);
+                glActiveTexture(GL_TEXTURE0+
+                    gpu_3do_sector_plane_texture_unit);
                 glBindTexture(GL_TEXTURE_BUFFER,sector_crossing_plane_texture);
                 glActiveTexture(GL_TEXTURE0);
                 prog.set_sector_crossing_camera_origin(cam.position);
@@ -7681,6 +7682,18 @@ namespace jkgm {
                !the_config->use_gpu_cache ||
                mode!=renderer_mode::ingame ||
                frame_gpu_3do_instances.empty())return;
+            // Spotlight cookie sampler2D units 12..15 and sun shadow
+            // sampler2DShadow units 16..18 must never alias the plane
+            // samplerBuffer. On GL 3.3 devices with only 16 fragment
+            // units, keep vanilla per-Thing sector lighting instead.
+            static GLint fragment_units=0;
+            if(fragment_units==0)
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);
+            if(fragment_units<=gpu_3do_sector_plane_texture_unit) {
+                // Level changes still invalidate the cached sector data.
+                if(sector_crossing_plane_texture)reset_sector_crossing();
+                return;
+            }
             uint32_t world=0;
             if(!engine_material_debug::read_object(
                     engine_material_debug::current_world_global,world) ||
@@ -7745,7 +7758,8 @@ namespace jkgm {
                     static_cast<GLsizeiptr>(planes.size()*sizeof(GLfloat)),
                     planes.data(),GL_STATIC_DRAW);
                 glGenTextures(1,&texture);
-                glActiveTexture(GL_TEXTURE0+12);
+                glActiveTexture(GL_TEXTURE0+
+                    gpu_3do_sector_plane_texture_unit);
                 glBindTexture(GL_TEXTURE_BUFFER,texture);
                 glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,buffer);
                 glBindTexture(GL_TEXTURE_BUFFER,0);

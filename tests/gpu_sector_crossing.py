@@ -38,10 +38,30 @@ assert "crossing_buffer_ready && !inst.camera_hud" in render
 assert "sector_crossing_planes" in api
 assert "set_sector_crossing(" in api
 setter=api[api.index("gpu_3do_preview_shader::set_sector_crossing("):]
-assert setter.index("gl::set_uniform_integer(sector_crossing_planes,12);") < (
-    setter.index("if(!count)return;"))
-# Otherwise samplerBuffer defaults to sampler unit 0 and conflicts with
-# the albedo sampler2D, preventing even the opt-out path from drawing.
+# Regression: samplerBuffer on unit 12 collided with spotlight cookie
+# sampler2D (units 12..15), silently suppressing all cached 3DO draws.
+# All active sampler types must occupy different numeric texture units
+# even when the fragment's sector-crossing branch is disabled.
+import re
+unit_match=re.search(
+    r"constexpr int gpu_3do_sector_plane_texture_unit\s*=\s*(\d+);",
+    instance)
+assert unit_match, "sector sampler unit must be explicitly reserved"
+plane_unit=int(unit_match.group(1))
+assert plane_unit==19
+spotlight_cookie_units={12+slot for slot in range(4)}
+translucent_sun_units={16,17,18}
+assert plane_unit not in spotlight_cookie_units | translucent_sun_units
+assert "gl::set_uniform_integer(translucent_spotlight_images[slot],12+slot);" in api
+assert (
+    "gl::set_uniform_integer(\n"
+    "        sector_crossing_planes,gpu_3do_sector_plane_texture_unit);"
+) in setter[:setter.index("if(!count)return;")]
+assert render.count("gpu_3do_sector_plane_texture_unit")>=3
+assert render.count("glActiveTexture(GL_TEXTURE0+\n")>=2
+assert "fragment_units<=gpu_3do_sector_plane_texture_unit" in render
+assert "glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);" in render
+assert "prog.set_sector_crossing(nullptr,false,false);" in render
 assert "sector_crossing_lit[4]" in vertex
 assert "sector_crossing_lit[4]" in fragment
 assert "if(sector_crossing_count>1)" in vertex

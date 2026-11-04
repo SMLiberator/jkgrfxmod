@@ -64,7 +64,13 @@ All normal single-sector models keep the existing vertex-lighting output.
 There is no new COG verb and no mutation of the Thing's owning sector.
 
 The renderer snapshots sector planes once per level into a GL 3.3 RGBA32F
-texture buffer (texture unit 12). The same native six-field world signature
+texture buffer (reserved texture unit 19). Spotlight MAT projection uses
+units 12..15, and translucent sun shadow samplers use units 16..18.
+The separate GL samplerBuffer unit is essential: OpenGL rejects a draw
+if an active samplerBuffer and sampler2D alias the same unit, even when
+the crossing branch is not executed. On devices offering fewer than 20
+fragment texture units, crossing lighting falls back to the existing
+per-Thing sector path. The same native six-field world signature
 used by the cache invalidates this snapshot on level changes. For each
 model, the GPU cache's existing group bounds are conservatively transformed
 with the native R/L/U affine matrix; the Adjoin graph selects at most four
