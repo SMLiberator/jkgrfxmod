@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -23,6 +24,8 @@ struct sector_crossing_region {
     sector_crossing_vec3 bounds_min{},bounds_max{};
     sector_crossing_vec3 interior_min{},interior_max{};
     bool has_interior_box=false,valid=false;
+    bool adjacency_valid=false; // false on malformed linked adjoin lists
+    std::vector<uint32_t> adjoining; // native sector table indices, not IDs
     std::vector<sector_crossing_plane> planes;
 };
 struct sector_crossing_snapshot {
@@ -30,6 +33,8 @@ struct sector_crossing_snapshot {
     uint32_t native_sector_count=0;
     size_t valid_count=0;
     std::vector<sector_crossing_region> sectors;
+    // Built on world capture; per-Thing lookup must never scan all sectors.
+    std::unordered_map<uint32_t,uint32_t> index_by_id;
 };
 inline bool sector_crossing_finite(sector_crossing_vec3 const &v) {
     return std::isfinite(v[0]) && std::isfinite(v[1]) && std::isfinite(v[2]);
@@ -88,42 +93,73 @@ inline bool sector_crossing_contains(
     }
     return !sector.planes.empty();
 }
-// At most eight nearby sector volumes per Thing. Exceeding the budget
-// disables the experimental crossing selection instead of guessing.
+// At most four connected sectors per Thing, including its owning sector.
+// This is intentionally a tighter GPU candidate budget than the earlier 8.
+// An overflowing connected query falls back to ordinary native ownership.
 struct sector_crossing_candidates {
-    static constexpr uint32_t capacity=8;
+    static constexpr uint32_t capacity=4;
     std::array<uint32_t,capacity> indices{};
     uint32_t count=0;
     bool overflow=false;
 };
+// Walk only the native adjoin graph: owner -> neighbors -> their neighbors.
+// A crossing Thing spanning sector 1, 8 and 3 only considers 1 -> 8 -> 3,
+// even if the level contains thousands of unconnected rooms. Two hops
+// cover the normal doorway case without walking an entire level graph.
+// AABB pruning is conservative and also bounds further BFS expansion.
 inline sector_crossing_candidates sector_crossing_collect_candidates(
     sector_crossing_snapshot const &snapshot,
     sector_crossing_vec3 const &origin,float radius,uint32_t owner_id)
 {
     sector_crossing_candidates result{};
-    auto add=[&](size_t index) {
-        if(result.count>=result.capacity) {
-            result.overflow=true;result.count=0;return false;
+    if(!sector_crossing_finite(origin) ||
+       !std::isfinite(radius) || radius<0.0f)return result;
+    auto const owner=snapshot.index_by_id.find(owner_id);
+    if(owner==snapshot.index_by_id.end() ||
+       owner->second>=snapshot.sectors.size())return result;
+    auto const index=owner->second;
+    auto const &starting=snapshot.sectors[index];
+    if(!starting.valid || !starting.adjacency_valid ||
+       !sector_crossing_sphere_overlaps_box(
+           origin,radius,starting.bounds_min,starting.bounds_max))
+        return result;
+
+    // Up to four candidates means these fixed-size queues never allocate.
+    // The owner is first, preserving JK's choice on coincident boundaries.
+    std::array<uint8_t,sector_crossing_candidates::capacity> depths{};
+    result.indices[0]=index;
+    result.count=1;
+    for(uint32_t front=0;front<result.count;++front) {
+        if(depths[front]>=2U)continue;
+        auto const &current=snapshot.sectors[result.indices[front]];
+        if(!current.adjacency_valid) {
+            result={};return result; // incomplete graph: keep native owner
         }
-        result.indices[result.count++]=static_cast<uint32_t>(index);
-        return true;
-    };
-    // Native ownership wins exact boundary ties; IDs need not equal indices.
-    for(size_t i=0;i<snapshot.sectors.size();++i) {
-        auto const &s=snapshot.sectors[i];
-        if(s.valid && s.id==owner_id &&
-           sector_crossing_sphere_overlaps_box(
-               origin,radius,s.bounds_min,s.bounds_max)) {
-            if(!add(i))return result;
-            break;
+        for(uint32_t neighbor_index:current.adjoining) {
+            if(neighbor_index>=snapshot.sectors.size()) {
+                result={};return result;
+            }
+            bool visited=false;
+            for(uint32_t i=0;i<result.count;++i)
+                if(result.indices[i]==neighbor_index) {
+                    visited=true;break;
+                }
+            if(visited)continue;
+            auto const &next=snapshot.sectors[neighbor_index];
+            if(!next.valid)continue;
+            if(!next.adjacency_valid) {
+                result={};return result; // don't use an incomplete network
+            }
+            if(!sector_crossing_sphere_overlaps_box(
+                   origin,radius,next.bounds_min,next.bounds_max))continue;
+            if(result.count>=result.capacity) {
+                result={};
+                result.overflow=true;
+                return result;
+            }
+            depths[result.count]=static_cast<uint8_t>(depths[front]+1U);
+            result.indices[result.count++]=neighbor_index;
         }
-    }
-    for(size_t i=0;i<snapshot.sectors.size();++i) {
-        auto const &s=snapshot.sectors[i];
-        if(!s.valid || s.id==owner_id ||
-           !sector_crossing_sphere_overlaps_box(
-               origin,radius,s.bounds_min,s.bounds_max))continue;
-        if(!add(i))return result;
     }
     return result;
 }
@@ -171,6 +207,7 @@ bool sector_crossing_capture(Read const &read,uintptr_t world,
     out.world=world;
     out.native_sector_count=count;
     out.sectors.reserve(count);
+    out.index_by_id.reserve(count);
     size_t total_planes=0;
     for(uint32_t i=0;i<count;++i) {
         uintptr_t const address=uintptr_t(sectors)+uintptr_t(i)*0x98U;
@@ -255,6 +292,48 @@ bool sector_crossing_capture(Read const &read,uintptr_t world,
         region.valid=good && !region.planes.empty();
         if(!region.valid)region.planes.clear();
         else ++out.valid_count;
+
+        // SithSector.adjoins (+0x2c) is a linked list of
+        // SithSurfaceAdjoin records: +0x04 is the DESTINATION sector,
+        // +0x10 is the next link. Do not follow mirror->sector: the
+        // direct destination pointer already represents the neighbor.
+        // Link topology is captured once per world, not once per Thing.
+        uint32_t adjoin=0;
+        bool links_ok=region.valid && read32(address+0x2cU,adjoin);
+        uint32_t num_links=0;
+        while(links_ok && adjoin!=0U) {
+            if(adjoin<0x10000U || adjoin>=0x7ff00000U ||
+               num_links++>=num_surfaces) {
+                links_ok=false;break; // includes cycles / malformed lists
+            }
+            uint32_t destination=0,next=0;
+            if(!read32(uintptr_t(adjoin)+0x04U,destination) ||
+               !read32(uintptr_t(adjoin)+0x10U,next)) {
+                links_ok=false;break;
+            }
+            // Destination points directly into the current native
+            // SithWorld sector table; never use or assume sector IDs.
+            uint64_t const delta=destination>=sectors
+                ? uint64_t(destination)-sectors : uint64_t(-1);
+            if(delta>=uint64_t(count)*0x98U ||
+               delta%0x98U!=0U) {
+                links_ok=false;break;
+            }
+            uint32_t neighbor=static_cast<uint32_t>(delta/0x98U);
+            if(neighbor!=i)region.adjoining.push_back(neighbor);
+            adjoin=next;
+        }
+        if(links_ok) {
+            std::sort(region.adjoining.begin(),region.adjoining.end());
+            region.adjoining.erase(
+                std::unique(region.adjoining.begin(),region.adjoining.end()),
+                region.adjoining.end());
+            region.adjacency_valid=true;
+        } else {
+            region.adjoining.clear();
+        }
+        if(region.valid)
+            out.index_by_id.emplace(region.id,i);
         out.sectors.push_back(std::move(region));
     }
     return out.valid_count>0U;

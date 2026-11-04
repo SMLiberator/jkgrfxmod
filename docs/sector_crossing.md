@@ -18,22 +18,40 @@ An optional interior collision box can shortcut the plane checks.
 Offsets are those already used and validated by JKGM, not OpenJKDF2's
 executable addresses.
 
-Bounding-sphere/AABB candidate selection narrows a Thing's potential
-sectors to at most eight, with owning-sector-first ties and safe fallback
-on candidate overflow or invalid geometry. Native IDs are not assumed
-to equal sector-array indices. All engine memory is read-only.
+The static snapshot now also extracts each SithSector's linked adjoin
+list, using SithSurfaceAdjoin's destination-sector (+0x04) and next-link
+(+0x10) pointers. These are native JKGM structure offsets, not the
+OpenJKDF2 executable's absolute addresses. Adjoin topology is used even
+if movement through an adjoin is disabled: a model can geometrically
+straddle the same sector boundary.
+
+Candidate selection now starts at the owning sector and follows at most
+two graph edges: owner -> adjacent -> adjacent. Each neighbor must pass
+a conservative Thing sphere/sector AABB overlap check before the search
+can continue through it. It never scans all world sectors per Thing.
+A per-world hash lookup resolves the native sector ID to an array index,
+so sparse IDs are handled directly.
+
+The ordinary candidate budget is **four sectors total**, including the
+owner. Exactly four is valid; a fifth overlapping connected candidate
+or an invalid linked list causes a safe fallback to JK's existing
+single-sector behavior. The BFS queue is a fixed four-element array,
+requiring no per-Thing allocations. Ordinary single-sector geometry
+takes the existing shader path unchanged. All engine reads are read-only.
 
 This stage deliberately does not change gameplay or shaders yet.
-The isolated C++ tests cover two adjoining rooms, sparse sector IDs,
-angled planes, interior collision boxes, invalid pointers and overflow.
+The isolated C++ tests cover two adjoining rooms, 1 -> 8 -> 3 adjoin
+hops, disconnected but spatially overlapping sectors, sparse sector
+IDs, slanted planes, interior collision boxes, invalid/cyclic native
+adjoin links, exactly four candidates and candidate overflow.
 
 ## Stage 2: instance staging
 
 Store the volume snapshot for the current SithWorld and invalidate it on
 world changes or geometry/membership changes. For each GPU-cached Thing,
 transform its conservative mesh bounds with the *actual* affine R/L/U
-matrix, including scaling or mirroring. Choose candidate sectors once
-per instance, NOT per pixel or across the entire level.
+matrix, including scaling or mirroring. Use the bounded adjoin graph
+query once per instance, not a full-sector scan or per-pixel raycast.
 
 Keep the existing fast vertex-lighting path whenever only the owner
 sector is relevant. Send a small bounded plane/lighting set to the shader
@@ -58,13 +76,17 @@ palette texels, transparency and RGB vertex colors.
 
 Performance target: no extra GPU texture lookups/draw calls for ordinary
 objects. No per-fragment raycast. No CPU triangulation or geometry
-reallocation. Prefer conservative fallback to wrong sector membership.
+reallocation. Prefer conservative fallback to wrong sector membership. The four
+candidate slots save per-instance shader uniform storage versus eight,
+and can halve the worst-case per-fragment sector loop once GPU-enabled.
+The adjoin query also removes the previous O(total world sectors)
+candidate scan, replacing it with a graph neighborhood walk.
 
 ## Later in-game checks
 
 Cars and long meshes spanning doorways; angled and concave regions;
 overlapping sectors, dynamic adjoins, camera transitions, animated
 materials, transparencies, 0x20 exemptions, scaled RLU transforms;
-and more than eight candidate sectors. If a native layout disagrees
+and more than four candidate sectors. If a native layout disagrees
 with the custom JKGM executable, validate it before activating the
 shader stage.
