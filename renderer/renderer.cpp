@@ -7139,6 +7139,9 @@ namespace jkgm {
             shader.set_fog(make_point(info[0],info[1],
                                the_config->enable_fog?info[2]:0.0f,0.0f),
                            make_point(color[0],color[1],color[2]));
+            // Diagnostic modes affect only GPU world Fluid in the forward
+            // pass. Default 0 retains the normal rendering path.
+            shader.set_fluid_debug_mode(the_config->world_cache_fluid_debug_mode);
             // Fluid samples the completed opaque depth texture, never the
             // framebuffer receiving translucent world fragments. The 3DO
             // shader already uses texture unit 8 for this same image.
