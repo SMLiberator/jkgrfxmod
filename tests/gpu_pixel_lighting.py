@@ -73,7 +73,13 @@ for stage in (frag, world_frag):
     assert "jk_point_compose(" in stage
 # Solid world faces use CMP palette RGB with no texture dependency.
 assert "uniform int solid_color;" in world_frag
-assert "solid_color!=0 ? clamp(material_tint.rgb" in world_frag
+# GeoMode 3 still uses its MAT/CMP color, but neither solid nor
+# textureless textured materials may clamp albedo_factor before
+# multiplying JK baked lighting (factors > 1 legitimately brighten).
+assert "solid_color!=0 ? material_tint.rgb :" in world_frag
+assert "texel.rgb*material_tint.rgb;" in world_frag
+assert "solid_color!=0 ? clamp(material_tint.rgb" not in world_frag
+assert "clamp(texel.rgb*material_tint.rgb,0.0,1.0)" not in world_frag
 assert "uniform int alpha_cutout;" in world_frag
 # Cutout alpha now shares the same coverage factor as masked, mixed-alpha,
 # forced-native translucency and dithered world faces.
