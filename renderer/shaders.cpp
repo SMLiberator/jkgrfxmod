@@ -237,6 +237,7 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , reflection_env2_sampler(gl::get_uniform_location(the_program,"env_map2"))
     , reflection_params(gl::get_uniform_location(the_program,"specular_params"))
     , reflection_normal_params(gl::get_uniform_location(the_program,"normal_specular_params"))
+    , normal_mapped_diffuse(gl::get_uniform_location(the_program,"normal_mapped_diffuse"))
     , reflection_scroll(gl::get_uniform_location(the_program,"normal_specular_scroll"))
     , reflection_scroll2(gl::get_uniform_location(the_program,"normal_specular_scroll2"))
     , environment_info(gl::get_uniform_location(the_program,"environment_info"))
@@ -341,6 +342,11 @@ void jkgm::shaders::world_cache_preview_shader::set_emissive(
         make_point(get<0>(intensity),get<1>(intensity),
                    get<2>(intensity)));
     gl::set_uniform_vector(emissive_scroll,scroll);
+}
+void jkgm::shaders::world_cache_preview_shader::set_normal_mapped_diffuse(
+    bool enabled)
+{
+    gl::set_uniform_integer(normal_mapped_diffuse,enabled?1:0);
 }
 void jkgm::shaders::world_cache_preview_shader::set_reflection(
     point<4,float> material,point<4,float> normals,
@@ -607,6 +613,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , palette_fullbright_sampler(gl::get_uniform_location(the_program,"palette_fullbright_mask"))
     , has_palette_fullbright(gl::get_uniform_location(the_program,"has_palette_fullbright"))
     , specular_params(gl::get_uniform_location(the_program,"specular_params"))
+    , normal_mapped_diffuse(gl::get_uniform_location(the_program,"normal_mapped_diffuse"))
     , dynamic_light_specular_enabled(gl::get_uniform_location(the_program,"dynamic_light_specular_enabled"))
     , specular_surface_sampler(gl::get_uniform_location(the_program,"surface_map"))
     , specular_normal_sampler(gl::get_uniform_location(the_program,"normal_map"))
@@ -870,6 +877,11 @@ void jkgm::shaders::gpu_3do_preview_shader::set_dynamic_light_specular(bool enab
     gl::set_uniform_integer(dynamic_light_specular_enabled,enabled?1:0);
 }
 
+void jkgm::shaders::gpu_3do_preview_shader::set_normal_mapped_diffuse(
+    bool enabled)
+{
+    gl::set_uniform_integer(normal_mapped_diffuse,enabled?1:0);
+}
 void jkgm::shaders::gpu_3do_preview_shader::set_point_specular(
     point<4,float> material,point<4,float> normal,point<2,float> scroll,
     point<2,float> scroll2)

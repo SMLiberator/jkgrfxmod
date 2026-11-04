@@ -165,6 +165,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("gpu_pixel_lighting")) {
             j.at("gpu_pixel_lighting").get_to(rv->gpu_pixel_lighting);
         }
+        if(j.contains("enable_normal_mapped_diffuse")) {
+            j.at("enable_normal_mapped_diffuse").get_to(
+                rv->enable_normal_mapped_diffuse);
+        }
         if(j.contains("restore_cmp_lights")) {
             j.at("restore_cmp_lights").get_to(rv->restore_cmp_lights);
         }

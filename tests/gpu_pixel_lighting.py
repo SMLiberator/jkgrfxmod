@@ -114,13 +114,48 @@ assert "vec3 lighting=cached_lit_rgb;" in world_frag
 assert "if(added<=0.0) return baked;" in frag
 assert "if(added<=0.0) return baked;" in shared
 assert "pixel_dynamic_lighting!=0" in frag
-assert "pixel_jk_diffuse_lighting()" in frag
+assert "pixel_jk_diffuse_lighting(diffuse_local_normal)" in frag
 assert "jk_fragment_lit" in frag
 assert "jk_lit_rgb*(1.0-env_metalness)" not in frag
 assert "albedo.rgb*jk_fragment_lit" in frag
 assert "dot(jk_fragment_lit,vec3(0.2126" in frag
 assert "nonrigid_light_transform!=0" in frag
 assert "light_position_radius[i].xyz-anchor" in frag
+# Normal-mapped diffuse is a separate, default-off experiment; no baked RGB
+# or vanilla Gouraud loop is changed. The mapped normal feeds only added
+# pixel-light response and deferred sun/spotlight receivers.
+assert "bool enable_normal_mapped_diffuse = false" in config
+assert 'j.contains("enable_normal_mapped_diffuse")' in parser
+assert wiring.count("shader.set_normal_mapped_diffuse(")==2
+assert "prog.set_normal_mapped_diffuse(" in wiring
+assert "diffuse_local_normal=mapped_local_normal(uv);" in frag
+assert "vec3 diffuse_view_normal=view_normal;" in frag
+assert "pixel_jk_diffuse_lighting(diffuse_local_normal)" in frag
+assert "view_depth,diffuse_view_normal" in frag
+assert "vec4(normalize(diffuse_view_normal)," in frag
+assert "vec3 diffuse_world_normal=normalize(cached_world_normal);" in world_frag
+assert "diffuse_world_normal=world_mapped_normal(material_texcoord);" in world_frag
+assert "vec3 normal=diffuse_world_normal;" in world_frag
+assert "vec4(diffuse_view_normal,1.0);" in world_frag
+assert "gl::set_uniform_integer(normal_mapped_diffuse,enabled?1:0);" in program
+assert "pixel_dynamic_lighting==0" in vert
+assert "vec3 lighting=cached_lit_rgb;" in world_frag
+assert "vec3 baked=sector_crossing_count>1" in frag
+# A matte material must still bind maps when specular is OFF.
+assert "spec_active || diffuse_mapping" in wiring
+assert "bool const material_normals_active=" in wiring
+assert "geometry_mode==4U && !material.solid_fullbright" in wiring
+assert "(reflective || diffuse_mapping) && material.has_normal" in wiring
+assert "spec_active?specular.first:0.0f" in wiring
+assert "reflective?specular.first:0.0f" in wiring
+# The opaque composite consumes the G-buffer normal for sun and cookie lights.
+composite=(root/"assets/shaders/post_opaque_composite.frag").read_text(
+    encoding="utf-8")
+assert "vec3 vn=texelFetch(normal_image,pixel,0).rgb;" in composite
+assert "vec4 normal_pixel=texelFetch(normal_image,tc,0);" in composite
+# Genuine shadow caster geometry and alpha-masked silhouettes are unchanged.
+shadow=(root/"assets/shaders/spotlight_shadow.vert").read_text(encoding="utf-8")
+assert "normal_map" not in shadow
 
 # This is why recomputing baked light at the pixel was visibly wrong:
 # gamma(interpolated brightness) != interpolated gamma(brightness).

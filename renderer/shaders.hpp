@@ -74,6 +74,7 @@ namespace jkgm {
             gl::uniform_location_id reflection_normal2_sampler,reflection_env_sampler;
             gl::uniform_location_id reflection_env2_sampler;
             gl::uniform_location_id reflection_params,reflection_normal_params;
+            gl::uniform_location_id normal_mapped_diffuse;
             gl::uniform_location_id reflection_scroll,reflection_scroll2,environment_info;
             gl::uniform_location_id camera_world_origin,camera_right_axis;
             gl::uniform_location_id camera_forward_axis,camera_up_axis;
@@ -106,6 +107,7 @@ namespace jkgm {
             void set_solid_color(point<4,float> tint);
             void set_solid_fullbright(bool enabled);
             void set_palette_fullbright(bool enabled);
+            void set_normal_mapped_diffuse(bool enabled);
             void set_reflection(point<4,float> material,point<4,float> normals,
                                 point<2,float> scroll,point<2,float> scroll2,
                                 bool from,bool to,float weight,int mode);
@@ -293,6 +295,7 @@ namespace jkgm {
             gl::uniform_location_id solid_fullbright;
             gl::uniform_location_id palette_fullbright_sampler,has_palette_fullbright;
             gl::uniform_location_id specular_params,normal_specular_params;
+            gl::uniform_location_id normal_mapped_diffuse;
             gl::uniform_location_id dynamic_light_specular_enabled;
             gl::uniform_location_id specular_surface_sampler,specular_normal_sampler;
             gl::uniform_location_id specular_normal2_sampler,specular_environment_sampler;
@@ -358,6 +361,7 @@ namespace jkgm {
                 std::array<float,3> const &origin);
             void set_local_eye(std::array<float,3> const &eye);
             void set_dynamic_light_specular(bool enabled);
+            void set_normal_mapped_diffuse(bool enabled);
             void set_point_specular(point<4,float> material,
                                     point<4,float> normal,
                                     point<2,float> normal_scroll,

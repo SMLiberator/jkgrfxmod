@@ -54,6 +54,7 @@ uniform sampler2D normal_map2; // second slope layer
 uniform sampler2D env_map;     // equirectangular / matcap
 uniform sampler2D env_map2;
 uniform vec4 view_right, view_forward, view_up, view_origin;
+uniform vec4 projection; // FOV scale for the deferred spotlight/sun normal
 uniform vec3 camera_right_axis,camera_forward_axis,camera_up_axis;
 uniform vec4 environment_info; // from enabled, reflection_mode, to enabled, progress
 uniform vec4 sun_direction; // view-space direction TOWARD sun
@@ -65,6 +66,7 @@ uniform vec2 normal_specular_scroll2;
 uniform vec3 local_eye;
 uniform int num_lights;
 uniform int pixel_dynamic_lighting;
+uniform int normal_mapped_diffuse; // opt-in: added real-time diffuse only
 uniform float ambient_light;
 uniform float effective_light_mode;
 uniform vec3 colormap_tint;
@@ -168,7 +170,7 @@ vec3 pixel_jk_color_at_brightness(float bright)
 // The baked vertex color stays authoritative. Dynamic lighting is evaluated
 // with precisely the same sample and composition formulas as world geometry.
 // 3DO-specific logic is limited to local-space transformations and light mode.
-vec3 pixel_jk_diffuse_lighting()
+vec3 pixel_jk_diffuse_lighting(vec3 mapped_diffuse_normal)
 {
     float mode=pixel_light_state.z>3.5 ? 1.0 :
                min(pixel_light_state.z,effective_light_mode);
@@ -178,7 +180,9 @@ vec3 pixel_jk_diffuse_lighting()
 
     vec3 anchor=mode>=2.5 ? local_fragment_position
                           : pixel_light_face_anchor;
-    vec3 normal=normalize(mode>=2.5 ? local_fragment_normal
+    // Flat LightMode 2 still uses its authored face normal/attenuation.
+    // Only Gouraud/LightMode 3 point diffuse gains mapped detail.
+    vec3 normal=normalize(mode>=2.5 ? mapped_diffuse_normal
                                     : pixel_light_face_normal);
     if(nonrigid_light_transform!=0) {
         vec3 r=view_right.xyz,f=view_forward.xyz,u=view_up.xyz;
@@ -842,6 +846,25 @@ void main() {
     float fullbright=solid_fullbright!=0 ? 1.0 :
         gpu_material_palette_fullbright(
             palette_fullbright_mask,uv+albedo_scroll,has_palette_fullbright);
+    // The material's original baked JK RGB is untouched. The optional
+    // perturbed normal is used only for ADDED sun, spotlight and pixel-point
+    // light. Keep the geometric normal if this face has no normal texture.
+    vec3 diffuse_local_normal=local_fragment_normal;
+    vec3 diffuse_view_normal=view_normal;
+    bool const_normal_mapped_diffuse=
+        normal_mapped_diffuse!=0 &&
+        (normal_specular_params.x>0.5 ||
+         normal_specular_params.z>0.5) &&
+        has_texture==1 && solid_fullbright==0 && fullbright<0.999 &&
+        world_lighting_exempt==0 && sprite_receiver==0 &&
+        decal_receiver_lighting==0;
+    if(const_normal_mapped_diffuse) {
+        diffuse_local_normal=mapped_local_normal(uv);
+        vec3 n=gpu_view_normal_from_local(diffuse_local_normal);
+        float sh=max(projection.x,0.0001);
+        float sv=sh/max(projection.y,0.0001);
+        diffuse_view_normal=normalize(vec3(n.x*sh,n.y*sv,n.z));
+    }
     float env_metalness=0.0;
     vec3 env_reflection=gpu_environment_reflection(albedo.rgb,uv,env_metalness);
     // CMP fullbright is immune to lighting, not an extra HDR source.
@@ -853,7 +876,8 @@ void main() {
     sector_crossing_slot=sector_crossing_count>1
         ? select_sector_crossing_slot() : 0;
     vec3 jk_fragment_lit=mix(
-        pixel_dynamic_lighting!=0 ? pixel_jk_diffuse_lighting() :
+        pixel_dynamic_lighting!=0
+          ? pixel_jk_diffuse_lighting(diffuse_local_normal) :
           (sector_crossing_count>1
              ? sector_crossing_lit[sector_crossing_slot] : jk_lit_rgb),
         vec3(1.0),fullbright);
@@ -866,7 +890,7 @@ void main() {
         // GPU alpha is applied when forming the premultiplied output below;
         // sunlight must not apply it twice.
         lit_rgb=illuminate_translucent_sun(lit_rgb,albedo.rgb,1.0,
-                                           view_depth,view_normal);
+                                           view_depth,diffuse_view_normal);
     }
     // Decal pigment inherits the receiver's interpolated JK diffuse light
     // instead of appearing fullbright. That scalar is written into unused
@@ -895,7 +919,7 @@ void main() {
        (alpha_mode==1 || alpha_mode==3) &&
        blend_mode!=1 && blend_mode!=2 && emissive_only==0) {
         projected_light=light_translucent_spotlight(
-            view_depth,view_normal,albedo.rgb,clamp(albedo.a,0.0,1.0)) *
+            view_depth,diffuse_view_normal,albedo.rgb,clamp(albedo.a,0.0,1.0)) *
             (1.0-fog);
     }
     if(dynamic_light_specular_enabled!=0 && num_lights>0 &&
@@ -948,7 +972,7 @@ void main() {
     // two-sided, independent of camera-facing normals. Coverage is still >0.
     out_normal=(world_lighting_exempt!=0 || fullbright>=0.5)
                    ? vec4(0.0,0.0,0.0,1.0) :
-                          vec4(normalize(view_normal),
+                          vec4(normalize(diffuse_view_normal),
                                sprite_receiver!=0 ? 2.0 : 1.0);
     // Depth target optionally carries the unlit diffuse base in GBA.
     // This keeps projected lighting independent of baked JK vertex light.

@@ -3188,6 +3188,8 @@ namespace jkgm {
             // No overhead from per-material GGX state for nonreflective maps.
             // Each pass resets shader state once; individual draws only
             // update the extra uniforms when actually reflective.
+            prog.set_normal_mapped_diffuse(
+                the_config->enable_normal_mapped_diffuse);
             prog.set_dynamic_light_specular(
                 the_config->enable_reflections &&
                 the_config->enable_dynamic_light_specular);
@@ -3663,37 +3665,51 @@ namespace jkgm {
                     (draw.texture.has_environment ||
                      draw.texture.has_environment2 || sun_active ||
                      point_specular_active);
-                if(spec_active) {
-                    gl::set_active_texture_unit(2);
-                    gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                     draw.texture.surface);
-                    gl::set_active_texture_unit(3);
-                    gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                     draw.texture.normal);
+                bool const diffuse_mapping=
+                    the_config->enable_normal_mapped_diffuse &&
+                    !inst.camera_hud && !inst.is_projected_decal &&
+                    !inst.is_sprite_quad && !inst.world_lighting_exempt &&
+                    !group.solid_color && !draw.texture.solid_fullbright &&
+                    (draw.texture.has_normal || draw.texture.has_normal2);
+                bool const material_normals_active=
+                    spec_active || diffuse_mapping;
+                if(material_normals_active) {
+                    if(spec_active) {
+                        gl::set_active_texture_unit(2);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         draw.texture.surface);
+                    }
+                    if(draw.texture.has_normal) {
+                        gl::set_active_texture_unit(3);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         draw.texture.normal);
+                    }
                     if(draw.texture.has_normal2) {
                         gl::set_active_texture_unit(5);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          draw.texture.normal2);
                     }
-                    if(draw.texture.has_environment) {
+                    if(spec_active && draw.texture.has_environment) {
                         gl::set_active_texture_unit(4);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          draw.texture.environment);
                     }
-                    if(draw.texture.environment_transition>0.0f &&
+                    if(spec_active &&
+                       draw.texture.environment_transition>0.0f &&
                        draw.texture.has_environment2) {
                         gl::set_active_texture_unit(7);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          draw.texture.environment2);
                     }
-                    prog.set_environment(draw.texture.has_environment,
-                                         draw.texture.has_environment2,
-                                         draw.texture.environment_transition,
-                                         draw.texture.reflection_mode);
+                    prog.set_environment(
+                        spec_active && draw.texture.has_environment,
+                        spec_active && draw.texture.has_environment2,
+                        spec_active?draw.texture.environment_transition:0.0f,
+                        draw.texture.reflection_mode);
                     prog.set_point_specular(
-                        make_point(specular.first,
+                        make_point(spec_active?specular.first:0.0f,
                                    specular.second,draw.texture.metalness,
-                                   draw.texture.has_surface?1.0f:0.0f),
+                                   spec_active && draw.texture.has_surface?1.0f:0.0f),
                         make_point(draw.texture.has_normal?1.0f:0.0f,
                                    draw.texture.normal_strength,
                                    draw.texture.has_normal2?1.0f:0.0f,
@@ -3707,7 +3723,7 @@ namespace jkgm {
                         make_point(0.0f,0.0f),make_point(0.0f,0.0f));
                     prog.set_environment(false,false,0.0f,0);
                 }
-                prev_specular_active=spec_active;
+                prev_specular_active=material_normals_active;
                 // JK's high-resolution MAT patch uses a 256x256 maximum UV
                 // reference area for *models*, independently per dimension.
                 // For a 64px MAT, 0..256 repeats four times; for >=256px,
@@ -6437,21 +6453,15 @@ namespace jkgm {
                 specular.first>0.0f &&
                 (material.has_environment || material.has_environment2 ||
                  direct_sun || direct_points);
+            bool const diffuse_mapping=
+                the_config->enable_normal_mapped_diffuse &&
+                geometry_mode==4U && !material.solid_fullbright &&
+                (material.has_normal || material.has_normal2);
             if(reflective) {
                 if(material.has_surface) {
                     gl::set_active_texture_unit(2);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
                                      material.surface);
-                }
-                if(material.has_normal) {
-                    gl::set_active_texture_unit(3);
-                    gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                     material.normal);
-                }
-                if(material.has_normal2) {
-                    gl::set_active_texture_unit(5);
-                    gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                     material.normal2);
                 }
                 if(material.has_environment) {
                     gl::set_active_texture_unit(4);
@@ -6465,13 +6475,25 @@ namespace jkgm {
                                      material.environment2);
                 }
             }
+            if((reflective || diffuse_mapping) && material.has_normal) {
+                gl::set_active_texture_unit(3);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 material.normal);
+            }
+            if((reflective || diffuse_mapping) && material.has_normal2) {
+                gl::set_active_texture_unit(5);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 material.normal2);
+            }
             shader.set_reflection(
                 make_point(reflective?specular.first:0.0f,
                            specular.second,material.metalness,
                            reflective && material.has_surface?1.0f:0.0f),
-                make_point(reflective && material.has_normal?1.0f:0.0f,
+                make_point((reflective || diffuse_mapping) &&
+                           material.has_normal?1.0f:0.0f,
                            material.normal_strength,
-                           reflective && material.has_normal2?1.0f:0.0f,
+                           (reflective || diffuse_mapping) &&
+                           material.has_normal2?1.0f:0.0f,
                            material.normal_strength2),
                 material.normal_scroll,material.normal_scroll2,
                 reflective && material.has_environment,
@@ -6647,6 +6669,8 @@ namespace jkgm {
                 });
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
+            shader.set_normal_mapped_diffuse(
+                the_config->enable_normal_mapped_diffuse);
             auto const &m=cam.native_view;
             shader.set_view_matrix(
                 make_point(m[0],m[1],m[2],0.0f),
@@ -7068,6 +7092,8 @@ namespace jkgm {
                 });
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
+            shader.set_normal_mapped_diffuse(
+                the_config->enable_normal_mapped_diffuse);
             shader.set_reflection_camera(cam.position,cam.right,
                                          cam.forward,cam.up);
             // Alpha-only worlds must initialize these independently of

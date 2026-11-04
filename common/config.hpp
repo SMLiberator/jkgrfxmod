@@ -39,6 +39,7 @@ namespace jkgm {
         float default_specular_roughness = 0.85f;
         bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
         bool gpu_pixel_lighting = false; // opt-in pixel dynamic lighting for all cached world/3DO geometry; false=JK Gouraud
+        bool enable_normal_mapped_diffuse = false; // experimental: mapped normals for GPU world/3DO added sun, spot and pixel point light
         bool restore_cmp_lights = false; // opt-in indexed textured MAT fullbright pixels; GeoMode 3 always retains native HW fullbright
         bool enable_sector_crossing_lighting = false; // experimental per-fragment 3DO sector light/CMP/tint
         bool enable_ssao = true;

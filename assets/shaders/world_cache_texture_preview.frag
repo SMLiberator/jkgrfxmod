@@ -28,6 +28,8 @@ uniform vec2 uv_scale,uv_scroll;
 // GPU 3DO-compatible EnvMap samplers, reflection modes, material parameters.
 uniform sampler2D surface_map,normal_map,normal_map2,env_map,env_map2;
 uniform vec4 specular_params,normal_specular_params,environment_info;
+uniform vec4 projection; // same FOV factors as world_cache_wireframe.vert
+uniform int normal_mapped_diffuse; // opt-in added lights, not baked JK RGB
 uniform vec2 normal_specular_scroll,normal_specular_scroll2;
 uniform vec3 camera_world_origin,camera_right_axis;
 uniform vec3 camera_forward_axis,camera_up_axis;
@@ -232,11 +234,19 @@ void main() {
             has_palette_fullbright);
     // Keep authored Gouraud/sector lighting, already interpolated in RGB.
     // The same GLSL helpers calculate pixel light for both world and 3DO.
+    // Reuse the normal-map slope reconstruction already used by GGX, but
+    // never use it for GeoMode 3 or CMP fullbright faces.
+    vec3 diffuse_world_normal=normalize(cached_world_normal);
+    bool mapped_diffuse=normal_mapped_diffuse!=0 && solid_color==0 &&
+        (normal_specular_params.x>0.5 ||
+         normal_specular_params.z>0.5) && fullbright<0.999;
+    if(mapped_diffuse)
+        diffuse_world_normal=world_mapped_normal(material_texcoord);
     vec3 lighting=cached_lit_rgb;
     if(world_pixel_dynamic_lighting!=0 && fullbright<0.999 &&
        cached_light_state.z>2.5 && num_lights>0) {
         float added=0.0;
-        vec3 normal=normalize(cached_world_normal);
+        vec3 normal=diffuse_world_normal;
         for(int i=0;i<num_lights;i++) {
             vec3 delta=light_position_radius[i].xyz-cached_world_position;
             added+=jk_point_sample(delta,normal,light_position_radius[i].w,
@@ -308,7 +318,21 @@ void main() {
     out_emissive=vec4(emission+env_reflection+direct_specular,
         dot(lighting,vec3(0.2126,0.7152,0.0722)));
     // Fullbright palette entries do not receive AO, sun or projected light.
+    // G-buffer normal is consumed by both opaque projected spotlights
+    // and sunlight. Retain JK's projected geometry normal without a map;
+    // match the vertex shader's FOV-scaled normal encoding when mapped.
+    vec3 diffuse_view_normal=normalize(cached_view_normal);
+    if(mapped_diffuse) {
+        vec3 view_n=vec3(
+            dot(diffuse_world_normal,camera_right_axis),
+            dot(diffuse_world_normal,camera_up_axis),
+            dot(diffuse_world_normal,camera_forward_axis));
+        float sh=max(projection.x,0.0001);
+        float sv=sh/max(projection.y,0.0001);
+        diffuse_view_normal=normalize(vec3(
+            view_n.x*sh,view_n.y*sv,view_n.z));
+    }
     out_normal=fullbright>=0.5 ? vec4(0.0,0.0,0.0,1.0) :
-               vec4(normalize(cached_view_normal),1.0);
+               vec4(diffuse_view_normal,1.0);
     out_depth=vec4(32.0/max(gl_FragCoord.w,0.00000001),albedo);
 }
