@@ -32,6 +32,8 @@ assert "sector_crossing_stage_instance(" in render
 assert "stage_sector_crossing();" in render
 assert "reset_sector_crossing();" in render
 assert "prog.set_sector_crossing(inst.crossing_lighting.get()," in render
+assert "prog.set_sector_crossing(nullptr,false,false);" in render
+assert "if(!the_config->enable_sector_crossing_lighting)" in render
 assert "crossing_buffer_ready && !inst.camera_hud" in render
 assert "sector_crossing_planes" in api
 assert "set_sector_crossing(" in api

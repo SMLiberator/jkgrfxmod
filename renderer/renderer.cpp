@@ -3138,6 +3138,10 @@ namespace jkgm {
             bool const have_perspective_frustum=frame_camera.perspective;
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
+            // With the JSON option OFF, set both sampler type and zero
+            // candidates once per pass, not once for every cached model.
+            if(!the_config->enable_sector_crossing_lighting)
+                prog.set_sector_crossing(nullptr,false,false);
             bool const crossing_buffer_ready=
                 the_config->enable_sector_crossing_lighting &&
                 !post_exempt && !decals_only &&
@@ -3526,10 +3530,11 @@ namespace jkgm {
                     prog.set_sprite_receiver(inst.is_sprite_quad);
                     prog.set_colormap_tint(inst.colormap_tint);
                     // Zero sector count preserves the existing fast path.
-                    prog.set_sector_crossing(inst.crossing_lighting.get(),
-                        crossing_buffer_ready && !inst.camera_hud &&
-                        !inst.is_projected_decal && !inst.is_sprite_quad,
-                        can_replace_sector_tint);
+                    if(the_config->enable_sector_crossing_lighting)
+                        prog.set_sector_crossing(inst.crossing_lighting.get(),
+                            crossing_buffer_ready && !inst.camera_hud &&
+                            !inst.is_projected_decal && !inst.is_sprite_quad,
+                            can_replace_sector_tint);
                     // Shared 3DO geometry can have several instances in
                     // different SithSectors. Do this per Thing, not per
                     // material/mesh. Invalid native pointers preserve JK.
