@@ -1520,6 +1520,44 @@ namespace {
         hash.add(m.num_faces);
         return hash.value;
     }
+    // This executable's rdModel3_DrawMesh back-face check dereferences
+    // mesh->vertices[face->pos_indices[0]].y before rdModel3_DrawFace.
+    // Invalid indices can reach the native fallback when a GPU snapshot is
+    // rejected. Diagnose and skip only a PROVEN corrupt face index rather
+    // than crashing on the original engine's unchecked read.
+    bool native_fallback_bad_first_vertex(void const *mesh,std::string &detail)
+    {
+        if(!gpu_span_readable(mesh,sizeof(native_mesh)))return false;
+        native_mesh m{};
+        std::memcpy(&m,mesh,sizeof(m));
+        if(m.num_faces<=0 || m.num_faces>65536 || m.num_vertices<=0 ||
+           m.num_vertices>65536 || !m.faces ||
+           !gpu_span_readable(m.faces,
+               size_t(m.num_faces)*sizeof(native_face)))return false;
+        for(int i=0;i<m.num_faces;++i) {
+            native_face f{};
+            std::memcpy(&f,m.faces+size_t(i)*sizeof(f),sizeof(f));
+            int32_t first=-1;
+            bool const readable=f.pos_indices &&
+                gpu_span_readable(f.pos_indices,sizeof(first));
+            if(readable)
+                std::memcpy(&first,f.pos_indices,sizeof(first));
+            if(readable && first>=0 && first<m.num_vertices)continue;
+            auto const end=std::find(m.name,m.name+sizeof(m.name),'\0');
+            std::ostringstream out;
+            out<<"3do="<<active_native_model_filename.data()
+               <<" mesh="<<std::string(m.name,end)
+               <<" mesh_ptr="<<mesh
+               <<" face="<<i<<" of "<<m.num_faces
+               <<" first_vertex="<<first<<" of "<<m.num_vertices
+               <<" index_ptr="<<static_cast<void const *>(f.pos_indices)
+               <<" reason="<<(readable?"out_of_bounds":"unreadable_index");
+            detail=out.str();
+            return true;
+        }
+        return false;
+    }
+
     void capture_static_sprite_decal_mesh(void *mesh,void *placement);
     void __cdecl HookedNativeMesh(void *mesh, void *placement)
     {
@@ -1722,12 +1760,26 @@ namespace {
         if(profiling)
             native_totals.mesh_queue_ns+=elapsed_native_ns(queue_begin);
         if(!queued) {
-            auto const fallback_begin=profiling ? std::chrono::steady_clock::now()
-                                                : std::chrono::steady_clock::time_point{};
-            RealNativeMesh(mesh,placement);
-            if(profiling) {
-                native_totals.mesh_native_ns+=elapsed_native_ns(fallback_begin);
-                ++native_totals.mesh_native_calls;
+            std::string invalid_first_vertex;
+            if(native_fallback_bad_first_vertex(mesh,invalid_first_vertex)) {
+                // An invalid face cannot be rendered by native JK either.
+                // Rate-limit repeated COG/animation failures, but record
+                // enough identity to locate the damaged 3DO or GeoSet.
+                static std::unordered_set<std::string> reported;
+                if(reported.size()<32U &&
+                   reported.insert(invalid_first_vertex).second)
+                    LOG_WARNING("Native rdModel3_DrawMesh fallback skipped "
+                                "corrupt face index: ",invalid_first_vertex);
+            } else {
+                auto const fallback_begin=profiling
+                    ?std::chrono::steady_clock::now()
+                    :std::chrono::steady_clock::time_point{};
+                RealNativeMesh(mesh,placement);
+                if(profiling) {
+                    native_totals.mesh_native_ns+=
+                        elapsed_native_ns(fallback_begin);
+                    ++native_totals.mesh_native_calls;
+                }
             }
         }
         else {

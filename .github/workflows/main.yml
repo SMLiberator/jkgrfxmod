@@ -244,6 +244,8 @@ jobs:
         sector_crossing_gpu_test.exe
     - name: Sector crossing shader and JSON opt-in wiring checks
       run: python3 tests/gpu_sector_crossing.py
+    - name: Native 3DO fallback corrupt-index crash guard checks
+      run: python3 tests/native_mesh_fallback_guard.py
     - name: Source-indexed MAT fullbright mask regression tests
       shell: cmd
       run: |
