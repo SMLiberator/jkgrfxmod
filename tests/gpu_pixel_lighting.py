@@ -111,7 +111,7 @@ for texture_alpha,material_alpha in ((1.0,1.0),(0.5,1.0),(1.0,0.7)):
     assert 0.0<=expected_rgb<=actual_alpha
 assert "discard;" in world_frag
 assert "vec3 lighting=cached_lit_rgb;" in world_frag
-assert "if(added<=0.0) return jk_lit_rgb;" in frag
+assert "if(added<=0.0) return baked;" in frag
 assert "if(added<=0.0) return baked;" in shared
 assert "pixel_dynamic_lighting!=0" in frag
 assert "pixel_jk_diffuse_lighting()" in frag

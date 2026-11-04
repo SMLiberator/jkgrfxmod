@@ -237,6 +237,13 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sector_crossing.cpp /Fe:sector_crossing_test.exe
         sector_crossing_test.exe
+    - name: GPU sector-crossing native 3DO staging tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sector_crossing_gpu.cpp /Fe:sector_crossing_gpu_test.exe
+        sector_crossing_gpu_test.exe
+    - name: Sector crossing shader and JSON opt-in wiring checks
+      run: python3 tests/gpu_sector_crossing.py
     - name: Source-indexed MAT fullbright mask regression tests
       shell: cmd
       run: |

@@ -599,6 +599,10 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , jk_color_add_fade(gl::get_uniform_location(the_program,"jk_color_add_fade"))
     , thing_sector_tint_delta(gl::get_uniform_location(the_program,"thing_sector_tint_delta"))
     , colormap_tint(gl::get_uniform_location(the_program,"colormap_tint"))
+    , sector_crossing_count(gl::get_uniform_location(the_program,"sector_crossing_count"))
+    , sector_crossing_planes(gl::get_uniform_location(the_program,"sector_crossing_planes"))
+    , sector_crossing_camera_origin(gl::get_uniform_location(
+          the_program,"sector_crossing_camera_origin"))
     , solid_fullbright(gl::get_uniform_location(the_program,"solid_fullbright"))
     , palette_fullbright_sampler(gl::get_uniform_location(the_program,"palette_fullbright_mask"))
     , has_palette_fullbright(gl::get_uniform_location(the_program,"has_palette_fullbright"))
@@ -652,6 +656,24 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
           the_program,"nonrigid_light_transform"))
     , effective_light_mode(gl::get_uniform_location(the_program,"effective_light_mode"))
 {
+    for(unsigned i=0;i<4;i++) {
+        auto const prefix=std::string("sector_crossing_");
+        auto const suffix="["+std::to_string(i)+"]";
+        sector_crossing_info.push_back(gl::get_uniform_location(
+            the_program,prefix+"info"+suffix));
+        sector_crossing_bounds_min.push_back(gl::get_uniform_location(
+            the_program,prefix+"bounds_min"+suffix));
+        sector_crossing_bounds_max.push_back(gl::get_uniform_location(
+            the_program,prefix+"bounds_max"+suffix));
+        sector_crossing_inner_min.push_back(gl::get_uniform_location(
+            the_program,prefix+"inner_min"+suffix));
+        sector_crossing_inner_max.push_back(gl::get_uniform_location(
+            the_program,prefix+"inner_max"+suffix));
+        sector_crossing_cmp.push_back(gl::get_uniform_location(
+            the_program,prefix+"cmp"+suffix));
+        sector_crossing_tint.push_back(gl::get_uniform_location(
+            the_program,prefix+"tint"+suffix));
+    }
     for(unsigned i=0;i<gpu_3do_max_lights;i++) {
         light_position_radius.push_back(gl::get_uniform_location(
             the_program,std::string("light_position_radius[")+std::to_string(i)+"]"));
@@ -773,6 +795,42 @@ void jkgm::shaders::gpu_3do_preview_shader::set_jk_color_effects(
     gl::set_uniform_vector(jk_color_filter,filter);
     gl::set_uniform_vector(jk_color_tint,tint);
     gl::set_uniform_vector(jk_color_add_fade,add_fade);
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_sector_crossing(
+    gpu_3do_crossing_state const *state,bool enabled,bool allow_sector_tint)
+{
+    int const count=enabled && state && state->count>1U &&
+        state->count<=4U ? static_cast<int>(state->count) : 0;
+    gl::set_uniform_integer(sector_crossing_count,count);
+    if(!count)return;
+    gl::set_uniform_integer(sector_crossing_planes,12);
+    for(int i=0;i<count;++i) {
+        auto const &s=state->sectors[i];
+        gl::set_uniform_vector(sector_crossing_info[i],
+            make_point(s.ambient,float(s.plane_start),
+                       float(s.plane_count),s.interior_valid?1.0f:0.0f));
+        gl::set_uniform_vector(sector_crossing_bounds_min[i],
+            make_point(s.bounds_min[0],s.bounds_min[1],s.bounds_min[2],0.0f));
+        gl::set_uniform_vector(sector_crossing_bounds_max[i],
+            make_point(s.bounds_max[0],s.bounds_max[1],s.bounds_max[2],0.0f));
+        gl::set_uniform_vector(sector_crossing_inner_min[i],
+            make_point(s.interior_min[0],s.interior_min[1],s.interior_min[2],0.0f));
+        gl::set_uniform_vector(sector_crossing_inner_max[i],
+            make_point(s.interior_max[0],s.interior_max[1],s.interior_max[2],0.0f));
+        gl::set_uniform_vector(sector_crossing_cmp[i],
+            make_point(s.cmp_tint[0],s.cmp_tint[1],s.cmp_tint[2],1.0f));
+        auto const tint=allow_sector_tint
+            ? s.sector_tint : std::array<float,3>{{0.0f,0.0f,0.0f}};
+        gl::set_uniform_vector(sector_crossing_tint[i],
+            make_point(tint[0],tint[1],tint[2],0.0f));
+    }
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_sector_crossing_camera_origin(
+    std::array<float,3> const &origin)
+{
+    gl::set_uniform_vector(sector_crossing_camera_origin,
+        make_point(origin[0],origin[1],origin[2]));
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_thing_sector_tint_delta(

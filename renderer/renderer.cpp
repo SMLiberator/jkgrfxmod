@@ -12,6 +12,7 @@
 #include "native_jk_palette_effects.hpp"
 #include "native_sector_palette_bridge.hpp"
 #include "thing_sector_tint.hpp"
+#include "sector_crossing_gpu.hpp"
 #include "retro_palette.hpp"
 #include "jk_colormap_layout.hpp"
 #include "jk_cmp_gpu.hpp"
@@ -522,6 +523,12 @@ namespace jkgm {
         // frame; share costly native memory reads across both GPU passes.
         std::unordered_map<uint64_t,gpu_3do_texture> gpu_frame_material_cache;
         std::vector<gpu_3do_instance> frame_gpu_3do_instances;
+        // Level-static sector planes; opt-in only.
+        sector_crossing_snapshot sector_crossing_world{};
+        std::array<uint32_t,6> sector_crossing_world_signature{};
+        std::vector<sector_crossing_plane_range> sector_crossing_ranges;
+        GLuint sector_crossing_plane_texture=0;
+        GLuint sector_crossing_plane_buffer=0;
         // The scene is rendered AFTER the prior scene is presented. Retain
         // the camera used to transform these 3DOs, not the live rdCamera from
         // the next frame when Camera Thing HUDs are composited.
@@ -1003,6 +1010,7 @@ namespace jkgm {
 
         ~renderer_impl() override
         {
+            reset_sector_crossing();
             release_spotlight_images();
             spotlight_shadow_target.reset();
             sun_shadow_target.reset();
@@ -1024,6 +1032,7 @@ namespace jkgm {
                 deferred_gpu_3do_instances.clear();
                 deferred_gpu_3do_camera={};
                 frame_has_exempt_gpu=false;
+                reset_sector_crossing();
                 if(the_config->use_gpu_cache ||
                    the_config->enable_decals ||
                    (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
@@ -3129,6 +3138,16 @@ namespace jkgm {
             bool const have_perspective_frustum=frame_camera.perspective;
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
+            bool const crossing_buffer_ready=
+                the_config->enable_sector_crossing_lighting &&
+                !post_exempt && !decals_only &&
+                sector_crossing_plane_texture!=0U;
+            if(crossing_buffer_ready) {
+                glActiveTexture(GL_TEXTURE0+12);
+                glBindTexture(GL_TEXTURE_BUFFER,sector_crossing_plane_texture);
+                glActiveTexture(GL_TEXTURE0);
+                prog.set_sector_crossing_camera_origin(cam.position);
+            }
             set_translucent_spotlights(prog,transparent && !post_exempt &&
                                       !decals_only);
             // Mask directional GGX in both opaque and translucent passes.
@@ -3506,6 +3525,11 @@ namespace jkgm {
                     prog.set_world_lighting_exempt(inst.world_lighting_exempt);
                     prog.set_sprite_receiver(inst.is_sprite_quad);
                     prog.set_colormap_tint(inst.colormap_tint);
+                    // Zero sector count preserves the existing fast path.
+                    prog.set_sector_crossing(inst.crossing_lighting.get(),
+                        crossing_buffer_ready && !inst.camera_hud &&
+                        !inst.is_projected_decal && !inst.is_sprite_quad,
+                        can_replace_sector_tint);
                     // Shared 3DO geometry can have several instances in
                     // different SithSectors. Do this per Thing, not per
                     // material/mesh. Invalid native pointers preserve JK.
@@ -7629,6 +7653,126 @@ namespace jkgm {
             }
         }
 
+        // Destroy the context-owned GL texture-buffer and all CPU sector
+        // state when a level changes or the renderer closes.
+        void reset_sector_crossing()
+        {
+            if(hGLRC && wglGetCurrentContext()==hGLRC) {
+                if(sector_crossing_plane_texture)
+                    glDeleteTextures(1,&sector_crossing_plane_texture);
+                if(sector_crossing_plane_buffer)
+                    glDeleteBuffers(1,&sector_crossing_plane_buffer);
+            }
+            sector_crossing_plane_texture=0;
+            sector_crossing_plane_buffer=0;
+            sector_crossing_world={};
+            sector_crossing_world_signature={};
+            sector_crossing_ranges.clear();
+        }
+
+        void stage_sector_crossing()
+        {
+            if(!the_config->enable_sector_crossing_lighting ||
+               !the_config->use_gpu_cache ||
+               mode!=renderer_mode::ingame ||
+               frame_gpu_3do_instances.empty())return;
+            uint32_t world=0;
+            if(!engine_material_debug::read_object(
+                    engine_material_debug::current_world_global,world) ||
+               !decal_native_address_ok(world)) {
+                reset_sector_crossing();return;
+            }
+            auto const read=[](uintptr_t ptr,void *out,size_t len)->bool {
+                if(!len || !engine_camera_detail::readable(ptr,len))
+                    return false;
+                std::memcpy(out,reinterpret_cast<void const *>(ptr),len);
+                return true;
+            };
+            // A new level can recycle the same SithWorld pointer. Compare
+            // all six static sector/vertex/surface table identity fields.
+            constexpr std::array<uint32_t,6> offsets{{
+                0x4cU,0x50U,0x88U,0x8cU,0xa8U,0xacU
+            }};
+            std::array<uint32_t,6> signature{};
+            for(size_t i=0;i<offsets.size();++i) {
+                if(!read(uintptr_t(world)+offsets[i],&signature[i],4U)) {
+                    reset_sector_crossing();return;
+                }
+            }
+            if(sector_crossing_world.world!=world ||
+               sector_crossing_world_signature!=signature ||
+               !sector_crossing_plane_texture) {
+                reset_sector_crossing();
+                sector_crossing_snapshot snapshot{};
+                if(!sector_crossing_capture(read,world,snapshot))return;
+                std::vector<GLfloat> planes;
+                std::vector<sector_crossing_plane_range> ranges(
+                    snapshot.sectors.size());
+                for(size_t i=0;i<snapshot.sectors.size();++i) {
+                    auto const &region=snapshot.sectors[i];
+                    if(!region.valid || !region.adjacency_valid ||
+                       region.planes.empty() ||
+                       region.planes.size()>sector_crossing_gpu_max_planes)
+                        continue;
+                    if(planes.size()/4U>
+                       size_t(std::numeric_limits<uint32_t>::max())-
+                           region.planes.size())return;
+                    auto &range=ranges[i];
+                    range.first=static_cast<uint32_t>(planes.size()/4U);
+                    range.count=static_cast<uint32_t>(region.planes.size());
+                    for(auto const &p:region.planes) {
+                        planes.push_back(p.normal[0]);
+                        planes.push_back(p.normal[1]);
+                        planes.push_back(p.normal[2]);
+                        planes.push_back(p.offset);
+                    }
+                }
+                if(planes.empty())return;
+                GLint max_texels=0;
+                glGetIntegerv(GL_MAX_TEXTURE_BUFFER_SIZE,&max_texels);
+                if(max_texels<1 ||
+                   planes.size()/4U>static_cast<size_t>(max_texels))
+                    return;
+                GLuint buffer=0,texture=0;
+                glGenBuffers(1,&buffer);
+                glBindBuffer(GL_TEXTURE_BUFFER,buffer);
+                glBufferData(GL_TEXTURE_BUFFER,
+                    static_cast<GLsizeiptr>(planes.size()*sizeof(GLfloat)),
+                    planes.data(),GL_STATIC_DRAW);
+                glGenTextures(1,&texture);
+                glActiveTexture(GL_TEXTURE0+12);
+                glBindTexture(GL_TEXTURE_BUFFER,texture);
+                glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,buffer);
+                glBindTexture(GL_TEXTURE_BUFFER,0);
+                glActiveTexture(GL_TEXTURE0);
+                glBindBuffer(GL_TEXTURE_BUFFER,0);
+                sector_crossing_plane_buffer=buffer;
+                sector_crossing_plane_texture=texture;
+                sector_crossing_world=std::move(snapshot);
+                sector_crossing_ranges=std::move(ranges);
+                sector_crossing_world_signature=signature;
+                if(the_config->profile_renderer)
+                    LOG_INFO("SECTOR CROSSING snapshot world=",world,
+                        " sectors=",sector_crossing_world.sectors.size(),
+                        " valid=",sector_crossing_world.valid_count,
+                        " uploaded_planes=",planes.size()/4U);
+            }
+            if(!sector_crossing_plane_texture)return;
+            uint32_t crossing=0;
+            for(auto &instance:frame_gpu_3do_instances) {
+                instance.crossing_lighting=sector_crossing_stage_instance(
+                    sector_crossing_world,sector_crossing_ranges,
+                    instance,read,true);
+                if(instance.crossing_lighting)++crossing;
+            }
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("SECTOR CROSSING model_instances=",
+                    frame_gpu_3do_instances.size(),
+                    " crossing=",crossing,
+                    " budget=",sector_crossing_candidates::capacity);
+        }
+
         void present_game() override
         {
             poll_audio_modules();
@@ -7661,6 +7805,7 @@ namespace jkgm {
             frame_gpu_3do_instances=consume_gpu_3do_instances();
             ++gpu_3do_present_serial;
             stage_world_cache();
+            stage_sector_crossing();
             animation_seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - animation_epoch).count();
             {

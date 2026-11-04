@@ -77,6 +77,60 @@ uniform float light_intensity[16];
 uniform float attenuation_min;
 in vec3 local_fragment_position;
 in vec3 local_fragment_normal;
+// Available for cached 3DOs only. Sector plane tests use a GL 3.3
+// RGBA32F texture buffer rather than consuming huge GLSL uniform arrays.
+uniform int sector_crossing_count;
+uniform samplerBuffer sector_crossing_planes;
+uniform vec3 sector_crossing_camera_origin;
+uniform vec4 sector_crossing_info[4]; // ambient, plane offset, plane count, interior flag
+uniform vec4 sector_crossing_bounds_min[4];
+uniform vec4 sector_crossing_bounds_max[4];
+uniform vec4 sector_crossing_inner_min[4];
+uniform vec4 sector_crossing_inner_max[4];
+uniform vec4 sector_crossing_cmp[4];
+uniform vec4 sector_crossing_tint[4];
+in vec3 sector_crossing_lit[4];
+int sector_crossing_slot=0;
+
+int select_sector_crossing_slot()
+{
+    if(sector_crossing_count<=1)return 0;
+    // Local vertex coordinates -> native view -> world. The existing
+    // camera axes already contain the inverse of JK's rigid view basis.
+    // Only models actually crossing sectors run this per-fragment work.
+    vec3 vp=view_right.xyz*local_fragment_position.x+
+            view_forward.xyz*local_fragment_position.y+
+            view_up.xyz*local_fragment_position.z+view_origin.xyz;
+    vec3 world=sector_crossing_camera_origin+
+        camera_right_axis*vp.x+camera_forward_axis*vp.y+
+        camera_up_axis*vp.z;
+    for(int i=0;i<4;i++) {
+        if(i>=sector_crossing_count)break;
+        vec3 lo=sector_crossing_bounds_min[i].xyz;
+        vec3 hi=sector_crossing_bounds_max[i].xyz;
+        if(any(lessThan(world,lo-vec3(0.0001))) ||
+           any(greaterThan(world,hi+vec3(0.0001))))continue;
+        if(sector_crossing_info[i].w>0.5 &&
+           all(greaterThan(world,sector_crossing_inner_min[i].xyz)) &&
+           all(lessThan(world,sector_crossing_inner_max[i].xyz)))
+            return i;
+        int begin_plane=int(sector_crossing_info[i].y+0.5);
+        int count=int(sector_crossing_info[i].z+0.5);
+        if(count<1 || count>96)continue;
+        bool inside=true;
+        // Shader bound matches CPU's validated per-sector plane limit.
+        for(int j=0;j<96;j++) {
+            if(j>=count)break;
+            vec4 plane=texelFetch(sector_crossing_planes,begin_plane+j);
+            if(dot(plane.xyz,world)+plane.w < -0.0001) {
+                inside=false;break;
+            }
+        }
+        if(inside)return i; // owner is slot 0: stable boundary tie
+    }
+    return 0; // invalid/hole: preserve native owning Thing sector
+}
+
 
 #include "jk_point_lighting.glsl"
 #include "gpu_material_common.glsl"
@@ -88,13 +142,19 @@ in vec3 local_fragment_normal;
 vec3 pixel_jk_color_at_brightness(float bright)
 {
     vec3 result=vec3(pow(clamp(bright,0.0,1.0),1.8)) *
-                pixel_light_vertex_rgb * colormap_tint;
+                pixel_light_vertex_rgb *
+                (sector_crossing_count>1
+                    ? sector_crossing_cmp[sector_crossing_slot].xyz
+                    : colormap_tint);
+    vec3 sector_tint=sector_crossing_count>1
+        ? sector_crossing_tint[sector_crossing_slot].xyz
+        : thing_sector_tint_delta;
     if(jk_color_filter.w>0.5 ||
-       any(greaterThan(abs(thing_sector_tint_delta),vec3(0.00001)))) {
+       any(greaterThan(abs(sector_tint),vec3(0.00001)))) {
         vec3 v=pow(clamp(result,0.0,1.0),vec3(1.0/1.8));
         if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
             v*=step(vec3(0.5),jk_color_filter.xyz);
-        vec3 t=clamp(jk_color_tint.xyz+thing_sector_tint_delta,
+        vec3 t=clamp(jk_color_tint.xyz+sector_tint,
                      vec3(-4.0),vec3(4.0));
         vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
         v=clamp(v*scale,0.0,1.0);
@@ -112,7 +172,9 @@ vec3 pixel_jk_diffuse_lighting()
 {
     float mode=pixel_light_state.z>3.5 ? 1.0 :
                min(pixel_light_state.z,effective_light_mode);
-    if(mode<1.5 || num_lights==0) return jk_lit_rgb;
+    vec3 baked=sector_crossing_count>1
+        ? sector_crossing_lit[sector_crossing_slot] : jk_lit_rgb;
+    if(mode<1.5 || num_lights==0) return baked;
 
     vec3 anchor=mode>=2.5 ? local_fragment_position
                           : pixel_light_face_anchor;
@@ -136,11 +198,11 @@ vec3 pixel_jk_diffuse_lighting()
                                mode<2.5);
         if(added>=1.0)break;
     }
-    if(added<=0.0) return jk_lit_rgb;
+    if(added<=0.0) return baked;
     vec3 light_color=max(
         pixel_jk_color_at_brightness(1.0)-
         pixel_jk_color_at_brightness(0.0),vec3(0.0));
-    return jk_point_compose(jk_lit_rgb,added,light_color);
+    return jk_point_compose(baked,added,light_color);
 }
 
 // Transform shaded normals with the node's inverse transpose. Raw
@@ -788,8 +850,12 @@ void main() {
     env_reflection*=1.0-fullbright;
     // Metal suppresses diffuse only when its environment contribution
     // actually exists; follows the native replacement shader.
+    sector_crossing_slot=sector_crossing_count>1
+        ? select_sector_crossing_slot() : 0;
     vec3 jk_fragment_lit=mix(
-        pixel_dynamic_lighting!=0 ? pixel_jk_diffuse_lighting() : jk_lit_rgb,
+        pixel_dynamic_lighting!=0 ? pixel_jk_diffuse_lighting() :
+          (sector_crossing_count>1
+             ? sector_crossing_lit[sector_crossing_slot] : jk_lit_rgb),
         vec3(1.0),fullbright);
     vec3 lit_rgb=albedo.rgb*jk_fragment_lit*(1.0-env_metalness);
     if(transparent_pass!=0 && post_exempt_pass==0 &&

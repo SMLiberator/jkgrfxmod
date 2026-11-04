@@ -47,6 +47,14 @@ out vec3 view_normal;
 // attributes as normalized projector coordinates and smooth angular alpha.
 uniform int decal_receiver_lighting;
 out vec4 decal_coverage;
+// Four-way sector crossing is opt-in and only active on models actually
+// overlapping multiple native Adjoin-linked sectors. The ordinary
+// single-sector path stays bit-for-bit unchanged.
+uniform int sector_crossing_count;
+uniform vec4 sector_crossing_info[4]; // x: ambient floor
+uniform vec4 sector_crossing_cmp[4];  // xyz: CMP RGB multiplier
+uniform vec4 sector_crossing_tint[4]; // xyz: sector-only color tint delta
+out vec3 sector_crossing_lit[4];
 void main() {
     decal_coverage=decal_receiver_lighting!=0
         ? vec4(local_face_anchor,local_extra_light)
@@ -138,6 +146,38 @@ void main() {
         v=clamp(v+jk_color_add_fade.xyz,0.0,1.0);
         v*=jk_color_add_fade.w;
         jk_lit_rgb=pow(clamp(v,0.0,1.0),vec3(1.8));
+    }
+    // Re-run JK's vertex gamma/color effects ONLY for crossing Things,
+    // once per candidate sector. This retains interpolation of gamma-
+    // corrected vertex RGB, unlike recomputing baked brightness per pixel.
+    if(sector_crossing_count>1) {
+        for(int i=0;i<4;i++) {
+            if(i>=sector_crossing_count)break;
+            if(i==0) {sector_crossing_lit[i]=jk_lit_rgb;continue;}
+            float sector_bright=mode<0.5 ? 1.0 :
+                max(clamp(l+local_extra_light,0.0,1.0),
+                    sector_crossing_info[i].x);
+            vec3 candidate=vec3(pow(
+                clamp(sector_bright,0.0,1.0),1.8))*local_vertex_rgb;
+            candidate*=sector_crossing_cmp[i].xyz;
+            if(jk_color_filter.w>0.5 ||
+               any(greaterThan(abs(sector_crossing_tint[i].xyz),
+                               vec3(0.00001)))) {
+                vec3 encoded=pow(clamp(candidate,0.0,1.0),
+                                 vec3(1.0/1.8));
+                if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
+                    encoded*=step(vec3(0.5),jk_color_filter.xyz);
+                vec3 tint=clamp(jk_color_tint.xyz+
+                                sector_crossing_tint[i].xyz,
+                                vec3(-4.0),vec3(4.0));
+                vec3 scale=vec3(1.0)+tint-0.5*(tint.yzx+tint.zxy);
+                encoded=clamp(encoded*scale,0.0,1.0);
+                encoded=clamp(encoded+jk_color_add_fade.xyz,0.0,1.0);
+                encoded*=jk_color_add_fade.w;
+                candidate=pow(clamp(encoded,0.0,1.0),vec3(1.8));
+            }
+            sector_crossing_lit[i]=candidate;
+        }
     }
     }
     // Match the patched native 3DO normal sideband. Non-Gouraud faces can

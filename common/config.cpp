@@ -165,6 +165,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("gpu_pixel_lighting")) {
             j.at("gpu_pixel_lighting").get_to(rv->gpu_pixel_lighting);
         }
+        if(j.contains("enable_sector_crossing_lighting")) {
+            j.at("enable_sector_crossing_lighting").get_to(
+                rv->enable_sector_crossing_lighting);
+        }
 
         if(j.contains("enable_ssao")) {
             j.at("enable_ssao").get_to(rv->enable_ssao);

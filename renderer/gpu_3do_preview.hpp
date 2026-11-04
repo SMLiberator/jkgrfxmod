@@ -61,6 +61,22 @@ namespace jkgm {
         std::vector<std::pair<uintptr_t,int32_t>> material_refs;
         std::vector<std::pair<uintptr_t,int32_t>> solid_material_refs;
     };
+
+    // Allocated only for cached models that overlap multiple Adjoin-linked
+    // sectors. No per-instance vector allocation on the ordinary fast path.
+    struct gpu_3do_crossing_sector {
+        std::array<float,3> bounds_min{},bounds_max{};
+        std::array<float,3> interior_min{},interior_max{};
+        std::array<float,3> cmp_tint{{1.0f,1.0f,1.0f}};
+        std::array<float,3> sector_tint{};
+        float ambient=1.0f;
+        uint32_t plane_start=0,plane_count=0;
+        bool interior_valid=false;
+    };
+    struct gpu_3do_crossing_state {
+        uint32_t count=0;
+        std::array<gpu_3do_crossing_sector,4> sectors{};
+    };
     struct gpu_3do_instance {
         uint64_t id=0;
         std::shared_ptr<gpu_3do_geometry const> geometry;
@@ -102,6 +118,10 @@ namespace jkgm {
         // Invalid/missing owner safely preserves native global effects.
         std::array<float,3> sector_tint{{0.0f,0.0f,0.0f}};
         bool sector_tint_valid=false;
+        // Only native rdModel3 Things have an authoritative owning sector.
+        uint32_t owning_sector_id=0;
+        bool owning_sector_valid=false;
+        std::shared_ptr<gpu_3do_crossing_state const> crossing_lighting;
         unsigned num_lights=0;
         std::array<gpu_3do_light,gpu_3do_max_lights> lights{};
     };
