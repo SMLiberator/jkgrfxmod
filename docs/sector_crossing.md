@@ -26,17 +26,20 @@ if movement through an adjoin is disabled: a model can geometrically
 straddle the same sector boundary.
 
 Candidate selection now starts at the owning sector and follows at most
-two graph edges: owner -> adjacent -> adjacent. Each neighbor must pass
-a conservative Thing sphere/sector AABB overlap check before the search
-can continue through it. It never scans all world sectors per Thing.
+two graph edges: owner -> adjacent -> adjacent. The fixed 64-entry
+traversal queue follows graph links even through non-overlapping intermediate
+sectors, because each individual animated 3DO *mesh* can sit completely
+outside its Thing's owning sector. The conservative transformed mesh
+sphere/sector AABB test filters the final shader candidates rather
+than the traversal links. It never scans all world sectors per Thing.
 A per-world hash lookup resolves the native sector ID to an array index,
 so sparse IDs are handled directly.
 
 The ordinary candidate budget is **four sectors total**, including the
 owner. Exactly four is valid; a fifth overlapping connected candidate
 or an invalid linked list causes a safe fallback to JK's existing
-single-sector behavior. The BFS queue is a fixed four-element array,
-requiring no per-Thing allocations. Ordinary single-sector geometry
+single-sector behavior. The candidate list has four entries, while its bounded traversal queue
+has 64 entries. Both are fixed-size and require no per-Thing allocations. Ordinary single-sector geometry
 takes the existing shader path unchanged. All engine reads are read-only.
 
 This stage deliberately does not change gameplay or shaders yet.
@@ -65,7 +68,8 @@ texture buffer (texture unit 12). The same native six-field world signature
 used by the cache invalidates this snapshot on level changes. For each
 model, the GPU cache's existing group bounds are conservatively transformed
 with the native R/L/U affine matrix; the Adjoin graph selects at most four
-candidate sectors within two hops. Too many sectors, corrupted native
+candidate sectors within two hops, even when an individual model mesh
+lies entirely in the second room. Too many sectors, corrupted native
 memory, a sector requiring more than 96 planes, or a missing owner sector
 leaves the original native-owner lighting unchanged.
 

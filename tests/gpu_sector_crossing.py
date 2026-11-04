@@ -54,4 +54,6 @@ assert "instance.camera_hud" in staging
 # Ensure no accidental O(total_sectors) scan in each render frame.
 assert "index_by_id.find(owner_id)" in select
 assert "for(uint32_t neighbor_index:current.adjoining)" in select
+assert "constexpr size_t visit_limit=64;" in select
+assert "visited[discovered++]" in select
 print("Sector-crossing opt-in / GPU 3DO shader integration checks passed")

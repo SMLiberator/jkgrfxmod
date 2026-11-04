@@ -93,20 +93,18 @@ inline bool sector_crossing_contains(
     }
     return !sector.planes.empty();
 }
-// At most four connected sectors per Thing, including its owning sector.
-// This is intentionally a tighter GPU candidate budget than the earlier 8.
-// An overflowing connected query falls back to ordinary native ownership.
+// At most four candidate shading regions including the native owner,
+// while traversing up to two Adjoin hops in a 64-node fixed-size queue.
+// Geometry belonging to a single animated *mesh* may lie wholly inside a
+// neighbor even when its owning Thing (or other meshes) is in the owner.
+// Thus traversal cannot require the intermediate region to overlap this
+// mesh's bounds: AABBs filter final candidates, NOT graph connectivity.
 struct sector_crossing_candidates {
     static constexpr uint32_t capacity=4;
     std::array<uint32_t,capacity> indices{};
     uint32_t count=0;
     bool overflow=false;
 };
-// Walk only the native adjoin graph: owner -> neighbors -> their neighbors.
-// A crossing Thing spanning sector 1, 8 and 3 only considers 1 -> 8 -> 3,
-// even if the level contains thousands of unconnected rooms. Two hops
-// cover the normal doorway case without walking an entire level graph.
-// AABB pruning is conservative and also bounds further BFS expansion.
 inline sector_crossing_candidates sector_crossing_collect_candidates(
     sector_crossing_snapshot const &snapshot,
     sector_crossing_vec3 const &origin,float radius,uint32_t owner_id)
@@ -117,47 +115,51 @@ inline sector_crossing_candidates sector_crossing_collect_candidates(
     auto const owner=snapshot.index_by_id.find(owner_id);
     if(owner==snapshot.index_by_id.end() ||
        owner->second>=snapshot.sectors.size())return result;
-    auto const index=owner->second;
-    auto const &starting=snapshot.sectors[index];
-    if(!starting.valid || !starting.adjacency_valid ||
-       !sector_crossing_sphere_overlaps_box(
-           origin,radius,starting.bounds_min,starting.bounds_max))
-        return result;
+    uint32_t const owner_index=owner->second;
+    auto const &starting=snapshot.sectors[owner_index];
+    if(!starting.valid || !starting.adjacency_valid)return result;
 
-    // Up to four candidates means these fixed-size queues never allocate.
-    // The owner is first, preserving JK's choice on coincident boundaries.
-    std::array<uint8_t,sector_crossing_candidates::capacity> depths{};
-    result.indices[0]=index;
+    // Native ownership is always slot 0, even when the geometry of
+    // this particular mesh lies entirely in a linked neighboring room.
+    result.indices[0]=owner_index;
     result.count=1;
-    for(uint32_t front=0;front<result.count;++front) {
-        if(depths[front]>=2U)continue;
-        auto const &current=snapshot.sectors[result.indices[front]];
+    struct visit {uint32_t index=0; uint8_t depth=0;};
+    constexpr size_t visit_limit=64;
+    std::array<visit,visit_limit> visited{};
+    size_t discovered=1;
+    visited[0]={owner_index,0U};
+    for(size_t head=0;head<discovered;++head) {
+        auto const &current=snapshot.sectors[visited[head].index];
+        if(visited[head].depth>=2U)continue;
         if(!current.adjacency_valid) {
-            result={};return result; // incomplete graph: keep native owner
+            result={};return result; // never use incomplete adjacency
         }
         for(uint32_t neighbor_index:current.adjoining) {
             if(neighbor_index>=snapshot.sectors.size()) {
                 result={};return result;
             }
-            bool visited=false;
-            for(uint32_t i=0;i<result.count;++i)
-                if(result.indices[i]==neighbor_index) {
-                    visited=true;break;
-                }
-            if(visited)continue;
+            bool seen=false;
+            for(size_t j=0;j<discovered;++j)
+                if(visited[j].index==neighbor_index){seen=true;break;}
+            if(seen)continue;
             auto const &next=snapshot.sectors[neighbor_index];
-            if(!next.valid)continue;
+            if(!next.valid)continue; // not a classifiable region
             if(!next.adjacency_valid) {
-                result={};return result; // don't use an incomplete network
+                result={};return result;
             }
+            if(discovered>=visit_limit) {
+                result={};result.overflow=true;return result;
+            }
+            visited[discovered++]={neighbor_index,
+                static_cast<uint8_t>(visited[head].depth+1U)};
+            // An intermediate nonoverlapping sector remains traversable
+            // so that owner 1 -> sector 8 -> sector 3 still reaches 3.
             if(!sector_crossing_sphere_overlaps_box(
-                   origin,radius,next.bounds_min,next.bounds_max))continue;
+                   origin,radius,next.bounds_min,next.bounds_max))
+                continue;
             if(result.count>=result.capacity) {
-                result={};
-                result.overflow=true;
-                return result;
+                result={};result.overflow=true;return result;
             }
-            depths[result.count]=static_cast<uint8_t>(depths[front]+1U);
             result.indices[result.count++]=neighbor_index;
         }
     }

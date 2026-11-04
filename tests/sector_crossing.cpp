@@ -64,6 +64,12 @@ int main() {
     assert(sector_crossing_select(graph,path,{{15,0,0}},1)==3);
     assert(sector_crossing_select(graph,path,{{-2,0,0}},1)==1);
     // No graph-wide scan to discover a disconnected overlap.
+    // Mesh fully in sector 3, while its owning Thing is in 1:
+    // sector 8 does not overlap this mesh but must still be traversed.
+    auto submesh=sector_crossing_collect_candidates(graph,{{17,0,0}},1,1);
+    assert(!submesh.overflow && submesh.count==2);
+    assert(submesh.indices[0]==0 && submesh.indices[1]==2);
+    assert(sector_crossing_select(graph,submesh,{{17,0,0}},1)==3);
     auto solo=sector_crossing_collect_candidates(graph,{{3,0,0}},1,2);
     assert(solo.count==1 && solo.indices[0]==3);
     // Stop at the first nonoverlapping intermediate sector: there is

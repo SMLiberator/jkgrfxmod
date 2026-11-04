@@ -85,6 +85,14 @@ int main()
     assert(std::abs(state->sectors[1].sector_tint[0]-0.25f)<0.0001f);
     assert(state->sectors[1].plane_start==1U);
     assert(state->sectors[1].plane_count==1U);
+    // A submesh wholly in the neighbor's sector must still receive
+    // different lighting even though the owning Thing lives in sector 11.
+    instance.transform[9]=4.0f;
+    auto remote=sector_crossing_stage_instance(
+        snapshot,ranges,instance,read,true);
+    assert(remote && remote->count==2);
+    assert(remote->sectors[1].ambient>remote->sectors[0].ambient);
+    instance.transform[9]=0.0f;
     auto noTint=sector_crossing_stage_instance(
         snapshot,ranges,instance,read,false);
     assert(noTint && noTint->sectors[1].sector_tint[0]==0.0f);
