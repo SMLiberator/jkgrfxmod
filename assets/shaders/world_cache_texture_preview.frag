@@ -46,6 +46,7 @@ uniform float face_opacity; // 90/255 when rdFace.type includes 0x2
 uniform int blend_mode; // normal=0, additive=1, multiply=2, fluid=3
 uniform sampler2D scene_depth; // resolved opaque R16F depth, JK units 32*Y
 uniform float fluid_thickness; // Beer-Lambert absorption coefficient
+uniform int fluid_debug_mode; // GPU world Fluid diagnostics; 0 preserves ordinary rendering
 uniform vec4 fog_params; // native fog start/end/opacity
 uniform vec3 fog_color;
 uniform int sky_mode;
@@ -300,6 +301,27 @@ void main() {
             float vertex_rgb_alpha=pow(clamp(face_opacity,0.0,1.0),1.8);
             vec3 diffuse=(lit_diffuse*(1.0-fog)*vertex_rgb_alpha+
                           fog_color*(fog*coverage))*absorption;
+            // Opt-in GPU Fluid debugging. Full-alpha outputs expose the
+            // source calculation before the transparency blend can obscure it.
+            // Normal mode (0) does not alter absorption, pigment, or reflections.
+            if(fluid_debug_mode==1) {
+                out_color=vec4(vec3(absorption),1.0);
+                return;
+            }
+            if(fluid_debug_mode==2) {
+                out_color=vec4(diffuse,1.0);
+                return;
+            }
+            if(fluid_debug_mode==3) {
+                bool invalid=any(isnan(env_reflection)) ||
+                             any(isinf(env_reflection)) ||
+                             any(isnan(direct_specular)) ||
+                             any(isinf(direct_specular)) ||
+                             any(isnan(specular)) || any(isinf(specular));
+                out_color=invalid ? vec4(1.0,0.0,1.0,1.0)
+                                  : vec4(0.0,1.0,0.0,1.0);
+                return;
+            }
             // Just as in native Fluid, emission and reflection are
             // independent of pigment absorption and alpha.
             out_color=vec4(diffuse+emission+specular,opacity);
