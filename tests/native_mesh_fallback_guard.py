@@ -20,7 +20,7 @@ assert 'reason="<<(readable?"out_of_bounds":"unreadable_index")' in src
 
 fallback=src[src.index("void __cdecl HookedNativeMesh("):
              src.index("int __cdecl HookedNativeFace(")]
-assert fallback.index("const bool queued=jkgm::queue_gpu_3do_mesh(") < (
+assert fallback.index("bool const queued=jkgm::queue_gpu_3do_mesh(") < (
     fallback.index("native_fallback_bad_first_vertex(mesh,invalid_first_vertex)"))
 assert fallback.index("native_fallback_bad_first_vertex(mesh,invalid_first_vertex)") < (
     fallback.index("RealNativeMesh(mesh,placement);"))
