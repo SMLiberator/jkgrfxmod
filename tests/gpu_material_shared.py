@@ -111,6 +111,29 @@ assert "shader.set_scene_depth(8);" in renderer
 assert "shader.set_fluid_thickness(material.blend==material_blend_mode::fluid" in renderer
 assert "frame_screen->get_resolved_depth_texture()" in renderer
 assert "material.fluid_thickness" in renderer
+# The opt-in Fluid debug view isolates depth absorption and pigment from
+# reflection NaNs. Normal mode must be 0 and must preserve existing blend math.
+config=read("common/config.hpp")
+parser=read("common/config.cpp")
+shader_header=read("renderer/shaders.hpp")
+assert "int world_cache_fluid_debug_mode = 0;" in config
+assert 'j.contains("world_cache_fluid_debug_mode")' in parser
+assert 'world_cache_fluid_debug_mode must be an integer from 0 to 3' in parser
+assert "void set_fluid_debug_mode(int mode);" in shader_header
+assert "set_fluid_debug_mode(int mode)" in world_api
+assert "shader.set_fluid_debug_mode(the_config->world_cache_fluid_debug_mode);" in renderer
+assert "uniform int fluid_debug_mode;" in world
+assert "if(fluid_debug_mode==1)" in world
+assert "out_color=vec4(vec3(absorption),1.0);" in world
+assert "if(fluid_debug_mode==2)" in world
+assert "out_color=vec4(diffuse,1.0);" in world
+assert "if(fluid_debug_mode==3)" in world
+assert "any(isnan(env_reflection))" in world
+assert "any(isinf(env_reflection))" in world
+assert "any(isnan(direct_specular))" in world
+assert "any(isinf(direct_specular))" in world
+assert "vec4(1.0,0.0,1.0,1.0)" in world  # invalid values are magenta
+assert "vec4(0.0,1.0,0.0,1.0)" in world  # finite values are green
 # A resident MAT may deliberately have NO albedo image (not an unresolved
 # native texture). World GeoMode 4 Fluid must use the shared white-source
 # shader, remain in the transparent pass, and never request native warmup.
