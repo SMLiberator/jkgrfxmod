@@ -35,6 +35,11 @@ assert "prog.set_sector_crossing(inst.crossing_lighting.get()," in render
 assert "crossing_buffer_ready && !inst.camera_hud" in render
 assert "sector_crossing_planes" in api
 assert "set_sector_crossing(" in api
+setter=api[api.index("gpu_3do_preview_shader::set_sector_crossing("):]
+assert setter.index("gl::set_uniform_integer(sector_crossing_planes,12);") < (
+    setter.index("if(!count)return;"))
+# Otherwise samplerBuffer defaults to sampler unit 0 and conflicts with
+# the albedo sampler2D, preventing even the opt-out path from drawing.
 assert "sector_crossing_lit[4]" in vertex
 assert "sector_crossing_lit[4]" in fragment
 assert "if(sector_crossing_count>1)" in vertex
