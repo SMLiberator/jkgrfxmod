@@ -81,7 +81,7 @@ namespace jkgm {
             gl::uniform_location_id alpha_cutout,alpha_cutoff;
             gl::uniform_location_id transparent_pass,alpha_mode,face_opacity;
             gl::uniform_location_id blend_mode;
-            gl::uniform_location_id scene_depth_sampler,fluid_thickness;
+            gl::uniform_location_id scene_depth_sampler,fluid_thickness,fluid_debug_mode;
             gl::uniform_location_id fog_params,fog_color;
             gl::uniform_location_id sky_mode,sky_horizon,sky_angles;
             gl::uniform_location_id sky_camera_origin,sky_camera_right;
@@ -118,6 +118,7 @@ namespace jkgm {
             void set_alpha_cutout(float cutoff);
             void set_scene_depth(int sampler);
             void set_fluid_thickness(float thickness);
+            void set_fluid_debug_mode(int mode);
             void set_alpha_policy(bool transparent,int mode,float cutoff,
                                   float native_opacity,int blend=0,
                                   bool emission_only=false);
