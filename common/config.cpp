@@ -139,11 +139,11 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             auto const &mode=j.at("world_cache_fluid_debug_mode");
             if(!mode.is_number_integer())
                 throw std::runtime_error(
-                    "world_cache_fluid_debug_mode must be an integer from 0 to 3");
+                    "world_cache_fluid_debug_mode must be an integer from 0 to 8");
             int const value=mode.get<int>();
-            if(value<0 || value>3)
+            if(value<0 || value>8)
                 throw std::runtime_error(
-                    "world_cache_fluid_debug_mode must be an integer from 0 to 3");
+                    "world_cache_fluid_debug_mode must be an integer from 0 to 8");
             rv->world_cache_fluid_debug_mode=value;
         }
         if(j.contains("enable_default_specular")) {
