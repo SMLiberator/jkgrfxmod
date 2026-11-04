@@ -856,6 +856,7 @@ void main() {
         (normal_specular_params.x>0.5 ||
          normal_specular_params.z>0.5) &&
         has_texture==1 && solid_fullbright==0 && fullbright<0.999 &&
+        blend_mode!=3 && // Fluid keeps geometry normals for diffuse light
         world_lighting_exempt==0 && sprite_receiver==0 &&
         decal_receiver_lighting==0;
     if(const_normal_mapped_diffuse) {
@@ -933,11 +934,16 @@ void main() {
     // by albedo alpha. With alpha=0 this acts as emission-only additive.
     float a=transparent_pass!=0 ? albedo.a : 1.0;
     if(transparent_pass!=0 && blend_mode==3) {
-        // Beer-Lambert absorption: pigment fades in shallow water,
-        // while specular highlights/emission remain independently visible.
+        // Native Fluid only multiplies diffuse pigment by absorption;
+        // MAT/texture alpha affects the blend factor, not pigment RGB.
+        // JK's original per-face vertex alpha is premultiplied before
+        // gamma-1.8, unlike MAT alpha. Match that distinction here.
         float absorption=fluid_absorption(view_depth);
         float opacity=albedo.a*absorption;
-        out_color=vec4(rgb*opacity+emission+specular+projected_light,opacity);
+        float vertex_rgb_alpha=pow(clamp(native_face_opacity,0.0,1.0),1.8);
+        vec3 diffuse=(lit_rgb*(1.0-fog)*vertex_rgb_alpha+
+                      fog_color*(fog*albedo.a))*absorption;
+        out_color=vec4(diffuse+emission+specular+projected_light,opacity);
     } else if(transparent_pass!=0 && blend_mode==2) {
         // With (DST_COLOR, ZERO) the RGB output is a multiplier, not
         // premultiplied color. Alpha zero must multiply by WHITE (identity).

@@ -31,6 +31,10 @@ The default is `false`: existing JK GPU-cached appearance is preserved.
 - No authored emission changes, no alteration to `restore_cmp_lights`,
   and no normal mapping for GeoMode 3 solid colors, HUDs, decals,
   sprites, fullbright pixels or ThingFlag 0x20 lighting-exempt models.
+- Fluid materials deliberately use geometric normals for diffuse light,
+  even with this option enabled. Fluid normal maps still shape environment
+  reflections and specular highlights; ripples should not make liquid appear
+  thick or sculpted by a flashlight.
 - Shadow *silhouettes* and occluders are still geometry/depth-map based:
   normal maps only change the receiver's light incidence. They do not
   create micro-geometry shadow casters or self-shadowing.

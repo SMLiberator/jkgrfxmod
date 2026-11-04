@@ -243,7 +243,10 @@ void main() {
     // Reuse the normal-map slope reconstruction already used by GGX, but
     // never use it for GeoMode 3 or CMP fullbright faces.
     vec3 diffuse_world_normal=normalize(cached_world_normal);
+    // Water normal maps shape reflections/specular, not diffuse incidence:
+    // bumpy diffuse headlights make thin liquid look opaque/thick.
     bool mapped_diffuse=normal_mapped_diffuse!=0 && solid_color==0 &&
+        blend_mode!=3 &&
         (normal_specular_params.x>0.5 ||
          normal_specular_params.z>0.5) && fullbright<0.999;
     if(mapped_diffuse)
@@ -286,11 +289,20 @@ void main() {
         vec3 lit=mix(lit_diffuse,fog_color,fog);
         vec3 specular=(env_reflection+direct_specular)*(1.0-fog);
         if(blend_mode==3) {
-            // Fluid absorption uses receiver depth, just like GPU-cached
-            // 3DO materials. Emission and reflections remain independent of
-            // pigment absorption, so shallow water can still reflect light.
-            float opacity=coverage*world_fluid_absorption(depth);
-            out_color=vec4(lit*opacity+emission+specular,opacity);
+            // Match game_trns_pass.frag's *native* Fluid composition.
+            // Native material/texture alpha changes destination blending,
+            // but does not multiply the already-lit liquid RGB a second
+            // time. Only the original D3D vertex alpha was premultiplied
+            // before the gamma-1.8 conversion. Reusing lit*opacity here
+            // darkens alpha<1 fluids, including tint-only replacements.
+            float absorption=world_fluid_absorption(depth);
+            float opacity=coverage*absorption;
+            float vertex_rgb_alpha=pow(clamp(face_opacity,0.0,1.0),1.8);
+            vec3 diffuse=(lit_diffuse*(1.0-fog)*vertex_rgb_alpha+
+                          fog_color*(fog*coverage))*absorption;
+            // Just as in native Fluid, emission and reflection are
+            // independent of pigment absorption and alpha.
+            out_color=vec4(diffuse+emission+specular,opacity);
         } else if(blend_mode==2) {
             // (DST_COLOR, ZERO) needs a neutral multiplier at alpha zero.
             out_color=vec4(mix(vec3(1.0),

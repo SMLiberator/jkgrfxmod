@@ -84,8 +84,28 @@ for stage in (native,world,model):
 assert "opaque_depth,vp_z,ray_ratio,fluid_thickness" in native
 assert "opaque_depth,fragment_depth,ray_ratio," in world
 assert "opaque_depth,fragment_depth,ray_ratio," in model
-assert "float opacity=coverage*world_fluid_absorption(depth);" in world
-assert "out_color=vec4(lit*opacity+emission+specular,opacity);" in world
+# Native Fluid uses MATERIAL alpha only in destination blending, not as a
+# second multiplication of pigment RGB. JK's vertex alpha, however, was
+# premultiplied before gamma conversion and must remain in RGB.
+assert "float absorption=world_fluid_absorption(depth);" in world
+assert "float opacity=coverage*absorption;" in world
+assert "float vertex_rgb_alpha=pow(clamp(face_opacity,0.0,1.0),1.8);" in world
+assert "vec3 diffuse=(lit_diffuse*(1.0-fog)*vertex_rgb_alpha+" in world
+assert "fog_color*(fog*coverage))*absorption;" in world
+assert "out_color=vec4(diffuse+emission+specular,opacity);" in world
+assert "out_color=vec4(lit*opacity+emission+specular,opacity);" not in world
+assert "float vertex_rgb_alpha=pow(clamp(native_face_opacity,0.0,1.0),1.8);" in model
+assert "vec3 diffuse=(lit_rgb*(1.0-fog)*vertex_rgb_alpha+" in model
+assert "fog_color*(fog*albedo.a))*absorption;" in model
+assert "out_color=vec4(diffuse+emission+specular+projected_light,opacity);" in model
+assert "out_color=vec4(rgb*opacity+emission+specular+projected_light,opacity);" not in model
+# Normal maps still affect fluid environment/reflection GGX, but they never
+# perturb the incoming diffuse normal for world or cached 3DO water.
+assert ("bool mapped_diffuse=normal_mapped_diffuse!=0 && solid_color==0 &&\n"
+        "        blend_mode!=3 &&") in world
+assert "blend_mode!=3 && // Fluid keeps geometry normals for diffuse light" in model
+assert "world_mapped_normal(material_texcoord)" in world
+assert "mapped_local_normal(uv)" in model
 assert "gl::set_active_texture_unit(8);" in renderer
 assert "shader.set_scene_depth(8);" in renderer
 assert "shader.set_fluid_thickness(material.blend==material_blend_mode::fluid" in renderer
@@ -104,6 +124,32 @@ assert 'stage="<<(has_albedo?"resident_with_albedo_but_unresolved"' in renderer
 # same branch; preserve the behavioral assertion without pinning its layout.
 assert re.search(r"if\s*\(\s*material\.blend\s*==\s*"
                  r"material_blend_mode::fluid\s*\)\s*\{\s*\+\+fluid\s*;", renderer)
+
+# Reference native vs GPU composition at various authored alpha factors.
+# The native D3D vertex is gamma-premultiplied by face opacity, while PNG
+# alpha and material albedo_factor.a are NOT applied to pigment RGB again.
+# Only absorption and the real coverage multiply the final blend alpha.
+def fluid_rgb(alpha,face_alpha,light,pigment,absorption,fog,fog_color):
+    coverage=alpha*face_alpha
+    vertex_rgb_alpha=face_alpha**1.8
+    diffuse=(pigment*light*(1-fog)*vertex_rgb_alpha+
+             fog_color*fog*coverage)*absorption
+    return diffuse,coverage*absorption
+
+for alpha in (0.15,0.35,0.6,1.0):
+    for face_alpha in (90/255,1.0):
+        for absorption in (0.05,0.4,0.95,1.0):
+            native_rgb,native_a=fluid_rgb(alpha,face_alpha,0.7,0.9,
+                                           absorption,0.2,0.5)
+            world_rgb,world_a=fluid_rgb(alpha,face_alpha,0.7,0.9,
+                                         absorption,0.2,0.5)
+            model_rgb,model_a=fluid_rgb(alpha,face_alpha,0.7,0.9,
+                                         absorption,0.2,0.5)
+            assert native_rgb==world_rgb==model_rgb
+            assert native_a==world_a==model_a
+            if alpha<1.0 and face_alpha==1.0 and absorption>0.0:
+                old_cache_rgb=((0.9*0.7)*(1-0.2)+0.5*0.2)*native_a
+                assert old_cache_rgb<native_rgb
 
 # Numeric parity and stability: no receiver is infinitely deep; zero
 # thickness is optically clear; greater ray length increases absorption.
