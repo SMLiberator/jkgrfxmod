@@ -30,9 +30,13 @@ assert "prog.set_solid_fullbright(draw.texture.solid_fullbright);" in renderer
 assert "shader.set_solid_fullbright(material.solid_fullbright);" in renderer
 # Pixel diffuse is now gated independently of the available native
 # point-light list, which can still be needed for optional GGX highlights.
-assert "world_pixel_dynamic_lighting!=0 && solid_fullbright==0" in fragment
+assert "world_pixel_dynamic_lighting!=0 && fullbright<0.999" in fragment
 assert "cached_light_state.z>2.5 && num_lights>0" in fragment
-assert "solid_fullbright!=0 ? vec3(1.0) : clamp(lighting,0.0,1.0);" in fragment
-assert "jk_fragment_lit=solid_fullbright!=0" in model
-assert "out_normal=(world_lighting_exempt!=0 || solid_fullbright!=0)" in model
-print("CMP sector tint / solid fullbright wiring checks passed")
+assert "lighting=mix(clamp(lighting,0.0,1.0),vec3(1.0),fullbright);" in fragment
+assert "vec3 jk_fragment_lit=mix(" in model
+assert "out_normal=(world_lighting_exempt!=0 || fullbright>=0.5)" in model
+assert "gpu_material_palette_fullbright(" in fragment
+assert "gpu_material_palette_fullbright(" in model
+assert "shader.set_palette_fullbright(indexed_fullbright);" in renderer
+assert "prog.set_palette_fullbright(indexed_fullbright);" in renderer
+print("CMP sector tint / per-texel fullbright wiring checks passed")

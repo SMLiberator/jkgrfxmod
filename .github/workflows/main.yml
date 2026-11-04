@@ -232,6 +232,11 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\jk_cmp_gpu.cpp /Fe:jk_cmp_gpu_test.exe
         jk_cmp_gpu_test.exe
+    - name: GPU sector crossing volume and candidate selection tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sector_crossing.cpp /Fe:sector_crossing_test.exe
+        sector_crossing_test.exe
     - name: Source-indexed MAT fullbright mask regression tests
       shell: cmd
       run: |
