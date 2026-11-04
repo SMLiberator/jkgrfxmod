@@ -33,7 +33,7 @@ namespace jkgm {
         float hdr_shadow_softness = 0.3f; // 0=original crisp ACES toe, 1=softest
         float hdr_color_crispness = 0.6f; // 0=hue-preserving, 1=original per-channel ACES
         bool enable_reflections = true;
-        int world_cache_fluid_debug_mode = 0; // 0=normal; 1=absorption; 2=diffuse pigment; 3=nonfinite reflection check
+        int world_cache_fluid_debug_mode = 0; // 0=normal; 1=absorption; 2=diffuse; 3=reflection finite; 4=albedo; 5=lighting; 6=metalness; 7=lit diffuse; 8=fluid diffuse weight
         // Opt-in direct-light GGX for previously unconfigured GPU 3DO/world MATs.
         bool enable_default_specular = false;
         float default_specular_strength = 0.25f;
