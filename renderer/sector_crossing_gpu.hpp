@@ -55,13 +55,27 @@ inline bool sector_crossing_instance_sphere(
     }
     center=gpu_3do_native_transform_point(instance.transform,local_center);
     if(!sector_crossing_finite(center))return false;
-    double r=0.0;
-    for(int i=0;i<3;++i) {
-        double const x=instance.transform[i*3],
-                     y=instance.transform[i*3+1],
-                     z=instance.transform[i*3+2];
-        r+=double(half[i])*std::sqrt(x*x+y*y+z*z);
-    }
+    // Test all eight affine corners of the local AABB. This is the
+    // tightest origin-centered sphere around this transformed box,
+    // including nonuniform scale, shear and mirrored R/L/U bases. The
+    // previous sum of column lengths was conservative but needlessly
+    // expanded the search to unrelated nearby sectors.
+    double radius_squared=0.0;
+    for(int x=-1;x<=1;x+=2)
+        for(int y=-1;y<=1;y+=2)
+            for(int z=-1;z<=1;z+=2) {
+                double dx=double(instance.transform[0])*half[0]*x+
+                          double(instance.transform[3])*half[1]*y+
+                          double(instance.transform[6])*half[2]*z;
+                double dy=double(instance.transform[1])*half[0]*x+
+                          double(instance.transform[4])*half[1]*y+
+                          double(instance.transform[7])*half[2]*z;
+                double dz=double(instance.transform[2])*half[0]*x+
+                          double(instance.transform[5])*half[1]*y+
+                          double(instance.transform[8])*half[2]*z;
+                radius_squared=std::max(radius_squared,dx*dx+dy*dy+dz*dz);
+            }
+    double r=std::sqrt(radius_squared);
     if(!std::isfinite(r)||r<0.0||r>100000.0)return false;
     radius=static_cast<float>(r);
     return true;

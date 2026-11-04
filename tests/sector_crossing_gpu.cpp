@@ -30,7 +30,8 @@ int main()
     // Non-normalized RLU must expand the conservative sphere correctly.
     instance.transform[0]=3.0f;
     assert(sector_crossing_instance_sphere(instance,center,radius));
-    assert(std::abs(radius-std::sqrt(9.0f)-2.0f)<0.0001f);
+    // Tight corner sphere after X scale=3: sqrt(3^2+1^2+1^2).
+    assert(std::abs(radius-std::sqrt(11.0f))<0.0001f);
     instance.transform[0]=1.0f;
 
     sector_crossing_snapshot snapshot{};
