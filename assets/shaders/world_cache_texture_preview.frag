@@ -278,7 +278,13 @@ void main() {
     env_metalness*=1.0-fullbright;
     env_reflection*=1.0-fullbright;
     direct_specular*=1.0-fullbright;
-    vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness);
+    // Fluid is a transmissive layer, not a metallic replacement for its
+    // pigment. EnvMap metalness may shape reflection/Fresnel, but must not
+    // remove the fluid's depth-absorbed albedo. With two scrolling normal
+    // layers the sampled environment can be dark, otherwise incorrectly
+    // leaving the entire liquid black except for highlights.
+    float diffuse_metalness=blend_mode==3 ? 0.0 : env_metalness;
+    vec3 lit_diffuse=albedo*lighting*(1.0-diffuse_metalness);
     if(transparent_pass!=0) {
         // Only one color attachment exists in the forward alpha target.
         // The framebuffer uses premultiplied (ONE, ONE_MINUS_SRC_ALPHA).
