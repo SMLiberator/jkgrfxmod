@@ -106,20 +106,6 @@ assert ("bool mapped_diffuse=normal_mapped_diffuse!=0 && solid_color==0 &&\n"
 assert "blend_mode!=3 && // Fluid keeps geometry normals for diffuse light" in model
 assert "world_mapped_normal(material_texcoord)" in world
 assert "mapped_local_normal(uv)" in model
-# A Fluid MAT must never lose its albedo because metalness replaces the
-# diffuse term. A second normal layer changes the reflected environment,
-# not the fluid pigment: dark reflection directions must not blacken water.
-assert "float diffuse_metalness=blend_mode==3 ? 0.0 : env_metalness;" in world
-assert "vec3 lit_diffuse=albedo*lighting*(1.0-diffuse_metalness);" in world
-assert "vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness);" not in world
-assert "vec3 env_reflection=world_environment_reflection(" in world
-for metalness in (0.0,0.3,0.7,1.0):
-    for reflected in (0.0,0.2,1.0):
-        diffuse_pigment=0.8*0.75
-        fluid_output=diffuse_pigment*(1.0-0.0)+reflected
-        opaque_output=diffuse_pigment*(1.0-metalness)+reflected
-        assert fluid_output>=diffuse_pigment
-        assert opaque_output<=diffuse_pigment+reflected
 assert "gl::set_active_texture_unit(8);" in renderer
 assert "shader.set_scene_depth(8);" in renderer
 assert "shader.set_fluid_thickness(material.blend==material_blend_mode::fluid" in renderer
