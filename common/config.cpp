@@ -135,6 +135,17 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_reflections")) {
             j.at("enable_reflections").get_to(rv->enable_reflections);
         }
+        if(j.contains("world_cache_fluid_debug_mode")) {
+            auto const &mode=j.at("world_cache_fluid_debug_mode");
+            if(!mode.is_number_integer())
+                throw std::runtime_error(
+                    "world_cache_fluid_debug_mode must be an integer from 0 to 3");
+            int const value=mode.get<int>();
+            if(value<0 || value>3)
+                throw std::runtime_error(
+                    "world_cache_fluid_debug_mode must be an integer from 0 to 3");
+            rv->world_cache_fluid_debug_mode=value;
+        }
         if(j.contains("enable_default_specular")) {
             j.at("enable_default_specular").get_to(rv->enable_default_specular);
         }
