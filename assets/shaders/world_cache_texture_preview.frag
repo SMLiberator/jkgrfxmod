@@ -322,6 +322,28 @@ void main() {
                                   : vec4(0.0,1.0,0.0,1.0);
                 return;
             }
+            // Inspect the inputs to the Fluid-only diffuse term separately.
+            // These outputs deliberately bypass regular alpha blending.
+            if(fluid_debug_mode==4) {
+                out_color=vec4(albedo,1.0);
+                return;
+            }
+            if(fluid_debug_mode==5) {
+                out_color=vec4(lighting,1.0);
+                return;
+            }
+            if(fluid_debug_mode==6) {
+                out_color=vec4(vec3(env_metalness),1.0);
+                return;
+            }
+            if(fluid_debug_mode==7) {
+                out_color=vec4(lit_diffuse,1.0);
+                return;
+            }
+            if(fluid_debug_mode==8) {
+                out_color=vec4(vec3((1.0-fog)*vertex_rgb_alpha*absorption),1.0);
+                return;
+            }
             // Just as in native Fluid, emission and reflection are
             // independent of pigment absorption and alpha.
             out_color=vec4(diffuse+emission+specular,opacity);
