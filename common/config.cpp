@@ -211,6 +211,12 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("use_gpu_cache")) {
             j.at("use_gpu_cache").get_to(rv->use_gpu_cache);
         }
+        if(j.contains("enable_gpu_camera_hud")) {
+            j.at("enable_gpu_camera_hud").get_to(rv->enable_gpu_camera_hud);
+        }
+        if(j.contains("camera_hud_depth_sort")) {
+            j.at("camera_hud_depth_sort").get_to(rv->camera_hud_depth_sort);
+        }
         // Retired toggles no longer override the single cache setting.
         // Warn explicitly so old configs don't silently switch modes.
         for(auto const *legacy:{

@@ -1925,8 +1925,15 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     bool const shadow_enabled=the_config &&
         ((the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
          the_config->enable_sun_shadows);
-    // Camera-HUD Things are visible-only and cannot enter shadow atlases.
-    // Permit their GPU path even when world model caching is disabled.
+    // Camera-HUD Things cannot enter the shadow atlases. Respect the
+    // global cache switch and the independent diagnostic HUD bypass switch:
+    // when disabled they render through native JK (and receive postFX).
+    if(active_native_model_camera_hud &&
+       (!the_config || !the_config->use_gpu_cache ||
+        !the_config->enable_gpu_camera_hud)) {
+        gpu_last_camera_hud_failure="native_HUD_renderer_selected";
+        return false;
+    }
     bool const shadow_only=!active_native_model_camera_hud &&
         the_config && shadow_enabled &&
         (force_shadow_only || !the_config->use_gpu_cache);
@@ -1935,8 +1942,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     // Excluded/invisible Things never enter either shadow map; they still
     // render normally through JK or the visible GPU 3DO path.
     if(shadow_only && !casts_sun_shadows)return false;
-    if(!the_config || (!the_config->use_gpu_cache && !shadow_only &&
-                       !active_native_model_camera_hud) ||
+    if(!the_config || (!the_config->use_gpu_cache && !shadow_only) ||
        !mesh || !matrix || pending_gpu_instances.size()>=16384 ||
        // Single VirtualQuery per candidate, including the optional RGB
        // field; thousands of calls happen on busy scenes.

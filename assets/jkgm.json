@@ -34,6 +34,8 @@
     "profile_renderer": false,
     "profile_audio": false,
     "use_gpu_cache": true,
+    "enable_gpu_camera_hud": true,
+    "camera_hud_depth_sort": true,
     "enable_native_fallback": true,
     "enable_gpu_mat_warmup": false,
     "enable_spotlights": false,

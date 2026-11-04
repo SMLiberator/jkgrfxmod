@@ -101,6 +101,8 @@ jobs:
 
     - name: Camera HUD emissive-only shader regression tests
       run: python3 tests/camera_hud_emissive.py
+    - name: Camera HUD deferred material and native fallback diagnostic checks
+      run: python3 tests/camera_hud_deferred.py
 
     - name: GPU-cached per-pixel dynamic lighting regression checks
       run: python3 tests/gpu_pixel_lighting.py

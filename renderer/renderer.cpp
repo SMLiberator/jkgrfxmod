@@ -522,6 +522,11 @@ namespace jkgm {
         // Resolved MAT surfaces are identical for all instances within one
         // frame; share costly native memory reads across both GPU passes.
         std::unordered_map<uint64_t,gpu_3do_texture> gpu_frame_material_cache;
+        // A Camera HUD's geometry and camera already survive until the
+        // next presentation. Retain its MAT resolution too: accessing
+        // native rdMaterial pointers one frame later can observe changed
+        // cels, freed/reused objects or mid-animation upload transitions.
+        std::unordered_map<uint64_t,gpu_3do_texture> deferred_gpu_hud_material_cache;
         std::vector<gpu_3do_instance> frame_gpu_3do_instances;
         // Level-static sector planes; opt-in only.
         sector_crossing_snapshot sector_crossing_world{};
@@ -1030,6 +1035,7 @@ namespace jkgm {
                 // Invalidate it before clearing GPU/MAT resources: otherwise
                 // a stale late-pass draw can briefly sample an unresolved MAT.
                 deferred_gpu_3do_instances.clear();
+                deferred_gpu_hud_material_cache.clear();
                 deferred_gpu_3do_camera={};
                 frame_has_exempt_gpu=false;
                 reset_sector_crossing();
@@ -1626,6 +1632,7 @@ namespace jkgm {
 
             if(presenting_menu) {
                 deferred_gpu_3do_instances.clear();
+                deferred_gpu_hud_material_cache.clear();
                 deferred_gpu_3do_camera={};
                 // Menus are palette-sRGB imagery drawn into our linear screen
                 // buffer. Present directly: GL_FRAMEBUFFER_SRGB performs the
@@ -3345,12 +3352,20 @@ namespace jkgm {
                         uint32_t(group.cel) |
                         (solid?(uint64_t(1)<<63):0U) |
                         (solid && inst.camera_hud?(uint64_t(1)<<62):0U);
-                    auto found=gpu_frame_material_cache.find(mat_key);
-                    if(found==gpu_frame_material_cache.end()) {
+                    auto &mat_cache=post_exempt
+                        ? deferred_gpu_hud_material_cache
+                        : gpu_frame_material_cache;
+                    auto found=mat_cache.find(mat_key);
+                    if(found==mat_cache.end()) {
+                        // The late Camera HUD pass must not dereference a
+                        // native rdMaterial from the next engine tick.
+                        // Missing entries were not visible in the originating
+                        // scene pass, so skip instead of making a late lookup.
+                        if(post_exempt) continue;
                         auto item=solid
                             ?resolve_gpu_3do_solid_material(group,inst.camera_hud)
                             :resolve_gpu_3do_material(group);
-                        found=gpu_frame_material_cache.emplace(mat_key,std::move(item)).first;
+                        found=mat_cache.emplace(mat_key,std::move(item)).first;
                         if(the_config->profile_renderer)
                             ++profile_frame.gpu_material_resolves;
                     }
@@ -3425,7 +3440,8 @@ namespace jkgm {
                         return a.order<b.order;
                     });
             }
-            if(transparent) {
+            if(transparent && !(post_exempt &&
+                                !the_config->camera_hud_depth_sort)) {
                 // JK's own translucent polygons are depth-sorted. Our faces
                 // need a GPU-path equivalent. Sorting index *ranges* does not
                 // modify/re-upload any cached mesh vertices or indices.
@@ -7997,15 +8013,44 @@ namespace jkgm {
             // DirectDraw HUD is composited AFTER post-processing in end_frame,
             // when this rendered scene is presented on the following frame.
 
-            // Preserve only Camera Thing instances for the next presentation.
+            // Preserve Camera Thing geometry, camera AND resolved materials
+            // from the same source frame. The next present() must never
+            // re-read native MAT pointers (animated cels and transient GUI
+            // materials can be changed/freed before that later draw).
             deferred_gpu_3do_instances.clear();
+            deferred_gpu_hud_material_cache.clear();
             deferred_gpu_3do_camera={};
+            size_t hud_cached_mats=0,hud_missing_mats=0,hud_instances=0;
             if(frame_has_exempt_gpu) {
                 deferred_gpu_3do_camera=frame_gpu_3do_camera;
-                // HUD is per instance, never per mesh or material.
-                for(auto &inst:frame_gpu_3do_instances)
-                    if(inst.camera_hud)
-                        deferred_gpu_3do_instances.push_back(std::move(inst));
+                for(auto &inst:frame_gpu_3do_instances) {
+                    if(!inst.camera_hud) continue;
+                    ++hud_instances;
+                    if(inst.geometry) for(auto const &group:inst.geometry->groups) {
+                        bool const solid=inst.effective_geometry_mode==3 ||
+                                         group.solid_color;
+                        uint64_t const key=
+                            (uint64_t(group.material)<<32) |
+                            uint32_t(group.cel) |
+                            (solid?(uint64_t(1)<<63):0U) |
+                            (solid?(uint64_t(1)<<62):0U);
+                        auto found=gpu_frame_material_cache.find(key);
+                        if(found!=gpu_frame_material_cache.end()) {
+                            if(deferred_gpu_hud_material_cache.emplace(
+                                   key,found->second).second)
+                                ++hud_cached_mats;
+                        } else ++hud_missing_mats;
+                    }
+                    deferred_gpu_3do_instances.push_back(std::move(inst));
+                }
+                if(the_config->profile_renderer &&
+                   the_config->profile_renderer_verbose &&
+                   gpu_3do_present_serial%120U==0U)
+                    LOG_INFO("Camera HUD frame material snapshot instances=",
+                             hud_instances," mats=",hud_cached_mats,
+                             " misses=",hud_missing_mats,
+                             " alpha_sort=",the_config->camera_hud_depth_sort?1:0,
+                             " gpu_HUD=",the_config->enable_gpu_camera_hud?1:0);
             }
             frame_has_exempt_gpu=false;
 

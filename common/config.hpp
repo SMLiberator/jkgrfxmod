@@ -54,6 +54,8 @@ namespace jkgm {
         bool profile_renderer_verbose = false; // opt-in detailed renderer diagnostics
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics
         bool use_gpu_cache = true; // unified GPU 3DO, sprite, and SithWorld rendering
+        bool enable_gpu_camera_hud = true; // Camera-type 3DOs: false forces native diagnostic (HUD then receives postFX)
+        bool camera_hud_depth_sort = true; // diagnostic: false preserves authored draw order for translucent Camera HUDs
         bool enable_native_fallback = true; // false: suppress mixed native world batches for cache gap diagnostics
         bool enable_gpu_mat_warmup = false; // experimental; direct JK std3D calls require verified native format/device state
         bool enable_spotlights = false; // COG MAT-based screen-space spotlights
