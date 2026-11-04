@@ -12,6 +12,26 @@ hdr=load("renderer/jk_cmp_gpu.hpp")
 config=load("common/config.hpp")
 parser=load("common/config.cpp")
 assert "bool enable_native_fallback = true;" in config
+assert "bool restore_cmp_lights = false;" in config
+assert 'j.contains("restore_cmp_lights")' in parser
+# Exact native JK HW policy: indexed textured faces need the opt-in,
+# GeoMode 3 colored faces always use their CMP light-table invariant.
+assert ("if(the_config->restore_cmp_lights &&\n"
+        "               original_indexed_albedo && tex.mipmap_buffers[mip]!=0U)") in renderer
+assert ("bool const indexed_fullbright=geometry_mode==4U &&\n"
+        "                the_config->restore_cmp_lights &&") in renderer
+assert ("bool const indexed_fullbright=\n"
+        "                    the_config->restore_cmp_lights &&\n"
+        "                    draw.texture.has_palette_fullbright &&") in renderer
+assert "out.solid_fullbright=jk_cmp_is_fullbright(" in renderer
+assert "prog.set_solid_fullbright(draw.texture.solid_fullbright);" in renderer
+assert "shader.set_solid_fullbright(material.solid_fullbright);" in renderer
+assert "if(geometry_mode==3U)shader.set_solid_color(material.tint);" in renderer
+# Core CMP fullbright computation is not conditioned on JSON:
+# the 8-bit solid-color path always tests the CMP light table.
+solid_code=renderer.split("gpu_3do_texture resolve_gpu_3do_solid_material(",1)[1].split(
+    "// Diagnostics only: native MAT residency",1)[0]
+assert "restore_cmp_lights" not in solid_code
 assert 'j.contains("enable_native_fallback")' in parser
 assert "!the_config->enable_native_fallback" in renderer
 assert "jk_cmp_lightlevel_offset==0x330U" in hdr

@@ -3000,7 +3000,11 @@ namespace jkgm {
                   !surface->replacement_material->albedo_map.has_value())) &&
                 !(ctl && ctl->albedo) && from_albedo.has_value() &&
                 albedo_weight<=0.0f;
-            if(original_indexed_albedo && tex.mipmap_buffers[mip]!=0U) {
+            // Native JK hardware does not preserve CMP fullbright pixels
+            // in textured MATs. Keep that behavior unless explicitly opted
+            // in; GeoMode 3 solid colors remain fullbright independently.
+            if(the_config->restore_cmp_lights &&
+               original_indexed_albedo && tex.mipmap_buffers[mip]!=0U) {
                 uint32_t cmp=0;
                 constexpr uintptr_t active_cmp=0x0073A410U;
                 if(read_object(active_cmp,cmp) &&
@@ -3593,6 +3597,7 @@ namespace jkgm {
                 bind_preview_color(draw.texture.emission,1,draw.texture.filtered);
                 // Unit 11 is the AO receiver on the projected-decal pass.
                 bool const indexed_fullbright=
+                    the_config->restore_cmp_lights &&
                     draw.texture.has_palette_fullbright &&
                     !inst.is_projected_decal && !inst.camera_hud;
                 if(indexed_fullbright)
@@ -6388,6 +6393,7 @@ namespace jkgm {
                              material.texture);
             shader.set_solid_fullbright(material.solid_fullbright);
             bool const indexed_fullbright=geometry_mode==4U &&
+                the_config->restore_cmp_lights &&
                 material.has_palette_fullbright;
             if(indexed_fullbright) {
                 gl::set_active_texture_unit(11);
