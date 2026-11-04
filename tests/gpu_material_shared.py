@@ -118,7 +118,7 @@ parser=read("common/config.cpp")
 shader_header=read("renderer/shaders.hpp")
 assert "int world_cache_fluid_debug_mode = 0;" in config
 assert 'j.contains("world_cache_fluid_debug_mode")' in parser
-assert 'world_cache_fluid_debug_mode must be an integer from 0 to 3' in parser
+assert 'world_cache_fluid_debug_mode must be an integer from 0 to 8' in parser
 assert "void set_fluid_debug_mode(int mode);" in shader_header
 assert "set_fluid_debug_mode(int mode)" in world_api
 assert "shader.set_fluid_debug_mode(the_config->world_cache_fluid_debug_mode);" in renderer
@@ -134,6 +134,20 @@ assert "any(isnan(direct_specular))" in world
 assert "any(isinf(direct_specular))" in world
 assert "vec4(1.0,0.0,1.0,1.0)" in world  # invalid values are magenta
 assert "vec4(0.0,1.0,0.0,1.0)" in world  # finite values are green
+# The full diffuse term can only go black after attenuation of albedo,
+# original Gouraud/sector lighting, metalness, fog, or face opacity.
+# Debug views split those factors; none may replace Fluid rendering by default.
+for mode,expr in (
+    (4,"vec4(albedo,1.0)"),
+    (5,"vec4(lighting,1.0)"),
+    (6,"vec4(vec3(env_metalness),1.0)"),
+    (7,"vec4(lit_diffuse,1.0)"),
+    (8,"vec4(vec3((1.0-fog)*vertex_rgb_alpha*absorption),1.0)"),
+):
+    assert f"if(fluid_debug_mode=={mode})" in world
+    assert "out_color="+expr+";" in world
+assert "vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness);" in world
+assert "world_cache_fluid_debug_mode must be an integer from 0 to 8" in parser
 # A resident MAT may deliberately have NO albedo image (not an unresolved
 # native texture). World GeoMode 4 Fluid must use the shared white-source
 # shader, remain in the transparent pass, and never request native warmup.
