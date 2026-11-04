@@ -46,7 +46,8 @@ assert "the_config->default_specular_roughness};" in renderer
 assert "return {material.reflection_strength,material.roughness};" in renderer
 # Both model and world binders reuse the same fallback selection.
 assert renderer.count("auto const specular=gpu_specular_parameters(")==2
-assert "make_point(specular.first," in renderer
+# Specular may be zeroed if only normal-mapped diffuse needs the texture.
+assert "make_point(spec_active?specular.first:0.0f," in renderer
 assert "specular.second,draw.texture.metalness," in renderer
 assert "make_point(reflective?specular.first:0.0f," in renderer
 assert "specular.second,material.metalness," in renderer

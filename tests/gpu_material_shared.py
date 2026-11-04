@@ -17,6 +17,30 @@ for stage in (model,world):
     assert "gpu_material_sample_albedo(" in stage
     assert "gpu_material_emission(" in stage
     assert "gpu_material_discard(" in stage
+# The native path never clamps albedo_factor BEFORE multiplying in the
+# authored JK vertex lighting. World cache used to clamp factors above one,
+# which made textureless color-only replacements visibly darker.
+native_opaque=read("assets/shaders/game_opaque_pass.frag")
+native_transparent=read("assets/shaders/game_trns_pass.frag")
+assert "vec4 albedo = albedo_map_sample * vertex_color * albedo_factor;" in native_opaque
+assert "vec4 albedo = albedo_map_sample * vertex_color * albedo_factor;" in native_transparent
+assert "vec4 albedo=texel*albedo_factor;" in model
+assert ("vec3 albedo=solid_color!=0 ? material_tint.rgb :\n"
+        "        texel.rgb*material_tint.rgb;") in world
+assert "clamp(texel.rgb*material_tint.rgb,0.0,1.0)" not in world
+assert "clamp(material_tint.rgb,0.0,1.0)" not in world
+# Numeric example: both no-map paths use a white texel and apply the
+# material factor AFTER (or equivalently alongside) baked vertex light.
+for factor in (0.25,0.8,1.0,1.5,2.0,4.0):
+    for baked in (0.0,0.1,0.3,0.7,1.0):
+        native=baked*factor
+        world_cache=(1.0*factor)*baked
+        model_cache=(1.0*factor)*baked
+        assert abs(world_cache-native)<1e-10
+        assert abs(model_cache-native)<1e-10
+        if factor>1.0 and 0.0<baked<1.0:
+            assert min(factor,1.0)*baked < native
+
 # Both world draw passes must bind the identical live MAT factors and maps.
 renderer=read("renderer/renderer.cpp")
 world_api=read("renderer/shaders.cpp")

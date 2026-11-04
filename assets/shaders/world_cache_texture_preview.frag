@@ -213,8 +213,14 @@ void main() {
     if(alpha_cutout!=0 && coverage<alpha_cutoff)discard;
     if(gpu_material_discard(coverage,alpha_mode,alpha_cutoff,
                             emissive_only,transparent_pass!=0,false))discard;
-    vec3 albedo=solid_color!=0 ? clamp(material_tint.rgb,0.0,1.0) :
-        clamp(texel.rgb*material_tint.rgb,0.0,1.0);
+    // Native D3D multiplies the vertex RGB by albedo_factor WITHOUT first
+    // clamping the material pigment to 1.0. For textureless replacements
+    // (albedo_source==2), a factor of 2 with 0.3 baked light must yield
+    // 0.6, not 0.3. Clamping before lighting darkens brightened MATs and
+    // makes GPU-cached world geometry disagree with the native 3DO path.
+    // Downstream presentation still owns the final display-range clamp.
+    vec3 albedo=solid_color!=0 ? material_tint.rgb :
+        texel.rgb*material_tint.rgb;
     if(sky_mode!=0) {
         // Occupancy is normal.A, not geometric normal. A sky pixel
         // covers the HOM background but receives no AO, sun or spotlights.
