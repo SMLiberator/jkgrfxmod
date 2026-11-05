@@ -1674,16 +1674,26 @@ namespace jkgm {
                 // DEFAULT WINDOW BACK buffer. Never read the old DirectDraw
                 // screenshot surface or an intermediate scene FBO.
                 GLint old_read_fb=0,old_read_buffer=0,old_pack_alignment=4;
+                GLint old_pack_row_length=0,old_pack_buffer=0;
                 glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&old_read_fb);
                 glGetIntegerv(GL_READ_BUFFER,&old_read_buffer);
                 glGetIntegerv(GL_PACK_ALIGNMENT,&old_pack_alignment);
+                glGetIntegerv(GL_PACK_ROW_LENGTH,&old_pack_row_length);
+                glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING,&old_pack_buffer);
                 glBindFramebuffer(GL_READ_FRAMEBUFFER,0);
                 glReadBuffer(GL_BACK);
+                glBindBuffer(GL_PIXEL_PACK_BUFFER,0);
                 glPixelStorei(GL_PACK_ALIGNMENT,1);
+                glPixelStorei(GL_PACK_ROW_LENGTH,0);
+                // Don't attribute a stale error from earlier scene draws
+                // to this rare screenshot readback. OpenGL errors are sticky.
+                for(unsigned i=0;i<8U && glGetError()!=GL_NO_ERROR;++i) {}
                 glReadPixels(0,0,w,h,GL_RGBA,GL_UNSIGNED_BYTE,
                              img.data.data());
                 GLenum const read_error=glGetError();
+                glPixelStorei(GL_PACK_ROW_LENGTH,old_pack_row_length);
                 glPixelStorei(GL_PACK_ALIGNMENT,old_pack_alignment);
+                glBindBuffer(GL_PIXEL_PACK_BUFFER,GLuint(old_pack_buffer));
                 glBindFramebuffer(GL_READ_FRAMEBUFFER,GLuint(old_read_fb));
                 glReadBuffer(GLenum(old_read_buffer));
                 if(read_error!=GL_NO_ERROR) {
