@@ -57,5 +57,12 @@ int main()
         assert(rgba[12U+i]==uint8_t(113U+i));
     }
     flip_rgba_rows(nullptr,0U,0U);
+    // Default OpenGL backbuffers need not have an alpha plane. In that
+    // case glReadPixels(GL_RGBA) may return zero alpha for visible pixels.
+    // Saved PNGs must always be fully opaque, never invisible/magenta.
+    for(unsigned i=3U;i<rgba.size();i+=4U)rgba[i]=0U;
+    force_opaque_alpha(rgba.data(),3U,2U);
+    for(unsigned i=3U;i<rgba.size();i+=4U)assert(rgba[i]==255U);
+    force_opaque_alpha(nullptr,0U,0U);
     return 0;
 }
