@@ -87,5 +87,13 @@ inline void flip_rgba_rows(uint8_t *pixels,size_t width,size_t height)
             std::swap(top[i],bottom[i]);
     }
 }
+// Window backbuffers often have undefined/zero alpha even though they are
+// visibly opaque. PNG alpha must NOT make the screenshot transparent.
+inline void force_opaque_alpha(uint8_t *pixels,size_t width,size_t height)
+{
+    if(!pixels || !width || !height)return;
+    for(size_t i=0;i<width*height;++i)
+        pixels[4U*i+3U]=255U;
+}
 } // namespace native_screenshot
 } // namespace jkgm
