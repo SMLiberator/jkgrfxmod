@@ -30,10 +30,14 @@ assert "HookedThingTemplateParse" in main and "HookedThingParseArg" in main
 assert "if(active_light_rgb_template.active)" in main
 assert "registry.prepare_world(reinterpret_cast<uintptr_t>(world));" in main
 assert "registry.prepare_static_world(reinterpret_cast<uintptr_t>(world));" in main
-assert "static_template=(template_index&0x8000U)!=0U" in main
+assert "bool const static_template=(world_flags&1U)!=0U" in main
+assert "static_world!=0U && static_world==uintptr_t(world)" in main
+assert "THING LIGHT RGB template: static=" in main
 assert "light_rgb_clock_now(),static_template" in main
 assert "if(!sprite_variant_hooks_active)" in main
-assert "thing_light_rgb::get_registry().inherit(" in main
+assert "light_rgb_template_ancestor(" in main
+assert "bool const have=registry.get(" in main
+assert "else registry.erase(reinterpret_cast<uintptr_t>(thing));" in main
 assert "thing_light_rgb_hooks_active=false;" in main
 assert "thing_light_clone_hook_active=false;" in main
 
