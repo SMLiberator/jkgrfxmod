@@ -3385,7 +3385,7 @@ namespace jkgm {
                     // the existing opaque architecture and depth-tested.
                     // The MAT may be fully opaque; its native SPR instance
                     // opacity (including SetSpriteInfo) is independent.
-                    auto const policy=inst.is_projected_decal
+                    auto const material_policy=inst.is_projected_decal
                         ? gpu_3do_alpha_mode::blend_only
                         : choose_gpu_3do_alpha_mode(
                             (group.face_type&0x2U)!=0 ||
@@ -3393,6 +3393,16 @@ namespace jkgm {
                             tex.alpha,tex.masked,
                             tex.special||tex.emissive_only,
                             tex.opacity,tex.dithered);
+                    // A live saber SideMat can contain fully opaque core
+                    // texels. The ordinary "mixed" route writes those to
+                    // the opaque depth buffer, which then rejects the final
+                    // joining triangle even if it is submitted last.
+                    // Composite the COMPLETE active trail in the alpha pass
+                    // with depth tests against world/other opaque surfaces,
+                    // but no saber-to-saber depth writes. The 3D fan can now
+                    // reliably cover both blades and the tip bridge.
+                    auto const policy=gpu_3do_trail_alpha_mode(
+                        material_policy,inst.saber_trail_active);
                     if(!post_exempt && !gpu_3do_draws_in_pass(policy,transparent)) continue;
                     float depth=0.0f;
                     if(transparent) {
