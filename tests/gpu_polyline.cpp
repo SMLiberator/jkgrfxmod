@@ -283,6 +283,37 @@ int main() {
     assert(p0.v==128.f && p1.v==128.f &&
            p2.v==0.f && p3.v==0.f);
 
+    // The tip-bridge side face can have an asymmetric rim about the
+    // circular TipMat cap center (native SideMat fan seams are not all
+    // exactly symmetric). Keep the bridge's midpoint aligned to the
+    // verified physical tip, without moving either blade or changing UVs.
+    auto skewed=native_capture;
+    skewed.faces[2].position[0][2]=0.95f;
+    skewed.faces[2].position[2][2]=1.08f;
+    auto skewed_fan=jkgm::make_gpu_polyline_geometry(
+        skewed,&delayed_camera,&actual_hilt_camera);
+    assert(skewed_fan);
+    assert(skewed_fan->groups[3].saber_trail_tip_bridge);
+    auto const &s0=skewed_fan->vertices[34];
+    auto const &s1=skewed_fan->vertices[35];
+    auto const &s2=skewed_fan->vertices[36];
+    auto const &s3=skewed_fan->vertices[37];
+    // Midpoint of the virtual strip equals past tip; midpoint of the
+    // live strip equals current tip, including camera-space depth.
+    for(unsigned n=0;n<3U;++n) {
+        auto p=[](jkgm::gpu_3do_vertex const &v,unsigned axis) {
+            return axis==0U?v.x:(axis==1U?v.y:v.z);
+        };
+        assert(std::abs((p(s0,n)+p(s1,n))*0.5f-
+                        delayed_camera[n])<1.e-5f);
+        assert(std::abs((p(s2,n)+p(s3,n))*0.5f-
+                        tip_camera[n])<1.e-5f);
+    }
+    assert(s0.u==fan->vertices[34].u &&
+           s1.u==fan->vertices[35].u);
+    assert(s0.v==fan->vertices[34].v &&
+           s1.v==fan->vertices[35].v);
+
     // The same native side scroll offset applies to BOTH tip endpoints;
     // no inferred texture height and no special "tip" of SideMat.
     auto scrolling=native_capture;
