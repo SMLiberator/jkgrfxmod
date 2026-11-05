@@ -15,6 +15,21 @@ int main() {
     assert(forced==gpu_3do_alpha_mode::blend_only);
     assert(special==gpu_3do_alpha_mode::blend_only);
     assert(faded==gpu_3do_alpha_mode::blend_only);
+    // The blade's bright opaque core and the translucent joining fan
+    // MUST share a single alpha-only pass during a swing. Otherwise core
+    // pixels write opaque depth before the triangle can be composited.
+    for(auto original : {solid,mixed,masked,forced,special,faded}) {
+        auto const during_swing=gpu_3do_trail_alpha_mode(original,true);
+        assert(during_swing==gpu_3do_alpha_mode::blend_only);
+        assert(!gpu_3do_draws_in_pass(during_swing,false));
+        assert(gpu_3do_draws_in_pass(during_swing,true));
+        assert(gpu_3do_fragment_visible(during_swing,true,1.f,0.5f));
+        assert(gpu_3do_trail_alpha_mode(original,false)==original);
+    }
+    assert(gpu_3do_trail_alpha_mode(mixed,true)==
+           gpu_3do_alpha_mode::blend_only);
+    assert(gpu_3do_trail_alpha_mode(mixed,false)==
+           gpu_3do_alpha_mode::mixed);
     auto dither=choose_gpu_3do_alpha_mode(false,true,false,false,0.45f,true);
     auto native_face_dither=choose_gpu_3do_alpha_mode(true,false,false,false,1.f,true);
     auto special_dither=choose_gpu_3do_alpha_mode(true,true,false,true,1.f,true);
