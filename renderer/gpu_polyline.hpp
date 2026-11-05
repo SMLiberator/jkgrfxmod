@@ -204,6 +204,7 @@ make_gpu_polyline_geometry(
 
     auto result=std::make_shared<gpu_3do_geometry>();
     std::array<uint32_t,3> join_triangle_indices{};
+    std::array<uint32_t,3> live_side_starts{};
     uint32_t join_vertex_start=0;
     bool have_join_triangle=false;
     for(size_t face_index=0;face_index<capture.faces.size();++face_index) {
@@ -242,6 +243,7 @@ make_gpu_polyline_geometry(
             }
         };
         uint32_t const begin=static_cast<uint32_t>(result->vertices.size());
+        if(face_index<3U)live_side_starts[face_index]=begin;
         for(uint32_t k=0;k<face.count;++k) {
             auto const &p=face.position[k];
             auto const &uv=face.uv[k];
@@ -439,6 +441,140 @@ make_gpu_polyline_geometry(
                     }
                 result->groups.erase(result->groups.begin()+1,
                                      result->groups.begin()+3);
+            }
+        }
+
+        // Tip-bridge strip: SideMat's vertical UV axis runs from the
+        // HISTORICAL tip (source blade BASE V) to the LIVE tip (source
+        // blade TIP V). U is copied from native SideMat tip-rim vertices;
+        // all UVs include the native live scrolling offset. TipMat's small
+        // circular square is exclusively for the two separate tip caps.
+        //
+        // Select the widest projected pair of native tip-rim vertices from
+        // ONE side face. The side of the blade can have multiple fan faces,
+        // but all three use the same Thing's SideMat. Prefer a rim pair that
+        // also maximizes the projected area of the connecting bridge.
+        int best_face=-1;
+        unsigned rim0=0U,rim1=0U,base_k=0U;
+        float best_area=-1.f,best_width=-1.f;
+        for(unsigned fi=0;fi<3U;++fi) {
+            unsigned tip_count=0U;
+            std::array<unsigned,2> tips{};
+            unsigned base_index=0U;
+            for(unsigned k=0;k<3U;++k) {
+                if(is_tip[fi][k]) {
+                    if(tip_count<2U)tips[tip_count]=k;
+                    ++tip_count;
+                } else base_index=k;
+            }
+            if(tip_count!=2U)continue;
+            auto const &a=capture.faces[fi].position[tips[0]];
+            auto const &b=capture.faces[fi].position[tips[1]];
+            float const dx=a[0]-b[0],dz=a[2]-b[2];
+            float const width2=dx*dx+dz*dz;
+            float const area=std::abs(dx*tip_delta[2]-dz*tip_delta[0]);
+            if(width2>1.e-10f &&
+               (area>best_area+1.e-8f ||
+                (std::abs(area-best_area)<=1.e-8f &&
+                 width2>best_width))) {
+                best_face=int(fi);
+                rim0=tips[0];rim1=tips[1];base_k=base_index;
+                best_area=area;best_width=width2;
+            }
+        }
+        if(best_face>=0) {
+            unsigned const source=unsigned(best_face);
+            auto const &side=capture.faces[source];
+            auto const &native0=result->vertices[
+                live_side_starts[source]+rim0];
+            auto const &native1=result->vertices[
+                live_side_starts[source]+rim1];
+            float const base_v=result->vertices[
+                live_side_starts[source]+base_k].v;
+
+            std::array<float,3> current0{{native0.x,native0.y,native0.z}};
+            std::array<float,3> current1{{native1.x,native1.y,native1.z}};
+            // If the native camera-facing rim aligns with the swing, the
+            // bridge would have zero area. Use the SAME rim width rotated
+            // perpendicular to the tip displacement in the camera X/Z
+            // plane. Only the bridge is adjusted, never the live blades.
+            float const projected_length2=
+                tip_delta[0]*tip_delta[0]+tip_delta[2]*tip_delta[2];
+            if(best_area<1.e-7f && projected_length2>1.e-10f) {
+                float const half_width=std::sqrt(best_width)*0.5f;
+                float const inv=1.f/std::sqrt(projected_length2);
+                float const side_x=-tip_delta[2]*inv*half_width;
+                float const side_z= tip_delta[0]*inv*half_width;
+                current0={{tip_camera[0]-side_x,tip_camera[1],
+                           tip_camera[2]-side_z}};
+                current1={{tip_camera[0]+side_x,tip_camera[1],
+                           tip_camera[2]+side_z}};
+            }
+            // Order: virtual rim 0/1 -> live rim 1/0. The bridge uses
+            // exactly one rectangle worth of SideMat, with the native
+            // U endpoints and full native BASE->TIP V progression.
+            std::array<gpu_3do_vertex,4> strip{{
+                native0,native1,native1,native0
+            }};
+            auto write_pos=[](gpu_3do_vertex &v,
+                              std::array<float,3> const &p) {
+                v.x=p[0];v.y=p[1];v.z=p[2];
+            };
+            std::array<float,3> past0=current0,past1=current1;
+            for(int n=0;n<3;++n) {
+                past0[n]+=tip_delta[n];past1[n]+=tip_delta[n];
+            }
+            write_pos(strip[0],past0);
+            write_pos(strip[1],past1);
+            write_pos(strip[2],current1);
+            write_pos(strip[3],current0);
+            strip[0].v=base_v;
+            strip[1].v=base_v;
+            // strip[2].v and strip[3].v are original native TIP V,
+            // including the scrolling offset. No texture height assumed.
+            float const ax=strip[1].x-strip[0].x;
+            float const ay=strip[1].y-strip[0].y;
+            float const az=strip[1].z-strip[0].z;
+            float const bx=strip[2].x-strip[0].x;
+            float const by=strip[2].y-strip[0].y;
+            float const bz=strip[2].z-strip[0].z;
+            float nx=ay*bz-az*by;
+            float ny=az*bx-ax*bz;
+            float nz=ax*by-ay*bx;
+            float const normal_length=std::sqrt(nx*nx+ny*ny+nz*nz);
+            if(std::isfinite(normal_length) && normal_length>1.e-8f) {
+                nx/=normal_length;ny/=normal_length;nz/=normal_length;
+                gpu_3do_group bridge_group{};
+                bridge_group.material=side.material;
+                bridge_group.cel=side.cel;
+                bridge_group.face_type=side.face_type|1U;
+                bridge_group.solid_color=false;
+                bridge_group.saber_trail_tip_bridge=true;
+                bridge_group.offset=
+                    static_cast<uint32_t>(result->indices.size());
+                bridge_group.count=6U;
+                bridge_group.bounds_min={{strip[0].x,strip[0].y,strip[0].z}};
+                bridge_group.bounds_max=bridge_group.bounds_min;
+                uint32_t const bridge_begin=
+                    static_cast<uint32_t>(result->vertices.size());
+                for(auto &v:strip) {
+                    v.nx=v.lnx=nx;v.ny=v.lny=ny;v.nz=v.lnz=nz;
+                    v.fax=past0[0];v.fay=past0[1];v.faz=past0[2];
+                    result->vertices.push_back(v);
+                    float const p[3]={v.x,v.y,v.z};
+                    for(int n=0;n<3;++n) {
+                        bridge_group.bounds_min[n]=std::min(
+                            bridge_group.bounds_min[n],p[n]);
+                        bridge_group.bounds_max[n]=std::max(
+                            bridge_group.bounds_max[n],p[n]);
+                        bridge_group.centroid[n]+=p[n]*0.25f;
+                    }
+                }
+                result->indices.insert(result->indices.end(),{
+                    bridge_begin,bridge_begin+1U,bridge_begin+2U,
+                    bridge_begin,bridge_begin+2U,bridge_begin+3U
+                });
+                result->groups.push_back(bridge_group);
             }
         }
 
