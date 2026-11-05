@@ -18,6 +18,7 @@
 #include "native_mat_upload_policy.hpp"
 #include "gpu_particle_cloud.hpp"
 #include "native_procedural_draw.hpp"
+#include "native_screenshot.hpp"
 #include "camera_hud_thing.hpp"
 #include "gpu_mat_ready_cache.hpp"
 #include "gpu_3do_modelview.hpp"
@@ -9263,6 +9264,47 @@ bool request_native_compressed_sound_hook()
     }
     return true;
 }
+    // The 1997 JK Screenshot hotkey (and jkScreenshot COG verb) call the
+    // SAME jkGame_Screenshot routine. Do not hook unvalidated JK.exe code:
+    // OpenJKDF2's symbolic address may differ in modified JKGM builds.
+    using native_jk_screenshot_fn=void(__cdecl *)();
+    native_jk_screenshot_fn RealJkGameScreenshot=
+        reinterpret_cast<native_jk_screenshot_fn>(
+            jkgm::native_screenshot::jk_game_screenshot_address);
+    bool native_screenshot_hook_active=false;
+
+    void __cdecl HookedJkGameScreenshot()
+    {
+        // Do not run GL from JK's input/COG thread. The renderer samples
+        // the complete image from the final backbuffer just before swap.
+        // Suppressing this native call also avoids the magenta SHOTxxxx.BMP.
+        if(the_renderer && the_renderer->queue_screenshot_png())return;
+        RealJkGameScreenshot();
+    }
+
+    bool request_native_screenshot_hook()
+    {
+        auto const read=[](uintptr_t a,void *dst,size_t n) {
+            if(!a || !gpu_span_readable(reinterpret_cast<void const *>(a),n))
+                return false;
+            std::memcpy(dst,reinterpret_cast<void const *>(a),n);
+            return true;
+        };
+        if(!jkgm::native_screenshot::verified_jk_screenshot(
+               read,reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr)))) {
+            LOG_WARNING("PNG screenshot hook skipped: native JK screenshot "
+                        "address/SHOT BMP signature unverified. "
+                        "Legacy screenshots remain active.");
+            return false;
+        }
+        LONG const err=DetourAttach(&(PVOID &)RealJkGameScreenshot,
+                                    HookedJkGameScreenshot);
+        if(err!=NO_ERROR) {
+            LOG_WARNING("PNG screenshot DetourAttach failed: ",err);
+            return false;
+        }
+        return true;
+    }
 } // anonymous
 
 bool attach_hooks()
@@ -9369,6 +9411,7 @@ bool attach_hooks()
     bool const sprite_hooks_requested=request_native_sprite_hooks();
     bool const particle_hooks_requested=request_native_particle_hooks();
     bool const polyline_hooks_requested=request_native_polyline_hooks();
+    bool const screenshot_hook_requested=request_native_screenshot_hook();
     bool const mesh_collision_hook_requested=request_type2_intersection_hook();
     bool const ice_thing_hook_requested=request_native_thingface_friction_hook();
     bool const earth_sound_hook_requested=request_native_earth_sound_hook();
@@ -9397,6 +9440,11 @@ bool attach_hooks()
     if(error==NO_ERROR) native_sprite_hook_active=sprite_hooks_requested;
     if(error==NO_ERROR) native_particle_hook_active=particle_hooks_requested;
     if(error==NO_ERROR) native_polyline_hook_active=polyline_hooks_requested;
+    if(error==NO_ERROR && screenshot_hook_requested) {
+        native_screenshot_hook_active=true;
+        LOG_INFO("JK Screenshot hotkey/COG verb redirected from legacy BMP "
+                 "to final OpenGL PNG backbuffer");
+    }
     if(error==NO_ERROR && mesh_collision_hook_requested) {
         native_mesh_collision_hook_active=true;
         LOG_INFO("JKGM native collision Detour installed: type2=",
@@ -9428,6 +9476,11 @@ bool detach_hooks()
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
 
+    if(native_screenshot_hook_active) {
+        DetourDetach(&(PVOID &)RealJkGameScreenshot,
+                     HookedJkGameScreenshot);
+        native_screenshot_hook_active=false;
+    }
     if(native_polyline_hook_active) {
         DetourDetach(&(PVOID &)RealNativePolylineDraw,HookedNativePolylineDraw);
         DetourDetach(&(PVOID &)RealNativePolylineFace,HookedNativePolylineFace);
