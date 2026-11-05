@@ -3267,24 +3267,35 @@ namespace {
                                     saber_fan_built=true;
                                     if(the_config->profile_renderer &&
                                        saber_trail_fan_logged++<12U) {
-                                        auto const &f=captured.faces[0];
-                                        float const bx=(f.position[2][0]+f.position[3][0])*0.5f;
-                                        float const bz=(f.position[2][2]+f.position[3][2])*0.5f;
-                                        float const tx=(f.position[0][0]+f.position[1][0])*0.5f;
-                                        float const tz=(f.position[0][2]+f.position[1][2])*0.5f;
-                                        float const projected_area=std::abs(
-                                            (tx-bx)*(delayed_cam[2]-bz)-
-                                            (tz-bz)*(delayed_cam[0]-bx))*0.5f;
-                                        float delta2=0.0f;
-                                        for(int n=0;n<3;++n)
-                                            delta2+=(delayed_cam[n]-
-                                                (f.position[0][n]+f.position[1][n])*0.5f)*
-                                                (delayed_cam[n]-
-                                                (f.position[0][n]+f.position[1][n])*0.5f);
+                                        std::array<float,3> b{},t{};
+                                        // These are the TRUE native hilt/tip
+                                        // centers, not side0's mainly hilt
+                                        // vertices. Camera XZ is the screen
+                                        // plane in JK's native view.
+                                        jkgm::gpu_polyline_cap_pose_camera(
+                                            captured,b,t);
+                                        float a[3]{},d[3]{},cross[3]{};
+                                        float sep2=0,blade2=0;
+                                        for(int n=0;n<3;++n) {
+                                            a[n]=t[n]-b[n];
+                                            d[n]=delayed_cam[n]-b[n];
+                                            blade2+=a[n]*a[n];
+                                            float diff=delayed_cam[n]-t[n];
+                                            sep2+=diff*diff;
+                                        }
+                                        cross[0]=a[1]*d[2]-a[2]*d[1];
+                                        cross[1]=a[2]*d[0]-a[0]*d[2];
+                                        cross[2]=a[0]*d[1]-a[1]*d[0];
+                                        float const area_xz=std::abs(cross[1])*.5f;
+                                        float const area3d=std::sqrt(
+                                            cross[0]*cross[0]+cross[1]*cross[1]+
+                                            cross[2]*cross[2])*.5f;
                                         LOG_INFO("GPU SABER TRAIL: fan emitted",
                                                  " owner=",owner," blade=",blade,
-                                                 " area_view_xz=",projected_area,
-                                                 " tip_separation=",std::sqrt(delta2),
+                                                 " area_view_xz=",area_xz,
+                                                 " area_3d=",area3d,
+                                                 " blade_length=",std::sqrt(blade2),
+                                                 " tip_separation=",std::sqrt(sep2),
                                                  " triangles=",geom->indices.size()/3U);
                                     }
                                 }

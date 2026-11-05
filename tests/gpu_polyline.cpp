@@ -50,40 +50,96 @@ int main() {
     assert(std::abs(next_frame->vertices[0].u+4.0f)<1.e-5f);
     assert(std::abs(next_frame->vertices[0].v-13.0f)<1.e-5f);
     assert(std::abs(mesh->vertices[0].u-12.5f)<1.e-5f);
-    capture.faces[0].uv_offset={{12.5f,-27.25f}};
-    // Every side gets a delayed strip, but the center fan is generated ONCE
-    // to avoid three coplanar identical triangles fighting over depth.
-    std::array<float,3> delayed_camera{{3.0f,4.0f,5.0f}};
-    auto fan=jkgm::make_gpu_polyline_geometry(capture,&delayed_camera);
-    assert(fan && fan->groups.size()==5);
-    assert(fan->vertices.size()==36U);
-    assert(fan->indices.size()==54U);
-    assert(fan->groups[0].count==15U); // shared center fan once
-    assert(fan->groups[1].count==12U);
-    assert(fan->groups[2].count==12U);
-    assert(fan->groups[3].count==mesh->groups[3].count);
-    assert(fan->groups[4].count==mesh->groups[4].count);
-    assert(fan->groups[0].material==mesh->groups[0].material);
-    assert(fan->material_refs==mesh->material_refs);
-    assert(std::abs(fan->vertices[0].u-12.5f)<1.e-5f);
-    assert(std::abs(fan->vertices[1].u-20.5f)<1.e-5f);
-    assert(std::abs(fan->vertices[4].u-20.5f)<1.e-5f);
-    assert(std::abs(fan->vertices[1].x-
-                    mesh->vertices[1].x)<1.e-6f);
-    assert(std::abs(fan->vertices[4].x-
-                    (mesh->vertices[0].x+3.f-0.5f))<1.e-5f);
-    assert(std::abs(fan->vertices[8].u-52.5f)<1.e-5f);
-    assert(std::abs(fan->vertices[8].v-(-22.25f))<1.e-5f);
-    std::array<float,3> base_world{},tip_world{};
+    // JKGM's ACTUAL five-face generator arrangement (disassembled from
+    // jkgm(5).exe): middle side face is [tip0,base0,tip1,base1].
+    // The pentagonal tip cap begins with the base center (one vertex),
+    // followed by four TRUE tip corners. Three side faces share vertices.
+    jkgm::gpu_polyline_capture native_capture{};
+    native_capture.faces.resize(5);
+    for(unsigned fi=0;fi<5;++fi) {
+        auto &face=native_capture.faces[fi];
+        face.material=fi<3?0x22000U:0x24000U;
+        face.count=fi==3U?5U:4U;
+        face.geo=4;
+        face.cel=2;
+        face.uv_offset={{0.0f,0.0f}};
+    }
+    auto &main=native_capture.faces[1];
+    main.position[0]={{-.05f,0.0f,1.0f}}; // left tip
+    main.position[1]={{-.05f,0.0f,0.0f}}; // left base
+    main.position[2]={{ .05f,0.0f,1.0f}}; // right tip
+    main.position[3]={{ .05f,0.0f,0.0f}}; // right base
+    main.uv[0]={{0.0f,0.0f}};
+    main.uv[1]={{0.0f,256.0f}};
+    main.uv[2]={{64.0f,0.0f}};
+    main.uv[3]={{64.0f,256.0f}};
+    // The other two sides are NOT full 2-tip/2-base quads.
+    auto &side0=native_capture.faces[0];
+    side0.position[0]={{-.05f,0.0f,0.0f}};
+    side0.position[1]={{ 0.0f,0.0f,0.0f}};
+    side0.position[2]=main.position[0];
+    side0.position[3]=main.position[1];
+    auto &side2=native_capture.faces[2];
+    side2.position[0]=main.position[2];
+    side2.position[1]=main.position[3];
+    side2.position[2]={{.05f,0.0f,0.0f}};
+    side2.position[3]={{ 0.0f,0.0f,0.0f}};
+    auto &tip_cap=native_capture.faces[3];
+    tip_cap.position[0]={{0,0,0}}; // base center, NOT a tip vertex
+    tip_cap.position[1]={{-.02f,-.02f,1.f}};
+    tip_cap.position[2]={{ .02f,-.02f,1.f}};
+    tip_cap.position[3]={{ .02f, .02f,1.f}};
+    tip_cap.position[4]={{-.02f, .02f,1.f}};
+    auto &base_cap=native_capture.faces[4];
+    base_cap.position[0]={{-.02f,-.02f,0.f}};
+    base_cap.position[1]={{ .02f,-.02f,0.f}};
+    base_cap.position[2]={{ .02f, .02f,0.f}};
+    base_cap.position[3]={{-.02f, .02f,0.f}};
+    std::array<float,3> base_camera{},tip_camera{};
+    assert(jkgm::gpu_polyline_cap_pose_camera(
+        native_capture,base_camera,tip_camera));
+    assert(std::abs(base_camera[2])<1.e-6f);
+    assert(std::abs(tip_camera[2]-1.f)<1.e-6f);
+    // A naive 5-point tip centroid would be only 0.8 units away.
+    std::array<float,3> native_base_world{},native_tip_world{};
     assert(jkgm::gpu_polyline_blade_pose(
-        capture,inverse,base_world,tip_world));
-    double pose_gap=0;
-    for(int i=0;i<3;++i)
-        pose_gap+=double(tip_world[i]-base_world[i])*
-                  double(tip_world[i]-base_world[i]);
-    // Synthetic five-vertex tip cap is off-center in X; preserve its
-    // measured cap centroid rather than assuming a unit-length blade.
-    assert(std::abs(pose_gap-1.04)<1.e-5);
+        native_capture,inverse,native_base_world,native_tip_world));
+    double native_length2=0.0;
+    for(int n=0;n<3;++n)
+        native_length2+=double(native_tip_world[n]-native_base_world[n])*
+                        double(native_tip_world[n]-native_base_world[n]);
+    assert(std::abs(native_length2-1.0)<1.e-5);
+    std::array<float,3> delayed_camera{{.5f,0.0f,1.0f}};
+    auto fan=jkgm::make_gpu_polyline_geometry(
+        native_capture,&delayed_camera);
+    assert(fan && fan->groups.size()==5U);
+    assert(fan->vertices.size()==28U);
+    assert(fan->indices.size()==42U);
+    assert(fan->groups[0].count==6U);
+    assert(fan->groups[1].count==15U);
+    assert(fan->groups[2].count==6U);
+    assert(fan->groups[3].count==9U);
+    assert(fan->groups[4].count==6U);
+    assert(fan->material_refs.size()==2U);
+    // Side 1 starts at vertex 4. The live edge uses SideMat's first
+    // half (U 0..32), while the delayed edge uses its other half (32..64).
+    assert(std::abs(fan->vertices[4].u-0.0f)<1.e-5f);
+    assert(std::abs(fan->vertices[6].u-32.0f)<1.e-5f);
+    assert(std::abs(fan->vertices[6].x)<1.e-5f);
+    assert(std::abs(fan->vertices[8].u-32.0f)<1.e-5f);
+    assert(std::abs(fan->vertices[10].u-64.0f)<1.e-5f);
+    assert(std::abs(fan->vertices[8].x-.5f)<1.e-5f);
+    assert(std::abs(fan->vertices[12].x)<1.e-5f);
+    assert(std::abs(fan->vertices[13].z-1.f)<1.e-5f);
+    assert(std::abs(fan->vertices[14].x-.5f)<1.e-5f);
+    // The fan's true camera-facing area must be large, not squeezed
+    // into side face 0's predominantly base-adjacent vertices.
+    float const area_xz=std::abs(
+        (tip_camera[0]-base_camera[0])*
+        (delayed_camera[2]-base_camera[2])-
+        (tip_camera[2]-base_camera[2])*
+        (delayed_camera[0]-base_camera[0]))*.5f;
+    assert(std::abs(area_xz-.25f)<1.e-5f);
 
     // An actual 60-ms delay: both edges advance; when motion stops the
     // delayed blade catches up and the triangle becomes degenerate.
