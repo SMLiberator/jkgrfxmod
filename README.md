@@ -40,6 +40,44 @@ sphere as a candidate filter; very badly off-center 3DOs with undersized
 static world receiver snapshot, not the engine's exact sector traversal,
 so compare hit semantics against your target levels during testing.
 
+## Colored per-Thing dynamic lights (JKGM)
+
+With `"gpu_pixel_lighting": true` in `jkgm.json`, GPU-cached world surfaces
+and 3DOs tint the **existing native point light**, without emitting a second
+light. Native/software Gouraud lighting remains monochrome.
+
+Specify a hue-only normalized Thing parameter in a template or placed Thing:
+
+```ini
+light=0.6 lightrgb=(0.15/0.5/1.0)
+```
+
+`lightrgb` accepts finite components in `0..1`. The highest component is
+normalized to `1`. Achromatic inputs, including `(0/0/0)`, mean **white**.
+Brightness and falloff still come exclusively from `light` / `SetThingLight()`.
+Use `SetThingLight(thing,0)` to turn a light off.
+
+COG supports immediate changes and timed color interpolation:
+
+```c
+SetThingLightRGB(thing, VectorSet(1, 0, 0), 0.0); // immediate red
+SetThingLightRGB(thing, VectorSet(0, 0, 1), 2.0); // red to blue in 2 s
+rgb = GetThingLightRGB(thing);                    // current RGB
+```
+
+The third `fadeSeconds` argument is always required (`0` is immediate),
+because JK COG verbs have fixed arity; valid fades are `0..3600` seconds.
+Fade endpoints are normalized at assignment; linear interpolation is
+not renormalized each frame.
+
+Colors are stored outside SithThing's type-specific union, inherited when
+Things spawn from templates, and isolated by Thing signature/world lifetime.
+The renderer matches the original native rdCamera light by position and
+intensity; the saber's SideMat hue takes priority if the same light is matched.
+`flashrgb` remains the separate explosion-screen-flash parameter.
+
+Template parsing needs the verified `jkgm(5).exe` parser/template/copy hooks.
+COG controls also require the community JK.dll verb registration.
 ## Adjustable saber light (COG)
 
 `SetSaberLightIntensity(thing, maximum)` controls the native lightsaber
