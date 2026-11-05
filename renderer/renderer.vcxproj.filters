@@ -137,6 +137,9 @@
     <ClInclude Include="native_screenshot.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="saber_light_rgb.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="compressed_sound_io.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
