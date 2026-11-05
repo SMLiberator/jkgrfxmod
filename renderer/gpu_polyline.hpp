@@ -56,11 +56,11 @@ inline bool gpu_polyline_inverse_view(
     return gpu_3do_matrix_finite(out);
 }
 
-// JKGM's five captured faces have three SideMat triangles followed by a
-// FIVE-vertex TIP fan and a FOUR-vertex BASE quad. The tip fan has a central
-// vertex plus four rim points, whereas the base has four rim points. The
-// previous version REVERSED these caps, so the connecting fan widened toward
-// the hilt and a translated base quad floated beside the saber.
+// Verified JKGM five-face layout: three SideMat triangles followed by a
+// FIVE-vertex BASE cap (one center plus four rim points) and a FOUR-vertex
+// TIP cap. The base and tip MUST NOT be reversed. Different native side
+// faces use different vertex orderings, so classify side vertices by their
+// distance to these physical endpoints, not by their triangle index.
 inline bool gpu_polyline_cap_pose_camera(
     gpu_polyline_capture const &capture,
     std::array<float,3> &base,std::array<float,3> &tip)
@@ -68,25 +68,24 @@ inline bool gpu_polyline_cap_pose_camera(
     if(capture.failed || capture.faces.size()!=5U ||
        capture.faces[3].count!=5U || capture.faces[4].count!=4U)
         return false;
-    auto const &tip_face=capture.faces[3];
-    auto const &base_face=capture.faces[4];
-    // The central vertex of a 5-point fan is not guaranteed to be first.
-    // Select the point closest to the mean of the other four, then use the
-    // rim mean as the accurate center of the tip (not one edge or the hilt).
+    auto const &base_face=capture.faces[3];
+    auto const &tip_face=capture.faces[4];
+    // The 5-point cap has a central vertex surrounded by four rim points.
+    // Locate the center geometrically, without assuming its index is zero.
     int center=-1;
     double least=std::numeric_limits<double>::infinity();
     for(unsigned skip=0;skip<5U;++skip) {
         std::array<double,3> mean{};
         for(unsigned k=0;k<5U;++k) {
-            for(float v:tip_face.position[k])
+            for(float v:base_face.position[k])
                 if(!std::isfinite(v))return false;
             if(k!=skip)
                 for(int n=0;n<3;++n)
-                    mean[n]+=tip_face.position[k][n]*0.25;
+                    mean[n]+=base_face.position[k][n]*0.25;
         }
         double d2=0.0;
         for(int n=0;n<3;++n) {
-            double const d=tip_face.position[skip][n]-mean[n];
+            double const d=base_face.position[skip][n]-mean[n];
             d2+=d*d;
         }
         if(d2<least){least=d2;center=int(skip);}
@@ -94,17 +93,17 @@ inline bool gpu_polyline_cap_pose_camera(
     if(center<0)return false;
     base={{0,0,0}};
     tip={{0,0,0}};
-    for(unsigned k=0;k<4U;++k) {
-        for(int n=0;n<3;++n) {
-            float const x=base_face.position[k][n];
-            if(!std::isfinite(x))return false;
-            base[n]+=x*0.25f;
-        }
-    }
     for(unsigned k=0;k<5U;++k)
         if(int(k)!=center)
             for(int n=0;n<3;++n)
-                tip[n]+=tip_face.position[k][n]*0.25f;
+                base[n]+=base_face.position[k][n]*0.25f;
+    for(unsigned k=0;k<4U;++k) {
+        for(int n=0;n<3;++n) {
+            float const x=tip_face.position[k][n];
+            if(!std::isfinite(x))return false;
+            tip[n]+=x*0.25f;
+        }
+    }
     double len2=0.0;
     for(int n=0;n<3;++n) {
         double const d=double(tip[n])-base[n];
@@ -310,25 +309,12 @@ make_gpu_polyline_geometry(
                 }
                 join_indices={join_begin,join_begin+1U,join_begin+2U};
             }
-        } else if(have_trail && face_index==3U) {
-            // The five-vertex fan is the TIP cap. Move that cap only.
-            // Face 4 is the BASE quad: it is shared by both blades and
-            // MUST NEVER be translated (the previous flying rectangle).
-            uint32_t const delayed_begin=
-                static_cast<uint32_t>(result->vertices.size());
-            for(unsigned k=0;k<face.count;++k) {
-                gpu_3do_vertex v=result->vertices[begin+k];
-                v.x+=tip_delta[0];
-                v.y+=tip_delta[1];
-                v.z+=tip_delta[2];
-                result->vertices.push_back(v);
-                expand_bounds(v);
-            }
-            for(uint32_t k=1;k+1<face.count;++k)
-                behind_indices.insert(behind_indices.end(),
-                                      {delayed_begin,delayed_begin+k,
-                                       delayed_begin+k+1});
         }
+        // Never duplicate a cap: the 5-point BASE cap belongs to the
+        // shared hilt and the TIP cap of the live blade remains native.
+        // The historical side triangles and true 3D fan already define
+        // the delayed tip. Duplicating cap geometry introduced a stray
+        // rectangular patch in front of the blade.
         result->indices.insert(result->indices.end(),
                                behind_indices.begin(),behind_indices.end());
         result->indices.insert(result->indices.end(),
