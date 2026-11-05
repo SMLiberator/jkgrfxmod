@@ -38,6 +38,16 @@ assert "instance.num_lights" in program
 # Both cached geometry paths must obey the same opt-in, and disabled
 # world geometry must retain native Gouraud dynamic light intensities.
 assert "the_config->gpu_pixel_lighting &&" in wiring
+# 0x20 skybox models use GPU vertex dynamic lights, not per-fragment
+# diffuse or per-pixel Thing point-specular. Other models remain unchanged.
+assert "inst.skybox_vertex_lighting=jkgm::thing_uses_skybox_vertex_lights(" in main
+assert "!inst.skybox_vertex_lighting &&" in wiring
+assert "prog.set_dynamic_light_specular(\n                        !inst.skybox_vertex_lighting &&" in wiring
+assert "!inst.camera_hud && !inst.skybox_vertex_lighting &&" in wiring
+assert "bool const have_thing_flags=" in main
+assert "if(have_thing_flags) {" in main
+assert "if(shadow_enabled || (the_config && the_config->enable_decals))" in main
+assert "pixel_dynamic_lighting==0" in vert
 assert ("world_cache_use_pixel_lights(\n"
         "                the_config->gpu_pixel_lighting,camera_ready);") in wiring
 assert "return enabled && camera_ready;" in (
