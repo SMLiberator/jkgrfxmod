@@ -3793,7 +3793,7 @@ namespace jkgm {
                 if(the_config->profile_renderer && inst.saber_trail_active &&
                    group.count>=9U && inst.geometry &&
                    inst.geometry->groups.size()>=3U &&
-                   group.material==inst.geometry->groups[1].material) {
+                   group.material==inst.geometry->groups[0].material) {
                     static unsigned trail_draw_logs=0;
                     if(trail_draw_logs++<16U)
                         LOG_INFO("GPU SABER TRAIL: GL draw",
