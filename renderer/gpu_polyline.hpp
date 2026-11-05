@@ -56,53 +56,74 @@ inline bool gpu_polyline_inverse_view(
     return gpu_3do_matrix_finite(out);
 }
 
-// Verified JKGM five-face layout: three SideMat triangles followed by a
-// FIVE-vertex BASE cap (one center plus four rim points) and a FOUR-vertex
-// TIP cap. The base and tip MUST NOT be reversed. Different native side
-// faces use different vertex orderings, so classify side vertices by their
-// distance to these physical endpoints, not by their triangle index.
+// JKGM emits three SideMat triangles and two caps (five and four
+// vertices). Do not decide which cap is the hilt by FACE INDEX: the actual
+// saber origin is rdPolyline_Draw's orientation translation. Comparing both
+// cap centers with that origin makes the result independent of cap order.
+// With no origin supplied, keep the legacy face-3-base interpretation only
+// for standalone callers that cannot access the native orientation.
 inline bool gpu_polyline_cap_pose_camera(
     gpu_polyline_capture const &capture,
-    std::array<float,3> &base,std::array<float,3> &tip)
+    std::array<float,3> &base,std::array<float,3> &tip,
+    std::array<float,3> const *native_hilt_camera=nullptr)
 {
     if(capture.failed || capture.faces.size()!=5U ||
        capture.faces[3].count!=5U || capture.faces[4].count!=4U)
         return false;
-    auto const &base_face=capture.faces[3];
-    auto const &tip_face=capture.faces[4];
-    // The 5-point cap has a central vertex surrounded by four rim points.
-    // Locate the center geometrically, without assuming its index is zero.
-    int center=-1;
-    double least=std::numeric_limits<double>::infinity();
-    for(unsigned skip=0;skip<5U;++skip) {
-        std::array<double,3> mean{};
-        for(unsigned k=0;k<5U;++k) {
-            for(float v:base_face.position[k])
+    auto cap_center=[](gpu_polyline_face const &face,
+                       std::array<float,3> &out) {
+        if(face.count!=4U && face.count!=5U)return false;
+        for(unsigned k=0;k<face.count;++k)
+            for(float v:face.position[k])
                 if(!std::isfinite(v))return false;
-            if(k!=skip)
+        out={{0,0,0}};
+        if(face.count==4U) {
+            for(unsigned k=0;k<4U;++k)
                 for(int n=0;n<3;++n)
-                    mean[n]+=base_face.position[k][n]*0.25;
+                    out[n]+=face.position[k][n]*0.25f;
+        } else {
+            // The five-point cap has one center plus four rim points.
+            // Locate the central point geometrically, not by its index.
+            unsigned central=0U;
+            double best=std::numeric_limits<double>::infinity();
+            for(unsigned skip=0;skip<5U;++skip) {
+                std::array<double,3> rim{};
+                for(unsigned k=0;k<5U;++k)
+                    if(k!=skip)
+                        for(int n=0;n<3;++n)
+                            rim[n]+=double(face.position[k][n])*0.25;
+                double distance=0.0;
+                for(int n=0;n<3;++n) {
+                    double const d=face.position[skip][n]-rim[n];
+                    distance+=d*d;
+                }
+                if(distance<best){best=distance;central=skip;}
+            }
+            for(unsigned k=0;k<5U;++k)
+                if(k!=central)
+                    for(int n=0;n<3;++n)
+                        out[n]+=face.position[k][n]*0.25f;
         }
-        double d2=0.0;
+        return true;
+    };
+    std::array<float,3> cap3{},cap4{};
+    if(!cap_center(capture.faces[3],cap3) ||
+       !cap_center(capture.faces[4],cap4))return false;
+
+    if(native_hilt_camera) {
+        double d3=0.0,d4=0.0;
         for(int n=0;n<3;++n) {
-            double const d=base_face.position[skip][n]-mean[n];
-            d2+=d*d;
+            if(!std::isfinite((*native_hilt_camera)[n]))return false;
+            double const a=cap3[n]-(*native_hilt_camera)[n];
+            double const b=cap4[n]-(*native_hilt_camera)[n];
+            d3+=a*a;d4+=b*b;
         }
-        if(d2<least){least=d2;center=int(skip);}
-    }
-    if(center<0)return false;
-    base={{0,0,0}};
-    tip={{0,0,0}};
-    for(unsigned k=0;k<5U;++k)
-        if(int(k)!=center)
-            for(int n=0;n<3;++n)
-                base[n]+=base_face.position[k][n]*0.25f;
-    for(unsigned k=0;k<4U;++k) {
-        for(int n=0;n<3;++n) {
-            float const x=tip_face.position[k][n];
-            if(!std::isfinite(x))return false;
-            tip[n]+=x*0.25f;
-        }
+        // Anchor BOTH blade centerlines to JK's *actual* hilt origin.
+        base=*native_hilt_camera;
+        tip=d3>d4?cap3:cap4;
+    } else {
+        base=cap3;
+        tip=cap4;
     }
     double len2=0.0;
     for(int n=0;n<3;++n) {
@@ -114,10 +135,12 @@ inline bool gpu_polyline_cap_pose_camera(
 
 inline bool gpu_polyline_blade_pose(
     gpu_polyline_capture const &capture,gpu_3do_matrix34 const &inverse_view,
-    std::array<float,3> &base_world,std::array<float,3> &tip_world)
+    std::array<float,3> &base_world,std::array<float,3> &tip_world,
+    std::array<float,3> const *native_hilt_camera=nullptr)
 {
     std::array<float,3> base{},tip{};
-    if(!gpu_polyline_cap_pose_camera(capture,base,tip))return false;
+    if(!gpu_polyline_cap_pose_camera(
+           capture,base,tip,native_hilt_camera))return false;
     base_world=gpu_3do_native_transform_point(inverse_view,base);
     tip_world=gpu_3do_native_transform_point(inverse_view,tip);
     return std::all_of(base_world.begin(),base_world.end(),
@@ -133,12 +156,14 @@ inline bool gpu_polyline_blade_pose(
 inline std::shared_ptr<gpu_3do_geometry const>
 make_gpu_polyline_geometry(
     gpu_polyline_capture const &capture,
-    std::array<float,3> const *trailing_tip_camera=nullptr)
+    std::array<float,3> const *trailing_tip_camera=nullptr,
+    std::array<float,3> const *native_hilt_camera=nullptr)
 {
     if(capture.failed || capture.faces.size()!=5U)return {};
     std::array<float,3> base_camera{},tip_camera{},tip_delta{};
     bool const have_trail=trailing_tip_camera &&
-        gpu_polyline_cap_pose_camera(capture,base_camera,tip_camera) &&
+        gpu_polyline_cap_pose_camera(
+            capture,base_camera,tip_camera,native_hilt_camera) &&
         std::all_of(trailing_tip_camera->begin(),trailing_tip_camera->end(),
                     [](float v){return std::isfinite(v);});
     if(trailing_tip_camera && !have_trail)return {};
