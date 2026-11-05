@@ -8,6 +8,12 @@
 
 namespace jkgm {
     constexpr uint32_t thingflag_skybox=0x20U;
+    // Skybox-tagged 3DOs retain native-style per-vertex Thing lights when
+    // GPU pixel lighting is otherwise enabled. Camera HUDs remain unlit.
+    inline bool thing_uses_skybox_vertex_lights(uint32_t flags,bool camera_hud)
+    {
+        return !camera_hud && (flags&thingflag_skybox)!=0U;
+    }
     // Native SithThing exclusions: invisible, skybox/unlit and non-casting
     // decoration. These Things remain visible wherever JK normally draws
     // them; only their depth contribution to shadow maps is suppressed.
