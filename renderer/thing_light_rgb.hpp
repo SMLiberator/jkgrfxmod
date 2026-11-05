@@ -35,6 +35,7 @@ struct record {
     uintptr_t address=0;
     uint32_t signature=0;
     bool is_template=false;
+    bool static_template=false; // Static.jkl persists across level loads
     rgb from=white;
     rgb to=white;
     double started=0;
@@ -48,19 +49,38 @@ struct record {
 class registry {
     mutable std::mutex mutex_;
     uintptr_t world_=0;
+    uintptr_t static_world_=0;
     std::unordered_map<uintptr_t,record> records_;
 public:
+    // Static.jkl and a level JKL are parsed into two distinct SithWorlds.
+    // Switching the active level must not discard static template colors.
+    void prepare_static_world(uintptr_t world) {
+        if(!world)return;
+        std::lock_guard<std::mutex> lock(mutex_);
+        if(static_world_!=world) {
+            records_.clear();
+            static_world_=world;
+            world_=0;
+        }
+    }
     void prepare_world(uintptr_t world) {
         if(!world)return;
         std::lock_guard<std::mutex> lock(mutex_);
-        if(world_!=world){records_.clear();world_=world;}
+        if(world_!=world) {
+            for(auto it=records_.begin();it!=records_.end();) {
+                if(it->second.static_template)++it;
+                else it=records_.erase(it);
+            }
+            world_=world;
+        }
     }
     void clear() {
         std::lock_guard<std::mutex> lock(mutex_);
-        records_.clear();world_=0;
+        records_.clear();world_=static_world_=0;
     }
     bool set(uintptr_t address,uint32_t signature,bool is_template,
-             rgb const &input,double fade,double now) {
+             rgb const &input,double fade,double now,
+             bool static_template=false) {
         rgb target{};
         if(address<0x10000U || !normalize(input,target) ||
            !std::isfinite(fade) || fade<0.0 || fade>3600.0 ||
@@ -71,6 +91,7 @@ public:
             v.signature==signature && v.is_template==is_template
             ?v.at(now):white;
         v.address=address;v.signature=signature;v.is_template=is_template;
+        v.static_template=is_template && static_template;
         v.from=before;v.to=target;v.started=now;v.duration=fade;
         if(fade<=0.0)v.from=target;
         return true;
