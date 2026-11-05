@@ -95,6 +95,7 @@ namespace jkgm {
         bool is_projected_decal=false; // type-3 SPR, world- or receiver-local
         bool is_sprite_quad=false; // ordinary SPR with shared GPU quad
         bool transient_procedural=false; // particles/polylines: evict after this frame
+        bool saber_trail_active=false; // diagnostics: procedural blade fan was appended
         float sprite_opacity=1.0f; // SetSpriteInfo opacity
         // Stable identity of the model mesh this instance came from.
         // Used by moving decals; zero when not captured or not an eligible

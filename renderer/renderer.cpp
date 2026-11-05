@@ -3788,6 +3788,19 @@ namespace jkgm {
                                         GL_UNSIGNED_INT,multidraw_offsets.data(),
                                         static_cast<GLsizei>(multidraw_counts.size()));
                 }
+                // Creation of a procedural trail doesn't prove the extra
+                // triangles survived to an actual OpenGL material draw.
+                if(the_config->profile_renderer && inst.saber_trail_active &&
+                   group.count>=15U) {
+                    static unsigned trail_draw_logs=0;
+                    if(trail_draw_logs++<16U)
+                        LOG_INFO("GPU SABER TRAIL: GL draw",
+                                 " pass=",transparent?"alpha":"opaque",
+                                 " indices=",group.count,
+                                 " policy=",static_cast<int>(draw.policy),
+                                 " material=",group.material,
+                                 " tex_px=",draw.texture.width,"x",draw.texture.height);
+                }
                 if(the_config->profile_renderer &&
                    transparent && draw.instance->is_projected_decal) {
                     static unsigned decal_gpu_draw_logs=0;

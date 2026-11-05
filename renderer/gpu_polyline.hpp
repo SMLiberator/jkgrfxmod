@@ -200,6 +200,10 @@ make_gpu_polyline_geometry(
             result->indices.insert(result->indices.end(),{
                 trailing_begin,trailing_begin+1U,trailing_begin+2U,
                 trailing_begin,trailing_begin+2U,trailing_begin+3U});
+            // JKGM has THREE sides around ONE blade centerline. Their fan
+            // centers are identical, so draw the shared body just once:
+            // otherwise three coplanar triangles compete for depth.
+            if(face_index==0U) {
             // Fan core: U stays at the SideMat center (white); V follows
             // the same base-to-tip mapping as the native side quad.
             uint32_t const fan_begin=
@@ -219,6 +223,7 @@ make_gpu_polyline_geometry(
             }
             result->indices.insert(result->indices.end(),{
                 fan_begin,fan_begin+1U,fan_begin+2U});
+            }
         }
         group.count=static_cast<uint32_t>(result->indices.size())-group.offset;
         result->groups.push_back(group);

@@ -3203,6 +3203,7 @@ namespace {
         active_gpu_polyline=previous;
         auto geom=jkgm::make_gpu_polyline_geometry(captured);
         std::string failure;
+        bool saber_fan_built=false;
         if(generated && geom &&
            gpu_mesh_materials_ready(*geom,false,
                the_config->profile_renderer?&failure:nullptr)) {
@@ -3263,10 +3264,29 @@ namespace {
                                     captured,&delayed_cam);
                                 if(trail) {
                                     geom=std::move(trail);
+                                    saber_fan_built=true;
                                     if(the_config->profile_renderer &&
-                                       saber_trail_fan_logged++<8U)
+                                       saber_trail_fan_logged++<12U) {
+                                        auto const &f=captured.faces[0];
+                                        float const bx=(f.position[2][0]+f.position[3][0])*0.5f;
+                                        float const bz=(f.position[2][2]+f.position[3][2])*0.5f;
+                                        float const tx=(f.position[0][0]+f.position[1][0])*0.5f;
+                                        float const tz=(f.position[0][2]+f.position[1][2])*0.5f;
+                                        float const projected_area=std::abs(
+                                            (tx-bx)*(delayed_cam[2]-bz)-
+                                            (tz-bz)*(delayed_cam[0]-bx))*0.5f;
+                                        float delta2=0.0f;
+                                        for(int n=0;n<3;++n)
+                                            delta2+=(delayed_cam[n]-
+                                                (f.position[0][n]+f.position[1][n])*0.5f)*
+                                                (delayed_cam[n]-
+                                                (f.position[0][n]+f.position[1][n])*0.5f);
                                         LOG_INFO("GPU SABER TRAIL: fan emitted",
-                                                 " owner=",owner," blade=",blade);
+                                                 " owner=",owner," blade=",blade,
+                                                 " area_view_xz=",projected_area,
+                                                 " tip_separation=",std::sqrt(delta2),
+                                                 " triangles=",geom->indices.size()/3U);
+                                    }
                                 }
                             }
                         }
@@ -3277,6 +3297,7 @@ namespace {
             inst.id=next_gpu_id++;
             inst.geometry=std::move(geom);
             inst.transient_procedural=true;
+            inst.saber_trail_active=saber_fan_built;
             inst.transform=inverse;
             inst.effective_light_mode=0.0f;
             inst.ambient=1.0f;

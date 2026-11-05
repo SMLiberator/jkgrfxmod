@@ -51,14 +51,16 @@ int main() {
     assert(std::abs(next_frame->vertices[0].v-13.0f)<1.e-5f);
     assert(std::abs(mesh->vertices[0].u-12.5f)<1.e-5f);
     capture.faces[0].uv_offset={{12.5f,-27.25f}};
-    // An active fan adds one delayed edge quad + one mid-UV triangle to
-    // every side group, without altering either end cap or any MAT reference.
+    // Every side gets a delayed strip, but the center fan is generated ONCE
+    // to avoid three coplanar identical triangles fighting over depth.
     std::array<float,3> delayed_camera{{3.0f,4.0f,5.0f}};
     auto fan=jkgm::make_gpu_polyline_geometry(capture,&delayed_camera);
     assert(fan && fan->groups.size()==5);
-    assert(fan->vertices.size()==42U);
-    assert(fan->indices.size()==60U);
-    for(unsigned i=0;i<3;++i)assert(fan->groups[i].count==15U);
+    assert(fan->vertices.size()==36U);
+    assert(fan->indices.size()==54U);
+    assert(fan->groups[0].count==15U); // shared center fan once
+    assert(fan->groups[1].count==12U);
+    assert(fan->groups[2].count==12U);
     assert(fan->groups[3].count==mesh->groups[3].count);
     assert(fan->groups[4].count==mesh->groups[4].count);
     assert(fan->groups[0].material==mesh->groups[0].material);
