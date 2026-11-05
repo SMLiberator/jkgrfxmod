@@ -37,12 +37,17 @@ assert "!the_config->enable_native_fallback" in renderer
 assert "jk_cmp_lightlevel_offset==0x330U" in hdr
 assert "jk_cmp_is_fullbright" in hdr
 assert "std::memcpy(&cmp,sector_state.data()+4U,sizeof(cmp));" in read
-assert "jk_cmp_read_tint(read,cmp,current)" in read
+# Identity CMP tint is intentionally bypassed, matching JK rdCache.
+# Behavioral zero-vs-identity cases are covered by world_cache.cpp and
+# sector_crossing_gpu.cpp; only check the integration symbol here.
+assert "jk_cmp_read_effective_tint" in read
+assert "jk_cmp_read_effective_tint" in hdr
 assert "native_sector_cmp_tint" in vertex
 assert "in vec3 cached_sector_cmp_tint;" in fragment
 assert "gl::enable_vertex_attrib_array(7);" in cache
 assert "frame_sector_cmp_tint.assign(" in renderer
-assert "&cache.frame_sector_cmp_tint))" in renderer
+assert "&cache.frame_sector_cmp_tint" in renderer
+assert "identity_cmp" in renderer
 assert "make_span(cache.frame_sector_cmp_tint)" in renderer
 assert "jk_cmp_read_lighttable(read_bytes,cmp,levels)" in renderer
 assert "out.solid_fullbright=jk_cmp_is_fullbright(" in renderer
