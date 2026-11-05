@@ -306,7 +306,8 @@ vec3 point_light_specular(vec3 base_color,vec2 uv)
         float D=a2/(3.14159265*d*d);
         float Gl=NdotL/(NdotL*(1.0-k)+k);
         vec3 F=F0+(vec3(1.0)-F0)*pow(1.0-Vh,5.0);
-        sum+=F*(D*Gv*Gl/max(4.0*NdotV,0.0001))*radiance;
+        sum+=F*(D*Gv*Gl/max(4.0*NdotV,0.0001))*
+             radiance*light_color[i];
     }
     return min(sum*strength,vec3(32.0));
 }
