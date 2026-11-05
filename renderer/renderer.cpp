@@ -4,6 +4,7 @@
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
 #include "saber_light_rgb.hpp"
+#include "thing_light_rgb.hpp"
 #include "gpu_3do_uv.hpp"
 #include "native_mat_warm_queue.hpp"
 #include "native_sprite_profile.hpp"
@@ -8044,6 +8045,77 @@ namespace jkgm {
                     " budget=",sector_crossing_candidates::capacity);
         }
 
+        void merge_thing_light_colors()
+        {
+            uint32_t world=0U;
+            if(!engine_material_debug::read_object(
+                   engine_material_debug::current_world_global,world) ||
+               world<0x10000U)return;
+            auto &registry=thing_light_rgb::get_registry();
+            registry.prepare_world(world);
+            auto const now=std::chrono::duration<double>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            auto const entries=registry.things(now);
+            if(entries.empty())return;
+
+            auto const read=[](uintptr_t ptr,void *dst,size_t bytes) {
+                if(ptr<0x10000U || !bytes ||
+                   !engine_camera_detail::readable(ptr,bytes))return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(ptr),bytes);
+                return true;
+            };
+            uint32_t camera=0U;
+            int32_t count=0;
+            if(!read(0x0073A418U,&camera,4U) ||
+               !read(uintptr_t(camera)+0x58U,&count,4U) ||
+               count<0 || count>64)return;
+            std::array<saber_light_rgb::camera_light,64> lights{};
+            size_t found=0;
+            for(int i=0;i<count;++i) {
+                uint32_t ptr=0U,id=0U,enabled=0U;
+                float intensity=0.f;
+                if(!read(uintptr_t(camera)+0x5cU+size_t(i)*4U,&ptr,4U) ||
+                   !read(ptr,&id,4U) || id>=64U ||
+                   !read(uintptr_t(ptr)+8U,&enabled,4U) ||
+                   !read(uintptr_t(ptr)+0x18U,&intensity,4U))
+                    return;
+                if(!enabled || !std::isfinite(intensity) ||
+                   intensity<=0.f)continue;
+                auto &light=lights[found++];
+                light.id=id;light.intensity=intensity;
+                if(!read(uintptr_t(camera)+0x15cU+size_t(id)*12U,
+                         light.position.data(),12U))return;
+            }
+            size_t matched=0;
+            for(auto const &entry:entries) {
+                uint32_t flags=0U,signature=0U,kind=0U;
+                std::array<float,3> position{};
+                float intensity=0.f;
+                if(!read(entry.address,&flags,4U) ||
+                   !read(entry.address+0x0cU,&kind,4U) ||
+                   !read(entry.address+0x74U,&signature,4U) ||
+                   !read(entry.address+0xb8U,position.data(),12U) ||
+                   !read(entry.address+0x118U,&intensity,4U) ||
+                   signature!=entry.signature || kind==0U || kind>11U ||
+                   (flags&1U)==0U ||
+                   (flags&(0x2U|0x10U|0x80000U))!=0U)
+                    continue;
+                uint32_t id=0U;
+                if(!saber_light_rgb::find_unique_native_light(
+                       lights.data(),found,position,intensity,id) ||
+                   frame_saber_light_colors.valid[id])
+                    continue; // saber SideMat hue takes precedence
+                frame_saber_light_colors.colors[id]=entry.to;
+                frame_saber_light_colors.valid[id]=true;
+                ++matched;
+            }
+            if(the_config->profile_renderer_verbose &&
+               matched>0 && gpu_3do_present_serial%120U==0U)
+                LOG_INFO("GPU THING LIGHT RGB: matched=",matched,
+                         " registered=",entries.size(),
+                         " native_camera_lights=",found);
+        }
+
         void present_game() override
         {
             poll_audio_modules();
@@ -8076,6 +8148,11 @@ namespace jkgm {
             frame_gpu_3do_instances=consume_gpu_3do_instances();
             // One native camera frame, shared between cached world and 3DOs.
             frame_saber_light_colors=saber_light_rgb::get_registry().consume();
+            // Ordinary colored Things annotate their EXISTING JK camera
+            // lights by native rdLight ID. This must run after the camera
+            // has gathered Sith sector lights, but before cached world/3DO
+            // shader uniforms are created.
+            merge_thing_light_colors();
             ++gpu_3do_present_serial;
             stage_world_cache();
             stage_sector_crossing();
