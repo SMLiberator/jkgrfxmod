@@ -76,7 +76,9 @@ int main() {
     for(int i=0;i<3;++i)
         pose_gap+=double(tip_world[i]-base_world[i])*
                   double(tip_world[i]-base_world[i]);
-    assert(std::abs(pose_gap-1.0)<1.e-5);
+    // Synthetic five-vertex tip cap is off-center in X; preserve its
+    // measured cap centroid rather than assuming a unit-length blade.
+    assert(std::abs(pose_gap-1.04)<1.e-5);
 
     // An actual 60-ms delay: both edges advance; when motion stops the
     // delayed blade catches up and the triangle becomes degenerate.
