@@ -20,6 +20,9 @@ assert "0xa1,0xe8,0x07,0x86,0x00,0x81,0xec,0xb0,0x02,0x00,0x00" in main
 assert 'std::memcmp(reinterpret_cast<void const *>(light_rgb_parse_addr)' in main
 assert 'std::memcmp(reinterpret_cast<void const *>(light_rgb_template_addr)' in main
 assert 'std::memcmp(reinterpret_cast<void const *>(sprite_clone_thing_addr)' in main
+assert "std::strtof(cursor,&end)" in main
+assert "if(*cursor!=(i<2U?'/':')'))return false;" in main
+assert "std::sscanf(" not in main
 assert "request_native_thing_light_rgb_hooks();" in main
 assert "HookedThingTemplateParse" in main and "HookedThingParseArg" in main
 assert "if(active_light_rgb_template.active)" in main
