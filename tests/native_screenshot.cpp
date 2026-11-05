@@ -13,7 +13,7 @@ int main()
     assert(png_filename(999U)=="JSHOT999.PNG");
     assert(screenshot_format("JSHOT%03d.BMP",14U,"JSHOT%03d.BMP"));
     assert(screenshot_format("JSHOT%03d.PCX",14U,"JSHOT%03d.PCX"));
-    assert(!screenshot_format("SHOT%04d.BMP",14U,"JSHOT%03d.BMP"));
+    assert(!screenshot_format("SHOT%04d.BMP",13U,"JSHOT%03d.BMP"));
     assert(!screenshot_format("JSHOT%03d.PCX",14U,"JSHOT%03d.BMP"));
 
     // Exact x86 entry, pushes and hotkey CALL from the user's
