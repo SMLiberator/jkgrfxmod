@@ -254,6 +254,21 @@ int main() {
            fan->indices[40U]==13U &&
            fan->indices[41U]==14U);
 
+    // A different MAT on the middle SideMat must NOT be merged with
+    // neighboring sides. Its final 3D fan still owns the middle MAT and
+    // remains a dedicated, last-submitted geometry group.
+    auto split_material=native_capture;
+    split_material.faces[1].material=0x26000U;
+    auto split_fan=jkgm::make_gpu_polyline_geometry(
+        split_material,&delayed_camera,&actual_hilt_camera);
+    assert(split_fan);
+    assert(split_fan->groups.size()==6U);
+    assert(split_fan->groups[5].saber_trail_join);
+    assert(split_fan->groups[5].material==0x26000U);
+    assert(split_fan->groups[5].count==3U);
+    assert(split_fan->groups[5].offset==39U);
+    assert(split_fan->material_refs.size()==3U);
+
     // Opposite native side ordering is independently classified:
     // [BASE_RIM, TIP_CENTER, BASE_RIM], and only its tip vertex moves.
     auto alternate=native_capture;
