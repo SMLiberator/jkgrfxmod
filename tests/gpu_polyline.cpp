@@ -76,20 +76,19 @@ int main() {
     set_side(0,-.06f,0.f);
     set_side(1,0.f,.06f);
     set_side(2,.06f,-.06f);
-    // The FIVE-point cap is the TIP; the FOUR-point quad is the BASE.
-    // An accidental cap swap made the fan widest at the hilt and copied
-    // the base quad to the delayed tip.
-    auto &tip_cap=native_capture.faces[3];
-    tip_cap.position[0]={{0,0,1}}; // tip fan center
-    tip_cap.position[1]={{-.02f,-.02f,1.f}};
-    tip_cap.position[2]={{ .02f,-.02f,1.f}};
-    tip_cap.position[3]={{ .02f, .02f,1.f}};
-    tip_cap.position[4]={{-.02f, .02f,1.f}};
-    auto &base_cap=native_capture.faces[4];
-    base_cap.position[0]={{-.04f,-.04f,0.f}};
-    base_cap.position[1]={{ .04f,-.04f,0.f}};
-    base_cap.position[2]={{ .04f, .04f,0.f}};
-    base_cap.position[3]={{-.04f, .04f,0.f}};
+    // Verified JKGM: FIVE-point BASE and FOUR-point TIP cap.
+    // Native side triangles may use different vertex ordering.
+    auto &base_cap=native_capture.faces[3];
+    base_cap.position[0]={{0,0,0}}; // center of base rim
+    base_cap.position[1]={{-.04f,-.04f,0.f}};
+    base_cap.position[2]={{ .04f,-.04f,0.f}};
+    base_cap.position[3]={{ .04f, .04f,0.f}};
+    base_cap.position[4]={{-.04f, .04f,0.f}};
+    auto &tip_cap=native_capture.faces[4];
+    tip_cap.position[0]={{-.02f,-.02f,1.f}};
+    tip_cap.position[1]={{ .02f,-.02f,1.f}};
+    tip_cap.position[2]={{ .02f, .02f,1.f}};
+    tip_cap.position[3]={{-.02f, .02f,1.f}};
     std::array<float,3> base_camera{},tip_camera{};
     assert(jkgm::gpu_polyline_cap_pose_camera(
         native_capture,base_camera,tip_camera));
@@ -108,24 +107,23 @@ int main() {
     auto native_mesh=jkgm::make_gpu_polyline_geometry(native_capture);
     assert(native_mesh && native_mesh->indices.size()==24U);
     assert(native_mesh->vertices.size()==18U);
-    // The live native blade must remain geometrically unchanged. Only
-    // the correct historical TIP may move; every vertex nearest the
-    // live hilt/base stays there. The base quad has no detached copy.
+    // The live native blade is untouched. The trailing SideMat is
+    // anchored at the SAME base: only vertices geometrically nearest
+    // the tip move. No extra tip/base caps and no floating quad.
     std::array<float,3> delayed_camera{{.5f,0.0f,1.0f}};
     auto fan=jkgm::make_gpu_polyline_geometry(
         native_capture,&delayed_camera);
     assert(fan && fan->groups.size()==5U);
-    // Original 8 tris + 3 lagging sides + 3 tip-cap tris + 1 fan = 15.
-    assert(fan->vertices.size()==35U);
-    assert(fan->indices.size()==45U);
+    assert(fan->vertices.size()==30U);
+    assert(fan->indices.size()==36U); // 8 native +3 delayed +1 fan
     assert(fan->groups[0].count==6U);
     assert(fan->groups[1].count==9U);
     assert(fan->groups[2].count==6U);
-    assert(fan->groups[3].count==18U); // actual tip cap + delayed tip cap
-    assert(fan->groups[4].count==6U);  // BASE cap only, no extra quad
+    assert(fan->groups[3].count==9U); // only native BASE cap
+    assert(fan->groups[4].count==6U); // only native TIP cap
     assert(fan->material_refs.size()==2U);
     unsigned const native_begin[5]={0,3,6,9,14};
-    unsigned const fan_begin[5]={0,6,15,21,31};
+    unsigned const fan_begin[5]={0,6,15,21,26};
     for(unsigned f=0;f<5U;++f) {
         for(unsigned k=0;k<native_capture.faces[f].count;++k) {
             auto const &original=native_mesh->vertices[native_begin[f]+k];
@@ -136,33 +134,30 @@ int main() {
         }
         assert((fan->groups[f].face_type&1U)!=0U);
     }
-    // Face 0 native side is [TIP_RIM, BASE, TIP_RIM].
-    // Only its two tip-rim vertices move. The shared hilt is unchanged.
+    // The first synthetic side is [TIP_RIM, BASE, TIP_RIM].
     assert(std::abs(fan->vertices[3].x-.44f)<1.e-5f);
     assert(std::abs(fan->vertices[4].x)<1.e-5f);
     assert(std::abs(fan->vertices[4].z)<1.e-5f);
     assert(std::abs(fan->vertices[5].x-.5f)<1.e-5f);
     assert(std::abs(fan->vertices[3].u-0.f)<1.e-5f);
     assert(std::abs(fan->vertices[5].u-64.f)<1.e-5f);
-    // The 3D fan is [the verified HILT, current TIP, past TIP].
+    // True 3D fan [BASE, current TIP, past TIP], never screen-rotated.
     assert(fan->vertices[12].x==base_camera[0] &&
            fan->vertices[12].z==base_camera[2]);
     assert(fan->vertices[13].x==tip_camera[0] &&
            fan->vertices[13].z==tip_camera[2]);
     assert(fan->vertices[14].x==delayed_camera[0] &&
            fan->vertices[14].z==delayed_camera[2]);
-    // The fan's texture goes from the original base UV to the tip UV.
+    // SideMat UV progression matches real base-to-tip orientation.
     assert(fan->vertices[12].u==32.f && fan->vertices[12].v==128.f);
     assert(fan->vertices[13].u==32.f && fan->vertices[13].v==0.f);
     assert(fan->vertices[14].u==32.f && fan->vertices[14].v==0.f);
-    // The new cap follows the tip; the quad at the hilt is untouched.
-    assert(std::abs(fan->vertices[26].x-.5f)<1.e-5f);
+    // The two native caps are untouched; no additional cap vertices exist.
+    assert(fan->vertices[21].x==native_mesh->vertices[9].x);
+    assert(fan->vertices[21].z==0.f);
+    assert(fan->vertices[26].x==native_mesh->vertices[14].x);
     assert(fan->vertices[26].z==1.f);
-    assert(fan->vertices[26].u==native_mesh->vertices[9].u);
-    assert(fan->vertices[31].x==native_mesh->vertices[14].x);
-    assert(fan->vertices[31].z==0.f);
-    // The delayed blade draws before the 3D fan, which draws before
-    // the live blade within the same SideMat material group.
+    // Delayed triangle, 3D connector, live triangle in painter order.
     assert(fan->indices[6]==9U && fan->indices[7]==10U &&
            fan->indices[8]==11U);
     assert(fan->indices[9]==12U && fan->indices[10]==13U &&
@@ -170,8 +165,8 @@ int main() {
     assert(fan->indices[12]==6U && fan->indices[13]==7U &&
            fan->indices[14]==8U);
 
-    // Side geometry with the OPPOSITE vertex order is also supported:
-    // [BASE_RIM, TIP_CENTER, BASE_RIM]. Only its one tip vertex moves.
+    // Opposite native side ordering is independently classified:
+    // [BASE_RIM, TIP_CENTER, BASE_RIM], and only its tip vertex moves.
     auto alternate=native_capture;
     for(unsigned fi=0;fi<3U;++fi) {
         auto &side=alternate.faces[fi];
@@ -186,8 +181,18 @@ int main() {
     assert(std::abs(alternate_fan->vertices[4].x-.5f)<1.e-5f);
     assert(alternate_fan->vertices[5].x==alternate.faces[0].position[2][0]);
 
-    // A swing along camera depth stays edge-on in screen space; do not
-    // replace the physical past position with a billboard projection.
+    // Mixed ordering across different SideMat faces is also supported.
+    auto mixed=native_capture;
+    mixed.faces[0]=alternate.faces[0];
+    mixed.faces[2]=alternate.faces[2];
+    auto mixed_fan=jkgm::make_gpu_polyline_geometry(mixed,&delayed_camera);
+    assert(mixed_fan);
+    assert(mixed_fan->vertices[3].x==mixed.faces[0].position[0][0]);
+    assert(std::abs(mixed_fan->vertices[4].x-.5f)<1.e-5f);
+    assert(std::abs(mixed_fan->vertices[9].x-.5f)<1.e-5f);
+    assert(mixed_fan->vertices[10].z==0.f);
+
+    // A depth-heavy swing MUST stay edge-on, never rotated towards us.
     std::array<float,3> depth_tip{{0.f,.5f,1.f}};
     auto depth_fan=jkgm::make_gpu_polyline_geometry(
         native_capture,&depth_tip);
