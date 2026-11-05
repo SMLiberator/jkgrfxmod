@@ -87,7 +87,7 @@ sector_crossing_stage_instance(
     sector_crossing_snapshot const &snapshot,
     std::vector<sector_crossing_plane_range> const &plane_ranges,
     gpu_3do_instance const &instance,Read const &read,
-    bool can_replace_tint)
+    bool can_replace_tint,uint32_t identity_cmp=0U)
 {
     if(!instance.owning_sector_valid || !instance.geometry ||
        instance.shadow_only || instance.camera_hud ||
@@ -150,9 +150,11 @@ sector_crossing_stage_instance(
             slot.sector_tint=can_replace_tint && instance.sector_tint_valid
                 ? instance.sector_tint : std::array<float,3>{{0.0f,0.0f,0.0f}};
         } else {
-            // Invalid extra-sector CMP tint is neutral, as in world cache.
+            // The native cache skips the multiplier on the identity CMP.
+            // Explicit zero on a NON-identity CMP is still meaningful.
             std::array<float,3> sampled{};
-            if(jk_cmp_read_tint(read,cmp,sampled))slot.cmp_tint=sampled;
+            if(jk_cmp_read_effective_tint(read,cmp,identity_cmp,sampled))
+                slot.cmp_tint=sampled;
             if(can_replace_tint)slot.sector_tint=tint;
         }
     }
