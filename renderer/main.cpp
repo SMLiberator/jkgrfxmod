@@ -2713,9 +2713,13 @@ namespace {
                                    jkgm::thing_light_rgb::rgb &rgb) {
         if(!value || !gpu_span_readable(value,2U))return false;
         float r=0,g=0,b=0;
-        char trailing=0;
-        if(std::sscanf(value," ( %f / %f / %f ) %c",
-                       &r,&g,&b,&trailing)!=3)return false;
+        int consumed=-1;
+        // %n is only reached AFTER the closing ')' matches. Checking
+        // the end prevents malformed or trailing tokens from silently
+        // becoming a valid Thing template property.
+        if(std::sscanf(value," ( %f / %f / %f ) %n",
+                       &r,&g,&b,&consumed)!=3 ||
+           consumed<0 || value[consumed]!='\0')return false;
         return jkgm::thing_light_rgb::normalize({{r,g,b}},rgb);
     }
     int __cdecl HookedThingParseArg(native_thing_parameter *arg,void *thing)
