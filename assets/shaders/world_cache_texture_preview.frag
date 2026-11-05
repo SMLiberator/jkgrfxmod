@@ -17,6 +17,7 @@ uniform int num_lights;
 uniform float light_attenuation;
 uniform vec4 light_position_radius[16];
 uniform float light_intensity[16];
+uniform vec3 light_color[16]; // white for non-saber native lights
 uniform sampler2D albedo_map;
 uniform sampler2D albedo_map2;
 uniform int albedo_source,albedo_source2;
@@ -256,16 +257,16 @@ void main() {
     vec3 lighting=cached_lit_rgb;
     if(world_pixel_dynamic_lighting!=0 && fullbright<0.999 &&
        cached_light_state.z>2.5 && num_lights>0) {
-        float added=0.0;
+        vec3 added=vec3(0.0);
         vec3 normal=diffuse_world_normal;
         for(int i=0;i<num_lights;i++) {
             vec3 delta=light_position_radius[i].xyz-cached_world_position;
-            added+=jk_point_sample(delta,normal,light_position_radius[i].w,
-                                   light_intensity[i],light_attenuation,
-                                   false);
-            if(added>=1.0)break;
+            added+=light_color[i]*jk_point_sample(
+                delta,normal,light_position_radius[i].w,
+                light_intensity[i],light_attenuation,false);
+            if(all(greaterThanEqual(added,vec3(1.0))))break;
         }
-        if(added>0.0) {
+        if(any(greaterThan(added,vec3(0.0)))) {
             vec3 light_color=max(
                 world_jk_effect(vec3(1.0),cached_sector_tint)-
                 world_jk_effect(vec3(0.0),cached_sector_tint),vec3(0.0));
