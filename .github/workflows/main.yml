@@ -56,6 +56,13 @@ jobs:
         thing_light_rgb_test.exe
         python3 tests/thing_light_rgb.py
 
+    - name: Static.jkl saved Thing index native restore and bounds regression tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\saved_static_template.cpp /Fe:saved_static_template_test.exe
+        saved_static_template_test.exe
+        python3 tests/saved_static_template.py
+
     - name: Per-Thing saber SideMat RGB matching and frame isolation tests
       shell: cmd
       run: |
