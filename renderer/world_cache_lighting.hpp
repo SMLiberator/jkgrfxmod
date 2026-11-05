@@ -22,6 +22,7 @@ struct world_cache_light_sample {
 struct world_cache_point_light {
     std::array<float,3> position{};
     float radius=0.0f,intensity=0.0f;
+    uint32_t native_id=0; // Same rdCamera id as 3DO lights
 };
 // gpu_pixel_lighting is the ONE opt-in switch for all GPU-cached
 // geometry. A valid camera is also required to replace native JK's
@@ -66,6 +67,7 @@ inline bool read_world_cache_camera_lights(
            !read(uintptr_t(ptr)+0x28U,&light.radius,4) ||
            id>=64 || !std::isfinite(light.intensity) ||
            !std::isfinite(light.radius))return false;
+        light.native_id=id;
         if(!enabled || light.intensity<=0.0f || light.radius<=0.0f)
             continue;
         if(type<0 || type>2 || out.size()>=16U)return false;
