@@ -10,6 +10,7 @@
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_alpha.hpp"
 #include "native_jk_palette_effects.hpp"
+#include "native_screenshot.hpp"
 #include "native_sector_palette_bridge.hpp"
 #include "thing_sector_tint.hpp"
 #include "sector_crossing_gpu.hpp"
@@ -31,6 +32,7 @@
 #include "backbuffer_surface.hpp"
 #include "base/file_block.hpp"
 #include "base/file_stream.hpp"
+#include <atomic>
 #include "base/log.hpp"
 #include "base/memory_block.hpp"
 #include "base/win32.hpp"
@@ -479,6 +481,8 @@ namespace jkgm {
         renderer_mode mode = renderer_mode::menu;
         // Actual GDI/8-bit menu presentation need not switch display mode.
         bool menu_frame_pending = false;
+        std::atomic<unsigned> pending_png_screenshots{0};
+        unsigned next_png_screenshot_number=0U;
         size<2, int> conf_scr_res;
 
         size<2, int> internal_scr_res;
@@ -1600,6 +1604,106 @@ namespace jkgm {
             gl::set_depth_mask(true);
         }
 
+        // Called ONLY by the game's original Screenshot hotkey or COG
+        // command detour. No GL operations occur on JK's input thread.
+        bool queue_screenshot_png() override
+        {
+            if(!ogs || mode!=renderer_mode::ingame)return false;
+            unsigned count=pending_png_screenshots.load(std::memory_order_relaxed);
+            do {
+                if(count>=8U)return false;
+            } while(!pending_png_screenshots.compare_exchange_weak(
+                count,count+1U,std::memory_order_release,
+                std::memory_order_relaxed));
+            return true;
+        }
+
+        void capture_pending_screenshot_png()
+        {
+            // Consume only one request per presented frame. Repeated hotkey
+            // presses queue their own captures instead of overwriting files.
+            unsigned const requests=pending_png_screenshots.exchange(
+                0U,std::memory_order_acquire);
+            if(requests==0U)return;
+            if(requests>1U)
+                pending_png_screenshots.fetch_add(
+                    requests-1U,std::memory_order_release);
+
+            int const w=get<x>(conf_scr_res),h=get<y>(conf_scr_res);
+            // No screenshot when the OpenGL window is not fully initialized.
+            if(!ogs || !hDC || w<=0 || h<=0 ||
+               w>16384 || h>16384 ||
+               uint64_t(w)*uint64_t(h)>64000000ULL) {
+                LOG_WARNING("Screenshot PNG skipped: invalid presenter size");
+                return;
+            }
+            // Preserve JK's SHOTxxxx numbering convention, but never
+            // replace an existing PNG (including from earlier sessions).
+            fs::path filename;
+            bool unused=false;
+            for(;next_png_screenshot_number<10000U;
+                ++next_png_screenshot_number) {
+                auto const name=native_screenshot::png_filename(
+                    next_png_screenshot_number);
+                fs::path candidate(name);
+                std::error_code ec;
+                bool const exists=fs::exists(candidate,ec);
+                if(ec) {
+                    LOG_WARNING("Screenshot PNG: cannot check filename: ",
+                                name," (",ec.message(),")");
+                    return;
+                }
+                if(!exists) {
+                    filename=std::move(candidate);
+                    ++next_png_screenshot_number;
+                    unused=true;
+                    break;
+                }
+            }
+            if(!unused) {
+                LOG_WARNING("Screenshot PNG: all SHOT0000.PNG..SHOT9999.PNG exist");
+                return;
+            }
+
+            try {
+                image img(make_size(w,h));
+                static_assert(sizeof(color_rgba8)==4U,
+                              "OpenGL screenshot readback needs packed RGBA8");
+                // After the postFX, Camera HUD, native HUD, and optional
+                // Retro palette pass, the final sRGB image is in the
+                // DEFAULT WINDOW BACK buffer. Never read the old DirectDraw
+                // screenshot surface or an intermediate scene FBO.
+                GLint old_read_fb=0,old_read_buffer=0,old_pack_alignment=4;
+                glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&old_read_fb);
+                glGetIntegerv(GL_READ_BUFFER,&old_read_buffer);
+                glGetIntegerv(GL_PACK_ALIGNMENT,&old_pack_alignment);
+                glBindFramebuffer(GL_READ_FRAMEBUFFER,0);
+                glReadBuffer(GL_BACK);
+                glPixelStorei(GL_PACK_ALIGNMENT,1);
+                glReadPixels(0,0,w,h,GL_RGBA,GL_UNSIGNED_BYTE,
+                             img.data.data());
+                GLenum const read_error=glGetError();
+                glPixelStorei(GL_PACK_ALIGNMENT,old_pack_alignment);
+                glBindFramebuffer(GL_READ_FRAMEBUFFER,GLuint(old_read_fb));
+                glReadBuffer(GLenum(old_read_buffer));
+                if(read_error!=GL_NO_ERROR) {
+                    LOG_WARNING("Screenshot PNG: glReadPixels failed: 0x",
+                                std::hex,unsigned(read_error));
+                    return;
+                }
+                native_screenshot::flip_rgba_rows(
+                    reinterpret_cast<uint8_t *>(img.data.data()),
+                    size_t(w),size_t(h));
+                auto output=make_file_output_stream(filename);
+                store_image_png(output.get(),img);
+                output.reset(); // flush/close before reporting success
+                LOG_INFO("Screenshot PNG saved: ",filename.string(),
+                         " (",w,"x",h,", final presented frame)");
+            } catch(std::exception const &e) {
+                LOG_WARNING("Screenshot PNG save failed: ",e.what());
+            }
+        }
+
         void end_frame()
         {
             bool const presenting_menu = menu_frame_pending ||
@@ -1659,6 +1763,7 @@ namespace jkgm {
                 gl::draw_elements(gl::element_type::triangles,
                     ogs->postmdl.num_indices,gl::index_type::uint32);
                 gl::set_depth_mask(true);
+                capture_pending_screenshot_png();
                 SwapBuffers(hDC);
                 begin_frame();
                 return;
@@ -1811,6 +1916,7 @@ namespace jkgm {
             {
                 profile_scope cpu(measure,profile_frame.timings[
                     profile_idx(profile_stage::present_swapbuffers)]);
+                capture_pending_screenshot_png();
                 SwapBuffers(hDC);
             }
             {
