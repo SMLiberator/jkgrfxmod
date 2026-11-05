@@ -108,6 +108,17 @@ assert "world_mapped_normal(material_texcoord)" in world
 assert "mapped_local_normal(uv)" in model
 assert "gl::set_active_texture_unit(8);" in renderer
 assert "shader.set_scene_depth(8);" in renderer
+# Unit 5 is shared by GPU normal_map2 and NATIVE Fluid scene depth.
+# GPU cached world and GPU 3DO drawing must restore that native depth
+# binding before returning to native transparent world/gun batches.
+alpha_pass=renderer[renderer.index("void draw_game_transparency_pass("):]
+native_depth_restore="restore_native_fluid_depth();"
+cached_alpha=alpha_pass.index("draw_world_cache_transparency();")
+native_alpha=alpha_pass.index("if(!isolate_native_world_batches())",cached_alpha)
+assert cached_alpha<alpha_pass.index(native_depth_restore,cached_alpha)<native_alpha
+gpu_3do_alpha=alpha_pass.index("draw_gpu_3do_preview(true);",native_alpha)
+gun_native=alpha_pass.index("gun_batch,",gpu_3do_alpha)
+assert gpu_3do_alpha<alpha_pass.index(native_depth_restore,gpu_3do_alpha)<gun_native
 assert "shader.set_fluid_thickness(material.blend==material_blend_mode::fluid" in renderer
 assert "frame_screen->get_resolved_depth_texture()" in renderer
 assert "material.fluid_thickness" in renderer
