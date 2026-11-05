@@ -3,6 +3,7 @@
 #include "presentation_gpu_profile.hpp"
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
+#include "saber_light_rgb.hpp"
 #include "gpu_3do_uv.hpp"
 #include "native_mat_warm_queue.hpp"
 #include "native_sprite_profile.hpp"
@@ -532,6 +533,7 @@ namespace jkgm {
         // cels, freed/reused objects or mid-animation upload transitions.
         std::unordered_map<uint64_t,gpu_3do_texture> deferred_gpu_hud_material_cache;
         std::vector<gpu_3do_instance> frame_gpu_3do_instances;
+        saber_light_rgb::snapshot frame_saber_light_colors{};
         // Level-static sector planes; opt-in only.
         sector_crossing_snapshot sector_crossing_world{};
         std::array<uint32_t,6> sector_crossing_world_signature{};
@@ -3697,7 +3699,9 @@ namespace jkgm {
                     prog.set_lighting(inst,
                         the_config->gpu_pixel_lighting &&
                         !inst.camera_hud && !inst.is_projected_decal &&
-                        inst.num_lights>0U);
+                        inst.num_lights>0U,
+                        frame_saber_light_colors.colors,
+                        frame_saber_light_colors.valid);
                     prog.set_camera_hud_thing(
                         inst.camera_hud,inst.camera_hud_world_depth);
                     // 0x20 suppresses JkGRfxMod light-reception effects on
@@ -6907,7 +6911,9 @@ namespace jkgm {
             if(!pixel_lighting && !point_specular)point_lights.clear();
             shader.set_specular_lighting(pixel_lighting,point_specular);
             set_translucent_sun(shader,the_config->enable_reflections);
-            shader.set_lights(point_lights,light_attenuation);
+            shader.set_lights(point_lights,light_attenuation,
+                frame_saber_light_colors.colors,
+                frame_saber_light_colors.valid);
             gl::enable(gl::capability::depth_test);
             gl::set_depth_function(gl::comparison_function::less);
             gl::set_depth_mask(true);
@@ -7007,7 +7013,9 @@ namespace jkgm {
                 make_point(0.0f,0.0f,0.0f),0.0f,
                 make_point(0.0f,0.0f),make_point(0.0f,0.0f),
                 make_point(1.0f,1.0f));
-            shader.set_lights(point_lights,light_attenuation);
+            shader.set_lights(point_lights,light_attenuation,
+                frame_saber_light_colors.colors,
+                frame_saber_light_colors.valid);
             size_t drawn=0,solid_drawn=0,masked_drawn=0,adjoin_drawn=0;
             size_t passable_drawn=0,unresolved=0,groups=0,skipped_alpha=0;
             size_t mixed_drawn=0,dithered_drawn=0;
@@ -7307,7 +7315,9 @@ namespace jkgm {
                 camera_lights_ready;
             if(!pixel_lighting && !point_specular)point_lights.clear();
             shader.set_specular_lighting(pixel_lighting,point_specular);
-            shader.set_lights(point_lights,light_attenuation);
+            shader.set_lights(point_lights,light_attenuation,
+                frame_saber_light_colors.colors,
+                frame_saber_light_colors.valid);
             set_translucent_sun(shader,the_config->enable_reflections);
             auto const &fog=get_fog_settings();
             auto const info=fog.info.value(),color=fog.color.value();
@@ -8062,6 +8072,8 @@ namespace jkgm {
             // Keeping one frame snapshot avoids losing the second pass.
             gpu_frame_material_cache.clear();
             frame_gpu_3do_instances=consume_gpu_3do_instances();
+            // One native camera frame, shared between cached world and 3DOs.
+            frame_saber_light_colors=saber_light_rgb::get_registry().consume();
             ++gpu_3do_present_serial;
             stage_world_cache();
             stage_sector_crossing();
