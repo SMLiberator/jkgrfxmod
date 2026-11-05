@@ -23,6 +23,20 @@ namespace jkgm {
         if(texture_has_alpha) return gpu_3do_alpha_mode::mixed;
         return gpu_3do_alpha_mode::solid;
     }
+    // A procedural saber trail is one overlapping translucent effect:
+    // delayed blade, live blade, tip caps, bridge, and the final 3D fan.
+    // Mixed-alpha MATs would otherwise write the blade's opaque core to
+    // depth BEFORE the fan is drawn; that makes painter ordering ineffective
+    // and leaves a bright blade stripe cutting through the final triangle.
+    // Route every component of an ACTIVE trail through alpha blending only.
+    // The scene's opaque world still owns depth and occludes the saber.
+    // Ordinary (non-trailing) saber blades and cached 3DOs are unaffected.
+    inline gpu_3do_alpha_mode gpu_3do_trail_alpha_mode(
+        gpu_3do_alpha_mode original,bool active_saber_trail)
+    {
+        return active_saber_trail
+            ? gpu_3do_alpha_mode::blend_only : original;
+    }
     // Emissive-only material coverage is independent of albedo alpha:
     // emission must blend additively even when the base is fully invisible.
     // This works with or without a texture image.
