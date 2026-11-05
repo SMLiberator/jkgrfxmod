@@ -86,6 +86,7 @@
     <ClInclude Include="compressed_sound_codec.hpp" />
     <ClInclude Include="compressed_sound_io.hpp" />
     <ClInclude Include="native_screenshot.hpp" />
+    <ClInclude Include="saber_light_rgb.hpp" />
     <ClInclude Include="compressed_sound_read.hpp" />
     <ClInclude Include="renderer_ao.hpp" />
     <ClInclude Include="renderer_ao_basic.hpp" />
