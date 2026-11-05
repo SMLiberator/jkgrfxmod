@@ -76,6 +76,7 @@ uniform int nonrigid_light_transform;
 uniform int dynamic_light_specular_enabled;
 uniform vec4 light_position_radius[16];
 uniform float light_intensity[16];
+uniform vec3 light_color[16]; // white for all non-saber native rdLights
 uniform float attenuation_min;
 in vec3 local_fragment_position;
 in vec3 local_fragment_normal;
@@ -191,18 +192,18 @@ vec3 pixel_jk_diffuse_lighting(vec3 mapped_diffuse_normal)
         normal=normalize(sign(determinant)*
             (cr*normal.x+cf*normal.y+cu*normal.z));
     }
-    float added=0.0;
+    vec3 added=vec3(0.0);
     for(int i=0;i<num_lights;i++) {
         vec3 delta=light_position_radius[i].xyz-anchor;
         if(nonrigid_light_transform!=0)
             delta=view_right.xyz*delta.x+
                   view_forward.xyz*delta.y+view_up.xyz*delta.z;
-        added+=jk_point_sample(delta,normal,light_position_radius[i].w,
-                               light_intensity[i],attenuation_min,
-                               mode<2.5);
-        if(added>=1.0)break;
+        added+=light_color[i]*jk_point_sample(
+            delta,normal,light_position_radius[i].w,
+            light_intensity[i],attenuation_min,mode<2.5);
+        if(all(greaterThanEqual(added,vec3(1.0))))break;
     }
-    if(added<=0.0) return baked;
+    if(all(lessThanEqual(added,vec3(0.0)))) return baked;
     vec3 light_color=max(
         pixel_jk_color_at_brightness(1.0)-
         pixel_jk_color_at_brightness(0.0),vec3(0.0));
