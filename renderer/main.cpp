@@ -27,6 +27,7 @@
 #include "spotlight.hpp"
 #include "saber_light.hpp"
 #include "saber_light_rgb.hpp"
+#include "thing_light_rgb.hpp"
 #include "thing_attachment_normal.hpp"
 #include "native_thingface_friction.hpp"
 #include "native_earth_hit_sound.hpp"
@@ -2664,9 +2665,117 @@ namespace {
         release_sprite_variants(world);
     }
 
+    // Native JKGM v2.3 addresses verified against jkgm(5).exe.
+    // sithThing_ParseArg handles both JKL template parameters and ordinary
+    // placed Thing parameters. sithTemplate_Parse copies its temporary Thing
+    // after parsing; intercept its result so no stack-Thing colors escape.
+    constexpr uintptr_t light_rgb_parse_addr=0x004CEE70U;
+    constexpr uintptr_t light_rgb_template_addr=0x004DE1C0U;
+    constexpr uint8_t light_rgb_parse_bytes[]{
+        0x8b,0x0d,0xf0,0x26,0x83,0x00,0x53,0x8b
+    };
+    constexpr uint8_t light_rgb_template_bytes[]{
+        0xa1,0xe8,0x07,0x86,0x00,0x81,0xec,0xb0,0x02,0x00,0x00
+    };
+    struct native_thing_parameter {
+        char const *key;
+        char const *value;
+    };
+    static_assert(sizeof(native_thing_parameter)==8U,
+                  "JKGM stdConffile Arg must have two 32-bit pointers");
+    using native_thing_parse_fn=int(__cdecl *)(native_thing_parameter*,void*);
+    using native_template_parse_fn=void *(__cdecl *)(void*);
+    native_thing_parse_fn RealThingParseArg=reinterpret_cast<
+        native_thing_parse_fn>(light_rgb_parse_addr);
+    native_template_parse_fn RealThingTemplateParse=reinterpret_cast<
+        native_template_parse_fn>(light_rgb_template_addr);
+    bool thing_light_rgb_hooks_active=false;
+    bool thing_light_clone_hook_active=false;
+    struct pending_template_color {
+        bool active=false;
+        bool explicit_color=false;
+        jkgm::thing_light_rgb::rgb color=jkgm::thing_light_rgb::white;
+    };
+    thread_local pending_template_color active_light_rgb_template{};
+    double light_rgb_clock_now() {
+        return std::chrono::duration<double>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+    uint32_t light_rgb_thing_signature(void const *ptr) {
+        uint32_t signature=0U;
+        if(ptr && gpu_span_readable(ptr,0x78U))
+            std::memcpy(&signature,static_cast<uint8_t const *>(ptr)+0x74U,4U);
+        return signature;
+    }
+    // rgb=(r/g/b) with finite 0..1 floats. lightrgb=(0/0/0)
+    // intentionally means white, as does any achromatic color.
+    bool light_rgb_parse_parameter(char const *value,
+                                   jkgm::thing_light_rgb::rgb &rgb) {
+        if(!value || !gpu_span_readable(value,2U))return false;
+        float r=0,g=0,b=0;
+        char trailing=0;
+        if(std::sscanf(value," ( %f / %f / %f ) %c",
+                       &r,&g,&b,&trailing)!=3)return false;
+        return jkgm::thing_light_rgb::normalize({{r,g,b}},rgb);
+    }
+    int __cdecl HookedThingParseArg(native_thing_parameter *arg,void *thing)
+    {
+        if(arg && thing && gpu_span_readable(arg,sizeof(*arg)) &&
+           arg->key && gpu_span_readable(arg->key,9U) &&
+           _stricmp(arg->key,"lightrgb")==0) {
+            jkgm::thing_light_rgb::rgb rgb{};
+            if(!light_rgb_parse_parameter(arg->value,rgb)) {
+                LOG_WARNING("JKGM lightrgb rejected: expected (r/g/b), "
+                            "finite channels 0..1");
+                return 0;
+            }
+            if(active_light_rgb_template.active) {
+                active_light_rgb_template.explicit_color=true;
+                active_light_rgb_template.color=rgb;
+            } else {
+                jkgm::thing_light_rgb::get_registry().set(
+                    reinterpret_cast<uintptr_t>(thing),
+                    light_rgb_thing_signature(thing),false,rgb,
+                    0.0,light_rgb_clock_now());
+            }
+            return 1;
+        }
+        return RealThingParseArg(arg,thing);
+    }
+    void *__cdecl HookedThingTemplateParse(void *world)
+    {
+        auto const previous=active_light_rgb_template;
+        active_light_rgb_template={};
+        active_light_rgb_template.active=true;
+        void *result=RealThingTemplateParse(world);
+        auto const pending=active_light_rgb_template;
+        active_light_rgb_template=previous;
+        if(!result || !gpu_span_readable(result,0x7cU))return result;
+        auto &registry=jkgm::thing_light_rgb::get_registry();
+        registry.prepare_world(reinterpret_cast<uintptr_t>(world));
+        jkgm::thing_light_rgb::rgb rgb{};
+        bool have=pending.explicit_color;
+        if(have)rgb=pending.color;
+        else {
+            uint32_t parent=0U;
+            std::memcpy(&parent,static_cast<uint8_t const *>(result)+0x78U,4U);
+            if(parent)
+                have=registry.get(parent,0U,rgb,light_rgb_clock_now());
+        }
+        if(have)
+            registry.set(reinterpret_cast<uintptr_t>(result),0U,true,rgb,
+                         0.0,light_rgb_clock_now());
+        return result;
+    }
+
     void *__cdecl HookedSithThingClone(void *thing,void const *source)
     {
         void *result=RealSithThingClone(thing,source);
+        if(thing && source && !active_light_rgb_template.active)
+            jkgm::thing_light_rgb::get_registry().inherit(
+                reinterpret_cast<uintptr_t>(thing),
+                light_rgb_thing_signature(thing),
+                reinterpret_cast<uintptr_t>(source),light_rgb_clock_now());
         if(!thing || !source || !gpu_span_readable(thing,0xCCU))
             return result;
         auto *rd=static_cast<uint8_t *>(thing)+0xC4U;
@@ -6583,6 +6692,42 @@ namespace {
             write_saber_light_native(owner,adjusted);
     }
 
+    // SetThingLightRGB(thing,normalizedRGB,fadeSeconds); does not change
+    // the native SetThingLight intensity/radius. The third argument is
+    // explicit because the JK COG ABI has fixed function arity.
+    void __cdecl cog_set_thing_light_rgb(void *ctx)
+    {
+        float const fade=cog_pop_float(ctx);
+        float components[3]{};
+        cog_pop_vector(ctx,components);
+        void *thing=cog_pop_thing(ctx);
+        if(!thing || !gpu_span_readable(thing,0x78U))return;
+        uint32_t type=0;
+        std::memcpy(&type,static_cast<uint8_t const *>(thing)+0x0cU,4U);
+        if(type<1U || type>11U)return;
+        uint32_t world=0U;
+        jkgm::engine_material_debug::read_object(
+            jkgm::engine_material_debug::current_world_global,world);
+        jkgm::thing_light_rgb::get_registry().prepare_world(world);
+        if(!jkgm::thing_light_rgb::get_registry().set(
+            reinterpret_cast<uintptr_t>(thing),
+            light_rgb_thing_signature(thing),false,
+            {{components[0],components[1],components[2]}},
+            fade,light_rgb_clock_now()))
+            LOG_WARNING("SetThingLightRGB rejected: channels must be "
+                        "finite 0..1, fade 0..3600 seconds");
+    }
+    void __cdecl cog_get_thing_light_rgb(void *ctx)
+    {
+        void *thing=cog_pop_thing(ctx);
+        jkgm::thing_light_rgb::rgb rgb=jkgm::thing_light_rgb::white;
+        if(thing && gpu_span_readable(thing,0x78U))
+            jkgm::thing_light_rgb::get_registry().get(
+                reinterpret_cast<uintptr_t>(thing),
+                light_rgb_thing_signature(thing),rgb,light_rgb_clock_now());
+        cog_push_vector(ctx,rgb.data());
+    }
+
     // RandDir(): uniformly random unit vector over the entire sphere.
     void __cdecl cog_math_rand_dir(void *ctx)
     {
@@ -9125,6 +9270,8 @@ namespace {
         cog_verb_entry{"getperipheralblur", cog_get_peripheral_blur},
         cog_verb_entry{"resetperipheralblur", cog_reset_peripheral_blur},
         cog_verb_entry{"setsaberlightintensity", cog_set_saber_light_intensity},
+        cog_verb_entry{"setthinglightrgb", cog_set_thing_light_rgb},
+        cog_verb_entry{"getthinglightrgb", cog_get_thing_light_rgb},
         cog_verb_entry{"setspotlight", cog_set_spotlight},
         cog_verb_entry{"setspotlightintensities", cog_set_spotlight_intensities},
         cog_verb_entry{"clearspotlight", cog_clear_spotlight},
