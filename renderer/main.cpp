@@ -2773,7 +2773,15 @@ namespace {
         active_light_rgb_template=previous;
         if(!result || !gpu_span_readable(result,0x7cU))return result;
         auto &registry=jkgm::thing_light_rgb::get_registry();
-        registry.prepare_world(reinterpret_cast<uintptr_t>(world));
+        // SithTemplate static-world slots use the native 0x8000 index bit.
+        // Preserve their hues when parsing a separate level JKL world.
+        uint32_t template_index=0U;
+        std::memcpy(&template_index,
+                    static_cast<uint8_t const *>(result)+4U,4U);
+        bool const static_template=(template_index&0x8000U)!=0U;
+        if(static_template)
+            registry.prepare_static_world(reinterpret_cast<uintptr_t>(world));
+        else registry.prepare_world(reinterpret_cast<uintptr_t>(world));
         jkgm::thing_light_rgb::rgb rgb{};
         bool have=pending.explicit_color;
         if(have)rgb=pending.color;
@@ -2785,7 +2793,7 @@ namespace {
         }
         if(have)
             registry.set(reinterpret_cast<uintptr_t>(result),0U,true,rgb,
-                         0.0,light_rgb_clock_now());
+                         0.0,light_rgb_clock_now(),static_template);
         return result;
     }
 
