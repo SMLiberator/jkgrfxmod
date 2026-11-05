@@ -13,6 +13,7 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_polyline.hpp"
 #include "saber_trail_history.hpp"
+#include "saber_trail_facing.hpp"
 #include "native_saber_damage.hpp"
 #include "native_mat_warm_queue.hpp"
 #include "native_mat_upload_policy.hpp"
@@ -3257,12 +3258,26 @@ namespace {
                                 std::array<float,3> delayed_world{};
                                 for(int n=0;n<3;++n)
                                     delayed_world[n]=base[n]+past[n]*length;
-                                auto const delayed_cam=
+                                auto const original_delayed_cam=
                                     jkgm::gpu_3do_native_transform_point(
                                         view,delayed_world);
+                                std::array<float,3> camera_base{},camera_tip{};
+                                std::array<float,3> facing_delayed_cam=
+                                    original_delayed_cam;
+                                if(jkgm::gpu_polyline_cap_pose_camera(
+                                       captured,camera_base,camera_tip))
+                                    jkgm::saber_trail_facing_tip(
+                                        camera_base,camera_tip,
+                                        original_delayed_cam,facing_delayed_cam);
+                                auto const &delayed_cam=facing_delayed_cam;
                                 auto trail=jkgm::make_gpu_polyline_geometry(
                                     captured,&delayed_cam);
-                                if(trail) {
+                                // make_gpu_polyline_geometry() also returns
+                                // an unchanged saber when the SideMat faces
+                                // were not supported. Never log it as a fan.
+                                bool const appended=trail &&
+                                    trail->indices.size()>geom->indices.size();
+                                if(appended) {
                                     geom=std::move(trail);
                                     saber_fan_built=true;
                                     if(the_config->profile_renderer &&
@@ -3296,7 +3311,11 @@ namespace {
                                                  " area_3d=",area3d,
                                                  " blade_length=",std::sqrt(blade2),
                                                  " tip_separation=",std::sqrt(sep2),
-                                                 " triangles=",geom->indices.size()/3U);
+                                                 " triangles=",geom->indices.size()/3U,
+                                                 " native_side_counts=",
+                                                 captured.faces[0].count,",",
+                                                 captured.faces[1].count,",",
+                                                 captured.faces[2].count);
                                     }
                                 }
                             }
