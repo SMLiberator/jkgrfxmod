@@ -7283,12 +7283,18 @@ namespace jkgm {
             ogs->game_transparency_pass_program.set_flare_mode(false);
             set_translucent_spotlights(ogs->game_transparency_pass_program,true);
             set_translucent_sun(ogs->game_transparency_pass_program,true);
-            // Sample the completed opaque pass; this is a different texture
-            // from the framebuffer receiving the transparency draw.
-            gl::set_active_texture_unit(5);
-            gl::bind_texture(gl::texture_bind_target::texture_2d,
-                             frame_screen->get_resolved_depth_texture());
-            gl::set_active_texture_unit(0);
+            // Native Fluid samples opaque scene depth from texture unit 5.
+            // GPU-cached world/3DO rendering uses unit 5 for normal_map2,
+            // so every transition BACK to native transparent batches must
+            // restore this binding (otherwise water samples the normal map
+            // as depth and its pigment can disappear).
+            auto restore_native_fluid_depth=[&] {
+                gl::set_active_texture_unit(5);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 frame_screen->get_resolved_depth_texture());
+                gl::set_active_texture_unit(0);
+            };
+            restore_native_fluid_depth();
             apply_engine_camera(ogs->game_transparency_pass_program);
 
             {
@@ -7322,6 +7328,7 @@ namespace jkgm {
             // after decals and before other translucent world/3DO overlays.
             draw_world_cache_transparency();
             ogs->game_transparency_pass_program.use_program();
+            restore_native_fluid_depth();
 
             // Unsupported special-blend native batches remain an explicit
             // world-cache isolation limitation until full native ownership.
@@ -7362,6 +7369,7 @@ namespace jkgm {
             // earlier so translucent world pixels may correctly cover them.
             draw_gpu_3do_preview(true);
             ogs->game_transparency_pass_program.use_program();
+            restore_native_fluid_depth();
 
             // Weapon/HUD depth is intentionally separate from world lights.
             ogs->game_transparency_pass_program.set_translucent_spotlight_count(0);
