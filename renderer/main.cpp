@@ -9529,6 +9529,59 @@ bool request_native_compressed_sound_hook()
         RealJkGameScreenshot();
     }
 
+    bool request_native_thing_light_rgb_hooks()
+    {
+        bool const known_executable=
+            reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))==
+                0x00400000U &&
+            gpu_span_readable(reinterpret_cast<void const *>(
+                light_rgb_parse_addr),sizeof(light_rgb_parse_bytes)) &&
+            gpu_span_readable(reinterpret_cast<void const *>(
+                light_rgb_template_addr),sizeof(light_rgb_template_bytes)) &&
+            gpu_span_readable(reinterpret_cast<void const *>(
+                sprite_clone_thing_addr),sizeof(sprite_clone_thing_bytes)) &&
+            std::memcmp(reinterpret_cast<void const *>(light_rgb_parse_addr),
+                        light_rgb_parse_bytes,sizeof(light_rgb_parse_bytes))==0 &&
+            std::memcmp(reinterpret_cast<void const *>(light_rgb_template_addr),
+                        light_rgb_template_bytes,sizeof(light_rgb_template_bytes))==0 &&
+            std::memcmp(reinterpret_cast<void const *>(sprite_clone_thing_addr),
+                        sprite_clone_thing_bytes,sizeof(sprite_clone_thing_bytes))==0;
+        if(!known_executable) {
+            LOG_WARNING("Thing LightRGB: native parser/template/clone "
+                        "signatures do not match jkgm(5).exe");
+            return false;
+        }
+        LONG error=DetourAttach(&(PVOID &)RealThingParseArg,HookedThingParseArg);
+        if(error!=NO_ERROR) {
+            LOG_WARNING("Thing LightRGB parameter parser hook failed: ",error);
+            return false;
+        }
+        error=DetourAttach(&(PVOID &)RealThingTemplateParse,
+                           HookedThingTemplateParse);
+        if(error!=NO_ERROR) {
+            DetourDetach(&(PVOID &)RealThingParseArg,HookedThingParseArg);
+            LOG_WARNING("Thing LightRGB template hook failed: ",error);
+            return false;
+        }
+        // SPR variants may already own the same native Thing-copy detour.
+        // Compose with that hook instead of detouring one native function
+        // twice (which would break SPR selection and template inheritance).
+        if(!sprite_variant_hooks_active) {
+            error=DetourAttach(&(PVOID &)RealSithThingClone,
+                               HookedSithThingClone);
+            if(error!=NO_ERROR) {
+                DetourDetach(&(PVOID &)RealThingTemplateParse,
+                             HookedThingTemplateParse);
+                DetourDetach(&(PVOID &)RealThingParseArg,HookedThingParseArg);
+                LOG_WARNING("Thing LightRGB clone hook failed: ",error);
+                return false;
+            }
+            thing_light_clone_hook_active=true;
+        }
+        LOG_INFO("Thing LightRGB native parameter/Thing-clone bridge enabled");
+        return true;
+    }
+
     bool request_native_screenshot_hook()
     {
         auto const read=[](uintptr_t a,void *dst,size_t n) {
@@ -9656,6 +9709,7 @@ bool attach_hooks()
 
     bool const sector_color_hook_requested=request_native_sector_color_hook();
     bool const sprite_hooks_requested=request_native_sprite_hooks();
+    bool const thing_rgb_hooks_requested=request_native_thing_light_rgb_hooks();
     bool const particle_hooks_requested=request_native_particle_hooks();
     bool const polyline_hooks_requested=request_native_polyline_hooks();
     bool const screenshot_hook_requested=request_native_screenshot_hook();
@@ -9672,6 +9726,8 @@ bool attach_hooks()
         sprite_frustum_hook_active=false;
         sprite_alpha_hook_active=false;
         sprite_variant_hooks_active=false;
+        thing_light_rgb_hooks_active=false;
+        thing_light_clone_hook_active=false;
         particle_owns_addproc_hook=false;
         pending_sprite_flare_spans.clear();
         flare_draw_trace_count=flare_face_trace_count=flare_alpha_trace_count=
@@ -9685,6 +9741,7 @@ bool attach_hooks()
                  "other JK color effects unchanged");
     }
     if(error==NO_ERROR) native_sprite_hook_active=sprite_hooks_requested;
+    if(error==NO_ERROR) thing_light_rgb_hooks_active=thing_rgb_hooks_requested;
     if(error==NO_ERROR) native_particle_hook_active=particle_hooks_requested;
     if(error==NO_ERROR) native_polyline_hook_active=polyline_hooks_requested;
     if(error==NO_ERROR && screenshot_hook_requested) {
@@ -9723,6 +9780,17 @@ bool detach_hooks()
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
 
+    if(thing_light_rgb_hooks_active) {
+        DetourDetach(&(PVOID &)RealThingTemplateParse,
+                     HookedThingTemplateParse);
+        DetourDetach(&(PVOID &)RealThingParseArg,HookedThingParseArg);
+        thing_light_rgb_hooks_active=false;
+    }
+    if(thing_light_clone_hook_active) {
+        DetourDetach(&(PVOID &)RealSithThingClone,HookedSithThingClone);
+        thing_light_clone_hook_active=false;
+    }
+    jkgm::thing_light_rgb::get_registry().clear();
     if(native_screenshot_hook_active) {
         DetourDetach(&(PVOID &)RealJkGameScreenshot,
                      HookedJkGameScreenshot);
