@@ -65,7 +65,8 @@ inline bool gpu_polyline_inverse_view(
 inline bool gpu_polyline_cap_pose_camera(
     gpu_polyline_capture const &capture,
     std::array<float,3> &base,std::array<float,3> &tip,
-    std::array<float,3> const *native_hilt_camera=nullptr)
+    std::array<float,3> const *native_hilt_camera=nullptr,
+    unsigned *tip_face_index=nullptr)
 {
     if(capture.failed || capture.faces.size()!=5U ||
        capture.faces[3].count!=5U || capture.faces[4].count!=4U)
@@ -110,6 +111,7 @@ inline bool gpu_polyline_cap_pose_camera(
     if(!cap_center(capture.faces[3],cap3) ||
        !cap_center(capture.faces[4],cap4))return false;
 
+    bool tip_is_face3=false;
     if(native_hilt_camera) {
         double d3=0.0,d4=0.0;
         for(int n=0;n<3;++n) {
@@ -120,11 +122,13 @@ inline bool gpu_polyline_cap_pose_camera(
         }
         // Anchor BOTH blade centerlines to JK's *actual* hilt origin.
         base=*native_hilt_camera;
-        tip=d3>d4?cap3:cap4;
+        tip_is_face3=d3>d4;
+        tip=tip_is_face3?cap3:cap4;
     } else {
         base=cap3;
         tip=cap4;
     }
+    if(tip_face_index)*tip_face_index=tip_is_face3?3U:4U;
     double len2=0.0;
     for(int n=0;n<3;++n) {
         double const d=double(tip[n])-base[n];
@@ -161,9 +165,11 @@ make_gpu_polyline_geometry(
 {
     if(capture.failed || capture.faces.size()!=5U)return {};
     std::array<float,3> base_camera{},tip_camera{},tip_delta{};
+    unsigned tip_cap_face_index=4U;
     bool const have_trail=trailing_tip_camera &&
         gpu_polyline_cap_pose_camera(
-            capture,base_camera,tip_camera,native_hilt_camera) &&
+            capture,base_camera,tip_camera,native_hilt_camera,
+            &tip_cap_face_index) &&
         std::all_of(trailing_tip_camera->begin(),trailing_tip_camera->end(),
                     [](float v){return std::isfinite(v);});
     if(trailing_tip_camera && !have_trail)return {};
@@ -197,6 +203,9 @@ make_gpu_polyline_geometry(
     }
 
     auto result=std::make_shared<gpu_3do_geometry>();
+    std::array<uint32_t,3> join_triangle_indices{};
+    uint32_t join_vertex_start=0;
+    bool have_join_triangle=false;
     for(size_t face_index=0;face_index<capture.faces.size();++face_index) {
         auto const &face=capture.faces[face_index];
         if(face.count<3U || face.count>5U || !face.material ||
@@ -254,11 +263,10 @@ make_gpu_polyline_geometry(
             result->vertices.push_back(v);
             expand_bounds(v);
         }
-        // Append indices only AFTER generating any delayed vertices. For
-        // alpha materials, issue the lagging blade first, the 3D wedge next,
-        // and the original native blade last. All retain the native MAT.
+        // Keep the lagging blade and its tip cap behind the live blade.
+        // The genuinely 3D connector is submitted as the final draw group,
+        // AFTER both blades and caps (independent of SideMat/TipMat).
         std::vector<uint32_t> behind_indices;
-        std::vector<uint32_t> join_indices;
         if(have_trail && face_index<3U) {
             uint32_t const delayed_begin=
                 static_cast<uint32_t>(result->vertices.size());
@@ -332,18 +340,34 @@ make_gpu_polyline_geometry(
                         v.nz=v.lnz=jz;
                     }
                 }
-                join_indices={join_begin,join_begin+1U,join_begin+2U};
+                join_triangle_indices={{join_begin,join_begin+1U,
+                                        join_begin+2U}};
+                join_vertex_start=join_begin;
+                have_join_triangle=true;
             }
         }
-        // Never duplicate a cap: the 5-point BASE cap belongs to the
-        // shared hilt and the TIP cap of the live blade remains native.
-        // The historical side triangles and true 3D fan already define
-        // the delayed tip. Duplicating cap geometry introduced a stray
-        // rectangular patch in front of the blade.
+        // The physical tip cap (4 or 5 vertices) gets its own delayed
+        // copy. Select it from the native hilt, NEVER by a fixed face
+        // index: copying the base cap would reintroduce the flying quad.
+        // The copied cap uses the same camera-facing rim and original UVs.
+        if(have_trail && face_index==tip_cap_face_index) {
+            uint32_t const past_cap_begin=
+                static_cast<uint32_t>(result->vertices.size());
+            for(unsigned k=0;k<face.count;++k) {
+                gpu_3do_vertex v=result->vertices[begin+k];
+                v.x+=tip_delta[0];
+                v.y+=tip_delta[1];
+                v.z+=tip_delta[2];
+                result->vertices.push_back(v);
+                expand_bounds(v);
+            }
+            for(uint32_t k=1;k+1<face.count;++k)
+                behind_indices.insert(behind_indices.end(),
+                                      {past_cap_begin,past_cap_begin+k,
+                                       past_cap_begin+k+1});
+        }
         result->indices.insert(result->indices.end(),
                                behind_indices.begin(),behind_indices.end());
-        result->indices.insert(result->indices.end(),
-                               join_indices.begin(),join_indices.end());
         for(uint32_t k=1;k+1<face.count;++k)
             result->indices.insert(result->indices.end(),
                                    {begin,begin+k,begin+k+1});
@@ -363,62 +387,94 @@ make_gpu_polyline_geometry(
         if(group.solid_color)result->solid_material_refs.push_back(ref);
         else result->material_refs.push_back(ref);
     }
-    // Transparent 3DO groups are depth-sorted individually. Previously the
-    // three native SideMat faces each contained their own delayed/live
-    // triangles; sorting those ranges could paint a delayed edge OVER the
-    // live blade, even though each face's local index order was correct.
-    // All three SideMat faces normally share one MAT/cel/flags. Merge just
-    // those ranges and order: 3 delayed triangles, the 3D fan, then the
-    // 3 live triangles. Caps retain their original separate groups.
-    if(have_trail && result->groups.size()==5U) {
-        auto const &g0=result->groups[0];
-        auto const &g1=result->groups[1];
-        auto const &g2=result->groups[2];
-        bool const common_side_material=
-            g0.count==6U && g1.count==9U && g2.count==6U &&
-            g0.offset==0U && g1.offset==6U && g2.offset==15U &&
-            g0.material==g1.material && g1.material==g2.material &&
-            g0.cel==g1.cel && g1.cel==g2.cel &&
-            g0.face_type==g1.face_type &&
-            g1.face_type==g2.face_type &&
-            g0.solid_color==g1.solid_color &&
-            g1.solid_color==g2.solid_color;
-        if(common_side_material) {
-            std::array<uint32_t,21> combined{};
-            unsigned next=0U;
-            auto copy_three=[&](size_t offset) {
-                for(unsigned k=0;k<3U;++k)
-                    combined[next++]=result->indices[offset+k];
-            };
-            copy_three(0U);  // delayed side 0
-            copy_three(6U);  // delayed side 1
-            copy_three(15U); // delayed side 2
-            copy_three(9U);  // true 3D connecting triangle
-            copy_three(3U);  // unmodified live side 0
-            copy_three(12U); // unmodified live side 1
-            copy_three(18U); // unmodified live side 2
-            std::copy(combined.begin(),combined.end(),
-                      result->indices.begin());
-            auto &group=result->groups[0];
-            group.count=21U;
-            group.centroid={{0,0,0}};
-            // The three side groups occupy the first 21 vertex records.
-            for(unsigned i=0;i<21U;++i) {
-                auto const &v=result->vertices[i];
-                group.centroid[0]+=v.x/21.f;
-                group.centroid[1]+=v.y/21.f;
-                group.centroid[2]+=v.z/21.f;
-            }
-            for(unsigned gi=1U;gi<=2U;++gi)
-                for(int n=0;n<3;++n) {
-                    group.bounds_min[n]=std::min(
-                        group.bounds_min[n],result->groups[gi].bounds_min[n]);
-                    group.bounds_max[n]=std::max(
-                        group.bounds_max[n],result->groups[gi].bounds_max[n]);
+    // Draw each physical blade and its cap before the joining triangle.
+    // Combining the SideMat ranges keeps their alpha blending in native
+    // delayed -> live order instead of sorting each narrow strip separately.
+    if(have_trail && have_join_triangle) {
+        if(result->groups.size()==5U) {
+            auto const &g0=result->groups[0];
+            auto const &g1=result->groups[1];
+            auto const &g2=result->groups[2];
+            bool const common_side_material=
+                g0.count==6U && g1.count==6U && g2.count==6U &&
+                g0.offset==0U && g1.offset==6U && g2.offset==12U &&
+                g0.material==g1.material && g1.material==g2.material &&
+                g0.cel==g1.cel && g1.cel==g2.cel &&
+                g0.face_type==g1.face_type &&
+                g1.face_type==g2.face_type &&
+                g0.solid_color==g1.solid_color &&
+                g1.solid_color==g2.solid_color;
+            if(common_side_material) {
+                std::array<uint32_t,18> combined{};
+                unsigned next=0U;
+                auto copy_three=[&](size_t offset) {
+                    for(unsigned k=0;k<3U;++k)
+                        combined[next++]=result->indices[offset+k];
+                };
+                copy_three(0U);  // historical side 0
+                copy_three(6U);  // historical side 1
+                copy_three(12U); // historical side 2
+                copy_three(3U);  // live side 0
+                copy_three(9U);  // live side 1
+                copy_three(15U); // live side 2
+                std::copy(combined.begin(),combined.end(),
+                          result->indices.begin());
+                auto &group=result->groups[0];
+                group.count=18U;
+                group.centroid={{0,0,0}};
+                for(unsigned i=0;i<21U;++i) {
+                    auto const &v=result->vertices[i];
+                    group.centroid[0]+=v.x/21.f;
+                    group.centroid[1]+=v.y/21.f;
+                    group.centroid[2]+=v.z/21.f;
                 }
-            result->groups.erase(result->groups.begin()+1,
-                                 result->groups.begin()+3);
+                for(unsigned gi=1U;gi<=2U;++gi)
+                    for(int n=0;n<3;++n) {
+                        group.bounds_min[n]=std::min(
+                            group.bounds_min[n],
+                            result->groups[gi].bounds_min[n]);
+                        group.bounds_max[n]=std::max(
+                            group.bounds_max[n],
+                            result->groups[gi].bounds_max[n]);
+                    }
+                result->groups.erase(result->groups.begin()+1,
+                                     result->groups.begin()+3);
+            }
         }
+
+        // A dedicated SideMat group is essential here: a fan appended
+        // inside the side range still renders before the TipMat cap when
+        // the renderer separately sorts translucent material groups.
+        auto join_group=result->groups[0];
+        join_group.material=capture.faces[1].material;
+        join_group.cel=capture.faces[1].cel;
+        join_group.face_type=capture.faces[1].face_type|1U;
+        join_group.solid_color=capture.faces[1].geo==3U;
+        join_group.offset=static_cast<uint32_t>(result->indices.size());
+        join_group.count=3U;
+        join_group.saber_trail_join=true;
+        join_group.bounds_min={{
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max()}};
+        join_group.bounds_max={{
+            -std::numeric_limits<float>::max(),
+            -std::numeric_limits<float>::max(),
+            -std::numeric_limits<float>::max()}};
+        join_group.centroid={{0,0,0}};
+        for(uint32_t k=0;k<3U;++k) {
+            auto const &v=result->vertices[join_vertex_start+k];
+            float const p[3]={v.x,v.y,v.z};
+            for(int n=0;n<3;++n) {
+                join_group.centroid[n]+=p[n]/3.f;
+                join_group.bounds_min[n]=std::min(join_group.bounds_min[n],p[n]);
+                join_group.bounds_max[n]=std::max(join_group.bounds_max[n],p[n]);
+            }
+        }
+        result->indices.insert(result->indices.end(),
+                               join_triangle_indices.begin(),
+                               join_triangle_indices.end());
+        result->groups.push_back(join_group);
     }
     auto deduplicate=[](auto &refs) {
         std::sort(refs.begin(),refs.end());
