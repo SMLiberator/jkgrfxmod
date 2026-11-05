@@ -147,7 +147,24 @@ for mode,expr in (
     assert f"if(fluid_debug_mode=={mode})" in world
     assert "out_color="+expr+";" in world
 assert "vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness);" in world
-assert "world_cache_fluid_debug_mode must be an integer from 0 to 8" in parser
+assert "world_cache_fluid_debug_mode must be an integer from 0 to 12" in parser
+# Trace why correct raw albedo produces a black cached Fluid diffuse.
+# The raw lighting stage is an independent varying, not reconstructed
+# from the final RGB so it can distinguish a live VBO issue from CMP/JKFX.
+world_vert=read("assets/shaders/world_cache_wireframe.vert")
+assert "out vec3 cached_raw_light_rgb;" in world_vert
+assert "in vec3 cached_raw_light_rgb;" in world
+assert "cached_raw_light_rgb=native_light_rgb;" in world_vert
+for mode,expression in (
+    (9,"vec4(cached_raw_light_rgb,1.0)"),
+    (10,"vec4(cached_sector_cmp_tint,1.0)"),
+    (11,"vec4(vec3(jk_color_add_fade.w),1.0)"),
+    (12,"vec4(forced_diffuse,1.0)"),
+):
+    assert f"if(fluid_debug_mode=={mode})" in world
+    assert "out_color="+expression+";" in world
+assert "vec3 force_lit=albedo*(1.0-env_metalness);" in world
+assert "vec3 forced_diffuse=(" in world
 # A resident MAT may deliberately have NO albedo image (not an unresolved
 # native texture). World GeoMode 4 Fluid must use the shared white-source
 # shader, remain in the transparent pass, and never request native warmup.
