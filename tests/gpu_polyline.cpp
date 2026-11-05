@@ -84,23 +84,24 @@ int main() {
     side2.position[1]=main.position[3];
     side2.position[2]={{.05f,0.0f,0.0f}};
     side2.position[3]={{ 0.0f,0.0f,0.0f}};
-    auto &tip_cap=native_capture.faces[3];
-    tip_cap.position[0]={{0,0,0}}; // base center, NOT a tip vertex
-    tip_cap.position[1]={{-.02f,-.02f,1.f}};
-    tip_cap.position[2]={{ .02f,-.02f,1.f}};
-    tip_cap.position[3]={{ .02f, .02f,1.f}};
-    tip_cap.position[4]={{-.02f, .02f,1.f}};
-    auto &base_cap=native_capture.faces[4];
-    base_cap.position[0]={{-.02f,-.02f,0.f}};
-    base_cap.position[1]={{ .02f,-.02f,0.f}};
-    base_cap.position[2]={{ .02f, .02f,0.f}};
-    base_cap.position[3]={{-.02f, .02f,0.f}};
+    auto &base_cap=native_capture.faces[3];
+    base_cap.position[0]={{0,0,0}}; // center of five-vertex BASE cap
+    base_cap.position[1]={{-.02f,-.02f,0.f}};
+    base_cap.position[2]={{ .02f,-.02f,0.f}};
+    base_cap.position[3]={{ .02f, .02f,0.f}};
+    base_cap.position[4]={{-.02f, .02f,0.f}};
+    auto &tip_cap=native_capture.faces[4];
+    tip_cap.position[0]={{-.02f,-.02f,1.f}};
+    tip_cap.position[1]={{ .02f,-.02f,1.f}};
+    tip_cap.position[2]={{ .02f, .02f,1.f}};
+    tip_cap.position[3]={{-.02f, .02f,1.f}};
     std::array<float,3> base_camera{},tip_camera{};
     assert(jkgm::gpu_polyline_cap_pose_camera(
         native_capture,base_camera,tip_camera));
     assert(std::abs(base_camera[2])<1.e-6f);
     assert(std::abs(tip_camera[2]-1.f)<1.e-6f);
-    // A naive 5-point tip centroid would be only 0.8 units away.
+    // The cap centers are at z=0 (five-vertex base) and z=1
+    // (four-vertex tip); never interpret face 3 as the blade tip.
     std::array<float,3> native_base_world{},native_tip_world{};
     assert(jkgm::gpu_polyline_blade_pose(
         native_capture,inverse,native_base_world,native_tip_world));

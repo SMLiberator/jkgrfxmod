@@ -58,9 +58,9 @@ inline bool gpu_polyline_inverse_view(
 // JKGM rdPolyline_Draw 0x00448D60, verified from the uploaded EXE:
 // first three faces share a generator vertex pool; the COMPLETE blade
 // quad is side face 1 (two tip and two hilt vertices). The five-vertex
-// cap at face 3 begins with a HILT-center vertex followed by FOUR tip
-// vertices; its simple centroid is therefore 20% short of the true tip.
-// Last face (4) consists of four hilt-cap vertices.
+// BASE cap at face 3 begins with the HILT center, followed by four
+// surrounding BASE points. The last four-vertex face (4) is the TIP cap.
+// Do not reverse these or the delay follows the hilt instead of the tip.
 inline bool gpu_polyline_cap_pose_camera(
     gpu_polyline_capture const &capture,
     std::array<float,3> &base,std::array<float,3> &tip)
@@ -77,8 +77,8 @@ inline bool gpu_polyline_cap_pose_camera(
             }
         return true;
     };
-    if(!center(capture.faces[4],0U,base) ||
-       !center(capture.faces[3],capture.faces[3].count==5U?1U:0U,tip))
+    if(!center(capture.faces[3],capture.faces[3].count==5U?1U:0U,base) ||
+       !center(capture.faces[4],0U,tip))
         return false;
     double len2=0.0;
     for(int n=0;n<3;++n) {
