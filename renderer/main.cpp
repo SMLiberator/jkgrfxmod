@@ -2775,6 +2775,10 @@ namespace {
                             "finite channels 0..1");
                 return 0;
             }
+            if(the_config && the_config->profile_renderer_verbose)
+                LOG_INFO("THING LIGHT RGB argument: template=",
+                         active_light_rgb_template.active,
+                         " rgb=",rgb[0],"/",rgb[1],"/",rgb[2]);
             if(active_light_rgb_template.active) {
                 active_light_rgb_template.explicit_color=true;
                 active_light_rgb_template.color=rgb;
