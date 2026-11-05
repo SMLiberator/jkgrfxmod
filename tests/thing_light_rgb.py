@@ -65,6 +65,10 @@ assert "light.native_id=id;" in world
 assert "uint32_t native_id=0" in gpu
 assert "light_color.push_back(" in program
 assert "std::vector<record> things(double now)" in header
+assert "size_t static_template_count() const" in header
+assert "runtime_colored_things=0" in renderer
+assert "GPU THING LIGHT RGB unmatched: owner=" in renderer
+assert "missing=" in renderer and " ambiguous=" in renderer
 assert "void prepare_static_world(uintptr_t world)" in header
 assert "if(it->second.static_template)++it;" in header
 assert "v.static_template=is_template && static_template;" in header
