@@ -3454,23 +3454,30 @@ namespace jkgm {
                         return a.depth>b.depth; // back to front
                     });
             }
-            // The SideMat fan must composite over BOTH saber blades and
-            // both tip caps. Ordinary transparent model groups remain
-            // globally back-to-front; only the special procedural fan is
-            // moved to the end of its own instance's draw ranges.
-            // Reordering this AFTER std::sort avoids a non-transitive
-            // comparator between unrelated alpha-sorted instances.
-            for(size_t i=0;i<draws.size();++i) {
-                auto const &candidate=draws[i];
-                if(!candidate.instance->saber_trail_active ||
-                   !candidate.group->saber_trail_join)continue;
-                auto const *owner=candidate.instance;
-                size_t tail=i;
-                for(size_t j=i+1;j<draws.size();++j)
-                    if(draws[j].instance==owner)tail=j;
-                if(tail>i)
-                    std::rotate(draws.begin()+i,draws.begin()+i+1,
-                                draws.begin()+tail+1);
+            // Composite special saber geometry in two explicit stages:
+            // after the delayed/live blades and TipMat caps, draw the
+            // SideMat bridge (virtual tip -> real tip), and LAST draw the
+            // true 3D fan over everything else. Apply this only within
+            // the same saber instance; ordinary model transparency still
+            // uses the global back-to-front depth sort above.
+            // Run separate passes so a previously moved fan cannot prevent
+            // the bridge from being moved into its penultimate position.
+            for(unsigned layer=0;layer<2U;++layer) {
+                for(size_t i=0;i<draws.size();++i) {
+                    auto const &candidate=draws[i];
+                    if(!candidate.instance->saber_trail_active)continue;
+                    bool const selected=layer==0U
+                        ?candidate.group->saber_trail_tip_bridge
+                        :candidate.group->saber_trail_join;
+                    if(!selected)continue;
+                    auto const *owner=candidate.instance;
+                    size_t tail=i;
+                    for(size_t j=i+1;j<draws.size();++j)
+                        if(draws[j].instance==owner)tail=j;
+                    if(tail>i)
+                        std::rotate(draws.begin()+i,draws.begin()+i+1,
+                                    draws.begin()+tail+1);
+                }
             }
             if(gpu_profiling)
                 profile_frame.gpu_preview_sort_us[pass_index]+=
@@ -3534,6 +3541,8 @@ namespace jkgm {
                        other.group->nonplanar!=group.nonplanar ||
                        other.group->solid_color!=group.solid_color ||
                        other.group->saber_trail_join!=group.saber_trail_join ||
+                       other.group->saber_trail_tip_bridge!=
+                           group.saber_trail_tip_bridge ||
                        other.policy!=draw.policy)
                         break;
                     ++draw_end;
