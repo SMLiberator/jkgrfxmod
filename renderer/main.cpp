@@ -28,6 +28,7 @@
 #include "saber_light.hpp"
 #include "saber_light_rgb.hpp"
 #include "thing_light_rgb.hpp"
+#include "saved_static_template.hpp"
 #include "thing_attachment_normal.hpp"
 #include "native_thingface_friction.hpp"
 #include "native_earth_hit_sound.hpp"
@@ -9616,6 +9617,118 @@ bool request_native_compressed_sound_hook()
         RealJkGameScreenshot();
     }
 
+    // JKGM savegame FullDescription (jkgm(5).exe @ 0x004F4960) has a
+    // signed "movsx ecx,word ptr [esi]" at 0x004F49F8 and then directly
+    // indexes currentWorld->aThingTemplates. Static.jkl indices have bit
+    // 0x8000 and must instead resolve against staticWorld->aThingTemplates.
+    // Intercept after sithThing_Reset and before the faulty signed lookup,
+    // then rejoin immediately after the native SetThingBasedOn call.
+    using native_save_template_gate_fn=void(__cdecl*)();
+    native_save_template_gate_fn RealSaveTemplateGate=
+        reinterpret_cast<native_save_template_gate_fn>(
+            jkgm::saved_static_template::restore_index_address);
+    bool native_save_template_hook_active=false;
+
+    uint32_t __cdecl resolve_saved_thing_template(uint32_t raw_index)
+    {
+        using namespace jkgm::saved_static_template;
+        auto const read=[](uintptr_t ptr,void *destination,size_t bytes) {
+            if(ptr<0x10000U ||
+               !gpu_span_readable(reinterpret_cast<void const *>(ptr),bytes))
+                return false;
+            std::memcpy(destination,reinterpret_cast<void const *>(ptr),bytes);
+            return true;
+        };
+        result const found=resolve(uint16_t(raw_index),read);
+        if(!found) {
+            LOG_WARNING("JK SAVE RESTORE: rejected template id=",raw_index,
+                        " static=",found.static_world,
+                        " local_index=",found.local_index,
+                        " reason=",int(found.reason));
+            return 0U;
+        }
+        if(found.static_world && the_config &&
+           the_config->profile_renderer_verbose) {
+            static unsigned logged=0U;
+            if(logged++<32U)
+                LOG_INFO("JK SAVE RESTORE: Static.jkl template id=",
+                         found.saved_index,
+                         " local_index=",found.local_index,
+                         " address=",found.address);
+        }
+        return uint32_t(found.address);
+    }
+
+    // Entry contract observed in the supplied executable:
+    //   ESI -> serialized template WORD; EDI -> reset destination Thing;
+    //   EBX -> current SithWorld; [ESP] -> one pending argument for Reset.
+    // Success contract at 0x004F4A2E: SetThingBasedOn(edi,template) has
+    // executed, ESI advanced by 2 and its two cdecl arguments are still
+    // on the stack (native code cleans them at 0x004F4A4A).
+    // Failure: discard the stale Reset argument, then use the original
+    // function's clean return-false epilogue at 0x004F4E9B.
+    __declspec(naked) void __cdecl HookedSaveTemplateGate()
+    {
+        __asm {
+            pushfd
+            pushad
+            movzx eax, word ptr [esi]
+            push eax
+            call resolve_saved_thing_template
+            add esp, 4
+            mov dword ptr [esp+28], eax
+            popad
+            popfd
+            test eax, eax
+            jz invalid_template
+            add esp, 4
+            add esi, 2
+            push eax
+            push edi
+            mov eax, 0x004CDB70
+            call eax
+            mov eax, 0x004F4A2E
+            jmp eax
+        invalid_template:
+            add esp, 4
+            mov eax, 0x004F4E9B
+            jmp eax
+        }
+    }
+
+    bool request_native_save_template_hook()
+    {
+        using namespace jkgm::saved_static_template;
+        auto const matches=[](uintptr_t address,
+                              uint8_t const *bytes,size_t length) {
+            return gpu_span_readable(
+                    reinterpret_cast<void const *>(address),length) &&
+                std::memcmp(reinterpret_cast<void const *>(address),
+                            bytes,length)==0;
+        };
+        if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=
+               0x00400000U ||
+           !matches(0x004F4960U,restore_prologue,
+                    sizeof(restore_prologue)) ||
+           !matches(restore_index_address,restore_index_bytes,
+                    sizeof(restore_index_bytes)) ||
+           !matches(0x004F4A27U,restore_copy_bytes,
+                    sizeof(restore_copy_bytes)) ||
+           !matches(restore_failure_address,restore_fail_bytes,
+                    sizeof(restore_fail_bytes))) {
+            LOG_WARNING("JK SAVE RESTORE: unsupported executable; "
+                        "Static.jkl template fix not installed");
+            return false;
+        }
+        LONG const error=DetourAttach(
+            &(PVOID &)RealSaveTemplateGate,HookedSaveTemplateGate);
+        if(error!=NO_ERROR) {
+            LOG_WARNING("JK SAVE RESTORE: template gate hook failed: ",error);
+            return false;
+        }
+        return true;
+    }
+
     bool request_native_thing_light_rgb_hooks()
     {
         bool const known_executable=
@@ -9797,6 +9910,7 @@ bool attach_hooks()
     bool const sector_color_hook_requested=request_native_sector_color_hook();
     bool const sprite_hooks_requested=request_native_sprite_hooks();
     bool const thing_rgb_hooks_requested=request_native_thing_light_rgb_hooks();
+    bool const save_template_hook_requested=request_native_save_template_hook();
     bool const particle_hooks_requested=request_native_particle_hooks();
     bool const polyline_hooks_requested=request_native_polyline_hooks();
     bool const screenshot_hook_requested=request_native_screenshot_hook();
@@ -9815,6 +9929,7 @@ bool attach_hooks()
         sprite_variant_hooks_active=false;
         thing_light_rgb_hooks_active=false;
         thing_light_clone_hook_active=false;
+        native_save_template_hook_active=false;
         particle_owns_addproc_hook=false;
         pending_sprite_flare_spans.clear();
         flare_draw_trace_count=flare_face_trace_count=flare_alpha_trace_count=
@@ -9829,6 +9944,10 @@ bool attach_hooks()
     }
     if(error==NO_ERROR) native_sprite_hook_active=sprite_hooks_requested;
     if(error==NO_ERROR) thing_light_rgb_hooks_active=thing_rgb_hooks_requested;
+    if(error==NO_ERROR && save_template_hook_requested) {
+        native_save_template_hook_active=true;
+        LOG_INFO("JK SAVE RESTORE: Static.jkl template index fix enabled");
+    }
     if(error==NO_ERROR) native_particle_hook_active=particle_hooks_requested;
     if(error==NO_ERROR) native_polyline_hook_active=polyline_hooks_requested;
     if(error==NO_ERROR && screenshot_hook_requested) {
@@ -9867,6 +9986,10 @@ bool detach_hooks()
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
 
+    if(native_save_template_hook_active) {
+        DetourDetach(&(PVOID &)RealSaveTemplateGate,HookedSaveTemplateGate);
+        native_save_template_hook_active=false;
+    }
     if(thing_light_rgb_hooks_active) {
         DetourDetach(&(PVOID &)RealThingTemplateParse,
                      HookedThingTemplateParse);
