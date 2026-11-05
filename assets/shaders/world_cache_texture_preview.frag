@@ -7,6 +7,7 @@
 in vec2 material_uv;
 in vec3 cached_view_normal;
 in vec3 cached_lit_rgb;
+in vec3 cached_raw_light_rgb;
 in vec3 cached_light_state; // authored+extra, ambient floor, light mode
 in vec3 cached_sector_tint; // SithSector.tint, not colormap
 in vec3 cached_sector_cmp_tint; // SithSector.colormap color multiplier
@@ -342,6 +343,31 @@ void main() {
             }
             if(fluid_debug_mode==8) {
                 out_color=vec4(vec3((1.0-fog)*vertex_rgb_alpha*absorption),1.0);
+                return;
+            }
+            if(fluid_debug_mode==9) {
+                // Is the live per-vertex light already black before the
+                // sector CMP/JK color effect stage in the vertex shader?
+                out_color=vec4(cached_raw_light_rgb,1.0);
+                return;
+            }
+            if(fluid_debug_mode==10) {
+                out_color=vec4(cached_sector_cmp_tint,1.0);
+                return;
+            }
+            if(fluid_debug_mode==11) {
+                out_color=vec4(vec3(jk_color_add_fade.w),1.0);
+                return;
+            }
+            if(fluid_debug_mode==12) {
+                // A/B against mode 2: preserve Fluid fog/coverage/depth
+                // math but replace ONLY the cached sector-light factor.
+                // No specular, no emission, no persistent render change.
+                vec3 force_lit=albedo*(1.0-env_metalness);
+                vec3 forced_diffuse=(
+                    force_lit*(1.0-fog)*vertex_rgb_alpha+
+                    fog_color*(fog*coverage))*absorption;
+                out_color=vec4(forced_diffuse,1.0);
                 return;
             }
             // Just as in native Fluid, emission and reflection are
