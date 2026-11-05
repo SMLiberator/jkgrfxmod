@@ -49,6 +49,7 @@ namespace jkgm {
         std::array<float,3> bounds_min{},bounds_max{};
         bool nonplanar=false; // keep per-face JK culling, bypass GL triangle culling
         bool solid_color=false; // face GeoMode 3: palette-indexed MAT, no texture
+        bool saber_trail_join=false; // last composite triangle of a procedural saber, after tip caps
     };
     struct gpu_3do_geometry {
         std::vector<gpu_3do_face_plane> face_planes;
