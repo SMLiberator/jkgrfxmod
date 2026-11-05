@@ -3202,6 +3202,26 @@ namespace {
         int const generated=RealNativePolylineDraw(rdthing,orientation);
         active_gpu_polyline=previous;
         auto geom=jkgm::make_gpu_polyline_geometry(captured);
+        // rdPolyline_Draw builds the saber in camera space with
+        // rdMatrix_Multiply34(camera.orient, orientation). Its translation
+        // is the REAL hilt; cap face ordering is not a reliable substitute.
+        // Do this only for trails: ordinary GPU polylines remain unchanged.
+        jkgm::gpu_3do_matrix34 native_orientation{};
+        std::array<float,3> native_hilt_camera{};
+        bool const orientation_readable=orientation &&
+            gpu_span_readable(orientation,sizeof(native_orientation));
+        if(orientation_readable)
+            std::memcpy(native_orientation.data(),orientation,
+                        sizeof(native_orientation));
+        bool const have_native_hilt=orientation_readable &&
+            jkgm::gpu_3do_matrix_finite(native_orientation);
+        if(have_native_hilt) {
+            auto const native_modelview=
+                jkgm::gpu_3do_native_modelview(view,native_orientation);
+            native_hilt_camera={{native_modelview[9],
+                                 native_modelview[10],
+                                 native_modelview[11]}};
+        }
         std::string failure;
         bool saber_fan_built=false;
         if(generated && geom &&
@@ -3235,8 +3255,10 @@ namespace {
                     // Dual sabers draw the same rdPolyline twice per frame.
                     if(blade<2U) {
                         std::array<float,3> base{},tip{},past{};
-                        if(jkgm::gpu_polyline_blade_pose(
-                               captured,inverse,base,tip)) {
+                        if(have_native_hilt &&
+                           jkgm::gpu_polyline_blade_pose(
+                               captured,inverse,base,tip,
+                               &native_hilt_camera)) {
                             auto const now=std::chrono::duration<double>(
                                 std::chrono::steady_clock::now().
                                     time_since_epoch()).count();
@@ -3264,7 +3286,7 @@ namespace {
                                     jkgm::gpu_3do_native_transform_point(
                                         view,delayed_world);
                                 auto trail=jkgm::make_gpu_polyline_geometry(
-                                    captured,&delayed_cam);
+                                    captured,&delayed_cam,&native_hilt_camera);
                                 // make_gpu_polyline_geometry() also returns
                                 // an unchanged saber when the SideMat faces
                                 // were not supported. Never log it as a fan.
@@ -3281,7 +3303,7 @@ namespace {
                                         // vertices. Camera XZ is the screen
                                         // plane in JK's native view.
                                         jkgm::gpu_polyline_cap_pose_camera(
-                                            captured,b,t);
+                                            captured,b,t,&native_hilt_camera);
                                         float a[3]{},d[3]{},cross[3]{};
                                         float sep2=0,blade2=0;
                                         for(int n=0;n<3;++n) {
