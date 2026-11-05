@@ -222,6 +222,18 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("use_gpu_cache")) {
             j.at("use_gpu_cache").get_to(rv->use_gpu_cache);
         }
+        if(j.contains("enable_saber_trails")) {
+            j.at("enable_saber_trails").get_to(rv->enable_saber_trails);
+        }
+        if(j.contains("saber_trail_delay")) {
+            auto const &value=j.at("saber_trail_delay");
+            if(!value.is_number())
+                throw std::runtime_error("saber_trail_delay must be a number");
+            double const seconds=value.get<double>();
+            if(!std::isfinite(seconds) || seconds<0.005 || seconds>0.25)
+                throw std::runtime_error("saber_trail_delay must be between 0.005 and 0.25 seconds");
+            rv->saber_trail_delay=static_cast<float>(seconds);
+        }
         if(j.contains("enable_gpu_camera_hud")) {
             j.at("enable_gpu_camera_hud").get_to(rv->enable_gpu_camera_hud);
         }

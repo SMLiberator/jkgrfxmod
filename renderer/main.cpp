@@ -12,6 +12,7 @@
 #include "native_particle_texture.hpp"
 #include "gpu_3do_preview.hpp"
 #include "gpu_polyline.hpp"
+#include "saber_trail_history.hpp"
 #include "native_mat_warm_queue.hpp"
 #include "native_mat_upload_policy.hpp"
 #include "gpu_particle_cloud.hpp"
@@ -3084,6 +3085,54 @@ namespace {
     bool native_polyline_hook_active=false;
     thread_local jkgm::gpu_polyline_capture *active_gpu_polyline=nullptr;
     unsigned polyline_gpu_logged=0,polyline_native_logged=0;
+    // JKGM's validated rdThing.pThing (+0x44), SithThing type (+0x0c)
+    // and generation signature (+0x74); no new native ABI offsets.
+    jkgm::saber_trail_history gpu_saber_trails;
+    std::unordered_map<uint64_t,bool> saber_marker_damage;
+    uintptr_t saber_trail_world=0;
+    uint64_t saber_blade_draw_frame=0;
+    std::unordered_map<uint64_t,unsigned> saber_blade_draw_counts;
+
+    uint64_t polyline_saber_owner(void const *rdthing)
+    {
+        uintptr_t const at=reinterpret_cast<uintptr_t>(rdthing);
+        if(!rdthing || !gpu_span_readable(
+               reinterpret_cast<void const *>(at+0x44U),4U))return 0;
+        uint32_t owner=0;
+        std::memcpy(&owner,reinterpret_cast<void const *>(at+0x44U),4U);
+        if(owner<0x10000U || !gpu_span_readable(
+               reinterpret_cast<void const *>(uintptr_t(owner)),0x78U))
+            return 0;
+        uint32_t signature=0,kind=0;
+        auto const *p=reinterpret_cast<uint8_t const *>(uintptr_t(owner));
+        std::memcpy(&signature,p+0x74U,4);
+        std::memcpy(&kind,p+0x0cU,4);
+        if(!signature || kind==0U || kind>15U)return 0;
+        return (uint64_t(owner)<<32)|signature;
+    }
+
+    uint64_t polyline_marker_owner(void const *thing)
+    {
+        if(!thing || !gpu_span_readable(thing,0x78U))return 0;
+        uint32_t signature=0,kind=0;
+        auto const *p=static_cast<uint8_t const *>(thing);
+        std::memcpy(&signature,p+0x74U,4);
+        std::memcpy(&kind,p+0x0cU,4);
+        if(!signature || kind==0U || kind>15U)return 0;
+        return (uint64_t(uint32_t(reinterpret_cast<uintptr_t>(thing)))<<32)|
+            signature;
+    }
+
+    void observe_saber_marker(void const *thing,uint32_t marker)
+    {
+        if(marker!=4U && marker!=5U)return;
+        uint64_t const owner=polyline_marker_owner(thing);
+        if(!owner)return;
+        if(saber_marker_damage.size()>256U)saber_marker_damage.clear();
+        // Native sithPuppet_DefaultCallback toggles SABERDAMAGE on 4/5.
+        saber_marker_damage[owner]=marker==4U;
+    }
+
 
     void __cdecl HookedNativePolylineFace(
         void *rdthing,void *face,void *vertices,void *meshinfo)
@@ -3185,6 +3234,58 @@ namespace {
         if(generated && geom &&
            gpu_mesh_materials_ready(*geom,false,
                the_config->profile_renderer?&failure:nullptr)) {
+            if(the_config->enable_saber_trails) {
+                uint64_t const owner=polyline_saber_owner(rdthing);
+                if(owner) {
+                    uint32_t world=0;
+                    uintptr_t const global=
+                        jkgm::engine_material_debug::current_world_global;
+                    if(gpu_span_readable(
+                           reinterpret_cast<void const *>(global),4U))
+                        std::memcpy(&world,
+                            reinterpret_cast<void const *>(global),4U);
+                    if(saber_trail_world!=world) {
+                        gpu_saber_trails.set_world(world);
+                        saber_marker_damage.clear();
+                        saber_trail_world=world;
+                    }
+                    if(saber_blade_draw_frame!=gpu_frame_serial) {
+                        saber_blade_draw_counts.clear();
+                        saber_blade_draw_frame=gpu_frame_serial;
+                    }
+                    unsigned const blade=saber_blade_draw_counts[owner]++;
+                    // Dual sabers draw the same rdPolyline twice per frame.
+                    if(blade<2U) {
+                        std::array<float,3> base{},tip{},past{};
+                        if(jkgm::gpu_polyline_blade_pose(
+                               captured,inverse,base,tip)) {
+                            auto const now=std::chrono::duration<double>(
+                                std::chrono::steady_clock::now().
+                                    time_since_epoch()).count();
+                            bool const active=saber_marker_damage[owner];
+                            jkgm::saber_trail_key const key{
+                                owner,static_cast<uint8_t>(blade)};
+                            if(gpu_saber_trails.advance(key,now,active,
+                                base,tip,the_config->saber_trail_delay,past)) {
+                                double length2=0.0;
+                                for(int n=0;n<3;++n)
+                                    length2+=double(tip[n]-base[n])*
+                                             double(tip[n]-base[n]);
+                                float const length=float(std::sqrt(length2));
+                                std::array<float,3> delayed_world{};
+                                for(int n=0;n<3;++n)
+                                    delayed_world[n]=base[n]+past[n]*length;
+                                auto const delayed_cam=
+                                    jkgm::gpu_3do_native_transform_point(
+                                        view,delayed_world);
+                                auto trail=jkgm::make_gpu_polyline_geometry(
+                                    captured,&delayed_cam);
+                                if(trail)geom=std::move(trail);
+                            }
+                        }
+                    }
+                }
+            }
             jkgm::gpu_3do_instance inst{};
             inst.id=next_gpu_id++;
             inst.geometry=std::move(geom);
@@ -6001,6 +6102,8 @@ namespace {
             std::memcpy(&thing_index,static_cast<uint8_t const *>(thing)+4,4);
         puppet_callback_fn const original=active_previous_callback;
         if(original) original(thing,track,marker);
+        // Observe native saber collision events independently of COG labels.
+        if(valid_thing)observe_saber_marker(thing,marker);
         if(!key_callback_message_registered || !valid_thing ||
            !gpu_span_readable(thing,16)) return;
         uint32_t current_index=0,thing_type=0;
@@ -9279,6 +9382,9 @@ bool detach_hooks()
         DetourDetach(&(PVOID &)RealNativePolylineFace,HookedNativePolylineFace);
         native_polyline_hook_active=false;
         active_gpu_polyline=nullptr;
+        gpu_saber_trails.clear();
+        saber_marker_damage.clear();
+        saber_blade_draw_counts.clear();
     }
     // A particle may share the sprite AddProcFace detour. Detach only the
     // native particle callbacks first; the owner removes AddProcFace below.

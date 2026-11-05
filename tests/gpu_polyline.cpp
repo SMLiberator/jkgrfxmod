@@ -1,4 +1,5 @@
 #include "renderer/gpu_polyline.hpp"
+#include "renderer/saber_trail_history.hpp"
 #include <cassert>
 #include <cmath>
 int main() {
@@ -46,6 +47,66 @@ int main() {
     assert(std::abs(next_frame->vertices[0].u+4.0f)<1.e-5f);
     assert(std::abs(next_frame->vertices[0].v-13.0f)<1.e-5f);
     assert(std::abs(mesh->vertices[0].u-12.5f)<1.e-5f);
+    capture.faces[0].uv_offset={{12.5f,-27.25f}};
+    // An active fan adds one delayed edge quad + one mid-UV triangle to
+    // every side group, without altering either end cap or any MAT reference.
+    std::array<float,3> delayed_camera{{3.0f,4.0f,5.0f}};
+    auto fan=jkgm::make_gpu_polyline_geometry(capture,&delayed_camera);
+    assert(fan && fan->groups.size()==5);
+    assert(fan->vertices.size()==42U);
+    assert(fan->indices.size()==60U);
+    for(unsigned i=0;i<3;++i)assert(fan->groups[i].count==15U);
+    assert(fan->groups[3].count==mesh->groups[3].count);
+    assert(fan->groups[4].count==mesh->groups[4].count);
+    assert(fan->groups[0].material==mesh->groups[0].material);
+    assert(fan->material_refs==mesh->material_refs);
+    assert(std::abs(fan->vertices[0].u-12.5f)<1.e-5f);
+    assert(std::abs(fan->vertices[1].u-20.5f)<1.e-5f);
+    assert(std::abs(fan->vertices[4].u-20.5f)<1.e-5f);
+    assert(std::abs(fan->vertices[1].x-
+                    mesh->vertices[1].x)<1.e-6f);
+    assert(std::abs(fan->vertices[4].x-
+                    (mesh->vertices[0].x+3.f-0.5f))<1.e-5f);
+    assert(std::abs(fan->vertices[8].u-52.5f)<1.e-5f);
+    assert(std::abs(fan->vertices[8].v-(-22.25f))<1.e-5f);
+    std::array<float,3> base_world{},tip_world{};
+    assert(jkgm::gpu_polyline_blade_pose(
+        capture,inverse,base_world,tip_world));
+    double pose_gap=0;
+    for(int i=0;i<3;++i)
+        pose_gap+=double(tip_world[i]-base_world[i])*
+                  double(tip_world[i]-base_world[i]);
+    assert(std::abs(pose_gap-1.0)<1.e-5);
+
+    // An actual 60-ms delay: both edges advance; when motion stops the
+    // delayed blade catches up and the triangle becomes degenerate.
+    jkgm::saber_trail_history history;
+    jkgm::saber_trail_key const right{0x123400005678ULL,0},
+                                  left{0x123400005678ULL,1};
+    jkgm::saber_trail_vec3 origin{{0,0,0}},lag{};
+    assert(!history.advance(right,1.00,true,origin,
+                            {{0,1,0}},0.06,lag));
+    assert(history.advance(right,1.02,true,origin,
+                           {{0.5f,0.8660254f,0}},0.06,lag));
+    assert(std::abs(lag[0])<1.e-5f);
+    assert(!history.advance(left,1.02,false,origin,
+                            {{0.5f,0.8660254f,0}},0.06,lag));
+    assert(history.advance(right,1.04,true,origin,
+                           {{0.8660254f,0.5f,0}},0.06,lag));
+    assert(history.advance(right,1.07,false,origin,
+                           {{0.8660254f,0.5f,0}},0.06,lag));
+    assert(!history.advance(right,1.101,false,origin,
+                            {{0.8660254f,0.5f,0}},0.06,lag));
+    // A moving hilt alone must not generate a luminous triangle.
+    history.clear();
+    assert(!history.advance(right,2.0,true,origin,
+                            {{0,1,0}},0.06,lag));
+    assert(!history.advance(right,2.03,true,{{1,0,0}},
+                            {{1,1,0}},0.06,lag));
+    history.set_world(0x10000U);
+    assert(!history.advance(right,2.04,false,origin,
+                            {{0,1,0}},0.06,lag));
+
     // Malformed native offsets must fail capture, rather than poison the GPU.
     capture.faces[0].uv_offset={{INFINITY,0.0f}};
     assert(!jkgm::make_gpu_polyline_geometry(capture));
