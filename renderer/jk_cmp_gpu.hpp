@@ -49,6 +49,21 @@ bool jk_cmp_read_tint(Read const &read,uint32_t address,
     return true;
 }
 
+// Native rdCache ignores the header tint when a face uses the identity
+// rdColormap. A stored (0,0,0) is NOT generally neutral: non-identity
+// colormaps must still be allowed to multiply lighting to black.
+template<class Read>
+bool jk_cmp_read_effective_tint(Read const &read,uint32_t address,
+                                uint32_t identity_cmp,
+                                std::array<float,3> &tint)
+{
+    if(identity_cmp!=0U && address==identity_cmp) {
+        tint={{1.0f,1.0f,1.0f}};
+        return true;
+    }
+    return jk_cmp_read_tint(read,address,tint);
+}
+
 template<class Read>
 bool jk_cmp_read_lighttable(Read const &read,uint32_t address,
                             jk_cmp_lighttable &table)
