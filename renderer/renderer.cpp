@@ -1637,11 +1637,11 @@ namespace jkgm {
                 LOG_WARNING("Screenshot PNG skipped: invalid presenter size");
                 return;
             }
-            // Preserve JK's SHOTxxxx numbering convention, but never
+            // Preserve JKGM's JSHOTxxx naming convention, but never
             // replace an existing PNG (including from earlier sessions).
             fs::path filename;
             bool unused=false;
-            for(;next_png_screenshot_number<10000U;
+            for(;next_png_screenshot_number<1000U;
                 ++next_png_screenshot_number) {
                 auto const name=native_screenshot::png_filename(
                     next_png_screenshot_number);
@@ -1661,7 +1661,7 @@ namespace jkgm {
                 }
             }
             if(!unused) {
-                LOG_WARNING("Screenshot PNG: all SHOT0000.PNG..SHOT9999.PNG exist");
+                LOG_WARNING("Screenshot PNG: all JSHOT000.PNG..JSHOT999.PNG exist");
                 return;
             }
 
