@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -55,34 +56,58 @@ inline bool gpu_polyline_inverse_view(
     return gpu_3do_matrix_finite(out);
 }
 
-// JKGM rdPolyline_Draw 0x00448D60, verified from the uploaded EXE:
-// first three faces are THREE-VERTEX SideMat triangles sharing a vertex
-// pool: [tip rim, hilt center, next tip rim]. The five-vertex BASE cap
-// at face 3 begins with the hilt center plus four surrounding BASE
-// points. The last four-vertex face (4) is the TIP cap.
-// Do not reverse these or the delay follows the hilt instead of the tip.
+// JKGM's five captured faces have three SideMat triangles followed by a
+// FIVE-vertex TIP fan and a FOUR-vertex BASE quad. The tip fan has a central
+// vertex plus four rim points, whereas the base has four rim points. The
+// previous version REVERSED these caps, so the connecting fan widened toward
+// the hilt and a translated base quad floated beside the saber.
 inline bool gpu_polyline_cap_pose_camera(
     gpu_polyline_capture const &capture,
     std::array<float,3> &base,std::array<float,3> &tip)
 {
-    if(capture.failed || capture.faces.size()!=5U)return false;
-    auto center=[](gpu_polyline_face const &face,unsigned start,
-                   std::array<float,3> &out) {
-        if(face.count<3U || face.count>5U || start>=face.count)return false;
-        out={{0,0,0}};
-        for(unsigned i=start;i<face.count;++i)
-            for(int n=0;n<3;++n) {
-                if(!std::isfinite(face.position[i][n]))return false;
-                out[n]+=face.position[i][n]/float(face.count-start);
-            }
-        return true;
-    };
-    if(!center(capture.faces[3],capture.faces[3].count==5U?1U:0U,base) ||
-       !center(capture.faces[4],0U,tip))
+    if(capture.failed || capture.faces.size()!=5U ||
+       capture.faces[3].count!=5U || capture.faces[4].count!=4U)
         return false;
+    auto const &tip_face=capture.faces[3];
+    auto const &base_face=capture.faces[4];
+    // The central vertex of a 5-point fan is not guaranteed to be first.
+    // Select the point closest to the mean of the other four, then use the
+    // rim mean as the accurate center of the tip (not one edge or the hilt).
+    int center=-1;
+    double least=std::numeric_limits<double>::infinity();
+    for(unsigned skip=0;skip<5U;++skip) {
+        std::array<double,3> mean{};
+        for(unsigned k=0;k<5U;++k) {
+            for(float v:tip_face.position[k])
+                if(!std::isfinite(v))return false;
+            if(k!=skip)
+                for(int n=0;n<3;++n)
+                    mean[n]+=tip_face.position[k][n]*0.25;
+        }
+        double d2=0.0;
+        for(int n=0;n<3;++n) {
+            double const d=tip_face.position[skip][n]-mean[n];
+            d2+=d*d;
+        }
+        if(d2<least){least=d2;center=int(skip);}
+    }
+    if(center<0)return false;
+    base={{0,0,0}};
+    tip={{0,0,0}};
+    for(unsigned k=0;k<4U;++k) {
+        for(int n=0;n<3;++n) {
+            float const x=base_face.position[k][n];
+            if(!std::isfinite(x))return false;
+            base[n]+=x*0.25f;
+        }
+    }
+    for(unsigned k=0;k<5U;++k)
+        if(int(k)!=center)
+            for(int n=0;n<3;++n)
+                tip[n]+=tip_face.position[k][n]*0.25f;
     double len2=0.0;
     for(int n=0;n<3;++n) {
-        double d=double(tip[n])-base[n];
+        double const d=double(tip[n])-base[n];
         len2+=d*d;
     }
     return std::isfinite(len2) && len2>1.e-8 && len2<1.e10;
@@ -102,15 +127,10 @@ inline bool gpu_polyline_blade_pose(
                        [](float x){return std::isfinite(x);});
 }
 
-// The source SideMat is split across two moving blade strips. Its center
-// samples the bright core on a triangle between their *tip* positions.
-// When the trailing tip reaches the current one the triangle collapses,
-// with no fake opacity fade or persistent world-space smear.
-// Preserve all five native faces exactly. When a swing is active, render a
-// second, camera-facing blade around the historical *world-space* direction,
-// then connect both centerlines with one truly three-dimensional triangle.
-// Never move half of a native side face or rotate the historical tip toward
-// the camera: doing either twists the trail and makes it behave like a billboard.
+// The live native blade is never modified. On a swing, move ONLY the
+// historical tip vertices; every base vertex remains at the live hilt.
+// The sole connecting triangle is genuinely three-dimensional.
+
 inline std::shared_ptr<gpu_3do_geometry const>
 make_gpu_polyline_geometry(
     gpu_polyline_capture const &capture,
@@ -123,14 +143,31 @@ make_gpu_polyline_geometry(
         std::all_of(trailing_tip_camera->begin(),trailing_tip_camera->end(),
                     [](float v){return std::isfinite(v);});
     if(trailing_tip_camera && !have_trail)return {};
+    // Classify each side vertex against the actual cap centers instead of
+    // assuming a fixed triangle vertex order. Two tip rims + one base
+    // center and two base rims + one tip center are both supported.
+    std::array<std::array<bool,3>,3> is_tip{};
     if(have_trail) {
-        // These are the verified JKGM five-face polyline shapes.
-        // Unknown layouts are still drawn normally, without a trail.
-        if(capture.faces[3].count!=5U || capture.faces[4].count!=4U)
-            return {};
-        for(unsigned i=0;i<3U;++i)
-            if(capture.faces[i].count!=3U || capture.faces[i].geo!=4U)
-                return {};
+        for(unsigned fi=0;fi<3U;++fi) {
+            auto const &face=capture.faces[fi];
+            if(face.count!=3U || face.geo!=4U)return {};
+            unsigned tips=0U;
+            for(unsigned k=0;k<3U;++k) {
+                double base2=0.0,tip2=0.0;
+                for(int n=0;n<3;++n) {
+                    double const x=face.position[k][n];
+                    if(!std::isfinite(x))return {};
+                    double const bd=x-base_camera[n];
+                    double const td=x-tip_camera[n];
+                    base2+=bd*bd;tip2+=td*td;
+                }
+                is_tip[fi][k]=tip2<base2;
+                if(is_tip[fi][k])++tips;
+            }
+            // A malformed/unknown side layout must not produce a flying
+            // blade. The original native faces are still renderable.
+            if(tips==0U || tips==3U)return {};
+        }
         for(int n=0;n<3;++n)
             tip_delta[n]=(*trailing_tip_camera)[n]-tip_camera[n];
     }
@@ -193,21 +230,17 @@ make_gpu_polyline_geometry(
             result->vertices.push_back(v);
             expand_bounds(v);
         }
-        for(uint32_t k=1;k+1<face.count;++k)
-            result->indices.insert(result->indices.end(),
-                                   {begin,begin+k,begin+k+1});
-
+        // Append indices only AFTER generating any delayed vertices. For
+        // alpha materials, issue the lagging blade first, the 3D wedge next,
+        // and the original native blade last. All retain the native MAT.
+        std::vector<uint32_t> behind_indices;
+        std::vector<uint32_t> join_indices;
         if(have_trail && face_index<3U) {
-            // Each native SideMat triangle is
-            // [tip_rim_0, hilt_center, tip_rim_1].
-            // Copy the COMPLETE camera-facing blade, moving only its
-            // two tip-rim vertices to the real delayed centerline. The
-            // camera-facing rim offsets and native UVs remain unchanged.
             uint32_t const delayed_begin=
                 static_cast<uint32_t>(result->vertices.size());
             for(unsigned k=0;k<3U;++k) {
                 gpu_3do_vertex v=result->vertices[begin+k];
-                if(k!=1U) {
+                if(is_tip[face_index][k]) {
                     v.x+=tip_delta[0];
                     v.y+=tip_delta[1];
                     v.z+=tip_delta[2];
@@ -215,40 +248,47 @@ make_gpu_polyline_geometry(
                 result->vertices.push_back(v);
                 expand_bounds(v);
             }
-            result->indices.insert(result->indices.end(),
-                                   {delayed_begin,delayed_begin+1U,
-                                    delayed_begin+2U});
+            behind_indices={delayed_begin,delayed_begin+1U,
+                            delayed_begin+2U};
 
             if(face_index==1U) {
-                // This is the only connecting triangle. It joins actual
-                // hilt/current-tip/delayed-tip positions in camera space
-                // (which are inverse-transformed back into world space by
-                // the ordinary procedural GPU instance transform).
-                // The SideMat center column retains the core color and
-                // the native base-to-tip UV progression.
-                float const center_u=
-                    (face.uv[0][0]+face.uv[2][0])*0.5f+
-                    face.uv_offset[0];
-                float const center_v=
-                    (face.uv[0][1]+face.uv[2][1])*0.5f+
-                    face.uv_offset[1];
                 auto const &past=*trailing_tip_camera;
+                // Use the actual source UV for the anchored base and the
+                // average of the tip rim UVs. Tip and base must not swap:
+                // the texture's bright core should travel along the blade,
+                // not create an opaque wall at the hilt.
+                std::array<float,2> base_uv{},tip_uv{};
+                unsigned base_count=0U,tip_count=0U;
+                for(unsigned k=0;k<3U;++k) {
+                    auto &dst=is_tip[face_index][k]?tip_uv:base_uv;
+                    dst[0]+=face.uv[k][0]+face.uv_offset[0];
+                    dst[1]+=face.uv[k][1]+face.uv_offset[1];
+                    if(is_tip[face_index][k])++tip_count;
+                    else ++base_count;
+                }
+                if(!base_count || !tip_count)return {};
+                for(int n=0;n<2;++n) {
+                    base_uv[n]/=float(base_count);
+                    tip_uv[n]/=float(tip_count);
+                }
                 uint32_t const join_begin=
                     static_cast<uint32_t>(result->vertices.size());
+                unsigned const template_vertex=
+                    !is_tip[face_index][0]?0U:
+                    (!is_tip[face_index][1]?1U:2U);
                 for(unsigned k=0;k<3U;++k) {
-                    gpu_3do_vertex v=result->vertices[begin+1U];
-                    auto const &p=k==0U?base_camera:
-                                  (k==1U?tip_camera:past);
-                    v.x=p[0];v.y=p[1];v.z=p[2];
-                    if(k!=0U) {v.u=center_u;v.v=center_v;}
+                    gpu_3do_vertex v=result->vertices[begin+template_vertex];
+                    auto const &pt=k==0U?base_camera:
+                                   (k==1U?tip_camera:past);
+                    v.x=pt[0];v.y=pt[1];v.z=pt[2];
+                    auto const &uv=k==0U?base_uv:tip_uv;
+                    v.u=uv[0];v.v=uv[1];
                     v.fax=base_camera[0];
                     v.fay=base_camera[1];
                     v.faz=base_camera[2];
                     result->vertices.push_back(v);
                     expand_bounds(v);
                 }
-                // Compute the geometric normal in its TRUE 3D plane,
-                // not the camera-facing side plane.
                 float const ax=tip_camera[0]-base_camera[0];
                 float const ay=tip_camera[1]-base_camera[1];
                 float const az=tip_camera[2]-base_camera[2];
@@ -268,13 +308,12 @@ make_gpu_polyline_geometry(
                         v.nz=v.lnz=jz;
                     }
                 }
-                result->indices.insert(result->indices.end(),
-                                       {join_begin,join_begin+1U,
-                                        join_begin+2U});
+                join_indices={join_begin,join_begin+1U,join_begin+2U};
             }
-        } else if(have_trail && face_index==4U) {
-            // The hilt cap is shared, but the trailing tip gets its own
-            // camera-facing tip cap, retaining the native shape and UVs.
+        } else if(have_trail && face_index==3U) {
+            // The five-vertex fan is the TIP cap. Move that cap only.
+            // Face 4 is the BASE quad: it is shared by both blades and
+            // MUST NEVER be translated (the previous flying rectangle).
             uint32_t const delayed_begin=
                 static_cast<uint32_t>(result->vertices.size());
             for(unsigned k=0;k<face.count;++k) {
@@ -286,10 +325,17 @@ make_gpu_polyline_geometry(
                 expand_bounds(v);
             }
             for(uint32_t k=1;k+1<face.count;++k)
-                result->indices.insert(result->indices.end(),
-                                       {delayed_begin,delayed_begin+k,
-                                        delayed_begin+k+1});
+                behind_indices.insert(behind_indices.end(),
+                                      {delayed_begin,delayed_begin+k,
+                                       delayed_begin+k+1});
         }
+        result->indices.insert(result->indices.end(),
+                               behind_indices.begin(),behind_indices.end());
+        result->indices.insert(result->indices.end(),
+                               join_indices.begin(),join_indices.end());
+        for(uint32_t k=1;k+1<face.count;++k)
+            result->indices.insert(result->indices.end(),
+                                   {begin,begin+k,begin+k+1});
         // Include the delayed blade and fan in group sorting/culling bounds.
         group.centroid={{0,0,0}};
         float const inv_count=
