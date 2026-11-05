@@ -6604,6 +6604,12 @@ namespace jkgm {
                                                 {{1.0f,1.0f,1.0f}});
             cache.frame_uv_offset.assign(cache.mesh.vertices.size(),
                                          {{0.0f,0.0f}});
+            // In JKGM rdColormap_pIdentityMap lives at 0x73A414.
+            // Native rdCache ignores this CMP's stored tint (even if zero).
+            uint32_t identity_cmp=0;
+            if(!safe_read(0x0073A414U,&identity_cmp,sizeof(identity_cmp)) ||
+               !decal_native_address_ok(identity_cmp))
+                identity_cmp=0;
             size_t light_fallback=0,gouraud_faces=0;
             auto stage_candidate=[&](world_cache_draw_candidate const &candidate) {
                 world_cache_light_sample info{};
@@ -6613,7 +6619,7 @@ namespace jkgm {
                        cache.native_dynamic_light,cache.frame_light_rgb,
                        &info,&cache.frame_light_state,
                        pixel_lighting,global_extra,&cache.frame_sector_tint,
-                       &cache.frame_sector_cmp_tint)) {
+                       &cache.frame_sector_cmp_tint,identity_cmp)) {
                     ++light_fallback;
                     return;
                 }
@@ -7836,11 +7842,17 @@ namespace jkgm {
                         " uploaded_planes=",planes.size()/4U);
             }
             if(!sector_crossing_plane_texture)return;
+            // Share the JK identity-CMP rule with world caching;
+            // snapshot once per frame instead of per crossing Thing.
+            uint32_t identity_cmp=0;
+            if(!read(0x0073A414U,&identity_cmp,sizeof(identity_cmp)) ||
+               !decal_native_address_ok(identity_cmp))
+                identity_cmp=0;
             uint32_t crossing=0;
             for(auto &instance:frame_gpu_3do_instances) {
                 instance.crossing_lighting=sector_crossing_stage_instance(
                     sector_crossing_world,sector_crossing_ranges,
-                    instance,read,true);
+                    instance,read,true,identity_cmp);
                 if(instance.crossing_lighting)++crossing;
             }
             if(the_config->profile_renderer &&
