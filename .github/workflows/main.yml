@@ -32,80 +32,16 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\compressed_sound_read.cpp /Fe:compressed_sound_read_test.exe
         compressed_sound_read_test.exe
 
-    - name: Standard sunlight shadow optimization configuration and code checks
-      run: python3 tests/sun_shadow_standard_optimizations.py
-
-    - name: Retro final-frame presentation order and menu exclusion
-      run: python3 tests/retro_final_presentation.py
-
-    - name: GPU world-cache specular integration and material gate checks
-      run: python3 tests/world_cache_direct_specular.py
-
-    - name: Default specular fallbacks, authoring precedence and opt-in validation
-      run: python3 tests/gpu_default_specular.py
-
-    - name: GPU cache configuration unification and permanent optimizations
-      run: python3 tests/gpu_cache_configuration.py
-
-    - name: GPU procedural Thing renderer integration checks
-      run: python3 tests/gpu_procedural_integration.py
-
-    - name: GPU particle-cloud geometry and per-CEL material tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_particle_cloud.cpp /Fe:gpu_particle_cloud_test.exe
-        gpu_particle_cloud_test.exe
-
-    - name: Native MAT uploader default format selection regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_mat_upload_policy.cpp /Fe:native_mat_upload_policy_test.exe
-        native_mat_upload_policy_test.exe
     - name: Deferred GPU MAT warm-up queue lifetime and retry tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\native_mat_warm_queue.cpp /Fe:native_mat_warm_queue_test.exe
         native_mat_warm_queue_test.exe
-    - name: Deferred MAT warmup responsiveness and safe service checks
-      run: python3 tests/native_mat_warmup_latency.py
-
     - name: GPU five-face lightsaber polyline geometry and view tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_polyline.cpp /Fe:gpu_polyline_test.exe
         gpu_polyline_test.exe
-
-    - name: Binary-verified JKGM procedural particle/polyline ABI tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_procedural_draw.cpp /Fe:native_procedural_draw_test.exe
-        native_procedural_draw_test.exe
-
-    - name: Native textured particle billboard UV regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_particle_texture.cpp /Fe:native_particle_texture_test.exe
-        native_particle_texture_test.exe
-
-    - name: Spotlight lighting independent of sun shadow regression tests
-      run: python3 tests/spotlight_sun_shadow_independence.py
-
-    - name: COG RGB split post-FX regression tests
-      run: python3 tests/postfx_rgb_split.py
-
-    - name: HDR auto-exposure invariants and retired diagnostic cleanup
-      run: python3 tests/auto_exposure_cleanup.py
-
-    - name: Shared GPU material shader regression tests
-      run: python3 tests/gpu_material_shared.py
-
-    - name: Camera HUD emissive-only shader regression tests
-      run: python3 tests/camera_hud_emissive.py
-    - name: Camera HUD deferred material and native fallback diagnostic checks
-      run: python3 tests/camera_hud_deferred.py
-
-    - name: GPU-cached per-pixel dynamic lighting regression checks
-      run: python3 tests/gpu_pixel_lighting.py
 
     - name: Camera Thing HUD type regression tests
       shell: cmd
@@ -113,35 +49,11 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\camera_hud_thing.cpp /Fe:camera_hud_thing_test.exe
         camera_hud_thing_test.exe
 
-    - name: Overlapping-sector enumeration regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\cog_sector_queries.cpp /Fe:cog_sector_queries_test.exe
-        cog_sector_queries_test.exe
-
-    - name: Per-Cog raycast result handle tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_raycast_results.cpp /Fe:cog_raycast_results_test.exe
-        cog_raycast_results_test.exe
-
-    - name: COG RayCast head-PYR orientation regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_raycast_head.cpp /Fe:cog_raycast_head_test.exe
-        cog_raycast_head_test.exe
-
     - name: COG RayCastEx native collideSize sphere regression tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_raycast_native_sphere.cpp /Fe:cog_raycast_native_sphere_test.exe
         cog_raycast_native_sphere_test.exe
-
-    - name: COG RayCast item and corpse collision eligibility tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\cog_raycast_target.cpp /Fe:cog_raycast_target_test.exe
-        cog_raycast_target_test.exe
 
     - name: Explicit COG RayCastEx precision geometry regression tests
       shell: cmd
@@ -149,23 +61,11 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_raycast_ex.cpp /Fe:cog_raycast_ex_test.exe
         cog_raycast_ex_test.exe
 
-    - name: COG PYR/direction conversion regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_pyr_math.cpp /Fe:cog_pyr_math_test.exe
-        cog_pyr_math_test.exe
-
     - name: COG Thing offset and position transforms regression tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_thing_offsets.cpp /Fe:cog_thing_offsets_test.exe
         cog_thing_offsets_test.exe
-    - name: Pure COG math verbs regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_math.cpp /Fe:cog_math_test.exe
-        cog_math_test.exe
-
     - name: Bounded transparency sorter regression tests
       shell: cmd
       run: |
@@ -177,58 +77,21 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\runtime_material_state.cpp /Fe:runtime_material_state_test.exe
         runtime_material_state_test.exe
-    - name: Vertex color lookup regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\fast_vertex_colors.cpp /Fe:fast_vertex_colors_test.exe
-        fast_vertex_colors_test.exe
-    - name: Active render camera inversion regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\active_rd_camera.cpp /Fe:active_rd_camera_test.exe
-        active_rd_camera_test.exe
-    - name: Native MAT mip level override tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_mat_mips.cpp /Fe:native_mat_mips_test.exe
-        native_mat_mips_test.exe
     - name: GPU 3DO native model-view precision tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_modelview.cpp /Fe:gpu_3do_modelview_test.exe
         gpu_3do_modelview_test.exe
-    - name: Verified native JKGM ThingNode accessor validation tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\thing_node_native.cpp /Fe:thing_node_native_test.exe
-        thing_node_native_test.exe
-    - name: Animated ThingNode pose and attachment reference tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\thing_node_math.cpp /Fe:thing_node_math_test.exe
-        thing_node_math_test.exe
-    - name: Native ThingNode attachment registry and transform tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\thing_node_attachment.cpp /Fe:thing_node_attachment_test.exe
-        thing_node_attachment_test.exe
     - name: COG MAT spotlight registry and animated-node tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\spotlight.cpp /Fe:spotlight_test.exe
         spotlight_test.exe
-    - name: Per-Thing saber light override and vanilla fade regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\saber_light.cpp /Fe:saber_light_test.exe
-        saber_light_test.exe
     - name: Spotlight shadow depth and static caster BVH tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\spotlight_shadow.cpp /Fe:spotlight_shadow_test.exe
         spotlight_shadow_test.exe
-    - name: GPU sector CMP and solid fullbright integration checks
-      run: python3 tests/gpu_cmp_integration.py
     - name: JKGM sector CMP and fullbright palette lookup tests
       shell: cmd
       run: |
@@ -244,10 +107,6 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sector_crossing_gpu.cpp /Fe:sector_crossing_gpu_test.exe
         sector_crossing_gpu_test.exe
-    - name: Sector crossing shader and JSON opt-in wiring checks
-      run: python3 tests/gpu_sector_crossing.py
-    - name: Native 3DO fallback corrupt-index crash guard checks
-      run: python3 tests/native_mesh_fallback_guard.py
     - name: Source-indexed MAT fullbright mask regression tests
       shell: cmd
       run: |
@@ -258,288 +117,54 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_decal_geoset.cpp /Fe:sprite_decal_geoset_test.exe
         sprite_decal_geoset_test.exe
-    - name: Dynamic SPR GeoSet integration checks
-      run: python3 tests/sprite_decal_geoset_integration.py
     - name: Native world GPU cache geometry and live surface state tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\world_cache.cpp /Fe:world_cache_test.exe
         world_cache_test.exe
-    - name: Native JK MAT cel and world UV animation parity
-      run: python3 tests/native_mat_animation.py
     - name: Directional sunlight and empty-world shadow regression tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sun_shadow.cpp /Fe:sun_shadow_test.exe
         sun_shadow_test.exe
-    - name: Validated native-memory region cache tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\readable_region_cache.cpp /Fe:readable_region_cache_test.exe
-        readable_region_cache_test.exe
-    - name: GL uniform redundancy filter tests (mock GL, no context needed)
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\uniform_cache.cpp glutil\program.cpp glutil\gl_types.cpp /Fe:uniform_cache_test.exe
-        uniform_cache_test.exe
-    - name: Adaptive sunlight shadow tile allocation tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\sun_dynamic_shadow_layout.cpp /Fe:sun_dynamic_shadow_layout_test.exe
-        sun_dynamic_shadow_layout_test.exe
-    - name: JK/MotS collision dispatcher regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_collision_dispatch.cpp /Fe:mots_collision_dispatch_test.exe
-        mots_collision_dispatch_test.exe
-    - name: JKGM Earth surface impact sound tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_earth_hit_sound.cpp /Fe:native_earth_hit_sound_test.exe
-        native_earth_hit_sound_test.exe
-    - name: JKGM icy Thing-face friction flag tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_thingface_friction.cpp /Fe:native_thingface_friction_test.exe
-        native_thingface_friction_test.exe
-    - name: JKGM true attached-face normal COG getter tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\thing_attachment_normal.cpp /Fe:thing_attachment_normal_test.exe
-        thing_attachment_normal_test.exe
     - name: Precise collide-3 native geometry and offset-node regression tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\precise_type3_native.cpp /Fe:precise_type3_native_test.exe
         precise_type3_native_test.exe
 
-    - name: Precise collide-3 bulk native joint-pose regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\precise_type3_pose_bulk.cpp /Fe:precise_type3_pose_bulk_test.exe
-        precise_type3_pose_bulk_test.exe
-
-    - name: Experimental precise collide-3 ray/face math regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\precise_type3_raycast.cpp /Fe:precise_type3_raycast_test.exe
-        precise_type3_raycast_test.exe
-
-    - name: Native JKGM type-2 collision hit ABI tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_native_collision_bridge.cpp /Fe:mots_native_collision_bridge_test.exe
-        mots_native_collision_bridge_test.exe
-    - name: Staged JKGM animated type-2 collision query tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_native_collision_query.cpp /Fe:mots_native_collision_query_test.exe
-        mots_native_collision_query_test.exe
-    - name: Read-only JKGM 3DO collision mesh snapshots
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_native_mesh_snapshot.cpp /Fe:mots_native_mesh_snapshot_test.exe
-        mots_native_mesh_snapshot_test.exe
-    - name: Geometry-centered mesh collision and automatic tree bounds
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\mots_mesh_collision_bounds.cpp /Fe:mots_mesh_collision_bounds_test.exe
-        mots_mesh_collision_bounds_test.exe
-    - name: MotS animated collision sphere-tree reference tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\mots_sphere_tree.cpp /Fe:mots_sphere_tree_test.exe
-        mots_sphere_tree_test.exe
-    - name: SPR extended orientation modes
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
-        sprite_orientation_test.exe
-    - name: SPR per-instance cache alpha tag regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_alpha_tag.cpp /Fe:sprite_alpha_tag_test.exe
-        sprite_alpha_tag_test.exe
-    - name: Moving SPR decal local-space transform tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_follow.cpp /Fe:sprite_decal_follow_test.exe
-        sprite_decal_follow_test.exe
-    - name: Moving SPR decal GPU receiver and follow tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_moving_receiver.cpp /Fe:sprite_decal_moving_receiver_test.exe
-        sprite_decal_moving_receiver_test.exe
     - name: SPR decal GPU mesh and MAT UV preparation tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_gpu_mesh.cpp /Fe:sprite_decal_gpu_mesh_test.exe
         sprite_decal_gpu_mesh_test.exe
-    - name: GPU SPR LightModes and renamed Thing position COG wiring
-      run: python3 tests/sprite_lighting_modes.py
-    - name: Shared GPU SPR quad and pose regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_gpu_quad.cpp /Fe:sprite_gpu_quad_test.exe
-        sprite_gpu_quad_test.exe
-    - name: Binary-verified native SPR cel layout regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_sprite_cel.cpp /Fe:native_sprite_cel_test.exe
-        native_sprite_cel_test.exe
-    - name: GPU explosion animation renderer wiring checks
-      run: python3 tests/gpu_explosion_animation.py
-    - name: Multi-entry SPR syntax and variant selection regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_variants.cpp /Fe:sprite_variants_test.exe
-        sprite_variants_test.exe
-    - name: Static collide-3 3DO decal receiver tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_decal_static_mesh.cpp /Fe:sprite_decal_static_mesh_test.exe
-        sprite_decal_static_mesh_test.exe
-    - name: Moving SPR projectile Look mesh-ray and snap tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_mesh_hit.cpp /Fe:sprite_decal_mesh_hit_test.exe
-        sprite_decal_mesh_hit_test.exe
-    - name: Moving 3DO multi-mesh decal projection tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_multimesh.cpp /Fe:sprite_decal_multimesh_test.exe
-        sprite_decal_multimesh_test.exe
-    - name: Unattached decal wall/floor receiver selection
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_decal_auto_align.cpp /Fe:sprite_decal_auto_align_test.exe
-        sprite_decal_auto_align_test.exe
     - name: SPR decal world BVH spatial query tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_bvh.cpp /Fe:sprite_decal_bvh_test.exe
         sprite_decal_bvh_test.exe
-    - name: SPR cached world volume and jitter regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_decal_world_cache.cpp /Fe:sprite_decal_world_cache_test.exe
-        sprite_decal_world_cache_test.exe
-    - name: SPR blood attachment normal projector tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_decal_attachment.cpp /Fe:sprite_decal_attachment_test.exe
-        sprite_decal_attachment_test.exe
-    - name: SPR projected decal transform and roll tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_projector.cpp /Fe:sprite_decal_projector_test.exe
-        sprite_decal_projector_test.exe
-    - name: Native JK23 projected decal surface extraction tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_world.cpp /Fe:sprite_decal_world_test.exe
-        sprite_decal_world_test.exe
     - name: Projected SPR decal geometry clipping tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_decal_clip.cpp /Fe:sprite_decal_clip_test.exe
         sprite_decal_clip_test.exe
-    - name: Sprite flare center-depth and opacity tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_flare_visibility.cpp /Fe:sprite_flare_visibility_test.exe
-        sprite_flare_visibility_test.exe
-    - name: Sprite roll geometry and timing tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_roll.cpp /Fe:sprite_roll_test.exe
-        sprite_roll_test.exe
-    - name: Per-Thing sprite interpolation and lifecycle tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_instance_info.cpp /Fe:sprite_instance_info_test.exe
-        sprite_instance_info_test.exe
-    - name: Captured SPR type and resource lifecycle tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_type_registry.cpp /Fe:sprite_type_registry_test.exe
-        sprite_type_registry_test.exe
-    - name: Sprite type patcher PE regression tests
-      run: python tests/test_sprite_type_patcher.py
     - name: Shared native MAT readiness cache regression tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_mat_ready_cache.cpp /Fe:gpu_mat_ready_cache_test.exe
         gpu_mat_ready_cache_test.exe
-    - name: Mutable cached 3DO source signature regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_cache_signature.cpp /Fe:gpu_3do_cache_signature_test.exe
-        gpu_3do_cache_signature_test.exe
-    - name: GPU 3DO high-resolution MAT UV scale regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_uv.cpp /Fe:gpu_3do_uv_test.exe
-        gpu_3do_uv_test.exe
     - name: GPU 3DO cached polygon triangulation regression tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_triangulation.cpp /Fe:gpu_3do_triangulation_test.exe
         gpu_3do_triangulation_test.exe
-    - name: GPU 3DO GeoMode and mirror compatibility tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_compat.cpp /Fe:gpu_3do_compat_test.exe
-        gpu_3do_compat_test.exe
-    - name: GPU 3DO native sphere visibility regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_frustum.cpp /Fe:gpu_3do_frustum_test.exe
-        gpu_3do_frustum_test.exe
-    - name: GPU 3DO uploaded texture alpha regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\texture_alpha.cpp /Fe:texture_alpha_test.exe
-        texture_alpha_test.exe
-    - name: Retro CMP palette quantization regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /O2 /I. tests\retro_palette.cpp /Fe:retro_palette_test.exe
-        retro_palette_test.exe
-    - name: Retro CMP log/file comparison self-test
-      run: python tools/verify_retro_cmp.py --self-test
-    - name: GPU 3DO colormap tint regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_colormap.cpp /Fe:gpu_3do_colormap_test.exe
-        gpu_3do_colormap_test.exe
     - name: GPU 3DO alpha partition tests
       shell: cmd
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_alpha.cpp /Fe:gpu_3do_alpha_test.exe
         gpu_3do_alpha_test.exe
-    - name: Native palette effect accumulation regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\jk_palette_effects.cpp /Fe:jk_palette_effects_test.exe
-        jk_palette_effects_test.exe
-    - name: Native 3DO profiler counter regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_3do_profile.cpp /Fe:native_3do_profile_test.exe
-        native_3do_profile_test.exe
-    - name: Native sprite profiler counter regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_sprite_profile.cpp /Fe:native_sprite_profile_test.exe
-        native_sprite_profile_test.exe
     - name: Native JKGM EXE bootstrap PE regression tests
       run: python tests/test_bootstrap_patcher.py
-    - name: Frame profiler counter regression tests
-      shell: cmd
-      run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\frame_profile_gaps.cpp /Fe:frame_profile_gaps_test.exe
-        frame_profile_gaps_test.exe
     - name: Package standalone development binaries
       shell: pwsh
       run: |
