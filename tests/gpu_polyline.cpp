@@ -145,7 +145,7 @@ int main() {
     std::array<float,3> delayed_camera{{.5f,0.0f,1.0f}};
     auto fan=jkgm::make_gpu_polyline_geometry(
         native_capture,&delayed_camera);
-    assert(fan && fan->groups.size()==5U);
+    assert(fan && fan->groups.size()==3U);
     auto correct_direction=jkgm::make_gpu_polyline_geometry(
         reversed_caps,&delayed_camera,&actual_hilt_camera);
     assert(correct_direction);
@@ -162,11 +162,13 @@ int main() {
     assert(referenced_fan->indices==fan->indices);
     assert(fan->vertices.size()==30U);
     assert(fan->indices.size()==36U); // 8 native +3 delayed +1 fan
-    assert(fan->groups[0].count==6U);
-    assert(fan->groups[1].count==9U);
-    assert(fan->groups[2].count==6U);
-    assert(fan->groups[3].count==9U); // only native BASE cap
-    assert(fan->groups[4].count==6U); // only native TIP cap
+    // One SideMat draw range keeps all delayed geometry BEHIND the live
+    // blade even if the GPU renderer sorts translucent MAT groups.
+    assert(fan->groups[0].count==21U);
+    assert(fan->groups[1].count==9U); // native BASE cap
+    assert(fan->groups[2].count==6U); // native TIP cap
+    assert(fan->groups[0].offset==0U &&
+           fan->groups[1].offset==21U && fan->groups[2].offset==30U);
     assert(fan->material_refs.size()==2U);
     unsigned const native_begin[5]={0,3,6,9,14};
     unsigned const fan_begin[5]={0,6,15,21,26};
@@ -178,7 +180,8 @@ int main() {
                    original.z==live.z);
             assert(original.u==live.u && original.v==live.v);
         }
-        assert((fan->groups[f].face_type&1U)!=0U);
+        if(f==0 || f>=3)
+            assert((fan->groups[f==0?0:f-2].face_type&1U)!=0U);
     }
     // The first synthetic side is [TIP_RIM, BASE, TIP_RIM].
     assert(std::abs(fan->vertices[3].x-.44f)<1.e-5f);
@@ -203,13 +206,15 @@ int main() {
     assert(fan->vertices[21].z==0.f);
     assert(fan->vertices[26].x==native_mesh->vertices[14].x);
     assert(fan->vertices[26].z==1.f);
-    // Delayed triangle, 3D connector, live triangle in painter order.
-    assert(fan->indices[6]==9U && fan->indices[7]==10U &&
-           fan->indices[8]==11U);
-    assert(fan->indices[9]==12U && fan->indices[10]==13U &&
-           fan->indices[11]==14U);
-    assert(fan->indices[12]==6U && fan->indices[13]==7U &&
-           fan->indices[14]==8U);
+    // All three delayed sides, the 3D connector, then all THREE live
+    // sides. Native side geometry is unchanged; only index order changes.
+    const unsigned ordered_side_triangles[7][3]={
+        {3,4,5},{9,10,11},{18,19,20},{12,13,14},
+        {0,1,2},{6,7,8},{15,16,17}};
+    for(unsigned tri=0;tri<7U;++tri)
+        for(unsigned k=0;k<3U;++k)
+            assert(fan->indices[tri*3U+k]==
+                   ordered_side_triangles[tri][k]);
 
     // Opposite native side ordering is independently classified:
     // [BASE_RIM, TIP_CENTER, BASE_RIM], and only its tip vertex moves.
