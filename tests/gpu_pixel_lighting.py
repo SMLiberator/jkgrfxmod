@@ -67,6 +67,15 @@ assert "range_distance*attenuation_min,0.0)*along" in vert
 assert "load_shader_source(filename.parent_path()/name" in program
 assert "float jk_point_sample(" in shared
 assert "vec3 jk_point_compose(" in shared
+assert "uniform vec3 light_color[16];" in frag
+assert "uniform vec3 light_color[16];" in world_frag
+assert "added+=light_color[i]*jk_point_sample(" in frag
+assert "added+=light_color[i]*jk_point_sample(" in world_frag
+assert "vec3 added=vec3(0.0);" in frag
+assert "vec3 added=vec3(0.0);" in world_frag
+assert "frame_saber_light_colors=saber_light_rgb::get_registry().consume();" in wiring
+assert 'light_color.push_back(gl::get_uniform_location(' in program
+assert "frame_saber_light_colors.valid" in wiring
 for stage in (frag, world_frag):
     assert "jk_point_sample(" in stage
 for stage in (frag, world_frag):
@@ -117,8 +126,8 @@ for texture_alpha,material_alpha in ((1.0,1.0),(0.5,1.0),(1.0,0.7)):
     assert 0.0<=expected_rgb<=actual_alpha
 assert "discard;" in world_frag
 assert "vec3 lighting=cached_lit_rgb;" in world_frag
-assert "if(added<=0.0) return baked;" in frag
-assert "if(added<=0.0) return baked;" in shared
+assert "if(all(lessThanEqual(added,vec3(0.0)))) return baked;" in frag
+assert "if(all(lessThanEqual(added,vec3(0.0)))) return baked;" in shared
 assert "pixel_dynamic_lighting!=0" in frag
 assert "pixel_jk_diffuse_lighting(diffuse_local_normal)" in frag
 assert "jk_fragment_lit" in frag
