@@ -19,8 +19,11 @@ int main()
     assert(lerp({{1,0,0}},{{0,0,1}},-1.f)==(rgb{{1.f,0.f,0.f}}));
 
     registry r;
-    r.prepare_world(0x100000U);
-    assert(r.set(0x110000U,0U,true,{{0.6f,0.3f,0.f}},0.0,10.0));
+    r.prepare_static_world(0x100000U);
+    assert(r.set(0x110000U,0U,true,{{0.6f,0.3f,0.f}},0.0,10.0,
+                 true)); // authored in Static.jkl
+    // Loading a separate level JKL must not discard Static.jkl hues.
+    r.prepare_world(0x200000U);
     assert(r.get(0x110000U,0U,x,10.0));
     assert(near(x[0],1.f)&&near(x[1],0.5f)); // template normalized
     r.inherit(0x120000U,42U,0x110000U,12.0); // spawn from template
@@ -53,9 +56,20 @@ int main()
     assert(!r.set(0x120000U,43U,false,{{1,0,0}},3601,30));
     assert(!r.set(0x120000U,43U,false,{{1,0,0}},0,
                   std::numeric_limits<double>::quiet_NaN()));
-    r.prepare_world(0x200000U);
-    assert(!r.get(0x110000U,0U,x,30.0));
-    assert(!r.get(0x120000U,43U,x,30.0));
+    // A level template can inherit a static parent, but a future level
+    // must discard its override and spawned Thing without losing the parent.
+    assert(r.get(0x110000U,0U,x,30.0));
+    assert(r.set(0x130000U,0U,true,x,0.0,30.0));
+    assert(r.get(0x130000U,0U,x,30.0));
+    assert(r.set(0x140000U,44U,false,{{1.f,0.f,0.f}},0.0,30.0));
+    r.prepare_world(0x300000U);
+    assert(r.get(0x110000U,0U,x,31.0));
+    assert(!r.get(0x130000U,0U,x,31.0));
+    assert(!r.get(0x140000U,44U,x,31.0));
+    assert(!r.get(0x120000U,43U,x,31.0));
+    // Reloading a new Static.jkl world also invalidates old static colors.
+    r.prepare_static_world(0x400000U);
+    assert(!r.get(0x110000U,0U,x,32.0));
     r.clear();
     assert(r.things(30.0).empty());
     return 0;
