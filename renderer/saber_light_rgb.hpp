@@ -57,11 +57,13 @@ inline bool find_unique_native_light(
         float const tolerance=std::max(0.0001f,0.001f*saber_intensity);
         if(std::fabs(l.intensity-saber_intensity)>tolerance)continue;
         double dist2=0;
+        bool finite=true;
         for(unsigned n=0;n<3;++n) {
+            if(!std::isfinite(l.position[n])){finite=false;break;}
             double const d=double(l.position[n])-saber_pos[n];
             dist2+=d*d;
         }
-        if(dist2>1.e-6)continue;
+        if(!finite || dist2>1.e-6)continue;
         if(found)return false; // Ambiguous: preserve original white light.
         id=l.id;
         found=true;
