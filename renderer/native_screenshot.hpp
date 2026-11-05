@@ -58,7 +58,7 @@ bool verified_jk_screenshot(Reader const &read,uintptr_t module_base)
         std::memcpy(&straddr,code.data()+i,sizeof(straddr));
         if(straddr<jk_executable_base || straddr>=0x02000000U)
             continue;
-        std::array<char,16> format{};
+        std::array<char,13> format{};
         if(!read(straddr,format.data(),format.size()))
             continue;
         if(screenshot_format(format.data(),format.size()))
