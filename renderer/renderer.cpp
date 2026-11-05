@@ -8056,7 +8056,16 @@ namespace jkgm {
             auto const now=std::chrono::duration<double>(
                 std::chrono::steady_clock::now().time_since_epoch()).count();
             auto const entries=registry.things(now);
-            if(entries.empty())return;
+            if(entries.empty()) {
+                if(the_config && the_config->profile_renderer_verbose &&
+                   gpu_3do_present_serial%120U==0U) {
+                    auto const retained=registry.static_template_count();
+                    if(retained>0U)
+                        LOG_INFO("GPU THING LIGHT RGB: static_templates=",
+                                 retained," runtime_colored_things=0");
+                }
+                return;
+            }
 
             auto const read=[](uintptr_t ptr,void *dst,size_t bytes) {
                 if(ptr<0x10000U || !bytes ||
