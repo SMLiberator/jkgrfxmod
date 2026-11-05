@@ -134,6 +134,9 @@
     <ClInclude Include="compressed_sound_codec.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="native_screenshot.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="compressed_sound_io.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
