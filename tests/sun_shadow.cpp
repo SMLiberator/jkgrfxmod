@@ -14,6 +14,14 @@ int main()
     // Optional sun range: zero keeps the old unlimited behaviour; a positive
     // range clamps the far cascade and fades added sun out completely.
     assert(thing_casts_sun_shadows(0U));
+    // 0x20 switches the GPU-cached model's Thing point lights to
+    // JK-style Gouraud/vertex lighting. HUDs are always exempt; a
+    // regular model with any other flag retains its configured pixel path.
+    assert(!thing_uses_skybox_vertex_lights(0U,false));
+    assert(thing_uses_skybox_vertex_lights(thingflag_skybox,false));
+    assert(thing_uses_skybox_vertex_lights(thingflag_skybox|0x100U,false));
+    assert(!thing_uses_skybox_vertex_lights(thingflag_skybox,true));
+    assert(!thing_uses_skybox_vertex_lights(0x10U,false));
     assert(!thing_casts_sun_shadows(0x10U));
     assert(!thing_casts_sun_shadows(0x20U));
     assert(!thing_casts_sun_shadows(0x80000U));
