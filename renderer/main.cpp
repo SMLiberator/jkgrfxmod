@@ -3184,6 +3184,20 @@ namespace {
         if(!jkgm::saber_light_rgb::find_unique_native_light(
                lights.data(),found,pos,strength,native_id))return;
         jkgm::saber_light_rgb::get_registry().add(native_id,color);
+        if(the_config && the_config->profile_renderer_verbose) {
+            static uint64_t last_window=~uint64_t(0);
+            static unsigned count_in_window=0;
+            uint64_t const window=gpu_frame_serial/120U;
+            if(last_window!=window) {
+                last_window=window;
+                count_in_window=0;
+            }
+            if(count_in_window++<2U)
+                LOG_INFO("GPU SABER RGB: native_light_id=",native_id,
+                         " solid_color_index=",palette_index,
+                         " rgb=",color[0],",",color[1],",",color[2],
+                         " intensity=",strength);
+        }
     }
 
     void __cdecl HookedNativePolylineFace(
