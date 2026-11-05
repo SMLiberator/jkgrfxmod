@@ -13,7 +13,6 @@
 #include "gpu_3do_preview.hpp"
 #include "gpu_polyline.hpp"
 #include "saber_trail_history.hpp"
-#include "saber_trail_facing.hpp"
 #include "native_saber_damage.hpp"
 #include "native_mat_warm_queue.hpp"
 #include "native_mat_upload_policy.hpp"
@@ -3258,18 +3257,12 @@ namespace {
                                 std::array<float,3> delayed_world{};
                                 for(int n=0;n<3;++n)
                                     delayed_world[n]=base[n]+past[n]*length;
-                                auto const original_delayed_cam=
+                                // Keep the historical tip in its TRUE 3D
+                                // position. Only the two blade meshes are
+                                // camera-facing; their joining triangle is not.
+                                auto const delayed_cam=
                                     jkgm::gpu_3do_native_transform_point(
                                         view,delayed_world);
-                                std::array<float,3> camera_base{},camera_tip{};
-                                std::array<float,3> facing_delayed_cam=
-                                    original_delayed_cam;
-                                if(jkgm::gpu_polyline_cap_pose_camera(
-                                       captured,camera_base,camera_tip))
-                                    jkgm::saber_trail_facing_tip(
-                                        camera_base,camera_tip,
-                                        original_delayed_cam,facing_delayed_cam);
-                                auto const &delayed_cam=facing_delayed_cam;
                                 auto trail=jkgm::make_gpu_polyline_geometry(
                                     captured,&delayed_cam);
                                 // make_gpu_polyline_geometry() also returns
