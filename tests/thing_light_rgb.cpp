@@ -35,6 +35,12 @@ int main()
     assert(near(x[0],1.f)&&near(x[1],0.5f)&&near(x[2],0.f));
     assert(r.get(0x120000U,42U,x,21.0));
     assert(near(x[0],0.5f)&&near(x[1],0.25f)&&near(x[2],0.5f));
+    // A clone mid-fade inherits the exact interpolated color, not a
+    // renormalized hue (which would distort its intensity).
+    r.inherit(0x150000U,45U,0x120000U,21.0);
+    assert(r.get(0x150000U,45U,x,21.0));
+    assert(near(x[0],0.5f)&&near(x[1],0.25f)&&near(x[2],0.5f));
+    r.erase(0x150000U);
     assert(r.get(0x120000U,42U,x,22.0));
     assert(x==(rgb{{0.f,0.f,1.f}}));
     // Readout during the fade matches what the shader receives; no
