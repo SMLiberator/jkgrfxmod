@@ -50,6 +50,7 @@ namespace jkgm {
         bool nonplanar=false; // keep per-face JK culling, bypass GL triangle culling
         bool solid_color=false; // face GeoMode 3: palette-indexed MAT, no texture
         bool saber_trail_join=false; // last composite triangle of a procedural saber, after tip caps
+        bool saber_trail_tip_bridge=false; // SideMat strip connecting past/live tip rims, just before the 3D fan
     };
     struct gpu_3do_geometry {
         std::vector<gpu_3do_face_plane> face_planes;
