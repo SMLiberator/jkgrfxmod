@@ -1691,9 +1691,9 @@ namespace jkgm {
                                 unsigned(read_error));
                     return;
                 }
-                native_screenshot::flip_rgba_rows(
-                    reinterpret_cast<uint8_t *>(img.data.data()),
-                    size_t(w),size_t(h));
+                auto *rgba=reinterpret_cast<uint8_t *>(img.data.data());
+                native_screenshot::flip_rgba_rows(rgba,size_t(w),size_t(h));
+                native_screenshot::force_opaque_alpha(rgba,size_t(w),size_t(h));
                 auto output=make_file_output_stream(filename);
                 store_image_png(output.get(),img);
                 output.reset(); // flush/close before reporting success
