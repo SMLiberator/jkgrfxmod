@@ -26,6 +26,7 @@
 #include "thing_node_attachment.hpp"
 #include "spotlight.hpp"
 #include "saber_light.hpp"
+#include "saber_light_rgb.hpp"
 #include "thing_attachment_normal.hpp"
 #include "native_thingface_friction.hpp"
 #include "native_earth_hit_sound.hpp"
@@ -758,6 +759,7 @@ namespace {
             };
             out.radius=radius;
             out.intensity=strength;
+            out.native_id=id;
         }
         return true;
     }
@@ -3107,6 +3109,83 @@ namespace {
             read,reinterpret_cast<uintptr_t>(rdthing),state);
     }
 
+    // JKGM actor saber light: sithRender emits one existing rdLight at
+    // SithThing.actorParams.saberBladePos (+0x198) with the native light
+    // strength (+0x1a4). Color it by native light ID, never add a second
+    // point source or tint unrelated Thing lights.
+    void capture_saber_light_rgb(void const *rdthing,
+                                 jkgm::gpu_polyline_capture const &capture)
+    {
+        if(capture.failed || capture.faces.size()!=5U ||
+           capture.faces[0].material<0x10000U ||
+           !jkgm::engine_material_debug::matches_tested_executable())
+            return;
+        jkgm::native_saber_damage_state saber{};
+        if(!polyline_native_swing_state(rdthing,saber) || !saber.owner)
+            return;
+        uint32_t const owner=uint32_t(saber.owner>>32);
+        auto const read=[](uintptr_t ptr,void *dst,size_t bytes)->bool {
+            if(ptr<0x10000U || !gpu_span_readable(
+                 reinterpret_cast<void const *>(ptr),bytes))return false;
+            std::memcpy(dst,reinterpret_cast<void const *>(ptr),bytes);
+            return true;
+        };
+        std::array<float,3> pos{};
+        float strength=0;
+        if(!read(uintptr_t(owner)+jkgm::saber_light::native_blade_position_offset,
+                 pos.data(),sizeof(pos)) ||
+           !read(uintptr_t(owner)+jkgm::saber_light::native_intensity_offset,
+                 &strength,sizeof(strength)) ||
+           !std::isfinite(strength) || strength<=0.0f)return;
+        using namespace jkgm::engine_material_debug;
+        native_material mat{};
+        if(!read_object(capture.faces[0].material,mat) ||
+           mat.num_texinfo==0U || mat.num_texinfo>16U)return;
+        int const cel=std::clamp(capture.faces[0].cel<0
+            ?int(mat.current_cel):capture.faces[0].cel,
+            0,int(mat.num_texinfo)-1);
+        native_texinfo info{};
+        if(!read_object(mat.texinfo[cel],info))return;
+        uint32_t palette_index=0;
+        std::memcpy(&palette_index,info.header+4U,4U);
+        if(palette_index>=256U)return;
+        uint32_t cmp=0;
+        if(!read_object(0x0073A414U,cmp))return; // identity CMP
+        uint8_t rgb[3]{};
+        if(!read_bytes(uintptr_t(cmp)+jkgm::jk_cmp_colors_offset+
+                       palette_index*3U,rgb,sizeof(rgb)))return;
+        auto const color=jkgm::saber_light_rgb::from_palette(
+            rgb[0],rgb[1],rgb[2]);
+        if(!jkgm::saber_light_rgb::colored(color))return;
+
+        uint32_t camera=0;
+        int32_t count=0;
+        if(!read(0x0073A418U,&camera,4U) ||
+           !read(uintptr_t(camera)+0x58U,&count,4U) ||
+           count<=0 || count>64)return;
+        std::array<jkgm::saber_light_rgb::camera_light,64> lights{};
+        size_t found=0U;
+        for(int i=0;i<count;++i) {
+            uint32_t source=0U,idx=0U,enabled=0U;
+            float power=0.0f;
+            if(!read(uintptr_t(camera)+0x5cU+uintptr_t(i)*4U,
+                     &source,4U) ||
+               !read(source,&idx,4U) || idx>=64U ||
+               !read(uintptr_t(source)+8U,&enabled,4U) ||
+               !read(uintptr_t(source)+0x18U,&power,4U))
+                return;
+            if(!enabled || !std::isfinite(power) || power<=0.0f)continue;
+            auto &light=lights[found++];
+            light.id=idx;light.intensity=power;
+            if(!read(uintptr_t(camera)+0x15cU+uintptr_t(idx)*12U,
+                     light.position.data(),12U))return;
+        }
+        uint32_t native_id=0;
+        if(!jkgm::saber_light_rgb::find_unique_native_light(
+               lights.data(),found,pos,strength,native_id))return;
+        jkgm::saber_light_rgb::get_registry().add(native_id,color);
+    }
+
     void __cdecl HookedNativePolylineFace(
         void *rdthing,void *face,void *vertices,void *meshinfo)
     {
@@ -3228,6 +3307,8 @@ namespace {
         if(generated && geom &&
            gpu_mesh_materials_ready(*geom,false,
                the_config->profile_renderer?&failure:nullptr)) {
+            if(the_config->gpu_pixel_lighting)
+                capture_saber_light_rgb(rdthing,captured);
             if(the_config->enable_saber_trails) {
                 jkgm::native_saber_damage_state saber_state{};
                 bool const found_saber=
