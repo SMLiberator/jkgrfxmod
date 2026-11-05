@@ -148,7 +148,8 @@ vec3 world_direct_specular(vec3 base_color,vec2 uv)
             float radiance=max(light_intensity[i]-
                                distance*light_attenuation,0.0);
             if(radiance<=0.0)continue;
-            sum+=world_ggx(N,V,delta/distance,F0,roughness)*radiance;
+            sum+=world_ggx(N,V,delta/distance,F0,roughness)*
+                 radiance*light_color[i];
         }
     }
     return min(sum*strength,vec3(32.0));
