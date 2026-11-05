@@ -510,6 +510,17 @@ make_gpu_polyline_geometry(
                 current1={{tip_camera[0]+side_x,tip_camera[1],
                            tip_camera[2]+side_z}};
             }
+            // Some native SideMat fan faces use a tip-rim pair whose
+            // midpoint is slightly offset from the true cap center. Center
+            // only the joining strip on the verified tip so its near/far
+            // rims meet BOTH physical tip centers. Keep the rim width,
+            // SideMat UVs, and the real/delayed blade vertices untouched.
+            for(int n=0;n<3;++n) {
+                float const rim_center=(current0[n]+current1[n])*0.5f;
+                float const correction=tip_camera[n]-rim_center;
+                current0[n]+=correction;
+                current1[n]+=correction;
+            }
             // Order: virtual rim 0/1 -> live rim 1/0. The bridge uses
             // exactly one rectangle worth of SideMat, with the native
             // U endpoints and full native BASE->TIP V progression.
