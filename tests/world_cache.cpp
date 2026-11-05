@@ -203,6 +203,28 @@ int main()
         light_read,light_surfaces,mesh,lit_face,8U,
         dynamic_lights,rgb,nullptr,nullptr,false,0.0f,&face_tint));
     assert(face_tint[0][0]==0.60f && face_tint[3][1]==0.15f);
+    // JK rdCache skips header tint multiplication for the identity CMP,
+    // even if that CMP stores (0,0,0). Non-identity zero is truly black.
+    constexpr uintptr_t sample_cmp=light_base+0x2400U;
+    lu32(light_sector+0x0cU,uint32_t(sample_cmp));
+    std::vector<std::array<float,3>> cmp_rgb(mesh.vertices.size());
+    auto sample_cmp_face=[&](uint32_t identity_cmp) {
+        return sample_world_cache_surface_light(
+            light_read,light_surfaces,mesh,lit_face,8U,
+            dynamic_lights,rgb,nullptr,nullptr,false,0.0f,
+            &face_tint,&cmp_rgb,identity_cmp);
+    };
+    assert(sample_cmp_face(uint32_t(sample_cmp)));
+    assert(cmp_rgb[0][0]==1.0f && cmp_rgb[3][2]==1.0f);
+    assert(sample_cmp_face(0U));
+    assert(cmp_rgb[0][0]==0.0f && cmp_rgb[3][2]==0.0f);
+    lf32(sample_cmp+jk_cmp_tint_offset,0.25f);
+    lf32(sample_cmp+jk_cmp_tint_offset+4U,0.5f);
+    lf32(sample_cmp+jk_cmp_tint_offset+8U,0.75f);
+    assert(sample_cmp_face(0U));
+    assert(cmp_rgb[0][0]==0.25f && cmp_rgb[3][2]==0.75f);
+    assert(sample_cmp_face(uint32_t(sample_cmp)));
+    assert(cmp_rgb[0][0]==1.0f && cmp_rgb[3][2]==1.0f);
     constexpr uintptr_t other_sector=light_base+0x900U;
     lu32(light_surfaces+7U*0x5cU+0x08U,uint32_t(other_sector));
     lu32(light_surfaces+7U*0x5cU+0x20U,0U);
