@@ -76,6 +76,13 @@ assert "vec3 added=vec3(0.0);" in world_frag
 assert "frame_saber_light_colors=saber_light_rgb::get_registry().consume();" in wiring
 assert 'light_color.push_back(gl::get_uniform_location(' in program
 assert "frame_saber_light_colors.valid" in wiring
+# Every world-cache set_lights call must pass RGB maps, including the
+# zero-light sky pass. A leftover two-argument call breaks the Windows build.
+assert wiring.count("shader.set_lights(")==4
+assert "shader.set_lights({},0.0f,\n" in wiring
+assert "shader.set_lights({},0.0f);" not in wiring
+assert wiring.count("frame_saber_light_colors.valid);")==5
+
 for stage in (frag, world_frag):
     assert "jk_point_sample(" in stage
 for stage in (frag, world_frag):
