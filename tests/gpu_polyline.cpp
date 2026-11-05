@@ -140,16 +140,30 @@ int main() {
     assert(native_mesh && native_mesh->indices.size()==24U);
     assert(native_mesh->vertices.size()==18U);
     // The live native blade is untouched. The trailing SideMat is
-    // anchored at the SAME base: only vertices geometrically nearest
-    // the tip move. No extra tip/base caps and no floating quad.
+    // anchored at the SAME base: only vertices nearest the tip move.
+    // Only the physical tip cap is duplicated; no second hilt quad.
     std::array<float,3> delayed_camera{{.5f,0.0f,1.0f}};
     auto fan=jkgm::make_gpu_polyline_geometry(
         native_capture,&delayed_camera);
-    assert(fan && fan->groups.size()==3U);
+    assert(fan && fan->groups.size()==4U);
     auto correct_direction=jkgm::make_gpu_polyline_geometry(
         reversed_caps,&delayed_camera,&actual_hilt_camera);
     assert(correct_direction);
-    assert(correct_direction->vertices.size()==30U);
+    // The 5-point cap is physically at the tip in this reversed case,
+    // so THAT cap (and not the 4-point base) is duplicated.
+    assert(correct_direction->vertices.size()==35U);
+    assert(correct_direction->indices.size()==45U);
+    assert(correct_direction->groups.size()==4U);
+    assert(correct_direction->groups[1].count==18U);
+    assert(correct_direction->groups[2].count==6U);
+    assert(correct_direction->groups[3].saber_trail_join);
+    for(unsigned k=0;k<5U;++k) {
+        auto const &live=correct_direction->vertices[21U+k];
+        auto const &lag=correct_direction->vertices[26U+k];
+        assert(std::abs(lag.x-live.x-.5f)<1.e-5f);
+        assert(lag.y==live.y && lag.z==live.z);
+        assert(lag.u==live.u && lag.v==live.v);
+    }
     assert(std::abs(correct_direction->vertices[12].z)<1.e-6f);
     assert(std::abs(correct_direction->vertices[13].z-1.f)<1.e-6f);
     assert(std::abs(correct_direction->vertices[14].x-.5f)<1.e-6f);
@@ -160,15 +174,22 @@ int main() {
     assert(referenced_fan);
     assert(referenced_fan->vertices.size()==fan->vertices.size());
     assert(referenced_fan->indices==fan->indices);
-    assert(fan->vertices.size()==30U);
-    assert(fan->indices.size()==36U); // 8 native +3 delayed +1 fan
-    // One SideMat draw range keeps all delayed geometry BEHIND the live
-    // blade even if the GPU renderer sorts translucent MAT groups.
-    assert(fan->groups[0].count==21U);
-    assert(fan->groups[1].count==9U); // native BASE cap
-    assert(fan->groups[2].count==6U); // native TIP cap
+    // 8 native tris + 3 delayed sides + 2 delayed tip-cap tris
+    // + 1 joining triangle: 14 total triangles.
+    assert(fan->vertices.size()==34U);
+    assert(fan->indices.size()==42U);
+    // Independent SideMat group for the final join. Both cap groups draw
+    // first regardless of differences between SideMat/TipMat alpha states.
+    assert(fan->groups[0].count==18U); // all six side triangles
+    assert(fan->groups[1].count==9U);  // shared BASE cap
+    assert(fan->groups[2].count==12U); // live + delayed TIP caps
+    assert(fan->groups[3].count==3U);  // final 3D connector
+    assert(fan->groups[3].saber_trail_join);
+    assert(fan->groups[3].material==native_capture.faces[1].material);
     assert(fan->groups[0].offset==0U &&
-           fan->groups[1].offset==21U && fan->groups[2].offset==30U);
+           fan->groups[1].offset==18U &&
+           fan->groups[2].offset==27U &&
+           fan->groups[3].offset==39U);
     assert(fan->material_refs.size()==2U);
     unsigned const native_begin[5]={0,3,6,9,14};
     unsigned const fan_begin[5]={0,6,15,21,26};
@@ -201,20 +222,37 @@ int main() {
     assert(fan->vertices[12].u==32.f && fan->vertices[12].v==128.f);
     assert(fan->vertices[13].u==32.f && fan->vertices[13].v==0.f);
     assert(fan->vertices[14].u==32.f && fan->vertices[14].v==0.f);
-    // The two native caps are untouched; no additional cap vertices exist.
+    // Live cap vertices are preserved bit-for-bit. Only the real TIP cap
+    // receives a translated copy; the base has no second cap or quad.
     assert(fan->vertices[21].x==native_mesh->vertices[9].x);
     assert(fan->vertices[21].z==0.f);
     assert(fan->vertices[26].x==native_mesh->vertices[14].x);
     assert(fan->vertices[26].z==1.f);
-    // All three delayed sides, the 3D connector, then all THREE live
-    // sides. Native side geometry is unchanged; only index order changes.
-    const unsigned ordered_side_triangles[7][3]={
-        {3,4,5},{9,10,11},{18,19,20},{12,13,14},
+    for(unsigned k=0;k<4U;++k) {
+        auto const &live=fan->vertices[26U+k];
+        auto const &lag=fan->vertices[30U+k];
+        assert(std::abs(lag.x-live.x-.5f)<1.e-5f);
+        assert(lag.y==live.y && lag.z==live.z);
+        assert(lag.u==live.u && lag.v==live.v);
+    }
+    // All three delayed SideMat triangles, then all three live sides.
+    // The connector is the FINAL index range, beyond even the tip caps.
+    const unsigned ordered_side_triangles[6][3]={
+        {3,4,5},{9,10,11},{18,19,20},
         {0,1,2},{6,7,8},{15,16,17}};
-    for(unsigned tri=0;tri<7U;++tri)
+    for(unsigned tri=0;tri<6U;++tri)
         for(unsigned k=0;k<3U;++k)
             assert(fan->indices[tri*3U+k]==
                    ordered_side_triangles[tri][k]);
+    assert(fan->indices[27U]==30U &&
+           fan->indices[28U]==31U &&
+           fan->indices[29U]==32U);
+    assert(fan->indices[33U]==26U &&
+           fan->indices[34U]==27U &&
+           fan->indices[35U]==28U);
+    assert(fan->indices[39U]==12U &&
+           fan->indices[40U]==13U &&
+           fan->indices[41U]==14U);
 
     // Opposite native side ordering is independently classified:
     // [BASE_RIM, TIP_CENTER, BASE_RIM], and only its tip vertex moves.
