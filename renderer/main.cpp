@@ -2713,7 +2713,8 @@ namespace {
     // relying solely on every intermediate template having a sidecar entry.
     bool light_rgb_template_ancestor(uintptr_t thing,
                                      jkgm::thing_light_rgb::rgb &color,
-                                     double now) {
+                                     double now,
+                                     uintptr_t *matched_source=nullptr) {
         auto &registry=jkgm::thing_light_rgb::get_registry();
         uintptr_t cursor=thing;
         for(unsigned depth=0;depth<32U;++depth) {
@@ -2727,8 +2728,10 @@ namespace {
             if(parent<0x10000U || uintptr_t(parent)==cursor)break;
             if(registry.get(parent,light_rgb_thing_signature(
                                 reinterpret_cast<void const *>(uintptr_t(parent))),
-                            color,now))
+                            color,now)) {
+                if(matched_source)*matched_source=uintptr_t(parent);
                 return true;
+            }
             cursor=parent;
         }
         return false;
@@ -2848,14 +2851,16 @@ namespace {
             auto &registry=jkgm::thing_light_rgb::get_registry();
             auto const now=light_rgb_clock_now();
             jkgm::thing_light_rgb::rgb color{};
-            bool const have=registry.get(
-                reinterpret_cast<uintptr_t>(source),
-                light_rgb_thing_signature(source),color,now) ||
-                light_rgb_template_ancestor(
-                    reinterpret_cast<uintptr_t>(source),color,now);
-            if(have)registry.set(
+            uintptr_t rgb_source=reinterpret_cast<uintptr_t>(source);
+            bool have=registry.get(rgb_source,
+                light_rgb_thing_signature(source),color,now);
+            if(!have)have=light_rgb_template_ancestor(
+                rgb_source,color,now,&rgb_source);
+            // inherit() snapshots the exact interpolated color rather than
+            // renormalizing a partially faded hue.
+            if(have)registry.inherit(
                 reinterpret_cast<uintptr_t>(thing),
-                light_rgb_thing_signature(thing),false,color,0.0,now);
+                light_rgb_thing_signature(thing),rgb_source,now);
             else registry.erase(reinterpret_cast<uintptr_t>(thing));
         }
         if(!thing || !source || !gpu_span_readable(thing,0xCCU))
