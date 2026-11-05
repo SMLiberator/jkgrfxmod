@@ -8086,7 +8086,16 @@ namespace jkgm {
                 if(!read(uintptr_t(camera)+0x15cU+size_t(id)*12U,
                          light.position.data(),12U))return;
             }
-            size_t matched=0;
+            // Intermittent white lights can come from several distinct
+            // phases: a recycled/inactive Thing, a light not collected by
+            // JK's native camera, coincident lights (unsafe to disambiguate),
+            // or a valid saber SideMat override. Preserve the strict matching
+            // policy, but expose the failure category in verbose profiling.
+            size_t matched=0,stale=0,inactive=0,missing=0,ambiguous=0,
+                   saber_override=0;
+            bool const trace=the_config && the_config->profile_renderer_verbose &&
+                gpu_3do_present_serial%120U==0U;
+            unsigned sample_count=0U;
             for(auto const &entry:entries) {
                 uint32_t flags=0U,signature=0U,kind=0U;
                 std::array<float,3> position{};
@@ -8096,24 +8105,68 @@ namespace jkgm {
                    !read(entry.address+0x74U,&signature,4U) ||
                    !read(entry.address+0xb8U,position.data(),12U) ||
                    !read(entry.address+0x118U,&intensity,4U) ||
-                   signature!=entry.signature || kind==0U || kind>11U ||
-                   (flags&1U)==0U ||
-                   (flags&(0x2U|0x10U|0x80000U))!=0U)
+                   signature!=entry.signature || kind==0U || kind>11U) {
+                    ++stale;
                     continue;
+                }
+                if((flags&1U)==0U ||
+                   (flags&(0x2U|0x10U|0x80000U))!=0U ||
+                   !std::isfinite(intensity) || intensity<=0.f) {
+                    ++inactive;
+                    continue;
+                }
                 uint32_t id=0U;
                 if(!saber_light_rgb::find_unique_native_light(
-                       lights.data(),found,position,intensity,id) ||
-                   frame_saber_light_colors.valid[id])
+                       lights.data(),found,position,intensity,id)) {
+                    // Count candidates using the same strict tolerances as
+                    // find_unique_native_light. Do not color a potentially
+                    // unrelated Thing when the match is ambiguous.
+                    size_t candidates=0;
+                    if(trace) {
+                        for(size_t i=0;i<found;++i) {
+                            auto const &l=lights[i];
+                            float const tolerance=
+                                std::max(0.0001f,0.001f*intensity);
+                            if(std::fabs(l.intensity-intensity)>tolerance)
+                                continue;
+                            double d2=0.0;
+                            for(unsigned k=0;k<3U;++k) {
+                                double const d=double(l.position[k])-
+                                               double(position[k]);
+                                d2+=d*d;
+                            }
+                            if(d2<=1.e-6)++candidates;
+                        }
+                    }
+                    if(candidates>1U)++ambiguous;
+                    else ++missing;
+                    if(trace && sample_count++<4U)
+                        LOG_INFO("GPU THING LIGHT RGB unmatched: owner=",
+                                 entry.address," signature=",signature,
+                                 " pos=",position[0],"/",position[1],"/",
+                                         position[2],
+                                 " intensity=",intensity,
+                                 " camera_count=",count,
+                                 " exact_candidates=",candidates,
+                                 " rgb=",entry.to[0],"/",entry.to[1],"/",
+                                         entry.to[2]);
+                    continue;
+                }
+                if(frame_saber_light_colors.valid[id]) {
+                    ++saber_override;
                     continue; // saber SideMat hue takes precedence
+                }
                 frame_saber_light_colors.colors[id]=entry.to;
                 frame_saber_light_colors.valid[id]=true;
                 ++matched;
             }
-            if(the_config->profile_renderer_verbose &&
-               matched>0 && gpu_3do_present_serial%120U==0U)
+            if(trace)
                 LOG_INFO("GPU THING LIGHT RGB: matched=",matched,
                          " registered=",entries.size(),
-                         " native_camera_lights=",found);
+                         " native_camera_lights=",found,
+                         " stale=",stale," inactive=",inactive,
+                         " missing=",missing," ambiguous=",ambiguous,
+                         " saber_override=",saber_override);
         }
 
         void present_game() override
