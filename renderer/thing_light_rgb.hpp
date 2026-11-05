@@ -134,6 +134,13 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         records_.erase(address);
     }
+    size_t static_template_count() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        size_t count=0;
+        for(auto const &p:records_)
+            if(p.second.static_template)++count;
+        return count;
+    }
     std::vector<record> things(double now) const {
         std::lock_guard<std::mutex> lock(mutex_);
         std::vector<record> result;
