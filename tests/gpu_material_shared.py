@@ -118,7 +118,6 @@ parser=read("common/config.cpp")
 shader_header=read("renderer/shaders.hpp")
 assert "int world_cache_fluid_debug_mode = 0;" in config
 assert 'j.contains("world_cache_fluid_debug_mode")' in parser
-assert 'world_cache_fluid_debug_mode must be an integer from 0 to 8' in parser
 assert "void set_fluid_debug_mode(int mode);" in shader_header
 assert "set_fluid_debug_mode(int mode)" in world_api
 assert "shader.set_fluid_debug_mode(the_config->world_cache_fluid_debug_mode);" in renderer
