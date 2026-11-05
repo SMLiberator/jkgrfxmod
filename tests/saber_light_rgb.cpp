@@ -33,6 +33,9 @@ int main()
     camera_light ambiguous[]{lights[1],coincident};
     assert(!find_unique_native_light(ambiguous,2,{{1.f,2.f,3.f}},0.6f,id));
     assert(!find_unique_native_light(lights,3,{{7.f,8.f,9.f}},0.6f,id));
+    auto invalid=lights[1];
+    invalid.position[1]=std::numeric_limits<float>::quiet_NaN();
+    assert(!find_unique_native_light(&invalid,1,{{1.f,2.f,3.f}},0.6f,id));
     registry pending;
     assert(pending.consume().get(4)==white);
     pending.add(4,red);
