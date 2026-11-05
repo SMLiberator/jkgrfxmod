@@ -94,7 +94,8 @@ inline bool sample_world_cache_surface_light(
     bool pixel_lighting=false,
     float global_extra=0.0f,
     std::vector<std::array<float,3>> *sector_tint=nullptr,
-    std::vector<std::array<float,3>> *sector_cmp_tint=nullptr)
+    std::vector<std::array<float,3>> *sector_cmp_tint=nullptr,
+    uint32_t identity_cmp=0U)
 {
     if(!read || face.count<3U || face.count%3U!=0U ||
        uint64_t(face.first_index)+face.count>mesh.indices.size())
@@ -147,7 +148,8 @@ inline bool sample_world_cache_surface_light(
             // Invalid/unloaded sector colormaps use neutral color instead
             // of losing visible world geometry during cache migration.
             std::array<float,3> current{};
-            if(jk_cmp_read_tint(read,cmp,current))tint=current;
+            if(jk_cmp_read_effective_tint(read,cmp,identity_cmp,current))
+                tint=current;
             for(uint32_t i=0;i<count;++i)
                 (*sector_cmp_tint)[base+i]=tint;
         }
