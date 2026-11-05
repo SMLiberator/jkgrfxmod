@@ -31,6 +31,7 @@ namespace jkgm {
         std::array<float,3> local_position{};
         float radius=0.0f;
         float intensity=0.0f;
+        uint32_t native_id=0; // rdCamera light index for SideMat tint lookup
     };
 
     struct gpu_3do_face_plane {
