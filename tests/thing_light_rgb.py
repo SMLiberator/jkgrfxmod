@@ -10,6 +10,8 @@ header = (root/"renderer/thing_light_rgb.hpp").read_text(encoding="utf-8")
 gpu = (root/"renderer/gpu_3do_preview.hpp").read_text(encoding="utf-8")
 world = (root/"renderer/world_cache_lighting.hpp").read_text(encoding="utf-8")
 program = (root/"renderer/shaders.cpp").read_text(encoding="utf-8")
+model_shader = (root/"assets/shaders/gpu_3do_preview.frag").read_text(encoding="utf-8")
+world_specular = (root/"assets/shaders/world_cache_direct_specular.glsl").read_text(encoding="utf-8")
 
 # Both native parser entrypoints, plus the Thing SetThingBasedOn clone,
 # are verified before detouring. Inheritance must share the SPR clone hook.
@@ -27,6 +29,9 @@ assert "request_native_thing_light_rgb_hooks();" in main
 assert "HookedThingTemplateParse" in main and "HookedThingParseArg" in main
 assert "if(active_light_rgb_template.active)" in main
 assert "registry.prepare_world(reinterpret_cast<uintptr_t>(world));" in main
+assert "registry.prepare_static_world(reinterpret_cast<uintptr_t>(world));" in main
+assert "static_template=(template_index&0x8000U)!=0U" in main
+assert "light_rgb_clock_now(),static_template" in main
 assert "if(!sprite_variant_hooks_active)" in main
 assert "thing_light_rgb::get_registry().inherit(" in main
 assert "thing_light_rgb_hooks_active=false;" in main
@@ -55,6 +60,12 @@ assert "light.native_id=id;" in world
 assert "uint32_t native_id=0" in gpu
 assert "light_color.push_back(" in program
 assert "std::vector<record> things(double now)" in header
-assert "if(world_!=world){records_.clear();world_=world;}" in header
+assert "void prepare_static_world(uintptr_t world)" in header
+assert "if(it->second.static_template)++it;" in header
+assert "v.static_template=is_template && static_template;" in header
+assert "static_world_=world;" in header
+# RGB must tint both dynamic diffuse and GGX specular; no white highlights.
+assert "radiance*light_color[i]" in model_shader
+assert "radiance*light_color[i]" in world_specular
 assert "double duration=0" in header
 assert "std::max({in[0],in[1],in[2]})" in header
