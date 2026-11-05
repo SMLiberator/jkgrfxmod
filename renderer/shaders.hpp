@@ -91,7 +91,7 @@ namespace jkgm {
             gl::uniform_location_id num_lights,light_attenuation;
             gl::uniform_location_id world_pixel_dynamic_lighting,world_dynamic_light_specular;
             gl::uniform_location_id jk_color_filter,jk_color_tint,jk_color_add_fade;
-            std::vector<gl::uniform_location_id> light_position_radius,light_intensity;
+            std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
         public:
             translucent_sun_uniforms translucent_sun;
             explicit world_cache_preview_shader(fs::path const &data_root);
@@ -129,7 +129,9 @@ namespace jkgm {
                          float ceiling_height,point<2,float> offset,
                          point<2,float> face_offset,point<2,float> viewport);
             void set_lights(std::vector<world_cache_point_light> const &lights,
-                            float attenuation);
+                            float attenuation,
+                            std::array<std::array<float,3>,64> const &saber_rgb,
+                            std::array<bool,64> const &saber_valid);
             void set_specular_lighting(bool pixel_diffuse,bool point_specular);
             // World-cache world-space positions and camera axes are already
             // supplied by set_reflection_camera(). The shared sun binder
@@ -336,7 +338,7 @@ namespace jkgm {
             gl::uniform_location_id ambient_light,attenuation_min,num_lights,
                                     pixel_dynamic_lighting,
                                     nonrigid_light_transform,effective_light_mode;
-            std::vector<gl::uniform_location_id> light_position_radius,light_intensity;
+            std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
         public:
             explicit gpu_3do_preview_shader(fs::path const &data_root);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
@@ -350,7 +352,9 @@ namespace jkgm {
                               point<2,float> scroll);
             void set_fog(point<4,float> params,point<4,float> color);
             void set_lighting(gpu_3do_instance const &instance,
-                              bool pixel_lighting);
+                              bool pixel_lighting,
+                              std::array<std::array<float,3>,64> const &saber_rgb,
+                              std::array<bool,64> const &saber_valid);
             void set_colormap_tint(std::array<float,3> const &tint);
             void set_solid_fullbright(bool enabled);
             void set_palette_fullbright(bool enabled);
