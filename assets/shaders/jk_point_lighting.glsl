@@ -31,11 +31,17 @@ float jk_point_sample(vec3 delta, vec3 surface_normal,
 // Decode only the final interpolated RGB, add light with saturation,
 // re-encode with the same curve. At zero contribution return exact baked RGB.
 // This deliberately avoids the old interpolated-raw-brightness banding.
-vec3 jk_point_compose(vec3 baked, float added, vec3 light_rgb)
+// RGB contribution is accumulated separately per channel. For white
+// sources, vec3(added) is exactly the legacy scalar point-light behavior.
+vec3 jk_point_compose(vec3 baked, vec3 added, vec3 light_rgb)
 {
-    if(added<=0.0) return baked;
+    if(all(lessThanEqual(added,vec3(0.0)))) return baked;
     vec3 base=pow(clamp(baked,0.0,1.0),vec3(1.0/JK_POINT_GAMMA));
     vec3 light=pow(clamp(light_rgb,0.0,1.0),vec3(1.0/JK_POINT_GAMMA));
-    vec3 lit=clamp(base+min(added,1.0)*light,0.0,1.0);
+    vec3 lit=clamp(base+min(added,vec3(1.0))*light,0.0,1.0);
     return pow(lit,vec3(JK_POINT_GAMMA));
+}
+vec3 jk_point_compose(vec3 baked,float added,vec3 light_rgb)
+{
+    return jk_point_compose(baked,vec3(added),light_rgb);
 }
