@@ -145,18 +145,21 @@ int main() {
     std::array<float,3> delayed_camera{{.5f,0.0f,1.0f}};
     auto fan=jkgm::make_gpu_polyline_geometry(
         native_capture,&delayed_camera);
-    assert(fan && fan->groups.size()==4U);
+    assert(fan && fan->groups.size()==5U);
     auto correct_direction=jkgm::make_gpu_polyline_geometry(
         reversed_caps,&delayed_camera,&actual_hilt_camera);
     assert(correct_direction);
     // The 5-point cap is physically at the tip in this reversed case,
     // so THAT cap (and not the 4-point base) is duplicated.
-    assert(correct_direction->vertices.size()==35U);
-    assert(correct_direction->indices.size()==45U);
-    assert(correct_direction->groups.size()==4U);
+    assert(correct_direction->vertices.size()==39U);
+    assert(correct_direction->indices.size()==51U);
+    assert(correct_direction->groups.size()==5U);
     assert(correct_direction->groups[1].count==18U);
     assert(correct_direction->groups[2].count==6U);
-    assert(correct_direction->groups[3].saber_trail_join);
+    assert(correct_direction->groups[3].saber_trail_tip_bridge);
+    assert(correct_direction->groups[3].offset==42U);
+    assert(correct_direction->groups[4].saber_trail_join);
+    assert(correct_direction->groups[4].offset==48U);
     for(unsigned k=0;k<5U;++k) {
         auto const &live=correct_direction->vertices[21U+k];
         auto const &lag=correct_direction->vertices[26U+k];
@@ -175,21 +178,26 @@ int main() {
     assert(referenced_fan->vertices.size()==fan->vertices.size());
     assert(referenced_fan->indices==fan->indices);
     // 8 native tris + 3 delayed sides + 2 delayed tip-cap tris
-    // + 1 joining triangle: 14 total triangles.
-    assert(fan->vertices.size()==34U);
-    assert(fan->indices.size()==42U);
+    // + 2 SideMat tip-bridge tris + 1 final joining triangle = 16.
+    assert(fan->vertices.size()==38U);
+    assert(fan->indices.size()==48U);
     // Independent SideMat group for the final join. Both cap groups draw
     // first regardless of differences between SideMat/TipMat alpha states.
     assert(fan->groups[0].count==18U); // all six side triangles
     assert(fan->groups[1].count==9U);  // shared BASE cap
     assert(fan->groups[2].count==12U); // live + delayed TIP caps
-    assert(fan->groups[3].count==3U);  // final 3D connector
-    assert(fan->groups[3].saber_trail_join);
+    assert(fan->groups[3].count==6U);  // tip-to-tip SideMat bridge
+    assert(fan->groups[3].saber_trail_tip_bridge);
     assert(fan->groups[3].material==native_capture.faces[1].material);
+    assert(fan->groups[4].count==3U);  // final 3D connector
+    assert(fan->groups[4].saber_trail_join);
+    assert(fan->groups[4].material==native_capture.faces[1].material);
+    assert(!fan->groups[4].saber_trail_tip_bridge);
     assert(fan->groups[0].offset==0U &&
            fan->groups[1].offset==18U &&
            fan->groups[2].offset==27U &&
-           fan->groups[3].offset==39U);
+           fan->groups[3].offset==39U &&
+           fan->groups[4].offset==45U);
     assert(fan->material_refs.size()==2U);
     unsigned const native_begin[5]={0,3,6,9,14};
     unsigned const fan_begin[5]={0,6,15,21,26};
@@ -250,24 +258,58 @@ int main() {
     assert(fan->indices[33U]==26U &&
            fan->indices[34U]==27U &&
            fan->indices[35U]==28U);
-    assert(fan->indices[39U]==12U &&
-           fan->indices[40U]==13U &&
-           fan->indices[41U]==14U);
+    // Quad indices connect the virtual rim to the real rim; the
+    // 3D joining triangle is still the LAST draw range.
+    const unsigned bridge_indices[6]={34,35,36,34,36,37};
+    for(unsigned k=0;k<6U;++k)
+        assert(fan->indices[39U+k]==bridge_indices[k]);
+    assert(fan->indices[45U]==12U &&
+           fan->indices[46U]==13U &&
+           fan->indices[47U]==14U);
+    // The strip is physically stretched between the tips, but its
+    // SideMat V axis progresses BASE->TIP from virtual to real.
+    // It reuses native tip-rim U coordinates, not the circular TipMat.
+    auto const &p0=fan->vertices[34],&p1=fan->vertices[35];
+    auto const &p2=fan->vertices[36],&p3=fan->vertices[37];
+    assert(std::abs(p0.x-.5f)<1.e-5f);
+    assert(std::abs(p1.x-.5f)<1.e-5f);
+    assert(std::abs(p2.x)<1.e-5f && std::abs(p3.x)<1.e-5f);
+    assert(std::abs(p0.z-.94f)<1.e-5f);
+    assert(std::abs(p1.z-1.06f)<1.e-5f);
+    assert(std::abs(p2.z-1.06f)<1.e-5f);
+    assert(std::abs(p3.z-.94f)<1.e-5f);
+    assert(p0.u==0.f && p1.u==64.f &&
+           p2.u==64.f && p3.u==0.f);
+    assert(p0.v==128.f && p1.v==128.f &&
+           p2.v==0.f && p3.v==0.f);
 
-    // A different MAT on the middle SideMat must NOT be merged with
-    // neighboring sides. Its final 3D fan still owns the middle MAT and
-    // remains a dedicated, last-submitted geometry group.
-    auto split_material=native_capture;
-    split_material.faces[1].material=0x26000U;
-    auto split_fan=jkgm::make_gpu_polyline_geometry(
-        split_material,&delayed_camera,&actual_hilt_camera);
-    assert(split_fan);
-    assert(split_fan->groups.size()==6U);
-    assert(split_fan->groups[5].saber_trail_join);
-    assert(split_fan->groups[5].material==0x26000U);
-    assert(split_fan->groups[5].count==3U);
-    assert(split_fan->groups[5].offset==39U);
-    assert(split_fan->material_refs.size()==3U);
+    // The same native side scroll offset applies to BOTH tip endpoints;
+    // no inferred texture height and no special "tip" of SideMat.
+    auto scrolling=native_capture;
+    for(unsigned fi=0;fi<3U;++fi)
+        scrolling.faces[fi].uv_offset={{4.5f,23.25f}};
+    auto scrolling_fan=jkgm::make_gpu_polyline_geometry(
+        scrolling,&delayed_camera,&actual_hilt_camera);
+    assert(scrolling_fan && scrolling_fan->groups[3].saber_trail_tip_bridge);
+    assert(std::abs(scrolling_fan->vertices[34].u-4.5f)<1.e-5f);
+    assert(std::abs(scrolling_fan->vertices[35].u-68.5f)<1.e-5f);
+    assert(std::abs(scrolling_fan->vertices[34].v-151.25f)<1.e-5f);
+    assert(std::abs(scrolling_fan->vertices[35].v-151.25f)<1.e-5f);
+    assert(std::abs(scrolling_fan->vertices[36].v-23.25f)<1.e-5f);
+    assert(std::abs(scrolling_fan->vertices[37].v-23.25f)<1.e-5f);
+
+    // Different actors may use different SideMat materials, but all
+    // three sides of any ONE saber share its native SideMat.
+    auto another_actor=native_capture;
+    for(unsigned fi=0;fi<3U;++fi)
+        another_actor.faces[fi].material=0x26000U;
+    auto another_trail=jkgm::make_gpu_polyline_geometry(
+        another_actor,&delayed_camera,&actual_hilt_camera);
+    assert(another_trail && another_trail->groups.size()==5U);
+    assert(another_trail->groups[0].material==0x26000U);
+    assert(another_trail->groups[3].material==0x26000U);
+    assert(another_trail->groups[4].material==0x26000U);
+    assert(another_trail->material_refs.size()==2U);
 
     // Opposite native side ordering is independently classified:
     // [BASE_RIM, TIP_CENTER, BASE_RIM], and only its tip vertex moves.
