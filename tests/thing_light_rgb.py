@@ -36,7 +36,8 @@ assert "THING LIGHT RGB template: static=" in main
 assert "light_rgb_clock_now(),static_template" in main
 assert "if(!sprite_variant_hooks_active)" in main
 assert "light_rgb_template_ancestor(" in main
-assert "bool const have=registry.get(" in main
+assert "bool have=registry.get(rgb_source," in main
+assert "if(have)registry.inherit(" in main
 assert "else registry.erase(reinterpret_cast<uintptr_t>(thing));" in main
 assert "thing_light_rgb_hooks_active=false;" in main
 assert "thing_light_clone_hook_active=false;" in main
