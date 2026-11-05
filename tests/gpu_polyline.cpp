@@ -94,6 +94,30 @@ int main() {
         native_capture,base_camera,tip_camera));
     assert(std::abs(base_camera[2])<1.e-6f);
     assert(std::abs(tip_camera[2]-1.f)<1.e-6f);
+
+    // The native orientation, not a hard-coded cap index, determines
+    // the physical hilt. JKGM's five/four face counts stay unchanged.
+    std::array<float,3> actual_hilt_camera{{0,0,0}};
+    std::array<float,3> physical_base{},physical_tip{};
+    assert(jkgm::gpu_polyline_cap_pose_camera(
+        native_capture,physical_base,physical_tip,&actual_hilt_camera));
+    assert(physical_base==actual_hilt_camera);
+    assert(std::abs(physical_tip[2]-1.f)<1.e-6f);
+    auto reversed_caps=native_capture;
+    for(unsigned k=0;k<5U;++k)
+        reversed_caps.faces[3].position[k][2]+=1.f;
+    for(unsigned k=0;k<4U;++k)
+        reversed_caps.faces[4].position[k][2]-=1.f;
+    std::array<float,3> reverse_base{},reverse_tip{};
+    // Without the orientation reference the old code chooses the WRONG
+    // hilt. With it, the verified hilt stays fixed and the tip is found.
+    assert(jkgm::gpu_polyline_cap_pose_camera(
+        reversed_caps,reverse_base,reverse_tip));
+    assert(std::abs(reverse_base[2]-1.f)<1.e-6f);
+    assert(jkgm::gpu_polyline_cap_pose_camera(
+        reversed_caps,reverse_base,reverse_tip,&actual_hilt_camera));
+    assert(reverse_base==actual_hilt_camera);
+    assert(std::abs(reverse_tip[2]-1.f)<1.e-6f);
     std::array<float,3> native_base_world{},native_tip_world{};
     assert(jkgm::gpu_polyline_blade_pose(
         native_capture,inverse,native_base_world,native_tip_world));
@@ -102,6 +126,14 @@ int main() {
         native_length2+=double(native_tip_world[n]-native_base_world[n])*
                         double(native_tip_world[n]-native_base_world[n]);
     assert(std::abs(native_length2-1.0)<1.e-5);
+    std::array<float,3> reverse_world_base{},reverse_world_tip{};
+    assert(jkgm::gpu_polyline_blade_pose(
+        reversed_caps,inverse,reverse_world_base,reverse_world_tip,
+        &actual_hilt_camera));
+    for(unsigned n=0;n<3U;++n) {
+        assert(std::abs(reverse_world_base[n]-native_base_world[n])<1.e-5f);
+        assert(std::abs(reverse_world_tip[n]-native_tip_world[n])<1.e-5f);
+    }
 
     // Original five faces = 3*1 + 3 + 2 = 8 triangles.
     auto native_mesh=jkgm::make_gpu_polyline_geometry(native_capture);
@@ -114,6 +146,20 @@ int main() {
     auto fan=jkgm::make_gpu_polyline_geometry(
         native_capture,&delayed_camera);
     assert(fan && fan->groups.size()==5U);
+    auto correct_direction=jkgm::make_gpu_polyline_geometry(
+        reversed_caps,&delayed_camera,&actual_hilt_camera);
+    assert(correct_direction);
+    assert(correct_direction->vertices.size()==30U);
+    assert(std::abs(correct_direction->vertices[12].z)<1.e-6f);
+    assert(std::abs(correct_direction->vertices[13].z-1.f)<1.e-6f);
+    assert(std::abs(correct_direction->vertices[14].x-.5f)<1.e-6f);
+    // The original (non-synthetic) hilt reference makes the same mesh
+    // as automatic face-3-base detection when the cap order is normal.
+    auto referenced_fan=jkgm::make_gpu_polyline_geometry(
+        native_capture,&delayed_camera,&actual_hilt_camera);
+    assert(referenced_fan);
+    assert(referenced_fan->vertices.size()==fan->vertices.size());
+    assert(referenced_fan->indices==fan->indices);
     assert(fan->vertices.size()==30U);
     assert(fan->indices.size()==36U); // 8 native +3 delayed +1 fan
     assert(fan->groups[0].count==6U);
