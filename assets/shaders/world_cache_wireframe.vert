@@ -12,6 +12,7 @@ layout(location=7) in vec3 native_sector_cmp_tint; // owning SithSector.colormap
 out vec2 material_uv;
 out vec3 cached_view_normal;
 out vec3 cached_lit_rgb;
+out vec3 cached_raw_light_rgb; // uncooked GPU world VBO lighting for Fluid debug
 out vec3 cached_light_state;
 out vec3 cached_sector_tint;
 out vec3 cached_sector_cmp_tint;
@@ -45,6 +46,7 @@ void main() {
     // JK's palette tint changes vertex illumination, not the albedo.
     // Apply it before Gouraud interpolation, matching the existing 3DO
     // GPU path's gamma conversion and per-channel tint scaling.
+    cached_raw_light_rgb=native_light_rgb;
     cached_lit_rgb=world_jk_effect(native_light_rgb,
                                    native_sector_tint,native_sector_cmp_tint);
     cached_light_state=native_light_state;
