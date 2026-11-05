@@ -86,6 +86,22 @@ int main()
     assert(std::abs(state->sectors[1].sector_tint[0]-0.25f)<0.0001f);
     assert(state->sectors[1].plane_start==1U);
     assert(state->sectors[1].plane_count==1U);
+    // Native rdCache skips CMP tint for the identity colormap. Do not
+    // globally reinterpret zero as white: non-identity zero means black.
+    constexpr uint32_t neighbor_cmp=0x30400U;
+    setFloat(neighbor_cmp+jk_cmp_tint_offset,0.0f);
+    setFloat(neighbor_cmp+jk_cmp_tint_offset+4U,0.0f);
+    setFloat(neighbor_cmp+jk_cmp_tint_offset+8U,0.0f);
+    auto identity=sector_crossing_stage_instance(
+        snapshot,ranges,instance,read,true,neighbor_cmp);
+    assert(identity && identity->sectors[1].cmp_tint[0]==1.0f &&
+           identity->sectors[1].cmp_tint[2]==1.0f);
+    auto nonidentity=sector_crossing_stage_instance(
+        snapshot,ranges,instance,read,true,0x30000U);
+    assert(nonidentity && nonidentity->sectors[1].cmp_tint[0]==0.0f);
+    setFloat(neighbor_cmp+jk_cmp_tint_offset,1.1f);
+    setFloat(neighbor_cmp+jk_cmp_tint_offset+4U,0.9f);
+    setFloat(neighbor_cmp+jk_cmp_tint_offset+8U,0.7f);
     // A submesh wholly in the neighbor's sector must still receive
     // different lighting even though the owning Thing lives in sector 11.
     instance.transform[9]=4.0f;
