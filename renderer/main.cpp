@@ -9292,8 +9292,8 @@ bool request_native_compressed_sound_hook()
         };
         if(!jkgm::native_screenshot::verified_jk_screenshot(
                read,reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr)))) {
-            LOG_WARNING("PNG screenshot hook skipped: native JK screenshot "
-                        "address/SHOT BMP signature unverified. "
+            LOG_WARNING("PNG screenshot hook skipped: JKGM screenshot entry, "
+                        "JSHOT BMP/PCX strings or hotkey caller do not match. "
                         "Legacy screenshots remain active.");
             return false;
         }
