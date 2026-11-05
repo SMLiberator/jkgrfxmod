@@ -6942,7 +6942,9 @@ namespace jkgm {
             if(sky_params_ready) {
                 // Sky shader uses the same VBO but a camera-space UV and
                 // far-depth G-buffer policy. No shadow or light receiver.
-                shader.set_lights({},0.0f);
+                shader.set_lights({},0.0f,
+                    frame_saber_light_colors.colors,
+                    frame_saber_light_colors.valid);
                 for(auto const &face:cache.sector_sky_candidates) {
                     auto const sky_type=world_cache_sky_type(face.sky_flags);
                     if(sky_type==world_cache_sky_kind::none ||
