@@ -2708,6 +2708,31 @@ namespace {
             std::memcpy(&signature,static_cast<uint8_t const *>(ptr)+0x74U,4U);
         return signature;
     }
+    // Template RGB may be authored in Static.jkl, then inherited through
+    // several JKL templates. Follow native pTemplate pointers rather than
+    // relying solely on every intermediate template having a sidecar entry.
+    bool light_rgb_template_ancestor(uintptr_t thing,
+                                     jkgm::thing_light_rgb::rgb &color,
+                                     double now) {
+        auto &registry=jkgm::thing_light_rgb::get_registry();
+        uintptr_t cursor=thing;
+        for(unsigned depth=0;depth<32U;++depth) {
+            if(cursor<0x10000U ||
+               !gpu_span_readable(reinterpret_cast<void const *>(cursor),
+                                  0x7cU))
+                break;
+            uint32_t parent=0U;
+            std::memcpy(&parent,reinterpret_cast<void const *>(cursor+0x78U),
+                        sizeof(parent));
+            if(parent<0x10000U || uintptr_t(parent)==cursor)break;
+            if(registry.get(parent,light_rgb_thing_signature(
+                                reinterpret_cast<void const *>(uintptr_t(parent))),
+                            color,now))
+                return true;
+            cursor=parent;
+        }
+        return false;
+    }
     // rgb=(r/g/b) with finite 0..1 floats. lightrgb=(0/0/0)
     // intentionally means white, as does any achromatic color.
     bool light_rgb_parse_parameter(char const *value,
@@ -2773,38 +2798,62 @@ namespace {
         active_light_rgb_template=previous;
         if(!result || !gpu_span_readable(result,0x7cU))return result;
         auto &registry=jkgm::thing_light_rgb::get_registry();
-        // SithTemplate static-world slots use the native 0x8000 index bit.
-        // Preserve their hues when parsing a separate level JKL world.
-        uint32_t template_index=0U;
+        // The authoritative static-JKL distinction is the SithWorld flag,
+        // not an inferred 0x8000 template index (which is only a hint).
+        // Also validate against the native static-world global for JKGM.
+        uint32_t template_index=0U,world_flags=0U,static_world=0U;
         std::memcpy(&template_index,
                     static_cast<uint8_t const *>(result)+4U,4U);
-        bool const static_template=(template_index&0x8000U)!=0U;
+        if(world && gpu_span_readable(world,sizeof(world_flags)))
+            std::memcpy(&world_flags,world,sizeof(world_flags));
+        if(gpu_span_readable(reinterpret_cast<void const *>(
+                 jkgm::engine_material_debug::static_world_global),4U))
+            std::memcpy(&static_world,reinterpret_cast<void const *>(
+                jkgm::engine_material_debug::static_world_global),4U);
+        bool const static_template=(world_flags&1U)!=0U ||
+            (static_world!=0U && static_world==uintptr_t(world));
         if(static_template)
             registry.prepare_static_world(reinterpret_cast<uintptr_t>(world));
         else registry.prepare_world(reinterpret_cast<uintptr_t>(world));
         jkgm::thing_light_rgb::rgb rgb{};
         bool have=pending.explicit_color;
         if(have)rgb=pending.color;
-        else {
-            uint32_t parent=0U;
-            std::memcpy(&parent,static_cast<uint8_t const *>(result)+0x78U,4U);
-            if(parent)
-                have=registry.get(parent,0U,rgb,light_rgb_clock_now());
-        }
+        else have=light_rgb_template_ancestor(
+            reinterpret_cast<uintptr_t>(result),rgb,light_rgb_clock_now());
         if(have)
             registry.set(reinterpret_cast<uintptr_t>(result),0U,true,rgb,
                          0.0,light_rgb_clock_now(),static_template);
+        if(the_config && the_config->profile_renderer_verbose) {
+            static unsigned count=0U;
+            if((have || (static_template && count<8U)) && count++<96U)
+                LOG_INFO("THING LIGHT RGB template: static=",static_template,
+                         " world_flags=",world_flags,
+                         " idx=",template_index,
+                         " explicit=",pending.explicit_color,
+                         " color=",have ? rgb[0]:1.f,"/",
+                                  have ? rgb[1]:1.f,"/",
+                                  have ? rgb[2]:1.f);
+        }
         return result;
     }
 
     void *__cdecl HookedSithThingClone(void *thing,void const *source)
     {
         void *result=RealSithThingClone(thing,source);
-        if(thing && source && !active_light_rgb_template.active)
-            jkgm::thing_light_rgb::get_registry().inherit(
+        if(thing && source && !active_light_rgb_template.active) {
+            auto &registry=jkgm::thing_light_rgb::get_registry();
+            auto const now=light_rgb_clock_now();
+            jkgm::thing_light_rgb::rgb color{};
+            bool const have=registry.get(
+                reinterpret_cast<uintptr_t>(source),
+                light_rgb_thing_signature(source),color,now) ||
+                light_rgb_template_ancestor(
+                    reinterpret_cast<uintptr_t>(source),color,now);
+            if(have)registry.set(
                 reinterpret_cast<uintptr_t>(thing),
-                light_rgb_thing_signature(thing),
-                reinterpret_cast<uintptr_t>(source),light_rgb_clock_now());
+                light_rgb_thing_signature(thing),false,color,0.0,now);
+            else registry.erase(reinterpret_cast<uintptr_t>(thing));
+        }
         if(!thing || !source || !gpu_span_readable(thing,0xCCU))
             return result;
         auto *rd=static_cast<uint8_t *>(thing)+0xC4U;
