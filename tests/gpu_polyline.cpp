@@ -1,5 +1,8 @@
 #include "renderer/gpu_polyline.hpp"
 #include "renderer/saber_trail_history.hpp"
+#include "renderer/native_saber_damage.hpp"
+#include <cstdint>
+#include <cstring>
 #include <cassert>
 #include <cmath>
 int main() {
@@ -108,6 +111,50 @@ int main() {
     history.set_world(0x10000U);
     assert(!history.advance(right,2.04,false,origin,
                             {{0,1,0}},0.06,lag));
+
+    // The executable's JKFLAG_SABERDAMAGE (+0x2a8, mask 0x2) is read
+    // directly from the rdThing-linked SithThing, independent of COG
+    // callbacks or KEY marker-hook installation.
+    constexpr uintptr_t mem_base=0x200000U;
+    constexpr uint32_t native_owner=uint32_t(mem_base+0x100U);
+    constexpr uintptr_t native_rdthing=mem_base+0x500U;
+    std::array<uint8_t,0x1000U> native_memory{};
+    auto write32=[&](uintptr_t at,uint32_t value) {
+        assert(at>=mem_base &&
+               at-mem_base+sizeof(value)<=native_memory.size());
+        std::memcpy(native_memory.data()+(at-mem_base),
+                    &value,sizeof(value));
+    };
+    auto read_native=[&](uintptr_t at,void *dst,size_t size) {
+        if(at<mem_base || size>native_memory.size() ||
+           at-mem_base>native_memory.size()-size)return false;
+        std::memcpy(dst,native_memory.data()+(at-mem_base),size);
+        return true;
+    };
+    write32(native_rdthing+jkgm::jk_saber_rdthing_owner_offset,native_owner);
+    write32(native_owner+jkgm::jk_saber_thing_type_offset,10U);
+    write32(native_owner+jkgm::jk_saber_thing_signature_offset,21U);
+    write32(native_owner+jkgm::jk_saber_thing_flags_offset,0U);
+    jkgm::native_saber_damage_state saber_state{};
+    assert(jkgm::read_native_saber_damage(
+        read_native,native_rdthing,saber_state));
+    assert(!saber_state.swing &&
+           saber_state.owner==((uint64_t(native_owner)<<32)|21U));
+    write32(native_owner+jkgm::jk_saber_thing_flags_offset,0x82U);
+    assert(jkgm::read_native_saber_damage(
+        read_native,native_rdthing,saber_state) && saber_state.swing);
+    write32(native_owner+jkgm::jk_saber_thing_flags_offset,0x80U);
+    assert(jkgm::read_native_saber_damage(
+        read_native,native_rdthing,saber_state) && !saber_state.swing);
+    // Initial signature zero must not suppress an otherwise valid saber.
+    write32(native_owner+jkgm::jk_saber_thing_signature_offset,0U);
+    assert(jkgm::read_native_saber_damage(
+        read_native,native_rdthing,saber_state));
+    write32(native_owner+jkgm::jk_saber_thing_type_offset,0U);
+    assert(!jkgm::read_native_saber_damage(
+        read_native,native_rdthing,saber_state));
+    assert(!jkgm::read_native_saber_damage(
+        read_native,mem_base+0xf00U,saber_state));
 
     // Malformed native offsets must fail capture, rather than poison the GPU.
     capture.faces[0].uv_offset={{INFINITY,0.0f}};
