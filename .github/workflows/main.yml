@@ -54,6 +54,7 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\thing_light_rgb.cpp /Fe:thing_light_rgb_test.exe
         thing_light_rgb_test.exe
+        python3 tests/thing_light_rgb.py
 
     - name: Per-Thing saber SideMat RGB matching and frame isolation tests
       shell: cmd
