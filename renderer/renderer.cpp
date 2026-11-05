@@ -1687,8 +1687,8 @@ namespace jkgm {
                 glBindFramebuffer(GL_READ_FRAMEBUFFER,GLuint(old_read_fb));
                 glReadBuffer(GLenum(old_read_buffer));
                 if(read_error!=GL_NO_ERROR) {
-                    LOG_WARNING("Screenshot PNG: glReadPixels failed: 0x",
-                                std::hex,unsigned(read_error));
+                    LOG_WARNING("Screenshot PNG: glReadPixels failed, GL error=",
+                                unsigned(read_error));
                     return;
                 }
                 native_screenshot::flip_rgba_rows(
