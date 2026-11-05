@@ -56,6 +56,9 @@ namespace jkgm {
         virtual void execute_game(IDirect3DExecuteBuffer *cmdbuf, IDirect3DViewport *vp) = 0;
         virtual void end_game() = 0;
         virtual void present_game() = 0;
+        // JK Screenshot hotkey/COG command requests a PNG from the next
+        // fully presented OpenGL backbuffer, not the legacy magenta DD surface.
+        virtual bool queue_screenshot_png() = 0;
 
         virtual IDirectDraw *get_directdraw() = 0;
         virtual IDirectDraw2 *get_directdraw2() = 0;
