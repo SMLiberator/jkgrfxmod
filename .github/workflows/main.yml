@@ -49,6 +49,12 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\native_screenshot.cpp /Fe:native_screenshot_test.exe
         native_screenshot_test.exe
 
+    - name: Native Thing LightRGB normalization, template copy and animated fade tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\thing_light_rgb.cpp /Fe:thing_light_rgb_test.exe
+        thing_light_rgb_test.exe
+
     - name: Per-Thing saber SideMat RGB matching and frame isolation tests
       shell: cmd
       run: |
