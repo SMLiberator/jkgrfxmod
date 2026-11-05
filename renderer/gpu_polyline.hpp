@@ -363,6 +363,63 @@ make_gpu_polyline_geometry(
         if(group.solid_color)result->solid_material_refs.push_back(ref);
         else result->material_refs.push_back(ref);
     }
+    // Transparent 3DO groups are depth-sorted individually. Previously the
+    // three native SideMat faces each contained their own delayed/live
+    // triangles; sorting those ranges could paint a delayed edge OVER the
+    // live blade, even though each face's local index order was correct.
+    // All three SideMat faces normally share one MAT/cel/flags. Merge just
+    // those ranges and order: 3 delayed triangles, the 3D fan, then the
+    // 3 live triangles. Caps retain their original separate groups.
+    if(have_trail && result->groups.size()==5U) {
+        auto const &g0=result->groups[0];
+        auto const &g1=result->groups[1];
+        auto const &g2=result->groups[2];
+        bool const common_side_material=
+            g0.count==6U && g1.count==9U && g2.count==6U &&
+            g0.offset==0U && g1.offset==6U && g2.offset==15U &&
+            g0.material==g1.material && g1.material==g2.material &&
+            g0.cel==g1.cel && g1.cel==g2.cel &&
+            g0.face_type==g1.face_type &&
+            g1.face_type==g2.face_type &&
+            g0.solid_color==g1.solid_color &&
+            g1.solid_color==g2.solid_color;
+        if(common_side_material) {
+            std::array<uint32_t,21> combined{};
+            unsigned next=0U;
+            auto copy_three=[&](size_t offset) {
+                for(unsigned k=0;k<3U;++k)
+                    combined[next++]=result->indices[offset+k];
+            };
+            copy_three(0U);  // delayed side 0
+            copy_three(6U);  // delayed side 1
+            copy_three(15U); // delayed side 2
+            copy_three(9U);  // true 3D connecting triangle
+            copy_three(3U);  // unmodified live side 0
+            copy_three(12U); // unmodified live side 1
+            copy_three(18U); // unmodified live side 2
+            std::copy(combined.begin(),combined.end(),
+                      result->indices.begin());
+            auto &group=result->groups[0];
+            group.count=21U;
+            group.centroid={{0,0,0}};
+            // The three side groups occupy the first 21 vertex records.
+            for(unsigned i=0;i<21U;++i) {
+                auto const &v=result->vertices[i];
+                group.centroid[0]+=v.x/21.f;
+                group.centroid[1]+=v.y/21.f;
+                group.centroid[2]+=v.z/21.f;
+            }
+            for(unsigned gi=1U;gi<=2U;++gi)
+                for(int n=0;n<3;++n) {
+                    group.bounds_min[n]=std::min(
+                        group.bounds_min[n],result->groups[gi].bounds_min[n]);
+                    group.bounds_max[n]=std::max(
+                        group.bounds_max[n],result->groups[gi].bounds_max[n]);
+                }
+            result->groups.erase(result->groups.begin()+1,
+                                 result->groups.begin()+3);
+        }
+    }
     auto deduplicate=[](auto &refs) {
         std::sort(refs.begin(),refs.end());
         refs.erase(std::unique(refs.begin(),refs.end()),refs.end());
