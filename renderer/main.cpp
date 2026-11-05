@@ -94,6 +94,7 @@
 #include <string>
 #include <sstream>
 #include <cstdio>
+#include <cstdlib>
 #include <random>
 #include <detours/detours.h>
 
@@ -2712,15 +2713,31 @@ namespace {
     bool light_rgb_parse_parameter(char const *value,
                                    jkgm::thing_light_rgb::rgb &rgb) {
         if(!value || !gpu_span_readable(value,2U))return false;
-        float r=0,g=0,b=0;
-        int consumed=-1;
-        // %n is only reached AFTER the closing ')' matches. Checking
-        // the end prevents malformed or trailing tokens from silently
-        // becoming a valid Thing template property.
-        if(std::sscanf(value," ( %f / %f / %f ) %n",
-                       &r,&g,&b,&consumed)!=3 ||
-           consumed<0 || value[consumed]!='\0')return false;
-        return jkgm::thing_light_rgb::normalize({{r,g,b}},rgb);
+        // Use strtof and check every delimiter explicitly. MSVC treats
+        // sscanf as unsafe (C4996), while sscanf_s can reject %n; neither
+        // gives us reliable validation of the entire "(r/g/b)" input.
+        char const *cursor=value;
+        auto whitespace=[&]() {
+            while(*cursor==' ' || *cursor=='\t' ||
+                  *cursor=='\r' || *cursor=='\n')++cursor;
+        };
+        whitespace();
+        if(*cursor!='(')return false;
+        ++cursor;
+        std::array<float,3> channels{};
+        for(unsigned i=0;i<3U;++i) {
+            whitespace();
+            char *end=nullptr;
+            channels[i]=std::strtof(cursor,&end);
+            if(end==cursor)return false;
+            cursor=end;
+            whitespace();
+            if(*cursor!=(i<2U?'/':')'))return false;
+            ++cursor;
+        }
+        whitespace();
+        if(*cursor!='\0')return false;
+        return jkgm::thing_light_rgb::normalize(channels,rgb);
     }
     int __cdecl HookedThingParseArg(native_thing_parameter *arg,void *thing)
     {
