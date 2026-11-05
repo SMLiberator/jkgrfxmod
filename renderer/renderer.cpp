@@ -3697,12 +3697,24 @@ namespace jkgm {
                                          make_point(m[6],m[7],m[8],0.0f),
                                          make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(it->second->vao);
+                    // ThingFlag 0x20 intentionally uses the existing JK-style
+                    // vertex dynamic-light loop; ordinary GPU 3DOs keep their
+                    // per-fragment point lights. This is an instance choice,
+                    // not a property of the shared mesh or material.
                     prog.set_lighting(inst,
                         the_config->gpu_pixel_lighting &&
+                        !inst.skybox_vertex_lighting &&
                         !inst.camera_hud && !inst.is_projected_decal &&
                         inst.num_lights>0U,
                         frame_saber_light_colors.colors,
                         frame_saber_light_colors.valid);
+                    // An authored skybox receives no per-pixel Thing-light
+                    // GGX either, even when its MAT has an EnvMap. EnvMap
+                    // reflections themselves remain as before.
+                    prog.set_dynamic_light_specular(
+                        !inst.skybox_vertex_lighting &&
+                        the_config->enable_reflections &&
+                        the_config->enable_dynamic_light_specular);
                     prog.set_camera_hud_thing(
                         inst.camera_hud,inst.camera_hud_world_depth);
                     // 0x20 suppresses JkGRfxMod light-reception effects on
@@ -3819,7 +3831,8 @@ namespace jkgm {
                 // Decals have no native point lights; ordinary per-vertex JK
                 // diffuse lighting is entirely unaffected by this switch.
                 bool const point_specular_active=
-                    !inst.camera_hud && the_config->enable_reflections &&
+                    !inst.camera_hud && !inst.skybox_vertex_lighting &&
+                    the_config->enable_reflections &&
                     the_config->enable_dynamic_light_specular &&
                     !inst.is_projected_decal && inst.num_lights>0U;
                 // Only unconfigured *ordinary* materials inherit this
