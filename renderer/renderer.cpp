@@ -3454,6 +3454,24 @@ namespace jkgm {
                         return a.depth>b.depth; // back to front
                     });
             }
+            // The SideMat fan must composite over BOTH saber blades and
+            // both tip caps. Ordinary transparent model groups remain
+            // globally back-to-front; only the special procedural fan is
+            // moved to the end of its own instance's draw ranges.
+            // Reordering this AFTER std::sort avoids a non-transitive
+            // comparator between unrelated alpha-sorted instances.
+            for(size_t i=0;i<draws.size();++i) {
+                auto const &candidate=draws[i];
+                if(!candidate.instance->saber_trail_active ||
+                   !candidate.group->saber_trail_join)continue;
+                auto const *owner=candidate.instance;
+                size_t tail=i;
+                for(size_t j=i+1;j<draws.size();++j)
+                    if(draws[j].instance==owner)tail=j;
+                if(tail>i)
+                    std::rotate(draws.begin()+i,draws.begin()+i+1,
+                                draws.begin()+tail+1);
+            }
             if(gpu_profiling)
                 profile_frame.gpu_preview_sort_us[pass_index]+=
                     elapsed_profile_us(sort_begin,profile_clock::now());
@@ -3515,6 +3533,7 @@ namespace jkgm {
                        other.group->face_type!=group.face_type ||
                        other.group->nonplanar!=group.nonplanar ||
                        other.group->solid_color!=group.solid_color ||
+                       other.group->saber_trail_join!=group.saber_trail_join ||
                        other.policy!=draw.policy)
                         break;
                     ++draw_end;
