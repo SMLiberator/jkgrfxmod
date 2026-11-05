@@ -283,6 +283,8 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
             the_program,"light_position_radius["+std::to_string(i)+"]"));
         light_intensity.push_back(gl::get_uniform_location(
             the_program,"light_intensity["+std::to_string(i)+"]"));
+        light_color.push_back(gl::get_uniform_location(
+            the_program,"light_color["+std::to_string(i)+"]"));
     }
 }
 void jkgm::shaders::world_cache_preview_shader::set_view_matrix(
@@ -456,7 +458,9 @@ void jkgm::shaders::world_cache_preview_shader::set_specular_lighting(
     gl::set_uniform_integer(world_dynamic_light_specular,point_specular?1:0);
 }
 void jkgm::shaders::world_cache_preview_shader::set_lights(
-    std::vector<world_cache_point_light> const &lights,float attenuation)
+    std::vector<world_cache_point_light> const &lights,float attenuation,
+    std::array<std::array<float,3>,64> const &saber_rgb,
+    std::array<bool,64> const &saber_valid)
 {
     gl::set_uniform_integer(num_lights,static_cast<int>(lights.size()));
     gl::set_uniform_float(light_attenuation,attenuation);
@@ -466,6 +470,11 @@ void jkgm::shaders::world_cache_preview_shader::set_lights(
             make_point(light.position[0],light.position[1],
                        light.position[2],light.radius));
         gl::set_uniform_float(light_intensity[i],light.intensity);
+        unsigned const id=light.native_id;
+        auto const rgb=id<64U && saber_valid[id]
+            ?saber_rgb[id]:std::array<float,3>{{1.f,1.f,1.f}};
+        gl::set_uniform_vector(light_color[i],
+            make_point(rgb[0],rgb[1],rgb[2]));
     }
 }
 
@@ -691,6 +700,8 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
             the_program,std::string("light_position_radius[")+std::to_string(i)+"]"));
         light_intensity.push_back(gl::get_uniform_location(
             the_program,std::string("light_intensity[")+std::to_string(i)+"]"));
+        light_color.push_back(gl::get_uniform_location(
+            the_program,std::string("light_color[")+std::to_string(i)+"]"));
     }
 
     for(int i=0;i<4;++i) {
@@ -984,7 +995,9 @@ void jkgm::shaders::gpu_3do_preview_shader::set_camera_axes(
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_lighting(
-    gpu_3do_instance const &instance,bool pixel_lighting)
+    gpu_3do_instance const &instance,bool pixel_lighting,
+    std::array<std::array<float,3>,64> const &saber_rgb,
+    std::array<bool,64> const &saber_valid)
 {
     gl::set_uniform_float(ambient_light,instance.ambient);
     gl::set_uniform_float(attenuation_min,instance.attenuation);
@@ -999,6 +1012,11 @@ void jkgm::shaders::gpu_3do_preview_shader::set_lighting(
             make_point(light.local_position[0],light.local_position[1],
                        light.local_position[2],light.radius));
         gl::set_uniform_float(light_intensity[i],light.intensity);
+        unsigned const id=light.native_id;
+        auto const rgb=id<64U && saber_valid[id]
+            ?saber_rgb[id]:std::array<float,3>{{1.f,1.f,1.f}};
+        gl::set_uniform_vector(light_color[i],
+            make_point(rgb[0],rgb[1],rgb[2]));
     }
 }
 
