@@ -167,7 +167,7 @@ int main() {
     assert(std::abs(depth_fan->vertices[14].x)<1.e-6f);
     assert(std::abs(depth_fan->vertices[14].y-.5f)<1.e-6f);
     assert(std::abs(depth_fan->vertices[14].z-1.f)<1.e-6f);
-    assert(std::abs(depth_fan->vertices[9].y)<1.e-6f);
+    assert(std::abs(depth_fan->vertices[9].y-.5f)<1.e-6f);
     assert(std::abs(depth_fan->vertices[10].z)<1.e-6f);
     // All three center points are collinear in screen X/Z, not in 3D.
     float const view_area2=
