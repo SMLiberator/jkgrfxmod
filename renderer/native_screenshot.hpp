@@ -1,8 +1,10 @@
 #pragma once
-// JK's Screenshot hotkey and jkScreenshot COG verb both call jkGame_Screenshot.
-// The original path reads a legacy DirectDraw backbuffer (magenta in JKGM).
-// A detour may be installed only when the JKGM screenshot routine is verified:
-// never trust OpenJKDF2's symbolic address alone on a modified executable.
+// The verified SHOT/JSHOT screenshot entry from jkgm(5).exe, whose SHA256 is
+// afb4605c8259075c151ad6b034b98562be87ebe90369d4d9abaee09b396ed50f.
+// This EXE calls 0x4025E0 at 0x402B6E on INPUT_FUNC_SCREENSHOT (40). The
+// native function uses "JSHOT%03d.PCX" in software rendering and
+// "JSHOT%03d.BMP" in hardware rendering. Do not use OpenJKDF2's differing
+// SHOT%04d naming assumption as a guard.
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -15,67 +17,69 @@ namespace jkgm {
 namespace native_screenshot {
 constexpr uintptr_t jk_game_screenshot_address=0x004025E0U;
 constexpr uintptr_t jk_executable_base=0x00400000U;
-// Next function in the original JK layout: jkGame_ddraw_idk_palettes.
-// This is merely a bounded search, not a guarantee that JKGM matches.
-constexpr size_t signature_code_bytes=0x1E0U;
+constexpr uintptr_t jk_screenshot_pcx_push=0x00402668U;
+constexpr uintptr_t jk_screenshot_bmp_push=0x0040273EU;
+constexpr uintptr_t jk_screenshot_hotkey_call=0x00402B6EU;
+constexpr uintptr_t jk_screenshot_pcx_format=0x005253A0U;
+constexpr uintptr_t jk_screenshot_bmp_format=0x005253B4U;
 
-inline bool screenshot_format(char const *s,size_t len)
+inline bool screenshot_format(char const *actual,size_t len,
+                              char const *expected)
 {
-    if(len<13U)return false;
-    auto lower=[](char c) {
-        return c>='A'&&c<='Z'?char(c-'A'+'a'):c;
-    };
-    if(lower(s[0])!='s' || lower(s[1])!='h' ||
-       lower(s[2])!='o' || lower(s[3])!='t')
-        return false;
-    // SHOT%04d.BMP is the native filename format. Require an exact
-    // format prefix, not an arbitrary x86 pointer containing "SHOT".
-    char const prefix[]="%04d.bmp";
-    for(size_t i=0;i<sizeof(prefix)-1U;++i)
-        if(lower(s[i+4U])!=prefix[i])return false;
-    return true;
+    if(len<14U)return false;
+    return std::memcmp(actual,expected,14U)==0;
 }
 
 template<typename Reader>
 bool verified_jk_screenshot(Reader const &read,uintptr_t module_base)
 {
     if(module_base!=jk_executable_base)return false;
-    std::array<uint8_t,signature_code_bytes> code{};
-    if(!read(jk_game_screenshot_address,code.data(),code.size()))
-        return false;
-    // Avoid hooking an unrelated function at the upstream JK address.
-    switch(code[0]) {
-    case 0x55: case 0x53: case 0x56: case 0x57:
-    case 0x81: case 0x83: case 0x8B: case 0xA1:
-        break;
-    default: return false;
-    }
-    // Look for a little-endian absolute reference from the function body
-    // to the native SHOT%04d.BMP format string in readable module memory.
-    // If JKGM moved the function, fail closed until its location is verified.
-    for(size_t i=0;i+4U<=code.size();++i) {
-        uint32_t straddr=0;
-        std::memcpy(&straddr,code.data()+i,sizeof(straddr));
-        if(straddr<jk_executable_base || straddr>=0x02000000U)
-            continue;
-        std::array<char,13> format{};
-        if(!read(straddr,format.data(),format.size()))
-            continue;
-        if(screenshot_format(format.data(),format.size()))
-            return true;
-    }
-    return false;
+    // Guard the real function prologue, both format references, both string
+    // contents, and the screenshot hotkey's direct CALL. A different JK
+    // executable must fall back to native behavior instead of detouring code
+    // that merely happens to reside at the same address.
+    std::array<uint8_t,8> start{};
+    constexpr std::array<uint8_t,8> expected_start{{
+        0x81,0xEC,0xB8,0x00,0x00,0x00,0x53,0x55
+    }};
+    if(!read(jk_game_screenshot_address,start.data(),start.size()) ||
+       start!=expected_start)return false;
+
+    auto verify_push=[&](uintptr_t instruction,uintptr_t pointer,
+                         char const *format) {
+        std::array<uint8_t,5> code{};
+        if(!read(instruction,code.data(),code.size()) ||
+           code[0]!=0x68)return false;
+        uint32_t address=0;
+        std::memcpy(&address,code.data()+1U,sizeof(address));
+        if(address!=pointer)return false;
+        std::array<char,14> name{};
+        if(!read(pointer,name.data(),name.size()))return false;
+        return screenshot_format(name.data(),name.size(),format);
+    };
+    if(!verify_push(jk_screenshot_pcx_push,jk_screenshot_pcx_format,
+                    "JSHOT%03d.PCX") ||
+       !verify_push(jk_screenshot_bmp_push,jk_screenshot_bmp_format,
+                    "JSHOT%03d.BMP"))return false;
+
+    std::array<uint8_t,5> call{};
+    if(!read(jk_screenshot_hotkey_call,call.data(),call.size()) ||
+       call[0]!=0xE8)return false;
+    int32_t offset=0;
+    std::memcpy(&offset,call.data()+1U,sizeof(offset));
+    return int64_t(jk_screenshot_hotkey_call)+5+offset==
+           int64_t(jk_game_screenshot_address);
 }
 
+// Preserve JKGM's "JSHOT" + 3 digits naming, now with PNG output.
 inline std::string png_filename(unsigned index)
 {
     char name[32]{};
-    std::snprintf(name,sizeof(name),"SHOT%04u.PNG",index);
+    std::snprintf(name,sizeof(name),"JSHOT%03u.PNG",index);
     return name;
 }
 
-// glReadPixels returns bottom-to-top rows; stb_image_write emits exactly
-// the supplied row order. Flip RGBA scanlines BEFORE the PNG encoder.
+// glReadPixels returns bottom-to-top rows; PNG encoding needs top-down rows.
 inline void flip_rgba_rows(uint8_t *pixels,size_t width,size_t height)
 {
     if(!pixels || !width || !height)return;
@@ -87,8 +91,8 @@ inline void flip_rgba_rows(uint8_t *pixels,size_t width,size_t height)
             std::swap(top[i],bottom[i]);
     }
 }
-// Window backbuffers often have undefined/zero alpha even though they are
-// visibly opaque. PNG alpha must NOT make the screenshot transparent.
+
+// The window may have undefined alpha despite its visibly opaque contents.
 inline void force_opaque_alpha(uint8_t *pixels,size_t width,size_t height)
 {
     if(!pixels || !width || !height)return;
