@@ -1348,15 +1348,20 @@ namespace {
               the_config->enable_spotlight_shadows));
         uintptr_t decal_model=0;
         bool decal_receiver=false;
+        // Always capture the linked Thing's flags for skybox vertex-lighting
+        // selection, even if both shadows and decals are turned off. The
+        // ownership check prevents unrelated rdThings from inheriting 0x20.
+        auto const read=[](uintptr_t address,void *dst,size_t n) {
+            if(!gpu_span_readable(reinterpret_cast<void const *>(address),n))
+                return false;
+            std::memcpy(dst,reinterpret_cast<void const *>(address),n);
+            return true;
+        };
+        uintptr_t const rd=reinterpret_cast<uintptr_t>(thing);
+        bool const have_thing_flags=
+            jkgm::read_native_model_thing_flags(read,rd,flags);
         if(shadow_enabled || (the_config && the_config->enable_decals)) {
-            auto const read=[](uintptr_t address,void *dst,size_t n) {
-                if(!gpu_span_readable(reinterpret_cast<void const *>(address),n))
-                    return false;
-                std::memcpy(dst,reinterpret_cast<void const *>(address),n);
-                return true;
-            };
-            uintptr_t const rd=reinterpret_cast<uintptr_t>(thing);
-            if(jkgm::read_native_model_thing_flags(read,rd,flags)) {
+            if(have_thing_flags) {
                 uint32_t owner=0,signature=0;
                 if(read(rd+0x44U,&owner,4) &&
                    read(uintptr_t(owner)+0x74U,&signature,4)) {
@@ -2261,6 +2266,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     inst.camera_hud=active_native_model_camera_hud;
     inst.camera_hud_world_depth=jkgm::camera_hud_uses_world_depth(
         inst.camera_hud,active_native_model_thing_flags);
+    inst.skybox_vertex_lighting=jkgm::thing_uses_skybox_vertex_lights(
+        active_native_model_thing_flags,inst.camera_hud);
     inst.casts_sun_shadows=casts_sun_shadows;
     // Receiving sunlight/SSAO is distinct from writing shadow depth.
     // SithThing flag 0x20 and Camera HUDs remain light-exempt.
