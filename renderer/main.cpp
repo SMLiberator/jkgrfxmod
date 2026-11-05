@@ -3130,6 +3130,11 @@ namespace {
             std::memcpy(dst,reinterpret_cast<void const *>(ptr),bytes);
             return true;
         };
+        // actorParams overlaps unrelated Thing-type unions. Never read
+        // saberBladePos from non-Actor/non-Player procedural polylines.
+        uint32_t kind=0U;
+        if(!read(uintptr_t(owner)+0x0cU,&kind,4U) ||
+           (kind!=2U && kind!=10U))return;
         std::array<float,3> pos{};
         float strength=0;
         if(!read(uintptr_t(owner)+jkgm::saber_light::native_blade_position_offset,
