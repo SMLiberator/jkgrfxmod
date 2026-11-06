@@ -527,6 +527,7 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , translucent_shadow_slot(gl::get_uniform_location(the_program,"translucent_shadow_slot"))
     , translucent_shadow_image(gl::get_uniform_location(the_program,"translucent_shadow_image"))
     , translucent_shadow_near_range(gl::get_uniform_location(the_program,"translucent_shadow_near_range"))
+    , translucent_shadow_angle_bias_scale(gl::get_uniform_location(the_program,"translucent_shadow_angle_bias_scale"))
     , translucent_sun(the_program)
 {
     for(int i=0;i<4;++i) {
@@ -549,9 +550,10 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
 
 
 void jkgm::shaders::game_pass_shader::set_translucent_shadow(
-    int slot,float near_plane,float far_plane)
+    int slot,float near_plane,float far_plane,float angle_bias_scale)
 {
     gl::set_uniform_integer(translucent_shadow_slot,slot);
+    gl::set_uniform_float(translucent_shadow_angle_bias_scale,angle_bias_scale);
     if(slot<0)return;
     gl::set_uniform_integer(translucent_shadow_image,10);
     gl::set_uniform_vector(translucent_shadow_near_range,
@@ -667,6 +669,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , translucent_shadow_slot(gl::get_uniform_location(the_program,"translucent_shadow_slot"))
     , translucent_shadow_image(gl::get_uniform_location(the_program,"translucent_shadow_image"))
     , translucent_shadow_near_range(gl::get_uniform_location(the_program,"translucent_shadow_near_range"))
+    , translucent_shadow_angle_bias_scale(gl::get_uniform_location(the_program,"translucent_shadow_angle_bias_scale"))
     , translucent_sun(the_program)
     , ambient_light(gl::get_uniform_location(the_program,"ambient_light"))
     , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
@@ -723,9 +726,10 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_translucent_shadow(
-    int slot,float near_plane,float far_plane)
+    int slot,float near_plane,float far_plane,float angle_bias_scale)
 {
     gl::set_uniform_integer(translucent_shadow_slot,slot);
+    gl::set_uniform_float(translucent_shadow_angle_bias_scale,angle_bias_scale);
     if(slot<0)return;
     gl::set_uniform_integer(translucent_shadow_image,10);
     gl::set_uniform_vector(translucent_shadow_near_range,
@@ -1356,6 +1360,7 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , spotlight_shadow_slot(gl::get_uniform_location(the_program,"spotlight_shadow_slot"))
     , spotlight_shadow_image(gl::get_uniform_location(the_program,"spotlight_shadow_image"))
     , spotlight_shadow_near_range(gl::get_uniform_location(the_program,"spotlight_shadow_near_range"))
+    , spotlight_shadow_angle_bias_scale(gl::get_uniform_location(the_program,"spotlight_shadow_angle_bias_scale"))
     , sun_lighting_active(gl::get_uniform_location(the_program,"sun_lighting_active"))
     , sun_shadow_active(gl::get_uniform_location(the_program,"sun_shadow_active"))
     , sun_shadow_image(gl::get_uniform_location(the_program,"sun_shadow_image"))
@@ -1474,9 +1479,10 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight_count(int c
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight_shadow(
-    int slot,float near_plane,float far_plane)
+    int slot,float near_plane,float far_plane,float angle_bias_scale)
 {
     gl::set_uniform_integer(spotlight_shadow_slot,slot);
+    gl::set_uniform_float(spotlight_shadow_angle_bias_scale,angle_bias_scale);
     if(slot>=0) {
         gl::set_uniform_integer(spotlight_shadow_image,10);
         gl::set_uniform_vector(spotlight_shadow_near_range,
