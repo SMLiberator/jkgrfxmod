@@ -64,6 +64,7 @@ namespace jkgm {
         bool enable_spotlights = false; // COG MAT-based screen-space spotlights
         bool enable_spotlight_shadows = false; // experimental, one static-world shadow map
         unsigned int spotlight_shadow_resolution = 256U; // depth-map width and height (64..1024)
+        float spotlight_shadow_angle_bias_scale = 0.0f; // opt-in: 0=legacy bias, 1=adaptive +0.035 JKU at grazing (0..2)
         bool enable_sun = true; // diffuse sunlight from SetSunInfo; independent of shadow rendering
         bool enable_sun_shadows = false;
         bool enable_sprite_shadows = false; // opt-in sun shadow casting for cached SPRs; reception unaffected
