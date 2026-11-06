@@ -800,7 +800,16 @@ namespace jkgm {
                      profile_window.sprite_gpu_quad_fallbacks/frames,
                      " mat_warmups_avg=",
                      profile_window.sprite_gpu_quad_mat_wait/frames,
-                     " NOTE=shared_quads_not_hardware_instanced");
+                     " NOTE=shared_quads_instancing_opt_in");
+            LOG_INFO("PERF sprite_instancing enabled=",
+                     the_config->enable_gpu_sprite_instancing?1:0,
+                     " batches_avg=",
+                     profile_window.gpu_sprite_instanced_calls/frames,
+                     " batched_sprites_avg=",
+                     profile_window.gpu_sprite_instanced_quads/frames,
+                     " saved_draw_calls_avg=",
+                     (profile_window.gpu_sprite_instanced_quads-
+                      profile_window.gpu_sprite_instanced_calls)/frames);
             auto const &rejects=profile_window.sprite_gpu_quad_rejects;
             LOG_INFO("PERF sprite_gpu_reject_avg source=",rejects[0]/frames,
                      " geomode=",rejects[1]/frames,
