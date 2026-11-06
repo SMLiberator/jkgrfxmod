@@ -49,10 +49,14 @@ assert "hud_missing_mats" in capture
 assert render.index("draw_game_transparency_pass(trimdl, posterize_lighting);") < render.index("// Preserve Camera Thing geometry, camera AND")
 assert render.count("deferred_gpu_hud_material_cache.clear();")>=3
 
-# For a flickering transparent panel, disabling depth sorting keeps
-# captured mesh/face order; the ordinary 3DO alpha sort is unchanged.
-assert "if(transparent && !(post_exempt &&" in draw
-assert "!the_config->camera_hud_depth_sort))" in draw
+# Alpha-blended overlay HUDs always preserve their original mesh order.
+# The optional depth sort is only applied to world-depth (0x20) HUDs,
+# which are composited beneath ordinary screen-space overlay HUDs.
+# Ordinary world 3DO translucency keeps the old back-to-front sort.
+assert "if(transparent && post_exempt) {" in draw
+assert "bool const sort_world_depth=the_config->camera_hud_depth_sort;" in draw
+assert "camera_hud_draw_precedes(" in draw
+assert "float const wx=post_exempt ? m[9] :" in draw
 assert "if(a.depth==b.depth) return a.order<b.order;" in draw
 assert "return a.depth>b.depth;" in draw
 assert "draw_gpu_3do_preview(true,true);" in render
