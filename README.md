@@ -1334,9 +1334,9 @@ change can follow later, so exports present the same 256-based convention.
 `world_cache_preview` have been replaced by `use_gpu_cache` (default
 `true`). `mesh_revision_tracking` and `optimize_hud_uploads` were
 retired; their optimized behaviors are standard. Legacy keys are ignored with
-a warning, so update existing `jkgm.json` files. Keep
-`enable_gpu_mat_warmup` separately disabled until its native uploader has
-been validated on the target machine.
+a warning, so update existing `jkgm.json` files. The guarded
+`enable_gpu_mat_warmup` uploader now defaults to enabled; disable it
+if native-device compatibility diagnostics require it.
 
 Direct native MAT preloading from GPU-cached 3DO interception has been
 **removed** after it caused a page fault in JKGM's std3D uploader during
@@ -1350,13 +1350,13 @@ The separate explicit `SetSpotlight` MAT request remains available:
 its loader is *not* invoked from the per-frame GPU mesh interception path.
 
 An experimental deferred GPU material warm-up queue is available with
-`"enable_gpu_mat_warmup": true` (default **false**). This is opt-in after
+`"enable_gpu_mat_warmup": true` (default **true**). This was originally opt-in after
 a startup crash from a wrongly selected native std3D texture format. The
 loader now passes JK's normal default upload variant (0), validates the
 native Direct3D device and selected texture-format descriptor, and limits
-uploads to four per game tick. With the switch disabled, the old native
-fallback behavior remains in effect. In-game verification is required
-before making automatic warm-up the default.
+uploads to up to 12 per game tick with a ~2ms soft time budget. The switch
+can still be disabled for native-device compatibility diagnostics;
+`enable_native_fallback` remains independently configurable.
 
 ## Shared native MAT readiness checks
 
@@ -1700,8 +1700,9 @@ geometry. Set it to `false` to disable the three ordinary cached drawing
 paths together, retaining the JK-assisted rendering path. This is not
 `use_vanilla_renderer`, which disables JkGRfxMod's hooks entirely. Features
 such as projected decals and shadow-only captures retain their own controls.
-`enable_native_fallback` is still available to diagnose unsupported world
-faces; experimental `enable_gpu_mat_warmup` remains opt-in and defaults false.
+`enable_native_fallback` remains enabled by default for unsupported world
+faces; guarded `enable_gpu_mat_warmup`, GPU sprite instancing, and Camera-type
+HUD rendering are also enabled by default, with individual opt-out controls.
 
 The GPU renderer snapshots 3DO face-corner positions, UVs and face normals
 once and updates only world/joint matrices per frame. Simple concave face

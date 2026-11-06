@@ -1,5 +1,6 @@
-"""Guard unified GPU caching, permanent optimizations, and opt-in MAT warming."""
+"""Guard unified GPU caching, permanent optimizations, and default-on MAT warming."""
 from pathlib import Path
+import json
 import re
 root=Path(__file__).resolve().parents[1]
 read=lambda p:(root/p).read_text(encoding="utf-8")
@@ -9,7 +10,12 @@ main=read("renderer/main.cpp")
 renderer=read("renderer/renderer.cpp")
 opengl=read("renderer/opengl_state.cpp")
 assert "bool use_gpu_cache = true;" in header
-assert "bool enable_gpu_mat_warmup = false;" in header
+sample=json.loads(read("assets/jkgm.json"))
+for key in ("enable_gpu_camera_hud", "enable_gpu_sprite_instancing",
+            "enable_gpu_mat_warmup", "enable_native_fallback"):
+    assert f"bool {key} = true;" in header
+    assert sample[key] is True
+    assert f'j.at("{key}").get_to(' in config
 assert 'j.at("use_gpu_cache").get_to(rv->use_gpu_cache);' in config
 assert "bool const revision_fastpath=mesh_revision::active();" in main
 assert "TrueJkInitNewCogVerbs(mesh_revision::register_mutator,ctx)" in main
