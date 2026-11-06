@@ -369,8 +369,15 @@ void main()
                 // direct sun highlight; the sprite's arbitrary view-facing
                 // normal must not decide whether the canopy shades it.
                 float sun_applied=incidence*sun_fade;
-                float shadowed_baseline=sprite ? 0.75*sun_fade
-                                              : 0.6*sun_applied;
+                // Shadow contrast must disappear with direct sun power.
+                // Previously even intensity=0.001 darkened the baked
+                // scene by up to 60% (75% for a cutout SPR).
+                // Keep the established appearance at intensity >= 1.0.
+                float sun_shadow_strength=clamp(
+                    sun_shadow_color_intensity.a,0.0,1.0);
+                float shadowed_baseline=(sprite ? 0.75*sun_fade
+                                               : 0.6*sun_applied)*
+                                        sun_shadow_strength;
                 surface_rgb*=1.0-shadowed_baseline*(1.0-visibility);
                 vec3 sun_light=pigment*sun_shadow_color_intensity.rgb*
                     sun_shadow_color_intensity.a*sun_applied*visibility;
