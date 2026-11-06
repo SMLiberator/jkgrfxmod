@@ -3307,6 +3307,13 @@ namespace jkgm {
             bool const have_perspective_frustum=frame_camera.perspective;
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
+            // Persistent GL program: reset instancing before every draw pass,
+            // including when the opt-in flag has just been disabled.
+            {
+                std::array<std::array<float,12>,
+                    shaders::gpu_3do_preview_shader::max_sprite_instances> none{};
+                prog.set_sprite_instances(none,0);
+            }
             // With the JSON option OFF, set both sampler type and zero
             // candidates once per pass, not once for every cached model.
             if(!the_config->enable_sector_crossing_lighting)
@@ -3583,6 +3590,8 @@ namespace jkgm {
             auto const sort_begin=gpu_profiling
                 ?profile_clock::now():profile_clock::time_point{};
             if(!transparent) {
+                bool const batch_sprites=the_config->enable_gpu_sprite_instancing &&
+                    !post_exempt && !decals_only;
                 // Opaque GPU 3DO draw ranges have no painter-order dependency.
                 // Native JK batches faces by material before D3D submission;
                 // our face-order grouping generated thousands of 1-2-triangle
@@ -3592,7 +3601,38 @@ namespace jkgm {
                 // Transparent/mixed-alpha fragments retain their existing
                 // back-to-front path below.
                 std::sort(draws.begin(),draws.end(),
-                    [](pending_draw const &a,pending_draw const &b) {
+                    [batch_sprites](pending_draw const &a,pending_draw const &b) {
+                        if(batch_sprites) {
+                            bool const a_sprite=a.instance->is_sprite_quad &&
+                                !a.instance->camera_hud;
+                            bool const b_sprite=b.instance->is_sprite_quad &&
+                                !b.instance->camera_hud;
+                            // Opaque and cutout SPRs have no painter-order
+                            // dependency: cluster equivalent shared quads.
+                            if(a_sprite!=b_sprite)return a_sprite;
+                            if(a_sprite) {
+                                auto const ak=std::tie(
+                                    a.instance->id,a.instance->ambient,
+                                    a.instance->sprite_opacity,
+                                    a.instance->effective_light_mode,
+                                    a.instance->effective_geometry_mode,
+                                    a.instance->world_lighting_exempt,
+                                    a.instance->sector_tint_valid,
+                                    a.instance->sector_tint,
+                                    a.instance->colormap_tint);
+                                auto const bk=std::tie(
+                                    b.instance->id,b.instance->ambient,
+                                    b.instance->sprite_opacity,
+                                    b.instance->effective_light_mode,
+                                    b.instance->effective_geometry_mode,
+                                    b.instance->world_lighting_exempt,
+                                    b.instance->sector_tint_valid,
+                                    b.instance->sector_tint,
+                                    b.instance->colormap_tint);
+                                if(ak<bk)return true;
+                                if(bk<ak)return false;
+                            }
+                        }
                         if(a.instance!=b.instance)
                             return a.instance<b.instance;
                         if(a.group->material!=b.group->material)
@@ -3694,13 +3734,62 @@ namespace jkgm {
                 auto const &inst=*draw.instance;
                 auto const &group=*draw.group;
                 size_t draw_end=draw_start+1;
+                // Keep per-pixel view-dependent materials, point-lit SPRs,
+                // Camera HUDs, decals and fluid on the original path.
+                // The first instancing experiment reuses shared diffuse
+                // state; only its per-sprite modelview transform varies.
+                bool const sprite_batch_eligible=
+                    the_config->enable_gpu_sprite_instancing &&
+                    !post_exempt && !decals_only &&
+                    inst.is_sprite_quad && !inst.camera_hud &&
+                    !inst.is_projected_decal && !inst.shadow_only &&
+                    !inst.transient_procedural &&
+                    inst.num_lights==0U && !inst.crossing_lighting &&
+                    !draw.texture.has_environment &&
+                    !draw.texture.has_environment2 &&
+                    !draw.texture.has_normal &&
+                    !draw.texture.has_normal2 &&
+                    !draw.texture.has_surface &&
+                    draw.texture.displacement_factor==0.0f &&
+                    draw.texture.blend!=material_blend_mode::fluid &&
+                    gpu_specular_parameters(draw.texture,false).first<=0.0f;
+                size_t sprite_batch_count=0;
+                if(sprite_batch_eligible) {
+                    size_t end=draw_start+1;
+                    bool const reversed=gpu_3do_reversed_winding(inst.transform);
+                    while(end<draws.size() &&
+                          end-draw_start<
+                            shaders::gpu_3do_preview_shader::max_sprite_instances) {
+                        auto const &next=draws[end];
+                        auto const &other=*next.instance;
+                        if(!other.is_sprite_quad || other.camera_hud ||
+                           other.num_lights!=0U || other.crossing_lighting ||
+                           other.id!=inst.id || next.group!=draw.group ||
+                           next.policy!=draw.policy ||
+                           other.ambient!=inst.ambient ||
+                           other.sprite_opacity!=inst.sprite_opacity ||
+                           other.effective_light_mode!=inst.effective_light_mode ||
+                           other.effective_geometry_mode!=inst.effective_geometry_mode ||
+                           other.world_lighting_exempt!=inst.world_lighting_exempt ||
+                           other.sector_tint_valid!=inst.sector_tint_valid ||
+                           other.sector_tint!=inst.sector_tint ||
+                           other.colormap_tint!=inst.colormap_tint ||
+                           gpu_3do_reversed_winding(other.transform)!=reversed)
+                            break;
+                        ++end;
+                    }
+                    if(end>draw_start+1) {
+                        draw_end=end;
+                        sprite_batch_count=draw_end-draw_start;
+                    }
+                }
                 // Transparent ranges have ALREADY been sorted back-to-front.
                 // Merge only consecutive entries with identical draw state:
                 // glMultiDrawElements preserves their index-range order,
                 // so the painter order, alpha blending and depth tests are
                 // unchanged. Never reorder alpha ranges by material as in
                 // the opaque path.
-                while(draw_end<draws.size()) {
+                while(sprite_batch_count==0 && draw_end<draws.size()) {
                     auto const &other=draws[draw_end];
                     if(other.instance!=draw.instance ||
                        other.group->material!=group.material ||
@@ -3980,7 +4069,22 @@ namespace jkgm {
                 prog.set_emissive(draw.texture.has_emission,
                                   draw.texture.emission_factor,
                                   draw.texture.emissive_scroll);
-                if(draw_end==draw_start+1) {
+                if(sprite_batch_count>1) {
+                    std::array<std::array<float,12>,
+                        shaders::gpu_3do_preview_shader::max_sprite_instances>
+                            sprite_models{};
+                    for(size_t n=draw_start;n<draw_end;++n)
+                        sprite_models[n-draw_start]=*draws[n].modelview;
+                    prog.set_sprite_instances(sprite_models,sprite_batch_count);
+                    glDrawElementsInstanced(GL_TRIANGLES,
+                        static_cast<GLsizei>(group.count),GL_UNSIGNED_INT,
+                        reinterpret_cast<void const *>(
+                            uintptr_t(group.offset)*sizeof(uint32_t)),
+                        static_cast<GLsizei>(sprite_batch_count));
+                    prog.set_sprite_instances(sprite_models,0);
+                    // Restore the normal per-Thing uniform path.
+                    active_instance=nullptr;
+                } else if(draw_end==draw_start+1) {
                     gl::draw_elements(gl::element_type::triangles,group.count,
                                       gl::index_type::uint32,
                                       static_cast<ptrdiff_t>(
@@ -4041,7 +4145,11 @@ namespace jkgm {
                         ++profile_frame.gpu_opaque_draw_calls;
                         profile_frame.gpu_opaque_draw_ranges+=draw_end-draw_start;
                     }
-                    if(draw_end>draw_start+1)
+                    if(sprite_batch_count>1) {
+                        ++profile_frame.gpu_sprite_instanced_calls;
+                        profile_frame.gpu_sprite_instanced_quads+=
+                            sprite_batch_count;
+                    } else if(draw_end>draw_start+1)
                         ++profile_frame.gpu_multidraw_calls;
                     for(size_t n=draw_start;n<draw_end;n++)
                         profile_frame.gpu_draw_triangles+=
