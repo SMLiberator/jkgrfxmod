@@ -63,6 +63,9 @@ jobs:
         saved_static_template_test.exe
         python3 tests/saved_static_template.py
 
+    - name: Weak sunlight shadow intensity regression tests
+      run: python3 tests/sun_shadow_intensity.py
+
     - name: Per-Thing saber SideMat RGB matching and frame isolation tests
       shell: cmd
       run: |
