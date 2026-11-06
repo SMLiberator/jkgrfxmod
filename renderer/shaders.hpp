@@ -199,6 +199,7 @@ namespace jkgm {
             gl::uniform_location_id translucent_shadow_slot;
             gl::uniform_location_id translucent_shadow_image;
             gl::uniform_location_id translucent_shadow_near_range;
+            gl::uniform_location_id translucent_shadow_angle_bias_scale;
             std::vector<gl::uniform_location_id> translucent_spotlight_images;
             std::vector<gl::uniform_location_id> translucent_spotlight_origins;
             std::vector<gl::uniform_location_id> translucent_spotlight_rights;
@@ -262,7 +263,8 @@ namespace jkgm {
             // params = (enabled 0/1, start, end, opacity)
             void set_fog(point<4, float> params, color_rgb color);
             void set_translucent_spotlight_count(int count);
-            void set_translucent_shadow(int slot,float near_plane,float far_plane);
+            void set_translucent_shadow(int slot,float near_plane,float far_plane,
+                                        float angle_bias_scale);
             void set_translucent_spotlight_camera(
                 point<4,float> origin,point<4,float> right,
                 point<4,float> forward,point<4,float> up,
@@ -325,6 +327,7 @@ namespace jkgm {
             gl::uniform_location_id translucent_shadow_slot;
             gl::uniform_location_id translucent_shadow_image;
             gl::uniform_location_id translucent_shadow_near_range;
+            gl::uniform_location_id translucent_shadow_angle_bias_scale;
             std::vector<gl::uniform_location_id> translucent_spotlight_images;
             std::vector<gl::uniform_location_id> translucent_spotlight_origins;
             std::vector<gl::uniform_location_id> translucent_spotlight_rights;
@@ -375,7 +378,8 @@ namespace jkgm {
             void set_albedo_transition(int source2,float weight);
             void set_scene_depth(int sampler);
             void set_translucent_spotlight_count(int count);
-            void set_translucent_shadow(int slot,float near_plane,float far_plane);
+            void set_translucent_shadow(int slot,float near_plane,float far_plane,
+                                        float angle_bias_scale);
             void set_translucent_spotlight_camera(
                 point<4,float> origin,point<4,float> right,
                 point<4,float> forward,point<4,float> up,
@@ -480,6 +484,7 @@ namespace jkgm {
             gl::uniform_location_id spotlight_shadow_slot;
             gl::uniform_location_id spotlight_shadow_image;
             gl::uniform_location_id spotlight_shadow_near_range;
+            gl::uniform_location_id spotlight_shadow_angle_bias_scale;
             gl::uniform_location_id sun_lighting_active,sun_shadow_active,sun_shadow_image;
             gl::uniform_location_id sun_shadow_direction,sun_shadow_color_intensity;
             gl::uniform_location_id sun_shadow_origin,sun_shadow_right;
@@ -521,7 +526,8 @@ namespace jkgm {
                                       point<4,float> right,point<4,float> forward,
                                       point<4,float> up);
             void set_spotlight_count(int count);
-            void set_spotlight_shadow(int slot,float near_plane,float far_plane);
+            void set_spotlight_shadow(int slot,float near_plane,float far_plane,
+                                      float angle_bias_scale);
             void set_sun_shadow(bool lighting_enabled,bool shadows_enabled,
                                 point<3,float> direction,
                                 point<4,float> color_intensity,
