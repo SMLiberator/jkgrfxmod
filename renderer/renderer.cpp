@@ -803,6 +803,8 @@ namespace jkgm {
                      " NOTE=shared_quads_instancing_opt_in");
             LOG_INFO("PERF sprite_instancing enabled=",
                      the_config->enable_gpu_sprite_instancing?1:0,
+                     " eligible_avg=",
+                     profile_window.gpu_sprite_instancing_eligible/frames,
                      " batches_avg=",
                      profile_window.gpu_sprite_instanced_calls/frames,
                      " batched_sprites_avg=",
@@ -4154,6 +4156,9 @@ namespace jkgm {
                         ++profile_frame.gpu_opaque_draw_calls;
                         profile_frame.gpu_opaque_draw_ranges+=draw_end-draw_start;
                     }
+                    if(sprite_batch_eligible)
+                        profile_frame.gpu_sprite_instancing_eligible+=
+                            sprite_batch_count>1 ? sprite_batch_count : 1U;
                     if(sprite_batch_count>1) {
                         ++profile_frame.gpu_sprite_instanced_calls;
                         profile_frame.gpu_sprite_instanced_quads+=
