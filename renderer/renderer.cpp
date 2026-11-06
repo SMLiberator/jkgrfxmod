@@ -4294,7 +4294,8 @@ namespace jkgm {
             }
             prog.set_translucent_shadow(shadow_slot,
                 shadow_slot>=0 ? spotlight_shadow_view.near_distance : 0.0f,
-                shadow_slot>=0 ? spotlight_shadow_view.range : 0.0f);
+                shadow_slot>=0 ? spotlight_shadow_view.range : 0.0f,
+                the_config->spotlight_shadow_angle_bias_scale);
             if(shadow_slot>=0) {
                 gl::set_active_texture_unit(10);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
@@ -6278,7 +6279,8 @@ namespace jkgm {
             prog.set_sun_shadow_receiver_bias_scale(
                 the_config->sun_shadow_receiver_bias_scale);
             prog.set_sun_max_distance(the_config->sun_max_distance);
-            prog.set_spotlight_shadow(-1,0.0f,0.0f);
+            prog.set_spotlight_shadow(-1,0.0f,0.0f,
+                the_config->spotlight_shadow_angle_bias_scale);
             prog.set_sun_shadow(false,false,make_point(0.0f,0.0f,1.0f),
                 make_point(0.0f,0.0f,0.0f,0.0f),
                 make_point(0.0f,0.0f,0.0f),make_point(1.0f,0.0f,0.0f),
@@ -6333,7 +6335,8 @@ namespace jkgm {
                         if(shadow_matches_light(spot) && spotlight_shadow_target) {
                             prog.set_spotlight_shadow(
                                 active,spotlight_shadow_view.near_distance,
-                                spotlight_shadow_view.range);
+                                spotlight_shadow_view.range,
+                                the_config->spotlight_shadow_angle_bias_scale);
                             gl::set_active_texture_unit(10);
                             gl::bind_texture(gl::texture_bind_target::texture_2d,
                                              spotlight_shadow_target->depth);
