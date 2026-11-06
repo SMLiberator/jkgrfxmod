@@ -197,6 +197,8 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_triangulation.cpp /Fe:gpu_3do_triangulation_test.exe
         gpu_3do_triangulation_test.exe
+    - name: Fluid sunlight receiver regression
+      run: python3 tests/fluid_sun_receivers.py
     - name: GPU cached emissive alpha parity regression
       run: python3 tests/gpu_emissive_alpha.py
     - name: GPU 3DO alpha partition tests

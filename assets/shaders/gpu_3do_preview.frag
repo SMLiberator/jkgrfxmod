@@ -905,10 +905,12 @@ void main() {
     if(transparent_pass!=0 && post_exempt_pass==0 &&
        world_lighting_exempt==0 && decal_receiver_lighting==0 &&
        fullbright<0.999 &&
-       blend_mode==0 && (alpha_mode==1 || alpha_mode==3) &&
+       (blend_mode==0 || blend_mode==3) &&
+       (alpha_mode==1 || alpha_mode==3) &&
        emissive_only==0) {
-        // GPU alpha is applied when forming the premultiplied output below;
-        // sunlight must not apply it twice.
+        // Normal and Fluid receive sunlight/occlusion on diffuse RGB.
+        // Fluid absorption and alpha remain unchanged further below;
+        // never multiply sunlight by Fluid opacity a second time.
         lit_rgb=illuminate_translucent_sun(lit_rgb,albedo.rgb,1.0,
                                            view_depth,diffuse_view_normal);
     }

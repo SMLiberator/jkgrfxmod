@@ -768,10 +768,10 @@ void main()
     const float TRANSLUCENT_COLOR_ALPHA_WEIGHT = 0.0;
     vec3 surface_color = albedo.rgb * (1.0 - metalness) *
                          mix(1.0, albedo.a, TRANSLUCENT_COLOR_ALPHA_WEIGHT);
-    // Only ordinary blended faces/sprites receive sunlight here. Opaque
-    // cutouts are already lit by the deferred pass; flares, fluids,
-    // additive/multiply effects preserve their behavior.
-    if(blend_mode==0 && flare_mode==0 &&
+    // Normal and Fluid receive diffuse sunlight and existing sun shadows.
+    // Fluid applies depth absorption to the lit RGB below without changing
+    // its alpha law. Exclude flares, alpha-cutouts, additive and multiply.
+    if((blend_mode==0 || blend_mode==3) && flare_mode==0 &&
        features.z<0.5) {
         surface_color=illuminate_translucent_sun(
             surface_color,unlit_base_color,clamp(albedo.a,0.0,1.0),
