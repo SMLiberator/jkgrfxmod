@@ -40,6 +40,10 @@ out vec3 pixel_light_face_normal;
 out vec3 pixel_light_vertex_rgb;
 out vec3 pixel_light_state; // static light, face extra light, mode
 uniform vec4 view_right, view_forward, view_up, view_origin;
+// Visible SPRs: GL 3.3 gl_InstanceID selects one cached quad transform
+// from a packed uniform array. Ordinary models continue to use view_*.
+uniform int sprite_instance_count;
+uniform vec4 sprite_instance_matrix[128]; // 32 instances * (right, forward, up, origin)
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 out vec2 pixel_uv;
 out vec3 view_normal;
@@ -56,19 +60,30 @@ uniform vec4 sector_crossing_cmp[4];  // xyz: CMP RGB multiplier
 uniform vec4 sector_crossing_tint[4]; // xyz: sector-only color tint delta
 out vec3 sector_crossing_lit[4];
 void main() {
+    vec4 model_right=view_right;
+    vec4 model_forward=view_forward;
+    vec4 model_up=view_up;
+    vec4 model_origin=view_origin;
+    if(sprite_instance_count>0) {
+        int base=gl_InstanceID*4;
+        model_right=sprite_instance_matrix[base];
+        model_forward=sprite_instance_matrix[base+1];
+        model_up=sprite_instance_matrix[base+2];
+        model_origin=sprite_instance_matrix[base+3];
+    }
     decal_coverage=decal_receiver_lighting!=0
         ? vec4(local_face_anchor,local_extra_light)
         : vec4(0.5,0.5,0.5,1.0);
     // Preserve rdMatrix_TransformPoint34's additive operand order.
-    float x = (view_forward.x*local_position.y+
-               view_up.x*local_position.z+
-               view_right.x*local_position.x)+view_origin.x;
-    float y = (view_forward.y*local_position.y+
-               view_up.y*local_position.z+
-               view_right.y*local_position.x)+view_origin.y;
-    float z = (view_up.z*local_position.z+
-               view_forward.z*local_position.y+
-               view_right.z*local_position.x)+view_origin.z;
+    float x = (model_forward.x*local_position.y+
+               model_up.x*local_position.z+
+               model_right.x*local_position.x)+model_origin.x;
+    float y = (model_forward.y*local_position.y+
+               model_up.y*local_position.z+
+               model_right.y*local_position.x)+model_origin.y;
+    float z = (model_up.z*local_position.z+
+               model_forward.z*local_position.y+
+               model_right.z*local_position.x)+model_origin.z;
     float h=max(projection.x,0.0001);
     float v=h/max(projection.y,0.0001);
     gl_Position=vec4(x/h,z/v,-projection.z,y);
@@ -106,7 +121,7 @@ void main() {
         // rigid basis (a rotation of world space). Compute the inverse-
         // transpose normal once per vertex, not once per affecting light.
         if(nonrigid_light_transform!=0) {
-            vec3 r=view_right.xyz,f=view_forward.xyz,u=view_up.xyz;
+            vec3 r=model_right.xyz,f=model_forward.xyz,u=model_up.xyz;
             vec3 cr=cross(f,u),cf=cross(u,r),cu=cross(r,f);
             float determinant=dot(r,cr);
             normal=normalize(sign(determinant)*
@@ -115,8 +130,8 @@ void main() {
         for(int i=0;i<num_lights;i++) {
             vec3 delta=light_position_radius[i].xyz-anchor;
             if(nonrigid_light_transform!=0)
-                delta=view_right.xyz*delta.x+
-                      view_forward.xyz*delta.y+view_up.xyz*delta.z;
+                delta=model_right.xyz*delta.x+
+                      model_forward.xyz*delta.y+model_up.xyz*delta.z;
             // Disabled pixel lighting must reproduce JK-style vertex
             // Gouraud, independent of edits to jk_point_lighting.glsl.
             float dist=length(delta);
@@ -188,7 +203,7 @@ void main() {
     // but normals must use its inverse transpose, never the raw columns.
     // The sign of the determinant preserves the orientation of reflected
     // node normals. Fall back for collapsed/singular nodes.
-    vec3 r=view_right.xyz, f=view_forward.xyz, u=view_up.xyz;
+    vec3 r=model_right.xyz, f=model_forward.xyz, u=model_up.xyz;
     vec3 cr=cross(f,u), cf=cross(u,r), cu=cross(r,f);
     float det=dot(r,cr);
     vec3 vn=abs(det)>1e-8
