@@ -36,6 +36,14 @@ inline float cog_math_lerp(float a,float b,float t)
     return a+(b-a)*t;
 }
 
+// Inverse of Lerp: return the position of value relative to [a,b].
+// Unclamped, including for reversed endpoints. Equal endpoints define no
+// interval, so return 0 rather than dividing by zero.
+inline float cog_math_inverse_lerp(float a,float b,float value)
+{
+    return a==b ? 0.0f : (value-a)/(b-a);
+}
+
 // Generate a uniform direction over the unit sphere from two independent
 // [0, 1) samples. Sampling z uniformly avoids the pole bias of latitude.
 inline std::array<float,3> cog_math_rand_dir(float azimuth_sample,float height_sample)

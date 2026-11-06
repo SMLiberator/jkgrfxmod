@@ -18,6 +18,13 @@ jobs:
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
 
+    - name: COG interpolation arithmetic and native handler wiring
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_math.cpp /Fe:cog_math_test.exe
+        cog_math_test.exe
+        python3 tests/cog_math_wiring.py
+
     - name: Compressed MP3 OGG FLAC decoder regression tests
       shell: cmd
       run: |

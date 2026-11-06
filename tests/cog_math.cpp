@@ -43,6 +43,21 @@ int main()
     assert(eq(cog_math_lerp(10.0f,20.0f,-0.5f),5.0f));
     assert(eq(cog_math_lerp(10.0f,20.0f,1.5f),25.0f));
     assert(eq(cog_math_lerp(20.0f,10.0f,1.5f),5.0f));
+
+    // InverseLerp(a,b,value) is unclamped and preserves endpoint ordering.
+    assert(eq(cog_math_inverse_lerp(10.0f,20.0f,10.0f),0.0f));
+    assert(eq(cog_math_inverse_lerp(10.0f,20.0f,15.0f),0.5f));
+    assert(eq(cog_math_inverse_lerp(10.0f,20.0f,20.0f),1.0f));
+    assert(eq(cog_math_inverse_lerp(10.0f,20.0f,5.0f),-0.5f));
+    assert(eq(cog_math_inverse_lerp(10.0f,20.0f,25.0f),1.5f));
+    assert(eq(cog_math_inverse_lerp(20.0f,10.0f,15.0f),0.5f));
+    assert(eq(cog_math_inverse_lerp(20.0f,10.0f,25.0f),-0.5f));
+    assert(eq(cog_math_inverse_lerp(20.0f,10.0f,5.0f),1.5f));
+    assert(eq(cog_math_inverse_lerp(-0.3f,0.3f,0.296323f),
+              0.99387167f));
+    // Identical endpoints have no unique inverse: deterministic zero.
+    assert(eq(cog_math_inverse_lerp(3.0f,3.0f,3.0f),0.0f));
+    assert(eq(cog_math_inverse_lerp(3.0f,3.0f,10.0f),0.0f));
     // Uniform spherical direction generation: cardinal axes and oblique case.
     auto const pos_x=cog_math_rand_dir(0.0f,0.5f);
     auto const pos_y=cog_math_rand_dir(0.25f,0.5f);

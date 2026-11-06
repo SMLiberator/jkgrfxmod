@@ -6672,8 +6672,8 @@ namespace {
     }
 
     // Pure math COG extensions. Numeric parameters are popped in reverse
-    // order, and all non-Sign results return flex. Lerp is intentionally
-    // UNCLAMPED, so t outside [0,1] extrapolates.
+    // order, and all non-Sign results return flex. Lerp and InverseLerp
+    // are intentionally UNCLAMPED, so values outside the interval extrapolate.
     void __cdecl cog_math_min(void *ctx)
     {
         float const b=cog_pop_float(ctx);
@@ -6720,6 +6720,14 @@ namespace {
         float const b=cog_pop_float(ctx);
         float const a=cog_pop_float(ctx);
         cog_push_float(ctx,jkgm::cog_math_lerp(a,b,t));
+    }
+
+    void __cdecl cog_math_inverse_lerp(void *ctx)
+    {
+        float const value=cog_pop_float(ctx);
+        float const b=cog_pop_float(ctx);
+        float const a=cog_pop_float(ctx);
+        cog_push_float(ctx,jkgm::cog_math_inverse_lerp(a,b,value));
     }
 
     // SithThing's actorParams: native (JKGM) saber light is +0x1a4;
@@ -9315,6 +9323,7 @@ namespace {
         cog_verb_entry{"clamp", cog_math_clamp},
         cog_verb_entry{"sign", cog_math_sign},
         cog_verb_entry{"lerp", cog_math_lerp},
+        cog_verb_entry{"inverselerp", cog_math_inverse_lerp},
         cog_verb_entry{"randdir", cog_math_rand_dir},
         cog_verb_entry{"rotatevector", cog_rotate_vector},
         cog_verb_entry{"getthingoffsetpos", cog_get_thing_offset_pos},
