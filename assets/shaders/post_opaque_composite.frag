@@ -36,6 +36,7 @@ uniform vec4 spotlight_screen_bounds[4];
 uniform int spotlight_shadow_slot; // -1 when no valid shadow map this frame
 uniform sampler2DShadow spotlight_shadow_image;
 uniform vec2 spotlight_shadow_near_range; // near, far in JK world units
+uniform float spotlight_shadow_angle_bias_scale; // 0=legacy, 1=+0.035 JKU at grazing
 
 uniform int sun_lighting_active; // independent of depth-map readiness
 uniform int sun_shadow_active;
@@ -166,7 +167,7 @@ float sun_dynamic_shadow_visibility(vec3 position,float incidence)
     return mix(1.0,visibility,near_fade);
 }
 
-float spotlight_shadow_visibility(vec2 uv,float receiver_distance)
+float spotlight_shadow_visibility(vec2 uv,float receiver_distance,float facing)
 {
     float n=spotlight_shadow_near_range.x;
     float f=spotlight_shadow_near_range.y;
@@ -175,9 +176,12 @@ float spotlight_shadow_visibility(vec2 uv,float receiver_distance)
     // receiver distance directly would create spurious shadows everywhere.
     float receiver=f/(f-n)-f*n/((f-n)*receiver_distance);
     float derivative=f*n/((f-n)*receiver_distance*receiver_distance);
-    // Preserve the geometry-scale depth bias with a 24-bit comparison map.
-    // Avoid detached contact shadows at long projector ranges.
-    float bias=max(0.000025,derivative*0.015);
+    // Zero scale preserves the fixed 0.015-JKU receiver bias. Grazing
+    // surfaces need more offset because each texel spans more surface area.
+    float grazing=1.0-clamp(abs(facing),0.0,1.0);
+    float world_bias=0.015+0.035*spotlight_shadow_angle_bias_scale*
+                     grazing*grazing;
+    float bias=max(0.000025,derivative*world_bias);
     vec2 texel=1.0/vec2(textureSize(spotlight_shadow_image,0));
     float lit=0.0;
     // Four nearby hardware-bilinear depth comparisons smooth jagged edges,
@@ -279,7 +283,7 @@ void project_spotlights(float depth,ivec2 pixel,
         float incidence=max(0.05, 0.25+0.75*facing);
         float shadow=1.0;
         if(i==spotlight_shadow_slot)
-            shadow=spotlight_shadow_visibility(uv,distance);
+            shadow=spotlight_shadow_visibility(uv,distance,facing);
         vec3 radiance=cookie.rgb*cookie.a*(edge*fade*incidence*shadow);
         diffuse+=radiance*spotlight_intensities[i].x;
         additive+=radiance*spotlight_intensities[i].y;
