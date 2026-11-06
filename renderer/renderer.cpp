@@ -433,6 +433,11 @@ namespace jkgm {
         struct gpu_3do_texture {
             // Stable texture-cache ID, unlike a borrowed GL texture_view.
             std::optional<srgb_texture_id> albedo_id;
+            // Late Camera-HUD rendering must own image IDs, not just GL
+            // texture_view handles: D3D MAT reloads can recycle freed images
+            // before the deferred HUD pass is presented.
+            std::optional<srgb_texture_id> albedo2_id;
+            std::optional<srgb_texture_id> emission_id;
             gl::texture_view texture = gl::default_texture;
             gl::texture_view texture2 = gl::default_texture;
             float albedo_transition=0.0f;
@@ -1022,6 +1027,7 @@ namespace jkgm {
 
         ~renderer_impl() override
         {
+            clear_deferred_gpu_hud_materials();
             reset_sector_crossing();
             release_spotlight_images();
             spotlight_shadow_target.reset();
@@ -1577,12 +1583,41 @@ namespace jkgm {
             }
         }
 
+        // Keep each image referenced by the deferred Camera HUD alive
+        // through the following presentation. GL texture_view stores only
+        // an object name; without a texture-cache reference, a MAT reload
+        // can release and recycle that object for a DIFFERENT image.
+        // Each cached material owns one retain per texture field (including
+        // a repeated ID); releases must mirror those retains.
+        void retain_deferred_gpu_hud_material(gpu_3do_texture const &m)
+        {
+            if(!texture_cache)return;
+            if(m.albedo_id)texture_cache->retain_srgb_texture(*m.albedo_id);
+            if(m.albedo2_id)texture_cache->retain_srgb_texture(*m.albedo2_id);
+            if(m.emission_id)texture_cache->retain_srgb_texture(*m.emission_id);
+        }
+        void clear_deferred_gpu_hud_materials()
+        {
+            if(texture_cache)
+                for(auto const &entry:deferred_gpu_hud_material_cache) {
+                    auto const &m=entry.second;
+                    if(m.albedo_id)texture_cache->release_srgb_texture(*m.albedo_id);
+                    if(m.albedo2_id)texture_cache->release_srgb_texture(*m.albedo2_id);
+                    if(m.emission_id)texture_cache->release_srgb_texture(*m.emission_id);
+                }
+            // Actual map clear (not the wrapper, to avoid recursion).
+            deferred_gpu_hud_material_cache.clear();
+        }
+
         // Composite Camera-type HUD Things after scene post-processing, but
         // before DirectDraw HUD. In Retro Mode draw to the linear staging
         // buffer so final palette quantization includes these Camera Things.
         void draw_post_exempt()
         {
-            if(deferred_gpu_3do_instances.empty()) return;
+            if(deferred_gpu_3do_instances.empty()) {
+                clear_deferred_gpu_hud_materials();
+                return;
+            }
 
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                  ogs->retro_mode_active && ogs->retro_present_buffer
@@ -1605,6 +1640,8 @@ namespace jkgm {
             gl::set_active_texture_unit(0);
             gl::disable(gl::capability::blend);
             gl::set_depth_mask(true);
+            // Present consumed this frame's retained image references.
+            clear_deferred_gpu_hud_materials();
         }
 
         // Called ONLY by the game's original Screenshot hotkey or COG
@@ -1749,7 +1786,7 @@ namespace jkgm {
 
             if(presenting_menu) {
                 deferred_gpu_3do_instances.clear();
-                deferred_gpu_hud_material_cache.clear();
+                clear_deferred_gpu_hud_materials();
                 deferred_gpu_3do_camera={};
                 // Menus are palette-sRGB imagery drawn into our linear screen
                 // buffer. Present directly: GL_FRAMEBUFFER_SRGB performs the
@@ -3000,6 +3037,7 @@ namespace jkgm {
             if(albedo_weight>0.0f) {
                 out.albedo_transition=albedo_weight;
                 if(to_albedo) {
+                    out.albedo2_id=to_albedo;
                     out.texture2=texture_cache->get_texture_handle(*to_albedo);
                     out.albedo_source2=1;
                     out.alpha=out.alpha ||
@@ -3032,6 +3070,7 @@ namespace jkgm {
             out.albedo_scroll=scroll_offset(surface->albedo_scroll);
             out.emissive_scroll=scroll_offset(surface->emissive_scroll);
             if(surface->emissive_map) {
+                out.emission_id=surface->emissive_map;
                 out.emission=texture_cache->get_texture_handle(*surface->emissive_map);
                 out.has_emission=true;
             }
@@ -8376,7 +8415,7 @@ namespace jkgm {
             // re-read native MAT pointers (animated cels and transient GUI
             // materials can be changed/freed before that later draw).
             deferred_gpu_3do_instances.clear();
-            deferred_gpu_hud_material_cache.clear();
+            clear_deferred_gpu_hud_materials();
             deferred_gpu_3do_camera={};
             size_t hud_cached_mats=0,hud_missing_mats=0,hud_instances=0;
             if(frame_has_exempt_gpu) {
@@ -8395,8 +8434,12 @@ namespace jkgm {
                         auto found=gpu_frame_material_cache.find(key);
                         if(found!=gpu_frame_material_cache.end()) {
                             if(deferred_gpu_hud_material_cache.emplace(
-                                   key,found->second).second)
+                                   key,found->second).second) {
+                                // A borrowed GL image is not stable across
+                                // the render/present frame boundary.
+                                retain_deferred_gpu_hud_material(found->second);
                                 ++hud_cached_mats;
+                            }
                         } else ++hud_missing_mats;
                     }
                     deferred_gpu_3do_instances.push_back(std::move(inst));
