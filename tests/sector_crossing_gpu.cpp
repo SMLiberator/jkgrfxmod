@@ -123,6 +123,12 @@ int main()
     assert(!sector_crossing_stage_instance(
         snapshot,ranges,instance,read,true));
     instance.owning_sector_valid=true;
+    // Skybox ThingFlag 0x20 must bypass sector-crossing color and
+    // lighting even when the feature is enabled and sectors overlap.
+    instance.skybox_vertex_lighting=true;
+    assert(!sector_crossing_stage_instance(
+        snapshot,ranges,instance,read,true));
+    instance.skybox_vertex_lighting=false;
     instance.camera_hud=true;
     assert(!sector_crossing_stage_instance(
         snapshot,ranges,instance,read,true));
