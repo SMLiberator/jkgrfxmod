@@ -1048,7 +1048,7 @@ namespace jkgm {
                 // Invalidate it before clearing GPU/MAT resources: otherwise
                 // a stale late-pass draw can briefly sample an unresolved MAT.
                 deferred_gpu_3do_instances.clear();
-                deferred_gpu_hud_material_cache.clear();
+                clear_deferred_gpu_hud_materials();
                 deferred_gpu_3do_camera={};
                 frame_has_exempt_gpu=false;
                 reset_sector_crossing();
