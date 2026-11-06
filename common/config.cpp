@@ -222,6 +222,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("use_gpu_cache")) {
             j.at("use_gpu_cache").get_to(rv->use_gpu_cache);
         }
+        if(j.contains("enable_gpu_sprite_instancing")) {
+            j.at("enable_gpu_sprite_instancing").get_to(
+                rv->enable_gpu_sprite_instancing);
+        }
         if(j.contains("enable_saber_trails")) {
             j.at("enable_saber_trails").get_to(rv->enable_saber_trails);
         }
