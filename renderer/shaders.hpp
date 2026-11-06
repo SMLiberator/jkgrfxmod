@@ -278,6 +278,7 @@ namespace jkgm {
         // Isolated first GPU 3DO mesh test: independent of old D3D vertex format.
         class gpu_3do_preview_shader : public opengl_shader {
             gl::uniform_location_id view_right,view_forward,view_up,view_origin;
+            gl::uniform_location_id sprite_instance_count,sprite_instance_matrix;
             gl::uniform_location_id projection;
             gl::uniform_location_id albedo_sampler,emissive_sampler,uv_scale,has_texture,
                                     has_emissive,transparent_pass,blend_mode,alpha_mode,alpha_cutoff,
@@ -343,9 +344,14 @@ namespace jkgm {
                                     nonrigid_light_transform,effective_light_mode;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
         public:
+            static constexpr size_t max_sprite_instances=32;
             explicit gpu_3do_preview_shader(fs::path const &data_root);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
                                  point<4,float> up,point<4,float> origin);
+            // Zero count restores the normal draw path.
+            void set_sprite_instances(
+                std::array<std::array<float,12>,max_sprite_instances> const &models,
+                size_t count);
             void set_projection(point<4,float> projection_params);
             void set_surface(int albedo_source,float width,float height,bool transparent,
                              int blend,int alpha_policy,float cutoff,float face_opacity,
