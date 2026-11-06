@@ -598,6 +598,10 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &ro
     , view_forward(gl::get_uniform_location(the_program,"view_forward"))
     , view_up(gl::get_uniform_location(the_program,"view_up"))
     , view_origin(gl::get_uniform_location(the_program,"view_origin"))
+    , sprite_instance_count(gl::get_uniform_location(
+          the_program,"sprite_instance_count"))
+    , sprite_instance_matrix(gl::get_uniform_location(
+          the_program,"sprite_instance_matrix[0]"))
     , projection(gl::get_uniform_location(the_program,"projection"))
     , albedo_sampler(gl::get_uniform_location(the_program,"albedo_map"))
     , emissive_sampler(gl::get_uniform_location(the_program,"emissive_map"))
@@ -774,6 +778,30 @@ void jkgm::shaders::gpu_3do_preview_shader::set_view_matrix(
     gl::set_uniform_vector(view_forward,f);
     gl::set_uniform_vector(view_up,u);
     gl::set_uniform_vector(view_origin,t);
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_sprite_instances(
+    std::array<std::array<float,12>,max_sprite_instances> const &models,
+    size_t count)
+{
+    if(count==0 || count>max_sprite_instances) {
+        gl::set_uniform_integer(sprite_instance_count,0);
+        return;
+    }
+    // One uniform-array upload per batch, independent of the per-Thing VAO.
+    std::array<float,max_sprite_instances*16> packed{};
+    for(size_t i=0;i<count;++i) {
+        auto const &m=models[i];
+        for(size_t axis=0;axis<4;++axis) {
+            size_t const dst=i*16+axis*4;
+            packed[dst+0]=m[axis*3+0];
+            packed[dst+1]=m[axis*3+1];
+            packed[dst+2]=m[axis*3+2];
+            packed[dst+3]=axis==3?1.0f:0.0f;
+        }
+    }
+    glUniform4fv(sprite_instance_matrix.get(),
+                 static_cast<GLsizei>(count*4U),packed.data());
+    gl::set_uniform_integer(sprite_instance_count,static_cast<int>(count));
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_projection(
     point<4,float> p)
