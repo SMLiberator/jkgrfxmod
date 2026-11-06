@@ -49,10 +49,17 @@ If a frame has missing MAT snapshots, collect the 3DO/MAT names and
 related material warm-up logs. If flipping `camera_hud_depth_sort`
 stabilizes the image, alpha sorting of intersecting or coplanar faces
 is implicated; if native-only fixes it, GPU/deferred timing is implicated.
-If neither fixes the flicker, investigate actual 3DO face overlap,
-animated CEL uploads and stale GL texture handles. Texture handles
-are recorded at scene time, but this experiment does not yet pin or
-deep-copy the underlying GL images against later deletion/re-upload.
+If neither fixes the flicker, investigate the GPU-only deferred
+material path. We found a concrete texture lifetime hazard: the
+per-frame material snapshot previously kept only borrowed GL handles,
+while a native D3D MAT Load could release an image, allowing the texture
+cache to reuse and overwrite the same GL object before the deferred
+Camera HUD had been drawn. Deferred HUD materials now retain the
+albedo, optional transition albedo, and emissive texture-cache IDs
+until the late HUD draw completes (also releasing on menus/shutdown).
+This protects the actual image contents as well as the GL handles.
+An in-game alpha-HUD test is still necessary to establish whether
+this accounts for all observed flickering.
 
 Switches in `jkgm.json`:
 
