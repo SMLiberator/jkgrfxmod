@@ -696,7 +696,11 @@ vec3 illuminate_translucent_sun(vec3 baked,vec3 pigment,float opacity,
         if(range_fade<=0.0)return baked;
     }
     float visibility=translucent_sun_visibility(world,max(incidence,0.35));
-    vec3 dimmed=baked*(1.0-0.75*range_fade*(1.0-visibility));
+    // Match native translucent rendering and the opaque composite:
+    // shadow contrast tracks sun power rather than darkening baked ambient.
+    float sun_shadow_strength=clamp(translucent_sun_color.a,0.0,1.0);
+    vec3 dimmed=baked*(1.0-0.75*range_fade*sun_shadow_strength*
+                      (1.0-visibility));
     vec3 radiance=pigment*translucent_sun_color.rgb*
                   translucent_sun_color.a*incidence*visibility*opacity*range_fade;
     return dimmed+radiance*(vec3(1.0)-clamp(dimmed,vec3(0.0),vec3(1.0)));
