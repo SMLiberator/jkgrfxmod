@@ -284,6 +284,17 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             }
             rv->spotlight_shadow_resolution = static_cast<unsigned int>(pixels);
         }
+        if(j.contains("spotlight_shadow_angle_bias_scale")) {
+            auto const &v=j.at("spotlight_shadow_angle_bias_scale");
+            if(!v.is_number())
+                throw std::runtime_error(
+                    "spotlight_shadow_angle_bias_scale must be numeric (0..2)");
+            double const scale=v.get<double>();
+            if(!std::isfinite(scale) || scale<0.0 || scale>2.0)
+                throw std::runtime_error(
+                    "spotlight_shadow_angle_bias_scale must be between 0 and 2");
+            rv->spotlight_shadow_angle_bias_scale=static_cast<float>(scale);
+        }
         if(j.contains("debug_void_pixels")) {
             j.at("debug_void_pixels").get_to(rv->debug_void_pixels);
         }
