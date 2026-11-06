@@ -3761,19 +3761,25 @@ namespace jkgm {
                     // Native D3D triangles do not carry per-Thing flags here.
                     prog.set_world_lighting_exempt(inst.world_lighting_exempt);
                     prog.set_sprite_receiver(inst.is_sprite_quad);
-                    prog.set_colormap_tint(inst.colormap_tint);
+                    // 0x20 skyboxes keep JK vertex lighting, not the sector's
+                    // CMP colors, tint, or opt-in crossing-based lighting.
+                    bool const allow_sector_effects=!inst.skybox_vertex_lighting;
+                    prog.set_colormap_tint(allow_sector_effects
+                        ? inst.colormap_tint
+                        : std::array<float,3>{{1.0f,1.0f,1.0f}});
                     // Zero sector count preserves the existing fast path.
                     if(the_config->enable_sector_crossing_lighting)
                         prog.set_sector_crossing(inst.crossing_lighting.get(),
-                            crossing_buffer_ready && !inst.camera_hud &&
-                            !inst.is_projected_decal && !inst.is_sprite_quad,
+                            crossing_buffer_ready && allow_sector_effects &&
+                            !inst.camera_hud && !inst.is_projected_decal &&
+                            !inst.is_sprite_quad,
                             can_replace_sector_tint);
                     // Shared 3DO geometry can have several instances in
                     // different SithSectors. Do this per Thing, not per
                     // material/mesh. Invalid native pointers preserve JK.
                     std::array<float,3> tint_delta{};
-                    if(can_replace_sector_tint && inst.sector_tint_valid &&
-                       !inst.camera_hud)
+                    if(can_replace_sector_tint && allow_sector_effects &&
+                       inst.sector_tint_valid && !inst.camera_hud)
                         tint_delta=inst.sector_tint;
                     prog.set_thing_sector_tint_delta(tint_delta);
                     std::array<float,3> local_eye{};
