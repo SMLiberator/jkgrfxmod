@@ -431,15 +431,21 @@ uniform vec4 translucent_spotlight_bounds[4];
 uniform int translucent_shadow_slot; // -1 disables shadow sampling
 uniform sampler2DShadow translucent_shadow_image;
 uniform vec2 translucent_shadow_near_range;
+uniform float translucent_shadow_angle_bias_scale; // opt-in; 0=legacy
 
-float translucent_shadow_visibility(vec2 uv,float distance)
+float translucent_shadow_visibility(vec2 uv,float distance,float facing)
 {
     float n=translucent_shadow_near_range.x;
     float f=translucent_shadow_near_range.y;
     if(distance<=n || distance>=f)return 1.0;
     float receiver=f/(f-n)-f*n/((f-n)*distance);
     float derivative=f*n/((f-n)*distance*distance);
-    float bias=max(0.000025,derivative*0.015);
+    // The same geometric angle-dependent receiver bias as opaque spotlights.
+    // No additional shadow-map samples or caster offset.
+    float grazing=1.0-clamp(abs(facing),0.0,1.0);
+    float world_bias=0.015+0.035*translucent_shadow_angle_bias_scale*
+                     grazing*grazing;
+    float bias=max(0.000025,derivative*world_bias);
     vec2 texel=1.0/vec2(textureSize(translucent_shadow_image,0));
     float visible=0.0;
     // Match the opaque spotlight's filtered depth comparison.
@@ -675,7 +681,7 @@ vec3 light_translucent_spotlight(float depth, vec3 view_normal,
         float facing = abs(dot(normal, normalize(-relative)));
         float incidence = 0.25 + 0.75 * facing;
         float visibility=i==translucent_shadow_slot
-        ? translucent_shadow_visibility(uv,distance) : 1.0;
+        ? translucent_shadow_visibility(uv,distance,facing) : 1.0;
     vec3 radiance = cookie.rgb * cookie.a * (edge * fade * incidence * visibility);
         diffuse += radiance * translucent_spotlight_intensities[i].x;
         additive += radiance * translucent_spotlight_intensities[i].y;
