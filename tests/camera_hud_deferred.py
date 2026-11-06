@@ -47,7 +47,23 @@ assert "deferred_gpu_3do_instances.push_back(std::move(inst));" in capture
 assert "gpu_3do_present_serial%120U==0U" in capture
 assert "hud_missing_mats" in capture
 assert render.index("draw_game_transparency_pass(trimdl, posterize_lighting);") < render.index("// Preserve Camera Thing geometry, camera AND")
-assert render.count("deferred_gpu_hud_material_cache.clear();")>=3
+# Deferred copies must hold texture-cache references, not just raw GL
+# texture_view names. A native MAT Load can otherwise overwrite a released
+# image in place before the next present() call.
+assert "void retain_deferred_gpu_hud_material(" in render
+assert "void clear_deferred_gpu_hud_materials()" in render
+assert "retain_deferred_gpu_hud_material(found->second);" in capture
+assert "out.albedo2_id=to_albedo;" in render
+assert "out.emission_id=surface->emissive_map;" in render
+for field in ("albedo_id", "albedo2_id", "emission_id"):
+    assert f"texture_cache->retain_srgb_texture(*m.{field})" in render
+    assert f"texture_cache->release_srgb_texture(*m.{field})" in render
+assert render.count("clear_deferred_gpu_hud_materials();")>=5
+assert render.count("deferred_gpu_hud_material_cache.clear();")==1
+assert "clear_deferred_gpu_hud_materials();" in render[
+    render.index("void draw_post_exempt()"):
+    render.index("// Called ONLY by the game's original Screenshot")
+]
 
 # For a flickering transparent panel, disabling depth sorting keeps
 # captured mesh/face order; the ordinary 3DO alpha sort is unchanged.
