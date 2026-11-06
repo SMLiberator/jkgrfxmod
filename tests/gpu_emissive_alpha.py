@@ -15,6 +15,7 @@ native = read("assets/shaders/game_trns_pass.frag")
 for shader in (model, world):
     assert shader.index("vec3 emission=") < shader.index("if(gpu_material_discard(")
     assert "gpu_material_emission_coverage(" in shader
+    assert "int const preserve_emission" not in shader  # GLSL qualifiers precede type
     assert "preserve_emission,transparent_pass!=0" in shader
     assert shader.count("vec3 emission=") == 1
 assert "return any(notEqual(emission,vec3(0.0))) ? 1 : 0;" in shared
@@ -26,6 +27,7 @@ assert "if(policy==4 && alpha<=gpu_material_dither_threshold())return true;" in 
 assert "if(policy==0 || policy==2 || policy==4)return true;" in shared
 assert "if(alpha<=0.001 && emission_only==0)return true;" in shared
 assert "if(alpha_cutout!=0 && coverage<alpha_cutoff)discard;" in world
+assert "if(decal_receiver_lighting==0 && native_face_opacity>0.001)" in model
 assert "if(albedo_map_sample.a < alpha_cutoff) discard;" in native
 assert "if(albedo.a <= dither_threshold()) discard;" in native
 assert "out_color = vec4(color, albedo.a);" in native

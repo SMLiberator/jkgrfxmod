@@ -220,7 +220,7 @@ void main() {
         ?gpu_material_emission(emissive_map,material_texcoord,
                                emissive_scroll,emissive_factor,has_emissive)
         :vec3(0.0);
-    int const preserve_emission=gpu_material_emission_coverage(
+    int preserve_emission=gpu_material_emission_coverage(
         emissive_only,blend_mode,emission);
     if(gpu_material_discard(coverage,alpha_mode,alpha_cutoff,
                             preserve_emission,transparent_pass!=0,false))discard;

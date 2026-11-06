@@ -822,8 +822,13 @@ void main() {
     // by albedo coverage in the shared policy.
     vec3 emission=gpu_material_emission(
         emissive_map,uv,emissive_scroll,emissive_factor,has_emissive);
-    int const preserve_emission=gpu_material_emission_coverage(
-        emissive_only,blend_mode,emission);
+    // Projected-decal feather and native sprite opacity must continue to
+    // suppress pixels at zero overall coverage; this is an albedo-texture
+    // exception, not permission to revive a completely faded effect.
+    int preserve_emission=emissive_only;
+    if(decal_receiver_lighting==0 && native_face_opacity>0.001)
+        preserve_emission=gpu_material_emission_coverage(
+            emissive_only,blend_mode,emission);
     if(gpu_material_discard(albedo.a,alpha_mode,alpha_cutoff,
                             preserve_emission,transparent_pass!=0,
                             post_exempt_pass!=0)) discard;
