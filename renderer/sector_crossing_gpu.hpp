@@ -91,6 +91,7 @@ sector_crossing_stage_instance(
 {
     if(!instance.owning_sector_valid || !instance.geometry ||
        instance.shadow_only || instance.camera_hud ||
+       instance.skybox_vertex_lighting ||
        instance.is_sprite_quad || instance.is_projected_decal ||
        instance.transient_procedural ||
        snapshot.world==0 || plane_ranges.size()!=snapshot.sectors.size())
