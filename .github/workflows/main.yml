@@ -77,9 +77,6 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\camera_hud_thing.cpp /Fe:camera_hud_thing_test.exe
         camera_hud_thing_test.exe
-        python3 tests/camera_hud_alpha.py
-        python3 tests/camera_hud_deferred.py
-        python3 tests/camera_hud_emissive.py
 
     - name: COG RayCastEx native collideSize sphere regression tests
       shell: cmd

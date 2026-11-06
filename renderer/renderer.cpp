@@ -11,7 +11,6 @@
 #include "audio_module_probe.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_alpha.hpp"
-#include "camera_hud_thing.hpp"
 #include "native_jk_palette_effects.hpp"
 #include "native_screenshot.hpp"
 #include "native_sector_palette_bridge.hpp"
@@ -3427,10 +3426,7 @@ namespace jkgm {
                     // whole cached draw ranges to avoid GL state work for
                     // entirely offscreen geometry. This is conservative:
                     // partially visible groups still reach OpenGL.
-                    // Post-composited Camera HUDs can sit against the near
-                    // plane. Native CPU frustum heuristics may flicker at
-                    // that boundary; GL performs the exact clipping.
-                    if(!inst.camera_hud && have_perspective_frustum &&
+                    if(have_perspective_frustum &&
                        gpu_3do_batch_outside_frustum(
                            native_frustum,modelviews.back(),
                            group.bounds_min,group.bounds_max)) {
@@ -3442,8 +3438,7 @@ namespace jkgm {
                     // unless it is double-sided. Since opaque faces are batched
                     // by MAT, only skip a group when ALL its faces face away.
                     // This saves CPU-side GL draw calls, not just GPU fragments.
-                    if(!inst.camera_hud && can_cpu_cull &&
-                       !(group.face_type&0x1U) &&
+                    if(can_cpu_cull && !(group.face_type&0x1U) &&
                        group.plane_count>0 &&
                        group.plane_start+group.plane_count<=
                            inst.geometry->face_planes.size()) {
@@ -3529,20 +3524,12 @@ namespace jkgm {
                         material_policy,inst.saber_trail_active);
                     if(!post_exempt && !gpu_3do_draws_in_pass(policy,transparent)) continue;
                     float depth=0.0f;
-                    if(transparent && (!post_exempt ||
-                                       inst.camera_hud_world_depth)) {
+                    if(transparent) {
                         auto const &m=inst.transform;
-                        // Ordinary world alpha uses face-group centroids.
-                        // World-depth HUDs use their *instance* origin so
-                        // meshes belonging to one HUD do not continually
-                        // reorder transparent layers while the camera moves.
                         auto const &c=group.centroid;
-                        float const wx=post_exempt ? m[9] :
-                            m[9]+m[0]*c[0]+m[3]*c[1]+m[6]*c[2];
-                        float const wy=post_exempt ? m[10] :
-                            m[10]+m[1]*c[0]+m[4]*c[1]+m[7]*c[2];
-                        float const wz=post_exempt ? m[11] :
-                            m[11]+m[2]*c[0]+m[5]*c[1]+m[8]*c[2];
+                        float const wx=m[9]+m[0]*c[0]+m[3]*c[1]+m[6]*c[2];
+                        float const wy=m[10]+m[1]*c[0]+m[4]*c[1]+m[7]*c[2];
+                        float const wz=m[11]+m[2]*c[0]+m[5]*c[1]+m[8]*c[2];
                         depth=(wx-cam.position[0])*cam.forward[0]+
                               (wy-cam.position[1])*cam.forward[1]+
                               (wz-cam.position[2])*cam.forward[2];
@@ -3582,29 +3569,18 @@ namespace jkgm {
                         return a.order<b.order;
                     });
             }
-            if(transparent && post_exempt) {
-                // Never sort overlay HUD alpha by near-coplanar centroids:
-                // minuscule camera/animation changes reverse compositing
-                // order, causing flicker. Preserve the native submission
-                // sequence. Draw 0x20 world-depth UI beneath overlay HUDs;
-                // optionally sort *those instances* back to front.
-                bool const sort_world_depth=the_config->camera_hud_depth_sort;
-                std::sort(draws.begin(),draws.end(),
-                    [sort_world_depth](pending_draw const &a,
-                                       pending_draw const &b) {
-                        return camera_hud_draw_precedes(
-                            a.instance->camera_hud_world_depth,a.depth,a.order,
-                            b.instance->camera_hud_world_depth,b.depth,b.order,
-                            sort_world_depth);
-                    });
-            } else if(transparent) {
-                // World translucency retains its existing back-to-front
-                // sort. Use std::sort and explicit tie order because MSVC x86
-                // stable_sort's temporary storage clashes with aligned types.
+            if(transparent && !(post_exempt &&
+                                !the_config->camera_hud_depth_sort)) {
+                // JK's own translucent polygons are depth-sorted. Our faces
+                // need a GPU-path equivalent. Sorting index *ranges* does not
+                // modify/re-upload any cached mesh vertices or indices.
+                // In-place sort: MSVC x86 std::stable_sort uses an internal
+                // aligned_storage buffer incompatible with our SIMD-aligned
+                // point<> members. Preserve exact tie order explicitly.
                 std::sort(draws.begin(),draws.end(),
                     [](pending_draw const &a,pending_draw const &b) {
                         if(a.depth==b.depth) return a.order<b.order;
-                        return a.depth>b.depth;
+                        return a.depth>b.depth; // back to front
                     });
             }
             // Composite special saber geometry in two explicit stages:
@@ -8431,7 +8407,7 @@ namespace jkgm {
                     LOG_INFO("Camera HUD frame material snapshot instances=",
                              hud_instances," mats=",hud_cached_mats,
                              " misses=",hud_missing_mats,
-                             " world_depth_sort=",the_config->camera_hud_depth_sort?1:0,
+                             " alpha_sort=",the_config->camera_hud_depth_sort?1:0,
                              " gpu_HUD=",the_config->enable_gpu_camera_hud?1:0);
             }
             frame_has_exempt_gpu=false;
