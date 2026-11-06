@@ -40,7 +40,7 @@ assert "if(post_exempt && tex.albedo_source==0)" in draw
 
 capture=render[render.index("// Preserve Camera Thing geometry, camera AND"):
                render.index("// Procedural particle clouds and camera-facing")]
-assert "deferred_gpu_hud_material_cache.clear();" in capture
+assert "clear_deferred_gpu_hud_materials();" in capture
 assert "auto found=gpu_frame_material_cache.find(key);" in capture
 assert "deferred_gpu_hud_material_cache.emplace(" in capture
 assert "deferred_gpu_3do_instances.push_back(std::move(inst));" in capture
