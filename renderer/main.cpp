@@ -2280,11 +2280,16 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
     for(float v:inst.transform)if(!std::isfinite(v))return false;
     if(!shadow_only && !inst.camera_hud) {
-        inst.colormap_tint=read_gpu_3do_colormap_tint();
-        inst.sector_tint=active_native_model_sector_tint;
-        inst.sector_tint_valid=active_native_model_sector_tint_valid;
-        inst.owning_sector_id=active_native_model_sector_id;
-        inst.owning_sector_valid=active_native_model_sector_id_valid;
+        // Skybox ThingFlag 0x20 retains its authored JK lighting, but
+        // never inherits the owning sector's CMP/sector color effects.
+        // Keep the instance's neutral colormap/tint/sector defaults.
+        if(!inst.skybox_vertex_lighting) {
+            inst.colormap_tint=read_gpu_3do_colormap_tint();
+            inst.sector_tint=active_native_model_sector_tint;
+            inst.sector_tint_valid=active_native_model_sector_tint_valid;
+            inst.owning_sector_id=active_native_model_sector_id;
+            inst.owning_sector_valid=active_native_model_sector_id_valid;
+        }
         // curLightingMode (rdModel3_Draw's effective Thing/global cap):
         // the verified rdModel3 global block is +0x48 from original JK.
         // This is sampled per instance because COG can change it each frame.
