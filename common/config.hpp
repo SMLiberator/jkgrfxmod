@@ -58,7 +58,7 @@ namespace jkgm {
         bool enable_saber_trails = true; // GPU-cached saber fan during marker 4/5 collision windows
         float saber_trail_delay = 0.06f; // seconds of delayed blade direction (0.005..0.25)
         bool enable_gpu_camera_hud = true; // Camera-type 3DOs: false forces native diagnostic (HUD then receives postFX)
-        bool camera_hud_depth_sort = true; // diagnostic: false preserves authored draw order for translucent Camera HUDs
+        bool camera_hud_depth_sort = true; // diagnostic: only 0x20 world-depth Camera UI; overlay Camera HUDs always preserve authored order
         bool enable_native_fallback = true; // false: suppress mixed native world batches for cache gap diagnostics
         bool enable_gpu_mat_warmup = false; // experimental; direct JK std3D calls require verified native format/device state
         bool enable_spotlights = false; // COG MAT-based screen-space spotlights
