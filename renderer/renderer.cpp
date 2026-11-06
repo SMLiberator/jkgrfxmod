@@ -8431,7 +8431,7 @@ namespace jkgm {
                     LOG_INFO("Camera HUD frame material snapshot instances=",
                              hud_instances," mats=",hud_cached_mats,
                              " misses=",hud_missing_mats,
-                             " alpha_sort=",the_config->camera_hud_depth_sort?1:0,
+                             " world_depth_sort=",the_config->camera_hud_depth_sort?1:0,
                              " gpu_HUD=",the_config->enable_gpu_camera_hud?1:0);
             }
             frame_has_exempt_gpu=false;
