@@ -43,6 +43,7 @@
     "enable_spotlights": false,
     "enable_spotlight_shadows": false,
     "spotlight_shadow_resolution": 256,
+    "spotlight_shadow_angle_bias_scale": 0.0,
     "enable_sun": true,
     "enable_sun_shadows": false,
     "sun_shadow_resolution": 512,
