@@ -816,19 +816,21 @@ void main() {
                       smoothstep(0.0,0.12,edge.z);
         albedo.a*=clamp(decal_coverage.w,0.0,1.0)*feather;
     }
+    // Evaluate the actual emissive texel before alpha rejection. Native
+    // normal/Fluid blending adds it even where albedo alpha is zero.
+    // Opaque depth and explicit masks/dithering are still controlled solely
+    // by albedo coverage in the shared policy.
+    vec3 emission=gpu_material_emission(
+        emissive_map,uv,emissive_scroll,emissive_factor,has_emissive);
+    int const preserve_emission=gpu_material_emission_coverage(
+        emissive_only,blend_mode,emission);
     if(gpu_material_discard(albedo.a,alpha_mode,alpha_cutoff,
-                            emissive_only,transparent_pass!=0,
+                            preserve_emission,transparent_pass!=0,
                             post_exempt_pass!=0)) discard;
     // For opaque masks/dither the surviving fragments write full coverage.
     if(post_exempt_pass!=0 &&
        (alpha_mode==0 || alpha_mode==2 || alpha_mode==4))
         albedo.a=1.0;
-    // Emission is independent of albedo opacity. Evaluate it before the
-    // Camera HUD early return: zero-alpha emissive-only MATs would otherwise
-    // disappear in the final post-exempt pass. Use the same emissive image,
-    // scrolling, and strength as the ordinary world path.
-    vec3 emission=gpu_material_emission(
-        emissive_map,uv,emissive_scroll,emissive_factor,has_emissive);
     if(camera_hud_thing!=0) {
         // Flat HUD output, exempt from JK lighting, fog, sunlight, SSAO,
         // bloom, HDR and other postFX. Add emissive RGB independently of

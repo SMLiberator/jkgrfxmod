@@ -30,6 +30,17 @@ vec3 gpu_material_emission(
     if(has_image!=0)result*=texture(image,uv+scroll).rgb;
     return result;
 }
+// Ordinary normal/Fluid emission is additive even through zero-alpha base
+// texels in the native transparency shader. Do not apply this exception to
+// additive/multiply blending, which has its own alpha-dependent semantics.
+// A whole-material emissive_only override retains its existing behavior.
+int gpu_material_emission_coverage(
+    int emissive_only,int blend_mode,vec3 emission)
+{
+    if(emissive_only!=0)return 1;
+    if(blend_mode!=0 && blend_mode!=3)return 0;
+    return any(notEqual(emission,vec3(0.0))) ? 1 : 0;
+}
 float gpu_material_dither_threshold()
 {
     ivec2 p=ivec2(gl_FragCoord.xy)&ivec2(3);
@@ -40,6 +51,8 @@ float gpu_material_dither_threshold()
 // Both caches use the same partition: solid coverage and masked/dithered
 // pixels fill G-buffer; only fractional alpha or forced translucency
 // enters forward alpha. Post-exempt Camera Things render all coverage once.
+// In the forward/HUD pass the final argument protects actual per-pixel
+// emission; opaque/masked/dithered coverage remains independent of emission.
 bool gpu_material_discard(
     float alpha,int policy,float cutoff,int emission_only,
     bool transparent,bool post_exempt)

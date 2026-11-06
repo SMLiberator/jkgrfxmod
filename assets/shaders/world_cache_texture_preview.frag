@@ -214,8 +214,16 @@ void main() {
     float texture_material_alpha=clamp(texel.a*material_tint.a,0.0,1.0);
     float coverage=clamp(texture_material_alpha*face_opacity,0.0,1.0);
     if(alpha_cutout!=0 && coverage<alpha_cutoff)discard;
+    // Match native normal/Fluid emission: base alpha does not mask actual
+    // emissive RGB. Sky remains nonemissive and is handled as before.
+    vec3 emission=sky_mode==0
+        ?gpu_material_emission(emissive_map,material_texcoord,
+                               emissive_scroll,emissive_factor,has_emissive)
+        :vec3(0.0);
+    int const preserve_emission=gpu_material_emission_coverage(
+        emissive_only,blend_mode,emission);
     if(gpu_material_discard(coverage,alpha_mode,alpha_cutoff,
-                            emissive_only,transparent_pass!=0,false))discard;
+                            preserve_emission,transparent_pass!=0,false))discard;
     // Native D3D multiplies the vertex RGB by albedo_factor WITHOUT first
     // clamping the material pigment to 1.0. For textureless replacements
     // (albedo_source==2), a factor of 2 with 0.3 baked light must yield
@@ -233,10 +241,6 @@ void main() {
         out_depth=vec4(65504.0,albedo);
         return;
     }
-    // Shared GPU MAT emission is independent of diffuse opacity.
-    vec3 emission=gpu_material_emission(
-        emissive_map,material_texcoord,emissive_scroll,
-        emissive_factor,has_emissive);
     float fullbright=solid_fullbright!=0 ? 1.0 :
         gpu_material_palette_fullbright(
             palette_fullbright_mask,material_texcoord+uv_scroll,

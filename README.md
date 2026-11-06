@@ -432,6 +432,12 @@ Randomness is deterministic per material instance and interval, not per frame,
 so the pattern is independent of framerate and draw order. Animations do not
 modify emissive/albedo opacity handling or blend modes.
 
+For ordinary mixed-alpha and Fluid materials, emissive RGB is independent of
+albedo alpha in both native and GPU-cached rendering: transparent base texels
+can glow without writing opaque depth. Explicit alpha masks and screen-door
+dithering still discard the entire pixel, including emission, while additive
+and multiply retain their established alpha/blend semantics.
+
 **Animation test cases:** scroll each layer separately and together, test
 negative U/V speeds, ensure UVs wrap, verify `sine`/`square` timing and
 `flicker`/`random` stability at different FPS, check blinking with
