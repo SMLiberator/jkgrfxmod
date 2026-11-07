@@ -601,68 +601,7 @@ vec3 illuminate_translucent_sun(vec3 baked,vec3 pigment,float opacity,
     return dimmed+radiance*(vec3(1.0)-clamp(dimmed,vec3(0.0),vec3(1.0)));
 }
 
-vec3 light_translucent_spotlight(float depth, vec3 view_normal,
-                                vec3 unlit_pigment, float opacity)
-{
-    if(translucent_spotlight_count == 0 || opacity <= 0.001 ||
-       depth <= 0.0 || depth >= 65500.0)
-        return vec3(0.0);
 
-    vec2 pixel_uv = gl_FragCoord.xy / translucent_spotlight_resolution;
-    bool covered = false;
-    for(int i = 0; i < 4; ++i) {
-        if(i >= translucent_spotlight_count) break;
-        vec4 box = translucent_spotlight_bounds[i];
-        if(all(greaterThanEqual(pixel_uv, box.xy)) &&
-           all(lessThanEqual(pixel_uv, box.zw))) {
-            covered = true;
-            break;
-        }
-    }
-    if(!covered) return vec3(0.0);
-
-    vec3 position = translucent_spotlight_world_pos(depth);
-    vec3 normal = vec3(0.0);
-    bool have_normal = false;
-    vec3 diffuse = vec3(0.0), additive = vec3(0.0);
-    for(int i = 0; i < 4; ++i) {
-        if(i >= translucent_spotlight_count) break;
-        vec4 box = translucent_spotlight_bounds[i];
-        if(any(lessThan(pixel_uv, box.xy)) ||
-           any(greaterThan(pixel_uv, box.zw))) continue;
-        vec3 relative = position - translucent_spotlight_origins[i].xyz;
-        float distance = dot(relative, translucent_spotlight_forwards[i].xyz);
-        float t = distance * translucent_spotlight_forwards[i].w;
-        if(t <= 0.01 || t >= 1.0) continue;
-        vec2 uv = vec2(
-            dot(relative, translucent_spotlight_rights[i].xyz) *
-                translucent_spotlight_rights[i].w / distance + 0.5,
-            dot(relative, translucent_spotlight_ups[i].xyz) *
-                translucent_spotlight_ups[i].w / distance + 0.5);
-        if(any(lessThan(uv, vec2(0.0))) ||
-           any(greaterThan(uv, vec2(1.0)))) continue;
-        vec4 cookie = sample_translucent_spotlight(i, uv);
-        if(cookie.a <= 0.001) continue;
-        if(!have_normal) {
-            normal = translucent_spotlight_world_normal(view_normal);
-            have_normal = true;
-        }
-        float border = min(min(uv.x, 1.0-uv.x), min(uv.y, 1.0-uv.y));
-        float edge = smoothstep(0.0, 0.02, border);
-        float fade = smoothstep(0.01, 0.04, t) *
-                     (1.0-smoothstep(0.35, 1.0, t));
-        // Thin glass/sprites may face either way. Do not flip mesh normals
-        // globally: the double-sided incidence is local to this lighting.
-        float facing = abs(dot(normal, normalize(-relative)));
-        float incidence = 0.25 + 0.75 * facing;
-        float visibility=i==translucent_shadow_slot
-        ? translucent_shadow_visibility(uv,distance,facing) : 1.0;
-    vec3 radiance = cookie.rgb * cookie.a * (edge * fade * incidence * visibility);
-        diffuse += radiance * translucent_spotlight_intensities[i].x;
-        additive += radiance * translucent_spotlight_intensities[i].y;
-    }
-    return (unlit_pigment * diffuse + additive) * opacity;
-}
 
 layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;

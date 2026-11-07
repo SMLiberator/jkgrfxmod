@@ -20,6 +20,7 @@ cases=(
     "gpu_pixel_lighting.py",
     "gpu_procedural_integration.py",
     "gpu_sector_crossing.py",
+    "native_game_shader_shared.py",
     "native_mat_animation.py",
     "native_mat_warmup_latency.py",
     "native_mesh_fallback_guard.py",

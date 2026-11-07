@@ -17,13 +17,15 @@ for filename in ("game_trns_pass.frag","gpu_3do_preview.frag"):
     # function declarations/implementations are moved.
     for declaration in ("float translucent_shadow_visibility(",
                         "vec3 translucent_spotlight_world_pos(",
-                        "vec3 translucent_spotlight_world_normal("):
+                        "vec3 translucent_spotlight_world_normal(",
+                        "vec3 light_translucent_spotlight("):
         assert declaration not in raw, (filename,declaration)
         assert common.count(declaration)==1, (filename,declaration)
     expanded=raw.replace(include,common)
     assert "float translucent_shadow_visibility(" in expanded
     assert "vec4 sample_translucent_spotlight(" in expanded
     assert "vec3 translucent_spotlight_world_normal(" in expanded
+    assert expanded.count("vec3 light_translucent_spotlight(")==1
     assert expanded.index("uniform int translucent_sun_enabled") > expanded.index(
         "vec3 translucent_spotlight_world_normal(")
 

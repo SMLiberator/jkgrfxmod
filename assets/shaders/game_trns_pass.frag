@@ -87,156 +87,11 @@ uniform vec2 normal_uv_offset;
 uniform vec2 normal_uv_offset2;
 uniform vec4 normal_params; // x/y strength, z/w layer enabled
 
-vec3 surface_view_normal(vec2 uv)
-{
-    float h_scale = camera_right.w > 0.5
-                        ? view_params.x
-                        : tan(radians(REFLECTION_HFOV_DEGREES) * 0.5);
-    float aspect = screen_resolution.x / max(screen_resolution.y, 1.0);
-    vec2 xy_scale = vec2(h_scale, h_scale / aspect);
-    vec3 n = normalize(vec3(vp_normal.xy / xy_scale, vp_normal.z));
+#include "game_surface_common.glsl"
 
-    // No replacement map: bit-for-bit same geometric view normal used
-    // by the previous reflection implementation.
-    if(normal_params.z < 0.5 && normal_params.w < 0.5) {
-        return n;
-    }
 
-    vec2 slope = vec2(0.0);
-    if(normal_params.z > 0.5 && normal_params.x > 0.0) {
-        vec3 layer = texture(normal_map, uv + normal_uv_offset).xyz * 2.0 - 1.0;
-        slope += normal_params.x * layer.xy / max(layer.z, 0.05);
-    }
-    if(normal_params.w > 0.5 && normal_params.y > 0.0) {
-        vec3 layer = texture(normal_map2, uv + normal_uv_offset2).xyz * 2.0 - 1.0;
-        slope += normal_params.y * layer.xy / max(layer.z, 0.05);
-    }
-    // Cotangent frame from geometric position and original UV derivatives.
-    // All quantities are in metric view space, avoiding the projection
-    // scaling distortion present in raw clip-space vertex coordinates.
-    vec3 pos = vec3(vp_pos.xy * xy_scale, vp_pos.z);
-    vec3 dp1 = dFdx(pos);
-    vec3 dp2 = dFdy(pos);
-    vec2 duv1 = dFdx(vp_texcoords);
-    vec2 duv2 = dFdy(vp_texcoords);
-    vec3 t = cross(dp2, n) * duv1.x + cross(n, dp1) * duv2.x;
-    vec3 b = cross(dp2, n) * duv1.y + cross(n, dp1) * duv2.y;
-    float basis_len = max(dot(t, t), dot(b, b));
-    if(basis_len < 1e-16) {
-        return n;
-    }
-    float inv_basis = inversesqrt(basis_len);
-    mat3 tbn = mat3(t * inv_basis, b * inv_basis, n);
-    return normalize(tbn * normalize(vec3(slope, 1.0)));
-}
 
-// Returns added EnvMap radiance and effective metalness (used to remove diffuse).
-// The base_color is BEFORE JK's vertex light intensity / vertex RGB multiplier:
-// painted metal should not lose environmental reflections in dark lighting.
-vec3 compute_reflection(vec3 base_color, vec2 texcoords, vec3 view_normal,
-                        out float metalness)
-{
-    // Without an active envmap, do not touch the surface/specular texture.
-    // In particular this makes enable_reflections=false a zero-sample path.
-    metalness = 0.0;
-    float strength = reflection_params.x;
-    if(env_params.x < 0.5 || strength <= 0.0) {
-        return vec3(0.0);
-    }
 
-    float roughness = reflection_params.y;
-    metalness = reflection_params.z;
-    if(reflection_params.w > 0.5) {
-        vec3 surface = texture(surface_map, texcoords).rgb;
-        strength *= surface.r;
-        roughness *= surface.g;
-        metalness *= surface.b;
-    }
-    // Avoid suppressing diffuse instantly when an EnvMap is faded in from black,
-    // or keeping metal suppression after its EnvMap has faded out.
-    metalness = clamp(metalness, 0.0, 1.0) *
-                mix(env_transition.x, env_transition.y, env_transition.z);
-
-    bool have_camera = camera_right.w > 0.5;
-    float h_scale = have_camera ? view_params.x : tan(radians(REFLECTION_HFOV_DEGREES) * 0.5);
-    float aspect = screen_resolution.x / max(screen_resolution.y, 1.0);
-    vec2 view_scale = vec2(h_scale, h_scale / aspect);
-
-    // View space: x right, y up, z forward. Normals are passed with a projection
-    // scale, which we remove here so the reflection uses genuine geometry.
-    vec3 v = normalize(vec3(vp_pos.xy * view_scale, vp_pos.z)); // eye -> surface
-    vec3 n = view_normal;
-    if(dot(n, v) > 0.0) {
-        n = -n;
-    }
-    vec3 r = reflect(v, n);
-
-    if(REFLECTION_DEBUG == 1) {
-        return r * 0.5 + 0.5;
-    }
-    else if(REFLECTION_DEBUG == 2) {
-        return n * 0.5 + 0.5;
-    }
-    else if(REFLECTION_DEBUG == 4) {
-        return have_camera ? vec3(0.0, 0.6, 0.0) : vec3(0.6, 0.0, 0.0);
-    }
-
-    // envmap = world-aligned, screen = world-aligned fallback until SSR is ready.
-    // fixed = camera-aligned equirectangular, matcap = view-normal UV on a square image.
-    int mode = int(env_params.y + 0.5);
-    vec3 env_dir = r;
-    if(mode <= 1 && have_camera) {
-        vec3 world_r = camera_right.xyz * r.x + camera_forward.xyz * r.z + camera_up.xyz * r.y;
-        env_dir = vec3(world_r.x, world_r.z, world_r.y);
-    }
-
-    if(REFLECTION_DEBUG == 5) {
-        if(have_camera) {
-            vec3 world_n = camera_right.xyz * n.x + camera_forward.xyz * n.z + camera_up.xyz * n.y;
-            return world_n * 0.5 + 0.5;
-        }
-        return vec3(0.6, 0.0, 0.0);
-    }
-
-    vec2 uv;
-    if(mode == 3) {
-        // Standard sphere-normal MatCap projection, fixed relative to the screen.
-        // Positive view-space Y is up; top of texture is v=0.
-        uv = vec2(0.5 + 0.5 * n.x, 0.5 - 0.5 * n.y);
-        uv = clamp(uv, vec2(0.001), vec2(0.999));
-    }
-    else {
-        uv = vec2(fract(atan(env_dir.x, env_dir.z) / (2.0 * REFLECTION_PI) + 0.5 +
-                            ENV_YAW_DEGREES / 360.0),
-                  0.5 - asin(clamp(env_dir.y, -1.0, 1.0)) / REFLECTION_PI);
-    }
-
-    // Preserve existing roughness->mip blur approximation.
-    vec2 env_size = env_transition.x > 0.5
-        ? vec2(textureSize(env_map, 0)) : vec2(textureSize(env_map2, 0));
-    float lod = clamp(roughness, 0.0, 1.0) * log2(max(max(env_size.x, env_size.y), 1.0));
-    vec3 env_from = vec3(0.0);
-    vec3 env_to = vec3(0.0);
-    if(env_transition.z < 1.0 && env_transition.x > 0.5) {
-        env_from = textureLod(env_map, uv, lod).rgb;
-    }
-    if(env_transition.z > 0.0 && env_transition.y > 0.5) {
-        env_to = textureLod(env_map2, uv, lod).rgb;
-    }
-    vec3 env = mix(env_from, env_to, env_transition.z) * ENV_INTENSITY;
-
-    if(REFLECTION_DEBUG == 3) {
-        return env;
-    }
-
-    // Schlick Fresnel. Dielectrics use a neutral F0; metals use their UNLIT
-    // base-color spectrum as specular reflectance, not vertex-lighted albedo.
-    vec3 f0 = mix(vec3(DIELECTRIC_F0), clamp(base_color, 0.0, 1.0), metalness);
-    float cos_theta = clamp(dot(n, -v), 0.0, 1.0);
-    vec3 fresnel = f0 + (vec3(1.0) - f0) * pow(1.0 - cos_theta, 5.0);
-
-    return env * fresnel * strength;
-}
 
 // One global COG-controlled directional sun. Only the specular term is
 // affected: the original Jedi Knight vertex lighting stays unchanged.
@@ -298,24 +153,7 @@ vec3 compute_sun_specular(vec3 base_color, vec2 texcoords, vec3 mapped_normal)
                sun_color_intensity.w * strength, vec3(32.0));
 }
 
-mat3 construct_tbn()
-{
-    vec3 n = normalize(vp_normal);
 
-    vec3 dp1 = dFdx(vp_pos);
-    vec3 dp2 = dFdy(vp_pos);
-    vec2 duv1 = dFdx(vp_texcoords);
-    vec2 duv2 = dFdy(vp_texcoords);
-
-    vec3 dp2perp = cross(dp2, n);
-    vec3 dp1perp = cross(n, dp1);
-
-    vec3 t = dp2perp * duv1.x + dp1perp * duv2.x;
-    vec3 b = dp2perp * duv1.y + dp1perp * duv2.y;
-
-    float invmax = inversesqrt(max(dot(t, t), dot(b, b)));
-    return mat3(t * invmax, b * invmax, n);
-}
 
 vec2 parallax_mapping(vec2 tc)
 {
@@ -351,15 +189,7 @@ vec2 parallax_mapping(vec2 tc)
     return adj_tc;
 }
 
-// 4x4 Bayer ordered screen-door coverage. Kept samples become fully
-// opaque and write ordinary depth/SSAO; no blend or per-face sort needed.
-float dither_threshold()
-{
-    ivec2 p=ivec2(gl_FragCoord.xy) & ivec2(3);
-    int lo=(((p.x^p.y)&1)<<1)|(p.y&1);
-    int hi=((((p.x>>1)^(p.y>>1))&1)<<1)|((p.y>>1)&1);
-    return (float(4*lo+hi)+0.5)/16.0;
-}
+
 
 // A flare is an ordinary native billboard with special depth behavior.
 // Rather than per-pixel occlusion, reconstruct its center from the
@@ -515,68 +345,7 @@ vec3 illuminate_translucent_sun(vec3 baked,vec3 pigment,float opacity,
     return dimmed+radiance*(vec3(1.0)-clamp(dimmed,vec3(0.0),vec3(1.0)));
 }
 
-vec3 light_translucent_spotlight(float depth, vec3 view_normal,
-                                vec3 unlit_pigment, float opacity)
-{
-    if(translucent_spotlight_count == 0 || opacity <= 0.001 ||
-       depth <= 0.0 || depth >= 65500.0)
-        return vec3(0.0);
 
-    vec2 pixel_uv = gl_FragCoord.xy / translucent_spotlight_resolution;
-    bool covered = false;
-    for(int i = 0; i < 4; ++i) {
-        if(i >= translucent_spotlight_count) break;
-        vec4 box = translucent_spotlight_bounds[i];
-        if(all(greaterThanEqual(pixel_uv, box.xy)) &&
-           all(lessThanEqual(pixel_uv, box.zw))) {
-            covered = true;
-            break;
-        }
-    }
-    if(!covered) return vec3(0.0);
-
-    vec3 position = translucent_spotlight_world_pos(depth);
-    vec3 normal = vec3(0.0);
-    bool have_normal = false;
-    vec3 diffuse = vec3(0.0), additive = vec3(0.0);
-    for(int i = 0; i < 4; ++i) {
-        if(i >= translucent_spotlight_count) break;
-        vec4 box = translucent_spotlight_bounds[i];
-        if(any(lessThan(pixel_uv, box.xy)) ||
-           any(greaterThan(pixel_uv, box.zw))) continue;
-        vec3 relative = position - translucent_spotlight_origins[i].xyz;
-        float distance = dot(relative, translucent_spotlight_forwards[i].xyz);
-        float t = distance * translucent_spotlight_forwards[i].w;
-        if(t <= 0.01 || t >= 1.0) continue;
-        vec2 uv = vec2(
-            dot(relative, translucent_spotlight_rights[i].xyz) *
-                translucent_spotlight_rights[i].w / distance + 0.5,
-            dot(relative, translucent_spotlight_ups[i].xyz) *
-                translucent_spotlight_ups[i].w / distance + 0.5);
-        if(any(lessThan(uv, vec2(0.0))) ||
-           any(greaterThan(uv, vec2(1.0)))) continue;
-        vec4 cookie = sample_translucent_spotlight(i, uv);
-        if(cookie.a <= 0.001) continue;
-        if(!have_normal) {
-            normal = translucent_spotlight_world_normal(view_normal);
-            have_normal = true;
-        }
-        float border = min(min(uv.x, 1.0-uv.x), min(uv.y, 1.0-uv.y));
-        float edge = smoothstep(0.0, 0.02, border);
-        float fade = smoothstep(0.01, 0.04, t) *
-                     (1.0-smoothstep(0.35, 1.0, t));
-        // Thin glass/sprites may face either way. Do not flip mesh normals
-        // globally: the double-sided incidence is local to this lighting.
-        float facing = abs(dot(normal, normalize(-relative)));
-        float incidence = 0.25 + 0.75 * facing;
-        float visibility=i==translucent_shadow_slot
-        ? translucent_shadow_visibility(uv,distance,facing) : 1.0;
-    vec3 radiance = cookie.rgb * cookie.a * (edge * fade * incidence * visibility);
-        diffuse += radiance * translucent_spotlight_intensities[i].x;
-        additive += radiance * translucent_spotlight_intensities[i].y;
-    }
-    return (unlit_pigment * diffuse + additive) * opacity;
-}
 
 void main()
 {
