@@ -24,6 +24,9 @@
     <ClCompile Include="native_sector_color_hook.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="native_compressed_sound_hook.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ddraw_impl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -360,6 +363,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="native_sector_color_hook.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="native_compressed_sound_hook.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="native_sprite_cel.hpp">

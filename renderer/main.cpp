@@ -34,6 +34,7 @@
 #include "native_thingface_friction.hpp"
 #include "native_earth_hit_sound.hpp"
 #include "compressed_sound_io.hpp"
+#include "native_compressed_sound_hook.hpp"
 #include "mots_native_collision_bridge.hpp"
 #include "precise_type3_native.hpp"
 #include "precise_type3_pose_bulk.hpp"
@@ -9591,39 +9592,9 @@ namespace {
 // Sector-palette hook callback and trampoline are in native_sector_color_hook.cpp.
 bool native_sector_effect_hook_active=false;
 
-using sith_sound_load_fn=void* (__cdecl*)(char*,int);
-sith_sound_load_fn RealSithSoundLoad=
-    reinterpret_cast<sith_sound_load_fn>(0x004EF440U);
+// Native sound loading Detours callback lives in native_compressed_sound_hook.cpp.
 bool native_compressed_sound_hook_active=false;
 
-void* __cdecl HookedSithSoundLoad(char* filename,int eager)
-{
-    // HostServices callbacks can be reset by JK's resource initialization.
-    // Revalidate/rebind on each load before calling the native loader.
-    if(!jkgm::install_compressed_sound_file_services()) {
-        static bool warned=false;
-        if(!warned) {
-            warned=true;
-            LOG_WARNING("JKGM compressed sound bridge unavailable: HostServices "
-                        "table mismatch or not yet initialized");
-        }
-    }
-    return RealSithSoundLoad(filename,eager);
-}
-bool request_native_compressed_sound_hook()
-{
-    if(!jkgm::compressed_sound_executable_supported()) {
-        LOG_WARNING("JKGM compressed sound hook skipped: unsupported EXE");
-        return false;
-    }
-    LONG const err=DetourAttach(&(PVOID&)RealSithSoundLoad,
-                                HookedSithSoundLoad);
-    if(err!=NO_ERROR) {
-        LOG_WARNING("JKGM compressed sound hook attach failed: ",err);
-        return false;
-    }
-    return true;
-}
     // The 1997 JK Screenshot hotkey (and jkScreenshot COG verb) call the
     // SAME jkGame_Screenshot routine. Do not hook unvalidated JK.exe code:
     // OpenJKDF2's symbolic address may differ in modified JKGM builds.
@@ -9962,7 +9933,7 @@ bool attach_hooks()
     bool const mesh_collision_hook_requested=request_type2_intersection_hook();
     bool const ice_thing_hook_requested=request_native_thingface_friction_hook();
     bool const earth_sound_hook_requested=request_native_earth_sound_hook();
-    bool const sound_formats_hook_requested=request_native_compressed_sound_hook();
+    bool const sound_formats_hook_requested=jkgm::native_compressed_sound_hook::request();
 
     LONG error = DetourTransactionCommit();
     if(error!=NO_ERROR) {
@@ -10125,7 +10096,7 @@ bool detach_hooks()
         jkgm::native_sector_palette_mode().store(0,std::memory_order_relaxed);
     }
     if(native_compressed_sound_hook_active) {
-        DetourDetach(&(PVOID&)RealSithSoundLoad,HookedSithSoundLoad);
+        jkgm::native_compressed_sound_hook::detach();
         native_compressed_sound_hook_active=false;
     }
     // Restore the native GOB/loose-file callbacks before unloading DLL.

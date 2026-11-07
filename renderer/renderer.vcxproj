@@ -45,6 +45,7 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="native_mesh_revision.cpp" />
     <ClCompile Include="native_sector_color_hook.cpp" />
+    <ClCompile Include="native_compressed_sound_hook.cpp" />
     <ClCompile Include="compressed_sound_codec.cpp" />
     <ClCompile Include="compressed_sound_io.cpp" />
     <ClCompile Include="renderer.cpp" />
@@ -162,6 +163,7 @@
     <ClInclude Include="native_saber_damage.hpp" />
     <ClInclude Include="native_sector_palette_bridge.hpp" />
     <ClInclude Include="native_sector_color_hook.hpp" />
+    <ClInclude Include="native_compressed_sound_hook.hpp" />
     <ClInclude Include="native_sprite_cel.hpp" />
     <ClInclude Include="native_sprite_profile.hpp" />
     <ClInclude Include="native_thingface_friction.hpp" />

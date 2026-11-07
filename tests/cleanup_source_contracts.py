@@ -23,6 +23,7 @@ cases=(
     "native_game_shader_shared.py",
     "native_mesh_revision_wiring.py",
     "native_sector_color_hook_wiring.py",
+    "native_compressed_sound_hook_wiring.py",
     "native_mat_animation.py",
     "native_mat_warmup_latency.py",
     "native_mesh_fallback_guard.py",
