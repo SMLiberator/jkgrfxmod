@@ -47,6 +47,7 @@
     "spotlight_shadow_angle_bias_scale": 0.0,
     "enable_sun": true,
     "enable_sun_shadows": false,
+    "sun_shadow_update_interval": 0.0,
     "sun_shadow_resolution": 512,
     "enable_decals": true,
     "enable_mesh_collision": false,
