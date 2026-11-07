@@ -68,6 +68,7 @@ namespace jkgm {
         float spotlight_shadow_angle_bias_scale = 0.0f; // opt-in: 0=legacy bias, 1=adaptive +0.035 JKU at grazing (0..2)
         bool enable_sun = true; // diffuse sunlight from SetSunInfo; independent of shadow rendering
         bool enable_sun_shadows = false;
+        double sun_shadow_update_interval = 0.0; // seconds between full CSM checks; 0=every frame
         bool enable_sprite_shadows = false; // opt-in sun shadow casting for cached SPRs; reception unaffected
         bool enable_sun_dynamic_shadows = false; // eight-Thing atlas
         bool sun_shadow_cull_back_faces = false; // 3DO sunlight: back-face culling is opt-in
