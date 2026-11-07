@@ -628,6 +628,17 @@ namespace jkgm {
         uint64_t sun_profile_throttle_skipped=0;
         uint64_t sun_profile_throttle_checked=0;
         uint64_t sun_profile_throttle_forced_early=0;
+        // Forced-check causes are sampled independently; near/far camera
+        // coverage failures can overlap in a single frame.
+        uint64_t sun_profile_throttle_due_timer=0;
+        uint64_t sun_profile_forced_unready=0;
+        uint64_t sun_profile_forced_world=0;
+        uint64_t sun_profile_forced_sun=0;
+        std::array<uint64_t,2> sun_profile_forced_coverage{};
+        uint64_t sun_profile_checked_pass_us=0;
+        uint64_t sun_profile_skipped_pass_us=0;
+        uint64_t sun_profile_checked_pass_peak_us=0;
+        uint64_t sun_profile_skipped_pass_peak_us=0;
         bool sun_shadow_ready=false;
         // Diagnostics for transient shadow loss: compare successive complete
         // shadow passes rather than sampling only one frame in 120.
@@ -5439,6 +5450,8 @@ namespace jkgm {
             sun_dynamic_tiles.clear();
             sun_dynamic_atlas_owners.clear();
             if(!the_config->enable_sun_shadows)return;
+            auto const sun_pass_started=the_config->profile_renderer
+                ?profile_clock::now():profile_clock::time_point{};
             auto sun_failure=[&](char const *reason) {
                 sun_shadow_frame_failure=reason;
                 if(the_config->profile_renderer_verbose &&
@@ -5521,8 +5534,40 @@ namespace jkgm {
                 if(skip_cascade_validation)++sun_profile_throttle_skipped;
                 else if(interval>0.0) {
                     ++sun_profile_throttle_checked;
-                    if(since_validation<interval)
+                    if(since_validation>=interval)
+                        ++sun_profile_throttle_due_timer;
+                    else if(since_validation>=0.0) {
                         ++sun_profile_throttle_forced_early;
+                        if(!sun_shadow_validated_world_view_ready)
+                            ++sun_profile_forced_unready;
+                        else for(int c=0;c<2;++c) {
+                            if(!sun_shadow_cascade_cached[c] ||
+                               sun_shadow_worlds[c]!=world ||
+                               sun_shadow_revisions[c]!=map.revision) {
+                                ++sun_profile_forced_world;
+                                continue;
+                            }
+                            bool direction_changed=false;
+                            for(int axis=0;axis<3;++axis)
+                                direction_changed=direction_changed ||
+                                    std::fabs(direction[axis]-
+                                        sun_shadow_directions[c][axis])>=1.0e-5f;
+                            if(direction_changed) {
+                                ++sun_profile_forced_sun;
+                                continue;
+                            }
+                            float const distance=c==0
+                                ?the_config->sun_shadow_near_distance
+                                :sun_shadow_effective_far_distance(
+                                     the_config->sun_shadow_far_distance,
+                                     the_config->sun_max_distance);
+                            if(!sun_shadow_projection_covers_camera(
+                                    sun_shadow_views[c],camera.position,
+                                    camera.right,camera.up,camera.forward,
+                                    horizontal,vertical,distance))
+                                ++sun_profile_forced_coverage[c];
+                        }
+                    }
                 }
             }
             sun_shadow_projection world_view=sun_shadow_validated_world_view;
@@ -6547,6 +6592,19 @@ namespace jkgm {
                     sun_shadow_last_validation=validation_now;
                 }
             }
+            if(the_config->profile_renderer) {
+                auto const pass_us=elapsed_profile_us(
+                    sun_pass_started,profile_clock::now());
+                if(skip_cascade_validation) {
+                    sun_profile_skipped_pass_us+=pass_us;
+                    sun_profile_skipped_pass_peak_us=std::max(
+                        sun_profile_skipped_pass_peak_us,pass_us);
+                } else {
+                    sun_profile_checked_pass_us+=pass_us;
+                    sun_profile_checked_pass_peak_us=std::max(
+                        sun_profile_checked_pass_peak_us,pass_us);
+                }
+            }
             if(the_config->profile_renderer_verbose &&
                gpu_3do_present_serial%120U==0U) {
                 LOG_INFO("SUN cache 120-frame-window near(full/static_hit/static_redraw/composite_redraw)=",
@@ -6566,6 +6624,23 @@ namespace jkgm {
                     " checked_frames=",sun_profile_throttle_checked,
                     " forced_early_checks=",sun_profile_throttle_forced_early,
                     " NOTE=dynamic_atlas_updated_each_frame");
+                LOG_INFO("SUN validation early reasons timer_due=",
+                    sun_profile_throttle_due_timer,
+                    " no_validated_map=",sun_profile_forced_unready,
+                    " world_or_cache_invalid=",sun_profile_forced_world,
+                    " sun_direction=",sun_profile_forced_sun,
+                    " near_camera_coverage=",sun_profile_forced_coverage[0],
+                    " far_camera_coverage=",sun_profile_forced_coverage[1],
+                    " NOTE=both_cascades_may_fail_in_one_frame");
+                LOG_INFO("SUN validation frame CPU checked_us_avg/peak=",
+                    sun_profile_checked_pass_us/
+                        std::max<uint64_t>(1,sun_profile_throttle_checked),
+                    "/",sun_profile_checked_pass_peak_us,
+                    " skipped_us_avg/peak=",
+                    sun_profile_skipped_pass_us/
+                        std::max<uint64_t>(1,sun_profile_throttle_skipped),
+                    "/",sun_profile_skipped_pass_peak_us,
+                    " NOTE=includes_dynamic_atlas_CPU_not_GPU");
                 // Orthogonal miss reasons: totals can exceed the miss count.
                 // No implicit GPU synchronization; these timings are CPU
                 // planning/GL submission only, not GPU rasterization costs.
@@ -6649,6 +6724,15 @@ namespace jkgm {
                 sun_profile_throttle_skipped=0;
                 sun_profile_throttle_checked=0;
                 sun_profile_throttle_forced_early=0;
+                sun_profile_throttle_due_timer=0;
+                sun_profile_forced_unready=0;
+                sun_profile_forced_world=0;
+                sun_profile_forced_sun=0;
+                sun_profile_forced_coverage.fill(0);
+                sun_profile_checked_pass_us=0;
+                sun_profile_skipped_pass_us=0;
+                sun_profile_checked_pass_peak_us=0;
+                sun_profile_skipped_pass_peak_us=0;
                 sun_profile_prepare_us.fill(0);
                 sun_profile_projection_us.fill(0);
                 sun_profile_world_query_us.fill(0);
