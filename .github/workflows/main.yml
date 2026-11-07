@@ -21,6 +21,7 @@ jobs:
     - name: Shared translucent spotlight shader regression
       run: |
         python3 tests/translucent_spotlight_shared.py
+        python3 tests/translucent_sun_sampling_shared.py
         python3 tests/spotlight_shadow_bias.py
 
     - name: Repository structure, config documentation, and project headers
