@@ -21,6 +21,9 @@
     <ClCompile Include="native_mesh_revision.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="native_sector_color_hook.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ddraw_impl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -354,6 +357,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="native_sector_palette_bridge.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="native_sector_color_hook.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="native_sprite_cel.hpp">

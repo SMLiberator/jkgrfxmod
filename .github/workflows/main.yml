@@ -39,6 +39,12 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
         sprite_orientation_test.exe
 
+    - name: Native sector palette request isolation regression
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\jk_palette_effects.cpp /Fe:jk_palette_effects_test.exe
+        jk_palette_effects_test.exe
+
     - name: Local-player HUD ammo bin selection regression
       shell: cmd
       run: |
