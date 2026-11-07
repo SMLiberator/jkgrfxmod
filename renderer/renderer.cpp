@@ -620,6 +620,14 @@ namespace jkgm {
         // Track only owners with a successfully rasterized atlas tile.
         std::unordered_set<uint64_t> sun_dynamic_atlas_owners;
         std::array<sun_shadow_projection,2> sun_shadow_views{};
+        // Last fully validated global sun projection. The dynamic atlas
+        // continues rendering every frame while cascade checks are throttled.
+        sun_shadow_projection sun_shadow_validated_world_view{};
+        std::chrono::steady_clock::time_point sun_shadow_last_validation{};
+        bool sun_shadow_validated_world_view_ready=false;
+        uint64_t sun_profile_throttle_skipped=0;
+        uint64_t sun_profile_throttle_checked=0;
+        uint64_t sun_profile_throttle_forced_early=0;
         bool sun_shadow_ready=false;
         // Diagnostics for transient shadow loss: compare successive complete
         // shadow passes rather than sampling only one frame in 120.
@@ -1125,6 +1133,8 @@ namespace jkgm {
                 sun_shadow_cascade_ready={{false,false}};
                 sun_shadow_cascade_cached={{false,false}};
                 sun_shadow_static_cached={{false,false}};
+                sun_shadow_validated_world_view_ready=false;
+                sun_shadow_last_validation={};
                 sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
                 sun_dynamic_atlas_owners.clear();
@@ -5098,7 +5108,8 @@ namespace jkgm {
         // Fit one directional map to the nearby camera frustum, retaining
         // the loaded level's full light-axis depth for offscreen casters.
         void draw_sun_dynamic_shadow_atlas(
-            sun_shadow_projection const &world_view)
+            sun_shadow_projection const &world_view,
+            bool cached_world_view=false)
         {
             sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
@@ -5239,6 +5250,33 @@ namespace jkgm {
                 sun_shadow_projection view{};
                 if(!make_sun_dynamic_shadow_projection(
                     world_view,object->bounds,view))continue;
+                if(cached_world_view) {
+                    // The atlas still renders CURRENT moving-object bounds.
+                    // Expand only its Z range if an object moved beyond the
+                    // last validated static-world depth interval.
+                    float z_min=decal_dot(view.origin,view.forward);
+                    float z_max=z_min+view.range;
+                    float caster_min=std::numeric_limits<float>::max();
+                    float caster_max=-caster_min;
+                    for(int corner=0;corner<8;++corner) {
+                        decal_vec3 point{};
+                        for(int axis=0;axis<3;++axis)
+                            point[axis]=(corner&(1<<axis))
+                                ?object->bounds.high[axis]
+                                :object->bounds.low[axis];
+                        float const z=decal_dot(point,view.forward);
+                        caster_min=std::min(caster_min,z);
+                        caster_max=std::max(caster_max,z);
+                    }
+                    float const margin=std::max(0.25f,view.range*0.02f);
+                    z_min=std::min(z_min,caster_min-margin);
+                    z_max=std::max(z_max,caster_max+margin);
+                    float const change=z_min-
+                        decal_dot(view.origin,view.forward);
+                    for(int axis=0;axis<3;++axis)
+                        view.origin[axis]+=view.forward[axis]*change;
+                    view.range=z_max-z_min;
+                }
                 sun_dynamic_shadow_tile tile{};
                 {
                     // Automatically size each dynamic shadow tile based on
@@ -5441,13 +5479,59 @@ namespace jkgm {
                 sun_failure("SithWorld shadow snapshot failed");
                 return;
             }
+            auto const camera=read_active_render_camera();
+            if(!camera.valid) {
+                sun_failure("render camera unavailable");
+                return;
+            }
+            float const horizontal=std::tan(camera.fov*
+                (3.14159265358979323846f/360.0f));
+            float const vertical=horizontal*float(get<y>(conf_scr_res))/
+                float(get<x>(conf_scr_res));
+            auto const validation_now=std::chrono::steady_clock::now();
+            double const interval=the_config->sun_shadow_update_interval;
+            bool cached_usable=sun_shadow_validated_world_view_ready;
+            for(int cascade=0;cascade<2 && cached_usable;++cascade) {
+                cached_usable=sun_shadow_cascade_cached[cascade] &&
+                    sun_shadow_worlds[cascade]==world &&
+                    sun_shadow_revisions[cascade]==map.revision;
+                for(int axis=0;axis<3 && cached_usable;++axis)
+                    cached_usable=std::fabs(direction[axis]-
+                        sun_shadow_directions[cascade][axis])<1.0e-5f;
+                if(!cached_usable)break;
+                float const distance=cascade==0
+                    ?the_config->sun_shadow_near_distance
+                    :sun_shadow_effective_far_distance(
+                         the_config->sun_shadow_far_distance,
+                         the_config->sun_max_distance);
+                cached_usable=sun_shadow_projection_covers_camera(
+                    sun_shadow_views[cascade],camera.position,camera.right,
+                    camera.up,camera.forward,horizontal,vertical,distance);
+            }
+            double const since_validation=
+                sun_shadow_last_validation==
+                    std::chrono::steady_clock::time_point{}
+                    ?std::numeric_limits<double>::infinity()
+                    :std::chrono::duration<double>(
+                        validation_now-sun_shadow_last_validation).count();
+            bool const skip_cascade_validation=
+                interval>0.0 && cached_usable &&
+                since_validation>=0.0 && since_validation<interval;
+            if(the_config->profile_renderer) {
+                if(skip_cascade_validation)++sun_profile_throttle_skipped;
+                else if(interval>0.0) {
+                    ++sun_profile_throttle_checked;
+                    if(since_validation<interval)
+                        ++sun_profile_throttle_forced_early;
+                }
+            }
+            sun_shadow_projection world_view=sun_shadow_validated_world_view;
             // Avoid three full sets of transformed group bounds (projection,
             // near cascade, far cascade), especially in crowded 3DO levels.
             // A level may have only a tiny native-world shell while its
             // playable architecture is made from 3DOs. Include submitted
             // model groups before fitting the sun map; otherwise both the
             // receiver lighting and model shadows fall outside the map.
-            std::vector<decal_volume_aabb> model_bounds;
             struct sun_model_candidate {
                 gpu_3do_instance const *instance;
                 gpu_3do_group const *group;
@@ -5459,6 +5543,8 @@ namespace jkgm {
                 uint64_t signature;
             };
             std::vector<sun_model_candidate> model_candidates;
+            if(!skip_cascade_validation) {
+            std::vector<decal_volume_aabb> model_bounds;
             auto const candidate_begin=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
             // Only ACTUAL depth casters are allowed to contribute to the
@@ -5590,7 +5676,7 @@ namespace jkgm {
                          model_candidates.size(),
                          " noncaster_material_groups_skipped=",
                          noncaster_bounds_skipped);
-            sun_shadow_projection world_view{};
+            world_view={};
             if(!make_sun_shadow_projection(map.world,direction,world_view,model_bounds)) {
                 sun_failure("no valid sun projection (world + casting 3DO bounds)");
                 return;
@@ -5603,11 +5689,7 @@ namespace jkgm {
                     <<decal_dot(world_view.origin,world_view.forward);
                 LOG_INFO(diag.str());
             }
-            auto const camera=read_active_render_camera();
-            if(!camera.valid) {
-                sun_failure("render camera unavailable");
-                return;
-            }
+            } // expensive global caster bounds/projection: checked frames only
             presentation_gpu_profile::completed_sample sun_completed{};
             bool const sun_gpu_timing=the_config->profile_renderer &&
                 sun_gpu_queries.begin(sun_completed);
@@ -5622,7 +5704,7 @@ namespace jkgm {
             auto const atlas_begin=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
             if(sun_gpu_timing)sun_gpu_queries.timestamp(0U,true);
-            draw_sun_dynamic_shadow_atlas(world_view);
+            draw_sun_dynamic_shadow_atlas(world_view,skip_cascade_validation);
             if(sun_gpu_timing)sun_gpu_queries.timestamp(0U,false);
             if(the_config->profile_renderer)
                 sun_profile_atlas_us+=elapsed_profile_us(
@@ -5695,10 +5777,7 @@ namespace jkgm {
                          " unknown_owner_parts=",unknown_owner_parts,
                          " atlas_owners=",sun_dynamic_atlas_owners.size());
             }
-            float const horizontal=std::tan(camera.fov*
-                (3.14159265358979323846f/360.0f));
-            float const vertical=horizontal*float(get<y>(conf_scr_res))/
-                float(get<x>(conf_scr_res));
+            if(!skip_cascade_validation) {
             for(int cascade=0;cascade<2;++cascade) {
             auto const cascade_begin=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
@@ -6443,11 +6522,31 @@ namespace jkgm {
             sun_shadow_caster_signatures[cascade]=caster_signature;
             sun_shadow_cascade_ready[cascade]=true;
             } // cascade
+            } else {
+                // Depth textures and their matching projection matrices are
+                // retained. Do not skip the dynamic atlas above.
+                sun_shadow_cascade_ready={{true,true}};
+                if(sun_gpu_timing) {
+                    for(size_t cascade=1;cascade<=2;++cascade) {
+                        sun_gpu_queries.timestamp(cascade,true);
+                        sun_gpu_queries.timestamp(cascade,false);
+                    }
+                }
+            }
             if(sun_gpu_timing)sun_gpu_queries.end();
             sun_shadow_ready=sun_shadow_cascade_ready[0] &&
                              sun_shadow_cascade_ready[1];
             if(!sun_shadow_ready && !sun_shadow_frame_failure)
                 sun_shadow_frame_failure="one or both cascades incomplete";
+            if(!skip_cascade_validation) {
+                // Do not establish a new throttle window after a failed or
+                // incomplete validation; retry on the next frame instead.
+                sun_shadow_validated_world_view_ready=sun_shadow_ready;
+                if(sun_shadow_ready) {
+                    sun_shadow_validated_world_view=world_view;
+                    sun_shadow_last_validation=validation_now;
+                }
+            }
             if(the_config->profile_renderer_verbose &&
                gpu_3do_present_serial%120U==0U) {
                 LOG_INFO("SUN cache 120-frame-window near(full/static_hit/static_redraw/composite_redraw)=",
@@ -6461,6 +6560,12 @@ namespace jkgm {
                     sun_profile_static_redraws[1],"/",
                     sun_profile_working_redraws[1],
                     " NOTE=full_hits_skip_all_shadow_draws; static_hits_still_blit_static_and_render_movers");
+                LOG_INFO("SUN cascade validation throttle interval_s=",
+                    std::to_string(interval),
+                    " skipped_frames=",sun_profile_throttle_skipped,
+                    " checked_frames=",sun_profile_throttle_checked,
+                    " forced_early_checks=",sun_profile_throttle_forced_early,
+                    " NOTE=dynamic_atlas_updated_each_frame");
                 // Orthogonal miss reasons: totals can exceed the miss count.
                 // No implicit GPU synchronization; these timings are CPU
                 // planning/GL submission only, not GPU rasterization costs.
@@ -6538,6 +6643,9 @@ namespace jkgm {
                     " ring_busy_skips=",sun_gpu_skipped,
                     " supported=",sun_gpu_queries.is_supported(),
                     " NOTE=delayed_nonblocking_timestamps_cascade_zero_if_cached");
+                sun_profile_throttle_skipped=0;
+                sun_profile_throttle_checked=0;
+                sun_profile_throttle_forced_early=0;
                 sun_profile_prepare_us.fill(0);
                 sun_profile_projection_us.fill(0);
                 sun_profile_world_query_us.fill(0);
