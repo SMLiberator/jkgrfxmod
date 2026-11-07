@@ -1,4 +1,4 @@
-"""Repository inventory, VS project/header parity, and sample config coverage.
+"""Repository inventory, VS project/header parity, config docs, and CI hygiene.
 
 This is an organizational test: it intentionally does not assert formatting of
 shader/C++ functions, and runs on both development and cleanup CI.
@@ -35,4 +35,32 @@ assert not missing_fields, f"sample keys missing from config struct: {missing_fi
 missing_docs = [name for name in sample if not re.search(
     rf"\b{re.escape(name)}\b", docs)]
 assert not missing_docs, f"sample keys undocumented: {missing_docs}"
-print(f"Repository structure OK: {len(headers)} headers, {len(sample)} sample config keys")
+
+# Keep the documented public configuration in sync with the real config class.
+# A mention in explanatory prose is not sufficient: every active option must
+# have exactly one entry in the primary or supplementary reference tables.
+config_body = cfg.split("class config {", 1)[1].split("\n    };", 1)[0]
+config_fields = set(re.findall(
+    r"^\s*(?:std::(?:optional|tuple)<[^;\n]+>|std::string|uint64_t|"
+    r"unsigned int|bool|float|int)\s+(\w+)\s*(?:=|;)",
+    config_body, re.MULTILINE))
+rows = re.findall(
+    r"^\|\s*(?:\*\*(\w+)\*\*|`(\w+)`)\s*\|",
+    docs, re.MULTILINE)
+documented = [bold or code for bold, code in rows]
+duplicates = sorted({key for key in documented if documented.count(key) > 1})
+assert not duplicates, f"duplicate configuration reference rows: {duplicates}"
+missing_rows = sorted(config_fields - set(documented))
+stale_rows = sorted(set(documented) - config_fields)
+assert not missing_rows, f"active config fields missing from tables: {missing_rows}"
+assert not stale_rows, f"obsolete config options still documented as active: {stale_rows}"
+
+# A single build job should not run the same test more than once. Tests in
+# the independent cleanup source-contract job remain intentionally separate.
+ci = (root / ".github" / "workflows" / "main.yml").read_text(encoding="utf-8")
+build_job = ci.split("\n  source-contracts:", 1)[0]
+invoked = re.findall(r"tests[/\\]+([\w-]+\.(?:cpp|py))\b", build_job)
+repeated = sorted({name for name in invoked if invoked.count(name) > 1})
+assert not repeated, f"duplicate CI test invocations: {repeated}"
+
+print(f"Repository structure OK: {len(headers)} headers, {len(sample)} sample keys, {len(config_fields)} documented config fields")
