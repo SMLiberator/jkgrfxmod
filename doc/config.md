@@ -69,6 +69,8 @@ not all options appear in the minimal sample `assets/jkgm.json`.
 
 | Setting | Effect | Default |
 | --- | --- | --- |
+| `enable_post` | Master switch for renderer post-processing effects. | `true` |
+| `enable_sun` | Enable additional COG-controlled directional sunlight; independent of `enable_sun_shadows`. | `true` |
 | `enable_blur` | Enable distance/peripheral spatial blur effects where configured by COG. | `true` |
 | `enable_trails` | Enable temporal frame blending/trails where configured by COG. | `true` |
 | `enable_fog` | Enable renderer fog from COG settings. | `true` |
