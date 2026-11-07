@@ -60,6 +60,29 @@
 | **data_path** | Path to material and shader patches.<br/>Accepts both absolute and relative [paths](https://en.wikipedia.org/wiki/Path_(computing)#MS-DOS/Microsoft_Windows_style). | `"<folderpath>"` | `"jkgm"` |
 | **log_path** | Path to log file.<br/>Accepts both absolute and relative [paths](https://en.wikipedia.org/wiki/Path_(computing)#MS-DOS/Microsoft_Windows_style). | `"<folderpath>"`, or `null` to not output to a log | `null` |
 
+
+### Additional runtime and diagnostic settings
+
+The following options are accepted by the configuration parser but were
+missing from the table above. Defaults are taken from `common/config.hpp`;
+not all options appear in the minimal sample `assets/jkgm.json`.
+
+| Setting | Effect | Default |
+| --- | --- | --- |
+| `enable_blur` | Enable distance/peripheral spatial blur effects where configured by COG. | `true` |
+| `enable_trails` | Enable temporal frame blending/trails where configured by COG. | `true` |
+| `enable_fog` | Enable renderer fog from COG settings. | `true` |
+| `retro_mode` | Quantize the final image to the classic CMP palette (without dithering). | `false` |
+| `camera_hud_depth_sort` | Sort translucent Camera-type HUD geometry by depth; disable to preserve authored order for diagnostics. | `true` |
+| `spotlight_shadow_angle_bias_scale` | Experimental receiver-side grazing-angle spotlight shadow bias; `0` preserves previous behavior. Range `0..2`. | `0.0` |
+| `enable_decals` | Enable type-3 projected sprite decals; legacy `enable_sprite_decals` is accepted if the new key is absent. | `true` |
+| `enable_mesh_collision` | Enable experimental patched JKGM type-2 mesh collision handling. | `false` |
+| `world_cache_fluid_debug_mode` | Fluid diagnostics for GPU-cached world materials (`0` is normal rendering). | `0` |
+| `enable_normal_mapped_diffuse` | Experimental mapped normals for added direct lighting on cached world and 3DO materials. | `false` |
+| `restore_cmp_lights` | Restore indexed fullbright MAT pixels on compatible GPU-cached rendering paths. | `false` |
+| `enable_sector_crossing_lighting` | Experimental per-fragment 3DO sector light/CMP/tint transitions. | `false` |
+| `profile_renderer_verbose` | Enable detailed renderer diagnostics in addition to the regular performance counters. | `false` |
+
 <!-- No need to really have this, but I didn't want to remove it yet, in
 ## HUD Scaling
 Recommend values for HUD scaling (based on 360p HUD size and Jedi Outcast/Academy HUD sizes): `2.0` for 720p, `3.0` for 1080p, `4.0` for 1440p, `6.0` for 2160p.

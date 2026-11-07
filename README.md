@@ -2086,13 +2086,15 @@ pixel-center UV convention. It builds bounds and surface normals; receiver
 lighting is applied in the projected-decals shader with no new texture format. Its intended draw path must
 preserve **per-Thing opacity** independently of ordinary 3DO face alpha.
 
-**First GPU submission path (experimental, off by default):** set
+**Type-3 SPR projected decals:** use the current `enable_decals` setting
+(default `true`) in `jkgm.json`:
 
 ```json
-"enable_sprite_decals": true
+"enable_decals": true
 ```
 
-in `jkgm.json` and load a type-`3` SPR placed near an **actual JK
+The older `enable_sprite_decals` key remains a compatibility alias.
+For the original world-projection experiment, load a type-`3` SPR placed near an **actual JK
 world surface** (not a 3DO-only wall). Each sprite defines a **centered
 box** with source SPR width and height and fixed 0.25 JK-unit depth.
 The Thing **Up axis is the outward surface normal**: projection goes

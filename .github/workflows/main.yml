@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [development]
+    branches: [development, cleanup]
   workflow_dispatch:
 
 jobs:
@@ -17,6 +17,9 @@ jobs:
       uses: ilammy/msvc-dev-cmd@v1
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
+
+    - name: Repository structure, config documentation, and project headers
+      run: python3 tests/repository_structure.py
 
     - name: Local-player HUD ammo bin selection regression
       shell: cmd
@@ -271,7 +274,7 @@ jobs:
     # Instead, prune after EVERY development CI push, even failed builds,
     # without introducing a new workflow on master.
     needs: [build]
-    if: ${{ always() }}
+    if: ${{ always() && github.ref == 'refs/heads/development' }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
