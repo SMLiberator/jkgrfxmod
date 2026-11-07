@@ -45,6 +45,7 @@
 #include "cog_raycast_native_sphere.hpp"
 #include "cog_raycast_results.hpp"
 #include "cog_sector_queries.hpp"
+#include "hud_ammo_override.hpp"
 #include "sprite_orientation.hpp"
 #include "sprite_type_registry.hpp"
 #include "sprite_variants.hpp"
@@ -9305,6 +9306,146 @@ namespace {
         else LOG_WARNING("COG ResetMaterialColor rejected: MAT=", mat);
     }
 
+
+    // JKGM(5).exe: verified 1998 JK hud, inventory and weapon setter.
+    // Native HUD: jkHud_GetWeaponAmmo(thing) at 0x408F40.
+    // Bin lookup: sithInventory_GetBin(thing,bin) at 0x4D33B0.
+    // Weapon setter: sithInventory_SetCurrentWeapon(thing,weapon) at 0x4D1A10.
+    // The world at [0x833A10] owns the LOCAL player's Thing at +0x124.
+    // Never use OpenJKDF2 addresses for this executable.
+    constexpr uintptr_t native_hud_get_ammo_addr=0x00408F40U;
+    constexpr uintptr_t native_inventory_get_bin_addr=0x004D33B0U;
+    constexpr uintptr_t native_set_weapon_addr=0x004D1A10U;
+    constexpr uintptr_t native_world_global=0x00833A10U;
+    constexpr std::array<uint8_t,13> native_hud_ammo_signature{{
+        0x83,0xec,0x2c,0xb8,0x0b,0x00,0x00,0x00,0x56,0x8b,0x74,0x24,0x34
+    }};
+    constexpr std::array<uint8_t,14> native_get_bin_signature{{
+        0x8b,0x4c,0x24,0x08,0x8b,0x44,0x24,0x04,0x8b,0x80,0xc0,0x01,0x00,0x00
+    }};
+    constexpr std::array<uint8_t,14> native_set_weapon_signature{{
+        0x8b,0x44,0x24,0x04,0x8b,0x54,0x24,0x08,0x8b,0x88,0xc0,0x01,0x00,0x00
+    }};
+
+    using native_get_weapon_ammo_fn=int(__cdecl *)(void *);
+    using native_get_inventory_bin_fn=float *(__cdecl *)(void *,int);
+    using native_set_current_weapon_fn=void(__cdecl *)(void *,int);
+    native_get_weapon_ammo_fn RealHudGetWeaponAmmo=
+        reinterpret_cast<native_get_weapon_ammo_fn>(native_hud_get_ammo_addr);
+    native_get_inventory_bin_fn NativeGetInventoryBin=
+        reinterpret_cast<native_get_inventory_bin_fn>(native_inventory_get_bin_addr);
+    native_set_current_weapon_fn RealSetCurrentWeapon=
+        reinterpret_cast<native_set_current_weapon_fn>(native_set_weapon_addr);
+    bool native_hud_ammo_hook_active=false;
+    jkgm::hud_ammo::selection hud_ammo_selection;
+
+    bool native_hud_ammo_matches()
+    {
+        if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=0x00400000U ||
+           !gpu_span_readable(reinterpret_cast<void const *>(
+               native_world_global),sizeof(uint32_t)))
+            return false;
+        auto matches=[](uintptr_t addr,auto const &bytes) {
+            return gpu_span_readable(reinterpret_cast<void const *>(addr),
+                                     bytes.size()) &&
+                   std::memcmp(reinterpret_cast<void const *>(addr),
+                               bytes.data(),bytes.size())==0;
+        };
+        return matches(native_hud_get_ammo_addr,native_hud_ammo_signature) &&
+               matches(native_inventory_get_bin_addr,native_get_bin_signature) &&
+               matches(native_set_weapon_addr,native_set_weapon_signature);
+    }
+
+    bool hud_read_u32(uintptr_t address,uint32_t &value)
+    {
+        if(address<0x10000U || address>UINTPTR_MAX-sizeof(value) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(address),
+                              sizeof(value)))return false;
+        std::memcpy(&value,reinterpret_cast<void const *>(address),sizeof(value));
+        return true;
+    }
+
+    struct hud_local_player {
+        uintptr_t world=0;
+        uintptr_t thing=0;
+        int weapon=-1;
+    };
+
+    bool read_hud_local_player(hud_local_player &result)
+    {
+        uint32_t world=0,thing=0,kind=0,player=0,weapon=0;
+        if(!hud_read_u32(native_world_global,world) || world<0x10000U ||
+           !hud_read_u32(uintptr_t(world)+0x124U,thing) ||
+           !hud_read_u32(uintptr_t(thing)+0x0cU,kind) || kind!=10U ||
+           !hud_read_u32(uintptr_t(thing)+0x1c0U,player) ||
+           !hud_read_u32(uintptr_t(player)+0x134cU,weapon))
+            return false;
+        result={world,thing,static_cast<int>(weapon)};
+        return true;
+    }
+
+    void update_local_hud_selection(hud_local_player const &local)
+    {
+        hud_ammo_selection.observe(local.world,local.thing,local.weapon);
+    }
+
+    // The native HUD calls us every time it requests the ammo number.
+    // With no COG override, defer to JK verbatim for exact vanilla parity.
+    int __cdecl HookedHudGetWeaponAmmo(void *thing)
+    {
+        hud_local_player local{};
+        if(!native_hud_ammo_hook_active ||
+           !read_hud_local_player(local) ||
+           reinterpret_cast<uintptr_t>(thing)!=local.thing)
+            return RealHudGetWeaponAmmo(thing);
+        update_local_hud_selection(local);
+        if(!hud_ammo_selection.overridden)
+            return RealHudGetWeaponAmmo(thing);
+        int const bin=hud_ammo_selection.get();
+        if(bin==-1)return -999; // JK's ':::' sentinel
+        if(bin<0 || bin>=200)return -999;
+        float const *item=NativeGetInventoryBin(thing,bin);
+        if(!item || !gpu_span_readable(item,sizeof(*item)) ||
+           !std::isfinite(*item))
+            return -999;
+        // JK truncates inventory floats to int, then clamps to zero.
+        return static_cast<int>(std::clamp(*item,0.0f,
+                        float(std::numeric_limits<int>::max()-1024)));
+    }
+
+    // Reset immediately on a real weapon change, even when a COG switches
+    // away and back between HUD frames. Ignore other multiplayer Things.
+    void __cdecl HookedSetCurrentWeapon(void *thing,int weapon)
+    {
+        RealSetCurrentWeapon(thing,weapon);
+        hud_local_player local{};
+        if(read_hud_local_player(local) &&
+           reinterpret_cast<uintptr_t>(thing)==local.thing)
+            update_local_hud_selection(local);
+    }
+
+    void __cdecl cog_set_ammo_bin(void *ctx)
+    {
+        int const bin=cog_pop_int(ctx);
+        if(bin< -1 || bin>=200)return;
+        hud_local_player local{};
+        if(!native_hud_ammo_hook_active || !read_hud_local_player(local))
+            return;
+        update_local_hud_selection(local);
+        hud_ammo_selection.set(bin);
+    }
+
+    void __cdecl cog_get_ammo_bin(void *ctx)
+    {
+        hud_local_player local{};
+        if(!native_hud_ammo_hook_active || !read_hud_local_player(local)) {
+            cog_push_int(ctx,-1);
+            return;
+        }
+        update_local_hud_selection(local);
+        cog_push_int(ctx,hud_ammo_selection.get());
+    }
+
     struct cog_verb_entry {
         char const *name;
         cog_handler_type handler;
@@ -9346,6 +9487,8 @@ namespace {
         cog_verb_entry{"firstsectoratpos", cog_first_sector_at_pos},
         cog_verb_entry{"nextsectoratpos", cog_next_sector_at_pos},
         cog_verb_entry{"getrayhitdistance", cog_get_ray_hit_distance},
+        cog_verb_entry{"setammobin", cog_set_ammo_bin},
+        cog_verb_entry{"getammobin", cog_get_ammo_bin},
         cog_verb_entry{"setfogcolor", cog_set_fog_color},
         cog_verb_entry{"getfogcolor", cog_get_fog_color},
         cog_verb_entry{"setfoginfo", cog_set_fog_info},
@@ -9464,6 +9607,9 @@ namespace {
         cog_sector_history.clear();
         cog_raycast_history.clear();
         for(auto const &verb : fx_verbs) {
+            if(!native_hud_ammo_hook_active &&
+               (std::strcmp(verb.name,"setammobin")==0 ||
+                std::strcmp(verb.name,"getammobin")==0))continue;
             register_verb(ctx, verb.handler, verb.name);
         }
 
@@ -9912,6 +10058,25 @@ bool attach_hooks()
         (ChangeDisplaySettingsW_type)DetourFindFunction("user32.dll", "ChangeDisplaySettingsW");
     DetourAttach(&(PVOID &)TrueChangeDisplaySettingsW, HookedChangeDisplaySettingsW);
 
+    // Replace only the original HUD ammo query and local-player weapon-change
+    // setter. Both are signature-verified against jkgm(5).exe.
+    if(native_hud_ammo_matches()) {
+        LONG const get_err=DetourAttach(&(PVOID &)RealHudGetWeaponAmmo,
+                                        HookedHudGetWeaponAmmo);
+        if(get_err==NO_ERROR) {
+            LONG const set_err=DetourAttach(&(PVOID &)RealSetCurrentWeapon,
+                                            HookedSetCurrentWeapon);
+            if(set_err==NO_ERROR)native_hud_ammo_hook_active=true;
+            else {
+                DetourDetach(&(PVOID &)RealHudGetWeaponAmmo,
+                             HookedHudGetWeaponAmmo);
+                LOG_WARNING("HUD ammo hook: weapon setter detour failed: ",set_err);
+            }
+        }
+        else LOG_WARNING("HUD ammo getter detour failed: ",get_err);
+    }
+    else LOG_WARNING("HUD ammo COG verbs unavailable: unsupported JK executable");
+
     // Unlike the GPU-only mesh intercept, forcing native MAT mip 0 applies
     // equally to JK-rendered sectors. JkGRfxMod generates OpenGL mipmaps.
     bool mip_hook_requested=false;
@@ -10087,6 +10252,12 @@ bool detach_hooks()
         sprite_world_geometry.clear();
     }
     // Detach injected functions
+    if(native_hud_ammo_hook_active) {
+        DetourDetach(&(PVOID &)RealSetCurrentWeapon,HookedSetCurrentWeapon);
+        DetourDetach(&(PVOID &)RealHudGetWeaponAmmo,HookedHudGetWeaponAmmo);
+        native_hud_ammo_hook_active=false;
+        hud_ammo_selection={};
+    }
     if(native_sector_effect_hook_active) {
         DetourDetach(&(PVOID&)RealNativeColorEffects,
                      HookedNativeColorEffects);

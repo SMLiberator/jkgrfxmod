@@ -181,6 +181,25 @@ Test rotating the camera without changing the sun position, changing sun
 color/intensity over time, normal-mapped water ripples, rough/dull surfaces,
 and reflections with no environment image.
 
+### Local-player HUD ammo bin COG verbs
+
+JkGRfxMod intercepts the native `jkHud_GetWeaponAmmo` lookup on the verified
+JKGM executable. It leaves JK's existing HUD number rendering untouched.
+Two COG verbs control **only the local player's HUD**:
+
+- `SetAmmoBin(bin)` displays that inventory bin's value, even when the
+  equipped weapon normally displays a different one. `SetAmmoBin(-1)`
+  displays JK's no-ammo marker (`:::`). Valid bin numbers are 0–199.
+- `GetAmmoBin()` returns the currently selected HUD source bin, or `-1`
+  when no ammo count is displayed. Before an override it reports the vanilla
+  mapping for the equipped weapon.
+
+The override resets on a **change of equipped weapon** or local player/world.
+It doesn't modify any inventory values, weapon firing, or ammo consumption.
+For the native default behavior, the original JK lookup is called unchanged.
+The verbs are registered only if all native HUD and inventory function
+signatures match the executable and both detours attach successfully.
+
 ### Additional COG math verbs (JK23)
 
 JkGRfxMod registers six pure numeric verbs through JK.dll's

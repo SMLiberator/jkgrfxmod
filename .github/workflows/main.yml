@@ -18,6 +18,13 @@ jobs:
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
 
+    - name: Local-player HUD ammo bin selection regression
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\hud_ammo_override.cpp /Fe:hud_ammo_override_test.exe
+        hud_ammo_override_test.exe
+        python3 tests/hud_ammo_wiring.py
+
     - name: COG interpolation arithmetic and native handler wiring
       shell: cmd
       run: |
