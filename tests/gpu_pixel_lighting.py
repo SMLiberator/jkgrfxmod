@@ -65,8 +65,8 @@ assert 'gl::set_uniform_integer(pixel_dynamic_lighting,pixel_lighting?1:0)' in p
 # gamma/saturation GLSL, but disabled mode keeps independent JK Gouraud.
 shared_path = root / "assets/shaders/jk_point_lighting.glsl"
 shared = shared_path.read_text(encoding="utf-8")
-world_vert_path = root / "assets/shaders/world_cache_wireframe.vert"
-world_frag_path = root / "assets/shaders/world_cache_texture_preview.frag"
+world_vert_path = root / "assets/shaders/world_cache.vert"
+world_frag_path = root / "assets/shaders/world_cache.frag"
 world_vert = world_vert_path.read_text(encoding="utf-8")
 world_frag = world_frag_path.read_text(encoding="utf-8")
 for stage in (frag, world_frag):
@@ -245,8 +245,8 @@ assert "world_cache_model_style_pixel_light(" not in (
 assert not (root / "assets/shaders/menu.vert").exists()
 assert not (root / "assets/shaders/world_cache_wireframe.frag").exists()
 # The world vertex shader is ACTIVE even though its filename says wireframe.
-assert 'root/"shaders/world_cache_wireframe.vert"' in program
-assert 'root/"shaders/world_cache_texture_preview.frag"' in program
+assert 'root/"shaders/world_cache.vert"' in program
+assert 'root/"shaders/world_cache.frag"' in program
 
 
 # The glslangValidator CLI cannot expand our runtime-local GLSL includes.

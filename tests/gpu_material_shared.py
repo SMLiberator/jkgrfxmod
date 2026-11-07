@@ -6,7 +6,7 @@ import re
 root=Path(__file__).resolve().parents[1]
 read=lambda file:(root/file).read_text(encoding="utf-8")
 common=read("assets/shaders/gpu_material_common.glsl")
-world=read("assets/shaders/world_cache_texture_preview.frag")
+world=read("assets/shaders/world_cache.frag")
 model=read("assets/shaders/gpu_3do_preview.frag")
 assert '#include "gpu_material_common.glsl"' in model
 assert '#include "gpu_material_common.glsl"' in world
@@ -161,7 +161,7 @@ assert "world_cache_fluid_debug_mode must be an integer from 0 to 12" in parser
 # Trace why correct raw albedo produces a black cached Fluid diffuse.
 # The raw lighting stage is an independent varying, not reconstructed
 # from the final RGB so it can distinguish a live VBO issue from CMP/JKFX.
-world_vert=read("assets/shaders/world_cache_wireframe.vert")
+world_vert=read("assets/shaders/world_cache.vert")
 assert "out vec3 cached_raw_light_rgb;" in world_vert
 assert "in vec3 cached_raw_light_rgb;" in world
 assert "cached_raw_light_rgb=native_light_rgb;" in world_vert
