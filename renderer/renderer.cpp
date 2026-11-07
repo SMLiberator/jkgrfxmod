@@ -664,6 +664,17 @@ namespace jkgm {
         std::array<uint64_t,2> sun_profile_moving_instanced_ranges{{0,0}};
         uint64_t sun_profile_candidate_us=0,sun_profile_candidate_groups=0;
         uint64_t sun_profile_atlas_us=0;
+        // Timing-only breakdown of the work performed before cache reuse.
+        std::array<uint64_t,2> sun_profile_projection_us{};
+        std::array<uint64_t,2> sun_profile_world_query_us{};
+        std::array<uint64_t,2> sun_profile_world_filter_us{};
+        std::array<uint64_t,2> sun_profile_model_scan_us{};
+        std::array<uint64_t,2> sun_profile_cache_check_us{};
+        // Same delayed, nonblocking timestamp ring as presentation profiling:
+        // stage 0 = dynamic atlas, 1 = near cascade, 2 = far cascade.
+        presentation_gpu_profile sun_gpu_queries;
+        std::array<uint64_t,presentation_gpu_profile::num_stages> sun_gpu_ns{};
+        uint64_t sun_gpu_samples=0,sun_gpu_skipped=0;
         uint64_t sun_profile_atlas_mat_hits=0,sun_profile_atlas_mat_misses=0;
         std::array<uint64_t,2> sun_shadow_static_signatures{};
         std::array<uint64_t,2> sun_shadow_static_revisions{};
@@ -1048,8 +1059,10 @@ namespace jkgm {
             // Context-owned GL queries must be deleted before the context
             // disappears. If the context is already gone, its objects go
             // away with it; do not issue GL calls on an invalid context.
-            if(hGLRC && wglGetCurrentContext()==hGLRC)
+            if(hGLRC && wglGetCurrentContext()==hGLRC) {
                 present_gpu_queries.release();
+                sun_gpu_queries.release();
+            }
         }
 
         void set_renderer_mode(renderer_mode mode) override
@@ -5513,11 +5526,22 @@ namespace jkgm {
                 sun_failure("render camera unavailable");
                 return;
             }
+            presentation_gpu_profile::completed_sample sun_completed{};
+            bool const sun_gpu_timing=the_config->profile_renderer &&
+                sun_gpu_queries.begin(sun_completed);
+            if(sun_completed.ready) {
+                for(size_t i=0;i<sun_gpu_ns.size();++i)
+                    sun_gpu_ns[i]+=sun_completed.nanoseconds[i];
+                ++sun_gpu_samples;
+            }
+            if(sun_completed.skipped)++sun_gpu_skipped;
             // Atlas first: exclude only successfully drawn Things from CSM.
             // Excess candidates retain the normal cascade fallback.
             auto const atlas_begin=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
+            if(sun_gpu_timing)sun_gpu_queries.timestamp(0U,true);
             draw_sun_dynamic_shadow_atlas(world_view);
+            if(sun_gpu_timing)sun_gpu_queries.timestamp(0U,false);
             if(the_config->profile_renderer)
                 sun_profile_atlas_us+=elapsed_profile_us(
                     atlas_begin,profile_clock::now());
@@ -5605,6 +5629,10 @@ namespace jkgm {
             if(!fit_sun_shadow_to_camera(view,camera.position,camera.right,
                     camera.up,camera.forward,horizontal,vertical,distance)) {
                 sun_failure("camera-local cascade projection invalid");
+                if(sun_gpu_timing) {
+                    sun_gpu_queries.timestamp(size_t(cascade)+1U,true);
+                    sun_gpu_queries.timestamp(size_t(cascade)+1U,false);
+                }
                 continue;
             }
             // Reuse an already rendered projection whenever the ACTUAL
@@ -5637,9 +5665,18 @@ namespace jkgm {
             if(!locked_view &&
                !stabilize_sun_shadow_projection(view,map.resolution)) {
                 sun_failure("camera-local cascade stabilization failed");
+                if(sun_gpu_timing) {
+                    sun_gpu_queries.timestamp(size_t(cascade)+1U,true);
+                    sun_gpu_queries.timestamp(size_t(cascade)+1U,false);
+                }
                 continue;
             }
 
+            if(the_config->profile_renderer)
+                sun_profile_projection_us[cascade]+=elapsed_profile_us(
+                    cascade_begin,profile_clock::now());
+            auto const world_query_begin=the_config->profile_renderer
+                ?profile_clock::now():profile_clock::time_point{};
             // Query the complete orthographic box. The spotlight helper's
             // perspective pyramid bounds do not cover a directional map.
             map.selected.clear();
@@ -5651,6 +5688,11 @@ namespace jkgm {
             for(uint32_t id:selected_surfaces)
                 if(id<map.mesh.surfaces.size() && map.mesh.surfaces[id].count>0U)
                     map.selected.push_back(map.mesh.surfaces[id]);
+            if(the_config->profile_renderer)
+                sun_profile_world_query_us[cascade]+=elapsed_profile_us(
+                    world_query_begin,profile_clock::now());
+            auto const world_filter_begin=the_config->profile_renderer
+                ?profile_clock::now():profile_clock::time_point{};
             std::vector<GLsizei> counts;
             std::vector<void const *> offsets;
             struct sun_world_cutout {
@@ -5741,6 +5783,9 @@ namespace jkgm {
                 hash_float(get<y>(draw.texture.albedo_scroll));
                 hash_float(draw.texture.albedo_transition);
             }
+            if(the_config->profile_renderer)
+                sun_profile_world_filter_us[cascade]+=elapsed_profile_us(
+                    world_filter_begin,profile_clock::now());
             // Keep the stable world state and add stationary 3DOs, but
             // NEVER include moving/unknown Thing geometry in this key.
             uint64_t static_signature=caster_signature;
@@ -5782,6 +5827,8 @@ namespace jkgm {
             size_t dynamic_far_skipped=0,dynamic_near_distance_skipped=0;
             float const dynamic_near_depth=std::max(0.0f,
                 the_config->sun_shadow_near_distance);
+            auto const model_scan_begin=the_config->profile_renderer
+                ?profile_clock::now():profile_clock::time_point{};
             for(auto const &prepared:model_candidates) {
                 auto const &instance=*prepared.instance;
                 auto const &group=*prepared.group;
@@ -5873,6 +5920,9 @@ namespace jkgm {
             append_model_set(caster_signature,all_count,all_sum,all_sum_sq);
             append_model_set(static_signature,static_count,static_sum,
                              static_sum_sq);
+            if(the_config->profile_renderer)
+                sun_profile_model_scan_us[cascade]+=elapsed_profile_us(
+                    model_scan_begin,profile_clock::now());
             if(the_config->profile_renderer_verbose &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN shadow caster batches world=",
@@ -5939,6 +5989,8 @@ namespace jkgm {
                     }
                 note_projection_miss(p,previous_view);
             };
+            auto const cache_check_begin=the_config->profile_renderer
+                ?profile_clock::now():profile_clock::time_point{};
             bool unchanged=sun_shadow_cascade_cached[cascade] &&
                 sun_shadow_worlds[cascade]==world &&
                 sun_shadow_revisions[cascade]==map.revision &&
@@ -5949,6 +6001,9 @@ namespace jkgm {
                 sun_shadow_same_projection(view,sun_shadow_views[cascade]);
             for(int i=0;i<3 && unchanged;++i)
                 unchanged=std::fabs(direction[i]-sun_shadow_directions[cascade][i])<1.0e-5f;
+            if(the_config->profile_renderer)
+                sun_profile_cache_check_us[cascade]+=elapsed_profile_us(
+                    cache_check_begin,profile_clock::now());
             if(unchanged) {
                 if(the_config->profile_renderer) {
                     ++sun_profile_full_hits[cascade];
@@ -5959,6 +6014,10 @@ namespace jkgm {
                 if(the_config->profile_renderer_verbose &&
                    gpu_3do_present_serial%120U==0U)
                     LOG_INFO("SUN cascade=",cascade," full_cache_hit=1");
+                if(sun_gpu_timing) {
+                    sun_gpu_queries.timestamp(size_t(cascade)+1U,true);
+                    sun_gpu_queries.timestamp(size_t(cascade)+1U,false);
+                }
                 continue;
             }
             if(the_config->profile_renderer) {
@@ -6003,6 +6062,8 @@ namespace jkgm {
                        sun_shadow_static_cached[cascade])++miss.cold;
                 }
             }
+            if(sun_gpu_timing)
+                sun_gpu_queries.timestamp(size_t(cascade)+1U,true);
             auto const &cascade_target=cascade==0 ? map.fbo : map.far_fbo;
             auto const &static_target=cascade==0 ? map.static_fbo : map.static_far_fbo;
             auto const dimensions=make_size(int(map.resolution),int(map.resolution));
@@ -6315,6 +6376,8 @@ namespace jkgm {
             gl::set_face_cull_mode(gl::face_mode::back);
             gl::set_active_texture_unit(0);
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+            if(sun_gpu_timing)
+                sun_gpu_queries.timestamp(size_t(cascade)+1U,false);
             if(the_config->profile_renderer_verbose &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN cascade=",cascade,
@@ -6332,6 +6395,7 @@ namespace jkgm {
             sun_shadow_caster_signatures[cascade]=caster_signature;
             sun_shadow_cascade_ready[cascade]=true;
             } // cascade
+            if(sun_gpu_timing)sun_gpu_queries.end();
             sun_shadow_ready=sun_shadow_cascade_ready[0] &&
                              sun_shadow_cascade_ready[1];
             if(!sun_shadow_ready && !sun_shadow_frame_failure)
@@ -6390,6 +6454,13 @@ namespace jkgm {
                         " moving_instanced_calls=",sun_profile_moving_instanced_calls[c],
                         " moving_instanced_ranges=",sun_profile_moving_instanced_ranges[c],
                         " NOTE=CPU_only_no_GPU_wait");
+                    LOG_INFO("SUN prepare CPU cascade=",c,
+                        " projection_us_total=",sun_profile_projection_us[c],
+                        " world_query_us_total=",sun_profile_world_query_us[c],
+                        " world_filter_us_total=",sun_profile_world_filter_us[c],
+                        " model_scan_us_total=",sun_profile_model_scan_us[c],
+                        " cache_check_us_total=",sun_profile_cache_check_us[c],
+                        " NOTE=model_scan_includes_material_lookup_and_signature");
                     sun_profile_full_misses[c]={};
                     sun_profile_static_misses[c]={};
                 }
@@ -6402,7 +6473,22 @@ namespace jkgm {
                     " dynamic_atlas_material_misses=",
                         sun_profile_atlas_mat_misses,
                     " NOTE=CPU_only_no_GPU_wait");
+                LOG_INFO("SUN GPU avg_us atlas=",
+                    sun_gpu_samples?(sun_gpu_ns[0]/1000U)/sun_gpu_samples:0U,
+                    " near=",sun_gpu_samples?(sun_gpu_ns[1]/1000U)/sun_gpu_samples:0U,
+                    " far=",sun_gpu_samples?(sun_gpu_ns[2]/1000U)/sun_gpu_samples:0U,
+                    " samples=",sun_gpu_samples,
+                    " ring_busy_skips=",sun_gpu_skipped,
+                    " supported=",sun_gpu_queries.is_supported(),
+                    " NOTE=delayed_nonblocking_timestamps_cascade_zero_if_cached");
                 sun_profile_prepare_us.fill(0);
+                sun_profile_projection_us.fill(0);
+                sun_profile_world_query_us.fill(0);
+                sun_profile_world_filter_us.fill(0);
+                sun_profile_model_scan_us.fill(0);
+                sun_profile_cache_check_us.fill(0);
+                sun_gpu_ns.fill(0);
+                sun_gpu_samples=sun_gpu_skipped=0;
                 sun_profile_static_submit_us.fill(0);
                 sun_profile_moving_submit_us.fill(0);
                 sun_profile_static_submitted.fill(0);
