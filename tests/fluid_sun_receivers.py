@@ -9,7 +9,7 @@ def read(path):
 
 native=read("assets/shaders/game_trns_pass.frag")
 cached=read("assets/shaders/gpu_3do_preview.frag")
-world=read("assets/shaders/world_cache_texture_preview.frag")
+world=read("assets/shaders/world_cache.frag")
 alpha=read("renderer/gpu_3do_alpha.hpp")
 renderer=read("renderer/renderer.cpp")
 

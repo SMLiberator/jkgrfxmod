@@ -9,7 +9,7 @@ root = Path(__file__).resolve().parents[1]
 read = lambda p: (root / p).read_text(encoding="utf-8")
 shared = read("assets/shaders/gpu_material_common.glsl")
 model = read("assets/shaders/gpu_3do_preview.frag")
-world = read("assets/shaders/world_cache_texture_preview.frag")
+world = read("assets/shaders/world_cache.frag")
 native = read("assets/shaders/game_trns_pass.frag")
 
 for shader in (model, world):
