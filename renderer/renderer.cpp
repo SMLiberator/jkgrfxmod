@@ -636,6 +636,7 @@ namespace jkgm {
         uint64_t sun_profile_forced_sun=0;
         std::array<uint64_t,2> sun_profile_forced_coverage{};
         uint64_t sun_profile_checked_pass_us=0;
+        uint64_t sun_profile_checked_pass_count=0;
         uint64_t sun_profile_skipped_pass_us=0;
         uint64_t sun_profile_checked_pass_peak_us=0;
         uint64_t sun_profile_skipped_pass_peak_us=0;
@@ -6600,6 +6601,7 @@ namespace jkgm {
                     sun_profile_skipped_pass_peak_us=std::max(
                         sun_profile_skipped_pass_peak_us,pass_us);
                 } else {
+                    ++sun_profile_checked_pass_count;
                     sun_profile_checked_pass_us+=pass_us;
                     sun_profile_checked_pass_peak_us=std::max(
                         sun_profile_checked_pass_peak_us,pass_us);
@@ -6634,7 +6636,7 @@ namespace jkgm {
                     " NOTE=both_cascades_may_fail_in_one_frame");
                 LOG_INFO("SUN validation frame CPU checked_us_avg/peak=",
                     sun_profile_checked_pass_us/
-                        std::max<uint64_t>(1,sun_profile_throttle_checked),
+                        std::max<uint64_t>(1,sun_profile_checked_pass_count),
                     "/",sun_profile_checked_pass_peak_us,
                     " skipped_us_avg/peak=",
                     sun_profile_skipped_pass_us/
@@ -6730,6 +6732,7 @@ namespace jkgm {
                 sun_profile_forced_sun=0;
                 sun_profile_forced_coverage.fill(0);
                 sun_profile_checked_pass_us=0;
+                sun_profile_checked_pass_count=0;
                 sun_profile_skipped_pass_us=0;
                 sun_profile_checked_pass_peak_us=0;
                 sun_profile_skipped_pass_peak_us=0;
