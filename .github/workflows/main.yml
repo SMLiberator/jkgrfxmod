@@ -274,6 +274,17 @@ jobs:
         if-no-files-found: error
         retention-days: 7
 
+  # Cleanup branch exercises dormant source-contract suites before any
+  # behavior-preserving shader or native-hook extraction is merged.
+  source-contracts:
+    name: Extended source-contract regressions
+    if: ${{ github.ref == 'refs/heads/cleanup' }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Run extended source-contract tests
+      run: python3 tests/cleanup_source_contracts.py
+
   prune-old-runs:
     name: Prune obsolete development CI runs
     # Scheduled workflows only run from master (the repo default branch).
