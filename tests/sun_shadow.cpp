@@ -11,6 +11,16 @@ using namespace jkgm;
 
 int main()
 {
+    // A zero interval keeps the original per-frame validation. An active
+    // interval only skips while the map remains usable and inside deadline.
+    assert(sun_shadow_cascade_validation_due(0.0,0.0,true));
+    assert(!sun_shadow_cascade_validation_due(0.0,0.1,true));
+    assert(!sun_shadow_cascade_validation_due(0.099,0.1,true));
+    assert(sun_shadow_cascade_validation_due(0.1,0.1,true));
+    assert(sun_shadow_cascade_validation_due(0.03,0.1,false));
+    assert(sun_shadow_cascade_validation_due(
+        std::numeric_limits<double>::infinity(),0.1,true));
+    assert(sun_shadow_cascade_validation_due(-1.0,0.1,true));
     // Optional sun range: zero keeps the old unlimited behaviour; a positive
     // range clamps the far cascade and fades added sun out completely.
     assert(thing_casts_sun_shadows(0U));
