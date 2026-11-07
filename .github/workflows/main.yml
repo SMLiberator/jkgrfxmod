@@ -18,6 +18,11 @@ jobs:
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
 
+    - name: Shared translucent spotlight shader regression
+      run: |
+        python3 tests/translucent_spotlight_shared.py
+        python3 tests/spotlight_shadow_bias.py
+
     - name: Repository structure, config documentation, and project headers
       run: python3 tests/repository_structure.py
 

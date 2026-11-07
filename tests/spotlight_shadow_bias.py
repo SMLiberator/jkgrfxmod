@@ -6,8 +6,12 @@ import json
 root=Path(__file__).resolve().parents[1]
 read=lambda p:(root/p).read_text(encoding="utf-8")
 opaque=read("assets/shaders/post_opaque_composite.frag")
-native=read("assets/shaders/game_trns_pass.frag")
-model=read("assets/shaders/gpu_3do_preview.frag")
+# Match the shader loader's same-directory include expansion. The actual
+# spotlight receiver code lives once in this shared GLSL file.
+shared=read("assets/shaders/translucent_spotlight_common.glsl")
+include='#include "translucent_spotlight_common.glsl"'
+native=read("assets/shaders/game_trns_pass.frag").replace(include,shared)
+model=read("assets/shaders/gpu_3do_preview.frag").replace(include,shared)
 config=read("common/config.hpp")
 parser=read("common/config.cpp")
 sample=json.loads(read("assets/jkgm.json"))
