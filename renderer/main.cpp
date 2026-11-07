@@ -9341,9 +9341,10 @@ namespace {
 
     bool native_hud_ammo_matches()
     {
-        if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=0x00400000U ||
-           !gpu_span_readable(reinterpret_cast<void const *>(
-               native_world_global),sizeof(uint32_t)))
+        // Renderer DLL attaches before JK finishes native world setup.
+        // Validate code now; validate the world/player data on each COG
+        // call instead of requiring that memory to be committed at startup.
+        if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=0x00400000U)
             return false;
         auto matches=[](uintptr_t addr,auto const &bytes) {
             return gpu_span_readable(reinterpret_cast<void const *>(addr),
