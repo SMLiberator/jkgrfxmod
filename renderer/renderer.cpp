@@ -671,15 +671,14 @@ namespace jkgm {
         std::array<uint64_t,2> sun_profile_model_scan_us{};
         std::array<uint64_t,2> sun_profile_cache_check_us{};
         // Nanosecond sampling, never a timestamp for every 3DO group.
-        std::array<uint64_t,2> sun_profile_material_sample_ns{};
-        std::array<uint64_t,2> sun_profile_signature_sample_ns{};
-        std::array<uint64_t,2> sun_profile_material_samples{};
-        std::array<uint64_t,2> sun_profile_signature_samples{};
-        std::array<uint64_t,2> sun_profile_material_calls{};
+        // Per-frame preparation is now shared by both cascades.
+        std::array<uint64_t,2> sun_profile_prepared_reuses{};
         uint64_t sun_profile_candidate_material_sample_ns=0;
         uint64_t sun_profile_candidate_bounds_sample_ns=0;
+        uint64_t sun_profile_candidate_signature_sample_ns=0;
         uint64_t sun_profile_candidate_material_samples=0;
         uint64_t sun_profile_candidate_bounds_samples=0;
+        uint64_t sun_profile_candidate_signature_samples=0;
         // Same delayed, nonblocking timestamp ring as presentation profiling:
         // stage 0 = dynamic atlas, 1 = near cascade, 2 = far cascade.
         presentation_gpu_profile sun_gpu_queries;
@@ -5453,6 +5452,11 @@ namespace jkgm {
                 gpu_3do_instance const *instance;
                 gpu_3do_group const *group;
                 decal_volume_aabb bounds;
+                // The frame material cache owns this object until the next
+                // game frame. unordered_map rehash preserves element addresses.
+                gpu_3do_texture const *texture;
+                bool cutout;
+                uint64_t signature;
             };
             std::vector<sun_model_candidate> model_candidates;
             auto const candidate_begin=the_config->profile_renderer
@@ -5481,15 +5485,13 @@ namespace jkgm {
                 }
                 return found->second;
             };
-            auto sun_group_depth_eligible=[&](
-                gpu_3do_group const &group,
-                gpu_3do_instance const &instance) {
-                auto const &tex=sun_caster_material(group,instance);
-                bool const cutout=tex.masked||tex.alpha||tex.dithered||
-                    (instance.is_sprite_quad && tex.albedo_source==1);
-                return sun_shadow_material_casts_depth(
-                    tex.albedo_source,tex.special,tex.emissive_only,
-                    tex.opacity,cutout);
+            // The group hash is independent of cascade projection and
+            // membership. Compute it once per frame instead of again for
+            // near and far; keep the exact original hash inputs and mixing.
+            auto mix_model_signature=[](uint64_t h) {
+                h^=h>>30;h*=0xbf58476d1ce4e5b9ULL;
+                h^=h>>27;h*=0x94d049bb133111ebULL;
+                return h^(h>>31);
             };
             size_t noncaster_bounds_skipped=0;
             size_t skipped_skybox_instances=0;
@@ -5509,7 +5511,12 @@ namespace jkgm {
                         ((candidate_sample_index++ & 63U)==0U);
                     auto const mat_begin=sample
                         ?profile_clock::now():profile_clock::time_point{};
-                    bool const eligible=sun_group_depth_eligible(group,instance);
+                    auto const &tex=sun_caster_material(group,instance);
+                    bool const cutout=tex.masked||tex.alpha||tex.dithered||
+                        (instance.is_sprite_quad && tex.albedo_source==1);
+                    bool const eligible=sun_shadow_material_casts_depth(
+                        tex.albedo_source,tex.special,tex.emissive_only,
+                        tex.opacity,cutout);
                     if(sample) {
                         sun_profile_candidate_material_sample_ns+=elapsed_profile_ns(
                             mat_begin,profile_clock::now());
@@ -5529,8 +5536,46 @@ namespace jkgm {
                         ++sun_profile_candidate_bounds_samples;
                     }
                     if(decal_finite(bounds.low) && decal_finite(bounds.high)) {
+                        auto const signature_begin=sample
+                            ?profile_clock::now():profile_clock::time_point{};
+                        uint64_t member=14695981039346656037ULL;
+                        auto member_u32=[&](uint32_t v) {
+                            for(int b=0;b<4;++b) {
+                                member^=uint64_t((v>>(b*8))&255U);
+                                member*=1099511628211ULL;
+                            }
+                        };
+                        auto member_float=[&](float v) {
+                            uint32_t bits=0;
+                            std::memcpy(&bits,&v,sizeof(bits));
+                            member_u32(bits);
+                        };
+                        member_u32(uint32_t(instance.id));
+                        member_u32(uint32_t(instance.id>>32));
+                        member_u32(group.offset);
+                        member_u32(group.count);
+                        member_u32(uint32_t(instance.shadow_owner));
+                        member_u32(uint32_t(instance.shadow_owner>>32));
+                        member_u32(uint32_t(group.material));
+                        member_u32(uint32_t(group.cel));
+                        if(cutout) {
+                            member_float(tex.alpha_cutoff);
+                            member_float(tex.opacity);
+                            member_float(get<x>(tex.albedo_scroll));
+                            member_float(get<y>(tex.albedo_scroll));
+                            member_float(tex.albedo_transition);
+                        }
+                        for(float v:instance.transform)member_float(v);
+                        member=mix_model_signature(member);
+                        if(sample) {
+                            sun_profile_candidate_signature_sample_ns+=
+                                elapsed_profile_ns(
+                                    signature_begin,profile_clock::now());
+                            ++sun_profile_candidate_signature_samples;
+                        }
                         model_bounds.push_back(bounds);
-                        model_candidates.push_back({&instance,&group,bounds});
+                        model_candidates.push_back(
+                            {&instance,&group,bounds,&tex,cutout,member});
                     }
                 }
             }
@@ -5834,11 +5879,6 @@ namespace jkgm {
             // Keep group count so identical duplicate groups are preserved.
             uint64_t all_sum=0,all_sum_sq=0,static_sum=0,static_sum_sq=0;
             uint64_t all_count=0,static_count=0;
-            auto mix_model_signature=[](uint64_t h) {
-                h^=h>>30;h*=0xbf58476d1ce4e5b9ULL;
-                h^=h>>27;h*=0x94d049bb133111ebULL;
-                return h^(h>>31);
-            };
             auto append_model_set=[&](uint64_t &signature,uint64_t count,
                                       uint64_t sum,uint64_t squared) {
                 auto append=[&](uint32_t v) {
@@ -5866,7 +5906,6 @@ namespace jkgm {
                 the_config->sun_shadow_near_distance);
             auto const model_scan_begin=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
-            uint64_t model_sample_index=0;
             for(auto const &prepared:model_candidates) {
                 auto const &instance=*prepared.instance;
                 auto const &group=*prepared.group;
@@ -5898,72 +5937,21 @@ namespace jkgm {
                     prepared.bounds.low,prepared.bounds.high,
                     bounds.low,bounds.high);
                 if(!in_cascade)continue;
-                bool const sample=the_config->profile_renderer &&
-                    ((model_sample_index++ & 127U)==0U);
-                auto const mat_begin=sample
-                    ?profile_clock::now():profile_clock::time_point{};
-                auto const &tex=sun_caster_material(group,instance);
+                // Eligibility and material values were evaluated once
+                // before the shared shadow projection was fitted.
+                auto const &tex=*prepared.texture;
+                bool const cutout=prepared.cutout;
                 if(the_config->profile_renderer)
-                    ++sun_profile_material_calls[cascade];
-                if(sample) {
-                    sun_profile_material_sample_ns[cascade]+=
-                        elapsed_profile_ns(mat_begin,profile_clock::now());
-                    ++sun_profile_material_samples[cascade];
-                }
-                // The sprite's texture alpha is a cutout mask even if
-                // its MAT was not explicitly marked alpha/masked.
-                bool const cutout=tex.masked||tex.alpha||tex.dithered||
-                    (instance.is_sprite_quad && tex.albedo_source==1);
-                if(!sun_shadow_material_casts_depth(
-                       tex.albedo_source,tex.special,tex.emissive_only,
-                       tex.opacity,cutout))continue;
+                    ++sun_profile_prepared_reuses[cascade];
                 // Verified non-moving SithThings may join the cached static
                 // layer. An unknown owner stays dynamic (conservative), and
                 // even a path/physics Thing parked in place remains dynamic.
                 bool const stable=sun_shadow_cache_stationary_model(
                     instance.shadow_owner,instance.dynamic_sun_caster,
                     true,map.static_complete);
-                auto hash_model=[&](auto &&integer,auto &&floating) {
-                    integer(uint32_t(instance.id));
-                    integer(uint32_t(instance.id>>32));
-                    integer(group.offset);integer(group.count);
-                    integer(uint32_t(instance.shadow_owner));
-                    integer(uint32_t(instance.shadow_owner>>32));
-                    integer(uint32_t(group.material));
-                    integer(uint32_t(group.cel));
-                    if(cutout) {
-                        floating(tex.alpha_cutoff);floating(tex.opacity);
-                        floating(get<x>(tex.albedo_scroll));
-                        floating(get<y>(tex.albedo_scroll));
-                        floating(tex.albedo_transition);
-                    }
-                    for(float v:instance.transform)floating(v);
-                };
-
-                if(!in_cascade)continue;
                 (stable?static_models:models).push_back(
                     {&instance,&group,tex,cutout,prepared.bounds});
-                uint64_t member=14695981039346656037ULL;
-                auto member_u32=[&](uint32_t v) {
-                    for(int b=0;b<4;++b) {
-                        member^=uint64_t((v>>(b*8))&255U);
-                        member*=1099511628211ULL;
-                    }
-                };
-                auto member_float=[&](float v) {
-                    uint32_t bits=0;
-                    std::memcpy(&bits,&v,sizeof(bits));
-                    member_u32(bits);
-                };
-                auto const signature_begin=sample
-                    ?profile_clock::now():profile_clock::time_point{};
-                hash_model(member_u32,member_float);
-                member=mix_model_signature(member);
-                if(sample) {
-                    sun_profile_signature_sample_ns[cascade]+=
-                        elapsed_profile_ns(signature_begin,profile_clock::now());
-                    ++sun_profile_signature_samples[cascade];
-                }
+                uint64_t const member=prepared.signature;
                 all_sum+=member;
                 all_sum_sq+=member*member;
                 ++all_count;
@@ -6520,12 +6508,8 @@ namespace jkgm {
                         " world_filter_us_total=",sun_profile_world_filter_us[c],
                         " model_scan_us_total=",sun_profile_model_scan_us[c],
                         " cache_check_us_total=",sun_profile_cache_check_us[c],
-                        " material_calls=",sun_profile_material_calls[c],
-                        " material_sample_ns=",sun_profile_material_sample_ns[c],
-                        " material_samples=",sun_profile_material_samples[c],
-                        " signature_sample_ns=",sun_profile_signature_sample_ns[c],
-                        " signature_samples=",sun_profile_signature_samples[c],
-                        " NOTE=material_signature_samples_one_in_128_not_total");
+                        " prepared_reuses=",sun_profile_prepared_reuses[c],
+                        " NOTE=prepared_candidate_material_and_hash_reused");
                     sun_profile_full_misses[c]={};
                     sun_profile_static_misses[c]={};
                 }
@@ -6543,7 +6527,9 @@ namespace jkgm {
                     " material_samples=",sun_profile_candidate_material_samples,
                     " bounds_ns=",sun_profile_candidate_bounds_sample_ns,
                     " bounds_samples=",sun_profile_candidate_bounds_samples,
-                    " NOTE=candidate_samples_one_in_64_not_full_total");
+                    " signature_ns=",sun_profile_candidate_signature_sample_ns,
+                    " signature_samples=",sun_profile_candidate_signature_samples,
+                    " NOTE=each_candidate_prepared_once_samples_one_in_64_not_total");
                 LOG_INFO("SUN GPU avg_us atlas=",
                     sun_gpu_samples?(sun_gpu_ns[0]/1000U)/sun_gpu_samples:0U,
                     " near=",sun_gpu_samples?(sun_gpu_ns[1]/1000U)/sun_gpu_samples:0U,
@@ -6558,15 +6544,13 @@ namespace jkgm {
                 sun_profile_world_filter_us.fill(0);
                 sun_profile_model_scan_us.fill(0);
                 sun_profile_cache_check_us.fill(0);
-                sun_profile_material_sample_ns.fill(0);
-                sun_profile_signature_sample_ns.fill(0);
-                sun_profile_material_samples.fill(0);
-                sun_profile_signature_samples.fill(0);
-                sun_profile_material_calls.fill(0);
+                sun_profile_prepared_reuses.fill(0);
                 sun_profile_candidate_material_sample_ns=0;
                 sun_profile_candidate_bounds_sample_ns=0;
+                sun_profile_candidate_signature_sample_ns=0;
                 sun_profile_candidate_material_samples=0;
                 sun_profile_candidate_bounds_samples=0;
+                sun_profile_candidate_signature_samples=0;
                 sun_gpu_ns.fill(0);
                 sun_gpu_samples=sun_gpu_skipped=0;
                 sun_profile_static_submit_us.fill(0);
