@@ -5515,8 +5515,8 @@ namespace jkgm {
                     :std::chrono::duration<double>(
                         validation_now-sun_shadow_last_validation).count();
             bool const skip_cascade_validation=
-                interval>0.0 && cached_usable &&
-                since_validation>=0.0 && since_validation<interval;
+                !sun_shadow_cascade_validation_due(
+                    since_validation,interval,cached_usable);
             if(the_config->profile_renderer) {
                 if(skip_cascade_validation)++sun_profile_throttle_skipped;
                 else if(interval>0.0) {
