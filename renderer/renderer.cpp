@@ -5543,6 +5543,7 @@ namespace jkgm {
                 uint64_t signature;
             };
             std::vector<sun_model_candidate> model_candidates;
+            size_t skipped_skybox_instances=0;
             if(!skip_cascade_validation) {
             std::vector<decal_volume_aabb> model_bounds;
             auto const candidate_begin=the_config->profile_renderer
@@ -5580,7 +5581,6 @@ namespace jkgm {
                 return h^(h>>31);
             };
             size_t noncaster_bounds_skipped=0;
-            size_t skipped_skybox_instances=0;
             uint64_t candidate_sample_index=0;
             for(auto const &instance:frame_gpu_3do_instances) {
                 if(!instance.casts_sun_shadows) {
