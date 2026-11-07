@@ -17,6 +17,7 @@ frag = frag_path.read_text(encoding="utf-8")
 config = (root / "common/config.hpp").read_text(encoding="utf-8")
 parser = (root / "common/config.cpp").read_text(encoding="utf-8")
 wiring = (root / "renderer/renderer.cpp").read_text(encoding="utf-8")
+main = (root / "renderer/main.cpp").read_text(encoding="utf-8")
 program = (root / "renderer/shaders.cpp").read_text(encoding="utf-8")
 
 required_varyings = {
@@ -244,7 +245,7 @@ assert "world_cache_model_style_pixel_light(" not in (
     root / "renderer/world_cache_lighting.hpp").read_text(encoding="utf-8")
 assert not (root / "assets/shaders/menu.vert").exists()
 assert not (root / "assets/shaders/world_cache_wireframe.frag").exists()
-# The world vertex shader is ACTIVE even though its filename says wireframe.
+# The cached-world vertex shader is a production rendering stage.
 assert 'root/"shaders/world_cache.vert"' in program
 assert 'root/"shaders/world_cache.frag"' in program
 

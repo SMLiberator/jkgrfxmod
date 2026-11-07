@@ -27,7 +27,9 @@ assert "visibility" not in spotlight_composite.split("    out_color=",1)[0]
 
 # Spotlight's OWN occlusion map still applies, but never sunlight's mask.
 spot_func=opaque.split("void project_spotlights(",1)[1].split("\n}",1)[0]
-assert "shadow=spotlight_shadow_visibility(uv,distance);" in spot_func
+# The occlusion lookup now takes geometric incidence for opt-in
+# angle-adaptive receiver bias, independently of sunlight shadows.
+assert "shadow=spotlight_shadow_visibility(uv,distance,facing);" in spot_func
 assert "diffuse+=radiance*spotlight_intensities[i].x;" in spot_func
 assert "additive+=radiance*spotlight_intensities[i].y;" in spot_func
 assert "sun_shadow_visibility" not in spot_func
