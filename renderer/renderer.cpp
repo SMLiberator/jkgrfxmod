@@ -6588,12 +6588,15 @@ namespace jkgm {
                     };
                     log_misses("full",sun_profile_full_misses[c]);
                     log_misses("static",sun_profile_static_misses[c]);
-                    auto const frames=sun_profile_full_hits[c]+
+                    auto const checks=sun_profile_full_hits[c]+
                         sun_profile_working_redraws[c];
+                    auto const frames=checks+sun_profile_throttle_skipped;
                     LOG_INFO("SUN cache CPU cascade=",c,
                         " preparation_us_total=",sun_profile_prepare_us[c],
                         " preparation_us_per_frame=",
                             sun_profile_prepare_us[c]/std::max<uint64_t>(1,frames),
+                        " preparation_us_per_check=",
+                            sun_profile_prepare_us[c]/std::max<uint64_t>(1,checks),
                         " static_submit_us_total=",sun_profile_static_submit_us[c],
                         " static_groups_submitted=",sun_profile_static_submitted[c],
                         " static_GL_calls=",sun_profile_static_gl_calls[c],
