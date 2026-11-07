@@ -73,7 +73,7 @@ assert "select_sector_crossing_slot()" in fragment
 assert "texelFetch(sector_crossing_planes,begin_plane+j)" in fragment
 assert "sector_crossing_count>1" in fragment
 assert "pixel_jk_diffuse_lighting(diffuse_local_normal)" in fragment
-assert "if(added<=0.0) return baked;" in fragment
+assert "if(all(lessThanEqual(added,vec3(0.0)))) return baked;" in fragment
 assert "gpu_material_palette_fullbright(" in fragment
 assert "world_lighting_exempt" in fragment
 assert "can_replace_sector_tint" in render
