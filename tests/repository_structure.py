@@ -52,7 +52,7 @@ assert not missing_docs, f"sample keys undocumented: {missing_docs}"
 config_body = cfg.split("class config {", 1)[1].split("\n    };", 1)[0]
 config_fields = set(re.findall(
     r"^\s*(?:std::(?:optional|tuple)<[^;\n]+>|std::string|uint64_t|"
-    r"unsigned int|bool|float|int)\s+(\w+)\s*(?:=|;)",
+    r"unsigned int|bool|float|double|int)\s+(\w+)\s*(?:=|;)",
     config_body, re.MULTILINE))
 rows = re.findall(
     r"^\|\s*(?:\*\*(\w+)\*\*|`(\w+)`)\s*\|",
