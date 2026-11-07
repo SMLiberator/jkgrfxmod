@@ -15,6 +15,17 @@ namespace jkgm {
 
 // Only atlas-rendered owners leave the broad cascades. Unknown owners
 // and overflowing/unrendered Things retain their low-res shadow fallback.
+// Schedule expensive near/far caster validation in real time, never by
+// frame count. Invalid caches override the interval immediately.
+inline bool sun_shadow_cascade_validation_due(
+    double seconds_since_last_check,double interval,bool cache_usable)
+{
+    return !cache_usable || !(interval>0.0) ||
+           !std::isfinite(seconds_since_last_check) ||
+           seconds_since_last_check<0.0 ||
+           seconds_since_last_check>=interval;
+}
+
 inline bool sun_shadow_caster_in_static_cascades(
     uint64_t owner,std::unordered_set<uint64_t> const &atlas_owners)
 {
