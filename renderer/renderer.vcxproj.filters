@@ -18,6 +18,9 @@
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="native_mesh_revision.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ddraw_impl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -321,6 +324,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="native_3do_profile.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="native_mesh_revision.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="native_earth_hit_sound.hpp">

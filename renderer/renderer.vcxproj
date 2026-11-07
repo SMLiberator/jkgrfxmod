@@ -43,6 +43,7 @@
     <ClCompile Include="primary_surface.cpp" />
     <ClCompile Include="dxguids.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="native_mesh_revision.cpp" />
     <ClCompile Include="compressed_sound_codec.cpp" />
     <ClCompile Include="compressed_sound_io.cpp" />
     <ClCompile Include="renderer.cpp" />
@@ -149,6 +150,7 @@
     <ClInclude Include="mots_native_mesh_snapshot.hpp" />
     <ClInclude Include="mots_sphere_tree.hpp" />
     <ClInclude Include="native_3do_profile.hpp" />
+    <ClInclude Include="native_mesh_revision.hpp" />
     <ClInclude Include="native_earth_hit_sound.hpp" />
     <ClInclude Include="native_jk_palette_effects.hpp" />
     <ClInclude Include="native_mat_mips.hpp" />

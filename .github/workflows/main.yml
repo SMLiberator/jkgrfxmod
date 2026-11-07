@@ -27,6 +27,18 @@ jobs:
     - name: Repository structure, config documentation, and project headers
       run: python3 tests/repository_structure.py
 
+    - name: Standalone native utility and mesh cache unit tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\cog_pyr_math.cpp /Fe:cog_pyr_math_test.exe
+        cog_pyr_math_test.exe
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_cache_signature.cpp /Fe:gpu_3do_cache_signature_test.exe
+        gpu_3do_cache_signature_test.exe
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_uv.cpp /Fe:gpu_3do_uv_test.exe
+        gpu_3do_uv_test.exe
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
+        sprite_orientation_test.exe
+
     - name: Local-player HUD ammo bin selection regression
       shell: cmd
       run: |

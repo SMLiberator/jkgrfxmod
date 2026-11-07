@@ -18,6 +18,16 @@ def entries(path: Path, kind: str) -> list[str]:
     return [elem.attrib["Include"] for elem in tree.findall(
         f".//ms:{kind}", ns) if "Include" in elem.attrib]
 
+# Every translation unit in renderer/ must be part of the Release build.
+# A successful build alone does not catch a newly extracted, unlisted .cpp.
+sources = {p.name for p in (root / "renderer").glob("*.cpp")}
+project_sources = entries(proj, "ClCompile")
+filter_sources = entries(filters, "ClCompile")
+assert len(project_sources) == len(set(project_sources)), "duplicate project source"
+assert len(filter_sources) == len(set(filter_sources)), "duplicate filter source"
+assert sources == set(project_sources), f"project source mismatch: {sources ^ set(project_sources)}"
+assert sources == set(filter_sources), f"filter source mismatch: {sources ^ set(filter_sources)}"
+
 headers = {p.name for p in (root / "renderer").glob("*.hpp")}
 project_headers = entries(proj, "ClInclude")
 filter_headers = entries(filters, "ClInclude")
@@ -63,4 +73,4 @@ invoked = re.findall(r"tests[/\\]+([\w-]+\.(?:cpp|py))\b", build_job)
 repeated = sorted({name for name in invoked if invoked.count(name) > 1})
 assert not repeated, f"duplicate CI test invocations: {repeated}"
 
-print(f"Repository structure OK: {len(headers)} headers, {len(sample)} sample keys, {len(config_fields)} documented config fields")
+print(f"Repository structure OK: {len(sources)} compiled units, {len(headers)} headers, {len(sample)} sample keys, {len(config_fields)} documented config fields")
