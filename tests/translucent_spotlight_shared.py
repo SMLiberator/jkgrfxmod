@@ -13,10 +13,13 @@ for filename in ("game_trns_pass.frag","gpu_3do_preview.frag"):
     raw=(base/filename).read_text(encoding="utf-8")
     assert raw.count(include)==1,filename
     assert "uniform int translucent_sun_enabled" in raw,filename
-    for symbol in ("translucent_shadow_visibility(", 
-                   "translucent_spotlight_world_pos(",
-                   "translucent_spotlight_world_normal("):
-        assert symbol not in raw, (filename,symbol)
+    # Calls remain in shader-specific composition; only the shared
+    # function declarations/implementations are moved.
+    for declaration in ("float translucent_shadow_visibility(",
+                        "vec3 translucent_spotlight_world_pos(",
+                        "vec3 translucent_spotlight_world_normal("):
+        assert declaration not in raw, (filename,declaration)
+        assert common.count(declaration)==1, (filename,declaration)
     expanded=raw.replace(include,common)
     assert "float translucent_shadow_visibility(" in expanded
     assert "vec4 sample_translucent_spotlight(" in expanded
