@@ -311,6 +311,17 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_sun_shadows")) {
             j.at("enable_sun_shadows").get_to(rv->enable_sun_shadows);
         }
+        if(j.contains("sun_shadow_update_interval")) {
+            auto const &v=j.at("sun_shadow_update_interval");
+            if(!v.is_number())
+                throw std::runtime_error(
+                    "sun_shadow_update_interval must be numeric (0..2 seconds)");
+            double const seconds=v.get<double>();
+            if(!std::isfinite(seconds) || seconds<0.0 || seconds>2.0)
+                throw std::runtime_error(
+                    "sun_shadow_update_interval must be between 0 and 2 seconds");
+            rv->sun_shadow_update_interval=seconds;
+        }
         if(j.contains("enable_sprite_shadows")) {
             j.at("enable_sprite_shadows").get_to(rv->enable_sprite_shadows);
         }
