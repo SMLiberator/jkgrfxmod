@@ -670,6 +670,16 @@ namespace jkgm {
         std::array<uint64_t,2> sun_profile_world_filter_us{};
         std::array<uint64_t,2> sun_profile_model_scan_us{};
         std::array<uint64_t,2> sun_profile_cache_check_us{};
+        // Nanosecond sampling, never a timestamp for every 3DO group.
+        std::array<uint64_t,2> sun_profile_material_sample_ns{};
+        std::array<uint64_t,2> sun_profile_signature_sample_ns{};
+        std::array<uint64_t,2> sun_profile_material_samples{};
+        std::array<uint64_t,2> sun_profile_signature_samples{};
+        std::array<uint64_t,2> sun_profile_material_calls{};
+        uint64_t sun_profile_candidate_material_sample_ns=0;
+        uint64_t sun_profile_candidate_bounds_sample_ns=0;
+        uint64_t sun_profile_candidate_material_samples=0;
+        uint64_t sun_profile_candidate_bounds_samples=0;
         // Same delayed, nonblocking timestamp ring as presentation profiling:
         // stage 0 = dynamic atlas, 1 = near cascade, 2 = far cascade.
         presentation_gpu_profile sun_gpu_queries;
@@ -714,6 +724,13 @@ namespace jkgm {
         {
             return static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::microseconds>(b - a).count());
+        }
+
+        static uint64_t elapsed_profile_ns(profile_clock::time_point a,
+                                           profile_clock::time_point b)
+        {
+            return static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(b-a).count());
         }
 
         void record_profile(profile_clock::time_point started,
@@ -5476,6 +5493,7 @@ namespace jkgm {
             };
             size_t noncaster_bounds_skipped=0;
             size_t skipped_skybox_instances=0;
+            uint64_t candidate_sample_index=0;
             for(auto const &instance:frame_gpu_3do_instances) {
                 if(!instance.casts_sun_shadows) {
                     ++skipped_skybox_instances;
@@ -5485,12 +5503,31 @@ namespace jkgm {
                 auto const &m=instance.transform;
                 for(auto const &group:instance.geometry->groups) {
                     if(group.count<3U || (group.face_type&0x2U))continue;
-                    if(!sun_group_depth_eligible(group,instance)) {
+                    // One of every 64 eligible-for-testing groups is timed.
+                    // Avoid thousands of expensive clock calls per frame.
+                    bool const sample=the_config->profile_renderer &&
+                        ((candidate_sample_index++ & 63U)==0U);
+                    auto const mat_begin=sample
+                        ?profile_clock::now():profile_clock::time_point{};
+                    bool const eligible=sun_group_depth_eligible(group,instance);
+                    if(sample) {
+                        sun_profile_candidate_material_sample_ns+=elapsed_profile_ns(
+                            mat_begin,profile_clock::now());
+                        ++sun_profile_candidate_material_samples;
+                    }
+                    if(!eligible) {
                         ++noncaster_bounds_skipped;
                         continue;
                     }
+                    auto const bounds_begin=sample
+                        ?profile_clock::now():profile_clock::time_point{};
                     auto const bounds=sun_shadow_transformed_aabb(
                         group.bounds_min,group.bounds_max,m);
+                    if(sample) {
+                        sun_profile_candidate_bounds_sample_ns+=elapsed_profile_ns(
+                            bounds_begin,profile_clock::now());
+                        ++sun_profile_candidate_bounds_samples;
+                    }
                     if(decal_finite(bounds.low) && decal_finite(bounds.high)) {
                         model_bounds.push_back(bounds);
                         model_candidates.push_back({&instance,&group,bounds});
@@ -5829,6 +5866,7 @@ namespace jkgm {
                 the_config->sun_shadow_near_distance);
             auto const model_scan_begin=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
+            uint64_t model_sample_index=0;
             for(auto const &prepared:model_candidates) {
                 auto const &instance=*prepared.instance;
                 auto const &group=*prepared.group;
@@ -5860,7 +5898,18 @@ namespace jkgm {
                     prepared.bounds.low,prepared.bounds.high,
                     bounds.low,bounds.high);
                 if(!in_cascade)continue;
+                bool const sample=the_config->profile_renderer &&
+                    ((model_sample_index++ & 127U)==0U);
+                auto const mat_begin=sample
+                    ?profile_clock::now():profile_clock::time_point{};
                 auto const &tex=sun_caster_material(group,instance);
+                if(the_config->profile_renderer)
+                    ++sun_profile_material_calls[cascade];
+                if(sample) {
+                    sun_profile_material_sample_ns[cascade]+=
+                        elapsed_profile_ns(mat_begin,profile_clock::now());
+                    ++sun_profile_material_samples[cascade];
+                }
                 // The sprite's texture alpha is a cutout mask even if
                 // its MAT was not explicitly marked alpha/masked.
                 bool const cutout=tex.masked||tex.alpha||tex.dithered||
@@ -5906,8 +5955,15 @@ namespace jkgm {
                     std::memcpy(&bits,&v,sizeof(bits));
                     member_u32(bits);
                 };
+                auto const signature_begin=sample
+                    ?profile_clock::now():profile_clock::time_point{};
                 hash_model(member_u32,member_float);
                 member=mix_model_signature(member);
+                if(sample) {
+                    sun_profile_signature_sample_ns[cascade]+=
+                        elapsed_profile_ns(signature_begin,profile_clock::now());
+                    ++sun_profile_signature_samples[cascade];
+                }
                 all_sum+=member;
                 all_sum_sq+=member*member;
                 ++all_count;
@@ -6033,6 +6089,8 @@ namespace jkgm {
             }
             // Reusing a depth texture requires the exact same stabilized
             // light projection, not merely the same sun and static casters.
+            auto const static_check_begin=the_config->profile_renderer
+                ?profile_clock::now():profile_clock::time_point{};
             bool static_same=map.static_complete &&
                 sun_shadow_static_cached[cascade] &&
                 sun_shadow_static_worlds[cascade]==world &&
@@ -6044,6 +6102,8 @@ namespace jkgm {
                 static_same=std::fabs(direction[i]-
                     sun_shadow_static_directions[cascade][i])<1.0e-5f;
             if(the_config->profile_renderer) {
+                sun_profile_cache_check_us[cascade]+=elapsed_profile_us(
+                    static_check_begin,profile_clock::now());
                 ++sun_profile_working_redraws[cascade];
                 sun_profile_prepare_us[cascade]+=elapsed_profile_us(
                     cascade_begin,profile_clock::now());
@@ -6460,7 +6520,12 @@ namespace jkgm {
                         " world_filter_us_total=",sun_profile_world_filter_us[c],
                         " model_scan_us_total=",sun_profile_model_scan_us[c],
                         " cache_check_us_total=",sun_profile_cache_check_us[c],
-                        " NOTE=model_scan_includes_material_lookup_and_signature");
+                        " material_calls=",sun_profile_material_calls[c],
+                        " material_sample_ns=",sun_profile_material_sample_ns[c],
+                        " material_samples=",sun_profile_material_samples[c],
+                        " signature_sample_ns=",sun_profile_signature_sample_ns[c],
+                        " signature_samples=",sun_profile_signature_samples[c],
+                        " NOTE=material_signature_samples_one_in_128_not_total");
                     sun_profile_full_misses[c]={};
                     sun_profile_static_misses[c]={};
                 }
@@ -6473,6 +6538,12 @@ namespace jkgm {
                     " dynamic_atlas_material_misses=",
                         sun_profile_atlas_mat_misses,
                     " NOTE=CPU_only_no_GPU_wait");
+                LOG_INFO("SUN prepare CPU candidate samples material_ns=",
+                    sun_profile_candidate_material_sample_ns,
+                    " material_samples=",sun_profile_candidate_material_samples,
+                    " bounds_ns=",sun_profile_candidate_bounds_sample_ns,
+                    " bounds_samples=",sun_profile_candidate_bounds_samples,
+                    " NOTE=candidate_samples_one_in_64_not_full_total");
                 LOG_INFO("SUN GPU avg_us atlas=",
                     sun_gpu_samples?(sun_gpu_ns[0]/1000U)/sun_gpu_samples:0U,
                     " near=",sun_gpu_samples?(sun_gpu_ns[1]/1000U)/sun_gpu_samples:0U,
@@ -6487,6 +6558,15 @@ namespace jkgm {
                 sun_profile_world_filter_us.fill(0);
                 sun_profile_model_scan_us.fill(0);
                 sun_profile_cache_check_us.fill(0);
+                sun_profile_material_sample_ns.fill(0);
+                sun_profile_signature_sample_ns.fill(0);
+                sun_profile_material_samples.fill(0);
+                sun_profile_signature_samples.fill(0);
+                sun_profile_material_calls.fill(0);
+                sun_profile_candidate_material_sample_ns=0;
+                sun_profile_candidate_bounds_sample_ns=0;
+                sun_profile_candidate_material_samples=0;
+                sun_profile_candidate_bounds_samples=0;
                 sun_gpu_ns.fill(0);
                 sun_gpu_samples=sun_gpu_skipped=0;
                 sun_profile_static_submit_us.fill(0);
