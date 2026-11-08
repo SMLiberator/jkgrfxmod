@@ -84,6 +84,26 @@ int main()
     owners.clear();
     assert(sun_shadow_caster_in_static_cascades(
         0x1111222233334444ULL,owners));
+    // The geometry cache is exact: any Thing, mesh, group-count or even
+    // sub-epsilon transform change must force bounds/hash recomputation.
+    std::array<float,12> const pose{{1,0,0,0,1,0,0,0,1,10,20,30}};
+    auto moved=pose;
+    moved[9]+=0.00001f;
+    auto const reuse=[&](uint64_t owner,uint64_t id,uintptr_t geometry,
+                          std::array<float,12> const &current,size_t groups,
+                          bool dynamic) {
+        return sun_shadow_static_geometry_reusable(
+            owner,id,geometry,current,groups,
+            1234,6789,0x12345U,pose,12,false || dynamic);
+    };
+    assert(reuse(1234,6789,0x12345U,pose,12,false));
+    assert(!reuse(0,6789,0x12345U,pose,12,false));
+    assert(!reuse(1235,6789,0x12345U,pose,12,false));
+    assert(!reuse(1234,6790,0x12345U,pose,12,false));
+    assert(!reuse(1234,6789,0x12346U,pose,12,false));
+    assert(!reuse(1234,6789,0x12345U,moved,12,false));
+    assert(!reuse(1234,6789,0x12345U,pose,13,false));
+    assert(!reuse(1234,6789,0x12345U,pose,12,true));
     // Static architectural Things are reusable, but movers, unknown owners,
     // disabled caching and missing FBOs always use the live 3DO pass.
     assert(sun_shadow_cache_stationary_model(1234,false,true,true));
