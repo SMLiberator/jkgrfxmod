@@ -5669,11 +5669,13 @@ namespace jkgm {
                 if(instance.shadow_owner!=0 && !instance.dynamic_sun_caster &&
                    !instance.is_sprite_quad && !instance.transient_procedural) {
                     auto &slot=sun_static_geometry_cache[instance_idx];
-                    if(slot.owner!=instance.shadow_owner ||
-                       slot.id!=instance.id ||
-                       slot.geometry!=instance.geometry.get() ||
-                       slot.transform!=m ||
-                       slot.groups.size()!=instance.geometry->groups.size()) {
+                    if(!sun_shadow_static_geometry_reusable(
+                           instance.shadow_owner,instance.id,
+                           reinterpret_cast<uintptr_t>(instance.geometry.get()),
+                           m,instance.geometry->groups.size(),
+                           slot.owner,slot.id,
+                           reinterpret_cast<uintptr_t>(slot.geometry),
+                           slot.transform,slot.groups.size(),false)) {
                         slot.owner=instance.shadow_owner;
                         slot.id=instance.id;
                         slot.geometry=instance.geometry.get();
