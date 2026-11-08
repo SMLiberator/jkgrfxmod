@@ -69,6 +69,7 @@ uniform vec2 sun_vsm_params; // x=min world-space stddev (JKU), y=bleed reductio
 #ifdef JKGM_SUN_SKY_APERTURE
 uniform int sun_shadow_debug_view;
 #ifdef JKGM_SUN_VSM
+uniform int sun_vsm_depth_guard;
 uniform sampler2D sun_shadow_raw_near;
 uniform sampler2D sun_shadow_raw_far;
 #else
@@ -244,6 +245,64 @@ float sun_debug_raw_visibility(vec3 world_position,float incidence)
     return mix(near_visibility,far_visibility,
                smoothstep(transition_start,transition_end,camera_depth));
 }
+#ifdef JKGM_SUN_VSM
+// Bilinear PCF from original unfiltered depths. The four comparisons
+// happen BEFORE interpolation: blurring raw depth invents light paths.
+float sun_vsm_raw_depth_coverage(sampler2D map,vec3 uv,float range,
+                                 float incidence)
+{
+    float grazing=1.0-clamp(incidence,0.0,1.0);
+    float bias_world=(0.008+0.027*grazing*grazing)*
+                     sun_shadow_receiver_bias_scale;
+    float bias=max(4.0/16777215.0,bias_world/max(range,0.001));
+    float receiver=uv.z-bias;
+    ivec2 dimensions=textureSize(map,0);
+    vec2 pixel=uv.xy*vec2(dimensions)-vec2(0.5);
+    ivec2 base=ivec2(floor(pixel));
+    vec2 fraction=fract(pixel);
+    float coverage=0.0;
+    for(int y=0;y<2;++y)
+    for(int x=0;x<2;++x) {
+        ivec2 tap=clamp(base+ivec2(x,y),ivec2(0),
+                        dimensions-ivec2(1));
+        float depth=texelFetch(map,tap,0).r;
+        float visible=receiver<=depth?1.0:0.0;
+        float wx=x==0?1.0-fraction.x:fraction.x;
+        float wy=y==0?1.0-fraction.y:fraction.y;
+        coverage+=visible*wx*wy;
+    }
+    return coverage;
+}
+float sun_vsm_raw_depth_visibility(vec3 world_position,float incidence)
+{
+    // Match the near/far cascade selection and blend used by VSM itself.
+    float camera_depth=dot(world_position-camera_origin.xyz,
+                           camera_forward.xyz);
+    vec3 near_uv=sun_shadow_coordinates(world_position,sun_shadow_origin,
+        sun_shadow_right,sun_shadow_up,sun_shadow_forward,sun_shadow_limits);
+    bool use_near=camera_depth<sun_shadow_split && sun_shadow_inside(near_uv);
+    float start=sun_shadow_split*0.8125;
+    float end=sun_shadow_split*0.9375;
+    if(use_near && camera_depth<start)
+        return sun_vsm_raw_depth_coverage(sun_shadow_raw_near,near_uv,
+                                         sun_shadow_limits.z,incidence);
+    vec3 far_uv=sun_shadow_coordinates(world_position,sun_shadow_far_origin,
+        sun_shadow_far_right,sun_shadow_far_up,
+        sun_shadow_far_forward,sun_shadow_far_limits);
+    if(!sun_shadow_inside(far_uv))
+        return use_near
+            ?sun_vsm_raw_depth_coverage(sun_shadow_raw_near,near_uv,
+                                         sun_shadow_limits.z,incidence)
+            :1.0;
+    float far_visibility=sun_vsm_raw_depth_coverage(sun_shadow_raw_far,
+        far_uv,sun_shadow_far_limits.z,incidence);
+    if(!use_near)return far_visibility;
+    float near_visibility=sun_vsm_raw_depth_coverage(sun_shadow_raw_near,
+        near_uv,sun_shadow_limits.z,incidence);
+    return mix(near_visibility,far_visibility,
+               smoothstep(start,end,camera_depth));
+}
+#endif
 #endif
 
 // Separate sky aperture from normal occluder shadowing: a sky polygon
@@ -574,6 +633,16 @@ void main()
                 // than silently restoring JK's original baked brightness.
                 // No change occurs when the sun is disabled (sun_fade=0).
                 float sky_access=sun_sky_aperture(world_position);
+#if defined(JKGM_SUN_VSM) && defined(JKGM_SUN_SKY_APERTURE)
+                // VSM blends roof and clear pixels into depth moments:
+                // this can make a blocked floor falsely sunlit. Cap ONLY
+                // the VSM contribution with a filtered raw-depth result.
+                // Off by default; the original VSM stays untouched.
+                if(sun_vsm_depth_guard!=0 && visibility>0.0)
+                    visibility=min(visibility,
+                        sun_vsm_raw_depth_visibility(
+                            world_position,incidence));
+#endif
                 float direct_visibility=visibility*sky_access;
                 float sun_applied=incidence*sun_fade;
                 // Preserve low-intensity compatibility: shadow contrast

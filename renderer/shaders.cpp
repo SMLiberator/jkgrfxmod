@@ -1524,6 +1524,8 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
         the_program,"sun_vsm_params"))
     , sun_shadow_debug_view(gl::get_uniform_location(
         the_program,"sun_shadow_debug_view"))
+    , sun_vsm_depth_guard(gl::get_uniform_location(
+        the_program,"sun_vsm_depth_guard"))
     , sun_shadow_raw_near(gl::get_uniform_location(
         the_program,"sun_shadow_raw_near"))
     , sun_shadow_raw_far(gl::get_uniform_location(
@@ -1695,6 +1697,12 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_vsm_params(
 {
     gl::set_uniform_vector(sun_vsm_params,
         make_point(min_stddev_world,bleed_reduction));
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_vsm_depth_guard(
+    bool enabled)
+{
+    gl::set_uniform_integer(sun_vsm_depth_guard,enabled?1:0);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_debug_view(

@@ -484,6 +484,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("experimental_sun_shadow_vsm"))
             j.at("experimental_sun_shadow_vsm").get_to(
                 rv->experimental_sun_shadow_vsm);
+        if(j.contains("experimental_sun_vsm_depth_guard"))
+            j.at("experimental_sun_vsm_depth_guard").get_to(
+                rv->experimental_sun_vsm_depth_guard);
         if(j.contains("sun_shadow_debug_view")) {
             auto const &mode=j.at("sun_shadow_debug_view");
             if(!mode.is_number_integer())

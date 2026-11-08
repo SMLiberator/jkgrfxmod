@@ -127,3 +127,15 @@ mode on the original textures; in PCF mode the diagnostic uses a
 `sampler2DShadow`. Both variants are registered in the C++ sampler
 registry. Diagnostics compile out on devices with fewer than 21
 fragment texture units and do not change regular shading.
+
+## Optional VSM occlusion guard
+
+`experimental_sun_vsm_depth_guard` adds four comparisons against
+the original near/far depth map in the opaque sun-lighting composite,
+then caps VSM visibility by their bilinearly interpolated result. It
+reuses existing diagnostic bindings **17/18**, while VSM moment maps
+remain at **13/14**. It is default-off and requires 21 fragment units
+and the VSM shader variant. This can suppress VSM-only false-lit strips
+under roof casters, at the cost of extra depth reads and potentially
+narrower penumbras. Aperture capture, shadow bias, VSM blur, PCF, and
+translucent paths are unchanged.

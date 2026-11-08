@@ -132,3 +132,28 @@ assert "sun_debug_raw_visibility(world,incidence)" in opaque
 assert "sun_shadow_visibility(world,incidence)" in opaque
 assert "sun_sky_aperture(world)" in opaque
 assert "out_color=vec4(vec3(clamp(visibility,0.0,1.0)),1.0);" in opaque
+
+# Optional raw-depth cap suppresses false VSM illumination in opaque
+# receivers. No changes to depth maps, VSM moment filters or PCF shaders.
+assert "bool experimental_sun_vsm_depth_guard = false;" in cfg
+assert 'j.contains("experimental_sun_vsm_depth_guard")' in parser
+assert "bool const vsm_depth_guard=sun_debug_supported &&" in renderer
+assert "the_config->experimental_sun_vsm_depth_guard;" in renderer
+assert "prog.set_sun_vsm_depth_guard(vsm_depth_guard);" in renderer
+assert "the_config->sun_shadow_debug_view==1 ||" in renderer
+assert "vsm_depth_guard)) {" in renderer
+assert "void set_sun_vsm_depth_guard(bool enabled);" in prog
+assert "game_post_opaque_composite_shader::set_sun_vsm_depth_guard(" in progcpp
+assert "uniform int sun_vsm_depth_guard;" in opaque
+assert "if(sun_vsm_depth_guard!=0 && visibility>0.0)" in opaque
+assert "sun_vsm_raw_depth_visibility(" in opaque
+assert "texelFetch(map,tap,0).r" in opaque
+assert "#if defined(JKGM_SUN_VSM) && defined(JKGM_SUN_SKY_APERTURE)" in opaque
+# Fully shadowed raw depths must reject VSM bright artifacts, but the
+# pixel-edge case remains fractional, rather than an abrupt 0/1 boundary.
+def raw_cap(vsm,taps,u,v):
+    weights=[(1-u)*(1-v),u*(1-v),(1-u)*v,u*v]
+    return min(vsm,sum(x*w for x,w in zip(taps,weights)))
+assert raw_cap(1.0,[0,0,0,0],0.4,0.3)==0.0
+assert raw_cap(0.7,[1,1,1,1],0.4,0.3)==0.7
+assert 0<raw_cap(1.0,[0,1,0,1],0.4,0.3)<1

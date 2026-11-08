@@ -7350,6 +7350,11 @@ namespace jkgm {
             bool const sun_debug_supported=sun_sky_aperture_hardware_supported();
             prog.set_sun_shadow_debug_view(sun_debug_supported
                 ?the_config->sun_shadow_debug_view:0);
+            // Opt-in VSM raw-depth cap for opaque sun receivers only.
+            bool const vsm_depth_guard=sun_debug_supported &&
+                the_config->experimental_sun_shadow_vsm &&
+                the_config->experimental_sun_vsm_depth_guard;
+            prog.set_sun_vsm_depth_guard(vsm_depth_guard);
             prog.set_sun_sky_aperture(false,
                 texture_units::opaque_sky_aperture,
                 make_point(1.0f,0.0f,1.0f,0.0f));
@@ -7476,8 +7481,9 @@ namespace jkgm {
                                 :gl::texture_view(sun_shadow_target->far_depth));
                         // Keep original near/far depth available alongside
                         // filtered VSM moments for diagnostic raw comparisons.
-                        if(the_config->sun_shadow_debug_view==1 &&
-                           sun_debug_supported) {
+                        if(sun_debug_supported &&
+                           (the_config->sun_shadow_debug_view==1 ||
+                            vsm_depth_guard)) {
                             gl::set_active_texture_unit(17);
                             gl::bind_texture(gl::texture_bind_target::texture_2d,
                                              sun_shadow_target->depth);
