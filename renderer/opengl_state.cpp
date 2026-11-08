@@ -3,6 +3,7 @@
 #include "base/log.hpp"
 #include "base/memory_block.hpp"
 #include "common/error_reporter.hpp"
+#include <algorithm>
 #include <random>
 
 jkgm::post_model::post_model()
@@ -380,6 +381,8 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     : data_root(the_config->data_path)
     , enable_post(the_config->enable_post)
     , enable_blur(the_config->enable_blur)
+    , experimental_spatial_blur_half_res(
+        the_config->experimental_spatial_blur_half_res)
     , enable_trails(the_config->enable_trails)
     , enable_hdr(the_config->enable_hdr)
     , experimental_fused_bloom_downsample(
@@ -422,6 +425,15 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , bloom_layers(screen_res)
 {
     LOG_DEBUG("Loading OpenGL assets");
+    // Keep the existing full-resolution blur program and buffers untouched.
+    // Allocate the alternative program/half-res target only when requested.
+    if(experimental_spatial_blur_half_res) {
+        post_spatial_blur_fast=
+            std::make_unique<shaders::post_spatial_blur_shader>(data_root,true);
+        spatial_blur_half_work=std::make_unique<post_buffer>(
+            make_size(std::max(1,get<x>(screen_res)/2),
+                      std::max(1,get<y>(screen_res)/2)));
+    }
     // Avoid even compiling shadow shaders on ordinary (disabled) installs.
     if((the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
        the_config->enable_sun_shadows)

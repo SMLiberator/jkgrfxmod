@@ -28,6 +28,8 @@ namespace jkgm {
         bool experimental_native_triangle_uploads = false;
         // Spatial blur (distance + peripheral) and temporal feedback trails.
         bool enable_blur = true;
+        // Experimental half-resolution horizontal blur, default-off.
+        bool experimental_spatial_blur_half_res = false;
         bool enable_trails = true;
         bool enable_fog = true;
         bool enable_post = true;

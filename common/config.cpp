@@ -81,6 +81,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_blur")) {
             j.at("enable_blur").get_to(rv->enable_blur);
         }
+        if(j.contains("experimental_spatial_blur_half_res")) {
+            j.at("experimental_spatial_blur_half_res").get_to(
+                rv->experimental_spatial_blur_half_res);
+        }
         if(j.contains("enable_trails")) {
             j.at("enable_trails").get_to(rv->enable_trails);
         }

@@ -239,6 +239,8 @@ jobs:
       run: python3 tests/gpu_3do_shared_collection.py
     - name: Experimental compositor and native triangle uploads
       run: python3 tests/experimental_compositor.py
+    - name: Experimental half-resolution spatial blur regression
+      run: python3 tests/experimental_spatial_blur.py
     - name: GPU 3DO alpha partition tests
       shell: cmd
       run: |

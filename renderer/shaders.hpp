@@ -668,13 +668,18 @@ namespace jkgm {
             gl::uniform_location_id screen_size;
             gl::uniform_location_id distance_params;
             gl::uniform_location_id peripheral_params;
+            // Only present in the opt-in half-resolution shader.
+            gl::uniform_location_id original_image;
+            gl::uniform_location_id output_size;
 
         public:
-            explicit post_spatial_blur_shader(fs::path const &data_root);
+            explicit post_spatial_blur_shader(fs::path const &data_root,
+                                              bool half_resolution=false);
             void set_source_sampler(int sampler);
             void set_depth_sampler(int sampler);
             void set_blur_axis(int axis);
             void set_screen_size(size<2, float> dims);
+            void set_fast_inputs(int original_sampler,size<2,float> output_dims);
             void set_distance_params(point<4, float> params);
             void set_peripheral_params(point<4, float> params);
         };

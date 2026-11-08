@@ -74,6 +74,7 @@ not all options appear in the minimal sample `assets/jkgm.json`.
 | `enable_post` | Master switch for renderer post-processing effects. | `true` |
 | `enable_sun` | Enable additional COG-controlled directional sunlight; independent of `enable_sun_shadows`. | `true` |
 | `enable_blur` | Enable distance/peripheral spatial blur effects where configured by COG. | `true` |
+| `experimental_spatial_blur_half_res` | EXPERIMENTAL: run the horizontal depth-aware Gaussian blur at half width/height, then perform the vertical pass at full resolution. Unblurred pixels are copied from the original full-res scene, so areas with no blur stay sharp; active blurred regions may look softer or have changed edge transitions. Uses separate shader and intermediate target, allocated only when enabled; disabled automatically if GL scissor testing is active. Does **not** change HDR exposure, tone mapping, bloom, color grading, or HUD processing. A/B-test screenshots and the `present_gpu_us blur` profiler counter. | `false` |
 | `enable_trails` | Enable temporal frame blending/trails where configured by COG. | `true` |
 | `enable_fog` | Enable renderer fog from COG settings. | `true` |
 | `retro_mode` | Quantize the final image to the classic CMP palette (without dithering). | `false` |

@@ -2,6 +2,7 @@
 
 #include "opengl_state.hpp"
 #include "postfx.hpp"
+#include "glad/gl.h"
 #include <algorithm>
 
 namespace jkgm {
@@ -21,7 +22,15 @@ namespace jkgm {
             return source;
         }
 
-        auto &shader = ogs->post_spatial_blur;
+        // Keep the original shader and full-size buffers for the default
+        // path. Scissored draws cannot cover a half-res target correctly.
+        bool const halfres=ogs->experimental_spatial_blur_half_res &&
+            ogs->post_spatial_blur_fast && ogs->spatial_blur_half_work &&
+            glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE;
+        auto &shader=halfres
+            ?*ogs->post_spatial_blur_fast:ogs->post_spatial_blur;
+        auto &work=halfres
+            ?*ogs->spatial_blur_half_work:ogs->spatial_blur_work;
         gl::disable(gl::capability::depth_test);
         gl::disable(gl::capability::blend);
         gl::disable(gl::capability::cull_face);
@@ -43,23 +52,37 @@ namespace jkgm {
 
         gl::set_active_texture_unit(1);
         gl::bind_texture(gl::texture_bind_target::texture_2d, linear_depth);
+        if(halfres) {
+            // The original scene stays bound for the vertical pass, so
+            // regions where blur is inactive remain sharp at full resolution.
+            gl::set_active_texture_unit(2);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,source);
+        }
         gl::set_active_texture_unit(0);
         gl::bind_texture(gl::texture_bind_target::texture_2d, source);
 
-        // Horizontal pass
+        // Horizontal pass. The experimental target contains 1/4 as many
+        // fragments, while the unchanged default remains full resolution.
         shader.set_blur_axis(0);
-        gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                             ogs->spatial_blur_work.fbo);
-        gl::set_viewport(ogs->spatial_blur_work.viewport);
+        if(halfres) {
+            shader.set_fast_inputs(2,make_size(
+                float(std::max(1,get<x>(screen_size)/2)),
+                float(std::max(1,get<y>(screen_size)/2))));
+        }
+        gl::bind_framebuffer(gl::framebuffer_bind_target::any,work.fbo);
+        gl::set_viewport(work.viewport);
         gl::draw_elements(
             gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
 
-        // Vertical pass. Source and destination are always distinct.
+        // Vertical pass always writes a full-resolution image, to preserve
+        // tone-mapping inputs, edges, overlays and HUD behavior.
         shader.set_blur_axis(1);
+        if(halfres)
+            shader.set_fast_inputs(2,static_cast<size<2,float>>(screen_size));
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                              ogs->spatial_blur_result.fbo);
         gl::set_viewport(ogs->spatial_blur_result.viewport);
-        gl::bind_texture(gl::texture_bind_target::texture_2d, ogs->spatial_blur_work.tex);
+        gl::bind_texture(gl::texture_bind_target::texture_2d,work.tex);
         gl::draw_elements(
             gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
 
