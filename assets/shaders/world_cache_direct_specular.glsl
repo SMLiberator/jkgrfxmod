@@ -18,6 +18,11 @@ uniform vec4 translucent_sun_tile_rect[8];
 uniform sampler2DShadow translucent_sun_near_depth;
 uniform sampler2DShadow translucent_sun_far_depth;
 uniform sampler2DShadow translucent_sun_dynamic_depth;
+#ifdef JKGM_SUN_SKY_APERTURE
+uniform int translucent_sun_sky_aperture_active;
+uniform sampler2DArray translucent_sun_sky_aperture_map;
+uniform vec4 translucent_sun_sky_aperture_depth_transform;
+#endif
 
 vec3 world_sun_coordinates(int slot,vec3 p)
 {
@@ -48,6 +53,42 @@ float world_sun_sample(int slot,vec3 uv,float incidence)
     return texture(translucent_sun_dynamic_depth,
                    vec3(center/tex_size,comparison));
 }
+// The cached world direct-GGX pass must obey the same sky-only sun gate as
+// opaque composition and native/GPU 3DO forward lighting.
+#ifdef JKGM_SUN_SKY_APERTURE
+float world_sun_sky_sample(vec3 uv,int layer)
+{
+    if(!world_sun_inside(uv))return 0.0;
+    vec2 tr=layer==0 ?translucent_sun_sky_aperture_depth_transform.xy
+                      :translucent_sun_sky_aperture_depth_transform.zw;
+    float receiver_z=uv.z*tr.x+tr.y;
+    if(receiver_z<0.0 || receiver_z>1.0)return 0.0;
+    float sky_z=texture(translucent_sun_sky_aperture_map,
+                        vec3(uv.xy,float(layer))).r;
+    return (sky_z<0.999999 && sky_z+0.00001<receiver_z)?1.0:0.0;
+}
+float world_sun_sky_aperture(vec3 world)
+{
+    if(translucent_sun_sky_aperture_active==0)return 1.0;
+    vec3 near_uv=world_sun_coordinates(0,world);
+    vec3 far_uv=world_sun_coordinates(1,world);
+    float depth=dot(world-camera_world_origin,camera_forward_axis);
+    bool n=depth<translucent_sun_split && world_sun_inside(near_uv);
+    bool f=world_sun_inside(far_uv);
+    if(n && !f)return world_sun_sky_sample(near_uv,0);
+    if(!n && f)return world_sun_sky_sample(far_uv,1);
+    if(!n && !f)return 0.0;
+    float near_access=world_sun_sky_sample(near_uv,0);
+    if(depth<translucent_sun_split*0.8125)return near_access;
+    float far_access=world_sun_sky_sample(far_uv,1);
+    return mix(near_access,far_access,
+        smoothstep(translucent_sun_split*0.8125,
+                   translucent_sun_split*0.9375,depth));
+}
+#else
+float world_sun_sky_aperture(vec3 world) { return 1.0; }
+#endif
+
 float world_sun_visibility(vec3 world,float incidence)
 {
     float camera_distance=dot(world-camera_world_origin,camera_forward_axis);
@@ -137,7 +178,8 @@ vec3 world_direct_specular(vec3 base_color,vec2 uv)
         if(nl>0.0)
             sum+=world_ggx(N,V,L,F0,roughness)*
                  translucent_sun_color.rgb*translucent_sun_color.w*
-                 world_sun_visibility(cached_world_position,max(nl,0.35));
+                 world_sun_visibility(cached_world_position,max(nl,0.35))*
+                 world_sun_sky_aperture(cached_world_position);
     }
     if(world_dynamic_light_specular!=0) {
         for(int i=0;i<num_lights;i++) {

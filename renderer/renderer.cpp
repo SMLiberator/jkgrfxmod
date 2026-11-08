@@ -4678,9 +4678,13 @@ namespace jkgm {
 
         bool sun_sky_aperture_hardware_supported() const
         {
-            GLint units=0;
-            glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&units);
-            return units>=texture_units::forward_next_extended_required_units;
+            // This is an immutable per-context capability. Query once:
+            // glGetIntegerv every frame is expensive through Wine.
+            static GLint fragment_units=0;
+            if(fragment_units==0)
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);
+            return fragment_units>=
+                texture_units::forward_next_extended_required_units;
         }
 
         bool sun_sky_aperture_ready() const

@@ -45,6 +45,11 @@ assert "float sun_sky_aperture_sample(vec3 uv,int layer)" in opaque
 assert "translucent_sun_sky_aperture_active==0)return 1.0;" in shared
 assert "float translucent_sun_sky_aperture(vec3 world) { return 1.0; }" in shared
 assert "float translucent_sun_sky_sample(vec3 uv,int layer)" in shared
+world=read("assets/shaders/world_cache_direct_specular.glsl")
+assert "#ifdef JKGM_SUN_SKY_APERTURE" in world
+assert "uniform sampler2DArray translucent_sun_sky_aperture_map;" in world
+assert "world_sun_sky_aperture(cached_world_position)" in world
+assert "float world_sun_sky_aperture(vec3 world) { return 1.0; }" in world
 for path in ("game_opaque_pass.frag","game_trns_pass.frag","gpu_3do_preview.frag"):
     frag=read("assets/shaders/"+path)
     assert "uniform sampler2DArray translucent_sun_sky_aperture_map;" in frag

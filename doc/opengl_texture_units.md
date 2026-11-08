@@ -73,3 +73,8 @@ Unit 19 is still the sector-crossing `samplerBuffer`, not a spare unit.
 units compile out the sampler and keep previous sunlight behavior;
 they never bind invalid array units. Resources are created only when
 the config is enabled and hardware meets that limit.
+
+GPU-cached SithWorld direct sunlight specular highlights are gated by the
+same sky aperture through `world_cache_direct_specular.glsl` (forward
+unit 20). Its authored ambient, non-sun environment reflections, and
+point-light specular contributions remain unchanged.

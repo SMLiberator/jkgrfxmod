@@ -43,6 +43,7 @@ constexpr binding gpu_3do_preview[]={
 
 // GLSL world_cache.frag (including #include fragments)
 constexpr binding world_cache[]={
+    {"translucent_sun_sky_aperture_map",20,sampler_kind::texture_array},
     {"albedo_map",0,sampler_kind::tex2d},
     {"albedo_map2",6,sampler_kind::tex2d},
     {"emissive_map",1,sampler_kind::tex2d},
