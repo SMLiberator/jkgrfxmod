@@ -15,8 +15,8 @@ world=read("renderer/world_cache_visibility.hpp")
 world_gpu=read("renderer/world_cache_gpu.hpp")
 sprite=read("renderer/sprite_gpu_quad.hpp")
 scroll=read("renderer/world_cache_uv_animation.hpp")
-vertex=read("assets/shaders/world_cache_wireframe.vert")
-fragment=read("assets/shaders/world_cache_texture_preview.frag")
+vertex=read("assets/shaders/world_cache.vert")
+fragment=read("assets/shaders/world_cache.frag")
 
 # Native material cel can change without invalidating mesh geometry.
 assert "group.cel<0?static_cast<int>(mat.current_cel):group.cel" in renderer

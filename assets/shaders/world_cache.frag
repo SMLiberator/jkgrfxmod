@@ -30,7 +30,7 @@ uniform vec2 uv_scale,uv_scroll;
 // GPU 3DO-compatible EnvMap samplers, reflection modes, material parameters.
 uniform sampler2D surface_map,normal_map,normal_map2,env_map,env_map2;
 uniform vec4 specular_params,normal_specular_params,environment_info;
-uniform vec4 projection; // same FOV factors as world_cache_wireframe.vert
+uniform vec4 projection; // same FOV factors as world_cache.vert
 uniform int normal_mapped_diffuse; // opt-in added lights, not baked JK RGB
 uniform vec2 normal_specular_scroll,normal_specular_scroll2;
 uniform vec3 camera_world_origin,camera_right_axis;

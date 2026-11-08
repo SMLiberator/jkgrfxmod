@@ -2,8 +2,8 @@
 
 | Variable | Explanation | Syntax | Default value |
 |----------------|------------------------------|--------|---------------|
-| **resolution** | What resolution to output at. | ordered pair (`[ x, y ]`) | `[ 1024, 768 ]` |
-| **fullscreen** | Select whether to use fullscreen or Windowed mode. | boolean<br/>(`true` for fullscreen, or `false` for windowed) |
+| **resolution** | Output resolution. The bundled sample `jkgm.json` specifies 1024×768; if the key is absent, the built-in fallback is 640×480. | ordered pair (`[ x, y ]`) | Built-in: `[ 640, 480 ]`; sample: `[ 1024, 768 ]` |
+| **fullscreen** | Select whether to use fullscreen or windowed mode. | boolean (`true` for fullscreen, `false` for windowed) | `false` |
 | **correct_game_aspect_ratio** | Select whether the game should use a 4:3 aspect ratio. | boolean<br/>(`true` for a 4:3 aspect ratio, or `false` to fill the screen) | `false` |
 | **correct_menu_aspect_ratio** | Select whether menus and cutscenes should be stretched to fill the screen. | boolean<br/>(`true` for the original aspect ratio, or `false` for stretched) | `true` |
 | **hud_scale** | Upscale the HUD to avoid tiny HUD at high resolutions. Use whole integers for best results. | decimal<br/>(ex: 2.0 = 200% scaling) | Default: `1.0` |
@@ -19,7 +19,6 @@
 | **enable_gpu_sprite_instancing** | Batch compatible GPU-cached sprites into instanced draw calls. Set `false` for A/B performance testing. | boolean | `true` |
 | **enable_gpu_camera_hud** | Render Camera-type HUD 3DOs through the post-processing-exempt GPU path. Set `false` for native HUD diagnostics. | boolean | `true` |
 | **enable_native_fallback** | Preserve native mixed world batches when GPU world rendering is active. Set to `false` to isolate the cached world and expose unsupported/missing faces; ordinary native fallback Things in those batches may also be hidden. | boolean | `true` |
-| **enable_gpu_mat_warmup** | EXPERIMENTAL: automatically request missing native MAT cels for GPU rendering, using a bounded, guarded native uploader. Enabled by default; disable to diagnose native-device issues. | boolean | `true` |
 | **gpu_pixel_lighting** | When enabled, use shared per-pixel dynamic point-light GLSL for supported GPU-cached 3DOs **and** cached world surfaces. When disabled, preserve JK-style vertex Gouraud dynamic lighting. Does not change native-rendered geometry. | boolean | `false` |
 | **enable_spotlights** | EXPERIMENTAL: enable COG MAT-textured perspective spotlights attached to individual Things (one per Thing); Things can independently follow animated model nodes via AttachThingToThingNode. Up to four active lights per level; opaque world/3DO receivers through the shared depth/normal buffer. A verified native JKGM cache-loader attempts MAT residency when SetSpotlight is called and retries during rendering if the device is not yet initialized; native cache entries are refreshed while the light is active. The spotlight blends against stored unlit material pigment plus a small additive glow, instead of merely adding a flat screen overlay. The loader is gated on tested executable signatures (the previous unverified 0x0044AA70 call remains removed). Runtime behavior is experimental. Translucent blended receivers are supported without a new pass; optional spotlight shadows use `enable_spotlight_shadows`, and ordinary translucent faces/sprites now receive diffuse sunlight and existing sun-map occlusion when sunlight is enabled on compatible hardware. | boolean | `false` |
 | **spotlight_shadow_resolution** | Width and height of the spotlight shadow depth map. Higher values sharpen shadow edges and use more video memory; accepted range is `64..1024`. Takes effect when the shadow map is created. | integer | `256` |
@@ -47,10 +46,9 @@
 | **hdr_shadow_softness** | Independent filmic shadow toe. `0` uses original crisp ACES shadows; higher values progressively soften dark regions. Applies to both color mapping styles. | number `0..1` | `0.3` |
 | **hdr_color_crispness** | `0` retains hue-consistent luminance-first tone mapping; `1` uses the older punchier per-channel ACES mapping, with intermediate blends. Independent of shadow softness; strongest values may shift hues. | number `0..1` | `0.6` |
 | **enable_bloom** | Use [bloom](https://en.wikipedia.org/wiki/Bloom_(shader_effect)) effect for brighter lights. Requires compatible texture pack. | boolean | Default: `true` |
-| **retain_hom_pixels** | Vanilla-like HOM (the default): preserve the existing linear scene color buffer from the previous frame in pixels where neither opaque geometry nor gap repair drew anything. No new texture, no copy, no extra pass; two scene-color clears are skipped. Depth and G-buffer are still reset, and menu/game transitions invalidate retained scene colors. Actual missing geometry can leave moving-camera trails and streaks. Set `false` to reproduce vanilla JK's advanced **Clear Display** option: clear empty regions to black instead of retaining HOM. For best thin-crack appearance try together with `fill_tjunction_gaps`. | boolean | `true` |
-| **debug_void_pixels** | Neon magenta/lime checkerboard diagnostic on uncovered opaque G-buffer pixels AFTER any gap repair, overriding black clear/HOM retention. Helps locate missing geometry and determine whether gap repair fully covers a crack. Alpha-blended-only pixels have no opaque depth and can also show this diagnostic underneath them. Disable for normal gameplay. | boolean | `false` |
-| **tjunction_gap_fill_size** | Max distance in screen pixels (`0..8`) to look for the nearest opaque G-buffer pixel on EACH side of a void, along a horizontal or vertical line. Requires `fill_tjunction_gaps: true`. Set 0 to disable repair. Larger values cover wider/asymmetric seams, but can bridge actual openings and increase shader depth reads, especially where much of the screen has no geometry. | integer | `2` |
-| **fill_tjunction_gaps** | Experimental configurable-radius T-junction seam repair in the existing opaque composition shader. Samples neighboring valid-depth G-buffer pixels only when the current pixel contains no opaque geometry, then fills only gaps bracketed horizontally or vertically by surfaces. Reuses tested depth values rather than fetching them twice, and skips the vertical search as soon as an optimal one-pixel horizontal gap is found. The default reach is now 2 px when enabled, but gap filling itself remains off by default. No frame-history texture or additional draw pass; genuine wide voids retain HOM when `retain_hom_pixels=true`, otherwise black. Disable for baseline, maximum performance, or unmodified classic HOM. | boolean | `false` |
+| **enable_reflections** | Master switch for replacement-renderer material reflections. Disabling also skips environment-reflection sampling where supported. | boolean | `true` |
+| **retain_hom_pixels** | Vanilla-like HOM (the default): preserve the existing linear scene color buffer from the previous frame in pixels where opaque geometry did not draw. No new texture, no copy, no extra pass; two scene-color clears are skipped. Depth and G-buffer are still reset, and menu/game transitions invalidate retained scene colors. Actual missing geometry can leave moving-camera trails and streaks. Set `false` to reproduce vanilla JK's advanced **Clear Display** option: clear empty regions to black instead of retaining HOM. For best thin-crack appearance try together with `fill_tjunction_gaps`. | boolean | `true` |
+| **debug_void_pixels** | Neon magenta/lime checkerboard diagnostic on uncovered opaque G-buffer pixels after opaque composition, overriding black clear/HOM retention. Helps locate missing geometry and distinguish uncovered cracks from painted surfaces. Alpha-blended-only pixels have no opaque depth and can also show this diagnostic underneath them. Disable for normal gameplay. | boolean | `false` |
 | **enable_ssao** | Use [screen-space ambient occlusion](https://en.wikipedia.org/wiki/Screen_space_ambient_occlusion) to subtly increase perceived depth in the image. | boolean | `true` |
 | **enable_parallax** | Use [parallax occlusion mapping](https://en.wikipedia.org/wiki/Parallax_occlusion_mapping) to add depth to individual textures. Requires compatible texture pack. | boolean | `true` |
 | **enable_texture_filtering** | Use [bilinear filtering](https://en.wikipedia.org/wiki/Bilinear_filtering) on textures, reducing texture aliasing whilst also making closeup textures blurry.  Disable to use nearest-neighbor filtering instead.<br/>Note that it does not affect [trilinear filtering](https://en.wikipedia.org/wiki/Trilinear_filtering), which is always used, or anisotropic filtering, which is controlled with `max_anisotropy`. | boolean | `true` |
@@ -59,6 +57,31 @@
 
 | **data_path** | Path to material and shader patches.<br/>Accepts both absolute and relative [paths](https://en.wikipedia.org/wiki/Path_(computing)#MS-DOS/Microsoft_Windows_style). | `"<folderpath>"` | `"jkgm"` |
 | **log_path** | Path to log file.<br/>Accepts both absolute and relative [paths](https://en.wikipedia.org/wiki/Path_(computing)#MS-DOS/Microsoft_Windows_style). | `"<folderpath>"`, or `null` to not output to a log | `null` |
+
+
+### Additional runtime and diagnostic settings
+
+The following options are accepted by the configuration parser but were
+missing from the table above. Defaults are taken from `common/config.hpp`;
+not all options appear in the minimal sample `assets/jkgm.json`.
+
+| Setting | Effect | Default |
+| --- | --- | --- |
+| `enable_post` | Master switch for renderer post-processing effects. | `true` |
+| `enable_sun` | Enable additional COG-controlled directional sunlight; independent of `enable_sun_shadows`. | `true` |
+| `enable_blur` | Enable distance/peripheral spatial blur effects where configured by COG. | `true` |
+| `enable_trails` | Enable temporal frame blending/trails where configured by COG. | `true` |
+| `enable_fog` | Enable renderer fog from COG settings. | `true` |
+| `retro_mode` | Quantize the final image to the classic CMP palette (without dithering). | `false` |
+| `camera_hud_depth_sort` | Sort translucent Camera-type HUD geometry by depth; disable to preserve authored order for diagnostics. | `true` |
+| `spotlight_shadow_angle_bias_scale` | Experimental receiver-side grazing-angle spotlight shadow bias; `0` preserves previous behavior. Range `0..2`. | `0.0` |
+| `enable_decals` | Enable type-3 projected sprite decals; legacy `enable_sprite_decals` is accepted if the new key is absent. | `true` |
+| `enable_mesh_collision` | Enable experimental patched JKGM type-2 mesh collision handling. | `false` |
+| `world_cache_fluid_debug_mode` | Fluid diagnostics for GPU-cached world materials (`0` is normal rendering). | `0` |
+| `enable_normal_mapped_diffuse` | Experimental mapped normals for added direct lighting on cached world and 3DO materials. | `false` |
+| `restore_cmp_lights` | Restore indexed fullbright MAT pixels on compatible GPU-cached rendering paths. | `false` |
+| `enable_sector_crossing_lighting` | Experimental per-fragment 3DO sector light/CMP/tint transitions. | `false` |
+| `profile_renderer_verbose` | Enable detailed renderer diagnostics in addition to the regular performance counters. | `false` |
 
 <!-- No need to really have this, but I didn't want to remove it yet, in
 ## HUD Scaling

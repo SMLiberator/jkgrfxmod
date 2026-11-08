@@ -2,7 +2,7 @@
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 load=lambda x:(root/x).read_text(encoding="utf-8")
-fragment=load("assets/shaders/world_cache_texture_preview.frag")
+fragment=load("assets/shaders/world_cache.frag")
 lighting=load("assets/shaders/world_cache_direct_specular.glsl")
 renderer=load("renderer/renderer.cpp")
 shaders=load("renderer/shaders.cpp")

@@ -34,7 +34,10 @@ assert "reset_sector_crossing();" in render
 assert "prog.set_sector_crossing(inst.crossing_lighting.get()," in render
 assert "prog.set_sector_crossing(nullptr,false,false);" in render
 assert "if(!the_config->enable_sector_crossing_lighting)" in render
-assert "crossing_buffer_ready && !inst.camera_hud" in render
+# The condition now also excludes skyboxes and projected sprites/decals.
+assert "crossing_buffer_ready && allow_sector_effects &&" in render
+assert "!inst.camera_hud && !inst.is_projected_decal &&" in render
+assert "!inst.is_sprite_quad" in render
 assert "sector_crossing_planes" in api
 assert "set_sector_crossing(" in api
 setter=api[api.index("gpu_3do_preview_shader::set_sector_crossing("):]
@@ -70,7 +73,7 @@ assert "select_sector_crossing_slot()" in fragment
 assert "texelFetch(sector_crossing_planes,begin_plane+j)" in fragment
 assert "sector_crossing_count>1" in fragment
 assert "pixel_jk_diffuse_lighting(diffuse_local_normal)" in fragment
-assert "if(added<=0.0) return baked;" in fragment
+assert "if(all(lessThanEqual(added,vec3(0.0)))) return baked;" in fragment
 assert "gpu_material_palette_fullbright(" in fragment
 assert "world_lighting_exempt" in fragment
 assert "can_replace_sector_tint" in render

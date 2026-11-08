@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [development]
+    branches: [development, cleanup]
   workflow_dispatch:
 
 jobs:
@@ -17,6 +17,33 @@ jobs:
       uses: ilammy/msvc-dev-cmd@v1
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
+
+    - name: Shared translucent spotlight shader regression
+      run: |
+        python3 tests/translucent_spotlight_shared.py
+        python3 tests/translucent_sun_sampling_shared.py
+        python3 tests/spotlight_shadow_bias.py
+
+    - name: Repository structure, config documentation, and project headers
+      run: python3 tests/repository_structure.py
+
+    - name: Standalone native utility and mesh cache unit tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\cog_pyr_math.cpp /Fe:cog_pyr_math_test.exe
+        cog_pyr_math_test.exe
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_cache_signature.cpp /Fe:gpu_3do_cache_signature_test.exe
+        gpu_3do_cache_signature_test.exe
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_uv.cpp /Fe:gpu_3do_uv_test.exe
+        gpu_3do_uv_test.exe
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
+        sprite_orientation_test.exe
+
+    - name: Native sector palette request isolation regression
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\jk_palette_effects.cpp /Fe:jk_palette_effects_test.exe
+        jk_palette_effects_test.exe
 
     - name: Local-player HUD ammo bin selection regression
       shell: cmd
@@ -136,8 +163,6 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\spotlight_shadow.cpp /Fe:spotlight_shadow_test.exe
         spotlight_shadow_test.exe
-    - name: Spotlight grazing-angle shadow acne regression
-      run: python3 tests/spotlight_shadow_bias.py
     - name: JKGM sector CMP and fullbright palette lookup tests
       shell: cmd
       run: |
@@ -265,13 +290,24 @@ jobs:
         if-no-files-found: error
         retention-days: 7
 
+  # Cleanup branch exercises dormant source-contract suites before any
+  # behavior-preserving shader or native-hook extraction is merged.
+  source-contracts:
+    name: Extended source-contract regressions
+    if: ${{ github.ref == 'refs/heads/cleanup' }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Run extended source-contract tests
+      run: python3 tests/cleanup_source_contracts.py
+
   prune-old-runs:
     name: Prune obsolete development CI runs
     # Scheduled workflows only run from master (the repo default branch).
     # Instead, prune after EVERY development CI push, even failed builds,
     # without introducing a new workflow on master.
     needs: [build]
-    if: ${{ always() }}
+    if: ${{ always() && github.ref == 'refs/heads/development' }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
