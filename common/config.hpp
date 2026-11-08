@@ -91,6 +91,12 @@ namespace jkgm {
         bool experimental_sun_shadow_vsm = false; // independent, default-off shadow path
         float sun_shadow_vsm_near_radius = 1.0f; // prefilter radius, map texels
         float sun_shadow_vsm_far_radius = 1.5f;
+        // VSM-only controls: a minimum depth standard deviation in JK
+        // WORLD units, not a fixed normalized-depth variance. This avoids
+        // changing the apparent leakage radius when chunk culling alters
+        // the ortho depth range. 0.01 JKU = 10 cm.
+        float sun_shadow_vsm_min_stddev_world = 0.01f;
+        float sun_shadow_vsm_bleed_reduction = 0.2f; // Chebyshev remap, 0..0.95
         float sun_shadow_near_distance = 16.0f; // camera-local near cascade, 2..128
         float sun_shadow_far_distance = 128.0f; // outer cascade coverage, 4..512
         float sun_max_distance = 0.0f; // 0=unlimited; else sun light+shadows fade out and stop at this camera distance

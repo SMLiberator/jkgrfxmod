@@ -61,7 +61,8 @@ uniform vec3 sun_shadow_far_origin,sun_shadow_far_right;
 uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
 uniform float sun_shadow_receiver_bias_scale;
-uniform vec2 sun_shadow_pcf_radius; // 0=legacy HW comparison; positive=4 taps // diagnostic multiplier, 0..2
+uniform vec2 sun_shadow_pcf_radius; // 0=legacy HW comparison; positive=4 taps
+uniform vec2 sun_vsm_params; // x=min world-space stddev (JKU), y=bleed reduction
 uniform float sun_max_distance; // 0=unlimited; JK forward distance where added sun ends
 
 // Added sunlight and its shadows are full strength to 85% of the range, fade
@@ -116,10 +117,16 @@ float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
     float receiver=coordinate.z-bias;
     vec2 moments=texture(map,coordinate.xy).rg;
     if(receiver<=moments.x)return 1.0;
-    float variance=max(moments.y-moments.x*moments.x,2.0e-7);
+    // Convert a physical minimum stddev to normalized shadow depth.
+    // Unlike a fixed 2e-7 variance, this remains constant in world units
+    // when the light's Z projection changes after 3DO chunk culling.
+    float min_stddev=sun_vsm_params.x/max(range,0.001);
+    float variance=max(moments.y-moments.x*moments.x,
+                       min_stddev*min_stddev);
     float delta=receiver-moments.x;
     float probability=variance/(variance+delta*delta);
-    return clamp((probability-0.2)/0.8,0.0,1.0);
+    float bleed=sun_vsm_params.y;
+    return clamp((probability-bleed)/(1.0-bleed),0.0,1.0);
 #else
     // Keep the original one-comparison path when the opt-in radius is 0.
     // Four bilinear hardware PCF comparisons broaden edges for radius > 0.

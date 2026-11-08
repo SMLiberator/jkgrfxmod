@@ -487,6 +487,7 @@ uniform vec3 translucent_sun_direction;
 uniform vec4 translucent_sun_color; // RGB, positive direct intensity
 uniform float translucent_sun_split;
 uniform float translucent_sun_bias_scale;
+uniform vec2 translucent_sun_vsm_params; // world-space stddev, bleed reduction
 uniform vec2 translucent_sun_pcf_radius; // independent near/far smoothing
 uniform vec4 translucent_sun_map_x[10];
 uniform vec4 translucent_sun_map_y[10];

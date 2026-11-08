@@ -4708,6 +4708,9 @@ namespace jkgm {
             uniforms.set_pcf_radius(
                 the_config->sun_shadow_near_pcf_radius,
                 the_config->sun_shadow_far_pcf_radius);
+            uniforms.set_vsm_params(
+                the_config->sun_shadow_vsm_min_stddev_world,
+                the_config->sun_shadow_vsm_bleed_reduction);
             uniforms.set_state(true,shadows,dynamic,
                 make_point(dir[0],dir[1],dir[2]),
                 make_point(rgb[0],rgb[1],rgb[2],intensity),
@@ -7125,6 +7128,9 @@ namespace jkgm {
             prog.set_sun_shadow_pcf_radius(
                 the_config->sun_shadow_near_pcf_radius,
                 the_config->sun_shadow_far_pcf_radius);
+            prog.set_sun_vsm_params(
+                the_config->sun_shadow_vsm_min_stddev_world,
+                the_config->sun_shadow_vsm_bleed_reduction);
             prog.set_sun_max_distance(the_config->sun_max_distance);
             prog.set_spotlight_shadow(-1,0.0f,0.0f,
                 the_config->spotlight_shadow_angle_bias_scale);

@@ -18,6 +18,7 @@ jkgm::shaders::translucent_sun_uniforms::translucent_sun_uniforms(
     , split(gl::get_uniform_location(program,"translucent_sun_split"))
     , bias_scale(gl::get_uniform_location(program,"translucent_sun_bias_scale"))
     , pcf_radius(gl::get_uniform_location(program,"translucent_sun_pcf_radius"))
+    , vsm_params(gl::get_uniform_location(program,"translucent_sun_vsm_params"))
     , near_depth(gl::get_uniform_location(program,"translucent_sun_near_depth"))
     , far_depth(gl::get_uniform_location(program,"translucent_sun_far_depth"))
     , dynamic_depth(gl::get_uniform_location(program,"translucent_sun_dynamic_depth"))
@@ -60,6 +61,13 @@ void jkgm::shaders::translucent_sun_uniforms::set_pcf_radius(
     float near_radius,float far_radius)
 {
     gl::set_uniform_vector(pcf_radius,make_point(near_radius,far_radius));
+}
+
+void jkgm::shaders::translucent_sun_uniforms::set_vsm_params(
+    float min_stddev_world,float bleed_reduction)
+{
+    gl::set_uniform_vector(vsm_params,
+        make_point(min_stddev_world,bleed_reduction));
 }
 
 void jkgm::shaders::translucent_sun_uniforms::set_map(
@@ -1435,6 +1443,8 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
         the_program,"sun_shadow_receiver_bias_scale"))
     , sun_shadow_pcf_radius(gl::get_uniform_location(
         the_program,"sun_shadow_pcf_radius"))
+    , sun_vsm_params(gl::get_uniform_location(
+        the_program,"sun_vsm_params"))
     , sun_max_distance(gl::get_uniform_location(the_program,"sun_max_distance"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
@@ -1589,6 +1599,13 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_pcf_radius
 {
     gl::set_uniform_vector(sun_shadow_pcf_radius,
                            make_point(near_radius,far_radius));
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_vsm_params(
+    float min_stddev_world,float bleed_reduction)
+{
+    gl::set_uniform_vector(sun_vsm_params,
+        make_point(min_stddev_world,bleed_reduction));
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_max_distance(

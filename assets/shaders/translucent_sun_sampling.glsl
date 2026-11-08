@@ -13,17 +13,24 @@ bool translucent_sun_inside(vec3 uv)
 // Keep the dynamic Thing atlas on its original one-comparison path. Its
 // packed guard regions are not designed for extended PCF footprints.
 #ifdef JKGM_SUN_VSM
-float translucent_sun_cascade_filter(sampler2D map,vec3 uv,float radius)
+float translucent_sun_cascade_filter(
+    sampler2D map,vec3 uv,float radius,float inv_range)
 {
     vec2 moments=texture(map,uv.xy).rg;
     if(uv.z<=moments.x)return 1.0;
-    float variance=max(moments.y-moments.x*moments.x,2.0e-7);
+    // The Z row is forward/range; its magnitude is 1/range.
+    // Use the same physical floor and bleed remap as opaque receivers.
+    float min_stddev=translucent_sun_vsm_params.x*inv_range;
+    float variance=max(moments.y-moments.x*moments.x,
+                       min_stddev*min_stddev);
     float delta=uv.z-moments.x;
     float probability=variance/(variance+delta*delta);
-    return clamp((probability-0.2)/0.8,0.0,1.0);
+    float bleed=translucent_sun_vsm_params.y;
+    return clamp((probability-bleed)/(1.0-bleed),0.0,1.0);
 }
 #else
-float translucent_sun_cascade_filter(sampler2DShadow map,vec3 uv,float radius)
+float translucent_sun_cascade_filter(
+    sampler2DShadow map,vec3 uv,float radius,float inv_range)
 {
     if(radius<=0.0)return texture(map,uv);
     vec2 spread=(radius/vec2(textureSize(map,0)))*0.5;
@@ -41,18 +48,18 @@ float translucent_sun_cascade_filter(sampler2DShadow map,vec3 uv,float radius)
 float translucent_sun_sample(int slot,vec3 uv,float incidence)
 {
     float grazing=1.0-clamp(incidence,0.0,1.0);
+    float inv_range=length(translucent_sun_map_z[slot].xyz);
     float offset=(0.008+0.027*grazing*grazing)*
-                 translucent_sun_bias_scale*
-                 length(translucent_sun_map_z[slot].xyz);
+                 translucent_sun_bias_scale*inv_range;
     float comparison=uv.z-max(4.0/16777215.0,offset);
     if(slot==0)
         return translucent_sun_cascade_filter(
             translucent_sun_near_depth,vec3(uv.xy,comparison),
-            translucent_sun_pcf_radius.x);
+            translucent_sun_pcf_radius.x,inv_range);
     if(slot==1)
         return translucent_sun_cascade_filter(
             translucent_sun_far_depth,vec3(uv.xy,comparison),
-            translucent_sun_pcf_radius.y);
+            translucent_sun_pcf_radius.y,inv_range);
     vec4 tile=translucent_sun_tile_rect[slot-2];
     vec2 tex_size=vec2(textureSize(translucent_sun_dynamic_depth,0));
     vec2 center=tile.xy+vec2(2.0)+uv.xy*(tile.zw-vec2(4.0));

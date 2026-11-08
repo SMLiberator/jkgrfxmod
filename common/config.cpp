@@ -495,6 +495,22 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                          rv->sun_shadow_vsm_near_radius);
         parse_vsm_radius("sun_shadow_vsm_far_radius",
                          rv->sun_shadow_vsm_far_radius);
+        auto parse_vsm_scalar=[&](char const *name,float &out,
+                                  double upper) {
+            if(!j.contains(name))return;
+            auto const &value=j.at(name);
+            if(!value.is_number())throw std::runtime_error(
+                std::string(name)+" must be numeric");
+            double const v=value.get<double>();
+            if(!std::isfinite(v) || v<0.0 || v>upper)
+                throw std::runtime_error(std::string(name)+
+                    " must be between 0 and "+std::to_string(upper));
+            out=static_cast<float>(v);
+        };
+        parse_vsm_scalar("sun_shadow_vsm_min_stddev_world",
+                         rv->sun_shadow_vsm_min_stddev_world,0.25);
+        parse_vsm_scalar("sun_shadow_vsm_bleed_reduction",
+                         rv->sun_shadow_vsm_bleed_reduction,0.95);
         // Old packs may still ship enable_sprite_decals. Prefer the new
         // enable_decals when both keys are supplied.
         if(j.contains("enable_decals")) {
