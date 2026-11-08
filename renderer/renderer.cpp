@@ -620,6 +620,28 @@ namespace jkgm {
         // Track only owners with a successfully rasterized atlas tile.
         std::unordered_set<uint64_t> sun_dynamic_atlas_owners;
         std::array<sun_shadow_projection,2> sun_shadow_views{};
+        // Bounds and opaque model hashes depend only on immutable GPU mesh
+        // snapshots and exact Thing/node transforms. Cache them across full
+        // sun validations; always resolve live materials on each validation.
+        struct sun_cached_static_group {
+            decal_volume_aabb bounds{};
+            uint64_t opaque_signature=0;
+            bool bounds_valid=false;
+            bool opaque_signature_valid=false;
+        };
+        struct sun_cached_static_instance {
+            uint64_t owner=0,id=0;
+            gpu_3do_geometry const *geometry=nullptr;
+            std::array<float,12> transform{};
+            std::vector<sun_cached_static_group> groups;
+        };
+        // Index-aligned to the current frame's instances. Reordering causes
+        // a safe miss; changes to owner, geometry or transform invalidate.
+        std::vector<sun_cached_static_instance> sun_static_geometry_cache;
+        uint64_t sun_profile_static_bounds_reused=0;
+        uint64_t sun_profile_static_signature_reused=0;
+        uint64_t sun_profile_static_bounds_calculated=0;
+        uint64_t sun_profile_static_signature_calculated=0;
         // Last fully validated global sun projection. The dynamic atlas
         // continues rendering every frame while cascade checks are throttled.
         sun_shadow_projection sun_shadow_validated_world_view{};
@@ -1147,6 +1169,7 @@ namespace jkgm {
                 sun_shadow_static_cached={{false,false}};
                 sun_shadow_validated_world_view_ready=false;
                 sun_shadow_last_validation={};
+                sun_static_geometry_cache.clear();
                 sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
                 sun_dynamic_atlas_owners.clear();
@@ -5628,14 +5651,40 @@ namespace jkgm {
             };
             size_t noncaster_bounds_skipped=0;
             uint64_t candidate_sample_index=0;
-            for(auto const &instance:frame_gpu_3do_instances) {
+            // Verify exact source geometry and pose for each slot. Do not
+            // assume frame submission order is stable between frames.
+            sun_static_geometry_cache.resize(frame_gpu_3do_instances.size());
+            for(size_t instance_idx=0;
+                instance_idx<frame_gpu_3do_instances.size();++instance_idx) {
+                auto const &instance=frame_gpu_3do_instances[instance_idx];
                 if(!instance.casts_sun_shadows) {
                     ++skipped_skybox_instances;
                     continue;
                 }
                 if(!instance.geometry || instance.is_projected_decal)continue;
                 auto const &m=instance.transform;
-                for(auto const &group:instance.geometry->groups) {
+                auto *cached=static_cast<sun_cached_static_instance *>(nullptr);
+                // Dynamic/unknown objects and camera-dependent sprite poses
+                // keep the original recomputation behavior.
+                if(instance.shadow_owner!=0 && !instance.dynamic_sun_caster &&
+                   !instance.is_sprite_quad && !instance.transient_procedural) {
+                    auto &slot=sun_static_geometry_cache[instance_idx];
+                    if(slot.owner!=instance.shadow_owner ||
+                       slot.id!=instance.id ||
+                       slot.geometry!=instance.geometry.get() ||
+                       slot.transform!=m ||
+                       slot.groups.size()!=instance.geometry->groups.size()) {
+                        slot.owner=instance.shadow_owner;
+                        slot.id=instance.id;
+                        slot.geometry=instance.geometry.get();
+                        slot.transform=m;
+                        slot.groups.assign(instance.geometry->groups.size(),{});
+                    }
+                    cached=&slot;
+                }
+                auto const &groups=instance.geometry->groups;
+                for(size_t group_idx=0;group_idx<groups.size();++group_idx) {
+                    auto const &group=groups[group_idx];
                     if(group.count<3U || (group.face_type&0x2U))continue;
                     // One of every 64 eligible-for-testing groups is timed.
                     // Avoid thousands of expensive clock calls per frame.
@@ -5660,8 +5709,22 @@ namespace jkgm {
                     }
                     auto const bounds_begin=sample
                         ?profile_clock::now():profile_clock::time_point{};
-                    auto const bounds=sun_shadow_transformed_aabb(
-                        group.bounds_min,group.bounds_max,m);
+                    auto *group_cache=cached?&cached->groups[group_idx]:nullptr;
+                    bool const reuse_bounds=group_cache &&
+                        group_cache->bounds_valid;
+                    decal_volume_aabb bounds=reuse_bounds
+                        ?group_cache->bounds
+                        :sun_shadow_transformed_aabb(
+                             group.bounds_min,group.bounds_max,m);
+                    if(!reuse_bounds && group_cache &&
+                       decal_finite(bounds.low) && decal_finite(bounds.high)) {
+                        group_cache->bounds=bounds;
+                        group_cache->bounds_valid=true;
+                    }
+                    if(the_config->profile_renderer) {
+                        if(reuse_bounds)++sun_profile_static_bounds_reused;
+                        else ++sun_profile_static_bounds_calculated;
+                    }
                     if(sample) {
                         sun_profile_candidate_bounds_sample_ns+=elapsed_profile_ns(
                             bounds_begin,profile_clock::now());
@@ -5670,7 +5733,12 @@ namespace jkgm {
                     if(decal_finite(bounds.low) && decal_finite(bounds.high)) {
                         auto const signature_begin=sample
                             ?profile_clock::now():profile_clock::time_point{};
-                        uint64_t member=14695981039346656037ULL;
+                        bool const reuse_signature=!cutout && group_cache &&
+                            group_cache->opaque_signature_valid;
+                        uint64_t member=reuse_signature
+                            ?group_cache->opaque_signature
+                            :14695981039346656037ULL;
+                        if(!reuse_signature) {
                         auto member_u32=[&](uint32_t v) {
                             for(int b=0;b<4;++b) {
                                 member^=uint64_t((v>>(b*8))&255U);
@@ -5699,6 +5767,15 @@ namespace jkgm {
                         }
                         for(float v:instance.transform)member_float(v);
                         member=mix_model_signature(member);
+                        if(!cutout && group_cache) {
+                            group_cache->opaque_signature=member;
+                            group_cache->opaque_signature_valid=true;
+                        }
+                        } // hash only new poses or live alpha/cutout materials
+                        if(the_config->profile_renderer) {
+                            if(reuse_signature)++sun_profile_static_signature_reused;
+                            else ++sun_profile_static_signature_calculated;
+                        }
                         if(sample) {
                             sun_profile_candidate_signature_sample_ns+=
                                 elapsed_profile_ns(
@@ -6698,6 +6775,12 @@ namespace jkgm {
                     sun_profile_full_misses[c]={};
                     sun_profile_static_misses[c]={};
                 }
+                LOG_INFO("SUN static group geometry cache bounds_reused=",
+                    sun_profile_static_bounds_reused,
+                    " bounds_calculated=",sun_profile_static_bounds_calculated,
+                    " opaque_hash_reused=",sun_profile_static_signature_reused,
+                    " hashes_calculated=",sun_profile_static_signature_calculated,
+                    " NOTE=live_materials_still_resolved_each_check");
                 LOG_INFO("SUN cache global CPU candidate_bounds_us_total=",
                     sun_profile_candidate_us,
                     " candidate_groups_total=",sun_profile_candidate_groups,
@@ -6749,6 +6832,10 @@ namespace jkgm {
                 sun_profile_candidate_material_samples=0;
                 sun_profile_candidate_bounds_samples=0;
                 sun_profile_candidate_signature_samples=0;
+                sun_profile_static_bounds_reused=0;
+                sun_profile_static_signature_reused=0;
+                sun_profile_static_bounds_calculated=0;
+                sun_profile_static_signature_calculated=0;
                 sun_gpu_ns.fill(0);
                 sun_gpu_samples=sun_gpu_skipped=0;
                 sun_profile_static_submit_us.fill(0);
