@@ -12,10 +12,12 @@ opaque=read("assets/shaders/post_opaque_composite.frag")
 forward=read("assets/shaders/translucent_sun_sampling.glsl")
 assert "bool experimental_sun_shadow_vsm = false;" in cfg
 assert 'j.contains("experimental_sun_shadow_vsm")' in parser
-for name in ("sun_shadow_vsm_near_radius","sun_shadow_vsm_far_radius",
-             "sun_shadow_vsm_min_stddev_world",
-             "sun_shadow_vsm_bleed_reduction"):
+for name in ("sun_shadow_vsm_near_radius","sun_shadow_vsm_far_radius"):
     assert f'parse_vsm_radius("{name}"' in parser
+    assert f"**{name}**" in read("doc/config.md")
+for name in ("sun_shadow_vsm_min_stddev_world",
+             "sun_shadow_vsm_bleed_reduction"):
+    assert f'parse_vsm_scalar("{name}"' in parser
     assert f"**{name}**" in read("doc/config.md")
 assert "std::isfinite(radius)" in parser
 assert "float sun_shadow_vsm_min_stddev_world = 0.01f;" in cfg
@@ -64,8 +66,6 @@ for name in ("game_opaque_pass.frag","game_trns_pass.frag","gpu_3do_preview.frag
 assert "sun_dynamic_image;" in opaque
 assert "translucent_sun_dynamic_depth;" in read("assets/shaders/game_trns_pass.frag")
 assert "spotlight_shadow_image;" in opaque
-print("Experimental sun VSM filter source contracts passed")
-
 # Same physical VSM distribution under two ortho depth ranges must yield
 # the same probability once the variance floor is expressed in world units.
 def chebyshev(range_jku, receiver_jku, mean_jku, variance_jku2,
@@ -82,3 +82,5 @@ for receiver in (0.05,0.1,0.2,0.5):
                chebyshev(250.0,receiver,0.03,0.0001))<1e-10
 assert chebyshev(10,0.1,0.03,0.0001,bleed=0.5) <= chebyshev(
     10,0.1,0.03,0.0001,bleed=0.2)
+
+print("Experimental sun VSM filter source contracts passed")
