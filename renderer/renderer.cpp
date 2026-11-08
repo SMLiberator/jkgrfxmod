@@ -4671,11 +4671,18 @@ namespace jkgm {
 
         bool sun_sky_aperture_ready() const
         {
-            return the_config->experimental_sun_sky_aperture &&
-                sun_shadow_ready && sun_sky_aperture_target &&
-                sun_sky_aperture_target->complete &&
-                sun_sky_aperture_target->valid[0] &&
-                sun_sky_aperture_target->valid[1];
+            if(!the_config->experimental_sun_sky_aperture ||
+               !sun_shadow_ready || !sun_sky_aperture_target ||
+               !sun_sky_aperture_target->complete ||
+               !sun_sky_aperture_target->valid[0] ||
+               !sun_sky_aperture_target->valid[1])return false;
+            // The opaque pass uses unit 16 and forward passes use unit 19.
+            // Do not bind an invalid sampler on minimum GL 3.3 hardware.
+            static GLint max_fragment_units=0;
+            if(max_fragment_units<=0)
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,
+                              &max_fragment_units);
+            return max_fragment_units>=20;
         }
 
         point<4,float> sun_sky_aperture_depth_transform() const
