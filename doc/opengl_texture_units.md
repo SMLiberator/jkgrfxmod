@@ -23,7 +23,7 @@ reference the same unit within a program.
 | 10 | Spotlight shadow (depth compare) | Unused | Translucent spotlight shadow | Spotlight shadow |
 | 11 | Fullbright palette / decal AO | Fullbright palette | Unused | Unused |
 | 12–15 | Spotlight cookies 0–3 | Unused | Translucent spotlight cookies 0–3 | 13–15 sun shadows |
-| 16–18 | Sun near/far/dynamic shadow | Unused | Sun near/far/dynamic shadow | Unused |
+| 16–18 | Sun near/far/dynamic shadow | Sun near/far/dynamic shadow (direct specular include) | Sun near/far/dynamic shadow | Unused |
 | 19 | **Sector-crossing samplerBuffer** | Unused | Unused | Unused |
 | 20 | **Reserved for future forward sky-aperture sampler2DArray** | Unused | Unused | Unused |
 
