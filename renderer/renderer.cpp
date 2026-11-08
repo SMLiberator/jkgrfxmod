@@ -4680,11 +4680,14 @@ namespace jkgm {
 
         point<4,float> sun_sky_aperture_depth_transform() const
         {
-            auto const near=sun_sky_aperture_target->depth_transform(
-                0,sun_shadow_views[0]);
-            auto const far=sun_sky_aperture_target->depth_transform(
-                1,sun_shadow_views[1]);
-            return make_point(near[0],near[1],far[0],far[1]);
+            auto const near_depth_params=
+                sun_sky_aperture_target->depth_transform(
+                    0,sun_shadow_views[0]);
+            auto const far_depth_params=
+                sun_sky_aperture_target->depth_transform(
+                    1,sun_shadow_views[1]);
+            return make_point(near_depth_params[0],near_depth_params[1],
+                              far_depth_params[0],far_depth_params[1]);
         }
 
         template<typename Shader>
