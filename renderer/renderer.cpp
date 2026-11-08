@@ -4669,6 +4669,24 @@ namespace jkgm {
 
 
 
+        bool sun_sky_aperture_ready() const
+        {
+            return the_config->experimental_sun_sky_aperture &&
+                sun_shadow_ready && sun_sky_aperture_target &&
+                sun_sky_aperture_target->complete &&
+                sun_sky_aperture_target->valid[0] &&
+                sun_sky_aperture_target->valid[1];
+        }
+
+        point<4,float> sun_sky_aperture_depth_transform() const
+        {
+            auto const near=sun_sky_aperture_target->depth_transform(
+                0,sun_shadow_views[0]);
+            auto const far=sun_sky_aperture_target->depth_transform(
+                1,sun_shadow_views[1]);
+            return make_point(near[0],near[1],far[0],far[1]);
+        }
+
         template<typename Shader>
         void set_translucent_sun(Shader &prog,bool active)
         {
@@ -4677,6 +4695,8 @@ namespace jkgm {
             auto &uniforms=prog.translucent_sun;
             uniforms.set_state(false,false,0,off,dark,
                                the_config->sun_shadow_near_distance,1.0f,0.0f);
+            uniforms.set_sky_aperture(false,19,
+                make_point(1.0f,0.0f,1.0f,0.0f));
             if(!active || !the_config->enable_sun)return;
             auto const cam=read_active_render_camera();
             if(!cam.valid)return;
@@ -4695,6 +4715,10 @@ namespace jkgm {
             bool const have_texture_slots=fragment_texture_units>=19;
             bool const shadows=have_texture_slots && sun_shadow_ready &&
                                bool(sun_shadow_target);
+            // One new sampler2DArray unit (19); keep forward lighting
+            // valid on GL3 hardware exposing fewer than 20 units.
+            bool const sky_aperture=shadows &&
+                fragment_texture_units>=20 && sun_sky_aperture_ready();
             int const dynamic=have_texture_slots &&
                 the_config->enable_sun_dynamic_shadows &&
                 sun_dynamic_target && !sun_dynamic_views.empty()
@@ -4716,6 +4740,9 @@ namespace jkgm {
             uniforms.set_vsm_params(
                 the_config->sun_shadow_vsm_min_stddev_world,
                 the_config->sun_shadow_vsm_bleed_reduction);
+            uniforms.set_sky_aperture(sky_aperture,19,
+                sky_aperture?sun_sky_aperture_depth_transform()
+                            :make_point(1.0f,0.0f,1.0f,0.0f));
             uniforms.set_state(true,shadows,dynamic,
                 make_point(dir[0],dir[1],dir[2]),
                 make_point(rgb[0],rgb[1],rgb[2],intensity),
@@ -4749,6 +4776,11 @@ namespace jkgm {
                     the_config->experimental_sun_shadow_vsm
                         ?gl::texture_view(sun_moments_target->filtered[1])
                         :gl::texture_view(sun_shadow_target->far_depth));
+            }
+            if(sky_aperture) {
+                glActiveTexture(GL_TEXTURE0+19);
+                glBindTexture(GL_TEXTURE_2D_ARRAY,
+                              sun_sky_aperture_target->depth.value());
             }
             if(dynamic>0) {
                 for(int i=0;i<dynamic;++i) {
@@ -7221,6 +7253,8 @@ namespace jkgm {
             prog.set_sun_vsm_params(
                 the_config->sun_shadow_vsm_min_stddev_world,
                 the_config->sun_shadow_vsm_bleed_reduction);
+            prog.set_sun_sky_aperture(false,16,
+                make_point(1.0f,0.0f,1.0f,0.0f));
             prog.set_sun_max_distance(the_config->sun_max_distance);
             prog.set_spotlight_shadow(-1,0.0f,0.0f,
                 the_config->spotlight_shadow_angle_bias_scale);
@@ -7312,6 +7346,15 @@ namespace jkgm {
                         make_point(sun_shadow_views[0].up[0],sun_shadow_views[0].up[1],sun_shadow_views[0].up[2]),
                         make_point(sun_shadow_views[0].forward[0],sun_shadow_views[0].forward[1],sun_shadow_views[0].forward[2]),
                         make_point(sun_shadow_views[0].width,sun_shadow_views[0].height,sun_shadow_views[0].range));
+                    bool const sky_aperture=shadows &&
+                        sun_sky_aperture_ready();
+                    if(sky_aperture) {
+                        prog.set_sun_sky_aperture(
+                            true,16,sun_sky_aperture_depth_transform());
+                        glActiveTexture(GL_TEXTURE0+16);
+                        glBindTexture(GL_TEXTURE_2D_ARRAY,
+                                      sun_sky_aperture_target->depth.value());
+                    }
                     if(shadows) {
                         auto const &far_view=sun_shadow_views[1];
                         prog.set_sun_shadow_far(
