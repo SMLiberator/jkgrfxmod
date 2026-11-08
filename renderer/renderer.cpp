@@ -3560,11 +3560,27 @@ namespace jkgm {
             // They are consumed entirely in this non-recursive draw call.
             static thread_local std::vector<pending_draw> draws;
             static thread_local std::vector<pending_draw> merged_draws;
-            static thread_local std::vector<gpu_3do_matrix34> modelviews;
+            // Opaque prepares the ordinary alpha list too. Keep its matrices
+            // alive across the intervening projected-decal pass; deferred
+            // Camera HUD and decals have independent scratch matrices.
+            static thread_local std::vector<pending_draw> ordinary_alpha_draws;
+            static thread_local std::vector<gpu_3do_matrix34> ordinary_modelviews;
+            static thread_local std::vector<gpu_3do_matrix34> isolated_modelviews;
+            static thread_local uint64_t ordinary_alpha_serial=0;
             static thread_local std::vector<sprite_batch_bucket> sprite_buckets;
             static thread_local std::map<sprite_batch_key,size_t> sprite_lookup;
+            bool const ordinary_pass=!post_exempt && !decals_only;
+            bool const prepare_both=ordinary_pass && !transparent;
+            bool const reuse_alpha=ordinary_pass && transparent &&
+                ordinary_alpha_serial!=0 &&
+                ordinary_alpha_serial==gpu_3do_present_serial;
+            if(prepare_both) {
+                ordinary_alpha_serial=0;
+                ordinary_alpha_draws.clear();
+            }
+            auto &modelviews=ordinary_pass
+                ?ordinary_modelviews:isolated_modelviews;
             draws.clear();
-            modelviews.clear();
             for(auto &bucket:sprite_buckets)bucket.draws.clear();
             sprite_lookup.clear();
             size_t used_sprite_buckets=0;
@@ -3572,11 +3588,15 @@ namespace jkgm {
             bool const collect_sprite_batches=
                 the_config->enable_gpu_sprite_instancing &&
                 !transparent && !post_exempt && !decals_only;
-            // Keep composed matrices stable across sorting and draw submission.
-            modelviews.reserve(instances.size());
+            // Reusing alpha candidates must not clear their modelview
+            // storage; otherwise a projected decal could invalidate it.
+            if(!reuse_alpha) {
+                modelviews.clear();
+                modelviews.reserve(instances.size());
+            }
             auto const collect_begin=gpu_profiling
                 ?profile_clock::now():profile_clock::time_point{};
-            for(auto const &inst:instances) {
+            if(!reuse_alpha) for(auto const &inst:instances) {
                 if(!inst.geometry || inst.shadow_only ||
                    (!post_exempt && inst.is_projected_decal!=decals_only))
                     continue;
@@ -3686,9 +3706,19 @@ namespace jkgm {
                     // reliably cover both blades and the tip bridge.
                     auto const policy=gpu_3do_trail_alpha_mode(
                         material_policy,inst.saber_trail_active);
-                    if(!post_exempt && !gpu_3do_draws_in_pass(policy,transparent)) continue;
+                    // Mixed-alpha faces belong to BOTH ordinary draw lists.
+                    // Classify once without changing per-pass face ordering.
+                    bool const opaque_eligible=prepare_both &&
+                        gpu_3do_draws_in_pass(policy,false);
+                    bool const alpha_eligible=prepare_both &&
+                        gpu_3do_draws_in_pass(policy,true);
+                    if(!post_exempt &&
+                       !(prepare_both
+                           ?(opaque_eligible || alpha_eligible)
+                           :gpu_3do_draws_in_pass(policy,transparent)))
+                        continue;
                     float depth=0.0f;
-                    if(transparent) {
+                    if(transparent || alpha_eligible) {
                         auto const &m=inst.transform;
                         auto const &c=group.centroid;
                         float const wx=m[9]+m[0]*c[0]+m[3]*c[1]+m[6]*c[2];
@@ -3701,6 +3731,9 @@ namespace jkgm {
                     pending_draw candidate{&inst,&group,&tex,policy,
                                            &modelviews.back(),depth,
                                            next_draw_order++};
+                    if(alpha_eligible)
+                        ordinary_alpha_draws.push_back(candidate);
+                    if(prepare_both && !opaque_eligible) continue;
                     // Ordinary opaque 3DOs and all transparent sprites stay
                     // on the original draw list; only compatible opaque
                     // sprite quads are collected in dedicated buckets.
@@ -3744,6 +3777,15 @@ namespace jkgm {
                             std::move(candidate));
                     } else draws.push_back(std::move(candidate));
                 }
+            }
+            // This is consumed once during the ordinary transparent pass.
+            // Both the MAT element addresses and the ordinary modelviews
+            // remain stable until then, including across decal rendering.
+            if(prepare_both)
+                ordinary_alpha_serial=gpu_3do_present_serial;
+            if(reuse_alpha) {
+                draws.swap(ordinary_alpha_draws);
+                ordinary_alpha_serial=0;
             }
             if(gpu_profiling)
                 profile_frame.gpu_preview_collect_us[pass_index]+=
