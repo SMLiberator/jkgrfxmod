@@ -32,6 +32,22 @@ inline bool sun_shadow_caster_in_static_cascades(
     return owner==0 || atlas_owners.find(owner)==atlas_owners.end();
 }
 
+// A geometry snapshot is immutable until its GPU mesh id changes. Reuse
+// per-group bounds and opaque signatures only when the Thing, mesh, exact
+// (including non-unit RLU) transform, and group count are all unchanged.
+// An unknown or moving Thing always takes the original calculation path.
+inline bool sun_shadow_static_geometry_reusable(
+    uint64_t owner,uint64_t id,uintptr_t geometry,
+    std::array<float,12> const &transform,size_t group_count,
+    uint64_t old_owner,uint64_t old_id,uintptr_t old_geometry,
+    std::array<float,12> const &old_transform,size_t old_group_count,
+    bool dynamic_motion)
+{
+    return owner!=0 && id!=0 && geometry!=0 && !dynamic_motion &&
+           owner==old_owner && id==old_id && geometry==old_geometry &&
+           transform==old_transform && group_count==old_group_count;
+}
+
 // A stable, verified SithThing may join the cached sunlight layer. Actors
 // in physics/path motion and unverified objects stay in the working cascade.
 // A supposedly stationary Thing changing pose will invalidate that layer
