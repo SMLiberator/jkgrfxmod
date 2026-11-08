@@ -6147,9 +6147,10 @@ namespace jkgm {
                 bool const cutout=prepared.cutout;
                 if(the_config->profile_renderer)
                     ++sun_profile_prepared_reuses[cascade];
-                // Verified non-moving SithThings may join the cached static
-                // layer. An unknown owner stays dynamic (conservative), and
-                // even a path/physics Thing parked in place remains dynamic.
+                // Verified currently stationary SithThings may join the
+                // cached static layer. Unknown owners remain dynamic.
+                // Movement type alone is not decisive: a parked Thing can
+                // become static until motion or animation is observed again.
                 bool const stable=sun_shadow_cache_stationary_model(
                     instance.shadow_owner,instance.dynamic_sun_caster,
                     true,map.static_complete);
