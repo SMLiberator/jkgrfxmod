@@ -4164,7 +4164,11 @@ namespace jkgm {
                 else if(prev_advanced_material)
                     prog.set_advanced_material(false,0.25f);
                 prev_advanced_material=advanced;
+                // Unit 9 is also used by receiver lighting for projected
+                // decals. Never overwrite it with a displacement MAT on
+                // the decal-only draw path.
                 bool const parallax=!inst.camera_hud &&
+                    !inst.is_projected_decal &&
                     material.displacement_factor!=0.0f;
                 if(parallax) {
                     gl::set_active_texture_unit(9);

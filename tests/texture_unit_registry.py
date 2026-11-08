@@ -79,3 +79,6 @@ assert "initialize_registered_samplers(name,prog);" in sh
 assert "glGetIntegerv(GL_CURRENT_PROGRAM,&previous);" in sh
 assert "glUseProgram(static_cast<GLuint>(previous));" in sh
 assert "glUniform1i(location,entry.unit);" in sh
+
+# Decal light and displacement reuse unit 9 ONLY when mutually exclusive.
+assert "bool const parallax=!inst.camera_hud &&\n                    !inst.is_projected_decal &&" in cpp
