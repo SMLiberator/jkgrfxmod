@@ -51,3 +51,11 @@ Other independent passes reuse low slots: SSAO 0 normal, 1 depth,
 menu 0 texture. The main registry covers the five most complex
 simultaneous-sampler scene programs. The CI check protects their complete
 GLSL inventories but does not replace a real OpenGL runtime test.
+
+At link time, `initialize_registered_samplers` assigns registered sampler
+locations to their units **before any frame draws**, including inactive
+shadow/buffer samplers. It restores the previously bound GL program and
+emits a warning if an active sampler requires a unit not supported by the
+current GPU. Source CI verifies this initializer is present. Unavailable
+high slots still need a future compile-time feature variant to operate on
+minimum-capability GL3 drivers; the warning is not a fallback renderer.

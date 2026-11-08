@@ -72,3 +72,10 @@ except AssertionError:
 else:
     raise AssertionError("New unregistered sampler was accepted")
 print("OpenGL texture-unit registry, alias and shader declarations passed")
+
+# Core linked-program construction must initialize every registered
+# sampler, including those whose feature flag is currently disabled.
+assert "initialize_registered_samplers(name,prog);" in sh
+assert "glGetIntegerv(GL_CURRENT_PROGRAM,&previous);" in sh
+assert "glUseProgram(static_cast<GLuint>(previous));" in sh
+assert "glUniform1i(location,entry.unit);" in sh

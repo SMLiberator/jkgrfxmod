@@ -174,6 +174,44 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
             return rv;
         }
 
+        // A newly linked program initializes ALL sampler uniforms to unit 0.
+        // Disabled features may keep sampler2DShadow/samplerBuffer uniforms
+        // active, so assign the registry before the very first draw, not
+        // only when a shadow or material branch becomes active.
+        void initialize_registered_samplers(std::string const &name,
+                                            gl::program_view program)
+        {
+            auto bind=[&](auto const &entries) {
+                GLint max_fragment_units=0;
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&max_fragment_units);
+                GLint previous=0;
+                glGetIntegerv(GL_CURRENT_PROGRAM,&previous);
+                // Use raw GL deliberately: gl::use_program tracks a cached
+                // current program for uniform-call deduplication. Restore
+                // the previous real GL program before returning.
+                glUseProgram(*program);
+                for(auto const &entry:entries) {
+                    GLint const location=glGetUniformLocation(
+                        *program,entry.uniform_name);
+                    if(location<0)continue; // optimized out on this variant
+                    if(entry.unit>=max_fragment_units) {
+                        LOG_WARNING("GL sampler unit unavailable in ",name,
+                                    ": ",entry.uniform_name," unit=",entry.unit,
+                                    " fragment_units=",max_fragment_units);
+                        continue;
+                    }
+                    glUniform1i(location,entry.unit);
+                }
+                glUseProgram(static_cast<GLuint>(previous));
+            };
+            if(name=="gpu_3do_preview")bind(texture_units::gpu_3do_preview);
+            else if(name=="world_cache_preview")bind(texture_units::world_cache);
+            else if(name=="game_opaque_pass")bind(texture_units::game_opaque_pass);
+            else if(name=="game_transparency_pass")bind(texture_units::game_trns_pass);
+            else if(name=="game_post_opaque_composite")
+                bind(texture_units::post_opaque_composite);
+        }
+
         void link_program_from_files(std::string const &name,
                                      gl::program_view prog,
                                      fs::path const &vx,
@@ -201,6 +239,7 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                                              "\n",
                                              err_str)));
             }
+            initialize_registered_samplers(name,prog);
         }
     }
 }
