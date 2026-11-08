@@ -117,12 +117,12 @@ float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
     float receiver=coordinate.z-bias;
     vec2 moments=texture(map,coordinate.xy).rg;
     if(receiver<=moments.x)return 1.0;
-    // Convert a physical minimum stddev to normalized shadow depth.
-    // Unlike a fixed 2e-7 variance, this remains constant in world units
-    // when the light's Z projection changes after 3DO chunk culling.
+    // The legacy 2e-7 floor prevents loss-of-significance noise in
+    // E[z*z]-E[z]^2. A world-space floor is ADDITIVE, never a replacement.
+    // With sun_vsm_params.x=0 this exactly matches the original VSM floor.
     float min_stddev=sun_vsm_params.x/max(range,0.001);
     float variance=max(moments.y-moments.x*moments.x,
-                       min_stddev*min_stddev);
+                       max(2.0e-7,min_stddev*min_stddev));
     float delta=receiver-moments.x;
     float probability=variance/(variance+delta*delta);
     float bleed=sun_vsm_params.y;

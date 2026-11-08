@@ -20,7 +20,7 @@ for name in ("sun_shadow_vsm_min_stddev_world",
     assert f'parse_vsm_scalar("{name}"' in parser
     assert f"**{name}**" in read("doc/config.md")
 assert "std::isfinite(radius)" in parser
-assert "float sun_shadow_vsm_min_stddev_world = 0.01f;" in cfg
+assert "float sun_shadow_vsm_min_stddev_world = 0.0f;" in cfg
 assert "float sun_shadow_vsm_bleed_reduction = 0.2f;" in cfg
 assert 'parse_vsm_scalar("sun_shadow_vsm_min_stddev_world"' in parser
 assert 'parse_vsm_scalar("sun_shadow_vsm_bleed_reduction"' in parser
@@ -46,7 +46,7 @@ assert "out_moments=sum;" in flt
 for src in [opaque,forward]:
     assert "#ifdef JKGM_SUN_VSM" in src
     assert "moments.y-moments.x*moments.x" in src
-    assert "min_stddev*min_stddev" in src
+    assert "max(2.0e-7,min_stddev*min_stddev)" in src
     assert "return clamp((probability-bleed)/(1.0-bleed),0.0,1.0);" in src
     assert "sampler2DShadow" in src and "sampler2D map" in src
 assert "min_stddev=sun_vsm_params.x/max(range,0.001)" in opaque
@@ -66,21 +66,29 @@ for name in ("game_opaque_pass.frag","game_trns_pass.frag","gpu_3do_preview.frag
 assert "sun_dynamic_image;" in opaque
 assert "translucent_sun_dynamic_depth;" in read("assets/shaders/game_trns_pass.frag")
 assert "spotlight_shadow_image;" in opaque
-# Same physical VSM distribution under two ortho depth ranges must yield
-# the same probability once the variance floor is expressed in world units.
-def chebyshev(range_jku, receiver_jku, mean_jku, variance_jku2,
-              stddev_floor_jku=0.01, bleed=0.2):
-    m=mean_jku/range_jku
-    v=max(variance_jku2/(range_jku**2),
-          (stddev_floor_jku/range_jku)**2)
-    r=receiver_jku/range_jku
+# The floating-point precision guard must remain at least 2e-7
+# even when the optional world-space floor is zero or the depth
+# projection changes. Zero must reproduce the ORIGINAL VSM behavior.
+def normalized_variance(depth_range,raw_variance,world_stddev=0.0):
+    return max(raw_variance,2.0e-7,(world_stddev/depth_range)**2)
+for depth_range in (1.0,20.0,100.0,500.0):
+    for raw in (-1e-5,-1e-9,0.0,1e-9,1e-7,3e-7):
+        assert normalized_variance(depth_range,raw,0.0)==max(raw,2e-7)
+        assert normalized_variance(depth_range,raw,0.01)>=max(raw,2e-7)
+assert normalized_variance(1,0.0,0.1)>normalized_variance(1,0.0,0.0)
+
+def chebyshev(depth_range,receiver,mean,raw_variance,
+              stddev_floor=0.0,bleed=0.2):
+    m=mean/depth_range
+    r=receiver/depth_range
     if r<=m:return 1.0
-    p=v/(v+(r-m)**2)
+    var=normalized_variance(depth_range,raw_variance,stddev_floor)
+    p=var/(var+(r-m)**2)
     return max(0.0,min(1.0,(p-bleed)/(1.0-bleed)))
 for receiver in (0.05,0.1,0.2,0.5):
-    assert abs(chebyshev(10.0,receiver,0.03,0.0001) -
-               chebyshev(250.0,receiver,0.03,0.0001))<1e-10
-assert chebyshev(10,0.1,0.03,0.0001,bleed=0.5) <= chebyshev(
-    10,0.1,0.03,0.0001,bleed=0.2)
+    p=chebyshev(100.0,receiver,0.03,-1.0e-8)
+    assert 0.0<=p<=1.0
+assert chebyshev(10.0,0.1,0.03,0.0001,bleed=0.5) <= chebyshev(
+    10.0,0.1,0.03,0.0001,bleed=0.2)
 
 print("Experimental sun VSM filter source contracts passed")

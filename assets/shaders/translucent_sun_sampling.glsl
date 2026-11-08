@@ -18,11 +18,11 @@ float translucent_sun_cascade_filter(
 {
     vec2 moments=texture(map,uv.xy).rg;
     if(uv.z<=moments.x)return 1.0;
-    // The Z row is forward/range; its magnitude is 1/range.
-    // Use the same physical floor and bleed remap as opaque receivers.
+    // The Z row is forward/range. Match opaque VSM exactly, retaining
+    // the old numerical floor even if the optional physical floor is 0.
     float min_stddev=translucent_sun_vsm_params.x*inv_range;
     float variance=max(moments.y-moments.x*moments.x,
-                       min_stddev*min_stddev);
+                       max(2.0e-7,min_stddev*min_stddev));
     float delta=uv.z-moments.x;
     float probability=variance/(variance+delta*delta);
     float bleed=translucent_sun_vsm_params.y;
