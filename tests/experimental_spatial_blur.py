@@ -1,4 +1,4 @@
-"""Regression contracts for all three experimental spatial-blur modes."""
+"""Regression contracts for the standard mode-2 blur and its legacy modes."""
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 read=lambda path:(root/path).read_text(encoding="utf-8")
@@ -10,18 +10,21 @@ blur=read("renderer/spatialblur.hpp")
 full=read("assets/shaders/post_spatial_blur.frag")
 fast=read("assets/shaders/post_spatial_blur_half_res.frag")
 recon=read("assets/shaders/post_spatial_blur_reconstruct.frag")
-assert "int experimental_spatial_blur_mode = 0;" in cfg
+assert "int spatial_blur_mode = 2;" in cfg
 assert "bool experimental_spatial_blur_half_res = false;" in cfg
+assert 'j.contains("spatial_blur_mode")' in parser
 assert 'j.contains("experimental_spatial_blur_mode")' in parser
-assert "rv->experimental_spatial_blur_mode=mode.get<int>();" in parser
-assert "rv->experimental_spatial_blur_mode=1;" in parser
-assert "experimental_spatial_blur_mode must be 0, 1 or 2" in parser
-for k in ("experimental_spatial_blur_mode","experimental_spatial_blur_half_res"):
+assert 'char const *key=j.contains("spatial_blur_mode")' in parser
+assert "rv->spatial_blur_mode=mode.get<int>();" in parser
+assert "rv->spatial_blur_mode=1;" in parser
+assert '" must be 0, 1 or 2"' in parser
+for k in ("spatial_blur_mode","experimental_spatial_blur_mode",
+          "experimental_spatial_blur_half_res"):
     assert f"`{k}`" in doc
-assert "int experimental_spatial_blur_mode = 0;" in state_h
-assert "the_config->experimental_spatial_blur_mode" in state
-assert "if(experimental_spatial_blur_mode>=1) {" in state
-assert "if(experimental_spatial_blur_mode==2) {" in state
+assert "int spatial_blur_mode = 2;" in state_h
+assert "the_config->spatial_blur_mode" in state
+assert "if(spatial_blur_mode>=1) {" in state
+assert "if(spatial_blur_mode==2) {" in state
 assert "std::unique_ptr<post_buffer> spatial_blur_half_result;" in state_h
 assert "spatial_blur_half_result=std::make_unique<post_buffer>(half_size);" in state
 assert "std::unique_ptr<shaders::post_spatial_blur_reconstruct_shader>" in state_h
@@ -31,7 +34,7 @@ assert "shaders/post_spatial_blur_reconstruct.frag" in sc
 assert "class post_spatial_blur_reconstruct_shader : public opengl_shader" in sh
 assert "post_spatial_blur_reconstruct_shader::set_inputs(" in sc
 assert "bool const dual_halfres=halfres &&" in blur
-assert "ogs->experimental_spatial_blur_mode==2" in blur
+assert "ogs->spatial_blur_mode==2" in blur
 assert "glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE" in blur
 assert "auto &shader=halfres" in blur
 assert "?*ogs->post_spatial_blur_fast:ogs->post_spatial_blur;" in blur

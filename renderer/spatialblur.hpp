@@ -22,13 +22,13 @@ namespace jkgm {
             return source;
         }
 
-        // Keep the original shader and full-size buffers for the default
-        // path. Scissored draws cannot cover a half-res target correctly.
-        bool const halfres=ogs->experimental_spatial_blur_mode>0 &&
+        // Mode 2 is the default; retain the original mode 0 shader for
+        // fallback and scissor-sensitive rendering.
+        bool const halfres=ogs->spatial_blur_mode>0 &&
             ogs->post_spatial_blur_fast && ogs->spatial_blur_half_work &&
             glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE;
         bool const dual_halfres=halfres &&
-            ogs->experimental_spatial_blur_mode==2 &&
+            ogs->spatial_blur_mode==2 &&
             ogs->spatial_blur_half_result &&
             ogs->post_spatial_blur_reconstruct;
         auto &shader=halfres

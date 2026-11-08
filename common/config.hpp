@@ -28,9 +28,10 @@ namespace jkgm {
         bool experimental_native_triangle_uploads = false;
         // Spatial blur (distance + peripheral) and temporal feedback trails.
         bool enable_blur = true;
-        // Experimental half-resolution horizontal blur, default-off.
-        bool experimental_spatial_blur_half_res = false; // legacy alias for mode 1
-        int experimental_spatial_blur_mode = 0; // 0=original, 1=half-horizontal, 2=both half + reconstruct
+        // Mode 2 is the standard path after in-game A/B testing; preserve
+        // modes 0 and 1 for compatibility and quality/performance comparisons.
+        int spatial_blur_mode = 2; // 0=original, 1=half-horizontal, 2=both half + reconstruct
+        bool experimental_spatial_blur_half_res = false; // legacy JSON alias for mode 1
         bool enable_trails = true;
         bool enable_fog = true;
         bool enable_post = true;

@@ -381,8 +381,7 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     : data_root(the_config->data_path)
     , enable_post(the_config->enable_post)
     , enable_blur(the_config->enable_blur)
-    , experimental_spatial_blur_mode(
-        the_config->experimental_spatial_blur_mode)
+    , spatial_blur_mode(the_config->spatial_blur_mode)
     , enable_trails(the_config->enable_trails)
     , enable_hdr(the_config->enable_hdr)
     , experimental_fused_bloom_downsample(
@@ -431,15 +430,16 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , bloom_layers(screen_res)
 {
     LOG_DEBUG("Loading OpenGL assets");
-    // Keep the existing full-resolution blur program and buffers untouched.
-    // Allocate the alternative program/half-res target only when requested.
-    if(experimental_spatial_blur_mode>=1) {
+    // Keep the original full-resolution path available as mode 0.
+    // The standard mode 2 uses quarter-size Gaussian buffers followed
+    // by full-resolution, depth-aware reconstruction.
+    if(spatial_blur_mode>=1) {
         post_spatial_blur_fast=
             std::make_unique<shaders::post_spatial_blur_shader>(data_root,true);
         auto const half_size=make_size(std::max(1,get<x>(screen_res)/2),
                                        std::max(1,get<y>(screen_res)/2));
         spatial_blur_half_work=std::make_unique<post_buffer>(half_size);
-        if(experimental_spatial_blur_mode==2) {
+        if(spatial_blur_mode==2) {
             spatial_blur_half_result=std::make_unique<post_buffer>(half_size);
             post_spatial_blur_reconstruct=std::make_unique<
                 shaders::post_spatial_blur_reconstruct_shader>(data_root);

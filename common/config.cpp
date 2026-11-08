@@ -85,17 +85,21 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_spatial_blur_half_res").get_to(
                 rv->experimental_spatial_blur_half_res);
         }
-        // Numeric mode takes precedence if both keys are supplied.
-        if(j.contains("experimental_spatial_blur_mode")) {
-            auto const &mode=j.at("experimental_spatial_blur_mode");
+        // Canonical mode takes precedence over both historical keys.
+        // Retain the two experimental JSON names for existing user configs.
+        if(j.contains("spatial_blur_mode") ||
+           j.contains("experimental_spatial_blur_mode")) {
+            char const *key=j.contains("spatial_blur_mode")
+                ?"spatial_blur_mode":"experimental_spatial_blur_mode";
+            auto const &mode=j.at(key);
             if(!mode.is_number_integer() || mode.get<int>()<0 ||
                mode.get<int>()>2)
-                throw std::runtime_error(
-                    "experimental_spatial_blur_mode must be 0, 1 or 2");
-            rv->experimental_spatial_blur_mode=mode.get<int>();
+                throw std::runtime_error(std::string(key)+
+                                         " must be 0, 1 or 2");
+            rv->spatial_blur_mode=mode.get<int>();
         }
         else if(rv->experimental_spatial_blur_half_res)
-            rv->experimental_spatial_blur_mode=1;
+            rv->spatial_blur_mode=1;
         if(j.contains("enable_trails")) {
             j.at("enable_trails").get_to(rv->enable_trails);
         }

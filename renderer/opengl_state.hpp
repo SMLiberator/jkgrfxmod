@@ -130,7 +130,7 @@ namespace jkgm {
         // Master optional post-processing switch (color-space conversion stays active).
         bool enable_post = true;
         bool enable_blur = true;
-        int experimental_spatial_blur_mode = 0;
+        int spatial_blur_mode = 2;
         bool enable_trails = true;
         bool auto_exposure_scene = false;
         bool enable_hdr = false;
