@@ -1000,7 +1000,7 @@ namespace jkgm {
                          " calls_opaque_alpha=",
                          profile_window.gpu_preview_calls[0]/frames,"/",
                          profile_window.gpu_preview_calls[1]/frames,
-                         " NOTE=setup_and_gl_state_restoration_in_total_not_substages");
+                         " NOTE=opaque_collect_prepares_ordinary_alpha_setup_and_restoration_not_in_substages");
                 LOG_INFO("PERF gpu_3do filter_state updates_avg=",
                          profile_window.gpu_filter_state_sets/frames,
                          " skipped_updates_avg=",profile_window.gpu_filter_state_skips/frames,
@@ -1028,7 +1028,7 @@ namespace jkgm {
                          profile_window.gpu_groups_frustum_culled/frames,
                          " backface_culled_avg=",
                          profile_window.gpu_groups_backface_culled/frames,
-                         " NOTE=counts_include_opaque_and_alpha_passes");
+                         " NOTE=actual_group_walks_shared_ordinary_alpha_counted_once");
             }
             LOG_INFO("PERF geometry tris avg/max=", profile_window.tris / frames,
                      "/", peak_triangles,
