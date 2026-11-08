@@ -94,7 +94,7 @@ int main()
                           bool dynamic) {
         return sun_shadow_static_geometry_reusable(
             owner,id,geometry,current,groups,
-            1234,6789,0x12345U,pose,12,false || dynamic);
+            1234,6789,0x12345U,pose,12,dynamic);
     };
     assert(reuse(1234,6789,0x12345U,pose,12,false));
     assert(!reuse(0,6789,0x12345U,pose,12,false));
