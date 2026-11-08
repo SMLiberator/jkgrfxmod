@@ -9,6 +9,7 @@ programs=("gpu_3do_preview","world_cache","game_opaque_pass",
           "game_trns_pass","post_opaque_composite")
 kinds={"tex2d":{"sampler2D"},"shadow":{"sampler2DShadow"},
        "buffer":{"samplerBuffer"},
+       "texture_array":{"sampler2DArray"},
        "depth_variant":{"sampler2D","sampler2DShadow"}}
 allow={("gpu_3do_preview",frozenset(("displacement_map","decal_light_texture"))),
        ("gpu_3do_preview",frozenset(("palette_fullbright_mask","decal_occlusion")))}
@@ -47,6 +48,12 @@ for prog in programs:
 assert "forward_sector_buffer=19;" in header
 assert "forward_next_extended_unit=20;" in header
 assert "forward_next_extended_required_units=21;" in header
+assert "opaque_sky_aperture=16;" in header
+assert "translucent_sun_sky_aperture_map" in header
+assert "sun_sky_aperture_map" in header
+sh=read("renderer/shaders.cpp")
+assert "JKGM_SUN_SKY_APERTURE 1" in sh
+assert "units>=texture_units::forward_next_extended_required_units" in sh
 assert "static_assert(no_incompatible_target_aliases(gpu_3do_preview)" in header
 gpu=read("renderer/gpu_3do_preview.hpp")
 cpp=read("renderer/renderer.cpp")

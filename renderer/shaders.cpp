@@ -20,6 +20,12 @@ jkgm::shaders::translucent_sun_uniforms::translucent_sun_uniforms(
     , bias_scale(gl::get_uniform_location(program,"translucent_sun_bias_scale"))
     , pcf_radius(gl::get_uniform_location(program,"translucent_sun_pcf_radius"))
     , vsm_params(gl::get_uniform_location(program,"translucent_sun_vsm_params"))
+    , sky_aperture_active(gl::get_uniform_location(
+        program,"translucent_sun_sky_aperture_active"))
+    , sky_aperture_map(gl::get_uniform_location(
+        program,"translucent_sun_sky_aperture_map"))
+    , sky_aperture_depth_transform(gl::get_uniform_location(
+        program,"translucent_sun_sky_aperture_depth_transform"))
     , near_depth(gl::get_uniform_location(program,"translucent_sun_near_depth"))
     , far_depth(gl::get_uniform_location(program,"translucent_sun_far_depth"))
     , dynamic_depth(gl::get_uniform_location(program,"translucent_sun_dynamic_depth"))
@@ -69,6 +75,17 @@ void jkgm::shaders::translucent_sun_uniforms::set_vsm_params(
 {
     gl::set_uniform_vector(vsm_params,
         make_point(min_stddev_world,bleed_reduction));
+}
+
+void jkgm::shaders::translucent_sun_uniforms::set_sky_aperture(
+    bool active,int sampler,point<4,float> near_far_depth_transform)
+{
+    // The sampler must have its own unit even when the feature is off.
+    gl::set_uniform_integer(sky_aperture_map,sampler);
+    gl::set_uniform_integer(sky_aperture_active,active?1:0);
+    if(!active)return;
+    gl::set_uniform_vector(sky_aperture_depth_transform,
+                           near_far_depth_transform);
 }
 
 void jkgm::shaders::translucent_sun_uniforms::set_map(
@@ -159,6 +176,22 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     report_fatal_message(
                         "VSM shader requires a #version directive");
                 source.insert(version_end+1U,"#define JKGM_SUN_VSM 1\n");
+            }
+            // Optional array samplers require a unique forward unit (20).
+            // When the GPU exposes fewer than 21 fragment units, remove the
+            // sampler at compile-time, not merely via a runtime uniform.
+            if(type==gl::shader_type::fragment) {
+                GLint units=0;
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&units);
+                if(units>=texture_units::forward_next_extended_required_units) {
+                    auto const newline=source.find('\n');
+                    if(source.compare(0,8,"#version")!=0 ||
+                       newline==std::string::npos)
+                        report_fatal_message(
+                            "Sky aperture shader requires a #version directive");
+                    source.insert(newline+1U,
+                                  "#define JKGM_SUN_SKY_APERTURE 1\n");
+                }
             }
             gl::shader_source(rv,make_string_span(""),make_span(source));
             gl::compile_shader(rv);
@@ -1489,6 +1522,12 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
         the_program,"sun_shadow_pcf_radius"))
     , sun_vsm_params(gl::get_uniform_location(
         the_program,"sun_vsm_params"))
+    , sun_sky_aperture_active(gl::get_uniform_location(
+        the_program,"sun_sky_aperture_active"))
+    , sun_sky_aperture_map(gl::get_uniform_location(
+        the_program,"sun_sky_aperture_map"))
+    , sun_sky_aperture_depth_transform(gl::get_uniform_location(
+        the_program,"sun_sky_aperture_depth_transform"))
     , sun_max_distance(gl::get_uniform_location(the_program,"sun_max_distance"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
@@ -1650,6 +1689,16 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_vsm_params(
 {
     gl::set_uniform_vector(sun_vsm_params,
         make_point(min_stddev_world,bleed_reduction));
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_sky_aperture(
+    bool active,int sampler,point<4,float> near_far_depth_transform)
+{
+    gl::set_uniform_integer(sun_sky_aperture_map,sampler);
+    gl::set_uniform_integer(sun_sky_aperture_active,active?1:0);
+    if(!active)return;
+    gl::set_uniform_vector(sun_sky_aperture_depth_transform,
+                           near_far_depth_transform);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_max_distance(

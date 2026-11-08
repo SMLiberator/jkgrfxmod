@@ -4,17 +4,19 @@
 // branch disables the effect at runtime (all sampler uniforms start at 0).
 #include <cstddef>
 namespace jkgm { namespace texture_units {
-enum class sampler_kind { tex2d, shadow, buffer, depth_variant };
+enum class sampler_kind { tex2d, shadow, buffer, texture_array, depth_variant };
 struct binding { char const *uniform_name; int unit; sampler_kind kind; };
 constexpr int forward_decal_light=9; // displacement disabled on decal-only pass
 constexpr int forward_decal_occlusion=11;
 constexpr int forward_spotlight_shadow=10;
 constexpr int forward_sun_near=16,forward_sun_far=17,forward_sun_dynamic=18;
 constexpr int forward_sector_buffer=19;
+constexpr int opaque_sky_aperture=16;
 constexpr int forward_next_extended_unit=20; // never use sector's samplerBuffer
 constexpr int forward_next_extended_required_units=21; // GL fragment unit count
 // GLSL gpu_3do_preview.frag (including #include fragments)
 constexpr binding gpu_3do_preview[]={
+    {"translucent_sun_sky_aperture_map",20,sampler_kind::texture_array},
     {"albedo_map",0,sampler_kind::tex2d},
     {"albedo_map2",6,sampler_kind::tex2d},
     {"emissive_map",1,sampler_kind::tex2d},
@@ -59,6 +61,7 @@ constexpr binding world_cache[]={
 
 // GLSL game_opaque_pass.frag (including #include fragments)
 constexpr binding game_opaque_pass[]={
+    {"translucent_sun_sky_aperture_map",20,sampler_kind::texture_array},
     {"albedo_map",0,sampler_kind::tex2d},
     {"albedo_map2",8,sampler_kind::tex2d},
     {"emissive_map",1,sampler_kind::tex2d},
@@ -75,6 +78,7 @@ constexpr binding game_opaque_pass[]={
 
 // GLSL game_trns_pass.frag (including #include fragments)
 constexpr binding game_trns_pass[]={
+    {"translucent_sun_sky_aperture_map",20,sampler_kind::texture_array},
     {"albedo_map",0,sampler_kind::tex2d},
     {"albedo_map2",8,sampler_kind::tex2d},
     {"emissive_map",1,sampler_kind::tex2d},
@@ -97,6 +101,7 @@ constexpr binding game_trns_pass[]={
 
 // GLSL post_opaque_composite.frag (including #include fragments)
 constexpr binding post_opaque_composite[]={
+    {"sun_sky_aperture_map",16,sampler_kind::texture_array},
     {"color_image",0,sampler_kind::tex2d},
     {"emissive_image",1,sampler_kind::tex2d},
     {"occlusion_image",2,sampler_kind::tex2d},

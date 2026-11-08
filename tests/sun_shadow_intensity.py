@@ -25,7 +25,10 @@ for name in ("native_alpha", "gpu_alpha"):
         assert "0.75*range_fade*sun_shadow_strength*" in shader
     else:
         assert "0.75*range_fade*clamp(translucent_sun_color.a,0.0,1.0)" in shader
-    assert "translucent_sun_color.a*incidence*visibility*opacity*range_fade;" in shader
+    # The sky-aperture factor is 1 with the experiment disabled and gates
+    # only the added direct sunlight, not the baked/ambient intensity.
+    assert "translucent_sun_color.a*incidence*visibility*sky_access*opacity*range_fade;" in shader
+    assert "float sky_access=translucent_sun_sky_aperture(world);" in shader
 
 def shade(base, strength, visibility, multiplier):
     return base*(1.0-multiplier*min(max(strength,0.0),1.0)*(1.0-visibility))

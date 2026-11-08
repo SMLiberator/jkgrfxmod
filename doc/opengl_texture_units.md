@@ -59,3 +59,17 @@ emits a warning if an active sampler requires a unit not supported by the
 current GPU. Source CI verifies this initializer is present. Unavailable
 high slots still need a future compile-time feature variant to operate on
 minimum-capability GL3 drivers; the warning is not a fallback renderer.
+
+## Experimental sky-only sunlight aperture
+
+The opt-in `experimental_sun_sky_aperture` reuses the sunlight cascades
+but rasterizes sky-flagged SithWorld surfaces separately. The opaque
+composite samples a two-layer `sampler2DArray` at **unit 16**;
+native forward and GPU-cached 3DO programs sample it at **unit 20**.
+Unit 19 is still the sector-crossing `samplerBuffer`, not a spare unit.
+
+`JKGM_SUN_SKY_APERTURE` is defined only when
+`GL_MAX_TEXTURE_IMAGE_UNITS >= 21`. Drivers with fewer fragment
+units compile out the sampler and keep previous sunlight behavior;
+they never bind invalid array units. Resources are created only when
+the config is enabled and hardware meets that limit.
