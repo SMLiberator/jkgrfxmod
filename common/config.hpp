@@ -87,6 +87,9 @@ namespace jkgm {
         unsigned int sun_shadow_far_resolution = 0U; // 0 = inherit near resolution
         float sun_shadow_near_pcf_radius = 0.0f; // 0=single HW PCF; >0 four samples
         float sun_shadow_far_pcf_radius = 0.0f; // independent four-sample filter
+        bool experimental_sun_shadow_vsm = false; // independent, default-off shadow path
+        float sun_shadow_vsm_near_radius = 1.0f; // prefilter radius, map texels
+        float sun_shadow_vsm_far_radius = 1.5f;
         float sun_shadow_near_distance = 16.0f; // camera-local near cascade, 2..128
         float sun_shadow_far_distance = 128.0f; // outer cascade coverage, 4..512
         float sun_max_distance = 0.0f; // 0=unlimited; else sun light+shadows fade out and stop at this camera distance

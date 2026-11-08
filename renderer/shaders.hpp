@@ -15,7 +15,8 @@ namespace jkgm {
 
         opengl_shader(std::string const &name,
                       fs::path const &vertex_part,
-                      fs::path const &fragment_part);
+                      fs::path const &fragment_part,
+                      bool prefiltered_sun=false);
 
     public:
         opengl_shader(opengl_shader const &) = delete;
@@ -214,7 +215,8 @@ namespace jkgm {
         protected:
             game_pass_shader(std::string const &name,
                              fs::path const &vertex_part,
-                             fs::path const &fragment_part);
+                             fs::path const &fragment_part,
+                             bool prefiltered_sun=false);
 
         public:
             void set_screen_resolution(size<2, float> res);
@@ -346,7 +348,8 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
         public:
             static constexpr size_t max_sprite_instances=32;
-            explicit gpu_3do_preview_shader(fs::path const &data_root);
+            explicit gpu_3do_preview_shader(fs::path const &data_root,
+                                            bool prefiltered_sun=false);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
                                  point<4,float> up,point<4,float> origin);
             // Zero count restores the normal draw path.
@@ -412,7 +415,8 @@ namespace jkgm {
 
         class game_opaque_pass_shader : public game_pass_shader {
         public:
-            explicit game_opaque_pass_shader(fs::path const &data_root);
+            explicit game_opaque_pass_shader(fs::path const &data_root,
+                                             bool prefiltered_sun=false);
         };
 
         class game_post_ssao_shader : public opengl_shader {
@@ -520,7 +524,8 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> spotlight_screen_bounds;
 
         public:
-            explicit game_post_opaque_composite_shader(fs::path const &data_root);
+            explicit game_post_opaque_composite_shader(
+                fs::path const &data_root,bool prefiltered_sun=false);
 
             void set_color_sampler(int sampler);
             void set_emissive_sampler(int sampler);
@@ -562,7 +567,17 @@ namespace jkgm {
 
         class game_transparency_pass_shader : public game_pass_shader {
         public:
-            explicit game_transparency_pass_shader(fs::path const &data_root);
+            explicit game_transparency_pass_shader(
+                fs::path const &data_root,bool prefiltered_sun=false);
+        };
+
+        // Converts depth into RG32F moments, then filters vertically.
+        class sun_shadow_prefilter_shader : public opengl_shader {
+            gl::uniform_location_id source_image,axis,texel_size,radius;
+        public:
+            explicit sun_shadow_prefilter_shader(fs::path const &root);
+            void set_source_sampler(int sampler);
+            void set_filter(int pass,size<2,float> dims,float radius_texels);
         };
 
         class post_box4_shader : public opengl_shader {
