@@ -129,7 +129,11 @@ struct sun_sky_aperture_gpu {
                 min_z=std::min(min_z,z);
                 max_z=std::max(max_z,z);
             }
-        min_z-=0.01f;max_z+=0.01f;
+        // Preserve a visible clear-depth border even in very large
+        // levels. A fixed 0.01-JKU pad can round to 1.0 in a 24-bit
+        // normalized map when the world spans many kilometers.
+        float const margin=std::max(0.01f,(max_z-min_z)*0.001f);
+        min_z-=margin;max_z+=margin;
         for(int i=0;i<3;++i)
             adjusted.origin[i]+=ordinary.forward[i]*(
                 min_z-decal_dot(ordinary.origin,ordinary.forward));
