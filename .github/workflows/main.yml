@@ -245,6 +245,8 @@ jobs:
       run: python3 tests/sun_cascade_pcf_experiment.py
     - name: Experimental cached VSM prefilter source contracts
       run: python3 tests/sun_shadow_vsm_experiment.py
+    - name: Experimental sun sky-aperture gate source contracts
+      run: python3 tests/sun_sky_aperture_experiment.py
     - name: GPU 3DO alpha partition tests
       shell: cmd
       run: |
