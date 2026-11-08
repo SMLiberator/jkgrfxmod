@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <vector>
 #include <unordered_set>
@@ -46,6 +47,22 @@ inline bool sun_shadow_static_geometry_reusable(
     return owner!=0 && id!=0 && geometry!=0 && !dynamic_motion &&
            owner==old_owner && id==old_id && geometry==old_geometry &&
            transform==old_transform && group_count==old_group_count;
+}
+
+// The original cutout group hash includes exactly these five live floats.
+// Compare their bit patterns, not float equality: -0/+0 and NaNs must
+// follow the same invalidation semantics as hashing their raw bytes.
+inline std::array<uint32_t,5> sun_shadow_cutout_signature_inputs(
+    float alpha_cutoff,float opacity,float scroll_x,float scroll_y,
+    float transition)
+{
+    auto bits=[](float value) {
+        uint32_t out=0;
+        std::memcpy(&out,&value,sizeof(out));
+        return out;
+    };
+    return {{bits(alpha_cutoff),bits(opacity),bits(scroll_x),
+             bits(scroll_y),bits(transition)}};
 }
 
 // A stable, verified SithThing may join the cached sunlight layer. Actors

@@ -620,14 +620,19 @@ namespace jkgm {
         // Track only owners with a successfully rasterized atlas tile.
         std::unordered_set<uint64_t> sun_dynamic_atlas_owners;
         std::array<sun_shadow_projection,2> sun_shadow_views{};
-        // Bounds and opaque model hashes depend only on immutable GPU mesh
-        // snapshots and exact Thing/node transforms. Cache them across full
-        // sun validations; always resolve live materials on each validation.
+        // Reuse stationary group bounds and both opaque/cutout hash results.
+        // Live MATs are still resolved at each full validation; cutout hash
+        // reuse additionally requires an exact match for their five inputs.
         struct sun_cached_static_group {
             decal_volume_aabb bounds{};
-            uint64_t opaque_signature=0;
-            bool bounds_valid=false;
-            bool opaque_signature_valid=false;
+            uint64_t opaque_signature=0,cutout_signature=0;
+            std::array<uint32_t,5> cutout_inputs{};
+            uint32_t offset=0,count=0;
+            uintptr_t material=0;
+            int32_t cel=-1;
+            std::array<float,3> bounds_min{},bounds_max{};
+            bool descriptor_valid=false,bounds_valid=false;
+            bool opaque_signature_valid=false,cutout_signature_valid=false;
         };
         struct sun_cached_static_instance {
             uint64_t owner=0,id=0;
@@ -642,6 +647,11 @@ namespace jkgm {
         uint64_t sun_profile_static_signature_reused=0;
         uint64_t sun_profile_static_bounds_calculated=0;
         uint64_t sun_profile_static_signature_calculated=0;
+        uint64_t sun_profile_cutout_hash_reused=0;
+        uint64_t sun_profile_cutout_hash_calculated=0;
+        uint64_t sun_profile_cutout_material_invalidations=0;
+        uint64_t sun_profile_static_group_invalidations=0;
+        uint64_t sun_profile_static_instance_invalidations=0;
         // Last fully validated global sun projection. The dynamic atlas
         // continues rendering every frame while cascade checks are throttled.
         sun_shadow_projection sun_shadow_validated_world_view{};
@@ -5676,6 +5686,8 @@ namespace jkgm {
                            slot.owner,slot.id,
                            reinterpret_cast<uintptr_t>(slot.geometry),
                            slot.transform,slot.groups.size(),false)) {
+                        if(the_config->profile_renderer && slot.owner!=0)
+                            ++sun_profile_static_instance_invalidations;
                         slot.owner=instance.shadow_owner;
                         slot.id=instance.id;
                         slot.geometry=instance.geometry.get();
@@ -5712,6 +5724,32 @@ namespace jkgm {
                     auto const bounds_begin=sample
                         ?profile_clock::now():profile_clock::time_point{};
                     auto *group_cache=cached?&cached->groups[group_idx]:nullptr;
+                    if(group_cache) {
+                        // Fail closed if a nominally immutable GPU group is
+                        // edited in place without changing its mesh pointer.
+                        bool const same_group=group_cache->descriptor_valid &&
+                            group_cache->offset==group.offset &&
+                            group_cache->count==group.count &&
+                            group_cache->material==group.material &&
+                            group_cache->cel==group.cel &&
+                            group_cache->bounds_min==group.bounds_min &&
+                            group_cache->bounds_max==group.bounds_max;
+                        if(!same_group) {
+                            if(the_config->profile_renderer &&
+                               group_cache->descriptor_valid)
+                                ++sun_profile_static_group_invalidations;
+                            group_cache->offset=group.offset;
+                            group_cache->count=group.count;
+                            group_cache->material=group.material;
+                            group_cache->cel=group.cel;
+                            group_cache->bounds_min=group.bounds_min;
+                            group_cache->bounds_max=group.bounds_max;
+                            group_cache->descriptor_valid=true;
+                            group_cache->bounds_valid=false;
+                            group_cache->opaque_signature_valid=false;
+                            group_cache->cutout_signature_valid=false;
+                        }
+                    }
                     bool const reuse_bounds=group_cache &&
                         group_cache->bounds_valid;
                     decal_volume_aabb bounds=reuse_bounds
@@ -5735,10 +5773,29 @@ namespace jkgm {
                     if(decal_finite(bounds.low) && decal_finite(bounds.high)) {
                         auto const signature_begin=sample
                             ?profile_clock::now():profile_clock::time_point{};
-                        bool const reuse_signature=!cutout && group_cache &&
+                        // Check the exact five live MAT inputs that the
+                        // original group hash incorporated for cutout faces.
+                        std::array<uint32_t,5> const cutout_inputs=
+                            cutout && group_cache
+                            ?sun_shadow_cutout_signature_inputs(
+                                tex.alpha_cutoff,tex.opacity,
+                                get<x>(tex.albedo_scroll),
+                                get<y>(tex.albedo_scroll),
+                                tex.albedo_transition)
+                            :std::array<uint32_t,5>{};
+                        bool const reuse_opaque=!cutout && group_cache &&
                             group_cache->opaque_signature_valid;
-                        uint64_t member=reuse_signature
+                        bool const reuse_cutout=cutout && group_cache &&
+                            group_cache->cutout_signature_valid &&
+                            group_cache->cutout_inputs==cutout_inputs;
+                        bool const reuse_signature=reuse_opaque||reuse_cutout;
+                        if(the_config->profile_renderer && cutout &&
+                           group_cache && group_cache->cutout_signature_valid &&
+                           !reuse_cutout)
+                            ++sun_profile_cutout_material_invalidations;
+                        uint64_t member=reuse_opaque
                             ?group_cache->opaque_signature
+                            :reuse_cutout?group_cache->cutout_signature
                             :14695981039346656037ULL;
                         if(!reuse_signature) {
                         auto member_u32=[&](uint32_t v) {
@@ -5769,14 +5826,23 @@ namespace jkgm {
                         }
                         for(float v:instance.transform)member_float(v);
                         member=mix_model_signature(member);
-                        if(!cutout && group_cache) {
-                            group_cache->opaque_signature=member;
-                            group_cache->opaque_signature_valid=true;
+                        if(group_cache) {
+                            if(cutout) {
+                                group_cache->cutout_signature=member;
+                                group_cache->cutout_inputs=cutout_inputs;
+                                group_cache->cutout_signature_valid=true;
+                            } else {
+                                group_cache->opaque_signature=member;
+                                group_cache->opaque_signature_valid=true;
+                            }
                         }
-                        } // hash only new poses or live alpha/cutout materials
+                        } // full hash on changed pose, geometry or material
                         if(the_config->profile_renderer) {
-                            if(reuse_signature)++sun_profile_static_signature_reused;
+                            if(reuse_opaque)++sun_profile_static_signature_reused;
+                            else if(reuse_cutout)++sun_profile_cutout_hash_reused;
                             else ++sun_profile_static_signature_calculated;
+                            if(cutout && !reuse_cutout)
+                                ++sun_profile_cutout_hash_calculated;
                         }
                         if(sample) {
                             sun_profile_candidate_signature_sample_ns+=
@@ -6782,6 +6848,12 @@ namespace jkgm {
                     sun_profile_static_bounds_reused,
                     " bounds_calculated=",sun_profile_static_bounds_calculated,
                     " opaque_hash_reused=",sun_profile_static_signature_reused,
+                    " cutout_hash_reused=",sun_profile_cutout_hash_reused,
+                    " cutout_hash_calculated=",sun_profile_cutout_hash_calculated,
+                    " cutout_material_invalidations=",
+                        sun_profile_cutout_material_invalidations,
+                    " group_invalidations=",sun_profile_static_group_invalidations,
+                    " instance_invalidations=",sun_profile_static_instance_invalidations,
                     " hashes_calculated=",sun_profile_static_signature_calculated,
                     " NOTE=live_materials_still_resolved_each_check");
                 LOG_INFO("SUN cache global CPU candidate_bounds_us_total=",
@@ -6839,6 +6911,11 @@ namespace jkgm {
                 sun_profile_static_signature_reused=0;
                 sun_profile_static_bounds_calculated=0;
                 sun_profile_static_signature_calculated=0;
+                sun_profile_cutout_hash_reused=0;
+                sun_profile_cutout_hash_calculated=0;
+                sun_profile_cutout_material_invalidations=0;
+                sun_profile_static_group_invalidations=0;
+                sun_profile_static_instance_invalidations=0;
                 sun_gpu_ns.fill(0);
                 sun_gpu_samples=sun_gpu_skipped=0;
                 sun_profile_static_submit_us.fill(0);

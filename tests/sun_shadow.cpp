@@ -104,6 +104,26 @@ int main()
     assert(!reuse(1234,6789,0x12345U,moved,12,false));
     assert(!reuse(1234,6789,0x12345U,pose,13,false));
     assert(!reuse(1234,6789,0x12345U,pose,12,true));
+    // Cached cutout groups must invalidate on every live hash input.
+    auto const cutout=sun_shadow_cutout_signature_inputs(
+        0.5f,1.0f,0.0f,0.0f,0.25f);
+    assert(cutout==sun_shadow_cutout_signature_inputs(
+        0.5f,1.0f,0.0f,0.0f,0.25f));
+    assert(cutout!=sun_shadow_cutout_signature_inputs(
+        0.6f,1.0f,0.0f,0.0f,0.25f));
+    assert(cutout!=sun_shadow_cutout_signature_inputs(
+        0.5f,0.9f,0.0f,0.0f,0.25f));
+    assert(cutout!=sun_shadow_cutout_signature_inputs(
+        0.5f,1.0f,0.1f,0.0f,0.25f));
+    assert(cutout!=sun_shadow_cutout_signature_inputs(
+        0.5f,1.0f,0.0f,0.1f,0.25f));
+    assert(cutout!=sun_shadow_cutout_signature_inputs(
+        0.5f,1.0f,0.0f,0.0f,0.5f));
+    // Float equality would miss this difference in the original hash.
+    assert(sun_shadow_cutout_signature_inputs(
+        0.5f,1.0f,+0.0f,0.0f,0.25f)!=
+           sun_shadow_cutout_signature_inputs(
+        0.5f,1.0f,-0.0f,0.0f,0.25f));
     // Static architectural Things are reusable, but movers, unknown owners,
     // disabled caching and missing FBOs always use the live 3DO pass.
     assert(sun_shadow_cache_stationary_model(1234,false,true,true));
