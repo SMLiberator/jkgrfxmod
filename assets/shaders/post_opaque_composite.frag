@@ -64,8 +64,10 @@ uniform float sun_shadow_receiver_bias_scale;
 uniform vec2 sun_shadow_pcf_radius; // 0=legacy HW comparison; positive=4 taps
 uniform vec2 sun_vsm_params; // x=min world-space stddev (JKU), y=bleed reduction
 uniform int sun_sky_aperture_active;
+#ifdef JKGM_SUN_SKY_APERTURE
 uniform sampler2DArray sun_sky_aperture_map;
 uniform vec4 sun_sky_aperture_depth_transform; // near scale,bias; far scale,bias
+#endif
 uniform float sun_max_distance; // 0=unlimited; JK forward distance where added sun ends
 
 // Added sunlight and its shadows are full strength to 85% of the range, fade
@@ -181,6 +183,7 @@ float sun_shadow_visibility(vec3 world_position,float incidence)
     return mix(near_visibility,far_visibility,blend);
 }
 
+#ifdef JKGM_SUN_SKY_APERTURE
 // Separate sky aperture from normal occluder shadowing: a sky polygon
 // facing the sun is necessary for added directional sunlight to enter.
 float sun_sky_aperture_sample(vec3 uv,int layer)
@@ -218,6 +221,10 @@ float sun_sky_aperture(vec3 position)
         smoothstep(sun_shadow_split*0.8125,
                    sun_shadow_split*0.9375,depth));
 }
+
+#else
+float sun_sky_aperture(vec3 position) { return 1.0; }
+#endif
 
 float sun_dynamic_shadow_visibility(vec3 position,float incidence)
 {

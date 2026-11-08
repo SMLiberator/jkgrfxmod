@@ -69,6 +69,7 @@ float translucent_sun_sample(int slot,vec3 uv,float incidence)
                    vec3(center/tex_size,comparison));
 }
 
+#ifdef JKGM_SUN_SKY_APERTURE
 // Sky apertures are a SEPARATE gate on added directional lighting, not a
 // replacement shadow comparison (darkening the baked JK ambient is wrong).
 float translucent_sun_sky_sample(vec3 uv,int layer)
@@ -102,3 +103,6 @@ float translucent_sun_sky_aperture(vec3 world)
         smoothstep(translucent_sun_split*0.8125,
                    translucent_sun_split*0.9375,depth));
 }
+#else
+float translucent_sun_sky_aperture(vec3 world) { return 1.0; }
+#endif
