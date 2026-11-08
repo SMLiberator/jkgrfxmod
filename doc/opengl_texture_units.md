@@ -23,9 +23,9 @@ reference the same unit within a program.
 | 10 | Spotlight shadow (depth compare) | Unused | Translucent spotlight shadow | Spotlight shadow |
 | 11 | Fullbright palette / decal AO | Fullbright palette | Unused | Unused |
 | 12–15 | Spotlight cookies 0–3 | Unused | Translucent spotlight cookies 0–3 | 13–15 sun shadows |
-| 16–18 | Sun near/far/dynamic shadow | Sun near/far/dynamic shadow (direct specular include) | Sun near/far/dynamic shadow | Unused |
+| 16–18 | Sun near/far/dynamic shadow | Sun near/far/dynamic shadow (direct specular include) | Sun near/far/dynamic shadow | 16 sky aperture; 17–18 unused |
 | 19 | **Sector-crossing samplerBuffer** | Unused | Unused | Unused |
-| 20 | **Reserved for future forward sky-aperture sampler2DArray** | Unused | Unused | Unused |
+| 20 | **Opt-in sky-aperture sampler2DArray** | **Opt-in sky-aperture sampler2DArray** | **Opt-in sky-aperture sampler2DArray** | Unused |
 
 The two GPU 3DO same-type aliases are deliberately restricted to
 *mutually exclusive* decal and ordinary material draws:
@@ -42,9 +42,9 @@ sampler uniforms start at unit 0 in OpenGL: an early return because a
 feature is disabled must **not** skip assignment of a distinct
 `samplerBuffer`, `sampler2DShadow`, or `sampler2DArray` unit. The
 hardware's `GL_MAX_TEXTURE_IMAGE_UNITS` limit must also be respected.
-Forward units 0–19 are reserved already; a future sky-aperture array on
-unit 20 needs **at least 21** available fragment texture units or a
-GLSL variant that compiles that sampler out on less capable hardware.
+Forward units 0–19 are already occupied; the experimental sky-aperture
+array on unit 20 requires **at least 21** available fragment texture units.
+On less capable hardware, the GLSL variant compiles that sampler out.
 
 Other independent passes reuse low slots: SSAO 0 normal, 1 depth,
 2 noise; presentation 0 source, 1–5 bloom; dynamic VSM prefilter 0 depth;
