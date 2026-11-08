@@ -5,6 +5,7 @@
 // One GL_DEPTH_COMPONENT24 2-layer texture stores the closest sky face on
 // each sunlight ray. A receiver must be farther from the sun than the
 // aperture to receive added sunlight. Normal caster shadows remain separate.
+#include "sun_shadow.hpp"
 #include "spotlight_shadow.hpp"
 #include "glutil/buffer.hpp"
 #include "glutil/framebuffer.hpp"
@@ -113,6 +114,39 @@ struct sun_sky_aperture_gpu {
 
     // Hash live sky flags and GeoModes, since COG can change those even
     // though the cached vertex/index arrays are immutable.
+    sun_shadow_projection expanded_sky_view(
+        sun_shadow_projection const &ordinary) const
+    {
+        // Do not increase the ordinary shadow depth interval (which hurts
+        // VSM precision). Enlarge only the dedicated sky aperture range.
+        auto adjusted=ordinary;
+        float min_z=decal_dot(ordinary.origin,ordinary.forward);
+        float max_z=min_z+ordinary.range;
+        for(auto const &face:world.receivers)
+            for(auto const &v:face.polygon) {
+                float z=decal_dot(v,ordinary.forward);
+                min_z=std::min(min_z,z);
+                max_z=std::max(max_z,z);
+            }
+        min_z-=0.01f;max_z+=0.01f;
+        for(int i=0;i<3;++i)
+            adjusted.origin[i]+=ordinary.forward[i]*(
+                min_z-decal_dot(ordinary.origin,ordinary.forward));
+        adjusted.range=max_z-min_z;
+        return adjusted;
+    }
+
+    // A scale and bias to convert the receiver's *ordinary* normalized
+    // sunlight depth into the aperture map's normalized depth.
+    std::array<float,2> depth_transform(
+        int cascade,sun_shadow_projection const &ordinary) const
+    {
+        auto const &sky=views[cascade];
+        float const old_z=decal_dot(ordinary.origin,ordinary.forward);
+        float const sky_z=decal_dot(sky.origin,sky.forward);
+        return {{ordinary.range/sky.range,(old_z-sky_z)/sky.range}};
+    }
+
     uint64_t live_signature(decal_native_read const &read) const
     {
         uint64_t h=14695981039346656037ULL;

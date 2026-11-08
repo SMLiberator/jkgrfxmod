@@ -63,6 +63,9 @@ uniform float sun_shadow_split; // JK forward distance from camera
 uniform float sun_shadow_receiver_bias_scale;
 uniform vec2 sun_shadow_pcf_radius; // 0=legacy HW comparison; positive=4 taps
 uniform vec2 sun_vsm_params; // x=min world-space stddev (JKU), y=bleed reduction
+uniform int sun_sky_aperture_active;
+uniform sampler2DArray sun_sky_aperture_map;
+uniform vec4 sun_sky_aperture_depth_transform; // near scale,bias; far scale,bias
 uniform float sun_max_distance; // 0=unlimited; JK forward distance where added sun ends
 
 // Added sunlight and its shadows are full strength to 85% of the range, fade
@@ -176,6 +179,44 @@ float sun_shadow_visibility(vec3 world_position,float incidence)
         near_uv,sun_shadow_limits.z,incidence,sun_shadow_pcf_radius.x);
     float blend=smoothstep(transition_start,transition_end,camera_depth);
     return mix(near_visibility,far_visibility,blend);
+}
+
+// Separate sky aperture from normal occluder shadowing: a sky polygon
+// facing the sun is necessary for added directional sunlight to enter.
+float sun_sky_aperture_sample(vec3 uv,int layer)
+{
+    if(!sun_shadow_inside(uv))return 0.0;
+    vec2 tr=layer==0
+        ?sun_sky_aperture_depth_transform.xy
+        :sun_sky_aperture_depth_transform.zw;
+    float receiver_z=uv.z*tr.x+tr.y;
+    if(receiver_z<0.0 || receiver_z>1.0)return 0.0;
+    float sky_z=texture(sun_sky_aperture_map,vec3(uv.xy,float(layer))).r;
+    // Missing aperture pixels contain the clear depth 1.0.
+    // Slight physical tolerance avoids rejecting a receiver exactly at
+    // a sky polygon because of depth quantization.
+    return (sky_z<0.999999 && sky_z+0.00001<receiver_z)?1.0:0.0;
+}
+float sun_sky_aperture(vec3 position)
+{
+    if(sun_sky_aperture_active==0)return 1.0;
+    float depth=dot(position-camera_origin.xyz,camera_forward.xyz);
+    vec3 near_uv=sun_shadow_coordinates(position,sun_shadow_origin,
+        sun_shadow_right,sun_shadow_up,sun_shadow_forward,sun_shadow_limits);
+    vec3 far_uv=sun_shadow_coordinates(position,sun_shadow_far_origin,
+        sun_shadow_far_right,sun_shadow_far_up,
+        sun_shadow_far_forward,sun_shadow_far_limits);
+    bool n=depth<sun_shadow_split && sun_shadow_inside(near_uv);
+    bool f=sun_shadow_inside(far_uv);
+    if(n && !f)return sun_sky_aperture_sample(near_uv,0);
+    if(!n && f)return sun_sky_aperture_sample(far_uv,1);
+    if(!n && !f)return 0.0;
+    float near_access=sun_sky_aperture_sample(near_uv,0);
+    if(depth<sun_shadow_split*0.8125)return near_access;
+    float far_access=sun_sky_aperture_sample(far_uv,1);
+    return mix(near_access,far_access,
+        smoothstep(sun_shadow_split*0.8125,
+                   sun_shadow_split*0.9375,depth));
 }
 
 float sun_dynamic_shadow_visibility(vec3 position,float incidence)
@@ -418,14 +459,15 @@ void main()
                 // Shade the baked brightness even in the absence of a
                 // direct sun highlight; the sprite's arbitrary view-facing
                 // normal must not decide whether the canopy shades it.
-                float sun_applied=incidence*sun_fade;
+                float sky_access=sun_sky_aperture(world_position);
+                float sun_applied=incidence*sun_fade*sky_access;
                 // Shadow contrast must disappear with direct sun power.
                 // Previously even intensity=0.001 darkened the baked
                 // scene by up to 60% (75% for a cutout SPR).
                 // Keep the established appearance at intensity >= 1.0.
                 float sun_shadow_strength=clamp(
                     sun_shadow_color_intensity.a,0.0,1.0);
-                float shadowed_baseline=(sprite ? 0.75*sun_fade
+                float shadowed_baseline=(sprite ? 0.75*sun_fade*sky_access
                                                : 0.6*sun_applied)*
                                         sun_shadow_strength;
                 surface_rgb*=1.0-shadowed_baseline*(1.0-visibility);

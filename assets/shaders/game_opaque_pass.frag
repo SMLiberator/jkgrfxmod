@@ -116,6 +116,9 @@ uniform vec4 translucent_sun_color; // RGB, positive direct intensity
 uniform float translucent_sun_split;
 uniform float translucent_sun_bias_scale;
 uniform vec2 translucent_sun_vsm_params; // world-space stddev, bleed reduction
+uniform int translucent_sun_sky_aperture_active;
+uniform sampler2DArray translucent_sun_sky_aperture_map;
+uniform vec4 translucent_sun_sky_aperture_depth_transform;
 uniform vec2 translucent_sun_pcf_radius; // independent near/far smoothing
 uniform vec4 translucent_sun_map_x[10];
 uniform vec4 translucent_sun_map_y[10];
@@ -199,7 +202,8 @@ float sun_specular_shadow_factor(float depth,float incidence)
     if(translucent_sun_maps_ready==0 && translucent_sun_dynamic_count==0)
         return fade;
     vec3 world=translucent_spotlight_world_pos(depth);
-    return fade*translucent_sun_visibility(world,max(incidence,0.35));
+    return fade*translucent_sun_sky_aperture(world)*
+           translucent_sun_visibility(world,max(incidence,0.35));
 }
 
 // One global COG-controlled directional sun. Only the specular term is
