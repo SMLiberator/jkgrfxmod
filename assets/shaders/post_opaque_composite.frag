@@ -186,7 +186,6 @@ float sun_shadow_visibility(vec3 world_position,float incidence)
 // Separate sky aperture from normal occluder shadowing: a sky polygon
 // facing the sun is necessary for added directional sunlight to enter.
 #ifdef JKGM_SUN_SKY_APERTURE
-#include "sun_sky_aperture_filter.glsl"
 float sun_sky_aperture_sample(vec3 uv,int layer)
 {
     if(!sun_shadow_inside(uv))return 0.0;
@@ -195,8 +194,11 @@ float sun_sky_aperture_sample(vec3 uv,int layer)
         :sun_sky_aperture_depth_transform.zw;
     float receiver_z=uv.z*tr.x+tr.y;
     if(receiver_z<0.0 || receiver_z>1.0)return 0.0;
-    return sun_sky_aperture_filtered_coverage(
-        sun_sky_aperture_map,uv.xy,receiver_z,layer);
+    // Sky geometry is slightly expanded during aperture-map capture,
+    // keeping the hard cutoff inside the regular (soft) sun shadow.
+    // Do not filter depth: one nearest lookup and one comparison.
+    float sky_z=texture(sun_sky_aperture_map,vec3(uv.xy,float(layer))).r;
+    return (sky_z<0.999999 && sky_z+0.00001<receiver_z)?1.0:0.0;
 }
 float sun_sky_aperture(vec3 position)
 {

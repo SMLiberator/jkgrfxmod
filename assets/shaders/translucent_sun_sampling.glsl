@@ -72,7 +72,6 @@ float translucent_sun_sample(int slot,vec3 uv,float incidence)
 // Sky apertures are a SEPARATE gate on added directional lighting, not a
 // replacement shadow comparison (darkening the baked JK ambient is wrong).
 #ifdef JKGM_SUN_SKY_APERTURE
-#include "sun_sky_aperture_filter.glsl"
 float translucent_sun_sky_sample(vec3 uv,int layer)
 {
     if(!translucent_sun_inside(uv))return 0.0;
@@ -81,8 +80,9 @@ float translucent_sun_sky_sample(vec3 uv,int layer)
         :translucent_sun_sky_aperture_depth_transform.zw;
     float receiver_z=uv.z*tr.x+tr.y;
     if(receiver_z<0.0 || receiver_z>1.0)return 0.0;
-    return sun_sky_aperture_filtered_coverage(
-        translucent_sun_sky_aperture_map,uv.xy,receiver_z,layer);
+    float sky_z=texture(translucent_sun_sky_aperture_map,
+                        vec3(uv.xy,float(layer))).r;
+    return (sky_z<0.999999 && sky_z+0.00001<receiver_z)?1.0:0.0;
 }
 float translucent_sun_sky_aperture(vec3 world)
 {

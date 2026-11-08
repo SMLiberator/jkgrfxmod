@@ -5720,17 +5720,22 @@ namespace jkgm {
             auto vec=[](decal_vec3 const &p) {
                 return make_point(p[0],p[1],p[2]);
             };
-            shader.set_orthographic_light(
-                vec(view.origin),vec(view.right),vec(view.up),
-                vec(view.forward),
-                make_point(view.width,view.height,view.range,0.0f));
             shader.set_model(make_point(1.0f,0.0f,0.0f),
                              make_point(0.0f,1.0f,0.0f),
                              make_point(0.0f,0.0f,1.0f),
                              make_point(0.0f,0.0f,0.0f));
             shader.set_shadow_alpha(false,make_point(1.0f,1.0f),
                 make_point(0.0f,0.0f),0.5f,1.0f,false,0.0f);
-            gl::bind_vertex_array(gate.vao);
+            // Gather live SKY faces once, then submit the same mesh at
+            // five tiny light-space offsets. This expands the sky silhouette
+            // by less than one ordinary sun-shadow texel, placing its HARD
+            // cutoff inside VSM's already-dark wall shadows. The ordinary
+            // sun-shadow map is unchanged. This work only happens when
+            // the cached aperture projection or sky flags change.
+            std::vector<GLsizei> sky_counts;
+            std::vector<void const *> sky_offsets;
+            sky_counts.reserve(gate.world.receivers.size());
+            sky_offsets.reserve(gate.world.receivers.size());
             for(size_t i=0;i<gate.world.receivers.size();++i) {
                 auto const &face=gate.world.receivers[i];
                 uintptr_t const base=gate.world.surfaces_addr+
@@ -5741,10 +5746,39 @@ namespace jkgm {
                    (flags&0x600U)==0U || geo<3U || geo>4U)
                     continue;
                 auto const &range=gate.mesh.surfaces[i];
-                gl::draw_elements(gl::element_type::triangles,range.count,
-                    gl::index_type::uint32,
-                    static_cast<ptrdiff_t>(
-                        range.first_index*sizeof(uint32_t)));
+                if(range.count==0)continue;
+                sky_counts.push_back(static_cast<GLsizei>(range.count));
+                sky_offsets.push_back(reinterpret_cast<void const *>(
+                    uintptr_t(range.first_index)*sizeof(uint32_t)));
+            }
+            if(!sky_counts.empty()) {
+                gl::bind_vertex_array(gate.vao);
+                // Use each cascade's actual shadow texel size, not the
+                // aperture atlas's (potentially larger) resolution.
+                unsigned const shadow_pixels=std::max(1U,cascade==0
+                    ?sun_shadow_target->resolution
+                    :sun_shadow_target->far_resolution);
+                float const step_x=view.width/float(shadow_pixels);
+                float const step_y=view.height/float(shadow_pixels);
+                constexpr float sky_expansion_texels=0.75f;
+                auto draw_sky_offset=[&](float dx,float dy) {
+                    auto origin=view.origin;
+                    for(int axis=0;axis<3;++axis)
+                        origin[axis]-=sky_expansion_texels*(
+                            dx*step_x*view.right[axis]+
+                            dy*step_y*view.up[axis]);
+                    shader.set_orthographic_light(
+                        vec(origin),vec(view.right),vec(view.up),
+                        vec(view.forward),
+                        make_point(view.width,view.height,view.range,0.0f));
+                    glMultiDrawElements(GL_TRIANGLES,sky_counts.data(),
+                        GL_UNSIGNED_INT,sky_offsets.data(),
+                        static_cast<GLsizei>(sky_counts.size()));
+                };
+                draw_sky_offset(0.0f,0.0f); // Original aperture coverage.
+                for(float dx:{-1.0f,1.0f})
+                    for(float dy:{-1.0f,1.0f})
+                        draw_sky_offset(dx,dy);
             }
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER,GLuint(saved_draw_fbo));
             glBindFramebuffer(GL_READ_FRAMEBUFFER,GLuint(saved_read_fbo));

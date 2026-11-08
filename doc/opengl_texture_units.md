@@ -79,15 +79,20 @@ same sky aperture through `world_cache_direct_specular.glsl` (forward
 unit 20). Its authored ambient, non-sun environment reflections, and
 point-light specular contributions remain unchanged.
 
-## Sky-aperture edge smoothing
+## Sky-aperture coverage expansion
 
-Sky aperture visibility is now filtered separately from PCF/VSM shadows:
-the shared `sun_sky_aperture_filter.glsl` performs four independent
-`texelFetch` depth comparisons and interpolates their results, with a
-conservative 25% minimum sky coverage. It retains 0 visibility everywhere
-there are no sky-flagged aperture pixels, avoids introducing invalid
-interpolated depth, and softens the staircase produced by a single
-`GL_NEAREST` aperture lookup. The aperture resource itself remains
-nearest-filtered; **do not enable GL_LINEAR on its depth texture**.
-The added work occurs only for actual sky-aperture sampling; when the
-experiment is disabled, GLSL bypasses these calls.
+Instead of four per-fragment aperture-depth samples and visibility filtering,
+the aperture map now uses one nearest depth sample per receiver, followed by
+a binary depth test. The cached sky geometry is rendered once at its original
+light-space coordinates plus four diagonal offsets of **0.75 ordinary
+sun-shadow texel** in each axis. The five versions are submitted with
+`glMultiDrawElements` in five calls, but only when the aperture map's
+projection/sky-surface signature changes; the aperture depth is cleared
+only once. This small silhouette expansion aims to bury the hard sky-mask
+edge within the existing PCF/VSM shadow, avoiding additional per-pixel
+filtering and its jagged standalone mask boundary. It may reintroduce
+some light leaks if the normal sun-shadow map does not represent a nearby
+wall; compare against the earlier filtered build if that occurs.
+
+Depth textures remain `GL_NEAREST` and their precision, sampler allocations,
+and existing sun-shadow filters are unchanged.

@@ -67,48 +67,31 @@ for path in ("game_trns_pass.frag","gpu_3do_preview.frag"):
     assert "float direct_visibility=visibility*sky_access;" in frag
     assert "(1.0-direct_visibility)" in frag
     assert "incidence*direct_visibility*opacity*range_fade;" in frag
-# Shared depth comparisons MUST precede filtering: linear interpolation
-# of depth would invent sky access at solid/sky transitions.
-filter_source=read("assets/shaders/sun_sky_aperture_filter.glsl")
-assert "texelFetch(aperture_map,ivec3(at,layer),0).r" in filter_source
-assert "GL_LINEAR" not in filter_source
-assert "texture(aperture_map" not in filter_source
-assert "for(int y=0;y<2;++y)" in filter_source
-assert "for(int x=0;x<2;++x)" in filter_source
-assert "smoothstep(0.25,1.0,coverage)" in filter_source
+# Aperture visibility returns to exactly one nearest depth comparison
+# per pixel. Dilation belongs to the cached raster pass, not the receiver.
+assert not (r/"assets/shaders/sun_sky_aperture_filter.glsl").exists()
 for shader in (opaque,shared,world):
-    assert shader.count('#include "sun_sky_aperture_filter.glsl"')==1
-    assert shader.count("sun_sky_aperture_filtered_coverage(")==1
+    assert "sun_sky_aperture_filtered_coverage" not in shader
+    assert "sun_sky_aperture_filter.glsl" not in shader
+    assert "sky_z+0.00001<receiver_z" in shader
+    assert shader.count("sky_z=texture(")==1
+# Multi-draw four shifted projections plus the unshifted sky polygons.
+assert "constexpr float sky_expansion_texels=0.75f;" in render
+assert "draw_sky_offset(0.0f,0.0f);" in render
+assert "for(float dx:{-1.0f,1.0f})" in render
+assert "for(float dy:{-1.0f,1.0f})" in render
+assert "draw_sky_offset(dx,dy);" in render
+assert "glMultiDrawElements(GL_TRIANGLES,sky_counts.data()," in render
+assert "sun_shadow_target->far_resolution" in render
+assert "gate.signatures[cascade]==signature" in render
+assert "gl::clear_buffer_depth(1.0f);" in render
 
 def aperture(sky,receiver):
     return sky<0.999999 and sky+0.00001<receiver
-
-def smoothstep(edge0,edge1,v):
-    t=max(0.0,min(1.0,(v-edge0)/(edge1-edge0)))
-    return t*t*(3-2*t)
-
-def filtered(sky,receiver,fx,fy):
-    # Neighbor taps are [top-left, top-right, bottom-left, bottom-right].
-    mask=[1.0 if aperture(z,receiver) else 0.0 for z in sky]
-    weights=[(1-fx)*(1-fy),fx*(1-fy),(1-fx)*fy,fx*fy]
-    return smoothstep(0.25,1.0,sum(a*w for a,w in zip(mask,weights)))
-
 assert not aperture(1.0,0.9)
 assert not aperture(0.8,0.5)
 assert aperture(0.1,0.5)
 assert not aperture(0.5,0.5)
-# Completely enclosed areas stay fully shadowed at all subtexel offsets.
-for fx,fy in ((0,0),(0.1,0.7),(0.5,0.5),(0.9,0.25),(1,1)):
-    assert filtered([1,1,1,1],0.9,fx,fy)==0.0
-    assert filtered([0.1]*4,0.8,fx,fy)==1.0
-    assert filtered([0.9]*4,0.8,fx,fy)==0.0
-# Along a sky/solid edge, visibility varies continuously, not as a 0/1
-# staircase. Below 25% sky coverage the gate remains fully closed.
-sky=[0.1,1.0,0.1,1.0]
-assert filtered(sky,0.8,0.95,0.5)==0.0
-assert filtered(sky,0.8,0.5,0.5)>0.0
-assert filtered(sky,0.8,0.5,0.5)<1.0
-assert 0.98<filtered(sky,0.8,0.05,0.5)<1.0
 for path in ("renderer/renderer.vcxproj","renderer/renderer.vcxproj.filters"):
     assert "sun_sky_aperture_gpu.hpp" in read(path)
 print("Opt-in sunlight sky-aperture source contracts passed")
@@ -131,8 +114,7 @@ for baseline in (0.6,0.75):
             assert abs(shaded_baked(0.8,intensity,1.0,0.0,baseline) -
                        0.8*(1.0-baseline))<1e-9
 
-# Keep the depth-only sky atlas point sampled: only the results of the
-# individual comparison tests may be interpolated.
+# The atlas stores nearest depth, not interpolated depths.
 gpu_resource=read("renderer/sun_sky_aperture_gpu.hpp")
 assert "GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MIN_FILTER,GL_NEAREST" in gpu_resource
 assert "GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MAG_FILTER,GL_NEAREST" in gpu_resource
