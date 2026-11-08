@@ -213,6 +213,7 @@
     <ClInclude Include="sun_dynamic_shadow_layout.hpp" />
     <ClInclude Include="sun_shadow.hpp" />
     <ClInclude Include="sun_shadow_gpu.hpp" />
+    <ClInclude Include="sun_shadow_moments_gpu.hpp" />
     <ClInclude Include="sun_skybox_thing.hpp" />
     <ClInclude Include="texture_alpha.hpp" />
     <ClInclude Include="thing_attachment_normal.hpp" />
