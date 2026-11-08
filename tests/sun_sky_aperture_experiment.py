@@ -77,8 +77,8 @@ for path in ("renderer/renderer.vcxproj","renderer/renderer.vcxproj.filters"):
     assert "sun_sky_aperture_gpu.hpp" in read(path)
 print("Opt-in sunlight sky-aperture source contracts passed")
 
-// A sky-blocked receiver should remain unlit by DIRECT sun, but its
-// baked brightness is no longer protected from sun shadow contrast.
+# A sky-blocked receiver should remain unlit by DIRECT sun, but its
+# baked brightness is no longer protected from sun shadow contrast.
 def shaded_baked(base,intensity,visibility,sky_access,baseline):
     direct_visibility=visibility*sky_access
     contrast=baseline*min(max(intensity,0.0),1.0)
