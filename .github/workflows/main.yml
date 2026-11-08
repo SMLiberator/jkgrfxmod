@@ -18,6 +18,9 @@ jobs:
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
 
+    - name: OpenGL texture unit registry and sampler collision guards
+      run: python3 tests/texture_unit_registry.py
+
     - name: Shared translucent spotlight shader regression
       run: |
         python3 tests/translucent_spotlight_shared.py

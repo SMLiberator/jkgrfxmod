@@ -3444,12 +3444,15 @@ namespace jkgm {
             set_translucent_sun(prog,!post_exempt && !decals_only);
             prog.set_scene_depth(8);
             prog.set_post_exempt(post_exempt);
-            prog.set_decal_receiver_lighting(decals_only,10,11);
+            prog.set_decal_receiver_lighting(decals_only,
+                texture_units::forward_decal_light,
+                texture_units::forward_decal_occlusion);
             if(decals_only) {
-                // Reuse the unused alpha of the opaque emissive G-buffer for
-                // the receiver's JK light intensity. No extra render target,
-                // color/depth copy or feedback from the active framebuffer.
-                gl::set_active_texture_unit(10);
+                // Unit 10 is the spotlight's sampler2DShadow, even if it
+                // is inactive. Reuse 2D displacement unit 9: decals disable
+                // parallax and receive JK light from opaque emissive alpha.
+                gl::set_active_texture_unit(
+                    texture_units::forward_decal_light);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                                  frame_screen->get_resolved_emissive_texture());
                 gl::set_active_texture_unit(11);

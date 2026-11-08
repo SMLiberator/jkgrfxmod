@@ -134,6 +134,7 @@
     <ClInclude Include="gpu_3do_frustum.hpp" />
     <ClInclude Include="gpu_3do_modelview.hpp" />
     <ClInclude Include="gpu_3do_preview.hpp" />
+    <ClInclude Include="texture_units.hpp" />
     <ClInclude Include="gpu_3do_triangulation.hpp" />
     <ClInclude Include="gpu_3do_uv.hpp" />
     <ClInclude Include="gpu_mat_ready_cache.hpp" />

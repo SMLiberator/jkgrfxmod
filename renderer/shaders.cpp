@@ -1,4 +1,5 @@
 #include "shaders.hpp"
+#include "texture_units.hpp"
 #include "base/file_stream.hpp"
 #include "base/log.hpp"
 #include "base/memory_block.hpp"
@@ -583,8 +584,10 @@ void jkgm::shaders::game_pass_shader::set_translucent_shadow(
 {
     gl::set_uniform_integer(translucent_shadow_slot,slot);
     gl::set_uniform_float(translucent_shadow_angle_bias_scale,angle_bias_scale);
+    // Bind its sampler type even when the light is inactive.
+    gl::set_uniform_integer(translucent_shadow_image,
+                            texture_units::forward_spotlight_shadow);
     if(slot<0)return;
-    gl::set_uniform_integer(translucent_shadow_image,10);
     gl::set_uniform_vector(translucent_shadow_near_range,
                            make_point(near_plane,far_plane));
 }
@@ -764,8 +767,10 @@ void jkgm::shaders::gpu_3do_preview_shader::set_translucent_shadow(
 {
     gl::set_uniform_integer(translucent_shadow_slot,slot);
     gl::set_uniform_float(translucent_shadow_angle_bias_scale,angle_bias_scale);
+    // Bind its sampler type even when the light is inactive.
+    gl::set_uniform_integer(translucent_shadow_image,
+                            texture_units::forward_spotlight_shadow);
     if(slot<0)return;
-    gl::set_uniform_integer(translucent_shadow_image,10);
     gl::set_uniform_vector(translucent_shadow_near_range,
                            make_point(near_plane,far_plane));
 }
@@ -1548,8 +1553,8 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight_shadow(
 {
     gl::set_uniform_integer(spotlight_shadow_slot,slot);
     gl::set_uniform_float(spotlight_shadow_angle_bias_scale,angle_bias_scale);
+    gl::set_uniform_integer(spotlight_shadow_image,10);
     if(slot>=0) {
-        gl::set_uniform_integer(spotlight_shadow_image,10);
         gl::set_uniform_vector(spotlight_shadow_near_range,
                                make_point(near_plane,far_plane));
     }

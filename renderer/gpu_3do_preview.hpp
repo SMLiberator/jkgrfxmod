@@ -1,6 +1,7 @@
 #pragma once
 // Development-only native 3DO GPU bypass. Each immutable mesh is copied once,
 // including UV seams and per-face material references. Transforms are dynamic.
+#include "texture_units.hpp"
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -26,7 +27,8 @@ namespace jkgm {
     // texture types. MATs/decals occupy 0..11, spotlight cookies 12..15,
     // and translucent sun shadow maps 16..18. The sector plane buffer is
     // the next unshared unit, even when the JSON option is disabled.
-    constexpr int gpu_3do_sector_plane_texture_unit=19;
+    constexpr int gpu_3do_sector_plane_texture_unit=
+        texture_units::forward_sector_buffer;
     struct gpu_3do_light {
         std::array<float,3> local_position{};
         float radius=0.0f;

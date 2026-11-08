@@ -278,6 +278,9 @@
     <ClInclude Include="gpu_3do_preview.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="texture_units.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="gpu_3do_triangulation.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
