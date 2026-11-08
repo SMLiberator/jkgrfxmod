@@ -15,8 +15,16 @@ uniform vec4 translucent_sun_map_x[10];
 uniform vec4 translucent_sun_map_y[10];
 uniform vec4 translucent_sun_map_z[10];
 uniform vec4 translucent_sun_tile_rect[8];
+// World-cache sun specular receives the SAME 16/17 textures as forward 3DOs.
+// In VSM mode they are RG32F moments, not comparison depth textures.
+#ifdef JKGM_SUN_VSM
+uniform sampler2D translucent_sun_near_depth;
+uniform sampler2D translucent_sun_far_depth;
+uniform vec2 translucent_sun_vsm_params; // world stddev, bleed reduction
+#else
 uniform sampler2DShadow translucent_sun_near_depth;
 uniform sampler2DShadow translucent_sun_far_depth;
+#endif
 uniform sampler2DShadow translucent_sun_dynamic_depth;
 #ifdef JKGM_SUN_SKY_APERTURE
 uniform int translucent_sun_sky_aperture_active;
@@ -36,6 +44,27 @@ bool world_sun_inside(vec3 uv)
     return all(greaterThanEqual(uv,vec3(0.0))) &&
            all(lessThanEqual(uv,vec3(1.0)));
 }
+#ifdef JKGM_SUN_VSM
+float world_sun_cascade_filter(sampler2D map,vec3 uv,float inv_range)
+{
+    vec2 moments=texture(map,uv.xy).rg;
+    if(uv.z<=moments.x)return 1.0;
+    // Keep the same variance floor, depth bias and probability remap as
+    // the native/GPU 3DO VSM receivers; no extra shadow texture reads.
+    float min_stddev=translucent_sun_vsm_params.x*inv_range;
+    float variance=max(moments.y-moments.x*moments.x,
+                       max(2.0e-7,min_stddev*min_stddev));
+    float delta=uv.z-moments.x;
+    float probability=variance/(variance+delta*delta);
+    float bleed=translucent_sun_vsm_params.y;
+    return clamp((probability-bleed)/(1.0-bleed),0.0,1.0);
+}
+#else
+float world_sun_cascade_filter(sampler2DShadow map,vec3 uv,float inv_range)
+{
+    return texture(map,uv);
+}
+#endif
 float world_sun_sample(int slot,vec3 uv,float incidence)
 {
     float grazing=1.0-clamp(incidence,0.0,1.0);
@@ -44,9 +73,11 @@ float world_sun_sample(int slot,vec3 uv,float incidence)
                  length(translucent_sun_map_z[slot].xyz);
     float comparison=uv.z-max(4.0/16777215.0,offset);
     if(slot==0)
-        return texture(translucent_sun_near_depth,vec3(uv.xy,comparison));
+        return world_sun_cascade_filter(translucent_sun_near_depth,
+            vec3(uv.xy,comparison),length(translucent_sun_map_z[0].xyz));
     if(slot==1)
-        return texture(translucent_sun_far_depth,vec3(uv.xy,comparison));
+        return world_sun_cascade_filter(translucent_sun_far_depth,
+            vec3(uv.xy,comparison),length(translucent_sun_map_z[1].xyz));
     vec4 tile=translucent_sun_tile_rect[slot-2];
     vec2 tex_size=vec2(textureSize(translucent_sun_dynamic_depth,0));
     vec2 center=tile.xy+vec2(2.0)+uv.xy*(tile.zw-vec2(4.0));

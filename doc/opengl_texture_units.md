@@ -96,3 +96,18 @@ wall; compare against the earlier filtered build if that occurs.
 
 Depth textures remain `GL_NEAREST` and their precision, sampler allocations,
 and existing sun-shadow filters are unchanged.
+
+## World-cache sunlight: VSM sampler compatibility
+
+The cached-world direct GGX shader now compiles with `JKGM_SUN_VSM` when
+`experimental_sun_shadow_vsm` and `enable_sun_shadows` are enabled,
+just like the native and GPU-3DO sunlight shaders. Units 16/17 then use
+`sampler2D` to sample RG32F near/far moments and apply the same VSM
+Chebyshev formula and light-bleed parameters. With VSM disabled they use
+`sampler2DShadow` against the depth maps. The dynamic Thing atlas
+remains a `sampler2DShadow` on unit 18 in both modes.
+
+Previously cached-world direct specular sampling read VSM moment color
+textures through a depth-comparison sampler, a format/type mismatch
+that could cause undefined visible highlights. This change does not
+modify VSM prefiltering, base sunlight diffuse, or sky apertures.

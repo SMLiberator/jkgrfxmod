@@ -466,7 +466,9 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     // Build the GPU world shader whenever unified caching is enabled.
     if(the_config->use_gpu_cache)
         world_cache_preview_program =
-            std::make_unique<shaders::world_cache_preview_shader>(data_root);
+            std::make_unique<shaders::world_cache_preview_shader>(
+                data_root,the_config->experimental_sun_shadow_vsm &&
+                          the_config->enable_sun_shadows);
 
     gl::bind_texture(gl::texture_bind_target::texture_2d, menu_texture);
     gl::tex_image_2d(gl::texture_bind_target::texture_2d,

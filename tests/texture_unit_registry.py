@@ -55,6 +55,12 @@ sh=read("renderer/shaders.cpp")
 assert "JKGM_SUN_SKY_APERTURE 1" in sh
 assert "units>=texture_units::forward_next_extended_required_units" in sh
 assert "static_assert(no_incompatible_target_aliases(gpu_3do_preview)" in header
+# World-cache units 16/17 are a sampler2D in VSM and sampler2DShadow in PCF.
+wm=re.search(r"constexpr binding world_cache\[\]=\{(.*?)\n\};",header,re.S)
+assert wm
+for uniform,slot in (("translucent_sun_near_depth","16"),
+                     ("translucent_sun_far_depth","17")):
+    assert f'{{"{uniform}",{slot},sampler_kind::depth_variant}}' in wm.group(1)
 gpu=read("renderer/gpu_3do_preview.hpp")
 cpp=read("renderer/renderer.cpp")
 sh=read("renderer/shaders.cpp")

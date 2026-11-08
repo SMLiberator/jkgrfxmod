@@ -102,7 +102,8 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
         public:
             translucent_sun_uniforms translucent_sun;
-            explicit world_cache_preview_shader(fs::path const &data_root);
+            explicit world_cache_preview_shader(fs::path const &data_root,
+                                                bool prefiltered_sun=false);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
                                  point<4,float> up,point<4,float> origin);
             void set_projection(point<4,float> params);

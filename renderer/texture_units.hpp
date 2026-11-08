@@ -54,9 +54,9 @@ constexpr binding world_cache[]={
     {"env_map2",7,sampler_kind::tex2d},
     {"palette_fullbright_mask",11,sampler_kind::tex2d},
     {"scene_depth",8,sampler_kind::tex2d},
-    // world_cache_direct_specular.glsl includes forward sun samplers.
-    {"translucent_sun_near_depth",16,sampler_kind::shadow},
-    {"translucent_sun_far_depth",17,sampler_kind::shadow},
+    // VSM binds RG32F moments here; non-VSM uses comparison depths.
+    {"translucent_sun_near_depth",16,sampler_kind::depth_variant},
+    {"translucent_sun_far_depth",17,sampler_kind::depth_variant},
     {"translucent_sun_dynamic_depth",18,sampler_kind::shadow},
 };
 

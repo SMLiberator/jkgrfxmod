@@ -63,6 +63,26 @@ for name in ("game_opaque_pass.frag","game_trns_pass.frag","gpu_3do_preview.frag
     assert "uniform vec2 translucent_sun_vsm_params;" in s
     assert "uniform sampler2D translucent_sun_far_depth;" in s
     assert "uniform sampler2DShadow translucent_sun_far_depth;" in s
+# GPU world uses the same VSM moments as forward 3DO receivers. Its linked
+# shader must be compiled for the matching sampler type and compare formula.
+world=read("assets/shaders/world_cache_direct_specular.glsl")
+state_programs=read("renderer/opengl_state.cpp")
+assert "world_cache_preview_shader(fs::path const &data_root,\n                                                bool prefiltered_sun=false);" in prog
+assert "world_cache_preview_shader::world_cache_preview_shader(\n    fs::path const &root,bool prefiltered_sun)" in progcpp
+assert 'root/"shaders/world_cache.frag",prefiltered_sun)' in progcpp
+assert "std::make_unique<shaders::world_cache_preview_shader>(\n                data_root,the_config->experimental_sun_shadow_vsm &&\n                          the_config->enable_sun_shadows)" in state_programs
+assert "#ifdef JKGM_SUN_VSM" in world
+assert "uniform sampler2D translucent_sun_near_depth;" in world
+assert "uniform sampler2D translucent_sun_far_depth;" in world
+assert "uniform sampler2DShadow translucent_sun_near_depth;" in world
+assert "uniform sampler2DShadow translucent_sun_far_depth;" in world
+assert "uniform sampler2DShadow translucent_sun_dynamic_depth;" in world
+assert "uniform vec2 translucent_sun_vsm_params;" in world
+assert "world_sun_cascade_filter(translucent_sun_near_depth," in world
+assert "world_sun_cascade_filter(translucent_sun_far_depth," in world
+assert "moments.y-moments.x*moments.x" in world
+assert "max(2.0e-7,min_stddev*min_stddev)" in world
+assert "return clamp((probability-bleed)/(1.0-bleed),0.0,1.0);" in world
 assert "sun_dynamic_image;" in opaque
 assert "translucent_sun_dynamic_depth;" in read("assets/shaders/game_trns_pass.frag")
 assert "spotlight_shadow_image;" in opaque

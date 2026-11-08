@@ -305,10 +305,10 @@ void jkgm::shaders::menu_shader::set_menu_sampler(int sampler)
 }
 
 jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
-    fs::path const &root)
+    fs::path const &root,bool prefiltered_sun)
     : opengl_shader("world_cache_preview",
                     root/"shaders/world_cache.vert",
-                    root/"shaders/world_cache.frag")
+                    root/"shaders/world_cache.frag",prefiltered_sun)
     , view_right(gl::get_uniform_location(the_program,"view_right"))
     , view_forward(gl::get_uniform_location(the_program,"view_forward"))
     , view_up(gl::get_uniform_location(the_program,"view_up"))
