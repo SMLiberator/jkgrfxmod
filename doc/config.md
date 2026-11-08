@@ -83,8 +83,9 @@ not all options appear in the minimal sample `assets/jkgm.json`.
 | `enable_sun` | Enable additional COG-controlled directional sunlight; independent of `enable_sun_shadows`. | `true` |
 | `enable_blur` | Enable distance/peripheral spatial blur effects where configured by COG. | `true` |
 | `spatial_blur_mode` | Standard spatial blur quality/performance mode. `2` (default) runs both Gaussian passes at half width/height followed by full-resolution depth-aware four-tap reconstruction; preserves original unblurred pixels and blends original detail back into weakly blurred areas. Confirmed by in-game A/B testing to provide a substantial performance improvement with a small visual tradeoff. `1` keeps the vertical pass at full resolution; `0` uses the original full-resolution Gaussian for quality comparisons/rollback. GL scissor testing falls back to the original path. Does **not** change HDR, exposure, tone mapping, color grading, bloom or HUD. | `2` |
-| `experimental_spatial_blur_mode` | Legacy compatibility alias for `spatial_blur_mode` (values `0..2`). Explicit `spatial_blur_mode` takes precedence if both are present. | absent |
 | `experimental_spatial_blur_half_res` | Older compatibility alias: `true` selects mode `1` only when neither numeric mode key is supplied. | `false` |
+
+Compatibility: the former `experimental_spatial_blur_mode` JSON key is still parsed as a legacy alias for `spatial_blur_mode` (values `0..2`). The canonical key wins when both are present. This alias is not an active config-struct field, so it is documented here rather than as an active option row.
 | `enable_trails` | Enable temporal frame blending/trails where configured by COG. | `true` |
 | `enable_fog` | Enable renderer fog from COG settings. | `true` |
 | `retro_mode` | Quantize the final image to the classic CMP palette (without dithering). | `false` |
