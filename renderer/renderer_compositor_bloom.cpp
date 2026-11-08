@@ -12,12 +12,20 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
 {
     update_auto_exposure(ogs,composed_screen);
 
-    // Default to the original path. Scissored fullscreen draws do not fill
-    // their targets, so skip temporary clears only when scissor is disabled.
-    bool const fused_bloom=ogs->experimental_fused_bloom_downsample;
+    // Scissored fullscreen draws cannot fully overwrite intermediate FBOs.
+    // Preserve the legacy sequence whenever scissor testing is enabled.
+    bool const full_viewport=glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE;
+    bool const fused_bloom=ogs->experimental_fused_bloom_downsample &&
+                           full_viewport;
     bool const skip_bloom_clears=ogs->experimental_skip_bloom_clears &&
-        glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE;
-
+                                 full_viewport;
+    if(fused_bloom || skip_bloom_clears) {
+        // A skipped clear is safe only if each pass overwrites ALL pixels.
+        // In particular, retained GL blending would otherwise accumulate
+        // previous-frame bloom data into the temporary FBOs.
+        gl::disable(gl::capability::blend);
+        gl::disable(gl::capability::depth_test);
+    }
     gl::bind_vertex_array(ogs->postmdl.vao);
     if(!fused_bloom) {
         // Original full-resolution bloom extraction, unchanged by default.

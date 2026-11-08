@@ -38,6 +38,11 @@ assert "c=bloom_threshold(c,exposure_factor);" in s
 assert "d=bloom_threshold(d,exposure_factor);" in s
 assert bm.count("if(!skip_bloom_clears)") == 4
 assert "glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE" in bm
+assert "experimental_fused_bloom_downsample &&" in bm
+assert "experimental_skip_bloom_clears &&" in bm
+assert "if(fused_bloom || skip_bloom_clears)" in bm
+assert "gl::disable(gl::capability::blend);" in bm
+assert "gl::disable(gl::capability::depth_test);" in bm
 assert "gl::clear({gl::clear_flag::color, gl::clear_flag::depth});" in bm
 assert "if(the_config->experimental_native_triangle_uploads &&" in r
 assert "tb.size()==0U" in r
