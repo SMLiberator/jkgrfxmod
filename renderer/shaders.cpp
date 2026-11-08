@@ -17,6 +17,7 @@ jkgm::shaders::translucent_sun_uniforms::translucent_sun_uniforms(
     , color(gl::get_uniform_location(program,"translucent_sun_color"))
     , split(gl::get_uniform_location(program,"translucent_sun_split"))
     , bias_scale(gl::get_uniform_location(program,"translucent_sun_bias_scale"))
+    , pcf_radius(gl::get_uniform_location(program,"translucent_sun_pcf_radius"))
     , near_depth(gl::get_uniform_location(program,"translucent_sun_near_depth"))
     , far_depth(gl::get_uniform_location(program,"translucent_sun_far_depth"))
     , dynamic_depth(gl::get_uniform_location(program,"translucent_sun_dynamic_depth"))
@@ -53,6 +54,12 @@ void jkgm::shaders::translucent_sun_uniforms::set_state(
         gl::set_uniform_integer(far_depth,17);
     }
     if(dynamic>0)gl::set_uniform_integer(dynamic_depth,18);
+}
+
+void jkgm::shaders::translucent_sun_uniforms::set_pcf_radius(
+    float near_radius,float far_radius)
+{
+    gl::set_uniform_vector(pcf_radius,make_point(near_radius,far_radius));
 }
 
 void jkgm::shaders::translucent_sun_uniforms::set_map(
@@ -1408,6 +1415,8 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , sun_shadow_split(gl::get_uniform_location(the_program,"sun_shadow_split"))
     , sun_shadow_receiver_bias_scale(gl::get_uniform_location(
         the_program,"sun_shadow_receiver_bias_scale"))
+    , sun_shadow_pcf_radius(gl::get_uniform_location(
+        the_program,"sun_shadow_pcf_radius"))
     , sun_max_distance(gl::get_uniform_location(the_program,"sun_max_distance"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
@@ -1555,6 +1564,13 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_receiver_b
     float scale)
 {
     gl::set_uniform_float(sun_shadow_receiver_bias_scale,scale);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_pcf_radius(
+    float near_radius,float far_radius)
+{
+    gl::set_uniform_vector(sun_shadow_pcf_radius,
+                           make_point(near_radius,far_radius));
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_max_distance(

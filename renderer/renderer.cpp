@@ -4702,6 +4702,9 @@ namespace jkgm {
                 point_axis(cam.forward,0.0f),point_axis(cam.up,v),
                 make_point(float(get<x>(conf_scr_res)),
                            float(get<y>(conf_scr_res))));
+            uniforms.set_pcf_radius(
+                the_config->sun_shadow_near_pcf_radius,
+                the_config->sun_shadow_far_pcf_radius);
             uniforms.set_state(true,shadows,dynamic,
                 make_point(dir[0],dir[1],dir[2]),
                 make_point(rgb[0],rgb[1],rgb[2],intensity),
@@ -7039,6 +7042,9 @@ namespace jkgm {
             prog.set_retain_hom_pixels(the_config->retain_hom_pixels);
             prog.set_sun_shadow_receiver_bias_scale(
                 the_config->sun_shadow_receiver_bias_scale);
+            prog.set_sun_shadow_pcf_radius(
+                the_config->sun_shadow_near_pcf_radius,
+                the_config->sun_shadow_far_pcf_radius);
             prog.set_sun_max_distance(the_config->sun_max_distance);
             prog.set_spotlight_shadow(-1,0.0f,0.0f,
                 the_config->spotlight_shadow_angle_bias_scale);

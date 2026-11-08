@@ -52,7 +52,8 @@ uniform sampler2DShadow sun_shadow_far_image;
 uniform vec3 sun_shadow_far_origin,sun_shadow_far_right;
 uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
-uniform float sun_shadow_receiver_bias_scale; // diagnostic multiplier, 0..2
+uniform float sun_shadow_receiver_bias_scale;
+uniform vec2 sun_shadow_pcf_radius; // 0=legacy HW comparison; positive=4 taps // diagnostic multiplier, 0..2
 uniform float sun_max_distance; // 0=unlimited; JK forward distance where added sun ends
 
 // Added sunlight and its shadows are full strength to 85% of the range, fade
@@ -85,7 +86,7 @@ bool sun_shadow_inside(vec3 coord)
            all(lessThanEqual(coord,vec3(1.0)));
 }
 float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
-                        float incidence)
+                        float incidence,float radius)
 {
     // A 24-bit normalized orthographic depth map avoids quantizing the
     // world's full light-axis range into only 65536 possible distances.
@@ -96,8 +97,19 @@ float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
     float bias_world=(0.008+0.027*grazing*grazing)*
                      sun_shadow_receiver_bias_scale;
     float bias=max(4.0/16777215.0,bias_world/max(range,0.001));
-    // Use one hardware bilinear comparison PCF sample in both cascades.
-    return texture(map,vec3(coordinate.xy,coordinate.z-bias));
+    // Keep the original one-comparison path when the opt-in radius is 0.
+    // Four bilinear hardware PCF comparisons broaden edges for radius > 0.
+    vec3 lookup=vec3(coordinate.xy,coordinate.z-bias);
+    if(radius<=0.0)return texture(map,lookup);
+    vec2 spread=(radius/vec2(textureSize(map,0)))*0.5;
+    float sum=0.0;
+    for(int y=0;y<2;++y)
+    for(int x=0;x<2;++x) {
+        vec2 delta=vec2(x==0?-spread.x:spread.x,
+                        y==0?-spread.y:spread.y);
+        sum+=texture(map,vec3(lookup.xy+delta,lookup.z));
+    }
+    return sum*0.25;
 }
 float sun_shadow_visibility(vec3 world_position,float incidence)
 {
@@ -115,19 +127,21 @@ float sun_shadow_visibility(vec3 world_position,float incidence)
     float transition_end=sun_shadow_split*0.9375;
     if(use_near && camera_depth<transition_start)
         return sun_shadow_filter(sun_shadow_image,near_uv,
-                                 sun_shadow_limits.z,incidence);
+                                 sun_shadow_limits.z,incidence,
+                                 sun_shadow_pcf_radius.x);
     vec3 far_uv=sun_shadow_coordinates(world_position,sun_shadow_far_origin,
         sun_shadow_far_right,sun_shadow_far_up,
         sun_shadow_far_forward,sun_shadow_far_limits);
     if(!sun_shadow_inside(far_uv))
         return use_near
-            ? sun_shadow_filter(sun_shadow_image,near_uv,sun_shadow_limits.z,incidence)
+            ? sun_shadow_filter(sun_shadow_image,near_uv,sun_shadow_limits.z,
+                                incidence,sun_shadow_pcf_radius.x)
             : 1.0;
     float far_visibility=sun_shadow_filter(sun_shadow_far_image,
-        far_uv,sun_shadow_far_limits.z,incidence);
+        far_uv,sun_shadow_far_limits.z,incidence,sun_shadow_pcf_radius.y);
     if(!use_near)return far_visibility;
     float near_visibility=sun_shadow_filter(sun_shadow_image,
-        near_uv,sun_shadow_limits.z,incidence);
+        near_uv,sun_shadow_limits.z,incidence,sun_shadow_pcf_radius.x);
     float blend=smoothstep(transition_start,transition_end,camera_depth);
     return mix(near_visibility,far_visibility,blend);
 }

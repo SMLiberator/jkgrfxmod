@@ -35,7 +35,7 @@ namespace jkgm {
         // GPU-cached 3DO translucency. Row vectors map world XYZ to shadow UV.
         struct translucent_sun_uniforms {
             gl::uniform_location_id enabled,maps_ready,dynamic_count;
-            gl::uniform_location_id direction,color,split,bias_scale;
+            gl::uniform_location_id direction,color,split,bias_scale,pcf_radius;
             gl::uniform_location_id near_depth,far_depth,dynamic_depth;
             gl::uniform_location_id max_distance;
             std::vector<gl::uniform_location_id> x,y,z,rect;
@@ -44,6 +44,7 @@ namespace jkgm {
                            point<3,float> sun_dir,point<4,float> sun_color,
                            float split_distance,float receiver_bias,
                            float max_distance=0.0f);
+            void set_pcf_radius(float near_radius,float far_radius);
             void set_map(int slot,point<4,float> row_x,point<4,float> row_y,
                          point<4,float> row_z,point<4,float> tile_rect);
         };
@@ -501,6 +502,7 @@ namespace jkgm {
             gl::uniform_location_id sun_shadow_far_forward,sun_shadow_far_limits;
             gl::uniform_location_id sun_shadow_split;
             gl::uniform_location_id sun_shadow_receiver_bias_scale;
+            gl::uniform_location_id sun_shadow_pcf_radius;
             gl::uniform_location_id sun_max_distance;
             gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
             std::vector<gl::uniform_location_id> sun_dynamic_atlas_rects;
@@ -544,6 +546,7 @@ namespace jkgm {
                                     point<3,float> up,point<3,float> forward,
                                     point<3,float> limits,float split);
             void set_sun_shadow_receiver_bias_scale(float scale);
+            void set_sun_shadow_pcf_radius(float near_radius,float far_radius);
             void set_sun_max_distance(float distance);
             void set_sun_dynamic_count(int count);
             void set_sun_dynamic_atlas_rect(int slot,point<4,float> rect);
