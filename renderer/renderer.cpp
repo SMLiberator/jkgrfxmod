@@ -2836,7 +2836,17 @@ namespace jkgm {
 
         void fill_buffer(triangle_batch const &tb, triangle_buffer_model *mdl)
         {
-            mdl->maybe_grow_buffers(tb.capacity() * 3);
+            // Opt-in: empty native batches need no GL map/unmap. Allocate
+            // populated GPU buffers from used counts rather than the CPU
+            // batch's 10,000-triangle reserve.
+            if(the_config->experimental_native_triangle_uploads &&
+               tb.size()==0U) {
+                mdl->num_vertices=0;
+                return;
+            }
+            mdl->maybe_grow_buffers(
+                (the_config->experimental_native_triangle_uploads
+                    ?tb.size():tb.capacity())*3);
 
             auto *vx = mdl->mmio.data();
             auto const cam = read_engine_camera();

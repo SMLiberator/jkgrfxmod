@@ -65,6 +65,18 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_bloom")) {
             j.at("enable_bloom").get_to(rv->enable_bloom);
         }
+        if(j.contains("experimental_fused_bloom_downsample")) {
+            j.at("experimental_fused_bloom_downsample").get_to(
+                rv->experimental_fused_bloom_downsample);
+        }
+        if(j.contains("experimental_skip_bloom_clears")) {
+            j.at("experimental_skip_bloom_clears").get_to(
+                rv->experimental_skip_bloom_clears);
+        }
+        if(j.contains("experimental_native_triangle_uploads")) {
+            j.at("experimental_native_triangle_uploads").get_to(
+                rv->experimental_native_triangle_uploads);
+        }
 
         if(j.contains("enable_blur")) {
             j.at("enable_blur").get_to(rv->enable_blur);

@@ -22,6 +22,10 @@ namespace jkgm {
         float max_anisotropy = 2.0f;
         std::optional<antialiasing_config> antialiasing;
         bool enable_bloom = true;
+        // Separate experimental optimizations, each default-off.
+        bool experimental_fused_bloom_downsample = false;
+        bool experimental_skip_bloom_clears = false;
+        bool experimental_native_triangle_uploads = false;
         // Spatial blur (distance + peripheral) and temporal feedback trails.
         bool enable_blur = true;
         bool enable_trails = true;

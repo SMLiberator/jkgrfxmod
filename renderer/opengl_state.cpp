@@ -382,6 +382,10 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , enable_blur(the_config->enable_blur)
     , enable_trails(the_config->enable_trails)
     , enable_hdr(the_config->enable_hdr)
+    , experimental_fused_bloom_downsample(
+        the_config->experimental_fused_bloom_downsample)
+    , experimental_skip_bloom_clears(
+        the_config->experimental_skip_bloom_clears)
     , auto_exposure_sensitivity(the_config->auto_exposure_sensitivity)
     , hdr_exposure_compensation(the_config->hdr_exposure_compensation)
     , hdr_shadow_softness(the_config->hdr_shadow_softness)

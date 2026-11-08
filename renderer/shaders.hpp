@@ -648,11 +648,16 @@ namespace jkgm {
         class post_scale_shader : public opengl_shader {
         private:
             gl::uniform_location_id fbuf_image;
+            gl::uniform_location_id fused_bloom_first_pass;
+            gl::uniform_location_id exposure_image,exposure_enabled;
+            gl::uniform_location_id hdr_exposure_compensation;
 
         public:
             explicit post_scale_shader(fs::path const &data_root);
 
             void set_fbuf_sampler(int sampler);
+            void set_fused_bloom(bool first_pass,int exposure_sampler,
+                                 bool adaptive,float compensation_ev);
         };
 
         class post_spatial_blur_shader : public opengl_shader {

@@ -133,6 +133,8 @@ namespace jkgm {
         bool enable_trails = true;
         bool auto_exposure_scene = false;
         bool enable_hdr = false;
+        bool experimental_fused_bloom_downsample = false;
+        bool experimental_skip_bloom_clears = false;
         float auto_exposure_sensitivity = 0.0f;
         float hdr_exposure_compensation = 0.5f;
         float hdr_shadow_softness = 0.6f;

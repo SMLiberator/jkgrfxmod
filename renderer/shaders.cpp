@@ -1742,12 +1742,27 @@ jkgm::shaders::post_scale_shader::post_scale_shader(fs::path const &data_root)
                     data_root / "shaders/postprocess.vert",
                     data_root / "shaders/post_scale.frag")
     , fbuf_image(gl::get_uniform_location(the_program, "fbuf_image"))
+    , fused_bloom_first_pass(gl::get_uniform_location(
+        the_program,"fused_bloom_first_pass"))
+    , exposure_image(gl::get_uniform_location(the_program,"exposure_image"))
+    , exposure_enabled(gl::get_uniform_location(the_program,"exposure_enabled"))
+    , hdr_exposure_compensation(gl::get_uniform_location(
+        the_program,"hdr_exposure_compensation"))
 {
 }
 
 void jkgm::shaders::post_scale_shader::set_fbuf_sampler(int sampler)
 {
     gl::set_uniform_integer(fbuf_image, sampler);
+}
+
+void jkgm::shaders::post_scale_shader::set_fused_bloom(
+    bool first_pass,int exposure_sampler,bool adaptive,float compensation_ev)
+{
+    gl::set_uniform_integer(fused_bloom_first_pass,first_pass?1:0);
+    gl::set_uniform_integer(exposure_image,exposure_sampler);
+    gl::set_uniform_integer(exposure_enabled,adaptive?1:0);
+    gl::set_uniform_float(hdr_exposure_compensation,compensation_ev);
 }
 
 jkgm::shaders::post_spatial_blur_shader::post_spatial_blur_shader(
