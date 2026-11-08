@@ -40,7 +40,11 @@ uniform float spotlight_shadow_angle_bias_scale; // 0=legacy, 1=+0.035 JKU at gr
 
 uniform int sun_lighting_active; // independent of depth-map readiness
 uniform int sun_shadow_active;
+#ifdef JKGM_SUN_VSM
+uniform sampler2D sun_shadow_image;
+#else
 uniform sampler2DShadow sun_shadow_image;
+#endif
 uniform vec3 sun_shadow_direction; // world-space direction toward the sun
 uniform vec4 sun_shadow_color_intensity;
 uniform vec3 sun_shadow_origin;
@@ -48,7 +52,11 @@ uniform vec3 sun_shadow_right;
 uniform vec3 sun_shadow_up;
 uniform vec3 sun_shadow_forward;
 uniform vec3 sun_shadow_limits; // orthographic width, height, depth range
+#ifdef JKGM_SUN_VSM
+uniform sampler2D sun_shadow_far_image;
+#else
 uniform sampler2DShadow sun_shadow_far_image;
+#endif
 uniform vec3 sun_shadow_far_origin,sun_shadow_far_right;
 uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
@@ -85,8 +93,13 @@ bool sun_shadow_inside(vec3 coord)
     return all(greaterThanEqual(coord,vec3(0.0))) &&
            all(lessThanEqual(coord,vec3(1.0)));
 }
+#ifdef JKGM_SUN_VSM
+float sun_shadow_filter(sampler2D map,vec3 coordinate,float range,
+                        float incidence,float radius)
+#else
 float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
                         float incidence,float radius)
+#endif
 {
     // A 24-bit normalized orthographic depth map avoids quantizing the
     // world's full light-axis range into only 65536 possible distances.
@@ -97,6 +110,17 @@ float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
     float bias_world=(0.008+0.027*grazing*grazing)*
                      sun_shadow_receiver_bias_scale;
     float bias=max(4.0/16777215.0,bias_world/max(range,0.001));
+#ifdef JKGM_SUN_VSM
+    // VSM: Chebyshev bound from prefiltered first and second moments.
+    // Preserve the receiver bias and reduce light bleeding conservatively.
+    float receiver=coordinate.z-bias;
+    vec2 moments=texture(map,coordinate.xy).rg;
+    if(receiver<=moments.x)return 1.0;
+    float variance=max(moments.y-moments.x*moments.x,2.0e-7);
+    float delta=receiver-moments.x;
+    float probability=variance/(variance+delta*delta);
+    return clamp((probability-0.2)/0.8,0.0,1.0);
+#else
     // Keep the original one-comparison path when the opt-in radius is 0.
     // Four bilinear hardware PCF comparisons broaden edges for radius > 0.
     vec3 lookup=vec3(coordinate.xy,coordinate.z-bias);
@@ -110,6 +134,7 @@ float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
         sum+=texture(map,vec3(lookup.xy+delta,lookup.z));
     }
     return sum*0.25;
+#endif
 }
 float sun_shadow_visibility(vec3 world_position,float incidence)
 {

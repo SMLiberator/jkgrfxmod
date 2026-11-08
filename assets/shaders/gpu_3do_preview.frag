@@ -493,8 +493,16 @@ uniform vec4 translucent_sun_map_y[10];
 uniform vec4 translucent_sun_map_z[10];
 uniform vec4 translucent_sun_tile_rect[8];
 uniform float translucent_sun_max_distance; // 0 = unlimited, native-pass parity
+#ifdef JKGM_SUN_VSM
+uniform sampler2D translucent_sun_near_depth;
+#else
 uniform sampler2DShadow translucent_sun_near_depth;
+#endif
+#ifdef JKGM_SUN_VSM
+uniform sampler2D translucent_sun_far_depth;
+#else
 uniform sampler2DShadow translucent_sun_far_depth;
+#endif
 uniform sampler2DShadow translucent_sun_dynamic_depth;
 
 #include "translucent_sun_sampling.glsl"
