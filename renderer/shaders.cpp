@@ -19,12 +19,6 @@ jkgm::shaders::translucent_sun_uniforms::translucent_sun_uniforms(
     , bias_scale(gl::get_uniform_location(program,"translucent_sun_bias_scale"))
     , pcf_radius(gl::get_uniform_location(program,"translucent_sun_pcf_radius"))
     , vsm_params(gl::get_uniform_location(program,"translucent_sun_vsm_params"))
-    , sky_aperture_active(gl::get_uniform_location(
-        program,"translucent_sun_sky_aperture_active"))
-    , sky_aperture_map(gl::get_uniform_location(
-        program,"translucent_sun_sky_aperture_map"))
-    , sky_aperture_depth_transform(gl::get_uniform_location(
-        program,"translucent_sun_sky_aperture_depth_transform"))
     , near_depth(gl::get_uniform_location(program,"translucent_sun_near_depth"))
     , far_depth(gl::get_uniform_location(program,"translucent_sun_far_depth"))
     , dynamic_depth(gl::get_uniform_location(program,"translucent_sun_dynamic_depth"))
@@ -74,18 +68,6 @@ void jkgm::shaders::translucent_sun_uniforms::set_vsm_params(
 {
     gl::set_uniform_vector(vsm_params,
         make_point(min_stddev_world,bleed_reduction));
-}
-
-void jkgm::shaders::translucent_sun_uniforms::set_sky_aperture(
-    bool active,int sampler,point<4,float> near_far_depth_transform)
-{
-    gl::set_uniform_integer(sky_aperture_active,active?1:0);
-    // Samplers of different types must never alias unit 0, even when
-    // the feature is disabled for this frame.
-    gl::set_uniform_integer(sky_aperture_map,sampler);
-    if(!active)return;
-    gl::set_uniform_vector(sky_aperture_depth_transform,
-                           near_far_depth_transform);
 }
 
 void jkgm::shaders::translucent_sun_uniforms::set_map(
@@ -169,27 +151,13 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
             diagnostic_context dc(filename.generic_string());
             gl::shader rv(type);
             auto source=load_shader_source(filename);
-            if(type==gl::shader_type::fragment) {
-                // Sky aperture adds a sampler2DArray alongside the existing
-                // material/shadow samplers. On GL 3.3 devices with fewer
-                // than 20 fragment units, compile the gate out entirely:
-                // merely disabling a sampler at runtime cannot avoid
-                // incompatible/default sampler bindings at draw time.
-                GLint fragment_units=0;
-                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);
-                bool const sky_aperture=fragment_units>=20;
-                if(prefiltered_sun || sky_aperture) {
-                    auto const version_end=source.find('\n');
-                    if(source.compare(0,8,"#version")!=0 ||
-                       version_end==std::string::npos)
-                        report_fatal_message(
-                            "Sun shader variant requires a #version directive");
-                    std::string defines;
-                    if(prefiltered_sun)defines+="#define JKGM_SUN_VSM 1\n";
-                    if(sky_aperture)
-                        defines+="#define JKGM_SUN_SKY_APERTURE 1\n";
-                    source.insert(version_end+1U,defines);
-                }
+            if(prefiltered_sun && type==gl::shader_type::fragment) {
+                auto const version_end=source.find('\n');
+                if(source.compare(0,8,"#version")!=0 ||
+                   version_end==std::string::npos)
+                    report_fatal_message(
+                        "VSM shader requires a #version directive");
+                source.insert(version_end+1U,"#define JKGM_SUN_VSM 1\n");
             }
             gl::shader_source(rv,make_string_span(""),make_span(source));
             gl::compile_shader(rv);
@@ -1477,12 +1445,6 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
         the_program,"sun_shadow_pcf_radius"))
     , sun_vsm_params(gl::get_uniform_location(
         the_program,"sun_vsm_params"))
-    , sun_sky_aperture_active(gl::get_uniform_location(
-        the_program,"sun_sky_aperture_active"))
-    , sun_sky_aperture_map(gl::get_uniform_location(
-        the_program,"sun_sky_aperture_map"))
-    , sun_sky_aperture_depth_transform(gl::get_uniform_location(
-        the_program,"sun_sky_aperture_depth_transform"))
     , sun_max_distance(gl::get_uniform_location(the_program,"sun_max_distance"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
@@ -1644,18 +1606,6 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_vsm_params(
 {
     gl::set_uniform_vector(sun_vsm_params,
         make_point(min_stddev_world,bleed_reduction));
-}
-
-void jkgm::shaders::game_post_opaque_composite_shader::set_sun_sky_aperture(
-    bool active,int sampler,point<4,float> near_far_depth_transform)
-{
-    gl::set_uniform_integer(sun_sky_aperture_active,active?1:0);
-    // Samplers of different types must never alias unit 0, even when
-    // the feature is disabled for this frame.
-    gl::set_uniform_integer(sun_sky_aperture_map,sampler);
-    if(!active)return;
-    gl::set_uniform_vector(sun_sky_aperture_depth_transform,
-                           near_far_depth_transform);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_max_distance(

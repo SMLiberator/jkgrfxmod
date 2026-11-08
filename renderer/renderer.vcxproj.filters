@@ -518,9 +518,6 @@
     <ClInclude Include="sun_shadow_moments_gpu.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="sun_sky_aperture_gpu.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="sun_skybox_thing.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>

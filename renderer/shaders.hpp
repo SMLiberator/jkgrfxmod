@@ -39,8 +39,6 @@ namespace jkgm {
             gl::uniform_location_id direction,color,split,bias_scale,pcf_radius;
             gl::uniform_location_id vsm_params; // world-space stddev, bleed reduction
             gl::uniform_location_id near_depth,far_depth,dynamic_depth;
-            gl::uniform_location_id sky_aperture_active,sky_aperture_map;
-            gl::uniform_location_id sky_aperture_depth_transform;
             gl::uniform_location_id max_distance;
             std::vector<gl::uniform_location_id> x,y,z,rect;
             explicit translucent_sun_uniforms(gl::program_view program);
@@ -50,8 +48,6 @@ namespace jkgm {
                            float max_distance=0.0f);
             void set_pcf_radius(float near_radius,float far_radius);
             void set_vsm_params(float min_stddev_world,float bleed_reduction);
-            void set_sky_aperture(bool active,int sampler,
-                                  point<4,float> near_far_depth_transform);
             void set_map(int slot,point<4,float> row_x,point<4,float> row_y,
                          point<4,float> row_z,point<4,float> tile_rect);
         };
@@ -514,8 +510,6 @@ namespace jkgm {
             gl::uniform_location_id sun_shadow_receiver_bias_scale;
             gl::uniform_location_id sun_shadow_pcf_radius;
             gl::uniform_location_id sun_vsm_params;
-            gl::uniform_location_id sun_sky_aperture_active,sun_sky_aperture_map;
-            gl::uniform_location_id sun_sky_aperture_depth_transform;
             gl::uniform_location_id sun_max_distance;
             gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
             std::vector<gl::uniform_location_id> sun_dynamic_atlas_rects;
@@ -562,8 +556,6 @@ namespace jkgm {
             void set_sun_shadow_receiver_bias_scale(float scale);
             void set_sun_shadow_pcf_radius(float near_radius,float far_radius);
             void set_sun_vsm_params(float min_stddev_world,float bleed_reduction);
-            void set_sun_sky_aperture(bool active,int sampler,
-                                     point<4,float> near_far_depth_transform);
             void set_sun_max_distance(float distance);
             void set_sun_dynamic_count(int count);
             void set_sun_dynamic_atlas_rect(int slot,point<4,float> rect);

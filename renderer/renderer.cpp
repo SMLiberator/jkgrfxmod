@@ -27,7 +27,6 @@
 #include "spotlight_shadow_gpu.hpp"
 #include "sun_shadow_gpu.hpp"
 #include "sun_shadow_moments_gpu.hpp"
-#include "sun_sky_aperture_gpu.hpp"
 #include "world_cache_gpu.hpp"
 #include "world_cache_alpha.hpp"
 #include "world_cache_sky.hpp"
@@ -616,7 +615,6 @@ namespace jkgm {
         std::unique_ptr<spotlight_shadow_gpu> spotlight_shadow_target;
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
         std::unique_ptr<sun_shadow_moments_gpu> sun_moments_target;
-        std::unique_ptr<sun_sky_aperture_gpu> sun_sky_aperture_target;
         std::unique_ptr<world_cache_gpu> world_cache_target;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
@@ -1128,7 +1126,6 @@ namespace jkgm {
             spotlight_shadow_target.reset();
             sun_shadow_target.reset();
             sun_moments_target.reset();
-            sun_sky_aperture_target.reset();
             sun_dynamic_target.reset();
             // Context-owned GL queries must be deleted before the context
             // disappears. If the context is already gone, its objects go
@@ -1185,8 +1182,6 @@ namespace jkgm {
                 sun_shadow_static_cached={{false,false}};
                 sun_shadow_validated_world_view_ready=false;
                 sun_shadow_last_validation={};
-                // Sky projection cache cannot survive a level/mode reset.
-                sun_sky_aperture_target.reset();
                 sun_static_geometry_cache.clear();
                 sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
@@ -4669,34 +4664,6 @@ namespace jkgm {
 
 
 
-        bool sun_sky_aperture_ready() const
-        {
-            if(!the_config->experimental_sun_sky_aperture ||
-               !sun_shadow_ready || !sun_sky_aperture_target ||
-               !sun_sky_aperture_target->complete ||
-               !sun_sky_aperture_target->valid[0] ||
-               !sun_sky_aperture_target->valid[1])return false;
-            // The opaque pass uses unit 16 and forward passes use unit 19.
-            // Do not bind an invalid sampler on minimum GL 3.3 hardware.
-            static GLint max_fragment_units=0;
-            if(max_fragment_units<=0)
-                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,
-                              &max_fragment_units);
-            return max_fragment_units>=20;
-        }
-
-        point<4,float> sun_sky_aperture_depth_transform() const
-        {
-            auto const near_depth_params=
-                sun_sky_aperture_target->depth_transform(
-                    0,sun_shadow_views[0]);
-            auto const far_depth_params=
-                sun_sky_aperture_target->depth_transform(
-                    1,sun_shadow_views[1]);
-            return make_point(near_depth_params[0],near_depth_params[1],
-                              far_depth_params[0],far_depth_params[1]);
-        }
-
         template<typename Shader>
         void set_translucent_sun(Shader &prog,bool active)
         {
@@ -4705,8 +4672,6 @@ namespace jkgm {
             auto &uniforms=prog.translucent_sun;
             uniforms.set_state(false,false,0,off,dark,
                                the_config->sun_shadow_near_distance,1.0f,0.0f);
-            uniforms.set_sky_aperture(false,19,
-                make_point(1.0f,0.0f,1.0f,0.0f));
             if(!active || !the_config->enable_sun)return;
             auto const cam=read_active_render_camera();
             if(!cam.valid)return;
@@ -4725,10 +4690,6 @@ namespace jkgm {
             bool const have_texture_slots=fragment_texture_units>=19;
             bool const shadows=have_texture_slots && sun_shadow_ready &&
                                bool(sun_shadow_target);
-            // One new sampler2DArray unit (19); keep forward lighting
-            // valid on GL3 hardware exposing fewer than 20 units.
-            bool const sky_aperture=shadows &&
-                fragment_texture_units>=20 && sun_sky_aperture_ready();
             int const dynamic=have_texture_slots &&
                 the_config->enable_sun_dynamic_shadows &&
                 sun_dynamic_target && !sun_dynamic_views.empty()
@@ -4750,9 +4711,6 @@ namespace jkgm {
             uniforms.set_vsm_params(
                 the_config->sun_shadow_vsm_min_stddev_world,
                 the_config->sun_shadow_vsm_bleed_reduction);
-            uniforms.set_sky_aperture(sky_aperture,19,
-                sky_aperture?sun_sky_aperture_depth_transform()
-                            :make_point(1.0f,0.0f,1.0f,0.0f));
             uniforms.set_state(true,shadows,dynamic,
                 make_point(dir[0],dir[1],dir[2]),
                 make_point(rgb[0],rgb[1],rgb[2],intensity),
@@ -4786,11 +4744,6 @@ namespace jkgm {
                     the_config->experimental_sun_shadow_vsm
                         ?gl::texture_view(sun_moments_target->filtered[1])
                         :gl::texture_view(sun_shadow_target->far_depth));
-            }
-            if(sky_aperture) {
-                glActiveTexture(GL_TEXTURE0+19);
-                glBindTexture(GL_TEXTURE_2D_ARRAY,
-                              sun_sky_aperture_target->depth.value());
             }
             if(dynamic>0) {
                 for(int i=0;i<dynamic;++i) {
@@ -5646,79 +5599,6 @@ namespace jkgm {
             return true;
         }
 
-        // Rasterize SKY apertures from their actual SithWorld polygons
-        // into a two-layer DEPTH texture matching the near/far sunlight
-        // XY projections. This is independent of whether PCF or VSM is
-        // the selected sun occluder filter. 3DO hidden Things are untouched.
-        void draw_sun_sky_aperture(int cascade,
-                                   sun_shadow_projection const &shadow_view,
-                                   decal_native_read const &read)
-        {
-            if(!sun_sky_aperture_target ||
-               !sun_sky_aperture_target->complete ||
-               !ogs->spotlight_shadow_depth_program)return;
-            auto &gate=*sun_sky_aperture_target;
-            if(gate.loaded_world==0)return;
-            auto const view=gate.expanded_sky_view(shadow_view);
-            if(!(view.range>0.0f) || !std::isfinite(view.range))return;
-            auto const signature=gate.live_signature(read);
-            if(gate.valid[cascade] && gate.signatures[cascade]==signature &&
-               sun_shadow_same_projection(view,gate.views[cascade]))
-                return;
-
-            GLboolean const scissor=glIsEnabled(GL_SCISSOR_TEST);
-            if(scissor)glDisable(GL_SCISSOR_TEST);
-            glDisable(GL_POLYGON_OFFSET_FILL);
-            glDisable(GL_BLEND);
-            glDisable(GL_CULL_FACE); // sky openings are two-sided
-            glEnable(GL_DEPTH_TEST);
-            glDepthMask(GL_TRUE);
-            glDepthFunc(GL_LESS);
-            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                                 gate.fbo[cascade]);
-            glViewport(0,0,GLsizei(gate.resolution),
-                       GLsizei(gate.resolution));
-            gl::clear_buffer_depth(1.0f);
-            auto &shader=*ogs->spotlight_shadow_depth_program;
-            shader.use_program();
-            auto vec=[](decal_vec3 const &p) {
-                return make_point(p[0],p[1],p[2]);
-            };
-            shader.set_orthographic_light(
-                vec(view.origin),vec(view.right),vec(view.up),
-                vec(view.forward),
-                make_point(view.width,view.height,view.range,0.0f));
-            shader.set_model(make_point(1.0f,0.0f,0.0f),
-                             make_point(0.0f,1.0f,0.0f),
-                             make_point(0.0f,0.0f,1.0f),
-                             make_point(0.0f,0.0f,0.0f));
-            shader.set_shadow_alpha(false,make_point(1.0f,1.0f),
-                make_point(0.0f,0.0f),0.5f,1.0f,false,0.0f);
-            gl::bind_vertex_array(gate.vao);
-            for(size_t i=0;i<gate.world.receivers.size();++i) {
-                auto const &face=gate.world.receivers[i];
-                uintptr_t const base=gate.world.surfaces_addr+
-                    uintptr_t(face.surface_index)*0x5cU;
-                uint32_t flags=0,geo=0;
-                if(!read(base+0x10U,&flags,4U) ||
-                   !read(base+0x1cU,&geo,4U) ||
-                   (flags&0x600U)==0U || geo<3U || geo>4U)
-                    continue;
-                auto const &range=gate.mesh.surfaces[i];
-                gl::draw_elements(gl::element_type::triangles,range.count,
-                    gl::index_type::uint32,
-                    static_cast<ptrdiff_t>(
-                        range.first_index*sizeof(uint32_t)));
-            }
-            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                                 gl::default_framebuffer);
-            glViewport(0,0,get<x>(conf_scr_res),get<y>(conf_scr_res));
-            if(scissor)glEnable(GL_SCISSOR_TEST);
-            gate.views[cascade]=view;
-            gate.signatures[cascade]=signature;
-            gate.valid[cascade]=true;
-        }
-
         void draw_sun_shadow_map()
         {
             sun_shadow_ready=false;
@@ -5773,16 +5653,6 @@ namespace jkgm {
             if(!map.update_world(safe_read,world)) {
                 sun_failure("SithWorld shadow snapshot failed");
                 return;
-            }
-            if(the_config->experimental_sun_sky_aperture) {
-                if(!sun_sky_aperture_target)
-                    sun_sky_aperture_target=
-                        std::make_unique<sun_sky_aperture_gpu>(
-                            std::max(map.resolution,map.far_resolution));
-                if(!sun_sky_aperture_target->update_world(safe_read,world) &&
-                   the_config->profile_renderer_verbose &&
-                   gpu_3do_present_serial%120U==0U)
-                    LOG_WARNING("SUN sky aperture geometry unavailable");
             }
             auto const camera=read_active_render_camera();
             if(!camera.valid) {
@@ -6284,8 +6154,6 @@ namespace jkgm {
                 continue;
             }
 
-            if(the_config->experimental_sun_sky_aperture)
-                draw_sun_sky_aperture(cascade,view,safe_read);
             if(the_config->profile_renderer)
                 sun_profile_projection_us[cascade]+=elapsed_profile_us(
                     cascade_begin,profile_clock::now());
@@ -7263,8 +7131,6 @@ namespace jkgm {
             prog.set_sun_vsm_params(
                 the_config->sun_shadow_vsm_min_stddev_world,
                 the_config->sun_shadow_vsm_bleed_reduction);
-            prog.set_sun_sky_aperture(false,16,
-                make_point(1.0f,0.0f,1.0f,0.0f));
             prog.set_sun_max_distance(the_config->sun_max_distance);
             prog.set_spotlight_shadow(-1,0.0f,0.0f,
                 the_config->spotlight_shadow_angle_bias_scale);
@@ -7356,15 +7222,6 @@ namespace jkgm {
                         make_point(sun_shadow_views[0].up[0],sun_shadow_views[0].up[1],sun_shadow_views[0].up[2]),
                         make_point(sun_shadow_views[0].forward[0],sun_shadow_views[0].forward[1],sun_shadow_views[0].forward[2]),
                         make_point(sun_shadow_views[0].width,sun_shadow_views[0].height,sun_shadow_views[0].range));
-                    bool const sky_aperture=shadows &&
-                        sun_sky_aperture_ready();
-                    if(sky_aperture) {
-                        prog.set_sun_sky_aperture(
-                            true,16,sun_sky_aperture_depth_transform());
-                        glActiveTexture(GL_TEXTURE0+16);
-                        glBindTexture(GL_TEXTURE_2D_ARRAY,
-                                      sun_sky_aperture_target->depth.value());
-                    }
                     if(shadows) {
                         auto const &far_view=sun_shadow_views[1];
                         prog.set_sun_shadow_far(
