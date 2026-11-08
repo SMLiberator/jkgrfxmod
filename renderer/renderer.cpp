@@ -7346,6 +7346,10 @@ namespace jkgm {
             prog.set_sun_vsm_params(
                 the_config->sun_shadow_vsm_min_stddev_world,
                 the_config->sun_shadow_vsm_bleed_reduction);
+            // Debug samplers are compiled out on contexts with <21 units.
+            bool const sun_debug_supported=sun_sky_aperture_hardware_supported();
+            prog.set_sun_shadow_debug_view(sun_debug_supported
+                ?the_config->sun_shadow_debug_view:0);
             prog.set_sun_sky_aperture(false,
                 texture_units::opaque_sky_aperture,
                 make_point(1.0f,0.0f,1.0f,0.0f));
@@ -7470,6 +7474,17 @@ namespace jkgm {
                             the_config->experimental_sun_shadow_vsm
                                 ?gl::texture_view(sun_moments_target->filtered[1])
                                 :gl::texture_view(sun_shadow_target->far_depth));
+                        // Keep original near/far depth available alongside
+                        // filtered VSM moments for diagnostic raw comparisons.
+                        if(the_config->sun_shadow_debug_view==1 &&
+                           sun_debug_supported) {
+                            gl::set_active_texture_unit(17);
+                            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                             sun_shadow_target->depth);
+                            gl::set_active_texture_unit(18);
+                            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                             sun_shadow_target->far_depth);
+                        }
                     }
                     if(the_config->enable_sun_dynamic_shadows &&
                        sun_dynamic_target && !sun_dynamic_views.empty()) {

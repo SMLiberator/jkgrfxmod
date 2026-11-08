@@ -112,3 +112,23 @@ assert chebyshev(10.0,0.1,0.03,0.0001,bleed=0.5) <= chebyshev(
     10.0,0.1,0.03,0.0001,bleed=0.2)
 
 print("Experimental sun VSM filter source contracts passed")
+
+# Raw-depth vs selected VSM vs aperture debug contract. This must
+# leave the normal shader path unchanged when the mode is zero.
+assert "int sun_shadow_debug_view = 0;" in cfg
+assert 'j.contains("sun_shadow_debug_view")' in parser
+assert "sun_shadow_debug_view must be between 0 and 4" in parser
+assert "**sun_shadow_debug_view**" in read("doc/config.md")
+assert "void set_sun_shadow_debug_view(int mode);" in prog
+assert "game_post_opaque_composite_shader::set_sun_shadow_debug_view(" in progcpp
+assert "prog.set_sun_shadow_debug_view(sun_debug_supported" in renderer
+assert "the_config->sun_shadow_debug_view==1" in renderer
+assert "uniform int sun_shadow_debug_view;" in opaque
+for typ in ("sampler2D","sampler2DShadow"):
+    assert f"uniform {typ} sun_shadow_raw_near;" in opaque
+    assert f"uniform {typ} sun_shadow_raw_far;" in opaque
+assert "texelFetch(map,pixel,0).r" in opaque
+assert "sun_debug_raw_visibility(world,incidence)" in opaque
+assert "sun_shadow_visibility(world,incidence)" in opaque
+assert "sun_sky_aperture(world)" in opaque
+assert "out_color=vec4(vec3(clamp(visibility,0.0,1.0)),1.0);" in opaque

@@ -92,6 +92,7 @@ namespace jkgm {
         float sun_shadow_near_pcf_radius = 0.0f; // 0=single HW PCF; >0 four samples
         float sun_shadow_far_pcf_radius = 0.0f; // independent four-sample filter
         bool experimental_sun_shadow_vsm = false; // independent, default-off shadow path
+        int sun_shadow_debug_view = 0; // 0 normal, 1 raw, 2 PCF/VSM, 3 sky, 4 combined
         float sun_shadow_vsm_near_radius = 1.0f; // prefilter radius, map texels
         float sun_shadow_vsm_far_radius = 1.5f;
         // Optional ADDITIONAL VSM depth standard-deviation floor in JK

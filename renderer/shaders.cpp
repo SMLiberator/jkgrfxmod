@@ -1522,6 +1522,12 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
         the_program,"sun_shadow_pcf_radius"))
     , sun_vsm_params(gl::get_uniform_location(
         the_program,"sun_vsm_params"))
+    , sun_shadow_debug_view(gl::get_uniform_location(
+        the_program,"sun_shadow_debug_view"))
+    , sun_shadow_raw_near(gl::get_uniform_location(
+        the_program,"sun_shadow_raw_near"))
+    , sun_shadow_raw_far(gl::get_uniform_location(
+        the_program,"sun_shadow_raw_far"))
     , sun_sky_aperture_active(gl::get_uniform_location(
         the_program,"sun_sky_aperture_active"))
     , sun_sky_aperture_map(gl::get_uniform_location(
@@ -1689,6 +1695,14 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_vsm_params(
 {
     gl::set_uniform_vector(sun_vsm_params,
         make_point(min_stddev_world,bleed_reduction));
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_debug_view(
+    int mode)
+{
+    gl::set_uniform_integer(sun_shadow_debug_view,mode);
+    gl::set_uniform_integer(sun_shadow_raw_near,17);
+    gl::set_uniform_integer(sun_shadow_raw_far,18);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_sky_aperture(

@@ -63,6 +63,19 @@ uniform float sun_shadow_split; // JK forward distance from camera
 uniform float sun_shadow_receiver_bias_scale;
 uniform vec2 sun_shadow_pcf_radius; // 0=legacy HW comparison; positive=4 taps
 uniform vec2 sun_vsm_params; // x=min world-space stddev (JKU), y=bleed reduction
+// Raw depth samplers on reserved compositor units 17/18.
+// With VSM, original depth has GL_TEXTURE_COMPARE_MODE disabled during
+// moments prefiltering; sample it as sampler2D and compare explicitly.
+#ifdef JKGM_SUN_SKY_APERTURE
+uniform int sun_shadow_debug_view;
+#ifdef JKGM_SUN_VSM
+uniform sampler2D sun_shadow_raw_near;
+uniform sampler2D sun_shadow_raw_far;
+#else
+uniform sampler2DShadow sun_shadow_raw_near;
+uniform sampler2DShadow sun_shadow_raw_far;
+#endif
+#endif
 uniform int sun_sky_aperture_active;
 #ifdef JKGM_SUN_SKY_APERTURE
 uniform sampler2DArray sun_sky_aperture_map;
@@ -182,6 +195,56 @@ float sun_shadow_visibility(vec3 world_position,float incidence)
     float blend=smoothstep(transition_start,transition_end,camera_depth);
     return mix(near_visibility,far_visibility,blend);
 }
+
+#ifdef JKGM_SUN_SKY_APERTURE
+#ifdef JKGM_SUN_VSM
+float sun_debug_raw_test(sampler2D map,vec3 uv,float range,float incidence)
+#else
+float sun_debug_raw_test(sampler2DShadow map,vec3 uv,float range,float incidence)
+#endif
+{
+    float grazing=1.0-clamp(incidence,0.0,1.0);
+    float bias_world=(0.008+0.027*grazing*grazing)*
+                     sun_shadow_receiver_bias_scale;
+    float bias=max(4.0/16777215.0,bias_world/max(range,0.001));
+    float receiver=uv.z-bias;
+#ifdef JKGM_SUN_VSM
+    // Nearest source texel from the raw, non-comparison depth map.
+    ivec2 dims=textureSize(map,0);
+    ivec2 pixel=clamp(ivec2(uv.xy*vec2(dims)),
+                      ivec2(0),dims-ivec2(1));
+    return receiver<=texelFetch(map,pixel,0).r?1.0:0.0;
+#else
+    return texture(map,vec3(uv.xy,receiver));
+#endif
+}
+float sun_debug_raw_visibility(vec3 world_position,float incidence)
+{
+    float camera_depth=dot(world_position-camera_origin.xyz,camera_forward.xyz);
+    vec3 near_uv=sun_shadow_coordinates(world_position,sun_shadow_origin,
+        sun_shadow_right,sun_shadow_up,sun_shadow_forward,sun_shadow_limits);
+    bool use_near=camera_depth<sun_shadow_split && sun_shadow_inside(near_uv);
+    float transition_start=sun_shadow_split*0.8125;
+    float transition_end=sun_shadow_split*0.9375;
+    if(use_near && camera_depth<transition_start)
+        return sun_debug_raw_test(sun_shadow_raw_near,near_uv,
+                                  sun_shadow_limits.z,incidence);
+    vec3 far_uv=sun_shadow_coordinates(world_position,sun_shadow_far_origin,
+        sun_shadow_far_right,sun_shadow_far_up,
+        sun_shadow_far_forward,sun_shadow_far_limits);
+    if(!sun_shadow_inside(far_uv))
+        return use_near
+            ?sun_debug_raw_test(sun_shadow_raw_near,near_uv,
+                                sun_shadow_limits.z,incidence):1.0;
+    float far_visibility=sun_debug_raw_test(sun_shadow_raw_far,far_uv,
+                                            sun_shadow_far_limits.z,incidence);
+    if(!use_near)return far_visibility;
+    float near_visibility=sun_debug_raw_test(sun_shadow_raw_near,near_uv,
+                                             sun_shadow_limits.z,incidence);
+    return mix(near_visibility,far_visibility,
+               smoothstep(transition_start,transition_end,camera_depth));
+}
+#endif
 
 // Separate sky aperture from normal occluder shadowing: a sky polygon
 // facing the sun is necessary for added directional sunlight to enter.
@@ -414,6 +477,48 @@ void main()
     // turn a real opaque fragment into a HOM pixel.
     if(retain_hom_pixels!=0 && !covered)
         discard;
+
+#ifdef JKGM_SUN_SKY_APERTURE
+    if(sun_shadow_debug_view!=0) {
+        // Opaque-only diagnostic, black=blocked and white=visible.
+        if(sun_shadow_active==0 || depth<=0.0 || depth>=65500.0) {
+            out_color=vec4(0.0,0.0,0.0,1.0);
+            return;
+        }
+        if(sun_shadow_debug_view==3 && sun_sky_aperture_active==0) {
+            // Blue means unavailable aperture, not fully visible sky.
+            out_color=vec4(0.0,0.0,1.0,1.0);
+            return;
+        }
+        vec3 world=reconstruct_scene_world(depth);
+        vec4 normal_pixel=texelFetch(normal_image,tc,0);
+        vec3 vn=normal_pixel.rgb;
+        if(dot(vn,vn)<0.0001) {
+            out_color=vec4(0.0,0.0,0.0,1.0);
+            return;
+        }
+        vec3 normal=normalize(camera_right.xyz*(vn.x/camera_right.w)+
+                              camera_up.xyz*(vn.y/camera_up.w)+
+                              camera_forward.xyz*vn.z);
+        float incidence=normal_pixel.a>1.5
+            ?max(abs(dot(normal,sun_shadow_direction)),0.35)
+            :max(dot(normal,sun_shadow_direction),0.0);
+        float visibility=0.0;
+        if(incidence>0.0) {
+            if(sun_shadow_debug_view==1)
+                visibility=sun_debug_raw_visibility(world,incidence);
+            else if(sun_shadow_debug_view==2)
+                visibility=sun_shadow_visibility(world,incidence);
+            else if(sun_shadow_debug_view==3)
+                visibility=sun_sky_aperture(world);
+            else
+                visibility=sun_shadow_visibility(world,incidence)*
+                           sun_sky_aperture(world);
+        }
+        out_color=vec4(vec3(clamp(visibility,0.0,1.0)),1.0);
+        return;
+    }
+#endif
 
     vec4 albedo = texelFetch(color_image, tc, 0);
     vec4 emissive = texelFetch(emissive_image, tc, 0);

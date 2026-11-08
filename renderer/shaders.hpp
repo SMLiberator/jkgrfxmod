@@ -515,6 +515,8 @@ namespace jkgm {
             gl::uniform_location_id sun_shadow_receiver_bias_scale;
             gl::uniform_location_id sun_shadow_pcf_radius;
             gl::uniform_location_id sun_vsm_params;
+            gl::uniform_location_id sun_shadow_debug_view;
+            gl::uniform_location_id sun_shadow_raw_near,sun_shadow_raw_far;
             gl::uniform_location_id sun_sky_aperture_active,sun_sky_aperture_map;
             gl::uniform_location_id sun_sky_aperture_depth_transform;
             gl::uniform_location_id sun_max_distance;
@@ -563,6 +565,7 @@ namespace jkgm {
             void set_sun_shadow_receiver_bias_scale(float scale);
             void set_sun_shadow_pcf_radius(float near_radius,float far_radius);
             void set_sun_vsm_params(float min_stddev_world,float bleed_reduction);
+            void set_sun_shadow_debug_view(int mode);
             void set_sun_sky_aperture(bool active,int sampler,
                                      point<4,float> near_far_depth_transform);
             void set_sun_max_distance(float distance);
