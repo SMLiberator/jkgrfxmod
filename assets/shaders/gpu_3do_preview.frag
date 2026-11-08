@@ -606,16 +606,18 @@ vec3 illuminate_translucent_sun(vec3 baked,vec3 pigment,float opacity,
                                   translucent_sun_max_distance,forward);
         if(range_fade<=0.0)return baked;
     }
+    // A closed sunward ray is a shadowed receiver, not an instruction to
+    // retain all baked light. The default-off aperture returns 1.0.
     float sky_access=translucent_sun_sky_aperture(world);
-    if(sky_access<=0.0)return baked;
     float visibility=translucent_sun_visibility(world,max(incidence,0.35));
+    float direct_visibility=visibility*sky_access;
     // Match native translucent rendering and the opaque composite:
     // shadow contrast tracks sun power rather than darkening baked ambient.
     float sun_shadow_strength=clamp(translucent_sun_color.a,0.0,1.0);
     vec3 dimmed=baked*(1.0-0.75*range_fade*sun_shadow_strength*
-                      (1.0-visibility)*sky_access);
+                      (1.0-direct_visibility));
     vec3 radiance=pigment*translucent_sun_color.rgb*
-                  translucent_sun_color.a*incidence*visibility*sky_access*opacity*range_fade;
+                  translucent_sun_color.a*incidence*direct_visibility*opacity*range_fade;
     return dimmed+radiance*(vec3(1.0)-clamp(dimmed,vec3(0.0),vec3(1.0)));
 }
 

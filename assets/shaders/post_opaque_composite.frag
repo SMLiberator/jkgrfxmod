@@ -463,23 +463,26 @@ void main()
                 float visibility=min(
                     sun_shadow_visibility(world_position,incidence),
                     sun_dynamic_shadow_visibility(world_position,incidence));
-                // Shade the baked brightness even in the absence of a
-                // direct sun highlight; the sprite's arbitrary view-facing
-                // normal must not decide whether the canopy shades it.
+                // Treat an absent sky aperture exactly like a blocked sun
+                // ray. It must suppress direct light AND allow the shadow
+                // baseline to darken authored brightness indoors, rather
+                // than silently restoring JK's original baked brightness.
+                // No change occurs when the sun is disabled (sun_fade=0).
                 float sky_access=sun_sky_aperture(world_position);
-                float sun_applied=incidence*sun_fade*sky_access;
-                // Shadow contrast must disappear with direct sun power.
-                // Previously even intensity=0.001 darkened the baked
-                // scene by up to 60% (75% for a cutout SPR).
-                // Keep the established appearance at intensity >= 1.0.
+                float direct_visibility=visibility*sky_access;
+                float sun_applied=incidence*sun_fade;
+                // Preserve low-intensity compatibility: shadow contrast
+                // tracks the developer's positive sun intensity.
                 float sun_shadow_strength=clamp(
                     sun_shadow_color_intensity.a,0.0,1.0);
-                float shadowed_baseline=(sprite ? 0.75*sun_fade*sky_access
+                // Sprite normals follow the camera, so their shadowed
+                // baseline does not depend on geometric incidence.
+                float shadowed_baseline=(sprite ? 0.75*sun_fade
                                                : 0.6*sun_applied)*
                                         sun_shadow_strength;
-                surface_rgb*=1.0-shadowed_baseline*(1.0-visibility);
+                surface_rgb*=1.0-shadowed_baseline*(1.0-direct_visibility);
                 vec3 sun_light=pigment*sun_shadow_color_intensity.rgb*
-                    sun_shadow_color_intensity.a*sun_applied*visibility;
+                    sun_shadow_color_intensity.a*sun_applied*direct_visibility;
                 surface_rgb+=sun_light*(vec3(1.0)-clamp(surface_rgb,0.0,1.0));
             }
         }

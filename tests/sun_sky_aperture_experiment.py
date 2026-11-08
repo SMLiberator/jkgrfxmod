@@ -40,7 +40,12 @@ assert "set_sky_aperture" in sh and "set_sky_aperture" in sc
 assert "sun_sky_aperture_active==0)return 1.0;" in opaque
 assert "float sun_sky_aperture(vec3 position) { return 1.0; }" in opaque
 assert "float sky_access=sun_sky_aperture(world_position);" in opaque
-assert "0.75*sun_fade*sky_access" in opaque
+assert "float direct_visibility=visibility*sky_access;" in opaque
+assert "float sun_applied=incidence*sun_fade;" in opaque
+assert "sprite ? 0.75*sun_fade" in opaque
+assert "0.75*sun_fade*sky_access" not in opaque
+assert "1.0-direct_visibility" in opaque
+assert "sun_applied*direct_visibility" in opaque
 assert "float sun_sky_aperture_sample(vec3 uv,int layer)" in opaque
 assert "translucent_sun_sky_aperture_active==0)return 1.0;" in shared
 assert "float translucent_sun_sky_aperture(vec3 world) { return 1.0; }" in shared
@@ -58,8 +63,10 @@ for path in ("game_opaque_pass.frag","game_trns_pass.frag","gpu_3do_preview.frag
 for path in ("game_trns_pass.frag","gpu_3do_preview.frag"):
     frag=read("assets/shaders/"+path)
     assert "float sky_access=translucent_sun_sky_aperture(world);" in frag
-    assert "if(sky_access<=0.0)return baked;" in frag
-    assert "visibility*sky_access*opacity*range_fade;" in frag
+    assert "if(sky_access<=0.0)return baked;" not in frag
+    assert "float direct_visibility=visibility*sky_access;" in frag
+    assert "(1.0-direct_visibility)" in frag
+    assert "incidence*direct_visibility*opacity*range_fade;" in frag
 def aperture(sky,receiver):
     return sky<0.999999 and sky+0.00001<receiver
 assert not aperture(1.0,0.9)
@@ -69,3 +76,21 @@ assert not aperture(0.5,0.5)
 for path in ("renderer/renderer.vcxproj","renderer/renderer.vcxproj.filters"):
     assert "sun_sky_aperture_gpu.hpp" in read(path)
 print("Opt-in sunlight sky-aperture source contracts passed")
+
+// A sky-blocked receiver should remain unlit by DIRECT sun, but its
+// baked brightness is no longer protected from sun shadow contrast.
+def shaded_baked(base,intensity,visibility,sky_access,baseline):
+    direct_visibility=visibility*sky_access
+    contrast=baseline*min(max(intensity,0.0),1.0)
+    return base*(1.0-contrast*(1.0-direct_visibility))
+
+for baseline in (0.6,0.75):
+    for intensity in (0.0,0.001,0.5,1.0,2.0):
+        assert shaded_baked(0.8,intensity,1.0,1.0,baseline)==0.8
+        assert abs(shaded_baked(0.8,intensity,1.0,0.0,baseline) -
+                   shaded_baked(0.8,intensity,0.0,1.0,baseline))<1e-9
+        if intensity==0.0:
+            assert shaded_baked(0.8,intensity,1.0,0.0,baseline)==0.8
+        if intensity>=1.0:
+            assert abs(shaded_baked(0.8,intensity,1.0,0.0,baseline) -
+                       0.8*(1.0-baseline))<1e-9
