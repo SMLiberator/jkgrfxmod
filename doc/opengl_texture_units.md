@@ -78,3 +78,16 @@ GPU-cached SithWorld direct sunlight specular highlights are gated by the
 same sky aperture through `world_cache_direct_specular.glsl` (forward
 unit 20). Its authored ambient, non-sun environment reflections, and
 point-light specular contributions remain unchanged.
+
+## Sky-aperture edge smoothing
+
+Sky aperture visibility is now filtered separately from PCF/VSM shadows:
+the shared `sun_sky_aperture_filter.glsl` performs four independent
+`texelFetch` depth comparisons and interpolates their results, with a
+conservative 25% minimum sky coverage. It retains 0 visibility everywhere
+there are no sky-flagged aperture pixels, avoids introducing invalid
+interpolated depth, and softens the staircase produced by a single
+`GL_NEAREST` aperture lookup. The aperture resource itself remains
+nearest-filtered; **do not enable GL_LINEAR on its depth texture**.
+The added work occurs only for actual sky-aperture sampling; when the
+experiment is disabled, GLSL bypasses these calls.
