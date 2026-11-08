@@ -3536,7 +3536,10 @@ namespace jkgm {
             struct pending_draw {
                 gpu_3do_instance const *instance;
                 gpu_3do_group const *group;
-                gpu_3do_texture texture;
+                // Borrow the material from the pass-local frame cache.
+                // unordered_map element addresses survive rehash; both
+                // the ordinary and retained HUD caches outlive this pass.
+                gpu_3do_texture const *texture;
                 gpu_3do_alpha_mode policy;
                 gpu_3do_matrix34 const *modelview;
                 float depth;
@@ -3695,7 +3698,7 @@ namespace jkgm {
                               (wy-cam.position[1])*cam.forward[1]+
                               (wz-cam.position[2])*cam.forward[2];
                     }
-                    pending_draw candidate{&inst,&group,tex,policy,
+                    pending_draw candidate{&inst,&group,&tex,policy,
                                            &modelviews.back(),depth,
                                            next_draw_order++};
                     // Ordinary opaque 3DOs and all transparent sprites stay
@@ -3875,6 +3878,7 @@ namespace jkgm {
                 ?profile_clock::now():profile_clock::time_point{};
             for(size_t draw_start=0;draw_start<draws.size();) {
                 auto const &draw=draws[draw_start];
+                auto const &material=*draw.texture;
                 auto const &inst=*draw.instance;
                 auto const &group=*draw.group;
                 size_t draw_end=draw_start+1;
@@ -3887,14 +3891,14 @@ namespace jkgm {
                     !inst.is_projected_decal && !inst.shadow_only &&
                     !inst.transient_procedural &&
                     inst.num_lights==0U && !inst.crossing_lighting &&
-                    !draw.texture.has_environment &&
-                    !draw.texture.has_environment2 &&
-                    !draw.texture.has_normal &&
-                    !draw.texture.has_normal2 &&
-                    !draw.texture.has_surface &&
-                    draw.texture.displacement_factor==0.0f &&
-                    draw.texture.blend!=material_blend_mode::fluid &&
-                    gpu_specular_parameters(draw.texture,false).first<=0.0f;
+                    !material.has_environment &&
+                    !material.has_environment2 &&
+                    !material.has_normal &&
+                    !material.has_normal2 &&
+                    !material.has_surface &&
+                    material.displacement_factor==0.0f &&
+                    material.blend!=material_blend_mode::fluid &&
+                    gpu_specular_parameters(material,false).first<=0.0f;
                 size_t sprite_batch_count=0;
                 if(draw.sprite_batch_group!=0U) {
                     size_t end=draw_start+1;
@@ -4051,7 +4055,7 @@ namespace jkgm {
                     : (inst.is_sprite_quad ? inst.sprite_opacity : 1.0f) *
                       ((group.face_type&0x2U)!=0 ? 90.0f/255.0f : 1.0f);
                 if(transparent) {
-                    switch(draw.texture.blend) {
+                    switch(material.blend) {
                     case material_blend_mode::additive:
                         gl::set_blend_function_separate(
                             gl::blend_function::one,gl::blend_function::one,
@@ -4069,23 +4073,23 @@ namespace jkgm {
                         break;
                     }
                 }
-                bind_preview_color(draw.texture.texture,0,draw.texture.filtered);
-                bind_preview_color(draw.texture.emission,1,draw.texture.filtered);
+                bind_preview_color(material.texture,0,material.filtered);
+                bind_preview_color(material.emission,1,material.filtered);
                 // Unit 11 is the AO receiver on the projected-decal pass.
                 bool const indexed_fullbright=
                     the_config->restore_cmp_lights &&
-                    draw.texture.has_palette_fullbright &&
+                    material.has_palette_fullbright &&
                     !inst.is_projected_decal && !inst.camera_hud;
                 if(indexed_fullbright)
-                    bind_preview_color(draw.texture.palette_fullbright_mask,
-                                       11,draw.texture.filtered);
+                    bind_preview_color(material.palette_fullbright_mask,
+                                       11,material.filtered);
                 prog.set_palette_fullbright(indexed_fullbright);
                 bool const has_albedo_transition=
-                    draw.texture.albedo_transition>0.0f;
+                    material.albedo_transition>0.0f;
                 if(has_albedo_transition) {
-                    bind_preview_color(draw.texture.texture2,6,draw.texture.filtered);
-                    prog.set_albedo_transition(draw.texture.albedo_source2,
-                                               draw.texture.albedo_transition);
+                    bind_preview_color(material.texture2,6,material.filtered);
+                    prog.set_albedo_transition(material.albedo_source2,
+                                               material.albedo_transition);
                 } else if(prev_albedo_transition) {
                     prog.set_albedo_transition(2,0.0f);
                 }
@@ -4095,20 +4099,20 @@ namespace jkgm {
                 bool const clip_decal=transparent && inst.is_projected_decal;
                 bool const advanced=clip_decal ||
                     (transparent &&
-                     draw.texture.blend==material_blend_mode::fluid);
+                     material.blend==material_blend_mode::fluid);
                 if(advanced)
                     prog.set_advanced_material(clip_decal,
-                                               draw.texture.fluid_thickness);
+                                               material.fluid_thickness);
                 else if(prev_advanced_material)
                     prog.set_advanced_material(false,0.25f);
                 prev_advanced_material=advanced;
                 bool const parallax=!inst.camera_hud &&
-                    draw.texture.displacement_factor!=0.0f;
+                    material.displacement_factor!=0.0f;
                 if(parallax) {
                     gl::set_active_texture_unit(9);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                     draw.texture.displacement);
-                    prog.set_parallax(draw.texture.displacement_factor);
+                                     material.displacement);
+                    prog.set_parallax(material.displacement_factor);
                 } else if(prev_parallax) {
                     prog.set_parallax(0.0f);
                 }
@@ -4128,69 +4132,69 @@ namespace jkgm {
                 bool const default_eligible=
                     !inst.camera_hud && !inst.is_projected_decal &&
                     !inst.is_sprite_quad && !inst.world_lighting_exempt &&
-                    !draw.texture.solid_fullbright &&
-                    !draw.texture.emissive_only &&
-                    draw.texture.albedo_source!=0 &&
-                    draw.texture.blend!=material_blend_mode::additive &&
-                    draw.texture.blend!=material_blend_mode::multiply;
+                    !material.solid_fullbright &&
+                    !material.emissive_only &&
+                    material.albedo_source!=0 &&
+                    material.blend!=material_blend_mode::additive &&
+                    material.blend!=material_blend_mode::multiply;
                 auto const specular=gpu_specular_parameters(
-                    draw.texture,default_eligible);
+                    material,default_eligible);
                 bool const spec_active=!inst.camera_hud &&
                     specular.first>0.0f &&
-                    (draw.texture.has_environment ||
-                     draw.texture.has_environment2 || sun_active ||
+                    (material.has_environment ||
+                     material.has_environment2 || sun_active ||
                      point_specular_active);
                 bool const diffuse_mapping=
                     the_config->enable_normal_mapped_diffuse &&
                     !inst.camera_hud && !inst.is_projected_decal &&
                     !inst.is_sprite_quad && !inst.world_lighting_exempt &&
-                    !group.solid_color && !draw.texture.solid_fullbright &&
-                    (draw.texture.has_normal || draw.texture.has_normal2);
+                    !group.solid_color && !material.solid_fullbright &&
+                    (material.has_normal || material.has_normal2);
                 bool const material_normals_active=
                     spec_active || diffuse_mapping;
                 if(material_normals_active) {
                     if(spec_active) {
                         gl::set_active_texture_unit(2);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                         draw.texture.surface);
+                                         material.surface);
                     }
-                    if(draw.texture.has_normal) {
+                    if(material.has_normal) {
                         gl::set_active_texture_unit(3);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                         draw.texture.normal);
+                                         material.normal);
                     }
-                    if(draw.texture.has_normal2) {
+                    if(material.has_normal2) {
                         gl::set_active_texture_unit(5);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                         draw.texture.normal2);
+                                         material.normal2);
                     }
-                    if(spec_active && draw.texture.has_environment) {
+                    if(spec_active && material.has_environment) {
                         gl::set_active_texture_unit(4);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                         draw.texture.environment);
+                                         material.environment);
                     }
                     if(spec_active &&
-                       draw.texture.environment_transition>0.0f &&
-                       draw.texture.has_environment2) {
+                       material.environment_transition>0.0f &&
+                       material.has_environment2) {
                         gl::set_active_texture_unit(7);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                         draw.texture.environment2);
+                                         material.environment2);
                     }
                     prog.set_environment(
-                        spec_active && draw.texture.has_environment,
-                        spec_active && draw.texture.has_environment2,
-                        spec_active?draw.texture.environment_transition:0.0f,
-                        draw.texture.reflection_mode);
+                        spec_active && material.has_environment,
+                        spec_active && material.has_environment2,
+                        spec_active?material.environment_transition:0.0f,
+                        material.reflection_mode);
                     prog.set_point_specular(
                         make_point(spec_active?specular.first:0.0f,
-                                   specular.second,draw.texture.metalness,
-                                   spec_active && draw.texture.has_surface?1.0f:0.0f),
-                        make_point(draw.texture.has_normal?1.0f:0.0f,
-                                   draw.texture.normal_strength,
-                                   draw.texture.has_normal2?1.0f:0.0f,
-                                   draw.texture.normal_strength2),
-                        draw.texture.normal_scroll,
-                        draw.texture.normal_scroll2);
+                                   specular.second,material.metalness,
+                                   spec_active && material.has_surface?1.0f:0.0f),
+                        make_point(material.has_normal?1.0f:0.0f,
+                                   material.normal_strength,
+                                   material.has_normal2?1.0f:0.0f,
+                                   material.normal_strength2),
+                        material.normal_scroll,
+                        material.normal_scroll2);
                 } else if(prev_specular_active) {
                     prog.set_point_specular(
                         make_point(0.0f,0.5f,0.0f,0.0f),
@@ -4206,22 +4210,22 @@ namespace jkgm {
                 // Type-3 SPR decal UVs come from rdSprite and must continue
                 // to use their original native dimensions.
                 float const uv_width=(inst.is_projected_decal || inst.is_sprite_quad)
-                    ? draw.texture.width
-                    : gpu_3do_model_uv_extent(draw.texture.width);
+                    ? material.width
+                    : gpu_3do_model_uv_extent(material.width);
                 float const uv_height=(inst.is_projected_decal || inst.is_sprite_quad)
-                    ? draw.texture.height
-                    : gpu_3do_model_uv_extent(draw.texture.height);
-                prog.set_solid_fullbright(draw.texture.solid_fullbright);
-                prog.set_surface(draw.texture.albedo_source,uv_width,
+                    ? material.height
+                    : gpu_3do_model_uv_extent(material.height);
+                prog.set_solid_fullbright(material.solid_fullbright);
+                prog.set_surface(material.albedo_source,uv_width,
                                  uv_height,transparent,
-                                 static_cast<int>(draw.texture.blend),
+                                 static_cast<int>(material.blend),
                                  static_cast<int>(draw.policy),
-                                 draw.texture.alpha_cutoff,face_opacity,
-                                 draw.texture.tint,draw.texture.albedo_scroll,
-                                 draw.texture.emissive_only);
-                prog.set_emissive(draw.texture.has_emission,
-                                  draw.texture.emission_factor,
-                                  draw.texture.emissive_scroll);
+                                 material.alpha_cutoff,face_opacity,
+                                 material.tint,material.albedo_scroll,
+                                 material.emissive_only);
+                prog.set_emissive(material.has_emission,
+                                  material.emission_factor,
+                                  material.emissive_scroll);
                 if(sprite_batch_count>1) {
                     std::array<std::array<float,12>,
                         shaders::gpu_3do_preview_shader::max_sprite_instances>
@@ -4275,7 +4279,7 @@ namespace jkgm {
                                  " indices=",group.count,
                                  " policy=",static_cast<int>(draw.policy),
                                  " material=",group.material,
-                                 " tex_px=",draw.texture.width,"x",draw.texture.height);
+                                 " tex_px=",material.width,"x",material.height);
                 }
                 if(the_config->profile_renderer &&
                    transparent && draw.instance->is_projected_decal) {

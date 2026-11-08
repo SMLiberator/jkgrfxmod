@@ -233,6 +233,8 @@ jobs:
       run: python3 tests/fluid_sun_receivers.py
     - name: GPU cached emissive alpha parity regression
       run: python3 tests/gpu_emissive_alpha.py
+    - name: GPU 3DO pending material reference regression
+      run: python3 tests/gpu_3do_pending_material.py
     - name: GPU 3DO alpha partition tests
       shell: cmd
       run: |
