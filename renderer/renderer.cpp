@@ -7353,7 +7353,8 @@ namespace jkgm {
             // Opt-in VSM raw-depth cap for opaque sun receivers only.
             bool const vsm_depth_guard=sun_debug_supported &&
                 the_config->experimental_sun_shadow_vsm &&
-                the_config->experimental_sun_vsm_depth_guard;
+                the_config->experimental_sun_vsm_depth_guard &&
+                sun_shadow_ready && bool(sun_shadow_target);
             prog.set_sun_vsm_depth_guard(vsm_depth_guard);
             prog.set_sun_sky_aperture(false,
                 texture_units::opaque_sky_aperture,

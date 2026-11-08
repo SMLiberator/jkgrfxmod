@@ -138,14 +138,16 @@ assert "out_color=vec4(vec3(clamp(visibility,0.0,1.0)),1.0);" in opaque
 assert "bool experimental_sun_vsm_depth_guard = false;" in cfg
 assert 'j.contains("experimental_sun_vsm_depth_guard")' in parser
 assert "bool const vsm_depth_guard=sun_debug_supported &&" in renderer
-assert "the_config->experimental_sun_vsm_depth_guard;" in renderer
+assert "the_config->experimental_sun_vsm_depth_guard &&" in renderer
+assert "sun_shadow_ready && bool(sun_shadow_target);" in renderer
 assert "prog.set_sun_vsm_depth_guard(vsm_depth_guard);" in renderer
 assert "the_config->sun_shadow_debug_view==1 ||" in renderer
 assert "vsm_depth_guard)) {" in renderer
 assert "void set_sun_vsm_depth_guard(bool enabled);" in prog
 assert "game_post_opaque_composite_shader::set_sun_vsm_depth_guard(" in progcpp
 assert "uniform int sun_vsm_depth_guard;" in opaque
-assert "if(sun_vsm_depth_guard!=0 && visibility>0.0)" in opaque
+assert "sun_shadow_active!=0 &&" in opaque
+assert "sun_vsm_depth_guard!=0 && visibility>0.0)" in opaque
 assert "sun_vsm_raw_depth_visibility(" in opaque
 assert "texelFetch(map,tap,0).r" in opaque
 assert "#if defined(JKGM_SUN_VSM) && defined(JKGM_SUN_SKY_APERTURE)" in opaque

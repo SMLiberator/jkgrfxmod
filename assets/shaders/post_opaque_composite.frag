@@ -638,7 +638,8 @@ void main()
                 // this can make a blocked floor falsely sunlit. Cap ONLY
                 // the VSM contribution with a filtered raw-depth result.
                 // Off by default; the original VSM stays untouched.
-                if(sun_vsm_depth_guard!=0 && visibility>0.0)
+                if(sun_shadow_active!=0 &&
+                   sun_vsm_depth_guard!=0 && visibility>0.0)
                     visibility=min(visibility,
                         sun_vsm_raw_depth_visibility(
                             world_position,incidence));
