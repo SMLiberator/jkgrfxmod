@@ -130,7 +130,7 @@ namespace jkgm {
         // Master optional post-processing switch (color-space conversion stays active).
         bool enable_post = true;
         bool enable_blur = true;
-        bool experimental_spatial_blur_half_res = false;
+        int experimental_spatial_blur_mode = 0;
         bool enable_trails = true;
         bool auto_exposure_scene = false;
         bool enable_hdr = false;
@@ -167,6 +167,8 @@ namespace jkgm {
         shaders::post_spatial_blur_shader post_spatial_blur;
         // Only compiled when the experimental setting is explicitly enabled.
         std::unique_ptr<shaders::post_spatial_blur_shader> post_spatial_blur_fast;
+        std::unique_ptr<shaders::post_spatial_blur_reconstruct_shader>
+            post_spatial_blur_reconstruct;
 
         post_model postmdl;
         overlay_model menumdl;
@@ -207,6 +209,7 @@ namespace jkgm {
         post_buffer spatial_blur_result;
         // Allocated lazily at renderer initialization for the opt-in path.
         std::unique_ptr<post_buffer> spatial_blur_half_work;
+        std::unique_ptr<post_buffer> spatial_blur_half_result;
 
         // Final post-processed frame is staged in screen_postbuffer1. These two
         // buffers alternate to preserve the accumulated previous output.

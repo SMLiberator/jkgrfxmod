@@ -24,9 +24,13 @@ namespace jkgm {
 
         // Keep the original shader and full-size buffers for the default
         // path. Scissored draws cannot cover a half-res target correctly.
-        bool const halfres=ogs->experimental_spatial_blur_half_res &&
+        bool const halfres=ogs->experimental_spatial_blur_mode>0 &&
             ogs->post_spatial_blur_fast && ogs->spatial_blur_half_work &&
             glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE;
+        bool const dual_halfres=halfres &&
+            ogs->experimental_spatial_blur_mode==2 &&
+            ogs->spatial_blur_half_result &&
+            ogs->post_spatial_blur_reconstruct;
         auto &shader=halfres
             ?*ogs->post_spatial_blur_fast:ogs->post_spatial_blur;
         auto &work=halfres
@@ -41,14 +45,16 @@ namespace jkgm {
         shader.set_source_sampler(0);
         shader.set_depth_sampler(1);
         shader.set_screen_size(static_cast<size<2, float>>(screen_size));
-        shader.set_distance_params(
-            make_point(std::max(0.0f, distance[0]),
-                       std::max(distance[1], distance[0] + 0.001f),
-                       std::clamp(distance[2], 0.0f, 1.0f), 0.0f));
-        shader.set_peripheral_params(
-            make_point(std::clamp(peripheral[0], 0.0f, 1.0f),
-                       std::max(peripheral[1], peripheral[0] + 0.001f),
-                       std::clamp(peripheral[2], 0.0f, 1.0f), 0.0f));
+        auto const distance_params=make_point(
+            std::max(0.0f,distance[0]),
+            std::max(distance[1],distance[0]+0.001f),
+            std::clamp(distance[2],0.0f,1.0f),0.0f);
+        auto const peripheral_params=make_point(
+            std::clamp(peripheral[0],0.0f,1.0f),
+            std::max(peripheral[1],peripheral[0]+0.001f),
+            std::clamp(peripheral[2],0.0f,1.0f),0.0f);
+        shader.set_distance_params(distance_params);
+        shader.set_peripheral_params(peripheral_params);
 
         gl::set_active_texture_unit(1);
         gl::bind_texture(gl::texture_bind_target::texture_2d, linear_depth);
@@ -67,24 +73,51 @@ namespace jkgm {
         if(halfres) {
             shader.set_fast_inputs(2,make_size(
                 float(std::max(1,get<x>(screen_size)/2)),
-                float(std::max(1,get<y>(screen_size)/2))));
+                float(std::max(1,get<y>(screen_size)/2))),false);
         }
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,work.fbo);
         gl::set_viewport(work.viewport);
         gl::draw_elements(
             gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
 
-        // Vertical pass always writes a full-resolution image, to preserve
-        // tone-mapping inputs, edges, overlays and HUD behavior.
+        // Mode 1: original full-size vertical pass.
+        // Mode 2: another quarter-size blur, then reconstruct to full size.
         shader.set_blur_axis(1);
-        if(halfres)
-            shader.set_fast_inputs(2,static_cast<size<2,float>>(screen_size));
+        if(halfres) {
+            shader.set_fast_inputs(2,dual_halfres
+                ?make_size(float(std::max(1,get<x>(screen_size)/2)),
+                           float(std::max(1,get<y>(screen_size)/2)))
+                :static_cast<size<2,float>>(screen_size),
+                !dual_halfres);
+        }
+        auto &vertical_target=dual_halfres
+            ?*ogs->spatial_blur_half_result:ogs->spatial_blur_result;
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                             ogs->spatial_blur_result.fbo);
-        gl::set_viewport(ogs->spatial_blur_result.viewport);
+                             vertical_target.fbo);
+        gl::set_viewport(vertical_target.viewport);
         gl::bind_texture(gl::texture_bind_target::texture_2d,work.tex);
         gl::draw_elements(
             gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
+
+        if(dual_halfres) {
+            // Full-res, depth-guided four-tap reconstruction. No blur or
+            // downsampling ever touches the original HDR source texture.
+            auto &rebuild=*ogs->post_spatial_blur_reconstruct;
+            rebuild.use_program();
+            rebuild.set_inputs(0,2,1);
+            rebuild.set_screen_size(static_cast<size<2,float>>(screen_size));
+            rebuild.set_distance_params(distance_params);
+            rebuild.set_peripheral_params(peripheral_params);
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 ogs->spatial_blur_result.fbo);
+            gl::set_viewport(ogs->spatial_blur_result.viewport);
+            gl::set_active_texture_unit(0);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             ogs->spatial_blur_half_result->tex);
+            gl::draw_elements(
+                gl::element_type::triangles,ogs->postmdl.num_indices,
+                gl::index_type::uint32);
+        }
 
         gl::set_depth_mask(true);
         return ogs->spatial_blur_result.tex;

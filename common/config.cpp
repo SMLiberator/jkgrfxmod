@@ -85,6 +85,17 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_spatial_blur_half_res").get_to(
                 rv->experimental_spatial_blur_half_res);
         }
+        // Numeric mode takes precedence if both keys are supplied.
+        if(j.contains("experimental_spatial_blur_mode")) {
+            auto const &mode=j.at("experimental_spatial_blur_mode");
+            if(!mode.is_number_integer() || mode.get<int>()<0 ||
+               mode.get<int>()>2)
+                throw std::runtime_error(
+                    "experimental_spatial_blur_mode must be 0, 1 or 2");
+            rv->experimental_spatial_blur_mode=mode.get<int>();
+        }
+        else if(rv->experimental_spatial_blur_half_res)
+            rv->experimental_spatial_blur_mode=1;
         if(j.contains("enable_trails")) {
             j.at("enable_trails").get_to(rv->enable_trails);
         }

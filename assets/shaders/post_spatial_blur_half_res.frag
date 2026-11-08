@@ -8,6 +8,7 @@ uniform int blur_axis;         // 0 = horizontal, 1 = vertical.
 uniform vec2 screen_size; // Full-resolution scene size for blur radius/aspect.
 uniform vec2 output_size; // Current destination: half-res horizontal, full-res vertical.
 uniform sampler2D original_image; // Full-resolution unblurred scene, never modified.
+uniform int restore_original; // 1 only on mode-1 full-resolution vertical pass.
 
 // xyz = near, far, intensity in [0,1].
 // xyz = inner radius, outer radius, intensity in [0,1].
@@ -42,7 +43,7 @@ void main()
     // The horizontal pass filters into a half-size target. The vertical
     // pass samples that target BUT restores untouched pixels from the
     // original full-resolution image, preserving sharp no-blur regions.
-    vec4 source = blur_axis==1
+    vec4 source = restore_original!=0
         ?texelFetch(original_image,pixel,0)
         :texture(source_image,uv);
 

@@ -671,6 +671,7 @@ namespace jkgm {
             // Only present in the opt-in half-resolution shader.
             gl::uniform_location_id original_image;
             gl::uniform_location_id output_size;
+            gl::uniform_location_id restore_original;
 
         public:
             explicit post_spatial_blur_shader(fs::path const &data_root,
@@ -679,9 +680,24 @@ namespace jkgm {
             void set_depth_sampler(int sampler);
             void set_blur_axis(int axis);
             void set_screen_size(size<2, float> dims);
-            void set_fast_inputs(int original_sampler,size<2,float> output_dims);
+            void set_fast_inputs(int original_sampler,size<2,float> output_dims,
+                                 bool fullres_unblurred);
             void set_distance_params(point<4, float> params);
             void set_peripheral_params(point<4, float> params);
+        };
+
+        // Full-resolution, depth-guided reconstruction from a half-res
+        // blurred source. Tone mapping remains in post_to_srgb.frag.
+        class post_spatial_blur_reconstruct_shader : public opengl_shader {
+        private:
+            gl::uniform_location_id blur_image, original_image, depth_image;
+            gl::uniform_location_id screen_size, distance_params, peripheral_params;
+        public:
+            explicit post_spatial_blur_reconstruct_shader(fs::path const &data_root);
+            void set_inputs(int blur_sampler,int original_sampler,int depth_sampler);
+            void set_screen_size(size<2,float> dims);
+            void set_distance_params(point<4,float> params);
+            void set_peripheral_params(point<4,float> params);
         };
 
         class post_frame_blend_shader : public opengl_shader {

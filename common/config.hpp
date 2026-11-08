@@ -29,7 +29,8 @@ namespace jkgm {
         // Spatial blur (distance + peripheral) and temporal feedback trails.
         bool enable_blur = true;
         // Experimental half-resolution horizontal blur, default-off.
-        bool experimental_spatial_blur_half_res = false;
+        bool experimental_spatial_blur_half_res = false; // legacy alias for mode 1
+        int experimental_spatial_blur_mode = 0; // 0=original, 1=half-horizontal, 2=both half + reconstruct
         bool enable_trails = true;
         bool enable_fog = true;
         bool enable_post = true;
