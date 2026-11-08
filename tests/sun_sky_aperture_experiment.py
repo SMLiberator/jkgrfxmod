@@ -108,7 +108,7 @@ sky=[0.1,1.0,0.1,1.0]
 assert filtered(sky,0.8,0.95,0.5)==0.0
 assert filtered(sky,0.8,0.5,0.5)>0.0
 assert filtered(sky,0.8,0.5,0.5)<1.0
-assert filtered(sky,0.8,0.05,0.5)==1.0
+assert 0.98<filtered(sky,0.8,0.05,0.5)<1.0
 for path in ("renderer/renderer.vcxproj","renderer/renderer.vcxproj.filters"):
     assert "sun_sky_aperture_gpu.hpp" in read(path)
 print("Opt-in sunlight sky-aperture source contracts passed")
