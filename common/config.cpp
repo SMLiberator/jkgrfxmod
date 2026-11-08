@@ -446,6 +446,17 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             }
             rv->sun_shadow_resolution = static_cast<unsigned int>(pixels);
         }
+        if(j.contains("sun_shadow_far_resolution")) {
+            auto const &v=j.at("sun_shadow_far_resolution");
+            if(!v.is_number_integer())
+                throw std::runtime_error(
+                    "sun_shadow_far_resolution must be 0 or an integer from 64 to 4096");
+            auto const pixels=v.get<long long>();
+            if(pixels!=0 && (pixels<64 || pixels>4096))
+                throw std::runtime_error(
+                    "sun_shadow_far_resolution must be 0 or between 64 and 4096");
+            rv->sun_shadow_far_resolution=static_cast<unsigned int>(pixels);
+        }
         // Old packs may still ship enable_sprite_decals. Prefer the new
         // enable_decals when both keys are supplied.
         if(j.contains("enable_decals")) {

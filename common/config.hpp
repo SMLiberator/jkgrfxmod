@@ -83,7 +83,8 @@ namespace jkgm {
         unsigned int sun_dynamic_shadow_resolution = 256U; // baseline 64..1024
         float sun_shadow_receiver_bias_scale = 1.0f; // A/B contact-gap tuning (0..2)
         float sun_shadow_caster_bias_scale = 1.0f; // A/B shadow polygon offset (0..2)
-        unsigned int sun_shadow_resolution = 512U; // per-cascade 24-bit depth map (64..4096)
+        unsigned int sun_shadow_resolution = 512U; // near and default far 24-bit depth map
+        unsigned int sun_shadow_far_resolution = 0U; // 0 = inherit near resolution
         float sun_shadow_near_distance = 16.0f; // camera-local near cascade, 2..128
         float sun_shadow_far_distance = 128.0f; // outer cascade coverage, 4..512
         float sun_max_distance = 0.0f; // 0=unlimited; else sun light+shadows fade out and stop at this camera distance

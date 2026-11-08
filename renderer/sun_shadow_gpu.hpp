@@ -24,14 +24,17 @@ struct sun_shadow_gpu {
     decal_world_geometry world{};
     spotlight_shadow_static_mesh mesh{};
     std::vector<spotlight_shadow_surface_range> selected;
-    unsigned resolution=512U;
+    unsigned resolution=512U; // near cascade
+    unsigned far_resolution=512U;
     bool complete=false;
     uintptr_t loaded_world=0;
     uint64_t revision=0;
 
-    explicit sun_shadow_gpu(unsigned pixels=512U)
+    explicit sun_shadow_gpu(unsigned pixels=512U,unsigned far_pixels=0U)
     {
         resolution=std::max(64U,std::min(pixels,4096U));
+        far_resolution=far_pixels==0U?resolution:
+            std::max(64U,std::min(far_pixels,4096U));
         gl::set_active_texture_unit(0);
         gl::bind_texture(gl::texture_bind_target::texture_2d,depth);
         gl::tex_image_2d(gl::texture_bind_target::texture_2d,0,
@@ -71,7 +74,7 @@ struct sun_shadow_gpu {
         gl::bind_texture(gl::texture_bind_target::texture_2d,far_depth);
         gl::tex_image_2d(gl::texture_bind_target::texture_2d,0,
             gl::texture_internal_format::depth_component_24,
-            make_size(int(resolution),int(resolution)),
+            make_size(int(far_resolution),int(far_resolution)),
             gl::texture_pixel_format::depth_component,
             gl::texture_pixel_type::float32,
             span<char const>(nullptr,0U));
@@ -104,12 +107,13 @@ struct sun_shadow_gpu {
                              gl::default_framebuffer);
         // Immutable world-only depth layers; no per-frame texture allocation.
         // If these additional FBOs fail, callers fall back to full redraw.
-        auto setup_static=[&](gl::framebuffer &target,gl::texture &texture) {
+        auto setup_static=[&](gl::framebuffer &target,gl::texture &texture,
+                              unsigned pixels) {
             gl::set_active_texture_unit(0);
             gl::bind_texture(gl::texture_bind_target::texture_2d,texture);
             gl::tex_image_2d(gl::texture_bind_target::texture_2d,0,
                 gl::texture_internal_format::depth_component_24,
-                make_size(int(resolution),int(resolution)),
+                make_size(int(pixels),int(pixels)),
                 gl::texture_pixel_format::depth_component,
                 gl::texture_pixel_type::float32,
                 span<char const>(nullptr,0U));
@@ -126,8 +130,9 @@ struct sun_shadow_gpu {
             return gl::check_framebuffer_status(
                 gl::framebuffer_bind_target::any)==gl::framebuffer_status::complete;
         };
-        static_complete=setup_static(static_fbo,static_depth);
-        bool const far_static_ok=setup_static(static_far_fbo,static_far_depth);
+        static_complete=setup_static(static_fbo,static_depth,resolution);
+        bool const far_static_ok=setup_static(
+            static_far_fbo,static_far_depth,far_resolution);
         static_complete=static_complete && far_static_ok;
         if(!static_complete)
             LOG_WARNING("Sun world depth layer cache unavailable; full cascade fallback");

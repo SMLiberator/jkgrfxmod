@@ -5576,7 +5576,8 @@ namespace jkgm {
             };
             if(!sun_shadow_target)
                 sun_shadow_target=std::make_unique<sun_shadow_gpu>(
-                    the_config->sun_shadow_resolution);
+                    the_config->sun_shadow_resolution,
+                    the_config->sun_shadow_far_resolution);
             auto &map=*sun_shadow_target;
             if(!map.update_world(safe_read,world)) {
                 sun_failure("SithWorld shadow snapshot failed");
@@ -6070,8 +6071,10 @@ namespace jkgm {
                     locked_view=true;
                 }
             }
+            unsigned const cascade_resolution=cascade==0
+                ?map.resolution:map.far_resolution;
             if(!locked_view &&
-               !stabilize_sun_shadow_projection(view,map.resolution)) {
+               !stabilize_sun_shadow_projection(view,cascade_resolution)) {
                 sun_failure("camera-local cascade stabilization failed");
                 if(sun_gpu_timing) {
                     sun_gpu_queries.timestamp(size_t(cascade)+1U,true);
@@ -6305,7 +6308,7 @@ namespace jkgm {
                              dynamic_near_distance_skipped,
                          " skybox_skipped=",skipped_skybox_instances,
                          " cascade=",cascade,
-                         " map=",map.resolution,
+                         " map=",cascade==0?map.resolution:map.far_resolution,
                          " selected_world=",map.selected.size(),
                          " hidden_world=",world_hidden,
                          " backfacing_world=",world_backfacing,
@@ -6441,7 +6444,8 @@ namespace jkgm {
                 sun_gpu_queries.timestamp(size_t(cascade)+1U,true);
             auto const &cascade_target=cascade==0 ? map.fbo : map.far_fbo;
             auto const &static_target=cascade==0 ? map.static_fbo : map.static_far_fbo;
-            auto const dimensions=make_size(int(map.resolution),int(map.resolution));
+            auto const dimensions=make_size(
+                int(cascade_resolution),int(cascade_resolution));
             gl::set_viewport(make_box(make_point(0,0),dimensions));
             gl::disable(gl::capability::blend);
             gl::disable(gl::capability::cull_face);
