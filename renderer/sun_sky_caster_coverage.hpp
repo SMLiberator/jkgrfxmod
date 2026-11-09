@@ -26,7 +26,8 @@ struct sun_sky_caster_coverage {
     sun_shadow_projection view{};
     std::array<uint8_t,tile_count> tiles{};
     unsigned active_tiles=0;
-    bool ready=false,fail_open=false;
+    bool ready=false;
+    bool fail_open=false;
 
     void reset(sun_shadow_projection const &projection)
     {
