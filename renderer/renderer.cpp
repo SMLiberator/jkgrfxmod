@@ -5901,7 +5901,11 @@ namespace jkgm {
             sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
             sun_dynamic_atlas_owners.clear();
-            if(the_config->enable_sun || the_config->enable_sun_shadows)
+            // Do not scan the whole SithSurface table when no active sun
+            // can contribute to this frame (the default ResetSun state).
+            // Recheck immediately when intensity becomes positive.
+            if((the_config->enable_sun || the_config->enable_sun_shadows) &&
+               get_sun_settings().intensity.value()[0]>0.0f)
                 refresh_sun_level_sky();
             if(!the_config->enable_sun_shadows || !sun_level_has_sky)return;
             auto const sun_pass_started=the_config->profile_renderer

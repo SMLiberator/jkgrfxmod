@@ -28,6 +28,7 @@ assert "sun_sky_surface_eligible(flags,adjoin)" in render
 assert "sun_sky_surface_eligible(flags,adjoin)" in render
 assert "uint32_t flags=0,adjoin=0;" in render
 assert "refresh_sun_level_sky();" in render
+assert "get_sun_settings().intensity.value()[0]>0.0f" in render
 assert "if(!the_config->enable_sun_shadows || !sun_level_has_sky)return;" in render
 assert "sun_level_has_sky &&" in render
 assert "flags&0x600U,adjoin" in h
