@@ -377,6 +377,8 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , jk_color_filter(gl::get_uniform_location(the_program,"jk_color_filter"))
     , jk_color_tint(gl::get_uniform_location(the_program,"jk_color_tint"))
     , jk_color_add_fade(gl::get_uniform_location(the_program,"jk_color_add_fade"))
+    , baked_vertex_overbrightness(gl::get_uniform_location(
+          the_program,"baked_vertex_overbrightness"))
     , translucent_sun(the_program)
 {
     for(unsigned i=0;i<16U;++i) {
@@ -552,6 +554,12 @@ void jkgm::shaders::world_cache_preview_shader::set_jk_color_effects(
     gl::set_uniform_vector(jk_color_tint,tint);
     gl::set_uniform_vector(jk_color_add_fade,add_fade);
 }
+void jkgm::shaders::world_cache_preview_shader::set_baked_vertex_overbrightness(
+    bool enabled)
+{
+    gl::set_uniform_integer(baked_vertex_overbrightness,enabled?1:0);
+}
+
 void jkgm::shaders::world_cache_preview_shader::set_specular_lighting(
     bool pixel_diffuse,bool point_specular)
 {
@@ -728,6 +736,8 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , jk_color_filter(gl::get_uniform_location(the_program,"jk_color_filter"))
     , jk_color_tint(gl::get_uniform_location(the_program,"jk_color_tint"))
     , jk_color_add_fade(gl::get_uniform_location(the_program,"jk_color_add_fade"))
+    , baked_vertex_overbrightness(gl::get_uniform_location(
+          the_program,"baked_vertex_overbrightness"))
     , thing_sector_tint_delta(gl::get_uniform_location(the_program,"thing_sector_tint_delta"))
     , colormap_tint(gl::get_uniform_location(the_program,"colormap_tint"))
     , sector_crossing_count(gl::get_uniform_location(the_program,"sector_crossing_count"))
@@ -949,6 +959,12 @@ void jkgm::shaders::gpu_3do_preview_shader::set_fog(
     gl::set_uniform_vector(fog_params,params);
     gl::set_uniform_vector(fog_color,
         make_point(get<0>(color),get<1>(color),get<2>(color)));
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_baked_vertex_overbrightness(
+    bool enabled)
+{
+    gl::set_uniform_integer(baked_vertex_overbrightness,enabled?1:0);
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_jk_color_effects(
