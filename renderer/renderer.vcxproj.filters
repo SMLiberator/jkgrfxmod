@@ -527,6 +527,9 @@
     <ClInclude Include="sun_sky_caster_coverage.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="sun_sky_surface.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="sun_skybox_thing.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
