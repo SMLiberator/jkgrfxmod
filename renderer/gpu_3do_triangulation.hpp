@@ -6,10 +6,19 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <numeric>
 #include <vector>
 
 namespace jkgm {
+    // A self-intersecting polygon cannot be triangulated unambiguously.
+    // It may be omitted after all native memory and corner indices have
+    // already passed validation; other errors remain mesh-level failures.
+    inline bool gpu_3do_skip_untriangulable_face(char const *reason)
+    {
+        return reason && std::strcmp(reason,"self_intersecting_outline")==0;
+    }
+
     struct gpu_3do_xy {
         double x=0.0, y=0.0;
     };
