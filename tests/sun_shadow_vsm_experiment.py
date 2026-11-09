@@ -113,36 +113,32 @@ assert chebyshev(10.0,0.1,0.03,0.0001,bleed=0.5) <= chebyshev(
 
 print("Experimental sun VSM filter source contracts passed")
 
-# Raw-depth vs selected VSM vs aperture debug contract. This must
-# leave the normal shader path unchanged when the mode is zero.
-assert "int sun_shadow_debug_view = 0;" in cfg
-assert 'j.contains("sun_shadow_debug_view")' in parser
-assert "sun_shadow_debug_view must be between 0 and 4" in parser
-assert "**sun_shadow_debug_view**" in read("doc/config.md")
-assert "void set_sun_shadow_debug_view(int mode);" in prog
-assert "game_post_opaque_composite_shader::set_sun_shadow_debug_view(" in progcpp
-assert "prog.set_sun_shadow_debug_view(sun_debug_supported" in renderer
-assert "the_config->sun_shadow_debug_view==1" in renderer
-assert "uniform int sun_shadow_debug_view;" in opaque
-for typ in ("sampler2D","sampler2DShadow"):
-    assert f"uniform {typ} sun_shadow_raw_near;" in opaque
-    assert f"uniform {typ} sun_shadow_raw_far;" in opaque
-assert "texelFetch(map,pixel,0).r" in opaque
-assert "sun_debug_raw_visibility(world,incidence)" in opaque
+# The debug visualization was removed. The raw-depth samplers remain
+# solely for the optional VSM depth guard, never for regular PCF shadows.
+assert "sun_shadow_debug_view" not in cfg
+assert "sun_shadow_debug_view" not in parser
+assert "sun_shadow_debug_view" not in prog
+assert "sun_shadow_debug_view" not in progcpp
+assert "sun_shadow_debug_view" not in renderer
+assert "sun_shadow_debug_view" not in opaque
+assert "uniform sampler2D sun_shadow_raw_near;" in opaque
+assert "uniform sampler2D sun_shadow_raw_far;" in opaque
+assert "uniform sampler2DShadow sun_shadow_raw_near;" not in opaque
+assert "uniform sampler2DShadow sun_shadow_raw_far;" not in opaque
 assert "sun_shadow_visibility(world,incidence)" in opaque
 assert "sun_sky_aperture(world)" in opaque
-assert "out_color=vec4(vec3(clamp(visibility,0.0,1.0)),1.0);" in opaque
 
 # Optional raw-depth cap suppresses false VSM illumination in opaque
 # receivers. No changes to depth maps, VSM moment filters or PCF shaders.
 assert "bool experimental_sun_vsm_depth_guard = false;" in cfg
 assert 'j.contains("experimental_sun_vsm_depth_guard")' in parser
-assert "bool const vsm_depth_guard=sun_debug_supported &&" in renderer
+assert "bool const vsm_depth_guard=sun_sky_aperture_hardware_supported() &&" in renderer
 assert "the_config->experimental_sun_vsm_depth_guard &&" in renderer
 assert "sun_shadow_ready && bool(sun_shadow_target);" in renderer
 assert "prog.set_sun_vsm_depth_guard(vsm_depth_guard);" in renderer
-assert "the_config->sun_shadow_debug_view==1 ||" in renderer
-assert "vsm_depth_guard)) {" in renderer
+assert "if(vsm_depth_guard) {" in renderer
+assert "gl::set_uniform_integer(sun_shadow_raw_near,17);" in progcpp
+assert "gl::set_uniform_integer(sun_shadow_raw_far,18);" in progcpp
 assert "void set_sun_vsm_depth_guard(bool enabled);" in prog
 assert "game_post_opaque_composite_shader::set_sun_vsm_depth_guard(" in progcpp
 assert "uniform int sun_vsm_depth_guard;" in opaque
