@@ -28,6 +28,7 @@
 #include "sun_shadow_gpu.hpp"
 #include "sun_shadow_moments_gpu.hpp"
 #include "sun_sky_aperture_gpu.hpp"
+#include "sun_sky_surface.hpp"
 #include "sun_sky_caster_coverage.hpp"
 #include "world_cache_gpu.hpp"
 #include "world_cache_alpha.hpp"
@@ -618,6 +619,12 @@ namespace jkgm {
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
         std::unique_ptr<sun_shadow_moments_gpu> sun_moments_target;
         std::unique_ptr<sun_sky_aperture_gpu> sun_sky_aperture_target;
+        // Fail-open physical-sky test, refreshed from the live SithSurface
+        // table once per rendered frame (also when sun shadows are off).
+        bool sun_level_has_sky=true;
+        bool sun_level_sky_known=false;
+        uint32_t sun_level_sky_faces=0;
+        uintptr_t sun_level_sky_world=0;
         // Phase 1B sky-first measurements; never included in cache keys.
         struct sun_sky_caster_measurement {
             bool available=false,fail_open=false;
@@ -1205,6 +1212,10 @@ namespace jkgm {
                 sun_shadow_last_validation={};
                 // Sky projection cache cannot survive a level/mode reset.
                 sun_sky_aperture_target.reset();
+                sun_level_has_sky=true;
+                sun_level_sky_known=false;
+                sun_level_sky_faces=0;
+                sun_level_sky_world=0;
                 sun_sky_caster_measured={};
                 sun_static_geometry_cache.clear();
                 sun_dynamic_views.clear();
@@ -3518,7 +3529,8 @@ namespace jkgm {
             // Match cached-world direct specular: disabling the COG sun
             // disables its GGX highlights too, independently of EnvMaps.
             float const sun_power=(the_config->enable_reflections &&
-                                   the_config->enable_sun)
+                                   the_config->enable_sun &&
+                                   sun_level_has_sky)
                 ? std::max(0.0f,sun.intensity.value()[0]) : 0.0f;
             bool const sun_active=sun_power>0.0f;
             prog.set_sun(make_point(sun_project(cam.right),
@@ -4695,6 +4707,60 @@ namespace jkgm {
 
 
 
+        // A level without any physical sky aperture cannot receive
+        // COG sunlight, regardless of SetSunInfo or shadow settings.
+        // Preserve the COG state so switching worlds later still works.
+        // Read the live surface table; GeoMode 0 is intentionally valid.
+        // Any malformed native pointer/read fails open (sun stays allowed).
+        void refresh_sun_level_sky()
+        {
+            bool present=true,known=false;
+            uint32_t eligible=0,world=0;
+            if(engine_material_debug::read_object(
+                    engine_material_debug::current_world_global,world) &&
+               decal_native_address_ok(world)) {
+                uint32_t count=0,table=0;
+                if(engine_material_debug::read_object(
+                       uintptr_t(world)+0xa8U,count) &&
+                   engine_material_debug::read_object(
+                       uintptr_t(world)+0xacU,table) &&
+                   count<=250000U &&
+                   (count==0U ||
+                    (decal_native_address_ok(table) &&
+                     engine_camera_detail::readable(
+                         uintptr_t(table),size_t(count)*0x5cU)))) {
+                    known=true;
+                    present=false;
+                    for(uint32_t i=0;i<count;++i) {
+                        uintptr_t const base=uintptr_t(table)+
+                            uintptr_t(i)*0x5cU;
+                        uint32_t adjoin=0,flags=0;
+                        std::memcpy(&adjoin,
+                            reinterpret_cast<void const *>(base+0x0cU),4U);
+                        std::memcpy(&flags,
+                            reinterpret_cast<void const *>(base+0x10U),4U);
+                        if(sun_sky_surface_eligible(flags,adjoin)) {
+                            present=true;
+                            ++eligible;
+                        }
+                    }
+                }
+            }
+            // A newly eligible sky surface must be captured in the
+            // aperture geometry snapshot, not merely in its live flags.
+            if(known && (world!=sun_level_sky_world ||
+                         !sun_level_sky_known ||
+                         eligible!=sun_level_sky_faces)) {
+                sun_sky_aperture_target.reset();
+                sun_shadow_cascade_cached={{false,false}};
+                sun_shadow_validated_world_view_ready=false;
+            }
+            sun_level_has_sky=present;
+            sun_level_sky_known=known;
+            sun_level_sky_faces=eligible;
+            sun_level_sky_world=world;
+        }
+
         bool sun_sky_aperture_hardware_supported() const
         {
             // This is an immutable per-context capability. Query once:
@@ -4741,7 +4807,8 @@ namespace jkgm {
             uniforms.set_sky_aperture(false,
                 texture_units::forward_next_extended_unit,
                 make_point(1.0f,0.0f,1.0f,0.0f));
-            if(!active || !the_config->enable_sun)return;
+            if(!active || !the_config->enable_sun ||
+               !sun_level_has_sky)return;
             auto const cam=read_active_render_camera();
             if(!cam.valid)return;
             auto const sun=get_sun_settings();
@@ -5759,10 +5826,10 @@ namespace jkgm {
                 auto const &face=gate.world.receivers[i];
                 uintptr_t const base=gate.world.surfaces_addr+
                     uintptr_t(face.surface_index)*0x5cU;
-                uint32_t flags=0,geo=0;
+                uint32_t flags=0,adjoin=0;
                 if(!read(base+0x10U,&flags,4U) ||
-                   !read(base+0x1cU,&geo,4U) ||
-                   (flags&0x600U)==0U || geo<3U || geo>4U)
+                   !read(base+0x0cU,&adjoin,4U) ||
+                   !sun_sky_surface_eligible(flags,adjoin))
                     continue;
                 auto const &range=gate.mesh.surfaces[i];
                 if(range.count==0)continue;
@@ -5827,7 +5894,9 @@ namespace jkgm {
             sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
             sun_dynamic_atlas_owners.clear();
-            if(!the_config->enable_sun_shadows)return;
+            if(the_config->enable_sun || the_config->enable_sun_shadows)
+                refresh_sun_level_sky();
+            if(!the_config->enable_sun_shadows || !sun_level_has_sky)return;
             auto const sun_pass_started=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
             auto sun_failure=[&](char const *reason) {
@@ -6413,13 +6482,13 @@ namespace jkgm {
                     for(auto const &face:gate.world.receivers) {
                         uintptr_t const addr=gate.world.surfaces_addr+
                             uintptr_t(face.surface_index)*0x5cU;
-                        uint32_t flags=0,geo=0;
+                        uint32_t flags=0,adjoin=0;
                         if(!safe_read(addr+0x10U,&flags,4U) ||
-                           !safe_read(addr+0x1cU,&geo,4U)) {
+                           !safe_read(addr+0x0cU,&adjoin,4U)) {
                             for(auto &mask:sky_coverages)mask.mark_all();
                             break;
                         }
-                        if((flags&0x600U)==0U || geo<3U || geo>4U)continue;
+                        if(!sun_sky_surface_eligible(flags,adjoin))continue;
                         for(size_t g=0;g<3;++g) {
                             ++sky_estimates[g].sky_faces;
                             sky_coverages[g].include_polygon(face.polygon);
@@ -7550,6 +7619,7 @@ namespace jkgm {
             auto const sun=get_sun_settings();
             float const sun_power=sun.intensity.value()[0];
             bool const sun_lit=the_config->enable_sun &&
+                sun_level_has_sky &&
                 std::isfinite(sun_power) && sun_power>0.0f;
             auto const cam=read_active_render_camera();
             if((the_config->enable_sun || the_config->enable_sun_shadows) &&
@@ -7971,7 +8041,7 @@ namespace jkgm {
             // material's own strength, roughness, metalness and normal maps.
             auto const sun=get_sun_settings();
             bool const direct_sun=the_config->enable_sun &&
-                sun.intensity.value()[0]>0.0f;
+                sun_level_has_sky && sun.intensity.value()[0]>0.0f;
             bool const direct_points=the_config->enable_dynamic_light_specular;
             bool const default_eligible=(geometry_mode==3U ||
                                           geometry_mode==4U) &&

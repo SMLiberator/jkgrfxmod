@@ -6,6 +6,7 @@
 // each sunlight ray. A receiver must be farther from the sun than the
 // aperture to receive added sunlight. Normal caster shadows remain separate.
 #include "sun_shadow.hpp"
+#include "sun_sky_surface.hpp"
 #include "spotlight_shadow.hpp"
 #include "glutil/buffer.hpp"
 #include "glutil/framebuffer.hpp"
@@ -130,7 +131,7 @@ struct sun_sky_aperture_gpu {
         return true;
     }
 
-    // Hash live sky flags and GeoModes, since COG can change those even
+    // Hash live sky flags and adjoin pointers, since COG can change those even
     // though the cached vertex/index arrays are immutable.
     sun_shadow_projection expanded_sky_view(
         sun_shadow_projection const &ordinary) const
@@ -175,13 +176,13 @@ struct sun_sky_aperture_gpu {
         for(auto const &surface:world.receivers) {
             uintptr_t const base=world.surfaces_addr+
                 uintptr_t(surface.surface_index)*0x5cU;
-            uint32_t flags=0,geo=0;
+            uint32_t flags=0,adjoin=0;
             if(!read(base+0x10U,&flags,4U) ||
-               !read(base+0x1cU,&geo,4U)) {
-                flags=0;geo=0;
+               !read(base+0x0cU,&adjoin,4U)) {
+                flags=0;adjoin=1U;
             }
             for(uint32_t v:{surface.surface_index,
-                            flags&0x600U,geo}) {
+                            flags&0x600U,adjoin}) {
                 h^=uint64_t(v);
                 h*=1099511628211ULL;
             }

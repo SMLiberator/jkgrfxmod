@@ -111,6 +111,17 @@ Recommend values for HUD scaling (based on 360p HUD size and Jedi Outcast/Academ
 Bloom brightness extraction now measures HDR-exposed linear scene luminance using the same fixed EV and adapted 1x1 EV as the final display pass. It still adds bloom before tone mapping and never double-exposes the bloom contribution. Bloom threshold and existing weights are unchanged when HDR is off.
 
 
+## Sky eligibility and no-sky levels
+
+COG sunlight and its shadow passes are suppressed in worlds with **no eligible
+sky surfaces**, even when scripts set sun intensity. A surface is eligible
+when it has sky flags 0x200/0x400 **and no adjoin pointer**. GeoMode does not
+affect eligibility: invisible (GeoMode 0) non-adjoin sky faces remain valid
+openings for custom 3DO skyboxes, while sky-flagged adjoins do not. The same
+rule controls the sky aperture and sky-first coverage measurements. Sun COG
+values remain stored for later levels. Native surface-table read failures
+conservatively leave sunlight enabled rather than disabling it by accident.
+
 ## Sprite sunlight and shadowing
 
 Cached world sprites receive direct sunlight and sample existing sun shadow maps,

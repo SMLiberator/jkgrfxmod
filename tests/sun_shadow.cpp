@@ -1,5 +1,6 @@
 #include "renderer/sun_shadow.hpp"
 #include "renderer/sun_sky_caster_coverage.hpp"
+#include "renderer/sun_sky_surface.hpp"
 #include "renderer/sun_skybox_thing.hpp"
 #include <cassert>
 #include <array>
@@ -12,6 +13,14 @@ using namespace jkgm;
 
 int main()
 {
+    // Only a sky-flagged non-adjoin is a physical sunlight aperture.
+    // Rendering GeoMode is deliberately irrelevant to this predicate.
+    assert(sun_sky_surface_eligible(0x200U,0U));
+    assert(sun_sky_surface_eligible(0x400U,0U));
+    assert(sun_sky_surface_eligible(0x600U,0U));
+    assert(!sun_sky_surface_eligible(0U,0U));
+    assert(!sun_sky_surface_eligible(0x200U,0x123400U));
+    assert(!sun_sky_surface_eligible(0x400U,0x123400U));
     // Sky-first Phase 1: only a conservative XY tile-mask estimate.
     // Roof and under-roof casters share light-space XY and are both
     // counted; no claim about actual depth visibility is made.

@@ -25,7 +25,15 @@ assert "gate.valid[cascade]=true;" in render
 assert "world.load(read,native_world,250000U,true,true,true)" in h
 assert "surface.surface_flags&0x600U" in h
 assert "flags&0x600U" in render
-assert "geo<3U || geo>4U" in render
+assert "sun_sky_surface_eligible(flags,adjoin)" in render
+assert "uint32_t flags=0,adjoin=0;" in render
+assert "refresh_sun_level_sky();" in render
+assert "if(!the_config->enable_sun_shadows || !sun_level_has_sky)return;" in render
+assert "sun_level_has_sky &&" in render
+assert "flags&0x600U,adjoin" in h
+assert "sun_sky_surface.hpp" in read("tests/sun_shadow.cpp")
+assert "sun_sky_surface_eligible(0x200U,0U)" in read("tests/sun_shadow.cpp")
+assert "sun_sky_surface_eligible(0x200U,0x123400U)" in read("tests/sun_shadow.cpp")
 assert "void draw_sun_sky_aperture(int cascade," in render
 assert "draw_sun_sky_aperture(cascade,view,safe_read);" in render
 assert "sun_sky_aperture_ready()" in render
