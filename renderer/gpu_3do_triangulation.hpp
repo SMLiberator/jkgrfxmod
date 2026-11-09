@@ -1,7 +1,8 @@
 #pragma once
 // Triangulate arbitrary simple 3DO face outlines without assuming convexity.
-// Geometry is cached only when a reliable, non-self-intersecting polygon can
-// be triangulated. The caller must use JK's original face renderer otherwise.
+// Keep validated polygons with reliable triangulations. The GPU mesh snapshot
+// omits self-intersecting faces individually, without guessing triangles or
+// unnecessarily falling back for the whole 3DO.
 #include <algorithm>
 #include <array>
 #include <cmath>
