@@ -21,6 +21,7 @@ out vec3 cached_world_normal;
 uniform vec4 view_right,view_forward,view_up,view_origin;
 uniform vec4 projection; // tan(half horizontal FOV), aspect, inverse far
 uniform int sky_mode; // 0=ordinary world, 1=horizon, 2=ceiling
+uniform int baked_vertex_overbrightness; // opt-in authored Gouraud HDR
 // Already neutralized native global palette: only COG/player effects remain.
 // The per-face sector tint is applied locally in the same color operation.
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
@@ -49,6 +50,14 @@ void main() {
     cached_raw_light_rgb=native_light_rgb;
     cached_lit_rgb=world_jk_effect(native_light_rgb,
                                    native_sector_tint,native_sector_cmp_tint);
+    // All native RGB8/CMP effects still operate on the ordinary 0..1
+    // Gouraud result. Only afterwards restore the authored HDR excess
+    // at each VERTEX, before interpolation, using the original static
+    // intensity+ExtraLight (not dynamic point-light contributions).
+    // The tint applied to the saturated white result also colors the HDR.
+    if(baked_vertex_overbrightness!=0 &&
+       native_light_state.z>2.5 && native_light_state.x>1.0)
+        cached_lit_rgb*=min(pow(native_light_state.x,1.8),65504.0);
     cached_light_state=native_light_state;
     cached_sector_tint=native_sector_tint;
     cached_sector_cmp_tint=native_sector_cmp_tint;
