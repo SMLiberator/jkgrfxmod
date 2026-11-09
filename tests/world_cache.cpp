@@ -195,6 +195,23 @@ int main()
         light_read,light_surfaces,mesh,lit_face,8U,
         dynamic_lights,rgb,&lit_sample));
     assert(lit_sample.mode==3U && lit_sample.vertices==4U);
+    // Reject bad triangle spans with an actionable reason. The new
+    // diagnostic argument must not alter successful Gouraud output.
+    auto invalid_light_face=lit_face;
+    invalid_light_face.count=0;
+    char const *light_failure=nullptr;
+    assert(!sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,invalid_light_face,8U,
+        dynamic_lights,rgb,nullptr,nullptr,false,0.0f,
+        nullptr,nullptr,0U,&light_failure));
+    assert(light_failure &&
+           std::strcmp(light_failure,"candidate_triangle_range_invalid")==0);
+    light_failure="stale_failure";
+    assert(sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,
+        dynamic_lights,rgb,nullptr,nullptr,false,0.0f,
+        nullptr,nullptr,0U,&light_failure));
+    assert(light_failure==nullptr);
     assert(std::fabs(rgb[0][0]-std::pow(0.20f,1.8f))<0.0001f);
     assert(std::fabs(rgb[3][2]-std::pow(0.45f,1.8f))<0.0001f);
     // Each surface uses its owning sector tint, independent of the camera.
@@ -448,6 +465,18 @@ int main()
     // neighboring surfaces remain unchanged.
     std::vector<std::array<float,2>> frame_uv(mesh.vertices.size());
     assert(write_world_cache_uv_animation(mesh,lookup,full[0],frame_uv));
+    // A mismatched cached-surface mapping must have its own failure reason.
+    auto invalid_uv_face=full[0];
+    invalid_uv_face.count=0;
+    char const *uv_failure=nullptr;
+    assert(!write_world_cache_uv_animation(
+        mesh,lookup,invalid_uv_face,frame_uv,&uv_failure));
+    assert(uv_failure &&
+           std::strcmp(uv_failure,"uv_cached_surface_mapping_mismatch")==0);
+    uv_failure="stale_failure";
+    assert(write_world_cache_uv_animation(
+        mesh,lookup,full[0],frame_uv,&uv_failure));
+    assert(uv_failure==nullptr);
     for(size_t i=0;i<4U;++i)
         assert(frame_uv[i][0]==8.0f && frame_uv[i][1]==-4.0f);
     for(size_t i=4U;i<frame_uv.size();++i)
