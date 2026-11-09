@@ -292,17 +292,18 @@ int main()
         assert(rgb[i]==mode3_rgb[i]);
         assert(pixel_state[i]==mode3_state[i]);
     }
-    // Unknown lighting modes remain rejected rather than being silently
-    // clamped or treated as unlit.
-    lu32(light_surfaces+2U*0x5cU+0x20U,5U);
-    char const *invalid_mode_reason=nullptr;
-    assert(!sample_world_cache_surface_light(
-        light_read,light_surfaces,mesh,lit_face,8U,
-        dynamic_lights,rgb,nullptr,nullptr,false,0.0f,
-        nullptr,nullptr,0U,&invalid_mode_reason));
-    assert(invalid_mode_reason &&
-           std::strcmp(invalid_mode_reason,
-                       "native_light_mode_unreadable_or_invalid")==0);
+    // Higher authored modes must also cap to Gouraud, not disappear.
+    for(uint32_t authored : {5U,6U,100U}) {
+        lu32(light_surfaces+2U*0x5cU+0x20U,authored);
+        world_cache_light_sample high_sample{};
+        assert(sample_world_cache_surface_light(
+            light_read,light_surfaces,mesh,lit_face,8U,
+            dynamic_lights,rgb,&high_sample,&pixel_state,true));
+        assert(high_sample.mode==3U &&
+               high_sample.authored_mode==authored);
+        assert(rgb==mode3_rgb);
+        assert(pixel_state==mode3_state);
+    }
     lu32(light_surfaces+2U*0x5cU+0x20U,3U);
     // Gouraud levels are authored independently for each world surface.
     // Changing a single local intensity must affect its own vertex only.
