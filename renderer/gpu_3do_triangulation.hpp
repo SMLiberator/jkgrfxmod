@@ -188,20 +188,30 @@ namespace jkgm {
         if(span<=1e-10) return fail("collapsed_spatial_bounds");
         double const nl=std::sqrt(newell[0]*newell[0]+
                                   newell[1]*newell[1]+newell[2]*newell[2]);
-        if(nl<=span*span*1e-10) return fail("zero_newell_area_or_self_intersection");
-        int const drop=std::abs(newell[0])>std::abs(newell[1])
-            ? (std::abs(newell[0])>std::abs(newell[2])?0:2)
-            : (std::abs(newell[1])>std::abs(newell[2])?1:2);
+        // A bow-tie may have exactly zero Newell area even though its
+        // edges cross. Project using the authored face normal in that case
+        // so we can identify a true crossing instead of treating it as an
+        // undiagnosed degenerate polygon.
+        bool const weak_newell=nl<=span*span*1e-10;
+        auto const &projection_normal=weak_newell?normal:newell;
+        int const drop=std::abs(projection_normal[0])>
+                       std::abs(projection_normal[1])
+            ? (std::abs(projection_normal[0])>
+               std::abs(projection_normal[2])?0:2)
+            : (std::abs(projection_normal[1])>
+               std::abs(projection_normal[2])?1:2);
         std::vector<gpu_3do_xy> projected;
         projected.reserve(points.size());
         for(auto const &p:points) {
             if(drop==0) projected.push_back({p[1],p[2]});
             else if(drop==1) projected.push_back({p[0],p[2]});
             else projected.push_back({p[0],p[1]});
-            double const height=((double(p[0])-points[0][0])*newell[0]+
-                                 (double(p[1])-points[0][1])*newell[1]+
-                                 (double(p[2])-points[0][2])*newell[2])/nl;
-            if(std::abs(height)>span*1e-4) nonplanar=true;
+            if(!weak_newell) {
+                double const height=((double(p[0])-points[0][0])*newell[0]+
+                                     (double(p[1])-points[0][1])*newell[1]+
+                                     (double(p[2])-points[0][2])*newell[2])/nl;
+                if(std::abs(height)>span*1e-4) nonplanar=true;
+            }
         }
         double px_min=projected[0].x,px_max=px_min;
         double py_min=projected[0].y,py_max=py_min;
@@ -228,6 +238,34 @@ namespace jkgm {
                std::abs(a.y-b.y)<=length_eps) contour.pop_back();
         }
         if(contour.size()<3) return fail("collapsed_contour");
+        // Check edges before signed area: a self-crossing bow-tie cancels
+        // its own area. When Newell is degenerate, accept only strict
+        // interior crossings so collinear zero-width faces aren't mislabeled.
+        for(size_t i=0;i<contour.size();i++) for(size_t j=i+1;j<contour.size();j++) {
+            if(j==i+1 || (i==0 && j+1==contour.size())) continue;
+            auto a=projected[contour[i]];
+            auto b=projected[contour[(i+1)%contour.size()]];
+            auto c=projected[contour[j]];
+            auto d=projected[contour[(j+1)%contour.size()]];
+            if(weak_newell) {
+                double const ab_c=gpu_3do_cross(a,b,c);
+                double const ab_d=gpu_3do_cross(a,b,d);
+                double const cd_a=gpu_3do_cross(c,d,a);
+                double const cd_b=gpu_3do_cross(c,d,b);
+                bool const crosses_ab=
+                    (ab_c>eps && ab_d< -eps) ||
+                    (ab_c< -eps && ab_d>eps);
+                bool const crosses_cd=
+                    (cd_a>eps && cd_b< -eps) ||
+                    (cd_a< -eps && cd_b>eps);
+                if(crosses_ab && crosses_cd)
+                    return fail("self_intersecting_outline");
+            } else if(gpu_3do_segments_intersect(a,b,c,d,length_eps,eps)) {
+                return fail("self_intersecting_outline");
+            }
+        }
+        if(weak_newell)
+            return fail("zero_newell_area_or_self_intersection");
         double signed_area2=0.0;
         for(size_t i=0;i<contour.size();i++) {
             auto a=projected[contour[i]];
@@ -236,17 +274,6 @@ namespace jkgm {
         }
         if(std::abs(signed_area2)<=eps) return fail("zero_signed_area");
         double const sign=signed_area2>0.0?1.0:-1.0;
-        // An intersecting ring has no unambiguous native-compatible cached
-        // triangulation. Reject it rather than drawing accidental triangles.
-        for(size_t i=0;i<contour.size();i++) for(size_t j=i+1;j<contour.size();j++) {
-            if(j==i+1 || (i==0 && j+1==contour.size())) continue;
-            auto a=projected[contour[i]];
-            auto b=projected[contour[(i+1)%contour.size()]];
-            auto c=projected[contour[j]];
-            auto d=projected[contour[(j+1)%contour.size()]];
-            if(gpu_3do_segments_intersect(a,b,c,d,length_eps,eps))
-                return fail("self_intersecting_outline");
-        }
 
         // Ear clipping handles concave polygons; the old triangle fan didn't.
         // Append only after the ENTIRE face has been triangulated successfully.
