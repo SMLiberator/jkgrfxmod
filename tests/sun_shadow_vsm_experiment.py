@@ -125,8 +125,8 @@ assert "uniform sampler2D sun_shadow_raw_near;" in opaque
 assert "uniform sampler2D sun_shadow_raw_far;" in opaque
 assert "uniform sampler2DShadow sun_shadow_raw_near;" not in opaque
 assert "uniform sampler2DShadow sun_shadow_raw_far;" not in opaque
-assert "sun_shadow_visibility(world,incidence)" in opaque
-assert "sun_sky_aperture(world)" in opaque
+assert "sun_shadow_visibility(world_position,incidence)" in opaque
+assert "sun_sky_aperture(world_position)" in opaque
 
 # Optional raw-depth cap suppresses false VSM illumination in opaque
 # receivers. No changes to depth maps, VSM moment filters or PCF shaders.
