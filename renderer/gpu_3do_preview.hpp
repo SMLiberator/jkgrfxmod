@@ -64,6 +64,9 @@ namespace jkgm {
         // keeping every valid face of their mesh GPU cached.
         uint32_t zero_area_faces_skipped=0;
         uint32_t first_zero_area_face=0;
+        // Untriangulable self-intersections omit only their own polygon.
+        uint32_t self_intersecting_faces_skipped=0;
+        uint32_t first_self_intersecting_face=0;
         uint32_t repaired_zero_normals=0;
         uint32_t trimmed_repeated_prefix_faces=0;
         std::vector<gpu_3do_group> groups;
