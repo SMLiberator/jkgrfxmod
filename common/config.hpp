@@ -81,7 +81,6 @@ namespace jkgm {
         bool experimental_sun_sky_aperture = false;
         // Phase 1 only: measure conservative sky-covered caster groups.
         // Does not yet prune any casters or change shadow texture contents.
-        bool experimental_sun_sky_caster_culling = false;
         // Actual static WORLD caster pruning (independent of diagnostics).
         bool experimental_sun_sky_caster_pruning = false;
         double sun_shadow_update_interval = 0.0; // seconds between full CSM checks; 0=every frame
@@ -98,7 +97,6 @@ namespace jkgm {
         float sun_shadow_far_pcf_radius = 0.0f; // independent four-sample filter
         bool experimental_sun_shadow_vsm = false; // independent, default-off shadow path
         bool experimental_sun_vsm_depth_guard = false; // opt-in raw-depth cap for opaque VSM
-        int sun_shadow_debug_view = 0; // 0 normal, 1 raw, 2 PCF/VSM, 3 sky, 4 combined
         float sun_shadow_vsm_near_radius = 1.0f; // prefilter radius, map texels
         float sun_shadow_vsm_far_radius = 1.5f;
         // Optional ADDITIONAL VSM depth standard-deviation floor in JK
