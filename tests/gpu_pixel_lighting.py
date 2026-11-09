@@ -144,6 +144,36 @@ for texture_alpha,material_alpha in ((1.0,1.0),(0.5,1.0),(1.0,0.7)):
     assert 0.0<=expected_rgb<=actual_alpha
 assert "discard;" in world_frag
 assert "vec3 lighting=cached_lit_rgb;" in world_frag
+# Baked >1.0 belongs to authored Gouraud vertices, not COG dynamic point
+# lights. Both GPU paths must retain the optional excess after all RGB8/CMP
+# effects while preserving exact 0..1 legacy shading when disabled.
+world_hdr_uniform="uniform int baked_vertex_overbrightness;"
+assert "bool enable_baked_vertex_overbrightness = false;" in config
+assert 'j.contains("enable_baked_vertex_overbrightness")' in parser
+assert "the_config->enable_baked_vertex_overbrightness" in wiring
+assert wiring.count("set_baked_vertex_overbrightness(")==3
+assert world_hdr_uniform in world_vert and world_hdr_uniform in world_frag
+assert world_hdr_uniform in vert
+assert "native_light_state.z>2.5 && native_light_state.x>1.0" in world_vert
+assert "cached_lit_rgb*=min(pow(native_light_state.x,1.8),65504.0);" in world_vert
+assert "lighting=mix(baked_vertex_overbrightness!=0" in world_frag
+assert "local_static_light+local_extra_light>1.0" in vert
+assert "jk_lit_rgb*=baked_hdr_multiplier;" in vert
+assert "sector_crossing_lit[i]=candidate*baked_hdr_multiplier;" in vert
+assert "vec3 baked_hdr_excess=max(baked-vec3(1.0),vec3(0.0));" in shared
+assert "return pow(lit,vec3(JK_POINT_GAMMA))+baked_hdr_excess;" in shared
+assert "set_baked_vertex_overbrightness(bool enabled)" in program
+# Reference math: 0..1 values must remain IDENTICAL; above 1, preserve
+# gamma-space overbrightness rather than multiplying un-gamma'd radiance.
+for authored in (0.0,0.25,0.5,0.75,1.0,1.1,1.5,2.0,4.0):
+    old=min(authored,1.0)**1.8
+    multiplier=authored**1.8 if authored>1.0 else 1.0
+    result=old*multiplier
+    if authored<=1.0:
+        assert result==old
+    else:
+        assert abs(result-authored**1.8)<1e-12
+        assert result>1.0
 assert "if(all(lessThanEqual(added,vec3(0.0)))) return baked;" in frag
 assert "if(all(lessThanEqual(added,vec3(0.0)))) return baked;" in shared
 assert "pixel_dynamic_lighting!=0" in frag
@@ -212,8 +242,11 @@ def point_sample(dist, radius, intensity, attenuation, incidence):
 def point_compose(baked, added, light_color):
     if added<=0.0:
         return baked
-    return tuple(min(1.0,b**(1.0/1.8)+min(added,1.0)*c**(1.0/1.8))**1.8
-                 for b,c in zip(baked,light_color))
+    return tuple(
+        min(1.0,min(b,1.0)**(1.0/1.8) +
+            min(added,1.0)*min(c,1.0)**(1.0/1.8))**1.8 +
+        max(b-1.0,0.0)
+        for b,c in zip(baked,light_color))
 
 for left,right in ((0.0,1.0),(0.1,0.9),(0.3,0.8)):
     for t in (0.0,0.25,0.5,0.75,1.0):
@@ -225,6 +258,13 @@ for left,right in ((0.0,1.0),(0.1,0.9),(0.3,0.8)):
             model=point_compose(baked,added,(1.0,)*3)
             assert world==model
             assert all(a>=b for a,b in zip(world,baked))
+# Overbright baked energy must survive a nonzero dynamic light without
+# allowing that dynamic light to manufacture additional HDR excess.
+for level in (1.2,2.0,3.0):
+    baked=(level**1.8,)*3
+    result=point_compose(baked,0.4,(1.0,)*3)
+    assert result==baked
+    assert point_compose(baked,0.0,(1.0,)*3)==baked
 # Preserve the previous C++ helper's numeric regression cases here, where
 # they are paired with the shader-source assertions for the real formula.
 assert "range_distance>=radius" in shared
