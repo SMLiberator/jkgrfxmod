@@ -12,7 +12,7 @@
 
 namespace jkgm {
 struct world_cache_light_sample {
-    uint32_t mode=0,vertices=0;
+    uint32_t mode=0,vertices=0,authored_mode=0;
 };
 
 // GPU world pixel lighting uses the SAME live rdCamera light parameters
@@ -117,9 +117,15 @@ inline bool sample_world_cache_surface_light(
                           uint64_t(face.surface_index)*0x5cU;
     if(addr64>0x7ff00000U)return reject("native_surface_address_invalid");
     uintptr_t const addr=static_cast<uintptr_t>(addr64);
-    uint32_t mode=0;
-    if(!read_decal_u32(read,addr+0x20U,mode) || mode>3U)return reject("native_light_mode_unreadable_or_invalid");
-    if(sample) {*sample={mode,count};}
+    uint32_t authored_mode=0;
+    if(!read_decal_u32(read,addr+0x20U,authored_mode) ||
+       authored_mode>4U)
+        return reject("native_light_mode_unreadable_or_invalid");
+    // JK's native sithRender clamps authored lighting to its active
+    // RD_LIGHTMODE_GOURAUD (3) limit. Mode 4 is valid source data in
+    // custom levels; it does not itself request MotS RGB vertex colors.
+    uint32_t const mode=std::min(authored_mode,3U);
+    if(sample) {*sample={mode,count,authored_mode};}
     // The owning sector is required for lit faces, and for tint even in
     // FullyLit mode. Read live Extra + colormap + tint in one bounded span:
     // +0x08 Extra, +0x0c colormap pointer, +0x10 tint[3]. That avoids an
