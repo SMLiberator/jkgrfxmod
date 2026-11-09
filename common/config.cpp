@@ -346,10 +346,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_sun_sky_aperture").get_to(
                 rv->experimental_sun_sky_aperture);
         }
-        if(j.contains("experimental_sun_sky_caster_culling")) {
-            j.at("experimental_sun_sky_caster_culling").get_to(
-                rv->experimental_sun_sky_caster_culling);
-        }
         if(j.contains("experimental_sun_sky_caster_pruning")) {
             j.at("experimental_sun_sky_caster_pruning").get_to(
                 rv->experimental_sun_sky_caster_pruning);
@@ -495,17 +491,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("experimental_sun_vsm_depth_guard"))
             j.at("experimental_sun_vsm_depth_guard").get_to(
                 rv->experimental_sun_vsm_depth_guard);
-        if(j.contains("sun_shadow_debug_view")) {
-            auto const &mode=j.at("sun_shadow_debug_view");
-            if(!mode.is_number_integer())
-                throw std::runtime_error(
-                    "sun_shadow_debug_view must be an integer from 0 to 4");
-            int const value=mode.get<int>();
-            if(value<0 || value>4)
-                throw std::runtime_error(
-                    "sun_shadow_debug_view must be between 0 and 4");
-            rv->sun_shadow_debug_view=value;
-        }
         auto parse_vsm_radius=[&](char const *name,float &out) {
             if(!j.contains(name))return;
             auto const &v=j.at(name);
