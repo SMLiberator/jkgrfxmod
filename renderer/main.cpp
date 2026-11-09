@@ -978,8 +978,7 @@ namespace {
                 // native fallback for the whole rdMesh is worse than one
                 // explicitly diagnosed missing polygon. Memory/index errors
                 // and other triangulation failures still reject the mesh.
-                if(tri_reason &&
-                   std::strcmp(tri_reason,"self_intersecting_outline")==0) {
+                if(jkgm::gpu_3do_skip_untriangulable_face(tri_reason)) {
                     ++g->self_intersecting_faces_skipped;
                     if(g->self_intersecting_faces_skipped==1)
                         g->first_self_intersecting_face=static_cast<uint32_t>(f);
