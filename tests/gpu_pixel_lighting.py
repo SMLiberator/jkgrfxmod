@@ -162,7 +162,7 @@ assert "jk_lit_rgb*=baked_hdr_multiplier;" in vert
 assert "sector_crossing_lit[i]=candidate*baked_hdr_multiplier;" in vert
 assert "vec3 baked_hdr_excess=max(baked-vec3(1.0),vec3(0.0));" in shared
 assert "return pow(lit,vec3(JK_POINT_GAMMA))+baked_hdr_excess;" in shared
-assert "set_baked_vertex_overbrightness(bool enabled)" in program
+assert program.count("::set_baked_vertex_overbrightness(\n    bool enabled)") == 2
 # Reference math: 0..1 values must remain IDENTICAL; above 1, preserve
 # gamma-space overbrightness rather than multiplying un-gamma'd radiance.
 for authored in (0.0,0.25,0.5,0.75,1.0,1.1,1.5,2.0,4.0):
