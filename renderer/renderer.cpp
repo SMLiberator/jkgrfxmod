@@ -8142,6 +8142,12 @@ namespace jkgm {
                 safe_read(base+0x20U,&mode,sizeof(mode));
                 safe_read(base+0x2cU,&indices,sizeof(indices));
                 safe_read(base+0x54U,&static_lights,sizeof(static_lights));
+                // Raw samples aid MotS-style mono/RGB investigation without
+                // assuming the native JKGM loader stores interleaved RGB.
+                std::array<float,4> static_sample{};
+                bool const static_sample_readable=static_lights!=0U &&
+                    safe_read(uintptr_t(static_lights),
+                              static_sample.data(),sizeof(static_sample));
                 LOG_INFO("WORLD CACHE staging reject world=",cache.loaded_world,
                          " surface=",candidate.surface_index,
                          " stage=",stage,
@@ -8151,6 +8157,11 @@ namespace jkgm {
                          " sector=",sector,
                          " vertex_indices_ptr=",indices,
                          " static_light_ptr=",static_lights,
+                         " static_sample_readable=",static_sample_readable?1:0,
+                         " static_sample=",static_sample[0],",",
+                                           static_sample[1],",",
+                                           static_sample[2],",",
+                                           static_sample[3],
                          " native_vertex_count=",cache.world.vertex_count,
                          " dynamic_lights=",cache.native_dynamic_light.size(),
                          " pixel_lighting=",pixel_lighting?1:0,
