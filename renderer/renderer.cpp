@@ -8117,7 +8117,7 @@ namespace jkgm {
             if(!safe_read(0x0073A414U,&identity_cmp,sizeof(identity_cmp)) ||
                !decal_native_address_ok(identity_cmp))
                 identity_cmp=0;
-            size_t light_fallback=0,gouraud_faces=0;
+            size_t light_fallback=0,gouraud_faces=0,mode4_faces=0;
             size_t light_read_rejected=0,uv_prepare_rejected=0;
             size_t stage_rejections_logged=0;
             std::map<std::string,size_t> sampled_stage_reasons;
@@ -8196,6 +8196,7 @@ namespace jkgm {
                     return;
                 }
                 if(info.mode==3U)++gouraud_faces;
+                if(info.authored_mode==4U)++mode4_faces;
                 ordered.push_back(&candidate);
                 cache.frame_render_candidates.push_back(candidate);
             };
@@ -8557,7 +8558,8 @@ namespace jkgm {
                          " light_fallback=",light_fallback,
                          " lighting_read_rejected=",light_read_rejected,
                          " uv_prepare_rejected=",uv_prepare_rejected,
-                         " gouraud_faces=",gouraud_faces);
+                         " gouraud_faces=",gouraud_faces,
+                         " mode4_gouraud_faces=",mode4_faces);
                 for(auto const &entry:sampled_stage_reasons)
                     LOG_INFO("WORLD CACHE staging reject summary world=",
                              cache.loaded_world," reason=",entry.first,
