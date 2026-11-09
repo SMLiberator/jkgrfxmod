@@ -4,6 +4,7 @@
 // GPU-first opaque draw and native-batch isolation live in renderer.cpp.
 #include "world_cache.hpp"
 #include "gpu_3do_frustum.hpp"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
