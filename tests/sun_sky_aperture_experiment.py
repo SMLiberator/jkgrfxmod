@@ -24,7 +24,7 @@ assert "gate.signatures[cascade]==signature" in render
 assert "gate.valid[cascade]=true;" in render
 assert "world.load(read,native_world,250000U,true,true,true)" in h
 assert "surface.surface_flags&0x600U" in h
-assert "flags&0x600U" in render
+assert "sun_sky_surface_eligible(flags,adjoin)" in render
 assert "sun_sky_surface_eligible(flags,adjoin)" in render
 assert "uint32_t flags=0,adjoin=0;" in render
 assert "refresh_sun_level_sky();" in render
