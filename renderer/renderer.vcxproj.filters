@@ -524,7 +524,7 @@
     <ClInclude Include="sun_sky_aperture_gpu.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="sun_sky_caster_coverage.hpp">
+    <ClInclude Include="sun_sky_caster_mask.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="sun_sky_surface.hpp">
