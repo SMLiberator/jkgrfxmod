@@ -112,6 +112,16 @@ int main()
     fast.reset(tile_view);
     fast.include_polygon(sky_quad);
     assert(fast.signature()==mask_hash);
+    // Sky slightly beyond the orthographic border can be dilated into
+    // the cascade: both opening and border receivers must remain.
+    fast.reset(tile_view);
+    std::vector<decal_vec3> edge_sky={
+        {{-0.1f,15.0f,1.0f}},{{-0.05f,15.0f,1.0f}},
+        {{-0.05f,17.0f,1.0f}},{{-0.1f,17.0f,1.0f}}};
+    fast.include_polygon(edge_sky);
+    assert(fast.may_overlap(std::vector<decal_vec3>{
+        {{0.01f,15.0f,1.0f}},{{0.1f,15.0f,1.0f}},
+        {{0.1f,17.0f,1.0f}}}));
     fast.mark_all();
     assert(fast.fail_open && fast.may_overlap(std::vector<decal_vec3>{
         {{1.0f,1.0f,0.0f}},{{2.0f,1.0f,0.0f}},

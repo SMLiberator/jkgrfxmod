@@ -343,7 +343,12 @@ struct sun_sky_caster_fast_mask {
             lo_x=std::min(lo_x,x);hi_x=std::max(hi_x,x);
             lo_y=std::min(lo_y,y);hi_y=std::max(hi_y,y);
         }
-        if(hi_x<0.0 || lo_x>1.0 || hi_y<0.0 || lo_y>1.0)return {};
+        // The sky pass dilates silhouettes by sub-texel offsets. A face
+        // just beyond the cascade edge must still mark border tiles
+        // after our two-cell halo is applied.
+        double const halo=double(padding_tiles)/double(side);
+        if(hi_x< -halo || lo_x>1.0+halo ||
+           hi_y< -halo || lo_y>1.0+halo)return {};
         auto coord=[](double v) {
             return int(std::floor(std::max(-1.0,std::min(2.0,v))*
                                   double(side)));

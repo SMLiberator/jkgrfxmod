@@ -624,6 +624,7 @@ namespace jkgm {
         bool sun_level_has_sky=true;
         bool sun_level_sky_known=false;
         uint32_t sun_level_sky_faces=0;
+        uint64_t sun_level_sky_identity=0;
         uintptr_t sun_level_sky_world=0;
         // Phase 1B sky-first measurements; never included in cache keys.
         struct sun_sky_caster_measurement {
@@ -1215,6 +1216,7 @@ namespace jkgm {
                 sun_level_has_sky=true;
                 sun_level_sky_known=false;
                 sun_level_sky_faces=0;
+                sun_level_sky_identity=0;
                 sun_level_sky_world=0;
                 sun_sky_caster_measured={};
                 sun_static_geometry_cache.clear();
@@ -4716,6 +4718,7 @@ namespace jkgm {
         {
             bool present=true,known=false;
             uint32_t eligible=0,world=0;
+            uint64_t identity=14695981039346656037ULL;
             if(engine_material_debug::read_object(
                     engine_material_debug::current_world_global,world) &&
                decal_native_address_ok(world)) {
@@ -4742,6 +4745,8 @@ namespace jkgm {
                         if(sun_sky_surface_eligible(flags,adjoin)) {
                             present=true;
                             ++eligible;
+                            identity^=uint64_t(i);
+                            identity*=1099511628211ULL;
                         }
                     }
                 }
@@ -4750,7 +4755,8 @@ namespace jkgm {
             // aperture geometry snapshot, not merely in its live flags.
             if(known && (world!=sun_level_sky_world ||
                          !sun_level_sky_known ||
-                         eligible!=sun_level_sky_faces)) {
+                         eligible!=sun_level_sky_faces ||
+                         identity!=sun_level_sky_identity)) {
                 sun_sky_aperture_target.reset();
                 sun_shadow_cascade_cached={{false,false}};
                 sun_shadow_validated_world_view_ready=false;
@@ -4758,6 +4764,7 @@ namespace jkgm {
             sun_level_has_sky=present;
             sun_level_sky_known=known;
             sun_level_sky_faces=eligible;
+            sun_level_sky_identity=identity;
             sun_level_sky_world=world;
         }
 
@@ -6468,10 +6475,12 @@ namespace jkgm {
                sun_level_sky_known &&
                sun_sky_aperture_target &&
                sun_sky_aperture_target->loaded_world==world &&
-               sun_sky_aperture_target->valid[size_t(cascade)]) {
+               sun_sky_aperture_target->valid[0] &&
+               sun_sky_aperture_target->valid[1]) {
                 auto const build_begin=profile_clock::now();
                 sky_prune_mask.reset(view);
                 unsigned eligible_in_snapshot=0;
+                uint64_t snapshot_identity=14695981039346656037ULL;
                 auto const &gate=*sun_sky_aperture_target;
                 for(auto const &face:gate.world.receivers) {
                     uintptr_t const addr=gate.world.surfaces_addr+
@@ -6484,10 +6493,13 @@ namespace jkgm {
                     }
                     if(!sun_sky_surface_eligible(flags,adjoin))continue;
                     ++eligible_in_snapshot;
+                    snapshot_identity^=uint64_t(face.surface_index);
+                    snapshot_identity*=1099511628211ULL;
                     sky_prune_mask.include_polygon(face.polygon);
                 }
                 // Snapshot/read mismatch is never grounds for culling.
-                if(eligible_in_snapshot!=sun_level_sky_faces)
+                if(eligible_in_snapshot!=sun_level_sky_faces ||
+                   snapshot_identity!=sun_level_sky_identity)
                     sky_prune_mask.mark_all();
                 sky_prune_ready=sky_prune_mask.valid &&
                     !sky_prune_mask.fail_open;

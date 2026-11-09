@@ -134,6 +134,11 @@ assert "static constexpr int side=128;" in tiles
 assert "static constexpr int padding_tiles=2;" in tiles
 assert "sky_prune_mask.may_overlap(surface.polygon)" in render
 assert "eligible_in_snapshot!=sun_level_sky_faces" in render
+assert "snapshot_identity!=sun_level_sky_identity" in render
+assert "identity!=sun_level_sky_identity" in render
+assert "sun_sky_aperture_target->valid[0] &&" in render
+assert "sun_sky_aperture_target->valid[1])" in render
+assert "double const halo=double(padding_tiles)/double(side);" in tiles
 assert "hash_u32(sky_prune_ready?1U:0U);" in render
 assert "experimental_sun_sky_caster_pruning = false;" in cfg
 assert 'j.contains("experimental_sun_sky_caster_pruning")' in parser
