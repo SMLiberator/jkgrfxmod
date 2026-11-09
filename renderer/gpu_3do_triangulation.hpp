@@ -193,7 +193,9 @@ namespace jkgm {
         // so we can identify a true crossing instead of treating it as an
         // undiagnosed degenerate polygon.
         bool const weak_newell=nl<=span*span*1e-10;
-        auto const &projection_normal=weak_newell?normal:newell;
+        std::array<double,3> const projection_normal=weak_newell
+            ?std::array<double,3>{{normal[0],normal[1],normal[2]}}
+            :newell;
         int const drop=std::abs(projection_normal[0])>
                        std::abs(projection_normal[1])
             ? (std::abs(projection_normal[0])>
