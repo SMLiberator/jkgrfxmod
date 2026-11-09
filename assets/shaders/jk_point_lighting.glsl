@@ -36,10 +36,14 @@ float jk_point_sample(vec3 delta, vec3 surface_normal,
 vec3 jk_point_compose(vec3 baked, vec3 added, vec3 light_rgb)
 {
     if(all(lessThanEqual(added,vec3(0.0)))) return baked;
+    // The saturated JK dynamic-light composition should never erase
+    // authored HDR baked illumination above 1.0. Off/native inputs are
+    // already <=1, so this addition is exactly zero for legacy scenes.
+    vec3 baked_hdr_excess=max(baked-vec3(1.0),vec3(0.0));
     vec3 base=pow(clamp(baked,0.0,1.0),vec3(1.0/JK_POINT_GAMMA));
     vec3 light=pow(clamp(light_rgb,0.0,1.0),vec3(1.0/JK_POINT_GAMMA));
     vec3 lit=clamp(base+min(added,vec3(1.0))*light,0.0,1.0);
-    return pow(lit,vec3(JK_POINT_GAMMA));
+    return pow(lit,vec3(JK_POINT_GAMMA))+baked_hdr_excess;
 }
 vec3 jk_point_compose(vec3 baked,float added,vec3 light_rgb)
 {
