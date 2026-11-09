@@ -23,7 +23,7 @@ reference the same unit within a program.
 | 10 | Spotlight shadow (depth compare) | Unused | Translucent spotlight shadow | Spotlight shadow |
 | 11 | Fullbright palette / decal AO | Fullbright palette | Unused | Unused |
 | 12–15 | Spotlight cookies 0–3 | Unused | Translucent spotlight cookies 0–3 | 13–15 sun shadows |
-| 16–18 | Sun near/far/dynamic shadow | Sun near/far/dynamic shadow (direct specular include) | Sun near/far/dynamic shadow | 16 sky aperture; 17–18 unused |
+| 16–18 | Sun near/far/dynamic shadow | Sun near/far/dynamic shadow (direct specular include) | Sun near/far/dynamic shadow | 16 sky aperture; 17–18 optional VSM guard raw depths |
 | 19 | **Sector-crossing samplerBuffer** | Unused | Unused | Unused |
 | 20 | **Opt-in sky-aperture sampler2DArray** | **Opt-in sky-aperture sampler2DArray** | **Opt-in sky-aperture sampler2DArray** | Unused |
 
@@ -112,28 +112,13 @@ textures through a depth-comparison sampler, a format/type mismatch
 that could cause undefined visible highlights. This change does not
 modify VSM prefiltering, base sunlight diffuse, or sky apertures.
 
-## Sun-shadow diagnostic
-
-`sun_shadow_debug_view` 1..4 visually compares original depth
-visibility, filtered PCF/VSM static cascade visibility, sky access, and
-their product, respectively; default is zero (off). It is an
-opaque-composite diagnostic and does not include the dynamic Thing
-atlas or later translucent rendering. Original depth textures are
-bound to additional compositor units **17/18**, while the selected
-PCF/VSM textures remain on **13/14** and sky aperture remains on **16**.
-In VSM mode, raw depth is sampled using `sampler2D` with manual
-receiver comparison because the VSM prefilter disables depth-compare
-mode on the original textures; in PCF mode the diagnostic uses a
-`sampler2DShadow`. Both variants are registered in the C++ sampler
-registry. Diagnostics compile out on devices with fewer than 21
-fragment texture units and do not change regular shading.
-
 ## Optional VSM occlusion guard
 
 `experimental_sun_vsm_depth_guard` adds four comparisons against
 the original near/far depth map in the opaque sun-lighting composite,
 then caps VSM visibility by their bilinearly interpolated result. It
-reuses existing diagnostic bindings **17/18**, while VSM moment maps
+uses raw-depth bindings **17/18** (both `sampler2D`, exclusively in the
+VSM shader variant), while VSM moment maps
 remain at **13/14**. It is default-off and requires 21 fragment units
 and the VSM shader variant. This can suppress VSM-only false-lit strips
 under roof casters, at the cost of extra depth reads and potentially
