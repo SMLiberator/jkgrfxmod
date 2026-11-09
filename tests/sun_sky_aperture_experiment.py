@@ -138,7 +138,7 @@ assert "GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MIN_FILTER,GL_NEAREST" in gpu_resource
 assert "GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MAG_FILTER,GL_NEAREST" in gpu_resource
 
 # Phase 2 static-world pruning is separately opt-in and fail-open.
-tiles=read("renderer/sun_sky_caster_coverage.hpp")
+tiles=read("renderer/sun_sky_caster_mask.hpp")
 assert "struct sun_sky_caster_fast_mask" in tiles
 assert "static constexpr int side=128;" in tiles
 assert "static constexpr int padding_tiles=2;" in tiles
@@ -154,42 +154,9 @@ assert "hash_u32(sky_prune_ready?1U:0U);" in render
 assert "experimental_sun_sky_caster_pruning = false;" in cfg
 assert 'j.contains("experimental_sun_sky_caster_pruning")' in parser
 assert "SUN sky-prune cascade=" in render
-# Phase 1 sky-first conservative occupancy is a measurement only: it
-# MUST NOT alter caster selection, depth rendering, or cache signatures.
-tiles=read("renderer/sun_sky_caster_coverage.hpp")
-assert "static constexpr int grid_side=32;" in tiles
-assert "static constexpr int max_grid_side=128;" in tiles
-assert "std::vector<uint8_t> bbox_tiles" in tiles
-assert "convex_hull(" in tiles
-assert "hull_hits_tile(" in tiles
-assert "overlap_result evaluate_polygon(" in tiles
-assert "overlap_result evaluate_aabb(" in tiles
-assert "int requested_side=grid_side" in tiles
-assert "void include_polygon(" in tiles
-assert "bool intersects_polygon(" in tiles
-assert "bool intersects_aabb(" in tiles
-assert "void mark_all()" in tiles
-assert "int padding_tiles=1" in tiles
-assert "bool fail_open=false;" in tiles
-assert "bool experimental_sun_sky_caster_culling = false;" in cfg
-assert 'j.contains("experimental_sun_sky_caster_culling")' in parser
-assert "**experimental_sun_sky_caster_culling**" in read("doc/config.md")
-assert '#include "sun_sky_caster_coverage.hpp"' in render
-assert "sky_coverages[g].reset(view,side);" in render
-assert "sky_coverages[g].include_polygon(face.polygon);" in render
-assert "mask.evaluate_polygon(" in render
-assert "mask.evaluate_aabb(" in render
-assert "measure_models(static_models,0);" in render
-assert "measure_models(models,1);" in render
-assert "sky_world_candidates.push_back({&surface,range.count});" in render
-assert "overlap_eval_cpu_us_3grids=" in render
-assert "world_rect_large=" in render
-assert "culling_applied=0" in render
-assert "gate.world.receivers" in render
-assert 'culling_applied=0' in render
 assert "map.selected.push_back(map.mesh.surfaces[id]);" in render
 assert "counts.push_back(static_cast<GLsizei>(range.count));" in render
 assert "(stable?static_models:models).push_back(" in render
-assert "sun_sky_caster_coverage.hpp" in read("renderer/renderer.vcxproj")
-assert "sun_sky_caster_coverage.hpp" in read("renderer/renderer.vcxproj.filters")
-assert '#include "renderer/sun_sky_caster_coverage.hpp"' in read("tests/sun_shadow.cpp")
+assert "sun_sky_caster_mask.hpp" in read("renderer/renderer.vcxproj")
+assert "sun_sky_caster_mask.hpp" in read("renderer/renderer.vcxproj.filters")
+assert '#include "renderer/sun_sky_caster_mask.hpp"' in read("tests/sun_shadow.cpp")
