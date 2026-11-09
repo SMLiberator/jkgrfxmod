@@ -8120,6 +8120,7 @@ namespace jkgm {
             size_t light_fallback=0,gouraud_faces=0;
             size_t light_read_rejected=0,uv_prepare_rejected=0;
             size_t stage_rejections_logged=0;
+            std::map<std::string,size_t> sampled_stage_reasons;
             // Inspect a bounded number of exact failures on the regular
             // profiling cadence, not every native surface each frame.
             auto log_stage_rejection=[&](
@@ -8127,8 +8128,12 @@ namespace jkgm {
                 char const *stage,char const *reason,
                 world_cache_light_sample const &info) {
                 if(!the_config->profile_renderer ||
-                   gpu_3do_present_serial%120U!=0U ||
-                   stage_rejections_logged>=12U)return;
+                   gpu_3do_present_serial%120U!=0U)return;
+                // Count every reason in a sampled frame, even when the
+                // per-surface detail limit has already been reached.
+                ++sampled_stage_reasons[std::string(stage)+"/"+
+                    (reason?reason:"unspecified")];
+                if(stage_rejections_logged>=12U)return;
                 ++stage_rejections_logged;
                 uint32_t sector=0,mode=0,indices=0,static_lights=0;
                 uintptr_t const base=cache.world.surfaces_addr+
@@ -8527,6 +8532,10 @@ namespace jkgm {
                          " lighting_read_rejected=",light_read_rejected,
                          " uv_prepare_rejected=",uv_prepare_rejected,
                          " gouraud_faces=",gouraud_faces);
+                for(auto const &entry:sampled_stage_reasons)
+                    LOG_INFO("WORLD CACHE staging reject summary world=",
+                             cache.loaded_world," reason=",entry.first,
+                             " surfaces=",entry.second);
                 LOG_INFO("WORLD CACHE material_effects_opaque visible=",mat_probe_faces,
                          " reflective=",mat_probe_reflective,
                          " env_maps=",mat_probe_env,
