@@ -272,6 +272,38 @@ int main()
     assert(std::fabs(rgb[3][2]-std::pow(0.40f,1.8f))<0.0001f);
     assert(pixel_state[3][0]>0.39f && pixel_state[3][0]<0.41f);
     assert(pixel_state[0][1]==0.20f && pixel_state[3][2]==3.0f);
+    // Native JK caps authored mode 4 to Gouraud 3, rather than dropping
+    // the whole world surface. It must preserve the same per-vertex result
+    // as an otherwise identical mode-3 surface.
+    auto const mode3_rgb=rgb;
+    auto const mode3_state=pixel_state;
+    lu32(light_surfaces+2U*0x5cU+0x20U,4U);
+    world_cache_light_sample mode4_sample{};
+    char const *mode4_reason="stale";
+    assert(sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,
+        dynamic_lights,rgb,&mode4_sample,&pixel_state,true,0.0f,
+        nullptr,nullptr,0U,&mode4_reason));
+    assert(mode4_reason==nullptr);
+    assert(mode4_sample.mode==3U &&
+           mode4_sample.authored_mode==4U &&
+           mode4_sample.vertices==4U);
+    for(size_t i=0;i<rgb.size();++i) {
+        assert(rgb[i]==mode3_rgb[i]);
+        assert(pixel_state[i]==mode3_state[i]);
+    }
+    // Unknown lighting modes remain rejected rather than being silently
+    // clamped or treated as unlit.
+    lu32(light_surfaces+2U*0x5cU+0x20U,5U);
+    char const *invalid_mode_reason=nullptr;
+    assert(!sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,
+        dynamic_lights,rgb,nullptr,nullptr,false,0.0f,
+        nullptr,nullptr,0U,&invalid_mode_reason));
+    assert(invalid_mode_reason &&
+           std::strcmp(invalid_mode_reason,
+                       "native_light_mode_unreadable_or_invalid")==0);
+    lu32(light_surfaces+2U*0x5cU+0x20U,3U);
     // Gouraud levels are authored independently for each world surface.
     // Changing a single local intensity must affect its own vertex only.
     lf32(light_intensities+2U*4U,0.85f);
