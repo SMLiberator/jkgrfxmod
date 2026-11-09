@@ -6457,6 +6457,43 @@ namespace jkgm {
             if(the_config->experimental_sun_sky_aperture &&
                sun_sky_aperture_hardware_supported())
                 draw_sun_sky_aperture(cascade,view,safe_read);
+            // Phase 2 experimental fast sky-first WORLD depth selector.
+            // The depth filter and dynamic/static 3DOs are unchanged.
+            sun_sky_caster_fast_mask sky_prune_mask{};
+            bool sky_prune_ready=false;
+            uint64_t sky_prune_build_us=0;
+            size_t sky_pruned_world=0,sky_tested_world=0;
+            if(the_config->experimental_sun_sky_caster_pruning &&
+               the_config->experimental_sun_sky_aperture &&
+               sun_level_sky_known &&
+               sun_sky_aperture_target &&
+               sun_sky_aperture_target->loaded_world==world &&
+               sun_sky_aperture_target->valid[size_t(cascade)]) {
+                auto const build_begin=profile_clock::now();
+                sky_prune_mask.reset(view);
+                unsigned eligible_in_snapshot=0;
+                auto const &gate=*sun_sky_aperture_target;
+                for(auto const &face:gate.world.receivers) {
+                    uintptr_t const addr=gate.world.surfaces_addr+
+                        uintptr_t(face.surface_index)*0x5cU;
+                    uint32_t flags=0,adjoin=0;
+                    if(!safe_read(addr+0x10U,&flags,4U) ||
+                       !safe_read(addr+0x0cU,&adjoin,4U)) {
+                        sky_prune_mask.mark_all();
+                        break;
+                    }
+                    if(!sun_sky_surface_eligible(flags,adjoin))continue;
+                    ++eligible_in_snapshot;
+                    sky_prune_mask.include_polygon(face.polygon);
+                }
+                // Snapshot/read mismatch is never grounds for culling.
+                if(eligible_in_snapshot!=sun_level_sky_faces)
+                    sky_prune_mask.mark_all();
+                sky_prune_ready=sky_prune_mask.valid &&
+                    !sky_prune_mask.fail_open;
+                sky_prune_build_us=elapsed_profile_us(
+                    build_begin,profile_clock::now());
+            }
             // Phase 1B: compare conservative hull coverage at 32/64/128
             // against the original rectangle estimator, without culling.
             std::array<sun_sky_caster_coverage,3> sky_coverages{};
@@ -6554,6 +6591,13 @@ namespace jkgm {
                 uint32_t bits=0;std::memcpy(&bits,&v,sizeof(bits));hash_u32(bits);
             };
             for(float v:direction)hash_float(v);
+            // Cache signatures MUST change with the active sky mask.
+            hash_u32(sky_prune_ready?1U:0U);
+            if(sky_prune_ready) {
+                uint64_t const key=sky_prune_mask.signature();
+                hash_u32(uint32_t(key));
+                hash_u32(uint32_t(key>>32));
+            }
             // Read live geomodes and MAT coverage each frame. COG changes to
             // a surface therefore invalidate the cached depth image.
             //
@@ -6588,6 +6632,13 @@ namespace jkgm {
                 if(geomode<2U || !decal_finite(surface.normal)) {
                     ++world_hidden;
                     continue;
+                }
+                if(sky_prune_ready) {
+                    ++sky_tested_world;
+                    if(!sky_prune_mask.may_overlap(surface.polygon)) {
+                        ++sky_pruned_world;
+                        continue;
+                    }
                 }
                 gpu_3do_group group{};group.material=surface.material;
                 group.cel=surface.cel;
@@ -6626,6 +6677,17 @@ namespace jkgm {
                 hash_float(get<x>(draw.texture.albedo_scroll));
                 hash_float(get<y>(draw.texture.albedo_scroll));
                 hash_float(draw.texture.albedo_transition);
+            }
+            if(the_config->experimental_sun_sky_caster_pruning &&
+               gpu_3do_present_serial%120U==0U) {
+                LOG_INFO("SUN sky-prune cascade=",cascade,
+                    " active=",sky_prune_ready?1:0,
+                    " tested=",sky_tested_world,
+                    " pruned=",sky_pruned_world,
+                    " coverage_tiles=",sky_prune_mask.occupied_tiles(),
+                    "/16384 build_cpu_us=",sky_prune_build_us,
+                    " fail_open=",sky_prune_mask.fail_open?1:0,
+                    " culling_applied=",sky_prune_ready?1:0);
             }
             if(the_config->profile_renderer)
                 sun_profile_world_filter_us[cascade]+=elapsed_profile_us(

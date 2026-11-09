@@ -95,6 +95,27 @@ int main()
         auto const direct=diagonal.evaluate_polygon(thin_diagonal);
         assert(direct.precise && direct.legacy);
     }
+    // Phase 2: cheap 128x128 padded bitmask safely conserves
+    // casters beneath sky, but rejects distant XY-incompatible faces.
+    sun_sky_caster_fast_mask fast{};
+    fast.reset(tile_view);
+    fast.include_polygon(sky_quad);
+    assert(fast.valid && !fast.fail_open);
+    assert(fast.may_overlap(sky_quad));
+    assert(fast.may_overlap(std::vector<decal_vec3>{
+        {{15.0f,15.0f,-30.0f}},{{17.0f,15.0f,-30.0f}},
+        {{17.0f,17.0f,-30.0f}}}));
+    assert(!fast.may_overlap(std::vector<decal_vec3>{
+        {{1.0f,1.0f,0.0f}},{{2.0f,1.0f,0.0f}},
+        {{2.0f,2.0f,0.0f}}}));
+    auto const mask_hash=fast.signature();
+    fast.reset(tile_view);
+    fast.include_polygon(sky_quad);
+    assert(fast.signature()==mask_hash);
+    fast.mark_all();
+    assert(fast.fail_open && fast.may_overlap(std::vector<decal_vec3>{
+        {{1.0f,1.0f,0.0f}},{{2.0f,1.0f,0.0f}},
+        {{2.0f,2.0f,0.0f}}}));
     // A zero interval keeps the original per-frame validation. An active
     // interval only skips while the map remains usable and inside deadline.
     assert(sun_shadow_cascade_validation_due(0.0,0.0,true));

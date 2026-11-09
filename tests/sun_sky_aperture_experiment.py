@@ -127,6 +127,17 @@ gpu_resource=read("renderer/sun_sky_aperture_gpu.hpp")
 assert "GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MIN_FILTER,GL_NEAREST" in gpu_resource
 assert "GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MAG_FILTER,GL_NEAREST" in gpu_resource
 
+# Phase 2 static-world pruning is separately opt-in and fail-open.
+tiles=read("renderer/sun_sky_caster_coverage.hpp")
+assert "struct sun_sky_caster_fast_mask" in tiles
+assert "static constexpr int side=128;" in tiles
+assert "static constexpr int padding_tiles=2;" in tiles
+assert "sky_prune_mask.may_overlap(surface.polygon)" in render
+assert "eligible_in_snapshot!=sun_level_sky_faces" in render
+assert "hash_u32(sky_prune_ready?1U:0U);" in render
+assert "experimental_sun_sky_caster_pruning = false;" in cfg
+assert 'j.contains("experimental_sun_sky_caster_pruning")' in parser
+assert "SUN sky-prune cascade=" in render
 # Phase 1 sky-first conservative occupancy is a measurement only: it
 # MUST NOT alter caster selection, depth rendering, or cache signatures.
 tiles=read("renderer/sun_sky_caster_coverage.hpp")

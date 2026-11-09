@@ -82,6 +82,8 @@ namespace jkgm {
         // Phase 1 only: measure conservative sky-covered caster groups.
         // Does not yet prune any casters or change shadow texture contents.
         bool experimental_sun_sky_caster_culling = false;
+        // Actual static WORLD caster pruning (independent of diagnostics).
+        bool experimental_sun_sky_caster_pruning = false;
         double sun_shadow_update_interval = 0.0; // seconds between full CSM checks; 0=every frame
         bool enable_sprite_shadows = false; // opt-in sun shadow casting for cached SPRs; reception unaffected
         bool enable_sun_dynamic_shadows = false; // eight-Thing atlas

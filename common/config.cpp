@@ -350,6 +350,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_sun_sky_caster_culling").get_to(
                 rv->experimental_sun_sky_caster_culling);
         }
+        if(j.contains("experimental_sun_sky_caster_pruning")) {
+            j.at("experimental_sun_sky_caster_pruning").get_to(
+                rv->experimental_sun_sky_caster_pruning);
+        }
         if(j.contains("sun_shadow_update_interval")) {
             auto const &v=j.at("sun_shadow_update_interval");
             if(!v.is_number())
