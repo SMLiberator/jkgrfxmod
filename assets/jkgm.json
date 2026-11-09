@@ -25,6 +25,7 @@
     "default_specular_roughness": 0.85,
     "enable_dynamic_light_specular": false,
     "gpu_pixel_lighting": false,
+    "enable_baked_vertex_overbrightness": false,
     "enable_ssao": true,
     "enable_parallax": true,
     "enable_texture_filtering": true,
