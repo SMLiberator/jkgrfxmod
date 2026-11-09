@@ -49,6 +49,38 @@ Gouraud calculation and the cached world uses the original JK world-vertex
 dynamic-light buffer; changing the shared pixel formulas must not alter
 those fallback modes.
 
+## Opt-in HDR baked vertex overbrightness
+
+`enable_baked_vertex_overbrightness` defaults to `false` and is independent
+of `gpu_pixel_lighting`. It retains the JK 0–1 Gouraud response exactly and
+restores **authored static vertex brightness + face ExtraLight above 1.0**
+after JK's usual gamma/CMP/sector color treatment, at the **vertex** stage.
+This applies to GPU-cached 3DOs and SithWorld geometry with effective
+Gouraud LightMode 3, including capped authored LightModes above 3.
+It does not add HDR energy from dynamic Thing or pixel point lights.
+
+For example, a source static intensity of 2.0 with zero ExtraLight produces
+approximately `2.0^1.8 = 3.48` times the normally saturated white vertex
+light before multiplying the material pigment. The HDR excess is colored
+by the existing colormap/sector color effects and interpolated with the
+other corners. Already-authored emissive MATs remain independent.
+
+The G-buffer uses floating-point color. Set `enable_hdr=true` to display
+strong highlights with filmic tone mapping and optionally
+`enable_bloom=true` for glow. The toggle does not affect native fallback
+geometry, wireframe faces, unlit meshes, or lighting of adjacent geometry.
+Values that overflow the RGBA16F range are limited to its maximum of 65504
+to avoid invalid framebuffer results.
+
+```json
+{
+  "use_gpu_cache": true,
+  "enable_hdr": true,
+  "enable_bloom": true,
+  "enable_baked_vertex_overbrightness": true
+}
+```
+
 ## Receiver-specific behavior
 
 3DOs use local positions and normals (accounting for scaled/mirrored
