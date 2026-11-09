@@ -48,6 +48,18 @@ for prog in programs:
 assert "forward_sector_buffer=19;" in header
 assert "forward_next_extended_unit=20;" in header
 assert "forward_next_extended_required_units=21;" in header
+# The optional VSM guard alone consumes raw depth textures on units 17/18.
+post=re.search(r"constexpr binding post_opaque_composite\[\]=\{(.*?)\n\};",header,re.S)
+assert post
+for uniform,unit in (("sun_shadow_raw_near",17),("sun_shadow_raw_far",18)):
+    assert f'{{"{uniform}",{unit},sampler_kind::tex2d}}' in post.group(1)
+post_src=read("assets/shaders/post_opaque_composite.frag")
+assert "#if defined(JKGM_SUN_SKY_APERTURE) && defined(JKGM_SUN_VSM)" in post_src
+assert "sun_shadow_debug_view" not in post_src
+assert "uniform sampler2D sun_shadow_raw_near;" in post_src
+assert "uniform sampler2D sun_shadow_raw_far;" in post_src
+assert "uniform sampler2DShadow sun_shadow_raw_near;" not in post_src
+assert "uniform sampler2DShadow sun_shadow_raw_far;" not in post_src
 assert "opaque_sky_aperture=16;" in header
 assert "translucent_sun_sky_aperture_map" in header
 assert "sun_sky_aperture_map" in header
