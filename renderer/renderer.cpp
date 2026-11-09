@@ -619,13 +619,16 @@ namespace jkgm {
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
         std::unique_ptr<sun_shadow_moments_gpu> sun_moments_target;
         std::unique_ptr<sun_sky_aperture_gpu> sun_sky_aperture_target;
-        // Fail-open physical-sky test, refreshed from the live SithSurface
-        // table once per rendered frame (also when sun shadows are off).
+        // Fail-open physical-sky eligibility, cached per SithWorld. The
+        // world surface table is audited occasionally rather than on every
+        // sunlit frame; aperture projection updates remain independent.
         bool sun_level_has_sky=true;
         bool sun_level_sky_known=false;
+        bool sun_level_sky_sun_active=false;
         uint32_t sun_level_sky_faces=0;
         uint64_t sun_level_sky_identity=0;
         uintptr_t sun_level_sky_world=0;
+        uint64_t sun_level_sky_last_audit_frame=0;
         // Phase 1B sky-first measurements; never included in cache keys.
         struct sun_sky_caster_measurement {
             bool available=false,fail_open=false;
@@ -1215,9 +1218,11 @@ namespace jkgm {
                 sun_sky_aperture_target.reset();
                 sun_level_has_sky=true;
                 sun_level_sky_known=false;
+                sun_level_sky_sun_active=false;
                 sun_level_sky_faces=0;
                 sun_level_sky_identity=0;
                 sun_level_sky_world=0;
+                sun_level_sky_last_audit_frame=0;
                 sun_sky_caster_measured={};
                 sun_static_geometry_cache.clear();
                 sun_dynamic_views.clear();
@@ -4712,16 +4717,28 @@ namespace jkgm {
         // A level without any physical sky aperture cannot receive
         // COG sunlight, regardless of SetSunInfo or shadow settings.
         // Preserve the COG state so switching worlds later still works.
-        // Read the live surface table; GeoMode 0 is intentionally valid.
+        // The mostly immutable SithSurface table only needs an eligibility
+        // audit on world changes, sun reactivation or periodically for rare
+        // COG sky-flag/adjoin changes. GeoMode 0 remains a valid aperture.
         // Any malformed native pointer/read fails open (sun stays allowed).
-        void refresh_sun_level_sky()
+        void refresh_sun_level_sky(bool force_audit)
         {
+            uint32_t world=0;
+            bool const world_valid=engine_material_debug::read_object(
+                engine_material_debug::current_world_global,world) &&
+                decal_native_address_ok(world);
+            constexpr uint64_t audit_interval_frames=120U;
+            if(!force_audit && world_valid && sun_level_sky_known &&
+               uintptr_t(world)==sun_level_sky_world &&
+               gpu_3do_present_serial>=sun_level_sky_last_audit_frame &&
+               gpu_3do_present_serial-sun_level_sky_last_audit_frame<
+                   audit_interval_frames)
+                return;
+
             bool present=true,known=false;
-            uint32_t eligible=0,world=0;
+            uint32_t eligible=0;
             uint64_t identity=14695981039346656037ULL;
-            if(engine_material_debug::read_object(
-                    engine_material_debug::current_world_global,world) &&
-               decal_native_address_ok(world)) {
+            if(world_valid) {
                 uint32_t count=0,table=0;
                 if(engine_material_debug::read_object(
                        uintptr_t(world)+0xa8U,count) &&
@@ -4766,6 +4783,8 @@ namespace jkgm {
             sun_level_sky_faces=eligible;
             sun_level_sky_identity=identity;
             sun_level_sky_world=world;
+            if(known)
+                sun_level_sky_last_audit_frame=gpu_3do_present_serial;
         }
 
         bool sun_sky_aperture_hardware_supported() const
@@ -5901,12 +5920,17 @@ namespace jkgm {
             sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
             sun_dynamic_atlas_owners.clear();
-            // Do not scan the whole SithSurface table when no active sun
-            // can contribute to this frame (the default ResetSun state).
-            // Recheck immediately when intensity becomes positive.
-            if((the_config->enable_sun || the_config->enable_sun_shadows) &&
-               get_sun_settings().intensity.value()[0]>0.0f)
-                refresh_sun_level_sky();
+            // Sun eligibility is constant for an ordinary level. A cheap
+            // world-pointer check replaces the full per-frame surface scan;
+            // a positive-sun transition forces a fresh audit immediately.
+            bool const sun_active=
+                (the_config->enable_sun || the_config->enable_sun_shadows) &&
+                get_sun_settings().intensity.value()[0]>0.0f;
+            if(sun_active) {
+                refresh_sun_level_sky(!sun_level_sky_sun_active);
+                sun_level_sky_sun_active=true;
+            }
+            else sun_level_sky_sun_active=false;
             if(!the_config->enable_sun_shadows || !sun_level_has_sky)return;
             auto const sun_pass_started=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
