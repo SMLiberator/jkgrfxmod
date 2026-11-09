@@ -28,6 +28,7 @@
 #include "sun_shadow_gpu.hpp"
 #include "sun_shadow_moments_gpu.hpp"
 #include "sun_sky_aperture_gpu.hpp"
+#include "sun_sky_caster_coverage.hpp"
 #include "world_cache_gpu.hpp"
 #include "world_cache_alpha.hpp"
 #include "world_cache_sky.hpp"
@@ -617,6 +618,17 @@ namespace jkgm {
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
         std::unique_ptr<sun_shadow_moments_gpu> sun_moments_target;
         std::unique_ptr<sun_sky_aperture_gpu> sun_sky_aperture_target;
+        // Phase 1 sky-first benchmark. These are observations only:
+        // never part of static cache keys or actual caster submission.
+        struct sun_sky_caster_measurement {
+            bool available=false,fail_open=false;
+            unsigned sky_faces=0,active_tiles=0;
+            uint64_t build_us=0;
+            uint64_t world_groups=0,world_overlaps=0;
+            uint64_t world_indices=0,world_overlap_indices=0;
+            uint64_t model_groups=0,model_overlaps=0;
+        };
+        std::array<sun_sky_caster_measurement,2> sun_sky_caster_measured{};
         std::unique_ptr<world_cache_gpu> world_cache_target;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
@@ -1187,6 +1199,7 @@ namespace jkgm {
                 sun_shadow_last_validation={};
                 // Sky projection cache cannot survive a level/mode reset.
                 sun_sky_aperture_target.reset();
+                sun_sky_caster_measured={};
                 sun_static_geometry_cache.clear();
                 sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
@@ -6369,6 +6382,42 @@ namespace jkgm {
             if(the_config->experimental_sun_sky_aperture &&
                sun_sky_aperture_hardware_supported())
                 draw_sun_sky_aperture(cascade,view,safe_read);
+            // Phase 1: build a conservative, CPU-only sky tile mask and
+            // measure how many existing depth casters touch it. NO pruning
+            // is performed; depth, cache signatures and VSM stay identical.
+            sun_sky_caster_coverage sky_coverage;
+            auto &sky_estimate=sun_sky_caster_measured[size_t(cascade)];
+            if(the_config->experimental_sun_sky_caster_culling) {
+                sky_estimate={};
+                auto const build_begin=profile_clock::now();
+                if(the_config->experimental_sun_sky_aperture &&
+                   sun_sky_aperture_target &&
+                   sun_sky_aperture_target->loaded_world==world &&
+                   sun_sky_aperture_target->valid[size_t(cascade)]) {
+                    auto const &gate=*sun_sky_aperture_target;
+                    sky_coverage.reset(view);
+                    sky_estimate.available=true;
+                    // Match the live flags/GeoModes used in the sky pass.
+                    // Any failed read conservatively marks every tile.
+                    for(auto const &face:gate.world.receivers) {
+                        uintptr_t const addr=gate.world.surfaces_addr+
+                            uintptr_t(face.surface_index)*0x5cU;
+                        uint32_t flags=0,geo=0;
+                        if(!safe_read(addr+0x10U,&flags,4U) ||
+                           !safe_read(addr+0x1cU,&geo,4U)) {
+                            sky_coverage.mark_all();
+                            break;
+                        }
+                        if((flags&0x600U)==0U || geo<3U || geo>4U)continue;
+                        ++sky_estimate.sky_faces;
+                        sky_coverage.include_polygon(face.polygon);
+                    }
+                    sky_estimate.active_tiles=sky_coverage.active_tiles;
+                    sky_estimate.fail_open=sky_coverage.fail_open;
+                }
+                sky_estimate.build_us=elapsed_profile_us(
+                    build_begin,profile_clock::now());
+            }
             if(the_config->profile_renderer)
                 sun_profile_projection_us[cascade]+=elapsed_profile_us(
                     cascade_begin,profile_clock::now());
@@ -6462,6 +6511,14 @@ namespace jkgm {
                    range.count>uint32_t(std::numeric_limits<GLsizei>::max())) {
                     ++world_material_skipped;
                     continue;
+                }
+                if(sky_estimate.available) {
+                    ++sky_estimate.world_groups;
+                    sky_estimate.world_indices+=range.count;
+                    if(sky_coverage.intersects_polygon(surface.polygon)) {
+                        ++sky_estimate.world_overlaps;
+                        sky_estimate.world_overlap_indices+=range.count;
+                    }
                 }
                 if(cutout)world_cutouts.push_back({range,tex});
                 else {
@@ -6567,6 +6624,11 @@ namespace jkgm {
                     true,map.static_complete);
                 (stable?static_models:models).push_back(
                     {&instance,&group,tex,cutout,prepared.bounds});
+                if(sky_estimate.available) {
+                    ++sky_estimate.model_groups;
+                    if(sky_coverage.intersects_aabb(prepared.bounds))
+                        ++sky_estimate.model_overlaps;
+                }
                 uint64_t const member=prepared.signature;
                 all_sum+=member;
                 all_sum_sq+=member*member;
@@ -7091,6 +7153,34 @@ namespace jkgm {
                     sun_moments_target->valid[1];
             if(!sun_shadow_ready && !sun_shadow_frame_failure)
                 sun_shadow_frame_failure="one or both cascades incomplete";
+            if(the_config->experimental_sun_sky_caster_culling &&
+               gpu_3do_present_serial%120U==0U) {
+                for(int c=0;c<2;++c) {
+                    auto const &s=sun_sky_caster_measured[size_t(c)];
+                    if(!s.available) {
+                        LOG_INFO("SUN sky-first estimate cascade=",c,
+                                 " available=0",
+                                 " need=experimental_sun_sky_aperture",
+                                 " culling_applied=0");
+                        continue;
+                    }
+                    LOG_INFO("SUN sky-first estimate cascade=",c,
+                        " available=1",
+                        " sky_faces=",s.sky_faces,
+                        " tiles=",s.active_tiles,"/",
+                        sun_sky_caster_coverage::tile_count,
+                        " world_groups_overlap=",s.world_overlaps,"/",
+                        s.world_groups,
+                        " world_indices_overlap=",s.world_overlap_indices,
+                        "/",s.world_indices,
+                        " model_groups_overlap=",s.model_overlaps,"/",
+                        s.model_groups,
+                        " build_cpu_us=",s.build_us,
+                        " fail_open=",s.fail_open?1:0,
+                        " conservative_bounds=1",
+                        " culling_applied=0");
+                }
+            }
             if(!skip_cascade_validation) {
                 // Do not establish a new throttle window after a failed or
                 // incomplete validation; retry on the next frame instead.

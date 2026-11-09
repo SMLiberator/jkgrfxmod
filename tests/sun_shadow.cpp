@@ -1,4 +1,5 @@
 #include "renderer/sun_shadow.hpp"
+#include "renderer/sun_sky_caster_coverage.hpp"
 #include "renderer/sun_skybox_thing.hpp"
 #include <cassert>
 #include <array>
@@ -11,6 +12,54 @@ using namespace jkgm;
 
 int main()
 {
+    // Sky-first Phase 1: only a conservative XY tile-mask estimate.
+    // Roof and under-roof casters share light-space XY and are both
+    // counted; no claim about actual depth visibility is made.
+    sun_shadow_projection tile_view{};
+    tile_view.origin={{0.0f,0.0f,0.0f}};
+    tile_view.right={{1.0f,0.0f,0.0f}};
+    tile_view.up={{0.0f,1.0f,0.0f}};
+    tile_view.forward={{0.0f,0.0f,1.0f}};
+    tile_view.width=32.0f;
+    tile_view.height=32.0f;
+    tile_view.range=20.0f;
+    sun_sky_caster_coverage coverage{};
+    coverage.reset(tile_view);
+    assert(coverage.ready && coverage.active_tiles==0);
+    decal_volume_aabb sky_zone{};
+    sky_zone.low={{15.0f,15.0f,1.0f}};
+    sky_zone.high={{17.0f,17.0f,2.0f}};
+    assert(!coverage.intersects_aabb(sky_zone));
+    std::vector<decal_vec3> sky_quad={
+        {{15.0f,15.0f,4.0f}},{{17.0f,15.0f,4.0f}},
+        {{17.0f,17.0f,4.0f}},{{15.0f,17.0f,4.0f}}};
+    coverage.include_polygon(sky_quad);
+    assert(coverage.active_tiles>0 &&
+           coverage.active_tiles<sun_sky_caster_coverage::tile_count);
+    assert(coverage.intersects_aabb(sky_zone));
+    decal_volume_aabb under_roof=sky_zone;
+    under_roof.low[2]=-100.0f;
+    under_roof.high[2]=-50.0f;
+    assert(coverage.intersects_aabb(under_roof)); // depth-agnostic
+    decal_volume_aabb off_sky{};
+    off_sky.low={{2.0f,2.0f,0.0f}};
+    off_sky.high={{3.0f,3.0f,1.0f}};
+    assert(!coverage.intersects_aabb(off_sky));
+    assert(!coverage.intersects_polygon(std::vector<decal_vec3>{
+        {{2.0f,2.0f,0.0f}},{{3.0f,2.0f,0.0f}},
+        {{3.0f,3.0f,0.0f}}}));
+    coverage.mark_all();
+    assert(coverage.fail_open);
+    assert(coverage.active_tiles==
+           sun_sky_caster_coverage::tile_count);
+    assert(coverage.intersects_aabb(off_sky));
+    // Invalid sky geometry must fail open, never accidentally prune.
+    coverage.reset(tile_view);
+    auto broken=sky_quad;
+    broken[0][0]=std::numeric_limits<float>::quiet_NaN();
+    coverage.include_polygon(broken);
+    assert(coverage.fail_open && coverage.intersects_aabb(off_sky));
+
     // A zero interval keeps the original per-frame validation. An active
     // interval only skips while the map remains usable and inside deadline.
     assert(sun_shadow_cascade_validation_due(0.0,0.0,true));

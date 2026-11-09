@@ -118,3 +118,30 @@ for baseline in (0.6,0.75):
 gpu_resource=read("renderer/sun_sky_aperture_gpu.hpp")
 assert "GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MIN_FILTER,GL_NEAREST" in gpu_resource
 assert "GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MAG_FILTER,GL_NEAREST" in gpu_resource
+
+# Phase 1 sky-first conservative occupancy is a measurement only: it
+# MUST NOT alter caster selection, depth rendering, or cache signatures.
+tiles=read("renderer/sun_sky_caster_coverage.hpp")
+assert "static constexpr int grid_side=32;" in tiles
+assert "void include_polygon(" in tiles
+assert "bool intersects_polygon(" in tiles
+assert "bool intersects_aabb(" in tiles
+assert "void mark_all()" in tiles
+assert "int padding_tiles=1" in tiles
+assert "bool fail_open=false;" in tiles
+assert "bool experimental_sun_sky_caster_culling = false;" in cfg
+assert 'j.contains("experimental_sun_sky_caster_culling")' in parser
+assert "**experimental_sun_sky_caster_culling**" in read("doc/config.md")
+assert '#include "sun_sky_caster_coverage.hpp"' in render
+assert "sky_coverage.reset(view);" in render
+assert "gate.world.receivers" in render
+assert "sky_coverage.include_polygon(face.polygon);" in render
+assert "sky_coverage.intersects_polygon(surface.polygon)" in render
+assert "sky_coverage.intersects_aabb(prepared.bounds)" in render
+assert 'culling_applied=0' in render
+assert "map.selected.push_back(map.mesh.surfaces[id]);" in render
+assert "counts.push_back(static_cast<GLsizei>(range.count));" in render
+assert "(stable?static_models:models).push_back(" in render
+assert "sun_sky_caster_coverage.hpp" in read("renderer/renderer.vcxproj")
+assert "sun_sky_caster_coverage.hpp" in read("renderer/renderer.vcxproj.filters")
+assert '#include "renderer/sun_sky_caster_coverage.hpp"' in read("tests/sun_shadow.cpp")
