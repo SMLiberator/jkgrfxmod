@@ -3440,6 +3440,8 @@ namespace jkgm {
             bool const have_perspective_frustum=frame_camera.perspective;
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
+            prog.set_baked_vertex_overbrightness(
+                the_config->enable_baked_vertex_overbrightness);
             // Persistent GL program: reset instancing before every draw pass,
             // including when the opt-in flag has just been disabled.
             {
@@ -8271,6 +8273,8 @@ namespace jkgm {
                 });
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
+            shader.set_baked_vertex_overbrightness(
+                the_config->enable_baked_vertex_overbrightness);
             shader.set_normal_mapped_diffuse(
                 the_config->enable_normal_mapped_diffuse);
             auto const &m=cam.native_view;
@@ -8707,6 +8711,8 @@ namespace jkgm {
                 });
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
+            shader.set_baked_vertex_overbrightness(
+                the_config->enable_baked_vertex_overbrightness);
             shader.set_normal_mapped_diffuse(
                 the_config->enable_normal_mapped_diffuse);
             shader.set_reflection_camera(cam.position,cam.right,
