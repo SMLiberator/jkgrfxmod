@@ -99,6 +99,7 @@ namespace jkgm {
             gl::uniform_location_id num_lights,light_attenuation;
             gl::uniform_location_id world_pixel_dynamic_lighting,world_dynamic_light_specular;
             gl::uniform_location_id jk_color_filter,jk_color_tint,jk_color_add_fade;
+            gl::uniform_location_id baked_vertex_overbrightness;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
         public:
             translucent_sun_uniforms translucent_sun;
@@ -142,6 +143,7 @@ namespace jkgm {
                             std::array<std::array<float,3>,64> const &saber_rgb,
                             std::array<bool,64> const &saber_valid);
             void set_specular_lighting(bool pixel_diffuse,bool point_specular);
+            void set_baked_vertex_overbrightness(bool enabled);
             // World-cache world-space positions and camera axes are already
             // supplied by set_reflection_camera(). The shared sun binder
             // also calls the 3DO-specific camera setter: no extra state needed.
@@ -296,6 +298,7 @@ namespace jkgm {
                                     albedo_scroll,emissive_scroll,fog_params,fog_color,
                                     emissive_only;
             gl::uniform_location_id jk_color_filter,jk_color_tint,jk_color_add_fade;
+            gl::uniform_location_id baked_vertex_overbrightness;
             gl::uniform_location_id thing_sector_tint_delta;
             gl::uniform_location_id colormap_tint;
             gl::uniform_location_id sector_crossing_count;
@@ -375,6 +378,7 @@ namespace jkgm {
                               bool pixel_lighting,
                               std::array<std::array<float,3>,64> const &saber_rgb,
                               std::array<bool,64> const &saber_valid);
+            void set_baked_vertex_overbrightness(bool enabled);
             void set_colormap_tint(std::array<float,3> const &tint);
             void set_solid_fullbright(bool enabled);
             void set_palette_fullbright(bool enabled);
