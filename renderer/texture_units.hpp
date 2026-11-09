@@ -103,8 +103,10 @@ constexpr binding game_trns_pass[]={
 // GLSL post_opaque_composite.frag (including #include fragments)
 constexpr binding post_opaque_composite[]={
     {"sun_sky_aperture_map",16,sampler_kind::texture_array},
-    {"sun_shadow_raw_near",17,sampler_kind::depth_variant},
-    {"sun_shadow_raw_far",18,sampler_kind::depth_variant},
+    // VSM depth guard only: these raw depths are sampler2D in both sources.
+    // The retired debug view was the only PCF sampler2DShadow consumer.
+    {"sun_shadow_raw_near",17,sampler_kind::tex2d},
+    {"sun_shadow_raw_far",18,sampler_kind::tex2d},
     {"color_image",0,sampler_kind::tex2d},
     {"emissive_image",1,sampler_kind::tex2d},
     {"occlusion_image",2,sampler_kind::tex2d},
