@@ -29,7 +29,7 @@
 #include "sun_shadow_moments_gpu.hpp"
 #include "sun_sky_aperture_gpu.hpp"
 #include "sun_sky_surface.hpp"
-#include "sun_sky_caster_coverage.hpp"
+#include "sun_sky_caster_mask.hpp"
 #include "world_cache_gpu.hpp"
 #include "world_cache_alpha.hpp"
 #include "world_cache_sky.hpp"
@@ -629,23 +629,6 @@ namespace jkgm {
         uint64_t sun_level_sky_identity=0;
         uintptr_t sun_level_sky_world=0;
         uint64_t sun_level_sky_last_audit_frame=0;
-        // Phase 1B sky-first measurements; never included in cache keys.
-        struct sun_sky_caster_measurement {
-            bool available=false,fail_open=false;
-            unsigned resolution=32,sky_faces=0,active_tiles=0,bbox_tiles=0;
-            uint64_t build_us=0,evaluate_us=0;
-            uint64_t world_groups=0,world_legacy=0,world_precise=0;
-            uint64_t world_indices=0,world_precise_indices=0;
-            uint64_t world_large_bounds=0,world_unknown=0,world_rect_tiles=0;
-            uint64_t stationary_groups=0,stationary_precise=0;
-            uint64_t moving_groups=0,moving_precise=0;
-            uint64_t other_groups=0,other_precise=0;
-            uint64_t model_large_bounds=0,model_unknown=0;
-        };
-        // grid indices: 0=32, 1=64, 2=128. Values updated only on
-        // a full cascade check, never on fast cache-only frames.
-        std::array<std::array<sun_sky_caster_measurement,3>,2>
-            sun_sky_caster_measured{};
         std::unique_ptr<world_cache_gpu> world_cache_target;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
@@ -1223,7 +1206,6 @@ namespace jkgm {
                 sun_level_sky_identity=0;
                 sun_level_sky_world=0;
                 sun_level_sky_last_audit_frame=0;
-                sun_sky_caster_measured={};
                 sun_static_geometry_cache.clear();
                 sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
@@ -6535,63 +6517,6 @@ namespace jkgm {
                 sky_prune_build_us=elapsed_profile_us(
                     build_begin,profile_clock::now());
             }
-            // Phase 1B: compare conservative hull coverage at 32/64/128
-            // against the original rectangle estimator, without culling.
-            std::array<sun_sky_caster_coverage,3> sky_coverages{};
-            auto &sky_estimates=sun_sky_caster_measured[size_t(cascade)];
-            bool const sky_measure_requested=
-                the_config->experimental_sun_sky_caster_culling;
-            bool const sky_measure_ready=sky_measure_requested &&
-                the_config->experimental_sun_sky_aperture &&
-                sun_sky_aperture_target &&
-                sun_sky_aperture_target->loaded_world==world &&
-                sun_sky_aperture_target->valid[size_t(cascade)];
-            if(sky_measure_requested) {
-                sky_estimates={};
-                auto const build_begin=profile_clock::now();
-                if(sky_measure_ready) {
-                    auto const &gate=*sun_sky_aperture_target;
-                    for(size_t g=0;g<3;++g) {
-                        int const side=g==0?32:g==1?64:128;
-                        sky_coverages[g].reset(view,side);
-                        sky_estimates[g].resolution=unsigned(side);
-                        sky_estimates[g].available=true;
-                    }
-                    for(auto const &face:gate.world.receivers) {
-                        uintptr_t const addr=gate.world.surfaces_addr+
-                            uintptr_t(face.surface_index)*0x5cU;
-                        uint32_t flags=0,adjoin=0;
-                        if(!safe_read(addr+0x10U,&flags,4U) ||
-                           !safe_read(addr+0x0cU,&adjoin,4U)) {
-                            for(auto &mask:sky_coverages)mask.mark_all();
-                            break;
-                        }
-                        if(!sun_sky_surface_eligible(flags,adjoin))continue;
-                        for(size_t g=0;g<3;++g) {
-                            ++sky_estimates[g].sky_faces;
-                            sky_coverages[g].include_polygon(face.polygon);
-                        }
-                    }
-                    for(size_t g=0;g<3;++g) {
-                        sky_estimates[g].active_tiles=
-                            sky_coverages[g].active_tiles;
-                        sky_estimates[g].bbox_tiles=
-                            sky_coverages[g].bbox_active_tiles;
-                        sky_estimates[g].fail_open=
-                            sky_coverages[g].fail_open;
-                    }
-                }
-                uint64_t const build_us=elapsed_profile_us(
-                    build_begin,profile_clock::now());
-                for(auto &estimate:sky_estimates)estimate.build_us=build_us;
-            }
-            // Keep candidate pointers only for this temporary experiment,
-            // so normal world/material selection is never re-evaluated.
-            std::vector<std::pair<
-                decal_world_surface_geometry const *,uint32_t>>
-                sky_world_candidates;
-            if(sky_measure_ready)
-                sky_world_candidates.reserve(map.world.receivers.size());
             if(the_config->profile_renderer)
                 sun_profile_projection_us[cascade]+=elapsed_profile_us(
                     cascade_begin,profile_clock::now());
@@ -6700,8 +6625,6 @@ namespace jkgm {
                     ++world_material_skipped;
                     continue;
                 }
-                if(sky_measure_ready)
-                    sky_world_candidates.push_back({&surface,range.count});
                 if(cutout)world_cutouts.push_back({range,tex});
                 else {
                     counts.push_back(static_cast<GLsizei>(range.count));
@@ -6831,59 +6754,6 @@ namespace jkgm {
             append_model_set(caster_signature,all_count,all_sum,all_sum_sq);
             append_model_set(static_signature,static_count,static_sum,
                              static_sum_sq);
-            if(sky_measure_ready) {
-                // This times the complete hull/bbox candidate evaluation
-                // separately from the three-grid mask construction.
-                // Candidates are the same eligible groups used for drawing.
-                auto const evaluation_begin=profile_clock::now();
-                for(size_t g=0;g<3;++g) {
-                    auto &s=sky_estimates[g];
-                    auto const &mask=sky_coverages[g];
-                    for(auto const &candidate:sky_world_candidates) {
-                        auto const rv=mask.evaluate_polygon(
-                            candidate.first->polygon);
-                        ++s.world_groups;
-                        s.world_indices+=candidate.second;
-                        if(rv.legacy)++s.world_legacy;
-                        if(rv.precise) {
-                            ++s.world_precise;
-                            s.world_precise_indices+=candidate.second;
-                        }
-                        if(rv.unknown)++s.world_unknown;
-                        s.world_rect_tiles+=rv.rect_tiles;
-                        if(rv.rect_tiles>=
-                           unsigned(mask.side*mask.side/2))
-                            ++s.world_large_bounds;
-                    }
-                    auto measure_models=[&](auto const &groups,int type) {
-                        for(auto const &group:groups) {
-                            auto const rv=mask.evaluate_aabb(group.bounds);
-                            uint64_t *total=nullptr,*overlap=nullptr;
-                            if(type==0) {
-                                total=&s.stationary_groups;
-                                overlap=&s.stationary_precise;
-                            } else if(group.instance->dynamic_sun_caster) {
-                                total=&s.moving_groups;
-                                overlap=&s.moving_precise;
-                            } else {
-                                total=&s.other_groups;
-                                overlap=&s.other_precise;
-                            }
-                            ++*total;
-                            if(rv.precise)++*overlap;
-                            if(rv.unknown)++s.model_unknown;
-                            if(rv.rect_tiles>=
-                               unsigned(mask.side*mask.side/2))
-                                ++s.model_large_bounds;
-                        }
-                    };
-                    measure_models(static_models,0);
-                    measure_models(models,1);
-                }
-                uint64_t const evaluation_us=elapsed_profile_us(
-                    evaluation_begin,profile_clock::now());
-                for(auto &s:sky_estimates)s.evaluate_us=evaluation_us;
-            }
             if(the_config->profile_renderer)
                 sun_profile_model_scan_us[cascade]+=elapsed_profile_us(
                     model_scan_begin,profile_clock::now());
@@ -7395,53 +7265,6 @@ namespace jkgm {
                     sun_moments_target->valid[1];
             if(!sun_shadow_ready && !sun_shadow_frame_failure)
                 sun_shadow_frame_failure="one or both cascades incomplete";
-            if(the_config->experimental_sun_sky_caster_culling &&
-               gpu_3do_present_serial%120U==0U) {
-                for(int c=0;c<2;++c) {
-                    for(size_t g=0;g<3;++g) {
-                        auto const &s=
-                            sun_sky_caster_measured[size_t(c)][g];
-                        if(!s.available) {
-                            LOG_INFO("SUN sky-first estimate cascade=",c,
-                                " grid=",g==0?32:g==1?64:128,
-                                " available=0 culling_applied=0");
-                            continue;
-                        }
-                        LOG_INFO("SUN sky-first estimate cascade=",c,
-                            " grid=",s.resolution,
-                            " available=1",
-                            " sky_faces=",s.sky_faces,
-                            " sky_tiles_hull=",s.active_tiles,"/",
-                            s.resolution*s.resolution,
-                            " sky_tiles_bbox=",s.bbox_tiles,
-                            " world_hull=",s.world_precise,"/",
-                            s.world_groups,
-                            " world_bbox=",s.world_legacy,"/",
-                            s.world_groups,
-                            " world_hull_indices=",s.world_precise_indices,
-                            "/",s.world_indices,
-                            " world_rect_tiles_avg=",
-                            s.world_groups
-                                ?s.world_rect_tiles/s.world_groups:0U,
-                            " world_rect_large=",s.world_large_bounds,
-                            " world_unknown=",s.world_unknown,
-                            " stationary_3do=",s.stationary_precise,"/",
-                            s.stationary_groups,
-                            " moving_3do=",s.moving_precise,"/",
-                            s.moving_groups,
-                            " uncached_3do=",s.other_precise,"/",
-                            s.other_groups,
-                            " model_large=",s.model_large_bounds,
-                            " model_unknown=",s.model_unknown,
-                            " mask_build_cpu_us_3grids=",s.build_us,
-                            " overlap_eval_cpu_us_3grids=",s.evaluate_us,
-                            " total_cpu_us_3grids=",
-                            s.build_us+s.evaluate_us,
-                            " fail_open=",s.fail_open?1:0,
-                            " culling_applied=0");
-                    }
-                }
-            }
             if(!skip_cascade_validation) {
                 // Do not establish a new throttle window after a failed or
                 // incomplete validation; retry on the next frame instead.
@@ -7697,12 +7520,9 @@ namespace jkgm {
             prog.set_sun_vsm_params(
                 the_config->sun_shadow_vsm_min_stddev_world,
                 the_config->sun_shadow_vsm_bleed_reduction);
-            // Debug samplers are compiled out on contexts with <21 units.
-            bool const sun_debug_supported=sun_sky_aperture_hardware_supported();
-            prog.set_sun_shadow_debug_view(sun_debug_supported
-                ?the_config->sun_shadow_debug_view:0);
-            // Opt-in VSM raw-depth cap for opaque sun receivers only.
-            bool const vsm_depth_guard=sun_debug_supported &&
+            // Keep raw VSM depth comparisons independently of the removed
+            // debug views; units 17/18 remain reserved for this guard.
+            bool const vsm_depth_guard=sun_sky_aperture_hardware_supported() &&
                 the_config->experimental_sun_shadow_vsm &&
                 the_config->experimental_sun_vsm_depth_guard &&
                 sun_shadow_ready && bool(sun_shadow_target);
@@ -7832,11 +7652,9 @@ namespace jkgm {
                             the_config->experimental_sun_shadow_vsm
                                 ?gl::texture_view(sun_moments_target->filtered[1])
                                 :gl::texture_view(sun_shadow_target->far_depth));
-                        // Keep original near/far depth available alongside
-                        // filtered VSM moments for diagnostic raw comparisons.
-                        if(sun_debug_supported &&
-                           (the_config->sun_shadow_debug_view==1 ||
-                            vsm_depth_guard)) {
+                        // The VSM depth guard still samples raw maps on
+                        // compositor units 17/18 when enabled.
+                        if(vsm_depth_guard) {
                             gl::set_active_texture_unit(17);
                             gl::bind_texture(gl::texture_bind_target::texture_2d,
                                              sun_shadow_target->depth);
