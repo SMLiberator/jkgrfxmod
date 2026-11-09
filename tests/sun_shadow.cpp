@@ -60,6 +60,32 @@ int main()
     coverage.include_polygon(broken);
     assert(coverage.fail_open && coverage.intersects_aabb(off_sky));
 
+    // Phase 1B: compare rectangle and convex-hull coverage. A thin
+    // diagonal should occupy far fewer tiles than its bounding box.
+    for(int side:{32,64,128}) {
+        sun_sky_caster_coverage diagonal{};
+        diagonal.reset(tile_view,side);
+        std::vector<decal_vec3> thin_diagonal={
+            {{3.0f,3.0f,2.0f}},{{5.0f,3.0f,2.0f}},
+            {{29.0f,27.0f,2.0f}},{{27.0f,27.0f,2.0f}}};
+        diagonal.include_polygon(thin_diagonal);
+        assert(diagonal.side==side);
+        assert(diagonal.active_tiles>0U);
+        assert(diagonal.active_tiles<diagonal.bbox_active_tiles);
+        assert(diagonal.active_tiles<unsigned(side*side));
+        decal_volume_aabb crossing{};
+        crossing.low={{15.0f,14.0f,-200.0f}};
+        crossing.high={{17.0f,16.0f,-150.0f}};
+        assert(diagonal.evaluate_aabb(crossing).precise);
+        decal_volume_aabb disjoint{};
+        disjoint.low={{3.0f,28.0f,0.0f}};
+        disjoint.high={{4.0f,29.0f,1.0f}};
+        assert(!diagonal.evaluate_aabb(disjoint).precise);
+        // The original box estimate may keep irrelevant shapes, but
+        // precise coverage must never mark a wider shape as disjoint.
+        auto const direct=diagonal.evaluate_polygon(thin_diagonal);
+        assert(direct.precise && direct.legacy);
+    }
     // A zero interval keeps the original per-frame validation. An active
     // interval only skips while the map remains usable and inside deadline.
     assert(sun_shadow_cascade_validation_due(0.0,0.0,true));

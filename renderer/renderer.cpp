@@ -618,17 +618,23 @@ namespace jkgm {
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
         std::unique_ptr<sun_shadow_moments_gpu> sun_moments_target;
         std::unique_ptr<sun_sky_aperture_gpu> sun_sky_aperture_target;
-        // Phase 1 sky-first benchmark. These are observations only:
-        // never part of static cache keys or actual caster submission.
+        // Phase 1B sky-first measurements; never included in cache keys.
         struct sun_sky_caster_measurement {
             bool available=false,fail_open=false;
-            unsigned sky_faces=0,active_tiles=0;
-            uint64_t build_us=0;
-            uint64_t world_groups=0,world_overlaps=0;
-            uint64_t world_indices=0,world_overlap_indices=0;
-            uint64_t model_groups=0,model_overlaps=0;
+            unsigned resolution=32,sky_faces=0,active_tiles=0,bbox_tiles=0;
+            uint64_t build_us=0,evaluate_us=0;
+            uint64_t world_groups=0,world_legacy=0,world_precise=0;
+            uint64_t world_indices=0,world_precise_indices=0;
+            uint64_t world_large_bounds=0,world_unknown=0,world_rect_tiles=0;
+            uint64_t stationary_groups=0,stationary_precise=0;
+            uint64_t moving_groups=0,moving_precise=0;
+            uint64_t other_groups=0,other_precise=0;
+            uint64_t model_large_bounds=0,model_unknown=0;
         };
-        std::array<sun_sky_caster_measurement,2> sun_sky_caster_measured{};
+        // grid indices: 0=32, 1=64, 2=128. Values updated only on
+        // a full cascade check, never on fast cache-only frames.
+        std::array<std::array<sun_sky_caster_measurement,3>,2>
+            sun_sky_caster_measured{};
         std::unique_ptr<world_cache_gpu> world_cache_target;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
@@ -6382,42 +6388,63 @@ namespace jkgm {
             if(the_config->experimental_sun_sky_aperture &&
                sun_sky_aperture_hardware_supported())
                 draw_sun_sky_aperture(cascade,view,safe_read);
-            // Phase 1: build a conservative, CPU-only sky tile mask and
-            // measure how many existing depth casters touch it. NO pruning
-            // is performed; depth, cache signatures and VSM stay identical.
-            sun_sky_caster_coverage sky_coverage;
-            auto &sky_estimate=sun_sky_caster_measured[size_t(cascade)];
-            if(the_config->experimental_sun_sky_caster_culling) {
-                sky_estimate={};
+            // Phase 1B: compare conservative hull coverage at 32/64/128
+            // against the original rectangle estimator, without culling.
+            std::array<sun_sky_caster_coverage,3> sky_coverages{};
+            auto &sky_estimates=sun_sky_caster_measured[size_t(cascade)];
+            bool const sky_measure_requested=
+                the_config->experimental_sun_sky_caster_culling;
+            bool const sky_measure_ready=sky_measure_requested &&
+                the_config->experimental_sun_sky_aperture &&
+                sun_sky_aperture_target &&
+                sun_sky_aperture_target->loaded_world==world &&
+                sun_sky_aperture_target->valid[size_t(cascade)];
+            if(sky_measure_requested) {
+                sky_estimates={};
                 auto const build_begin=profile_clock::now();
-                if(the_config->experimental_sun_sky_aperture &&
-                   sun_sky_aperture_target &&
-                   sun_sky_aperture_target->loaded_world==world &&
-                   sun_sky_aperture_target->valid[size_t(cascade)]) {
+                if(sky_measure_ready) {
                     auto const &gate=*sun_sky_aperture_target;
-                    sky_coverage.reset(view);
-                    sky_estimate.available=true;
-                    // Match the live flags/GeoModes used in the sky pass.
-                    // Any failed read conservatively marks every tile.
+                    for(size_t g=0;g<3;++g) {
+                        int const side=g==0?32:g==1?64:128;
+                        sky_coverages[g].reset(view,side);
+                        sky_estimates[g].resolution=unsigned(side);
+                        sky_estimates[g].available=true;
+                    }
                     for(auto const &face:gate.world.receivers) {
                         uintptr_t const addr=gate.world.surfaces_addr+
                             uintptr_t(face.surface_index)*0x5cU;
                         uint32_t flags=0,geo=0;
                         if(!safe_read(addr+0x10U,&flags,4U) ||
                            !safe_read(addr+0x1cU,&geo,4U)) {
-                            sky_coverage.mark_all();
+                            for(auto &mask:sky_coverages)mask.mark_all();
                             break;
                         }
                         if((flags&0x600U)==0U || geo<3U || geo>4U)continue;
-                        ++sky_estimate.sky_faces;
-                        sky_coverage.include_polygon(face.polygon);
+                        for(size_t g=0;g<3;++g) {
+                            ++sky_estimates[g].sky_faces;
+                            sky_coverages[g].include_polygon(face.polygon);
+                        }
                     }
-                    sky_estimate.active_tiles=sky_coverage.active_tiles;
-                    sky_estimate.fail_open=sky_coverage.fail_open;
+                    for(size_t g=0;g<3;++g) {
+                        sky_estimates[g].active_tiles=
+                            sky_coverages[g].active_tiles;
+                        sky_estimates[g].bbox_tiles=
+                            sky_coverages[g].bbox_active_tiles;
+                        sky_estimates[g].fail_open=
+                            sky_coverages[g].fail_open;
+                    }
                 }
-                sky_estimate.build_us=elapsed_profile_us(
+                uint64_t const build_us=elapsed_profile_us(
                     build_begin,profile_clock::now());
+                for(auto &estimate:sky_estimates)estimate.build_us=build_us;
             }
+            // Keep candidate pointers only for this temporary experiment,
+            // so normal world/material selection is never re-evaluated.
+            std::vector<std::pair<
+                decal_world_surface_geometry const *,uint32_t>>
+                sky_world_candidates;
+            if(sky_measure_ready)
+                sky_world_candidates.reserve(map.world.receivers.size());
             if(the_config->profile_renderer)
                 sun_profile_projection_us[cascade]+=elapsed_profile_us(
                     cascade_begin,profile_clock::now());
@@ -6512,14 +6539,8 @@ namespace jkgm {
                     ++world_material_skipped;
                     continue;
                 }
-                if(sky_estimate.available) {
-                    ++sky_estimate.world_groups;
-                    sky_estimate.world_indices+=range.count;
-                    if(sky_coverage.intersects_polygon(surface.polygon)) {
-                        ++sky_estimate.world_overlaps;
-                        sky_estimate.world_overlap_indices+=range.count;
-                    }
-                }
+                if(sky_measure_ready)
+                    sky_world_candidates.push_back({&surface,range.count});
                 if(cutout)world_cutouts.push_back({range,tex});
                 else {
                     counts.push_back(static_cast<GLsizei>(range.count));
@@ -6624,11 +6645,7 @@ namespace jkgm {
                     true,map.static_complete);
                 (stable?static_models:models).push_back(
                     {&instance,&group,tex,cutout,prepared.bounds});
-                if(sky_estimate.available) {
-                    ++sky_estimate.model_groups;
-                    if(sky_coverage.intersects_aabb(prepared.bounds))
-                        ++sky_estimate.model_overlaps;
-                }
+
                 uint64_t const member=prepared.signature;
                 all_sum+=member;
                 all_sum_sq+=member*member;
@@ -6642,6 +6659,59 @@ namespace jkgm {
             append_model_set(caster_signature,all_count,all_sum,all_sum_sq);
             append_model_set(static_signature,static_count,static_sum,
                              static_sum_sq);
+            if(sky_measure_ready) {
+                // This times the complete hull/bbox candidate evaluation
+                // separately from the three-grid mask construction.
+                // Candidates are the same eligible groups used for drawing.
+                auto const evaluation_begin=profile_clock::now();
+                for(size_t g=0;g<3;++g) {
+                    auto &s=sky_estimates[g];
+                    auto const &mask=sky_coverages[g];
+                    for(auto const &candidate:sky_world_candidates) {
+                        auto const rv=mask.evaluate_polygon(
+                            candidate.first->polygon);
+                        ++s.world_groups;
+                        s.world_indices+=candidate.second;
+                        if(rv.legacy)++s.world_legacy;
+                        if(rv.precise) {
+                            ++s.world_precise;
+                            s.world_precise_indices+=candidate.second;
+                        }
+                        if(rv.unknown)++s.world_unknown;
+                        s.world_rect_tiles+=rv.rect_tiles;
+                        if(rv.rect_tiles>=
+                           unsigned(mask.side*mask.side/2))
+                            ++s.world_large_bounds;
+                    }
+                    auto measure_models=[&](auto const &groups,int type) {
+                        for(auto const &group:groups) {
+                            auto const rv=mask.evaluate_aabb(group.bounds);
+                            uint64_t *total=nullptr,*overlap=nullptr;
+                            if(type==0) {
+                                total=&s.stationary_groups;
+                                overlap=&s.stationary_precise;
+                            } else if(group.instance->dynamic_sun_caster) {
+                                total=&s.moving_groups;
+                                overlap=&s.moving_precise;
+                            } else {
+                                total=&s.other_groups;
+                                overlap=&s.other_precise;
+                            }
+                            ++*total;
+                            if(rv.precise)++*overlap;
+                            if(rv.unknown)++s.model_unknown;
+                            if(rv.rect_tiles>=
+                               unsigned(mask.side*mask.side/2))
+                                ++s.model_large_bounds;
+                        }
+                    };
+                    measure_models(static_models,0);
+                    measure_models(models,1);
+                }
+                uint64_t const evaluation_us=elapsed_profile_us(
+                    evaluation_begin,profile_clock::now());
+                for(auto &s:sky_estimates)s.evaluate_us=evaluation_us;
+            }
             if(the_config->profile_renderer)
                 sun_profile_model_scan_us[cascade]+=elapsed_profile_us(
                     model_scan_begin,profile_clock::now());
@@ -7156,29 +7226,48 @@ namespace jkgm {
             if(the_config->experimental_sun_sky_caster_culling &&
                gpu_3do_present_serial%120U==0U) {
                 for(int c=0;c<2;++c) {
-                    auto const &s=sun_sky_caster_measured[size_t(c)];
-                    if(!s.available) {
+                    for(size_t g=0;g<3;++g) {
+                        auto const &s=
+                            sun_sky_caster_measured[size_t(c)][g];
+                        if(!s.available) {
+                            LOG_INFO("SUN sky-first estimate cascade=",c,
+                                " grid=",g==0?32:g==1?64:128,
+                                " available=0 culling_applied=0");
+                            continue;
+                        }
                         LOG_INFO("SUN sky-first estimate cascade=",c,
-                                 " available=0",
-                                 " need=experimental_sun_sky_aperture",
-                                 " culling_applied=0");
-                        continue;
+                            " grid=",s.resolution,
+                            " available=1",
+                            " sky_faces=",s.sky_faces,
+                            " sky_tiles_hull=",s.active_tiles,"/",
+                            s.resolution*s.resolution,
+                            " sky_tiles_bbox=",s.bbox_tiles,
+                            " world_hull=",s.world_precise,"/",
+                            s.world_groups,
+                            " world_bbox=",s.world_legacy,"/",
+                            s.world_groups,
+                            " world_hull_indices=",s.world_precise_indices,
+                            "/",s.world_indices,
+                            " world_rect_tiles_avg=",
+                            s.world_groups
+                                ?s.world_rect_tiles/s.world_groups:0U,
+                            " world_rect_large=",s.world_large_bounds,
+                            " world_unknown=",s.world_unknown,
+                            " stationary_3do=",s.stationary_precise,"/",
+                            s.stationary_groups,
+                            " moving_3do=",s.moving_precise,"/",
+                            s.moving_groups,
+                            " uncached_3do=",s.other_precise,"/",
+                            s.other_groups,
+                            " model_large=",s.model_large_bounds,
+                            " model_unknown=",s.model_unknown,
+                            " mask_build_cpu_us_3grids=",s.build_us,
+                            " overlap_eval_cpu_us_3grids=",s.evaluate_us,
+                            " total_cpu_us_3grids=",
+                            s.build_us+s.evaluate_us,
+                            " fail_open=",s.fail_open?1:0,
+                            " culling_applied=0");
                     }
-                    LOG_INFO("SUN sky-first estimate cascade=",c,
-                        " available=1",
-                        " sky_faces=",s.sky_faces,
-                        " tiles=",s.active_tiles,"/",
-                        sun_sky_caster_coverage::tile_count,
-                        " world_groups_overlap=",s.world_overlaps,"/",
-                        s.world_groups,
-                        " world_indices_overlap=",s.world_overlap_indices,
-                        "/",s.world_indices,
-                        " model_groups_overlap=",s.model_overlaps,"/",
-                        s.model_groups,
-                        " build_cpu_us=",s.build_us,
-                        " fail_open=",s.fail_open?1:0,
-                        " conservative_bounds=1",
-                        " culling_applied=0");
                 }
             }
             if(!skip_cascade_validation) {
