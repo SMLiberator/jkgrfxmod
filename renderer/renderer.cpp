@@ -6476,7 +6476,8 @@ namespace jkgm {
                sun_sky_aperture_target &&
                sun_sky_aperture_target->loaded_world==world &&
                sun_sky_aperture_target->valid[0] &&
-               sun_sky_aperture_target->valid[1]) {
+               sun_sky_aperture_target->valid[1] &&
+               cascade_resolution>=256U) {
                 auto const build_begin=profile_clock::now();
                 sky_prune_mask.reset(view);
                 unsigned eligible_in_snapshot=0;

@@ -1,7 +1,9 @@
 #pragma once
 // Sky-first Phase 1B: comparative CPU-only estimates at 32/64/128 tiles.
 // Conservative convex hulls (supersets of projected polygons) avoid most
-// bounding-rectangle false positives. These tests never prune casters.
+// bounding-rectangle false positives. That test-only estimator never
+// prunes casters; the separate fast mask below may prune static world
+// casters only when its independent opt-in runtime switch is enabled.
 #include "sun_shadow.hpp"
 #include <algorithm>
 #include <array>

@@ -100,7 +100,9 @@ struct sun_sky_aperture_gpu {
         valid={{false,false}};
         // Use the *existing* validated native SithWorld snapshot format.
         // Sky polygons are real world-coordinate apertures, not projected
-        // skybox texture UVs; include passable adjoins for those openings.
+        // skybox texture UVs. Retain sky adjoins in the snapshot for
+        // dynamic flag changes, but never render them as light apertures.
+        // Invisible GeoMode 0 non-adjoin sky polygons ARE valid apertures.
         if(!world.load(read,native_world,250000U,true,true,true))
             return false;
         std::vector<decal_world_surface_geometry> skies;
