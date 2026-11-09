@@ -70,8 +70,9 @@ int main() {
     assert(gpu_3do_triangulate_face(warped,normal,triangles,nonplanar));
     assert(nonplanar && triangles.size()==2);
 
-    // No accidental GPU triangles for non-simple or degenerate polygons:
-    // the caller must fall back to JK's native mesh draw.
+    // Never emit accidental GPU triangles for non-simple polygons. The
+    // mesh snapshot omits just the offending self-intersecting face, while
+    // retaining all other validated faces and rejecting unsafe sources.
     std::vector<point3> const bowtie{{
         {{0,0,0}},{{3,3,0}},{{0,3,0}},{{3,0,0}}
     }};
@@ -79,6 +80,9 @@ int main() {
     assert(!gpu_3do_triangulate_face(
         bowtie,normal,triangles,nonplanar,&reject_reason));
     assert(reject_reason!=nullptr);
+    assert(jkgm::gpu_3do_skip_untriangulable_face(reject_reason));
+    assert(!jkgm::gpu_3do_skip_untriangulable_face(nullptr));
+    assert(!jkgm::gpu_3do_skip_untriangulable_face("invalid_uv_index"));
     assert(triangles.empty());
     std::vector<point3> const line{{
         {{0,0,0}},{{1,0,0}},{{2,0,0}},{{3,0,0}}
