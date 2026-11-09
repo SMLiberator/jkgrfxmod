@@ -8206,7 +8206,22 @@ namespace jkgm {
             // They are submitted only in the later forward-alpha pass.
             for(auto const &candidate:cache.sector_special_candidates)
                 stage_candidate(candidate);
-            if(ordered.empty() && cache.sector_sky_candidates.empty())return;
+            if(ordered.empty() && cache.sector_sky_candidates.empty()) {
+                // Still report diagnostic totals if every candidate failed
+                // before the GPU pass had anything to draw.
+                if(the_config->profile_renderer &&
+                   gpu_3do_present_serial%120U==0U && light_fallback>0) {
+                    LOG_INFO("WORLD CACHE all staged draws rejected world=",
+                             cache.loaded_world,
+                             " lighting_read_rejected=",light_read_rejected,
+                             " uv_prepare_rejected=",uv_prepare_rejected);
+                    for(auto const &entry:sampled_stage_reasons)
+                        LOG_INFO("WORLD CACHE staging reject summary world=",
+                                 cache.loaded_world," reason=",entry.first,
+                                 " surfaces=",entry.second);
+                }
+                return;
+            }
             // FreeColorEffect(sector slot) disables the native request.
             // Honor that for all cached world surfaces, too, without
             // touching their authored/COG SithSector.tint values.
