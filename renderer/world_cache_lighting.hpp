@@ -118,12 +118,11 @@ inline bool sample_world_cache_surface_light(
     if(addr64>0x7ff00000U)return reject("native_surface_address_invalid");
     uintptr_t const addr=static_cast<uintptr_t>(addr64);
     uint32_t authored_mode=0;
-    if(!read_decal_u32(read,addr+0x20U,authored_mode) ||
-       authored_mode>4U)
+    if(!read_decal_u32(read,addr+0x20U,authored_mode))
         return reject("native_light_mode_unreadable_or_invalid");
-    // JK's native sithRender clamps authored lighting to its active
-    // RD_LIGHTMODE_GOURAUD (3) limit. Mode 4 is valid source data in
-    // custom levels; it does not itself request MotS RGB vertex colors.
+    // Native sithRender clamps any authored lighting mode above its
+    // active Gouraud (3) limit. An oversized mode does not itself request
+    // MotS RGB vertex colors; those require separate color-mode/flag data.
     uint32_t const mode=std::min(authored_mode,3U);
     if(sample) {*sample={mode,count,authored_mode};}
     // The owning sector is required for lit faces, and for tint even in
