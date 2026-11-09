@@ -973,6 +973,19 @@ namespace {
                     }
                     *failure_detail=details.str();
                 }
+                // A valid but self-crossing authored polygon has no safe
+                // filled triangulation. Do not discard its other mesh faces:
+                // native fallback for the whole rdMesh is worse than one
+                // explicitly diagnosed missing polygon. Memory/index errors
+                // and other triangulation failures still reject the mesh.
+                if(tri_reason &&
+                   std::strcmp(tri_reason,"self_intersecting_outline")==0) {
+                    ++g->self_intersecting_faces_skipped;
+                    if(g->self_intersecting_faces_skipped==1)
+                        g->first_self_intersecting_face=static_cast<uint32_t>(f);
+                    g->vertices.resize(base);
+                    continue;
+                }
                 return reject("non_simple_or_degenerate_face");
             }
             if(missing_normal&&normal_valid)++g->repaired_zero_normals;
@@ -2030,6 +2043,20 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             updated.source_checked_generation=current_generation;
             updated.last_audit_frame=audit_frame ? gpu_frame_serial : 0U;
             if(geom) {
+                if(geom->self_intersecting_faces_skipped>0) {
+                    // Log once per authored model/mesh, not once per frame
+                    // or Thing instance; retain the other valid faces.
+                    static std::unordered_set<std::string> warned;
+                    auto const key=std::to_string(active_native_model_ptr)+
+                        "|" + std::to_string(m.mesh_index);
+                    if(warned.size()<80U && warned.insert(key).second)
+                        LOG_WARNING("GPU 3DO self-intersecting face omitted ",
+                                    gpu_3do_source_detail(m),
+                                    " first_face=",geom->first_self_intersecting_face,
+                                    " omitted_faces=",geom->self_intersecting_faces_skipped,
+                                    " retained_groups=",geom->groups.size(),
+                                    " reason=self_intersecting_outline");
+                }
                 updated.id=next_gpu_id++;
                 updated.geometry=std::move(geom);
                 if(profiling) ++gpu_native_stats.snapshots;
