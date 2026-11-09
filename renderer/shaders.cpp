@@ -1522,8 +1522,6 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
         the_program,"sun_shadow_pcf_radius"))
     , sun_vsm_params(gl::get_uniform_location(
         the_program,"sun_vsm_params"))
-    , sun_shadow_debug_view(gl::get_uniform_location(
-        the_program,"sun_shadow_debug_view"))
     , sun_vsm_depth_guard(gl::get_uniform_location(
         the_program,"sun_vsm_depth_guard"))
     , sun_shadow_raw_near(gl::get_uniform_location(
@@ -1703,12 +1701,7 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_vsm_depth_guard(
     bool enabled)
 {
     gl::set_uniform_integer(sun_vsm_depth_guard,enabled?1:0);
-}
-
-void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_debug_view(
-    int mode)
-{
-    gl::set_uniform_integer(sun_shadow_debug_view,mode);
+    // Original raw near/far depths are still required for optional VSM guard.
     gl::set_uniform_integer(sun_shadow_raw_near,17);
     gl::set_uniform_integer(sun_shadow_raw_far,18);
 }
