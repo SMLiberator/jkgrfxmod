@@ -13,6 +13,7 @@ layout(location=7) in float local_light_mode;
 layout(location=8) in vec3 local_vertex_rgb;
 uniform float ambient_light;
 uniform float effective_light_mode; // captured per Thing
+uniform int baked_vertex_overbrightness; // opt-in authored Gouraud HDR
 uniform int camera_hud_thing; // SithThing type=camera: unlit textured 3DO
 // Native JK applies these to RGB8 *vertex colors* before texturing.
 uniform vec3 colormap_tint; // nonidentity CMP header RGB multiplier
@@ -113,6 +114,14 @@ void main() {
     float mode=local_light_mode>3.5 ? 1.0
         : min(local_light_mode,effective_light_mode);
     float l=mode>=2.5 ? local_static_light : 0.0;
+    // Isolate authored static intensity+ExtraLight from the dynamic
+    // light loop: a bright headlight must NOT become baked HDR.
+    // Native 0..1 shader behavior is entirely unchanged when disabled.
+    float baked_hdr_multiplier=1.0;
+    if(baked_vertex_overbrightness!=0 && mode>=2.5 &&
+       local_static_light+local_extra_light>1.0)
+        baked_hdr_multiplier=min(
+            pow(local_static_light+local_extra_light,1.8),65504.0);
     if(mode>=1.5 && num_lights>0 && pixel_dynamic_lighting==0) {
         vec3 anchor=mode>=2.5 ? local_position : local_face_anchor;
         vec3 normal=mode>=2.5 ? local_light_normal : local_normal;
@@ -162,6 +171,7 @@ void main() {
         v*=jk_color_add_fade.w;
         jk_lit_rgb=pow(clamp(v,0.0,1.0),vec3(1.8));
     }
+    jk_lit_rgb*=baked_hdr_multiplier;
     // Re-run JK's vertex gamma/color effects ONLY for crossing Things,
     // once per candidate sector. This retains interpolation of gamma-
     // corrected vertex RGB, unlike recomputing baked brightness per pixel.
@@ -191,7 +201,7 @@ void main() {
                 encoded*=jk_color_add_fade.w;
                 candidate=pow(clamp(encoded,0.0,1.0),vec3(1.8));
             }
-            sector_crossing_lit[i]=candidate;
+            sector_crossing_lit[i]=candidate*baked_hdr_multiplier;
         }
     }
     }
