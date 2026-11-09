@@ -27,7 +27,16 @@ assert "surface.surface_flags&0x600U" in h
 assert "sun_sky_surface_eligible(flags,adjoin)" in render
 assert "sun_sky_surface_eligible(flags,adjoin)" in render
 assert "uint32_t flags=0,adjoin=0;" in render
-assert "refresh_sun_level_sky();" in render
+# Sky eligibility is stable within a level: avoid scanning all native
+# surfaces every frame, but re-audit on sun activation, world changes and
+# periodically for rare COG sky/adjoin mutations.
+assert "void refresh_sun_level_sky(bool force_audit)" in render
+assert "refresh_sun_level_sky(!sun_level_sky_sun_active);" in render
+assert "constexpr uint64_t audit_interval_frames=120U;" in render
+assert "uintptr_t(world)==sun_level_sky_world" in render
+assert "sun_level_sky_last_audit_frame=gpu_3do_present_serial;" in render
+assert "else sun_level_sky_sun_active=false;" in render
+assert "sun_level_sky_known=false;" in render
 assert "get_sun_settings().intensity.value()[0]>0.0f" in render
 assert "if(!the_config->enable_sun_shadows || !sun_level_has_sky)return;" in render
 assert "sun_level_has_sky &&" in render
