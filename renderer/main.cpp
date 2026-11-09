@@ -911,8 +911,9 @@ namespace {
             // sometimes not perfectly planar). A triangle fan loses those
             // faces. Clip ears in a stable 2D projection instead, preserving
             // each corner's original material UV and native vertex lighting.
-            // For invalid outlines use the entire native mesh draw, rather
-            // than silently losing geometry from the cached GPU path.
+            // For invalid outlines, do not invent GPU triangles. The snapshot
+            // can omit diagnosed self-intersections individually; other unsafe
+            // triangulation errors still reject the mesh.
             std::vector<std::array<float,3>> outline;
             outline.reserve(face.count);
             for(uint32_t v=0;v<face.count;v++) {
