@@ -13,6 +13,7 @@ in vec3 cached_sector_tint; // SithSector.tint, not colormap
 in vec3 cached_sector_cmp_tint; // SithSector.colormap color multiplier
 in vec3 cached_world_position;
 in vec3 cached_world_normal;
+uniform int baked_vertex_overbrightness;
 uniform int num_lights;
 uniform float light_attenuation;
 uniform vec4 light_position_radius[16];
@@ -277,7 +278,12 @@ void main() {
             lighting=jk_point_compose(lighting,added,light_color);
         }
     }
-    lighting=mix(clamp(lighting,0.0,1.0),vec3(1.0),fullbright);
+    // HDR baked Gouraud light must not be destroyed by the final
+    // fullbright/CMP blend; normal 0..1 lighting stays bit-for-bit native.
+    lighting=mix(baked_vertex_overbrightness!=0
+                     ?max(lighting,vec3(0.0))
+                     :clamp(lighting,0.0,1.0),
+                 vec3(1.0),fullbright);
     float env_metalness=0.0;
     vec3 env_reflection=world_environment_reflection(
         albedo,material_texcoord,env_metalness);
