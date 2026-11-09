@@ -39,8 +39,10 @@ struct sun_sky_caster_coverage {
 
     sun_shadow_projection view{};
     int side=grid_side;
-    std::vector<uint8_t> tiles=std::vector<uint8_t>(tile_count,0U);
-    std::vector<uint8_t> bbox_tiles=std::vector<uint8_t>(tile_count,0U);
+    // Allocate tile storage only when the experiment is enabled; the
+    // renderer constructs these objects even with diagnostics disabled.
+    std::vector<uint8_t> tiles;
+    std::vector<uint8_t> bbox_tiles;
     unsigned active_tiles=0,bbox_active_tiles=0;
     bool ready=false;
     bool fail_open=false;
