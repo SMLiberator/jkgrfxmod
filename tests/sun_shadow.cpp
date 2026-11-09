@@ -1,5 +1,5 @@
 #include "renderer/sun_shadow.hpp"
-#include "renderer/sun_sky_caster_coverage.hpp"
+#include "renderer/sun_sky_caster_mask.hpp"
 #include "renderer/sun_sky_surface.hpp"
 #include "renderer/sun_skybox_thing.hpp"
 #include <cassert>
@@ -21,9 +21,7 @@ int main()
     assert(!sun_sky_surface_eligible(0U,0U));
     assert(!sun_sky_surface_eligible(0x200U,0x123400U));
     assert(!sun_sky_surface_eligible(0x400U,0x123400U));
-    // Sky-first Phase 1: only a conservative XY tile-mask estimate.
-    // Roof and under-roof casters share light-space XY and are both
-    // counted; no claim about actual depth visibility is made.
+    // Active 128x128 pruning uses a conservative light-space XY mask.
     sun_shadow_projection tile_view{};
     tile_view.origin={{0.0f,0.0f,0.0f}};
     tile_view.right={{1.0f,0.0f,0.0f}};
@@ -32,71 +30,10 @@ int main()
     tile_view.width=32.0f;
     tile_view.height=32.0f;
     tile_view.range=20.0f;
-    sun_sky_caster_coverage coverage{};
-    coverage.reset(tile_view);
-    assert(coverage.ready && coverage.active_tiles==0);
-    decal_volume_aabb sky_zone{};
-    sky_zone.low={{15.0f,15.0f,1.0f}};
-    sky_zone.high={{17.0f,17.0f,2.0f}};
-    assert(!coverage.intersects_aabb(sky_zone));
     std::vector<decal_vec3> sky_quad={
         {{15.0f,15.0f,4.0f}},{{17.0f,15.0f,4.0f}},
         {{17.0f,17.0f,4.0f}},{{15.0f,17.0f,4.0f}}};
-    coverage.include_polygon(sky_quad);
-    assert(coverage.active_tiles>0 &&
-           coverage.active_tiles<sun_sky_caster_coverage::tile_count);
-    assert(coverage.intersects_aabb(sky_zone));
-    decal_volume_aabb under_roof=sky_zone;
-    under_roof.low[2]=-100.0f;
-    under_roof.high[2]=-50.0f;
-    assert(coverage.intersects_aabb(under_roof)); // depth-agnostic
-    decal_volume_aabb off_sky{};
-    off_sky.low={{2.0f,2.0f,0.0f}};
-    off_sky.high={{3.0f,3.0f,1.0f}};
-    assert(!coverage.intersects_aabb(off_sky));
-    assert(!coverage.intersects_polygon(std::vector<decal_vec3>{
-        {{2.0f,2.0f,0.0f}},{{3.0f,2.0f,0.0f}},
-        {{3.0f,3.0f,0.0f}}}));
-    coverage.mark_all();
-    assert(coverage.fail_open);
-    assert(coverage.active_tiles==
-           sun_sky_caster_coverage::tile_count);
-    assert(coverage.intersects_aabb(off_sky));
-    // Invalid sky geometry must fail open, never accidentally prune.
-    coverage.reset(tile_view);
-    auto broken=sky_quad;
-    broken[0][0]=std::numeric_limits<float>::quiet_NaN();
-    coverage.include_polygon(broken);
-    assert(coverage.fail_open && coverage.intersects_aabb(off_sky));
-
-    // Phase 1B: compare rectangle and convex-hull coverage. A thin
-    // diagonal should occupy far fewer tiles than its bounding box.
-    for(int side:{32,64,128}) {
-        sun_sky_caster_coverage diagonal{};
-        diagonal.reset(tile_view,side);
-        std::vector<decal_vec3> thin_diagonal={
-            {{3.0f,3.0f,2.0f}},{{5.0f,3.0f,2.0f}},
-            {{29.0f,27.0f,2.0f}},{{27.0f,27.0f,2.0f}}};
-        diagonal.include_polygon(thin_diagonal);
-        assert(diagonal.side==side);
-        assert(diagonal.active_tiles>0U);
-        assert(diagonal.active_tiles<diagonal.bbox_active_tiles);
-        assert(diagonal.active_tiles<unsigned(side*side));
-        decal_volume_aabb crossing{};
-        crossing.low={{15.0f,14.0f,-200.0f}};
-        crossing.high={{17.0f,16.0f,-150.0f}};
-        assert(diagonal.evaluate_aabb(crossing).precise);
-        decal_volume_aabb disjoint{};
-        disjoint.low={{3.0f,28.0f,0.0f}};
-        disjoint.high={{4.0f,29.0f,1.0f}};
-        assert(!diagonal.evaluate_aabb(disjoint).precise);
-        // The original box estimate may keep irrelevant shapes, but
-        // precise coverage must never mark a wider shape as disjoint.
-        auto const direct=diagonal.evaluate_polygon(thin_diagonal);
-        assert(direct.precise && direct.legacy);
-    }
-    // Phase 2: cheap 128x128 padded bitmask safely conserves
-    // casters beneath sky, but rejects distant XY-incompatible faces.
+    // Preserve casters beneath sky while rejecting XY-incompatible faces.
     sun_sky_caster_fast_mask fast{};
     fast.reset(tile_view);
     fast.include_polygon(sky_quad);
