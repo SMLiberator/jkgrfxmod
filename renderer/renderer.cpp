@@ -8118,24 +8118,65 @@ namespace jkgm {
                !decal_native_address_ok(identity_cmp))
                 identity_cmp=0;
             size_t light_fallback=0,gouraud_faces=0;
+            size_t light_read_rejected=0,uv_prepare_rejected=0;
+            size_t stage_rejections_logged=0;
+            // Inspect a bounded number of exact failures on the regular
+            // profiling cadence, not every native surface each frame.
+            auto log_stage_rejection=[&](
+                world_cache_draw_candidate const &candidate,
+                char const *stage,char const *reason,
+                world_cache_light_sample const &info) {
+                if(!the_config->profile_renderer ||
+                   gpu_3do_present_serial%120U!=0U ||
+                   stage_rejections_logged>=12U)return;
+                ++stage_rejections_logged;
+                uint32_t sector=0,mode=0,indices=0,static_lights=0;
+                uintptr_t const base=cache.world.surfaces_addr+
+                    uintptr_t(candidate.surface_index)*0x5cU;
+                safe_read(base+0x08U,&sector,sizeof(sector));
+                safe_read(base+0x20U,&mode,sizeof(mode));
+                safe_read(base+0x2cU,&indices,sizeof(indices));
+                safe_read(base+0x54U,&static_lights,sizeof(static_lights));
+                LOG_INFO("WORLD CACHE staging reject world=",cache.loaded_world,
+                         " surface=",candidate.surface_index,
+                         " stage=",stage,
+                         " reason=",reason?reason:"unspecified",
+                         " geo=",candidate.geometry_mode,
+                         " mode=",mode," sampled_mode=",info.mode,
+                         " sector=",sector,
+                         " vertex_indices_ptr=",indices,
+                         " static_light_ptr=",static_lights,
+                         " native_vertex_count=",cache.world.vertex_count,
+                         " dynamic_lights=",cache.native_dynamic_light.size(),
+                         " pixel_lighting=",pixel_lighting?1:0,
+                         " first_index=",candidate.first_index,
+                         " indices=",candidate.count,
+                         " mat_ptr=",candidate.material,
+                         " cel=",candidate.cel);
+            };
             auto stage_candidate=[&](world_cache_draw_candidate const &candidate) {
                 world_cache_light_sample info{};
+                char const *failure=nullptr;
                 if(!sample_world_cache_surface_light(
                        safe_read,cache.world.surfaces_addr,cache.mesh,
                        candidate,cache.world.vertex_count,
                        cache.native_dynamic_light,cache.frame_light_rgb,
                        &info,&cache.frame_light_state,
                        pixel_lighting,global_extra,&cache.frame_sector_tint,
-                       &cache.frame_sector_cmp_tint,identity_cmp)) {
+                       &cache.frame_sector_cmp_tint,identity_cmp,&failure)) {
                     ++light_fallback;
+                    ++light_read_rejected;
+                    log_stage_rejection(candidate,"lighting",failure,info);
                     return;
                 }
                 // Native JK has already advanced SlideSurface UV offsets.
                 // The GPU mesh retains its immutable authored coordinates.
                 if(!write_world_cache_uv_animation(
                        cache.mesh,cache.cached_surface_lookup,
-                       candidate,cache.frame_uv_offset)) {
+                       candidate,cache.frame_uv_offset,&failure)) {
                     ++light_fallback;
+                    ++uv_prepare_rejected;
+                    log_stage_rejection(candidate,"uv_animation",failure,info);
                     return;
                 }
                 if(info.mode==3U)++gouraud_faces;
@@ -8483,6 +8524,8 @@ namespace jkgm {
                          " unresolved_material=",unresolved,
                          " deferred_special=",skipped_alpha,
                          " light_fallback=",light_fallback,
+                         " lighting_read_rejected=",light_read_rejected,
+                         " uv_prepare_rejected=",uv_prepare_rejected,
                          " gouraud_faces=",gouraud_faces);
                 LOG_INFO("WORLD CACHE material_effects_opaque visible=",mat_probe_faces,
                          " reflective=",mat_probe_reflective,
