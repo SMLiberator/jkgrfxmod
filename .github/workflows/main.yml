@@ -181,6 +181,13 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sector_crossing_gpu.cpp /Fe:sector_crossing_gpu_test.exe
         sector_crossing_gpu_test.exe
+
+    - name: CPU world vertex ambient probe grid and native capture tests
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\world_vertex_ambient.cpp /Fe:world_vertex_ambient_test.exe
+        world_vertex_ambient_test.exe
+        python3 tests/world_vertex_ambient.py
     - name: Source-indexed MAT fullbright mask regression tests
       shell: cmd
       run: |

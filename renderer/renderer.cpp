@@ -31,6 +31,7 @@
 #include "sun_sky_surface.hpp"
 #include "sun_sky_caster_mask.hpp"
 #include "world_cache_gpu.hpp"
+#include "world_vertex_ambient.hpp"
 #include "world_cache_alpha.hpp"
 #include "world_cache_sky.hpp"
 #include "sun_dynamic_shadow_gpu.hpp"
@@ -630,6 +631,11 @@ namespace jkgm {
         uintptr_t sun_level_sky_world=0;
         uint64_t sun_level_sky_last_audit_frame=0;
         std::unique_ptr<world_cache_gpu> world_cache_target;
+        // CPU-only, sector-local authored world-vertex ambient samples.
+        world_vertex_ambient_grid world_vertex_ambient_probes;
+        uint64_t world_vertex_ambient_revision=0;
+        uintptr_t world_vertex_ambient_world=0;
+        bool world_vertex_ambient_valid=false;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
         std::vector<sun_dynamic_shadow_tile> sun_dynamic_tiles;
@@ -1163,6 +1169,10 @@ namespace jkgm {
                 deferred_gpu_3do_camera={};
                 frame_has_exempt_gpu=false;
                 reset_sector_crossing();
+                world_vertex_ambient_probes.reset();
+                world_vertex_ambient_revision=0;
+                world_vertex_ambient_world=0;
+                world_vertex_ambient_valid=false;
                 if(the_config->use_gpu_cache ||
                    the_config->enable_decals ||
                    (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
@@ -9337,6 +9347,82 @@ namespace jkgm {
             sector_crossing_ranges.clear();
         }
 
+        // A/B prototype: replace native per-Thing ambient using ONLY
+        // world Gouraud samples in that Thing's owning sector. This is
+        // independent of viewport visibility and never samples other
+        // sectors (including ones touching at portals).
+        void stage_world_vertex_ambient()
+        {
+            if(!the_config->experimental_world_vertex_ambient ||
+               the_config->enable_sector_crossing_lighting ||
+               !the_config->use_gpu_cache ||
+               mode!=renderer_mode::ingame ||
+               frame_gpu_3do_instances.empty() ||
+               !world_cache_target || !world_cache_target->ready)
+                return;
+            auto const &cache=*world_cache_target;
+            float const radius=the_config->experimental_world_vertex_ambient_radius;
+            if(world_vertex_ambient_world!=cache.loaded_world ||
+               world_vertex_ambient_revision!=cache.revision ||
+               world_vertex_ambient_probes.radius()!=radius) {
+                world_vertex_ambient_world=cache.loaded_world;
+                world_vertex_ambient_revision=cache.revision;
+                world_vertex_ambient_valid=false;
+                auto const read=[](uintptr_t ptr,void *out,size_t len)->bool {
+                    if(!len || !engine_camera_detail::readable(ptr,len))
+                        return false;
+                    std::memcpy(out,reinterpret_cast<void const *>(ptr),len);
+                    return true;
+                };
+                world_vertex_ambient_stats stats{};
+                auto const started=profile_clock::now();
+                bool const built=capture_world_vertex_ambient(
+                    read,cache.loaded_world,cache.world.surfaces_addr,
+                    cache.mesh,the_config->enable_baked_overbright,radius,
+                    world_vertex_ambient_probes,stats);
+                world_vertex_ambient_valid=built &&
+                    world_vertex_ambient_probes.sample_count()>0U;
+                LOG_INFO("WORLD VERTEX AMBIENT capture world=",
+                    cache.loaded_world,
+                    " built=",built?1:0,
+                    " accepted=",stats.surfaces_sampled,
+                    " rejected=",stats.surfaces_skipped,
+                    " vertices=",stats.vertices_sampled,
+                    " cells=",world_vertex_ambient_probes.cell_count(),
+                    " radius=",radius,
+                    " cpu_us=",elapsed_profile_us(
+                        started,profile_clock::now()));
+            }
+            if(!world_vertex_ambient_valid)return;
+            uint32_t applied=0,missed=0,excluded=0;
+            for(auto &inst:frame_gpu_3do_instances) {
+                // Do not alter the native HUD, skybox, sprite, decal or
+                // depth-only semantics. Native fallback is untouched.
+                if(!inst.geometry || inst.shadow_only || inst.camera_hud ||
+                   inst.skybox_vertex_lighting || inst.world_lighting_exempt ||
+                   inst.is_projected_decal || inst.is_sprite_quad ||
+                   !inst.owning_sector_valid) {
+                    ++excluded;continue;
+                }
+                std::array<float,3> const position{{
+                    inst.transform[9],inst.transform[10],inst.transform[11]
+                }};
+                float sampled=0.0f;
+                if(world_vertex_ambient_probes.sample(
+                       inst.owning_sector_id,position,sampled)) {
+                    inst.ambient=sampled;
+                    ++applied;
+                } else ++missed; // Retain this Thing's original JK ambient.
+            }
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("WORLD VERTEX AMBIENT models=",
+                    frame_gpu_3do_instances.size(),
+                    " applied=",applied,
+                    " misses_native=",missed,
+                    " excluded=",excluded);
+        }
+
         void stage_sector_crossing()
         {
             if(!the_config->enable_sector_crossing_lighting ||
@@ -9632,6 +9718,7 @@ namespace jkgm {
             merge_thing_light_colors();
             ++gpu_3do_present_serial;
             stage_world_cache();
+            stage_world_vertex_ambient();
             stage_sector_crossing();
             animation_seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - animation_epoch).count();

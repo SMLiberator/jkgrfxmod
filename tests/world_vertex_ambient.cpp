@@ -1,0 +1,115 @@
+#include "renderer/world_vertex_ambient.hpp"
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <unordered_map>
+
+namespace {
+struct memory {
+    std::unordered_map<uintptr_t,uint8_t> bytes;
+    template<class T>
+    void put(uintptr_t addr,T const &value) {
+        auto const *src=reinterpret_cast<uint8_t const *>(&value);
+        for(size_t i=0;i<sizeof(value);++i)bytes[addr+i]=src[i];
+    }
+    bool read(uintptr_t addr,void *dst,size_t size) const {
+        auto *out=static_cast<uint8_t *>(dst);
+        for(size_t i=0;i<size;++i) {
+            auto const f=bytes.find(addr+i);
+            if(f==bytes.end())return false;
+            out[i]=f->second;
+        }
+        return true;
+    }
+};
+} // namespace
+
+int main() {
+    jkgm::world_vertex_ambient_grid grid;
+    float result=-1.0f;
+    assert(!grid.sample(7,{{0.0f,0.0f,0.0f}},result));
+    assert(grid.add(7,{{0.0f,0.0f,0.0f}},0.0f));
+    assert(grid.add(7,{{0.5f,0.0f,0.0f}},2.0f));
+    assert(grid.add(8,{{0.0f,0.0f,0.0f}},0.5f));
+    assert(grid.sample(7,{{0.1f,0.0f,0.0f}},result));
+    assert(std::fabs(result-1.0f)<0.00001f); // same cell average
+    assert(grid.sample(8,{{0.1f,0.0f,0.0f}},result));
+    assert(std::fabs(result-0.5f)<0.00001f); // same point, other sector
+    result=123.0f;
+    assert(!grid.sample(7,{{100.0f,0.0f,0.0f}},result));
+    assert(result==123.0f); // native ambient fallback remains possible
+    assert(!grid.add(7,{{0.0f,0.0f,0.0f}},-1.0f));
+    assert(!grid.add(7,{{0.0f,0.0f,0.0f}},
+                    std::numeric_limits<float>::infinity()));
+    assert(grid.sample_count()==3U);
+
+    // Exercise the actual native SithWorld surface layout and sector IDs.
+    uintptr_t constexpr world=0x00100000U;
+    uintptr_t constexpr sectors=0x00200000U;
+    uintptr_t constexpr surfaces=0x00300000U;
+    uintptr_t constexpr lights0=0x00400000U;
+    uintptr_t constexpr lights1=0x00400100U;
+    uintptr_t constexpr lights_sky=0x00400200U;
+    memory mem;
+    mem.put(world+0x4cU,uint32_t(2));
+    mem.put(world+0x50U,uint32_t(sectors));
+    mem.put(sectors,uint32_t(7));
+    mem.put(sectors+0x08U,0.1f);
+    mem.put(sectors+0x98U,uint32_t(8));
+    mem.put(sectors+0x98U+0x08U,0.0f);
+    auto face=[&](uint32_t index,uint32_t sector,uint32_t ptr,
+                  float extra) {
+        uintptr_t const f=surfaces+uintptr_t(index)*0x5cU;
+        mem.put(f+0x08U,sector);
+        mem.put(f+0x1cU,uint32_t(4)); // textured
+        mem.put(f+0x20U,uint32_t(3)); // Gouraud
+        mem.put(f+0x44U,extra);
+        mem.put(f+0x54U,ptr);
+    };
+    face(0,uint32_t(sectors),uint32_t(lights0),0.2f);
+    face(1,uint32_t(sectors+0x98U),uint32_t(lights1),0.0f);
+    face(2,uint32_t(sectors),uint32_t(lights_sky),0.0f);
+    mem.put(lights0+0U,0.0f);
+    mem.put(lights0+4U,0.5f);
+    mem.put(lights0+8U,1.5f);
+    for(uint32_t i=0;i<3;++i) {
+        mem.put(lights1+i*4U,2.0f);
+        mem.put(lights_sky+i*4U,2.0f);
+    }
+    jkgm::world_cache_mesh mesh{};
+    mesh.vertices.resize(9);
+    mesh.indices={0,1,2,3,4,5,6,7,8};
+    for(size_t i=0;i<mesh.vertices.size();++i)
+        mesh.vertices[i].position={{0.2f,0.1f,0.0f}};
+    jkgm::world_cache_surface_range range{};
+    range.surface_index=0;range.first_index=0;range.count=3;
+    mesh.surfaces.push_back(range);
+    range.surface_index=1;range.first_index=3;
+    mesh.surfaces.push_back(range);
+    range.surface_index=2;range.first_index=6;
+    range.surface_flags=0x200U; // sky is excluded from probes
+    mesh.surfaces.push_back(range);
+    auto reader=[&](uintptr_t addr,void *dst,size_t n) {
+        return mem.read(addr,dst,n);
+    };
+    jkgm::world_vertex_ambient_stats stats{};
+    assert(jkgm::capture_world_vertex_ambient(
+        reader,world,surfaces,mesh,true,1.0f,grid,stats));
+    assert(stats.surfaces_seen==3 && stats.surfaces_sampled==2);
+    assert(stats.surfaces_skipped==1 && stats.vertices_sampled==6);
+    assert(grid.sample_count()==6U && grid.cell_count()==2U);
+    assert(grid.sample(7,{{0.2f,0.1f,0.0f}},result));
+    assert(std::fabs(result-(0.2f+0.7f+1.7f)/3.0f)<0.00001f);
+    assert(grid.sample(8,{{0.2f,0.1f,0.0f}},result));
+    assert(std::fabs(result-2.0f)<0.00001f);
+    assert(!grid.sample(9,{{0.2f,0.1f,0.0f}},result));
+    // Turning off overbright caps each authored input at 1, not the sum.
+    assert(jkgm::capture_world_vertex_ambient(
+        reader,world,surfaces,mesh,false,1.0f,grid,stats));
+    assert(grid.sample(7,{{0.2f,0.1f,0.0f}},result));
+    assert(std::fabs(result-(0.2f+0.7f+1.2f)/3.0f)<0.00001f);
+    // Valid but distant geometry must not cause light bleed.
+    assert(!grid.sample(7,{{10.0f,0.1f,0.0f}},result));
+}

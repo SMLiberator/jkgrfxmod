@@ -1280,7 +1280,8 @@ namespace {
             };
             own_sector_tint_valid=jkgm::read_jk_thing_sector_tint(
                 read,hud_owner,own_sector_tint);
-            if(the_config->enable_sector_crossing_lighting) {
+            if(the_config->enable_sector_crossing_lighting ||
+               the_config->experimental_world_vertex_ambient) {
                 uint32_t sector=0;
                 if(read(uintptr_t(hud_owner)+0x5cU,&sector,4U) &&
                    sector>=0x10000U && sector<0x7ff00000U)

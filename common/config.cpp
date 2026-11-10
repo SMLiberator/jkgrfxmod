@@ -235,6 +235,22 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("enable_sector_crossing_lighting").get_to(
                 rv->enable_sector_crossing_lighting);
         }
+        if(j.contains("experimental_world_vertex_ambient")) {
+            j.at("experimental_world_vertex_ambient").get_to(
+                rv->experimental_world_vertex_ambient);
+        }
+        if(j.contains("experimental_world_vertex_ambient_radius")) {
+            auto const &v=j.at("experimental_world_vertex_ambient_radius");
+            if(!v.is_number())
+                throw std::runtime_error(
+                    "experimental_world_vertex_ambient_radius must be between 0.25 and 4");
+            double const radius=v.get<double>();
+            if(!std::isfinite(radius) || radius<0.25 || radius>4.0)
+                throw std::runtime_error(
+                    "experimental_world_vertex_ambient_radius must be between 0.25 and 4");
+            rv->experimental_world_vertex_ambient_radius=
+                static_cast<float>(radius);
+        }
 
         if(j.contains("enable_ssao")) {
             j.at("enable_ssao").get_to(rv->enable_ssao);

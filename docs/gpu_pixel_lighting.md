@@ -79,6 +79,38 @@ are accepted as deprecated configuration aliases.
 }
 ```
 
+## Experimental spatial ambient from world vertices
+
+For an initial GPU-cached 3DO lighting A/B test, enable:
+
+~~~json
+{
+  "experimental_world_vertex_ambient": true,
+  "experimental_world_vertex_ambient_radius": 1.0
+}
+~~~
+
+The renderer captures each eligible Gouraud world-face corner's authored
+intensity, face ExtraLight and sector ExtraLight once per world-cache revision.
+It groups samples into a coarse 3D CPU grid keyed by the **native sector ID**.
+For each ordinary GPU-cached 3DO mesh, it interpolates nearby cell averages
+around the mesh transform origin and substitutes the result for the camera
+ambient floor. Cells in other sectors are never queried. Sky and passable
+adjoin polygons contribute no probes.
+
+If there are no nearby samples within the radius, the original native Thing
+ambient is left unchanged. The current version does not recompute probes on
+per-frame COG vertex-light changes, and it cannot detect walls or occluders
+**inside** a single sector. It is a prototype, not a complete indirect-light
+solver or a source of additional emissive light for neighboring surfaces.
+It excludes sprites, Camera HUDs, skyboxes, decals and native-rendered 3DOs.
+The existing experimental per-fragment sector-crossing lighting takes
+precedence if both toggles are enabled; disable that option for probe testing.
+
+Start with a dark room that has bright and dark Gouraud world corners; move
+a 3DO around it. Try radii from 0.5 to 2.0 world units and compare to the
+toggle disabled. A neighboring sector is an important leak regression.
+
 ## Receiver-specific behavior
 
 3DOs use local positions and normals (accounting for scaled/mirrored

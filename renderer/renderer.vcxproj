@@ -231,6 +231,7 @@
     <ClInclude Include="world_cache_gpu.hpp" />
     <ClInclude Include="light_intensity_range.hpp" />
     <ClInclude Include="world_cache_lighting.hpp" />
+    <ClInclude Include="world_vertex_ambient.hpp" />
     <ClInclude Include="world_cache_portals.hpp" />
     <ClInclude Include="world_cache_sky.hpp" />
     <ClInclude Include="world_cache_uv_animation.hpp" />
