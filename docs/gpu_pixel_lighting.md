@@ -91,18 +91,29 @@ For an initial GPU-cached 3DO lighting A/B test, enable:
 ~~~
 
 The renderer captures each eligible Gouraud world-face corner's authored
-intensity, face ExtraLight and sector ExtraLight once per world-cache revision.
-It groups samples into a coarse 3D CPU grid keyed by the **native sector ID**.
-For each ordinary GPU-cached 3DO mesh, it interpolates nearby cell averages
-around the mesh transform origin and substitutes the result for the camera
-ambient floor. Cells in other sectors are never queried. Sky and passable
-adjoin polygons contribute no probes.
+vertex intensity and **per-face ExtraLight**, excluding both the SithSector's
+JKL-defined AmbientLight and sector ExtraLight. These authored values are
+cached once per world-cache revision in a coarse 3D CPU grid keyed by native
+sector ID. They replace the per-Thing camera ambient *floor*, not the model's
+authored static shading, dynamic point lights, or per-face ExtraLight.
 
-If there are no nearby samples within the radius, the original native Thing
-ambient is left unchanged. The current version does not recompute probes on
-per-frame COG vertex-light changes, and it cannot detect walls or occluders
-**inside** a single sector. It is a prototype, not a complete indirect-light
-solver or a source of additional emissive light for neighboring surfaces.
+The renderer separately captures passable SithSurfaceAdjoin polygons from
+the full native world table, including invisible and untextured adjoins not
+present in the world render cache. When an ordinary GPU-cached 3DO is within
+the configured radius of the **finite portal opening**, it samples the
+neighboring sector as well. Near the opening, both sides converge to an
+identical 50/50 blend; farther away each sector uses its own samples.
+Solid, sky-flagged and invalid adjoins are not eligible. No direct sampling
+takes place through unrelated sector walls. Crossings use one portal hop;
+adjoin passability and probe lighting are captured at level-cache creation,
+not tracked live after COG changes.
+
+If the home sector lacks samples, but a valid neighboring portal has nearby
+samples, the renderer can borrow those; otherwise it retains native Thing
+ambient. The current version does not recompute probes on per-frame COG
+vertex-light changes, and it cannot detect walls or occluders **inside** a
+single sector. It is a prototype, not a complete indirect-light solver or
+a source of additional emissive light for neighboring surfaces.
 It excludes sprites, Camera HUDs, skyboxes, decals and native-rendered 3DOs.
 The existing experimental per-fragment sector-crossing lighting takes
 precedence if both toggles are enabled; disable that option for probe testing.

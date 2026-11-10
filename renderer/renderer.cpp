@@ -9347,10 +9347,9 @@ namespace jkgm {
             sector_crossing_ranges.clear();
         }
 
-        // A/B prototype: replace native per-Thing ambient using ONLY
-        // world Gouraud samples in that Thing's owning sector. This is
-        // independent of viewport visibility and never samples other
-        // sectors (including ones touching at portals).
+        // A/B prototype: replace native per-Thing ambient with authored world
+        // Gouraud probes. Only the local sector and adjacent sectors through
+        // verified passable portal polygons can contribute.
         void stage_world_vertex_ambient()
         {
             if(!the_config->experimental_world_vertex_ambient ||
@@ -9389,12 +9388,14 @@ namespace jkgm {
                     " rejected=",stats.surfaces_skipped,
                     " vertices=",stats.vertices_sampled,
                     " cells=",world_vertex_ambient_probes.cell_count(),
+                    " passable_portals=",stats.portals_captured,
                     " radius=",radius,
                     " cpu_us=",elapsed_profile_us(
                         started,profile_clock::now()));
             }
             if(!world_vertex_ambient_valid)return;
             uint32_t applied=0,missed=0,excluded=0;
+            uint32_t portal_mixed=0,portal_only=0;
             for(auto &inst:frame_gpu_3do_instances) {
                 // Do not alter the native HUD, skybox, sprite, decal or
                 // depth-only semantics. Native fallback is untouched.
@@ -9408,17 +9409,24 @@ namespace jkgm {
                     inst.transform[9],inst.transform[10],inst.transform[11]
                 }};
                 float sampled=0.0f;
-                if(world_vertex_ambient_probes.sample(
-                       inst.owning_sector_id,position,sampled)) {
+                auto const result=world_vertex_ambient_probes.sample_with_portals(
+                    inst.owning_sector_id,position,sampled);
+                if(result!=world_vertex_ambient_result::none) {
                     inst.ambient=sampled;
                     ++applied;
-                } else ++missed; // Retain this Thing's original JK ambient.
+                    if(result==world_vertex_ambient_result::mixed)
+                        ++portal_mixed;
+                    else if(result==world_vertex_ambient_result::portal_only)
+                        ++portal_only;
+                } else ++missed; // Retain native ambient when no probe exists.
             }
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("WORLD VERTEX AMBIENT models=",
                     frame_gpu_3do_instances.size(),
                     " applied=",applied,
+                    " portal_mixed=",portal_mixed,
+                    " portal_only=",portal_only,
                     " misses_native=",missed,
                     " excluded=",excluded);
         }
