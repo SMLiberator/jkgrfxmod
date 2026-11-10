@@ -13,7 +13,7 @@
 
 namespace jkgm {
 struct world_cache_light_sample {
-    uint32_t mode=0,vertices=0;
+    uint32_t mode=0,vertices=0,authored_mode=0;
 };
 
 // GPU world pixel lighting uses the SAME live rdCamera light parameters
@@ -98,23 +98,35 @@ inline bool sample_world_cache_surface_light(
     float global_extra=0.0f,
     std::vector<std::array<float,3>> *sector_tint=nullptr,
     std::vector<std::array<float,3>> *sector_cmp_tint=nullptr,
-    uint32_t identity_cmp=0U,bool overbright=false)
+    uint32_t identity_cmp=0U,char const **failure_reason=nullptr,
+    bool overbright=false)
 {
+    // Optional diagnostic output, no extra reads or allocations on success.
+    auto const reject=[&](char const *reason) {
+        if(failure_reason)*failure_reason=reason;
+        return false;
+    };
+    if(failure_reason)*failure_reason=nullptr;
     if(!read || face.count<3U || face.count%3U!=0U ||
        uint64_t(face.first_index)+face.count>mesh.indices.size())
-        return false;
+        return reject("candidate_triangle_range_invalid");
     uint32_t const count=face.count/3U+2U;
-    if(count>128U)return false;
+    if(count>128U)return reject("candidate_corner_count_exceeds_128");
     uint32_t const base=mesh.indices[face.first_index];
     if(uint64_t(base)+count>mesh.vertices.size() ||
-       uint64_t(base)+count>out.size())return false;
+       uint64_t(base)+count>out.size())return reject("cached_vertex_span_invalid");
     uint64_t const addr64=uint64_t(surfaces)+
                           uint64_t(face.surface_index)*0x5cU;
-    if(addr64>0x7ff00000U)return false;
+    if(addr64>0x7ff00000U)return reject("native_surface_address_invalid");
     uintptr_t const addr=static_cast<uintptr_t>(addr64);
-    uint32_t mode=0;
-    if(!read_decal_u32(read,addr+0x20U,mode) || mode>3U)return false;
-    if(sample) {*sample={mode,count};}
+    uint32_t authored_mode=0;
+    if(!read_decal_u32(read,addr+0x20U,authored_mode))
+        return reject("native_light_mode_unreadable_or_invalid");
+    // Native sithRender clamps any authored lighting mode above its
+    // active Gouraud (3) limit. An oversized mode does not itself request
+    // MotS RGB vertex colors; those require separate color-mode/flag data.
+    uint32_t const mode=std::min(authored_mode,3U);
+    if(sample) {*sample={mode,count,authored_mode};}
     // The owning sector is required for lit faces, and for tint even in
     // FullyLit mode. Read live Extra + colormap + tint in one bounded span:
     // +0x08 Extra, +0x0c colormap pointer, +0x10 tint[3]. That avoids an
@@ -122,22 +134,22 @@ inline bool sample_world_cache_surface_light(
     uint32_t sector=0;
     if(mode!=0U || sector_tint || sector_cmp_tint) {
         if(!read_decal_u32(read,addr+0x08U,sector) ||
-           !decal_native_address_ok(sector))return false;
+           !decal_native_address_ok(sector))return reject("native_sector_pointer_unreadable_or_invalid");
     }
     float ambient=0.0f;
     if(sector_tint || sector_cmp_tint) {
         if((sector_tint && sector_tint->size()!=out.size()) ||
            (sector_cmp_tint && sector_cmp_tint->size()!=out.size()))
-            return false;
+            return reject("sector_tint_output_size_mismatch");
         std::array<uint8_t,20> sector_state{};
         if(!read(uintptr_t(sector)+0x08U,
-                 sector_state.data(),sector_state.size()))return false;
+                 sector_state.data(),sector_state.size()))return reject("native_sector_state_unreadable");
         std::memcpy(&ambient,sector_state.data(),sizeof(ambient));
         if(sector_tint) {
             std::array<float,3> tint{};
             std::memcpy(tint.data(),sector_state.data()+8U,sizeof(tint));
             for(float &v:tint) {
-                if(!std::isfinite(v))return false;
+                if(!std::isfinite(v))return reject("native_sector_tint_nonfinite");
                 v=std::max(0.0f,std::min(v,1.0f));
             }
             for(uint32_t i=0;i<count;++i)(*sector_tint)[base+i]=tint;
@@ -168,12 +180,12 @@ inline bool sample_world_cache_surface_light(
     if(!read(addr+0x44U,&extra,sizeof(extra)) ||
        (!sector_tint &&
         !read(uintptr_t(sector)+0x08U,&ambient,sizeof(ambient))) ||
-       !std::isfinite(extra) || !std::isfinite(ambient))return false;
+       !std::isfinite(extra) || !std::isfinite(ambient))return reject("native_extra_or_ambient_unreadable_or_nonfinite");
     // Native world faces use sector Extra, not the camera ambient value.
     // The camera value changes as JK processes each visible sector.
     // sithRender's global extra light can additionally raise/lower the
     // world floor (sithRender_RenderSectors parity).
-    if(!std::isfinite(global_extra))return false;
+    if(!std::isfinite(global_extra))return reject("global_extra_nonfinite");
     // Each authored ExtraLight source is bounded independently; the
     // combined sector/global light floor may exceed that input limit.
     ambient=std::max(0.0f,clamp_authored_extra_light(ambient,overbright)+
@@ -194,24 +206,26 @@ inline bool sample_world_cache_surface_light(
     }
     if(native_vertex_count==0U ||
        (!pixel_lighting &&
-        native_dynamic_light.size()!=native_vertex_count))return false;
-    if(pixel_state && pixel_state->size()!=out.size())return false;
+        native_dynamic_light.size()!=native_vertex_count))return reject("native_dynamic_vertex_light_buffer_unavailable");
+    if(pixel_state && pixel_state->size()!=out.size())return reject("pixel_light_output_size_mismatch");
     uint32_t indices=0,static_ptr=0;
     if(!read_decal_u32(read,addr+0x2cU,indices) ||
        !read_decal_u32(read,addr+0x54U,static_ptr) ||
-       !decal_native_address_ok(indices))return false;
+       !decal_native_address_ok(indices))return reject("gouraud_vertex_indices_pointer_invalid");
     std::array<uint32_t,128> ids{};
     std::array<float,128> source{};
-    if(!read(indices,ids.data(),count*sizeof(uint32_t)))return false;
+    if(!read(indices,ids.data(),count*sizeof(uint32_t)))return reject("gouraud_vertex_indices_unreadable");
     if(static_ptr!=0U &&
        (!decal_native_address_ok(static_ptr) ||
-        !read(static_ptr,source.data(),count*sizeof(float))))return false;
+        !read(static_ptr,source.data(),count*sizeof(float))))return reject("gouraud_static_light_array_unreadable");
     std::array<std::array<float,3>,128> result{};
     for(uint32_t i=0;i<count;++i) {
-        if(ids[i]>=native_vertex_count ||
-           !std::isfinite(source[i]) ||
-           (!pixel_lighting &&
-            !std::isfinite(native_dynamic_light[ids[i]])))return false;
+        if(ids[i]>=native_vertex_count)
+            return reject("gouraud_vertex_index_out_of_bounds");
+        if(!std::isfinite(source[i]))
+            return reject("gouraud_static_light_nonfinite");
+        if(!pixel_lighting && !std::isfinite(native_dynamic_light[ids[i]]))
+            return reject("gouraud_dynamic_vertex_light_nonfinite");
         float const raw_brightness=
             clamp_authored_light(source[i],overbright)+
             clamp_authored_extra_light(extra,overbright);

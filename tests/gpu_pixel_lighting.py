@@ -171,6 +171,10 @@ for texture_alpha,material_alpha in ((1.0,1.0),(0.5,1.0),(1.0,0.7)):
     assert 0.0<=expected_rgb<=actual_alpha
 assert "discard;" in world_frag
 assert "vec3 lighting=cached_lit_rgb;" in world_frag
+# Overbright authoring is tested by the canonical input-limit checks above.
+assert "set_baked_vertex_overbrightness(" not in wiring
+assert "baked_hdr_multiplier" not in vert
+assert "baked_hdr_excess" not in shared
 assert "if(all(lessThanEqual(added,vec3(0.0)))) return baked;" in frag
 assert "if(all(lessThanEqual(added,vec3(0.0)))) return baked;" in shared
 assert "pixel_dynamic_lighting!=0" in frag
@@ -239,8 +243,11 @@ def point_sample(dist, radius, intensity, attenuation, incidence):
 def point_compose(baked, added, light_color):
     if added<=0.0:
         return baked
-    return tuple(min(1.0,b**(1.0/1.8)+min(added,1.0)*c**(1.0/1.8))**1.8
-                 for b,c in zip(baked,light_color))
+    return tuple(
+        min(1.0,min(b,1.0)**(1.0/1.8) +
+            min(added,1.0)*min(c,1.0)**(1.0/1.8))**1.8 +
+        max(b-1.0,0.0)
+        for b,c in zip(baked,light_color))
 
 for left,right in ((0.0,1.0),(0.1,0.9),(0.3,0.8)):
     for t in (0.0,0.25,0.5,0.75,1.0):
@@ -252,6 +259,13 @@ for left,right in ((0.0,1.0),(0.1,0.9),(0.3,0.8)):
             model=point_compose(baked,added,(1.0,)*3)
             assert world==model
             assert all(a>=b for a,b in zip(world,baked))
+# Overbright baked energy must survive a nonzero dynamic light without
+# allowing that dynamic light to manufacture additional HDR excess.
+for level in (1.2,2.0,3.0):
+    baked=(level**1.8,)*3
+    result=point_compose(baked,0.4,(1.0,)*3)
+    assert result==baked
+    assert point_compose(baked,0.0,(1.0,)*3)==baked
 # Preserve the previous C++ helper's numeric regression cases here, where
 # they are paired with the shader-source assertions for the real formula.
 assert "range_distance>=radius" in shared

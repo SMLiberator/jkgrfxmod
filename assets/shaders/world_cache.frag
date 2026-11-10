@@ -276,6 +276,7 @@ void main() {
             lighting=jk_point_compose(lighting,added,light_color);
         }
     }
+    // Do not clip combined authored and dynamic HDR lighting.
     lighting=mix(max(lighting,vec3(0.0)),vec3(1.0),fullbright);
     float env_metalness=0.0;
     vec3 env_reflection=world_environment_reflection(

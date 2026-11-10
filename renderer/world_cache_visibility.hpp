@@ -4,6 +4,7 @@
 // GPU-first opaque draw and native-batch isolation live in renderer.cpp.
 #include "world_cache.hpp"
 #include "gpu_3do_frustum.hpp"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -85,6 +86,9 @@ inline void append_world_cache_candidate(
     std::memcpy(&flags,raw.data()+4,4);     // +0x10 SithSurface flags
     std::memcpy(&face_type,raw.data()+0x0c,4); // +0x18 rdFace.type
     std::memcpy(&geo,raw.data()+0x10,4);    // +0x1c rdFace GeoMode
+    // Native hardware GeoMode has a maximum of 4 (textured). Higher
+    // authored values are capped, not rejected as missing surfaces.
+    geo=std::min(geo,4U);
     std::memcpy(&material,raw.data()+0x28,4); // +0x34 rdMaterial
     std::memcpy(&cel,raw.data()+0x2c,4);    // +0x38 wall cel
     std::array<float,2> uv_offset{};

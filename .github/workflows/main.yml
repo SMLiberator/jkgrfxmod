@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [development, cleanup]
+    branches: [development, cleanup, performance]
   workflow_dispatch:
 
 jobs:
@@ -17,6 +17,9 @@ jobs:
       uses: ilammy/msvc-dev-cmd@v1
     - name: Build
       run: MSBuild.exe -t:Build -p:Configuration=Release -p:Platform=x86 -p:PlatformToolset=v143 jkgfxmod.sln
+
+    - name: OpenGL texture unit registry and sampler collision guards
+      run: python3 tests/texture_unit_registry.py
 
     - name: Shared translucent spotlight shader regression
       run: |
@@ -233,6 +236,20 @@ jobs:
       run: python3 tests/fluid_sun_receivers.py
     - name: GPU cached emissive alpha parity regression
       run: python3 tests/gpu_emissive_alpha.py
+    - name: GPU 3DO pending material reference regression
+      run: python3 tests/gpu_3do_pending_material.py
+    - name: GPU 3DO shared visible collection regression
+      run: python3 tests/gpu_3do_shared_collection.py
+    - name: Experimental compositor and native triangle uploads
+      run: python3 tests/experimental_compositor.py
+    - name: Experimental half-resolution spatial blur regression
+      run: python3 tests/experimental_spatial_blur.py
+    - name: Independent sun cascade resolution and PCF regression
+      run: python3 tests/sun_cascade_pcf_experiment.py
+    - name: Experimental cached VSM prefilter source contracts
+      run: python3 tests/sun_shadow_vsm_experiment.py
+    - name: Experimental sun sky-aperture gate source contracts
+      run: python3 tests/sun_sky_aperture_experiment.py
     - name: GPU 3DO alpha partition tests
       shell: cmd
       run: |

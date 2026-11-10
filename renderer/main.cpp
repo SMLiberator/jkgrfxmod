@@ -842,15 +842,18 @@ namespace {
                 gpu_span_readable(face.uv_indices,size_t(face.count)*4);
             // Native JK switches to solid mode when UVs are absent.
             bool const solid_face=face.geo==3 || !face_uv;
-            // The native engine's per-face mode is capped by the mesh mode.
-            // Faces with unknown modes fall back instead of rendering unlit.
-            if(m.lighting_mode<0 || m.lighting_mode>3 ||
-               face.light>3 || !std::isfinite(face.extra_light))
+            // Native JK caps face/mesh lighting requests to Gouraud 3.
+            // Values above 3 must not prevent GPU caching valid faces.
+            if(m.lighting_mode<0 || !std::isfinite(face.extra_light))
                 return reject("invalid_mesh_or_face_light_mode");
             // Preserve force-unlit faces as a shader sentinel (4), since
             // they override even a FullyLit per-Thing lighting cap.
+            // Clamp authored lighting to Gouraud 3 at both mesh and
+            // face levels; the sentinel 4 is reserved solely for JK's
+            // force-unlit face flag (0x10), not source mode 4+.
             int const mode=(face.type&0x10U)!=0 ? 4
-                            : std::min(m.lighting_mode,static_cast<int>(face.light));
+                : std::min(std::min(m.lighting_mode,3),
+                           static_cast<int>(std::min(face.light,3U)));
             if(mode==3 && (!m.vertex_lights || !has_smooth_normals ||
                !gpu_span_readable(m.vertex_lights,size_t(m.num_vertices)*4)))
                 return reject("missing_gouraud_normals_or_lights");
@@ -918,8 +921,9 @@ namespace {
             // sometimes not perfectly planar). A triangle fan loses those
             // faces. Clip ears in a stable 2D projection instead, preserving
             // each corner's original material UV and native vertex lighting.
-            // For invalid outlines use the entire native mesh draw, rather
-            // than silently losing geometry from the cached GPU path.
+            // For invalid outlines, do not invent GPU triangles. The snapshot
+            // can omit diagnosed self-intersections individually; other unsafe
+            // triangulation errors still reject the mesh.
             std::vector<std::array<float,3>> outline;
             outline.reserve(face.count);
             for(uint32_t v=0;v<face.count;v++) {
@@ -979,6 +983,18 @@ namespace {
                                <<p[1]<<","<<p[2];
                     }
                     *failure_detail=details.str();
+                }
+                // A valid but self-crossing authored polygon has no safe
+                // filled triangulation. Do not discard its other mesh faces:
+                // native fallback for the whole rdMesh is worse than one
+                // explicitly diagnosed missing polygon. Memory/index errors
+                // and other triangulation failures still reject the mesh.
+                if(jkgm::gpu_3do_skip_untriangulable_face(tri_reason)) {
+                    ++g->self_intersecting_faces_skipped;
+                    if(g->self_intersecting_faces_skipped==1)
+                        g->first_self_intersecting_face=static_cast<uint32_t>(f);
+                    g->vertices.resize(base);
+                    continue;
                 }
                 return reject("non_simple_or_degenerate_face");
             }
@@ -1912,7 +1928,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         auto const *bytes=static_cast<uint8_t const *>(mesh);
         std::memcpy(&vertex_rgb,bytes+0x6cU,sizeof(vertex_rgb));
     }
-    // All JK GeoModes 0..4 are valid. In hardware mode 0..2 draw nothing;
+    // Native JK caps GeoMode at 4. In hardware mode 0..2 draw nothing;
     // only filled modes 3/4 need a cached GPU draw.
     if(the_config->profile_renderer) ++gpu_native_stats.attempted;
     // rdModel3_Draw at 0x44612c-0x446144 stores the *effective* Thing/
@@ -1933,7 +1949,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
            current_geo_mode,m.geometry_mode)) {
         if(the_config->profile_renderer) {
             ++gpu_native_stats.geometry_native;
-            if(current_geo_mode<0 || current_geo_mode>4)
+            if(current_geo_mode<0)
                 ++gpu_native_stats.geo_thing_not_full;
             else ++gpu_native_stats.geo_mesh_not_full;
         }
@@ -2037,6 +2053,20 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             updated.source_checked_generation=current_generation;
             updated.last_audit_frame=audit_frame ? gpu_frame_serial : 0U;
             if(geom) {
+                if(geom->self_intersecting_faces_skipped>0) {
+                    // Log once per authored model/mesh, not once per frame
+                    // or Thing instance; retain the other valid faces.
+                    static std::unordered_set<std::string> warned;
+                    auto const key=std::to_string(active_native_model_ptr)+
+                        "|" + std::to_string(m.mesh_index);
+                    if(warned.size()<80U && warned.insert(key).second)
+                        LOG_WARNING("GPU 3DO self-intersecting face omitted ",
+                                    gpu_3do_source_detail(m),
+                                    " first_face=",geom->first_self_intersecting_face,
+                                    " omitted_faces=",geom->self_intersecting_faces_skipped,
+                                    " retained_groups=",geom->groups.size(),
+                                    " reason=self_intersecting_outline");
+                }
                 updated.id=next_gpu_id++;
                 updated.geometry=std::move(geom);
                 if(profiling) ++gpu_native_stats.snapshots;
@@ -2133,7 +2163,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     // its native material cache. We can switch to GPU rendering next frame.
     // Many instances share this mesh. Check MAT handles once per mesh per
     // frame, refreshing next frame so animated cels still get a warm-up.
-    bool const solid_thing=std::min(current_geo_mode,m.geometry_mode)==3;
+    bool const solid_thing=
+        jkgm::gpu_3do_effective_geo_mode(current_geo_mode,m.geometry_mode)==3;
     // A shared mesh can be solid for one Thing and textured for another.
     // Do not reuse texture residency checks for a solid-color instance.
     if(!shadow_only && solid_thing &&
@@ -2192,7 +2223,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     inst.geometry=it->second.geometry;
     inst.shadow_only=shadow_only;
     inst.effective_geometry_mode=static_cast<uint32_t>(
-        std::min(current_geo_mode,m.geometry_mode));
+        jkgm::gpu_3do_effective_geo_mode(current_geo_mode,m.geometry_mode));
     inst.camera_hud=active_native_model_camera_hud;
     inst.camera_hud_world_depth=jkgm::camera_hud_uses_world_depth(
         inst.camera_hud,active_native_model_thing_flags);
@@ -2229,12 +2260,13 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         int32_t lighting_cap=0;
         std::memcpy(&lighting_cap,
                     reinterpret_cast<void const *>(effective_light_mode_addr),4);
-        if(lighting_cap<0 || lighting_cap>3) {
+        if(lighting_cap<0) {
             if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
             gpu_log_fallback(m,"unsupported_thing_lighting_mode");
             return false;
         }
-        inst.effective_light_mode=static_cast<float>(lighting_cap);
+        inst.effective_light_mode=
+            static_cast<float>(std::min(lighting_cap,3));
         if(!snapshot_gpu_3do_lighting(m,inst.transform.data(),inst)) {
             if(the_config->profile_renderer) ++gpu_native_stats.lighting_native;
             gpu_log_fallback(m,"unsupported_dynamic_lighting_or_light_count");

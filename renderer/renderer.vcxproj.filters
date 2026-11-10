@@ -278,6 +278,9 @@
     <ClInclude Include="gpu_3do_preview.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="texture_units.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="gpu_3do_triangulation.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -513,6 +516,18 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="sun_shadow_gpu.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sun_shadow_moments_gpu.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sun_sky_aperture_gpu.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sun_sky_caster_mask.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sun_sky_surface.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="sun_skybox_thing.hpp">

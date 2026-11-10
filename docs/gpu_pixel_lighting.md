@@ -49,6 +49,36 @@ Gouraud calculation and the cached world uses the original JK world-vertex
 dynamic-light buffer; changing the shared pixel formulas must not alter
 those fallback modes.
 
+## Baked and authored overbrightness
+
+`enable_baked_overbright` defaults to `true` and controls the GPU-cached
+world/3DO/sprite light-input range independently of `gpu_pixel_lighting`:
+
+- `false`: cap each authored baked-vertex intensity, sector ambient value,
+  and ExtraLight input at 1.0 (vanilla-style inputs).
+- `true`: cap those inputs at 2.0. Excessive custom-level values above 2.0
+  are limited; negative ExtraLight darkening remains valid.
+
+Individual values are bounded **before** the renderer combines them.
+Ambient/ExtraLight, baked light, dynamic point lights and other added sources
+can together exceed 2.0; their HDR sum is not saturated to the input limit.
+Per-vertex gamma/color and sector/CMP tints preserve the overbright energy,
+rather than restoring it with an additional post-tint multiplier.
+
+This affects GPU-cached geometry only. Native fallback continues to use
+the native engine. Set `enable_hdr=true` for filmic tone mapping, and
+optionally `enable_bloom=true` for bloom. The previous
+`enable_baked_vertex_overbrightness` and `overbright_intensities` names
+are accepted as deprecated configuration aliases.
+
+```json
+{
+  "use_gpu_cache": true,
+  "enable_hdr": true,
+  "enable_baked_overbright": true
+}
+```
+
 ## Receiver-specific behavior
 
 3DOs use local positions and normals (accounting for scaled/mirrored

@@ -15,7 +15,8 @@ namespace jkgm {
 
         opengl_shader(std::string const &name,
                       fs::path const &vertex_part,
-                      fs::path const &fragment_part);
+                      fs::path const &fragment_part,
+                      bool prefiltered_sun=false);
 
     public:
         opengl_shader(opengl_shader const &) = delete;
@@ -35,8 +36,11 @@ namespace jkgm {
         // GPU-cached 3DO translucency. Row vectors map world XYZ to shadow UV.
         struct translucent_sun_uniforms {
             gl::uniform_location_id enabled,maps_ready,dynamic_count;
-            gl::uniform_location_id direction,color,split,bias_scale;
+            gl::uniform_location_id direction,color,split,bias_scale,pcf_radius;
+            gl::uniform_location_id vsm_params; // world-space stddev, bleed reduction
             gl::uniform_location_id near_depth,far_depth,dynamic_depth;
+            gl::uniform_location_id sky_aperture_active,sky_aperture_map;
+            gl::uniform_location_id sky_aperture_depth_transform;
             gl::uniform_location_id max_distance;
             std::vector<gl::uniform_location_id> x,y,z,rect;
             explicit translucent_sun_uniforms(gl::program_view program);
@@ -44,6 +48,10 @@ namespace jkgm {
                            point<3,float> sun_dir,point<4,float> sun_color,
                            float split_distance,float receiver_bias,
                            float max_distance=0.0f);
+            void set_pcf_radius(float near_radius,float far_radius);
+            void set_vsm_params(float min_stddev_world,float bleed_reduction);
+            void set_sky_aperture(bool active,int sampler,
+                                  point<4,float> near_far_depth_transform);
             void set_map(int slot,point<4,float> row_x,point<4,float> row_y,
                          point<4,float> row_z,point<4,float> tile_rect);
         };
@@ -94,7 +102,8 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
         public:
             translucent_sun_uniforms translucent_sun;
-            explicit world_cache_preview_shader(fs::path const &data_root);
+            explicit world_cache_preview_shader(fs::path const &data_root,
+                                                bool prefiltered_sun=false);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
                                  point<4,float> up,point<4,float> origin);
             void set_projection(point<4,float> params);
@@ -213,7 +222,8 @@ namespace jkgm {
         protected:
             game_pass_shader(std::string const &name,
                              fs::path const &vertex_part,
-                             fs::path const &fragment_part);
+                             fs::path const &fragment_part,
+                             bool prefiltered_sun=false);
 
         public:
             void set_screen_resolution(size<2, float> res);
@@ -345,7 +355,8 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
         public:
             static constexpr size_t max_sprite_instances=32;
-            explicit gpu_3do_preview_shader(fs::path const &data_root);
+            explicit gpu_3do_preview_shader(fs::path const &data_root,
+                                            bool prefiltered_sun=false);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
                                  point<4,float> up,point<4,float> origin);
             // Zero count restores the normal draw path.
@@ -411,7 +422,8 @@ namespace jkgm {
 
         class game_opaque_pass_shader : public game_pass_shader {
         public:
-            explicit game_opaque_pass_shader(fs::path const &data_root);
+            explicit game_opaque_pass_shader(fs::path const &data_root,
+                                             bool prefiltered_sun=false);
         };
 
         class game_post_ssao_shader : public opengl_shader {
@@ -501,6 +513,12 @@ namespace jkgm {
             gl::uniform_location_id sun_shadow_far_forward,sun_shadow_far_limits;
             gl::uniform_location_id sun_shadow_split;
             gl::uniform_location_id sun_shadow_receiver_bias_scale;
+            gl::uniform_location_id sun_shadow_pcf_radius;
+            gl::uniform_location_id sun_vsm_params;
+            gl::uniform_location_id sun_vsm_depth_guard;
+            gl::uniform_location_id sun_shadow_raw_near,sun_shadow_raw_far;
+            gl::uniform_location_id sun_sky_aperture_active,sun_sky_aperture_map;
+            gl::uniform_location_id sun_sky_aperture_depth_transform;
             gl::uniform_location_id sun_max_distance;
             gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
             std::vector<gl::uniform_location_id> sun_dynamic_atlas_rects;
@@ -518,7 +536,8 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> spotlight_screen_bounds;
 
         public:
-            explicit game_post_opaque_composite_shader(fs::path const &data_root);
+            explicit game_post_opaque_composite_shader(
+                fs::path const &data_root,bool prefiltered_sun=false);
 
             void set_color_sampler(int sampler);
             void set_emissive_sampler(int sampler);
@@ -544,6 +563,11 @@ namespace jkgm {
                                     point<3,float> up,point<3,float> forward,
                                     point<3,float> limits,float split);
             void set_sun_shadow_receiver_bias_scale(float scale);
+            void set_sun_shadow_pcf_radius(float near_radius,float far_radius);
+            void set_sun_vsm_params(float min_stddev_world,float bleed_reduction);
+            void set_sun_vsm_depth_guard(bool enabled);
+            void set_sun_sky_aperture(bool active,int sampler,
+                                     point<4,float> near_far_depth_transform);
             void set_sun_max_distance(float distance);
             void set_sun_dynamic_count(int count);
             void set_sun_dynamic_atlas_rect(int slot,point<4,float> rect);
@@ -559,7 +583,17 @@ namespace jkgm {
 
         class game_transparency_pass_shader : public game_pass_shader {
         public:
-            explicit game_transparency_pass_shader(fs::path const &data_root);
+            explicit game_transparency_pass_shader(
+                fs::path const &data_root,bool prefiltered_sun=false);
+        };
+
+        // Converts depth into RG32F moments, then filters vertically.
+        class sun_shadow_prefilter_shader : public opengl_shader {
+            gl::uniform_location_id source_image,axis,texel_size,radius;
+        public:
+            explicit sun_shadow_prefilter_shader(fs::path const &root);
+            void set_source_sampler(int sampler);
+            void set_filter(int pass,size<2,float> dims,float radius_texels);
         };
 
         class post_box4_shader : public opengl_shader {
@@ -648,11 +682,16 @@ namespace jkgm {
         class post_scale_shader : public opengl_shader {
         private:
             gl::uniform_location_id fbuf_image;
+            gl::uniform_location_id fused_bloom_first_pass;
+            gl::uniform_location_id exposure_image,exposure_enabled;
+            gl::uniform_location_id hdr_exposure_compensation;
 
         public:
             explicit post_scale_shader(fs::path const &data_root);
 
             void set_fbuf_sampler(int sampler);
+            void set_fused_bloom(bool first_pass,int exposure_sampler,
+                                 bool adaptive,float compensation_ev);
         };
 
         class post_spatial_blur_shader : public opengl_shader {
@@ -663,15 +702,36 @@ namespace jkgm {
             gl::uniform_location_id screen_size;
             gl::uniform_location_id distance_params;
             gl::uniform_location_id peripheral_params;
+            // Only present in the opt-in half-resolution shader.
+            gl::uniform_location_id original_image;
+            gl::uniform_location_id output_size;
+            gl::uniform_location_id restore_original;
 
         public:
-            explicit post_spatial_blur_shader(fs::path const &data_root);
+            explicit post_spatial_blur_shader(fs::path const &data_root,
+                                              bool half_resolution=false);
             void set_source_sampler(int sampler);
             void set_depth_sampler(int sampler);
             void set_blur_axis(int axis);
             void set_screen_size(size<2, float> dims);
+            void set_fast_inputs(int original_sampler,size<2,float> output_dims,
+                                 bool fullres_unblurred);
             void set_distance_params(point<4, float> params);
             void set_peripheral_params(point<4, float> params);
+        };
+
+        // Full-resolution, depth-guided reconstruction from a half-res
+        // blurred source. Tone mapping remains in post_to_srgb.frag.
+        class post_spatial_blur_reconstruct_shader : public opengl_shader {
+        private:
+            gl::uniform_location_id blur_image, original_image, depth_image;
+            gl::uniform_location_id screen_size, distance_params, peripheral_params;
+        public:
+            explicit post_spatial_blur_reconstruct_shader(fs::path const &data_root);
+            void set_inputs(int blur_sampler,int original_sampler,int depth_sampler);
+            void set_screen_size(size<2,float> dims);
+            void set_distance_params(point<4,float> params);
+            void set_peripheral_params(point<4,float> params);
         };
 
         class post_frame_blend_shader : public opengl_shader {

@@ -247,13 +247,28 @@ uniform vec3 translucent_sun_direction;
 uniform vec4 translucent_sun_color; // RGB, positive direct intensity
 uniform float translucent_sun_split;
 uniform float translucent_sun_bias_scale;
+uniform vec2 translucent_sun_vsm_params; // world-space stddev, bleed reduction
+uniform int translucent_sun_sky_aperture_active;
+#ifdef JKGM_SUN_SKY_APERTURE
+uniform sampler2DArray translucent_sun_sky_aperture_map;
+uniform vec4 translucent_sun_sky_aperture_depth_transform;
+#endif
+uniform vec2 translucent_sun_pcf_radius; // independent near/far smoothing
 uniform float translucent_sun_max_distance; // 0=unlimited
 uniform vec4 translucent_sun_map_x[10];
 uniform vec4 translucent_sun_map_y[10];
 uniform vec4 translucent_sun_map_z[10];
 uniform vec4 translucent_sun_tile_rect[8];
+#ifdef JKGM_SUN_VSM
+uniform sampler2D translucent_sun_near_depth;
+#else
 uniform sampler2DShadow translucent_sun_near_depth;
+#endif
+#ifdef JKGM_SUN_VSM
+uniform sampler2D translucent_sun_far_depth;
+#else
 uniform sampler2DShadow translucent_sun_far_depth;
+#endif
 uniform sampler2DShadow translucent_sun_dynamic_depth;
 
 #include "translucent_sun_sampling.glsl"
@@ -309,7 +324,8 @@ float sun_specular_shadow_factor(float depth,float incidence)
     if(translucent_sun_maps_ready==0 && translucent_sun_dynamic_count==0)
         return fade;
     vec3 world=translucent_spotlight_world_pos(depth);
-    return fade*translucent_sun_visibility(world,max(incidence,0.35));
+    return fade*translucent_sun_sky_aperture(world)*
+           translucent_sun_visibility(world,max(incidence,0.35));
 }
 
 // Normal is evaluated on the TRANSLUCENT fragment, not from the opaque
@@ -338,10 +354,15 @@ vec3 illuminate_translucent_sun(vec3 baked,vec3 pigment,float opacity,
                                   translucent_sun_max_distance,forward);
         if(range_fade<=0.0)return baked;
     }
+    // A closed sunward ray is a shadowed receiver, not an instruction to
+    // retain all baked light. The default-off aperture returns 1.0.
+    float sky_access=translucent_sun_sky_aperture(world);
     float visibility=translucent_sun_visibility(world,max(incidence,0.35));
-    vec3 dimmed=baked*(1.0-0.75*range_fade*clamp(translucent_sun_color.a,0.0,1.0)*(1.0-visibility));
+    float direct_visibility=visibility*sky_access;
+    vec3 dimmed=baked*(1.0-0.75*range_fade*clamp(translucent_sun_color.a,0.0,1.0)*
+                                (1.0-direct_visibility));
     vec3 radiance=pigment*translucent_sun_color.rgb*
-                  translucent_sun_color.a*incidence*visibility*opacity*range_fade;
+                  translucent_sun_color.a*incidence*direct_visibility*opacity*range_fade;
     return dimmed+radiance*(vec3(1.0)-clamp(dimmed,vec3(0.0),vec3(1.0)));
 }
 

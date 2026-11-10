@@ -3,6 +3,7 @@
 #include "base/log.hpp"
 #include "base/memory_block.hpp"
 #include "common/error_reporter.hpp"
+#include <algorithm>
 #include <random>
 
 jkgm::post_model::post_model()
@@ -380,18 +381,29 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     : data_root(the_config->data_path)
     , enable_post(the_config->enable_post)
     , enable_blur(the_config->enable_blur)
+    , spatial_blur_mode(the_config->spatial_blur_mode)
     , enable_trails(the_config->enable_trails)
     , enable_hdr(the_config->enable_hdr)
+    , experimental_fused_bloom_downsample(
+        the_config->experimental_fused_bloom_downsample)
+    , experimental_skip_bloom_clears(
+        the_config->experimental_skip_bloom_clears)
     , auto_exposure_sensitivity(the_config->auto_exposure_sensitivity)
     , hdr_exposure_compensation(the_config->hdr_exposure_compensation)
     , hdr_shadow_softness(the_config->hdr_shadow_softness)
     , hdr_color_crispness(the_config->hdr_color_crispness)
     , menu_program(data_root)
     , menu_present_program(data_root, true)
-    , game_opaque_pass_program(data_root)
+    , game_opaque_pass_program(
+        data_root,the_config->experimental_sun_shadow_vsm &&
+                  the_config->enable_sun_shadows)
     , game_post_ssao_program(data_root)
-    , game_post_opaque_composite_program(data_root)
-    , game_transparency_pass_program(data_root)
+    , game_post_opaque_composite_program(
+        data_root,the_config->experimental_sun_shadow_vsm &&
+                  the_config->enable_sun_shadows)
+    , game_transparency_pass_program(
+        data_root,the_config->experimental_sun_shadow_vsm &&
+                  the_config->enable_sun_shadows)
     , post_box4(data_root)
     , post_gauss3(data_root)
     , post_gauss7(data_root)
@@ -418,6 +430,25 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , bloom_layers(screen_res)
 {
     LOG_DEBUG("Loading OpenGL assets");
+    // Keep the original full-resolution path available as mode 0.
+    // The standard mode 2 uses quarter-size Gaussian buffers followed
+    // by full-resolution, depth-aware reconstruction.
+    if(spatial_blur_mode>=1) {
+        post_spatial_blur_fast=
+            std::make_unique<shaders::post_spatial_blur_shader>(data_root,true);
+        auto const half_size=make_size(std::max(1,get<x>(screen_res)/2),
+                                       std::max(1,get<y>(screen_res)/2));
+        spatial_blur_half_work=std::make_unique<post_buffer>(half_size);
+        if(spatial_blur_mode==2) {
+            spatial_blur_half_result=std::make_unique<post_buffer>(half_size);
+            post_spatial_blur_reconstruct=std::make_unique<
+                shaders::post_spatial_blur_reconstruct_shader>(data_root);
+        }
+    }
+    if(the_config->experimental_sun_shadow_vsm &&
+       the_config->enable_sun_shadows)
+        sun_shadow_prefilter_program=
+            std::make_unique<shaders::sun_shadow_prefilter_shader>(data_root);
     // Avoid even compiling shadow shaders on ordinary (disabled) installs.
     if((the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
        the_config->enable_sun_shadows)
@@ -428,12 +459,16 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     // clipped and queued without ever drawing if this shader is absent.
     if(the_config->use_gpu_cache || the_config->enable_decals) {
         gpu_3do_preview_program =
-            std::make_unique<shaders::gpu_3do_preview_shader>(data_root);
+            std::make_unique<shaders::gpu_3do_preview_shader>(
+                data_root,the_config->experimental_sun_shadow_vsm &&
+                          the_config->enable_sun_shadows);
     }
     // Build the GPU world shader whenever unified caching is enabled.
     if(the_config->use_gpu_cache)
         world_cache_preview_program =
-            std::make_unique<shaders::world_cache_preview_shader>(data_root);
+            std::make_unique<shaders::world_cache_preview_shader>(
+                data_root,the_config->experimental_sun_shadow_vsm &&
+                          the_config->enable_sun_shadows);
 
     gl::bind_texture(gl::texture_bind_target::texture_2d, menu_texture);
     gl::tex_image_2d(gl::texture_bind_target::texture_2d,

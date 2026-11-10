@@ -26,6 +26,10 @@
 #include "spotlight.hpp"
 #include "spotlight_shadow_gpu.hpp"
 #include "sun_shadow_gpu.hpp"
+#include "sun_shadow_moments_gpu.hpp"
+#include "sun_sky_aperture_gpu.hpp"
+#include "sun_sky_surface.hpp"
+#include "sun_sky_caster_mask.hpp"
 #include "world_cache_gpu.hpp"
 #include "world_cache_alpha.hpp"
 #include "world_cache_sky.hpp"
@@ -613,6 +617,18 @@ namespace jkgm {
         std::vector<translucent_spotlight_draw> translucent_spotlights_for_frame;
         std::unique_ptr<spotlight_shadow_gpu> spotlight_shadow_target;
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
+        std::unique_ptr<sun_shadow_moments_gpu> sun_moments_target;
+        std::unique_ptr<sun_sky_aperture_gpu> sun_sky_aperture_target;
+        // Fail-open physical-sky eligibility, cached per SithWorld. The
+        // world surface table is audited occasionally rather than on every
+        // sunlit frame; aperture projection updates remain independent.
+        bool sun_level_has_sky=true;
+        bool sun_level_sky_known=false;
+        bool sun_level_sky_sun_active=false;
+        uint32_t sun_level_sky_faces=0;
+        uint64_t sun_level_sky_identity=0;
+        uintptr_t sun_level_sky_world=0;
+        uint64_t sun_level_sky_last_audit_frame=0;
         std::unique_ptr<world_cache_gpu> world_cache_target;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
@@ -620,6 +636,58 @@ namespace jkgm {
         // Track only owners with a successfully rasterized atlas tile.
         std::unordered_set<uint64_t> sun_dynamic_atlas_owners;
         std::array<sun_shadow_projection,2> sun_shadow_views{};
+        // Reuse stationary group bounds and both opaque/cutout hash results.
+        // Live MATs are still resolved at each full validation; cutout hash
+        // reuse additionally requires an exact match for their five inputs.
+        struct sun_cached_static_group {
+            decal_volume_aabb bounds{};
+            uint64_t opaque_signature=0,cutout_signature=0;
+            std::array<uint32_t,5> cutout_inputs{};
+            uint32_t offset=0,count=0;
+            uintptr_t material=0;
+            int32_t cel=-1;
+            std::array<float,3> bounds_min{},bounds_max{};
+            bool descriptor_valid=false,bounds_valid=false;
+            bool opaque_signature_valid=false,cutout_signature_valid=false;
+        };
+        struct sun_cached_static_instance {
+            uint64_t owner=0,id=0;
+            gpu_3do_geometry const *geometry=nullptr;
+            std::array<float,12> transform{};
+            std::vector<sun_cached_static_group> groups;
+        };
+        // Index-aligned to the current frame's instances. Reordering causes
+        // a safe miss; changes to owner, geometry or transform invalidate.
+        std::vector<sun_cached_static_instance> sun_static_geometry_cache;
+        uint64_t sun_profile_static_bounds_reused=0;
+        uint64_t sun_profile_static_signature_reused=0;
+        uint64_t sun_profile_static_bounds_calculated=0;
+        uint64_t sun_profile_static_signature_calculated=0;
+        uint64_t sun_profile_cutout_hash_reused=0;
+        uint64_t sun_profile_cutout_hash_calculated=0;
+        uint64_t sun_profile_cutout_material_invalidations=0;
+        uint64_t sun_profile_static_group_invalidations=0;
+        uint64_t sun_profile_static_instance_invalidations=0;
+        // Last fully validated global sun projection. The dynamic atlas
+        // continues rendering every frame while cascade checks are throttled.
+        sun_shadow_projection sun_shadow_validated_world_view{};
+        std::chrono::steady_clock::time_point sun_shadow_last_validation{};
+        bool sun_shadow_validated_world_view_ready=false;
+        uint64_t sun_profile_throttle_skipped=0;
+        uint64_t sun_profile_throttle_checked=0;
+        uint64_t sun_profile_throttle_forced_early=0;
+        // Forced-check causes are sampled independently; near/far camera
+        // coverage failures can overlap in a single frame.
+        uint64_t sun_profile_throttle_due_timer=0;
+        uint64_t sun_profile_forced_unready=0;
+        uint64_t sun_profile_forced_world=0;
+        uint64_t sun_profile_forced_sun=0;
+        std::array<uint64_t,2> sun_profile_forced_coverage{};
+        uint64_t sun_profile_checked_pass_us=0;
+        uint64_t sun_profile_checked_pass_count=0;
+        uint64_t sun_profile_skipped_pass_us=0;
+        uint64_t sun_profile_checked_pass_peak_us=0;
+        uint64_t sun_profile_skipped_pass_peak_us=0;
         bool sun_shadow_ready=false;
         // Diagnostics for transient shadow loss: compare successive complete
         // shadow passes rather than sampling only one frame in 120.
@@ -664,6 +732,26 @@ namespace jkgm {
         std::array<uint64_t,2> sun_profile_moving_instanced_ranges{{0,0}};
         uint64_t sun_profile_candidate_us=0,sun_profile_candidate_groups=0;
         uint64_t sun_profile_atlas_us=0;
+        // Timing-only breakdown of the work performed before cache reuse.
+        std::array<uint64_t,2> sun_profile_projection_us{};
+        std::array<uint64_t,2> sun_profile_world_query_us{};
+        std::array<uint64_t,2> sun_profile_world_filter_us{};
+        std::array<uint64_t,2> sun_profile_model_scan_us{};
+        std::array<uint64_t,2> sun_profile_cache_check_us{};
+        // Nanosecond sampling, never a timestamp for every 3DO group.
+        // Per-frame preparation is now shared by both cascades.
+        std::array<uint64_t,2> sun_profile_prepared_reuses{};
+        uint64_t sun_profile_candidate_material_sample_ns=0;
+        uint64_t sun_profile_candidate_bounds_sample_ns=0;
+        uint64_t sun_profile_candidate_signature_sample_ns=0;
+        uint64_t sun_profile_candidate_material_samples=0;
+        uint64_t sun_profile_candidate_bounds_samples=0;
+        uint64_t sun_profile_candidate_signature_samples=0;
+        // Same delayed, nonblocking timestamp ring as presentation profiling:
+        // stage 0 = dynamic atlas, 1 = near cascade, 2 = far cascade.
+        presentation_gpu_profile sun_gpu_queries;
+        std::array<uint64_t,presentation_gpu_profile::num_stages> sun_gpu_ns{};
+        uint64_t sun_gpu_samples=0,sun_gpu_skipped=0;
         uint64_t sun_profile_atlas_mat_hits=0,sun_profile_atlas_mat_misses=0;
         std::array<uint64_t,2> sun_shadow_static_signatures{};
         std::array<uint64_t,2> sun_shadow_static_revisions{};
@@ -703,6 +791,13 @@ namespace jkgm {
         {
             return static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::microseconds>(b - a).count());
+        }
+
+        static uint64_t elapsed_profile_ns(profile_clock::time_point a,
+                                           profile_clock::time_point b)
+        {
+            return static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(b-a).count());
         }
 
         void record_profile(profile_clock::time_point started,
@@ -921,7 +1016,7 @@ namespace jkgm {
                          " calls_opaque_alpha=",
                          profile_window.gpu_preview_calls[0]/frames,"/",
                          profile_window.gpu_preview_calls[1]/frames,
-                         " NOTE=setup_and_gl_state_restoration_in_total_not_substages");
+                         " NOTE=opaque_collect_prepares_ordinary_alpha_setup_and_restoration_not_in_substages");
                 LOG_INFO("PERF gpu_3do filter_state updates_avg=",
                          profile_window.gpu_filter_state_sets/frames,
                          " skipped_updates_avg=",profile_window.gpu_filter_state_skips/frames,
@@ -949,7 +1044,7 @@ namespace jkgm {
                          profile_window.gpu_groups_frustum_culled/frames,
                          " backface_culled_avg=",
                          profile_window.gpu_groups_backface_culled/frames,
-                         " NOTE=counts_include_opaque_and_alpha_passes");
+                         " NOTE=actual_group_walks_shared_ordinary_alpha_counted_once");
             }
             LOG_INFO("PERF geometry tris avg/max=", profile_window.tris / frames,
                      "/", peak_triangles,
@@ -1044,12 +1139,16 @@ namespace jkgm {
             release_spotlight_images();
             spotlight_shadow_target.reset();
             sun_shadow_target.reset();
+            sun_moments_target.reset();
+            sun_sky_aperture_target.reset();
             sun_dynamic_target.reset();
             // Context-owned GL queries must be deleted before the context
             // disappears. If the context is already gone, its objects go
             // away with it; do not issue GL calls on an invalid context.
-            if(hGLRC && wglGetCurrentContext()==hGLRC)
+            if(hGLRC && wglGetCurrentContext()==hGLRC) {
                 present_gpu_queries.release();
+                sun_gpu_queries.release();
+            }
         }
 
         void set_renderer_mode(renderer_mode mode) override
@@ -1096,6 +1195,18 @@ namespace jkgm {
                 sun_shadow_cascade_ready={{false,false}};
                 sun_shadow_cascade_cached={{false,false}};
                 sun_shadow_static_cached={{false,false}};
+                sun_shadow_validated_world_view_ready=false;
+                sun_shadow_last_validation={};
+                // Sky projection cache cannot survive a level/mode reset.
+                sun_sky_aperture_target.reset();
+                sun_level_has_sky=true;
+                sun_level_sky_known=false;
+                sun_level_sky_sun_active=false;
+                sun_level_sky_faces=0;
+                sun_level_sky_identity=0;
+                sun_level_sky_world=0;
+                sun_level_sky_last_audit_frame=0;
+                sun_static_geometry_cache.clear();
                 sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
                 sun_dynamic_atlas_owners.clear();
@@ -2752,7 +2863,17 @@ namespace jkgm {
 
         void fill_buffer(triangle_batch const &tb, triangle_buffer_model *mdl)
         {
-            mdl->maybe_grow_buffers(tb.capacity() * 3);
+            // Opt-in: empty native batches need no GL map/unmap. Allocate
+            // populated GPU buffers from used counts rather than the CPU
+            // batch's 10,000-triangle reserve.
+            if(the_config->experimental_native_triangle_uploads &&
+               tb.size()==0U) {
+                mdl->num_vertices=0;
+                return;
+            }
+            mdl->maybe_grow_buffers(
+                (the_config->experimental_native_triangle_uploads
+                    ?tb.size():tb.capacity())*3);
 
             auto *vx = mdl->mmio.data();
             auto const cam = read_engine_camera();
@@ -3347,12 +3468,15 @@ namespace jkgm {
             set_translucent_sun(prog,!post_exempt && !decals_only);
             prog.set_scene_depth(8);
             prog.set_post_exempt(post_exempt);
-            prog.set_decal_receiver_lighting(decals_only,10,11);
+            prog.set_decal_receiver_lighting(decals_only,
+                texture_units::forward_decal_light,
+                texture_units::forward_decal_occlusion);
             if(decals_only) {
-                // Reuse the unused alpha of the opaque emissive G-buffer for
-                // the receiver's JK light intensity. No extra render target,
-                // color/depth copy or feedback from the active framebuffer.
-                gl::set_active_texture_unit(10);
+                // Unit 10 is the spotlight's sampler2DShadow, even if it
+                // is inactive. Reuse 2D displacement unit 9: decals disable
+                // parallax and receive JK light from opaque emissive alpha.
+                gl::set_active_texture_unit(
+                    texture_units::forward_decal_light);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                                  frame_screen->get_resolved_emissive_texture());
                 gl::set_active_texture_unit(11);
@@ -3394,7 +3518,8 @@ namespace jkgm {
             // Match cached-world direct specular: disabling the COG sun
             // disables its GGX highlights too, independently of EnvMaps.
             float const sun_power=(the_config->enable_reflections &&
-                                   the_config->enable_sun)
+                                   the_config->enable_sun &&
+                                   sun_level_has_sky)
                 ? std::max(0.0f,sun.intensity.value()[0]) : 0.0f;
             bool const sun_active=sun_power>0.0f;
             prog.set_sun(make_point(sun_project(cam.right),
@@ -3452,7 +3577,10 @@ namespace jkgm {
             struct pending_draw {
                 gpu_3do_instance const *instance;
                 gpu_3do_group const *group;
-                gpu_3do_texture texture;
+                // Borrow the material from the pass-local frame cache.
+                // unordered_map element addresses survive rehash; both
+                // the ordinary and retained HUD caches outlive this pass.
+                gpu_3do_texture const *texture;
                 gpu_3do_alpha_mode policy;
                 gpu_3do_matrix34 const *modelview;
                 float depth;
@@ -3473,11 +3601,27 @@ namespace jkgm {
             // They are consumed entirely in this non-recursive draw call.
             static thread_local std::vector<pending_draw> draws;
             static thread_local std::vector<pending_draw> merged_draws;
-            static thread_local std::vector<gpu_3do_matrix34> modelviews;
+            // Opaque prepares the ordinary alpha list too. Keep its matrices
+            // alive across the intervening projected-decal pass; deferred
+            // Camera HUD and decals have independent scratch matrices.
+            static thread_local std::vector<pending_draw> ordinary_alpha_draws;
+            static thread_local std::vector<gpu_3do_matrix34> ordinary_modelviews;
+            static thread_local std::vector<gpu_3do_matrix34> isolated_modelviews;
+            static thread_local uint64_t ordinary_alpha_serial=0;
             static thread_local std::vector<sprite_batch_bucket> sprite_buckets;
             static thread_local std::map<sprite_batch_key,size_t> sprite_lookup;
+            bool const ordinary_pass=!post_exempt && !decals_only;
+            bool const prepare_both=ordinary_pass && !transparent;
+            bool const reuse_alpha=ordinary_pass && transparent &&
+                ordinary_alpha_serial!=0 &&
+                ordinary_alpha_serial==gpu_3do_present_serial;
+            if(prepare_both) {
+                ordinary_alpha_serial=0;
+                ordinary_alpha_draws.clear();
+            }
+            auto &modelviews=ordinary_pass
+                ?ordinary_modelviews:isolated_modelviews;
             draws.clear();
-            modelviews.clear();
             for(auto &bucket:sprite_buckets)bucket.draws.clear();
             sprite_lookup.clear();
             size_t used_sprite_buckets=0;
@@ -3485,11 +3629,15 @@ namespace jkgm {
             bool const collect_sprite_batches=
                 the_config->enable_gpu_sprite_instancing &&
                 !transparent && !post_exempt && !decals_only;
-            // Keep composed matrices stable across sorting and draw submission.
-            modelviews.reserve(instances.size());
+            // Reusing alpha candidates must not clear their modelview
+            // storage; otherwise a projected decal could invalidate it.
+            if(!reuse_alpha) {
+                modelviews.clear();
+                modelviews.reserve(instances.size());
+            }
             auto const collect_begin=gpu_profiling
                 ?profile_clock::now():profile_clock::time_point{};
-            for(auto const &inst:instances) {
+            if(!reuse_alpha) for(auto const &inst:instances) {
                 if(!inst.geometry || inst.shadow_only ||
                    (!post_exempt && inst.is_projected_decal!=decals_only))
                     continue;
@@ -3599,9 +3747,19 @@ namespace jkgm {
                     // reliably cover both blades and the tip bridge.
                     auto const policy=gpu_3do_trail_alpha_mode(
                         material_policy,inst.saber_trail_active);
-                    if(!post_exempt && !gpu_3do_draws_in_pass(policy,transparent)) continue;
+                    // Mixed-alpha faces belong to BOTH ordinary draw lists.
+                    // Classify once without changing per-pass face ordering.
+                    bool const opaque_eligible=prepare_both &&
+                        gpu_3do_draws_in_pass(policy,false);
+                    bool const alpha_eligible=prepare_both &&
+                        gpu_3do_draws_in_pass(policy,true);
+                    if(!post_exempt &&
+                       !(prepare_both
+                           ?(opaque_eligible || alpha_eligible)
+                           :gpu_3do_draws_in_pass(policy,transparent)))
+                        continue;
                     float depth=0.0f;
-                    if(transparent) {
+                    if(transparent || alpha_eligible) {
                         auto const &m=inst.transform;
                         auto const &c=group.centroid;
                         float const wx=m[9]+m[0]*c[0]+m[3]*c[1]+m[6]*c[2];
@@ -3611,9 +3769,12 @@ namespace jkgm {
                               (wy-cam.position[1])*cam.forward[1]+
                               (wz-cam.position[2])*cam.forward[2];
                     }
-                    pending_draw candidate{&inst,&group,tex,policy,
+                    pending_draw candidate{&inst,&group,&tex,policy,
                                            &modelviews.back(),depth,
                                            next_draw_order++};
+                    if(alpha_eligible)
+                        ordinary_alpha_draws.push_back(candidate);
+                    if(prepare_both && !opaque_eligible) continue;
                     // Ordinary opaque 3DOs and all transparent sprites stay
                     // on the original draw list; only compatible opaque
                     // sprite quads are collected in dedicated buckets.
@@ -3657,6 +3818,15 @@ namespace jkgm {
                             std::move(candidate));
                     } else draws.push_back(std::move(candidate));
                 }
+            }
+            // This is consumed once during the ordinary transparent pass.
+            // Both the MAT element addresses and the ordinary modelviews
+            // remain stable until then, including across decal rendering.
+            if(prepare_both)
+                ordinary_alpha_serial=gpu_3do_present_serial;
+            if(reuse_alpha) {
+                draws.swap(ordinary_alpha_draws);
+                ordinary_alpha_serial=0;
             }
             if(gpu_profiling)
                 profile_frame.gpu_preview_collect_us[pass_index]+=
@@ -3791,6 +3961,7 @@ namespace jkgm {
                 ?profile_clock::now():profile_clock::time_point{};
             for(size_t draw_start=0;draw_start<draws.size();) {
                 auto const &draw=draws[draw_start];
+                auto const &material=*draw.texture;
                 auto const &inst=*draw.instance;
                 auto const &group=*draw.group;
                 size_t draw_end=draw_start+1;
@@ -3803,14 +3974,14 @@ namespace jkgm {
                     !inst.is_projected_decal && !inst.shadow_only &&
                     !inst.transient_procedural &&
                     inst.num_lights==0U && !inst.crossing_lighting &&
-                    !draw.texture.has_environment &&
-                    !draw.texture.has_environment2 &&
-                    !draw.texture.has_normal &&
-                    !draw.texture.has_normal2 &&
-                    !draw.texture.has_surface &&
-                    draw.texture.displacement_factor==0.0f &&
-                    draw.texture.blend!=material_blend_mode::fluid &&
-                    gpu_specular_parameters(draw.texture,false).first<=0.0f;
+                    !material.has_environment &&
+                    !material.has_environment2 &&
+                    !material.has_normal &&
+                    !material.has_normal2 &&
+                    !material.has_surface &&
+                    material.displacement_factor==0.0f &&
+                    material.blend!=material_blend_mode::fluid &&
+                    gpu_specular_parameters(material,false).first<=0.0f;
                 size_t sprite_batch_count=0;
                 if(draw.sprite_batch_group!=0U) {
                     size_t end=draw_start+1;
@@ -3967,7 +4138,7 @@ namespace jkgm {
                     : (inst.is_sprite_quad ? inst.sprite_opacity : 1.0f) *
                       ((group.face_type&0x2U)!=0 ? 90.0f/255.0f : 1.0f);
                 if(transparent) {
-                    switch(draw.texture.blend) {
+                    switch(material.blend) {
                     case material_blend_mode::additive:
                         gl::set_blend_function_separate(
                             gl::blend_function::one,gl::blend_function::one,
@@ -3985,23 +4156,23 @@ namespace jkgm {
                         break;
                     }
                 }
-                bind_preview_color(draw.texture.texture,0,draw.texture.filtered);
-                bind_preview_color(draw.texture.emission,1,draw.texture.filtered);
+                bind_preview_color(material.texture,0,material.filtered);
+                bind_preview_color(material.emission,1,material.filtered);
                 // Unit 11 is the AO receiver on the projected-decal pass.
                 bool const indexed_fullbright=
                     the_config->restore_cmp_lights &&
-                    draw.texture.has_palette_fullbright &&
+                    material.has_palette_fullbright &&
                     !inst.is_projected_decal && !inst.camera_hud;
                 if(indexed_fullbright)
-                    bind_preview_color(draw.texture.palette_fullbright_mask,
-                                       11,draw.texture.filtered);
+                    bind_preview_color(material.palette_fullbright_mask,
+                                       11,material.filtered);
                 prog.set_palette_fullbright(indexed_fullbright);
                 bool const has_albedo_transition=
-                    draw.texture.albedo_transition>0.0f;
+                    material.albedo_transition>0.0f;
                 if(has_albedo_transition) {
-                    bind_preview_color(draw.texture.texture2,6,draw.texture.filtered);
-                    prog.set_albedo_transition(draw.texture.albedo_source2,
-                                               draw.texture.albedo_transition);
+                    bind_preview_color(material.texture2,6,material.filtered);
+                    prog.set_albedo_transition(material.albedo_source2,
+                                               material.albedo_transition);
                 } else if(prev_albedo_transition) {
                     prog.set_albedo_transition(2,0.0f);
                 }
@@ -4011,20 +4182,24 @@ namespace jkgm {
                 bool const clip_decal=transparent && inst.is_projected_decal;
                 bool const advanced=clip_decal ||
                     (transparent &&
-                     draw.texture.blend==material_blend_mode::fluid);
+                     material.blend==material_blend_mode::fluid);
                 if(advanced)
                     prog.set_advanced_material(clip_decal,
-                                               draw.texture.fluid_thickness);
+                                               material.fluid_thickness);
                 else if(prev_advanced_material)
                     prog.set_advanced_material(false,0.25f);
                 prev_advanced_material=advanced;
+                // Unit 9 is also used by receiver lighting for projected
+                // decals. Never overwrite it with a displacement MAT on
+                // the decal-only draw path.
                 bool const parallax=!inst.camera_hud &&
-                    draw.texture.displacement_factor!=0.0f;
+                    !inst.is_projected_decal &&
+                    material.displacement_factor!=0.0f;
                 if(parallax) {
                     gl::set_active_texture_unit(9);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                     draw.texture.displacement);
-                    prog.set_parallax(draw.texture.displacement_factor);
+                                     material.displacement);
+                    prog.set_parallax(material.displacement_factor);
                 } else if(prev_parallax) {
                     prog.set_parallax(0.0f);
                 }
@@ -4044,69 +4219,69 @@ namespace jkgm {
                 bool const default_eligible=
                     !inst.camera_hud && !inst.is_projected_decal &&
                     !inst.is_sprite_quad && !inst.world_lighting_exempt &&
-                    !draw.texture.solid_fullbright &&
-                    !draw.texture.emissive_only &&
-                    draw.texture.albedo_source!=0 &&
-                    draw.texture.blend!=material_blend_mode::additive &&
-                    draw.texture.blend!=material_blend_mode::multiply;
+                    !material.solid_fullbright &&
+                    !material.emissive_only &&
+                    material.albedo_source!=0 &&
+                    material.blend!=material_blend_mode::additive &&
+                    material.blend!=material_blend_mode::multiply;
                 auto const specular=gpu_specular_parameters(
-                    draw.texture,default_eligible);
+                    material,default_eligible);
                 bool const spec_active=!inst.camera_hud &&
                     specular.first>0.0f &&
-                    (draw.texture.has_environment ||
-                     draw.texture.has_environment2 || sun_active ||
+                    (material.has_environment ||
+                     material.has_environment2 || sun_active ||
                      point_specular_active);
                 bool const diffuse_mapping=
                     the_config->enable_normal_mapped_diffuse &&
                     !inst.camera_hud && !inst.is_projected_decal &&
                     !inst.is_sprite_quad && !inst.world_lighting_exempt &&
-                    !group.solid_color && !draw.texture.solid_fullbright &&
-                    (draw.texture.has_normal || draw.texture.has_normal2);
+                    !group.solid_color && !material.solid_fullbright &&
+                    (material.has_normal || material.has_normal2);
                 bool const material_normals_active=
                     spec_active || diffuse_mapping;
                 if(material_normals_active) {
                     if(spec_active) {
                         gl::set_active_texture_unit(2);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                         draw.texture.surface);
+                                         material.surface);
                     }
-                    if(draw.texture.has_normal) {
+                    if(material.has_normal) {
                         gl::set_active_texture_unit(3);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                         draw.texture.normal);
+                                         material.normal);
                     }
-                    if(draw.texture.has_normal2) {
+                    if(material.has_normal2) {
                         gl::set_active_texture_unit(5);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                         draw.texture.normal2);
+                                         material.normal2);
                     }
-                    if(spec_active && draw.texture.has_environment) {
+                    if(spec_active && material.has_environment) {
                         gl::set_active_texture_unit(4);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                         draw.texture.environment);
+                                         material.environment);
                     }
                     if(spec_active &&
-                       draw.texture.environment_transition>0.0f &&
-                       draw.texture.has_environment2) {
+                       material.environment_transition>0.0f &&
+                       material.has_environment2) {
                         gl::set_active_texture_unit(7);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                         draw.texture.environment2);
+                                         material.environment2);
                     }
                     prog.set_environment(
-                        spec_active && draw.texture.has_environment,
-                        spec_active && draw.texture.has_environment2,
-                        spec_active?draw.texture.environment_transition:0.0f,
-                        draw.texture.reflection_mode);
+                        spec_active && material.has_environment,
+                        spec_active && material.has_environment2,
+                        spec_active?material.environment_transition:0.0f,
+                        material.reflection_mode);
                     prog.set_point_specular(
                         make_point(spec_active?specular.first:0.0f,
-                                   specular.second,draw.texture.metalness,
-                                   spec_active && draw.texture.has_surface?1.0f:0.0f),
-                        make_point(draw.texture.has_normal?1.0f:0.0f,
-                                   draw.texture.normal_strength,
-                                   draw.texture.has_normal2?1.0f:0.0f,
-                                   draw.texture.normal_strength2),
-                        draw.texture.normal_scroll,
-                        draw.texture.normal_scroll2);
+                                   specular.second,material.metalness,
+                                   spec_active && material.has_surface?1.0f:0.0f),
+                        make_point(material.has_normal?1.0f:0.0f,
+                                   material.normal_strength,
+                                   material.has_normal2?1.0f:0.0f,
+                                   material.normal_strength2),
+                        material.normal_scroll,
+                        material.normal_scroll2);
                 } else if(prev_specular_active) {
                     prog.set_point_specular(
                         make_point(0.0f,0.5f,0.0f,0.0f),
@@ -4122,22 +4297,22 @@ namespace jkgm {
                 // Type-3 SPR decal UVs come from rdSprite and must continue
                 // to use their original native dimensions.
                 float const uv_width=(inst.is_projected_decal || inst.is_sprite_quad)
-                    ? draw.texture.width
-                    : gpu_3do_model_uv_extent(draw.texture.width);
+                    ? material.width
+                    : gpu_3do_model_uv_extent(material.width);
                 float const uv_height=(inst.is_projected_decal || inst.is_sprite_quad)
-                    ? draw.texture.height
-                    : gpu_3do_model_uv_extent(draw.texture.height);
-                prog.set_solid_fullbright(draw.texture.solid_fullbright);
-                prog.set_surface(draw.texture.albedo_source,uv_width,
+                    ? material.height
+                    : gpu_3do_model_uv_extent(material.height);
+                prog.set_solid_fullbright(material.solid_fullbright);
+                prog.set_surface(material.albedo_source,uv_width,
                                  uv_height,transparent,
-                                 static_cast<int>(draw.texture.blend),
+                                 static_cast<int>(material.blend),
                                  static_cast<int>(draw.policy),
-                                 draw.texture.alpha_cutoff,face_opacity,
-                                 draw.texture.tint,draw.texture.albedo_scroll,
-                                 draw.texture.emissive_only);
-                prog.set_emissive(draw.texture.has_emission,
-                                  draw.texture.emission_factor,
-                                  draw.texture.emissive_scroll);
+                                 material.alpha_cutoff,face_opacity,
+                                 material.tint,material.albedo_scroll,
+                                 material.emissive_only);
+                prog.set_emissive(material.has_emission,
+                                  material.emission_factor,
+                                  material.emissive_scroll);
                 if(sprite_batch_count>1) {
                     std::array<std::array<float,12>,
                         shaders::gpu_3do_preview_shader::max_sprite_instances>
@@ -4191,7 +4366,7 @@ namespace jkgm {
                                  " indices=",group.count,
                                  " policy=",static_cast<int>(draw.policy),
                                  " material=",group.material,
-                                 " tex_px=",draw.texture.width,"x",draw.texture.height);
+                                 " tex_px=",material.width,"x",material.height);
                 }
                 if(the_config->profile_renderer &&
                    transparent && draw.instance->is_projected_decal) {
@@ -4521,6 +4696,114 @@ namespace jkgm {
 
 
 
+        // A level without any physical sky aperture cannot receive
+        // COG sunlight, regardless of SetSunInfo or shadow settings.
+        // Preserve the COG state so switching worlds later still works.
+        // The mostly immutable SithSurface table only needs an eligibility
+        // audit on world changes, sun reactivation or periodically for rare
+        // COG sky-flag/adjoin changes. GeoMode 0 remains a valid aperture.
+        // Any malformed native pointer/read fails open (sun stays allowed).
+        void refresh_sun_level_sky(bool force_audit)
+        {
+            uint32_t world=0;
+            bool const world_valid=engine_material_debug::read_object(
+                engine_material_debug::current_world_global,world) &&
+                decal_native_address_ok(world);
+            constexpr uint64_t audit_interval_frames=120U;
+            if(!force_audit && world_valid && sun_level_sky_known &&
+               uintptr_t(world)==sun_level_sky_world &&
+               gpu_3do_present_serial>=sun_level_sky_last_audit_frame &&
+               gpu_3do_present_serial-sun_level_sky_last_audit_frame<
+                   audit_interval_frames)
+                return;
+
+            bool present=true,known=false;
+            uint32_t eligible=0;
+            uint64_t identity=14695981039346656037ULL;
+            if(world_valid) {
+                uint32_t count=0,table=0;
+                if(engine_material_debug::read_object(
+                       uintptr_t(world)+0xa8U,count) &&
+                   engine_material_debug::read_object(
+                       uintptr_t(world)+0xacU,table) &&
+                   count<=250000U &&
+                   (count==0U ||
+                    (decal_native_address_ok(table) &&
+                     engine_camera_detail::readable(
+                         uintptr_t(table),size_t(count)*0x5cU)))) {
+                    known=true;
+                    present=false;
+                    for(uint32_t i=0;i<count;++i) {
+                        uintptr_t const base=uintptr_t(table)+
+                            uintptr_t(i)*0x5cU;
+                        uint32_t adjoin=0,flags=0;
+                        std::memcpy(&adjoin,
+                            reinterpret_cast<void const *>(base+0x0cU),4U);
+                        std::memcpy(&flags,
+                            reinterpret_cast<void const *>(base+0x10U),4U);
+                        if(sun_sky_surface_eligible(flags,adjoin)) {
+                            present=true;
+                            ++eligible;
+                            identity^=uint64_t(i);
+                            identity*=1099511628211ULL;
+                        }
+                    }
+                }
+            }
+            // A newly eligible sky surface must be captured in the
+            // aperture geometry snapshot, not merely in its live flags.
+            if(known && (world!=sun_level_sky_world ||
+                         !sun_level_sky_known ||
+                         eligible!=sun_level_sky_faces ||
+                         identity!=sun_level_sky_identity)) {
+                sun_sky_aperture_target.reset();
+                sun_shadow_cascade_cached={{false,false}};
+                sun_shadow_validated_world_view_ready=false;
+            }
+            sun_level_has_sky=present;
+            sun_level_sky_known=known;
+            sun_level_sky_faces=eligible;
+            sun_level_sky_identity=identity;
+            sun_level_sky_world=world;
+            if(known)
+                sun_level_sky_last_audit_frame=gpu_3do_present_serial;
+        }
+
+        bool sun_sky_aperture_hardware_supported() const
+        {
+            // This is an immutable per-context capability. Query once:
+            // glGetIntegerv every frame is expensive through Wine.
+            static GLint fragment_units=0;
+            if(fragment_units==0)
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);
+            return fragment_units>=
+                texture_units::forward_next_extended_required_units;
+        }
+
+        bool sun_sky_aperture_ready() const
+        {
+            if(!the_config->experimental_sun_sky_aperture ||
+               !sun_shadow_ready || !sun_sky_aperture_target ||
+               !sun_sky_aperture_target->complete ||
+               !sun_sky_aperture_target->valid[0] ||
+               !sun_sky_aperture_target->valid[1])return false;
+            // Unit 19 is the forward sector samplerBuffer, not an array
+            // sampler. Unit 20 requires at least 21 fragment image units.
+            return sun_sky_aperture_hardware_supported();
+        }
+
+        point<4,float> sun_sky_aperture_depth_transform() const
+        {
+            auto const near_depth_params=
+                sun_sky_aperture_target->depth_transform(
+                    0,sun_shadow_views[0]);
+            auto const far_depth_params=
+                sun_sky_aperture_target->depth_transform(
+                    1,sun_shadow_views[1]);
+            return make_point(near_depth_params[0],near_depth_params[1],
+                              far_depth_params[0],far_depth_params[1]);
+        }
+
         template<typename Shader>
         void set_translucent_sun(Shader &prog,bool active)
         {
@@ -4529,7 +4812,11 @@ namespace jkgm {
             auto &uniforms=prog.translucent_sun;
             uniforms.set_state(false,false,0,off,dark,
                                the_config->sun_shadow_near_distance,1.0f,0.0f);
-            if(!active || !the_config->enable_sun)return;
+            uniforms.set_sky_aperture(false,
+                texture_units::forward_next_extended_unit,
+                make_point(1.0f,0.0f,1.0f,0.0f));
+            if(!active || !the_config->enable_sun ||
+               !sun_level_has_sky)return;
             auto const cam=read_active_render_camera();
             if(!cam.valid)return;
             auto const sun=get_sun_settings();
@@ -4547,6 +4834,12 @@ namespace jkgm {
             bool const have_texture_slots=fragment_texture_units>=19;
             bool const shadows=have_texture_slots && sun_shadow_ready &&
                                bool(sun_shadow_target);
+            // Unit 19 belongs to sector crossing's samplerBuffer. The
+            // 2D-array sampler is bound at unit 20 only if supported.
+            bool const sky_aperture=shadows &&
+                fragment_texture_units>=
+                    texture_units::forward_next_extended_required_units &&
+                sun_sky_aperture_ready();
             int const dynamic=have_texture_slots &&
                 the_config->enable_sun_dynamic_shadows &&
                 sun_dynamic_target && !sun_dynamic_views.empty()
@@ -4562,6 +4855,16 @@ namespace jkgm {
                 point_axis(cam.forward,0.0f),point_axis(cam.up,v),
                 make_point(float(get<x>(conf_scr_res)),
                            float(get<y>(conf_scr_res))));
+            uniforms.set_pcf_radius(
+                the_config->sun_shadow_near_pcf_radius,
+                the_config->sun_shadow_far_pcf_radius);
+            uniforms.set_vsm_params(
+                the_config->sun_shadow_vsm_min_stddev_world,
+                the_config->sun_shadow_vsm_bleed_reduction);
+            uniforms.set_sky_aperture(sky_aperture,
+                texture_units::forward_next_extended_unit,
+                sky_aperture?sun_sky_aperture_depth_transform()
+                            :make_point(1.0f,0.0f,1.0f,0.0f));
             uniforms.set_state(true,shadows,dynamic,
                 make_point(dir[0],dir[1],dir[2]),
                 make_point(rgb[0],rgb[1],rgb[2],intensity),
@@ -4587,10 +4890,20 @@ namespace jkgm {
                 set_projection(1,sun_shadow_views[1],null_rect);
                 gl::set_active_texture_unit(16);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                 sun_shadow_target->depth);
+                    the_config->experimental_sun_shadow_vsm
+                        ?gl::texture_view(sun_moments_target->filtered[0])
+                        :gl::texture_view(sun_shadow_target->depth));
                 gl::set_active_texture_unit(17);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                 sun_shadow_target->far_depth);
+                    the_config->experimental_sun_shadow_vsm
+                        ?gl::texture_view(sun_moments_target->filtered[1])
+                        :gl::texture_view(sun_shadow_target->far_depth));
+            }
+            if(sky_aperture) {
+                gl::set_active_texture_unit(
+                    texture_units::forward_next_extended_unit);
+                glBindTexture(GL_TEXTURE_2D_ARRAY,
+                              sun_sky_aperture_target->depth.value());
             }
             if(dynamic>0) {
                 for(int i=0;i<dynamic;++i) {
@@ -5069,7 +5382,8 @@ namespace jkgm {
         // Fit one directional map to the nearby camera frustum, retaining
         // the loaded level's full light-axis depth for offscreen casters.
         void draw_sun_dynamic_shadow_atlas(
-            sun_shadow_projection const &world_view)
+            sun_shadow_projection const &world_view,
+            bool cached_world_view=false)
         {
             sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
@@ -5210,6 +5524,33 @@ namespace jkgm {
                 sun_shadow_projection view{};
                 if(!make_sun_dynamic_shadow_projection(
                     world_view,object->bounds,view))continue;
+                if(cached_world_view) {
+                    // The atlas still renders CURRENT moving-object bounds.
+                    // Expand only its Z range if an object moved beyond the
+                    // last validated static-world depth interval.
+                    float z_min=decal_dot(view.origin,view.forward);
+                    float z_max=z_min+view.range;
+                    float caster_min=std::numeric_limits<float>::max();
+                    float caster_max=-caster_min;
+                    for(int corner=0;corner<8;++corner) {
+                        decal_vec3 point{};
+                        for(int axis=0;axis<3;++axis)
+                            point[axis]=(corner&(1<<axis))
+                                ?object->bounds.high[axis]
+                                :object->bounds.low[axis];
+                        float const z=decal_dot(point,view.forward);
+                        caster_min=std::min(caster_min,z);
+                        caster_max=std::max(caster_max,z);
+                    }
+                    float const margin=std::max(0.25f,view.range*0.02f);
+                    z_min=std::min(z_min,caster_min-margin);
+                    z_max=std::max(z_max,caster_max+margin);
+                    float const change=z_min-
+                        decal_dot(view.origin,view.forward);
+                    for(int axis=0;axis<3;++axis)
+                        view.origin[axis]+=view.forward[axis]*change;
+                    view.range=z_max-z_min;
+                }
                 sun_dynamic_shadow_tile tile{};
                 {
                     // Automatically size each dynamic shadow tile based on
@@ -5363,6 +5704,196 @@ namespace jkgm {
             }
         }
 
+        // Filter the final static+moving sun depth map, never the static
+        // layer in isolation. Cached depths keep their filtered moments.
+        bool regenerate_sun_shadow_moments(int cascade,gl::texture_view depth_map)
+        {
+            if(!sun_moments_target || !sun_moments_target->complete ||
+               !ogs->sun_shadow_prefilter_program || cascade<0 || cascade>=2)
+                return false;
+            auto &moments=*sun_moments_target;
+            unsigned const pixels=moments.resolutions[cascade];
+            auto &shader=*ogs->sun_shadow_prefilter_program;
+            GLboolean const scissor=glIsEnabled(GL_SCISSOR_TEST);
+            if(scissor==GL_TRUE)glDisable(GL_SCISSOR_TEST);
+            gl::disable(gl::capability::depth_test);
+            gl::disable(gl::capability::blend);
+            gl::disable(gl::capability::cull_face);
+            gl::set_depth_mask(false);
+            gl::bind_vertex_array(ogs->postmdl.vao);
+            gl::set_viewport(make_box(make_point(0,0),
+                                     make_size(int(pixels),int(pixels))));
+            shader.use_program();
+            shader.set_source_sampler(0);
+            gl::set_active_texture_unit(0);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,depth_map);
+            // Scalar depth sampling instead of shadow comparisons. The
+            // original depth textures remain available for rasterization.
+            gl::set_texture_compare_mode(gl::texture_bind_target::texture_2d,
+                                         gl::texture_compare_mode::none);
+            gl::set_texture_min_filter(gl::texture_bind_target::texture_2d,
+                                       gl::min_filter::nearest);
+            gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d,
+                                       gl::mag_filter::nearest);
+            float const radius=cascade==0
+                ?the_config->sun_shadow_vsm_near_radius
+                :the_config->sun_shadow_vsm_far_radius;
+            shader.set_filter(0,make_size(float(pixels),float(pixels)),radius);
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 moments.horizontal_fbo[cascade]);
+            gl::draw_elements(gl::element_type::triangles,
+                              ogs->postmdl.num_indices,gl::index_type::uint32);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             moments.horizontal[cascade]);
+            shader.set_filter(1,make_size(float(pixels),float(pixels)),radius);
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 moments.filtered_fbo[cascade]);
+            gl::draw_elements(gl::element_type::triangles,
+                              ogs->postmdl.num_indices,gl::index_type::uint32);
+            gl::set_depth_mask(true);
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 gl::default_framebuffer);
+            gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+            if(scissor==GL_TRUE)glEnable(GL_SCISSOR_TEST);
+            moments.valid[cascade]=true;
+            return true;
+        }
+
+        // Rasterize SKY apertures from their actual SithWorld polygons
+        // into a two-layer DEPTH texture matching the near/far sunlight
+        // XY projections. This is independent of whether PCF or VSM is
+        // the selected sun occluder filter. 3DO hidden Things are untouched.
+        void draw_sun_sky_aperture(int cascade,
+                                   sun_shadow_projection const &shadow_view,
+                                   decal_native_read const &read)
+        {
+            if(!sun_sky_aperture_target ||
+               !sun_sky_aperture_target->complete ||
+               !ogs->spotlight_shadow_depth_program)return;
+            auto &gate=*sun_sky_aperture_target;
+            if(gate.loaded_world==0)return;
+            auto const view=gate.expanded_sky_view(shadow_view);
+            if(!(view.range>0.0f) || !std::isfinite(view.range))return;
+            auto const signature=gate.live_signature(read);
+            if(gate.valid[cascade] && gate.signatures[cascade]==signature &&
+               sun_shadow_same_projection(view,gate.views[cascade]))
+                return;
+
+            GLint saved_draw_fbo=0,saved_read_fbo=0,saved_vao=0;
+            GLint saved_program=0,saved_depth_func=0,saved_viewport[4]{};
+            GLfloat saved_polygon_factor=0.0f,saved_polygon_units=0.0f;
+            GLboolean saved_depth_mask=GL_TRUE;
+            GLboolean const scissor=glIsEnabled(GL_SCISSOR_TEST);
+            GLboolean const blend=glIsEnabled(GL_BLEND);
+            GLboolean const cull=glIsEnabled(GL_CULL_FACE);
+            GLboolean const depth_test=glIsEnabled(GL_DEPTH_TEST);
+            GLboolean const polygon_offset=glIsEnabled(GL_POLYGON_OFFSET_FILL);
+            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&saved_draw_fbo);
+            glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&saved_read_fbo);
+            glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&saved_vao);
+            glGetIntegerv(GL_CURRENT_PROGRAM,&saved_program);
+            glGetIntegerv(GL_DEPTH_FUNC,&saved_depth_func);
+            glGetIntegerv(GL_VIEWPORT,saved_viewport);
+            glGetBooleanv(GL_DEPTH_WRITEMASK,&saved_depth_mask);
+            glGetFloatv(GL_POLYGON_OFFSET_FACTOR,&saved_polygon_factor);
+            glGetFloatv(GL_POLYGON_OFFSET_UNITS,&saved_polygon_units);
+            if(scissor)glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glDisable(GL_BLEND);
+            glDisable(GL_CULL_FACE); // sky openings are two-sided
+            glEnable(GL_DEPTH_TEST);
+            glDepthMask(GL_TRUE);
+            glDepthFunc(GL_LESS);
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 gate.fbo[cascade]);
+            glViewport(0,0,GLsizei(gate.resolution),
+                       GLsizei(gate.resolution));
+            gl::clear_buffer_depth(1.0f);
+            auto &shader=*ogs->spotlight_shadow_depth_program;
+            shader.use_program();
+            auto vec=[](decal_vec3 const &p) {
+                return make_point(p[0],p[1],p[2]);
+            };
+            shader.set_model(make_point(1.0f,0.0f,0.0f),
+                             make_point(0.0f,1.0f,0.0f),
+                             make_point(0.0f,0.0f,1.0f),
+                             make_point(0.0f,0.0f,0.0f));
+            shader.set_shadow_alpha(false,make_point(1.0f,1.0f),
+                make_point(0.0f,0.0f),0.5f,1.0f,false,0.0f);
+            // Gather live SKY faces once, then submit the same mesh at
+            // five tiny light-space offsets. This expands the sky silhouette
+            // by less than one ordinary sun-shadow texel, placing its HARD
+            // cutoff inside VSM's already-dark wall shadows. The ordinary
+            // sun-shadow map is unchanged. This work only happens when
+            // the cached aperture projection or sky flags change.
+            std::vector<GLsizei> sky_counts;
+            std::vector<void const *> sky_offsets;
+            sky_counts.reserve(gate.world.receivers.size());
+            sky_offsets.reserve(gate.world.receivers.size());
+            for(size_t i=0;i<gate.world.receivers.size();++i) {
+                auto const &face=gate.world.receivers[i];
+                uintptr_t const base=gate.world.surfaces_addr+
+                    uintptr_t(face.surface_index)*0x5cU;
+                uint32_t flags=0,adjoin=0;
+                if(!read(base+0x10U,&flags,4U) ||
+                   !read(base+0x0cU,&adjoin,4U) ||
+                   !sun_sky_surface_eligible(flags,adjoin))
+                    continue;
+                auto const &range=gate.mesh.surfaces[i];
+                if(range.count==0)continue;
+                sky_counts.push_back(static_cast<GLsizei>(range.count));
+                sky_offsets.push_back(reinterpret_cast<void const *>(
+                    uintptr_t(range.first_index)*sizeof(uint32_t)));
+            }
+            if(!sky_counts.empty()) {
+                gl::bind_vertex_array(gate.vao);
+                // Use each cascade's actual shadow texel size, not the
+                // aperture atlas's (potentially larger) resolution.
+                unsigned const shadow_pixels=std::max(1U,cascade==0
+                    ?sun_shadow_target->resolution
+                    :sun_shadow_target->far_resolution);
+                float const step_x=view.width/float(shadow_pixels);
+                float const step_y=view.height/float(shadow_pixels);
+                constexpr float sky_expansion_texels=0.75f;
+                auto draw_sky_offset=[&](float dx,float dy) {
+                    auto origin=view.origin;
+                    for(int axis=0;axis<3;++axis)
+                        origin[axis]-=sky_expansion_texels*(
+                            dx*step_x*view.right[axis]+
+                            dy*step_y*view.up[axis]);
+                    shader.set_orthographic_light(
+                        vec(origin),vec(view.right),vec(view.up),
+                        vec(view.forward),
+                        make_point(view.width,view.height,view.range,0.0f));
+                    glMultiDrawElements(GL_TRIANGLES,sky_counts.data(),
+                        GL_UNSIGNED_INT,sky_offsets.data(),
+                        static_cast<GLsizei>(sky_counts.size()));
+                };
+                draw_sky_offset(0.0f,0.0f); // Original aperture coverage.
+                for(float dx:{-1.0f,1.0f})
+                    for(float dy:{-1.0f,1.0f})
+                        draw_sky_offset(dx,dy);
+            }
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER,GLuint(saved_draw_fbo));
+            glBindFramebuffer(GL_READ_FRAMEBUFFER,GLuint(saved_read_fbo));
+            glViewport(saved_viewport[0],saved_viewport[1],
+                       saved_viewport[2],saved_viewport[3]);
+            gl::bind_vertex_array(gl::vertex_array_view(GLuint(saved_vao)));
+            gl::use_program(gl::program_view(GLuint(saved_program)));
+            glDepthMask(saved_depth_mask);
+            glDepthFunc(GLenum(saved_depth_func));
+            glPolygonOffset(saved_polygon_factor,saved_polygon_units);
+            if(scissor)glEnable(GL_SCISSOR_TEST);
+            if(blend)glEnable(GL_BLEND);else glDisable(GL_BLEND);
+            if(cull)glEnable(GL_CULL_FACE);else glDisable(GL_CULL_FACE);
+            if(depth_test)glEnable(GL_DEPTH_TEST);else glDisable(GL_DEPTH_TEST);
+            if(polygon_offset)glEnable(GL_POLYGON_OFFSET_FILL);
+            else glDisable(GL_POLYGON_OFFSET_FILL);
+            gate.views[cascade]=view;
+            gate.signatures[cascade]=signature;
+            gate.valid[cascade]=true;
+        }
+
         void draw_sun_shadow_map()
         {
             sun_shadow_ready=false;
@@ -5371,7 +5902,20 @@ namespace jkgm {
             sun_dynamic_views.clear();
             sun_dynamic_tiles.clear();
             sun_dynamic_atlas_owners.clear();
-            if(!the_config->enable_sun_shadows)return;
+            // Sun eligibility is constant for an ordinary level. A cheap
+            // world-pointer check replaces the full per-frame surface scan;
+            // a positive-sun transition forces a fresh audit immediately.
+            bool const sun_active=
+                (the_config->enable_sun || the_config->enable_sun_shadows) &&
+                get_sun_settings().intensity.value()[0]>0.0f;
+            if(sun_active) {
+                refresh_sun_level_sky(!sun_level_sky_sun_active);
+                sun_level_sky_sun_active=true;
+            }
+            else sun_level_sky_sun_active=false;
+            if(!the_config->enable_sun_shadows || !sun_level_has_sky)return;
+            auto const sun_pass_started=the_config->profile_renderer
+                ?profile_clock::now():profile_clock::time_point{};
             auto sun_failure=[&](char const *reason) {
                 sun_shadow_frame_failure=reason;
                 if(the_config->profile_renderer_verbose &&
@@ -5406,25 +5950,126 @@ namespace jkgm {
             };
             if(!sun_shadow_target)
                 sun_shadow_target=std::make_unique<sun_shadow_gpu>(
-                    the_config->sun_shadow_resolution);
+                    the_config->sun_shadow_resolution,
+                    the_config->sun_shadow_far_resolution);
             auto &map=*sun_shadow_target;
+            if(the_config->experimental_sun_shadow_vsm && !sun_moments_target)
+                sun_moments_target=std::make_unique<sun_shadow_moments_gpu>(
+                    map.resolution,map.far_resolution);
             if(!map.update_world(safe_read,world)) {
                 sun_failure("SithWorld shadow snapshot failed");
                 return;
             }
+            if(the_config->experimental_sun_sky_aperture &&
+               sun_sky_aperture_hardware_supported()) {
+                if(!sun_sky_aperture_target)
+                    sun_sky_aperture_target=
+                        std::make_unique<sun_sky_aperture_gpu>(
+                            std::max(map.resolution,map.far_resolution));
+                if(!sun_sky_aperture_target->update_world(safe_read,world) &&
+                   the_config->profile_renderer_verbose &&
+                   gpu_3do_present_serial%120U==0U)
+                    LOG_WARNING("SUN sky aperture geometry unavailable");
+            }
+            auto const camera=read_active_render_camera();
+            if(!camera.valid) {
+                sun_failure("render camera unavailable");
+                return;
+            }
+            float const horizontal=std::tan(camera.fov*
+                (3.14159265358979323846f/360.0f));
+            float const vertical=horizontal*float(get<y>(conf_scr_res))/
+                float(get<x>(conf_scr_res));
+            auto const validation_now=std::chrono::steady_clock::now();
+            double const interval=the_config->sun_shadow_update_interval;
+            bool cached_usable=sun_shadow_validated_world_view_ready;
+            for(int cascade=0;cascade<2 && cached_usable;++cascade) {
+                cached_usable=sun_shadow_cascade_cached[cascade] &&
+                    sun_shadow_worlds[cascade]==world &&
+                    sun_shadow_revisions[cascade]==map.revision;
+                for(int axis=0;axis<3 && cached_usable;++axis)
+                    cached_usable=std::fabs(direction[axis]-
+                        sun_shadow_directions[cascade][axis])<1.0e-5f;
+                if(!cached_usable)break;
+                float const distance=cascade==0
+                    ?the_config->sun_shadow_near_distance
+                    :sun_shadow_effective_far_distance(
+                         the_config->sun_shadow_far_distance,
+                         the_config->sun_max_distance);
+                cached_usable=sun_shadow_projection_covers_camera(
+                    sun_shadow_views[cascade],camera.position,camera.right,
+                    camera.up,camera.forward,horizontal,vertical,distance);
+            }
+            double const since_validation=
+                sun_shadow_last_validation==
+                    std::chrono::steady_clock::time_point{}
+                    ?std::numeric_limits<double>::infinity()
+                    :std::chrono::duration<double>(
+                        validation_now-sun_shadow_last_validation).count();
+            bool const skip_cascade_validation=
+                !sun_shadow_cascade_validation_due(
+                    since_validation,interval,cached_usable);
+            if(the_config->profile_renderer) {
+                if(skip_cascade_validation)++sun_profile_throttle_skipped;
+                else if(interval>0.0) {
+                    ++sun_profile_throttle_checked;
+                    if(since_validation>=interval)
+                        ++sun_profile_throttle_due_timer;
+                    else if(since_validation>=0.0) {
+                        ++sun_profile_throttle_forced_early;
+                        if(!sun_shadow_validated_world_view_ready)
+                            ++sun_profile_forced_unready;
+                        else for(int c=0;c<2;++c) {
+                            if(!sun_shadow_cascade_cached[c] ||
+                               sun_shadow_worlds[c]!=world ||
+                               sun_shadow_revisions[c]!=map.revision) {
+                                ++sun_profile_forced_world;
+                                continue;
+                            }
+                            bool direction_changed=false;
+                            for(int axis=0;axis<3;++axis)
+                                direction_changed=direction_changed ||
+                                    std::fabs(direction[axis]-
+                                        sun_shadow_directions[c][axis])>=1.0e-5f;
+                            if(direction_changed) {
+                                ++sun_profile_forced_sun;
+                                continue;
+                            }
+                            float const distance=c==0
+                                ?the_config->sun_shadow_near_distance
+                                :sun_shadow_effective_far_distance(
+                                     the_config->sun_shadow_far_distance,
+                                     the_config->sun_max_distance);
+                            if(!sun_shadow_projection_covers_camera(
+                                    sun_shadow_views[c],camera.position,
+                                    camera.right,camera.up,camera.forward,
+                                    horizontal,vertical,distance))
+                                ++sun_profile_forced_coverage[c];
+                        }
+                    }
+                }
+            }
+            sun_shadow_projection world_view=sun_shadow_validated_world_view;
             // Avoid three full sets of transformed group bounds (projection,
             // near cascade, far cascade), especially in crowded 3DO levels.
             // A level may have only a tiny native-world shell while its
             // playable architecture is made from 3DOs. Include submitted
             // model groups before fitting the sun map; otherwise both the
             // receiver lighting and model shadows fall outside the map.
-            std::vector<decal_volume_aabb> model_bounds;
             struct sun_model_candidate {
                 gpu_3do_instance const *instance;
                 gpu_3do_group const *group;
                 decal_volume_aabb bounds;
+                // The frame material cache owns this object until the next
+                // game frame. unordered_map rehash preserves element addresses.
+                gpu_3do_texture const *texture;
+                bool cutout;
+                uint64_t signature;
             };
             std::vector<sun_model_candidate> model_candidates;
+            size_t skipped_skybox_instances=0;
+            if(!skip_cascade_validation) {
+            std::vector<decal_volume_aabb> model_bounds;
             auto const candidate_begin=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
             // Only ACTUAL depth casters are allowed to contribute to the
@@ -5451,36 +6096,208 @@ namespace jkgm {
                 }
                 return found->second;
             };
-            auto sun_group_depth_eligible=[&](
-                gpu_3do_group const &group,
-                gpu_3do_instance const &instance) {
-                auto const &tex=sun_caster_material(group,instance);
-                bool const cutout=tex.masked||tex.alpha||tex.dithered||
-                    (instance.is_sprite_quad && tex.albedo_source==1);
-                return sun_shadow_material_casts_depth(
-                    tex.albedo_source,tex.special,tex.emissive_only,
-                    tex.opacity,cutout);
+            // The group hash is independent of cascade projection and
+            // membership. Compute it once per frame instead of again for
+            // near and far; keep the exact original hash inputs and mixing.
+            auto mix_model_signature=[](uint64_t h) {
+                h^=h>>30;h*=0xbf58476d1ce4e5b9ULL;
+                h^=h>>27;h*=0x94d049bb133111ebULL;
+                return h^(h>>31);
             };
             size_t noncaster_bounds_skipped=0;
-            size_t skipped_skybox_instances=0;
-            for(auto const &instance:frame_gpu_3do_instances) {
+            uint64_t candidate_sample_index=0;
+            // Verify exact source geometry and pose for each slot. Do not
+            // assume frame submission order is stable between frames.
+            sun_static_geometry_cache.resize(frame_gpu_3do_instances.size());
+            for(size_t instance_idx=0;
+                instance_idx<frame_gpu_3do_instances.size();++instance_idx) {
+                auto const &instance=frame_gpu_3do_instances[instance_idx];
                 if(!instance.casts_sun_shadows) {
                     ++skipped_skybox_instances;
                     continue;
                 }
                 if(!instance.geometry || instance.is_projected_decal)continue;
                 auto const &m=instance.transform;
-                for(auto const &group:instance.geometry->groups) {
+                auto *cached=static_cast<sun_cached_static_instance *>(nullptr);
+                // Dynamic/unknown objects and camera-dependent sprite poses
+                // keep the original recomputation behavior.
+                if(instance.shadow_owner!=0 && !instance.dynamic_sun_caster &&
+                   !instance.is_sprite_quad && !instance.transient_procedural) {
+                    auto &slot=sun_static_geometry_cache[instance_idx];
+                    if(!sun_shadow_static_geometry_reusable(
+                           instance.shadow_owner,instance.id,
+                           reinterpret_cast<uintptr_t>(instance.geometry.get()),
+                           m,instance.geometry->groups.size(),
+                           slot.owner,slot.id,
+                           reinterpret_cast<uintptr_t>(slot.geometry),
+                           slot.transform,slot.groups.size(),false)) {
+                        if(the_config->profile_renderer && slot.owner!=0)
+                            ++sun_profile_static_instance_invalidations;
+                        slot.owner=instance.shadow_owner;
+                        slot.id=instance.id;
+                        slot.geometry=instance.geometry.get();
+                        slot.transform=m;
+                        slot.groups.assign(instance.geometry->groups.size(),{});
+                    }
+                    cached=&slot;
+                }
+                auto const &groups=instance.geometry->groups;
+                for(size_t group_idx=0;group_idx<groups.size();++group_idx) {
+                    auto const &group=groups[group_idx];
                     if(group.count<3U || (group.face_type&0x2U))continue;
-                    if(!sun_group_depth_eligible(group,instance)) {
+                    // One of every 64 eligible-for-testing groups is timed.
+                    // Avoid thousands of expensive clock calls per frame.
+                    bool const sample=the_config->profile_renderer &&
+                        ((candidate_sample_index++ & 63U)==0U);
+                    auto const mat_begin=sample
+                        ?profile_clock::now():profile_clock::time_point{};
+                    auto const &tex=sun_caster_material(group,instance);
+                    bool const cutout=tex.masked||tex.alpha||tex.dithered||
+                        (instance.is_sprite_quad && tex.albedo_source==1);
+                    bool const eligible=sun_shadow_material_casts_depth(
+                        tex.albedo_source,tex.special,tex.emissive_only,
+                        tex.opacity,cutout);
+                    if(sample) {
+                        sun_profile_candidate_material_sample_ns+=elapsed_profile_ns(
+                            mat_begin,profile_clock::now());
+                        ++sun_profile_candidate_material_samples;
+                    }
+                    if(!eligible) {
                         ++noncaster_bounds_skipped;
                         continue;
                     }
-                    auto const bounds=sun_shadow_transformed_aabb(
-                        group.bounds_min,group.bounds_max,m);
+                    auto const bounds_begin=sample
+                        ?profile_clock::now():profile_clock::time_point{};
+                    auto *group_cache=cached?&cached->groups[group_idx]:nullptr;
+                    if(group_cache) {
+                        // Fail closed if a nominally immutable GPU group is
+                        // edited in place without changing its mesh pointer.
+                        bool const same_group=group_cache->descriptor_valid &&
+                            group_cache->offset==group.offset &&
+                            group_cache->count==group.count &&
+                            group_cache->material==group.material &&
+                            group_cache->cel==group.cel &&
+                            group_cache->bounds_min==group.bounds_min &&
+                            group_cache->bounds_max==group.bounds_max;
+                        if(!same_group) {
+                            if(the_config->profile_renderer &&
+                               group_cache->descriptor_valid)
+                                ++sun_profile_static_group_invalidations;
+                            group_cache->offset=group.offset;
+                            group_cache->count=group.count;
+                            group_cache->material=group.material;
+                            group_cache->cel=group.cel;
+                            group_cache->bounds_min=group.bounds_min;
+                            group_cache->bounds_max=group.bounds_max;
+                            group_cache->descriptor_valid=true;
+                            group_cache->bounds_valid=false;
+                            group_cache->opaque_signature_valid=false;
+                            group_cache->cutout_signature_valid=false;
+                        }
+                    }
+                    bool const reuse_bounds=group_cache &&
+                        group_cache->bounds_valid;
+                    decal_volume_aabb bounds=reuse_bounds
+                        ?group_cache->bounds
+                        :sun_shadow_transformed_aabb(
+                             group.bounds_min,group.bounds_max,m);
+                    if(!reuse_bounds && group_cache &&
+                       decal_finite(bounds.low) && decal_finite(bounds.high)) {
+                        group_cache->bounds=bounds;
+                        group_cache->bounds_valid=true;
+                    }
+                    if(the_config->profile_renderer) {
+                        if(reuse_bounds)++sun_profile_static_bounds_reused;
+                        else ++sun_profile_static_bounds_calculated;
+                    }
+                    if(sample) {
+                        sun_profile_candidate_bounds_sample_ns+=elapsed_profile_ns(
+                            bounds_begin,profile_clock::now());
+                        ++sun_profile_candidate_bounds_samples;
+                    }
                     if(decal_finite(bounds.low) && decal_finite(bounds.high)) {
+                        auto const signature_begin=sample
+                            ?profile_clock::now():profile_clock::time_point{};
+                        // Check the exact five live MAT inputs that the
+                        // original group hash incorporated for cutout faces.
+                        std::array<uint32_t,5> const cutout_inputs=
+                            cutout && group_cache
+                            ?sun_shadow_cutout_signature_inputs(
+                                tex.alpha_cutoff,tex.opacity,
+                                get<x>(tex.albedo_scroll),
+                                get<y>(tex.albedo_scroll),
+                                tex.albedo_transition)
+                            :std::array<uint32_t,5>{};
+                        bool const reuse_opaque=!cutout && group_cache &&
+                            group_cache->opaque_signature_valid;
+                        bool const reuse_cutout=cutout && group_cache &&
+                            group_cache->cutout_signature_valid &&
+                            group_cache->cutout_inputs==cutout_inputs;
+                        bool const reuse_signature=reuse_opaque||reuse_cutout;
+                        if(the_config->profile_renderer && cutout &&
+                           group_cache && group_cache->cutout_signature_valid &&
+                           !reuse_cutout)
+                            ++sun_profile_cutout_material_invalidations;
+                        uint64_t member=reuse_opaque
+                            ?group_cache->opaque_signature
+                            :reuse_cutout?group_cache->cutout_signature
+                            :14695981039346656037ULL;
+                        if(!reuse_signature) {
+                        auto member_u32=[&](uint32_t v) {
+                            for(int b=0;b<4;++b) {
+                                member^=uint64_t((v>>(b*8))&255U);
+                                member*=1099511628211ULL;
+                            }
+                        };
+                        auto member_float=[&](float v) {
+                            uint32_t bits=0;
+                            std::memcpy(&bits,&v,sizeof(bits));
+                            member_u32(bits);
+                        };
+                        member_u32(uint32_t(instance.id));
+                        member_u32(uint32_t(instance.id>>32));
+                        member_u32(group.offset);
+                        member_u32(group.count);
+                        member_u32(uint32_t(instance.shadow_owner));
+                        member_u32(uint32_t(instance.shadow_owner>>32));
+                        member_u32(uint32_t(group.material));
+                        member_u32(uint32_t(group.cel));
+                        if(cutout) {
+                            member_float(tex.alpha_cutoff);
+                            member_float(tex.opacity);
+                            member_float(get<x>(tex.albedo_scroll));
+                            member_float(get<y>(tex.albedo_scroll));
+                            member_float(tex.albedo_transition);
+                        }
+                        for(float v:instance.transform)member_float(v);
+                        member=mix_model_signature(member);
+                        if(group_cache) {
+                            if(cutout) {
+                                group_cache->cutout_signature=member;
+                                group_cache->cutout_inputs=cutout_inputs;
+                                group_cache->cutout_signature_valid=true;
+                            } else {
+                                group_cache->opaque_signature=member;
+                                group_cache->opaque_signature_valid=true;
+                            }
+                        }
+                        } // full hash on changed pose, geometry or material
+                        if(the_config->profile_renderer) {
+                            if(reuse_opaque)++sun_profile_static_signature_reused;
+                            else if(reuse_cutout)++sun_profile_cutout_hash_reused;
+                            else ++sun_profile_static_signature_calculated;
+                            if(cutout && !reuse_cutout)
+                                ++sun_profile_cutout_hash_calculated;
+                        }
+                        if(sample) {
+                            sun_profile_candidate_signature_sample_ns+=
+                                elapsed_profile_ns(
+                                    signature_begin,profile_clock::now());
+                            ++sun_profile_candidate_signature_samples;
+                        }
                         model_bounds.push_back(bounds);
-                        model_candidates.push_back({&instance,&group,bounds});
+                        model_candidates.push_back(
+                            {&instance,&group,bounds,&tex,cutout,member});
                     }
                 }
             }
@@ -5495,7 +6312,7 @@ namespace jkgm {
                          model_candidates.size(),
                          " noncaster_material_groups_skipped=",
                          noncaster_bounds_skipped);
-            sun_shadow_projection world_view{};
+            world_view={};
             if(!make_sun_shadow_projection(map.world,direction,world_view,model_bounds)) {
                 sun_failure("no valid sun projection (world + casting 3DO bounds)");
                 return;
@@ -5508,16 +6325,23 @@ namespace jkgm {
                     <<decal_dot(world_view.origin,world_view.forward);
                 LOG_INFO(diag.str());
             }
-            auto const camera=read_active_render_camera();
-            if(!camera.valid) {
-                sun_failure("render camera unavailable");
-                return;
+            } // expensive global caster bounds/projection: checked frames only
+            presentation_gpu_profile::completed_sample sun_completed{};
+            bool const sun_gpu_timing=the_config->profile_renderer &&
+                sun_gpu_queries.begin(sun_completed);
+            if(sun_completed.ready) {
+                for(size_t i=0;i<sun_gpu_ns.size();++i)
+                    sun_gpu_ns[i]+=sun_completed.nanoseconds[i];
+                ++sun_gpu_samples;
             }
+            if(sun_completed.skipped)++sun_gpu_skipped;
             // Atlas first: exclude only successfully drawn Things from CSM.
             // Excess candidates retain the normal cascade fallback.
             auto const atlas_begin=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
-            draw_sun_dynamic_shadow_atlas(world_view);
+            if(sun_gpu_timing)sun_gpu_queries.timestamp(0U,true);
+            draw_sun_dynamic_shadow_atlas(world_view,skip_cascade_validation);
+            if(sun_gpu_timing)sun_gpu_queries.timestamp(0U,false);
             if(the_config->profile_renderer)
                 sun_profile_atlas_us+=elapsed_profile_us(
                     atlas_begin,profile_clock::now());
@@ -5589,10 +6413,7 @@ namespace jkgm {
                          " unknown_owner_parts=",unknown_owner_parts,
                          " atlas_owners=",sun_dynamic_atlas_owners.size());
             }
-            float const horizontal=std::tan(camera.fov*
-                (3.14159265358979323846f/360.0f));
-            float const vertical=horizontal*float(get<y>(conf_scr_res))/
-                float(get<x>(conf_scr_res));
+            if(!skip_cascade_validation) {
             for(int cascade=0;cascade<2;++cascade) {
             auto const cascade_begin=the_config->profile_renderer
                 ?profile_clock::now():profile_clock::time_point{};
@@ -5605,6 +6426,10 @@ namespace jkgm {
             if(!fit_sun_shadow_to_camera(view,camera.position,camera.right,
                     camera.up,camera.forward,horizontal,vertical,distance)) {
                 sun_failure("camera-local cascade projection invalid");
+                if(sun_gpu_timing) {
+                    sun_gpu_queries.timestamp(size_t(cascade)+1U,true);
+                    sun_gpu_queries.timestamp(size_t(cascade)+1U,false);
+                }
                 continue;
             }
             // Reuse an already rendered projection whenever the ACTUAL
@@ -5634,12 +6459,69 @@ namespace jkgm {
                     locked_view=true;
                 }
             }
+            unsigned const cascade_resolution=cascade==0
+                ?map.resolution:map.far_resolution;
             if(!locked_view &&
-               !stabilize_sun_shadow_projection(view,map.resolution)) {
+               !stabilize_sun_shadow_projection(view,cascade_resolution)) {
                 sun_failure("camera-local cascade stabilization failed");
+                if(sun_gpu_timing) {
+                    sun_gpu_queries.timestamp(size_t(cascade)+1U,true);
+                    sun_gpu_queries.timestamp(size_t(cascade)+1U,false);
+                }
                 continue;
             }
 
+            if(the_config->experimental_sun_sky_aperture &&
+               sun_sky_aperture_hardware_supported())
+                draw_sun_sky_aperture(cascade,view,safe_read);
+            // Phase 2 experimental fast sky-first WORLD depth selector.
+            // The depth filter and dynamic/static 3DOs are unchanged.
+            sun_sky_caster_fast_mask sky_prune_mask{};
+            bool sky_prune_ready=false;
+            uint64_t sky_prune_build_us=0;
+            size_t sky_pruned_world=0,sky_tested_world=0;
+            if(the_config->experimental_sun_sky_caster_pruning &&
+               the_config->experimental_sun_sky_aperture &&
+               sun_level_sky_known &&
+               sun_sky_aperture_target &&
+               sun_sky_aperture_target->loaded_world==world &&
+               sun_sky_aperture_target->valid[0] &&
+               sun_sky_aperture_target->valid[1] &&
+               cascade_resolution>=256U) {
+                auto const build_begin=profile_clock::now();
+                sky_prune_mask.reset(view);
+                unsigned eligible_in_snapshot=0;
+                uint64_t snapshot_identity=14695981039346656037ULL;
+                auto const &gate=*sun_sky_aperture_target;
+                for(auto const &face:gate.world.receivers) {
+                    uintptr_t const addr=gate.world.surfaces_addr+
+                        uintptr_t(face.surface_index)*0x5cU;
+                    uint32_t flags=0,adjoin=0;
+                    if(!safe_read(addr+0x10U,&flags,4U) ||
+                       !safe_read(addr+0x0cU,&adjoin,4U)) {
+                        sky_prune_mask.mark_all();
+                        break;
+                    }
+                    if(!sun_sky_surface_eligible(flags,adjoin))continue;
+                    ++eligible_in_snapshot;
+                    snapshot_identity^=uint64_t(face.surface_index);
+                    snapshot_identity*=1099511628211ULL;
+                    sky_prune_mask.include_polygon(face.polygon);
+                }
+                // Snapshot/read mismatch is never grounds for culling.
+                if(eligible_in_snapshot!=sun_level_sky_faces ||
+                   snapshot_identity!=sun_level_sky_identity)
+                    sky_prune_mask.mark_all();
+                sky_prune_ready=sky_prune_mask.valid &&
+                    !sky_prune_mask.fail_open;
+                sky_prune_build_us=elapsed_profile_us(
+                    build_begin,profile_clock::now());
+            }
+            if(the_config->profile_renderer)
+                sun_profile_projection_us[cascade]+=elapsed_profile_us(
+                    cascade_begin,profile_clock::now());
+            auto const world_query_begin=the_config->profile_renderer
+                ?profile_clock::now():profile_clock::time_point{};
             // Query the complete orthographic box. The spotlight helper's
             // perspective pyramid bounds do not cover a directional map.
             map.selected.clear();
@@ -5651,6 +6533,11 @@ namespace jkgm {
             for(uint32_t id:selected_surfaces)
                 if(id<map.mesh.surfaces.size() && map.mesh.surfaces[id].count>0U)
                     map.selected.push_back(map.mesh.surfaces[id]);
+            if(the_config->profile_renderer)
+                sun_profile_world_query_us[cascade]+=elapsed_profile_us(
+                    world_query_begin,profile_clock::now());
+            auto const world_filter_begin=the_config->profile_renderer
+                ?profile_clock::now():profile_clock::time_point{};
             std::vector<GLsizei> counts;
             std::vector<void const *> offsets;
             struct sun_world_cutout {
@@ -5670,6 +6557,13 @@ namespace jkgm {
                 uint32_t bits=0;std::memcpy(&bits,&v,sizeof(bits));hash_u32(bits);
             };
             for(float v:direction)hash_float(v);
+            // Cache signatures MUST change with the active sky mask.
+            hash_u32(sky_prune_ready?1U:0U);
+            if(sky_prune_ready) {
+                uint64_t const key=sky_prune_mask.signature();
+                hash_u32(uint32_t(key));
+                hash_u32(uint32_t(key>>32));
+            }
             // Read live geomodes and MAT coverage each frame. COG changes to
             // a surface therefore invalidate the cached depth image.
             //
@@ -5704,6 +6598,13 @@ namespace jkgm {
                 if(geomode<2U || !decal_finite(surface.normal)) {
                     ++world_hidden;
                     continue;
+                }
+                if(sky_prune_ready) {
+                    ++sky_tested_world;
+                    if(!sky_prune_mask.may_overlap(surface.polygon)) {
+                        ++sky_pruned_world;
+                        continue;
+                    }
                 }
                 gpu_3do_group group{};group.material=surface.material;
                 group.cel=surface.cel;
@@ -5741,6 +6642,20 @@ namespace jkgm {
                 hash_float(get<y>(draw.texture.albedo_scroll));
                 hash_float(draw.texture.albedo_transition);
             }
+            if(the_config->experimental_sun_sky_caster_pruning &&
+               gpu_3do_present_serial%120U==0U) {
+                LOG_INFO("SUN sky-prune cascade=",cascade,
+                    " active=",sky_prune_ready?1:0,
+                    " tested=",sky_tested_world,
+                    " pruned=",sky_pruned_world,
+                    " coverage_tiles=",sky_prune_mask.occupied_tiles(),
+                    "/16384 build_cpu_us=",sky_prune_build_us,
+                    " fail_open=",sky_prune_mask.fail_open?1:0,
+                    " culling_applied=",sky_prune_ready?1:0);
+            }
+            if(the_config->profile_renderer)
+                sun_profile_world_filter_us[cascade]+=elapsed_profile_us(
+                    world_filter_begin,profile_clock::now());
             // Keep the stable world state and add stationary 3DOs, but
             // NEVER include moving/unknown Thing geometry in this key.
             uint64_t static_signature=caster_signature;
@@ -5752,11 +6667,6 @@ namespace jkgm {
             // Keep group count so identical duplicate groups are preserved.
             uint64_t all_sum=0,all_sum_sq=0,static_sum=0,static_sum_sq=0;
             uint64_t all_count=0,static_count=0;
-            auto mix_model_signature=[](uint64_t h) {
-                h^=h>>30;h*=0xbf58476d1ce4e5b9ULL;
-                h^=h>>27;h*=0x94d049bb133111ebULL;
-                return h^(h>>31);
-            };
             auto append_model_set=[&](uint64_t &signature,uint64_t count,
                                       uint64_t sum,uint64_t squared) {
                 auto append=[&](uint32_t v) {
@@ -5782,6 +6692,8 @@ namespace jkgm {
             size_t dynamic_far_skipped=0,dynamic_near_distance_skipped=0;
             float const dynamic_near_depth=std::max(0.0f,
                 the_config->sun_shadow_near_distance);
+            auto const model_scan_begin=the_config->profile_renderer
+                ?profile_clock::now():profile_clock::time_point{};
             for(auto const &prepared:model_candidates) {
                 auto const &instance=*prepared.instance;
                 auto const &group=*prepared.group;
@@ -5813,54 +6725,23 @@ namespace jkgm {
                     prepared.bounds.low,prepared.bounds.high,
                     bounds.low,bounds.high);
                 if(!in_cascade)continue;
-                auto const &tex=sun_caster_material(group,instance);
-                // The sprite's texture alpha is a cutout mask even if
-                // its MAT was not explicitly marked alpha/masked.
-                bool const cutout=tex.masked||tex.alpha||tex.dithered||
-                    (instance.is_sprite_quad && tex.albedo_source==1);
-                if(!sun_shadow_material_casts_depth(
-                       tex.albedo_source,tex.special,tex.emissive_only,
-                       tex.opacity,cutout))continue;
-                // Verified non-moving SithThings may join the cached static
-                // layer. An unknown owner stays dynamic (conservative), and
-                // even a path/physics Thing parked in place remains dynamic.
+                // Eligibility and material values were evaluated once
+                // before the shared shadow projection was fitted.
+                auto const &tex=*prepared.texture;
+                bool const cutout=prepared.cutout;
+                if(the_config->profile_renderer)
+                    ++sun_profile_prepared_reuses[cascade];
+                // Verified currently stationary SithThings may join the
+                // cached static layer. Unknown owners remain dynamic.
+                // Movement type alone is not decisive: a parked Thing can
+                // become static until motion or animation is observed again.
                 bool const stable=sun_shadow_cache_stationary_model(
                     instance.shadow_owner,instance.dynamic_sun_caster,
                     true,map.static_complete);
-                auto hash_model=[&](auto &&integer,auto &&floating) {
-                    integer(uint32_t(instance.id));
-                    integer(uint32_t(instance.id>>32));
-                    integer(group.offset);integer(group.count);
-                    integer(uint32_t(instance.shadow_owner));
-                    integer(uint32_t(instance.shadow_owner>>32));
-                    integer(uint32_t(group.material));
-                    integer(uint32_t(group.cel));
-                    if(cutout) {
-                        floating(tex.alpha_cutoff);floating(tex.opacity);
-                        floating(get<x>(tex.albedo_scroll));
-                        floating(get<y>(tex.albedo_scroll));
-                        floating(tex.albedo_transition);
-                    }
-                    for(float v:instance.transform)floating(v);
-                };
-
-                if(!in_cascade)continue;
                 (stable?static_models:models).push_back(
                     {&instance,&group,tex,cutout,prepared.bounds});
-                uint64_t member=14695981039346656037ULL;
-                auto member_u32=[&](uint32_t v) {
-                    for(int b=0;b<4;++b) {
-                        member^=uint64_t((v>>(b*8))&255U);
-                        member*=1099511628211ULL;
-                    }
-                };
-                auto member_float=[&](float v) {
-                    uint32_t bits=0;
-                    std::memcpy(&bits,&v,sizeof(bits));
-                    member_u32(bits);
-                };
-                hash_model(member_u32,member_float);
-                member=mix_model_signature(member);
+
+                uint64_t const member=prepared.signature;
                 all_sum+=member;
                 all_sum_sq+=member*member;
                 ++all_count;
@@ -5873,6 +6754,9 @@ namespace jkgm {
             append_model_set(caster_signature,all_count,all_sum,all_sum_sq);
             append_model_set(static_signature,static_count,static_sum,
                              static_sum_sq);
+            if(the_config->profile_renderer)
+                sun_profile_model_scan_us[cascade]+=elapsed_profile_us(
+                    model_scan_begin,profile_clock::now());
             if(the_config->profile_renderer_verbose &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN shadow caster batches world=",
@@ -5884,7 +6768,7 @@ namespace jkgm {
                              dynamic_near_distance_skipped,
                          " skybox_skipped=",skipped_skybox_instances,
                          " cascade=",cascade,
-                         " map=",map.resolution,
+                         " map=",cascade==0?map.resolution:map.far_resolution,
                          " selected_world=",map.selected.size(),
                          " hidden_world=",world_hidden,
                          " backfacing_world=",world_backfacing,
@@ -5939,6 +6823,8 @@ namespace jkgm {
                     }
                 note_projection_miss(p,previous_view);
             };
+            auto const cache_check_begin=the_config->profile_renderer
+                ?profile_clock::now():profile_clock::time_point{};
             bool unchanged=sun_shadow_cascade_cached[cascade] &&
                 sun_shadow_worlds[cascade]==world &&
                 sun_shadow_revisions[cascade]==map.revision &&
@@ -5949,7 +6835,16 @@ namespace jkgm {
                 sun_shadow_same_projection(view,sun_shadow_views[cascade]);
             for(int i=0;i<3 && unchanged;++i)
                 unchanged=std::fabs(direction[i]-sun_shadow_directions[cascade][i])<1.0e-5f;
+            if(the_config->profile_renderer)
+                sun_profile_cache_check_us[cascade]+=elapsed_profile_us(
+                    cache_check_begin,profile_clock::now());
             if(unchanged) {
+                if(the_config->experimental_sun_shadow_vsm &&
+                   sun_moments_target &&
+                   !sun_moments_target->valid[cascade])
+                    regenerate_sun_shadow_moments(cascade,cascade==0
+                        ?gl::texture_view(map.depth)
+                        :gl::texture_view(map.far_depth));
                 if(the_config->profile_renderer) {
                     ++sun_profile_full_hits[cascade];
                     sun_profile_prepare_us[cascade]+=elapsed_profile_us(
@@ -5959,6 +6854,10 @@ namespace jkgm {
                 if(the_config->profile_renderer_verbose &&
                    gpu_3do_present_serial%120U==0U)
                     LOG_INFO("SUN cascade=",cascade," full_cache_hit=1");
+                if(sun_gpu_timing) {
+                    sun_gpu_queries.timestamp(size_t(cascade)+1U,true);
+                    sun_gpu_queries.timestamp(size_t(cascade)+1U,false);
+                }
                 continue;
             }
             if(the_config->profile_renderer) {
@@ -5974,6 +6873,8 @@ namespace jkgm {
             }
             // Reusing a depth texture requires the exact same stabilized
             // light projection, not merely the same sun and static casters.
+            auto const static_check_begin=the_config->profile_renderer
+                ?profile_clock::now():profile_clock::time_point{};
             bool static_same=map.static_complete &&
                 sun_shadow_static_cached[cascade] &&
                 sun_shadow_static_worlds[cascade]==world &&
@@ -5985,6 +6886,8 @@ namespace jkgm {
                 static_same=std::fabs(direction[i]-
                     sun_shadow_static_directions[cascade][i])<1.0e-5f;
             if(the_config->profile_renderer) {
+                sun_profile_cache_check_us[cascade]+=elapsed_profile_us(
+                    static_check_begin,profile_clock::now());
                 ++sun_profile_working_redraws[cascade];
                 sun_profile_prepare_us[cascade]+=elapsed_profile_us(
                     cascade_begin,profile_clock::now());
@@ -6003,9 +6906,12 @@ namespace jkgm {
                        sun_shadow_static_cached[cascade])++miss.cold;
                 }
             }
+            if(sun_gpu_timing)
+                sun_gpu_queries.timestamp(size_t(cascade)+1U,true);
             auto const &cascade_target=cascade==0 ? map.fbo : map.far_fbo;
             auto const &static_target=cascade==0 ? map.static_fbo : map.static_far_fbo;
-            auto const dimensions=make_size(int(map.resolution),int(map.resolution));
+            auto const dimensions=make_size(
+                int(cascade_resolution),int(cascade_resolution));
             gl::set_viewport(make_box(make_point(0,0),dimensions));
             gl::disable(gl::capability::blend);
             gl::disable(gl::capability::cull_face);
@@ -6313,8 +7219,14 @@ namespace jkgm {
             glDisable(GL_POLYGON_OFFSET_FILL);
             gl::disable(gl::capability::cull_face);
             gl::set_face_cull_mode(gl::face_mode::back);
+            if(the_config->experimental_sun_shadow_vsm)
+                regenerate_sun_shadow_moments(cascade,cascade==0
+                    ?gl::texture_view(map.depth)
+                    :gl::texture_view(map.far_depth));
             gl::set_active_texture_unit(0);
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+            if(sun_gpu_timing)
+                sun_gpu_queries.timestamp(size_t(cascade)+1U,false);
             if(the_config->profile_renderer_verbose &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN cascade=",cascade,
@@ -6332,10 +7244,50 @@ namespace jkgm {
             sun_shadow_caster_signatures[cascade]=caster_signature;
             sun_shadow_cascade_ready[cascade]=true;
             } // cascade
+            } else {
+                // Depth textures and their matching projection matrices are
+                // retained. Do not skip the dynamic atlas above.
+                sun_shadow_cascade_ready={{true,true}};
+                if(sun_gpu_timing) {
+                    for(size_t cascade=1;cascade<=2;++cascade) {
+                        sun_gpu_queries.timestamp(cascade,true);
+                        sun_gpu_queries.timestamp(cascade,false);
+                    }
+                }
+            }
+            if(sun_gpu_timing)sun_gpu_queries.end();
             sun_shadow_ready=sun_shadow_cascade_ready[0] &&
                              sun_shadow_cascade_ready[1];
+            if(the_config->experimental_sun_shadow_vsm)
+                sun_shadow_ready=sun_shadow_ready && sun_moments_target &&
+                    sun_moments_target->complete &&
+                    sun_moments_target->valid[0] &&
+                    sun_moments_target->valid[1];
             if(!sun_shadow_ready && !sun_shadow_frame_failure)
                 sun_shadow_frame_failure="one or both cascades incomplete";
+            if(!skip_cascade_validation) {
+                // Do not establish a new throttle window after a failed or
+                // incomplete validation; retry on the next frame instead.
+                sun_shadow_validated_world_view_ready=sun_shadow_ready;
+                if(sun_shadow_ready) {
+                    sun_shadow_validated_world_view=world_view;
+                    sun_shadow_last_validation=validation_now;
+                }
+            }
+            if(the_config->profile_renderer) {
+                auto const pass_us=elapsed_profile_us(
+                    sun_pass_started,profile_clock::now());
+                if(skip_cascade_validation) {
+                    sun_profile_skipped_pass_us+=pass_us;
+                    sun_profile_skipped_pass_peak_us=std::max(
+                        sun_profile_skipped_pass_peak_us,pass_us);
+                } else {
+                    ++sun_profile_checked_pass_count;
+                    sun_profile_checked_pass_us+=pass_us;
+                    sun_profile_checked_pass_peak_us=std::max(
+                        sun_profile_checked_pass_peak_us,pass_us);
+                }
+            }
             if(the_config->profile_renderer_verbose &&
                gpu_3do_present_serial%120U==0U) {
                 LOG_INFO("SUN cache 120-frame-window near(full/static_hit/static_redraw/composite_redraw)=",
@@ -6349,6 +7301,29 @@ namespace jkgm {
                     sun_profile_static_redraws[1],"/",
                     sun_profile_working_redraws[1],
                     " NOTE=full_hits_skip_all_shadow_draws; static_hits_still_blit_static_and_render_movers");
+                LOG_INFO("SUN cascade validation throttle interval_s=",
+                    std::to_string(interval),
+                    " skipped_frames=",sun_profile_throttle_skipped,
+                    " checked_frames=",sun_profile_throttle_checked,
+                    " forced_early_checks=",sun_profile_throttle_forced_early,
+                    " NOTE=dynamic_atlas_updated_each_frame");
+                LOG_INFO("SUN validation early reasons timer_due=",
+                    sun_profile_throttle_due_timer,
+                    " no_validated_map=",sun_profile_forced_unready,
+                    " world_or_cache_invalid=",sun_profile_forced_world,
+                    " sun_direction=",sun_profile_forced_sun,
+                    " near_camera_coverage=",sun_profile_forced_coverage[0],
+                    " far_camera_coverage=",sun_profile_forced_coverage[1],
+                    " NOTE=both_cascades_may_fail_in_one_frame");
+                LOG_INFO("SUN validation frame CPU checked_us_avg/peak=",
+                    sun_profile_checked_pass_us/
+                        std::max<uint64_t>(1,sun_profile_checked_pass_count),
+                    "/",sun_profile_checked_pass_peak_us,
+                    " skipped_us_avg/peak=",
+                    sun_profile_skipped_pass_us/
+                        std::max<uint64_t>(1,sun_profile_throttle_skipped),
+                    "/",sun_profile_skipped_pass_peak_us,
+                    " NOTE=includes_dynamic_atlas_CPU_not_GPU");
                 // Orthogonal miss reasons: totals can exceed the miss count.
                 // No implicit GPU synchronization; these timings are CPU
                 // planning/GL submission only, not GPU rasterization costs.
@@ -6371,12 +7346,15 @@ namespace jkgm {
                     };
                     log_misses("full",sun_profile_full_misses[c]);
                     log_misses("static",sun_profile_static_misses[c]);
-                    auto const frames=sun_profile_full_hits[c]+
+                    auto const checks=sun_profile_full_hits[c]+
                         sun_profile_working_redraws[c];
+                    auto const frames=checks+sun_profile_throttle_skipped;
                     LOG_INFO("SUN cache CPU cascade=",c,
                         " preparation_us_total=",sun_profile_prepare_us[c],
                         " preparation_us_per_frame=",
                             sun_profile_prepare_us[c]/std::max<uint64_t>(1,frames),
+                        " preparation_us_per_check=",
+                            sun_profile_prepare_us[c]/std::max<uint64_t>(1,checks),
                         " static_submit_us_total=",sun_profile_static_submit_us[c],
                         " static_groups_submitted=",sun_profile_static_submitted[c],
                         " static_GL_calls=",sun_profile_static_gl_calls[c],
@@ -6390,9 +7368,29 @@ namespace jkgm {
                         " moving_instanced_calls=",sun_profile_moving_instanced_calls[c],
                         " moving_instanced_ranges=",sun_profile_moving_instanced_ranges[c],
                         " NOTE=CPU_only_no_GPU_wait");
+                    LOG_INFO("SUN prepare CPU cascade=",c,
+                        " projection_us_total=",sun_profile_projection_us[c],
+                        " world_query_us_total=",sun_profile_world_query_us[c],
+                        " world_filter_us_total=",sun_profile_world_filter_us[c],
+                        " model_scan_us_total=",sun_profile_model_scan_us[c],
+                        " cache_check_us_total=",sun_profile_cache_check_us[c],
+                        " prepared_reuses=",sun_profile_prepared_reuses[c],
+                        " NOTE=prepared_candidate_material_and_hash_reused");
                     sun_profile_full_misses[c]={};
                     sun_profile_static_misses[c]={};
                 }
+                LOG_INFO("SUN static group geometry cache bounds_reused=",
+                    sun_profile_static_bounds_reused,
+                    " bounds_calculated=",sun_profile_static_bounds_calculated,
+                    " opaque_hash_reused=",sun_profile_static_signature_reused,
+                    " cutout_hash_reused=",sun_profile_cutout_hash_reused,
+                    " cutout_hash_calculated=",sun_profile_cutout_hash_calculated,
+                    " cutout_material_invalidations=",
+                        sun_profile_cutout_material_invalidations,
+                    " group_invalidations=",sun_profile_static_group_invalidations,
+                    " instance_invalidations=",sun_profile_static_instance_invalidations,
+                    " hashes_calculated=",sun_profile_static_signature_calculated,
+                    " NOTE=live_materials_still_resolved_each_check");
                 LOG_INFO("SUN cache global CPU candidate_bounds_us_total=",
                     sun_profile_candidate_us,
                     " candidate_groups_total=",sun_profile_candidate_groups,
@@ -6402,7 +7400,59 @@ namespace jkgm {
                     " dynamic_atlas_material_misses=",
                         sun_profile_atlas_mat_misses,
                     " NOTE=CPU_only_no_GPU_wait");
+                LOG_INFO("SUN prepare CPU candidate samples material_ns=",
+                    sun_profile_candidate_material_sample_ns,
+                    " material_samples=",sun_profile_candidate_material_samples,
+                    " bounds_ns=",sun_profile_candidate_bounds_sample_ns,
+                    " bounds_samples=",sun_profile_candidate_bounds_samples,
+                    " signature_ns=",sun_profile_candidate_signature_sample_ns,
+                    " signature_samples=",sun_profile_candidate_signature_samples,
+                    " NOTE=each_candidate_prepared_once_samples_one_in_64_not_total");
+                LOG_INFO("SUN GPU avg_us atlas=",
+                    sun_gpu_samples?(sun_gpu_ns[0]/1000U)/sun_gpu_samples:0U,
+                    " near=",sun_gpu_samples?(sun_gpu_ns[1]/1000U)/sun_gpu_samples:0U,
+                    " far=",sun_gpu_samples?(sun_gpu_ns[2]/1000U)/sun_gpu_samples:0U,
+                    " samples=",sun_gpu_samples,
+                    " ring_busy_skips=",sun_gpu_skipped,
+                    " supported=",sun_gpu_queries.is_supported(),
+                    " NOTE=delayed_nonblocking_timestamps_cascade_zero_if_cached");
+                sun_profile_throttle_skipped=0;
+                sun_profile_throttle_checked=0;
+                sun_profile_throttle_forced_early=0;
+                sun_profile_throttle_due_timer=0;
+                sun_profile_forced_unready=0;
+                sun_profile_forced_world=0;
+                sun_profile_forced_sun=0;
+                sun_profile_forced_coverage.fill(0);
+                sun_profile_checked_pass_us=0;
+                sun_profile_checked_pass_count=0;
+                sun_profile_skipped_pass_us=0;
+                sun_profile_checked_pass_peak_us=0;
+                sun_profile_skipped_pass_peak_us=0;
                 sun_profile_prepare_us.fill(0);
+                sun_profile_projection_us.fill(0);
+                sun_profile_world_query_us.fill(0);
+                sun_profile_world_filter_us.fill(0);
+                sun_profile_model_scan_us.fill(0);
+                sun_profile_cache_check_us.fill(0);
+                sun_profile_prepared_reuses.fill(0);
+                sun_profile_candidate_material_sample_ns=0;
+                sun_profile_candidate_bounds_sample_ns=0;
+                sun_profile_candidate_signature_sample_ns=0;
+                sun_profile_candidate_material_samples=0;
+                sun_profile_candidate_bounds_samples=0;
+                sun_profile_candidate_signature_samples=0;
+                sun_profile_static_bounds_reused=0;
+                sun_profile_static_signature_reused=0;
+                sun_profile_static_bounds_calculated=0;
+                sun_profile_static_signature_calculated=0;
+                sun_profile_cutout_hash_reused=0;
+                sun_profile_cutout_hash_calculated=0;
+                sun_profile_cutout_material_invalidations=0;
+                sun_profile_static_group_invalidations=0;
+                sun_profile_static_instance_invalidations=0;
+                sun_gpu_ns.fill(0);
+                sun_gpu_samples=sun_gpu_skipped=0;
                 sun_profile_static_submit_us.fill(0);
                 sun_profile_moving_submit_us.fill(0);
                 sun_profile_static_submitted.fill(0);
@@ -6464,6 +7514,22 @@ namespace jkgm {
             prog.set_retain_hom_pixels(the_config->retain_hom_pixels);
             prog.set_sun_shadow_receiver_bias_scale(
                 the_config->sun_shadow_receiver_bias_scale);
+            prog.set_sun_shadow_pcf_radius(
+                the_config->sun_shadow_near_pcf_radius,
+                the_config->sun_shadow_far_pcf_radius);
+            prog.set_sun_vsm_params(
+                the_config->sun_shadow_vsm_min_stddev_world,
+                the_config->sun_shadow_vsm_bleed_reduction);
+            // Keep raw VSM depth comparisons independently of the removed
+            // debug views; units 17/18 remain reserved for this guard.
+            bool const vsm_depth_guard=sun_sky_aperture_hardware_supported() &&
+                the_config->experimental_sun_shadow_vsm &&
+                the_config->experimental_sun_vsm_depth_guard &&
+                sun_shadow_ready && bool(sun_shadow_target);
+            prog.set_sun_vsm_depth_guard(vsm_depth_guard);
+            prog.set_sun_sky_aperture(false,
+                texture_units::opaque_sky_aperture,
+                make_point(1.0f,0.0f,1.0f,0.0f));
             prog.set_sun_max_distance(the_config->sun_max_distance);
             prog.set_spotlight_shadow(-1,0.0f,0.0f,
                 the_config->spotlight_shadow_angle_bias_scale);
@@ -6476,6 +7542,7 @@ namespace jkgm {
             auto const sun=get_sun_settings();
             float const sun_power=sun.intensity.value()[0];
             bool const sun_lit=the_config->enable_sun &&
+                sun_level_has_sky &&
                 std::isfinite(sun_power) && sun_power>0.0f;
             auto const cam=read_active_render_camera();
             if((the_config->enable_sun || the_config->enable_sun_shadows) &&
@@ -6555,6 +7622,17 @@ namespace jkgm {
                         make_point(sun_shadow_views[0].up[0],sun_shadow_views[0].up[1],sun_shadow_views[0].up[2]),
                         make_point(sun_shadow_views[0].forward[0],sun_shadow_views[0].forward[1],sun_shadow_views[0].forward[2]),
                         make_point(sun_shadow_views[0].width,sun_shadow_views[0].height,sun_shadow_views[0].range));
+                    bool const sky_aperture=shadows &&
+                        sun_sky_aperture_ready();
+                    if(sky_aperture) {
+                        prog.set_sun_sky_aperture(
+                            true,texture_units::opaque_sky_aperture,
+                            sun_sky_aperture_depth_transform());
+                        gl::set_active_texture_unit(
+                            texture_units::opaque_sky_aperture);
+                        glBindTexture(GL_TEXTURE_2D_ARRAY,
+                                      sun_sky_aperture_target->depth.value());
+                    }
                     if(shadows) {
                         auto const &far_view=sun_shadow_views[1];
                         prog.set_sun_shadow_far(
@@ -6566,10 +7644,24 @@ namespace jkgm {
                             the_config->sun_shadow_near_distance);
                         gl::set_active_texture_unit(13);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                         sun_shadow_target->depth);
+                            the_config->experimental_sun_shadow_vsm
+                                ?gl::texture_view(sun_moments_target->filtered[0])
+                                :gl::texture_view(sun_shadow_target->depth));
                         gl::set_active_texture_unit(14);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                         sun_shadow_target->far_depth);
+                            the_config->experimental_sun_shadow_vsm
+                                ?gl::texture_view(sun_moments_target->filtered[1])
+                                :gl::texture_view(sun_shadow_target->far_depth));
+                        // The VSM depth guard still samples raw maps on
+                        // compositor units 17/18 when enabled.
+                        if(vsm_depth_guard) {
+                            gl::set_active_texture_unit(17);
+                            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                             sun_shadow_target->depth);
+                            gl::set_active_texture_unit(18);
+                            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                             sun_shadow_target->far_depth);
+                        }
                     }
                     if(the_config->enable_sun_dynamic_shadows &&
                        sun_dynamic_target && !sun_dynamic_views.empty()) {
@@ -6870,7 +7962,7 @@ namespace jkgm {
             // material's own strength, roughness, metalness and normal maps.
             auto const sun=get_sun_settings();
             bool const direct_sun=the_config->enable_sun &&
-                sun.intensity.value()[0]>0.0f;
+                sun_level_has_sky && sun.intensity.value()[0]>0.0f;
             bool const direct_points=the_config->enable_dynamic_light_specular;
             bool const default_eligible=(geometry_mode==3U ||
                                           geometry_mode==4U) &&
@@ -7025,29 +8117,87 @@ namespace jkgm {
             if(!safe_read(0x0073A414U,&identity_cmp,sizeof(identity_cmp)) ||
                !decal_native_address_ok(identity_cmp))
                 identity_cmp=0;
-            size_t light_fallback=0,gouraud_faces=0;
+            size_t light_fallback=0,gouraud_faces=0,mode4_faces=0;
+            size_t light_read_rejected=0,uv_prepare_rejected=0;
+            size_t stage_rejections_logged=0;
+            std::map<std::string,size_t> sampled_stage_reasons;
+            // Inspect a bounded number of exact failures on the regular
+            // profiling cadence, not every native surface each frame.
+            auto log_stage_rejection=[&](
+                world_cache_draw_candidate const &candidate,
+                char const *stage,char const *reason,
+                world_cache_light_sample const &info) {
+                if(!the_config->profile_renderer ||
+                   gpu_3do_present_serial%120U!=0U)return;
+                // Count every reason in a sampled frame, even when the
+                // per-surface detail limit has already been reached.
+                ++sampled_stage_reasons[std::string(stage)+"/"+
+                    (reason?reason:"unspecified")];
+                if(stage_rejections_logged>=12U)return;
+                ++stage_rejections_logged;
+                uint32_t sector=0,mode=0,indices=0,static_lights=0;
+                uintptr_t const base=cache.world.surfaces_addr+
+                    uintptr_t(candidate.surface_index)*0x5cU;
+                safe_read(base+0x08U,&sector,sizeof(sector));
+                safe_read(base+0x20U,&mode,sizeof(mode));
+                safe_read(base+0x2cU,&indices,sizeof(indices));
+                safe_read(base+0x54U,&static_lights,sizeof(static_lights));
+                // Raw samples aid MotS-style mono/RGB investigation without
+                // assuming the native JKGM loader stores interleaved RGB.
+                std::array<float,4> static_sample{};
+                bool const static_sample_readable=static_lights!=0U &&
+                    safe_read(uintptr_t(static_lights),
+                              static_sample.data(),sizeof(static_sample));
+                LOG_INFO("WORLD CACHE staging reject world=",cache.loaded_world,
+                         " surface=",candidate.surface_index,
+                         " stage=",stage,
+                         " reason=",reason?reason:"unspecified",
+                         " geo=",candidate.geometry_mode,
+                         " mode=",mode," sampled_mode=",info.mode,
+                         " sector=",sector,
+                         " vertex_indices_ptr=",indices,
+                         " static_light_ptr=",static_lights,
+                         " static_sample_readable=",static_sample_readable?1:0,
+                         " static_sample=",static_sample[0],",",
+                                           static_sample[1],",",
+                                           static_sample[2],",",
+                                           static_sample[3],
+                         " native_vertex_count=",cache.world.vertex_count,
+                         " dynamic_lights=",cache.native_dynamic_light.size(),
+                         " pixel_lighting=",pixel_lighting?1:0,
+                         " first_index=",candidate.first_index,
+                         " indices=",candidate.count,
+                         " mat_ptr=",candidate.material,
+                         " cel=",candidate.cel);
+            };
             auto stage_candidate=[&](world_cache_draw_candidate const &candidate) {
                 world_cache_light_sample info{};
+                char const *failure=nullptr;
                 if(!sample_world_cache_surface_light(
                        safe_read,cache.world.surfaces_addr,cache.mesh,
                        candidate,cache.world.vertex_count,
                        cache.native_dynamic_light,cache.frame_light_rgb,
                        &info,&cache.frame_light_state,
                        pixel_lighting,global_extra,&cache.frame_sector_tint,
-                       &cache.frame_sector_cmp_tint,identity_cmp,
+                       &cache.frame_sector_cmp_tint,identity_cmp,&failure,
                        the_config->enable_baked_overbright)) {
                     ++light_fallback;
+                    ++light_read_rejected;
+                    log_stage_rejection(candidate,"lighting",failure,info);
                     return;
                 }
                 // Native JK has already advanced SlideSurface UV offsets.
                 // The GPU mesh retains its immutable authored coordinates.
                 if(!write_world_cache_uv_animation(
                        cache.mesh,cache.cached_surface_lookup,
-                       candidate,cache.frame_uv_offset)) {
+                       candidate,cache.frame_uv_offset,&failure)) {
                     ++light_fallback;
+                    ++uv_prepare_rejected;
+                    log_stage_rejection(candidate,"uv_animation",failure,info);
                     return;
                 }
                 if(info.mode==3U)++gouraud_faces;
+                if(info.authored_mode==4U)++mode4_faces;
                 ordered.push_back(&candidate);
                 cache.frame_render_candidates.push_back(candidate);
             };
@@ -7058,7 +8208,22 @@ namespace jkgm {
             // They are submitted only in the later forward-alpha pass.
             for(auto const &candidate:cache.sector_special_candidates)
                 stage_candidate(candidate);
-            if(ordered.empty() && cache.sector_sky_candidates.empty())return;
+            if(ordered.empty() && cache.sector_sky_candidates.empty()) {
+                // Still report diagnostic totals if every candidate failed
+                // before the GPU pass had anything to draw.
+                if(the_config->profile_renderer &&
+                   gpu_3do_present_serial%120U==0U && light_fallback>0) {
+                    LOG_INFO("WORLD CACHE all staged draws rejected world=",
+                             cache.loaded_world,
+                             " lighting_read_rejected=",light_read_rejected,
+                             " uv_prepare_rejected=",uv_prepare_rejected);
+                    for(auto const &entry:sampled_stage_reasons)
+                        LOG_INFO("WORLD CACHE staging reject summary world=",
+                                 cache.loaded_world," reason=",entry.first,
+                                 " surfaces=",entry.second);
+                }
+                return;
+            }
             // FreeColorEffect(sector slot) disables the native request.
             // Honor that for all cached world surfaces, too, without
             // touching their authored/COG SithSector.tint values.
@@ -7392,7 +8557,14 @@ namespace jkgm {
                          " unresolved_material=",unresolved,
                          " deferred_special=",skipped_alpha,
                          " light_fallback=",light_fallback,
-                         " gouraud_faces=",gouraud_faces);
+                         " lighting_read_rejected=",light_read_rejected,
+                         " uv_prepare_rejected=",uv_prepare_rejected,
+                         " gouraud_faces=",gouraud_faces,
+                         " mode4_gouraud_faces=",mode4_faces);
+                for(auto const &entry:sampled_stage_reasons)
+                    LOG_INFO("WORLD CACHE staging reject summary world=",
+                             cache.loaded_world," reason=",entry.first,
+                             " surfaces=",entry.second);
                 LOG_INFO("WORLD CACHE material_effects_opaque visible=",mat_probe_faces,
                          " reflective=",mat_probe_reflective,
                          " env_maps=",mat_probe_env,

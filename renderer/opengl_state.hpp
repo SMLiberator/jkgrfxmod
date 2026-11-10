@@ -130,9 +130,12 @@ namespace jkgm {
         // Master optional post-processing switch (color-space conversion stays active).
         bool enable_post = true;
         bool enable_blur = true;
+        int spatial_blur_mode = 2;
         bool enable_trails = true;
         bool auto_exposure_scene = false;
         bool enable_hdr = false;
+        bool experimental_fused_bloom_downsample = false;
+        bool experimental_skip_bloom_clears = false;
         float auto_exposure_sensitivity = 0.0f;
         float hdr_exposure_compensation = 0.5f;
         float hdr_shadow_softness = 0.6f;
@@ -148,6 +151,8 @@ namespace jkgm {
         shaders::game_post_ssao_shader game_post_ssao_program;
         shaders::game_post_opaque_composite_shader game_post_opaque_composite_program;
         std::unique_ptr<shaders::spotlight_shadow_depth_shader> spotlight_shadow_depth_program;
+        std::unique_ptr<shaders::sun_shadow_prefilter_shader>
+            sun_shadow_prefilter_program;
 
         shaders::game_transparency_pass_shader game_transparency_pass_program;
 
@@ -162,6 +167,10 @@ namespace jkgm {
         shaders::post_auto_exposure_shader post_auto_exposure;
         shaders::post_frame_blend_shader post_frame_blend;
         shaders::post_spatial_blur_shader post_spatial_blur;
+        // Only compiled when the experimental setting is explicitly enabled.
+        std::unique_ptr<shaders::post_spatial_blur_shader> post_spatial_blur_fast;
+        std::unique_ptr<shaders::post_spatial_blur_reconstruct_shader>
+            post_spatial_blur_reconstruct;
 
         post_model postmdl;
         overlay_model menumdl;
@@ -200,6 +209,9 @@ namespace jkgm {
         // Separable spatial blur works in linear HDR before final post processing.
         post_buffer spatial_blur_work;
         post_buffer spatial_blur_result;
+        // Allocated lazily at renderer initialization for the opt-in path.
+        std::unique_ptr<post_buffer> spatial_blur_half_work;
+        std::unique_ptr<post_buffer> spatial_blur_half_result;
 
         // Final post-processed frame is staged in screen_postbuffer1. These two
         // buffers alternate to preserve the accumulated previous output.

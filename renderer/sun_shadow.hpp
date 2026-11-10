@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <vector>
 #include <unordered_set>
@@ -15,10 +16,53 @@ namespace jkgm {
 
 // Only atlas-rendered owners leave the broad cascades. Unknown owners
 // and overflowing/unrendered Things retain their low-res shadow fallback.
+// Schedule expensive near/far caster validation in real time, never by
+// frame count. Invalid caches override the interval immediately.
+inline bool sun_shadow_cascade_validation_due(
+    double seconds_since_last_check,double interval,bool cache_usable)
+{
+    return !cache_usable || !(interval>0.0) ||
+           !std::isfinite(seconds_since_last_check) ||
+           seconds_since_last_check<0.0 ||
+           seconds_since_last_check>=interval;
+}
+
 inline bool sun_shadow_caster_in_static_cascades(
     uint64_t owner,std::unordered_set<uint64_t> const &atlas_owners)
 {
     return owner==0 || atlas_owners.find(owner)==atlas_owners.end();
+}
+
+// A geometry snapshot is immutable until its GPU mesh id changes. Reuse
+// per-group bounds and opaque signatures only when the Thing, mesh, exact
+// (including non-unit RLU) transform, and group count are all unchanged.
+// An unknown or moving Thing always takes the original calculation path.
+inline bool sun_shadow_static_geometry_reusable(
+    uint64_t owner,uint64_t id,uintptr_t geometry,
+    std::array<float,12> const &transform,size_t group_count,
+    uint64_t old_owner,uint64_t old_id,uintptr_t old_geometry,
+    std::array<float,12> const &old_transform,size_t old_group_count,
+    bool dynamic_motion)
+{
+    return owner!=0 && id!=0 && geometry!=0 && !dynamic_motion &&
+           owner==old_owner && id==old_id && geometry==old_geometry &&
+           transform==old_transform && group_count==old_group_count;
+}
+
+// The original cutout group hash includes exactly these five live floats.
+// Compare their bit patterns, not float equality: -0/+0 and NaNs must
+// follow the same invalidation semantics as hashing their raw bytes.
+inline std::array<uint32_t,5> sun_shadow_cutout_signature_inputs(
+    float alpha_cutoff,float opacity,float scroll_x,float scroll_y,
+    float transition)
+{
+    auto bits=[](float value) {
+        uint32_t out=0;
+        std::memcpy(&out,&value,sizeof(out));
+        return out;
+    };
+    return {{bits(alpha_cutoff),bits(opacity),bits(scroll_x),
+             bits(scroll_y),bits(transition)}};
 }
 
 // A stable, verified SithThing may join the cached sunlight layer. Actors

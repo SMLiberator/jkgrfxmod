@@ -1,4 +1,5 @@
 #include "shaders.hpp"
+#include "texture_units.hpp"
 #include "base/file_stream.hpp"
 #include "base/log.hpp"
 #include "base/memory_block.hpp"
@@ -17,6 +18,14 @@ jkgm::shaders::translucent_sun_uniforms::translucent_sun_uniforms(
     , color(gl::get_uniform_location(program,"translucent_sun_color"))
     , split(gl::get_uniform_location(program,"translucent_sun_split"))
     , bias_scale(gl::get_uniform_location(program,"translucent_sun_bias_scale"))
+    , pcf_radius(gl::get_uniform_location(program,"translucent_sun_pcf_radius"))
+    , vsm_params(gl::get_uniform_location(program,"translucent_sun_vsm_params"))
+    , sky_aperture_active(gl::get_uniform_location(
+        program,"translucent_sun_sky_aperture_active"))
+    , sky_aperture_map(gl::get_uniform_location(
+        program,"translucent_sun_sky_aperture_map"))
+    , sky_aperture_depth_transform(gl::get_uniform_location(
+        program,"translucent_sun_sky_aperture_depth_transform"))
     , near_depth(gl::get_uniform_location(program,"translucent_sun_near_depth"))
     , far_depth(gl::get_uniform_location(program,"translucent_sun_far_depth"))
     , dynamic_depth(gl::get_uniform_location(program,"translucent_sun_dynamic_depth"))
@@ -53,6 +62,30 @@ void jkgm::shaders::translucent_sun_uniforms::set_state(
         gl::set_uniform_integer(far_depth,17);
     }
     if(dynamic>0)gl::set_uniform_integer(dynamic_depth,18);
+}
+
+void jkgm::shaders::translucent_sun_uniforms::set_pcf_radius(
+    float near_radius,float far_radius)
+{
+    gl::set_uniform_vector(pcf_radius,make_point(near_radius,far_radius));
+}
+
+void jkgm::shaders::translucent_sun_uniforms::set_vsm_params(
+    float min_stddev_world,float bleed_reduction)
+{
+    gl::set_uniform_vector(vsm_params,
+        make_point(min_stddev_world,bleed_reduction));
+}
+
+void jkgm::shaders::translucent_sun_uniforms::set_sky_aperture(
+    bool active,int sampler,point<4,float> near_far_depth_transform)
+{
+    // The sampler must have its own unit even when the feature is off.
+    gl::set_uniform_integer(sky_aperture_map,sampler);
+    gl::set_uniform_integer(sky_aperture_active,active?1:0);
+    if(!active)return;
+    gl::set_uniform_vector(sky_aperture_depth_transform,
+                           near_far_depth_transform);
 }
 
 void jkgm::shaders::translucent_sun_uniforms::set_map(
@@ -130,11 +163,36 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
         }
 
         gl::shader compile_shader_from_file(fs::path const &filename,
-                                            gl::shader_type type)
+                                            gl::shader_type type,
+                                            bool prefiltered_sun=false)
         {
             diagnostic_context dc(filename.generic_string());
             gl::shader rv(type);
-            auto const source=load_shader_source(filename);
+            auto source=load_shader_source(filename);
+            if(prefiltered_sun && type==gl::shader_type::fragment) {
+                auto const version_end=source.find('\n');
+                if(source.compare(0,8,"#version")!=0 ||
+                   version_end==std::string::npos)
+                    report_fatal_message(
+                        "VSM shader requires a #version directive");
+                source.insert(version_end+1U,"#define JKGM_SUN_VSM 1\n");
+            }
+            // Optional array samplers require a unique forward unit (20).
+            // When the GPU exposes fewer than 21 fragment units, remove the
+            // sampler at compile-time, not merely via a runtime uniform.
+            if(type==gl::shader_type::fragment) {
+                GLint units=0;
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&units);
+                if(units>=texture_units::forward_next_extended_required_units) {
+                    auto const newline=source.find('\n');
+                    if(source.compare(0,8,"#version")!=0 ||
+                       newline==std::string::npos)
+                        report_fatal_message(
+                            "Sky aperture shader requires a #version directive");
+                    source.insert(newline+1U,
+                                  "#define JKGM_SUN_SKY_APERTURE 1\n");
+                }
+            }
             gl::shader_source(rv,make_string_span(""),make_span(source));
             gl::compile_shader(rv);
             if(!gl::get_shader_compile_status(rv)) {
@@ -149,13 +207,53 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
             return rv;
         }
 
+        // A newly linked program initializes ALL sampler uniforms to unit 0.
+        // Disabled features may keep sampler2DShadow/samplerBuffer uniforms
+        // active, so assign the registry before the very first draw, not
+        // only when a shadow or material branch becomes active.
+        void initialize_registered_samplers(std::string const &name,
+                                            gl::program_view program)
+        {
+            auto bind=[&](auto const &entries) {
+                GLint max_fragment_units=0;
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&max_fragment_units);
+                GLint previous=0;
+                glGetIntegerv(GL_CURRENT_PROGRAM,&previous);
+                // Use raw GL deliberately: gl::use_program tracks a cached
+                // current program for uniform-call deduplication. Restore
+                // the previous real GL program before returning.
+                glUseProgram(*program);
+                for(auto const &entry:entries) {
+                    GLint const location=glGetUniformLocation(
+                        *program,entry.uniform_name);
+                    if(location<0)continue; // optimized out on this variant
+                    if(entry.unit>=max_fragment_units) {
+                        LOG_WARNING("GL sampler unit unavailable in ",name,
+                                    ": ",entry.uniform_name," unit=",entry.unit,
+                                    " fragment_units=",max_fragment_units);
+                        continue;
+                    }
+                    glUniform1i(location,entry.unit);
+                }
+                glUseProgram(static_cast<GLuint>(previous));
+            };
+            if(name=="gpu_3do_preview")bind(texture_units::gpu_3do_preview);
+            else if(name=="world_cache_preview")bind(texture_units::world_cache);
+            else if(name=="game_opaque_pass")bind(texture_units::game_opaque_pass);
+            else if(name=="game_transparency_pass")bind(texture_units::game_trns_pass);
+            else if(name=="game_post_opaque_composite")
+                bind(texture_units::post_opaque_composite);
+        }
+
         void link_program_from_files(std::string const &name,
                                      gl::program_view prog,
                                      fs::path const &vx,
-                                     fs::path const &fg)
+                                     fs::path const &fg,
+                                     bool prefiltered_sun=false)
         {
-            auto vx_shader = compile_shader_from_file(vx, gl::shader_type::vertex);
-            auto fg_shader = compile_shader_from_file(fg, gl::shader_type::fragment);
+            auto vx_shader = compile_shader_from_file(vx,gl::shader_type::vertex);
+            auto fg_shader = compile_shader_from_file(
+                fg,gl::shader_type::fragment,prefiltered_sun);
 
             gl::attach_shader(prog, vx_shader);
             gl::attach_shader(prog, fg_shader);
@@ -174,15 +272,18 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                                              "\n",
                                              err_str)));
             }
+            initialize_registered_samplers(name,prog);
         }
     }
 }
 
 jkgm::opengl_shader::opengl_shader(std::string const &name,
                                    fs::path const &vertex_part,
-                                   fs::path const &fragment_part)
+                                   fs::path const &fragment_part,
+                                   bool prefiltered_sun)
 {
-    link_program_from_files(name, the_program, vertex_part, fragment_part);
+    link_program_from_files(
+        name,the_program,vertex_part,fragment_part,prefiltered_sun);
 }
 
 void jkgm::opengl_shader::use_program()
@@ -204,10 +305,10 @@ void jkgm::shaders::menu_shader::set_menu_sampler(int sampler)
 }
 
 jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
-    fs::path const &root)
+    fs::path const &root,bool prefiltered_sun)
     : opengl_shader("world_cache_preview",
                     root/"shaders/world_cache.vert",
-                    root/"shaders/world_cache.frag")
+                    root/"shaders/world_cache.frag",prefiltered_sun)
     , view_right(gl::get_uniform_location(the_program,"view_right"))
     , view_forward(gl::get_uniform_location(the_program,"view_forward"))
     , view_up(gl::get_uniform_location(the_program,"view_up"))
@@ -480,8 +581,9 @@ void jkgm::shaders::world_cache_preview_shader::set_lights(
 
 jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
                                                   fs::path const &vertex_part,
-                                                  fs::path const &fragment_part)
-    : opengl_shader(name, vertex_part, fragment_part)
+                                                  fs::path const &fragment_part,
+                                                  bool prefiltered_sun)
+    : opengl_shader(name,vertex_part,fragment_part,prefiltered_sun)
     , screen_resolution(gl::get_uniform_location(the_program, "screen_resolution"))
     , features(gl::get_uniform_location(the_program, "features"))
     , blend_mode(gl::get_uniform_location(the_program, "blend_mode"))
@@ -554,8 +656,10 @@ void jkgm::shaders::game_pass_shader::set_translucent_shadow(
 {
     gl::set_uniform_integer(translucent_shadow_slot,slot);
     gl::set_uniform_float(translucent_shadow_angle_bias_scale,angle_bias_scale);
+    // Bind its sampler type even when the light is inactive.
+    gl::set_uniform_integer(translucent_shadow_image,
+                            texture_units::forward_spotlight_shadow);
     if(slot<0)return;
-    gl::set_uniform_integer(translucent_shadow_image,10);
     gl::set_uniform_vector(translucent_shadow_near_range,
                            make_point(near_plane,far_plane));
 }
@@ -591,9 +695,10 @@ void jkgm::shaders::game_pass_shader::set_translucent_spotlight(
     gl::set_uniform_vector(translucent_spotlight_bounds[slot],bounds);
 }
 
-jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(fs::path const &root)
+jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
+    fs::path const &root,bool prefiltered_sun)
     : opengl_shader("gpu_3do_preview",root/"shaders/gpu_3do_preview.vert",
-                   root/"shaders/gpu_3do_preview.frag")
+                   root/"shaders/gpu_3do_preview.frag",prefiltered_sun)
     , view_right(gl::get_uniform_location(the_program,"view_right"))
     , view_forward(gl::get_uniform_location(the_program,"view_forward"))
     , view_up(gl::get_uniform_location(the_program,"view_up"))
@@ -734,8 +839,10 @@ void jkgm::shaders::gpu_3do_preview_shader::set_translucent_shadow(
 {
     gl::set_uniform_integer(translucent_shadow_slot,slot);
     gl::set_uniform_float(translucent_shadow_angle_bias_scale,angle_bias_scale);
+    // Bind its sampler type even when the light is inactive.
+    gl::set_uniform_integer(translucent_shadow_image,
+                            texture_units::forward_spotlight_shadow);
     if(slot<0)return;
-    gl::set_uniform_integer(translucent_shadow_image,10);
     gl::set_uniform_vector(translucent_shadow_near_range,
                            make_point(near_plane,far_plane));
 }
@@ -1052,10 +1159,12 @@ void jkgm::shaders::gpu_3do_preview_shader::set_lighting(
     }
 }
 
-jkgm::shaders::game_opaque_pass_shader::game_opaque_pass_shader(fs::path const &data_root)
+jkgm::shaders::game_opaque_pass_shader::game_opaque_pass_shader(
+    fs::path const &data_root,bool prefiltered_sun)
     : game_pass_shader("game_opaque_pass",
                        data_root / "shaders/game.vert",
-                       data_root / "shaders/game_opaque_pass.frag")
+                       data_root / "shaders/game_opaque_pass.frag",
+                       prefiltered_sun)
 {
 }
 
@@ -1367,10 +1476,11 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(
 }
 
 jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_shader(
-    fs::path const &data_root)
+    fs::path const &data_root,bool prefiltered_sun)
     : opengl_shader("game_post_opaque_composite",
                     data_root / "shaders/postprocess.vert",
-                    data_root / "shaders/post_opaque_composite.frag")
+                    data_root / "shaders/post_opaque_composite.frag",
+                    prefiltered_sun)
     , color_image(gl::get_uniform_location(the_program, "color_image"))
     , emissive_image(gl::get_uniform_location(the_program, "emissive_image"))
     , occlusion_image(gl::get_uniform_location(the_program, "occlusion_image"))
@@ -1408,6 +1518,22 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , sun_shadow_split(gl::get_uniform_location(the_program,"sun_shadow_split"))
     , sun_shadow_receiver_bias_scale(gl::get_uniform_location(
         the_program,"sun_shadow_receiver_bias_scale"))
+    , sun_shadow_pcf_radius(gl::get_uniform_location(
+        the_program,"sun_shadow_pcf_radius"))
+    , sun_vsm_params(gl::get_uniform_location(
+        the_program,"sun_vsm_params"))
+    , sun_vsm_depth_guard(gl::get_uniform_location(
+        the_program,"sun_vsm_depth_guard"))
+    , sun_shadow_raw_near(gl::get_uniform_location(
+        the_program,"sun_shadow_raw_near"))
+    , sun_shadow_raw_far(gl::get_uniform_location(
+        the_program,"sun_shadow_raw_far"))
+    , sun_sky_aperture_active(gl::get_uniform_location(
+        the_program,"sun_sky_aperture_active"))
+    , sun_sky_aperture_map(gl::get_uniform_location(
+        the_program,"sun_sky_aperture_map"))
+    , sun_sky_aperture_depth_transform(gl::get_uniform_location(
+        the_program,"sun_sky_aperture_depth_transform"))
     , sun_max_distance(gl::get_uniform_location(the_program,"sun_max_distance"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
@@ -1511,8 +1637,8 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight_shadow(
 {
     gl::set_uniform_integer(spotlight_shadow_slot,slot);
     gl::set_uniform_float(spotlight_shadow_angle_bias_scale,angle_bias_scale);
+    gl::set_uniform_integer(spotlight_shadow_image,10);
     if(slot>=0) {
-        gl::set_uniform_integer(spotlight_shadow_image,10);
         gl::set_uniform_vector(spotlight_shadow_near_range,
                                make_point(near_plane,far_plane));
     }
@@ -1555,6 +1681,39 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_receiver_b
     float scale)
 {
     gl::set_uniform_float(sun_shadow_receiver_bias_scale,scale);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_pcf_radius(
+    float near_radius,float far_radius)
+{
+    gl::set_uniform_vector(sun_shadow_pcf_radius,
+                           make_point(near_radius,far_radius));
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_vsm_params(
+    float min_stddev_world,float bleed_reduction)
+{
+    gl::set_uniform_vector(sun_vsm_params,
+        make_point(min_stddev_world,bleed_reduction));
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_vsm_depth_guard(
+    bool enabled)
+{
+    gl::set_uniform_integer(sun_vsm_depth_guard,enabled?1:0);
+    // Original raw near/far depths are still required for optional VSM guard.
+    gl::set_uniform_integer(sun_shadow_raw_near,17);
+    gl::set_uniform_integer(sun_shadow_raw_far,18);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_sky_aperture(
+    bool active,int sampler,point<4,float> near_far_depth_transform)
+{
+    gl::set_uniform_integer(sun_sky_aperture_map,sampler);
+    gl::set_uniform_integer(sun_sky_aperture_active,active?1:0);
+    if(!active)return;
+    gl::set_uniform_vector(sun_sky_aperture_depth_transform,
+                           near_far_depth_transform);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_max_distance(
@@ -1605,11 +1764,38 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight(
 }
 
 jkgm::shaders::game_transparency_pass_shader::game_transparency_pass_shader(
-    fs::path const &data_root)
+    fs::path const &data_root,bool prefiltered_sun)
     : game_pass_shader("game_transparency_pass",
                        data_root / "shaders/game.vert",
-                       data_root / "shaders/game_trns_pass.frag")
+                       data_root / "shaders/game_trns_pass.frag",
+                       prefiltered_sun)
 {
+}
+
+jkgm::shaders::sun_shadow_prefilter_shader::sun_shadow_prefilter_shader(
+    fs::path const &root)
+    : opengl_shader("sun_shadow_prefilter",
+                    root/"shaders/postprocess.vert",
+                    root/"shaders/sun_shadow_prefilter.frag")
+    , source_image(gl::get_uniform_location(the_program,"source_image"))
+    , axis(gl::get_uniform_location(the_program,"axis"))
+    , texel_size(gl::get_uniform_location(the_program,"texel_size"))
+    , radius(gl::get_uniform_location(the_program,"radius"))
+{
+}
+
+void jkgm::shaders::sun_shadow_prefilter_shader::set_source_sampler(int sampler)
+{
+    gl::set_uniform_integer(source_image,sampler);
+}
+
+void jkgm::shaders::sun_shadow_prefilter_shader::set_filter(
+    int pass,size<2,float> dims,float radius_texels)
+{
+    gl::set_uniform_integer(axis,pass);
+    gl::set_uniform_vector(texel_size,make_point(
+        1.0f/get<x>(dims),1.0f/get<y>(dims)));
+    gl::set_uniform_float(radius,radius_texels);
 }
 
 jkgm::shaders::post_box4_shader::post_box4_shader(fs::path const &data_root)
@@ -1742,6 +1928,12 @@ jkgm::shaders::post_scale_shader::post_scale_shader(fs::path const &data_root)
                     data_root / "shaders/postprocess.vert",
                     data_root / "shaders/post_scale.frag")
     , fbuf_image(gl::get_uniform_location(the_program, "fbuf_image"))
+    , fused_bloom_first_pass(gl::get_uniform_location(
+        the_program,"fused_bloom_first_pass"))
+    , exposure_image(gl::get_uniform_location(the_program,"exposure_image"))
+    , exposure_enabled(gl::get_uniform_location(the_program,"exposure_enabled"))
+    , hdr_exposure_compensation(gl::get_uniform_location(
+        the_program,"hdr_exposure_compensation"))
 {
 }
 
@@ -1750,17 +1942,32 @@ void jkgm::shaders::post_scale_shader::set_fbuf_sampler(int sampler)
     gl::set_uniform_integer(fbuf_image, sampler);
 }
 
+void jkgm::shaders::post_scale_shader::set_fused_bloom(
+    bool first_pass,int exposure_sampler,bool adaptive,float compensation_ev)
+{
+    gl::set_uniform_integer(fused_bloom_first_pass,first_pass?1:0);
+    gl::set_uniform_integer(exposure_image,exposure_sampler);
+    gl::set_uniform_integer(exposure_enabled,adaptive?1:0);
+    gl::set_uniform_float(hdr_exposure_compensation,compensation_ev);
+}
+
 jkgm::shaders::post_spatial_blur_shader::post_spatial_blur_shader(
-    fs::path const &data_root)
-    : opengl_shader("post_spatial_blur",
+    fs::path const &data_root,bool half_resolution)
+    : opengl_shader(half_resolution
+                        ? "post_spatial_blur_half_res" : "post_spatial_blur",
                     data_root / "shaders/postprocess.vert",
-                    data_root / "shaders/post_spatial_blur.frag")
+                    data_root / (half_resolution
+                        ? "shaders/post_spatial_blur_half_res.frag"
+                        : "shaders/post_spatial_blur.frag"))
     , source_image(gl::get_uniform_location(the_program, "source_image"))
     , depth_image(gl::get_uniform_location(the_program, "depth_image"))
     , blur_axis(gl::get_uniform_location(the_program, "blur_axis"))
     , screen_size(gl::get_uniform_location(the_program, "screen_size"))
     , distance_params(gl::get_uniform_location(the_program, "distance_params"))
     , peripheral_params(gl::get_uniform_location(the_program, "peripheral_params"))
+    , original_image(gl::get_uniform_location(the_program,"original_image"))
+    , output_size(gl::get_uniform_location(the_program,"output_size"))
+    , restore_original(gl::get_uniform_location(the_program,"restore_original"))
 {
 }
 
@@ -1784,6 +1991,14 @@ void jkgm::shaders::post_spatial_blur_shader::set_screen_size(size<2, float> dim
     gl::set_uniform_vector(screen_size, dims);
 }
 
+void jkgm::shaders::post_spatial_blur_shader::set_fast_inputs(
+    int original_sampler,size<2,float> output_dims,bool fullres_unblurred)
+{
+    gl::set_uniform_integer(original_image,original_sampler);
+    gl::set_uniform_vector(output_size,output_dims);
+    gl::set_uniform_integer(restore_original,fullres_unblurred?1:0);
+}
+
 void jkgm::shaders::post_spatial_blur_shader::set_distance_params(point<4, float> params)
 {
     gl::set_uniform_vector(distance_params, params);
@@ -1792,6 +2007,47 @@ void jkgm::shaders::post_spatial_blur_shader::set_distance_params(point<4, float
 void jkgm::shaders::post_spatial_blur_shader::set_peripheral_params(point<4, float> params)
 {
     gl::set_uniform_vector(peripheral_params, params);
+}
+
+
+jkgm::shaders::post_spatial_blur_reconstruct_shader::
+    post_spatial_blur_reconstruct_shader(fs::path const &data_root)
+    : opengl_shader("post_spatial_blur_reconstruct",
+                    data_root / "shaders/postprocess.vert",
+                    data_root / "shaders/post_spatial_blur_reconstruct.frag")
+    , blur_image(gl::get_uniform_location(the_program,"blur_image"))
+    , original_image(gl::get_uniform_location(the_program,"original_image"))
+    , depth_image(gl::get_uniform_location(the_program,"depth_image"))
+    , screen_size(gl::get_uniform_location(the_program,"screen_size"))
+    , distance_params(gl::get_uniform_location(the_program,"distance_params"))
+    , peripheral_params(gl::get_uniform_location(the_program,"peripheral_params"))
+{
+}
+
+void jkgm::shaders::post_spatial_blur_reconstruct_shader::set_inputs(
+    int blur_sampler,int original_sampler,int depth_sampler)
+{
+    gl::set_uniform_integer(blur_image,blur_sampler);
+    gl::set_uniform_integer(original_image,original_sampler);
+    gl::set_uniform_integer(depth_image,depth_sampler);
+}
+
+void jkgm::shaders::post_spatial_blur_reconstruct_shader::set_screen_size(
+    size<2,float> dims)
+{
+    gl::set_uniform_vector(screen_size,dims);
+}
+
+void jkgm::shaders::post_spatial_blur_reconstruct_shader::set_distance_params(
+    point<4,float> params)
+{
+    gl::set_uniform_vector(distance_params,params);
+}
+
+void jkgm::shaders::post_spatial_blur_reconstruct_shader::set_peripheral_params(
+    point<4,float> params)
+{
+    gl::set_uniform_vector(peripheral_params,params);
 }
 
 jkgm::shaders::post_frame_blend_shader::post_frame_blend_shader(

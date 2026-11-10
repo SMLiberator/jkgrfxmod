@@ -10,18 +10,24 @@ int main() {
     assert(gpu_3do_supports_geo_mode(3,4)); // Thing solid
     assert(gpu_3do_supports_geo_mode(4,3)); // Mesh solid
     assert(gpu_3do_supports_geo_mode(3,3));
-    assert(!gpu_3do_supports_geo_mode(5,4));
+    assert(gpu_3do_supports_geo_mode(5,4));
+    assert(gpu_3do_effective_geo_mode(5,4)==4);
+    assert(gpu_3do_effective_geo_mode(6,7)==4);
+    assert(gpu_3do_effective_geo_mode(3,8)==3);
     assert(gpu_3do_supports_geo_mode(4,2));
     assert(gpu_3do_supports_geo_mode(4,0));
     assert(!gpu_3do_supports_geo_mode(-1,4));
     assert(!gpu_3do_supports_geo_mode(4,-1));
-    assert(!gpu_3do_supports_geo_mode(4,5));
+    assert(gpu_3do_supports_geo_mode(4,5));
     for(int face_mode=0;face_mode<=4;++face_mode) {
         assert(gpu_3do_supports_face_mode(face_mode));
         assert(gpu_3do_face_mode_draws_filled(face_mode)==(face_mode>=3));
     }
     assert(!gpu_3do_supports_face_mode(-1));
-    assert(!gpu_3do_supports_face_mode(5));
+    assert(gpu_3do_supports_face_mode(5));
+    assert(gpu_3do_supports_face_mode(100));
+    assert(gpu_3do_face_mode_draws_filled(5));
+    assert(gpu_3do_face_mode_draws_filled(100));
     for(int thing_mode=0;thing_mode<=4;++thing_mode) {
         for(int mesh_mode=0;mesh_mode<=4;++mesh_mode) {
             assert(gpu_3do_geo_mode_draws_filled(thing_mode,mesh_mode)==

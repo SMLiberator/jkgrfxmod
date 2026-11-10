@@ -16,7 +16,7 @@ opaque = shaders["opaque"]
 assert "sun_shadow_color_intensity.a,0.0,1.0" in opaque
 assert "0.6*sun_applied)*" in opaque
 assert "sun_shadow_strength;" in opaque
-assert "surface_rgb*=1.0-shadowed_baseline*(1.0-visibility);" in opaque
+assert "surface_rgb*=1.0-shadowed_baseline*(1.0-direct_visibility);" in opaque
 
 for name in ("native_alpha", "gpu_alpha"):
     shader = shaders[name]
@@ -25,7 +25,12 @@ for name in ("native_alpha", "gpu_alpha"):
         assert "0.75*range_fade*sun_shadow_strength*" in shader
     else:
         assert "0.75*range_fade*clamp(translucent_sun_color.a,0.0,1.0)" in shader
-    assert "translucent_sun_color.a*incidence*visibility*opacity*range_fade;" in shader
+    # A closed sunward ray is now equivalent to a shadow for both the
+    # developer's direct sunlight and the baked-baseline contrast.
+    assert "translucent_sun_color.a*incidence*direct_visibility*opacity*range_fade;" in shader
+    assert "float sky_access=translucent_sun_sky_aperture(world);" in shader
+    assert "float direct_visibility=visibility*sky_access;" in shader
+    assert "if(sky_access<=0.0)return baked;" not in shader
 
 def shade(base, strength, visibility, multiplier):
     return base*(1.0-multiplier*min(max(strength,0.0),1.0)*(1.0-visibility))

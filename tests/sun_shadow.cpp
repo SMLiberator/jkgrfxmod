@@ -1,4 +1,6 @@
 #include "renderer/sun_shadow.hpp"
+#include "renderer/sun_sky_caster_mask.hpp"
+#include "renderer/sun_sky_surface.hpp"
 #include "renderer/sun_skybox_thing.hpp"
 #include <cassert>
 #include <array>
@@ -11,6 +13,66 @@ using namespace jkgm;
 
 int main()
 {
+    // Only a sky-flagged non-adjoin is a physical sunlight aperture.
+    // Rendering GeoMode is deliberately irrelevant to this predicate.
+    assert(sun_sky_surface_eligible(0x200U,0U));
+    assert(sun_sky_surface_eligible(0x400U,0U));
+    assert(sun_sky_surface_eligible(0x600U,0U));
+    assert(!sun_sky_surface_eligible(0U,0U));
+    assert(!sun_sky_surface_eligible(0x200U,0x123400U));
+    assert(!sun_sky_surface_eligible(0x400U,0x123400U));
+    // Active 128x128 pruning uses a conservative light-space XY mask.
+    sun_shadow_projection tile_view{};
+    tile_view.origin={{0.0f,0.0f,0.0f}};
+    tile_view.right={{1.0f,0.0f,0.0f}};
+    tile_view.up={{0.0f,1.0f,0.0f}};
+    tile_view.forward={{0.0f,0.0f,1.0f}};
+    tile_view.width=32.0f;
+    tile_view.height=32.0f;
+    tile_view.range=20.0f;
+    std::vector<decal_vec3> sky_quad={
+        {{15.0f,15.0f,4.0f}},{{17.0f,15.0f,4.0f}},
+        {{17.0f,17.0f,4.0f}},{{15.0f,17.0f,4.0f}}};
+    // Preserve casters beneath sky while rejecting XY-incompatible faces.
+    sun_sky_caster_fast_mask fast{};
+    fast.reset(tile_view);
+    fast.include_polygon(sky_quad);
+    assert(fast.valid && !fast.fail_open);
+    assert(fast.may_overlap(sky_quad));
+    assert(fast.may_overlap(std::vector<decal_vec3>{
+        {{15.0f,15.0f,-30.0f}},{{17.0f,15.0f,-30.0f}},
+        {{17.0f,17.0f,-30.0f}}}));
+    assert(!fast.may_overlap(std::vector<decal_vec3>{
+        {{1.0f,1.0f,0.0f}},{{2.0f,1.0f,0.0f}},
+        {{2.0f,2.0f,0.0f}}}));
+    auto const mask_hash=fast.signature();
+    fast.reset(tile_view);
+    fast.include_polygon(sky_quad);
+    assert(fast.signature()==mask_hash);
+    // Sky slightly beyond the orthographic border can be dilated into
+    // the cascade: both opening and border receivers must remain.
+    fast.reset(tile_view);
+    std::vector<decal_vec3> edge_sky={
+        {{-0.1f,15.0f,1.0f}},{{-0.05f,15.0f,1.0f}},
+        {{-0.05f,17.0f,1.0f}},{{-0.1f,17.0f,1.0f}}};
+    fast.include_polygon(edge_sky);
+    assert(fast.may_overlap(std::vector<decal_vec3>{
+        {{0.01f,15.0f,1.0f}},{{0.1f,15.0f,1.0f}},
+        {{0.1f,17.0f,1.0f}}}));
+    fast.mark_all();
+    assert(fast.fail_open && fast.may_overlap(std::vector<decal_vec3>{
+        {{1.0f,1.0f,0.0f}},{{2.0f,1.0f,0.0f}},
+        {{2.0f,2.0f,0.0f}}}));
+    // A zero interval keeps the original per-frame validation. An active
+    // interval only skips while the map remains usable and inside deadline.
+    assert(sun_shadow_cascade_validation_due(0.0,0.0,true));
+    assert(!sun_shadow_cascade_validation_due(0.0,0.1,true));
+    assert(!sun_shadow_cascade_validation_due(0.099,0.1,true));
+    assert(sun_shadow_cascade_validation_due(0.1,0.1,true));
+    assert(sun_shadow_cascade_validation_due(0.03,0.1,false));
+    assert(sun_shadow_cascade_validation_due(
+        std::numeric_limits<double>::infinity(),0.1,true));
+    assert(sun_shadow_cascade_validation_due(-1.0,0.1,true));
     // Optional sun range: zero keeps the old unlimited behaviour; a positive
     // range clamps the far cascade and fades added sun out completely.
     assert(thing_casts_sun_shadows(0U));
@@ -74,6 +136,46 @@ int main()
     owners.clear();
     assert(sun_shadow_caster_in_static_cascades(
         0x1111222233334444ULL,owners));
+    // The geometry cache is exact: any Thing, mesh, group-count or even
+    // sub-epsilon transform change must force bounds/hash recomputation.
+    std::array<float,12> const pose{{1,0,0,0,1,0,0,0,1,10,20,30}};
+    auto moved=pose;
+    moved[9]+=0.00001f;
+    auto const reuse=[&](uint64_t owner,uint64_t id,uintptr_t geometry,
+                          std::array<float,12> const &current,size_t groups,
+                          bool dynamic) {
+        return sun_shadow_static_geometry_reusable(
+            owner,id,geometry,current,groups,
+            1234,6789,0x12345U,pose,12,dynamic);
+    };
+    assert(reuse(1234,6789,0x12345U,pose,12,false));
+    assert(!reuse(0,6789,0x12345U,pose,12,false));
+    assert(!reuse(1235,6789,0x12345U,pose,12,false));
+    assert(!reuse(1234,6790,0x12345U,pose,12,false));
+    assert(!reuse(1234,6789,0x12346U,pose,12,false));
+    assert(!reuse(1234,6789,0x12345U,moved,12,false));
+    assert(!reuse(1234,6789,0x12345U,pose,13,false));
+    assert(!reuse(1234,6789,0x12345U,pose,12,true));
+    // Cached cutout groups must invalidate on every live hash input.
+    auto const cutout=sun_shadow_cutout_signature_inputs(
+        0.5f,1.0f,0.0f,0.0f,0.25f);
+    assert(cutout==sun_shadow_cutout_signature_inputs(
+        0.5f,1.0f,0.0f,0.0f,0.25f));
+    assert(cutout!=sun_shadow_cutout_signature_inputs(
+        0.6f,1.0f,0.0f,0.0f,0.25f));
+    assert(cutout!=sun_shadow_cutout_signature_inputs(
+        0.5f,0.9f,0.0f,0.0f,0.25f));
+    assert(cutout!=sun_shadow_cutout_signature_inputs(
+        0.5f,1.0f,0.1f,0.0f,0.25f));
+    assert(cutout!=sun_shadow_cutout_signature_inputs(
+        0.5f,1.0f,0.0f,0.1f,0.25f));
+    assert(cutout!=sun_shadow_cutout_signature_inputs(
+        0.5f,1.0f,0.0f,0.0f,0.5f));
+    // Float equality would miss this difference in the original hash.
+    assert(sun_shadow_cutout_signature_inputs(
+        0.5f,1.0f,+0.0f,0.0f,0.25f)!=
+           sun_shadow_cutout_signature_inputs(
+        0.5f,1.0f,-0.0f,0.0f,0.25f));
     // Static architectural Things are reusable, but movers, unknown owners,
     // disabled caching and missing FBOs always use the live 3DO pass.
     assert(sun_shadow_cache_stationary_model(1234,false,true,true));

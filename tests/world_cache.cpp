@@ -195,6 +195,23 @@ int main()
         light_read,light_surfaces,mesh,lit_face,8U,
         dynamic_lights,rgb,&lit_sample));
     assert(lit_sample.mode==3U && lit_sample.vertices==4U);
+    // Reject bad triangle spans with an actionable reason. The new
+    // diagnostic argument must not alter successful Gouraud output.
+    auto invalid_light_face=lit_face;
+    invalid_light_face.count=0;
+    char const *light_failure=nullptr;
+    assert(!sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,invalid_light_face,8U,
+        dynamic_lights,rgb,nullptr,nullptr,false,0.0f,
+        nullptr,nullptr,0U,&light_failure));
+    assert(light_failure &&
+           std::strcmp(light_failure,"candidate_triangle_range_invalid")==0);
+    light_failure="stale_failure";
+    assert(sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,
+        dynamic_lights,rgb,nullptr,nullptr,false,0.0f,
+        nullptr,nullptr,0U,&light_failure));
+    assert(light_failure==nullptr);
     assert(std::fabs(rgb[0][0]-std::pow(0.20f,1.8f))<0.0001f);
     assert(std::fabs(rgb[3][2]-std::pow(0.45f,1.8f))<0.0001f);
     // Each surface uses its owning sector tint, independent of the camera.
@@ -255,6 +272,39 @@ int main()
     assert(std::fabs(rgb[3][2]-std::pow(0.40f,1.8f))<0.0001f);
     assert(pixel_state[3][0]>0.39f && pixel_state[3][0]<0.41f);
     assert(pixel_state[0][1]==0.20f && pixel_state[3][2]==3.0f);
+    // Native JK caps authored mode 4 to Gouraud 3, rather than dropping
+    // the whole world surface. It must preserve the same per-vertex result
+    // as an otherwise identical mode-3 surface.
+    auto const mode3_rgb=rgb;
+    auto const mode3_state=pixel_state;
+    lu32(light_surfaces+2U*0x5cU+0x20U,4U);
+    world_cache_light_sample mode4_sample{};
+    char const *mode4_reason="stale";
+    assert(sample_world_cache_surface_light(
+        light_read,light_surfaces,mesh,lit_face,8U,
+        dynamic_lights,rgb,&mode4_sample,&pixel_state,true,0.0f,
+        nullptr,nullptr,0U,&mode4_reason));
+    assert(mode4_reason==nullptr);
+    assert(mode4_sample.mode==3U &&
+           mode4_sample.authored_mode==4U &&
+           mode4_sample.vertices==4U);
+    for(size_t i=0;i<rgb.size();++i) {
+        assert(rgb[i]==mode3_rgb[i]);
+        assert(pixel_state[i]==mode3_state[i]);
+    }
+    // Higher authored modes must also cap to Gouraud, not disappear.
+    for(uint32_t authored : {5U,6U,100U}) {
+        lu32(light_surfaces+2U*0x5cU+0x20U,authored);
+        world_cache_light_sample high_sample{};
+        assert(sample_world_cache_surface_light(
+            light_read,light_surfaces,mesh,lit_face,8U,
+            dynamic_lights,rgb,&high_sample,&pixel_state,true));
+        assert(high_sample.mode==3U &&
+               high_sample.authored_mode==authored);
+        assert(rgb==mode3_rgb);
+        assert(pixel_state==mode3_state);
+    }
+    lu32(light_surfaces+2U*0x5cU+0x20U,3U);
     // Gouraud levels are authored independently for each world surface.
     // Changing a single local intensity must affect its own vertex only.
     lf32(light_intensities+2U*4U,0.85f);
@@ -448,6 +498,18 @@ int main()
     // neighboring surfaces remain unchanged.
     std::vector<std::array<float,2>> frame_uv(mesh.vertices.size());
     assert(write_world_cache_uv_animation(mesh,lookup,full[0],frame_uv));
+    // A mismatched cached-surface mapping must have its own failure reason.
+    auto invalid_uv_face=full[0];
+    invalid_uv_face.count=0;
+    char const *uv_failure=nullptr;
+    assert(!write_world_cache_uv_animation(
+        mesh,lookup,invalid_uv_face,frame_uv,&uv_failure));
+    assert(uv_failure &&
+           std::strcmp(uv_failure,"uv_cached_surface_mapping_mismatch")==0);
+    uv_failure="stale_failure";
+    assert(write_world_cache_uv_animation(
+        mesh,lookup,full[0],frame_uv,&uv_failure));
+    assert(uv_failure==nullptr);
     for(size_t i=0;i<4U;++i)
         assert(frame_uv[i][0]==8.0f && frame_uv[i][1]==-4.0f);
     for(size_t i=4U;i<frame_uv.size();++i)

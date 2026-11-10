@@ -22,8 +22,16 @@ namespace jkgm {
         float max_anisotropy = 2.0f;
         std::optional<antialiasing_config> antialiasing;
         bool enable_bloom = true;
+        // Separate experimental optimizations, each default-off.
+        bool experimental_fused_bloom_downsample = false;
+        bool experimental_skip_bloom_clears = false;
+        bool experimental_native_triangle_uploads = false;
         // Spatial blur (distance + peripheral) and temporal feedback trails.
         bool enable_blur = true;
+        // Mode 2 is the standard path after in-game A/B testing; preserve
+        // modes 0 and 1 for compatibility and quality/performance comparisons.
+        int spatial_blur_mode = 2; // 0=original, 1=half-horizontal, 2=both half + reconstruct
+        bool experimental_spatial_blur_half_res = false; // legacy JSON alias for mode 1
         bool enable_trails = true;
         bool enable_fog = true;
         bool enable_post = true;
@@ -69,6 +77,14 @@ namespace jkgm {
         float spotlight_shadow_angle_bias_scale = 0.0f; // opt-in: 0=legacy bias, 1=adaptive +0.035 JKU at grazing (0..2)
         bool enable_sun = true; // diffuse sunlight from SetSunInfo; independent of shadow rendering
         bool enable_sun_shadows = false;
+        // Sky polygons as sunlight apertures; experimental, default-off.
+        // Requires sunlight shadows so the per-cascade projection exists.
+        bool experimental_sun_sky_aperture = false;
+        // Phase 1 only: measure conservative sky-covered caster groups.
+        // Does not yet prune any casters or change shadow texture contents.
+        // Actual static WORLD caster pruning (independent of diagnostics).
+        bool experimental_sun_sky_caster_pruning = false;
+        double sun_shadow_update_interval = 0.0; // seconds between full CSM checks; 0=every frame
         bool enable_sprite_shadows = false; // opt-in sun shadow casting for cached SPRs; reception unaffected
         bool enable_sun_dynamic_shadows = false; // eight-Thing atlas
         bool sun_shadow_cull_back_faces = false; // 3DO sunlight: back-face culling is opt-in
@@ -76,7 +92,20 @@ namespace jkgm {
         unsigned int sun_dynamic_shadow_resolution = 256U; // baseline 64..1024
         float sun_shadow_receiver_bias_scale = 1.0f; // A/B contact-gap tuning (0..2)
         float sun_shadow_caster_bias_scale = 1.0f; // A/B shadow polygon offset (0..2)
-        unsigned int sun_shadow_resolution = 512U; // per-cascade 24-bit depth map (64..4096)
+        unsigned int sun_shadow_resolution = 512U; // near and default far 24-bit depth map
+        unsigned int sun_shadow_far_resolution = 0U; // 0 = inherit near resolution
+        float sun_shadow_near_pcf_radius = 0.0f; // 0=single HW PCF; >0 four samples
+        float sun_shadow_far_pcf_radius = 0.0f; // independent four-sample filter
+        bool experimental_sun_shadow_vsm = false; // independent, default-off shadow path
+        bool experimental_sun_vsm_depth_guard = false; // opt-in raw-depth cap for opaque VSM
+        float sun_shadow_vsm_near_radius = 1.0f; // prefilter radius, map texels
+        float sun_shadow_vsm_far_radius = 1.5f;
+        // Optional ADDITIONAL VSM depth standard-deviation floor in JK
+        // world units. Never replace the 2e-7 normalized precision floor:
+        // cancelling E[z*z]-E[z]^2 without it causes speckled outlines.
+        // Zero preserves the original VSM appearance (bleed=0.2).
+        float sun_shadow_vsm_min_stddev_world = 0.0f;
+        float sun_shadow_vsm_bleed_reduction = 0.2f; // Chebyshev remap, 0..0.95
         float sun_shadow_near_distance = 16.0f; // camera-local near cascade, 2..128
         float sun_shadow_far_distance = 128.0f; // outer cascade coverage, 4..512
         float sun_max_distance = 0.0f; // 0=unlimited; else sun light+shadows fade out and stop at this camera distance

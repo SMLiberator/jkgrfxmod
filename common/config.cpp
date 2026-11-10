@@ -65,10 +65,41 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_bloom")) {
             j.at("enable_bloom").get_to(rv->enable_bloom);
         }
+        if(j.contains("experimental_fused_bloom_downsample")) {
+            j.at("experimental_fused_bloom_downsample").get_to(
+                rv->experimental_fused_bloom_downsample);
+        }
+        if(j.contains("experimental_skip_bloom_clears")) {
+            j.at("experimental_skip_bloom_clears").get_to(
+                rv->experimental_skip_bloom_clears);
+        }
+        if(j.contains("experimental_native_triangle_uploads")) {
+            j.at("experimental_native_triangle_uploads").get_to(
+                rv->experimental_native_triangle_uploads);
+        }
 
         if(j.contains("enable_blur")) {
             j.at("enable_blur").get_to(rv->enable_blur);
         }
+        if(j.contains("experimental_spatial_blur_half_res")) {
+            j.at("experimental_spatial_blur_half_res").get_to(
+                rv->experimental_spatial_blur_half_res);
+        }
+        // Canonical mode takes precedence over both historical keys.
+        // Retain the two experimental JSON names for existing user configs.
+        if(j.contains("spatial_blur_mode") ||
+           j.contains("experimental_spatial_blur_mode")) {
+            char const *key=j.contains("spatial_blur_mode")
+                ?"spatial_blur_mode":"experimental_spatial_blur_mode";
+            auto const &mode=j.at(key);
+            if(!mode.is_number_integer() || mode.get<int>()<0 ||
+               mode.get<int>()>2)
+                throw std::runtime_error(std::string(key)+
+                                         " must be 0, 1 or 2");
+            rv->spatial_blur_mode=mode.get<int>();
+        }
+        else if(rv->experimental_spatial_blur_half_res)
+            rv->spatial_blur_mode=1;
         if(j.contains("enable_trails")) {
             j.at("enable_trails").get_to(rv->enable_trails);
         }
@@ -328,6 +359,25 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_sun_shadows")) {
             j.at("enable_sun_shadows").get_to(rv->enable_sun_shadows);
         }
+        if(j.contains("experimental_sun_sky_aperture")) {
+            j.at("experimental_sun_sky_aperture").get_to(
+                rv->experimental_sun_sky_aperture);
+        }
+        if(j.contains("experimental_sun_sky_caster_pruning")) {
+            j.at("experimental_sun_sky_caster_pruning").get_to(
+                rv->experimental_sun_sky_caster_pruning);
+        }
+        if(j.contains("sun_shadow_update_interval")) {
+            auto const &v=j.at("sun_shadow_update_interval");
+            if(!v.is_number())
+                throw std::runtime_error(
+                    "sun_shadow_update_interval must be numeric (0..2 seconds)");
+            double const seconds=v.get<double>();
+            if(!std::isfinite(seconds) || seconds<0.0 || seconds>2.0)
+                throw std::runtime_error(
+                    "sun_shadow_update_interval must be between 0 and 2 seconds");
+            rv->sun_shadow_update_interval=seconds;
+        }
         if(j.contains("enable_sprite_shadows")) {
             j.at("enable_sprite_shadows").get_to(rv->enable_sprite_shadows);
         }
@@ -425,6 +475,70 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             }
             rv->sun_shadow_resolution = static_cast<unsigned int>(pixels);
         }
+        if(j.contains("sun_shadow_far_resolution")) {
+            auto const &v=j.at("sun_shadow_far_resolution");
+            if(!v.is_number_integer())
+                throw std::runtime_error(
+                    "sun_shadow_far_resolution must be 0 or an integer from 64 to 4096");
+            auto const pixels=v.get<long long>();
+            if(pixels!=0 && (pixels<64 || pixels>4096))
+                throw std::runtime_error(
+                    "sun_shadow_far_resolution must be 0 or between 64 and 4096");
+            rv->sun_shadow_far_resolution=static_cast<unsigned int>(pixels);
+        }
+        auto parse_sun_pcf_radius=[&](char const *name,float &out) {
+            if(!j.contains(name))return;
+            auto const &v=j.at(name);
+            if(!v.is_number())
+                throw std::runtime_error(std::string(name)+
+                                         " must be numeric (0..4)");
+            double const radius=v.get<double>();
+            if(!std::isfinite(radius) || radius<0.0 || radius>4.0)
+                throw std::runtime_error(std::string(name)+
+                                         " must be between 0 and 4");
+            out=static_cast<float>(radius);
+        };
+        parse_sun_pcf_radius("sun_shadow_near_pcf_radius",
+                             rv->sun_shadow_near_pcf_radius);
+        parse_sun_pcf_radius("sun_shadow_far_pcf_radius",
+                             rv->sun_shadow_far_pcf_radius);
+        if(j.contains("experimental_sun_shadow_vsm"))
+            j.at("experimental_sun_shadow_vsm").get_to(
+                rv->experimental_sun_shadow_vsm);
+        if(j.contains("experimental_sun_vsm_depth_guard"))
+            j.at("experimental_sun_vsm_depth_guard").get_to(
+                rv->experimental_sun_vsm_depth_guard);
+        auto parse_vsm_radius=[&](char const *name,float &out) {
+            if(!j.contains(name))return;
+            auto const &v=j.at(name);
+            if(!v.is_number())throw std::runtime_error(
+                std::string(name)+" must be numeric (0..4)");
+            double const radius=v.get<double>();
+            if(!std::isfinite(radius) || radius<0.0 || radius>4.0)
+                throw std::runtime_error(
+                    std::string(name)+" must be between 0 and 4");
+            out=static_cast<float>(radius);
+        };
+        parse_vsm_radius("sun_shadow_vsm_near_radius",
+                         rv->sun_shadow_vsm_near_radius);
+        parse_vsm_radius("sun_shadow_vsm_far_radius",
+                         rv->sun_shadow_vsm_far_radius);
+        auto parse_vsm_scalar=[&](char const *name,float &out,
+                                  double upper) {
+            if(!j.contains(name))return;
+            auto const &value=j.at(name);
+            if(!value.is_number())throw std::runtime_error(
+                std::string(name)+" must be numeric");
+            double const v=value.get<double>();
+            if(!std::isfinite(v) || v<0.0 || v>upper)
+                throw std::runtime_error(std::string(name)+
+                    " must be between 0 and "+std::to_string(upper));
+            out=static_cast<float>(v);
+        };
+        parse_vsm_scalar("sun_shadow_vsm_min_stddev_world",
+                         rv->sun_shadow_vsm_min_stddev_world,0.25);
+        parse_vsm_scalar("sun_shadow_vsm_bleed_reduction",
+                         rv->sun_shadow_vsm_bleed_reduction,0.95);
         // Old packs may still ship enable_sprite_decals. Prefer the new
         // enable_decals when both keys are supplied.
         if(j.contains("enable_decals")) {

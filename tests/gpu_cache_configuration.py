@@ -17,6 +17,9 @@ for key in ("enable_gpu_camera_hud", "enable_gpu_sprite_instancing",
     assert sample[key] is True
     assert f'j.at("{key}").get_to(' in config
 assert 'j.at("use_gpu_cache").get_to(rv->use_gpu_cache);' in config
+assert "bool enable_baked_vertex_overbrightness = false;" in header
+assert sample["enable_baked_vertex_overbrightness"] is False
+assert 'j.contains("enable_baked_vertex_overbrightness")' in config
 assert "bool const revision_fastpath=mesh_revision::active();" in main
 assert "TrueJkInitNewCogVerbs(mesh_revision::register_mutator,ctx)" in main
 assert "hud_slab_valid[hud_back_index][curr_slab]=true;" in renderer
