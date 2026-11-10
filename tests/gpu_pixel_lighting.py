@@ -96,6 +96,7 @@ assert "std::max(raw_brightness+dynamic,0.0f),ambient" in world_lights
 assert "clamp_authored_light(ambient,overbright)" in sector_cross
 assert "clamp_authored_extra_light(extra,overbright)" in sector_cross
 assert "the_config->overbright_intensities" in main
+assert "native_face_extra=jkgm::clamp_authored_extra_light(" in main
 assert "the_config->overbright_intensities" in wiring
 assert "pow(max(bright,0.0),1.8)" in vert
 assert "clamp(bright,0.0,1.0)" not in vert
