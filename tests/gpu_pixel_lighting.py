@@ -83,9 +83,11 @@ limits=(root/"renderer/light_intensity_range.hpp").read_text(encoding="utf-8")
 world_lights=(root/"renderer/world_cache_lighting.hpp").read_text(encoding="utf-8")
 sector_cross=(root/"renderer/sector_crossing_gpu.hpp").read_text(encoding="utf-8")
 sample=(root/"assets/jkgm.json").read_text(encoding="utf-8")
-assert "bool overbright_intensities = true" in config
+assert "bool enable_baked_overbright = true" in config
+assert 'j.contains("enable_baked_overbright")' in parser
 assert 'j.contains("overbright_intensities")' in parser
-assert '"overbright_intensities": true' in sample
+assert 'j.contains("enable_baked_vertex_overbrightness")' in parser
+assert '"enable_baked_overbright": true' in sample
 assert "overbright ? 2.0f : 1.0f" in limits
 assert "std::clamp(value,0.0f,authored_light_limit(overbright))" in limits
 assert "std::min(value,authored_light_limit(overbright))" in limits
@@ -95,9 +97,9 @@ assert "clamp_authored_extra_light(global_extra,overbright)" in world_lights
 assert "std::max(raw_brightness+dynamic,0.0f),ambient" in world_lights
 assert "clamp_authored_light(ambient,overbright)" in sector_cross
 assert "clamp_authored_extra_light(extra,overbright)" in sector_cross
-assert "the_config->overbright_intensities" in main
+assert "the_config->enable_baked_overbright" in main
 assert "native_face_extra=jkgm::clamp_authored_extra_light(" in main
-assert "the_config->overbright_intensities" in wiring
+assert "the_config->enable_baked_overbright" in wiring
 assert "pow(max(bright,0.0),1.8)" in vert
 assert "clamp(bright,0.0,1.0)" not in vert
 assert "lighting=mix(max(lighting,vec3(0.0)),vec3(1.0),fullbright);" in world_frag
