@@ -113,6 +113,19 @@ int main()
     auto noTint=sector_crossing_stage_instance(
         snapshot,ranges,instance,read,false);
     assert(noTint && noTint->sectors[1].sector_tint[0]==0.0f);
+    // Author-limited sector components contribute separately. Crossing
+    // may legitimately exceed the single-source cap after combining them.
+    setFloat(snapshot.sectors[1].native_sector+0x04U,3.5f);
+    setFloat(snapshot.sectors[1].native_sector+0x08U,3.5f);
+    auto bounded=sector_crossing_stage_instance(
+        snapshot,ranges,instance,read,true,0U,false);
+    auto overbright=sector_crossing_stage_instance(
+        snapshot,ranges,instance,read,true,0U,true);
+    assert(bounded && overbright);
+    assert(std::abs(bounded->sectors[1].ambient-2.1f)<0.0001f);
+    assert(std::abs(overbright->sectors[1].ambient-4.1f)<0.0001f);
+    setFloat(snapshot.sectors[1].native_sector+0x04U,0.6f);
+    setFloat(snapshot.sectors[1].native_sector+0x08U,0.1f);
     // Four candidates max and 96 planes per region. Invalid native
     // geometry never produces partial per-Thing shader data.
     ranges[1].count=97;
