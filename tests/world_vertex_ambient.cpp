@@ -64,9 +64,9 @@ int main() {
     mem.put(world+0xa8U,uint32_t(4)); // 4th face: invisible portal
     mem.put(world+0xacU,uint32_t(surfaces));
     mem.put(sectors,uint32_t(7));
-    mem.put(sectors+0x08U,1.9f); // intentionally unlike sampled vertices
+    mem.put(sectors+0x08U,1.9f); // a bright authored sector floor
     mem.put(sectors+0x98U,uint32_t(8));
-    mem.put(sectors+0x98U+0x08U,0.05f); // very different sector ExtraLight
+    mem.put(sectors+0x98U+0x08U,0.05f); // dim neighboring sector
     auto face=[&](uint32_t index,uint32_t sector,uint32_t ptr,
                   float extra) {
         uintptr_t const f=surfaces+uintptr_t(index)*0x5cU;
@@ -134,7 +134,7 @@ int main() {
     assert(grid.sample_count()==6U && grid.cell_count()==2U);
     assert(stats.portals_captured==1U && grid.portal_count()==1U);
     assert(grid.sample(7,{{0.2f,0.1f,0.0f}},result));
-    assert(std::fabs(result-(0.2f+0.7f+1.7f)/3.0f)<0.00001f);
+    assert(std::fabs(result-1.9f)<0.00001f); // sector ExtraLight is a floor
     assert(grid.sample(8,{{0.2f,0.1f,0.0f}},result));
     assert(std::fabs(result-2.0f)<0.00001f);
     assert(!grid.sample(9,{{0.2f,0.1f,0.0f}},result));
@@ -142,7 +142,7 @@ int main() {
     assert(jkgm::capture_world_vertex_ambient(
         reader,world,surfaces,mesh,false,1.0f,grid,stats));
     assert(grid.sample(7,{{0.2f,0.1f,0.0f}},result));
-    assert(std::fabs(result-(0.2f+0.7f+1.2f)/3.0f)<0.00001f);
+    assert(std::fabs(result-(1.0f+1.0f+1.2f)/3.0f)<0.00001f);
     // Valid but distant geometry must not cause light bleed.
     assert(!grid.sample(7,{{10.0f,0.1f,0.0f}},result));
 
@@ -201,4 +201,32 @@ int main() {
         jkgm::world_vertex_ambient_result::portal_only);
     assert(std::fabs(result-0.4f)<0.00001f);
 
+    // A fully dark vertex array in a sector with 1.0 ExtraLight must
+    // sample as lit, even though the static vertex intensities are zero.
+    // Use the same native world lighting policy as world_cache_lighting.hpp.
+    mem.put(portal_face+0x10U,uint32_t(0)); // restore ordinary adjoin
+    mem.put(sectors+0x08U,1.0f);
+    mem.put(surfaces+0x44U,0.0f);
+    for(uint32_t i=0;i<3;++i)mem.put(lights0+i*4U,0.0f);
+    assert(jkgm::capture_world_vertex_ambient(
+        reader,world,surfaces,mesh,true,1.0f,grid,stats));
+    assert(grid.sample(7,{{0.2f,0.1f,0.0f}},result));
+    assert(std::fabs(result-1.0f)<0.00001f);
+
+    // The authored face extra is additive before taking the sector floor.
+    // It may increase brightness even when the sector ExtraLight is zero.
+    mem.put(sectors+0x08U,0.0f);
+    mem.put(surfaces+0x44U,0.3f);
+    assert(jkgm::capture_world_vertex_ambient(
+        reader,world,surfaces,mesh,true,1.0f,grid,stats));
+    assert(grid.sample(7,{{0.2f,0.1f,0.0f}},result));
+    assert(std::fabs(result-0.3f)<0.00001f);
+
+    // Negative sector ExtraLight must not darken authored vertex values.
+    mem.put(sectors+0x08U,-0.8f);
+    mem.put(lights0,0.6f);
+    assert(jkgm::capture_world_vertex_ambient(
+        reader,world,surfaces,mesh,true,1.0f,grid,stats));
+    assert(grid.sample(7,{{0.2f,0.1f,0.0f}},result));
+    assert(std::fabs(result-(0.9f+0.3f+0.3f)/3.0f)<0.00001f);
 }

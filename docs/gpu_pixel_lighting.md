@@ -91,11 +91,20 @@ For an initial GPU-cached 3DO lighting A/B test, enable:
 ~~~
 
 The renderer captures each eligible Gouraud world-face corner's authored
-vertex intensity and **per-face ExtraLight**, excluding both the SithSector's
-JKL-defined AmbientLight and sector ExtraLight. These authored values are
-cached once per world-cache revision in a coarse 3D CPU grid keyed by native
-sector ID. They replace the per-Thing camera ambient *floor*, not the model's
-authored static shading, dynamic point lights, or per-face ExtraLight.
+vertex intensity, **per-face ExtraLight**, and the owning SithSector's
+**ExtraLight floor**, using the same static formula as the cached world:
+
+```cpp
+probe = max(0.0f, authored_vertex + face_extra, sector_extra);
+```
+
+Each authored input obeys the `enable_baked_overbright` limit before
+combination. The result is cached once per world-cache revision in a coarse
+3D CPU grid keyed by native sector ID. Successful probe samples replace the
+per-Thing **camera ambient floor**, not the model's authored static shading,
+dynamic point lights, or its own ExtraLight. A sector ExtraLight of 1.0
+therefore lights Things even if every surrounding world vertex is zero; the
+camera/Thing ambient value itself is not sampled.
 
 The renderer separately captures passable SithSurfaceAdjoin polygons from
 the full native world table, including invisible and untextured adjoins not

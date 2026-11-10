@@ -34,10 +34,17 @@ assert "cells_.find(key{sector" in probes
 assert "read(face+0x54U,&static_ptr,4U)" in probes
 assert "clamp_authored_light(intensity[i],overbright)" in probes
 assert "clamp_authored_extra_light(face_extra,overbright)" in probes
-assert "clamp_authored_extra_light(sector_extra,overbright)" not in probes
-assert "read(uintptr_t(sector)+0x08U,&sector_extra,4U)" not in probes
-assert "std::max(0.0f,authored+extra)" in probes
+assert "clamp_authored_extra_light(sector_extra,overbright)" in probes
+assert "read(uintptr_t(sector)+0x08U,&sector_extra,4U)" in probes
+assert "std::max(std::max(0.0f,authored+extra),floor)" in probes
 assert "capture_world_vertex_ambient_portals(" in probes
+assert "float face_extra=0.0f,sector_extra=0.0f" in probes
+# A bright sector with all-zero vertices must still light a Thing.
+test=(root/"tests/world_vertex_ambient.cpp").read_text(encoding="utf-8")
+assert "mem.put(sectors+0x08U,1.0f);" in test
+assert "std::fabs(result-1.0f)<0.00001f" in test
+assert "mem.put(sectors+0x08U,-0.8f);" in test
+assert "mem.put(surfaces+0x44U,0.3f);" in test
 assert "grid.add_portal(a,b,polygon)" in probes
 assert "read(uintptr_t(adjoin)+0x04U,&destination,4U)" in probes
 assert "triangle_distance2(" in probes

@@ -1,6 +1,7 @@
 #pragma once
 // CPU-only authored world-vertex ambient probes with local, passable-adjoin
-// interpolation. Neither sector ambient nor sector ExtraLight is sampled.
+// interpolation. Sector ExtraLight is a world-vertex brightness floor;
+// the camera-derived Thing ambient is not part of the probe.
 // No GL resources or per-frame scan of the SithWorld surface table.
 #include "world_cache.hpp"
 #include "light_intensity_range.hpp"
@@ -407,7 +408,7 @@ bool capture_world_vertex_ambient(
         }
         uintptr_t const face=surfaces+uintptr_t(range.surface_index)*0x5cU;
         uint32_t sector=0,geo=0,mode=0,static_ptr=0;
-        float face_extra=0.0f;
+        float face_extra=0.0f,sector_extra=0.0f;
         if(!read(face+0x08U,&sector,4U) ||
            !read(face+0x1cU,&geo,4U) ||
            !read(face+0x20U,&mode,4U) ||
@@ -416,7 +417,8 @@ bool capture_world_vertex_ambient(
            uint64_t(sector)<sector_base ||
            uint64_t(sector)>=sector_end ||
            (sector-sector_base)%0x98U!=0U ||
-           !std::isfinite(face_extra) ||
+           !read(uintptr_t(sector)+0x08U,&sector_extra,4U) ||
+           !std::isfinite(sector_extra) || !std::isfinite(face_extra) ||
            geo<3U || mode<3U) {
             ++stats.surfaces_skipped;continue;
         }
@@ -434,11 +436,16 @@ bool capture_world_vertex_ambient(
         if(!read(sector,&sector_id,4U)) {
             ++stats.surfaces_skipped;continue;
         }
+        // Match the cached world's Gouraud path: the sector's authored
+        // ExtraLight is a floor, while face ExtraLight is added to the
+        // static vertex sample. This is NOT Thing/camera ambient.
+        float const floor=std::max(0.0f,
+            clamp_authored_extra_light(sector_extra,overbright));
         float const extra=clamp_authored_extra_light(face_extra,overbright);
         uint32_t accepted=0;
         for(uint32_t i=0;i<n;++i) {
             float const authored=clamp_authored_light(intensity[i],overbright);
-            float const light=std::max(0.0f,authored+extra);
+            float const light=std::max(std::max(0.0f,authored+extra),floor);
             if(grid.add(sector_id,mesh.vertices[base+i].position,light))
                 ++accepted;
         }
