@@ -636,6 +636,10 @@ namespace jkgm {
         uint64_t world_vertex_ambient_revision=0;
         uintptr_t world_vertex_ambient_world=0;
         bool world_vertex_ambient_valid=false;
+        uint64_t world_vertex_ambient_changed_sectors=0;
+        uint64_t world_vertex_ambient_changed_cells=0;
+        uint64_t world_vertex_ambient_changed_vertices=0;
+        uint64_t world_vertex_ambient_unreadable=0;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
         std::vector<sun_dynamic_shadow_tile> sun_dynamic_tiles;
@@ -1173,6 +1177,10 @@ namespace jkgm {
                 world_vertex_ambient_revision=0;
                 world_vertex_ambient_world=0;
                 world_vertex_ambient_valid=false;
+                world_vertex_ambient_changed_sectors=0;
+                world_vertex_ambient_changed_cells=0;
+                world_vertex_ambient_changed_vertices=0;
+                world_vertex_ambient_unreadable=0;
                 if(the_config->use_gpu_cache ||
                    the_config->enable_decals ||
                    (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
@@ -9361,18 +9369,22 @@ namespace jkgm {
                 return;
             auto const &cache=*world_cache_target;
             float const radius=the_config->experimental_world_vertex_ambient_radius;
+            auto const read=[](uintptr_t ptr,void *out,size_t len)->bool {
+                if(!len || !engine_camera_detail::readable(ptr,len))
+                    return false;
+                std::memcpy(out,reinterpret_cast<void const *>(ptr),len);
+                return true;
+            };
             if(world_vertex_ambient_world!=cache.loaded_world ||
                world_vertex_ambient_revision!=cache.revision ||
                world_vertex_ambient_probes.radius()!=radius) {
                 world_vertex_ambient_world=cache.loaded_world;
                 world_vertex_ambient_revision=cache.revision;
                 world_vertex_ambient_valid=false;
-                auto const read=[](uintptr_t ptr,void *out,size_t len)->bool {
-                    if(!len || !engine_camera_detail::readable(ptr,len))
-                        return false;
-                    std::memcpy(out,reinterpret_cast<void const *>(ptr),len);
-                    return true;
-                };
+                world_vertex_ambient_changed_sectors=0;
+                world_vertex_ambient_changed_cells=0;
+                world_vertex_ambient_changed_vertices=0;
+                world_vertex_ambient_unreadable=0;
                 world_vertex_ambient_stats stats{};
                 auto const started=profile_clock::now();
                 bool const built=capture_world_vertex_ambient(
@@ -9394,6 +9406,33 @@ namespace jkgm {
                         started,profile_clock::now()));
             }
             if(!world_vertex_ambient_valid)return;
+            // Check only sectors represented in the probe cache. A native
+            // SetSectorLight fade may advance over many frames, including
+            // after the COG verb returns; react to its live ExtraLight value
+            // and rebuild ONLY cells in sectors whose floor has changed.
+            auto const refresh=world_vertex_ambient_probes.refresh_sector_floors(
+                read,the_config->enable_baked_overbright);
+            // Accumulate diagnostics to avoid log I/O on every fade tick.
+            world_vertex_ambient_changed_sectors+=refresh.changed;
+            world_vertex_ambient_changed_cells+=refresh.cells;
+            world_vertex_ambient_changed_vertices+=refresh.vertices;
+            world_vertex_ambient_unreadable+=refresh.unreadable;
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U) {
+                if(world_vertex_ambient_changed_sectors ||
+                   world_vertex_ambient_unreadable)
+                    LOG_INFO("WORLD VERTEX AMBIENT live_sector_light checked=",
+                        refresh.checked,
+                        " changed=",world_vertex_ambient_changed_sectors,
+                        " cells=",world_vertex_ambient_changed_cells,
+                        " vertices=",world_vertex_ambient_changed_vertices,
+                        " unreadable=",world_vertex_ambient_unreadable,
+                        " window_frames=120");
+                world_vertex_ambient_changed_sectors=0;
+                world_vertex_ambient_changed_cells=0;
+                world_vertex_ambient_changed_vertices=0;
+                world_vertex_ambient_unreadable=0;
+            }
             uint32_t applied=0,missed=0,excluded=0;
             uint32_t portal_mixed=0,portal_only=0;
             for(auto &inst:frame_gpu_3do_instances) {

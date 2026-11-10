@@ -1,6 +1,6 @@
 #pragma once
 // CPU-only authored world-vertex ambient probes with local, passable-adjoin
-// interpolation. Sector ExtraLight is a world-vertex brightness floor;
+// interpolation. Sector ExtraLight is a live world-vertex brightness floor;
 // the camera-derived Thing ambient is not part of the probe.
 // No GL resources or per-frame scan of the SithWorld surface table.
 #include "world_cache.hpp"
@@ -49,8 +49,17 @@ class world_vertex_ambient_grid {
         std::array<double,3> position_sum{};
         double light_sum=0.0;
         uint32_t count=0;
+        // Immutable authored brightness (vertex + face ExtraLight) before
+        // applying the owning sector's runtime ExtraLight minimum.
+        std::vector<float> base_lights;
+    };
+    struct sector_light_state {
+        uintptr_t native_sector=0;
+        float floor=0.0f;
+        std::vector<key> cells; // only cells belonging to this SithSector
     };
     std::unordered_map<key,cell,key_hash> cells_;
+    std::unordered_map<uint32_t,sector_light_state> sector_lights_;
     using point=std::array<float,3>;
     using dpoint=std::array<double,3>;
     struct portal_triangle { std::array<point,3> v{}; };
@@ -134,6 +143,7 @@ class world_vertex_ambient_grid {
 public:
     void reset(float radius=1.0f) {
         cells_.clear();
+        sector_lights_.clear();
         portals_.clear();
         portal_sectors_.clear();
         samples_=0;
@@ -141,22 +151,89 @@ public:
                 radius<=4.0f ? radius:1.0f;
     }
     size_t cell_count() const {return cells_.size();}
+    size_t tracked_sector_count() const {return sector_lights_.size();}
     size_t portal_count() const {return portals_.size();}
     uint32_t sample_count() const {return samples_;}
     float radius() const {return radius_;}
+
+    // Register BEFORE inserting a sector's first sample. Unlike the Thing
+    // camera ambient, SithSector +0x08 is the live world-lighting floor.
+    // Duplicate surfaces in one sector register the same validated pointer.
+    bool register_sector(uint32_t id,uintptr_t native_sector,
+                         float extra,bool overbright) {
+        if(!decal_native_address_ok(native_sector) ||
+           !std::isfinite(extra))return false;
+        float const floor=std::max(0.0f,
+            clamp_authored_extra_light(extra,overbright));
+        auto const it=sector_lights_.find(id);
+        if(it!=sector_lights_.end())
+            return it->second.native_sector==native_sector;
+        sector_light_state state{};
+        state.native_sector=native_sector;
+        state.floor=floor;
+        sector_lights_.emplace(id,std::move(state));
+        return true;
+    }
 
     bool add(uint32_t sector,std::array<float,3> const &position,float light) {
         if(!std::isfinite(light) || light<0.0f ||
            samples_==std::numeric_limits<uint32_t>::max())return false;
         std::array<int32_t,3> c{};
         if(!cell_coord(position,c))return false;
-        auto &cell=cells_[key{sector,c[0],c[1],c[2]}];
+        key const k{sector,c[0],c[1],c[2]};
+        auto const registered=sector_lights_.find(sector);
+        auto [it,inserted]=cells_.try_emplace(k);
+        auto &cell=it->second;
         if(cell.count==std::numeric_limits<uint32_t>::max())return false;
+        if(inserted && registered!=sector_lights_.end())
+            registered->second.cells.push_back(k);
         for(size_t i=0;i<3;++i)cell.position_sum[i]+=position[i];
-        cell.light_sum+=light;
+        cell.base_lights.push_back(light);
+        float const floor=registered!=sector_lights_.end()?
+                          registered->second.floor:0.0f;
+        cell.light_sum+=std::max(light,floor);
         ++cell.count;
         ++samples_;
         return true;
+    }
+
+    struct refresh_stats {
+        uint32_t checked=0,changed=0,cells=0,vertices=0,unreadable=0;
+    };
+
+    // This detects *every tick* of a SetSectorLight transition, not merely
+    // the initial verb invocation. No world geometry scan or full grid
+    // rebuild. All updates are confined to the changed sector's cells.
+    template<class Read>
+    refresh_stats refresh_sector_floors(Read const &read,bool overbright) {
+        refresh_stats stats{};
+        for(auto &entry:sector_lights_) {
+            auto &sector=entry.second;
+            ++stats.checked;
+            float extra=0.0f;
+            if(!read(sector.native_sector+0x08U,&extra,sizeof(extra)) ||
+               !std::isfinite(extra)) {
+                ++stats.unreadable;
+                continue; // Fail closed: retain last valid floor.
+            }
+            float const floor=std::max(0.0f,
+                clamp_authored_extra_light(extra,overbright));
+            if(floor==sector.floor)continue;
+            sector.floor=floor;
+            ++stats.changed;
+            for(auto const &k:sector.cells) {
+                auto found=cells_.find(k);
+                if(found==cells_.end())continue;
+                auto &cell=found->second;
+                double sum=0.0;
+                for(float authored:cell.base_lights)
+                    sum+=std::max(authored,floor);
+                cell.light_sum=sum;
+                ++stats.cells;
+                stats.vertices+=cell.count;
+            }
+        }
+        return stats;
     }
 
     // Interpolate nearby per-cell averages, not per-triangle copies:
@@ -439,14 +516,15 @@ bool capture_world_vertex_ambient(
         // Match the cached world's Gouraud path: the sector's authored
         // ExtraLight is a floor, while face ExtraLight is added to the
         // static vertex sample. This is NOT Thing/camera ambient.
-        float const floor=std::max(0.0f,
-            clamp_authored_extra_light(sector_extra,overbright));
+        if(!grid.register_sector(sector_id,sector,sector_extra,overbright)) {
+            ++stats.surfaces_skipped;continue;
+        }
         float const extra=clamp_authored_extra_light(face_extra,overbright);
         uint32_t accepted=0;
         for(uint32_t i=0;i<n;++i) {
             float const authored=clamp_authored_light(intensity[i],overbright);
-            float const light=std::max(std::max(0.0f,authored+extra),floor);
-            if(grid.add(sector_id,mesh.vertices[base+i].position,light))
+            float const base_light=std::max(0.0f,authored+extra);
+            if(grid.add(sector_id,mesh.vertices[base+i].position,base_light))
                 ++accepted;
         }
         if(accepted) {

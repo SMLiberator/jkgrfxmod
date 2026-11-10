@@ -119,10 +119,23 @@ not tracked live after COG changes.
 
 If the home sector lacks samples, but a valid neighboring portal has nearby
 samples, the renderer can borrow those; otherwise it retains native Thing
-ambient. The current version does not recompute probes on per-frame COG
-vertex-light changes, and it cannot detect walls or occluders **inside** a
-single sector. It is a prototype, not a complete indirect-light solver or
-a source of additional emissive light for neighboring surfaces.
+ambient.
+
+**Runtime sector ExtraLight is supported:** at each frame, the renderer
+reads the live ExtraLight field (+0x08) for only the sectors represented in
+the probe snapshot. When it changes (including intermediate steps of a
+`SetSectorLight` fade), it recomputes only the cells belonging to that
+sector, using each cell's retained authored vertex + face ExtraLight
+contributions. Other sectors, portal topology, native world vertex data
+and the complete probe grid stay untouched. This is more robust than
+intercepting only a COG call, because the engine can advance fades after
+the verb has returned. The `WORLD VERTEX AMBIENT live_sector_light`
+profile log reports changed sectors, affected cells and vertices.
+
+Per-frame COG changes to individual vertex intensities or face ExtraLight
+are **not** currently tracked; they require a world-cache rebuild. This
+prototype cannot detect walls or occluders **inside** a single sector and
+is not a full indirect-light solver.
 It excludes sprites, Camera HUDs, skyboxes, decals and native-rendered 3DOs.
 The existing experimental per-fragment sector-crossing lighting takes
 precedence if both toggles are enabled; disable that option for probe testing.

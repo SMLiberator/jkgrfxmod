@@ -229,4 +229,70 @@ int main() {
         reader,world,surfaces,mesh,true,1.0f,grid,stats));
     assert(grid.sample(7,{{0.2f,0.1f,0.0f}},result));
     assert(std::fabs(result-(0.9f+0.3f+0.3f)/3.0f)<0.00001f);
+
+    // The next tests emulate SetSectorLight's intermediate fade steps,
+    // without rebuilding the world cache or its passable-portal polygons.
+    // A per-cell mean of max(raw,sector) differs from max(mean(raw),sector).
+    mem.put(sectors+0x08U,0.0f);
+    mem.put(surfaces+0x44U,0.0f);
+    mem.put(lights0,0.2f);
+    mem.put(lights0+4U,1.4f);
+    mem.put(lights0+8U,0.6f);
+    assert(jkgm::capture_world_vertex_ambient(
+        reader,world,surfaces,mesh,true,1.0f,grid,stats));
+    assert(grid.tracked_sector_count()==2U);
+    assert(grid.portal_count()==1U);
+    size_t const saved_cells=grid.cell_count();
+    uint32_t const saved_samples=grid.sample_count();
+    assert(grid.sample(7,{{0.2f,0.1f,0.0f}},result));
+    assert(std::fabs(result-(0.2f+1.4f+0.6f)/3.0f)<0.00001f);
+    mem.put(sectors+0x08U,1.0f);
+    auto change=grid.refresh_sector_floors(reader,true);
+    assert(change.checked==2U && change.changed==1U);
+    assert(change.cells==1U && change.vertices==3U);
+    assert(change.unreadable==0U);
+    assert(grid.cell_count()==saved_cells && grid.sample_count()==saved_samples);
+    assert(grid.portal_count()==1U);
+    assert(grid.sample(7,{{0.2f,0.1f,0.0f}},result));
+    assert(std::fabs(result-(1.0f+1.4f+1.0f)/3.0f)<0.00001f);
+    assert(grid.sample(8,{{0.2f,0.1f,0.0f}},result));
+    assert(std::fabs(result-2.0f)<0.00001f);
+    change=grid.refresh_sector_floors(reader,true);
+    assert(change.changed==0U && change.cells==0U && change.vertices==0U);
+
+    // A fade step affects precisely one sector's cells, even as the
+    // object continues to sample across the unchanged passable portal.
+    mem.put(sectors+0x08U,0.5f);
+    change=grid.refresh_sector_floors(reader,true);
+    assert(change.changed==1U && change.cells==1U);
+    assert(grid.sample(7,{{0.2f,0.1f,0.0f}},result));
+    assert(std::fabs(result-(0.5f+1.4f+0.6f)/3.0f)<0.00001f);
+    float blended=0.0f;
+    assert(grid.sample_with_portals(
+        7,{{0.0f,0.1f,0.0f}},blended)==
+        jkgm::world_vertex_ambient_result::mixed);
+    assert(blended>0.8f && blended<2.0f);
+
+    // Failed native reads do not wipe out an earlier valid sector floor.
+    mem.put(sectors+0x08U,1.8f);
+    auto unreadable=[&](uintptr_t addr,void *dst,size_t size) {
+        return addr==sectors+0x08U?false:reader(addr,dst,size);
+    };
+    change=grid.refresh_sector_floors(unreadable,true);
+    assert(change.unreadable==1U && change.changed==0U);
+    assert(grid.sample(7,{{0.2f,0.1f,0.0f}},result));
+    assert(std::fabs(result-(0.5f+1.4f+0.6f)/3.0f)<0.00001f);
+    change=grid.refresh_sector_floors(reader,true);
+    assert(change.unreadable==0U && change.changed==1U);
+    assert(grid.sample(7,{{0.2f,0.1f,0.0f}},result));
+    assert(std::fabs(result-1.8f)<0.00001f);
+
+    // An effective floor already capped at 2 stays unchanged when an
+    // authored value above the cap changes again.
+    mem.put(sectors+0x08U,5.0f);
+    change=grid.refresh_sector_floors(reader,true);
+    assert(change.changed==1U);
+    mem.put(sectors+0x08U,6.0f);
+    change=grid.refresh_sector_floors(reader,true);
+    assert(change.changed==0U && change.cells==0U);
 }
