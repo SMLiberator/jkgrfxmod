@@ -173,6 +173,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("enable_dynamic_light_specular").get_to(
                 rv->enable_dynamic_light_specular);
         }
+        if(j.contains("overbright_intensities")) {
+            j.at("overbright_intensities").get_to(rv->overbright_intensities);
+        }
         if(j.contains("gpu_pixel_lighting")) {
             j.at("gpu_pixel_lighting").get_to(rv->gpu_pixel_lighting);
         }
