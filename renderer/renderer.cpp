@@ -6987,7 +6987,7 @@ namespace jkgm {
             std::vector<world_cache_point_light> point_lights;
             bool const camera_ready=read_world_cache_camera_lights(
                 safe_read,0x0073A418U,point_lights,camera_ambient,
-                light_attenuation,the_config->overbright_intensities);
+                light_attenuation,the_config->enable_baked_overbright);
             // With pixel lighting enabled, an empty valid light list
             // still means zero pixel lights (never use stale native data).
             // When disabled, use JK's native world-vertex Gouraud light
@@ -7035,7 +7035,7 @@ namespace jkgm {
                        &info,&cache.frame_light_state,
                        pixel_lighting,global_extra,&cache.frame_sector_tint,
                        &cache.frame_sector_cmp_tint,identity_cmp,
-                       the_config->overbright_intensities)) {
+                       the_config->enable_baked_overbright)) {
                     ++light_fallback;
                     return;
                 }
@@ -7552,7 +7552,7 @@ namespace jkgm {
             };
             bool const camera_lights_ready=read_world_cache_camera_lights(
                 read_native,0x0073A418U,point_lights,camera_ambient,
-                light_attenuation,the_config->overbright_intensities);
+                light_attenuation,the_config->enable_baked_overbright);
             bool const pixel_lighting=world_cache_use_pixel_lights(
                 the_config->gpu_pixel_lighting,camera_lights_ready);
             bool const point_specular=the_config->enable_reflections &&
@@ -8277,7 +8277,7 @@ namespace jkgm {
                 instance.crossing_lighting=sector_crossing_stage_instance(
                     sector_crossing_world,sector_crossing_ranges,
                     instance,read,true,identity_cmp,
-                    the_config->overbright_intensities);
+                    the_config->enable_baked_overbright);
                 if(instance.crossing_lighting)++crossing;
             }
             if(the_config->profile_renderer &&
