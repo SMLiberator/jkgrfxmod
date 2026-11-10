@@ -173,8 +173,22 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("enable_dynamic_light_specular").get_to(
                 rv->enable_dynamic_light_specular);
         }
-        if(j.contains("overbright_intensities")) {
-            j.at("overbright_intensities").get_to(rv->overbright_intensities);
+        // One canonical switch for baked vertex, sector ambient, and extra
+        // light. Older experimental names are accepted only as aliases.
+        if(j.contains("enable_baked_overbright")) {
+            j.at("enable_baked_overbright").get_to(rv->enable_baked_overbright);
+        } else if(j.contains("overbright_intensities")) {
+            j.at("overbright_intensities").get_to(rv->enable_baked_overbright);
+        } else if(j.contains("enable_baked_vertex_overbrightness")) {
+            j.at("enable_baked_vertex_overbrightness").get_to(
+                rv->enable_baked_overbright);
+        }
+        for(auto const *legacy:{
+                "overbright_intensities",
+                "enable_baked_vertex_overbrightness"}) {
+            if(j.contains(legacy))
+                LOG_WARNING("Deprecated jkgm.json option ignored or aliased: ",
+                    legacy," (use enable_baked_overbright)");
         }
         if(j.contains("gpu_pixel_lighting")) {
             j.at("gpu_pixel_lighting").get_to(rv->gpu_pixel_lighting);
