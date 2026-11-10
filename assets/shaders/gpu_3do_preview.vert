@@ -141,26 +141,25 @@ void main() {
             if(range_distance<light_position_radius[i].w && along>0.0)
                 l+=max(light_intensity[i]-
                        range_distance*attenuation_min,0.0)*along;
-            if(l>=1.0) break;
         }
     }
     float bright=mode<0.5 ? 1.0
-        : max(clamp(l+local_extra_light,0.0,1.0),ambient_light);
-    jk_lit_rgb=vec3(pow(clamp(bright,0.0,1.0),1.8))*local_vertex_rgb;
+        : max(max(l+local_extra_light,0.0),ambient_light);
+    jk_lit_rgb=vec3(pow(max(bright,0.0),1.8))*local_vertex_rgb;
     jk_lit_rgb*=colormap_tint; // before native hardware color effects
     if(jk_color_filter.w>0.5 ||
        any(greaterThan(abs(thing_sector_tint_delta),vec3(0.00001)))) {
         // Approximate the hardware rdCache per-vertex RGB8 color operation.
-        vec3 v=pow(clamp(jk_lit_rgb,0.0,1.0),vec3(1.0/1.8));
+        vec3 v=pow(max(jk_lit_rgb,vec3(0.0)),vec3(1.0/1.8));
         if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
             v*=step(vec3(0.5),jk_color_filter.xyz);
         vec3 t=clamp(jk_color_tint.xyz+thing_sector_tint_delta,
                      vec3(-4.0),vec3(4.0));
         vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
-        v=clamp(v*scale,0.0,1.0);
-        v=clamp(v+jk_color_add_fade.xyz,0.0,1.0);
+        v=max(v*scale,vec3(0.0));
+        v=max(v+jk_color_add_fade.xyz,vec3(0.0));
         v*=jk_color_add_fade.w;
-        jk_lit_rgb=pow(clamp(v,0.0,1.0),vec3(1.8));
+        jk_lit_rgb=pow(max(v,vec3(0.0)),vec3(1.8));
     }
     // Re-run JK's vertex gamma/color effects ONLY for crossing Things,
     // once per candidate sector. This retains interpolation of gamma-
@@ -170,15 +169,15 @@ void main() {
             if(i>=sector_crossing_count)break;
             if(i==0) {sector_crossing_lit[i]=jk_lit_rgb;continue;}
             float sector_bright=mode<0.5 ? 1.0 :
-                max(clamp(l+local_extra_light,0.0,1.0),
+                max(max(l+local_extra_light,0.0),
                     sector_crossing_info[i].x);
             vec3 candidate=vec3(pow(
-                clamp(sector_bright,0.0,1.0),1.8))*local_vertex_rgb;
+                max(sector_bright,0.0),1.8))*local_vertex_rgb;
             candidate*=sector_crossing_cmp[i].xyz;
             if(jk_color_filter.w>0.5 ||
                any(greaterThan(abs(sector_crossing_tint[i].xyz),
                                vec3(0.00001)))) {
-                vec3 encoded=pow(clamp(candidate,0.0,1.0),
+                vec3 encoded=pow(max(candidate,vec3(0.0)),
                                  vec3(1.0/1.8));
                 if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
                     encoded*=step(vec3(0.5),jk_color_filter.xyz);
@@ -186,10 +185,10 @@ void main() {
                                 sector_crossing_tint[i].xyz,
                                 vec3(-4.0),vec3(4.0));
                 vec3 scale=vec3(1.0)+tint-0.5*(tint.yzx+tint.zxy);
-                encoded=clamp(encoded*scale,0.0,1.0);
-                encoded=clamp(encoded+jk_color_add_fade.xyz,0.0,1.0);
+                encoded=max(encoded*scale,vec3(0.0));
+                encoded=max(encoded+jk_color_add_fade.xyz,vec3(0.0));
                 encoded*=jk_color_add_fade.w;
-                candidate=pow(clamp(encoded,0.0,1.0),vec3(1.8));
+                candidate=pow(max(encoded,vec3(0.0)),vec3(1.8));
             }
             sector_crossing_lit[i]=candidate;
         }
