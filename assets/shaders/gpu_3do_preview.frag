@@ -144,7 +144,7 @@ int select_sector_crossing_slot()
 // brightness. Gouraud/static shading itself stays in the vertex shader.
 vec3 pixel_jk_color_at_brightness(float bright)
 {
-    vec3 result=vec3(pow(clamp(bright,0.0,1.0),1.8)) *
+    vec3 result=vec3(pow(max(bright,0.0),1.8)) *
                 pixel_light_vertex_rgb *
                 (sector_crossing_count>1
                     ? sector_crossing_cmp[sector_crossing_slot].xyz
@@ -154,16 +154,16 @@ vec3 pixel_jk_color_at_brightness(float bright)
         : thing_sector_tint_delta;
     if(jk_color_filter.w>0.5 ||
        any(greaterThan(abs(sector_tint),vec3(0.00001)))) {
-        vec3 v=pow(clamp(result,0.0,1.0),vec3(1.0/1.8));
+        vec3 v=pow(max(result,vec3(0.0)),vec3(1.0/1.8));
         if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
             v*=step(vec3(0.5),jk_color_filter.xyz);
         vec3 t=clamp(jk_color_tint.xyz+sector_tint,
                      vec3(-4.0),vec3(4.0));
         vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
-        v=clamp(v*scale,0.0,1.0);
-        v=clamp(v+jk_color_add_fade.xyz,0.0,1.0);
+        v=max(v*scale,vec3(0.0));
+        v=max(v+jk_color_add_fade.xyz,vec3(0.0));
         v*=jk_color_add_fade.w;
-        result=pow(clamp(v,0.0,1.0),vec3(1.8));
+        result=pow(max(v,vec3(0.0)),vec3(1.8));
     }
     return result;
 }
@@ -201,7 +201,6 @@ vec3 pixel_jk_diffuse_lighting(vec3 mapped_diffuse_normal)
         added+=light_color[i]*jk_point_sample(
             delta,normal,light_position_radius[i].w,
             light_intensity[i],attenuation_min,mode<2.5);
-        if(all(greaterThanEqual(added,vec3(1.0))))break;
     }
     if(all(lessThanEqual(added,vec3(0.0)))) return baked;
     vec3 light_color=max(
