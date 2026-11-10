@@ -12,6 +12,7 @@
 #include "native_sprite_profile.hpp"
 #include "native_particle_texture.hpp"
 #include "gpu_3do_preview.hpp"
+#include "light_intensity_range.hpp"
 #include "gpu_polyline.hpp"
 #include "saber_trail_history.hpp"
 #include "native_saber_damage.hpp"
@@ -578,7 +579,8 @@ namespace {
         if(!std::isfinite(ambient) || !std::isfinite(attenuation) ||
            count<0 || count>64 || attenuation<0.0f || attenuation>100.0f)
             return false;
-        instance.ambient=std::max(0.0f,std::min(ambient,1.0f));
+        instance.ambient=jkgm::clamp_authored_light(
+            ambient,the_config && the_config->overbright_intensities);
         instance.attenuation=attenuation;
         // With no dynamic point lights the shader uses the authored JK
         // vertex intensity/ambient only. There is no distance attenuation
@@ -875,7 +877,9 @@ namespace {
                 // to use the flat face normal for diffuse/non-Gouraud modes.
                 auto const light_normal=has_smooth_normals
                     ? static_cast<float const *>(m.normals)+i : face.normal;
-                float const static_light=mode==3 ? static_cast<float const *>(m.vertex_lights)[pi] : 0.0f;
+                float const static_light=mode==3 ? jkgm::clamp_authored_light(
+                    static_cast<float const *>(m.vertex_lights)[pi],
+                    the_config && the_config->overbright_intensities) : 0.0f;
                 // jkgm.exe's .rgbx extension stores one immutable float3
                 // per source vertex at mesh+0x6c. Native D3D packs each
                 // channel as floor(clamp(x,0,1)*255+0.5). Match that
@@ -894,7 +898,10 @@ namespace {
                     m.vertices[i],m.vertices[i+1],m.vertices[i+2],
                     u,vtex,face.normal[0],face.normal[1],face.normal[2],
                     static_light,light_normal[0],light_normal[1],light_normal[2],
-                    anchor[0],anchor[1],anchor[2],face.extra_light,float(mode),
+                    anchor[0],anchor[1],anchor[2],
+                    jkgm::clamp_authored_extra_light(face.extra_light,
+                        the_config && the_config->overbright_intensities),
+                    float(mode),
                     rgb[0],rgb[1],rgb[2]
                 };
                 for(float vcheck : {out.x,out.y,out.z,out.u,out.v,
@@ -3781,7 +3788,8 @@ namespace {
             if(read(0x0073A418U,&camera,4) &&
                read(uintptr_t(camera)+0x54U,&ambient,4) &&
                std::isfinite(ambient))
-                inst.ambient=std::clamp(ambient,0.0f,1.0f);
+                inst.ambient=jkgm::clamp_authored_light(
+                    ambient,the_config && the_config->overbright_intensities);
         }
         inst.is_sprite_quad=true;
         inst.casts_sun_shadows=false;
@@ -5674,7 +5682,8 @@ namespace {
         if(lighting>0U) {
             if(!read(uintptr_t(camera)+0x54U,&native_ambient,4) ||
                !std::isfinite(native_ambient))return reject(6);
-            native_ambient=std::clamp(native_ambient,0.0f,1.0f);
+            native_ambient=jkgm::clamp_authored_light(
+                native_ambient,the_config && the_config->overbright_intensities);
         }
         if(!jkgm::make_gpu_sprite_pose(
                 type,pose,view,size,offset,info.width,info.height,
