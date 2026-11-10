@@ -2,6 +2,7 @@
 // Live JK world lighting; static world geometry remains immutable.
 // RGB output intentionally reserves a MotS-style three-channel light stream.
 #include "world_cache_visibility.hpp"
+#include "light_intensity_range.hpp"
 #include "jk_cmp_gpu.hpp"
 #include <algorithm>
 #include <array>
@@ -37,7 +38,7 @@ inline bool world_cache_use_pixel_lights(bool enabled,bool camera_ready)
 inline bool read_world_cache_camera_lights(
     decal_native_read const &read,uintptr_t camera_global,
     std::vector<world_cache_point_light> &out,
-    float &ambient,float &attenuation)
+    float &ambient,float &attenuation,bool overbright=false)
 {
     out.clear();
     ambient=attenuation=0.0f;
@@ -51,7 +52,7 @@ inline bool read_world_cache_camera_lights(
        !std::isfinite(ambient) || !std::isfinite(attenuation) ||
        count<0 || count>64 || attenuation<0.0f || attenuation>100.0f)
         return false;
-    ambient=std::max(0.0f,std::min(ambient,1.0f));
+    ambient=clamp_authored_light(ambient,overbright);
     for(int32_t i=0;i<count;++i) {
         uint32_t ptr=0;
         if(!read_decal_u32(read,uintptr_t(camera)+0x5cU+
@@ -97,7 +98,7 @@ inline bool sample_world_cache_surface_light(
     float global_extra=0.0f,
     std::vector<std::array<float,3>> *sector_tint=nullptr,
     std::vector<std::array<float,3>> *sector_cmp_tint=nullptr,
-    uint32_t identity_cmp=0U)
+    uint32_t identity_cmp=0U,bool overbright=false)
 {
     if(!read || face.count<3U || face.count%3U!=0U ||
        uint64_t(face.first_index)+face.count>mesh.indices.size())
@@ -173,20 +174,21 @@ inline bool sample_world_cache_surface_light(
     // sithRender's global extra light can additionally raise/lower the
     // world floor (sithRender_RenderSectors parity).
     if(!std::isfinite(global_extra))return false;
-    ambient=std::max(0.0f,std::min(ambient+global_extra,1.0f));
-    auto clamp01=[](float v) {
-        return std::max(0.0f,std::min(v,1.0f));
-    };
+    // Each authored ExtraLight source is bounded independently; the
+    // combined sector/global light floor may exceed that input limit.
+    ambient=std::max(0.0f,clamp_authored_extra_light(ambient,overbright)+
+                     clamp_authored_extra_light(global_extra,overbright));
     if(mode!=3U) {
         // 0 fully lit; 1 unlit (face extra/ambient); 2 diffuse (JK's
         // default procEntry static light is 1.0); 3 vertex Gouraud.
         float const bright=mode==1U?
-            std::max(clamp01(extra),clamp01(ambient)):1.0f;
+            std::max(clamp_authored_extra_light(extra,overbright),ambient):1.0f;
         float const gamma=std::pow(bright,1.8f);
         for(uint32_t i=0;i<count;++i) {
             out[base+i]={{gamma,gamma,gamma}};
             if(pixel_state)(*pixel_state)[base+i]={{
-                mode==1U?extra:1.0f,clamp01(ambient),float(mode)}};
+                mode==1U?clamp_authored_extra_light(extra,overbright):1.0f,
+                ambient,float(mode)}};
         }
         return true;
     }
@@ -210,14 +212,16 @@ inline bool sample_world_cache_surface_light(
            !std::isfinite(source[i]) ||
            (!pixel_lighting &&
             !std::isfinite(native_dynamic_light[ids[i]])))return false;
-        float const raw_brightness=source[i]+extra;
+        float const raw_brightness=
+            clamp_authored_light(source[i],overbright)+
+            clamp_authored_extra_light(extra,overbright);
         float const dynamic=pixel_lighting?0.0f:native_dynamic_light[ids[i]];
         float const brightness=std::max(
-            clamp01(raw_brightness+dynamic),clamp01(ambient));
+            std::max(raw_brightness+dynamic,0.0f),ambient);
         float const gamma=std::pow(brightness,1.8f);
         result[i]={{gamma,gamma,gamma}};
         if(pixel_state)(*pixel_state)[base+i]={{
-            raw_brightness,clamp01(ambient),3.0f}};
+            raw_brightness,ambient,3.0f}};
     }
     for(uint32_t i=0;i<count;++i)out[base+i]=result[i];
     return true;
