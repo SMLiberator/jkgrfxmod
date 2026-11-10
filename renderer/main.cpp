@@ -5623,6 +5623,8 @@ namespace {
         float native_face_extra=0.0f;
         std::memcpy(&native_face_extra,src+0x8cU,sizeof(native_face_extra));
         if(!std::isfinite(native_face_extra))return reject(5);
+        native_face_extra=jkgm::clamp_authored_extra_light(
+            native_face_extra,the_config->overbright_intensities);
         // Emit at most eight distinct native face-mode samples per process.
         if(the_config->profile_renderer) {
             uint64_t const key=(uint64_t(type&255U)<<56) |
