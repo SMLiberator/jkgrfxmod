@@ -162,12 +162,14 @@ int main() {
 
     // Near an infinite extension of the plane, but outside the real
     // polygon/radius: don't pick up the neighboring sector.
-    assert(grid.add(7,{{0.0f,2.5f,0.0f}},0.1f));
+    // The grid now applies the registered sector's ExtraLight floor even
+    // to test-injected samples; choose a value above that floor here.
+    assert(grid.add(7,{{0.0f,2.5f,0.0f}},1.3f));
     assert(grid.add(8,{{0.0f,2.5f,0.0f}},1.8f));
     assert(grid.sample_with_portals(
         7,{{0.0f,2.5f,0.0f}},result)==
         jkgm::world_vertex_ambient_result::local);
-    assert(std::fabs(result-0.1f)<0.00001f);
+    assert(std::fabs(result-1.3f)<0.00001f);
 
     // A solid Adjoin must not contribute a portal, even if geometry is
     // nearby and the level still contains world vertices in both sectors.
