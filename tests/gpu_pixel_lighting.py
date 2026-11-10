@@ -78,6 +78,30 @@ assert "range_distance*attenuation_min,0.0)*along" in vert
 assert "load_shader_source(filename.parent_path()/name" in program
 assert "float jk_point_sample(" in shared
 assert "vec3 jk_point_compose(" in shared
+# Authored lighting inputs are separately capped at 1/2, never the HDR sum.
+limits=(root/"renderer/light_intensity_range.hpp").read_text(encoding="utf-8")
+world_lights=(root/"renderer/world_cache_lighting.hpp").read_text(encoding="utf-8")
+sector_cross=(root/"renderer/sector_crossing_gpu.hpp").read_text(encoding="utf-8")
+sample=(root/"assets/jkgm.json").read_text(encoding="utf-8")
+assert "bool overbright_intensities = true" in config
+assert 'j.contains("overbright_intensities")' in parser
+assert '"overbright_intensities": true' in sample
+assert "overbright ? 2.0f : 1.0f" in limits
+assert "std::clamp(value,0.0f,authored_light_limit(overbright))" in limits
+assert "std::min(value,authored_light_limit(overbright))" in limits
+assert "clamp_authored_light(source[i],overbright)" in world_lights
+assert "clamp_authored_extra_light(extra,overbright)" in world_lights
+assert "clamp_authored_extra_light(global_extra,overbright)" in world_lights
+assert "std::max(raw_brightness+dynamic,0.0f),ambient" in world_lights
+assert "clamp_authored_light(ambient,overbright)" in sector_cross
+assert "clamp_authored_extra_light(extra,overbright)" in sector_cross
+assert "the_config->overbright_intensities" in main
+assert "the_config->overbright_intensities" in wiring
+assert "pow(max(bright,0.0),1.8)" in vert
+assert "clamp(bright,0.0,1.0)" not in vert
+assert "lighting=mix(max(lighting,vec3(0.0)),vec3(1.0),fullbright);" in world_frag
+assert "vec3 lit=max(base+max(added,vec3(0.0))*light,vec3(0.0));" in shared
+assert "if(l>=1.0) break;" not in vert
 assert "uniform vec3 light_color[16];" in frag
 assert "uniform vec3 light_color[16];" in world_frag
 assert "added+=light_color[i]*jk_point_sample(" in frag
