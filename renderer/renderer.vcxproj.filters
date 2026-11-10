@@ -563,6 +563,9 @@
     <ClInclude Include="world_cache_gpu.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="light_intensity_range.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="world_cache_lighting.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
