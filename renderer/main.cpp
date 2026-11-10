@@ -580,7 +580,7 @@ namespace {
            count<0 || count>64 || attenuation<0.0f || attenuation>100.0f)
             return false;
         instance.ambient=jkgm::clamp_authored_light(
-            ambient,the_config && the_config->overbright_intensities);
+            ambient,the_config && the_config->enable_baked_overbright);
         instance.attenuation=attenuation;
         // With no dynamic point lights the shader uses the authored JK
         // vertex intensity/ambient only. There is no distance attenuation
@@ -879,7 +879,7 @@ namespace {
                     ? static_cast<float const *>(m.normals)+i : face.normal;
                 float const static_light=mode==3 ? jkgm::clamp_authored_light(
                     static_cast<float const *>(m.vertex_lights)[pi],
-                    the_config && the_config->overbright_intensities) : 0.0f;
+                    the_config && the_config->enable_baked_overbright) : 0.0f;
                 // jkgm.exe's .rgbx extension stores one immutable float3
                 // per source vertex at mesh+0x6c. Native D3D packs each
                 // channel as floor(clamp(x,0,1)*255+0.5). Match that
@@ -900,7 +900,7 @@ namespace {
                     static_light,light_normal[0],light_normal[1],light_normal[2],
                     anchor[0],anchor[1],anchor[2],
                     jkgm::clamp_authored_extra_light(face.extra_light,
-                        the_config && the_config->overbright_intensities),
+                        the_config && the_config->enable_baked_overbright),
                     float(mode),
                     rgb[0],rgb[1],rgb[2]
                 };
@@ -3789,7 +3789,7 @@ namespace {
                read(uintptr_t(camera)+0x54U,&ambient,4) &&
                std::isfinite(ambient))
                 inst.ambient=jkgm::clamp_authored_light(
-                    ambient,the_config && the_config->overbright_intensities);
+                    ambient,the_config && the_config->enable_baked_overbright);
         }
         inst.is_sprite_quad=true;
         inst.casts_sun_shadows=false;
@@ -5624,7 +5624,7 @@ namespace {
         std::memcpy(&native_face_extra,src+0x8cU,sizeof(native_face_extra));
         if(!std::isfinite(native_face_extra))return reject(5);
         native_face_extra=jkgm::clamp_authored_extra_light(
-            native_face_extra,the_config->overbright_intensities);
+            native_face_extra,the_config->enable_baked_overbright);
         // Emit at most eight distinct native face-mode samples per process.
         if(the_config->profile_renderer) {
             uint64_t const key=(uint64_t(type&255U)<<56) |
@@ -5685,7 +5685,7 @@ namespace {
             if(!read(uintptr_t(camera)+0x54U,&native_ambient,4) ||
                !std::isfinite(native_ambient))return reject(6);
             native_ambient=jkgm::clamp_authored_light(
-                native_ambient,the_config && the_config->overbright_intensities);
+                native_ambient,the_config && the_config->enable_baked_overbright);
         }
         if(!jkgm::make_gpu_sprite_pose(
                 type,pose,view,size,offset,info.width,info.height,
