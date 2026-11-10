@@ -3,6 +3,7 @@
 // The expensive plane/Adjoin snapshot belongs to the level, not the Thing;
 // a crossing Thing gets only four small shading descriptors.
 #include "sector_crossing.hpp"
+#include "light_intensity_range.hpp"
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_modelview.hpp"
 #include "jk_cmp_gpu.hpp"
@@ -87,7 +88,7 @@ sector_crossing_stage_instance(
     sector_crossing_snapshot const &snapshot,
     std::vector<sector_crossing_plane_range> const &plane_ranges,
     gpu_3do_instance const &instance,Read const &read,
-    bool can_replace_tint,uint32_t identity_cmp=0U)
+    bool can_replace_tint,uint32_t identity_cmp=0U,bool overbright=false)
 {
     if(!instance.owning_sector_valid || !instance.geometry ||
        instance.shadow_only || instance.camera_hud ||
@@ -140,12 +141,14 @@ sector_crossing_stage_instance(
         slot.interior_valid=sector.has_interior_box;
         slot.plane_start=range.first;
         slot.plane_count=range.count;
+        ambient=clamp_authored_light(ambient,overbright);
+        extra=clamp_authored_extra_light(extra,overbright);
         if(i==0)owner_light=ambient+extra;
         // Preserve global sithRender extra, IR override and possible
         // Thing emission in the native per-Thing rdCamera snapshot by
         // adjusting it by the candidate sector's relative ambient delta.
         slot.ambient=i==0?instance.ambient:
-            std::clamp(instance.ambient+(ambient+extra)-owner_light,0.0f,1.0f);
+            std::max(0.0f,instance.ambient+(ambient+extra)-owner_light);
         if(i==0) {
             slot.cmp_tint=instance.colormap_tint;
             slot.sector_tint=can_replace_tint && instance.sector_tint_valid
