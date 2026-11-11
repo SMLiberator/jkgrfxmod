@@ -15,7 +15,10 @@ assert 'j.contains("experimental_world_vertex_ambient")' in parser
 assert 'j.contains("experimental_world_vertex_ambient_radius")' in parser
 assert '"experimental_world_vertex_ambient": false' in sample
 assert '"experimental_world_vertex_ambient_radius": 1.0' in sample
-assert "stage_world_cache();\n            stage_world_vertex_ambient();\n            stage_sector_crossing();" in r
+assert ("stage_world_cache();\n"
+        "            stage_world_vertex_ambient();\n"
+        "            stage_volumetric_ambient();\n"
+        "            stage_sector_crossing();") in r
 assert "void stage_world_vertex_ambient()" in r
 assert "capture_world_vertex_ambient(" in r
 assert "inst.ambient=sampled;" in r

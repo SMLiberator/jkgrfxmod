@@ -239,6 +239,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_sector_crossing_vertex").get_to(
                 rv->experimental_sector_crossing_vertex);
         }
+        if(j.contains("experimental_volumetric_ambient")) {
+            j.at("experimental_volumetric_ambient").get_to(
+                rv->experimental_volumetric_ambient);
+        }
         if(j.contains("experimental_world_vertex_ambient")) {
             j.at("experimental_world_vertex_ambient").get_to(
                 rv->experimental_world_vertex_ambient);

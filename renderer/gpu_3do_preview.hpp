@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -90,6 +91,15 @@ namespace jkgm {
         uint32_t count=0;
         std::array<gpu_3do_crossing_sector,4> sectors{};
     };
+    // Snapshot the selected sector volume PER instance, including its live
+    // ExtraLight floor. Deferred 3DO passes never hold pointers into a
+    // mutable world cache or rely on the currently selected native sector.
+    struct gpu_3do_ambient_volume {
+        std::array<float,3> bounds_min{},bounds_max{};
+        std::array<uint8_t,8> samples{};
+        float range=1.0f;
+        float live_floor=0.0f;
+    };
     struct gpu_3do_instance {
         uint64_t id=0;
         std::shared_ptr<gpu_3do_geometry const> geometry;
@@ -137,6 +147,7 @@ namespace jkgm {
         uint32_t owning_sector_id=0;
         bool owning_sector_valid=false;
         std::shared_ptr<gpu_3do_crossing_state const> crossing_lighting;
+        std::optional<gpu_3do_ambient_volume> volumetric_ambient;
         unsigned num_lights=0;
         std::array<gpu_3do_light,gpu_3do_max_lights> lights{};
     };

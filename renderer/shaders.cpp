@@ -790,6 +790,20 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , translucent_sun(the_program)
     , ambient_light(gl::get_uniform_location(the_program,"ambient_light"))
     , jk_light_limit(gl::get_uniform_location(the_program,"jk_light_limit"))
+    , volumetric_ambient_enabled(gl::get_uniform_location(
+          the_program,"volumetric_ambient_enabled"))
+    , volumetric_ambient_bounds_min(gl::get_uniform_location(
+          the_program,"volumetric_ambient_bounds_min"))
+    , volumetric_ambient_bounds_max(gl::get_uniform_location(
+          the_program,"volumetric_ambient_bounds_max"))
+    , volumetric_ambient_corners0(gl::get_uniform_location(
+          the_program,"volumetric_ambient_corners0"))
+    , volumetric_ambient_corners1(gl::get_uniform_location(
+          the_program,"volumetric_ambient_corners1"))
+    , volumetric_ambient_range(gl::get_uniform_location(
+          the_program,"volumetric_ambient_range"))
+    , volumetric_ambient_live_floor(gl::get_uniform_location(
+          the_program,"volumetric_ambient_live_floor"))
     , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
     , pixel_dynamic_lighting(gl::get_uniform_location(
@@ -1150,6 +1164,28 @@ void jkgm::shaders::gpu_3do_preview_shader::set_light_brightness_limit(
 {
     gl::set_uniform_float(jk_light_limit,limit);
 }
+void jkgm::shaders::gpu_3do_preview_shader::set_volumetric_ambient(
+    gpu_3do_ambient_volume const *volume)
+{
+    gl::set_uniform_integer(volumetric_ambient_enabled,volume?1:0);
+    if(!volume)return;
+    gl::set_uniform_vector(volumetric_ambient_bounds_min,
+        make_point(volume->bounds_min[0],volume->bounds_min[1],
+                   volume->bounds_min[2]));
+    gl::set_uniform_vector(volumetric_ambient_bounds_max,
+        make_point(volume->bounds_max[0],volume->bounds_max[1],
+                   volume->bounds_max[2]));
+    auto const q=[&](size_t i) {
+        return float(volume->samples[i])/255.0f;
+    };
+    gl::set_uniform_vector(volumetric_ambient_corners0,
+        make_point(q(0),q(1),q(2),q(3)));
+    gl::set_uniform_vector(volumetric_ambient_corners1,
+        make_point(q(4),q(5),q(6),q(7)));
+    gl::set_uniform_float(volumetric_ambient_range,volume->range);
+    gl::set_uniform_float(volumetric_ambient_live_floor,volume->live_floor);
+}
+
 void jkgm::shaders::gpu_3do_preview_shader::set_lighting(
     gpu_3do_instance const &instance,bool pixel_lighting,
     std::array<std::array<float,3>,64> const &saber_rgb,

@@ -60,6 +60,13 @@ uniform int sector_crossing_per_vertex; // opt-in A/B: classify once per model v
 uniform samplerBuffer sector_crossing_planes;
 uniform vec3 sector_crossing_camera_origin;
 uniform vec3 camera_right_axis,camera_forward_axis,camera_up_axis;
+// Compact 2x2x2 owner-sector world vertex ambient, opt-in. Samples are
+// decoded from 8 cached uint8 corner values by the per-Thing uniform setter.
+// Only one trilinear lookup per 3DO VERTEX, never per fragment.
+uniform int volumetric_ambient_enabled;
+uniform vec3 volumetric_ambient_bounds_min,volumetric_ambient_bounds_max;
+uniform vec4 volumetric_ambient_corners0,volumetric_ambient_corners1;
+uniform float volumetric_ambient_range,volumetric_ambient_live_floor;
 uniform vec4 sector_crossing_info[4]; // x: ambient; y,z: planes; w: inner-box shortcut
 uniform vec4 sector_crossing_bounds_min[4];
 uniform vec4 sector_crossing_bounds_max[4];
@@ -115,6 +122,34 @@ int select_sector_crossing_vertex(vec3 view_position)
     }
     return 0; // preserve native owning Thing sector if no candidate matches
 }
+float volumetric_ambient_at(vec3 view_position)
+{
+    vec3 world=sector_crossing_camera_origin+
+        camera_right_axis*view_position.x+
+        camera_forward_axis*view_position.y+
+        camera_up_axis*view_position.z;
+    vec3 span=volumetric_ambient_bounds_max-volumetric_ambient_bounds_min;
+    vec3 t;
+    t.x=span.x>0.000001
+        ? clamp((world.x-volumetric_ambient_bounds_min.x)/span.x,0.0,1.0):0.5;
+    t.y=span.y>0.000001
+        ? clamp((world.y-volumetric_ambient_bounds_min.y)/span.y,0.0,1.0):0.5;
+    t.z=span.z>0.000001
+        ? clamp((world.z-volumetric_ambient_bounds_min.z)/span.z,0.0,1.0):0.5;
+    // Corner layout is binary xyz (x bit 0, y bit 1, z bit 2).
+    float low=mix(mix(volumetric_ambient_corners0.x,
+                      volumetric_ambient_corners0.y,t.x),
+                  mix(volumetric_ambient_corners0.z,
+                      volumetric_ambient_corners0.w,t.x),t.y);
+    float high=mix(mix(volumetric_ambient_corners1.x,
+                       volumetric_ambient_corners1.y,t.x),
+                   mix(volumetric_ambient_corners1.z,
+                       volumetric_ambient_corners1.w,t.x),t.y);
+    // ExtraLight is a LIVE floor, never permanently baked into the 8 bytes.
+    return max(mix(low,high,t.z)*volumetric_ambient_range,
+               volumetric_ambient_live_floor);
+}
+
 void main() {
     vec4 model_right=view_right;
     vec4 model_forward=view_forward;
@@ -205,8 +240,10 @@ void main() {
     // Face ExtraLight may darken the authored vertex, but cannot produce
     // >1 baked brightness with the option off (or >2 with it on).
     float raw_light=clamp(l+local_extra_light,0.0,jk_light_limit);
+    float ambient_floor=volumetric_ambient_enabled!=0
+        ? volumetric_ambient_at(vec3(x,y,z)) : ambient_light;
     float bright=mode<0.5 ? 1.0
-        : max(raw_light+dynamic_added,ambient_light);
+        : max(raw_light+dynamic_added,ambient_floor);
     if(jk_light_limit<=1.0)bright=min(bright,1.0);
     jk_lit_rgb=vec3(pow(max(bright,0.0),1.8))*local_vertex_rgb;
     jk_lit_rgb*=colormap_tint; // before native hardware color effects

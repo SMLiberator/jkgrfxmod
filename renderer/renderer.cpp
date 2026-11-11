@@ -32,6 +32,7 @@
 #include "sun_sky_caster_mask.hpp"
 #include "world_cache_gpu.hpp"
 #include "world_vertex_ambient.hpp"
+#include "volumetric_ambient.hpp"
 #include "world_cache_alpha.hpp"
 #include "world_cache_sky.hpp"
 #include "sun_dynamic_shadow_gpu.hpp"
@@ -636,6 +637,11 @@ namespace jkgm {
         uint64_t world_vertex_ambient_revision=0;
         uintptr_t world_vertex_ambient_world=0;
         bool world_vertex_ambient_valid=false;
+        volumetric_ambient_field volumetric_ambient_cache;
+        uint64_t volumetric_ambient_revision=0;
+        uintptr_t volumetric_ambient_world=0;
+        bool volumetric_ambient_overbright=false;
+        bool volumetric_ambient_valid=false;
         uint64_t world_vertex_ambient_changed_sectors=0;
         uint64_t world_vertex_ambient_changed_cells=0;
         uint64_t world_vertex_ambient_changed_vertices=0;
@@ -1177,6 +1183,11 @@ namespace jkgm {
                 world_vertex_ambient_revision=0;
                 world_vertex_ambient_world=0;
                 world_vertex_ambient_valid=false;
+                volumetric_ambient_cache.reset();
+                volumetric_ambient_revision=0;
+                volumetric_ambient_world=0;
+                volumetric_ambient_overbright=false;
+                volumetric_ambient_valid=false;
                 world_vertex_ambient_changed_sectors=0;
                 world_vertex_ambient_changed_cells=0;
                 world_vertex_ambient_changed_vertices=0;
@@ -3480,8 +3491,12 @@ namespace jkgm {
                     gpu_3do_sector_plane_texture_unit);
                 glBindTexture(GL_TEXTURE_BUFFER,sector_crossing_plane_texture);
                 glActiveTexture(GL_TEXTURE0);
-                prog.set_sector_crossing_camera_origin(cam.position);
             }
+            // Both experimental features reconstruct world XYZ from
+            // the same camera-space vertex and these camera axes.
+            if(crossing_buffer_ready ||
+               the_config->experimental_volumetric_ambient)
+                prog.set_sector_crossing_camera_origin(cam.position);
             set_translucent_spotlights(prog,transparent && !post_exempt &&
                                       !decals_only);
             // Mask directional GGX in both opaque and translucent passes.
@@ -4085,6 +4100,9 @@ namespace jkgm {
                                          make_point(m[6],m[7],m[8],0.0f),
                                          make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(it->second->vao);
+                    // Persistent GL uniforms must reset on each Thing.
+                    prog.set_volumetric_ambient(inst.volumetric_ambient
+                        ? &*inst.volumetric_ambient : nullptr);
                     // ThingFlag 0x20 intentionally uses the existing JK-style
                     // vertex dynamic-light loop; ordinary GPU 3DOs keep their
                     // per-fragment point lights. This is an instance choice,
@@ -9368,6 +9386,7 @@ namespace jkgm {
         void stage_world_vertex_ambient()
         {
             if(!the_config->experimental_world_vertex_ambient ||
+               the_config->experimental_volumetric_ambient ||
                the_config->enable_sector_crossing_lighting ||
                !the_config->use_gpu_cache ||
                mode!=renderer_mode::ingame ||
@@ -9475,6 +9494,109 @@ namespace jkgm {
                     " portal_only=",portal_only,
                     " misses_native=",missed,
                     " excluded=",excluded);
+        }
+
+        // A sector-local 2x2x2 volume is built only when the native
+        // world-cache snapshot changes. The current ExtraLight floor is
+        // sampled live; SetSectorLight fades need no volume rebuild.
+        void stage_volumetric_ambient()
+        {
+            if(!the_config->experimental_volumetric_ambient ||
+               the_config->enable_sector_crossing_lighting ||
+               !the_config->use_gpu_cache ||
+               mode!=renderer_mode::ingame ||
+               frame_gpu_3do_instances.empty() ||
+               !world_cache_target || !world_cache_target->ready)
+                return;
+            auto const &cache=*world_cache_target;
+            auto const read=[](uintptr_t ptr,void *out,size_t len)->bool {
+                if(!len || !engine_camera_detail::readable(ptr,len))
+                    return false;
+                std::memcpy(out,reinterpret_cast<void const *>(ptr),len);
+                return true;
+            };
+            bool const overbright=the_config->enable_baked_overbright;
+            if(volumetric_ambient_world!=cache.loaded_world ||
+               volumetric_ambient_revision!=cache.revision ||
+               volumetric_ambient_overbright!=overbright) {
+                volumetric_ambient_world=cache.loaded_world;
+                volumetric_ambient_revision=cache.revision;
+                volumetric_ambient_overbright=overbright;
+                volumetric_ambient_valid=false;
+                volumetric_ambient_stats stats{};
+                auto const started=profile_clock::now();
+                bool const built=capture_volumetric_ambient(
+                    read,cache.loaded_world,cache.world.surfaces_addr,
+                    cache.mesh,overbright,volumetric_ambient_cache,stats);
+                volumetric_ambient_valid=built &&
+                    volumetric_ambient_cache.sector_count()>0U;
+                LOG_INFO("VOLUMETRIC AMBIENT snapshot world=",
+                    cache.loaded_world," built=",built?1:0,
+                    " accepted=",stats.surfaces_sampled,
+                    " rejected=",stats.surfaces_skipped,
+                    " vertices=",stats.vertices_sampled,
+                    " sectors=",stats.sectors,
+                    " cpu_us=",elapsed_profile_us(
+                        started,profile_clock::now()));
+            }
+            if(!volumetric_ambient_valid)return;
+            float global_extra=0.0f;
+            if(!read(0x008D4098U,&global_extra,sizeof(global_extra)) ||
+               !std::isfinite(global_extra) ||
+               std::fabs(global_extra)>8.0f)
+                global_extra=0.0f;
+            auto const &sectors=volumetric_ambient_cache.sectors();
+            // Read live sector ExtraLight once per represented sector per
+            // frame, not once for each model inside a populated sector.
+            std::unordered_map<uint32_t,float> live_floors;
+            live_floors.reserve(std::min(frame_gpu_3do_instances.size(),
+                                         sectors.size()));
+            uint32_t applied=0,missed=0,excluded=0,unreadable=0;
+            for(auto &inst:frame_gpu_3do_instances) {
+                // Preserve HUD, skybox/0x20, sprite, decal and native paths.
+                if(!inst.geometry || inst.shadow_only || inst.camera_hud ||
+                   inst.skybox_vertex_lighting || inst.world_lighting_exempt ||
+                   inst.is_projected_decal || inst.is_sprite_quad ||
+                   !inst.owning_sector_valid) {
+                    ++excluded;continue;
+                }
+                auto const it=std::lower_bound(sectors.begin(),sectors.end(),
+                    inst.owning_sector_id,
+                    [](volumetric_ambient_sector const &sector,uint32_t id) {
+                        return sector.id<id;
+                    });
+                if(it==sectors.end() || it->id!=inst.owning_sector_id) {
+                    ++missed;continue; // Keep native camera ambient.
+                }
+                auto found=live_floors.find(it->id);
+                if(found==live_floors.end()) {
+                    float extra=0.0f;
+                    if(!read(it->native_sector+0x08U,&extra,sizeof(extra)) ||
+                       !std::isfinite(extra)) {
+                        ++unreadable;continue; // Keep native on invalid read.
+                    }
+                    found=live_floors.emplace(it->id,
+                        clamp_authored_extra_floor(
+                            extra,global_extra,overbright)).first;
+                }
+                gpu_3do_ambient_volume volume{};
+                volume.bounds_min=it->lo;
+                volume.bounds_max=it->hi;
+                volume.samples=it->light;
+                volume.range=it->range;
+                volume.live_floor=found->second;
+                inst.volumetric_ambient=volume;
+                ++applied;
+            }
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("VOLUMETRIC AMBIENT models=",
+                    frame_gpu_3do_instances.size(),
+                    " applied=",applied,
+                    " misses_native=",missed,
+                    " excluded=",excluded,
+                    " unreadable=",unreadable,
+                    " sectors=",sectors.size());
         }
 
         void stage_sector_crossing()
@@ -9773,6 +9895,7 @@ namespace jkgm {
             ++gpu_3do_present_serial;
             stage_world_cache();
             stage_world_vertex_ambient();
+            stage_volumetric_ambient();
             stage_sector_crossing();
             animation_seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - animation_epoch).count();
