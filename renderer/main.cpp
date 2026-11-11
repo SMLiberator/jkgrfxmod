@@ -1280,8 +1280,11 @@ namespace {
             };
             own_sector_tint_valid=jkgm::read_jk_thing_sector_tint(
                 read,hud_owner,own_sector_tint);
+            // All three sector-aware 3DO lighting modes need the same
+            // authoritative Thing-sector ID, even when enabled alone.
             if(the_config->enable_sector_crossing_lighting ||
-               the_config->experimental_world_vertex_ambient) {
+               the_config->experimental_world_vertex_ambient ||
+               the_config->experimental_volumetric_ambient) {
                 uint32_t sector=0;
                 if(read(uintptr_t(hud_owner)+0x5cU,&sector,4U) &&
                    sector>=0x10000U && sector<0x7ff00000U)

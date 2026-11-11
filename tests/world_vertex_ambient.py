@@ -26,7 +26,9 @@ assert "sample_with_portals(" in r
 assert "portal_mixed=" in r
 assert "portal_only=" in r
 assert "++missed; // Retain native ambient when no probe exists." in r
-assert "the_config->enable_sector_crossing_lighting ||\n               the_config->experimental_world_vertex_ambient" in native
+assert ("the_config->enable_sector_crossing_lighting ||\n"
+        "               the_config->experimental_world_vertex_ambient ||\n"
+        "               the_config->experimental_volumetric_ambient") in native
 assert "inst.owning_sector_id" in r
 assert "inst.shadow_only || inst.camera_hud" in r
 assert "the_config->enable_sector_crossing_lighting ||" in r

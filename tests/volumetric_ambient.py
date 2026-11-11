@@ -69,6 +69,16 @@ assert "gpu_3do_preview_shader::set_volumetric_ambient(" in api
 assert "gl::set_uniform_integer(volumetric_ambient_enabled,volume?1:0);" in api
 assert "float(volume->samples[i])/255.0f" in api
 assert "it==sectors.end()" in wiring
+# Regression: this flag must be checked in the native rdModel3 ownership
+# hook, not only in the renderer. Without this branch every instance has
+# owning_sector_valid=false and silently retains vanilla ambient.
+native=(root/"renderer/main.cpp").read_text(encoding="utf-8")
+assert ("if(the_config->enable_sector_crossing_lighting ||\n"
+        "               the_config->experimental_world_vertex_ambient ||\n"
+        "               the_config->experimental_volumetric_ambient)") in native
+assert "own_sector_id_valid=read(sector,&own_sector_id,4U);" in native
+assert "inst.owning_sector_valid=active_native_model_sector_id_valid;" in native
+assert "!inst.owning_sector_valid" in wiring
 assert "inst.skybox_vertex_lighting || inst.world_lighting_exempt ||" in wiring
 assert "mem.put(addr+0x44U,1.5f)" in tests
 assert "assert(field.sectors()[0].range==1.0f);" in tests
