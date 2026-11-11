@@ -217,6 +217,29 @@ public:
     size_t node_count() const {return nodes_.size();}
     continuous_ambient_stats stats() const {return stats_;}
 
+    // Read-only CPU->GPU staging API. No native pointers, GL objects or
+    // assumptions about unordered_map iteration order escape this field.
+    template<class Visit>
+    void for_each_node(Visit &&visit) const {
+        if(!ready_)return;
+        for(auto const &entry:nodes_) {
+            auto const owners=floor_owners_.find(entry.first);
+            visit(entry.first.sector,entry.first.at,
+                float(entry.second.brightness)/255.0f*range_,
+                owners==floor_owners_.end() ? nullptr : &owners->second);
+        }
+    }
+    bool get_fallback(uint32_t sector,point &lo,point &hi,
+                      std::array<uint8_t,8> &corners) const {
+        if(!ready_)return false;
+        auto const found=fallback_.find(sector);
+        if(found==fallback_.end())return false;
+        lo=found->second.lo;
+        hi=found->second.hi;
+        corners=found->second.corners;
+        return true;
+    }
+
     bool add(uint32_t sector,point const &position,float authored_light) {
         if(ready_ || !std::isfinite(authored_light) ||
            stats_.source_vertices>=1000000U)return false;

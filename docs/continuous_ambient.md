@@ -95,3 +95,37 @@ This is intentionally **not** a dense voxel fill. A giant empty sector
 can remain sparse in memory. It does not yet guarantee an ideal spatial
 light distribution in extremely large or complicated sectors; that
 remains a visual quality and profiling question for the GPU prototype.
+
+## Stage B0: GPU-ready sparse buffer packing
+
+The CPU profiler established that a JkGR test world uses ~44k occupied
+sector-local voxel nodes. A dense world-wide 3D texture would waste memory.
+Stage B0 instead defines a GL 3.3-compatible, bounded sparse hash table
+without changing the rendered scene.
+
+- renderer/continuous_ambient_gpu.hpp exports two contiguous arrays:
+  GL_RGBA32UI voxel keys (sector, signed XYZ grid coordinates as uint32
+  bits) and GL_RG32F values (authored brightness, shared live-lit value
+  or -1 for an ordinary, single-sector node).
+- Each key is inserted deterministically in sorted order, with at most
+  32 linear probes. If that bound cannot be met, the table grows rather
+  than introducing unbounded lookup latency.
+- assets/shaders/continuous_ambient_lookup.glsl describes the matching
+  GLSL 3.30 usamplerBuffer/samplerBuffer lookup. It is NOT YET included
+  by the production GPU 3DO shader; texture units remain untouched.
+- The owner-sector low-frequency fallback stays separate. GPU vertex
+  sampling will interpolate between eight world-aligned grid corners
+  and use the fallback only when a sparse key is absent.
+- update_shared_floors() recomputes shared-node values from all connected
+  owners on the CPU, preserving continuity during scripted ExtraLight
+  changes. It fails atomically if any live floor is invalid.
+- The key/value pair requires 24 bytes per hash slot, plus optional
+  CPU-side shared ownership lists. Both memory and maximum lookup
+  probes are measurable before GPU shader integration.
+- Windows tests verify negative grid coordinates, identical positions
+  in disconnected sectors, deterministic packing, live portal floors,
+  failed floor reads, and a synthetic 40k+ voxel workload.
+
+There is no new rendering option or visual change in Stage B0.
+Stage B1 will allocate/upload texture buffers and sample them per
+3DO vertex behind a separate default-off GPU experiment.

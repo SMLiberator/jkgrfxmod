@@ -201,6 +201,12 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. /DJKGM_NATIVE_CAPTURE_TEST tests\continuous_ambient.cpp /Fe:continuous_ambient_test.exe || exit /b 1
         continuous_ambient_test.exe || exit /b 1
         python3 tests/continuous_ambient.py || exit /b 1
+    - name: GPU-ready continuous ambient sparse voxel packing
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\continuous_ambient_gpu.cpp /Fe:continuous_ambient_gpu_test.exe || exit /b 1
+        continuous_ambient_gpu_test.exe || exit /b 1
+        python3 tests/continuous_ambient_gpu.py || exit /b 1
     - name: Source-indexed MAT fullbright mask regression tests
       shell: cmd
       run: |
