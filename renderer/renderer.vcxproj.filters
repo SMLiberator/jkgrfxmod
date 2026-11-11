@@ -572,6 +572,12 @@
     <ClInclude Include="world_vertex_ambient.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="continuous_ambient.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="continuous_ambient_capture.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="volumetric_ambient.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
