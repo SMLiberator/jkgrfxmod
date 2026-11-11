@@ -48,12 +48,20 @@ setter=api[api.index("gpu_3do_preview_shader::set_sector_crossing("):]
 # All active sampler types must occupy different numeric texture units
 # even when the fragment's sector-crossing branch is disabled.
 import re
+registry=read("renderer/texture_units.hpp")
+# Resolve the symbolic binding instead of expecting a numeric literal:
+# the renderer intentionally uses the shared sampler-unit registry.
+assert re.search(
+    r"constexpr\s+int\s+gpu_3do_sector_plane_texture_unit\s*=\s*"
+    r"texture_units::forward_sector_buffer\s*;",
+    instance), "3DO sector sampler must use the shared texture-unit registry"
 unit_match=re.search(
-    r"constexpr int gpu_3do_sector_plane_texture_unit\s*=\s*(\d+);",
-    instance)
-assert unit_match, "sector sampler unit must be explicitly reserved"
+    r"constexpr\s+int\s+forward_sector_buffer\s*=\s*(\d+)\s*;",
+    registry)
+assert unit_match, "sector sampler unit must be reserved in texture_units.hpp"
 plane_unit=int(unit_match.group(1))
 assert plane_unit==19
+assert '"sector_crossing_planes",19,sampler_kind::buffer' in registry
 spotlight_cookie_units={12+slot for slot in range(4)}
 translucent_sun_units={16,17,18}
 assert plane_unit not in spotlight_cookie_units | translucent_sun_units
