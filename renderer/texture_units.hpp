@@ -11,6 +11,8 @@ constexpr int forward_decal_occlusion=11;
 constexpr int forward_spotlight_shadow=10;
 constexpr int forward_sun_near=16,forward_sun_far=17,forward_sun_dynamic=18;
 constexpr int forward_sector_buffer=19;
+constexpr int forward_continuous_key_buffer=21;
+constexpr int forward_continuous_value_buffer=22;
 constexpr int opaque_sky_aperture=16;
 constexpr int forward_next_extended_unit=20; // never use sector's samplerBuffer
 constexpr int forward_next_extended_required_units=21; // GL fragment unit count
@@ -31,6 +33,8 @@ constexpr binding gpu_3do_preview[]={
     {"env_map",4,sampler_kind::tex2d},
     {"env_map2",7,sampler_kind::tex2d},
     {"sector_crossing_planes",19,sampler_kind::buffer},
+    {"continuous_voxel_keys",21,sampler_kind::buffer},
+    {"continuous_voxel_values",22,sampler_kind::buffer},
     {"translucent_shadow_image",10,sampler_kind::shadow},
     {"translucent_spotlight_image_0",12,sampler_kind::tex2d},
     {"translucent_spotlight_image_1",13,sampler_kind::tex2d},
@@ -137,4 +141,8 @@ static_assert(no_incompatible_target_aliases(game_trns_pass),"Sampler target col
 static_assert(no_incompatible_target_aliases(post_opaque_composite),"Sampler target collision in post_opaque_composite");
 static_assert(forward_sector_buffer != forward_next_extended_unit,
               "Sector samplerBuffer must not alias an array sampler");
+static_assert(forward_continuous_key_buffer!=forward_continuous_value_buffer &&
+              forward_continuous_key_buffer!=forward_sector_buffer &&
+              forward_continuous_value_buffer!=forward_next_extended_unit,
+              "Continuous ambient GPU buffers require distinct texture units");
 }} // namespace jkgm::texture_units

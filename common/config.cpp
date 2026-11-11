@@ -247,6 +247,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_continuous_ambient_cpu").get_to(
                 rv->experimental_continuous_ambient_cpu);
         }
+        if(j.contains("experimental_continuous_ambient_gpu")) {
+            j.at("experimental_continuous_ambient_gpu").get_to(
+                rv->experimental_continuous_ambient_gpu);
+        }
         if(j.contains("experimental_world_vertex_ambient")) {
             j.at("experimental_world_vertex_ambient").get_to(
                 rv->experimental_world_vertex_ambient);

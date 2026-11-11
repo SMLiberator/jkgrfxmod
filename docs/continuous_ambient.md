@@ -129,3 +129,42 @@ without changing the rendered scene.
 There is no new rendering option or visual change in Stage B0.
 Stage B1 will allocate/upload texture buffers and sample them per
 3DO vertex behind a separate default-off GPU experiment.
+
+## Stage B1: isolated GPU 3DO experiment (default off)
+
+Set `"experimental_continuous_ambient_gpu": true` to run the first
+per-vertex GLSL 3.30 sparse-voxel lighting experiment. The original
+`experimental_volumetric_ambient` 2x2x2 model remains available for
+comparison and is suppressed ONLY while the new GPU field is valid for
+the frame. The CPU profiling option remains independent.
+
+The renderer uploads two texture buffers per SithWorld revision:
+RGBA32UI sector+world-voxel keys and RG32F authored/shared-live values.
+The vertex shader converts the existing camera-space vertex back to
+world space, retrieves eight voxels by bounded hash lookup and performs
+trilinear interpolation. Missing sparse nodes use each sector's
+analytically evaluated 2x2x2 fallback at the same world-aligned grid
+position. All nodes near connected portals use reconciled static
+samples; shared nodes use live ExtraLight averaged across their
+participating sectors. The old native 3DO Gouraud and 0x20 exemption
+paths remain unchanged.
+
+The two new buffer samplers use dedicated texture units 21 and 22
+(sector crossing 19, sky aperture 20). Vertex shader compilation,
+runtime allocation and draw submission all require >=23 fragment and
+combined units plus at least two vertex texture units. Low-end GL 3.3
+devices automatically retain their previous lighting. Sector-crossing
+lighting and the new sparse GPU ambient remain mutually exclusive for
+this first performance experiment.
+
+GL textures/buffers are released on world or mode changes; native
+sector ExtraLight is read once per sector per frame, and the dynamic
+values buffer is reuploaded only when sector floors change. Failed
+reads or GL updates leave the legacy renderer available. This first
+GPU variant is intentionally 3DO-only: cached world geometry retains
+authored baked lighting, and sprite/decal/HUD/sky models are excluded.
+
+The user-visible differences now require an in-game A/B test across
+connected sector boundaries. Prior Stage A CPU coverage at model
+origins does NOT establish visual continuity on all mesh vertices or
+measure GPU runtime costs.

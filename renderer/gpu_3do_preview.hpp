@@ -153,6 +153,11 @@ namespace jkgm {
         bool owning_thing_world_position_valid=false;
         std::shared_ptr<gpu_3do_crossing_state const> crossing_lighting;
         std::optional<gpu_3do_ambient_volume> volumetric_ambient;
+        // Independent sparse continuous-ambient GPU experiment. Store the
+        // owning sector's eight-corner SPARSE-MISS fallback and live floor
+        // once per Thing; the vertex shader uses world-aligned sparse nodes
+        // first and falls back only when a key is absent.
+        std::optional<gpu_3do_ambient_volume> continuous_ambient_fallback;
         // Only allocated near a verified passable opening. Each owner
         // and neighbor volume is sampled per vertex; the symmetric mixing
         // weight is selected from finite portal geometry once per Thing.

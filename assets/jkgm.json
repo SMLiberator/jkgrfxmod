@@ -27,6 +27,7 @@
     "enable_baked_overbright": true,
     "experimental_volumetric_ambient": false,
     "experimental_continuous_ambient_cpu": false,
+    "experimental_continuous_ambient_gpu": false,
     "experimental_world_vertex_ambient": false,
     "experimental_world_vertex_ambient_radius": 1.0,
     "gpu_pixel_lighting": false,

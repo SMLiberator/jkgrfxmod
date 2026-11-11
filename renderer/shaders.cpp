@@ -171,6 +171,26 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
             diagnostic_context dc(filename.generic_string());
             gl::shader rv(type);
             auto source=load_shader_source(filename);
+            // The optional sparse voxel vertex path requires two distinct
+            // GL_TEXTURE_BUFFER units AFTER sector=19 and sky=20. Compile it
+            // out entirely on low-end GL 3.3 devices, so inactive samplers
+            // cannot alias sampler2D bindings at unit 0.
+            if(type==gl::shader_type::vertex &&
+               filename.filename()=="gpu_3do_preview.vert") {
+                GLint fragment_units=0,vertex_units=0,combined_units=0;
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);
+                glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS,&vertex_units);
+                glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,&combined_units);
+                if(fragment_units>=23 && vertex_units>=2 &&
+                   combined_units>=23) {
+                    auto const newline=source.find('\n');
+                    if(source.compare(0,8,"#version")!=0 ||
+                       newline==std::string::npos)
+                        report_fatal_message("Continuous voxel vertex GLSL requires #version");
+                    source.insert(newline+1U,
+                                  "#define JKGM_CONTINUOUS_AMBIENT_GPU 1\n");
+                }
+            }
             if(prefiltered_sun && type==gl::shader_type::fragment) {
                 auto const version_end=source.find('\n');
                 if(source.compare(0,8,"#version")!=0 ||
@@ -820,6 +840,26 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
           the_program,"volumetric_neighbor_range"))
     , volumetric_neighbor_live_floor(gl::get_uniform_location(
           the_program,"volumetric_neighbor_live_floor"))
+    , continuous_ambient_enabled(gl::get_uniform_location(
+          the_program,"continuous_ambient_enabled"))
+    , continuous_ambient_sector(gl::get_uniform_location(
+          the_program,"continuous_ambient_sector"))
+    , continuous_voxel_mask(gl::get_uniform_location(
+          the_program,"continuous_voxel_mask"))
+    , continuous_voxel_spacing(gl::get_uniform_location(
+          the_program,"continuous_voxel_spacing"))
+    , continuous_ambient_range(gl::get_uniform_location(
+          the_program,"continuous_ambient_range"))
+    , continuous_ambient_floor(gl::get_uniform_location(
+          the_program,"continuous_ambient_floor"))
+    , continuous_fallback_min(gl::get_uniform_location(
+          the_program,"continuous_fallback_min"))
+    , continuous_fallback_max(gl::get_uniform_location(
+          the_program,"continuous_fallback_max"))
+    , continuous_fallback_bottom(gl::get_uniform_location(
+          the_program,"continuous_fallback_bottom"))
+    , continuous_fallback_top(gl::get_uniform_location(
+          the_program,"continuous_fallback_top"))
     , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
     , pixel_dynamic_lighting(gl::get_uniform_location(
@@ -996,6 +1036,32 @@ void jkgm::shaders::gpu_3do_preview_shader::set_jk_color_effects(
     gl::set_uniform_vector(jk_color_filter,filter);
     gl::set_uniform_vector(jk_color_tint,tint);
     gl::set_uniform_vector(jk_color_add_fade,add_fade);
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_continuous_ambient(
+    gpu_3do_ambient_volume const *fallback,
+    uint32_t sector,uint32_t mask,float spacing)
+{
+    bool const active=fallback && sector!=0xffffffffU &&
+        mask!=0U && spacing>0.0f && std::isfinite(spacing);
+    gl::set_uniform_integer(continuous_ambient_enabled,active?1:0);
+    if(!active)return;
+    gl::set_uniform_integer(continuous_ambient_sector,static_cast<int>(sector));
+    gl::set_uniform_integer(continuous_voxel_mask,static_cast<int>(mask));
+    gl::set_uniform_float(continuous_voxel_spacing,spacing);
+    gl::set_uniform_float(continuous_ambient_range,fallback->range);
+    gl::set_uniform_float(continuous_ambient_floor,fallback->live_floor);
+    gl::set_uniform_vector(continuous_fallback_min,
+        make_point(fallback->bounds_min[0],fallback->bounds_min[1],
+                   fallback->bounds_min[2]));
+    gl::set_uniform_vector(continuous_fallback_max,
+        make_point(fallback->bounds_max[0],fallback->bounds_max[1],
+                   fallback->bounds_max[2]));
+    auto q=[&](size_t i){return float(fallback->samples[i])/255.0f;};
+    gl::set_uniform_vector(continuous_fallback_bottom,
+        make_point(q(0),q(1),q(2),q(3)));
+    gl::set_uniform_vector(continuous_fallback_top,
+        make_point(q(4),q(5),q(6),q(7)));
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_sector_crossing(

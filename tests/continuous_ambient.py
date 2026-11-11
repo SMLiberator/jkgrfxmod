@@ -64,7 +64,7 @@ assert "capture_continuous_ambient(" in renderer
 assert "CONTINUOUS AMBIENT CPU snapshot world=" in renderer
 assert "CONTINUOUS AMBIENT CPU coverage eligible=" in renderer
 assert "inst.owning_sector_id,inst.owning_thing_world_position," in renderer
-assert "continuous_ambient" not in shader
+assert '#include "continuous_ambient_lookup.glsl"' in shader
 assert "bool experimental_continuous_ambient_cpu = false;" in config
 assert 'j.contains("experimental_continuous_ambient_cpu")' in (
     root/"common/config.cpp").read_text(encoding="utf-8")

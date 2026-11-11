@@ -77,7 +77,8 @@ native=(root/"renderer/main.cpp").read_text(encoding="utf-8")
 assert ("if(the_config->enable_sector_crossing_lighting ||\n"
         "               the_config->experimental_world_vertex_ambient ||\n"
         "               the_config->experimental_volumetric_ambient ||\n"
-        "               the_config->experimental_continuous_ambient_cpu)") in native
+        "               (the_config->experimental_continuous_ambient_cpu ||\n"
+        "                the_config->experimental_continuous_ambient_gpu))") in native
 assert "own_sector_id_valid=read(sector,&own_sector_id,4U);" in native
 assert "inst.owning_sector_valid=active_native_model_sector_id_valid;" in native
 assert "!inst.owning_sector_valid" in wiring

@@ -8,7 +8,7 @@ header=read("renderer/texture_units.hpp")
 programs=("gpu_3do_preview","world_cache","game_opaque_pass",
           "game_trns_pass","post_opaque_composite")
 kinds={"tex2d":{"sampler2D"},"shadow":{"sampler2DShadow"},
-       "buffer":{"samplerBuffer"},
+       "buffer":{"samplerBuffer","usamplerBuffer"},
        "texture_array":{"sampler2DArray"},
        "depth_variant":{"sampler2D","sampler2DShadow"}}
 allow={("gpu_3do_preview",frozenset(("displacement_map","decal_light_texture"))),
@@ -30,7 +30,11 @@ def validate(name,mapping,source):
        "stale",sorted(mapping.keys()-decl.keys()))
     used=defaultdict(list)
     for uniform,(slot,target) in mapping.items():
-        assert target in kinds and decl[uniform]==kinds[target],(name,uniform,decl[uniform],target)
+        assert target in kinds,(name,uniform,target)
+        if target=="buffer":
+            assert decl[uniform] in ({"samplerBuffer"},{"usamplerBuffer"}),(name,uniform,decl[uniform])
+        else:
+            assert decl[uniform]==kinds[target],(name,uniform,decl[uniform],target)
         assert 0<=slot<=31,(name,uniform,slot)
         used[slot].append((uniform,target))
     for unit,contents in used.items():
@@ -44,10 +48,20 @@ for prog in programs:
     entries=re.findall(r'\{"(\w+)",(\d+),sampler_kind::(\w+)\}',m.group(1))
     mapping={n:(int(slot),kind) for n,slot,kind in entries}
     assert len(mapping)==len(entries),("duplicate",prog)
-    validate(prog,mapping,expand(prog+".frag"))
+    source=expand(prog+".frag")
+    if prog=="gpu_3do_preview":
+        source+=expand(prog+".vert")
+    validate(prog,mapping,source)
 assert "forward_sector_buffer=19;" in header
 assert "forward_next_extended_unit=20;" in header
 assert "forward_next_extended_required_units=21;" in header
+assert "forward_continuous_key_buffer=21;" in header
+assert "forward_continuous_value_buffer=22;" in header
+assert '"continuous_voxel_keys",21,sampler_kind::buffer' in header
+assert '"continuous_voxel_values",22,sampler_kind::buffer' in header
+assert "GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS" in sh
+assert "JKGM_CONTINUOUS_AMBIENT_GPU 1" in sh
+
 # The optional VSM guard alone consumes raw depth textures on units 17/18.
 post=re.search(r"constexpr binding post_opaque_composite\[\]=\{(.*?)\n\};",header,re.S)
 assert post
@@ -90,7 +104,9 @@ m=re.search(r"constexpr binding gpu_3do_preview\[\]=\{(.*?)\n\};",header,re.S)
 entries=re.findall(r'\{"(\w+)",(\d+),sampler_kind::(\w+)\}',m.group(1))
 mapping={n:(int(slot),kind) for n,slot,kind in entries}
 try:
-    validate("gpu_3do_preview",mapping,expand("gpu_3do_preview.frag")+
+    validate("gpu_3do_preview",mapping,
+             expand("gpu_3do_preview.frag")+
+             expand("gpu_3do_preview.vert")+
              "\nuniform sampler2DArray future_aperture;\n")
 except AssertionError:
     pass

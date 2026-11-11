@@ -31,10 +31,10 @@ assert "static_assert(sizeof(continuous_ambient_gpu_table::key)==16" in packed
 assert "static_assert(sizeof(continuous_ambient_gpu_table::value)==8" in packed
 assert "uniform usamplerBuffer continuous_voxel_keys;" in glsl
 assert "uniform samplerBuffer continuous_voxel_values;" in glsl
-assert "uniform uint continuous_voxel_mask;" in glsl
+assert "uniform int continuous_voxel_mask;" in glsl
 assert "texelFetch(continuous_voxel_keys,int(slot))" in glsl
 assert "texelFetch(continuous_voxel_values,int(slot)).xy" in glsl
-assert "slot=(slot+1u)&continuous_voxel_mask;" in glsl
+assert "slot=(slot+1u)&uint(continuous_voxel_mask);" in glsl
 assert "for(int attempt=0;attempt<32;++attempt)" in glsl
 # Match exact CPU/GLSL wrapping constants and slot indexing:
 for cpp_const,glsl_const in [
@@ -49,6 +49,21 @@ assert "continuous_ambient_gpu.hpp" in project
 assert "continuous_ambient_gpu.hpp" in filters
 assert "GPU-ready continuous ambient sparse voxel packing" in workflow
 assert "tests\\continuous_ambient_gpu.cpp" in workflow
-assert "assets/shaders/continuous_ambient_lookup.glsl" not in vertex
-assert "continuous_ambient_gpu.hpp" not in renderer
+assert '#include "continuous_ambient_lookup.glsl"' in vertex
+assert '#include "continuous_ambient_gpu.hpp"' in renderer
+assert "void stage_continuous_ambient_gpu()" in renderer
+assert "stage_continuous_ambient_gpu();" in renderer
+assert "continuous_ambient_gpu_enabled_this_frame" in renderer
+assert "glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32UI,key_buffer);" in renderer
+assert "glTexBuffer(GL_TEXTURE_BUFFER,GL_RG32F,value_buffer);" in renderer
+assert "update_shared_floors(" in renderer
+assert "if(floors!=continuous_ambient_live_floors)" in renderer
+assert "std::optional<gpu_3do_ambient_volume> continuous_ambient_fallback;" in (
+    root/"renderer/gpu_3do_preview.hpp").read_text(encoding="utf-8")
+assert "bool experimental_continuous_ambient_gpu = false;" in (
+    root/"common/config.hpp").read_text(encoding="utf-8")
+assert "experimental_continuous_ambient_gpu" in (
+    root/"renderer/main.cpp").read_text(encoding="utf-8")
+assert "JKGM_CONTINUOUS_AMBIENT_GPU" in (
+    root/"renderer/shaders.cpp").read_text(encoding="utf-8")
 print("Continuous ambient sparse GPU transport contracts passed")

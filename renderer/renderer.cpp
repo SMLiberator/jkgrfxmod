@@ -34,6 +34,7 @@
 #include "world_vertex_ambient.hpp"
 #include "volumetric_ambient.hpp"
 #include "continuous_ambient_capture.hpp"
+#include "continuous_ambient_gpu.hpp"
 #include "world_cache_alpha.hpp"
 #include "world_cache_sky.hpp"
 #include "sun_dynamic_shadow_gpu.hpp"
@@ -646,6 +647,12 @@ namespace jkgm {
         uint64_t continuous_ambient_cpu_revision=0;
         bool continuous_ambient_cpu_overbright=false;
         bool continuous_ambient_cpu_valid=false;
+        std::unique_ptr<continuous_ambient_gpu_table> continuous_ambient_gpu_cache;
+        GLuint continuous_ambient_key_buffer=0,continuous_ambient_key_texture=0;
+        GLuint continuous_ambient_value_buffer=0,continuous_ambient_value_texture=0;
+        std::unordered_map<uint32_t,uintptr_t> continuous_ambient_sector_addresses;
+        std::unordered_map<uint32_t,float> continuous_ambient_live_floors;
+        bool continuous_ambient_gpu_enabled_this_frame=false;
         // Reuse the old experiment's VALIDATED finite passable-Adjoin
         // polygons, but no legacy lighting cells or CPU light samples.
         world_vertex_ambient_grid volumetric_ambient_portals;
@@ -1163,6 +1170,7 @@ namespace jkgm {
         {
             clear_deferred_gpu_hud_materials();
             reset_sector_crossing();
+            reset_continuous_ambient_gpu();
             release_spotlight_images();
             spotlight_shadow_target.reset();
             sun_shadow_target.reset();
@@ -1190,6 +1198,7 @@ namespace jkgm {
                 deferred_gpu_3do_camera={};
                 frame_has_exempt_gpu=false;
                 reset_sector_crossing();
+                reset_continuous_ambient_gpu();
                 world_vertex_ambient_probes.reset();
                 world_vertex_ambient_revision=0;
                 world_vertex_ambient_world=0;
@@ -3509,10 +3518,27 @@ namespace jkgm {
                 glBindTexture(GL_TEXTURE_BUFFER,sector_crossing_plane_texture);
                 glActiveTexture(GL_TEXTURE0);
             }
-            // Both experimental features reconstruct world XYZ from
-            // the same camera-space vertex and these camera axes.
+            // Both experiments reconstruct world XYZ from the
+            // same camera-space vertex and these camera axes.
+            bool const continuous_buffer_ready=
+                continuous_ambient_gpu_enabled_this_frame &&
+                !post_exempt && !decals_only &&
+                continuous_ambient_key_texture!=0U &&
+                continuous_ambient_value_texture!=0U;
+            if(continuous_buffer_ready) {
+                glActiveTexture(GL_TEXTURE0+
+                    texture_units::forward_continuous_key_buffer);
+                glBindTexture(GL_TEXTURE_BUFFER,continuous_ambient_key_texture);
+                glActiveTexture(GL_TEXTURE0+
+                    texture_units::forward_continuous_value_buffer);
+                glBindTexture(GL_TEXTURE_BUFFER,continuous_ambient_value_texture);
+                glActiveTexture(GL_TEXTURE0);
+            }
+            // The sparse volume and legacy volume share the SAME
+            // world-space camera transform, only sampling differs.
             if(crossing_buffer_ready ||
-               the_config->experimental_volumetric_ambient)
+               the_config->experimental_volumetric_ambient ||
+               continuous_ambient_gpu_enabled_this_frame)
                 prog.set_sector_crossing_camera_origin(cam.position);
             set_translucent_spotlights(prog,transparent && !post_exempt &&
                                       !decals_only);
@@ -4124,6 +4150,14 @@ namespace jkgm {
                         inst.volumetric_ambient_neighbor
                             ? &*inst.volumetric_ambient_neighbor : nullptr,
                         inst.volumetric_ambient_neighbor_weight);
+                    prog.set_continuous_ambient(
+                        continuous_buffer_ready && inst.continuous_ambient_fallback
+                            ? &*inst.continuous_ambient_fallback : nullptr,
+                        inst.owning_sector_id,
+                        continuous_buffer_ready && continuous_ambient_gpu_cache
+                            ? continuous_ambient_gpu_cache->mask() : 0U,
+                        continuous_buffer_ready && continuous_ambient_gpu_cache
+                            ? continuous_ambient_gpu_cache->spacing() : 1.0f);
                     // ThingFlag 0x20 intentionally uses the existing JK-style
                     // vertex dynamic-light loop; ordinary GPU 3DOs keep their
                     // per-fragment point lights. This is an instance choice,
@@ -9401,12 +9435,37 @@ namespace jkgm {
             sector_crossing_ranges.clear();
         }
 
+        // Keep GL_TEXTURE_BUFFER resources tied to the GL context and
+        // SithWorld revision. Never issue deletion after context loss.
+        void reset_continuous_ambient_gpu()
+        {
+            if(hGLRC && wglGetCurrentContext()==hGLRC) {
+                if(continuous_ambient_key_texture)
+                    glDeleteTextures(1,&continuous_ambient_key_texture);
+                if(continuous_ambient_value_texture)
+                    glDeleteTextures(1,&continuous_ambient_value_texture);
+                if(continuous_ambient_key_buffer)
+                    glDeleteBuffers(1,&continuous_ambient_key_buffer);
+                if(continuous_ambient_value_buffer)
+                    glDeleteBuffers(1,&continuous_ambient_value_buffer);
+            }
+            continuous_ambient_key_texture=0;
+            continuous_ambient_value_texture=0;
+            continuous_ambient_key_buffer=0;
+            continuous_ambient_value_buffer=0;
+            continuous_ambient_gpu_cache.reset();
+            continuous_ambient_sector_addresses.clear();
+            continuous_ambient_live_floors.clear();
+            continuous_ambient_gpu_enabled_this_frame=false;
+        }
+
         // A/B prototype: replace native per-Thing ambient with authored world
         // Gouraud probes. Only the local sector and adjacent sectors through
         // verified passable portal polygons can contribute.
         void stage_world_vertex_ambient()
         {
-            if(!the_config->experimental_world_vertex_ambient ||
+            if(continuous_ambient_gpu_enabled_this_frame ||
+               !the_config->experimental_world_vertex_ambient ||
                the_config->experimental_volumetric_ambient ||
                the_config->enable_sector_crossing_lighting ||
                !the_config->use_gpu_cache ||
@@ -9523,7 +9582,8 @@ namespace jkgm {
         // revision, retain its compact field, and report sample coverage.
         void stage_continuous_ambient_cpu()
         {
-            if(!the_config->experimental_continuous_ambient_cpu ||
+            if((!the_config->experimental_continuous_ambient_cpu &&
+                !the_config->experimental_continuous_ambient_gpu) ||
                !the_config->use_gpu_cache ||
                mode!=renderer_mode::ingame ||
                !world_cache_target || !world_cache_target->ready)
@@ -9535,6 +9595,7 @@ namespace jkgm {
                 continuous_ambient_cpu_revision!=cache.revision ||
                 continuous_ambient_cpu_overbright!=overbright;
             if(rebuild) {
+                reset_continuous_ambient_gpu();
                 continuous_ambient_cpu_world=cache.loaded_world;
                 continuous_ambient_cpu_revision=cache.revision;
                 continuous_ambient_cpu_overbright=overbright;
@@ -9610,12 +9671,173 @@ namespace jkgm {
                 " max=",sampled?max_light:0.0f);
         }
 
+        // Stage B1: independent, opt-in GL 3.3 continuous voxel
+        // illumination. All static keys upload ONCE per world revision;
+        // only the small shared-live values buffer changes on sector fades.
+        // A failed read/upload/capability check leaves the old lighting.
+        void stage_continuous_ambient_gpu()
+        {
+            continuous_ambient_gpu_enabled_this_frame=false;
+            if(!the_config->experimental_continuous_ambient_gpu ||
+               the_config->enable_sector_crossing_lighting ||
+               !continuous_ambient_cpu_valid ||
+               !continuous_ambient_cpu_cache ||
+               !world_cache_target || !world_cache_target->ready ||
+               mode!=renderer_mode::ingame ||
+               frame_gpu_3do_instances.empty())return;
+            static GLint fragment_units=0,vertex_units=0,combined_units=0;
+            if(fragment_units==0) {
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);
+                glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS,&vertex_units);
+                glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,&combined_units);
+            }
+            if(fragment_units<=texture_units::forward_continuous_value_buffer ||
+               vertex_units<2 || combined_units<=
+                    texture_units::forward_continuous_value_buffer)return;
+            auto const read=[](uintptr_t p,void *out,size_t count)->bool {
+                if(!count || !engine_camera_detail::readable(p,count))
+                    return false;
+                std::memcpy(out,reinterpret_cast<void const *>(p),count);
+                return true;
+            };
+            if(!continuous_ambient_gpu_cache) {
+                auto table=std::make_unique<continuous_ambient_gpu_table>();
+                if(!table->build(*continuous_ambient_cpu_cache))return;
+                GLint max_texels=0;
+                glGetIntegerv(GL_MAX_TEXTURE_BUFFER_SIZE,&max_texels);
+                if(max_texels<1 ||
+                   table->capacity()>static_cast<uint32_t>(max_texels))
+                    return;
+                uint32_t count=0,base=0;
+                uintptr_t world=world_cache_target->loaded_world;
+                if(!read(world+0x4cU,&count,4U) ||
+                   !read(world+0x50U,&base,4U) ||
+                   !count || count>65536U ||
+                   !decal_native_address_ok(base))return;
+                std::unordered_map<uint32_t,uintptr_t> sectors;
+                sectors.reserve(count);
+                for(uint32_t i=0;i<count;++i) {
+                    uintptr_t const ptr=uintptr_t(base)+uintptr_t(i)*0x98U;
+                    uint32_t id=0;
+                    if(!read(ptr,&id,4U))return;
+                    sectors[id]=ptr;
+                }
+                GLuint key_buffer=0,value_buffer=0,key_tex=0,value_tex=0;
+                glGenBuffers(1,&key_buffer);
+                glGenBuffers(1,&value_buffer);
+                glGenTextures(1,&key_tex);
+                glGenTextures(1,&value_tex);
+                if(!key_buffer || !value_buffer || !key_tex || !value_tex) {
+                    if(key_tex)glDeleteTextures(1,&key_tex);
+                    if(value_tex)glDeleteTextures(1,&value_tex);
+                    if(key_buffer)glDeleteBuffers(1,&key_buffer);
+                    if(value_buffer)glDeleteBuffers(1,&value_buffer);
+                    return;
+                }
+                glBindBuffer(GL_TEXTURE_BUFFER,key_buffer);
+                glBufferData(GL_TEXTURE_BUFFER,
+                    static_cast<GLsizeiptr>(table->key_bytes()),
+                    table->keys().data(),GL_STATIC_DRAW);
+                glActiveTexture(GL_TEXTURE0+
+                    texture_units::forward_continuous_key_buffer);
+                glBindTexture(GL_TEXTURE_BUFFER,key_tex);
+                glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32UI,key_buffer);
+                glBindBuffer(GL_TEXTURE_BUFFER,value_buffer);
+                glBufferData(GL_TEXTURE_BUFFER,
+                    static_cast<GLsizeiptr>(table->value_bytes()),
+                    table->values().data(),GL_DYNAMIC_DRAW);
+                glActiveTexture(GL_TEXTURE0+
+                    texture_units::forward_continuous_value_buffer);
+                glBindTexture(GL_TEXTURE_BUFFER,value_tex);
+                glTexBuffer(GL_TEXTURE_BUFFER,GL_RG32F,value_buffer);
+                glBindBuffer(GL_TEXTURE_BUFFER,0);
+                glActiveTexture(GL_TEXTURE0);
+                if(glGetError()!=GL_NO_ERROR) {
+                    glDeleteTextures(1,&key_tex);
+                    glDeleteTextures(1,&value_tex);
+                    glDeleteBuffers(1,&key_buffer);
+                    glDeleteBuffers(1,&value_buffer);
+                    return;
+                }
+                continuous_ambient_key_buffer=key_buffer;
+                continuous_ambient_value_buffer=value_buffer;
+                continuous_ambient_key_texture=key_tex;
+                continuous_ambient_value_texture=value_tex;
+                continuous_ambient_sector_addresses=std::move(sectors);
+                continuous_ambient_gpu_cache=std::move(table);
+                LOG_INFO("CONTINUOUS AMBIENT GPU upload nodes=",
+                    continuous_ambient_gpu_cache->node_count(),
+                    " slots=",continuous_ambient_gpu_cache->capacity(),
+                    " max_probes=",continuous_ambient_gpu_cache->max_probes(),
+                    " static_bytes=",continuous_ambient_gpu_cache->key_bytes(),
+                    " value_bytes=",continuous_ambient_gpu_cache->value_bytes());
+            }
+            float global_extra=0.0f;
+            if(!read(0x008D4098U,&global_extra,sizeof(global_extra)) ||
+               !std::isfinite(global_extra) || std::fabs(global_extra)>8.0f)
+                global_extra=0.0f;
+            std::unordered_map<uint32_t,float> floors;
+            floors.reserve(continuous_ambient_sector_addresses.size());
+            for(auto const &entry:continuous_ambient_sector_addresses) {
+                float extra=0.0f;
+                if(!read(entry.second+0x08U,&extra,4U) ||
+                   !std::isfinite(extra))return;
+                floors.emplace(entry.first,clamp_authored_extra_floor(
+                    extra,global_extra,the_config->enable_baked_overbright));
+            }
+            // Update before publishing live floors. A failed sector read
+            // cannot partially modify the texture or the previous snapshot.
+            if(floors!=continuous_ambient_live_floors) {
+                auto const lookup=[&](uint32_t id,float &v) {
+                    auto it=floors.find(id);
+                    if(it==floors.end())return false;
+                    v=it->second;return true;
+                };
+                if(!continuous_ambient_gpu_cache->update_shared_floors(
+                    lookup,continuous_ambient_cpu_cache->range()))return;
+                glBindBuffer(GL_TEXTURE_BUFFER,continuous_ambient_value_buffer);
+                glBufferSubData(GL_TEXTURE_BUFFER,0,
+                    static_cast<GLsizeiptr>(
+                        continuous_ambient_gpu_cache->value_bytes()),
+                    continuous_ambient_gpu_cache->values().data());
+                glBindBuffer(GL_TEXTURE_BUFFER,0);
+                if(glGetError()!=GL_NO_ERROR)return;
+                continuous_ambient_live_floors=std::move(floors);
+            }
+            uint32_t applied=0;
+            for(auto &inst:frame_gpu_3do_instances) {
+                if(!inst.geometry || inst.shadow_only || inst.camera_hud ||
+                   inst.skybox_vertex_lighting || inst.world_lighting_exempt ||
+                   inst.is_projected_decal || inst.is_sprite_quad ||
+                   !inst.owning_sector_valid)continue;
+                continuous_ambient_field::point lo{},hi{};
+                std::array<uint8_t,8> corners{};
+                if(!continuous_ambient_cpu_cache->get_fallback(
+                       inst.owning_sector_id,lo,hi,corners))continue;
+                auto floor=continuous_ambient_live_floors.find(
+                    inst.owning_sector_id);
+                if(floor==continuous_ambient_live_floors.end())continue;
+                gpu_3do_ambient_volume v{};
+                v.bounds_min=lo;v.bounds_max=hi;v.samples=corners;
+                v.range=continuous_ambient_cpu_cache->range();
+                v.live_floor=floor->second;
+                inst.continuous_ambient_fallback=v;
+                ++applied;
+            }
+            continuous_ambient_gpu_enabled_this_frame=applied>0U;
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("CONTINUOUS AMBIENT GPU instances=",applied,
+                         " slots=",continuous_ambient_gpu_cache->capacity());
+        }
+
         // A sector-local 2x2x2 volume is built only when the native
         // world-cache snapshot changes. The current ExtraLight floor is
         // sampled live; SetSectorLight fades need no volume rebuild.
         void stage_volumetric_ambient()
         {
-            if(!the_config->experimental_volumetric_ambient ||
+            if(continuous_ambient_gpu_enabled_this_frame ||
+               !the_config->experimental_volumetric_ambient ||
                the_config->enable_sector_crossing_lighting ||
                !the_config->use_gpu_cache ||
                mode!=renderer_mode::ingame ||
@@ -10069,6 +10291,7 @@ namespace jkgm {
             ++gpu_3do_present_serial;
             stage_world_cache();
             stage_continuous_ambient_cpu();
+            stage_continuous_ambient_gpu();
             stage_world_vertex_ambient();
             stage_volumetric_ambient();
             stage_sector_crossing();

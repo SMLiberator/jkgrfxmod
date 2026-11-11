@@ -367,6 +367,16 @@ namespace jkgm {
                                     volumetric_neighbor_corners1,
                                     volumetric_neighbor_range,
                                     volumetric_neighbor_live_floor,
+                                    continuous_ambient_enabled,
+                                    continuous_ambient_sector,
+                                    continuous_voxel_mask,
+                                    continuous_voxel_spacing,
+                                    continuous_ambient_range,
+                                    continuous_ambient_floor,
+                                    continuous_fallback_min,
+                                    continuous_fallback_max,
+                                    continuous_fallback_bottom,
+                                    continuous_fallback_top,
                                     pixel_dynamic_lighting,
                                     nonrigid_light_transform,effective_light_mode;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
@@ -392,6 +402,9 @@ namespace jkgm {
             void set_volumetric_ambient(
                 gpu_3do_ambient_volume const *volume,
                 gpu_3do_ambient_volume const *neighbor,float weight);
+            void set_continuous_ambient(
+                gpu_3do_ambient_volume const *fallback,
+                uint32_t sector,uint32_t mask,float spacing);
             void set_lighting(gpu_3do_instance const &instance,
                               bool pixel_lighting,
                               std::array<std::array<float,3>,64> const &saber_rgb,
