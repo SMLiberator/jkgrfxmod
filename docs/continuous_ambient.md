@@ -2,8 +2,20 @@
 
 **Status:** CPU-only. The current experimental_volumetric_ambient
 2x2x2 GPU path, all existing JSON options, renderer behavior and shader
-requirements are **unchanged**. This commit produces no visual difference.
+requirements are **unchanged**. This stage produces no visual difference.
 Stage B GPU integration requires separate review and tests.
+
+To profile the CPU-only field on a real JkGR world, set
+`"experimental_continuous_ambient_cpu": true` in jkgm.json. Leave
+`"experimental_volumetric_ambient"` at whichever value you are already
+comparing; the new option does **not** change lighting. A one-time
+`CONTINUOUS AMBIENT CPU snapshot` log contains capture/build microseconds,
+raw/final node counts, represented sectors, and portal-stitching counts.
+With `"profile_renderer": true`, a periodic
+`CONTINUOUS AMBIENT CPU coverage` log samples owning SithThing origins
+with zero extra-light floors to estimate missing static voxels. The
+CPU field is retained only while the option is enabled, and its cached
+snapshot is reset on world changes.
 
 ## Target
 

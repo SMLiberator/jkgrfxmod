@@ -1289,7 +1289,8 @@ namespace {
             // Unlike rdMesh's camera/view-space matrix, the linked
             // SithThing position is WORLD-space and common to every node.
             // Capture only for the volume experiment, once per Thing.
-            if(the_config->experimental_volumetric_ambient) {
+            if(the_config->experimental_volumetric_ambient ||
+               the_config->experimental_continuous_ambient_cpu) {
                 own_world_position_valid=read(
                     uintptr_t(hud_owner)+0xb8U,
                     own_world_position.data(),sizeof(own_world_position));
@@ -1303,7 +1304,8 @@ namespace {
             // authoritative Thing-sector ID, even when enabled alone.
             if(the_config->enable_sector_crossing_lighting ||
                the_config->experimental_world_vertex_ambient ||
-               the_config->experimental_volumetric_ambient) {
+               the_config->experimental_volumetric_ambient ||
+               the_config->experimental_continuous_ambient_cpu) {
                 uint32_t sector=0;
                 if(read(uintptr_t(hud_owner)+0x5cU,&sector,4U) &&
                    sector>=0x10000U && sector<0x7ff00000U)

@@ -33,6 +33,7 @@
 #include "world_cache_gpu.hpp"
 #include "world_vertex_ambient.hpp"
 #include "volumetric_ambient.hpp"
+#include "continuous_ambient_capture.hpp"
 #include "world_cache_alpha.hpp"
 #include "world_cache_sky.hpp"
 #include "sun_dynamic_shadow_gpu.hpp"
@@ -638,6 +639,13 @@ namespace jkgm {
         uintptr_t world_vertex_ambient_world=0;
         bool world_vertex_ambient_valid=false;
         volumetric_ambient_field volumetric_ambient_cache;
+        // Standalone CPU-only continuous voxel diagnostic; independent of
+        // existing 2x2x2 shader and legacy probes, off by default.
+        std::unique_ptr<continuous_ambient_field> continuous_ambient_cpu_cache;
+        uintptr_t continuous_ambient_cpu_world=0;
+        uint64_t continuous_ambient_cpu_revision=0;
+        bool continuous_ambient_cpu_overbright=false;
+        bool continuous_ambient_cpu_valid=false;
         // Reuse the old experiment's VALIDATED finite passable-Adjoin
         // polygons, but no legacy lighting cells or CPU light samples.
         world_vertex_ambient_grid volumetric_ambient_portals;
@@ -1188,6 +1196,11 @@ namespace jkgm {
                 world_vertex_ambient_valid=false;
                 volumetric_ambient_cache.reset();
                 volumetric_ambient_portals.reset();
+                continuous_ambient_cpu_cache.reset();
+                continuous_ambient_cpu_world=0;
+                continuous_ambient_cpu_revision=0;
+                continuous_ambient_cpu_overbright=false;
+                continuous_ambient_cpu_valid=false;
                 volumetric_ambient_revision=0;
                 volumetric_ambient_world=0;
                 volumetric_ambient_overbright=false;
@@ -9504,6 +9517,99 @@ namespace jkgm {
                     " excluded=",excluded);
         }
 
+        // Profiling-only Stage A of the continuous sparse voxel field.
+        // Explicitly does NOT alter 3DO instances, shader uniforms or the
+        // old volumetric ambient A/B settings. Build once per world cache
+        // revision, retain its compact field, and report sample coverage.
+        void stage_continuous_ambient_cpu()
+        {
+            if(!the_config->experimental_continuous_ambient_cpu ||
+               !the_config->use_gpu_cache ||
+               mode!=renderer_mode::ingame ||
+               !world_cache_target || !world_cache_target->ready)
+                return;
+            auto const &cache=*world_cache_target;
+            bool const overbright=the_config->enable_baked_overbright;
+            bool const rebuild=!continuous_ambient_cpu_cache ||
+                continuous_ambient_cpu_world!=cache.loaded_world ||
+                continuous_ambient_cpu_revision!=cache.revision ||
+                continuous_ambient_cpu_overbright!=overbright;
+            if(rebuild) {
+                continuous_ambient_cpu_world=cache.loaded_world;
+                continuous_ambient_cpu_revision=cache.revision;
+                continuous_ambient_cpu_overbright=overbright;
+                continuous_ambient_cpu_valid=false;
+                if(!continuous_ambient_cpu_cache)
+                    continuous_ambient_cpu_cache=
+                        std::make_unique<continuous_ambient_field>();
+                auto const read=[](uintptr_t ptr,void *out,size_t len)->bool {
+                    if(!len || !engine_camera_detail::readable(ptr,len))
+                        return false;
+                    std::memcpy(out,reinterpret_cast<void const *>(ptr),len);
+                    return true;
+                };
+                continuous_ambient_capture_stats capture{};
+                auto const started=profile_clock::now();
+                bool const built=capture_continuous_ambient(
+                    read,cache.loaded_world,cache.world.surfaces_addr,
+                    cache.mesh,overbright,1.0f,*continuous_ambient_cpu_cache,
+                    capture);
+                continuous_ambient_cpu_valid=built &&
+                    continuous_ambient_cpu_cache->node_count()>0U;
+                auto const counters=continuous_ambient_cpu_cache->stats();
+                LOG_INFO("CONTINUOUS AMBIENT CPU snapshot world=",
+                    cache.loaded_world,
+                    " built=",built?1:0,
+                    " valid=",continuous_ambient_cpu_valid?1:0,
+                    " surfaces=",capture.surfaces_sampled,
+                    " rejected=",capture.surfaces_skipped,
+                    " authored_vertices=",capture.vertices_sampled,
+                    " raw_nodes=",counters.raw_nodes,
+                    " final_nodes=",counters.final_nodes,
+                    " fallback_sectors=",counters.fallback_sectors,
+                    " passable_portals=",capture.passable_portals,
+                    " triangles=",counters.portal_triangles,
+                    " stitched_locations=",counters.stitched_locations,
+                    " shared_nodes=",counters.shared_nodes,
+                    " oversized_portals=",counters.skipped_oversized_portals,
+                    " cpu_us=",elapsed_profile_us(
+                        started,profile_clock::now()));
+            }
+            // Sample the actual owning-Thing origins at a low diagnostic
+            // frequency, never modifying the rendered ambient. Zero live
+            // floors are enough to determine whether static voxel coverage
+            // exists; a separate GPU stage will handle live ExtraLight.
+            if(!continuous_ambient_cpu_valid ||
+               !the_config->profile_renderer ||
+               gpu_3do_present_serial%120U!=0U)return;
+            auto const zero_floor=[](uint32_t,float &floor)->bool {
+                floor=0.0f;return true;
+            };
+            uint32_t eligible=0,sampled=0,missing=0;
+            float min_light=2.0f,max_light=0.0f;
+            for(auto const &inst:frame_gpu_3do_instances) {
+                if(!inst.geometry || inst.shadow_only || inst.camera_hud ||
+                   inst.skybox_vertex_lighting || inst.world_lighting_exempt ||
+                   inst.is_projected_decal || inst.is_sprite_quad ||
+                   !inst.owning_sector_valid ||
+                   !inst.owning_thing_world_position_valid)
+                    continue;
+                ++eligible;
+                float brightness=0.0f;
+                if(continuous_ambient_cpu_cache->sample(
+                       inst.owning_sector_id,inst.owning_thing_world_position,
+                       zero_floor,brightness)) {
+                    ++sampled;
+                    min_light=std::min(min_light,brightness);
+                    max_light=std::max(max_light,brightness);
+                } else ++missing;
+            }
+            LOG_INFO("CONTINUOUS AMBIENT CPU coverage eligible=",eligible,
+                " sampled=",sampled," missing=",missing,
+                " min=",sampled?min_light:0.0f,
+                " max=",sampled?max_light:0.0f);
+        }
+
         // A sector-local 2x2x2 volume is built only when the native
         // world-cache snapshot changes. The current ExtraLight floor is
         // sampled live; SetSectorLight fades need no volume rebuild.
@@ -9962,6 +10068,7 @@ namespace jkgm {
             merge_thing_light_colors();
             ++gpu_3do_present_serial;
             stage_world_cache();
+            stage_continuous_ambient_cpu();
             stage_world_vertex_ambient();
             stage_volumetric_ambient();
             stage_sector_crossing();

@@ -16,6 +16,7 @@ assert 'j.contains("experimental_world_vertex_ambient_radius")' in parser
 assert '"experimental_world_vertex_ambient": false' in sample
 assert '"experimental_world_vertex_ambient_radius": 1.0' in sample
 assert ("stage_world_cache();\n"
+        "            stage_continuous_ambient_cpu();\n"
         "            stage_world_vertex_ambient();\n"
         "            stage_volumetric_ambient();\n"
         "            stage_sector_crossing();") in r
@@ -28,7 +29,8 @@ assert "portal_only=" in r
 assert "++missed; // Retain native ambient when no probe exists." in r
 assert ("the_config->enable_sector_crossing_lighting ||\n"
         "               the_config->experimental_world_vertex_ambient ||\n"
-        "               the_config->experimental_volumetric_ambient") in native
+        "               the_config->experimental_volumetric_ambient ||\n"
+        "               the_config->experimental_continuous_ambient_cpu") in native
 assert "inst.owning_sector_id" in r
 assert "inst.shadow_only || inst.camera_hud" in r
 assert "the_config->enable_sector_crossing_lighting ||" in r
