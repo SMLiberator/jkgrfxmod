@@ -189,6 +189,12 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\world_vertex_ambient.cpp /Fe:world_vertex_ambient_test.exe || exit /b 1
         world_vertex_ambient_test.exe || exit /b 1
         python3 tests/world_vertex_ambient.py
+    - name: Experimental volumetric ambient field CPU capture and quantization
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\volumetric_ambient.cpp /Fe:volumetric_ambient_test.exe || exit /b 1
+        volumetric_ambient_test.exe || exit /b 1
+        python3 tests/volumetric_ambient.py || exit /b 1
     - name: Source-indexed MAT fullbright mask regression tests
       shell: cmd
       run: |
