@@ -146,6 +146,11 @@ namespace jkgm {
         // Only native rdModel3 Things have an authoritative owning sector.
         uint32_t owning_sector_id=0;
         bool owning_sector_valid=false;
+        // Native SithThing +0xb8 WORLD position, common across all its
+        // animated 3DO nodes. Do not use transform[9..11]: rdMesh's 3x4
+        // matrix is view-space and differs from one hierarchy node to another.
+        std::array<float,3> owning_thing_world_position{};
+        bool owning_thing_world_position_valid=false;
         std::shared_ptr<gpu_3do_crossing_state const> crossing_lighting;
         std::optional<gpu_3do_ambient_volume> volumetric_ambient;
         // Only allocated near a verified passable opening. Each owner

@@ -137,6 +137,23 @@ assert "volumetric_ambient_portals.reset(1.0f);" in wiring
 assert "volumetric_ambient_portals.reset();" in wiring
 assert "volumetric_ambient_portals.nearest_portal(" in wiring
 assert "inst.volumetric_ambient_neighbor_weight=weight;" in wiring
+# Portal polygons are world-space; the rdMesh placement at transform[9..11]
+# is camera-space AND node-dependent. Only SithThing +0xb8 can select
+# the same neighboring portal for every animated mesh node.
+assert "uintptr_t(hud_owner)+0xb8U" in native
+assert "own_world_position_valid=read(" in native
+assert "active_native_model_world_position=own_world_position;" in native
+assert "active_native_model_world_position=previous_world_position;" in native
+assert "inst.owning_thing_world_position=active_native_model_world_position;" in native
+assert "inst.owning_thing_world_position_valid=" in native
+assert "std::array<float,3> owning_thing_world_position{};" in instance
+assert "bool owning_thing_world_position_valid=false;" in instance
+assert "if(!inst.owning_thing_world_position_valid)" in wiring
+assert "inst.owning_sector_id,inst.owning_thing_world_position," in wiring
+portal_stage=wiring.split("void stage_volumetric_ambient()",1)[1].split(
+    "void stage_sector_crossing()",1)[0]
+assert "inst.transform[9]" not in portal_stage
+assert "missing_thing_origin=" in portal_stage
 assert "if(!get_floor(*other,neighbor_floor))" in wiring
 assert "std::optional<gpu_3do_ambient_volume> volumetric_ambient_neighbor;" in instance
 assert "uniform float volumetric_neighbor_weight;" in vertex

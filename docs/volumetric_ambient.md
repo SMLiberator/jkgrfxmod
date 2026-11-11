@@ -82,9 +82,15 @@ tests but production shader paths are unchanged by Batch A.
 - On world-cache revision, capture the actual native polygons of finite,
   non-sky, passable Adjoins using the already-tested legacy ambient portal
   reader; DO NOT build the legacy per-sector spatial light probes.
-- For each eligible 3DO, use the *world-space Thing origin* to find the
-  closest polygon within that radius. Reject infinite-plane continuations,
-  solid and sky Adjoins, invalid neighboring sectors, and nonfinite inputs.
+- For each eligible 3DO, use the **linked SithThing +0xb8 world-space
+  origin**, captured once by the native rdModel3 hook and shared by all
+  model nodes, to find the closest polygon within that radius. Do NOT use
+  `gpu_3do_instance.transform[9..11]`: that is the camera/view-space
+  origin of an individual animated rdMesh node. Reject infinite-plane
+  continuations, solid and sky Adjoins, invalid neighboring sectors, and
+  nonfinite inputs. If the owning Thing position is unreadable, preserve
+  the original one-volume result rather than choosing a portal from
+  mismatched coordinate spaces.
 - The owner and neighbor 2x2x2 fields are independently interpolated at
   **each model vertex** and independently floored by their respective
   live sector/global ExtraLight values. Mix their results using the
@@ -105,3 +111,21 @@ tests but production shader paths are unchanged by Batch A.
   If the level changes Adjoin passability at runtime without triggering
   a world-cache revision, portal connectivity remains at its most recent
   captured state until the next revision.
+
+## Portal-space correction after initial Batch C testing
+
+A flaw in the first Batch C implementation compared a **per-mesh
+camera-space** transform origin to **world-space** portal polygons. This
+made portal matching inconsistent across model nodes or absent entirely.
+The corrected capture stores the parent SithThing's native world position
+once, and uses it for *all* submeshes when choosing the neighbor and
+portal blending weight. Only the cheap per-vertex 2x2x2 volume samples
+can differ between the nodes. A model crossing a portal should now
+select the same neighbor across all of its nodes.
+
+This fix does not change the fact that the portal blend **weight** is
+constant for the whole Thing in the first experiment. If the Thing's
+root stays outside the 1-unit radius while a long animated node crosses
+an opening, that node will not be blended yet. Per-vertex portal-distance
+evaluation is an independent follow-up experiment, not a property of the
+current revision.

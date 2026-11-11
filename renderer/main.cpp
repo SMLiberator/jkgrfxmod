@@ -146,6 +146,10 @@ namespace {
     thread_local std::array<float,3> active_native_model_sector_tint{};
     thread_local uint32_t active_native_model_sector_id=0;
     thread_local bool active_native_model_sector_id_valid=false;
+    // One authoritative SithThing world-space origin for ALL 3DO hierarchy
+    // nodes; the rdMesh callback's transform is view-space and node-local.
+    thread_local std::array<float,3> active_native_model_world_position{};
+    thread_local bool active_native_model_world_position_valid=false;
     // rdThing->model3 at +4 points to rdModel3, whose first 32 bytes
     // contain the source 3DO filename. Keep this context for the nested
     // rdModel3_DrawMesh callback and restore it on recursive model draws.
@@ -1270,6 +1274,8 @@ namespace {
         bool own_sector_tint_valid=false;
         uint32_t own_sector_id=0;
         bool own_sector_id_valid=false;
+        std::array<float,3> own_world_position{};
+        bool own_world_position_valid=false;
         if(!camera_hud && the_config && the_config->use_gpu_cache &&
            hud_owner>=0x10000U) {
             auto const read=[](uintptr_t addr,void *out,size_t len) {
@@ -1280,6 +1286,19 @@ namespace {
             };
             own_sector_tint_valid=jkgm::read_jk_thing_sector_tint(
                 read,hud_owner,own_sector_tint);
+            // Unlike rdMesh's camera/view-space matrix, the linked
+            // SithThing position is WORLD-space and common to every node.
+            // Capture only for the volume experiment, once per Thing.
+            if(the_config->experimental_volumetric_ambient) {
+                own_world_position_valid=read(
+                    uintptr_t(hud_owner)+0xb8U,
+                    own_world_position.data(),sizeof(own_world_position));
+                if(own_world_position_valid)
+                    for(float coordinate:own_world_position)
+                        if(!std::isfinite(coordinate)) {
+                            own_world_position_valid=false;break;
+                        }
+            }
             // All three sector-aware 3DO lighting modes need the same
             // authoritative Thing-sector ID, even when enabled alone.
             if(the_config->enable_sector_crossing_lighting ||
@@ -1409,6 +1428,9 @@ namespace {
         auto const previous_sector_tint=active_native_model_sector_tint;
         uint32_t const previous_sector_id=active_native_model_sector_id;
         bool const previous_sector_id_valid=active_native_model_sector_id_valid;
+        auto const previous_world_position=active_native_model_world_position;
+        bool const previous_world_position_valid=
+            active_native_model_world_position_valid;
         uint64_t const previous_owner=active_native_shadow_owner;
         uint64_t const previous_family=active_native_spotlight_family;
         bool const previous_moving=active_native_shadow_dynamic;
@@ -1422,6 +1444,8 @@ namespace {
         active_native_model_sector_tint=own_sector_tint;
         active_native_model_sector_id=own_sector_id;
         active_native_model_sector_id_valid=own_sector_id_valid;
+        active_native_model_world_position=own_world_position;
+        active_native_model_world_position_valid=own_world_position_valid;
         active_native_shadow_owner=owner_key;
         active_native_spotlight_family=owner_key &&
             the_config && the_config->enable_spotlights &&
@@ -1439,6 +1463,8 @@ namespace {
         active_native_model_sector_tint=previous_sector_tint;
         active_native_model_sector_id=previous_sector_id;
         active_native_model_sector_id_valid=previous_sector_id_valid;
+        active_native_model_world_position=previous_world_position;
+        active_native_model_world_position_valid=previous_world_position_valid;
         active_native_model_filename=previous_model_filename;
         active_native_model_ptr=previous_model_ptr;
         active_native_rdthing_ptr=previous_rdthing_ptr;
@@ -2254,6 +2280,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             inst.sector_tint_valid=active_native_model_sector_tint_valid;
             inst.owning_sector_id=active_native_model_sector_id;
             inst.owning_sector_valid=active_native_model_sector_id_valid;
+            inst.owning_thing_world_position=active_native_model_world_position;
+            inst.owning_thing_world_position_valid=
+                active_native_model_world_position_valid;
         }
         // curLightingMode (rdModel3_Draw's effective Thing/global cap):
         // the verified rdModel3 global block is +0x48 from original JK.

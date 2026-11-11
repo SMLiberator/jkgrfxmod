@@ -9571,6 +9571,7 @@ namespace jkgm {
                                          sectors.size()));
             uint32_t applied=0,missed=0,excluded=0,unreadable=0;
             uint32_t portal_blended=0,portal_missing_neighbor=0;
+            uint32_t missing_thing_origin=0;
             // Both volumes share this once-per-frame floor cache.
             // Never interpolate pre-floor baked bytes with sector ExtraLight,
             // or SetSectorLight would need to rebuild the volume.
@@ -9623,18 +9624,19 @@ namespace jkgm {
                 }
                 inst.volumetric_ambient=make_volume(*it,floor);
                 ++applied;
-                // Distance is measured to the ACTUAL finite passable portal
-                // polygon, not its infinite plane. Use the authoritative
-                // model world origin, just as the older probe experiment
-                // did, to select a single nearest neighbor. Each volume is
-                // still interpolated at every 3DO vertex in the GPU shader.
-                std::array<float,3> const position{{
-                    inst.transform[9],inst.transform[10],inst.transform[11]
-                }};
+                // The mesh transform is camera/view-space and its origin
+                // differs by animated model node. Portal polygons are
+                // WORLD-space. Always use the one owning SithThing world
+                // origin captured by rdModel3, shared by all its nodes.
+                // With no valid native owner position, keep the ordinary
+                // one-volume result rather than comparing mixed spaces.
+                if(!inst.owning_thing_world_position_valid) {
+                    ++missing_thing_origin;continue;
+                }
                 uint32_t neighbor_id=0U;
                 float weight=0.0f;
                 if(!volumetric_ambient_portals.nearest_portal(
-                       inst.owning_sector_id,position,
+                       inst.owning_sector_id,inst.owning_thing_world_position,
                        neighbor_id,weight))continue;
                 auto const other=find_sector(neighbor_id);
                 if(other==sectors.end() || other->id!=neighbor_id) {
@@ -9656,6 +9658,7 @@ namespace jkgm {
                     " applied=",applied,
                     " portal_blended=",portal_blended,
                     " portal_missing_neighbor=",portal_missing_neighbor,
+                    " missing_thing_origin=",missing_thing_origin,
                     " misses_native=",missed,
                     " excluded=",excluded,
                     " unreadable=",unreadable,
