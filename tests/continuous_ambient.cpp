@@ -79,6 +79,32 @@ int main(){
     assert(f.stats().raw_nodes>0 && f.stats().final_nodes>0);
     assert(!f.sample(2,{{INFINITY,0,0}},zero,b));
     assert(!f.add(1,{{0,0,0}},0.4f)); // immutable after finalize
+    // A huge open sector can have authored light on opposite walls but
+    // NO splatted voxel near its middle. A dense fill would allocate
+    // potentially millions of empty nodes. The eight-corner analytical
+    // fallback must illuminate that interior without creating new voxels.
+    f.reset();
+    assert(f.add(7,{{-20,-20,-20}},0.1f));
+    assert(f.add(7,{{20,20,20}},0.9f));
+    assert(f.add(8,{{-20,-20,-20}},0.85f));
+    assert(f.add(8,{{20,20,20}},0.85f));
+    assert(f.finalize());
+    assert(f.stats().fallback_sectors==2U);
+    assert(f.node_count()<=108U);
+    assert(f.sample(7,{{0,0,0}},zero,a));
+    assert(f.sample(8,{{0,0,0}},zero,b));
+    assert(a>0.2f && a<0.8f && b>0.80f);
+    // Live fades apply to FALLBACK cells as well: neither additional
+    // nodes nor a volume rebuild are needed.
+    auto raised=[](uint32_t id,float &light) {
+        light=id==7?0.75f:0.0f;return true;
+    };
+    assert(f.sample(7,{{0,0,0}},raised,a) && a>=0.75f);
+    // Moving from one empty voxel to the next must be continuous.
+    assert(f.sample(7,{{0.999f,0,0}},zero,a));
+    assert(f.sample(7,{{1.001f,0,0}},zero,b));
+    assert(near(a,b,0.01f));
+
     // Multiple portals intersecting at the same voxel must reconcile
     // connected components transitively, independent of portal order.
     f.reset();

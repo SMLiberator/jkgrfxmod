@@ -31,6 +31,18 @@ assert "float const raw=float(found->second.brightness)/255.0f*range_;" in field
 assert "for(uint32_t owner:owners->second)" in field
 assert "lit=total/float(owners->second.size());" in field
 assert "if(weights<=1e-12)return false;" in field
+# Empty sector interiors fall back to eight sector-wide samples
+# WITHOUT allocating a dense 3D array. Original sparse and stitched
+# values always take precedence at their world-aligned grid positions.
+assert "struct fallback_sector {" in field
+assert "std::unordered_map<uint32_t,fallback_sector> fallback_" in field
+assert "std::unordered_map<uint32_t,source_sector> authored_" in field
+assert "fallback_.emplace(entry.first,output);" in field
+assert "authored_.clear();" in field
+assert "stats_.fallback_sectors=" in field
+assert "fallback->second.sample(location(at),range_)" in field
+assert "A huge open sector can have authored light" in test
+assert "f.node_count()<=108U" in test
 assert "return field.finalize();" in capture
 assert "capture_world_vertex_ambient_portals(" in capture
 assert "portal_geometry.for_each_portal_triangle(" in capture

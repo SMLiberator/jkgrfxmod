@@ -17,7 +17,7 @@ namespace jkgm {
 struct continuous_ambient_stats {
     uint32_t source_vertices=0, raw_nodes=0, final_nodes=0;
     uint32_t portal_triangles=0, stitched_locations=0, shared_nodes=0;
-    uint32_t skipped_oversized_portals=0;
+    uint32_t skipped_oversized_portals=0, fallback_sectors=0;
 };
 
 class continuous_ambient_field {
@@ -53,12 +53,51 @@ private:
         uint32_t a=0,b=0;
         std::array<point,3> vertices{};
     };
+    struct authored_source {
+        point position{};
+        float light=0.0f;
+    };
+    struct source_sector {
+        point lo{{std::numeric_limits<float>::max(),
+                  std::numeric_limits<float>::max(),
+                  std::numeric_limits<float>::max()}};
+        point hi{{std::numeric_limits<float>::lowest(),
+                  std::numeric_limits<float>::lowest(),
+                  std::numeric_limits<float>::lowest()}};
+        std::vector<authored_source> points;
+    };
+    struct fallback_sector {
+        point lo{},hi{};
+        std::array<uint8_t,8> corners{};
+        float sample(point const &position,float range) const {
+            std::array<double,3> t{};
+            for(int d=0;d<3;++d) {
+                double const span=double(hi[d])-lo[d];
+                t[d]=span>1e-6
+                    ? std::clamp((double(position[d])-lo[d])/span,0.0,1.0)
+                    : 0.5;
+            }
+            double raw=0.0;
+            for(unsigned corner=0;corner<8;++corner) {
+                double w=1.0;
+                for(int d=0;d<3;++d)
+                    w*=((corner>>d)&1U)?t[d]:1.0-t[d];
+                raw+=w*(double(corners[corner])/255.0)*range;
+            }
+            return float(raw);
+        }
+    };
     struct node {
         uint8_t brightness=0;
     };
     using edges=std::vector<std::pair<uint32_t,uint32_t>>;
     std::unordered_map<node_key,accumulation,node_hash> accumulating_;
     std::unordered_map<node_key,node,node_hash> nodes_;
+    // Sparse world nodes retain detail near authored surfaces. Large empty
+    // sector interiors use a bounded 8-corner low-frequency analytic value,
+    // rather than allocating a potentially enormous 3D box of cells.
+    std::unordered_map<uint32_t,source_sector> authored_;
+    std::unordered_map<uint32_t,fallback_sector> fallback_;
     // Only stitched nodes store this information. Other nodes use their
     // own sector's live floor; no permanent ExtraLight is baked.
     std::unordered_map<node_key,std::vector<uint32_t>,node_hash> floor_owners_;
@@ -166,6 +205,7 @@ private:
 public:
     void reset(float spacing=1.0f,bool overbright=false) {
         accumulating_.clear();nodes_.clear();floor_owners_.clear();
+        authored_.clear();fallback_.clear();
         portals_.clear();stats_={};ready_=false;
         spacing_=std::isfinite(spacing) && spacing>=0.25f && spacing<=4.0f
             ? spacing : 1.0f;
@@ -208,6 +248,13 @@ public:
                 std::clamp(authored_light,0.0f,range_);
             n.weight+=contribution.second;
         }
+        auto &sources=authored_[sector];
+        for(int d=0;d<3;++d) {
+            sources.lo[d]=std::min(sources.lo[d],position[d]);
+            sources.hi[d]=std::max(sources.hi[d],position[d]);
+        }
+        sources.points.push_back({position,
+            std::clamp(authored_light,0.0f,range_)});
         ++stats_.source_vertices;
         return true;
     }
@@ -227,6 +274,37 @@ public:
     }
     bool finalize() {
         if(ready_)return false;
+        // Sparse splats deliberately cover only a small area around
+        // authored surfaces. Before discarding the source points, build
+        // a cheap sector-wide, world-space 2x2x2 fallback for genuinely
+        // empty interiors. These values are sampled analytically at
+        // missing voxel corners; no dense interior allocation is needed.
+        // Portal-reconciled nodes always override this fallback.
+        fallback_.clear();
+        for(auto const &entry:authored_) {
+            auto const &input=entry.second;
+            if(input.points.empty())continue;
+            fallback_sector output{};
+            output.lo=input.lo;output.hi=input.hi;
+            for(unsigned corner=0;corner<8;++corner) {
+                std::array<double,3> target{};
+                for(int d=0;d<3;++d)
+                    target[d]=((corner>>d)&1U)?input.hi[d]:input.lo[d];
+                double sum=0.0,weights=0.0;
+                for(auto const &src:input.points) {
+                    double dist2=0.0;
+                    for(int d=0;d<3;++d)
+                        dist2+=sq(double(src.position[d])-target[d]);
+                    double const w=1.0/std::max(0.0001,dist2);
+                    sum+=w*src.light;weights+=w;
+                }
+                output.corners[corner]=pack(
+                    float(weights>0.0?sum/weights:0.0),range_);
+            }
+            fallback_.emplace(entry.first,output);
+        }
+        stats_.fallback_sectors=static_cast<uint32_t>(fallback_.size());
+        authored_.clear(); // No large source arrays remain during gameplay.
         stats_.raw_nodes=static_cast<uint32_t>(accumulating_.size());
         // Never feed already-stitched values into later portal calculations.
         // This immutable source snapshot makes stitching order-independent.
@@ -354,12 +432,17 @@ public:
                             base[2]+((i>>2)&1)}};
             node_key const key{sector,at};
             auto found=nodes_.find(key);
-            if(found==nodes_.end())continue; // sparse unoccupied region
+            auto fallback=found==nodes_.end()
+                ? fallback_.find(sector) : fallback_.end();
+            if(found==nodes_.end() && fallback==fallback_.end())
+                continue; // no authored sector or valid stitched cell
             double weight=1.0;
             for(int d=0;d<3;++d)
                 weight*=((i>>d)&1)?t[d]:1.0-t[d];
             if(weight<=0.0)continue;
-            float const raw=float(found->second.brightness)/255.0f*range_;
+            float const raw=found!=nodes_.end()
+                ? float(found->second.brightness)/255.0f*range_
+                : fallback->second.sample(location(at),range_);
             float lit=0.0f;
             auto owners=floor_owners_.find(key);
             if(owners==floor_owners_.end()) {

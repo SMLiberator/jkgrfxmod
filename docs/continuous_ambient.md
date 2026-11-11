@@ -31,8 +31,12 @@ from renderer/world_vertex_ambient.hpp.
 - Compute shared voxel brightness from an immutable snapshot of the
   original authored samples. Portal order cannot progressively contaminate
   later portal values. Bound native portal size and total sparse node count.
-- Trilinearly interpolate eight neighboring values. If nodes are missing,
-  renormalize surviving weights; if none contribute, report no sample.
+- Trilinearly interpolate eight neighboring values. Missing sparse nodes
+  use an analytic, sector-wide eight-corner low-frequency fallback
+  derived from the original authored vertices, with the same world-aligned
+  sample coordinates. This fills even large empty interiors without a
+  giant dense allocation. A sector with no authored data and no connected
+  shared nodes still reports no sample.
 - Preserve live sector ExtraLight separately from static quantization.
   A shared node averages individually floored sector values at sample
   time; SetSectorLight fades therefore require no static rebuild.
@@ -50,9 +54,9 @@ not appear in the rendered mesh. Solid and sky Adjoins are excluded.
 
 ## Remaining work
 
-1. Extend coverage to empty interior cells far from authored vertices:
-   current 27-node splatting is intentionally sparse and can leave gaps
-   in very large rooms.
+1. Compare the current sparse+fallback field against the old 2x2x2
+   field in unusually large rooms to see whether the low-frequency
+   fallback sufficiently preserves broad baked gradients.
 2. Evaluate oblique/large portals and walls close to openings. The
    conservative sqrt(3)*spacing stitching band can soften light within
    approximately a voxel of a doorway; it is not physical light transport.
@@ -64,3 +68,18 @@ not appear in the rendered mesh. Solid and sky Adjoins are excluded.
 No OpenGL version increase is needed for this CPU stage. OpenGL 3.3
 texture buffers remain a viable GPU transport; OpenGL 4.3 compute
 shaders and shader-storage buffers could be an optional later upgrade.
+
+## Coverage prototype follow-up
+
+The first CPU version had empty sample regions whenever a sector was
+wider than the splat radius of nearby authored vertices. The updated
+prototype stores a small 2x2x2 fallthrough field per represented sector,
+computed from the SAME authored source vertices during finalization.
+A missing world-aligned node uses that low-frequency value at the node's
+world position. Interpolation remains continuous across cell boundaries,
+while valid authored and shared portal nodes retain priority.
+
+This is intentionally **not** a dense voxel fill. A giant empty sector
+can remain sparse in memory. It does not yet guarantee an ideal spatial
+light distribution in extremely large or complicated sectors; that
+remains a visual quality and profiling question for the GPU prototype.
