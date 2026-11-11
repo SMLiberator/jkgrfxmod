@@ -67,6 +67,12 @@ uniform int volumetric_ambient_enabled;
 uniform vec3 volumetric_ambient_bounds_min,volumetric_ambient_bounds_max;
 uniform vec4 volumetric_ambient_corners0,volumetric_ambient_corners1;
 uniform float volumetric_ambient_range,volumetric_ambient_live_floor;
+// A second quantized volume is uploaded ONLY for a Thing close to a
+// passable finite portal. Zero blend keeps the original fast shader path.
+uniform float volumetric_neighbor_weight;
+uniform vec3 volumetric_neighbor_bounds_min,volumetric_neighbor_bounds_max;
+uniform vec4 volumetric_neighbor_corners0,volumetric_neighbor_corners1;
+uniform float volumetric_neighbor_range,volumetric_neighbor_live_floor;
 uniform vec4 sector_crossing_info[4]; // x: ambient; y,z: planes; w: inner-box shortcut
 uniform vec4 sector_crossing_bounds_min[4];
 uniform vec4 sector_crossing_bounds_max[4];
@@ -122,32 +128,40 @@ int select_sector_crossing_vertex(vec3 view_position)
     }
     return 0; // preserve native owning Thing sector if no candidate matches
 }
+float volumetric_ambient_sample(
+    vec3 world,vec3 lo,vec3 hi,vec4 bottom,vec4 top,
+    float quantized_range,float live_floor)
+{
+    vec3 span=hi-lo;
+    vec3 t;
+    t.x=span.x>0.000001 ? clamp((world.x-lo.x)/span.x,0.0,1.0):0.5;
+    t.y=span.y>0.000001 ? clamp((world.y-lo.y)/span.y,0.0,1.0):0.5;
+    t.z=span.z>0.000001 ? clamp((world.z-lo.z)/span.z,0.0,1.0):0.5;
+    // Binary corner order: x bit 0, y bit 1, z bit 2.
+    float low=mix(mix(bottom.x,bottom.y,t.x),
+                  mix(bottom.z,bottom.w,t.x),t.y);
+    float high=mix(mix(top.x,top.y,t.x),
+                   mix(top.z,top.w,t.x),t.y);
+    // Live ExtraLight is the floor of EACH sampled sector, not an
+    // immutable corner and not a second additive light.
+    return max(mix(low,high,t.z)*quantized_range,live_floor);
+}
 float volumetric_ambient_at(vec3 view_position)
 {
     vec3 world=sector_crossing_camera_origin+
         camera_right_axis*view_position.x+
         camera_forward_axis*view_position.y+
         camera_up_axis*view_position.z;
-    vec3 span=volumetric_ambient_bounds_max-volumetric_ambient_bounds_min;
-    vec3 t;
-    t.x=span.x>0.000001
-        ? clamp((world.x-volumetric_ambient_bounds_min.x)/span.x,0.0,1.0):0.5;
-    t.y=span.y>0.000001
-        ? clamp((world.y-volumetric_ambient_bounds_min.y)/span.y,0.0,1.0):0.5;
-    t.z=span.z>0.000001
-        ? clamp((world.z-volumetric_ambient_bounds_min.z)/span.z,0.0,1.0):0.5;
-    // Corner layout is binary xyz (x bit 0, y bit 1, z bit 2).
-    float low=mix(mix(volumetric_ambient_corners0.x,
-                      volumetric_ambient_corners0.y,t.x),
-                  mix(volumetric_ambient_corners0.z,
-                      volumetric_ambient_corners0.w,t.x),t.y);
-    float high=mix(mix(volumetric_ambient_corners1.x,
-                       volumetric_ambient_corners1.y,t.x),
-                   mix(volumetric_ambient_corners1.z,
-                       volumetric_ambient_corners1.w,t.x),t.y);
-    // ExtraLight is a LIVE floor, never permanently baked into the 8 bytes.
-    return max(mix(low,high,t.z)*volumetric_ambient_range,
-               volumetric_ambient_live_floor);
+    float own=volumetric_ambient_sample(
+        world,volumetric_ambient_bounds_min,volumetric_ambient_bounds_max,
+        volumetric_ambient_corners0,volumetric_ambient_corners1,
+        volumetric_ambient_range,volumetric_ambient_live_floor);
+    if(volumetric_neighbor_weight<=0.0)return own;
+    float neighbor=volumetric_ambient_sample(
+        world,volumetric_neighbor_bounds_min,volumetric_neighbor_bounds_max,
+        volumetric_neighbor_corners0,volumetric_neighbor_corners1,
+        volumetric_neighbor_range,volumetric_neighbor_live_floor);
+    return mix(own,neighbor,volumetric_neighbor_weight);
 }
 
 void main() {

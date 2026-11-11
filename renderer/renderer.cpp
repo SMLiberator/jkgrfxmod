@@ -638,6 +638,9 @@ namespace jkgm {
         uintptr_t world_vertex_ambient_world=0;
         bool world_vertex_ambient_valid=false;
         volumetric_ambient_field volumetric_ambient_cache;
+        // Reuse the old experiment's VALIDATED finite passable-Adjoin
+        // polygons, but no legacy lighting cells or CPU light samples.
+        world_vertex_ambient_grid volumetric_ambient_portals;
         uint64_t volumetric_ambient_revision=0;
         uintptr_t volumetric_ambient_world=0;
         bool volumetric_ambient_overbright=false;
@@ -1184,6 +1187,7 @@ namespace jkgm {
                 world_vertex_ambient_world=0;
                 world_vertex_ambient_valid=false;
                 volumetric_ambient_cache.reset();
+                volumetric_ambient_portals.reset();
                 volumetric_ambient_revision=0;
                 volumetric_ambient_world=0;
                 volumetric_ambient_overbright=false;
@@ -4101,8 +4105,12 @@ namespace jkgm {
                                          make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(it->second->vao);
                     // Persistent GL uniforms must reset on each Thing.
-                    prog.set_volumetric_ambient(inst.volumetric_ambient
-                        ? &*inst.volumetric_ambient : nullptr);
+                    prog.set_volumetric_ambient(
+                        inst.volumetric_ambient
+                            ? &*inst.volumetric_ambient : nullptr,
+                        inst.volumetric_ambient_neighbor
+                            ? &*inst.volumetric_ambient_neighbor : nullptr,
+                        inst.volumetric_ambient_neighbor_weight);
                     // ThingFlag 0x20 intentionally uses the existing JK-style
                     // vertex dynamic-light loop; ordinary GPU 3DOs keep their
                     // per-fragment point lights. This is an instance choice,
@@ -9530,12 +9538,22 @@ namespace jkgm {
                     cache.mesh,overbright,volumetric_ambient_cache,stats);
                 volumetric_ambient_valid=built &&
                     volumetric_ambient_cache.sector_count()>0U;
+                // Capture passable, non-sky native Adjoin polygons ONCE
+                // beside the volume. Rebuilding only on world topology
+                // changes preserves the original per-frame cost.
+                volumetric_ambient_portals.reset(1.0f);
+                uint32_t const passable_portals=built
+                    ? capture_world_vertex_ambient_portals(
+                        read,cache.loaded_world,volumetric_ambient_portals)
+                    : 0U;
                 LOG_INFO("VOLUMETRIC AMBIENT snapshot world=",
                     cache.loaded_world," built=",built?1:0,
                     " accepted=",stats.surfaces_sampled,
                     " rejected=",stats.surfaces_skipped,
                     " vertices=",stats.vertices_sampled,
                     " sectors=",stats.sectors,
+                    " passable_portals=",passable_portals,
+                    " portal_radius=",volumetric_ambient_portals.radius(),
                     " cpu_us=",elapsed_profile_us(
                         started,profile_clock::now()));
             }
@@ -9552,51 +9570,98 @@ namespace jkgm {
             live_floors.reserve(std::min(frame_gpu_3do_instances.size(),
                                          sectors.size()));
             uint32_t applied=0,missed=0,excluded=0,unreadable=0;
+            uint32_t portal_blended=0,portal_missing_neighbor=0;
+            // Both volumes share this once-per-frame floor cache.
+            // Never interpolate pre-floor baked bytes with sector ExtraLight,
+            // or SetSectorLight would need to rebuild the volume.
+            auto const get_floor=[&](volumetric_ambient_sector const &sector,
+                                     float &floor) -> bool {
+                auto found=live_floors.find(sector.id);
+                if(found==live_floors.end()) {
+                    float extra=0.0f;
+                    if(!read(sector.native_sector+0x08U,&extra,sizeof(extra)) ||
+                       !std::isfinite(extra))return false;
+                    found=live_floors.emplace(sector.id,
+                        clamp_authored_extra_floor(
+                            extra,global_extra,overbright)).first;
+                }
+                floor=found->second;
+                return true;
+            };
+            auto const make_volume=[](volumetric_ambient_sector const &s,
+                                      float floor) {
+                gpu_3do_ambient_volume v{};
+                v.bounds_min=s.lo;
+                v.bounds_max=s.hi;
+                v.samples=s.light;
+                v.range=s.range;
+                v.live_floor=floor;
+                return v;
+            };
+            auto const find_sector=[&](uint32_t id) {
+                return std::lower_bound(sectors.begin(),sectors.end(),id,
+                    [](volumetric_ambient_sector const &s,uint32_t key) {
+                        return s.id<key;
+                    });
+            };
             for(auto &inst:frame_gpu_3do_instances) {
-                // Preserve HUD, skybox/0x20, sprite, decal and native paths.
+                // Preserve Camera HUDs, ThingFlag 0x20, sprite/decal
+                // receivers, depth-only, and native fallback as before.
                 if(!inst.geometry || inst.shadow_only || inst.camera_hud ||
                    inst.skybox_vertex_lighting || inst.world_lighting_exempt ||
                    inst.is_projected_decal || inst.is_sprite_quad ||
                    !inst.owning_sector_valid) {
                     ++excluded;continue;
                 }
-                auto const it=std::lower_bound(sectors.begin(),sectors.end(),
-                    inst.owning_sector_id,
-                    [](volumetric_ambient_sector const &sector,uint32_t id) {
-                        return sector.id<id;
-                    });
+                auto const it=find_sector(inst.owning_sector_id);
                 if(it==sectors.end() || it->id!=inst.owning_sector_id) {
-                    ++missed;continue; // Keep native camera ambient.
+                    ++missed;continue; // Original camera ambient fallback.
                 }
-                auto found=live_floors.find(it->id);
-                if(found==live_floors.end()) {
-                    float extra=0.0f;
-                    if(!read(it->native_sector+0x08U,&extra,sizeof(extra)) ||
-                       !std::isfinite(extra)) {
-                        ++unreadable;continue; // Keep native on invalid read.
-                    }
-                    found=live_floors.emplace(it->id,
-                        clamp_authored_extra_floor(
-                            extra,global_extra,overbright)).first;
+                float floor=0.0f;
+                if(!get_floor(*it,floor)) {
+                    ++unreadable;continue;
                 }
-                gpu_3do_ambient_volume volume{};
-                volume.bounds_min=it->lo;
-                volume.bounds_max=it->hi;
-                volume.samples=it->light;
-                volume.range=it->range;
-                volume.live_floor=found->second;
-                inst.volumetric_ambient=volume;
+                inst.volumetric_ambient=make_volume(*it,floor);
                 ++applied;
+                // Distance is measured to the ACTUAL finite passable portal
+                // polygon, not its infinite plane. Use the authoritative
+                // model world origin, just as the older probe experiment
+                // did, to select a single nearest neighbor. Each volume is
+                // still interpolated at every 3DO vertex in the GPU shader.
+                std::array<float,3> const position{{
+                    inst.transform[9],inst.transform[10],inst.transform[11]
+                }};
+                uint32_t neighbor_id=0U;
+                float weight=0.0f;
+                if(!volumetric_ambient_portals.nearest_portal(
+                       inst.owning_sector_id,position,
+                       neighbor_id,weight))continue;
+                auto const other=find_sector(neighbor_id);
+                if(other==sectors.end() || other->id!=neighbor_id) {
+                    ++portal_missing_neighbor;continue;
+                }
+                float neighbor_floor=0.0f;
+                if(!get_floor(*other,neighbor_floor)) {
+                    ++unreadable;continue;
+                }
+                inst.volumetric_ambient_neighbor=
+                    make_volume(*other,neighbor_floor);
+                inst.volumetric_ambient_neighbor_weight=weight;
+                ++portal_blended;
             }
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("VOLUMETRIC AMBIENT models=",
                     frame_gpu_3do_instances.size(),
                     " applied=",applied,
+                    " portal_blended=",portal_blended,
+                    " portal_missing_neighbor=",portal_missing_neighbor,
                     " misses_native=",missed,
                     " excluded=",excluded,
                     " unreadable=",unreadable,
-                    " sectors=",sectors.size());
+                    " sectors=",sectors.size(),
+                    " passable_portals=",
+                        volumetric_ambient_portals.portal_count());
         }
 
         void stage_sector_crossing()

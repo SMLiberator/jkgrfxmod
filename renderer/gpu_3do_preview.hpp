@@ -148,6 +148,11 @@ namespace jkgm {
         bool owning_sector_valid=false;
         std::shared_ptr<gpu_3do_crossing_state const> crossing_lighting;
         std::optional<gpu_3do_ambient_volume> volumetric_ambient;
+        // Only allocated near a verified passable opening. Each owner
+        // and neighbor volume is sampled per vertex; the symmetric mixing
+        // weight is selected from finite portal geometry once per Thing.
+        std::optional<gpu_3do_ambient_volume> volumetric_ambient_neighbor;
+        float volumetric_ambient_neighbor_weight=0.0f;
         unsigned num_lights=0;
         std::array<gpu_3do_light,gpu_3do_max_lights> lights{};
     };

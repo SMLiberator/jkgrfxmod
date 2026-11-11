@@ -360,6 +360,13 @@ namespace jkgm {
                                     volumetric_ambient_corners1,
                                     volumetric_ambient_range,
                                     volumetric_ambient_live_floor,
+                                    volumetric_neighbor_weight,
+                                    volumetric_neighbor_bounds_min,
+                                    volumetric_neighbor_bounds_max,
+                                    volumetric_neighbor_corners0,
+                                    volumetric_neighbor_corners1,
+                                    volumetric_neighbor_range,
+                                    volumetric_neighbor_live_floor,
                                     pixel_dynamic_lighting,
                                     nonrigid_light_transform,effective_light_mode;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
@@ -382,7 +389,9 @@ namespace jkgm {
                               point<2,float> scroll);
             void set_fog(point<4,float> params,point<4,float> color);
             void set_light_brightness_limit(float limit);
-            void set_volumetric_ambient(gpu_3do_ambient_volume const *volume);
+            void set_volumetric_ambient(
+                gpu_3do_ambient_volume const *volume,
+                gpu_3do_ambient_volume const *neighbor,float weight);
             void set_lighting(gpu_3do_instance const &instance,
                               bool pixel_lighting,
                               std::array<std::array<float,3>,64> const &saber_rgb,

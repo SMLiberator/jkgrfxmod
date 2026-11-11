@@ -156,6 +156,40 @@ public:
     uint32_t sample_count() const {return samples_;}
     float radius() const {return radius_;}
 
+    // Find the closest finite PASSABLE portal from the owner sector.
+    // This query is geometry-only: it works even if no old cell probes
+    // were registered, allowing volumetric 3DOs to reuse the validated
+    // native Adjoin/polygon capture without creating a second parser.
+    // The symmetric half-weight at the portal ensures a Thing changes
+    // owning sector continuously rather than abruptly swapping its floor.
+    bool nearest_portal(uint32_t owner,point const &position,
+                        uint32_t &neighbor,float &neighbor_weight) const {
+        neighbor=0;
+        neighbor_weight=0.0f;
+        for(float x:position)if(!std::isfinite(x))return false;
+        auto const found=portal_sectors_.find(owner);
+        if(found==portal_sectors_.end())return false;
+        double const radius2=double(radius_)*radius_;
+        double closest=radius2;
+        bool matched=false;
+        for(size_t index:found->second) {
+            auto const &portal=portals_[index];
+            double const distance2=portal_distance2(portal,position);
+            if(!std::isfinite(distance2) || distance2>=closest)
+                continue;
+            uint32_t const other=portal.a==owner?portal.b:portal.a;
+            if(other==owner)continue;
+            closest=distance2;
+            neighbor=other;
+            matched=true;
+        }
+        if(!matched || closest>=radius2)return false;
+        double const t=std::sqrt(closest)/double(radius_);
+        double const smooth=t*t*(3.0-2.0*t);
+        neighbor_weight=static_cast<float>(0.5*(1.0-smooth));
+        return neighbor_weight>0.0f;
+    }
+
     // Register BEFORE inserting a sector's first sample. Unlike the Thing
     // camera ambient, SithSector +0x08 is the live world-lighting floor.
     // Duplicate surfaces in one sector register the same validated pointer.

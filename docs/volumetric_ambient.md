@@ -3,8 +3,9 @@
 The new volumetric ambient experiment is available through
 `experimental_volumetric_ambient=true`. It is opt-in and off by default.
 The older `experimental_world_vertex_ambient` spatial-probe mode remains
-available for A/B visual comparison. The volume is implemented in two
-batches: CPU generation/validation (A), and opt-in GPU 3DO shading (B).
+available for A/B visual comparison. The volume began with
+CPU generation/validation (A), opt-in GPU 3DO shading (B), and now
+passable-portal interpolation (C).
 Ordinary rendering is unchanged while both switches are disabled.
 
 ## Agreed lighting policy
@@ -71,8 +72,36 @@ tests but production shader paths are unchanged by Batch A.
   otherwise unchanged for A/B tests.
 - Runtime validation is still needed: review indoor/outdoor light
   gradients, adjoining rooms, visible vertex interpolation, and CPU/GPU
-  timings before considering the new field the default. Current
-  sector selection does **not** blend neighboring volumes across
-  passable portals; this remains a comparison point, not a promised
-  feature of Batch B. With the experiment off, the restored vanilla
-  lighting baseline is unchanged.
+  timings before considering the new field the default. With the
+  experiment off, the restored vanilla lighting baseline is unchanged.
+
+## Batch C: passable-portal volume blending
+
+- The same `experimental_volumetric_ambient=true` switch now enables a
+  **1.0 Sith-unit portal transition** (no new option).
+- On world-cache revision, capture the actual native polygons of finite,
+  non-sky, passable Adjoins using the already-tested legacy ambient portal
+  reader; DO NOT build the legacy per-sector spatial light probes.
+- For each eligible 3DO, use the *world-space Thing origin* to find the
+  closest polygon within that radius. Reject infinite-plane continuations,
+  solid and sky Adjoins, invalid neighboring sectors, and nonfinite inputs.
+- The owner and neighbor 2x2x2 fields are independently interpolated at
+  **each model vertex** and independently floored by their respective
+  live sector/global ExtraLight values. Mix their results using the
+  symmetric portal weight: 50/50 at the opening and zero at the radius.
+  This avoids the abrupt owner-sector handover while keeping authored
+  [0,1] or [0,2] saturation and live fades intact.
+- Cost: a nearest-portal check for each eligible Thing; a second
+  trilinear lookup and a few extra instance uniforms only for nearby
+  models. The ordinary one-volume vertex path remains unchanged.
+- Current limitation: portal proximity and mix weight are constant per
+  Thing (its origin), not independently evaluated for every vertex.
+  This is intentionally the low-overhead initial trial; very large
+  models can show a transition different from individual vertices'
+  distances to the opening. A vertex-varying exact finite-polygon
+  transition can be investigated if that is a visible problem.
+- This feature is independent of the GPU sector-crossing CMP/tint
+  experiment, which still takes precedence if separately enabled.
+  If the level changes Adjoin passability at runtime without triggering
+  a world-cache revision, portal connectivity remains at its most recent
+  captured state until the next revision.

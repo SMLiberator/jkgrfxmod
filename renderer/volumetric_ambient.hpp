@@ -1,5 +1,6 @@
 #pragma once
-// Experimental sector-local volumetric ambient, Batch A (CPU-only).
+// Sector-local CPU-built 2x2x2 volumetric ambient; GPU sampling in
+// gpu_3do_preview.vert, portal selection reused from world_vertex_ambient.hpp.
 // Build once per world snapshot from authored Gouraud vertex intensities.
 // Eight uint8 corner samples per sector; runtime ExtraLight is NOT baked.
 #include "world_cache.hpp"

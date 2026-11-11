@@ -5,6 +5,8 @@
 #include "base/memory_block.hpp"
 #include "common/error_reporter.hpp"
 #include "glad/gl.h"
+#include <algorithm>
+#include <cmath>
 #include <sstream>
 
 namespace jkgm {
@@ -804,6 +806,20 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
           the_program,"volumetric_ambient_range"))
     , volumetric_ambient_live_floor(gl::get_uniform_location(
           the_program,"volumetric_ambient_live_floor"))
+    , volumetric_neighbor_weight(gl::get_uniform_location(
+          the_program,"volumetric_neighbor_weight"))
+    , volumetric_neighbor_bounds_min(gl::get_uniform_location(
+          the_program,"volumetric_neighbor_bounds_min"))
+    , volumetric_neighbor_bounds_max(gl::get_uniform_location(
+          the_program,"volumetric_neighbor_bounds_max"))
+    , volumetric_neighbor_corners0(gl::get_uniform_location(
+          the_program,"volumetric_neighbor_corners0"))
+    , volumetric_neighbor_corners1(gl::get_uniform_location(
+          the_program,"volumetric_neighbor_corners1"))
+    , volumetric_neighbor_range(gl::get_uniform_location(
+          the_program,"volumetric_neighbor_range"))
+    , volumetric_neighbor_live_floor(gl::get_uniform_location(
+          the_program,"volumetric_neighbor_live_floor"))
     , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
     , pixel_dynamic_lighting(gl::get_uniform_location(
@@ -1165,9 +1181,15 @@ void jkgm::shaders::gpu_3do_preview_shader::set_light_brightness_limit(
     gl::set_uniform_float(jk_light_limit,limit);
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_volumetric_ambient(
-    gpu_3do_ambient_volume const *volume)
+    gpu_3do_ambient_volume const *volume,
+    gpu_3do_ambient_volume const *neighbor,float weight)
 {
     gl::set_uniform_integer(volumetric_ambient_enabled,volume?1:0);
+    // Always clear both enable and weight across draw calls; otherwise a
+    // nearby portal can incorrectly light the next ordinary 3DO instance.
+    float const mix_weight=volume && neighbor && std::isfinite(weight)
+        ? std::clamp(weight,0.0f,0.5f) : 0.0f;
+    gl::set_uniform_float(volumetric_neighbor_weight,mix_weight);
     if(!volume)return;
     gl::set_uniform_vector(volumetric_ambient_bounds_min,
         make_point(volume->bounds_min[0],volume->bounds_min[1],
@@ -1184,6 +1206,25 @@ void jkgm::shaders::gpu_3do_preview_shader::set_volumetric_ambient(
         make_point(q(4),q(5),q(6),q(7)));
     gl::set_uniform_float(volumetric_ambient_range,volume->range);
     gl::set_uniform_float(volumetric_ambient_live_floor,volume->live_floor);
+    if(mix_weight<=0.0f)return;
+    gl::set_uniform_vector(volumetric_neighbor_bounds_min,
+        make_point(neighbor->bounds_min[0],neighbor->bounds_min[1],
+                   neighbor->bounds_min[2]));
+    gl::set_uniform_vector(volumetric_neighbor_bounds_max,
+        make_point(neighbor->bounds_max[0],neighbor->bounds_max[1],
+                   neighbor->bounds_max[2]));
+    gl::set_uniform_vector(volumetric_neighbor_corners0,
+        make_point(float(neighbor->samples[0])/255.0f,
+                   float(neighbor->samples[1])/255.0f,
+                   float(neighbor->samples[2])/255.0f,
+                   float(neighbor->samples[3])/255.0f));
+    gl::set_uniform_vector(volumetric_neighbor_corners1,
+        make_point(float(neighbor->samples[4])/255.0f,
+                   float(neighbor->samples[5])/255.0f,
+                   float(neighbor->samples[6])/255.0f,
+                   float(neighbor->samples[7])/255.0f));
+    gl::set_uniform_float(volumetric_neighbor_range,neighbor->range);
+    gl::set_uniform_float(volumetric_neighbor_live_floor,neighbor->live_floor);
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_lighting(

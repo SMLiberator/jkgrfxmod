@@ -42,9 +42,10 @@ assert "volumetric_ambient_world!=cache.loaded_world" in wiring
 assert "volumetric_ambient_revision!=cache.revision" in wiring
 assert "volumetric_ambient_overbright!=overbright" in wiring
 assert "clamp_authored_extra_floor(" in wiring
-assert "it->native_sector+0x08U" in wiring
-assert "volume.samples=it->light;" in wiring
-assert "prog.set_volumetric_ambient(inst.volumetric_ambient" in wiring
+assert "sector.native_sector+0x08U" in wiring
+assert "v.samples=s.light;" in wiring
+assert "prog.set_volumetric_ambient(" in wiring
+assert "inst.volumetric_ambient_neighbor_weight);" in wiring
 assert "experimental_world_vertex_ambient" in wiring  # retained for A/B
 config=(root/"common/config.hpp").read_text(encoding="utf-8")
 parser=(root/"common/config.cpp").read_text(encoding="utf-8")
@@ -114,8 +115,36 @@ for byte_values in ((0,255,0,255,0,255,0,255),
                 expected=cpu_sample(byte_values,xyz,rng,floor)
                 gpu=vertex_sample(byte_values,xyz,rng,floor)
                 assert abs(expected-gpu)<1e-6,(xyz,rng,floor)
-assert "float low=mix(mix(volumetric_ambient_corners0.x," in vertex
-assert "float high=mix(mix(volumetric_ambient_corners1.x," in vertex
-assert "return max(mix(low,high,t.z)*volumetric_ambient_range," in vertex
+assert "float low=mix(mix(bottom.x,bottom.y,t.x)," in vertex
+assert "float high=mix(mix(top.x,top.y,t.x)," in vertex
+assert "return max(mix(low,high,t.z)*quantized_range,live_floor);" in vertex
 
-print("Volumetric ambient CPU/GPU source contracts passed")
+# Portal-aware blending is a symmetric floor-preserving mix of two
+# independently evaluated sectors. Never combine quantized bytes before
+# their live ExtraLight floors; doing that would break SetSectorLight fades.
+for weight in (0.0,0.125,0.25,0.5):
+    for xyz in ((0.,0.,0.),(.33,.45,.67),(1.,1.,1.)):
+        own=vertex_sample((0,10,70,90,150,120,200,255),xyz,1.,.1)
+        other=vertex_sample((255,200,210,175,80,30,50,0),xyz,1.,.55)
+        combined=own*(1.-weight)+other*weight
+        assert min(own,other)-1e-6<=combined<=max(own,other)+1e-6
+        if weight==.5:
+            reverse=other*(1.-weight)+own*weight
+            assert abs(combined-reverse)<1e-6
+assert "world_vertex_ambient_grid volumetric_ambient_portals;" in wiring
+assert "capture_world_vertex_ambient_portals(" in wiring
+assert "volumetric_ambient_portals.reset(1.0f);" in wiring
+assert "volumetric_ambient_portals.reset();" in wiring
+assert "volumetric_ambient_portals.nearest_portal(" in wiring
+assert "inst.volumetric_ambient_neighbor_weight=weight;" in wiring
+assert "if(!get_floor(*other,neighbor_floor))" in wiring
+assert "std::optional<gpu_3do_ambient_volume> volumetric_ambient_neighbor;" in instance
+assert "uniform float volumetric_neighbor_weight;" in vertex
+assert "if(volumetric_neighbor_weight<=0.0)return own;" in vertex
+assert "return mix(own,neighbor,volumetric_neighbor_weight);" in vertex
+assert "gl::set_uniform_float(volumetric_neighbor_weight,mix_weight);" in api
+assert "assert(grid.nearest_portal(7," in (root/"tests/world_vertex_ambient.cpp").read_text(encoding="utf-8")
+assert "assert(neighbor==0U && std::fabs(weight-0.5f)<0.00001f);" in (
+    root/"tests/world_vertex_ambient.cpp").read_text(encoding="utf-8")
+
+print("Volumetric ambient CPU/GPU/portal source contracts passed")

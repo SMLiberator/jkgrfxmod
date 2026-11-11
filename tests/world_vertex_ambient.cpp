@@ -160,6 +160,21 @@ int main() {
     grid.sample_with_portals(8,{{-0.01f,0.1f,0.0f}},from_eight);
     assert(std::fabs(from_seven-from_eight)<0.05f);
 
+    // The new 2x2x2 GPU volume reuses exactly this passable-portal
+    // geometry without legacy cell probes. Neighbor selection and mixing
+    // must be symmetric as the native owning sector changes.
+    uint32_t neighbor=0;
+    float weight=0.0f;
+    assert(grid.nearest_portal(7,{{0.0f,0.1f,0.0f}},neighbor,weight));
+    assert(neighbor==8U && std::fabs(weight-0.5f)<0.00001f);
+    assert(grid.nearest_portal(8,{{0.0f,0.1f,0.0f}},neighbor,weight));
+    assert(neighbor==7U && std::fabs(weight-0.5f)<0.00001f);
+    assert(grid.nearest_portal(7,{{0.5f,0.1f,0.0f}},neighbor,weight));
+    assert(neighbor==8U && weight>0.0f && weight<0.5f);
+    assert(!grid.nearest_portal(
+        7,{{1.01f,0.1f,0.0f}},neighbor,weight));
+    assert(weight==0.0f);
+
     // Near an infinite extension of the plane, but outside the real
     // polygon/radius: don't pick up the neighboring sector.
     // The grid now applies the registered sector's ExtraLight floor even
@@ -170,6 +185,8 @@ int main() {
         7,{{0.0f,2.5f,0.0f}},result)==
         jkgm::world_vertex_ambient_result::local);
     assert(std::fabs(result-1.3f)<0.00001f);
+    assert(!grid.nearest_portal(
+        7,{{0.0f,2.5f,0.0f}},neighbor,weight));
 
     // A solid Adjoin must not contribute a portal, even if geometry is
     // nearby and the level still contains world vertices in both sectors.
@@ -177,6 +194,8 @@ int main() {
     assert(jkgm::capture_world_vertex_ambient(
         reader,world,surfaces,mesh,true,1.0f,grid,stats));
     assert(stats.portals_captured==0U && grid.portal_count()==0U);
+    assert(!grid.nearest_portal(
+        7,{{0.0f,0.1f,0.0f}},neighbor,weight));
     assert(grid.sample_with_portals(
         7,{{0.0f,0.1f,0.0f}},result)==
         jkgm::world_vertex_ambient_result::local);
@@ -187,6 +206,8 @@ int main() {
     assert(jkgm::capture_world_vertex_ambient(
         reader,world,surfaces,mesh,true,1.0f,grid,stats));
     assert(grid.portal_count()==0U);
+    assert(!grid.nearest_portal(
+        7,{{0.0f,0.1f,0.0f}},neighbor,weight));
 
     // If the Thing's home sector lacks nearby samples, the portal can
     // borrow a neighboring sample without falling back to JKL ambient.
@@ -297,4 +318,15 @@ int main() {
     mem.put(sectors+0x08U,6.0f);
     change=grid.refresh_sector_floors(reader,true);
     assert(change.changed==0U && change.cells==0U);
+
+    // Native sector ID zero is legal. It must not be used as a sentinel
+    // for a missing neighbor in the geometry-only portal lookup.
+    grid.reset();
+    assert(grid.add_portal(1U,0U,opening));
+    assert(grid.nearest_portal(
+        1U,{{0.0f,0.0f,0.0f}},neighbor,weight));
+    assert(neighbor==0U && std::fabs(weight-0.5f)<0.00001f);
+    assert(grid.nearest_portal(
+        0U,{{0.0f,0.0f,0.0f}},neighbor,weight));
+    assert(neighbor==1U && std::fabs(weight-0.5f)<0.00001f);
 }
