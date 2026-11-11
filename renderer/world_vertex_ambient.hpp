@@ -519,11 +519,10 @@ bool capture_world_vertex_ambient(
         if(!grid.register_sector(sector_id,sector,sector_extra,overbright)) {
             ++stats.surfaces_skipped;continue;
         }
-        float const extra=clamp_authored_extra_light(face_extra,overbright);
         uint32_t accepted=0;
         for(uint32_t i=0;i<n;++i) {
-            float const authored=clamp_authored_light(intensity[i],overbright);
-            float const base_light=std::max(0.0f,authored+extra);
+            float const base_light=clamp_authored_baked_sum(
+                intensity[i],face_extra,overbright);
             if(grid.add(sector_id,mesh.vertices[base+i].position,base_light))
                 ++accepted;
         }

@@ -96,7 +96,7 @@ namespace jkgm {
             gl::uniform_location_id sky_camera_forward,sky_camera_up;
             gl::uniform_location_id sky_ceiling_height,sky_offset;
             gl::uniform_location_id sky_face_offset,sky_viewport;
-            gl::uniform_location_id num_lights,light_attenuation;
+            gl::uniform_location_id num_lights,light_attenuation,jk_light_limit;
             gl::uniform_location_id world_pixel_dynamic_lighting,world_dynamic_light_specular;
             gl::uniform_location_id jk_color_filter,jk_color_tint,jk_color_add_fade;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
@@ -137,6 +137,7 @@ namespace jkgm {
                          point<3,float> forward,point<3,float> up,
                          float ceiling_height,point<2,float> offset,
                          point<2,float> face_offset,point<2,float> viewport);
+            void set_light_brightness_limit(float limit);
             void set_lights(std::vector<world_cache_point_light> const &lights,
                             float attenuation,
                             std::array<std::array<float,3>,64> const &saber_rgb,
@@ -351,6 +352,7 @@ namespace jkgm {
             translucent_sun_uniforms translucent_sun;
         private:
             gl::uniform_location_id ambient_light,attenuation_min,num_lights,
+                                    jk_light_limit,
                                     pixel_dynamic_lighting,
                                     nonrigid_light_transform,effective_light_mode;
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
@@ -372,6 +374,7 @@ namespace jkgm {
             void set_emissive(bool textured,point<4,float> intensity,
                               point<2,float> scroll);
             void set_fog(point<4,float> params,point<4,float> color);
+            void set_light_brightness_limit(float limit);
             void set_lighting(gpu_3do_instance const &instance,
                               bool pixel_lighting,
                               std::array<std::array<float,3>,64> const &saber_rgb,

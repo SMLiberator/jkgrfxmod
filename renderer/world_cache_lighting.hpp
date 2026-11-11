@@ -136,7 +136,7 @@ inline bool sample_world_cache_surface_light(
         if(!read_decal_u32(read,addr+0x08U,sector) ||
            !decal_native_address_ok(sector))return reject("native_sector_pointer_unreadable_or_invalid");
     }
-    float ambient=0.0f;
+    float sector_floor=0.0f;
     if(sector_tint || sector_cmp_tint) {
         if((sector_tint && sector_tint->size()!=out.size()) ||
            (sector_cmp_tint && sector_cmp_tint->size()!=out.size()))
@@ -144,7 +144,7 @@ inline bool sample_world_cache_surface_light(
         std::array<uint8_t,20> sector_state{};
         if(!read(uintptr_t(sector)+0x08U,
                  sector_state.data(),sector_state.size()))return reject("native_sector_state_unreadable");
-        std::memcpy(&ambient,sector_state.data(),sizeof(ambient));
+        std::memcpy(&sector_floor,sector_state.data(),sizeof(sector_floor));
         if(sector_tint) {
             std::array<float,3> tint{};
             std::memcpy(tint.data(),sector_state.data()+8U,sizeof(tint));
@@ -179,28 +179,28 @@ inline bool sample_world_cache_surface_light(
     float extra=0.0f;
     if(!read(addr+0x44U,&extra,sizeof(extra)) ||
        (!sector_tint &&
-        !read(uintptr_t(sector)+0x08U,&ambient,sizeof(ambient))) ||
-       !std::isfinite(extra) || !std::isfinite(ambient))return reject("native_extra_or_ambient_unreadable_or_nonfinite");
-    // Native world faces use sector Extra, not the camera ambient value.
+        !read(uintptr_t(sector)+0x08U,&sector_floor,sizeof(sector_floor))) ||
+       !std::isfinite(extra) || !std::isfinite(sector_floor))return reject("native_extra_or_ambient_unreadable_or_nonfinite");
+    // Native world faces use sector ExtraLight, not camera AmbientLight.
     // The camera value changes as JK processes each visible sector.
     // sithRender's global extra light can additionally raise/lower the
     // world floor (sithRender_RenderSectors parity).
     if(!std::isfinite(global_extra))return reject("global_extra_nonfinite");
-    // Each authored ExtraLight source is bounded independently; the
-    // combined sector/global light floor may exceed that input limit.
-    ambient=std::max(0.0f,clamp_authored_extra_light(ambient,overbright)+
-                     clamp_authored_extra_light(global_extra,overbright));
+    // SithSector +0x08 is ExtraLight (a floor), NOT sector AmbientLight.
+    // Clamp the combined sector/global value just like native sithRender.
+    sector_floor=clamp_authored_extra_floor(
+        sector_floor,global_extra,overbright);
     if(mode!=3U) {
-        // 0 fully lit; 1 unlit (face extra/ambient); 2 diffuse (JK's
+        // 0 fully lit; 1 unlit (face extra/sector_floor); 2 diffuse (JK's
         // default procEntry static light is 1.0); 3 vertex Gouraud.
         float const bright=mode==1U?
-            std::max(clamp_authored_extra_light(extra,overbright),ambient):1.0f;
+            std::max(clamp_authored_extra_light(extra,overbright),sector_floor):1.0f;
         float const gamma=std::pow(bright,1.8f);
         for(uint32_t i=0;i<count;++i) {
             out[base+i]={{gamma,gamma,gamma}};
             if(pixel_state)(*pixel_state)[base+i]={{
                 mode==1U?clamp_authored_extra_light(extra,overbright):1.0f,
-                ambient,float(mode)}};
+                sector_floor,float(mode)}};
         }
         return true;
     }
@@ -226,16 +226,15 @@ inline bool sample_world_cache_surface_light(
             return reject("gouraud_static_light_nonfinite");
         if(!pixel_lighting && !std::isfinite(native_dynamic_light[ids[i]]))
             return reject("gouraud_dynamic_vertex_light_nonfinite");
-        float const raw_brightness=
-            clamp_authored_light(source[i],overbright)+
-            clamp_authored_extra_light(extra,overbright);
+        float const raw_brightness=clamp_authored_baked_sum(
+            source[i],extra,overbright);
         float const dynamic=pixel_lighting?0.0f:native_dynamic_light[ids[i]];
-        float const brightness=std::max(
-            std::max(raw_brightness+dynamic,0.0f),ambient);
+        float const brightness=compose_authored_world_brightness(
+            raw_brightness,dynamic,sector_floor,overbright);
         float const gamma=std::pow(brightness,1.8f);
         result[i]={{gamma,gamma,gamma}};
         if(pixel_state)(*pixel_state)[base+i]={{
-            raw_brightness,ambient,3.0f}};
+            raw_brightness,sector_floor,3.0f}};
     }
     for(uint32_t i=0;i<count;++i)out[base+i]=result[i];
     return true;

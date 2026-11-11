@@ -7,6 +7,15 @@
 // interpolate(pow(vertex_brightness, gamma)) !=
 // pow(interpolate(vertex_brightness), gamma).
 
+uniform float jk_light_limit; // 1=vanilla saturation, 2=overbright authored inputs
+// Restore native RGB saturation when baked overbright is disabled.
+// The HDR path retains the existing untethered post-tint/dynamic color.
+vec3 jk_light_color_cap(vec3 value)
+{
+    return jk_light_limit<=1.0
+        ? clamp(value,vec3(0.0),vec3(1.0)) : max(value,vec3(0.0));
+}
+
 const float JK_POINT_GAMMA = 1.8;
 
 // Smooth Lambert point light. Radius is an independent hard cutoff;
@@ -36,9 +45,9 @@ float jk_point_sample(vec3 delta, vec3 surface_normal,
 vec3 jk_point_compose(vec3 baked, vec3 added, vec3 light_rgb)
 {
     if(all(lessThanEqual(added,vec3(0.0)))) return baked;
-    vec3 base=pow(max(baked,vec3(0.0)),vec3(1.0/JK_POINT_GAMMA));
+    vec3 base=pow(jk_light_color_cap(baked),vec3(1.0/JK_POINT_GAMMA));
     vec3 light=pow(clamp(light_rgb,0.0,1.0),vec3(1.0/JK_POINT_GAMMA));
-    vec3 lit=max(base+max(added,vec3(0.0))*light,vec3(0.0));
+    vec3 lit=jk_light_color_cap(base+max(added,vec3(0.0))*light);
     return pow(lit,vec3(JK_POINT_GAMMA));
 }
 vec3 jk_point_compose(vec3 baked,float added,vec3 light_rgb)

@@ -78,7 +78,8 @@ assert "range_distance*attenuation_min,0.0)*along" in vert
 assert "load_shader_source(filename.parent_path()/name" in program
 assert "float jk_point_sample(" in shared
 assert "vec3 jk_point_compose(" in shared
-# Authored lighting inputs are separately capped at 1/2, never the HDR sum.
+# Vanilla bounds both the authored sum and completed lighting at 1.
+# Overbright allows authored static+face up to 2 and retains dynamic HDR.
 limits=(root/"renderer/light_intensity_range.hpp").read_text(encoding="utf-8")
 world_lights=(root/"renderer/world_cache_lighting.hpp").read_text(encoding="utf-8")
 sector_cross=(root/"renderer/sector_crossing_gpu.hpp").read_text(encoding="utf-8")
@@ -91,10 +92,14 @@ assert '"enable_baked_overbright": true' in sample
 assert "overbright ? 2.0f : 1.0f" in limits
 assert "std::clamp(value,0.0f,authored_light_limit(overbright))" in limits
 assert "std::min(value,authored_light_limit(overbright))" in limits
-assert "clamp_authored_light(source[i],overbright)" in world_lights
-assert "clamp_authored_extra_light(extra,overbright)" in world_lights
-assert "clamp_authored_extra_light(global_extra,overbright)" in world_lights
-assert "std::max(raw_brightness+dynamic,0.0f),ambient" in world_lights
+assert "clamp_authored_baked_sum(" in world_lights
+assert "source[i],extra,overbright)" in world_lights
+assert "clamp_authored_extra_floor(" in world_lights
+assert "sector_floor,global_extra,overbright)" in world_lights
+assert "compose_authored_world_brightness(" in world_lights
+assert "return overbright?lit:std::min(lit,1.0f);" in limits
+assert "std::clamp(clamp_authored_light(vertex,overbright)+" in limits
+assert "std::clamp(clamp_authored_extra_light(sector_extra,overbright)+" in limits
 assert "clamp_authored_light(ambient,overbright)" in sector_cross
 assert "clamp_authored_extra_light(extra,overbright)" in sector_cross
 assert "the_config->enable_baked_overbright" in main
@@ -103,7 +108,17 @@ assert "the_config->enable_baked_overbright" in wiring
 assert "pow(max(bright,0.0),1.8)" in vert
 assert "clamp(bright,0.0,1.0)" not in vert
 assert "lighting=mix(max(lighting,vec3(0.0)),vec3(1.0),fullbright);" in world_frag
-assert "vec3 lit=max(base+max(added,vec3(0.0))*light,vec3(0.0));" in shared
+assert "vec3 lit=jk_light_color_cap(base+max(added,vec3(0.0))*light);" in shared
+assert "uniform float jk_light_limit;" in shared
+assert "uniform float jk_light_limit;" in vert
+assert "uniform float jk_light_limit;" in world_vert
+assert "jk_light_limit<=1.0" in vert
+assert "jk_light_color_cap(jk_lit_rgb)" in vert
+assert "jk_light_color_cap(raw*cmp_tint)" in world_vert
+assert "jk_light_color_cap(raw*cached_sector_cmp_tint)" in world_frag
+assert 'the_program,"jk_light_limit"' in program
+assert wiring.count("shader.set_light_brightness_limit(")==2
+assert wiring.count("prog.set_light_brightness_limit(")==1
 assert "if(l>=1.0) break;" not in vert
 assert "uniform vec3 light_color[16];" in frag
 assert "uniform vec3 light_color[16];" in world_frag
@@ -240,13 +255,15 @@ for left, right in [(0.1, 0.9), (0.0, 1.0), (0.3, 0.8)]:
 def point_sample(dist, radius, intensity, attenuation, incidence):
     return max(intensity-dist*attenuation, 0.0)*max(incidence,0.0) if dist<radius else 0.0
 
-def point_compose(baked, added, light_color):
+def point_compose(baked, added, light_color, overbright=False):
     if added<=0.0:
         return baked
     return tuple(
-        min(1.0,min(b,1.0)**(1.0/1.8) +
-            min(added,1.0)*min(c,1.0)**(1.0/1.8))**1.8 +
-        max(b-1.0,0.0)
+        (max(b,0.0)**(1.0/1.8) +
+         max(added,0.0)*min(max(c,0.0),1.0)**(1.0/1.8)
+         if overbright else
+         min(1.0,max(b,0.0)**(1.0/1.8) +
+             max(added,0.0)*min(max(c,0.0),1.0)**(1.0/1.8)))**1.8
         for b,c in zip(baked,light_color))
 
 for left,right in ((0.0,1.0),(0.1,0.9),(0.3,0.8)):
@@ -259,13 +276,13 @@ for left,right in ((0.0,1.0),(0.1,0.9),(0.3,0.8)):
             model=point_compose(baked,added,(1.0,)*3)
             assert world==model
             assert all(a>=b for a,b in zip(world,baked))
-# Overbright baked energy must survive a nonzero dynamic light without
-# allowing that dynamic light to manufacture additional HDR excess.
-for level in (1.2,2.0,3.0):
+# Vanilla saturates after dynamic light; overbright preserves added HDR.
+assert point_compose((0.8**1.8,)*3,0.5,(1.0,)*3)==(1.0,)*3
+for level in (1.2,2.0):
     baked=(level**1.8,)*3
-    result=point_compose(baked,0.4,(1.0,)*3)
-    assert result==baked
-    assert point_compose(baked,0.0,(1.0,)*3)==baked
+    result=point_compose(baked,0.4,(1.0,)*3,overbright=True)
+    assert all(c>b for c,b in zip(result,baked))
+    assert point_compose(baked,0.0,(1.0,)*3,overbright=True)==baked
 # Preserve the previous C++ helper's numeric regression cases here, where
 # they are paired with the shader-source assertions for the real formula.
 assert "range_distance>=radius" in shared

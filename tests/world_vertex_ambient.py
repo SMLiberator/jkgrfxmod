@@ -32,12 +32,12 @@ assert "range.passable_adjoin" in probes
 assert "cell_count() const" in probes
 assert "cells_.find(key{sector" in probes
 assert "read(face+0x54U,&static_ptr,4U)" in probes
-assert "clamp_authored_light(intensity[i],overbright)" in probes
-assert "clamp_authored_extra_light(face_extra,overbright)" in probes
+assert "float const base_light=clamp_authored_baked_sum(" in probes
+assert "intensity[i],face_extra,overbright)" in probes
 assert "register_sector(sector_id,sector,sector_extra,overbright)" in probes
 assert "clamp_authored_extra_light(extra,overbright)" in probes
 assert "read(uintptr_t(sector)+0x08U,&sector_extra,4U)" in probes
-assert "float const base_light=std::max(0.0f,authored+extra)" in probes
+assert "float const base_light=clamp_authored_baked_sum(" in probes
 assert "float const floor=std::max(0.0f," in probes
 assert "cell.light_sum+=std::max(light,floor)" in probes
 assert "sector_lights_" in probes

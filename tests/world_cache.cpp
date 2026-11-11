@@ -331,6 +331,53 @@ int main()
     assert(std::fabs(pixel_state[0][1]-0.30f)<0.00001f);
     assert(std::fabs(pixel_state[0][0]-0.30f)<0.00001f);
     assert(std::fabs(rgb[0][0]-std::pow(0.30f,1.8f))<0.0001f);
+    // Native parity: authored vertex+face ExtraLight is ONE bounded value;
+    // SithSector +0x08 and global extra produce a separate minimum floor.
+    // SithSector +0x04 (AmbientLight) must not illuminate world surfaces.
+    auto sample_range=[&](bool overbright,float global,bool pixel) {
+        return sample_world_cache_surface_light(
+            light_read,light_surfaces,mesh,lit_face,8U,dynamic_lights,rgb,
+            nullptr,&pixel_state,pixel,global,nullptr,nullptr,0U,nullptr,
+            overbright);
+    };
+    lf32(light_intensities,0.80f);
+    lf32(light_surfaces+2U*0x5cU+0x44U,0.50f);
+    assert(sample_range(false,0.0f,true));
+    assert(pixel_state[0][0]==1.0f && rgb[0][0]==1.0f);
+    assert(sample_range(true,0.0f,true));
+    assert(std::fabs(pixel_state[0][0]-1.30f)<0.0001f);
+    assert(std::fabs(rgb[0][0]-std::pow(1.30f,1.8f))<0.0001f);
+    assert(sample_range(false,0.0f,false));
+    assert(rgb[0][0]==1.0f); // Native per-vertex point light cannot exceed 1
+    assert(sample_range(true,0.0f,false));
+    assert(std::fabs(rgb[0][0]-std::pow(1.35f,1.8f))<0.0001f);
+
+    lf32(light_intensities,1.80f);
+    lf32(light_surfaces+2U*0x5cU+0x44U,0.70f);
+    assert(sample_range(true,0.0f,true));
+    assert(pixel_state[0][0]==2.0f);
+    assert(sample_range(false,0.0f,true));
+    assert(pixel_state[0][0]==1.0f);
+
+    lf32(light_intensities,0.0f);
+    lf32(light_surfaces+2U*0x5cU+0x44U,0.0f);
+    lf32(light_sector+0x08U,0.85f);
+    assert(sample_range(false,0.50f,true));
+    assert(pixel_state[0][1]==1.0f && rgb[0][0]==1.0f);
+    assert(sample_range(true,0.50f,true));
+    assert(std::fabs(pixel_state[0][1]-1.35f)<0.0001f);
+    assert(std::fabs(rgb[0][0]-std::pow(1.35f,1.8f))<0.0001f);
+
+    // A negative face ExtraLight subtracts before the floor; a negative
+    // sector floor by itself never subtracts from a lit world vertex.
+    lf32(light_intensities,0.80f);
+    lf32(light_surfaces+2U*0x5cU+0x44U,-0.50f);
+    lf32(light_sector+0x08U,-0.80f);
+    assert(sample_range(false,0.0f,true));
+    assert(std::fabs(pixel_state[0][0]-0.30f)<0.0001f);
+    assert(std::fabs(rgb[0][0]-std::pow(0.30f,1.8f))<0.0001f);
+    lf32(light_intensities,0.0f);
+    lf32(light_sector+0x08U,0.20f);
     lf32(light_surfaces+2U*0x5cU+0x44U,0.10f);
     lu32(light_surfaces+2U*0x5cU+0x20U,0U);
     assert(sample_world_cache_surface_light(

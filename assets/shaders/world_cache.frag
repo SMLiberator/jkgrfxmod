@@ -66,17 +66,17 @@ uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
 
 vec3 world_jk_effect(vec3 raw,vec3 local_sector_tint)
 {
-    vec3 v=pow(max(raw*cached_sector_cmp_tint,vec3(0.0)),
+    vec3 v=pow(jk_light_color_cap(raw*cached_sector_cmp_tint),
                vec3(1.0/1.8));
     if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
         v*=step(vec3(0.5),jk_color_filter.xyz);
     vec3 t=clamp(local_sector_tint+jk_color_tint.xyz,
                  vec3(-4.0),vec3(4.0));
     vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
-    v=max(v*scale,vec3(0.0));
-    v=max(v+jk_color_add_fade.xyz,vec3(0.0));
+    v=jk_light_color_cap(v*scale);
+    v=jk_light_color_cap(v+jk_color_add_fade.xyz);
     v*=jk_color_add_fade.w;
-    return pow(max(v,vec3(0.0)),vec3(1.8));
+    return pow(jk_light_color_cap(v),vec3(1.8));
 }
 // Reconstruct world-space tangent basis from the native UVs and geometry.
 // Reflection normals deliberately exclude the FOV scaling used for SSAO.

@@ -24,19 +24,28 @@ uniform int sky_mode; // 0=ordinary world, 1=horizon, 2=ceiling
 // Already neutralized native global palette: only COG/player effects remain.
 // The per-face sector tint is applied locally in the same color operation.
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
+uniform float jk_light_limit; // 1=vanilla saturation; 2=overbright
+// Restore native RGB saturation when baked overbright is disabled.
+// The HDR path retains the existing untethered post-tint/dynamic color.
+vec3 jk_light_color_cap(vec3 value)
+{
+    return jk_light_limit<=1.0
+        ? clamp(value,vec3(0.0),vec3(1.0)) : max(value,vec3(0.0));
+}
+
 vec3 world_jk_effect(vec3 raw,vec3 local_sector_tint,vec3 cmp_tint)
 {
     // Match GPU 3DO's colormap multiplication before native palette effects.
-    vec3 v=pow(max(raw*cmp_tint,vec3(0.0)),vec3(1.0/1.8));
+    vec3 v=pow(jk_light_color_cap(raw*cmp_tint),vec3(1.0/1.8));
     if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
         v*=step(vec3(0.5),jk_color_filter.xyz);
     vec3 t=clamp(local_sector_tint+jk_color_tint.xyz,
                  vec3(-4.0),vec3(4.0));
     vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
-    v=max(v*scale,vec3(0.0));
-    v=max(v+jk_color_add_fade.xyz,vec3(0.0));
+    v=jk_light_color_cap(v*scale);
+    v=jk_light_color_cap(v+jk_color_add_fade.xyz);
     v*=jk_color_add_fade.w;
-    return pow(max(v,vec3(0.0)),vec3(1.8));
+    return pow(jk_light_color_cap(v),vec3(1.8));
 }
 void main() {
     // Native texVertOffset adds in MAT pixels, before dimension scaling.

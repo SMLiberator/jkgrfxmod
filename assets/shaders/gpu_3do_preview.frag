@@ -152,8 +152,8 @@ vec3 pixel_jk_color_at_brightness(float bright)
             ? sector_vertex_cmp
             : sector_crossing_cmp[sector_crossing_slot].xyz)
         : colormap_tint;
-    vec3 result=vec3(pow(max(bright,0.0),1.8)) *
-                pixel_light_vertex_rgb * effective_cmp;
+    vec3 result=jk_light_color_cap(vec3(pow(max(bright,0.0),1.8)) *
+                pixel_light_vertex_rgb * effective_cmp);
     vec3 sector_tint=sector_crossing_count>1
         ? (sector_crossing_per_vertex!=0
             ? sector_vertex_tint
@@ -161,16 +161,16 @@ vec3 pixel_jk_color_at_brightness(float bright)
         : thing_sector_tint_delta;
     if(jk_color_filter.w>0.5 ||
        any(greaterThan(abs(sector_tint),vec3(0.00001)))) {
-        vec3 v=pow(max(result,vec3(0.0)),vec3(1.0/1.8));
+        vec3 v=pow(jk_light_color_cap(result),vec3(1.0/1.8));
         if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
             v*=step(vec3(0.5),jk_color_filter.xyz);
         vec3 t=clamp(jk_color_tint.xyz+sector_tint,
                      vec3(-4.0),vec3(4.0));
         vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
-        v=max(v*scale,vec3(0.0));
-        v=max(v+jk_color_add_fade.xyz,vec3(0.0));
+        v=jk_light_color_cap(v*scale);
+        v=jk_light_color_cap(v+jk_color_add_fade.xyz);
         v*=jk_color_add_fade.w;
-        result=pow(max(v,vec3(0.0)),vec3(1.8));
+        result=pow(jk_light_color_cap(v),vec3(1.8));
     }
     return result;
 }

@@ -55,15 +55,20 @@ those fallback modes.
 world/3DO/sprite light-input range independently of `gpu_pixel_lighting`:
 
 - `false`: cap each authored baked-vertex intensity, sector ambient value,
-  and ExtraLight input at 1.0 (vanilla-style inputs).
-- `true`: cap those inputs at 2.0. Excessive custom-level values above 2.0
-  are limited; negative ExtraLight darkening remains valid.
+  and ExtraLight input at 1.0, **also cap the vertex + face ExtraLight
+  sum at 1.0**, and restore native-style final saturation at 1.0 after
+  dynamic lighting and vertex color effects.
+- `true`: cap authored inputs and the completed baked vertex + face
+  ExtraLight sum at 2.0; preserve additional dynamic-light HDR above 2.
+  Per-vertex gamma/color and sector/CMP effects retain that HDR range.
 
-Individual values are bounded **before** the renderer combines them.
-Ambient/ExtraLight, baked light, dynamic point lights and other added sources
-can together exceed 2.0; their HDR sum is not saturated to the input limit.
-Per-vertex gamma/color and sector/CMP tints preserve the overbright energy,
-rather than restoring it with an additional post-tint multiplier.
+SithSector ExtraLight (+0x08) is a **world-surface lighting floor**,
+not the sector's AmbientLight (+0x04), which affects Things. The world
+floor is `clamp(sector ExtraLight + global ExtraLight,0,limit)`. Face
+ExtraLight is a separate additive input; negative face ExtraLight can
+darken an authored vertex before this floor is applied. When disabled,
+overbright restores the original 1.0 output saturation rather than merely
+capping each input independently.
 
 This affects GPU-cached geometry only. Native fallback continues to use
 the native engine. Set `enable_hdr=true` for filmic tone mapping, and

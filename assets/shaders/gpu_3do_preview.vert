@@ -12,6 +12,7 @@ layout(location=6) in float local_extra_light;
 layout(location=7) in float local_light_mode;
 layout(location=8) in vec3 local_vertex_rgb;
 uniform float ambient_light;
+uniform float jk_light_limit; // authored cap; 1 restores vanilla saturation
 uniform float effective_light_mode; // captured per Thing
 uniform int camera_hud_thing; // SithThing type=camera: unlit textured 3DO
 // Native JK applies these to RGB8 *vertex colors* before texturing.
@@ -75,6 +76,14 @@ out vec3 sector_vertex_tint;
 // Identical owner-first bounds/plane semantics to the previous fragment
 // classifier. Running this at each transformed vertex avoids a potentially
 // expensive 96-plane loop at every covered pixel.
+// Restore native RGB saturation when baked overbright is disabled.
+// The HDR path retains the existing untethered post-tint/dynamic color.
+vec3 jk_light_color_cap(vec3 value)
+{
+    return jk_light_limit<=1.0
+        ? clamp(value,vec3(0.0),vec3(1.0)) : max(value,vec3(0.0));
+}
+
 int select_sector_crossing_vertex(vec3 view_position)
 {
     vec3 world=sector_crossing_camera_origin+
@@ -162,6 +171,7 @@ void main() {
     float mode=local_light_mode>3.5 ? 1.0
         : min(local_light_mode,effective_light_mode);
     float l=mode>=2.5 ? local_static_light : 0.0;
+    float dynamic_added=0.0;
     if(mode>=1.5 && num_lights>0 && pixel_dynamic_lighting==0) {
         vec3 anchor=mode>=2.5 ? local_position : local_face_anchor;
         vec3 normal=mode>=2.5 ? local_light_normal : local_normal;
@@ -188,27 +198,32 @@ void main() {
             float range_distance=mode>=2.5
                 ? dist : abs(dot(normal,delta));
             if(range_distance<light_position_radius[i].w && along>0.0)
-                l+=max(light_intensity[i]-
+                dynamic_added+=max(light_intensity[i]-
                        range_distance*attenuation_min,0.0)*along;
         }
     }
+    // Face ExtraLight may darken the authored vertex, but cannot produce
+    // >1 baked brightness with the option off (or >2 with it on).
+    float raw_light=clamp(l+local_extra_light,0.0,jk_light_limit);
     float bright=mode<0.5 ? 1.0
-        : max(max(l+local_extra_light,0.0),ambient_light);
+        : max(raw_light+dynamic_added,ambient_light);
+    if(jk_light_limit<=1.0)bright=min(bright,1.0);
     jk_lit_rgb=vec3(pow(max(bright,0.0),1.8))*local_vertex_rgb;
     jk_lit_rgb*=colormap_tint; // before native hardware color effects
+    jk_lit_rgb=jk_light_color_cap(jk_lit_rgb);
     if(jk_color_filter.w>0.5 ||
        any(greaterThan(abs(thing_sector_tint_delta),vec3(0.00001)))) {
         // Approximate the hardware rdCache per-vertex RGB8 color operation.
-        vec3 v=pow(max(jk_lit_rgb,vec3(0.0)),vec3(1.0/1.8));
+        vec3 v=pow(jk_light_color_cap(jk_lit_rgb),vec3(1.0/1.8));
         if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
             v*=step(vec3(0.5),jk_color_filter.xyz);
         vec3 t=clamp(jk_color_tint.xyz+thing_sector_tint_delta,
                      vec3(-4.0),vec3(4.0));
         vec3 scale=vec3(1.0)+t-0.5*(t.yzx+t.zxy);
-        v=max(v*scale,vec3(0.0));
-        v=max(v+jk_color_add_fade.xyz,vec3(0.0));
+        v=jk_light_color_cap(v*scale);
+        v=jk_light_color_cap(v+jk_color_add_fade.xyz);
         v*=jk_color_add_fade.w;
-        jk_lit_rgb=pow(max(v,vec3(0.0)),vec3(1.8));
+        jk_lit_rgb=pow(jk_light_color_cap(v),vec3(1.8));
     }
     // Re-run JK's vertex gamma/color effects ONLY for crossing Things,
     // once per candidate sector. This retains interpolation of gamma-
@@ -223,15 +238,16 @@ void main() {
             if(sector_crossing_per_vertex!=0 && i!=selected_slot)continue;
             if(i==0) {sector_crossing_lit[i]=jk_lit_rgb;continue;}
             float sector_bright=mode<0.5 ? 1.0 :
-                max(max(l+local_extra_light,0.0),
-                    sector_crossing_info[i].x);
+                max(raw_light+dynamic_added,sector_crossing_info[i].x);
+            if(jk_light_limit<=1.0)sector_bright=min(sector_bright,1.0);
             vec3 candidate=vec3(pow(
                 max(sector_bright,0.0),1.8))*local_vertex_rgb;
             candidate*=sector_crossing_cmp[i].xyz;
+            candidate=jk_light_color_cap(candidate);
             if(jk_color_filter.w>0.5 ||
                any(greaterThan(abs(sector_crossing_tint[i].xyz),
                                vec3(0.00001)))) {
-                vec3 encoded=pow(max(candidate,vec3(0.0)),
+                vec3 encoded=pow(jk_light_color_cap(candidate),
                                  vec3(1.0/1.8));
                 if(any(greaterThan(jk_color_filter.xyz,vec3(0.5))))
                     encoded*=step(vec3(0.5),jk_color_filter.xyz);
@@ -239,10 +255,10 @@ void main() {
                                 sector_crossing_tint[i].xyz,
                                 vec3(-4.0),vec3(4.0));
                 vec3 scale=vec3(1.0)+tint-0.5*(tint.yzx+tint.zxy);
-                encoded=max(encoded*scale,vec3(0.0));
-                encoded=max(encoded+jk_color_add_fade.xyz,vec3(0.0));
+                encoded=jk_light_color_cap(encoded*scale);
+                encoded=jk_light_color_cap(encoded+jk_color_add_fade.xyz);
                 encoded*=jk_color_add_fade.w;
-                candidate=pow(max(encoded,vec3(0.0)),vec3(1.8));
+                candidate=pow(jk_light_color_cap(encoded),vec3(1.8));
             }
             sector_crossing_lit[i]=candidate;
         }

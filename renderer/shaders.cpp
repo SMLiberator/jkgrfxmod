@@ -370,6 +370,7 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , sky_viewport(gl::get_uniform_location(the_program,"sky_viewport"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
     , light_attenuation(gl::get_uniform_location(the_program,"light_attenuation"))
+    , jk_light_limit(gl::get_uniform_location(the_program,"jk_light_limit"))
     , world_pixel_dynamic_lighting(gl::get_uniform_location(
           the_program,"world_pixel_dynamic_lighting"))
     , world_dynamic_light_specular(gl::get_uniform_location(
@@ -557,6 +558,11 @@ void jkgm::shaders::world_cache_preview_shader::set_specular_lighting(
 {
     gl::set_uniform_integer(world_pixel_dynamic_lighting,pixel_diffuse?1:0);
     gl::set_uniform_integer(world_dynamic_light_specular,point_specular?1:0);
+}
+void jkgm::shaders::world_cache_preview_shader::set_light_brightness_limit(
+    float limit)
+{
+    gl::set_uniform_float(jk_light_limit,limit);
 }
 void jkgm::shaders::world_cache_preview_shader::set_lights(
     std::vector<world_cache_point_light> const &lights,float attenuation,
@@ -783,6 +789,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , translucent_shadow_angle_bias_scale(gl::get_uniform_location(the_program,"translucent_shadow_angle_bias_scale"))
     , translucent_sun(the_program)
     , ambient_light(gl::get_uniform_location(the_program,"ambient_light"))
+    , jk_light_limit(gl::get_uniform_location(the_program,"jk_light_limit"))
     , attenuation_min(gl::get_uniform_location(the_program,"attenuation_min"))
     , num_lights(gl::get_uniform_location(the_program,"num_lights"))
     , pixel_dynamic_lighting(gl::get_uniform_location(
@@ -1138,6 +1145,11 @@ void jkgm::shaders::gpu_3do_preview_shader::set_camera_axes(
     gl::set_uniform_vector(camera_up_axis,make_point(u[0],u[1],u[2]));
 }
 
+void jkgm::shaders::gpu_3do_preview_shader::set_light_brightness_limit(
+    float limit)
+{
+    gl::set_uniform_float(jk_light_limit,limit);
+}
 void jkgm::shaders::gpu_3do_preview_shader::set_lighting(
     gpu_3do_instance const &instance,bool pixel_lighting,
     std::array<std::array<float,3>,64> const &saber_rgb,

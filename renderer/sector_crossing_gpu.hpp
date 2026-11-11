@@ -143,12 +143,15 @@ sector_crossing_stage_instance(
         slot.plane_count=range.count;
         ambient=clamp_authored_light(ambient,overbright);
         extra=clamp_authored_extra_light(extra,overbright);
-        if(i==0)owner_light=ambient+extra;
-        // Preserve global sithRender extra, IR override and possible
-        // Thing emission in the native per-Thing rdCamera snapshot by
-        // adjusting it by the candidate sector's relative ambient delta.
-        slot.ambient=i==0?instance.ambient:
-            std::max(0.0f,instance.ambient+(ambient+extra)-owner_light);
+        float const sector_light=std::clamp(
+            ambient+extra,0.0f,authored_light_limit(overbright));
+        if(i==0)owner_light=sector_light;
+        // Preserve global sithRender extra, IR override and Thing emission
+        // in the native camera snapshot, but never exceed the selected cap
+        // when translating the owning sector's ambient into a neighbor.
+        slot.ambient=i==0?instance.ambient:std::clamp(
+            instance.ambient+sector_light-owner_light,
+            0.0f,authored_light_limit(overbright));
         if(i==0) {
             slot.cmp_tint=instance.colormap_tint;
             slot.sector_tint=can_replace_tint && instance.sector_tint_valid

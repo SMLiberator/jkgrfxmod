@@ -138,11 +138,11 @@ int main() {
     assert(grid.sample(8,{{0.2f,0.1f,0.0f}},result));
     assert(std::fabs(result-2.0f)<0.00001f);
     assert(!grid.sample(9,{{0.2f,0.1f,0.0f}},result));
-    // Turning off overbright caps each authored input at 1, not the sum.
+    // The disabled path also caps the completed vertex + face sum at 1.
     assert(jkgm::capture_world_vertex_ambient(
         reader,world,surfaces,mesh,false,1.0f,grid,stats));
     assert(grid.sample(7,{{0.2f,0.1f,0.0f}},result));
-    assert(std::fabs(result-(1.0f+1.0f+1.2f)/3.0f)<0.00001f);
+    assert(std::fabs(result-1.0f)<0.00001f);
     // Valid but distant geometry must not cause light bleed.
     assert(!grid.sample(7,{{10.0f,0.1f,0.0f}},result));
 
