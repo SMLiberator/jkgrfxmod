@@ -214,7 +214,6 @@
     <ClInclude Include="sun_dynamic_shadow_layout.hpp" />
     <ClInclude Include="sun_shadow.hpp" />
     <ClInclude Include="sun_shadow_gpu.hpp" />
-    <ClInclude Include="sun_shadow_moments_gpu.hpp" />
     <ClInclude Include="sun_sky_aperture_gpu.hpp" />
     <ClInclude Include="sun_sky_caster_mask.hpp" />
     <ClInclude Include="sun_sky_surface.hpp" />

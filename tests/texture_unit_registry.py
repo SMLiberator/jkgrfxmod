@@ -9,8 +9,7 @@ programs=("gpu_3do_preview","world_cache","game_opaque_pass",
           "game_trns_pass","post_opaque_composite")
 kinds={"tex2d":{"sampler2D"},"shadow":{"sampler2DShadow"},
        "buffer":{"samplerBuffer","usamplerBuffer"},
-       "texture_array":{"sampler2DArray"},
-       "depth_variant":{"sampler2D","sampler2DShadow"}}
+       "texture_array":{"sampler2DArray"}}
 allow={("gpu_3do_preview",frozenset(("displacement_map","decal_light_texture"))),
        ("gpu_3do_preview",frozenset(("palette_fullbright_mask","decal_occlusion")))}
 def expand(name,visited=frozenset()):
@@ -65,18 +64,13 @@ assert '"continuous_voxel_values",22,sampler_kind::buffer' in header
 assert "GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS" in sh
 assert "JKGM_CONTINUOUS_AMBIENT_GPU 1" in sh
 
-# The optional VSM guard alone consumes raw depth textures on units 17/18.
-post=re.search(r"constexpr binding post_opaque_composite\[\]=\{(.*?)\n\};",header,re.S)
-assert post
-for uniform,unit in (("sun_shadow_raw_near",17),("sun_shadow_raw_far",18)):
-    assert f'{{"{uniform}",{unit},sampler_kind::tex2d}}' in post.group(1)
+# All sun shadow receivers now use PCF-only depth-comparison samplers.
 post_src=read("assets/shaders/post_opaque_composite.frag")
-assert "#if defined(JKGM_SUN_SKY_APERTURE) && defined(JKGM_SUN_VSM)" in post_src
-assert "sun_shadow_debug_view" not in post_src
-assert "uniform sampler2D sun_shadow_raw_near;" in post_src
-assert "uniform sampler2D sun_shadow_raw_far;" in post_src
-assert "uniform sampler2DShadow sun_shadow_raw_near;" not in post_src
-assert "uniform sampler2DShadow sun_shadow_raw_far;" not in post_src
+assert "uniform sampler2DShadow sun_shadow_image;" in post_src
+assert "uniform sampler2DShadow sun_shadow_far_image;" in post_src
+assert "JKGM_SUN_VSM" not in post_src
+assert "sun_shadow_raw_near" not in header
+assert "depth_variant" not in header
 assert "opaque_sky_aperture=16;" in header
 assert "translucent_sun_sky_aperture_map" in header
 assert "sun_sky_aperture_map" in header
@@ -84,12 +78,12 @@ sh=read("renderer/shaders.cpp")
 assert "JKGM_SUN_SKY_APERTURE 1" in sh
 assert "units>=texture_units::forward_next_extended_required_units" in sh
 assert "static_assert(no_incompatible_target_aliases(gpu_3do_preview)" in header
-# World-cache units 16/17 are a sampler2D in VSM and sampler2DShadow in PCF.
+# World-cache units 16/17 remain hardware depth-comparison samplers.
 wm=re.search(r"constexpr binding world_cache\[\]=\{(.*?)\n\};",header,re.S)
 assert wm
 for uniform,slot in (("translucent_sun_near_depth","16"),
                      ("translucent_sun_far_depth","17")):
-    assert f'{{"{uniform}",{slot},sampler_kind::depth_variant}}' in wm.group(1)
+    assert f'{{"{uniform}",{slot},sampler_kind::shadow}}' in wm.group(1)
 gpu=read("renderer/gpu_3do_preview.hpp")
 cpp=read("renderer/renderer.cpp")
 sh=read("renderer/shaders.cpp")

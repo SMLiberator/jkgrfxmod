@@ -509,43 +509,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                              rv->sun_shadow_near_pcf_radius);
         parse_sun_pcf_radius("sun_shadow_far_pcf_radius",
                              rv->sun_shadow_far_pcf_radius);
-        if(j.contains("experimental_sun_shadow_vsm"))
-            j.at("experimental_sun_shadow_vsm").get_to(
-                rv->experimental_sun_shadow_vsm);
-        if(j.contains("experimental_sun_vsm_depth_guard"))
-            j.at("experimental_sun_vsm_depth_guard").get_to(
-                rv->experimental_sun_vsm_depth_guard);
-        auto parse_vsm_radius=[&](char const *name,float &out) {
-            if(!j.contains(name))return;
-            auto const &v=j.at(name);
-            if(!v.is_number())throw std::runtime_error(
-                std::string(name)+" must be numeric (0..4)");
-            double const radius=v.get<double>();
-            if(!std::isfinite(radius) || radius<0.0 || radius>4.0)
-                throw std::runtime_error(
-                    std::string(name)+" must be between 0 and 4");
-            out=static_cast<float>(radius);
-        };
-        parse_vsm_radius("sun_shadow_vsm_near_radius",
-                         rv->sun_shadow_vsm_near_radius);
-        parse_vsm_radius("sun_shadow_vsm_far_radius",
-                         rv->sun_shadow_vsm_far_radius);
-        auto parse_vsm_scalar=[&](char const *name,float &out,
-                                  double upper) {
-            if(!j.contains(name))return;
-            auto const &value=j.at(name);
-            if(!value.is_number())throw std::runtime_error(
-                std::string(name)+" must be numeric");
-            double const v=value.get<double>();
-            if(!std::isfinite(v) || v<0.0 || v>upper)
-                throw std::runtime_error(std::string(name)+
-                    " must be between 0 and "+std::to_string(upper));
-            out=static_cast<float>(v);
-        };
-        parse_vsm_scalar("sun_shadow_vsm_min_stddev_world",
-                         rv->sun_shadow_vsm_min_stddev_world,0.25);
-        parse_vsm_scalar("sun_shadow_vsm_bleed_reduction",
-                         rv->sun_shadow_vsm_bleed_reduction,0.95);
         // Old packs may still ship enable_sprite_decals. Prefer the new
         // enable_decals when both keys are supplied.
         if(j.contains("enable_decals")) {

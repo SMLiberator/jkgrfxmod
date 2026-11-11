@@ -98,16 +98,6 @@ namespace jkgm {
         unsigned int sun_shadow_far_resolution = 0U; // 0 = inherit near resolution
         float sun_shadow_near_pcf_radius = 0.0f; // 0=single HW PCF; >0 four samples
         float sun_shadow_far_pcf_radius = 0.0f; // independent four-sample filter
-        bool experimental_sun_shadow_vsm = false; // independent, default-off shadow path
-        bool experimental_sun_vsm_depth_guard = false; // opt-in raw-depth cap for opaque VSM
-        float sun_shadow_vsm_near_radius = 1.0f; // prefilter radius, map texels
-        float sun_shadow_vsm_far_radius = 1.5f;
-        // Optional ADDITIONAL VSM depth standard-deviation floor in JK
-        // world units. Never replace the 2e-7 normalized precision floor:
-        // cancelling E[z*z]-E[z]^2 without it causes speckled outlines.
-        // Zero preserves the original VSM appearance (bleed=0.2).
-        float sun_shadow_vsm_min_stddev_world = 0.0f;
-        float sun_shadow_vsm_bleed_reduction = 0.2f; // Chebyshev remap, 0..0.95
         float sun_shadow_near_distance = 16.0f; // camera-local near cascade, 2..128
         float sun_shadow_far_distance = 128.0f; // outer cascade coverage, 4..512
         float sun_max_distance = 0.0f; // 0=unlimited; else sun light+shadows fade out and stop at this camera distance

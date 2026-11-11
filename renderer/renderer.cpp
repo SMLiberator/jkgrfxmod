@@ -26,7 +26,6 @@
 #include "spotlight.hpp"
 #include "spotlight_shadow_gpu.hpp"
 #include "sun_shadow_gpu.hpp"
-#include "sun_shadow_moments_gpu.hpp"
 #include "sun_sky_aperture_gpu.hpp"
 #include "sun_sky_surface.hpp"
 #include "sun_sky_caster_mask.hpp"
@@ -619,7 +618,6 @@ namespace jkgm {
         std::vector<translucent_spotlight_draw> translucent_spotlights_for_frame;
         std::unique_ptr<spotlight_shadow_gpu> spotlight_shadow_target;
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
-        std::unique_ptr<sun_shadow_moments_gpu> sun_moments_target;
         std::unique_ptr<sun_sky_aperture_gpu> sun_sky_aperture_target;
         // Fail-open physical-sky eligibility, cached per SithWorld. The
         // world surface table is audited occasionally rather than on every
@@ -633,7 +631,7 @@ namespace jkgm {
         uint64_t sun_level_sky_last_audit_frame=0;
         std::unique_ptr<world_cache_gpu> world_cache_target;
         // The CPU sparse voxel field is an internal prerequisite of GPU ambient.
-        std::unique_ptr<continuous_ambient_field> continuous_ambient_cpu_cache;        std::unique_ptr<continuous_ambient_field> continuous_ambient_cpu_cache;
+        std::unique_ptr<continuous_ambient_field> continuous_ambient_cpu_cache;
         uintptr_t continuous_ambient_cpu_world=0;
         uint64_t continuous_ambient_cpu_revision=0;
         bool continuous_ambient_cpu_overbright=false;
@@ -1154,7 +1152,6 @@ namespace jkgm {
             release_spotlight_images();
             spotlight_shadow_target.reset();
             sun_shadow_target.reset();
-            sun_moments_target.reset();
             sun_sky_aperture_target.reset();
             sun_dynamic_target.reset();
             // Context-owned GL queries must be deleted before the context
@@ -4910,9 +4907,6 @@ namespace jkgm {
             uniforms.set_pcf_radius(
                 the_config->sun_shadow_near_pcf_radius,
                 the_config->sun_shadow_far_pcf_radius);
-            uniforms.set_vsm_params(
-                the_config->sun_shadow_vsm_min_stddev_world,
-                the_config->sun_shadow_vsm_bleed_reduction);
             uniforms.set_sky_aperture(sky_aperture,
                 texture_units::forward_next_extended_unit,
                 sky_aperture?sun_sky_aperture_depth_transform()
@@ -4942,14 +4936,10 @@ namespace jkgm {
                 set_projection(1,sun_shadow_views[1],null_rect);
                 gl::set_active_texture_unit(16);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
-                    the_config->experimental_sun_shadow_vsm
-                        ?gl::texture_view(sun_moments_target->filtered[0])
-                        :gl::texture_view(sun_shadow_target->depth));
+                    sun_shadow_target->depth);
                 gl::set_active_texture_unit(17);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
-                    the_config->experimental_sun_shadow_vsm
-                        ?gl::texture_view(sun_moments_target->filtered[1])
-                        :gl::texture_view(sun_shadow_target->far_depth));
+                    sun_shadow_target->far_depth);
             }
             if(sky_aperture) {
                 gl::set_active_texture_unit(
@@ -5756,65 +5746,10 @@ namespace jkgm {
             }
         }
 
-        // Filter the final static+moving sun depth map, never the static
-        // layer in isolation. Cached depths keep their filtered moments.
-        bool regenerate_sun_shadow_moments(int cascade,gl::texture_view depth_map)
-        {
-            if(!sun_moments_target || !sun_moments_target->complete ||
-               !ogs->sun_shadow_prefilter_program || cascade<0 || cascade>=2)
-                return false;
-            auto &moments=*sun_moments_target;
-            unsigned const pixels=moments.resolutions[cascade];
-            auto &shader=*ogs->sun_shadow_prefilter_program;
-            GLboolean const scissor=glIsEnabled(GL_SCISSOR_TEST);
-            if(scissor==GL_TRUE)glDisable(GL_SCISSOR_TEST);
-            gl::disable(gl::capability::depth_test);
-            gl::disable(gl::capability::blend);
-            gl::disable(gl::capability::cull_face);
-            gl::set_depth_mask(false);
-            gl::bind_vertex_array(ogs->postmdl.vao);
-            gl::set_viewport(make_box(make_point(0,0),
-                                     make_size(int(pixels),int(pixels))));
-            shader.use_program();
-            shader.set_source_sampler(0);
-            gl::set_active_texture_unit(0);
-            gl::bind_texture(gl::texture_bind_target::texture_2d,depth_map);
-            // Scalar depth sampling instead of shadow comparisons. The
-            // original depth textures remain available for rasterization.
-            gl::set_texture_compare_mode(gl::texture_bind_target::texture_2d,
-                                         gl::texture_compare_mode::none);
-            gl::set_texture_min_filter(gl::texture_bind_target::texture_2d,
-                                       gl::min_filter::nearest);
-            gl::set_texture_mag_filter(gl::texture_bind_target::texture_2d,
-                                       gl::mag_filter::nearest);
-            float const radius=cascade==0
-                ?the_config->sun_shadow_vsm_near_radius
-                :the_config->sun_shadow_vsm_far_radius;
-            shader.set_filter(0,make_size(float(pixels),float(pixels)),radius);
-            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                                 moments.horizontal_fbo[cascade]);
-            gl::draw_elements(gl::element_type::triangles,
-                              ogs->postmdl.num_indices,gl::index_type::uint32);
-            gl::bind_texture(gl::texture_bind_target::texture_2d,
-                             moments.horizontal[cascade]);
-            shader.set_filter(1,make_size(float(pixels),float(pixels)),radius);
-            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                                 moments.filtered_fbo[cascade]);
-            gl::draw_elements(gl::element_type::triangles,
-                              ogs->postmdl.num_indices,gl::index_type::uint32);
-            gl::set_depth_mask(true);
-            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
-                                 gl::default_framebuffer);
-            gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
-            if(scissor==GL_TRUE)glEnable(GL_SCISSOR_TEST);
-            moments.valid[cascade]=true;
-            return true;
-        }
-
         // Rasterize SKY apertures from their actual SithWorld polygons
         // into a two-layer DEPTH texture matching the near/far sunlight
-        // XY projections. This is independent of whether PCF or VSM is
-        // the selected sun occluder filter. 3DO hidden Things are untouched.
+        // XY projections. The PCF depth maps remain independent of
+        // this gate. Hidden 3DO Things are untouched.
         void draw_sun_sky_aperture(int cascade,
                                    sun_shadow_projection const &shadow_view,
                                    decal_native_read const &read)
@@ -5875,7 +5810,7 @@ namespace jkgm {
             // Gather live SKY faces once, then submit the same mesh at
             // five tiny light-space offsets. This expands the sky silhouette
             // by less than one ordinary sun-shadow texel, placing its HARD
-            // cutoff inside VSM's already-dark wall shadows. The ordinary
+            // cutoff inside the ordinary depth-map wall shadows. The ordinary
             // sun-shadow map is unchanged. This work only happens when
             // the cached aperture projection or sky flags change.
             std::vector<GLsizei> sky_counts;
@@ -6005,9 +5940,6 @@ namespace jkgm {
                     the_config->sun_shadow_resolution,
                     the_config->sun_shadow_far_resolution);
             auto &map=*sun_shadow_target;
-            if(the_config->experimental_sun_shadow_vsm && !sun_moments_target)
-                sun_moments_target=std::make_unique<sun_shadow_moments_gpu>(
-                    map.resolution,map.far_resolution);
             if(!map.update_world(safe_read,world)) {
                 sun_failure("SithWorld shadow snapshot failed");
                 return;
@@ -6891,12 +6823,6 @@ namespace jkgm {
                 sun_profile_cache_check_us[cascade]+=elapsed_profile_us(
                     cache_check_begin,profile_clock::now());
             if(unchanged) {
-                if(the_config->experimental_sun_shadow_vsm &&
-                   sun_moments_target &&
-                   !sun_moments_target->valid[cascade])
-                    regenerate_sun_shadow_moments(cascade,cascade==0
-                        ?gl::texture_view(map.depth)
-                        :gl::texture_view(map.far_depth));
                 if(the_config->profile_renderer) {
                     ++sun_profile_full_hits[cascade];
                     sun_profile_prepare_us[cascade]+=elapsed_profile_us(
@@ -7271,10 +7197,6 @@ namespace jkgm {
             glDisable(GL_POLYGON_OFFSET_FILL);
             gl::disable(gl::capability::cull_face);
             gl::set_face_cull_mode(gl::face_mode::back);
-            if(the_config->experimental_sun_shadow_vsm)
-                regenerate_sun_shadow_moments(cascade,cascade==0
-                    ?gl::texture_view(map.depth)
-                    :gl::texture_view(map.far_depth));
             gl::set_active_texture_unit(0);
             gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
             if(sun_gpu_timing)
@@ -7310,11 +7232,6 @@ namespace jkgm {
             if(sun_gpu_timing)sun_gpu_queries.end();
             sun_shadow_ready=sun_shadow_cascade_ready[0] &&
                              sun_shadow_cascade_ready[1];
-            if(the_config->experimental_sun_shadow_vsm)
-                sun_shadow_ready=sun_shadow_ready && sun_moments_target &&
-                    sun_moments_target->complete &&
-                    sun_moments_target->valid[0] &&
-                    sun_moments_target->valid[1];
             if(!sun_shadow_ready && !sun_shadow_frame_failure)
                 sun_shadow_frame_failure="one or both cascades incomplete";
             if(!skip_cascade_validation) {
@@ -7569,16 +7486,6 @@ namespace jkgm {
             prog.set_sun_shadow_pcf_radius(
                 the_config->sun_shadow_near_pcf_radius,
                 the_config->sun_shadow_far_pcf_radius);
-            prog.set_sun_vsm_params(
-                the_config->sun_shadow_vsm_min_stddev_world,
-                the_config->sun_shadow_vsm_bleed_reduction);
-            // Keep raw VSM depth comparisons independently of the removed
-            // debug views; units 17/18 remain reserved for this guard.
-            bool const vsm_depth_guard=sun_sky_aperture_hardware_supported() &&
-                the_config->experimental_sun_shadow_vsm &&
-                the_config->experimental_sun_vsm_depth_guard &&
-                sun_shadow_ready && bool(sun_shadow_target);
-            prog.set_sun_vsm_depth_guard(vsm_depth_guard);
             prog.set_sun_sky_aperture(false,
                 texture_units::opaque_sky_aperture,
                 make_point(1.0f,0.0f,1.0f,0.0f));
@@ -7696,24 +7603,10 @@ namespace jkgm {
                             the_config->sun_shadow_near_distance);
                         gl::set_active_texture_unit(13);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
-                            the_config->experimental_sun_shadow_vsm
-                                ?gl::texture_view(sun_moments_target->filtered[0])
-                                :gl::texture_view(sun_shadow_target->depth));
+                            sun_shadow_target->depth);
                         gl::set_active_texture_unit(14);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
-                            the_config->experimental_sun_shadow_vsm
-                                ?gl::texture_view(sun_moments_target->filtered[1])
-                                :gl::texture_view(sun_shadow_target->far_depth));
-                        // The VSM depth guard still samples raw maps on
-                        // compositor units 17/18 when enabled.
-                        if(vsm_depth_guard) {
-                            gl::set_active_texture_unit(17);
-                            gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                             sun_shadow_target->depth);
-                            gl::set_active_texture_unit(18);
-                            gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                             sun_shadow_target->far_depth);
-                        }
+                            sun_shadow_target->far_depth);
                     }
                     if(the_config->enable_sun_dynamic_shadows &&
                        sun_dynamic_target && !sun_dynamic_views.empty()) {

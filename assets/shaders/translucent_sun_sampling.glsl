@@ -12,23 +12,6 @@ bool translucent_sun_inside(vec3 uv)
 }
 // Keep the dynamic Thing atlas on its original one-comparison path. Its
 // packed guard regions are not designed for extended PCF footprints.
-#ifdef JKGM_SUN_VSM
-float translucent_sun_cascade_filter(
-    sampler2D map,vec3 uv,float radius,float inv_range)
-{
-    vec2 moments=texture(map,uv.xy).rg;
-    if(uv.z<=moments.x)return 1.0;
-    // The Z row is forward/range. Match opaque VSM exactly, retaining
-    // the old numerical floor even if the optional physical floor is 0.
-    float min_stddev=translucent_sun_vsm_params.x*inv_range;
-    float variance=max(moments.y-moments.x*moments.x,
-                       max(2.0e-7,min_stddev*min_stddev));
-    float delta=uv.z-moments.x;
-    float probability=variance/(variance+delta*delta);
-    float bleed=translucent_sun_vsm_params.y;
-    return clamp((probability-bleed)/(1.0-bleed),0.0,1.0);
-}
-#else
 float translucent_sun_cascade_filter(
     sampler2DShadow map,vec3 uv,float radius,float inv_range)
 {
@@ -43,7 +26,6 @@ float translucent_sun_cascade_filter(
     }
     return sum*0.25;
 }
-#endif
 
 float translucent_sun_sample(int slot,vec3 uv,float incidence)
 {

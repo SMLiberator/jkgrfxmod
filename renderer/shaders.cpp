@@ -21,7 +21,6 @@ jkgm::shaders::translucent_sun_uniforms::translucent_sun_uniforms(
     , split(gl::get_uniform_location(program,"translucent_sun_split"))
     , bias_scale(gl::get_uniform_location(program,"translucent_sun_bias_scale"))
     , pcf_radius(gl::get_uniform_location(program,"translucent_sun_pcf_radius"))
-    , vsm_params(gl::get_uniform_location(program,"translucent_sun_vsm_params"))
     , sky_aperture_active(gl::get_uniform_location(
         program,"translucent_sun_sky_aperture_active"))
     , sky_aperture_map(gl::get_uniform_location(
@@ -70,13 +69,6 @@ void jkgm::shaders::translucent_sun_uniforms::set_pcf_radius(
     float near_radius,float far_radius)
 {
     gl::set_uniform_vector(pcf_radius,make_point(near_radius,far_radius));
-}
-
-void jkgm::shaders::translucent_sun_uniforms::set_vsm_params(
-    float min_stddev_world,float bleed_reduction)
-{
-    gl::set_uniform_vector(vsm_params,
-        make_point(min_stddev_world,bleed_reduction));
 }
 
 void jkgm::shaders::translucent_sun_uniforms::set_sky_aperture(
@@ -165,8 +157,7 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
         }
 
         gl::shader compile_shader_from_file(fs::path const &filename,
-                                            gl::shader_type type,
-                                            bool prefiltered_sun=false)
+                                            gl::shader_type type)
         {
             diagnostic_context dc(filename.generic_string());
             gl::shader rv(type);
@@ -190,14 +181,6 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     source.insert(newline+1U,
                                   "#define JKGM_CONTINUOUS_AMBIENT_GPU 1\n");
                 }
-            }
-            if(prefiltered_sun && type==gl::shader_type::fragment) {
-                auto const version_end=source.find('\n');
-                if(source.compare(0,8,"#version")!=0 ||
-                   version_end==std::string::npos)
-                    report_fatal_message(
-                        "VSM shader requires a #version directive");
-                source.insert(version_end+1U,"#define JKGM_SUN_VSM 1\n");
             }
             // Optional array samplers require a unique forward unit (20).
             // When the GPU exposes fewer than 21 fragment units, remove the
@@ -270,12 +253,11 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
         void link_program_from_files(std::string const &name,
                                      gl::program_view prog,
                                      fs::path const &vx,
-                                     fs::path const &fg,
-                                     bool prefiltered_sun=false)
+                                     fs::path const &fg)
         {
             auto vx_shader = compile_shader_from_file(vx,gl::shader_type::vertex);
             auto fg_shader = compile_shader_from_file(
-                fg,gl::shader_type::fragment,prefiltered_sun);
+                fg,gl::shader_type::fragment);
 
             gl::attach_shader(prog, vx_shader);
             gl::attach_shader(prog, fg_shader);
@@ -301,11 +283,10 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
 
 jkgm::opengl_shader::opengl_shader(std::string const &name,
                                    fs::path const &vertex_part,
-                                   fs::path const &fragment_part,
-                                   bool prefiltered_sun)
+                                   fs::path const &fragment_part)
 {
     link_program_from_files(
-        name,the_program,vertex_part,fragment_part,prefiltered_sun);
+        name,the_program,vertex_part,fragment_part);
 }
 
 void jkgm::opengl_shader::use_program()
@@ -327,10 +308,10 @@ void jkgm::shaders::menu_shader::set_menu_sampler(int sampler)
 }
 
 jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
-    fs::path const &root,bool prefiltered_sun)
+    fs::path const &root)
     : opengl_shader("world_cache_preview",
                     root/"shaders/world_cache.vert",
-                    root/"shaders/world_cache.frag",prefiltered_sun)
+                    root/"shaders/world_cache.frag")
     , view_right(gl::get_uniform_location(the_program,"view_right"))
     , view_forward(gl::get_uniform_location(the_program,"view_forward"))
     , view_up(gl::get_uniform_location(the_program,"view_up"))
@@ -609,9 +590,8 @@ void jkgm::shaders::world_cache_preview_shader::set_lights(
 
 jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
                                                   fs::path const &vertex_part,
-                                                  fs::path const &fragment_part,
-                                                  bool prefiltered_sun)
-    : opengl_shader(name,vertex_part,fragment_part,prefiltered_sun)
+                                                  fs::path const &fragment_part)
+    : opengl_shader(name,vertex_part,fragment_part)
     , screen_resolution(gl::get_uniform_location(the_program, "screen_resolution"))
     , features(gl::get_uniform_location(the_program, "features"))
     , blend_mode(gl::get_uniform_location(the_program, "blend_mode"))
@@ -724,9 +704,9 @@ void jkgm::shaders::game_pass_shader::set_translucent_spotlight(
 }
 
 jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
-    fs::path const &root,bool prefiltered_sun)
+    fs::path const &root)
     : opengl_shader("gpu_3do_preview",root/"shaders/gpu_3do_preview.vert",
-                   root/"shaders/gpu_3do_preview.frag",prefiltered_sun)
+                   root/"shaders/gpu_3do_preview.frag")
     , view_right(gl::get_uniform_location(the_program,"view_right"))
     , view_forward(gl::get_uniform_location(the_program,"view_forward"))
     , view_up(gl::get_uniform_location(the_program,"view_up"))
@@ -1245,11 +1225,10 @@ void jkgm::shaders::gpu_3do_preview_shader::set_lighting(
 }
 
 jkgm::shaders::game_opaque_pass_shader::game_opaque_pass_shader(
-    fs::path const &data_root,bool prefiltered_sun)
+    fs::path const &data_root)
     : game_pass_shader("game_opaque_pass",
                        data_root / "shaders/game.vert",
-                       data_root / "shaders/game_opaque_pass.frag",
-                       prefiltered_sun)
+                       data_root / "shaders/game_opaque_pass.frag")
 {
 }
 
@@ -1561,11 +1540,10 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(
 }
 
 jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_shader(
-    fs::path const &data_root,bool prefiltered_sun)
+    fs::path const &data_root)
     : opengl_shader("game_post_opaque_composite",
                     data_root / "shaders/postprocess.vert",
-                    data_root / "shaders/post_opaque_composite.frag",
-                    prefiltered_sun)
+                    data_root / "shaders/post_opaque_composite.frag")
     , color_image(gl::get_uniform_location(the_program, "color_image"))
     , emissive_image(gl::get_uniform_location(the_program, "emissive_image"))
     , occlusion_image(gl::get_uniform_location(the_program, "occlusion_image"))
@@ -1605,14 +1583,6 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
         the_program,"sun_shadow_receiver_bias_scale"))
     , sun_shadow_pcf_radius(gl::get_uniform_location(
         the_program,"sun_shadow_pcf_radius"))
-    , sun_vsm_params(gl::get_uniform_location(
-        the_program,"sun_vsm_params"))
-    , sun_vsm_depth_guard(gl::get_uniform_location(
-        the_program,"sun_vsm_depth_guard"))
-    , sun_shadow_raw_near(gl::get_uniform_location(
-        the_program,"sun_shadow_raw_near"))
-    , sun_shadow_raw_far(gl::get_uniform_location(
-        the_program,"sun_shadow_raw_far"))
     , sun_sky_aperture_active(gl::get_uniform_location(
         the_program,"sun_sky_aperture_active"))
     , sun_sky_aperture_map(gl::get_uniform_location(
@@ -1775,22 +1745,6 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_pcf_radius
                            make_point(near_radius,far_radius));
 }
 
-void jkgm::shaders::game_post_opaque_composite_shader::set_sun_vsm_params(
-    float min_stddev_world,float bleed_reduction)
-{
-    gl::set_uniform_vector(sun_vsm_params,
-        make_point(min_stddev_world,bleed_reduction));
-}
-
-void jkgm::shaders::game_post_opaque_composite_shader::set_sun_vsm_depth_guard(
-    bool enabled)
-{
-    gl::set_uniform_integer(sun_vsm_depth_guard,enabled?1:0);
-    // Original raw near/far depths are still required for optional VSM guard.
-    gl::set_uniform_integer(sun_shadow_raw_near,17);
-    gl::set_uniform_integer(sun_shadow_raw_far,18);
-}
-
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_sky_aperture(
     bool active,int sampler,point<4,float> near_far_depth_transform)
 {
@@ -1849,38 +1803,11 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_spotlight(
 }
 
 jkgm::shaders::game_transparency_pass_shader::game_transparency_pass_shader(
-    fs::path const &data_root,bool prefiltered_sun)
+    fs::path const &data_root)
     : game_pass_shader("game_transparency_pass",
                        data_root / "shaders/game.vert",
-                       data_root / "shaders/game_trns_pass.frag",
-                       prefiltered_sun)
+                       data_root / "shaders/game_trns_pass.frag")
 {
-}
-
-jkgm::shaders::sun_shadow_prefilter_shader::sun_shadow_prefilter_shader(
-    fs::path const &root)
-    : opengl_shader("sun_shadow_prefilter",
-                    root/"shaders/postprocess.vert",
-                    root/"shaders/sun_shadow_prefilter.frag")
-    , source_image(gl::get_uniform_location(the_program,"source_image"))
-    , axis(gl::get_uniform_location(the_program,"axis"))
-    , texel_size(gl::get_uniform_location(the_program,"texel_size"))
-    , radius(gl::get_uniform_location(the_program,"radius"))
-{
-}
-
-void jkgm::shaders::sun_shadow_prefilter_shader::set_source_sampler(int sampler)
-{
-    gl::set_uniform_integer(source_image,sampler);
-}
-
-void jkgm::shaders::sun_shadow_prefilter_shader::set_filter(
-    int pass,size<2,float> dims,float radius_texels)
-{
-    gl::set_uniform_integer(axis,pass);
-    gl::set_uniform_vector(texel_size,make_point(
-        1.0f/get<x>(dims),1.0f/get<y>(dims)));
-    gl::set_uniform_float(radius,radius_texels);
 }
 
 jkgm::shaders::post_box4_shader::post_box4_shader(fs::path const &data_root)

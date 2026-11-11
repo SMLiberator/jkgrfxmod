@@ -1290,7 +1290,7 @@ namespace {
             // SithThing position is WORLD-space and common to every node.
             // Capture once for continuous ambient when enabled.
             if(the_config->experimental_continuous_ambient_gpu) {
-                own_world_position_valid=read(                own_world_position_valid=read(
+                own_world_position_valid=read(
                     uintptr_t(hud_owner)+0xb8U,
                     own_world_position.data(),sizeof(own_world_position));
                 if(own_world_position_valid)
@@ -1303,7 +1303,7 @@ namespace {
             // native Thing-sector ID.
             if(the_config->enable_sector_crossing_lighting ||
                the_config->experimental_continuous_ambient_gpu) {
-                uint32_t sector=0;                uint32_t sector=0;
+                uint32_t sector=0;
                 if(read(uintptr_t(hud_owner)+0x5cU,&sector,4U) &&
                    sector>=0x10000U && sector<0x7ff00000U)
                     own_sector_id_valid=read(sector,&own_sector_id,4U);

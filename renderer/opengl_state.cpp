@@ -395,15 +395,12 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , menu_program(data_root)
     , menu_present_program(data_root, true)
     , game_opaque_pass_program(
-        data_root,the_config->experimental_sun_shadow_vsm &&
-                  the_config->enable_sun_shadows)
+        data_root)
     , game_post_ssao_program(data_root)
     , game_post_opaque_composite_program(
-        data_root,the_config->experimental_sun_shadow_vsm &&
-                  the_config->enable_sun_shadows)
+        data_root)
     , game_transparency_pass_program(
-        data_root,the_config->experimental_sun_shadow_vsm &&
-                  the_config->enable_sun_shadows)
+        data_root)
     , post_box4(data_root)
     , post_gauss3(data_root)
     , post_gauss7(data_root)
@@ -445,10 +442,6 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
                 shaders::post_spatial_blur_reconstruct_shader>(data_root);
         }
     }
-    if(the_config->experimental_sun_shadow_vsm &&
-       the_config->enable_sun_shadows)
-        sun_shadow_prefilter_program=
-            std::make_unique<shaders::sun_shadow_prefilter_shader>(data_root);
     // Avoid even compiling shadow shaders on ordinary (disabled) installs.
     if((the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
        the_config->enable_sun_shadows)
@@ -460,15 +453,13 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     if(the_config->use_gpu_cache || the_config->enable_decals) {
         gpu_3do_preview_program =
             std::make_unique<shaders::gpu_3do_preview_shader>(
-                data_root,the_config->experimental_sun_shadow_vsm &&
-                          the_config->enable_sun_shadows);
+                data_root);
     }
     // Build the GPU world shader whenever unified caching is enabled.
     if(the_config->use_gpu_cache)
         world_cache_preview_program =
             std::make_unique<shaders::world_cache_preview_shader>(
-                data_root,the_config->experimental_sun_shadow_vsm &&
-                          the_config->enable_sun_shadows);
+                data_root);
 
     gl::bind_texture(gl::texture_bind_target::texture_2d, menu_texture);
     gl::tex_image_2d(gl::texture_bind_target::texture_2d,

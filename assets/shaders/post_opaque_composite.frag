@@ -40,11 +40,7 @@ uniform float spotlight_shadow_angle_bias_scale; // 0=legacy, 1=+0.035 JKU at gr
 
 uniform int sun_lighting_active; // independent of depth-map readiness
 uniform int sun_shadow_active;
-#ifdef JKGM_SUN_VSM
-uniform sampler2D sun_shadow_image;
-#else
 uniform sampler2DShadow sun_shadow_image;
-#endif
 uniform vec3 sun_shadow_direction; // world-space direction toward the sun
 uniform vec4 sun_shadow_color_intensity;
 uniform vec3 sun_shadow_origin;
@@ -52,24 +48,12 @@ uniform vec3 sun_shadow_right;
 uniform vec3 sun_shadow_up;
 uniform vec3 sun_shadow_forward;
 uniform vec3 sun_shadow_limits; // orthographic width, height, depth range
-#ifdef JKGM_SUN_VSM
-uniform sampler2D sun_shadow_far_image;
-#else
 uniform sampler2DShadow sun_shadow_far_image;
-#endif
 uniform vec3 sun_shadow_far_origin,sun_shadow_far_right;
 uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split; // JK forward distance from camera
 uniform float sun_shadow_receiver_bias_scale;
 uniform vec2 sun_shadow_pcf_radius; // 0=legacy HW comparison; positive=4 taps
-uniform vec2 sun_vsm_params; // x=min world-space stddev (JKU), y=bleed reduction
-// The optional VSM depth guard reads original depth on compositor units 17/18.
-// VSM moment generation disables depth comparison on source textures.
-#if defined(JKGM_SUN_SKY_APERTURE) && defined(JKGM_SUN_VSM)
-uniform int sun_vsm_depth_guard;
-uniform sampler2D sun_shadow_raw_near;
-uniform sampler2D sun_shadow_raw_far;
-#endif
 uniform int sun_sky_aperture_active;
 #ifdef JKGM_SUN_SKY_APERTURE
 uniform sampler2DArray sun_sky_aperture_map;
@@ -106,13 +90,8 @@ bool sun_shadow_inside(vec3 coord)
     return all(greaterThanEqual(coord,vec3(0.0))) &&
            all(lessThanEqual(coord,vec3(1.0)));
 }
-#ifdef JKGM_SUN_VSM
-float sun_shadow_filter(sampler2D map,vec3 coordinate,float range,
-                        float incidence,float radius)
-#else
 float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
                         float incidence,float radius)
-#endif
 {
     // A 24-bit normalized orthographic depth map avoids quantizing the
     // world's full light-axis range into only 65536 possible distances.
@@ -123,23 +102,6 @@ float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
     float bias_world=(0.008+0.027*grazing*grazing)*
                      sun_shadow_receiver_bias_scale;
     float bias=max(4.0/16777215.0,bias_world/max(range,0.001));
-#ifdef JKGM_SUN_VSM
-    // VSM: Chebyshev bound from prefiltered first and second moments.
-    // Preserve the receiver bias and reduce light bleeding conservatively.
-    float receiver=coordinate.z-bias;
-    vec2 moments=texture(map,coordinate.xy).rg;
-    if(receiver<=moments.x)return 1.0;
-    // The legacy 2e-7 floor prevents loss-of-significance noise in
-    // E[z*z]-E[z]^2. A world-space floor is ADDITIVE, never a replacement.
-    // With sun_vsm_params.x=0 this exactly matches the original VSM floor.
-    float min_stddev=sun_vsm_params.x/max(range,0.001);
-    float variance=max(moments.y-moments.x*moments.x,
-                       max(2.0e-7,min_stddev*min_stddev));
-    float delta=receiver-moments.x;
-    float probability=variance/(variance+delta*delta);
-    float bleed=sun_vsm_params.y;
-    return clamp((probability-bleed)/(1.0-bleed),0.0,1.0);
-#else
     // Keep the original one-comparison path when the opt-in radius is 0.
     // Four bilinear hardware PCF comparisons broaden edges for radius > 0.
     vec3 lookup=vec3(coordinate.xy,coordinate.z-bias);
@@ -153,7 +115,6 @@ float sun_shadow_filter(sampler2DShadow map,vec3 coordinate,float range,
         sum+=texture(map,vec3(lookup.xy+delta,lookup.z));
     }
     return sum*0.25;
-#endif
 }
 float sun_shadow_visibility(vec3 world_position,float incidence)
 {
@@ -189,66 +150,6 @@ float sun_shadow_visibility(vec3 world_position,float incidence)
     float blend=smoothstep(transition_start,transition_end,camera_depth);
     return mix(near_visibility,far_visibility,blend);
 }
-
-#if defined(JKGM_SUN_SKY_APERTURE) && defined(JKGM_SUN_VSM)
-// Bilinear PCF#ifdef JKGM_SUN_VSM
-// Bilinear PCF from original unfiltered depths. The four comparisons
-// happen BEFORE interpolation: blurring raw depth invents light paths.
-float sun_vsm_raw_depth_coverage(sampler2D map,vec3 uv,float range,
-                                 float incidence)
-{
-    float grazing=1.0-clamp(incidence,0.0,1.0);
-    float bias_world=(0.008+0.027*grazing*grazing)*
-                     sun_shadow_receiver_bias_scale;
-    float bias=max(4.0/16777215.0,bias_world/max(range,0.001));
-    float receiver=uv.z-bias;
-    ivec2 dimensions=textureSize(map,0);
-    vec2 pixel=uv.xy*vec2(dimensions)-vec2(0.5);
-    ivec2 base=ivec2(floor(pixel));
-    vec2 fraction=fract(pixel);
-    float coverage=0.0;
-    for(int y=0;y<2;++y)
-    for(int x=0;x<2;++x) {
-        ivec2 tap=clamp(base+ivec2(x,y),ivec2(0),
-                        dimensions-ivec2(1));
-        float depth=texelFetch(map,tap,0).r;
-        float visible=receiver<=depth?1.0:0.0;
-        float wx=x==0?1.0-fraction.x:fraction.x;
-        float wy=y==0?1.0-fraction.y:fraction.y;
-        coverage+=visible*wx*wy;
-    }
-    return coverage;
-}
-float sun_vsm_raw_depth_visibility(vec3 world_position,float incidence)
-{
-    // Match the near/far cascade selection and blend used by VSM itself.
-    float camera_depth=dot(world_position-camera_origin.xyz,
-                           camera_forward.xyz);
-    vec3 near_uv=sun_shadow_coordinates(world_position,sun_shadow_origin,
-        sun_shadow_right,sun_shadow_up,sun_shadow_forward,sun_shadow_limits);
-    bool use_near=camera_depth<sun_shadow_split && sun_shadow_inside(near_uv);
-    float start=sun_shadow_split*0.8125;
-    float end=sun_shadow_split*0.9375;
-    if(use_near && camera_depth<start)
-        return sun_vsm_raw_depth_coverage(sun_shadow_raw_near,near_uv,
-                                         sun_shadow_limits.z,incidence);
-    vec3 far_uv=sun_shadow_coordinates(world_position,sun_shadow_far_origin,
-        sun_shadow_far_right,sun_shadow_far_up,
-        sun_shadow_far_forward,sun_shadow_far_limits);
-    if(!sun_shadow_inside(far_uv))
-        return use_near
-            ?sun_vsm_raw_depth_coverage(sun_shadow_raw_near,near_uv,
-                                         sun_shadow_limits.z,incidence)
-            :1.0;
-    float far_visibility=sun_vsm_raw_depth_coverage(sun_shadow_raw_far,
-        far_uv,sun_shadow_far_limits.z,incidence);
-    if(!use_near)return far_visibility;
-    float near_visibility=sun_vsm_raw_depth_coverage(sun_shadow_raw_near,
-        near_uv,sun_shadow_limits.z,incidence);
-    return mix(near_visibility,far_visibility,
-               smoothstep(start,end,camera_depth));
-}
-#endif
 
 // Separate sky aperture from normal occluder shadowing: a sky polygon
 // facing the sun is necessary for added directional sunlight to enter.
@@ -536,17 +437,6 @@ void main()
                 // than silently restoring JK's original baked brightness.
                 // No change occurs when the sun is disabled (sun_fade=0).
                 float sky_access=sun_sky_aperture(world_position);
-#if defined(JKGM_SUN_VSM) && defined(JKGM_SUN_SKY_APERTURE)
-                // VSM blends roof and clear pixels into depth moments:
-                // this can make a blocked floor falsely sunlit. Cap ONLY
-                // the VSM contribution with a filtered raw-depth result.
-                // Off by default; the original VSM stays untouched.
-                if(sun_shadow_active!=0 &&
-                   sun_vsm_depth_guard!=0 && visibility>0.0)
-                    visibility=min(visibility,
-                        sun_vsm_raw_depth_visibility(
-                            world_position,incidence));
-#endif
                 float direct_visibility=visibility*sky_access;
                 float sun_applied=incidence*sun_fade;
                 // Preserve low-intensity compatibility: shadow contrast

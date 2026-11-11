@@ -4,7 +4,7 @@
 // branch disables the effect at runtime (all sampler uniforms start at 0).
 #include <cstddef>
 namespace jkgm { namespace texture_units {
-enum class sampler_kind { tex2d, shadow, buffer, texture_array, depth_variant };
+enum class sampler_kind { tex2d, shadow, buffer, texture_array };
 struct binding { char const *uniform_name; int unit; sampler_kind kind; };
 constexpr int forward_decal_light=9; // displacement disabled on decal-only pass
 constexpr int forward_decal_occlusion=11;
@@ -40,8 +40,8 @@ constexpr binding gpu_3do_preview[]={
     {"translucent_spotlight_image_1",13,sampler_kind::tex2d},
     {"translucent_spotlight_image_2",14,sampler_kind::tex2d},
     {"translucent_spotlight_image_3",15,sampler_kind::tex2d},
-    {"translucent_sun_near_depth",16,sampler_kind::depth_variant},
-    {"translucent_sun_far_depth",17,sampler_kind::depth_variant},
+    {"translucent_sun_near_depth",16,sampler_kind::shadow},
+    {"translucent_sun_far_depth",17,sampler_kind::shadow},
     {"translucent_sun_dynamic_depth",18,sampler_kind::shadow},
 };
 
@@ -58,9 +58,8 @@ constexpr binding world_cache[]={
     {"env_map2",7,sampler_kind::tex2d},
     {"palette_fullbright_mask",11,sampler_kind::tex2d},
     {"scene_depth",8,sampler_kind::tex2d},
-    // VSM binds RG32F moments here; non-VSM uses comparison depths.
-    {"translucent_sun_near_depth",16,sampler_kind::depth_variant},
-    {"translucent_sun_far_depth",17,sampler_kind::depth_variant},
+    {"translucent_sun_near_depth",16,sampler_kind::shadow},
+    {"translucent_sun_far_depth",17,sampler_kind::shadow},
     {"translucent_sun_dynamic_depth",18,sampler_kind::shadow},
 };
 
@@ -76,8 +75,8 @@ constexpr binding game_opaque_pass[]={
     {"env_map2",9,sampler_kind::tex2d},
     {"normal_map",6,sampler_kind::tex2d},
     {"normal_map2",7,sampler_kind::tex2d},
-    {"translucent_sun_near_depth",16,sampler_kind::depth_variant},
-    {"translucent_sun_far_depth",17,sampler_kind::depth_variant},
+    {"translucent_sun_near_depth",16,sampler_kind::shadow},
+    {"translucent_sun_far_depth",17,sampler_kind::shadow},
     {"translucent_sun_dynamic_depth",18,sampler_kind::shadow},
 };
 
@@ -99,18 +98,14 @@ constexpr binding game_trns_pass[]={
     {"translucent_spotlight_image_1",13,sampler_kind::tex2d},
     {"translucent_spotlight_image_2",14,sampler_kind::tex2d},
     {"translucent_spotlight_image_3",15,sampler_kind::tex2d},
-    {"translucent_sun_near_depth",16,sampler_kind::depth_variant},
-    {"translucent_sun_far_depth",17,sampler_kind::depth_variant},
+    {"translucent_sun_near_depth",16,sampler_kind::shadow},
+    {"translucent_sun_far_depth",17,sampler_kind::shadow},
     {"translucent_sun_dynamic_depth",18,sampler_kind::shadow},
 };
 
 // GLSL post_opaque_composite.frag (including #include fragments)
 constexpr binding post_opaque_composite[]={
     {"sun_sky_aperture_map",16,sampler_kind::texture_array},
-    // VSM depth guard only: these raw depths are sampler2D in both sources.
-    // The retired debug view was the only PCF sampler2DShadow consumer.
-    {"sun_shadow_raw_near",17,sampler_kind::tex2d},
-    {"sun_shadow_raw_far",18,sampler_kind::tex2d},
     {"color_image",0,sampler_kind::tex2d},
     {"emissive_image",1,sampler_kind::tex2d},
     {"occlusion_image",2,sampler_kind::tex2d},
@@ -121,8 +116,8 @@ constexpr binding post_opaque_composite[]={
     {"spotlight_image_2",8,sampler_kind::tex2d},
     {"spotlight_image_3",9,sampler_kind::tex2d},
     {"spotlight_shadow_image",10,sampler_kind::shadow},
-    {"sun_shadow_image",13,sampler_kind::depth_variant},
-    {"sun_shadow_far_image",14,sampler_kind::depth_variant},
+    {"sun_shadow_image",13,sampler_kind::shadow},
+    {"sun_shadow_far_image",14,sampler_kind::shadow},
     {"sun_dynamic_image",15,sampler_kind::shadow},
 };
 

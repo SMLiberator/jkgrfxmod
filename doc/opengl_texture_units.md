@@ -23,9 +23,10 @@ reference the same unit within a program.
 | 10 | Spotlight shadow (depth compare) | Unused | Translucent spotlight shadow | Spotlight shadow |
 | 11 | Fullbright palette / decal AO | Fullbright palette | Unused | Unused |
 | 12–15 | Spotlight cookies 0–3 | Unused | Translucent spotlight cookies 0–3 | 13–15 sun shadows |
-| 16–18 | Sun near/far/dynamic shadow | Sun near/far/dynamic shadow (direct specular include) | Sun near/far/dynamic shadow | 16 sky aperture; 17–18 optional VSM guard raw depths |
+| 16–18 | Sun near/far/dynamic shadow | Sun near/far/dynamic shadow (direct specular include) | Sun near/far/dynamic shadow | 16 sky aperture; 17–18 unused |
 | 19 | **Sector-crossing samplerBuffer** | Unused | Unused | Unused |
 | 20 | **Opt-in sky-aperture sampler2DArray** | **Opt-in sky-aperture sampler2DArray** | **Opt-in sky-aperture sampler2DArray** | Unused |
+| 21–22 | Continuous ambient voxel buffer textures | Unused | Unused | Unused |
 
 The two GPU 3DO same-type aliases are deliberately restricted to
 *mutually exclusive* decal and ordinary material draws:
@@ -47,8 +48,7 @@ array on unit 20 requires **at least 21** available fragment texture units.
 On less capable hardware, the GLSL variant compiles that sampler out.
 
 Other independent passes reuse low slots: SSAO 0 normal, 1 depth,
-2 noise; presentation 0 source, 1–5 bloom; dynamic VSM prefilter 0 depth;
-menu 0 texture. The main registry covers the five most complex
+2 noise; presentation 0 source, 1–5 bloom; menu 0 texture. The main registry covers the five most complex
 simultaneous-sampler scene programs. The CI check protects their complete
 GLSL inventories but does not replace a real OpenGL runtime test.
 
@@ -89,7 +89,7 @@ sun-shadow texel** in each axis. The five versions are submitted with
 `glMultiDrawElements` in five calls, but only when the aperture map's
 projection/sky-surface signature changes; the aperture depth is cleared
 only once. This small silhouette expansion aims to bury the hard sky-mask
-edge within the existing PCF/VSM shadow, avoiding additional per-pixel
+edge within the existing PCF shadow, avoiding additional per-pixel
 filtering and its jagged standalone mask boundary. It may reintroduce
 some light leaks if the normal sun-shadow map does not represent a nearby
 wall; compare against the earlier filtered build if that occurs.
@@ -97,30 +97,3 @@ wall; compare against the earlier filtered build if that occurs.
 Depth textures remain `GL_NEAREST` and their precision, sampler allocations,
 and existing sun-shadow filters are unchanged.
 
-## World-cache sunlight: VSM sampler compatibility
-
-The cached-world direct GGX shader now compiles with `JKGM_SUN_VSM` when
-`experimental_sun_shadow_vsm` and `enable_sun_shadows` are enabled,
-just like the native and GPU-3DO sunlight shaders. Units 16/17 then use
-`sampler2D` to sample RG32F near/far moments and apply the same VSM
-Chebyshev formula and light-bleed parameters. With VSM disabled they use
-`sampler2DShadow` against the depth maps. The dynamic Thing atlas
-remains a `sampler2DShadow` on unit 18 in both modes.
-
-Previously cached-world direct specular sampling read VSM moment color
-textures through a depth-comparison sampler, a format/type mismatch
-that could cause undefined visible highlights. This change does not
-modify VSM prefiltering, base sunlight diffuse, or sky apertures.
-
-## Optional VSM occlusion guard
-
-`experimental_sun_vsm_depth_guard` adds four comparisons against
-the original near/far depth map in the opaque sun-lighting composite,
-then caps VSM visibility by their bilinearly interpolated result. It
-uses raw-depth bindings **17/18** (both `sampler2D`, exclusively in the
-VSM shader variant), while VSM moment maps
-remain at **13/14**. It is default-off and requires 21 fragment units
-and the VSM shader variant. This can suppress VSM-only false-lit strips
-under roof casters, at the cost of extra depth reads and potentially
-narrower penumbras. Aperture capture, shadow bias, VSM blur, PCF, and
-translucent paths are unchanged.

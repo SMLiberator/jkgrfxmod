@@ -15,8 +15,7 @@ namespace jkgm {
 
         opengl_shader(std::string const &name,
                       fs::path const &vertex_part,
-                      fs::path const &fragment_part,
-                      bool prefiltered_sun=false);
+                      fs::path const &fragment_part);
 
     public:
         opengl_shader(opengl_shader const &) = delete;
@@ -37,7 +36,6 @@ namespace jkgm {
         struct translucent_sun_uniforms {
             gl::uniform_location_id enabled,maps_ready,dynamic_count;
             gl::uniform_location_id direction,color,split,bias_scale,pcf_radius;
-            gl::uniform_location_id vsm_params; // world-space stddev, bleed reduction
             gl::uniform_location_id near_depth,far_depth,dynamic_depth;
             gl::uniform_location_id sky_aperture_active,sky_aperture_map;
             gl::uniform_location_id sky_aperture_depth_transform;
@@ -49,7 +47,6 @@ namespace jkgm {
                            float split_distance,float receiver_bias,
                            float max_distance=0.0f);
             void set_pcf_radius(float near_radius,float far_radius);
-            void set_vsm_params(float min_stddev_world,float bleed_reduction);
             void set_sky_aperture(bool active,int sampler,
                                   point<4,float> near_far_depth_transform);
             void set_map(int slot,point<4,float> row_x,point<4,float> row_y,
@@ -102,8 +99,7 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
         public:
             translucent_sun_uniforms translucent_sun;
-            explicit world_cache_preview_shader(fs::path const &data_root,
-                                                bool prefiltered_sun=false);
+            explicit world_cache_preview_shader(fs::path const &data_root);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
                                  point<4,float> up,point<4,float> origin);
             void set_projection(point<4,float> params);
@@ -223,8 +219,7 @@ namespace jkgm {
         protected:
             game_pass_shader(std::string const &name,
                              fs::path const &vertex_part,
-                             fs::path const &fragment_part,
-                             bool prefiltered_sun=false);
+                             fs::path const &fragment_part);
 
         public:
             void set_screen_resolution(size<2, float> res);
@@ -353,7 +348,7 @@ namespace jkgm {
         private:
             gl::uniform_location_id ambient_light,attenuation_min,num_lights,
                                     jk_light_limit,
-                                    continuous_ambient_enabled,                                    continuous_ambient_enabled,
+                                    continuous_ambient_enabled,
                                     continuous_ambient_sector,
                                     continuous_voxel_mask,
                                     continuous_voxel_spacing,
@@ -368,8 +363,7 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> light_position_radius,light_intensity,light_color;
         public:
             static constexpr size_t max_sprite_instances=32;
-            explicit gpu_3do_preview_shader(fs::path const &data_root,
-                                            bool prefiltered_sun=false);
+            explicit gpu_3do_preview_shader(fs::path const &data_root);
             void set_view_matrix(point<4,float> right,point<4,float> forward,
                                  point<4,float> up,point<4,float> origin);
             // Zero count restores the normal draw path.
@@ -439,8 +433,7 @@ namespace jkgm {
 
         class game_opaque_pass_shader : public game_pass_shader {
         public:
-            explicit game_opaque_pass_shader(fs::path const &data_root,
-                                             bool prefiltered_sun=false);
+            explicit game_opaque_pass_shader(fs::path const &data_root);
         };
 
         class game_post_ssao_shader : public opengl_shader {
@@ -531,9 +524,6 @@ namespace jkgm {
             gl::uniform_location_id sun_shadow_split;
             gl::uniform_location_id sun_shadow_receiver_bias_scale;
             gl::uniform_location_id sun_shadow_pcf_radius;
-            gl::uniform_location_id sun_vsm_params;
-            gl::uniform_location_id sun_vsm_depth_guard;
-            gl::uniform_location_id sun_shadow_raw_near,sun_shadow_raw_far;
             gl::uniform_location_id sun_sky_aperture_active,sun_sky_aperture_map;
             gl::uniform_location_id sun_sky_aperture_depth_transform;
             gl::uniform_location_id sun_max_distance;
@@ -554,7 +544,7 @@ namespace jkgm {
 
         public:
             explicit game_post_opaque_composite_shader(
-                fs::path const &data_root,bool prefiltered_sun=false);
+                fs::path const &data_root);
 
             void set_color_sampler(int sampler);
             void set_emissive_sampler(int sampler);
@@ -581,8 +571,6 @@ namespace jkgm {
                                     point<3,float> limits,float split);
             void set_sun_shadow_receiver_bias_scale(float scale);
             void set_sun_shadow_pcf_radius(float near_radius,float far_radius);
-            void set_sun_vsm_params(float min_stddev_world,float bleed_reduction);
-            void set_sun_vsm_depth_guard(bool enabled);
             void set_sun_sky_aperture(bool active,int sampler,
                                      point<4,float> near_far_depth_transform);
             void set_sun_max_distance(float distance);
@@ -601,16 +589,7 @@ namespace jkgm {
         class game_transparency_pass_shader : public game_pass_shader {
         public:
             explicit game_transparency_pass_shader(
-                fs::path const &data_root,bool prefiltered_sun=false);
-        };
-
-        // Converts depth into RG32F moments, then filters vertically.
-        class sun_shadow_prefilter_shader : public opengl_shader {
-            gl::uniform_location_id source_image,axis,texel_size,radius;
-        public:
-            explicit sun_shadow_prefilter_shader(fs::path const &root);
-            void set_source_sampler(int sampler);
-            void set_filter(int pass,size<2,float> dims,float radius_texels);
+                fs::path const &data_root);
         };
 
         class post_box4_shader : public opengl_shader {
