@@ -30,6 +30,7 @@
 #include "sun_sky_surface.hpp"
 #include "sun_sky_caster_mask.hpp"
 #include "world_cache_gpu.hpp"
+#include "world_cache_streaming.hpp"
 #include "continuous_ambient_capture.hpp"
 #include "continuous_ambient_gpu.hpp"
 #include "world_cache_alpha.hpp"
@@ -8046,16 +8047,15 @@ namespace jkgm {
                     safe_read,cache.loaded_world,cache.world.vertex_count,
                     cache.native_dynamic_light);
             }
-            cache.frame_light_rgb.assign(cache.mesh.vertices.size(),
-                                         {{1.0f,1.0f,1.0f}});
-            cache.frame_light_state.assign(cache.mesh.vertices.size(),
-                                           {{1.0f,1.0f,0.0f}});
-            cache.frame_sector_tint.assign(cache.mesh.vertices.size(),
-                                            {{0.0f,0.0f,0.0f}});
-            cache.frame_sector_cmp_tint.assign(cache.mesh.vertices.size(),
-                                                {{1.0f,1.0f,1.0f}});
-            cache.frame_uv_offset.assign(cache.mesh.vertices.size(),
-                                         {{0.0f,0.0f}});
+            // update_world() initializes all live arrays and matching GPU
+            // storage. Preserve hidden surfaces' last values: every visible
+            // surface is sampled again before it can be submitted.
+            size_t const live_vertices=cache.mesh.vertices.size();
+            if(cache.frame_light_rgb.size()!=live_vertices ||
+               cache.frame_light_state.size()!=live_vertices ||
+               cache.frame_sector_tint.size()!=live_vertices ||
+               cache.frame_sector_cmp_tint.size()!=live_vertices ||
+               cache.frame_uv_offset.size()!=live_vertices)return;
             // In JKGM rdColormap_pIdentityMap lives at 0x73A414.
             // Native rdCache ignores this CMP's stored tint (even if zero).
             uint32_t identity_cmp=0;
@@ -8115,6 +8115,9 @@ namespace jkgm {
                          " mat_ptr=",candidate.material,
                          " cel=",candidate.cel);
             };
+            bool const suppress_sector_tint=
+                native_sector_palette_mode().load(
+                    std::memory_order_relaxed)==1;
             auto stage_candidate=[&](world_cache_draw_candidate const &candidate) {
                 world_cache_light_sample info{};
                 char const *failure=nullptr;
@@ -8140,6 +8143,14 @@ namespace jkgm {
                     ++uv_prepare_rejected;
                     log_stage_rejection(candidate,"uv_animation",failure,info);
                     return;
+                }
+                // FreeColorEffect must suppress only surfaces actually
+                // submitted. Do not clear every world vertex each frame.
+                if(suppress_sector_tint) {
+                    size_t const first=cache.mesh.indices[candidate.first_index];
+                    size_t const count=size_t(candidate.count)/3U+2U;
+                    std::fill_n(cache.frame_sector_tint.begin()+first,count,
+                        std::array<float,3>{{0.0f,0.0f,0.0f}});
                 }
                 if(info.mode==3U)++gouraud_faces;
                 if(info.authored_mode==4U)++mode4_faces;
@@ -8169,36 +8180,48 @@ namespace jkgm {
                 }
                 return;
             }
-            // FreeColorEffect(sector slot) disables the native request.
-            // Honor that for all cached world surfaces, too, without
-            // touching their authored/COG SithSector.tint values.
-            if(native_sector_palette_mode().load(
-                   std::memory_order_relaxed)==1)
-                std::fill(cache.frame_sector_tint.begin(),
-                          cache.frame_sector_tint.end(),
-                          std::array<float,3>{{0.0f,0.0f,0.0f}});
-            // One streaming upload of live RGB lighting. World position,
-            // UV, normal and index buffers remain entirely immutable.
-            gl::bind_buffer(gl::buffer_bind_target::array,cache.lighting);
-            gl::buffer_data(gl::buffer_bind_target::array,
-                make_span(cache.frame_light_rgb).as_const_bytes(),
-                gl::buffer_usage::stream_draw);
-            gl::bind_buffer(gl::buffer_bind_target::array,cache.light_state);
-            gl::buffer_data(gl::buffer_bind_target::array,
-                make_span(cache.frame_light_state).as_const_bytes(),
-                gl::buffer_usage::stream_draw);
-            gl::bind_buffer(gl::buffer_bind_target::array,cache.sector_tint);
-            gl::buffer_data(gl::buffer_bind_target::array,
-                make_span(cache.frame_sector_tint).as_const_bytes(),
-                gl::buffer_usage::stream_draw);
-            gl::bind_buffer(gl::buffer_bind_target::array,cache.sector_cmp_tint);
-            gl::buffer_data(gl::buffer_bind_target::array,
-                make_span(cache.frame_sector_cmp_tint).as_const_bytes(),
-                gl::buffer_usage::stream_draw);
-            gl::bind_buffer(gl::buffer_bind_target::array,cache.uv_animation);
-            gl::buffer_data(gl::buffer_bind_target::array,
-                make_span(cache.frame_uv_offset).as_const_bytes(),
-                gl::buffer_usage::stream_draw);
+            // Native portal visibility has already selected the only faces
+            // whose live vertex attributes need refreshing this frame.
+            // The full-upload fallback avoids dozens of small GL calls or
+            // stalling in glBufferSubData on heavily visible/fragmented maps.
+            auto const stream=plan_world_cache_vertex_stream(
+                cache.mesh,cache.frame_render_candidates);
+            auto upload_live=[&](auto const &buffer,auto const &values) {
+                gl::bind_buffer(gl::buffer_bind_target::array,buffer);
+                if(stream.partial) {
+                    for(auto const &range:stream.ranges)
+                        gl::buffer_sub_data(gl::buffer_bind_target::array,
+                            range.first_vertex*sizeof(values[0]),
+                            make_span(values.data()+range.first_vertex,
+                                      range.count).as_const_bytes());
+                } else {
+                    gl::buffer_data(gl::buffer_bind_target::array,
+                        make_span(values).as_const_bytes(),
+                        gl::buffer_usage::stream_draw);
+                }
+            };
+            if(!cache.frame_render_candidates.empty()) {
+                upload_live(cache.lighting,cache.frame_light_rgb);
+                upload_live(cache.light_state,cache.frame_light_state);
+                upload_live(cache.sector_tint,cache.frame_sector_tint);
+                upload_live(cache.sector_cmp_tint,cache.frame_sector_cmp_tint);
+                upload_live(cache.uv_animation,cache.frame_uv_offset);
+            }
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U) {
+                size_t const transferred=cache.frame_render_candidates.empty()
+                    ?0U:(stream.partial?stream.touched_vertices:live_vertices);
+                LOG_INFO("WORLD CACHE vertex streaming mode=",
+                    cache.frame_render_candidates.empty()?"none":
+                        stream.partial?"partial":"full",
+                    " visible_vertices=",stream.touched_vertices,
+                    " uploaded_vertices=",transferred,
+                    " total_vertices=",live_vertices,
+                    " merged_ranges=",stream.ranges.size(),
+                    " uploaded_bytes=",transferred*
+                        (4U*sizeof(std::array<float,3>)+
+                         sizeof(std::array<float,2>)));
+            }
             std::sort(ordered.begin(),ordered.end(),
                 [](world_cache_draw_candidate const *a,
                    world_cache_draw_candidate const *b) {

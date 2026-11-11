@@ -238,6 +238,7 @@
     <ClInclude Include="world_cache_sky.hpp" />
     <ClInclude Include="world_cache_uv_animation.hpp" />
     <ClInclude Include="world_cache_visibility.hpp" />
+    <ClInclude Include="world_cache_streaming.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="exports.def" />

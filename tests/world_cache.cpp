@@ -4,6 +4,7 @@
 #include "renderer/world_cache_portals.hpp"
 #include "renderer/world_cache_lighting.hpp"
 #include "renderer/world_cache_uv_animation.hpp"
+#include "renderer/world_cache_streaming.hpp"
 #include <array>
 #include <algorithm>
 #include <cassert>
@@ -70,6 +71,51 @@ int main()
     assert(mesh.vertices[2].uv[1]==64.0f);
     assert(mesh.vertices[5].uv[0]==0.0f); // missing source UV not fabricated
     assert(mesh.vertices[3].normal[1]==-1.0f);
+    // Only selected portal-visible surfaces occupy upload ranges.
+    // Geometry remains immutable, and noncontiguous surfaces stay in the
+    // buffer without requiring any per-frame rebuild.
+    decal_world_geometry stream_world{};
+    stream_world.valid_world=true;
+    for(uint32_t i=0;i<32U;++i)
+        stream_world.receivers.push_back(make_surface(200U+i,float(i)*4.0f));
+    world_cache_mesh stream_mesh{};
+    assert(build_world_cache_mesh(stream_world,stream_mesh));
+    auto make_stream_faces=[&](std::vector<size_t> const &ids) {
+        std::vector<world_cache_draw_candidate> selected;
+        for(size_t id:ids) {
+            auto const &surface=stream_mesh.surfaces.at(id);
+            selected.push_back({surface.surface_index,
+                surface.first_index,surface.count});
+        }
+        return selected;
+    };
+    auto const adjacent=plan_world_cache_vertex_stream(
+        stream_mesh,make_stream_faces({1U,2U,3U}));
+    assert(adjacent.valid && adjacent.partial);
+    assert(adjacent.ranges.size()==1U);
+    assert(adjacent.ranges[0].first_vertex==4U &&
+           adjacent.ranges[0].count==12U);
+    assert(adjacent.touched_vertices==12U);
+    auto const scattered=plan_world_cache_vertex_stream(
+        stream_mesh,make_stream_faces({1U,10U,20U}));
+    assert(scattered.valid && scattered.partial);
+    assert(scattered.ranges.size()==3U &&
+           scattered.touched_vertices==12U);
+    auto all_ids=std::vector<size_t>{};
+    for(size_t i=0;i<32U;++i)all_ids.push_back(i);
+    auto const full=plan_world_cache_vertex_stream(
+        stream_mesh,make_stream_faces(all_ids));
+    assert(full.valid && !full.partial);
+    assert(full.ranges.size()==1U &&
+           full.touched_vertices==stream_mesh.vertices.size());
+    auto const no_faces=plan_world_cache_vertex_stream(stream_mesh,{});
+    assert(no_faces.valid && !no_faces.partial &&
+           no_faces.ranges.empty() && no_faces.touched_vertices==0U);
+    auto broken_face=make_stream_faces({1U});
+    broken_face.front().first_index=uint32_t(stream_mesh.indices.size());
+    auto const broken=plan_world_cache_vertex_stream(
+        stream_mesh,broken_face);
+    assert(!broken.valid && !broken.partial);
     // Backface culling is mandatory, including SithSurface flag 0x1.
     // A clockwise authored polygon must be corrected at triangulation,
     // so its visible front still matches the native face normal.
