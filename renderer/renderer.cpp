@@ -31,8 +31,6 @@
 #include "sun_sky_surface.hpp"
 #include "sun_sky_caster_mask.hpp"
 #include "world_cache_gpu.hpp"
-#include "world_vertex_ambient.hpp"
-#include "volumetric_ambient.hpp"
 #include "continuous_ambient_capture.hpp"
 #include "continuous_ambient_gpu.hpp"
 #include "world_cache_alpha.hpp"
@@ -634,15 +632,8 @@ namespace jkgm {
         uintptr_t sun_level_sky_world=0;
         uint64_t sun_level_sky_last_audit_frame=0;
         std::unique_ptr<world_cache_gpu> world_cache_target;
-        // CPU-only, sector-local authored world-vertex ambient samples.
-        world_vertex_ambient_grid world_vertex_ambient_probes;
-        uint64_t world_vertex_ambient_revision=0;
-        uintptr_t world_vertex_ambient_world=0;
-        bool world_vertex_ambient_valid=false;
-        volumetric_ambient_field volumetric_ambient_cache;
-        // Standalone CPU-only continuous voxel diagnostic; independent of
-        // existing 2x2x2 shader and legacy probes, off by default.
-        std::unique_ptr<continuous_ambient_field> continuous_ambient_cpu_cache;
+        // The CPU sparse voxel field is an internal prerequisite of GPU ambient.
+        std::unique_ptr<continuous_ambient_field> continuous_ambient_cpu_cache;        std::unique_ptr<continuous_ambient_field> continuous_ambient_cpu_cache;
         uintptr_t continuous_ambient_cpu_world=0;
         uint64_t continuous_ambient_cpu_revision=0;
         bool continuous_ambient_cpu_overbright=false;
@@ -653,17 +644,6 @@ namespace jkgm {
         std::unordered_map<uint32_t,uintptr_t> continuous_ambient_sector_addresses;
         std::unordered_map<uint32_t,float> continuous_ambient_live_floors;
         bool continuous_ambient_gpu_enabled_this_frame=false;
-        // Reuse the old experiment's VALIDATED finite passable-Adjoin
-        // polygons, but no legacy lighting cells or CPU light samples.
-        world_vertex_ambient_grid volumetric_ambient_portals;
-        uint64_t volumetric_ambient_revision=0;
-        uintptr_t volumetric_ambient_world=0;
-        bool volumetric_ambient_overbright=false;
-        bool volumetric_ambient_valid=false;
-        uint64_t world_vertex_ambient_changed_sectors=0;
-        uint64_t world_vertex_ambient_changed_cells=0;
-        uint64_t world_vertex_ambient_changed_vertices=0;
-        uint64_t world_vertex_ambient_unreadable=0;
         std::unique_ptr<sun_dynamic_shadow_gpu> sun_dynamic_target;
         std::vector<sun_shadow_projection> sun_dynamic_views;
         std::vector<sun_dynamic_shadow_tile> sun_dynamic_tiles;
@@ -1199,25 +1179,11 @@ namespace jkgm {
                 frame_has_exempt_gpu=false;
                 reset_sector_crossing();
                 reset_continuous_ambient_gpu();
-                world_vertex_ambient_probes.reset();
-                world_vertex_ambient_revision=0;
-                world_vertex_ambient_world=0;
-                world_vertex_ambient_valid=false;
-                volumetric_ambient_cache.reset();
-                volumetric_ambient_portals.reset();
                 continuous_ambient_cpu_cache.reset();
                 continuous_ambient_cpu_world=0;
                 continuous_ambient_cpu_revision=0;
                 continuous_ambient_cpu_overbright=false;
                 continuous_ambient_cpu_valid=false;
-                volumetric_ambient_revision=0;
-                volumetric_ambient_world=0;
-                volumetric_ambient_overbright=false;
-                volumetric_ambient_valid=false;
-                world_vertex_ambient_changed_sectors=0;
-                world_vertex_ambient_changed_cells=0;
-                world_vertex_ambient_changed_vertices=0;
-                world_vertex_ambient_unreadable=0;
                 if(the_config->use_gpu_cache ||
                    the_config->enable_decals ||
                    (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
@@ -3534,10 +3500,8 @@ namespace jkgm {
                 glBindTexture(GL_TEXTURE_BUFFER,continuous_ambient_value_texture);
                 glActiveTexture(GL_TEXTURE0);
             }
-            // The sparse volume and legacy volume share the SAME
-            // world-space camera transform, only sampling differs.
+            // Sparse ambient and sector crossing share the world-space transform.
             if(crossing_buffer_ready ||
-               the_config->experimental_volumetric_ambient ||
                continuous_ambient_gpu_enabled_this_frame)
                 prog.set_sector_crossing_camera_origin(cam.position);
             set_translucent_spotlights(prog,transparent && !post_exempt &&
@@ -4144,12 +4108,6 @@ namespace jkgm {
                                          make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(it->second->vao);
                     // Persistent GL uniforms must reset on each Thing.
-                    prog.set_volumetric_ambient(
-                        inst.volumetric_ambient
-                            ? &*inst.volumetric_ambient : nullptr,
-                        inst.volumetric_ambient_neighbor
-                            ? &*inst.volumetric_ambient_neighbor : nullptr,
-                        inst.volumetric_ambient_neighbor_weight);
                     prog.set_continuous_ambient(
                         continuous_buffer_ready && inst.continuous_ambient_fallback
                             ? &*inst.continuous_ambient_fallback : nullptr,
@@ -9459,131 +9417,11 @@ namespace jkgm {
             continuous_ambient_gpu_enabled_this_frame=false;
         }
 
-        // A/B prototype: replace native per-Thing ambient with authored world
-        // Gouraud probes. Only the local sector and adjacent sectors through
-        // verified passable portal polygons can contribute.
-        void stage_world_vertex_ambient()
-        {
-            if(continuous_ambient_gpu_enabled_this_frame ||
-               !the_config->experimental_world_vertex_ambient ||
-               the_config->experimental_volumetric_ambient ||
-               the_config->enable_sector_crossing_lighting ||
-               !the_config->use_gpu_cache ||
-               mode!=renderer_mode::ingame ||
-               frame_gpu_3do_instances.empty() ||
-               !world_cache_target || !world_cache_target->ready)
-                return;
-            auto const &cache=*world_cache_target;
-            float const radius=the_config->experimental_world_vertex_ambient_radius;
-            auto const read=[](uintptr_t ptr,void *out,size_t len)->bool {
-                if(!len || !engine_camera_detail::readable(ptr,len))
-                    return false;
-                std::memcpy(out,reinterpret_cast<void const *>(ptr),len);
-                return true;
-            };
-            if(world_vertex_ambient_world!=cache.loaded_world ||
-               world_vertex_ambient_revision!=cache.revision ||
-               world_vertex_ambient_probes.radius()!=radius) {
-                world_vertex_ambient_world=cache.loaded_world;
-                world_vertex_ambient_revision=cache.revision;
-                world_vertex_ambient_valid=false;
-                world_vertex_ambient_changed_sectors=0;
-                world_vertex_ambient_changed_cells=0;
-                world_vertex_ambient_changed_vertices=0;
-                world_vertex_ambient_unreadable=0;
-                world_vertex_ambient_stats stats{};
-                auto const started=profile_clock::now();
-                bool const built=capture_world_vertex_ambient(
-                    read,cache.loaded_world,cache.world.surfaces_addr,
-                    cache.mesh,the_config->enable_baked_overbright,radius,
-                    world_vertex_ambient_probes,stats);
-                world_vertex_ambient_valid=built &&
-                    world_vertex_ambient_probes.sample_count()>0U;
-                LOG_INFO("WORLD VERTEX AMBIENT capture world=",
-                    cache.loaded_world,
-                    " built=",built?1:0,
-                    " accepted=",stats.surfaces_sampled,
-                    " rejected=",stats.surfaces_skipped,
-                    " vertices=",stats.vertices_sampled,
-                    " cells=",world_vertex_ambient_probes.cell_count(),
-                    " passable_portals=",stats.portals_captured,
-                    " radius=",radius,
-                    " cpu_us=",elapsed_profile_us(
-                        started,profile_clock::now()));
-            }
-            if(!world_vertex_ambient_valid)return;
-            // Check only sectors represented in the probe cache. A native
-            // SetSectorLight fade may advance over many frames, including
-            // after the COG verb returns; react to its live ExtraLight value
-            // and rebuild ONLY cells in sectors whose floor has changed.
-            auto const refresh=world_vertex_ambient_probes.refresh_sector_floors(
-                read,the_config->enable_baked_overbright);
-            // Accumulate diagnostics to avoid log I/O on every fade tick.
-            world_vertex_ambient_changed_sectors+=refresh.changed;
-            world_vertex_ambient_changed_cells+=refresh.cells;
-            world_vertex_ambient_changed_vertices+=refresh.vertices;
-            world_vertex_ambient_unreadable+=refresh.unreadable;
-            if(the_config->profile_renderer &&
-               gpu_3do_present_serial%120U==0U) {
-                if(world_vertex_ambient_changed_sectors ||
-                   world_vertex_ambient_unreadable)
-                    LOG_INFO("WORLD VERTEX AMBIENT live_sector_light checked=",
-                        refresh.checked,
-                        " changed=",world_vertex_ambient_changed_sectors,
-                        " cells=",world_vertex_ambient_changed_cells,
-                        " vertices=",world_vertex_ambient_changed_vertices,
-                        " unreadable=",world_vertex_ambient_unreadable,
-                        " window_frames=120");
-                world_vertex_ambient_changed_sectors=0;
-                world_vertex_ambient_changed_cells=0;
-                world_vertex_ambient_changed_vertices=0;
-                world_vertex_ambient_unreadable=0;
-            }
-            uint32_t applied=0,missed=0,excluded=0;
-            uint32_t portal_mixed=0,portal_only=0;
-            for(auto &inst:frame_gpu_3do_instances) {
-                // Do not alter the native HUD, skybox, sprite, decal or
-                // depth-only semantics. Native fallback is untouched.
-                if(!inst.geometry || inst.shadow_only || inst.camera_hud ||
-                   inst.skybox_vertex_lighting || inst.world_lighting_exempt ||
-                   inst.is_projected_decal || inst.is_sprite_quad ||
-                   !inst.owning_sector_valid) {
-                    ++excluded;continue;
-                }
-                std::array<float,3> const position{{
-                    inst.transform[9],inst.transform[10],inst.transform[11]
-                }};
-                float sampled=0.0f;
-                auto const result=world_vertex_ambient_probes.sample_with_portals(
-                    inst.owning_sector_id,position,sampled);
-                if(result!=world_vertex_ambient_result::none) {
-                    inst.ambient=sampled;
-                    ++applied;
-                    if(result==world_vertex_ambient_result::mixed)
-                        ++portal_mixed;
-                    else if(result==world_vertex_ambient_result::portal_only)
-                        ++portal_only;
-                } else ++missed; // Retain native ambient when no probe exists.
-            }
-            if(the_config->profile_renderer &&
-               gpu_3do_present_serial%120U==0U)
-                LOG_INFO("WORLD VERTEX AMBIENT models=",
-                    frame_gpu_3do_instances.size(),
-                    " applied=",applied,
-                    " portal_mixed=",portal_mixed,
-                    " portal_only=",portal_only,
-                    " misses_native=",missed,
-                    " excluded=",excluded);
-        }
-
-        // Profiling-only Stage A of the continuous sparse voxel field.
-        // Explicitly does NOT alter 3DO instances, shader uniforms or the
-        // old volumetric ambient A/B settings. Build once per world cache
-        // revision, retain its compact field, and report sample coverage.
+        // Build the CPU field used by the GPU continuous ambient sampler.
+        // Build once per world-cache revision and report sample coverage.
         void stage_continuous_ambient_cpu()
         {
-            if((!the_config->experimental_continuous_ambient_cpu &&
-                !the_config->experimental_continuous_ambient_gpu) ||
+            if(!the_config->experimental_continuous_ambient_gpu ||
                !the_config->use_gpu_cache ||
                mode!=renderer_mode::ingame ||
                !world_cache_target || !world_cache_target->ready)
@@ -9674,7 +9512,7 @@ namespace jkgm {
         // Stage B1: independent, opt-in GL 3.3 continuous voxel
         // illumination. All static keys upload ONCE per world revision;
         // only the small shared-live values buffer changes on sector fades.
-        // A failed read/upload/capability check leaves the old lighting.
+        // A failed read/upload/capability check preserves native lighting.
         void stage_continuous_ambient_gpu()
         {
             continuous_ambient_gpu_enabled_this_frame=false;
@@ -9829,170 +9667,6 @@ namespace jkgm {
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("CONTINUOUS AMBIENT GPU instances=",applied,
                          " slots=",continuous_ambient_gpu_cache->capacity());
-        }
-
-        // A sector-local 2x2x2 volume is built only when the native
-        // world-cache snapshot changes. The current ExtraLight floor is
-        // sampled live; SetSectorLight fades need no volume rebuild.
-        void stage_volumetric_ambient()
-        {
-            if(continuous_ambient_gpu_enabled_this_frame ||
-               !the_config->experimental_volumetric_ambient ||
-               the_config->enable_sector_crossing_lighting ||
-               !the_config->use_gpu_cache ||
-               mode!=renderer_mode::ingame ||
-               frame_gpu_3do_instances.empty() ||
-               !world_cache_target || !world_cache_target->ready)
-                return;
-            auto const &cache=*world_cache_target;
-            auto const read=[](uintptr_t ptr,void *out,size_t len)->bool {
-                if(!len || !engine_camera_detail::readable(ptr,len))
-                    return false;
-                std::memcpy(out,reinterpret_cast<void const *>(ptr),len);
-                return true;
-            };
-            bool const overbright=the_config->enable_baked_overbright;
-            if(volumetric_ambient_world!=cache.loaded_world ||
-               volumetric_ambient_revision!=cache.revision ||
-               volumetric_ambient_overbright!=overbright) {
-                volumetric_ambient_world=cache.loaded_world;
-                volumetric_ambient_revision=cache.revision;
-                volumetric_ambient_overbright=overbright;
-                volumetric_ambient_valid=false;
-                volumetric_ambient_stats stats{};
-                auto const started=profile_clock::now();
-                bool const built=capture_volumetric_ambient(
-                    read,cache.loaded_world,cache.world.surfaces_addr,
-                    cache.mesh,overbright,volumetric_ambient_cache,stats);
-                volumetric_ambient_valid=built &&
-                    volumetric_ambient_cache.sector_count()>0U;
-                // Capture passable, non-sky native Adjoin polygons ONCE
-                // beside the volume. Rebuilding only on world topology
-                // changes preserves the original per-frame cost.
-                volumetric_ambient_portals.reset(1.0f);
-                uint32_t const passable_portals=built
-                    ? capture_world_vertex_ambient_portals(
-                        read,cache.loaded_world,volumetric_ambient_portals)
-                    : 0U;
-                LOG_INFO("VOLUMETRIC AMBIENT snapshot world=",
-                    cache.loaded_world," built=",built?1:0,
-                    " accepted=",stats.surfaces_sampled,
-                    " rejected=",stats.surfaces_skipped,
-                    " vertices=",stats.vertices_sampled,
-                    " sectors=",stats.sectors,
-                    " passable_portals=",passable_portals,
-                    " portal_radius=",volumetric_ambient_portals.radius(),
-                    " cpu_us=",elapsed_profile_us(
-                        started,profile_clock::now()));
-            }
-            if(!volumetric_ambient_valid)return;
-            float global_extra=0.0f;
-            if(!read(0x008D4098U,&global_extra,sizeof(global_extra)) ||
-               !std::isfinite(global_extra) ||
-               std::fabs(global_extra)>8.0f)
-                global_extra=0.0f;
-            auto const &sectors=volumetric_ambient_cache.sectors();
-            // Read live sector ExtraLight once per represented sector per
-            // frame, not once for each model inside a populated sector.
-            std::unordered_map<uint32_t,float> live_floors;
-            live_floors.reserve(std::min(frame_gpu_3do_instances.size(),
-                                         sectors.size()));
-            uint32_t applied=0,missed=0,excluded=0,unreadable=0;
-            uint32_t portal_blended=0,portal_missing_neighbor=0;
-            uint32_t missing_thing_origin=0;
-            // Both volumes share this once-per-frame floor cache.
-            // Never interpolate pre-floor baked bytes with sector ExtraLight,
-            // or SetSectorLight would need to rebuild the volume.
-            auto const get_floor=[&](volumetric_ambient_sector const &sector,
-                                     float &floor) -> bool {
-                auto found=live_floors.find(sector.id);
-                if(found==live_floors.end()) {
-                    float extra=0.0f;
-                    if(!read(sector.native_sector+0x08U,&extra,sizeof(extra)) ||
-                       !std::isfinite(extra))return false;
-                    found=live_floors.emplace(sector.id,
-                        clamp_authored_extra_floor(
-                            extra,global_extra,overbright)).first;
-                }
-                floor=found->second;
-                return true;
-            };
-            auto const make_volume=[](volumetric_ambient_sector const &s,
-                                      float floor) {
-                gpu_3do_ambient_volume v{};
-                v.bounds_min=s.lo;
-                v.bounds_max=s.hi;
-                v.samples=s.light;
-                v.range=s.range;
-                v.live_floor=floor;
-                return v;
-            };
-            auto const find_sector=[&](uint32_t id) {
-                return std::lower_bound(sectors.begin(),sectors.end(),id,
-                    [](volumetric_ambient_sector const &s,uint32_t key) {
-                        return s.id<key;
-                    });
-            };
-            for(auto &inst:frame_gpu_3do_instances) {
-                // Preserve Camera HUDs, ThingFlag 0x20, sprite/decal
-                // receivers, depth-only, and native fallback as before.
-                if(!inst.geometry || inst.shadow_only || inst.camera_hud ||
-                   inst.skybox_vertex_lighting || inst.world_lighting_exempt ||
-                   inst.is_projected_decal || inst.is_sprite_quad ||
-                   !inst.owning_sector_valid) {
-                    ++excluded;continue;
-                }
-                auto const it=find_sector(inst.owning_sector_id);
-                if(it==sectors.end() || it->id!=inst.owning_sector_id) {
-                    ++missed;continue; // Original camera ambient fallback.
-                }
-                float floor=0.0f;
-                if(!get_floor(*it,floor)) {
-                    ++unreadable;continue;
-                }
-                inst.volumetric_ambient=make_volume(*it,floor);
-                ++applied;
-                // The mesh transform is camera/view-space and its origin
-                // differs by animated model node. Portal polygons are
-                // WORLD-space. Always use the one owning SithThing world
-                // origin captured by rdModel3, shared by all its nodes.
-                // With no valid native owner position, keep the ordinary
-                // one-volume result rather than comparing mixed spaces.
-                if(!inst.owning_thing_world_position_valid) {
-                    ++missing_thing_origin;continue;
-                }
-                uint32_t neighbor_id=0U;
-                float weight=0.0f;
-                if(!volumetric_ambient_portals.nearest_portal(
-                       inst.owning_sector_id,inst.owning_thing_world_position,
-                       neighbor_id,weight))continue;
-                auto const other=find_sector(neighbor_id);
-                if(other==sectors.end() || other->id!=neighbor_id) {
-                    ++portal_missing_neighbor;continue;
-                }
-                float neighbor_floor=0.0f;
-                if(!get_floor(*other,neighbor_floor)) {
-                    ++unreadable;continue;
-                }
-                inst.volumetric_ambient_neighbor=
-                    make_volume(*other,neighbor_floor);
-                inst.volumetric_ambient_neighbor_weight=weight;
-                ++portal_blended;
-            }
-            if(the_config->profile_renderer &&
-               gpu_3do_present_serial%120U==0U)
-                LOG_INFO("VOLUMETRIC AMBIENT models=",
-                    frame_gpu_3do_instances.size(),
-                    " applied=",applied,
-                    " portal_blended=",portal_blended,
-                    " portal_missing_neighbor=",portal_missing_neighbor,
-                    " missing_thing_origin=",missing_thing_origin,
-                    " misses_native=",missed,
-                    " excluded=",excluded,
-                    " unreadable=",unreadable,
-                    " sectors=",sectors.size(),
-                    " passable_portals=",
-                        volumetric_ambient_portals.portal_count());
         }
 
         void stage_sector_crossing()
@@ -10292,8 +9966,6 @@ namespace jkgm {
             stage_world_cache();
             stage_continuous_ambient_cpu();
             stage_continuous_ambient_gpu();
-            stage_world_vertex_ambient();
-            stage_volumetric_ambient();
             stage_sector_crossing();
             animation_seconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - animation_epoch).count();

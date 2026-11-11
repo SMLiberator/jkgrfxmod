@@ -1,7 +1,7 @@
 #pragma once
-// CPU-only sparse world-aligned, portal-stitched volumetric ambient prototype.
-// No GL objects, no runtime renderer changes. Native capture lives in
-// continuous_ambient_capture.hpp; the existing 2x2x2 GPU path is unchanged.
+// CPU sparse world-aligned, portal-stitched continuous ambient field.
+// Native capture is in continuous_ambient_capture.hpp; the GPU transport
+// and vertex shader consume this immutable field and live sector floors.
 #include <algorithm>
 #include <array>
 #include <cmath>

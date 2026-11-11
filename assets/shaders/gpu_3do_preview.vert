@@ -60,19 +60,6 @@ uniform int sector_crossing_per_vertex; // opt-in A/B: classify once per model v
 uniform samplerBuffer sector_crossing_planes;
 uniform vec3 sector_crossing_camera_origin;
 uniform vec3 camera_right_axis,camera_forward_axis,camera_up_axis;
-// Compact 2x2x2 owner-sector world vertex ambient, opt-in. Samples are
-// decoded from 8 cached uint8 corner values by the per-Thing uniform setter.
-// Only one trilinear lookup per 3DO VERTEX, never per fragment.
-uniform int volumetric_ambient_enabled;
-uniform vec3 volumetric_ambient_bounds_min,volumetric_ambient_bounds_max;
-uniform vec4 volumetric_ambient_corners0,volumetric_ambient_corners1;
-uniform float volumetric_ambient_range,volumetric_ambient_live_floor;
-// A second quantized volume is uploaded ONLY for a Thing close to a
-// passable finite portal. Zero blend keeps the original fast shader path.
-uniform float volumetric_neighbor_weight;
-uniform vec3 volumetric_neighbor_bounds_min,volumetric_neighbor_bounds_max;
-uniform vec4 volumetric_neighbor_corners0,volumetric_neighbor_corners1;
-uniform float volumetric_neighbor_range,volumetric_neighbor_live_floor;
 uniform vec4 sector_crossing_info[4]; // x: ambient; y,z: planes; w: inner-box shortcut
 uniform vec4 sector_crossing_bounds_min[4];
 uniform vec4 sector_crossing_bounds_max[4];
@@ -128,6 +115,7 @@ int select_sector_crossing_vertex(vec3 view_position)
     }
     return 0; // preserve native owning Thing sector if no candidate matches
 }
+// Reused by continuous ambient when an individual sparse node is missing.
 float volumetric_ambient_sample(
     vec3 world,vec3 lo,vec3 hi,vec4 bottom,vec4 top,
     float quantized_range,float live_floor)
@@ -145,23 +133,6 @@ float volumetric_ambient_sample(
     // Live ExtraLight is the floor of EACH sampled sector, not an
     // immutable corner and not a second additive light.
     return max(mix(low,high,t.z)*quantized_range,live_floor);
-}
-float volumetric_ambient_at(vec3 view_position)
-{
-    vec3 world=sector_crossing_camera_origin+
-        camera_right_axis*view_position.x+
-        camera_forward_axis*view_position.y+
-        camera_up_axis*view_position.z;
-    float own=volumetric_ambient_sample(
-        world,volumetric_ambient_bounds_min,volumetric_ambient_bounds_max,
-        volumetric_ambient_corners0,volumetric_ambient_corners1,
-        volumetric_ambient_range,volumetric_ambient_live_floor);
-    if(volumetric_neighbor_weight<=0.0)return own;
-    float neighbor=volumetric_ambient_sample(
-        world,volumetric_neighbor_bounds_min,volumetric_neighbor_bounds_max,
-        volumetric_neighbor_corners0,volumetric_neighbor_corners1,
-        volumetric_neighbor_range,volumetric_neighbor_live_floor);
-    return mix(own,neighbor,volumetric_neighbor_weight);
 }
 
 #ifdef JKGM_CONTINUOUS_AMBIENT_GPU
@@ -298,8 +269,7 @@ void main() {
     // Face ExtraLight may darken the authored vertex, but cannot produce
     // >1 baked brightness with the option off (or >2 with it on).
     float raw_light=clamp(l+local_extra_light,0.0,jk_light_limit);
-    float ambient_floor=volumetric_ambient_enabled!=0
-        ? volumetric_ambient_at(vec3(x,y,z)) : ambient_light;
+    float ambient_floor=ambient_light;
 #ifdef JKGM_CONTINUOUS_AMBIENT_GPU
     if(continuous_ambient_enabled!=0)
         ambient_floor=continuous_ambient_at(vec3(x,y,z));

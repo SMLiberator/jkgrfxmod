@@ -1,10 +1,9 @@
 #pragma once
 // Native SithWorld capture adapter for the CPU-only continuous field.
-// Reuse the original, validated native passable-Adjoin reader. Never touch
-// the production shader/renderer until this representation passes profiling.
+// Reuse the validated native passable-Adjoin reader for the GPU field.
 #include "continuous_ambient.hpp"
-#include "volumetric_ambient.hpp"
-#include "world_vertex_ambient.hpp"
+#include "light_intensity_range.hpp"
+#include "passable_adjoin_portals.hpp"
 #include <array>
 #include <cstdint>
 #include <cmath>
@@ -79,9 +78,9 @@ bool capture_continuous_ambient(Read const &read,uintptr_t world,
             stats.vertices_sampled+=n;
         } else ++stats.surfaces_skipped;
     }
-    world_vertex_ambient_grid portal_geometry;
-    portal_geometry.reset(spacing);
-    stats.passable_portals=capture_world_vertex_ambient_portals(
+    passable_adjoin_portals portal_geometry;
+    portal_geometry.reset();
+    stats.passable_portals=capture_passable_adjoin_portals(
         read,world,portal_geometry);
     portal_geometry.for_each_portal_triangle(
         [&](uint32_t a,uint32_t b,

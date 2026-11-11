@@ -7,7 +7,7 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 field=(root/"renderer/continuous_ambient.hpp").read_text(encoding="utf-8")
 capture=(root/"renderer/continuous_ambient_capture.hpp").read_text(encoding="utf-8")
-portal=(root/"renderer/world_vertex_ambient.hpp").read_text(encoding="utf-8")
+portal=(root/"renderer/passable_adjoin_portals.hpp").read_text(encoding="utf-8")
 test=(root/"tests/continuous_ambient.cpp").read_text(encoding="utf-8")
 renderer=(root/"renderer/renderer.cpp").read_text(encoding="utf-8")
 shader=(root/"assets/shaders/gpu_3do_preview.vert").read_text(encoding="utf-8")
@@ -46,7 +46,7 @@ assert "fallback->second.sample(location(at),range_)" in field
 assert "A huge open sector can have authored light" in test
 assert "f.node_count()<=108U" in test
 assert "return field.finalize();" in capture
-assert "capture_world_vertex_ambient_portals(" in capture
+assert "capture_passable_adjoin_portals(" in capture
 assert "portal_geometry.for_each_portal_triangle(" in capture
 assert "if(field.add_portal(a,b,triangle))" in capture
 assert "clamp_authored_light(lights[i],overbright)" in capture
@@ -59,21 +59,15 @@ assert "gl::" not in field and "glBind" not in field
 assert '#include "continuous_ambient_capture.hpp"' in renderer
 assert "void stage_continuous_ambient_cpu()" in renderer
 assert "stage_continuous_ambient_cpu();" in renderer
-assert "experimental_continuous_ambient_cpu" in renderer
+assert "experimental_continuous_ambient_gpu" in renderer
 assert "capture_continuous_ambient(" in renderer
 assert "CONTINUOUS AMBIENT CPU snapshot world=" in renderer
 assert "CONTINUOUS AMBIENT CPU coverage eligible=" in renderer
 assert "inst.owning_sector_id,inst.owning_thing_world_position," in renderer
 assert '#include "continuous_ambient_lookup.glsl"' in shader
-assert "bool experimental_continuous_ambient_cpu = false;" in config
-assert 'j.contains("experimental_continuous_ambient_cpu")' in (
-    root/"common/config.cpp").read_text(encoding="utf-8")
-assert '"experimental_continuous_ambient_cpu": false' in (
-    root/"assets/jkgm.json").read_text(encoding="utf-8")
-assert "| **experimental_continuous_ambient_cpu** |" in (
-    root/"doc/config.md").read_text(encoding="utf-8")
+assert "bool experimental_continuous_ambient_gpu = false;" in config
 native=(root/"renderer/main.cpp").read_text(encoding="utf-8")
-assert "the_config->experimental_continuous_ambient_cpu" in native
+assert "the_config->experimental_continuous_ambient_gpu" in native
 assert "uintptr_t(hud_owner)+0xb8U" in native
 assert "JKGM_NATIVE_CAPTURE_TEST" in test
 assert "mem.put(adjoin,uint32_t(0));" in test

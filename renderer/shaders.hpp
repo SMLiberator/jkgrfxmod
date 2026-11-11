@@ -353,21 +353,7 @@ namespace jkgm {
         private:
             gl::uniform_location_id ambient_light,attenuation_min,num_lights,
                                     jk_light_limit,
-                                    volumetric_ambient_enabled,
-                                    volumetric_ambient_bounds_min,
-                                    volumetric_ambient_bounds_max,
-                                    volumetric_ambient_corners0,
-                                    volumetric_ambient_corners1,
-                                    volumetric_ambient_range,
-                                    volumetric_ambient_live_floor,
-                                    volumetric_neighbor_weight,
-                                    volumetric_neighbor_bounds_min,
-                                    volumetric_neighbor_bounds_max,
-                                    volumetric_neighbor_corners0,
-                                    volumetric_neighbor_corners1,
-                                    volumetric_neighbor_range,
-                                    volumetric_neighbor_live_floor,
-                                    continuous_ambient_enabled,
+                                    continuous_ambient_enabled,                                    continuous_ambient_enabled,
                                     continuous_ambient_sector,
                                     continuous_voxel_mask,
                                     continuous_voxel_spacing,
@@ -399,9 +385,6 @@ namespace jkgm {
                               point<2,float> scroll);
             void set_fog(point<4,float> params,point<4,float> color);
             void set_light_brightness_limit(float limit);
-            void set_volumetric_ambient(
-                gpu_3do_ambient_volume const *volume,
-                gpu_3do_ambient_volume const *neighbor,float weight);
             void set_continuous_ambient(
                 gpu_3do_ambient_volume const *fallback,
                 uint32_t sector,uint32_t mask,float spacing);

@@ -53,11 +53,7 @@ namespace jkgm {
         bool restore_cmp_lights = false; // opt-in indexed textured MAT fullbright pixels; GeoMode 3 always retains native HW fullbright
         bool enable_sector_crossing_lighting = false; // experimental 3DO sector light/CMP/tint
         bool experimental_sector_crossing_vertex = false; // A/B: vertex instead of fragment sector selection
-        bool experimental_volumetric_ambient = false; // opt-in 2x2x2 sector-local GPU 3DO ambient floor
-        bool experimental_continuous_ambient_cpu = false; // CPU-only sparse portal-stitched voxel capture/profiling
         bool experimental_continuous_ambient_gpu = false; // GL 3.3 sparse buffer-texture ambient for GPU 3DOs; opt-in
-        bool experimental_world_vertex_ambient = false; // legacy spatial-probe A/B comparison; volumetric takes precedence // opt-in CPU world-vertex probe ambient for cached 3DOs
-        float experimental_world_vertex_ambient_radius = 1.0f; // JK world units, 0.25..4
         bool enable_ssao = true;
         bool debug_void_pixels = false; // show raw unresolved empty-depth pixels as neon checkerboard
         bool retain_hom_pixels = true; // vanilla JK HOM default; false = Clear Display

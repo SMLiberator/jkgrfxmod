@@ -569,7 +569,7 @@
     <ClInclude Include="world_cache_lighting.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="world_vertex_ambient.hpp">
+    <ClInclude Include="passable_adjoin_portals.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="continuous_ambient.hpp">
@@ -579,9 +579,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="continuous_ambient_capture.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="volumetric_ambient.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="world_cache_portals.hpp">
