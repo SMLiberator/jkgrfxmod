@@ -20,7 +20,7 @@ assert "bool enable_sector_crossing_lighting = false;" in config
 assert "bool experimental_sector_crossing_vertex = false;" in config
 assert 'j.contains("experimental_sector_crossing_vertex")' in parser
 assert 'j.contains("enable_sector_crossing_lighting")' in parser
-assert "if(the_config->enable_sector_crossing_lighting)" in main
+assert "if(the_config->enable_sector_crossing_lighting ||" in main
 assert "active_native_model_sector_id_valid" in main
 assert "inst.owning_sector_id=active_native_model_sector_id;" in main
 assert "sector_crossing_collect_candidates(" in staging
