@@ -52,6 +52,9 @@ for prog in programs:
     if prog=="gpu_3do_preview":
         source+=expand(prog+".vert")
     validate(prog,mapping,source)
+# The vertex-shader capability guard belongs to shaders.cpp. Load it
+# before checking the continuous-ambient sampler registrations.
+sh=read("renderer/shaders.cpp")
 assert "forward_sector_buffer=19;" in header
 assert "forward_next_extended_unit=20;" in header
 assert "forward_next_extended_required_units=21;" in header
