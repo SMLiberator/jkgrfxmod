@@ -153,6 +153,14 @@ public:
     size_t cell_count() const {return cells_.size();}
     size_t tracked_sector_count() const {return sector_lights_.size();}
     size_t portal_count() const {return portals_.size();}
+    // Expose validated passable native opening triangles for the separate
+    // continuous-voxel CPU builder. No old light-probe cells are required.
+    template<class Visit>
+    void for_each_portal_triangle(Visit &&visit) const {
+        for(auto const &p:portals_)
+            for(auto const &triangle:p.triangles)
+                visit(p.a,p.b,triangle.v);
+    }
     uint32_t sample_count() const {return samples_;}
     float radius() const {return radius_;}
 
