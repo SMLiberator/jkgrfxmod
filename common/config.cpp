@@ -235,6 +235,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("enable_sector_crossing_lighting").get_to(
                 rv->enable_sector_crossing_lighting);
         }
+        if(j.contains("experimental_sector_crossing_vertex")) {
+            j.at("experimental_sector_crossing_vertex").get_to(
+                rv->experimental_sector_crossing_vertex);
+        }
         if(j.contains("experimental_world_vertex_ambient")) {
             j.at("experimental_world_vertex_ambient").get_to(
                 rv->experimental_world_vertex_ambient);

@@ -299,6 +299,7 @@ namespace jkgm {
             gl::uniform_location_id thing_sector_tint_delta;
             gl::uniform_location_id colormap_tint;
             gl::uniform_location_id sector_crossing_count;
+            gl::uniform_location_id sector_crossing_per_vertex;
             gl::uniform_location_id sector_crossing_planes;
             gl::uniform_location_id sector_crossing_camera_origin;
             std::vector<gl::uniform_location_id> sector_crossing_info;
@@ -381,7 +382,7 @@ namespace jkgm {
             void set_thing_sector_tint_delta(std::array<float,3> const &delta);
             void set_sector_crossing(
                 gpu_3do_crossing_state const *state,bool enabled,
-                bool allow_sector_tint);
+                bool allow_sector_tint,bool per_vertex);
             void set_sector_crossing_camera_origin(
                 std::array<float,3> const &origin);
             void set_local_eye(std::array<float,3> const &eye);

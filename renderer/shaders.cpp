@@ -731,6 +731,8 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , thing_sector_tint_delta(gl::get_uniform_location(the_program,"thing_sector_tint_delta"))
     , colormap_tint(gl::get_uniform_location(the_program,"colormap_tint"))
     , sector_crossing_count(gl::get_uniform_location(the_program,"sector_crossing_count"))
+    , sector_crossing_per_vertex(gl::get_uniform_location(
+          the_program,"sector_crossing_per_vertex"))
     , sector_crossing_planes(gl::get_uniform_location(the_program,"sector_crossing_planes"))
     , sector_crossing_camera_origin(gl::get_uniform_location(
           the_program,"sector_crossing_camera_origin"))
@@ -960,7 +962,8 @@ void jkgm::shaders::gpu_3do_preview_shader::set_jk_color_effects(
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_sector_crossing(
-    gpu_3do_crossing_state const *state,bool enabled,bool allow_sector_tint)
+    gpu_3do_crossing_state const *state,bool enabled,
+    bool allow_sector_tint,bool per_vertex)
 {
     int const count=enabled && state && state->count>1U &&
         state->count<=4U ? static_cast<int>(state->count) : 0;
@@ -970,6 +973,8 @@ void jkgm::shaders::gpu_3do_preview_shader::set_sector_crossing(
     gl::set_uniform_integer(
         sector_crossing_planes,gpu_3do_sector_plane_texture_unit);
     gl::set_uniform_integer(sector_crossing_count,count);
+    gl::set_uniform_integer(sector_crossing_per_vertex,
+        count>1 && per_vertex ? 1 : 0);
     if(!count)return;
     for(int i=0;i<count;++i) {
         auto const &s=state->sectors[i];

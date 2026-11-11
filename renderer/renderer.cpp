@@ -3468,7 +3468,7 @@ namespace jkgm {
             // With the JSON option OFF, set both sampler type and zero
             // candidates once per pass, not once for every cached model.
             if(!the_config->enable_sector_crossing_lighting)
-                prog.set_sector_crossing(nullptr,false,false);
+                prog.set_sector_crossing(nullptr,false,false,false);
             bool const crossing_buffer_ready=
                 the_config->enable_sector_crossing_lighting &&
                 !post_exempt && !decals_only &&
@@ -4120,7 +4120,8 @@ namespace jkgm {
                             crossing_buffer_ready && allow_sector_effects &&
                             !inst.camera_hud && !inst.is_projected_decal &&
                             !inst.is_sprite_quad,
-                            can_replace_sector_tint);
+                            can_replace_sector_tint,
+                            the_config->experimental_sector_crossing_vertex);
                     // Shared 3DO geometry can have several instances in
                     // different SithSectors. Do this per Thing, not per
                     // material/mesh. Invalid native pointers preserve JK.

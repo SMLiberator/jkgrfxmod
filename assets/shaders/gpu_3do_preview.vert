@@ -55,10 +55,57 @@ out vec4 decal_coverage;
 // overlapping multiple native Adjoin-linked sectors. The ordinary
 // single-sector path stays bit-for-bit unchanged.
 uniform int sector_crossing_count;
-uniform vec4 sector_crossing_info[4]; // x: ambient floor
+uniform int sector_crossing_per_vertex; // opt-in A/B: classify once per model vertex
+uniform samplerBuffer sector_crossing_planes;
+uniform vec3 sector_crossing_camera_origin;
+uniform vec3 camera_right_axis,camera_forward_axis,camera_up_axis;
+uniform vec4 sector_crossing_info[4]; // x: ambient; y,z: planes; w: inner-box shortcut
+uniform vec4 sector_crossing_bounds_min[4];
+uniform vec4 sector_crossing_bounds_max[4];
+uniform vec4 sector_crossing_inner_min[4];
+uniform vec4 sector_crossing_inner_max[4];
 uniform vec4 sector_crossing_cmp[4];  // xyz: CMP RGB multiplier
 uniform vec4 sector_crossing_tint[4]; // xyz: sector-only color tint delta
 out vec3 sector_crossing_lit[4];
+// The fragment program uses the linearly interpolated CMP/tint for colored
+// pixel point lights, matching the per-vertex selected baked color.
+out vec3 sector_vertex_cmp;
+out vec3 sector_vertex_tint;
+
+// Identical owner-first bounds/plane semantics to the previous fragment
+// classifier. Running this at each transformed vertex avoids a potentially
+// expensive 96-plane loop at every covered pixel.
+int select_sector_crossing_vertex(vec3 view_position)
+{
+    vec3 world=sector_crossing_camera_origin+
+        camera_right_axis*view_position.x+
+        camera_forward_axis*view_position.y+
+        camera_up_axis*view_position.z;
+    for(int i=0;i<4;++i) {
+        if(i>=sector_crossing_count)break;
+        vec3 lo=sector_crossing_bounds_min[i].xyz;
+        vec3 hi=sector_crossing_bounds_max[i].xyz;
+        if(any(lessThan(world,lo-vec3(0.0001))) ||
+           any(greaterThan(world,hi+vec3(0.0001))))continue;
+        if(sector_crossing_info[i].w>0.5 &&
+           all(greaterThan(world,sector_crossing_inner_min[i].xyz)) &&
+           all(lessThan(world,sector_crossing_inner_max[i].xyz)))
+            return i;
+        int begin_plane=int(sector_crossing_info[i].y+0.5);
+        int count=int(sector_crossing_info[i].z+0.5);
+        if(count<1 || count>96)continue;
+        bool inside=true;
+        for(int j=0;j<96;++j) {
+            if(j>=count)break;
+            vec4 plane=texelFetch(sector_crossing_planes,begin_plane+j);
+            if(dot(plane.xyz,world)+plane.w < -0.0001) {
+                inside=false;break;
+            }
+        }
+        if(inside)return i;
+    }
+    return 0; // preserve native owning Thing sector if no candidate matches
+}
 void main() {
     vec4 model_right=view_right;
     vec4 model_forward=view_forward;
@@ -97,6 +144,8 @@ void main() {
     pixel_light_face_normal=local_normal;
     pixel_light_vertex_rgb=local_vertex_rgb;
     pixel_light_state=vec3(local_static_light,local_extra_light,local_light_mode);
+    sector_vertex_cmp=colormap_tint;
+    sector_vertex_tint=thing_sector_tint_delta;
     // A Camera-type Thing is a HUD overlay: no native ambient/dynamic
     // lighting, colormap tint, palette fade or per-camera color effects.
     if(camera_hud_thing!=0) {
@@ -165,8 +214,13 @@ void main() {
     // once per candidate sector. This retains interpolation of gamma-
     // corrected vertex RGB, unlike recomputing baked brightness per pixel.
     if(sector_crossing_count>1) {
+        int selected_slot=sector_crossing_per_vertex!=0
+            ? select_sector_crossing_vertex(vec3(x,y,z)) : 0;
         for(int i=0;i<4;i++) {
             if(i>=sector_crossing_count)break;
+            // The vertex mode only evaluates the chosen candidate's gamma
+            // and color effects; the legacy fragment mode keeps all four.
+            if(sector_crossing_per_vertex!=0 && i!=selected_slot)continue;
             if(i==0) {sector_crossing_lit[i]=jk_lit_rgb;continue;}
             float sector_bright=mode<0.5 ? 1.0 :
                 max(max(l+local_extra_light,0.0),
@@ -191,6 +245,13 @@ void main() {
                 candidate=pow(max(encoded,vec3(0.0)),vec3(1.8));
             }
             sector_crossing_lit[i]=candidate;
+        }
+        if(sector_crossing_per_vertex!=0) {
+            // Interpolate the SELECTED candidate RGB across the triangle,
+            // not the sector index: no per-fragment branching or hard seam.
+            jk_lit_rgb=sector_crossing_lit[selected_slot];
+            sector_vertex_cmp=sector_crossing_cmp[selected_slot].xyz;
+            sector_vertex_tint=sector_crossing_tint[selected_slot].xyz;
         }
     }
     }

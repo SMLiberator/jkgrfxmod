@@ -97,6 +97,48 @@ Special IR/override lighting, dynamic topology edits and models spanning
 more than four sectors still need manual testing. See the CI source
 wiring checks and the pure C++ native-memory staging tests.
 
+## Experimental per-vertex sector selection (A/B)
+
+The default sector-crossing mode continues to select the owning/candidate
+sector for **each fragment**, using the candidate's convex halfspace planes.
+To compare performance and visual transitions, enable both switches:
+
+```json
+{
+  "enable_sector_crossing_lighting": true,
+  "experimental_sector_crossing_vertex": true
+}
+```
+
+This second switch is off by default. It moves only the **sector selection**
+to the 3DO vertex shader. Per-vertex JK light and CMP/tint correction were
+already computed there: the experimental mode now picks one sector for each
+transformed model vertex and interpolates the selected, gamma-corrected RGB
+across the triangle. Its candidate test has the same owner-first bounding
+box, interior-box and maximum-96-plane rules as the fragment classifier,
+using the same GPU sector-plane texture buffer.
+
+For GPU per-pixel Thing lights, the already-selected CMP and sector tint
+are interpolated as vertex varyings so added dynamic light uses the same
+transition. No per-fragment sector-plane tests run when vertex mode is active;
+other per-fragment material, specular, point-light and normal-map work
+remains unchanged.
+
+**Tradeoff:** transitions can become smoother and reduce pixel work, but
+their visual width depends on 3DO triangle size. A large triangle with
+vertices all in one sector will not detect another sector passing through
+its interior; a triangle with vertices in different sectors blends lighting
+across its entire area. This is *not* exact per-pixel sector membership.
+Use fragment mode for comparison whenever large sparse meshes exhibit
+bleeding, delayed transitions, or incorrect CMP/tint at portals.
+
+HUDs, skyboxes, sprites, decals, single-sector Things, missing/invalid
+sector data, and the candidate budget behave as before. Vertex mode adds
+no extra texture bindings: the preexisting plane samplerBuffer remains
+on reserved unit 19, now read by the vertex stage. The mode is only active
+when crossing candidates are available. Compare frame times and visual
+results in the same doorway/vehicle scenes with the switch on and off.
+
 ## Implementation details and later improvements
 
 

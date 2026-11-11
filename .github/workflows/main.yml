@@ -176,11 +176,12 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sector_crossing.cpp /Fe:sector_crossing_test.exe
         sector_crossing_test.exe
-    - name: GPU sector-crossing native 3DO staging tests
+    - name: GPU sector-crossing native 3DO staging and vertex-mode contracts
       shell: cmd
       run: |
-        cl.exe /nologo /EHsc /std:c++17 /I. tests\sector_crossing_gpu.cpp /Fe:sector_crossing_gpu_test.exe
-        sector_crossing_gpu_test.exe
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sector_crossing_gpu.cpp /Fe:sector_crossing_gpu_test.exe || exit /b 1
+        sector_crossing_gpu_test.exe || exit /b 1
+        python3 tests/gpu_sector_crossing.py || exit /b 1
 
     - name: CPU world vertex ambient probe grid and native capture tests
       shell: cmd

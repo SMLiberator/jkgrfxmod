@@ -102,7 +102,8 @@ Compatibility: the former `experimental_spatial_blur_mode` JSON key is still par
 | `world_cache_fluid_debug_mode` | Fluid diagnostics for GPU-cached world materials (`0` is normal rendering). | `0` |
 | `enable_normal_mapped_diffuse` | Experimental mapped normals for added direct lighting on cached world and 3DO materials. | `false` |
 | `restore_cmp_lights` | Restore indexed fullbright MAT pixels on compatible GPU-cached rendering paths. | `false` |
-| `enable_sector_crossing_lighting` | Experimental per-fragment 3DO sector light/CMP/tint transitions. | `false` |
+| `enable_sector_crossing_lighting` | Experimental GPU-cached 3DO sector light/CMP/tint transitions. The default selects sectors per fragment; can optionally switch to per-vertex selection. | `false` |
+| `experimental_sector_crossing_vertex` | A/B experiment requiring `enable_sector_crossing_lighting=true`: select the candidate sector in the 3DO vertex shader and interpolate its lighting/CMP/tint across the triangle, skipping per-fragment sector plane checks. Usually cheaper for large screen-facing meshes, but wide triangles can create inaccurate soft transitions. `false` retains previous per-fragment behavior. | `false` |
 | `profile_renderer_verbose` | Enable detailed renderer diagnostics in addition to the regular performance counters. | `false` |
 
 <!-- No need to really have this, but I didn't want to remove it yet, in

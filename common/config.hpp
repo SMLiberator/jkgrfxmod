@@ -51,7 +51,8 @@ namespace jkgm {
         bool gpu_pixel_lighting = false; // opt-in pixel dynamic lighting for all cached world/3DO geometry; false=JK Gouraud
         bool enable_normal_mapped_diffuse = false; // experimental: mapped normals for GPU world/3DO added sun, spot and pixel point light
         bool restore_cmp_lights = false; // opt-in indexed textured MAT fullbright pixels; GeoMode 3 always retains native HW fullbright
-        bool enable_sector_crossing_lighting = false; // experimental per-fragment 3DO sector light/CMP/tint
+        bool enable_sector_crossing_lighting = false; // experimental 3DO sector light/CMP/tint
+        bool experimental_sector_crossing_vertex = false; // A/B: vertex instead of fragment sector selection
         bool experimental_world_vertex_ambient = false; // opt-in CPU world-vertex probe ambient for cached 3DOs
         float experimental_world_vertex_ambient_radius = 1.0f; // JK world units, 0.25..4
         bool enable_ssao = true;

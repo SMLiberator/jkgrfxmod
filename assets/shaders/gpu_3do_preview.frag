@@ -83,6 +83,7 @@ in vec3 local_fragment_normal;
 // Available for cached 3DOs only. Sector plane tests use a GL 3.3
 // RGBA32F texture buffer rather than consuming huge GLSL uniform arrays.
 uniform int sector_crossing_count;
+uniform int sector_crossing_per_vertex; // selects and blends color in vertex stage
 uniform samplerBuffer sector_crossing_planes;
 uniform vec3 sector_crossing_camera_origin;
 uniform vec4 sector_crossing_info[4]; // ambient, plane offset, plane count, interior flag
@@ -93,6 +94,8 @@ uniform vec4 sector_crossing_inner_max[4];
 uniform vec4 sector_crossing_cmp[4];
 uniform vec4 sector_crossing_tint[4];
 in vec3 sector_crossing_lit[4];
+in vec3 sector_vertex_cmp;
+in vec3 sector_vertex_tint;
 int sector_crossing_slot=0;
 
 int select_sector_crossing_slot()
@@ -144,13 +147,17 @@ int select_sector_crossing_slot()
 // brightness. Gouraud/static shading itself stays in the vertex shader.
 vec3 pixel_jk_color_at_brightness(float bright)
 {
+    vec3 effective_cmp=sector_crossing_count>1
+        ? (sector_crossing_per_vertex!=0
+            ? sector_vertex_cmp
+            : sector_crossing_cmp[sector_crossing_slot].xyz)
+        : colormap_tint;
     vec3 result=vec3(pow(max(bright,0.0),1.8)) *
-                pixel_light_vertex_rgb *
-                (sector_crossing_count>1
-                    ? sector_crossing_cmp[sector_crossing_slot].xyz
-                    : colormap_tint);
+                pixel_light_vertex_rgb * effective_cmp;
     vec3 sector_tint=sector_crossing_count>1
-        ? sector_crossing_tint[sector_crossing_slot].xyz
+        ? (sector_crossing_per_vertex!=0
+            ? sector_vertex_tint
+            : sector_crossing_tint[sector_crossing_slot].xyz)
         : thing_sector_tint_delta;
     if(jk_color_filter.w>0.5 ||
        any(greaterThan(abs(sector_tint),vec3(0.00001)))) {
@@ -175,7 +182,7 @@ vec3 pixel_jk_diffuse_lighting(vec3 mapped_diffuse_normal)
 {
     float mode=pixel_light_state.z>3.5 ? 1.0 :
                min(pixel_light_state.z,effective_light_mode);
-    vec3 baked=sector_crossing_count>1
+    vec3 baked=sector_crossing_count>1 && sector_crossing_per_vertex==0
         ? sector_crossing_lit[sector_crossing_slot] : jk_lit_rgb;
     if(mode<1.5 || num_lights==0) return baked;
 
@@ -740,12 +747,15 @@ void main() {
     env_reflection*=1.0-fullbright;
     // Metal suppresses diffuse only when its environment contribution
     // actually exists; follows the native replacement shader.
-    sector_crossing_slot=sector_crossing_count>1
+    // The vertex experiment has already selected and interpolated JK color.
+    // Avoid all per-fragment sector bounds/plane traversal in that mode.
+    sector_crossing_slot=sector_crossing_count>1 &&
+                         sector_crossing_per_vertex==0
         ? select_sector_crossing_slot() : 0;
     vec3 jk_fragment_lit=mix(
         pixel_dynamic_lighting!=0
           ? pixel_jk_diffuse_lighting(diffuse_local_normal) :
-          (sector_crossing_count>1
+          (sector_crossing_count>1 && sector_crossing_per_vertex==0
              ? sector_crossing_lit[sector_crossing_slot] : jk_lit_rgb),
         vec3(1.0),fullbright);
     vec3 lit_rgb=albedo.rgb*jk_fragment_lit*(1.0-env_metalness);

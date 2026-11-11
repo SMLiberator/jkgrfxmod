@@ -17,6 +17,8 @@ vertex=read("assets/shaders/gpu_3do_preview.vert")
 fragment=read("assets/shaders/gpu_3do_preview.frag")
 api=read("renderer/shaders.cpp")
 assert "bool enable_sector_crossing_lighting = false;" in config
+assert "bool experimental_sector_crossing_vertex = false;" in config
+assert 'j.contains("experimental_sector_crossing_vertex")' in parser
 assert 'j.contains("enable_sector_crossing_lighting")' in parser
 assert "if(the_config->enable_sector_crossing_lighting)" in main
 assert "active_native_model_sector_id_valid" in main
@@ -32,7 +34,7 @@ assert "sector_crossing_stage_instance(" in render
 assert "stage_sector_crossing();" in render
 assert "reset_sector_crossing();" in render
 assert "prog.set_sector_crossing(inst.crossing_lighting.get()," in render
-assert "prog.set_sector_crossing(nullptr,false,false);" in render
+assert "prog.set_sector_crossing(nullptr,false,false,false);" in render
 assert "if(!the_config->enable_sector_crossing_lighting)" in render
 # The condition now also excludes skyboxes and projected sprites/decals.
 assert "crossing_buffer_ready && allow_sector_effects &&" in render
@@ -64,12 +66,25 @@ assert render.count("gpu_3do_sector_plane_texture_unit")>=3
 assert render.count("glActiveTexture(GL_TEXTURE0+\n")>=2
 assert "fragment_units<=gpu_3do_sector_plane_texture_unit" in render
 assert "glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);" in render
-assert "prog.set_sector_crossing(nullptr,false,false);" in render
+assert "prog.set_sector_crossing(nullptr,false,false,false);" in render
 assert "sector_crossing_lit[4]" in vertex
 assert "sector_crossing_lit[4]" in fragment
 assert "if(sector_crossing_count>1)" in vertex
 assert "if(i==0) {sector_crossing_lit[i]=jk_lit_rgb;continue;}" in vertex
 assert "select_sector_crossing_slot()" in fragment
+assert "select_sector_crossing_vertex(vec3 view_position)" in vertex
+assert "texelFetch(sector_crossing_planes,begin_plane+j)" in vertex
+assert "sector_crossing_per_vertex!=0 && i!=selected_slot" in vertex
+assert "jk_lit_rgb=sector_crossing_lit[selected_slot]" in vertex
+assert "sector_vertex_cmp=sector_crossing_cmp[selected_slot].xyz" in vertex
+assert "sector_vertex_tint=sector_crossing_tint[selected_slot].xyz" in vertex
+assert "in vec3 sector_vertex_cmp;" in fragment
+assert "in vec3 sector_vertex_tint;" in fragment
+assert "sector_crossing_per_vertex==0" in fragment
+assert "experimental_sector_crossing_vertex" in render
+assert "gl::set_uniform_integer(sector_crossing_per_vertex," in setter
+assert "gl::set_uniform_integer(sector_crossing_count,count);" in setter
+assert "count>1 && per_vertex ? 1 : 0" in setter
 assert "texelFetch(sector_crossing_planes,begin_plane+j)" in fragment
 assert "sector_crossing_count>1" in fragment
 assert "pixel_jk_diffuse_lighting(diffuse_local_normal)" in fragment
