@@ -20,7 +20,7 @@ def expand(name,visited=frozenset()):
         lambda m:expand(m.group(1),visited|{name}),s)
 def validate(name,mapping,source):
     decl=defaultdict(set)
-    for kind,names in re.findall(r"\buniform\s+(sampler\w+)\s+([^;]+);",source):
+    for kind,names in re.findall(r"\buniform\s+([iu]?sampler\w+)\s+([^;]+);",source):
         for namepart in names.split(","):
             m=re.fullmatch(r"\s*([A-Za-z_]\w*)\s*(?:\[[^\]]+\])?\s*",namepart)
             assert m,(name,namepart)
