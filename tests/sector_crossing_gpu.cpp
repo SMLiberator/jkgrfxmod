@@ -113,6 +113,10 @@ int main()
     auto noTint=sector_crossing_stage_instance(
         snapshot,ranges,instance,read,false);
     assert(noTint && noTint->sectors[1].sector_tint[0]==0.0f);
+    // A neighbor's broad AABB can overlap the owner's interior even when
+    // its actual collision half-space starts at X=0. This is the exact
+    // false-positive source of multi-sector shader work under test.
+    snapshot.sectors[1].bounds_min[0]=-8.0f;
     // A fully owned model is still staged in the baseline A/B path,
     // but opt-in owner containment skips the multi-sector shader entirely.
     sector_crossing_stage_stats owner_stats{};
@@ -184,6 +188,7 @@ int main()
         snapshot.sectors[0],instance,test_center,std::sqrt(3.0f))==
         sector_crossing_owner_proof::none);
     snapshot.sectors[0].planes[0]=saved_plane;
+    snapshot.sectors[1].bounds_min[0]=0.0f;
     // Author-limited sector components contribute separately. Crossing
     // may legitimately exceed the single-source cap after combining them.
     setFloat(snapshot.sectors[1].native_sector+0x04U,3.5f);
