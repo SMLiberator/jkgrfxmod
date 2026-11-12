@@ -43,8 +43,18 @@ inline planar_reflection_render_setup make_planar_reflection_render_setup(
         float(sign*w)
     }};
     for(float v:out.clip_view)if(!std::isfinite(v))return {};
-    out.width=std::max(1,int(std::ceil(double(display_width)*scale)));
-    out.height=std::max(1,int(std::ceil(double(display_height)*scale)));
+    // A decimal JSON scale such as 0.2 becomes a slightly larger float.
+    // Without snapping, ceil(1920 * 0.2f) erroneously returns 385.
+    // Snap only tiny float-representation errors around an integer pixel.
+    auto dimension=[&](int n) {
+        double scaled=double(n)*double(scale);
+        double nearest=std::round(scaled);
+        if(std::fabs(scaled-nearest)<std::max(1.e-5,scaled*1.e-7))
+            scaled=nearest;
+        return std::max(1,int(std::ceil(scaled)));
+    };
+    out.width=dimension(display_width);
+    out.height=dimension(display_height);
     out.valid=true;
     return out;
 }
