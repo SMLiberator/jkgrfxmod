@@ -35,6 +35,15 @@ uniform int normal_mapped_diffuse; // opt-in added lights, not baked JK RGB
 uniform vec2 normal_specular_scroll,normal_specular_scroll2;
 uniform vec3 camera_world_origin,camera_right_axis;
 uniform vec3 camera_forward_axis,camera_up_axis;
+// Single opt-in, same-frame planar capture, bound only during world draws.
+// RGBA alpha marks actually reflected geometry; unfilled sky pixels fall
+// through to the legacy EnvMap when one is configured.
+uniform sampler2D planar_reflection_map;
+uniform int planar_reflection_ready;
+uniform vec4 planar_receiver_plane;
+uniform vec3 planar_camera_origin,planar_camera_right,planar_camera_forward;
+uniform vec3 planar_camera_up;
+uniform vec2 planar_tan_half_fov;
 uniform vec4 material_tint;
 uniform int solid_color; // GeoMode 3: native MAT/CMP RGB, no texture sampling
 uniform int solid_fullbright; // CMP index unchanged across the 64 light levels
@@ -105,19 +114,49 @@ vec3 world_mapped_normal(vec2 uv)
                      normalize(vec3(slope,1.0)));
 }
 
-// Match GPU-cached 3DO Fresnel, equirectangular/matcap UV, roughness LOD,
-// metalness and global/per-MAT environment transitions.
+// A pixel can use this capture only if it lies on the selected world
+// reflection plane. One captured MAT may be shared by non-coplanar faces.
+// Pixel-space reflected camera projection is independent of texture UVs.
+vec4 world_planar_reflection(vec3 mapped_normal)
+{
+    if(planar_reflection_ready==0)return vec4(0.0);
+    vec3 const_geom=normalize(cached_world_normal);
+    if(abs(dot(const_geom,planar_receiver_plane.xyz))<0.999 ||
+       abs(dot(cached_world_position,planar_receiver_plane.xyz)-
+           planar_receiver_plane.w)>
+               max(0.02,abs(planar_receiver_plane.w)*0.000002))
+        return vec4(0.0);
+    vec3 d=cached_world_position-planar_camera_origin;
+    float z=dot(d,planar_camera_forward);
+    if(z<=0.001)return vec4(0.0);
+    vec2 uv=0.5+0.5*vec2(
+        dot(d,planar_camera_right),
+        dot(d,planar_camera_up))/
+        (z*max(planar_tan_half_fov,vec2(0.0001)));
+    // Small, cheap perturbation from existing water normal maps. Reflective
+    // geometry still uses a stable planar projection when maps are absent.
+    vec3 bump=mapped_normal-const_geom;
+    uv+=vec2(dot(bump,planar_camera_right),
+             dot(bump,planar_camera_up))*0.015;
+    if(any(lessThan(uv,vec2(0.0))) ||
+       any(greaterThan(uv,vec2(1.0))))return vec4(0.0);
+    return texture(planar_reflection_map,uv);
+}
+
+// Reuse the existing strength/roughness/metalness/Fresnel law for captured
+// geometry. Sky/uncaptured pixels retain optional equirectangular EnvMap.
 vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
 {
     metalness=0.0;
-    if((environment_info.x<0.5 && environment_info.z<0.5) ||
-       specular_params.x<=0.0)return vec3(0.0);
+    int mode=int(environment_info.y+0.5);
+    bool has_env=environment_info.x>0.5 || environment_info.z>0.5;
+    bool has_planar=mode==4 && planar_reflection_ready!=0;
+    if((!has_env && !has_planar) || specular_params.x<=0.0)
+        return vec3(0.0);
     vec3 surf=specular_params.w>0.5?texture(surface_map,uv).rgb:vec3(1.0);
     float strength=max(specular_params.x*surf.r,0.0);
     if(strength<=0.0)return vec3(0.0);
     float roughness=clamp(specular_params.y*surf.g,0.0,1.0);
-    metalness=clamp(specular_params.z*surf.b,0.0,1.0)*
-              mix(environment_info.x,environment_info.z,environment_info.w);
     vec3 nw=world_mapped_normal(uv);
     vec3 vw=normalize(cached_world_position-camera_world_origin);
     vec3 n=normalize(vec3(dot(nw,camera_right_axis),
@@ -126,27 +165,36 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
                           dot(vw,camera_up_axis),dot(vw,camera_forward_axis)));
     if(dot(n,v)>0.0)n=-n;
     vec3 reflection=reflect(v,n);
-    int mode=int(environment_info.y+0.5);
-    vec3 dir=reflection;
-    if(mode<=1 || mode==4) {
-        vec3 world=camera_right_axis*reflection.x+
-                   camera_forward_axis*reflection.z+
-                   camera_up_axis*reflection.y;
-        dir=vec3(world.x,world.z,world.y);
+    vec4 planar=has_planar?world_planar_reflection(nw):vec4(0.0);
+    vec3 env=vec3(0.0);
+    if(has_env && planar.a<0.999) {
+        vec3 dir=reflection;
+        if(mode<=1 || mode==4) {
+            vec3 world=camera_right_axis*reflection.x+
+                       camera_forward_axis*reflection.z+
+                       camera_up_axis*reflection.y;
+            dir=vec3(world.x,world.z,world.y);
+        }
+        vec2 env_uv=mode==3
+            ?clamp(vec2(0.5+0.5*n.x,0.5-0.5*n.y),
+                   vec2(0.001),vec2(0.999))
+            :vec2(fract(atan(dir.x,dir.z)/6.28318530718+0.5),
+                  0.5-asin(clamp(dir.y,-1.0,1.0))/3.14159265359);
+        ivec2 dims=environment_info.x>0.5?
+            textureSize(env_map,0):textureSize(env_map2,0);
+        float lod=roughness*log2(max(float(max(dims.x,dims.y)),1.0));
+        vec3 env_from=vec3(0.0),env_to=vec3(0.0);
+        if(environment_info.x>0.5 && environment_info.w<1.0)
+            env_from=textureLod(env_map,env_uv,lod).rgb;
+        if(environment_info.z>0.5 && environment_info.w>0.0)
+            env_to=textureLod(env_map2,env_uv,lod).rgb;
+        env=mix(env_from,env_to,environment_info.w);
     }
-    vec2 env_uv=mode==3
-        ?clamp(vec2(0.5+0.5*n.x,0.5-0.5*n.y),vec2(0.001),vec2(0.999))
-        :vec2(fract(atan(dir.x,dir.z)/6.28318530718+0.5),
-              0.5-asin(clamp(dir.y,-1.0,1.0))/3.14159265359);
-    ivec2 dims=environment_info.x>0.5?
-        textureSize(env_map,0):textureSize(env_map2,0);
-    float lod=roughness*log2(max(float(max(dims.x,dims.y)),1.0));
-    vec3 env_from=vec3(0.0),env_to=vec3(0.0);
-    if(environment_info.x>0.5 && environment_info.w<1.0)
-        env_from=textureLod(env_map,env_uv,lod).rgb;
-    if(environment_info.z>0.5 && environment_info.w>0.0)
-        env_to=textureLod(env_map2,env_uv,lod).rgb;
-    vec3 env=mix(env_from,env_to,environment_info.w);
+    env=mix(env,planar.rgb,planar.a);
+    float source_coverage=max(
+        mix(environment_info.x,environment_info.z,environment_info.w),
+        planar.a);
+    metalness=clamp(specular_params.z*surf.b,0.0,1.0)*source_coverage;
     vec3 f0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
     float cos_theta=clamp(dot(n,-v),0.0,1.0);
     vec3 fresnel=f0+(vec3(1.0)-f0)*pow(1.0-cos_theta,5.0);
