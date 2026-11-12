@@ -87,6 +87,7 @@ class planar_reflection_gl_scope {
     GLint depth_func_=GL_LESS,blend_src_rgb_=GL_ONE,blend_dst_rgb_=GL_ZERO;
     GLint blend_src_alpha_=GL_ONE,blend_dst_alpha_=GL_ZERO;
     GLboolean depth_mask_=GL_TRUE,color_mask_[4]{};
+    GLfloat clear_color_[4]{};
     GLboolean blend_=GL_FALSE,depth_test_=GL_FALSE,cull_test_=GL_FALSE;
     GLboolean scissor_=GL_FALSE,framebuffer_srgb_=GL_FALSE;
     GLboolean polygon_offset_=GL_FALSE;
@@ -110,6 +111,7 @@ public:
         glGetIntegerv(GL_BLEND_DST_ALPHA,&blend_dst_alpha_);
         glGetBooleanv(GL_DEPTH_WRITEMASK,&depth_mask_);
         glGetBooleanv(GL_COLOR_WRITEMASK,color_mask_);
+        glGetFloatv(GL_COLOR_CLEAR_VALUE,clear_color_);
         blend_=glIsEnabled(GL_BLEND);
         depth_test_=glIsEnabled(GL_DEPTH_TEST);
         cull_test_=glIsEnabled(GL_CULL_FACE);
@@ -135,6 +137,8 @@ public:
         glBlendFuncSeparate(GLenum(blend_src_rgb_),GLenum(blend_dst_rgb_),
                             GLenum(blend_src_alpha_),GLenum(blend_dst_alpha_));
         glDepthMask(depth_mask_);
+        glClearColor(clear_color_[0],clear_color_[1],
+                     clear_color_[2],clear_color_[3]);
         glColorMask(color_mask_[0],color_mask_[1],
                     color_mask_[2],color_mask_[3]);
         auto restore=[](GLenum capability,GLboolean enabled) {
