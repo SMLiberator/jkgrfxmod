@@ -88,7 +88,13 @@ Turn `planar_reflection_debug_view` off to keep the normal picture.
 
 The first version chooses one planar-material world surface, preferring
 the nearest plane; without an explicit planar MAT it can choose a world Fluid
-surface for water diagnostics. No arbitrary fallback plane is fabricated.
+surface for water diagnostics. A passable-adjoin surface is an eligible
+reflection RECEIVER when its material is planar or Fluid, even though such
+portal geometry is excluded from the mirrored SCENE render. This matters for
+water boundaries authored as traversable sector adjoins. The selector logs
+`planar_matches`, `fluid_matches`, and `passable_reflection_receivers` to
+diagnose whether eligible planes were found. No arbitrary fallback plane is
+fabricated.
 It uses all cached world-sector geometry rather than the main camera's portal
 candidate list, draws the animated 3DO nodes from up to 128 nearest native
 Thing owners (with primary GPU nodes as fallback), and excludes sky, HUD,
