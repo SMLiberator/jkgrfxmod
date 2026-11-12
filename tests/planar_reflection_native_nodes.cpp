@@ -32,7 +32,9 @@ int main()
     put(thing+0x0cU,uint32_t(2U)); // Ordinary SithThing.
     put(thing+0x74U,uint32_t(23U));
     gpu_3do_matrix34 const identity{{1,0,0,0,1,0,0,0,1,0,0,0}};
-    for(size_t i=0;i<9;++i)put(thing+0x88U+i*4U,identity[i]);
+    // resolve_native_thing_node checks the full 48-byte orientation block
+    // before replacing its translation with SithThing.position (+0xb8).
+    for(size_t i=0;i<12;++i)put(thing+0x88U+i*4U,identity[i]);
     for(size_t i=0;i<3;++i)put(thing+0xb8U+i*4U,identity[9+i]);
     put(rd,uint32_t(1U));
     put(rd+4U,uint32_t(model));
