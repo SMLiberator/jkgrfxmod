@@ -24,6 +24,7 @@ assert "source.world_transform" in loader
 assert "instance.shadow_owner=source.owner" in loader
 assert 'experimental_planar_thing_discovery &&' in renderer
 assert "sample_budget=16U" in renderer
+assert "size_t const remaining=scan.models.size();" in renderer
 assert "acquire_planar_reflection_offscreen_gpu(" in renderer
 assert "NOTE=offscreen_acquisition_only_no_capture_yet" in renderer
 for project in ("renderer/renderer.vcxproj","renderer/renderer.vcxproj.filters"):
