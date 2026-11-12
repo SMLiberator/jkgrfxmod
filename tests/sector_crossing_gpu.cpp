@@ -121,6 +121,7 @@ int main()
         snapshot,ranges,instance,read,true,0U,false,false,&owner_stats);
     assert(owner_baseline && owner_baseline->count==2);
     assert(owner_stats.proof_sphere==1U && owner_stats.owner_culled==0U);
+    assert(owner_stats.proof_multisector_baseline==1U);
     auto owner_fast=sector_crossing_stage_instance(
         snapshot,ranges,instance,read,true,0U,false,true,&owner_stats);
     assert(!owner_fast && owner_stats.owner_culled==1U);
