@@ -10252,7 +10252,7 @@ namespace jkgm {
             planar_plane_from_material=false;
             float best_distance=std::numeric_limits<float>::infinity();
             int best_priority=-1;
-            std::unordered_map<uintptr_t,gpu_3do_texture> mats;
+            std::map<std::pair<uintptr_t,int32_t>,gpu_3do_texture> mats;
             for(auto const &surface:cache.mesh.surfaces) {
                 if(surface.count<3U || surface.passable_adjoin ||
                    (surface.surface_flags&0x600U)!=0U ||
@@ -10268,12 +10268,13 @@ namespace jkgm {
                 if(!(std::isfinite(len) && len>1.e-5f))continue;
                 // A MAT is often shared by hundreds of water polygons.
                 // Material identity is independent of the individual plane.
-                auto it=mats.find(surface.material);
+                auto const mat_key=std::make_pair(surface.material,surface.cel);
+                auto it=mats.find(mat_key);
                 if(it==mats.end()) {
                     gpu_3do_group group{};
                     group.material=surface.material;
                     group.cel=surface.cel;
-                    it=mats.emplace(surface.material,
+                    it=mats.emplace(mat_key,
                         resolve_gpu_3do_material(group)).first;
                 }
                 auto const &mat=it->second;
