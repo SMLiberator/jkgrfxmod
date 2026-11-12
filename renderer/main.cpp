@@ -12,6 +12,8 @@
 #include "native_sprite_profile.hpp"
 #include "native_particle_texture.hpp"
 #include "gpu_3do_preview.hpp"
+#include "planar_reflection_native_nodes.hpp"
+#include "planar_reflection_offscreen_gpu.hpp"
 #include "light_intensity_range.hpp"
 #include "gpu_polyline.hpp"
 #include "saber_trail_history.hpp"
@@ -2334,6 +2336,170 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     if(the_config->profile_renderer) ++gpu_native_stats.queued;
     return !shadow_only;
 }
+// Read-only offscreen 3DO geometry acquisition, completely independent of
+// native rdModel3_Draw traversal and the main camera's portal visibility.
+// Invoked only by an opt-in planar diagnostic until capture is wired up.
+// Each matching hierarchy pose comes from the EXISTING native joint accessor.
+jkgm::planar_reflection_offscreen_gpu
+jkgm::acquire_planar_reflection_offscreen_gpu(
+    std::vector<planar_reflection_model_thing> const &candidates,
+    size_t max_things)
+{
+    planar_reflection_offscreen_gpu out{};
+    if(!the_config || !the_config->use_gpu_cache ||
+       !engine_material_debug::matches_tested_executable() ||
+       max_things==0U)return out;
+    auto const read=[](uintptr_t at,void *dst,size_t bytes)->bool {
+        if(!thing_node_valid_address(at,bytes) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(at),bytes))
+            return false;
+        std::memcpy(dst,reinterpret_cast<void const *>(at),bytes);
+        return true;
+    };
+    // The animation accessor updates rdThing's cached matrices, but does
+    // not submit geometry, touch the live rdCamera or change GL state.
+    using node_matrix_fn=int(__cdecl *)(void *,float const *,unsigned,float *);
+    auto const accessor=reinterpret_cast<node_matrix_fn>(
+        jkgm_node_matrix_address);
+    auto const refresh=[&](uintptr_t rdthing,
+                           gpu_3do_matrix34 const &root,
+                           gpu_3do_matrix34 &first)->bool {
+        return accessor(reinterpret_cast<void *>(rdthing),
+                        root.data(),0U,first.data())!=0;
+    };
+    static bool const rgb_extension=[] {
+        constexpr uintptr_t code=0x009001C0U;
+        constexpr uint8_t prefix[]={0xc7,0x43,0x6c,0,0,0,0};
+        return gpu_span_readable(reinterpret_cast<void const *>(code),
+                                 sizeof(prefix)) &&
+               std::memcmp(reinterpret_cast<void const *>(code),prefix,
+                           sizeof(prefix))==0;
+    }();
+    std::vector<planar_reflection_native_node> native_nodes;
+    for(size_t i=0;i<candidates.size() && i<max_things;++i) {
+        auto const &thing=candidates[i];
+        ++out.stats.considered;
+        if(!collect_planar_reflection_native_nodes(
+               read,thing,refresh,native_nodes)) {
+            ++out.stats.pose_failures;
+            continue;
+        }
+        ++out.stats.posed_things;
+        out.stats.native_mesh_nodes+=native_nodes.size();
+        uint32_t flags=0;
+        if(!read(thing.thing,&flags,4U)) {
+            ++out.stats.pose_failures;
+            continue;
+        }
+        for(auto const &source:native_nodes) {
+            if(!gpu_span_readable(reinterpret_cast<void const *>(source.mesh),
+                                  rgb_extension?0x70U:sizeof(native_mesh))) {
+                ++out.stats.empty_or_invalid_meshes;
+                continue;
+            }
+            native_mesh mesh{};
+            std::memcpy(&mesh,reinterpret_cast<void const *>(source.mesh),
+                        sizeof(mesh));
+            if(mesh.num_faces<=0 || mesh.num_vertices<3 ||
+               !gpu_3do_supports_geo_mode(4,mesh.geometry_mode) ||
+               !gpu_3do_geo_mode_draws_filled(4,mesh.geometry_mode)) {
+                ++out.stats.empty_or_invalid_meshes;
+                continue;
+            }
+            float const *rgb=nullptr;
+            if(rgb_extension)
+                std::memcpy(&rgb,reinterpret_cast<uint8_t const *>(
+                    source.mesh)+0x6cU,sizeof(rgb));
+            uint64_t signature=0;
+            if(!gpu_mesh_source_signature(
+                   mesh,rgb,signature,nullptr)) {
+                ++out.stats.empty_or_invalid_meshes;
+                continue;
+            }
+            void const *const key=reinterpret_cast<void const *>(source.mesh);
+            auto it=gpu_mesh_cache.find(key);
+            bool const same=it!=gpu_mesh_cache.end() &&
+                it->second.vertices==mesh.vertices &&
+                it->second.faces==mesh.faces &&
+                it->second.rgb==rgb &&
+                it->second.uvs==mesh.uvs &&
+                it->second.normals==mesh.normals &&
+                it->second.vertex_lights==mesh.vertex_lights &&
+                it->second.num_vertices==mesh.num_vertices &&
+                it->second.num_faces==mesh.num_faces &&
+                it->second.num_uvs==mesh.num_uvs &&
+                it->second.lighting_mode==mesh.lighting_mode &&
+                it->second.source_signature==signature &&
+                it->second.geometry!=nullptr;
+            if(!same) {
+                // The shared cache is also used by JK's ordinary 3DO hook.
+                // Preserve its usual revision checks and bounded growth.
+                if(it==gpu_mesh_cache.end() &&
+                   gpu_mesh_cache.size()>=4096U) {
+                    ++out.stats.empty_or_invalid_meshes;
+                    continue;
+                }
+                char const *failure=nullptr;
+                auto geometry=snapshot_gpu_mesh(mesh,rgb,&failure);
+                if(!geometry) {
+                    ++out.stats.empty_or_invalid_meshes;
+                    continue;
+                }
+                cached_gpu_mesh entry{};
+                entry.vertices=mesh.vertices;
+                entry.faces=mesh.faces;
+                entry.rgb=rgb;
+                entry.uvs=mesh.uvs;
+                entry.normals=mesh.normals;
+                entry.vertex_lights=mesh.vertex_lights;
+                entry.num_vertices=mesh.num_vertices;
+                entry.num_faces=mesh.num_faces;
+                entry.num_uvs=mesh.num_uvs;
+                entry.lighting_mode=mesh.lighting_mode;
+                entry.source_signature=signature;
+                entry.source_checked_frame=gpu_frame_serial;
+                entry.source_checked_generation=mesh_revision::current();
+                entry.id=next_gpu_id++;
+                entry.geometry=std::move(geometry);
+                gpu_mesh_cache[key]=std::move(entry);
+                it=gpu_mesh_cache.find(key);
+                ++out.stats.new_gpu_snapshots;
+            } else ++out.stats.reused_gpu_meshes;
+            if(it==gpu_mesh_cache.end() || !it->second.geometry ||
+               it->second.geometry->groups.empty())
+                continue;
+            bool const solid=gpu_3do_effective_geo_mode(
+                4,mesh.geometry_mode)==3;
+            // Request native MAT warm-up through the existing safe queue.
+            // Never upload texture memory from inside the offscreen probe.
+            if(!gpu_mesh_materials_ready(*it->second.geometry,solid)) {
+                ++out.stats.material_unready;
+                continue;
+            }
+            gpu_3do_instance instance{};
+            instance.id=it->second.id;
+            instance.geometry=it->second.geometry;
+            instance.transform=source.world_transform;
+            instance.shadow_owner=source.owner;
+            instance.owning_thing_world_position=thing.position;
+            instance.owning_thing_world_position_valid=true;
+            instance.effective_geometry_mode=static_cast<uint32_t>(
+                gpu_3do_effective_geo_mode(4,mesh.geometry_mode));
+            instance.skybox_vertex_lighting=thing_uses_skybox_vertex_lights(
+                flags,false);
+            instance.world_lighting_exempt=instance.skybox_vertex_lighting;
+            instance.casts_sun_shadows=false;
+            // Simplified lighting only; this array is NOT inserted into the
+            // normal gameplay frame, spotlight or sun shadow map.
+            instance.ambient=1.0f;
+            instance.num_lights=0;
+            out.nodes.emplace_back(std::move(instance));
+            ++out.stats.ready_nodes;
+        }
+    }
+    return out;
+}
+
 jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
 {
     auto const sample=gpu_native_stats;
