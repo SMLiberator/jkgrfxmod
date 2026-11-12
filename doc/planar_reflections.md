@@ -153,9 +153,16 @@ Even at `planar_reflection_resolution_scale: 0.125`, the secondary
 camera still visits native Thing lists and can refresh up to 128 Thing
 hierarchies every frame. Its cost is not proportional to rendered pixels.
 Frustum and multi-draw improvements reduce world/model submissions but
-do not yet eliminate this expensive acquisition path. Profile a large
-scene before/after and use the reported stage times to decide whether
-pose reuse, source caching, capture update cadence or 3DO LOD bias is next.
+do not yet eliminate the expensive native hierarchy/pose acquisition path.
+The offscreen path now shares the ordinary 3DO mesh-revision fast path,
+hashing full source arrays only when their revision changes or a periodic
+32-frame audit is due (or once per frame if mutation tracking is disabled).
+`source_hashes`, `source_hash_skips`, `source_new_snapshots` and
+`source_untracked_changes` reveal whether it is working. A detected
+untracked modification disables the fast path. This avoids redundant
+geometry hashing, **not** hierarchy pose refreshes; subsequent optimization
+should target independent model frustum rejection and pose traversal,
+followed by capture cadence and selective LOD bias.
 
 ## Capture contract
 

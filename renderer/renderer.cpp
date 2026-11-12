@@ -10814,6 +10814,11 @@ namespace jkgm {
                          " late_hidden_things=",
                          offscreen.stats.excluded_by_flags_or_geomode,
                          " acquired_3do_nodes=",offscreen.stats.ready_nodes,
+                         " source_hashes=",offscreen.stats.source_hashes,
+                         " source_hash_skips=",offscreen.stats.source_hash_skips,
+                         " source_untracked_changes=",
+                         offscreen.stats.untracked_source_changes,
+                         " source_new_snapshots=",offscreen.stats.new_gpu_snapshots,
                          " incomplete_3do_things=",offscreen.stats.incomplete_things,
                          " ms_cpu=",float(us)/1000.0f,
                          " NOTE=planar_world_material_sampling_no_sky_yet");

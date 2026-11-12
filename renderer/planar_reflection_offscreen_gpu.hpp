@@ -14,6 +14,8 @@ namespace jkgm {
         size_t excluded_by_flags_or_geomode=0;
         size_t native_mesh_nodes=0,empty_or_invalid_meshes=0;
         size_t reused_gpu_meshes=0,new_gpu_snapshots=0;
+        size_t source_hashes=0,source_hash_skips=0;
+        size_t untracked_source_changes=0;
         size_t material_unready=0,incomplete_things=0,ready_nodes=0;
     };
     struct planar_reflection_offscreen_gpu {

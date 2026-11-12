@@ -2432,16 +2432,14 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
             if(rgb_extension)
                 std::memcpy(&rgb,reinterpret_cast<uint8_t const *>(
                     source.mesh)+0x6cU,sizeof(rgb));
-            uint64_t signature=0;
-            if(!gpu_mesh_source_signature(
-                   mesh,rgb,signature,nullptr)) {
-                ++out.stats.empty_or_invalid_meshes;
-                incomplete=true;
-                continue;
-            }
             void const *const key=reinterpret_cast<void const *>(source.mesh);
             auto it=gpu_mesh_cache.find(key);
-            bool const same=it!=gpu_mesh_cache.end() &&
+            // Exactly the ordinary GPU 3DO source-validation policy: compare
+            // native header fields on every encounter, but hash vertex/UV/
+            // face arrays only on revision changes and every 32nd audit
+            // frame. Without native mutation hooks, hash once per frame.
+            // Offscreen and primary-camera 3DOs share the SAME cache.
+            bool const header_unchanged=it!=gpu_mesh_cache.end() &&
                 it->second.vertices==mesh.vertices &&
                 it->second.faces==mesh.faces &&
                 it->second.rgb==rgb &&
@@ -2451,9 +2449,45 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 it->second.num_vertices==mesh.num_vertices &&
                 it->second.num_faces==mesh.num_faces &&
                 it->second.num_uvs==mesh.num_uvs &&
-                it->second.lighting_mode==mesh.lighting_mode &&
-                it->second.source_signature==signature &&
+                it->second.lighting_mode==mesh.lighting_mode;
+            bool const revision_fastpath=mesh_revision::active();
+            uint64_t const generation=mesh_revision::current();
+            bool const audit_frame=(gpu_frame_serial%32U)==0U;
+            bool const cached_geometry_ready=header_unchanged &&
                 it->second.geometry!=nullptr;
+            bool const should_hash=!cached_geometry_ready ||
+                (revision_fastpath
+                 ? (it->second.source_checked_generation!=generation ||
+                    (audit_frame &&
+                     it->second.last_audit_frame!=gpu_frame_serial))
+                 : it->second.source_checked_frame!=gpu_frame_serial);
+            uint64_t signature=it!=gpu_mesh_cache.end()
+                ?it->second.source_signature:0U;
+            if(should_hash) {
+                ++out.stats.source_hashes;
+                if(!gpu_mesh_source_signature(
+                       mesh,rgb,signature,nullptr)) {
+                    ++out.stats.empty_or_invalid_meshes;
+                    incomplete=true;
+                    continue;
+                }
+                if(revision_fastpath && audit_frame &&
+                   cached_geometry_ready &&
+                   it->second.source_checked_generation==generation &&
+                   it->second.source_signature!=signature) {
+                    // A COG/binary mutation escaped tracked JK.dll verbs:
+                    // use the standard fallback to per-frame hashing.
+                    mesh_revision::report_untracked();
+                    ++out.stats.untracked_source_changes;
+                }
+            } else ++out.stats.source_hash_skips;
+            bool const same=cached_geometry_ready &&
+                it->second.source_signature==signature;
+            if(same && should_hash) {
+                it->second.source_checked_frame=gpu_frame_serial;
+                it->second.source_checked_generation=generation;
+                if(audit_frame)it->second.last_audit_frame=gpu_frame_serial;
+            }
             if(!same) {
                 // The shared cache is also used by JK's ordinary 3DO hook.
                 // Preserve its usual revision checks and bounded growth.
@@ -2484,6 +2518,7 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 entry.source_signature=signature;
                 entry.source_checked_frame=gpu_frame_serial;
                 entry.source_checked_generation=mesh_revision::current();
+                entry.last_audit_frame=audit_frame ? gpu_frame_serial : 0U;
                 entry.id=next_gpu_id++;
                 entry.geometry=std::move(geometry);
                 gpu_mesh_cache[key]=std::move(entry);

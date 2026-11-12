@@ -97,6 +97,8 @@ assert "planar_gpu_queries.timestamp(1U,true)" in renderer
 assert "planar_gpu_queries.timestamp(2U,true)" in renderer
 assert "planar_gpu_queries.end();" in renderer
 assert "planar_gpu_queries.release();" in renderer
+assert "source_hashes=" in renderer and "source_hash_skips=" in renderer
+assert "source_untracked_changes=" in renderer
 assert "shader.set_color_effects(" in renderer
 assert "shader.set_fog(" in renderer
 assert "shader.set_model_lighting(" in renderer
