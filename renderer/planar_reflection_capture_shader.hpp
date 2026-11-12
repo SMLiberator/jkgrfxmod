@@ -4,6 +4,7 @@
 #include "shaders.hpp"
 #include "gpu_3do_modelview.hpp"
 #include <array>
+#include <algorithm>
 
 namespace jkgm {
 class planar_reflection_capture_shader : public opengl_shader {
