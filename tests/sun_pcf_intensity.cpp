@@ -7,6 +7,7 @@ static bool near(float a,float b) { return std::abs(a-b)<1e-5f; }
 int main()
 {
     using jkgm::sun_intensity_pcf_radii;
+    using jkgm::sun_intensity_dynamic_pcf_radius;
     auto const unchanged=sun_intensity_pcf_radii(1.0f,1.5f,0.5f,0.0f,4.0f);
     assert(near(unchanged.near_radius,1.0f));
     assert(near(unchanged.far_radius,1.5f));
@@ -29,5 +30,16 @@ int main()
         1.0f,2.0f,std::numeric_limits<float>::quiet_NaN(),1.0f,4.0f);
     assert(near(nan.near_radius,1.0f));
     assert(near(nan.far_radius,2.0f));
+
+    // Dynamic atlas shares the intensity formula but clamps its final
+    // footprint to two texels so the tile guards remain safe.
+    assert(near(sun_intensity_dynamic_pcf_radius(1.0f,2.0f,1.0f,2.0f),1.0f));
+    assert(near(sun_intensity_dynamic_pcf_radius(1.0f,1.0f,1.0f,2.0f),1.5f));
+    assert(near(sun_intensity_dynamic_pcf_radius(1.0f,0.0f,1.0f,2.0f),2.0f));
+    assert(near(sun_intensity_dynamic_pcf_radius(1.5f,0.0f,1.0f,2.0f),2.0f));
+    assert(near(sun_intensity_dynamic_pcf_radius(1.0f,0.5f,0.0f,2.0f),1.0f));
+    assert(near(sun_intensity_dynamic_pcf_radius(0.0f,0.0f,1.0f,2.0f),0.0f));
+    assert(near(sun_intensity_dynamic_pcf_radius(
+        1.0f,std::numeric_limits<float>::quiet_NaN(),1.0f,2.0f),1.0f));
     return 0;
 }

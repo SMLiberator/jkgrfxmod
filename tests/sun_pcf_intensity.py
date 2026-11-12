@@ -14,6 +14,8 @@ source=read("renderer/renderer.cpp")
 assert '#include "sun_pcf_intensity.hpp"' in source
 assert "get_sun_settings().intensity.value()[0]" in source
 assert "effective_sun_pcf_radii()" in source
+assert "effective_sun_dynamic_pcf_radius()" in source
+assert "sun_intensity_dynamic_pcf_radius(" in source
 assert "uniforms.set_pcf_radius(pcf.near_radius,pcf.far_radius);" in source
 assert "prog.set_sun_shadow_pcf_radius(sun_pcf.near_radius," in source
 assert "sun_pcf.near_radius,sun_pcf.far_radius" in source
@@ -26,4 +28,7 @@ assert "sun_dynamic_tile_pcf(" in shader
 helper=read("renderer/sun_pcf_intensity.hpp")
 assert 'return {near_base,far_base};' in helper
 assert 'return {radius(near_base),radius(far_base)};' in helper
+assert "inline float sun_intensity_dynamic_pcf_radius(" in helper
+assert "return std::min(2.0f," in helper
+assert "sun_intensity_pcf_radii(base,base,intensity," in helper
 print("intensity-adaptive PCF source contracts OK")

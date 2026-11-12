@@ -5079,6 +5079,15 @@ namespace jkgm {
                 the_config->experimental_sun_pcf_intensity_reference);
         }
 
+        float effective_sun_dynamic_pcf_radius() const
+        {
+            return sun_intensity_dynamic_pcf_radius(
+                the_config->sun_dynamic_shadow_pcf_radius,
+                get_sun_settings().intensity.value()[0],
+                the_config->experimental_sun_pcf_intensity_softness,
+                the_config->experimental_sun_pcf_intensity_reference);
+        }
+
         template<typename Shader>
         void set_translucent_sun(Shader &prog,bool active)
         {
@@ -5133,7 +5142,7 @@ namespace jkgm {
             auto const pcf=effective_sun_pcf_radii();
             uniforms.set_pcf_radius(pcf.near_radius,pcf.far_radius);
             uniforms.set_dynamic_pcf_radius(
-                the_config->sun_dynamic_shadow_pcf_radius);
+                effective_sun_dynamic_pcf_radius());
             uniforms.set_sky_aperture(sky_aperture,
                 texture_units::forward_next_extended_unit,
                 sky_aperture?sun_sky_aperture_depth_transform()
@@ -7713,8 +7722,8 @@ namespace jkgm {
             auto const sun_pcf=effective_sun_pcf_radii();
             prog.set_sun_shadow_pcf_radius(sun_pcf.near_radius,
                                            sun_pcf.far_radius);
-            prog.set_sun_dynamic_pcf_radius(
-                the_config->sun_dynamic_shadow_pcf_radius);
+            float const dynamic_sun_pcf=effective_sun_dynamic_pcf_radius();
+            prog.set_sun_dynamic_pcf_radius(dynamic_sun_pcf);
             prog.set_sun_sky_aperture(false,
                 texture_units::opaque_sky_aperture,
                 make_point(1.0f,0.0f,1.0f,0.0f));
@@ -7886,7 +7895,7 @@ namespace jkgm {
                         half_sun_shader->set_sun_shadow_pcf_radius(
                             sun_pcf.near_radius,sun_pcf.far_radius);
                         half_sun_shader->set_sun_dynamic_pcf_radius(
-                            the_config->sun_dynamic_shadow_pcf_radius);
+                            dynamic_sun_pcf);
                         half_sun_shader->set_sun_dynamic_count(0);
                         configure_sun(*half_sun_shader);
                         prog.use_program();

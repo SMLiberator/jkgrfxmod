@@ -15,7 +15,14 @@ render=read("renderer/renderer.cpp")
 assert "uniforms.set_dynamic_pcf_radius(" in render
 assert "prog.set_sun_dynamic_pcf_radius(" in render
 assert "half_sun_shader->set_sun_dynamic_pcf_radius(" in render
-assert render.count("the_config->sun_dynamic_shadow_pcf_radius")==3
+assert render.count("the_config->sun_dynamic_shadow_pcf_radius")==1
+assert render.count("effective_sun_dynamic_pcf_radius()")==3
+assert "get_sun_settings().intensity.value()[0]" in render
+assert "the_config->experimental_sun_pcf_intensity_softness" in render
+assert "the_config->experimental_sun_pcf_intensity_reference" in render
+helper_cpp=read("renderer/sun_pcf_intensity.hpp")
+assert "sun_intensity_dynamic_pcf_radius(" in helper_cpp
+assert "std::min(2.0f," in helper_cpp
 head=read("renderer/shaders.hpp")
 source=read("renderer/shaders.cpp")
 assert "gl::uniform_location_id dynamic_pcf_radius;" in head

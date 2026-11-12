@@ -29,4 +29,15 @@ namespace jkgm {
         };
         return {radius(near_base),radius(far_base)};
     }
+
+    // Reuse precisely the same daylight intensity response as the static
+    // cascades, with the dynamic Thing atlas's stricter 2px guard limit.
+    // Zero base radius keeps its original single-comparison path.
+    inline float sun_intensity_dynamic_pcf_radius(
+        float base,float intensity,float max_softening,float reference)
+    {
+        return std::min(2.0f,
+            sun_intensity_pcf_radii(base,base,intensity,
+                                    max_softening,reference).near_radius);
+    }
 }
