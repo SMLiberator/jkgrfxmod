@@ -52,6 +52,12 @@ struct profile_sample {
   uint64_t gpu_opaque_draw_calls=0,gpu_transparent_draw_calls=0;
   uint64_t gpu_opaque_draw_ranges=0,gpu_transparent_draw_ranges=0;
   uint64_t gpu_draw_triangles=0,gpu_material_resolves=0,gpu_uploads=0;
+  // Subrange counts, not GL calls or measured pixel overdraw. They describe
+  // the GPU-resident draw workload without changing transparency order.
+  uint64_t gpu_alpha_fluid_sprite_ranges=0;
+  uint64_t gpu_alpha_other_sprite_ranges=0;
+  uint64_t gpu_alpha_model_ranges=0;
+  uint64_t gpu_opaque_cutout_sprite_ranges=0;
   // Visible 3DO material filter state: a "skip" avoids three glTexParameter
   // calls, tracked per pass using actual texture object IDs.
   uint64_t gpu_filter_state_sets=0,gpu_filter_state_skips=0;
@@ -136,6 +142,10 @@ struct profile_sample {
     gpu_opaque_draw_ranges+=o.gpu_opaque_draw_ranges;
     gpu_transparent_draw_ranges+=o.gpu_transparent_draw_ranges;
     gpu_draw_triangles+=o.gpu_draw_triangles;
+    gpu_alpha_fluid_sprite_ranges+=o.gpu_alpha_fluid_sprite_ranges;
+    gpu_alpha_other_sprite_ranges+=o.gpu_alpha_other_sprite_ranges;
+    gpu_alpha_model_ranges+=o.gpu_alpha_model_ranges;
+    gpu_opaque_cutout_sprite_ranges+=o.gpu_opaque_cutout_sprite_ranges;
     gpu_material_resolves+=o.gpu_material_resolves;
     gpu_uploads+=o.gpu_uploads;
     gpu_filter_state_sets+=o.gpu_filter_state_sets;

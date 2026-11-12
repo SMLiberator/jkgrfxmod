@@ -799,6 +799,15 @@ namespace jkgm {
         std::array<uint64_t,presentation_gpu_profile::num_stages> present_gpu_ns{};
         uint64_t present_gpu_samples=0, present_gpu_skipped=0;
 
+        // Asynchronous GPU timings for the scene, separate from postFX and
+        // shadow profiling. No GL readbacks or query waits on the hot path.
+        // 0 = opaque gbuffer (no shadow capture), 1 = world/decal/flare alpha,
+        // 2 = cached 3DO/SPR alpha. Gun/overlay is not included in 1 or 2.
+        presentation_gpu_profile scene_gpu_queries;
+        std::array<uint64_t,presentation_gpu_profile::num_stages> scene_gpu_ns{};
+        uint64_t scene_gpu_samples=0, scene_gpu_skipped=0;
+        bool scene_gpu_timing=false;
+
         static uint64_t elapsed_profile_us(profile_clock::time_point a,
                                            profile_clock::time_point b)
         {
@@ -963,6 +972,19 @@ namespace jkgm {
                      " NOTE=delayed_nonblocking_GPU_timestamps_zero_if_no_samples");
             present_gpu_ns.fill(0U);
             present_gpu_samples=present_gpu_skipped=0U;
+            uint64_t const scene_samples=scene_gpu_samples;
+            LOG_INFO("PERF scene_gpu_us opaque_gbuffer=",
+                     scene_samples?(scene_gpu_ns[0]/1000U)/scene_samples:0U,
+                     " world_decal_flare_alpha=",
+                     scene_samples?(scene_gpu_ns[1]/1000U)/scene_samples:0U,
+                     " cached_3do_sprite_alpha=",
+                     scene_samples?(scene_gpu_ns[2]/1000U)/scene_samples:0U,
+                     " samples=",scene_samples,
+                     " ring_busy_skips=",scene_gpu_skipped,
+                     " supported=",scene_gpu_queries.is_supported(),
+                     " NOTE=async_GPU_only;opaque_excludes_shadow_maps;world_includes_decals;gun_overlay_excluded");
+            scene_gpu_ns.fill(0U);
+            scene_gpu_samples=scene_gpu_skipped=0U;
             if(the_config->use_gpu_cache ||
                the_config->enable_decals) {
                 LOG_INFO("PERF gpu_3do fallback_native_per_frame geometry=",
@@ -1043,6 +1065,15 @@ namespace jkgm {
                          " multi_calls_avg=",
                          profile_window.gpu_multidraw_calls/frames,
                          " NOTE=opaque_material_sorted_alpha_consecutive_order_preserved");
+                LOG_INFO("PERF overdraw_ranges_avg fluid_sprites=",
+                         profile_window.gpu_alpha_fluid_sprite_ranges/frames,
+                         " other_alpha_sprites=",
+                         profile_window.gpu_alpha_other_sprite_ranges/frames,
+                         " alpha_models=",
+                         profile_window.gpu_alpha_model_ranges/frames,
+                         " opaque_cutout_sprites=",
+                         profile_window.gpu_opaque_cutout_sprite_ranges/frames,
+                         " NOTE=GPU_3DO_draw_ranges_not_fragments_or_GL_calls;fluid_only_sprite");
                 LOG_INFO("PERF gpu_3do passes opaque_GL_calls_avg=",
                          profile_window.gpu_opaque_draw_calls/frames,
                          " opaque_ranges_avg=",
@@ -1160,6 +1191,7 @@ namespace jkgm {
             // away with it; do not issue GL calls on an invalid context.
             if(hGLRC && wglGetCurrentContext()==hGLRC) {
                 present_gpu_queries.release();
+                scene_gpu_queries.release();
                 sun_gpu_queries.release();
             }
         }
@@ -4448,9 +4480,22 @@ namespace jkgm {
                             sprite_batch_count;
                     } else if(draw_end>draw_start+1)
                         ++profile_frame.gpu_multidraw_calls;
-                    for(size_t n=draw_start;n<draw_end;n++)
-                        profile_frame.gpu_draw_triangles+=
-                            draws[n].group->count/3;
+                    for(size_t n=draw_start;n<draw_end;n++) {
+                        auto const &item=draws[n];
+                        profile_frame.gpu_draw_triangles+=item.group->count/3;
+                        if(post_exempt || decals_only)continue;
+                        if(transparent) {
+                            if(item.instance->is_sprite_quad) {
+                                if(item.texture->blend==material_blend_mode::fluid)
+                                    ++profile_frame.gpu_alpha_fluid_sprite_ranges;
+                                else ++profile_frame.gpu_alpha_other_sprite_ranges;
+                            } else ++profile_frame.gpu_alpha_model_ranges;
+                        } else if(item.instance->is_sprite_quad &&
+                                  (item.policy==gpu_3do_alpha_mode::masked ||
+                                   item.policy==gpu_3do_alpha_mode::dithered)) {
+                            ++profile_frame.gpu_opaque_cutout_sprite_ranges;
+                        }
+                    }
                 }
                 draw_start=draw_end;
             }
@@ -8889,6 +8934,7 @@ namespace jkgm {
 
         void draw_game_transparency_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
         {
+            if(scene_gpu_timing)scene_gpu_queries.timestamp(1U,true);
             frame_screen->begin_transparency_pass();
             prepare_translucent_spotlights();
 
@@ -8999,7 +9045,10 @@ namespace jkgm {
             // GPU-resident ordinary 3DO translucent faces join the alpha
             // pass after native world geometry. Projected SPRs were submitted
             // earlier so translucent world pixels may correctly cover them.
+            if(scene_gpu_timing)scene_gpu_queries.timestamp(1U,false);
+            if(scene_gpu_timing)scene_gpu_queries.timestamp(2U,true);
             draw_gpu_3do_preview(true);
+            if(scene_gpu_timing)scene_gpu_queries.timestamp(2U,false);
             ogs->game_transparency_pass_program.use_program();
             restore_native_fluid_depth();
 
@@ -10069,6 +10118,16 @@ namespace jkgm {
 
             bool posterize_lighting = the_config->enable_posterized_lighting;
             {
+                presentation_gpu_profile::completed_sample scene_completed{};
+                scene_gpu_timing=profiling && scene_gpu_queries.begin(scene_completed);
+                if(scene_completed.ready) {
+                    for(size_t i=0;i<scene_gpu_ns.size();++i)
+                        scene_gpu_ns[i]+=scene_completed.nanoseconds[i];
+                    ++scene_gpu_samples;
+                }
+                if(scene_completed.skipped)++scene_gpu_skipped;
+            }
+            {
                 profile_scope timer(profiling,
                     profile_frame.timings[profile_idx(profile_stage::opaque_pass)]);
                 draw_spotlight_shadow_map();
@@ -10111,13 +10170,17 @@ namespace jkgm {
                     sun_shadow_previous_ready=sun_shadow_ready;
                     sun_shadow_previous_excluded=excluded;
                 }
+                if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,true);
                 draw_game_gbuffer_pass(trimdl, posterize_lighting);
+                if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,false);
             }
             {
                 profile_scope timer(profiling,
                     profile_frame.timings[profile_idx(profile_stage::transparent_pass)]);
                 draw_game_transparency_pass(trimdl, posterize_lighting);
             }
+            if(scene_gpu_timing)scene_gpu_queries.end();
+            scene_gpu_timing=false;
             // DirectDraw HUD is composited AFTER post-processing in end_frame,
             // when this rendered scene is presented on the following frame.
 
