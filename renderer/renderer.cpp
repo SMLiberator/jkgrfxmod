@@ -6,6 +6,9 @@
 #include "planar_reflection_things.hpp"
 #include "planar_reflection_workset.hpp"
 #include "planar_reflection_offscreen_gpu.hpp"
+#include "planar_reflection_render_math.hpp"
+#include "planar_reflection_capture_target.hpp"
+#include "planar_reflection_capture_shader.hpp"
 #include "saber_light_rgb.hpp"
 #include "thing_light_rgb.hpp"
 #include "gpu_3do_uv.hpp"
@@ -582,6 +585,17 @@ namespace jkgm {
         std::unique_ptr<post_buffer> smoke_half_buffer;
         GLuint smoke_half_stencil=0;
         bool smoke_half_failed=false;
+        // Independent low-cost planar capture: allocated on first enabled
+        // scene, never by the normal GPU renderer or menus.
+        std::unique_ptr<planar_reflection_capture_target> planar_capture_target;
+        std::unique_ptr<planar_reflection_capture_shader> planar_capture_program;
+        bool planar_capture_ready=false;
+        uintptr_t planar_plane_world=0;
+        uint64_t planar_plane_world_revision=0;
+        uint64_t planar_plane_scanned_frame=~uint64_t(0);
+        std::optional<planar_reflection_plane> planar_capture_plane;
+        bool planar_plane_from_material=false;
+
 
         HGDIOBJ indexed_bitmap_dc = NULL;
         char const *indexed_bitmap_source = nullptr;
@@ -1204,6 +1218,8 @@ namespace jkgm {
                     smoke_half_stencil=0;
                 }
                 smoke_half_buffer.reset();
+                planar_capture_program.reset();
+                planar_capture_target.reset();
                 present_gpu_queries.release();
                 scene_gpu_queries.release();
                 sun_gpu_queries.release();
@@ -1221,6 +1237,11 @@ namespace jkgm {
                 clear_deferred_gpu_hud_materials();
                 deferred_gpu_3do_camera={};
                 frame_has_exempt_gpu=false;
+                planar_capture_ready=false;
+                planar_capture_plane.reset();
+                planar_plane_world=0;
+                planar_plane_world_revision=0;
+                planar_plane_scanned_frame=~uint64_t(0);
                 reset_sector_crossing();
                 reset_continuous_ambient_gpu();
                 continuous_ambient_cpu_cache.reset();
@@ -2149,6 +2170,27 @@ namespace jkgm {
                 // returned earlier). Exactly one final LUT pass in gameplay.
                 present_retro_after_hud();
                 if(gpu_timing)present_gpu_queries.timestamp(2U,false);
+            }
+            if(the_config->planar_reflection_debug_view &&
+               planar_capture_ready && planar_capture_target &&
+               planar_capture_target->ready()) {
+                // Raw FBO inspection, after HUD/post/Retro: never alters
+                // the actual reflection texture or samples screen depth.
+                GLint old_draw=0,old_read=0,old_read_buffer=0;
+                glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&old_draw);
+                glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&old_read);
+                glGetIntegerv(GL_READ_BUFFER,&old_read_buffer);
+                glBindFramebuffer(GL_READ_FRAMEBUFFER,
+                                  planar_capture_target->framebuffer());
+                glReadBuffer(GL_COLOR_ATTACHMENT0);
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER,0);
+                glBlitFramebuffer(0,0,planar_capture_target->width(),
+                    planar_capture_target->height(),0,0,
+                    get<x>(conf_scr_res),get<y>(conf_scr_res),
+                    GL_COLOR_BUFFER_BIT,GL_LINEAR);
+                glBindFramebuffer(GL_READ_FRAMEBUFFER,GLuint(old_read));
+                glReadBuffer(GLenum(old_read_buffer));
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER,GLuint(old_draw));
             }
             if(gpu_timing)present_gpu_queries.end();
             {
@@ -10188,6 +10230,296 @@ namespace jkgm {
                          " saber_override=",saber_override);
         }
 
+        // Choose a real reflected plane. An explicit planar MAT always wins
+        // over a Fluid-only diagnostic fallback; the nearest candidate of
+        // that tier is used for the one-target first implementation.
+        void select_planar_capture_plane(engine_camera const &camera)
+        {
+            if(!world_cache_target || !world_cache_target->ready) {
+                planar_capture_plane.reset();
+                return;
+            }
+            auto const &cache=*world_cache_target;
+            bool const changed=planar_plane_world!=cache.loaded_world ||
+                planar_plane_world_revision!=cache.revision;
+            if(!changed && planar_plane_scanned_frame!=~uint64_t(0) &&
+               gpu_3do_present_serial-planar_plane_scanned_frame<120U)
+                return;
+            planar_plane_scanned_frame=gpu_3do_present_serial;
+            planar_plane_world=cache.loaded_world;
+            planar_plane_world_revision=cache.revision;
+            planar_capture_plane.reset();
+            planar_plane_from_material=false;
+            float best_distance=std::numeric_limits<float>::infinity();
+            int best_priority=-1;
+            std::unordered_map<uintptr_t,gpu_3do_texture> mats;
+            for(auto const &surface:cache.mesh.surfaces) {
+                if(surface.count<3U || surface.passable_adjoin ||
+                   (surface.surface_flags&0x600U)!=0U ||
+                   surface.first_index>=cache.mesh.indices.size() ||
+                   surface.material==0U)
+                    continue;
+                auto const first=cache.mesh.indices[surface.first_index];
+                if(first>=cache.mesh.vertices.size())continue;
+                auto const &v=cache.mesh.vertices[first];
+                auto const normal=v.normal;
+                float const len=std::sqrt(normal[0]*normal[0]+
+                    normal[1]*normal[1]+normal[2]*normal[2]);
+                if(!(std::isfinite(len) && len>1.e-5f))continue;
+                // A MAT is often shared by hundreds of water polygons.
+                // Material identity is independent of the individual plane.
+                auto it=mats.find(surface.material);
+                if(it==mats.end()) {
+                    gpu_3do_group group{};
+                    group.material=surface.material;
+                    group.cel=surface.cel;
+                    it=mats.emplace(surface.material,
+                        resolve_gpu_3do_material(group)).first;
+                }
+                auto const &mat=it->second;
+                int const priority=mat.reflection_mode==4 ? 2 :
+                    mat.blend==material_blend_mode::fluid ? 1 : 0;
+                if(priority==0)continue;
+                planar_reflection_plane plane{};
+                plane.normal=normal;
+                plane.offset=normal[0]*v.position[0]+
+                    normal[1]*v.position[1]+normal[2]*v.position[2];
+                if(!normalize_planar_reflection_plane(plane,plane))continue;
+                float const distance=std::fabs(
+                    engine_camera_detail::dot(camera.position,plane.normal)-
+                    plane.offset);
+                if(priority<best_priority ||
+                   (priority==best_priority && distance>=best_distance))
+                    continue;
+                best_priority=priority;
+                best_distance=distance;
+                planar_capture_plane=plane;
+                planar_plane_from_material=priority==2;
+            }
+            if(the_config->profile_renderer || the_config->planar_reflection_debug_view)
+                LOG_INFO("PLANAR plane select: world=",cache.loaded_world,
+                         " source=",planar_capture_plane
+                              ?(planar_plane_from_material?"material":"fluid")
+                              :"none",
+                         " scale=",the_config->planar_reflection_resolution_scale,
+                         " candidate_surfaces=",cache.mesh.surfaces.size());
+        }
+
+        void render_planar_capture()
+        {
+            planar_capture_ready=false;
+            if(!the_config->experimental_planar_reflection_capture ||
+               !the_config->use_gpu_cache ||
+               !world_cache_target || !world_cache_target->ready ||
+               !ogs || !frame_world_cache_camera.valid ||
+               !frame_world_cache_camera.perspective)
+                return;
+            auto const &camera=frame_world_cache_camera.camera;
+            select_planar_capture_plane(camera);
+            if(!planar_capture_plane)return;
+            auto const reflected=make_planar_reflection_camera(
+                camera,*planar_capture_plane);
+            auto const setup=make_planar_reflection_render_setup(
+                get<x>(internal_scr_res),get<y>(internal_scr_res),
+                the_config->planar_reflection_resolution_scale,
+                camera,reflected,*planar_capture_plane);
+            if(!setup.valid)return;
+            float const aspect=float(setup.width)/float(setup.height);
+            float const half_fov=std::tan(
+                camera.fov*0.008726646259971648f);
+            float const far_plane=frame_world_cache_camera.far_plane;
+            if(!std::isfinite(half_fov) || half_fov<=0.0f ||
+               !std::isfinite(far_plane) || far_plane<=0.1f)return;
+            if(!planar_capture_target)
+                planar_capture_target=
+                    std::make_unique<planar_reflection_capture_target>();
+            if(!planar_capture_target->ensure(setup.width,setup.height)) {
+                static bool warned=false;
+                if(!warned) {
+                    warned=true;
+                    LOG_WARNING("PLANAR capture framebuffer unavailable at ",
+                        setup.width,"x",setup.height);
+                }
+                return;
+            }
+            if(!planar_capture_program)
+                planar_capture_program=
+                    std::make_unique<planar_reflection_capture_shader>(
+                        the_config->data_path);
+            auto &shader=*planar_capture_program;
+            auto const view=planar_camera_native_view(reflected);
+            auto const begun=std::chrono::steady_clock::now();
+            size_t world_drawn=0,model_drawn=0,model_candidates=0;
+            // Acquisition does NOT mutate rdCamera; its refresh callback
+            // updates only each Thing's native cached animation matrices.
+            planar_reflection_offscreen_gpu offscreen{};
+            if(engine_material_debug::matches_tested_executable()) {
+                uint32_t world=0;
+                if(engine_material_debug::read_object(
+                       engine_material_debug::current_world_global,world)) {
+                    auto read=[](uintptr_t at,void *dst,size_t bytes) {
+                        return engine_material_debug::read_bytes(at,dst,bytes);
+                    };
+                    planar_reflection_thing_scan scan{};
+                    if(collect_planar_reflection_things(read,world,scan)) {
+                        auto &things=scan.models;
+                        // Favor nearby Things, but never use the primary
+                        // camera's frustum/portal subset as eligibility.
+                        std::sort(things.begin(),things.end(),
+                            [&](auto const &a,auto const &b) {
+                                auto dist2=[&](auto const &p) {
+                                    float result=0;
+                                    for(unsigned axis=0;axis<3;++axis) {
+                                        float const d=p.position[axis]-
+                                                      reflected.position[axis];
+                                        result+=d*d;
+                                    }
+                                    return result;
+                                };
+                                return dist2(a)<dist2(b);
+                            });
+                        model_candidates=things.size();
+                        constexpr size_t max_native_things=128U;
+                        offscreen=acquire_planar_reflection_offscreen_gpu(
+                            things,max_native_things);
+                    }
+                }
+            }
+            // Prefer complete offscreen native hierarchy snapshots; add only
+            // primary-camera nodes of Things that were not independently
+            // acquired. Each Thing with a complete hierarchy is drawn once.
+            std::unordered_set<uint64_t> acquired_owners;
+            for(auto const &inst:offscreen.nodes)
+                if(inst.shadow_owner)acquired_owners.insert(inst.shadow_owner);
+            planar_reflection_gl_scope restore;
+            glBindFramebuffer(GL_FRAMEBUFFER,planar_capture_target->framebuffer());
+            glViewport(0,0,setup.width,setup.height);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_BLEND);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LESS);
+            glDepthMask(GL_TRUE);
+            glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+            glClearColor(0.055f,0.075f,0.105f,1.0f);
+            glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_BACK);
+            shader.use_program();
+            shader.set_projection(half_fov,aspect,far_plane);
+            shader.set_clip(setup.clip_view);
+            shader.set_modelview(view,false);
+            auto submit_material=[&](gpu_3do_texture const &mat,
+                                      bool solid)->bool {
+                if(mat.reflection_mode==4 ||
+                   mat.special || mat.emissive_only ||
+                   mat.blend==material_blend_mode::fluid ||
+                   mat.blend==material_blend_mode::additive ||
+                   mat.blend==material_blend_mode::multiply ||
+                   !std::isfinite(mat.opacity) || mat.opacity<0.999f)
+                    return false;
+                bool const textured=!solid && mat.albedo_source==1 &&
+                                     mat.has_image;
+                if(!textured && !(solid || mat.albedo_source==2))return false;
+                gl::set_active_texture_unit(0);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 textured?mat.texture:gl::default_texture);
+                shader.set_material(mat.width,mat.height,mat.tint,
+                    mat.albedo_scroll,textured,
+                    (mat.masked || mat.dithered || mat.alpha)
+                        ?mat.alpha_cutoff:0.0f);
+                return true;
+            };
+            auto &cache=*world_cache_target;
+            // These ranges include all cached world sectors. Unlike
+            // frame_render_candidates, they are NOT main-portal-culled.
+            gl::bind_vertex_array(cache.vao);
+            glFrontFace(GL_CW); // reflected camera reverses handedness
+            for(auto const &surface:cache.mesh.surfaces) {
+                if(surface.count==0U || surface.passable_adjoin ||
+                   (surface.surface_flags&0x600U)!=0U ||
+                   surface.first_index>=cache.mesh.indices.size())
+                    continue;
+                gpu_3do_group group{};
+                group.material=surface.material;
+                group.cel=surface.cel;
+                bool const solid=!surface.has_uv;
+                auto const mat=solid
+                    ?resolve_gpu_3do_solid_material(group,false)
+                    :resolve_gpu_3do_material(group);
+                if(!submit_material(mat,solid))continue;
+                gl::draw_elements(gl::element_type::triangles,
+                    static_cast<GLsizei>(surface.count),
+                    gl::index_type::uint32,
+                    static_cast<ptrdiff_t>(
+                        surface.first_index*sizeof(uint32_t)));
+                ++world_drawn;
+            }
+            auto draw_model=[&](gpu_3do_instance const &inst) {
+                if(inst.shadow_only || inst.camera_hud ||
+                   inst.is_projected_decal || inst.is_sprite_quad ||
+                   !inst.geometry || inst.geometry->groups.empty() ||
+                   !gpu_3do_matrix_finite(inst.transform))return;
+                auto glmesh=gpu_3do_gl_cache.find(inst.id);
+                if(glmesh==gpu_3do_gl_cache.end()) {
+                    if(gpu_3do_gl_cache.size()>8192U)return;
+                    glmesh=gpu_3do_gl_cache.emplace(inst.id,
+                        std::make_unique<gpu_3do_gl_mesh>(
+                            *inst.geometry)).first;
+                }
+                auto const modelview=gpu_3do_native_modelview(
+                    view,inst.transform);
+                if(!gpu_3do_matrix_finite(modelview))return;
+                shader.set_modelview(modelview,true);
+                gl::bind_vertex_array(glmesh->second->vao);
+                // Both the reflected camera and negative-scale models
+                // reverse winding. Two reversals restore the normal front.
+                glFrontFace(gpu_3do_reversed_winding(inst.transform)
+                    ?GL_CCW:GL_CW);
+                for(auto const &group:inst.geometry->groups) {
+                    bool const solid=group.solid_color ||
+                        inst.effective_geometry_mode==3U;
+                    auto const mat=solid
+                        ?resolve_gpu_3do_solid_material(group,false)
+                        :resolve_gpu_3do_material(group);
+                    if(!submit_material(mat,solid))continue;
+                    if(group.nonplanar || (group.face_type&1U)) {
+                        glDisable(GL_CULL_FACE);
+                    } else glEnable(GL_CULL_FACE);
+                    gl::draw_elements(gl::element_type::triangles,
+                        static_cast<GLsizei>(group.count),
+                        gl::index_type::uint32,
+                        static_cast<ptrdiff_t>(
+                            group.offset*sizeof(uint32_t)));
+                    ++model_drawn;
+                }
+            };
+            for(auto const &inst:offscreen.nodes)draw_model(inst);
+            for(auto const &inst:frame_gpu_3do_instances)
+                if(inst.shadow_owner==0U ||
+                   !acquired_owners.count(inst.shadow_owner))
+                    draw_model(inst);
+            gl::set_active_texture_unit(0);
+            planar_capture_ready=true;
+            if((gpu_3do_present_serial%120U)==0U) {
+                auto const us=std::chrono::duration_cast<
+                    std::chrono::microseconds>(
+                        std::chrono::steady_clock::now()-begun).count();
+                LOG_INFO("PLANAR capture: resolution=",setup.width,"x",
+                         setup.height," scale=",
+                         the_config->planar_reflection_resolution_scale,
+                         " plane_source=",
+                         planar_plane_from_material?"material":"fluid",
+                         " world_faces=",world_drawn,
+                         " model_groups=",model_drawn,
+                         " native_thing_candidates=",model_candidates,
+                         " acquired_3do_nodes=",offscreen.stats.ready_nodes,
+                         " incomplete_3do_things=",offscreen.stats.incomplete_things,
+                         " ms_cpu=",float(us)/1000.0f,
+                         " NOTE=debug_capture_only_no_material_sampling");
+            }
+        }
+
         void present_game() override
         {
             poll_audio_modules();
@@ -10443,6 +10775,8 @@ namespace jkgm {
                     profile_frame.timings[profile_idx(profile_stage::transparent_pass)]);
                 draw_game_transparency_pass(trimdl, posterize_lighting);
             }
+            if(the_config->experimental_planar_reflection_capture)
+                render_planar_capture();
             if(scene_gpu_timing)scene_gpu_queries.end();
             scene_gpu_timing=false;
             // DirectDraw HUD is composited AFTER post-processing in end_frame,
