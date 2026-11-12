@@ -19,6 +19,16 @@ v=read("assets/shaders/planar_capture.vert")
 f=read("assets/shaders/planar_capture.frag")
 assert "render_planar_capture();" in renderer
 assert "select_planar_capture_plane(" in renderer
+# Passable adjoins frequently carry water: eligible as reflective RECEIVERS,
+# while the mirrored scene itself must still omit passable portal geometry.
+selector=renderer.split("void select_planar_capture_plane(",1)[1].split(
+    "void render_planar_capture()",1)[0]
+assert "surface.count<3U || surface.passable_adjoin" not in selector
+assert "if(surface.passable_adjoin)++matched_passable;" in selector
+assert "mat.blend==material_blend_mode::fluid ? 1 : 0" in selector
+assert "passable_reflection_receivers=" in selector
+capture=renderer.split("void render_planar_capture()",1)[1]
+assert "surface.count==0U || surface.passable_adjoin" in capture
 assert "make_planar_reflection_camera(" in renderer
 assert "make_planar_reflection_render_setup(" in renderer
 assert "planar_reflection_gl_scope restore;" in renderer
