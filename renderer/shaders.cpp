@@ -360,6 +360,14 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
     , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
     , camera_up_axis(gl::get_uniform_location(the_program,"camera_up_axis"))
+    , planar_sampler(gl::get_uniform_location(the_program,"planar_reflection_map"))
+    , planar_ready(gl::get_uniform_location(the_program,"planar_reflection_ready"))
+    , planar_plane(gl::get_uniform_location(the_program,"planar_receiver_plane"))
+    , planar_camera_origin(gl::get_uniform_location(the_program,"planar_camera_origin"))
+    , planar_camera_right(gl::get_uniform_location(the_program,"planar_camera_right"))
+    , planar_camera_forward(gl::get_uniform_location(the_program,"planar_camera_forward"))
+    , planar_camera_up(gl::get_uniform_location(the_program,"planar_camera_up"))
+    , planar_tan_half_fov(gl::get_uniform_location(the_program,"planar_tan_half_fov"))
     , alpha_cutout(gl::get_uniform_location(the_program,"alpha_cutout"))
     , alpha_cutoff(gl::get_uniform_location(the_program,"alpha_cutoff"))
     , transparent_pass(gl::get_uniform_location(the_program,"transparent_pass"))
@@ -500,6 +508,24 @@ void jkgm::shaders::world_cache_preview_shader::set_reflection_camera(
     gl::set_uniform_vector(camera_up_axis,
                            make_point(up[0],up[1],up[2]));
 }
+void jkgm::shaders::world_cache_preview_shader::set_planar_reflection(
+    bool ready,point<4,float> plane,point<3,float> origin,
+    point<3,float> right,point<3,float> forward,point<3,float> up,
+    point<2,float> tan_half_fov)
+{
+    // Unit 15 is within the OpenGL 3.3 minimum fragment sampler count
+    // and is reserved for the world-only planar source in this pass.
+    gl::set_uniform_integer(planar_sampler,15);
+    gl::set_uniform_integer(planar_ready,ready?1:0);
+    if(!ready)return;
+    gl::set_uniform_vector(planar_plane,plane);
+    gl::set_uniform_vector(planar_camera_origin,origin);
+    gl::set_uniform_vector(planar_camera_right,right);
+    gl::set_uniform_vector(planar_camera_forward,forward);
+    gl::set_uniform_vector(planar_camera_up,up);
+    gl::set_uniform_vector(planar_tan_half_fov,tan_half_fov);
+}
+
 void jkgm::shaders::world_cache_preview_shader::set_alpha_cutout(
     float cutoff)
 {
