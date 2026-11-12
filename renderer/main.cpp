@@ -1328,7 +1328,8 @@ namespace {
         uintptr_t const rd=reinterpret_cast<uintptr_t>(thing);
         bool const have_thing_flags=
             jkgm::read_native_model_thing_flags(read,rd,flags);
-        if(shadow_enabled || (the_config && the_config->enable_decals)) {
+        if(shadow_enabled || (the_config && the_config->enable_decals) ||
+           (the_config && the_config->experimental_planar_thing_discovery)) {
             if(have_thing_flags) {
                 uint32_t owner=0,signature=0;
                 if(read(rd+0x44U,&owner,4) &&
