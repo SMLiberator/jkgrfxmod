@@ -285,6 +285,8 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_things.cpp /Fe:planar_reflection_things_test.exe || exit /b 1
         planar_reflection_things_test.exe || exit /b 1
         python3 tests/planar_reflection_things.py || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_workset.cpp /Fe:planar_reflection_workset_test.exe || exit /b 1
+        planar_reflection_workset_test.exe || exit /b 1
     - name: Experimental sun sky-aperture gate source contracts
       run: python3 tests/sun_sky_aperture_experiment.py
     - name: GPU 3DO alpha partition tests
