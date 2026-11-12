@@ -29,8 +29,7 @@ namespace jkgm {
     {
         out.clear();
         using namespace mots_native_layout;
-        if(!read || !refresh ||
-           !thing_node_valid_address(source.thing,0x10cU) ||
+        if(!thing_node_valid_address(source.thing,0x10cU) ||
            !thing_node_valid_address(source.model,0x5cU) ||
            !validate_native_thing_node_accessor(read))
             return false;
