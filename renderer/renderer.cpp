@@ -7519,26 +7519,6 @@ namespace jkgm {
                 glIsEnabled(GL_BLEND)==GL_FALSE;
             auto *half_sun_shader=half_sun_active
                 ?ogs->game_post_opaque_half_sun_program.get():nullptr;
-            if(half_sun_shader) {
-                half_sun_shader->use_program();
-                half_sun_shader->set_depth_sampler(3);
-                half_sun_shader->set_coverage_normal_sampler(5);
-                half_sun_shader->set_sun_shadow_receiver_bias_scale(
-                    the_config->sun_shadow_receiver_bias_scale);
-                half_sun_shader->set_sun_shadow_pcf_radius(
-                    the_config->sun_shadow_near_pcf_radius,
-                    the_config->sun_shadow_far_pcf_radius);
-                half_sun_shader->set_sun_dynamic_count(0);
-                prog.use_program();
-            }
-            auto set_sun_programs=[&](auto const &apply) {
-                apply(prog);
-                if(half_sun_shader) {
-                    half_sun_shader->use_program();
-                    apply(*half_sun_shader);
-                    prog.use_program();
-                }
-            };
             if(cam.valid && (the_config->enable_spotlights || sun_lit)) {
                 float const h=std::tan(cam.fov*(3.14159265358979323846f/360.0f));
                 float const v=h*float(get<y>(conf_scr_res))/
@@ -7546,13 +7526,11 @@ namespace jkgm {
                 auto point_axis=[](std::array<float,3> const &a,float w) {
                     return make_point(a[0],a[1],a[2],w);
                 };
-                set_sun_programs([&](auto &target) {
-                    target.set_projector_camera(
-                        point_axis(cam.position,0.0f),
-                        point_axis(cam.right,h),
-                        point_axis(cam.forward,0.0f),
-                        point_axis(cam.up,v));
-                });
+                prog.set_projector_camera(
+                    point_axis(cam.position,0.0f),
+                    point_axis(cam.right,h),
+                    point_axis(cam.forward,0.0f),
+                    point_axis(cam.up,v));
                 int active=0;
                 auto spots=(the_config->enable_spotlights)
                     ? collect_spotlights_for_frame()
@@ -7602,10 +7580,13 @@ namespace jkgm {
                 }
                 prog.set_spotlight_count(active);
                 if(sun_lit) {
+                    // Set the sun uniforms once per shader, instead of
+                    // bouncing between GL programs for every caster tile.
+                    // Keep the original fullscreen compositor's state intact.
+                    auto configure_sun=[&](auto &target) {
                     bool const shadows=sun_shadow_ready && bool(sun_shadow_target);
                     auto const direction=normalized_sun_direction(sun.direction.value());
                     auto const rgb=sun.color.value();
-                    set_sun_programs([&](auto &target) {
                     target.set_sun_shadow(true,shadows,
                         make_point(direction[0],direction[1],direction[2]),
                         make_point(rgb[0],rgb[1],rgb[2],sun_power),
@@ -7614,11 +7595,10 @@ namespace jkgm {
                         make_point(sun_shadow_views[0].up[0],sun_shadow_views[0].up[1],sun_shadow_views[0].up[2]),
                         make_point(sun_shadow_views[0].forward[0],sun_shadow_views[0].forward[1],sun_shadow_views[0].forward[2]),
                         make_point(sun_shadow_views[0].width,sun_shadow_views[0].height,sun_shadow_views[0].range));
-                    });
                     bool const sky_aperture=shadows &&
                         sun_sky_aperture_ready();
                     if(sky_aperture) {
-                        prog.set_sun_sky_aperture(
+                        target.set_sun_sky_aperture(
                             true,texture_units::opaque_sky_aperture,
                             sun_sky_aperture_depth_transform());
                         gl::set_active_texture_unit(
@@ -7628,7 +7608,6 @@ namespace jkgm {
                     }
                     if(shadows) {
                         auto const &far_view=sun_shadow_views[1];
-                        set_sun_programs([&](auto &target) {
                         target.set_sun_shadow_far(
                             make_point(far_view.origin[0],far_view.origin[1],far_view.origin[2]),
                             make_point(far_view.right[0],far_view.right[1],far_view.right[2]),
@@ -7636,7 +7615,6 @@ namespace jkgm {
                             make_point(far_view.forward[0],far_view.forward[1],far_view.forward[2]),
                             make_point(far_view.width,far_view.height,far_view.range),
                             the_config->sun_shadow_near_distance);
-                        });
                         gl::set_active_texture_unit(13);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                             sun_shadow_target->depth);
@@ -7652,23 +7630,37 @@ namespace jkgm {
                         for(size_t i=0;i<sun_dynamic_views.size();++i) {
                             auto const &v=sun_dynamic_views[i];
                             auto const &tile=sun_dynamic_tiles[i];
-                            set_sun_programs([&](auto &target) {
                             target.set_sun_dynamic_atlas_rect(int(i),
                                 make_point(float(tile.x),float(tile.y),
                                            float(tile.size),float(tile.size)));
-                            });
-                            set_sun_programs([&](auto &target) {
                             target.set_sun_dynamic(int(i),
                                 make_point(v.origin[0],v.origin[1],v.origin[2]),
                                 make_point(v.right[0],v.right[1],v.right[2]),
                                 make_point(v.up[0],v.up[1],v.up[2]),
                                 make_point(v.forward[0],v.forward[1],v.forward[2]),
                                 make_point(v.width,v.height,v.range));
-                            });
                         }
-                        set_sun_programs([&](auto &target) {
-                            target.set_sun_dynamic_count(int(sun_dynamic_views.size()));
-                        });
+                        target.set_sun_dynamic_count(int(sun_dynamic_views.size()));
+                    }
+                    };
+                    configure_sun(prog);
+                    if(half_sun_shader) {
+                        half_sun_shader->use_program();
+                        half_sun_shader->set_depth_sampler(3);
+                        half_sun_shader->set_coverage_normal_sampler(5);
+                        half_sun_shader->set_projector_camera(
+                            point_axis(cam.position,0.0f),
+                            point_axis(cam.right,h),
+                            point_axis(cam.forward,0.0f),
+                            point_axis(cam.up,v));
+                        half_sun_shader->set_sun_shadow_receiver_bias_scale(
+                            the_config->sun_shadow_receiver_bias_scale);
+                        half_sun_shader->set_sun_shadow_pcf_radius(
+                            the_config->sun_shadow_near_pcf_radius,
+                            the_config->sun_shadow_far_pcf_radius);
+                        half_sun_shader->set_sun_dynamic_count(0);
+                        configure_sun(*half_sun_shader);
+                        prog.use_program();
                     }
                 }
             }
