@@ -590,6 +590,11 @@ namespace jkgm {
         // scene, never by the normal GPU renderer or menus.
         std::unique_ptr<offscreen_capture_target> planar_capture_target;
         std::unique_ptr<planar_reflection_capture_shader> planar_capture_program;
+        // Asynchronous offscreen GPU timestamps: world, models, mipmaps.
+        // Read only completed frames, with no GL query waits on the hot path.
+        presentation_gpu_profile planar_gpu_queries;
+        std::array<uint64_t,presentation_gpu_profile::num_stages> planar_gpu_ns{};
+        uint64_t planar_gpu_samples=0,planar_gpu_skipped=0;
         bool planar_capture_ready=false;
         uintptr_t planar_plane_world=0;
         uint64_t planar_plane_world_revision=0;
@@ -1224,6 +1229,7 @@ namespace jkgm {
                 smoke_half_buffer.reset();
                 planar_capture_program.reset();
                 planar_capture_target.reset();
+                planar_gpu_queries.release();
                 present_gpu_queries.release();
                 scene_gpu_queries.release();
                 sun_gpu_queries.release();
@@ -10490,6 +10496,14 @@ namespace jkgm {
                 }
             }
             auto const after_acquisition=std::chrono::steady_clock::now();
+            presentation_gpu_profile::completed_sample gpu_result{};
+            bool const gpu_profile_active=the_config->profile_renderer &&
+                planar_gpu_queries.begin(gpu_result);
+            if(gpu_result.ready) {
+                planar_gpu_ns=gpu_result.nanoseconds;
+                ++planar_gpu_samples;
+            }
+            if(gpu_result.skipped)++planar_gpu_skipped;
             // Prefer complete offscreen native hierarchy snapshots; add only
             // primary-camera nodes of Things that were not independently
             // acquired. Each Thing with a complete hierarchy is drawn once.
@@ -10561,6 +10575,7 @@ namespace jkgm {
                 gl::set_active_texture_unit(0);
                 return true;
             };
+            if(gpu_profile_active)planar_gpu_queries.timestamp(0U,true);
             // The stage produced a reflected-frustum-only LIVE draw list.
             // Group by material/cel/GeoMode to avoid a GL call and a native
             // MAT lookup for every world polygon in JkGR's huge levels.
@@ -10627,6 +10642,10 @@ namespace jkgm {
                 world_drawn+=entry.second.size();
             }
             auto const after_world=std::chrono::steady_clock::now();
+            if(gpu_profile_active) {
+                planar_gpu_queries.timestamp(0U,false);
+                planar_gpu_queries.timestamp(1U,true);
+            }
             struct planar_emissive_model_group {
                 gpu_3do_instance const *instance=nullptr;
                 gpu_3do_group const *group=nullptr;
@@ -10743,11 +10762,20 @@ namespace jkgm {
                 glDepthMask(GL_TRUE);
                 glDepthFunc(GL_LESS);
             }
+            auto const after_models=std::chrono::steady_clock::now();
+            if(gpu_profile_active) {
+                planar_gpu_queries.timestamp(1U,false);
+                planar_gpu_queries.timestamp(2U,true);
+            }
             // Refresh the reflection mip chain once, not once per surface.
             // GL scope restores the previous unit-0 material binding.
             gl::set_active_texture_unit(0);
             glBindTexture(GL_TEXTURE_2D,planar_capture_target->color_texture());
             glGenerateMipmap(GL_TEXTURE_2D);
+            if(gpu_profile_active) {
+                planar_gpu_queries.timestamp(2U,false);
+                planar_gpu_queries.end();
+            }
             auto const after_capture=std::chrono::steady_clock::now();
             planar_capture_camera=reflected;
             planar_capture_ready=true;
@@ -10771,8 +10799,15 @@ namespace jkgm {
                              after_acquisition-begun).count(),
                          " ms_world=",std::chrono::duration<float,std::milli>(
                              after_world-after_acquisition).count(),
-                         " ms_models_and_mips=",std::chrono::duration<float,std::milli>(
-                             after_capture-after_world).count(),
+                         " ms_models=",std::chrono::duration<float,std::milli>(
+                             after_models-after_world).count(),
+                         " ms_mips=",std::chrono::duration<float,std::milli>(
+                             after_capture-after_models).count(),
+                         " gpu_ms_world=",float(planar_gpu_ns[0])/1000000.0f,
+                         " gpu_ms_models=",float(planar_gpu_ns[1])/1000000.0f,
+                         " gpu_ms_mips=",float(planar_gpu_ns[2])/1000000.0f,
+                         " gpu_samples=",planar_gpu_samples,
+                         " gpu_skipped=",planar_gpu_skipped,
                          " native_thing_candidates=",model_candidates,
                          " hidden_by_thing_flags=",hidden_by_flags,
                          " hidden_by_cur_geomode=",hidden_by_geo,

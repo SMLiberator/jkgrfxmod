@@ -88,7 +88,15 @@ assert "for(auto const &face:planar_frame_candidates)" in renderer
 assert "gpu_3do_batch_outside_frustum(" in renderer
 assert "glMultiDrawElements(GL_TRIANGLES,world_counts.data()" in renderer
 assert "ms_acquire=" in renderer and "ms_world=" in renderer
-assert "ms_models_and_mips=" in renderer
+assert "ms_models=" in renderer and "ms_mips=" in renderer
+assert "gpu_ms_world=" in renderer
+assert "gpu_ms_models=" in renderer and "gpu_ms_mips=" in renderer
+assert "planar_gpu_queries.begin(gpu_result)" in renderer
+assert "planar_gpu_queries.timestamp(0U,true)" in renderer
+assert "planar_gpu_queries.timestamp(1U,true)" in renderer
+assert "planar_gpu_queries.timestamp(2U,true)" in renderer
+assert "planar_gpu_queries.end();" in renderer
+assert "planar_gpu_queries.release();" in renderer
 assert "shader.set_color_effects(" in renderer
 assert "shader.set_fog(" in renderer
 assert "shader.set_model_lighting(" in renderer

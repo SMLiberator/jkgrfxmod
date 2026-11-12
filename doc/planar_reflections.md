@@ -114,9 +114,12 @@ geometry, without writing depth or occluding captured buildings. It restores
 GL framebuffer/texture/render state, including both material texture units,
 after the pass. Captures are full frame, not
 yet cropped to the planar surface. The periodic PLANAR log reports CPU phase
-durations (acquisition, world submission, model submission plus mip generation)
-and cull/group counts; these CPU times can include driver stalls. Independent
-GPU timestamps are still needed to establish GPU execution cost.
+durations (acquisition, world submission, model submission, mipmap generation)
+and cull/group counts; CPU times can include driver stalls. When
+`profile_renderer` is enabled, separate nonblocking GPU timestamp queries
+report `gpu_ms_world`, `gpu_ms_models`, `gpu_ms_mips` and sample/skip counts.
+Query results are read only after completion, without waiting on the GPU;
+the reported values may lag behind the current frame by several frames.
 
 **Visual parity and limits:** The lightweight capture now uses the
 GPU world shader's Gouraud/CMP/sector tint and global JK color-effect
