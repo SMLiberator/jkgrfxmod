@@ -246,6 +246,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_ssao")) {
             j.at("enable_ssao").get_to(rv->enable_ssao);
         }
+        if(j.contains("experimental_half_res_ssao")) {
+            j.at("experimental_half_res_ssao").get_to(
+                rv->experimental_half_res_ssao);
+        }
 
         if(j.contains("enable_parallax")) {
             j.at("enable_parallax").get_to(rv->enable_parallax);

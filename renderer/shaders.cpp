@@ -1377,10 +1377,12 @@ void jkgm::shaders::game_pass_shader::set_displacement_factor(float factor)
     gl::set_uniform_float(displacement_factor, factor);
 }
 
-jkgm::shaders::game_post_ssao_shader::game_post_ssao_shader(fs::path const &data_root)
-    : opengl_shader("game_post_ssao",
+jkgm::shaders::game_post_ssao_shader::game_post_ssao_shader(
+    fs::path const &data_root,bool half_res)
+    : opengl_shader(half_res?"game_post_ssao_half":"game_post_ssao",
                     data_root / "shaders/postprocess.vert",
-                    data_root / "shaders/post_ssao.frag")
+                    data_root / (half_res?"shaders/post_ssao_half.frag":
+                                          "shaders/post_ssao.frag"))
     , normal_image(gl::get_uniform_location(the_program, "normal_image"))
     , depth_image(gl::get_uniform_location(the_program, "depth_image"))
     , noise_image(gl::get_uniform_location(the_program, "noise_image"))
@@ -1808,6 +1810,40 @@ jkgm::shaders::game_transparency_pass_shader::game_transparency_pass_shader(
                        data_root / "shaders/game.vert",
                        data_root / "shaders/game_trns_pass.frag")
 {
+}
+
+jkgm::shaders::post_ssao_half_blur_shader::post_ssao_half_blur_shader(
+    fs::path const &data_root)
+    : opengl_shader("post_ssao_half_blur",
+                    data_root/"shaders/postprocess.vert",
+                    data_root/"shaders/post_ssao_half_blur.frag")
+    , source_image(gl::get_uniform_location(the_program,"source_image"))
+{}
+void jkgm::shaders::post_ssao_half_blur_shader::set_source_sampler(int s)
+{
+    gl::set_uniform_integer(source_image,s);
+}
+
+jkgm::shaders::post_ssao_half_upsample_shader::
+    post_ssao_half_upsample_shader(fs::path const &data_root)
+    : opengl_shader("post_ssao_half_upsample",
+                    data_root/"shaders/postprocess.vert",
+                    data_root/"shaders/post_ssao_half_upsample.frag")
+    , source_image(gl::get_uniform_location(the_program,"source_image"))
+    , normal_image(gl::get_uniform_location(the_program,"normal_image"))
+    , depth_image(gl::get_uniform_location(the_program,"depth_image"))
+{}
+void jkgm::shaders::post_ssao_half_upsample_shader::set_source_sampler(int s)
+{
+    gl::set_uniform_integer(source_image,s);
+}
+void jkgm::shaders::post_ssao_half_upsample_shader::set_normal_sampler(int s)
+{
+    gl::set_uniform_integer(normal_image,s);
+}
+void jkgm::shaders::post_ssao_half_upsample_shader::set_depth_sampler(int s)
+{
+    gl::set_uniform_integer(depth_image,s);
 }
 
 jkgm::shaders::post_box4_shader::post_box4_shader(fs::path const &data_root)

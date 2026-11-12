@@ -28,6 +28,7 @@
     "experimental_continuous_ambient_gpu": false,
     "gpu_pixel_lighting": false,
     "enable_ssao": true,
+    "experimental_half_res_ssao": false,
     "enable_parallax": true,
     "enable_texture_filtering": true,
     "retro_mode": false,

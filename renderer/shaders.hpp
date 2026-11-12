@@ -448,7 +448,7 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> samples;
 
         public:
-            explicit game_post_ssao_shader(fs::path const &data_root);
+            explicit game_post_ssao_shader(fs::path const &data_root,bool half_res=false);
 
             void set_normal_sampler(int sampler);
             void set_depth_sampler(int sampler);
@@ -590,6 +590,24 @@ namespace jkgm {
         public:
             explicit game_transparency_pass_shader(
                 fs::path const &data_root);
+        };
+
+        // Packed half-resolution AO blur and full-resolution bilateral
+        // reconstruction. Construct only for the opt-in experiment.
+        class post_ssao_half_blur_shader : public opengl_shader {
+            gl::uniform_location_id source_image;
+        public:
+            explicit post_ssao_half_blur_shader(fs::path const &data_root);
+            void set_source_sampler(int sampler);
+        };
+
+        class post_ssao_half_upsample_shader : public opengl_shader {
+            gl::uniform_location_id source_image,normal_image,depth_image;
+        public:
+            explicit post_ssao_half_upsample_shader(fs::path const &data_root);
+            void set_source_sampler(int sampler);
+            void set_normal_sampler(int sampler);
+            void set_depth_sampler(int sampler);
         };
 
         class post_box4_shader : public opengl_shader {

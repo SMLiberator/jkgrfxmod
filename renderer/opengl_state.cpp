@@ -427,6 +427,14 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , bloom_layers(screen_res)
 {
     LOG_DEBUG("Loading OpenGL assets");
+    if(the_config->enable_ssao && the_config->experimental_half_res_ssao) {
+        game_post_ssao_half_program=std::make_unique<
+            shaders::game_post_ssao_shader>(data_root,true);
+        post_ssao_half_blur_program=std::make_unique<
+            shaders::post_ssao_half_blur_shader>(data_root);
+        post_ssao_half_upsample_program=std::make_unique<
+            shaders::post_ssao_half_upsample_shader>(data_root);
+    }
     // Keep the original full-resolution path available as mode 0.
     // The standard mode 2 uses quarter-size Gaussian buffers followed
     // by full-resolution, depth-aware reconstruction.
