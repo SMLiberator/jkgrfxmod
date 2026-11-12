@@ -459,6 +459,10 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
                 shaders::post_spatial_blur_reconstruct_shader>(data_root);
         }
     }
+    if(the_config->use_gpu_cache &&
+       the_config->experimental_half_res_fluid_sprites)
+        post_smoke_composite=std::make_unique<
+            shaders::post_smoke_composite_shader>(data_root);
     // Avoid even compiling shadow shaders on ordinary (disabled) installs.
     if((the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
        the_config->enable_sun_shadows)

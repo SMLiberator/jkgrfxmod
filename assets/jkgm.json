@@ -40,6 +40,8 @@
     "profile_audio": false,
     "use_gpu_cache": true,
     "enable_gpu_sprite_instancing": true,
+    "experimental_half_res_fluid_sprites": false,
+    "fluid_sprite_layer_budget": 0,
     "enable_saber_trails": true,
     "saber_trail_delay": 0.06,
     "enable_gpu_camera_hud": true,

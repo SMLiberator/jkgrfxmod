@@ -573,6 +573,11 @@ namespace jkgm {
         std::unique_ptr<renderer_compositor> frame_compositor;
         std::unique_ptr<renderer_ao> frame_ao;
         std::unique_ptr<renderer_screen> frame_screen;
+        // Opt-in cached fluid SPR target: half-size RGBA16F plus an 8-bit
+        // per-pixel stencil layer count. Never used for world fluids or cutouts.
+        std::unique_ptr<post_buffer> smoke_half_buffer;
+        GLuint smoke_half_stencil=0;
+        bool smoke_half_failed=false;
 
         HGDIOBJ indexed_bitmap_dc = NULL;
         char const *indexed_bitmap_source = nullptr;
@@ -1190,6 +1195,11 @@ namespace jkgm {
             // disappears. If the context is already gone, its objects go
             // away with it; do not issue GL calls on an invalid context.
             if(hGLRC && wglGetCurrentContext()==hGLRC) {
+                if(smoke_half_stencil) {
+                    glDeleteRenderbuffers(1,&smoke_half_stencil);
+                    smoke_half_stencil=0;
+                }
+                smoke_half_buffer.reset();
                 present_gpu_queries.release();
                 scene_gpu_queries.release();
                 sun_gpu_queries.release();
@@ -3448,9 +3458,49 @@ namespace jkgm {
             return frame;
         }
 
+        // Allocate lazily: baseline builds never create the texture, stencil,
+        // FBO, or composite shader. A missing stencil FBO fails open to the
+        // original full-resolution draw, never to invisible smoke.
+        bool ensure_smoke_half_target()
+        {
+            if(smoke_half_failed || !ogs || !ogs->post_smoke_composite)
+                return false;
+            if(smoke_half_buffer) return true;
+            auto const dims=make_size(
+                std::max(1,(get<x>(conf_scr_res)+1)/2),
+                std::max(1,(get<y>(conf_scr_res)+1)/2));
+            auto buffer=std::make_unique<post_buffer>(dims);
+            glGenRenderbuffers(1,&smoke_half_stencil);
+            glBindRenderbuffer(GL_RENDERBUFFER,smoke_half_stencil);
+            glRenderbufferStorage(GL_RENDERBUFFER,GL_STENCIL_INDEX8,
+                                  get<x>(dims),get<y>(dims));
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,buffer->fbo);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_STENCIL_ATTACHMENT,
+                                      GL_RENDERBUFFER,smoke_half_stencil);
+            GLenum const status=glCheckFramebufferStatus(GL_FRAMEBUFFER);
+            glBindRenderbuffer(GL_RENDERBUFFER,0);
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 gl::default_framebuffer);
+            if(status!=GL_FRAMEBUFFER_COMPLETE) {
+                LOG_WARNING("SMOKE half-res unavailable: framebuffer status=",
+                            static_cast<unsigned>(status),
+                            " falling_back=full_resolution");
+                glDeleteRenderbuffers(1,&smoke_half_stencil);
+                smoke_half_stencil=0;
+                smoke_half_failed=true;
+                return false;
+            }
+            smoke_half_buffer=std::move(buffer);
+            LOG_INFO("SMOKE half-res ready dimensions=",get<x>(dims),
+                     "x",get<y>(dims),
+                     " budget=",the_config->fluid_sprite_layer_budget,
+                     " NOTE=fluid_SPR_only_back_to_front_no_world_changes");
+            return true;
+        }
+
         // Separate opaque and alpha passes. Native JK no longer processes
         // individual faces in either path: only GPU indexed ranges remain.
-        void draw_gpu_3do_preview(bool transparent,bool post_exempt=false,
+        void draw_gpu_3do_preview(bool transparent,bool post_exempt=
                                   bool decals_only=false)
         {
             auto const &instances=post_exempt ? deferred_gpu_3do_instances
@@ -3491,6 +3541,7 @@ namespace jkgm {
             bool const have_perspective_frustum=frame_camera.perspective;
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
+            prog.set_smoke_half_resolution(false);
             prog.set_light_brightness_limit(
                 authored_light_limit(the_config->enable_baked_overbright));
             // Persistent GL program: reset instancing before every draw pass,
@@ -3673,6 +3724,7 @@ namespace jkgm {
             // They are consumed entirely in this non-recursive draw call.
             static thread_local std::vector<pending_draw> draws;
             static thread_local std::vector<pending_draw> merged_draws;
+            static thread_local std::vector<pending_draw> smoke_draws;
             // Opaque prepares the ordinary alpha list too. Keep its matrices
             // alive across the intervening projected-decal pass; deferred
             // Camera HUD and decals have independent scratch matrices.
@@ -3992,6 +4044,33 @@ namespace jkgm {
             if(gpu_profiling)
                 profile_frame.gpu_preview_sort_us[pass_index]+=
                     elapsed_profile_us(sort_begin,profile_clock::now());
+            // Preserve original back-to-front order within BOTH partitions.
+            // Smoke is composed after the ordinary translucent 3DO pass.
+            // The split never touches native world, gun, opaque, or cutouts.
+            smoke_draws.clear();
+            bool const split_smoke=transparent && ordinary_pass &&
+                                   the_config->use_gpu_cache &&
+                                   the_config->experimental_half_res_fluid_sprites &&
+                                   ensure_smoke_half_target();
+            if(split_smoke) {
+                // FBO construction changes the binding on the first frame.
+                frame_screen->begin_transparency_pass();
+                size_t write=0;
+                for(size_t read=0;read<draws.size();++read) {
+                    auto &candidate=draws[read];
+                    bool const fluid_sprite=candidate.instance->is_sprite_quad &&
+                        !candidate.instance->camera_hud &&
+                        !candidate.instance->is_projected_decal &&
+                        candidate.texture->blend==material_blend_mode::fluid;
+                    if(fluid_sprite)
+                        smoke_draws.push_back(std::move(candidate));
+                    else {
+                        if(write!=read)draws[write]=std::move(candidate);
+                        ++write;
+                    }
+                }
+                draws.resize(write);
+            }
             gpu_3do_instance const *active_instance=nullptr;
             bool prev_specular_active=false;
             bool prev_albedo_transition=false;
@@ -4031,6 +4110,7 @@ namespace jkgm {
             static thread_local std::vector<void const *> multidraw_offsets;
             auto const submit_begin=gpu_profiling
                 ?profile_clock::now():profile_clock::time_point{};
+            auto submit_draws=[&] {
             for(size_t draw_start=0;draw_start<draws.size();) {
                 auto const &draw=draws[draw_start];
                 auto const &material=*draw.texture;
@@ -4498,6 +4578,80 @@ namespace jkgm {
                     }
                 }
                 draw_start=draw_end;
+            }
+            };
+            submit_draws();
+            if(split_smoke && !smoke_draws.empty()) {
+                // No GL depth attachment: shader checks the original opaque
+                // R16F depth in its full-resolution 2x2 pixel footprint.
+                // Stencil counts only fragments surviving shader discard.
+                draws.swap(smoke_draws);
+                active_instance=nullptr;
+                auto const dims=make_size(
+                    std::max(1,(get<x>(conf_scr_res)+1)/2),
+                    std::max(1,(get<y>(conf_scr_res)+1)/2));
+                gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                     smoke_half_buffer->fbo);
+                gl::set_viewport(make_box(make_point(0,0),dims));
+                GLfloat const blank[4]={0.0f,0.0f,0.0f,0.0f};
+                GLint const stencil_clear=0;
+                glStencilMask(0xff);
+                glClearBufferfv(GL_COLOR,0,blank);
+                glClearBufferiv(GL_STENCIL,0,&stencil_clear);
+                glDisable(GL_DEPTH_TEST);
+                glDepthMask(GL_FALSE);
+                auto const budget=the_config->fluid_sprite_layer_budget;
+                if(budget>0U) {
+                    glEnable(GL_STENCIL_TEST);
+                    // GL compares reference OP stencil: ref > count.
+                    glStencilFunc(GL_GREATER,static_cast<GLint>(budget),0xff);
+                    glStencilOp(GL_KEEP,GL_KEEP,GL_INCR);
+                } else glDisable(GL_STENCIL_TEST);
+                // The shader still samples the full-res opaque depth image.
+                // Change screen-coordinate reconstruction to half-size.
+                auto const axis=[](std::array<float,3> const &a,float w) {
+                    return make_point(a[0],a[1],a[2],w);
+                };
+                float const h=std::tan(cam.fov*0.008726646259971648f);
+                float const v=h*float(get<y>(conf_scr_res))/
+                                float(get<x>(conf_scr_res));
+                prog.set_translucent_spotlight_camera(
+                    axis(cam.position,0.0f),axis(cam.right,h),
+                    axis(cam.forward,0.0f),axis(cam.up,v),
+                    make_point(float(get<x>(dims)),float(get<y>(dims))));
+                prog.set_smoke_half_resolution(true);
+                submit_draws();
+                prog.set_smoke_half_resolution(false);
+                glDisable(GL_STENCIL_TEST);
+                draws.swap(smoke_draws);
+                // Full-res framebuffer and viewport for all remaining passes.
+                frame_screen->begin_transparency_pass();
+                gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+                // The smoke texture contains premultiplied RGBA. Composite
+                // it once, without sampling the scene's color FBO itself.
+                glDisable(GL_DEPTH_TEST);
+                gl::disable(gl::capability::cull_face);
+                gl::enable(gl::capability::blend);
+                gl::set_blend_function(gl::blend_function::one,
+                    gl::blend_function::one_minus_source_alpha);
+                ogs->post_smoke_composite->use_program();
+                ogs->post_smoke_composite->set_samplers(0,1);
+                gl::set_active_texture_unit(0);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 smoke_half_buffer->tex);
+                gl::set_active_texture_unit(1);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 frame_screen->get_resolved_depth_texture());
+                gl::set_active_texture_unit(0);
+                gl::bind_vertex_array(ogs->postmdl.vao);
+                gl::draw_elements(gl::element_type::triangles,
+                    ogs->postmdl.num_indices,gl::index_type::uint32);
+                glEnable(GL_DEPTH_TEST);
+                if(gpu_profiling && gpu_3do_present_serial%120U==0U)
+                    LOG_INFO("SMOKE half-res drawn_ranges=",smoke_draws.size(),
+                             " budget=",budget,
+                             " stencil=",budget>0U?1:0,
+                             " NOTE=stencil_early_shader_reject_not_guaranteed_GL33");
             }
             if(gpu_profiling)
                 profile_frame.gpu_preview_submit_us[pass_index]+=

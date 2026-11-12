@@ -761,6 +761,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , albedo_transition_info(gl::get_uniform_location(the_program,"albedo_transition"))
     , scene_depth_sampler(gl::get_uniform_location(the_program,"scene_depth"))
     , advanced_material_params(gl::get_uniform_location(the_program,"advanced_material_params"))
+    , smoke_half_resolution(gl::get_uniform_location(the_program,"smoke_half_resolution"))
     , post_exempt_pass(gl::get_uniform_location(the_program,"post_exempt_pass"))
     , camera_hud_thing(gl::get_uniform_location(the_program,"camera_hud_thing"))
     , world_lighting_exempt(gl::get_uniform_location(
@@ -1132,6 +1133,11 @@ void jkgm::shaders::gpu_3do_preview_shader::set_albedo_transition(
 void jkgm::shaders::gpu_3do_preview_shader::set_scene_depth(int sampler)
 {
     gl::set_uniform_integer(scene_depth_sampler,sampler);
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_smoke_half_resolution(bool enabled)
+{
+    gl::set_uniform_integer(smoke_half_resolution,enabled?1:0);
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_world_lighting_exempt(
@@ -1983,6 +1989,23 @@ void jkgm::shaders::post_low_pass_shader::set_exposure(
     gl::set_uniform_integer(exposure_image,sampler);
     gl::set_uniform_integer(exposure_enabled,adaptive?1:0);
     gl::set_uniform_float(hdr_exposure_compensation,compensation_ev);
+}
+
+jkgm::shaders::post_smoke_composite_shader::post_smoke_composite_shader(
+    fs::path const &data_root)
+    : opengl_shader("post_smoke_composite",
+                    data_root/"shaders/postprocess.vert",
+                    data_root/"shaders/post_smoke_composite.frag")
+    , smoke_image(gl::get_uniform_location(the_program,"smoke_image"))
+    , opaque_depth(gl::get_uniform_location(the_program,"opaque_depth"))
+{
+}
+
+void jkgm::shaders::post_smoke_composite_shader::set_samplers(
+    int smoke_sampler,int depth_sampler)
+{
+    gl::set_uniform_integer(smoke_image,smoke_sampler);
+    gl::set_uniform_integer(opaque_depth,depth_sampler);
 }
 
 jkgm::shaders::post_scale_shader::post_scale_shader(fs::path const &data_root)

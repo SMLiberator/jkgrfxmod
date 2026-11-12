@@ -14,6 +14,7 @@ uniform vec3 emissive_factor;
 uniform vec4 fog_params;   // start, end, opacity, unused
 uniform vec3 fog_color;
 uniform sampler2D scene_depth; // completed opaque depth, native units 32*Y
+uniform int smoke_half_resolution; // 1 during half-size fluid SPR rendering
 uniform vec2 advanced_material_params; // depth_clip, fluid thickness
 uniform sampler2D displacement_map;
 uniform float displacement_factor;
@@ -421,9 +422,15 @@ vec3 gpu_view_position()
            view_up.xyz*local_fragment_position.z;
     return vec3(p.x,p.z,p.y);
 }
+// The opaque scene depth remains full resolution at all times.
+ivec2 opaque_scene_pixel()
+{
+    ivec2 p=ivec2(gl_FragCoord.xy)*(smoke_half_resolution!=0?2:1);
+    return min(p,textureSize(scene_depth,0)-ivec2(1));
+}
 bool depth_clip_rejected(float fragment_depth)
 {
-    float opaque_depth=texelFetch(scene_depth,ivec2(gl_FragCoord.xy),0).r;
+    float opaque_depth=texelFetch(scene_depth,opaque_scene_pixel(),0).r;
     if(opaque_depth>=65500.0) return true;
     vec3 pos=gpu_view_position();
     vec3 plane=cross(dFdx(pos),dFdy(pos));
@@ -436,7 +443,7 @@ bool depth_clip_rejected(float fragment_depth)
 }
 float fluid_absorption(float fragment_depth)
 {
-    float opaque_depth=texelFetch(scene_depth,ivec2(gl_FragCoord.xy),0).r;
+    float opaque_depth=texelFetch(scene_depth,opaque_scene_pixel(),0).r;
     if(opaque_depth>=65500.0)
         return jk_fluid_absorption(opaque_depth,fragment_depth,1.0,
                                   advanced_material_params.y);
@@ -636,6 +643,18 @@ void main() {
     // This is the exact native 1/rhw linear depth (32*Y) even on large
     // triangles crossing the camera near plane; no vertex-depth clamping.
     float view_depth=32.0/max(gl_FragCoord.w,0.00000001);
+    if(smoke_half_resolution!=0) {
+        // This FBO has stencil but not the full-resolution hardware depth.
+        // A conservative 2x2 opaque footprint blocks smoke through walls.
+        ivec2 p=opaque_scene_pixel();
+        ivec2 last=textureSize(scene_depth,0)-ivec2(1);
+        float closest=texelFetch(scene_depth,p,0).r;
+        closest=min(closest,texelFetch(scene_depth,min(p+ivec2(1,0),last),0).r);
+        closest=min(closest,texelFetch(scene_depth,min(p+ivec2(0,1),last),0).r);
+        closest=min(closest,texelFetch(scene_depth,min(p+ivec2(1,1),last),0).r);
+        if(closest<65500.0 &&
+           view_depth>closest+max(0.05,closest*0.0005)) discard;
+    }
     // Camera + ThingFlag 0x20 behaves as a world-anchored GUI element:
     // remain immune to all postFX, but disappear behind opaque scene depth.
     // The final framebuffer has no attached scene depth after compositing.

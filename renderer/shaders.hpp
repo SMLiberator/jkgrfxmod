@@ -315,6 +315,7 @@ namespace jkgm {
             gl::uniform_location_id specular_environment2_sampler;
             gl::uniform_location_id albedo2_sampler,albedo_transition_info;
             gl::uniform_location_id scene_depth_sampler,advanced_material_params;
+            gl::uniform_location_id smoke_half_resolution;
             gl::uniform_location_id post_exempt_pass;
             gl::uniform_location_id camera_hud_thing;
             gl::uniform_location_id world_lighting_exempt;
@@ -405,6 +406,7 @@ namespace jkgm {
             void set_environment(bool from,bool to,float weight,int mode);
             void set_albedo_transition(int source2,float weight);
             void set_scene_depth(int sampler);
+            void set_smoke_half_resolution(bool enabled);
             void set_translucent_spotlight_count(int count);
             void set_translucent_shadow(int slot,float near_plane,float far_plane,
                                         float angle_bias_scale);
@@ -708,6 +710,15 @@ namespace jkgm {
             void set_fbuf_sampler(int sampler);
             void set_fused_bloom(bool first_pass,int exposure_sampler,
                                  bool adaptive,float compensation_ev);
+        };
+
+        // Pre-multiplied half-size fluid SPR layer -> full-size scene.
+        class post_smoke_composite_shader : public opengl_shader {
+        private:
+            gl::uniform_location_id smoke_image,opaque_depth;
+        public:
+            explicit post_smoke_composite_shader(fs::path const &data_root);
+            void set_samplers(int smoke_sampler,int depth_sampler);
         };
 
         class post_spatial_blur_shader : public opengl_shader {

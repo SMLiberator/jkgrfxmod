@@ -168,6 +168,7 @@ namespace jkgm {
         shaders::post_gauss15_shader post_gauss15;
         shaders::post_low_pass_shader post_low_pass;
         shaders::post_scale_shader post_scale;
+        std::unique_ptr<shaders::post_smoke_composite_shader> post_smoke_composite;
         shaders::post_to_srgb_shader post_to_srgb;
         shaders::post_auto_exposure_shader post_auto_exposure;
         shaders::post_frame_blend_shader post_frame_blend;

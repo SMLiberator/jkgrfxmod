@@ -293,6 +293,23 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("enable_gpu_sprite_instancing").get_to(
                 rv->enable_gpu_sprite_instancing);
         }
+        if(j.contains("experimental_half_res_fluid_sprites")) {
+            j.at("experimental_half_res_fluid_sprites").get_to(
+                rv->experimental_half_res_fluid_sprites);
+        }
+        if(j.contains("fluid_sprite_layer_budget")) {
+            auto const &value=j.at("fluid_sprite_layer_budget");
+            if(!value.is_number_integer()) {
+                throw std::runtime_error(
+                    "fluid_sprite_layer_budget must be an integer from 0 to 255");
+            }
+            int const budget=value.get<int>();
+            if(budget<0 || budget>255) {
+                throw std::runtime_error(
+                    "fluid_sprite_layer_budget must be an integer from 0 to 255");
+            }
+            rv->fluid_sprite_layer_budget=static_cast<unsigned int>(budget);
+        }
         if(j.contains("enable_saber_trails")) {
             j.at("enable_saber_trails").get_to(rv->enable_saber_trails);
         }

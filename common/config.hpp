@@ -70,6 +70,8 @@ namespace jkgm {
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics
         bool use_gpu_cache = true; // unified GPU 3DO, sprite, and SithWorld rendering
         bool enable_gpu_sprite_instancing = true; // compatible SPR instancing, disable for diagnostics
+        bool experimental_half_res_fluid_sprites = false; // opt-in half-size fluid SPR layer
+        unsigned int fluid_sprite_layer_budget = 0U; // 0=unlimited; 1..255 surviving layers per half-size pixel
         bool enable_saber_trails = true; // GPU-cached saber fan during marker 4/5 collision windows
         float saber_trail_delay = 0.06f; // seconds of delayed blade direction (0.005..0.25)
         bool enable_gpu_camera_hud = true; // Camera-type 3DOs: false forces native diagnostic (HUD then receives postFX)
