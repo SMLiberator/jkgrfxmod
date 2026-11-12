@@ -10272,6 +10272,7 @@ namespace jkgm {
                                  " gpu_reused=",offscreen.stats.reused_gpu_meshes,
                                  " gpu_snapshots=",offscreen.stats.new_gpu_snapshots,
                                  " material_unready=",offscreen.stats.material_unready,
+                                 " incomplete_things=",offscreen.stats.incomplete_things,
                                  " ready_nodes=",offscreen.stats.ready_nodes,
                                  " NOTE=offscreen_acquisition_only_no_capture_yet");
                     } else {
