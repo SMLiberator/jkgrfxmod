@@ -55,6 +55,8 @@
     "spotlight_shadow_angle_bias_scale": 0.0,
     "enable_sun": true,
     "enable_sun_shadows": false,
+    "experimental_sun_pcf_intensity_softness": 0.0,
+    "experimental_sun_pcf_intensity_reference": 1.0,
     "sun_shadow_update_interval": 0.0,
     "sun_shadow_resolution": 512,
     "enable_decals": true,

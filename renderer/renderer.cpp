@@ -26,6 +26,7 @@
 #include "spotlight.hpp"
 #include "spotlight_shadow_gpu.hpp"
 #include "sun_shadow_gpu.hpp"
+#include "sun_pcf_intensity.hpp"
 #include "sun_sky_aperture_gpu.hpp"
 #include "sun_sky_surface.hpp"
 #include "sun_sky_caster_mask.hpp"
@@ -5068,6 +5069,16 @@ namespace jkgm {
                               far_depth_params[0],far_depth_params[1]);
         }
 
+        adaptive_sun_pcf_radii effective_sun_pcf_radii() const
+        {
+            return sun_intensity_pcf_radii(
+                the_config->sun_shadow_near_pcf_radius,
+                the_config->sun_shadow_far_pcf_radius,
+                get_sun_settings().intensity.value()[0],
+                the_config->experimental_sun_pcf_intensity_softness,
+                the_config->experimental_sun_pcf_intensity_reference);
+        }
+
         template<typename Shader>
         void set_translucent_sun(Shader &prog,bool active)
         {
@@ -5119,9 +5130,8 @@ namespace jkgm {
                 point_axis(cam.forward,0.0f),point_axis(cam.up,v),
                 make_point(float(get<x>(conf_scr_res)),
                            float(get<y>(conf_scr_res))));
-            uniforms.set_pcf_radius(
-                the_config->sun_shadow_near_pcf_radius,
-                the_config->sun_shadow_far_pcf_radius);
+            auto const pcf=effective_sun_pcf_radii();
+            uniforms.set_pcf_radius(pcf.near_radius,pcf.far_radius);
             uniforms.set_sky_aperture(sky_aperture,
                 texture_units::forward_next_extended_unit,
                 sky_aperture?sun_sky_aperture_depth_transform()
@@ -7698,9 +7708,9 @@ namespace jkgm {
             prog.set_retain_hom_pixels(the_config->retain_hom_pixels);
             prog.set_sun_shadow_receiver_bias_scale(
                 the_config->sun_shadow_receiver_bias_scale);
-            prog.set_sun_shadow_pcf_radius(
-                the_config->sun_shadow_near_pcf_radius,
-                the_config->sun_shadow_far_pcf_radius);
+            auto const sun_pcf=effective_sun_pcf_radii();
+            prog.set_sun_shadow_pcf_radius(sun_pcf.near_radius,
+                                           sun_pcf.far_radius);
             prog.set_sun_sky_aperture(false,
                 texture_units::opaque_sky_aperture,
                 make_point(1.0f,0.0f,1.0f,0.0f));
@@ -7870,8 +7880,7 @@ namespace jkgm {
                         half_sun_shader->set_sun_shadow_receiver_bias_scale(
                             the_config->sun_shadow_receiver_bias_scale);
                         half_sun_shader->set_sun_shadow_pcf_radius(
-                            the_config->sun_shadow_near_pcf_radius,
-                            the_config->sun_shadow_far_pcf_radius);
+                            sun_pcf.near_radius,sun_pcf.far_radius);
                         half_sun_shader->set_sun_dynamic_count(0);
                         configure_sun(*half_sun_shader);
                         prog.use_program();

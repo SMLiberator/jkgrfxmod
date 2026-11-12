@@ -268,6 +268,12 @@ jobs:
       run: python3 tests/experimental_specular_normal_mode.py
     - name: Independent sun cascade resolution and PCF regression
       run: python3 tests/sun_cascade_pcf_experiment.py
+    - name: Intensity-adaptive sun PCF radius regression
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\sun_pcf_intensity.cpp /Fe:sun_pcf_intensity_test.exe || exit /b 1
+        sun_pcf_intensity_test.exe || exit /b 1
+        python3 tests/sun_pcf_intensity.py || exit /b 1
     - name: Experimental sun sky-aperture gate source contracts
       run: python3 tests/sun_sky_aperture_experiment.py
     - name: GPU 3DO alpha partition tests
