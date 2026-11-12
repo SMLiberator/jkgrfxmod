@@ -5,6 +5,7 @@
 #include "gpu_3do_preview.hpp"
 #include "planar_reflection_things.hpp"
 #include "planar_reflection_workset.hpp"
+#include "planar_reflection_offscreen_gpu.hpp"
 #include "saber_light_rgb.hpp"
 #include "thing_light_rgb.hpp"
 #include "gpu_3do_uv.hpp"
@@ -10234,6 +10235,25 @@ namespace jkgm {
                     if(collect_planar_reflection_things(read,world,scan)) {
                         auto const work=build_planar_reflection_workset(
                             scan,frame_gpu_3do_instances);
+                        // Rotate through uncovered Things on diagnostic
+                        // samples; a large city must not probe everything
+                        // in one frame or permanently starve later Things.
+                        constexpr size_t sample_budget=16U;
+                        std::vector<planar_reflection_model_thing> sample;
+                        size_t const remaining=work.uncovered_things.size();
+                        size_t const sample_count=std::min(
+                            sample_budget,remaining);
+                        sample.reserve(sample_count);
+                        if(remaining) {
+                            size_t const first=
+                                ((gpu_3do_present_serial/120U)*sample_budget)%
+                                remaining;
+                            for(size_t i=0;i<sample_count;++i)
+                                sample.push_back(work.uncovered_things[
+                                    (first+i)%remaining]);
+                        }
+                        auto const offscreen=acquire_planar_reflection_offscreen_gpu(
+                            sample,sample_budget);
                         LOG_INFO("PLANAR discovery world=",world,
                                  " sectors=",scan.sectors,
                                  " linked_things=",scan.linked_things,
@@ -10245,7 +10265,15 @@ namespace jkgm {
                                  " uncovered_things=",work.uncovered_things.size(),
                                  " unowned_gpu_nodes=",work.unowned_gpu_nodes,
                                  " unmatched_gpu_nodes=",work.unmatched_gpu_nodes,
-                                 " NOTE=inventory_only_no_capture_yet");
+                                 " probed_things=",offscreen.stats.considered,
+                                 " pose_ready=",offscreen.stats.posed_things,
+                                 " pose_failed=",offscreen.stats.pose_failures,
+                                 " native_nodes=",offscreen.stats.native_mesh_nodes,
+                                 " gpu_reused=",offscreen.stats.reused_gpu_meshes,
+                                 " gpu_snapshots=",offscreen.stats.new_gpu_snapshots,
+                                 " material_unready=",offscreen.stats.material_unready,
+                                 " ready_nodes=",offscreen.stats.ready_nodes,
+                                 " NOTE=offscreen_acquisition_only_no_capture_yet");
                     } else {
                         LOG_WARNING("PLANAR discovery unavailable world=",world,
                                     " error=",planar_reflection_thing_error_name(scan.error));
