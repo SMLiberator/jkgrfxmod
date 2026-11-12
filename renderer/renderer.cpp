@@ -10613,6 +10613,7 @@ namespace jkgm {
                                  " linked_things=",scan.linked_things,
                                  " reflected_3do_candidates=",scan.models.size(),
                                  " excluded_flags=",scan.excluded_flags,
+                                 " excluded_geo_mode=",scan.excluded_geo_mode,
                                  " non_models=",scan.non_models,
                                  " matched_things=",work.matched_things,
                                  " cached_nodes=",work.cached_instance_indices.size(),
