@@ -162,6 +162,13 @@ pose reuse, source caching, capture update cadence or 3DO LOD bias is next.
   A visible plane must be selected before any capture work.
 - A secondary `engine_camera` is reflected using the plane normal and
   offset `dot(normal, world_position)==offset`.
+- `renderer/offscreen_capture_target.hpp` provides a reusable HDR/depth
+  framebuffer and scoped GL-state restoration for secondary camera consumers.
+- `renderer/offscreen_capture_projection.hpp` describes perspective and
+  orthographic projections without relying on native rdCamera state.
+  The planar renderer still uses its original perspective projection;
+  an arbitrary camera will accept FOV=0 for orthographic projection,
+  with a separately selected vertical world-space span.
 - `renderer/planar_reflection_camera.hpp` provides GL-free, tested world-to-view
   matrix math matching the GPU-cached world and 3DO matrix layouts. Captures
   must not modify JK's live rdCamera, and must not trust a mirrored camera's

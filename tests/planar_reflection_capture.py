@@ -12,7 +12,8 @@ for name in ("experimental_planar_reflection_capture",
     assert f'j.contains("{name}")' in config
 assert 'std::isfinite(v)' in config and 'v<0.125f || v>1.0f' in config
 renderer=read("renderer/renderer.cpp")
-target=read("renderer/planar_reflection_capture_target.hpp")
+target=read("renderer/offscreen_capture_target.hpp")
+projection=read("renderer/offscreen_capture_projection.hpp")
 shader=read("renderer/planar_reflection_capture_shader.hpp")
 v=read("assets/shaders/planar_capture.vert")
 f=read("assets/shaders/planar_capture.frag")
@@ -30,7 +31,14 @@ capture=renderer.split("void render_planar_capture()",1)[1]
 assert "face.count==0U || face.passable_adjoin" in capture
 assert "make_planar_reflection_camera(" in renderer
 assert "make_planar_reflection_render_setup(" in renderer
-assert "planar_reflection_gl_scope restore;" in renderer
+assert "offscreen_capture_gl_scope restore;" in renderer
+assert "make_offscreen_capture_projection(" in renderer
+assert "shader.set_projection(projection);" in renderer
+assert "offscreen_capture_target" in renderer
+assert "clip_enabled" in f and "orthographic_mode" in f
+assert "capture_forward_depth" in v and "capture_forward_depth" in f
+assert "projection.w>0.5" in v
+assert "struct offscreen_capture_projection" in projection
 assert "for(auto const &surface:cache.mesh.surfaces)" in renderer
 assert "collect_planar_reflection_things(read,world,scan)" in renderer
 assert "acquire_planar_reflection_offscreen_gpu(" in renderer
@@ -96,7 +104,7 @@ assert "mix(lit,fog_color,fog_far)" in f
 # Reflection distance already includes the camera->receiver leg. Its
 # contribution must be removed from the capture fog, then reconstructed by
 # the primary renderer without counting the first leg twice.
-assert "float plane_fraction=clamp(" in f
+assert "float plane_fraction=clip_enabled!=0 ? clamp(" in f
 assert "float fog_total=capture_fog_fraction(total_depth);" in f
 assert "float fog_near=capture_fog_fraction(total_depth*plane_fraction);" in f
 assert "fog_far=clamp((fog_total-fog_near)/" in f
@@ -141,12 +149,13 @@ assert "GL_COLOR_ATTACHMENT0" in target
 assert "GL_DEPTH_COMPONENT24" in target
 assert "glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING" in target
 assert "glBindFramebuffer(GL_DRAW_FRAMEBUFFER" in target
-assert "clip_plane_view" in v and "if(clip_side<" in f
+assert "clip_plane_view" in v and "if(clip_enabled!=0 && clip_side<" in f
 assert "is_model" in v and "native_uv_offset" in v
 assert "albedo_map" in f and "alpha_cutoff" in f
 for p in ("renderer/renderer.vcxproj","renderer/renderer.vcxproj.filters"):
     s=read(p)
-    for name in ("planar_reflection_capture_target.hpp",
+    for name in ("offscreen_capture_target.hpp",
+                 "offscreen_capture_projection.hpp",
                  "planar_reflection_capture_shader.hpp",
                  "planar_reflection_render_math.hpp"):
         assert name in s

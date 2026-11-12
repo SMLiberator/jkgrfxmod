@@ -7,7 +7,8 @@
 #include "planar_reflection_workset.hpp"
 #include "planar_reflection_offscreen_gpu.hpp"
 #include "planar_reflection_render_math.hpp"
-#include "planar_reflection_capture_target.hpp"
+#include "offscreen_capture_target.hpp"
+#include "offscreen_capture_projection.hpp"
 #include "planar_reflection_capture_shader.hpp"
 #include "saber_light_rgb.hpp"
 #include "thing_light_rgb.hpp"
@@ -587,7 +588,7 @@ namespace jkgm {
         bool smoke_half_failed=false;
         // Independent low-cost planar capture: allocated on first enabled
         // scene, never by the normal GPU renderer or menus.
-        std::unique_ptr<planar_reflection_capture_target> planar_capture_target;
+        std::unique_ptr<offscreen_capture_target> planar_capture_target;
         std::unique_ptr<planar_reflection_capture_shader> planar_capture_program;
         bool planar_capture_ready=false;
         uintptr_t planar_plane_world=0;
@@ -10422,15 +10423,16 @@ namespace jkgm {
                 the_config->planar_reflection_resolution_scale,
                 camera,reflected,*planar_capture_plane);
             if(!setup.valid)return;
-            float const aspect=float(setup.width)/float(setup.height);
-            float const half_fov=std::tan(
-                camera.fov*0.008726646259971648f);
+            // Reuse the same perspective coordinates through the generic
+            // offscreen projection descriptor. The FOV=0 orthographic mode
+            // is reserved for arbitrary camera captures, not reflections.
             float const far_plane=frame_world_cache_camera.far_plane;
-            if(!std::isfinite(half_fov) || half_fov<=0.0f ||
-               !std::isfinite(far_plane) || far_plane<=0.1f)return;
+            auto const projection=make_offscreen_capture_projection(
+                setup.width,setup.height,camera.fov,0.0f,far_plane);
+            if(!projection.valid || projection.orthographic)return;
             if(!planar_capture_target)
                 planar_capture_target=
-                    std::make_unique<planar_reflection_capture_target>();
+                    std::make_unique<offscreen_capture_target>();
             if(!planar_capture_target->ensure(setup.width,setup.height)) {
                 static bool warned=false;
                 if(!warned) {
@@ -10494,7 +10496,7 @@ namespace jkgm {
             std::unordered_set<uint64_t> acquired_owners;
             for(auto const &inst:offscreen.nodes)
                 if(inst.shadow_owner)acquired_owners.insert(inst.shadow_owner);
-            planar_reflection_gl_scope restore;
+            offscreen_capture_gl_scope restore;
             glBindFramebuffer(GL_FRAMEBUFFER,planar_capture_target->framebuffer());
             glViewport(0,0,setup.width,setup.height);
             glDisable(GL_SCISSOR_TEST);
@@ -10512,7 +10514,7 @@ namespace jkgm {
             glEnable(GL_CULL_FACE);
             glCullFace(GL_BACK);
             shader.use_program();
-            shader.set_projection(half_fov,aspect,far_plane);
+            shader.set_projection(projection);
             shader.set_clip(setup.clip_view);
             auto const fog=get_fog_settings();
             auto const fog_info=fog.info.value(),fog_rgb=fog.color.value();

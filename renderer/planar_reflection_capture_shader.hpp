@@ -3,12 +3,14 @@
 // the main G-buffer and never alters the native JK camera or its draw queue.
 #include "shaders.hpp"
 #include "gpu_3do_modelview.hpp"
+#include "offscreen_capture_projection.hpp"
 #include <array>
 #include <algorithm>
 
 namespace jkgm {
 class planar_reflection_capture_shader : public opengl_shader {
     gl::uniform_location_id vr_,vf_,vu_,origin_,projection_,clip_;
+    gl::uniform_location_id clip_enabled_,ortho_mode_;
     gl::uniform_location_id model_,sampler_,uv_scale_,uv_scroll_;
     gl::uniform_location_id tint_,has_albedo_,alpha_;
     gl::uniform_location_id fog_params_,fog_color_,jk_filter_,jk_tint_,jk_fade_,jk_limit_;
@@ -26,6 +28,8 @@ public:
          origin_(gl::get_uniform_location(the_program,"view_origin")),
          projection_(gl::get_uniform_location(the_program,"projection")),
          clip_(gl::get_uniform_location(the_program,"clip_plane_view")),
+         clip_enabled_(gl::get_uniform_location(the_program,"clip_enabled")),
+         ortho_mode_(gl::get_uniform_location(the_program,"orthographic_mode")),
          model_(gl::get_uniform_location(the_program,"is_model")),
          sampler_(gl::get_uniform_location(the_program,"albedo_map")),
          uv_scale_(gl::get_uniform_location(the_program,"uv_scale")),
@@ -49,9 +53,11 @@ public:
          emission_enabled_(gl::get_uniform_location(the_program,"has_emissive")),
          emission_only_(gl::get_uniform_location(the_program,"emissive_only"))
     {}
-    void set_projection(float half_fov,float aspect,float far_plane) {
+    void set_projection(offscreen_capture_projection const &p) {
         gl::set_uniform_vector(projection_,make_point(
-            half_fov,aspect,1.0f/far_plane,0.0f));
+            p.half_horizontal,p.aspect,p.reciprocal_far,
+            p.orthographic?1.0f:0.0f));
+        gl::set_uniform_integer(ortho_mode_,p.orthographic?1:0);
     }
     void set_modelview(gpu_3do_matrix34 const &m,bool model) {
         gl::set_uniform_integer(model_,model?1:0);
@@ -60,8 +66,9 @@ public:
         gl::set_uniform_vector(vu_,make_point(m[6],m[7],m[8],0.0f));
         gl::set_uniform_vector(origin_,make_point(m[9],m[10],m[11],1.0f));
     }
-    void set_clip(std::array<float,4> const &p) {
+    void set_clip(std::array<float,4> const &p,bool enabled=true) {
         gl::set_uniform_vector(clip_,make_point(p[0],p[1],p[2],p[3]));
+        gl::set_uniform_integer(clip_enabled_,enabled?1:0);
     }
     void set_fog(point<4,float> params,point<3,float> color) {
         gl::set_uniform_vector(fog_params_,params);

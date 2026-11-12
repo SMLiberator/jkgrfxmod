@@ -398,7 +398,10 @@
     <ClInclude Include="planar_reflection_render_math.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="planar_reflection_capture_target.hpp">
+    <ClInclude Include="offscreen_capture_target.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="offscreen_capture_projection.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="planar_reflection_capture_shader.hpp">

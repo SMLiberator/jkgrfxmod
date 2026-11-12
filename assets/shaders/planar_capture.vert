@@ -20,6 +20,7 @@ uniform vec3 model_cmp_tint,model_sector_tint;
 out vec2 pixel_uv;
 out vec3 baked_light;
 out float clip_side;
+out float capture_forward_depth;
 vec3 jk_capture_color(vec3 raw,vec3 cmp,vec3 sector_tint) {
     vec3 initial=raw*cmp;
     vec3 capped=jk_light_limit<=1.0
@@ -45,7 +46,12 @@ void main() {
            local_position.z*view_up.xyz+view_origin.xyz;
     float half_h=max(projection.x,0.0001);
     float half_v=half_h/max(projection.y,0.0001);
-    gl_Position=vec4(p.x/half_h,p.z/half_v,-projection.z,p.y);
+    // W=1 selects orthographic projection. W=0 retains planar perspective.
+    if(projection.w>0.5)
+        gl_Position=vec4(p.x/half_h,p.z/half_v,
+                         2.0*p.y*projection.z-1.0,1.0);
+    else gl_Position=vec4(p.x/half_h,p.z/half_v,-projection.z,p.y);
+    capture_forward_depth=p.y;
     pixel_uv=local_uv+(is_model!=0 ? vec2(0.0):native_uv_offset);
     if(is_model==0) {
         baked_light=jk_capture_color(native_light,native_cmp_or_mode,

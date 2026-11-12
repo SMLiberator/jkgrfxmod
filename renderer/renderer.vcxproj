@@ -174,7 +174,8 @@
     <ClInclude Include="planar_reflection_native_nodes.hpp" />
     <ClInclude Include="planar_reflection_offscreen_gpu.hpp" />
     <ClInclude Include="planar_reflection_render_math.hpp" />
-    <ClInclude Include="planar_reflection_capture_target.hpp" />
+    <ClInclude Include="offscreen_capture_target.hpp" />
+    <ClInclude Include="offscreen_capture_projection.hpp" />
     <ClInclude Include="planar_reflection_capture_shader.hpp" />
     <ClInclude Include="postfx.hpp" />
     <ClInclude Include="precise_type3_native.hpp" />

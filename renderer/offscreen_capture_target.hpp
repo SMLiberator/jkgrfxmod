@@ -1,20 +1,20 @@
 #pragma once
-// A dedicated non-MSAA color/depth target for one planar capture.
+// Reusable non-MSAA HDR color/depth target for offscreen cameras.
 // Uses no native rdCamera, no G-buffer and no main framebuffer attachments.
 #include "glad/glad.h"
 #include <algorithm>
 
 namespace jkgm {
-class planar_reflection_capture_target {
+class offscreen_capture_target {
     GLuint fbo_=0,color_=0,depth_=0;
     int width_=0,height_=0;
     bool failed_=false;
 public:
-    planar_reflection_capture_target()=default;
-    planar_reflection_capture_target(planar_reflection_capture_target const &)=delete;
-    planar_reflection_capture_target &
-        operator=(planar_reflection_capture_target const &)=delete;
-    ~planar_reflection_capture_target(){release();}
+    offscreen_capture_target()=default;
+    offscreen_capture_target(offscreen_capture_target const &)=delete;
+    offscreen_capture_target &
+        operator=(offscreen_capture_target const &)=delete;
+    ~offscreen_capture_target(){release();}
     void release() {
         if(depth_)glDeleteRenderbuffers(1,&depth_);
         if(color_)glDeleteTextures(1,&color_);
@@ -85,7 +85,7 @@ public:
 
 // Scoped GL state for the experimental pass. The legacy renderer expects
 // very particular program/texture/VAO/blend/depth state after its draws.
-class planar_reflection_gl_scope {
+class offscreen_capture_gl_scope {
     GLint draw_=0,read_=0,viewport_[4]{},program_=0,vao_=0;
     GLint active_=0,texture0_=0,texture1_=0,front_=GL_CCW,cull_=GL_BACK;
     GLint depth_func_=GL_LESS,blend_src_rgb_=GL_ONE,blend_dst_rgb_=GL_ZERO;
@@ -97,7 +97,7 @@ class planar_reflection_gl_scope {
     GLboolean framebuffer_srgb_=GL_FALSE;
     GLboolean polygon_offset_=GL_FALSE;
 public:
-    planar_reflection_gl_scope() {
+    offscreen_capture_gl_scope() {
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw_);
         glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read_);
         glGetIntegerv(GL_VIEWPORT,viewport_);
@@ -127,10 +127,10 @@ public:
         framebuffer_srgb_=glIsEnabled(GL_FRAMEBUFFER_SRGB);
         polygon_offset_=glIsEnabled(GL_POLYGON_OFFSET_FILL);
     }
-    planar_reflection_gl_scope(planar_reflection_gl_scope const &)=delete;
-    planar_reflection_gl_scope &
-        operator=(planar_reflection_gl_scope const &)=delete;
-    ~planar_reflection_gl_scope(){
+    offscreen_capture_gl_scope(offscreen_capture_gl_scope const &)=delete;
+    offscreen_capture_gl_scope &
+        operator=(offscreen_capture_gl_scope const &)=delete;
+    ~offscreen_capture_gl_scope(){
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER,GLuint(draw_));
         glBindFramebuffer(GL_READ_FRAMEBUFFER,GLuint(read_));
         glViewport(viewport_[0],viewport_[1],viewport_[2],viewport_[3]);
