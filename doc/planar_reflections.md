@@ -81,16 +81,13 @@ In `jkgm.json`:
 
 ```json
 "experimental_planar_reflection_capture": true,
-"planar_reflection_resolution_scale": 0.5,
-"planar_reflection_debug_view": true
+"planar_reflection_resolution_scale": 0.5
 ```
 
 The scale is validated to `[0.125, 1.0]`, defaults to `0.5`, and applies to
 the game's internal screen resolution. At 1920x1080, the default target is
-960x540. Debug view **replaces the displayed scene** after postprocessing
-and HUD, showing the raw framebuffer without modifying gameplay rendering.
-Turn `planar_reflection_debug_view` off to keep the normal picture.
-`experimental_planar_reflection_capture` is disabled by default.
+960x540. The experimental capture is disabled by default and has no
+on-screen debug blit; test it through a reflective material in gameplay.
 
 The first version chooses one planar-material world surface, preferring
 the nearest plane; without an explicit planar MAT it can choose a world Fluid
@@ -194,5 +191,5 @@ native model-view compatibility, including nonunit and oblique plane normals.
 fallbacks; `tests/planar_reflection_render_math.cpp` verifies resolution and
 signed clip-plane computations; `tests/planar_reflection_capture.py` checks
 native offscreen/FBO/GL-state/shader/config integration. Automated tests do
-**not** establish correct live reflection visuals; inspect the debug view
-in Wine/Windows before connecting it to MATs.
+**not** establish correct live reflection visuals; verify through a planar
+material in Wine/Windows.

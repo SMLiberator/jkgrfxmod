@@ -3,7 +3,6 @@
 uniform sampler2D color_image;
 uniform sampler2D emissive_image;
 uniform sampler2D occlusion_image;
-uniform int debug_void_pixels; // unresolved raw empty-depth pixels, neon checkerboard
 uniform int retain_hom_pixels; // skip unwritten pixels, leaving prior scene buffer
 uniform sampler2D depth_image;
 uniform vec4 fog_params; // start, end, opacity, unused
@@ -404,17 +403,6 @@ void main()
     ivec2 tc=ivec2(gl_FragCoord.xy);
     float depth=texelFetch(depth_image,tc,0).r;
     bool covered=has_opaque_coverage(tc);
-    // Debug the ACTUAL remaining missing pixels,
-    // regardless of HOM being enabled. Bright alternating neon colors make
-    // subpixel edge cracks conspicuous even under sunlight/HDR processing.
-    if(debug_void_pixels!=0 && !covered) {
-        ivec2 pixel=ivec2(gl_FragCoord.xy);
-        bool checker=(((pixel.x/2)+(pixel.y/2))&1)==0;
-        out_color=vec4(checker?vec3(8.0,0.0,8.0):
-                              vec3(0.0,8.0,0.0),1.0);
-        return;
-    }
-
     // Preserve the previous scene only if NO opaque fragment was drawn.
     // In particular, a skybox beyond 65504/32 world units can overflow
     // half-float scene depth while its color and coverage are still valid.

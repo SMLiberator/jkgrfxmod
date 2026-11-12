@@ -304,10 +304,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_planar_reflection_capture").get_to(
                 rv->experimental_planar_reflection_capture);
         }
-        if(j.contains("planar_reflection_debug_view")) {
-            j.at("planar_reflection_debug_view").get_to(
-                rv->planar_reflection_debug_view);
-        }
         if(j.contains("planar_reflection_resolution_scale")) {
             auto const &s=j.at("planar_reflection_resolution_scale");
             if(!s.is_number())throw std::runtime_error(
@@ -411,9 +407,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                 throw std::runtime_error(
                     "spotlight_shadow_angle_bias_scale must be between 0 and 2");
             rv->spotlight_shadow_angle_bias_scale=static_cast<float>(scale);
-        }
-        if(j.contains("debug_void_pixels")) {
-            j.at("debug_void_pixels").get_to(rv->debug_void_pixels);
         }
         if(j.contains("retain_hom_pixels")) {
             j.at("retain_hom_pixels").get_to(rv->retain_hom_pixels);

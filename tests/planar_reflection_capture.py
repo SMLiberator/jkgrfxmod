@@ -6,10 +6,9 @@ read=lambda path:(root/path).read_text(encoding="utf-8")
 settings=json.loads(read("assets/jkgm.json"))
 assert settings["experimental_planar_reflection_capture"] is False
 assert settings["planar_reflection_resolution_scale"]==0.5
-assert settings["planar_reflection_debug_view"] is False
 config=read("common/config.cpp")
 for name in ("experimental_planar_reflection_capture",
-             "planar_reflection_resolution_scale","planar_reflection_debug_view"):
+             "planar_reflection_resolution_scale"):
     assert f'j.contains("{name}")' in config
 assert 'std::isfinite(v)' in config and 'v<0.125f || v>1.0f' in config
 renderer=read("renderer/renderer.cpp")
@@ -138,7 +137,6 @@ assert "clamp(native_light,vec3(0.45)" not in v
 assert "instance.ambient=1.0f;" not in main
 
 
-assert "glBlitFramebuffer(" in renderer
 assert "GL_COLOR_ATTACHMENT0" in target
 assert "GL_DEPTH_COMPONENT24" in target
 assert "glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING" in target

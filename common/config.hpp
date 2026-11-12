@@ -59,7 +59,6 @@ namespace jkgm {
         bool enable_ssao = true;
         bool experimental_half_res_ssao = false; // quarter-pixel AO + depth-aware reconstruction
         bool experimental_half_res_sun_visibility = false; // half-res opaque shadow visibility only
-        bool debug_void_pixels = false; // show raw unresolved empty-depth pixels as neon checkerboard
         bool retain_hom_pixels = true; // vanilla JK HOM default; false = Clear Display
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
@@ -73,7 +72,6 @@ namespace jkgm {
         bool experimental_planar_thing_discovery = false; // read-only 120-frame native 3DO diagnostics
         bool experimental_planar_reflection_capture = false; // independent GPU reflected-scene FBO; opt-in
         float planar_reflection_resolution_scale = 0.5f; // 0.25..1.0 of internal screen (0.5 default)
-        bool planar_reflection_debug_view = false; // display raw reflection capture over game
         bool enable_gpu_sprite_instancing = true; // compatible SPR instancing, disable for diagnostics
         bool experimental_half_res_fluid_sprites = false; // opt-in half-size fluid SPR layer
         unsigned int fluid_sprite_layer_budget = 0U; // 0=unlimited; 1..255 surviving layers per half-size pixel

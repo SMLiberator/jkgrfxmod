@@ -2174,27 +2174,6 @@ namespace jkgm {
                 present_retro_after_hud();
                 if(gpu_timing)present_gpu_queries.timestamp(2U,false);
             }
-            if(the_config->planar_reflection_debug_view &&
-               planar_capture_ready && planar_capture_target &&
-               planar_capture_target->ready()) {
-                // Raw FBO inspection, after HUD/post/Retro: never alters
-                // the actual reflection texture or samples screen depth.
-                GLint old_draw=0,old_read=0,old_read_buffer=0;
-                glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&old_draw);
-                glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&old_read);
-                glGetIntegerv(GL_READ_BUFFER,&old_read_buffer);
-                glBindFramebuffer(GL_READ_FRAMEBUFFER,
-                                  planar_capture_target->framebuffer());
-                glReadBuffer(GL_COLOR_ATTACHMENT0);
-                glBindFramebuffer(GL_DRAW_FRAMEBUFFER,0);
-                glBlitFramebuffer(0,0,planar_capture_target->width(),
-                    planar_capture_target->height(),0,0,
-                    get<x>(conf_scr_res),get<y>(conf_scr_res),
-                    GL_COLOR_BUFFER_BIT,GL_LINEAR);
-                glBindFramebuffer(GL_READ_FRAMEBUFFER,GLuint(old_read));
-                glReadBuffer(GLenum(old_read_buffer));
-                glBindFramebuffer(GL_DRAW_FRAMEBUFFER,GLuint(old_draw));
-            }
             if(gpu_timing)present_gpu_queries.end();
             {
                 profile_scope cpu(measure,profile_frame.timings[
@@ -7763,7 +7742,6 @@ namespace jkgm {
             auto &prog=ogs->game_post_opaque_composite_program;
             prog.set_spotlight_count(0);
             prog.set_sun_dynamic_count(0);
-            prog.set_debug_void_pixels(the_config->debug_void_pixels);
             prog.set_retain_hom_pixels(the_config->retain_hom_pixels);
             prog.set_sun_shadow_receiver_bias_scale(
                 the_config->sun_shadow_receiver_bias_scale);
@@ -10413,7 +10391,7 @@ namespace jkgm {
                 planar_capture_plane=plane;
                 planar_plane_from_material=priority==2;
             }
-            if(the_config->profile_renderer || the_config->planar_reflection_debug_view)
+            if(the_config->profile_renderer)
                 LOG_INFO("PLANAR plane select: world=",cache.loaded_world,
                          " source=",planar_capture_plane
                               ?(planar_plane_from_material?"material":"fluid")

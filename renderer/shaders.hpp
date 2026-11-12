@@ -521,7 +521,6 @@ namespace jkgm {
             gl::uniform_location_id emissive_image;
             gl::uniform_location_id occlusion_image;
             gl::uniform_location_id depth_image;
-            gl::uniform_location_id debug_void_pixels;
             gl::uniform_location_id retain_hom_pixels;
             gl::uniform_location_id fog_params;
             gl::uniform_location_id fog_color;
@@ -573,7 +572,6 @@ namespace jkgm {
             void set_occlusion_sampler(int sampler);
             void set_depth_sampler(int sampler);
             void set_coverage_normal_sampler(int sampler);
-            void set_debug_void_pixels(bool enabled);
             void set_retain_hom_pixels(bool enabled);
             void set_fog(point<4,float> params,color_rgb fog);
             void set_projector_camera(point<4,float> origin,

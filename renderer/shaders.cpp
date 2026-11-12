@@ -1614,7 +1614,6 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , emissive_image(gl::get_uniform_location(the_program, "emissive_image"))
     , occlusion_image(gl::get_uniform_location(the_program, "occlusion_image"))
     , depth_image(gl::get_uniform_location(the_program, "depth_image"))
-    , debug_void_pixels(gl::get_uniform_location(the_program, "debug_void_pixels"))
     , retain_hom_pixels(gl::get_uniform_location(the_program, "retain_hom_pixels"))
     , fog_params(gl::get_uniform_location(the_program, "fog_params"))
     , fog_color(gl::get_uniform_location(the_program, "fog_color"))
@@ -1722,12 +1721,6 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_coverage_normal_sampl
     int sampler)
 {
     gl::set_uniform_integer(normal_image,sampler);
-}
-
-void jkgm::shaders::game_post_opaque_composite_shader::set_debug_void_pixels(
-    bool enabled)
-{
-    gl::set_uniform_integer(debug_void_pixels,enabled?1:0);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_retain_hom_pixels(
