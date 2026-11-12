@@ -8360,7 +8360,7 @@ namespace jkgm {
                 vec(camera.up),make_point(h,v));
             gl::set_active_texture_unit(15);
             gl::bind_texture(gl::texture_bind_target::texture_2d,
-                             planar_capture_target->color_texture());
+                             gl::texture_view(planar_capture_target->color_texture()));
             gl::set_active_texture_unit(0);
         }
 
