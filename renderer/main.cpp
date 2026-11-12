@@ -2513,9 +2513,8 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
             ++out.stats.incomplete_things;
         } else {
             out.stats.ready_nodes+=complete_thing_nodes.size();
-            out.nodes.insert(out.nodes.end(),
-                             std::make_move_iterator(complete_thing_nodes.begin()),
-                             std::make_move_iterator(complete_thing_nodes.end()));
+            for(auto &node:complete_thing_nodes)
+                out.nodes.emplace_back(std::move(node));
         }
     }
     return out;
