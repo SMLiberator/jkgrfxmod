@@ -24,7 +24,7 @@ inline planar_reflection_render_setup make_planar_reflection_render_setup(
     planar_reflection_render_setup out{};
     if(display_width<1 || display_height<1 ||
        display_width>16384 || display_height>16384 ||
-       !std::isfinite(scale) || scale<0.25f || scale>1.0f ||
+       !std::isfinite(scale) || scale<0.125f || scale>1.0f ||
        !main_camera.valid || !reflected_camera.valid)return out;
     planar_reflection_plane p{};
     if(!normalize_planar_reflection_plane(plane,p))return out;
