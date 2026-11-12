@@ -8569,11 +8569,12 @@ namespace jkgm {
             // sector tint and UV offsets, but never submit them in the normal
             // opaque or forward-alpha main-camera draw list.
             if(the_config->experimental_planar_reflection_capture &&
-               the_config->enable_reflections && can_cull) {
-                select_planar_capture_plane(camera.camera);
+               the_config->enable_reflections &&
+               cam.frustum.far_plane>0.1f) {
+                select_planar_capture_plane(cam.camera);
                 if(planar_capture_plane) {
                     auto const reflected=make_planar_reflection_camera(
-                        camera.camera,*planar_capture_plane);
+                        cam.camera,*planar_capture_plane);
                     if(reflected.valid) {
                         auto const reflection_view=
                             planar_camera_native_view(reflected);
@@ -8586,7 +8587,7 @@ namespace jkgm {
                             append_world_cache_candidate(
                                 safe_read,cache.world.surfaces_addr,surface,
                                 reflected_candidates,reflection_stats,
-                                &camera.frustum,&reflection_view,
+                                &cam.frustum,&reflection_view,
                                 &special_candidates);
                         reflected_candidates.insert(reflected_candidates.end(),
                             special_candidates.begin(),special_candidates.end());

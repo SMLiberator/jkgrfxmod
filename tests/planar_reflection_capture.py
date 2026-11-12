@@ -65,6 +65,15 @@ assert "NOTE=planar_world_material_sampling_no_sky_yet" in renderer
 # the primary camera's alpha draw queue.
 assert "planar_frame_candidates.clear();" in renderer
 assert "append_world_cache_candidate(" in renderer
+# Inside draw_world_cache_preview(), the captured camera is named cam.
+reflect_stage=renderer.split(
+    "// The reflected camera may see faces that JK's primary portal",1)[1].split(
+    "if(ordered.empty()",1)[0]
+assert "cam.frustum.far_plane>0.1f" in reflect_stage
+assert "select_planar_capture_plane(cam.camera);" in reflect_stage
+assert "cam.camera,*planar_capture_plane" in reflect_stage
+assert "&cam.frustum,&reflection_view" in reflect_stage
+assert "camera.camera" not in reflect_stage and "can_cull" not in reflect_stage
 assert "stage_candidate(candidate,false)" in renderer
 assert "reflection_staged.push_back(candidate)" in renderer
 assert "stream_candidates.insert(stream_candidates.end()," in renderer
