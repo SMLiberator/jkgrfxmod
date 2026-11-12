@@ -311,9 +311,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("planar_reflection_resolution_scale")) {
             auto const &s=j.at("planar_reflection_resolution_scale");
             if(!s.is_number())throw std::runtime_error(
-                "planar_reflection_resolution_scale must be a finite number between 0.25 and 1.0");
+                "planar_reflection_resolution_scale must be a finite number between 0.125 and 1.0");
             float const v=s.get<float>();
-            if(!std::isfinite(v) || v<0.25f || v>1.0f)
+            if(!std::isfinite(v) || v<0.125f || v>1.0f)
                 throw std::runtime_error(
                     "planar_reflection_resolution_scale must be between 0.25 and 1.0");
             rv->planar_reflection_resolution_scale=v;
