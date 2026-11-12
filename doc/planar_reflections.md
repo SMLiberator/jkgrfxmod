@@ -79,7 +79,7 @@ In `jkgm.json`:
 "planar_reflection_debug_view": true
 ```
 
-The scale is validated to `[0.25, 1.0]`, defaults to `0.5`, and applies to
+The scale is validated to `[0.125, 1.0]`, defaults to `0.5`, and applies to
 the game's internal screen resolution. At 1920x1080, the default target is
 960x540. Debug view **replaces the displayed scene** after postprocessing
 and HUD, showing the raw framebuffer without modifying gameplay rendering.
