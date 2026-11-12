@@ -10472,7 +10472,7 @@ namespace jkgm {
             glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
             // Zero alpha means no reflected geometry; shader EnvMap is
             // retained for sky/background wherever this capture has holes.
-            glClearColor(0.055f,0.075f,0.105f,0.0f);
+            glClearColor(0.0f,0.0f,0.0f,0.0f);
             glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
             glEnable(GL_CULL_FACE);
             glCullFace(GL_BACK);
@@ -10593,7 +10593,7 @@ namespace jkgm {
                          " acquired_3do_nodes=",offscreen.stats.ready_nodes,
                          " incomplete_3do_things=",offscreen.stats.incomplete_things,
                          " ms_cpu=",float(us)/1000.0f,
-                         " NOTE=debug_capture_only_no_material_sampling");
+                         " NOTE=planar_world_material_sampling_no_sky_yet");
             }
         }
 
