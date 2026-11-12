@@ -594,6 +594,7 @@ namespace jkgm {
         uint64_t planar_plane_world_revision=0;
         uint64_t planar_plane_scanned_frame=~uint64_t(0);
         std::optional<planar_reflection_plane> planar_capture_plane;
+        engine_camera planar_capture_camera{};
         bool planar_plane_from_material=false;
 
 
@@ -8262,6 +8263,9 @@ namespace jkgm {
             bool const reflective=the_config->enable_reflections &&
                 specular.first>0.0f &&
                 (material.has_environment || material.has_environment2 ||
+                 (material.reflection_mode==4 &&
+                  the_config->experimental_planar_reflection_capture &&
+                  planar_capture_ready) ||
                  direct_sun || direct_points);
             bool const diffuse_mapping=
                 the_config->enable_normal_mapped_diffuse &&
@@ -8310,6 +8314,53 @@ namespace jkgm {
                 reflective && material.has_environment2,
                 reflective?material.environment_transition:0.0f,
                 material.reflection_mode);
+            gl::set_active_texture_unit(0);
+        }
+
+        // Bind the same-frame mirrored capture only to the cached-world
+        // shader. Ordinary EnvMaps and 3DO materials keep their old paths;
+        // mode=planar samples the target only on the selected coplanar face.
+        void bind_world_planar_reflection(
+            shaders::world_cache_preview_shader &shader)
+        {
+            auto disabled=[&] {
+                shader.set_planar_reflection(false,
+                    make_point(0.0f,0.0f,1.0f,0.0f),
+                    make_point(0.0f,0.0f,0.0f),
+                    make_point(1.0f,0.0f,0.0f),
+                    make_point(0.0f,1.0f,0.0f),
+                    make_point(0.0f,0.0f,1.0f),
+                    make_point(1.0f,1.0f));
+            };
+            if(!the_config->experimental_planar_reflection_capture ||
+               !the_config->enable_reflections ||
+               !planar_capture_ready || !planar_capture_target ||
+               !planar_capture_target->ready() || !planar_capture_plane ||
+               !planar_capture_camera.valid) {
+                disabled();
+                return;
+            }
+            auto const &camera=planar_capture_camera;
+            float const aspect=float(planar_capture_target->width())/
+                               float(planar_capture_target->height());
+            float const h=std::tan(camera.fov*0.008726646259971648f);
+            float const v=h/aspect;
+            if(!(std::isfinite(h) && std::isfinite(v) &&
+                 h>0.0f && v>0.0f)) {
+                disabled();
+                return;
+            }
+            auto const vec=[](std::array<float,3> const &a) {
+                return make_point(a[0],a[1],a[2]);
+            };
+            auto const &p=*planar_capture_plane;
+            shader.set_planar_reflection(true,
+                make_point(p.normal[0],p.normal[1],p.normal[2],p.offset),
+                vec(camera.position),vec(camera.right),vec(camera.forward),
+                vec(camera.up),make_point(h,v));
+            gl::set_active_texture_unit(15);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             planar_capture_target->color_texture());
             gl::set_active_texture_unit(0);
         }
 
@@ -8581,6 +8632,7 @@ namespace jkgm {
                 });
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
+            bind_world_planar_reflection(shader);
             shader.set_specular_normal_mode(
                 the_config->experimental_specular_normal_mode);
             shader.set_light_brightness_limit(
@@ -9021,6 +9073,7 @@ namespace jkgm {
                 });
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
+            bind_world_planar_reflection(shader);
             shader.set_specular_normal_mode(
                 the_config->experimental_specular_normal_mode);
             shader.set_light_brightness_limit(
@@ -10417,7 +10470,9 @@ namespace jkgm {
             glDepthFunc(GL_LESS);
             glDepthMask(GL_TRUE);
             glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
-            glClearColor(0.055f,0.075f,0.105f,1.0f);
+            // Zero alpha means no reflected geometry; shader EnvMap is
+            // retained for sky/background wherever this capture has holes.
+            glClearColor(0.055f,0.075f,0.105f,0.0f);
             glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
             glEnable(GL_CULL_FACE);
             glCullFace(GL_BACK);
@@ -10517,6 +10572,7 @@ namespace jkgm {
                    !acquired_owners.count(inst.shadow_owner))
                     draw_model(inst);
             gl::set_active_texture_unit(0);
+            planar_capture_camera=reflected;
             planar_capture_ready=true;
             if((gpu_3do_present_serial%120U)==0U) {
                 auto const us=std::chrono::duration_cast<
@@ -10788,6 +10844,12 @@ namespace jkgm {
                     sun_shadow_previous_ready=sun_shadow_ready;
                     sun_shadow_previous_excluded=excluded;
                 }
+                // Capture the reflection BEFORE world materials sample it,
+                // otherwise water would always display a one-frame-old view.
+                // The main frame 3DO snapshot and static-world cache already
+                // exist here; the offscreen camera does not touch rdCamera.
+                if(the_config->experimental_planar_reflection_capture)
+                    render_planar_capture();
                 if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,true);
                 draw_game_gbuffer_pass(trimdl, posterize_lighting);
                 if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,false);
@@ -10797,8 +10859,6 @@ namespace jkgm {
                     profile_frame.timings[profile_idx(profile_stage::transparent_pass)]);
                 draw_game_transparency_pass(trimdl, posterize_lighting);
             }
-            if(the_config->experimental_planar_reflection_capture)
-                render_planar_capture();
             if(scene_gpu_timing)scene_gpu_queries.end();
             scene_gpu_timing=false;
             // DirectDraw HUD is composited AFTER post-processing in end_frame,
