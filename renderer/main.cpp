@@ -2391,19 +2391,29 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
             ++out.stats.pose_failures;
             continue;
         }
+        std::vector<gpu_3do_instance> complete_thing_nodes;
+        complete_thing_nodes.reserve(native_nodes.size());
+        bool incomplete=false;
         for(auto const &source:native_nodes) {
             if(!gpu_span_readable(reinterpret_cast<void const *>(source.mesh),
                                   rgb_extension?0x70U:sizeof(native_mesh))) {
                 ++out.stats.empty_or_invalid_meshes;
+                incomplete=true;
                 continue;
             }
             native_mesh mesh{};
             std::memcpy(&mesh,reinterpret_cast<void const *>(source.mesh),
                         sizeof(mesh));
-            if(mesh.num_faces<=0 || mesh.num_vertices<3 ||
-               !gpu_3do_supports_geo_mode(4,mesh.geometry_mode) ||
-               !gpu_3do_geo_mode_draws_filled(4,mesh.geometry_mode)) {
+            // Empty hierarchy meshes and modes 0..2 intentionally have no
+            // filled triangles. Other invalid mesh data fails the Thing.
+            if(mesh.num_faces==0 || mesh.num_vertices==0 ||
+               (gpu_3do_supports_geo_mode(4,mesh.geometry_mode) &&
+                !gpu_3do_geo_mode_draws_filled(4,mesh.geometry_mode)))
+                continue;
+            if(mesh.num_faces<0 || mesh.num_vertices<3 ||
+               !gpu_3do_supports_geo_mode(4,mesh.geometry_mode)) {
                 ++out.stats.empty_or_invalid_meshes;
+                incomplete=true;
                 continue;
             }
             float const *rgb=nullptr;
@@ -2414,6 +2424,7 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
             if(!gpu_mesh_source_signature(
                    mesh,rgb,signature,nullptr)) {
                 ++out.stats.empty_or_invalid_meshes;
+                incomplete=true;
                 continue;
             }
             void const *const key=reinterpret_cast<void const *>(source.mesh);
@@ -2437,12 +2448,14 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 if(it==gpu_mesh_cache.end() &&
                    gpu_mesh_cache.size()>=4096U) {
                     ++out.stats.empty_or_invalid_meshes;
+                    incomplete=true;
                     continue;
                 }
                 char const *failure=nullptr;
                 auto geometry=snapshot_gpu_mesh(mesh,rgb,&failure);
                 if(!geometry) {
                     ++out.stats.empty_or_invalid_meshes;
+                    incomplete=true;
                     continue;
                 }
                 cached_gpu_mesh entry{};
@@ -2474,6 +2487,7 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
             // Never upload texture memory from inside the offscreen probe.
             if(!gpu_mesh_materials_ready(*it->second.geometry,solid)) {
                 ++out.stats.material_unready;
+                incomplete=true;
                 continue;
             }
             gpu_3do_instance instance{};
@@ -2493,8 +2507,15 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
             // normal gameplay frame, spotlight or sun shadow map.
             instance.ambient=1.0f;
             instance.num_lights=0;
-            out.nodes.emplace_back(std::move(instance));
-            ++out.stats.ready_nodes;
+            complete_thing_nodes.emplace_back(std::move(instance));
+        }
+        if(incomplete) {
+            ++out.stats.incomplete_things;
+        } else {
+            out.stats.ready_nodes+=complete_thing_nodes.size();
+            out.nodes.insert(out.nodes.end(),
+                             std::make_move_iterator(complete_thing_nodes.begin()),
+                             std::make_move_iterator(complete_thing_nodes.end()));
         }
     }
     return out;
