@@ -15,6 +15,7 @@ class planar_reflection_capture_shader : public opengl_shader {
     gl::uniform_location_id model_ambient_,model_mode_,model_cmp_,model_sector_;
     gl::uniform_location_id emission_sampler_,emission_factor_,emission_scroll_;
     gl::uniform_location_id emission_enabled_,emission_only_;
+    gl::uniform_location_id emission_dilation_;
 public:
     explicit planar_reflection_capture_shader(fs::path const &root)
         :opengl_shader("planar_capture",
@@ -47,7 +48,9 @@ public:
          emission_factor_(gl::get_uniform_location(the_program,"emissive_factor")),
          emission_scroll_(gl::get_uniform_location(the_program,"emissive_scroll")),
          emission_enabled_(gl::get_uniform_location(the_program,"has_emissive")),
-         emission_only_(gl::get_uniform_location(the_program,"emissive_only"))
+         emission_only_(gl::get_uniform_location(the_program,"emissive_only")),
+         emission_dilation_(gl::get_uniform_location(
+             the_program,"emissive_dilation_radius"))
     {}
     void set_projection(float half_fov,float aspect,float far_plane) {
         gl::set_uniform_vector(projection_,make_point(
@@ -80,6 +83,9 @@ public:
         gl::set_uniform_float(model_mode_,mode);
         gl::set_uniform_vector(model_cmp_,cmp);
         gl::set_uniform_vector(model_sector_,sector_tint);
+    }
+    void set_emissive_dilation(float radius) {
+        gl::set_uniform_float(emission_dilation_,radius);
     }
     void set_emission(bool textured,point<4,float> strength,
                       point<2,float> scroll,bool only) {

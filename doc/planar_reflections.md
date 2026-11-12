@@ -82,6 +82,7 @@ In `jkgm.json`:
 ```json
 "experimental_planar_reflection_capture": true,
 "planar_reflection_resolution_scale": 0.5,
+"planar_reflection_emissive_dilation": 0.0,
 "planar_reflection_debug_view": true
 ```
 
@@ -90,6 +91,19 @@ the game's internal screen resolution. At 1920x1080, the default target is
 960x540. Debug view **replaces the displayed scene** after postprocessing
 and HUD, showing the raw framebuffer without modifying gameplay rendering.
 Turn `planar_reflection_debug_view` off to keep the normal picture.
+
+**Optional emissive texture dilation:** `planar_reflection_emissive_dilation`
+(default 0, range 0..2) expands only sampled emissive texture details in the
+mirrored scene. Try 1.0 at 0.125x for city windows, and compare against 0.
+At 1.0x resolution the dilation is zero regardless of strength. The
+radius is `min(3, strength * (1/sqrt(capture_scale)-1))` source texels,
+adjusted for distant minified texture-coordinate footprints. The 3x3
+luminance-maximum filter selects whole RGB colors without increasing peak
+intensity or changing albedo/alpha, and is only evaluated on surfaces with
+emissive textures. Zero strength retains the original single-fetch path.
+This is a cheap experimental shader prototype, not yet a precomputed
+emissive texture cache. Profile before adding cache memory or generation
+work; source material textures are never modified.
 `experimental_planar_reflection_capture` is disabled by default.
 
 The first version chooses one planar-material world surface, preferring
