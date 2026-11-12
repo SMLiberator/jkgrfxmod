@@ -67,7 +67,12 @@ unready materials must not produce a partial reflection. Default is off.
 
 Independent GPU-ready mesh acquisition now feeds the debug capture.
 Animated Thing hierarchy completeness is checked before admission. The
-runtime visuals still need in-game verification.
+independent sector scan honors native ThingFlags `0x10` and `0x80000`, plus
+`SetThingCurGeoMode` values 0–2 (no filled hardware geometry), and the GPU
+acquisition rechecks both states immediately before pose refresh. This is
+independent of the primary camera's frustum/portal visibility; models outside
+its view must remain available to a mirror. GeoMode 3 is respected as solid
+color; 4 is fully textured. The runtime visuals still need in-game verification.
 
 ## Experimental capture and debug view
 
