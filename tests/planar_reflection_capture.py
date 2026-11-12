@@ -35,6 +35,12 @@ assert "planar_reflection_gl_scope restore;" in renderer
 assert "for(auto const &surface:cache.mesh.surfaces)" in renderer
 assert "collect_planar_reflection_things(read,world,scan)" in renderer
 assert "acquire_planar_reflection_offscreen_gpu(" in renderer
+assert "hidden_by_cur_geomode=" in renderer
+main=read("renderer/main.cpp")
+assert "thing.thing+0xf8U,&native_geo" in main
+assert "native_geo<3" in main
+assert "gpu_3do_effective_geo_mode(cur_geo,mesh.geometry_mode)" in main
+assert "inst.effective_geometry_mode<3U" in renderer
 assert "gpu_3do_native_modelview(" in renderer
 assert "planar_capture_target->framebuffer()" in renderer
 assert "glBlitFramebuffer(" in renderer
