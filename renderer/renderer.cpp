@@ -10235,9 +10235,10 @@ namespace jkgm {
                     if(collect_planar_reflection_things(read,world,scan)) {
                         auto const work=build_planar_reflection_workset(
                             scan,frame_gpu_3do_instances);
-                        // Rotate through uncovered Things on diagnostic
-                        // samples; a large city must not probe everything
-                        // in one frame or permanently starve later Things.
+                        // Main-view ownership does not prove that ALL
+                        // hierarchy nodes were submitted (per-mesh culling).
+                        // Probe every discovered Thing independently,
+                        // rotating to avoid large per-frame scans.
                         constexpr size_t sample_budget=16U;
                         std::vector<planar_reflection_model_thing> sample;
                         size_t const remaining=work.uncovered_things.size();
