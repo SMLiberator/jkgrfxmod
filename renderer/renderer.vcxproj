@@ -171,6 +171,8 @@
     <ClInclude Include="planar_reflection_camera.hpp" />
     <ClInclude Include="planar_reflection_things.hpp" />
     <ClInclude Include="planar_reflection_workset.hpp" />
+    <ClInclude Include="planar_reflection_native_nodes.hpp" />
+    <ClInclude Include="planar_reflection_offscreen_gpu.hpp" />
     <ClInclude Include="postfx.hpp" />
     <ClInclude Include="precise_type3_native.hpp" />
     <ClInclude Include="precise_type3_pose_bulk.hpp" />
