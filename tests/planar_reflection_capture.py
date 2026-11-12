@@ -43,6 +43,24 @@ assert "gpu_3do_effective_geo_mode(cur_geo,mesh.geometry_mode)" in main
 assert "inst.effective_geometry_mode<3U" in renderer
 assert "gpu_3do_native_modelview(" in renderer
 assert "planar_capture_target->framebuffer()" in renderer
+# World MAT sampling happens AFTER same-frame capture, not from stale history.
+shader_h=read("renderer/shaders.hpp")
+shader_cpp=read("renderer/shaders.cpp")
+world_shader=read("assets/shaders/world_cache.frag")
+assert "void set_planar_reflection(bool ready" in shader_h
+assert "world_cache_preview_shader::set_planar_reflection(" in shader_cpp
+assert "planar_reflection_map" in world_shader
+assert "world_planar_reflection(" in world_shader
+assert "planar_receiver_plane" in world_shader
+assert "sample_color.rgb/=sample_color.a" in world_shader
+assert "bind_world_planar_reflection(shader);" in renderer
+assert "planar_capture_target->color_texture()" in renderer
+assert "planar_capture_camera=reflected;" in renderer
+assert "glClearColor(0.0f,0.0f,0.0f,0.0f)" in renderer
+assert renderer.index("render_planar_capture();") < renderer.index(
+    "draw_game_gbuffer_pass(trimdl, posterize_lighting);")
+assert "NOTE=planar_world_material_sampling_no_sky_yet" in renderer
+
 assert "glBlitFramebuffer(" in renderer
 assert "GL_COLOR_ATTACHMENT0" in target
 assert "GL_DEPTH_COMPONENT24" in target
