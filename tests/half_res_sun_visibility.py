@@ -21,6 +21,8 @@ assert "half_sun_shader->set_sun_dynamic_count(0);" in renderer
 assert "frame_screen->begin_compose_opaque_pass(true);" in renderer
 assert "prog.set_sun_half_visibility(half_sun_active,11);" in renderer
 assert "sun_half_visibility_image" in units
+assert 'post_opaque_half_sun[]=' in units
+assert 'bind(texture_units::post_opaque_half_sun);' in read("renderer/shaders.cpp")
 assert "sun_half_reconstruct_shadow(tc,depth,vn)" in opaque
 assert "if(visibility<0.0)" in opaque
 assert "float sky_access=sun_sky_aperture(world_position);" in opaque

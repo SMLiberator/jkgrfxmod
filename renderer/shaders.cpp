@@ -248,6 +248,8 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
             else if(name=="game_transparency_pass")bind(texture_units::game_trns_pass);
             else if(name=="game_post_opaque_composite")
                 bind(texture_units::post_opaque_composite);
+            else if(name=="game_post_opaque_half_sun")
+                bind(texture_units::post_opaque_half_sun);
         }
 
         void link_program_from_files(std::string const &name,

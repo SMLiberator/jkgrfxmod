@@ -130,6 +130,17 @@ constexpr bool no_incompatible_target_aliases(binding const (&x)[N]) {
                 return false;
     return true;
 }
+// GLSL post_sun_visibility_half.frag does not sample the sky-aperture
+// texture: the full-resolution compositor handles the hard sky boundary.
+constexpr binding post_opaque_half_sun[]={
+    {"depth_image",3,sampler_kind::tex2d},
+    {"normal_image",5,sampler_kind::tex2d},
+    {"sun_shadow_image",13,sampler_kind::shadow},
+    {"sun_shadow_far_image",14,sampler_kind::shadow},
+    {"sun_dynamic_image",15,sampler_kind::shadow},
+};
+static_assert(no_incompatible_target_aliases(post_opaque_half_sun),
+              "Sampler target collision in post_opaque_half_sun");
 static_assert(no_incompatible_target_aliases(gpu_3do_preview),"Sampler target collision in gpu_3do_preview");
 static_assert(no_incompatible_target_aliases(world_cache),"Sampler target collision in world_cache");
 static_assert(no_incompatible_target_aliases(game_opaque_pass),"Sampler target collision in game_opaque_pass");
