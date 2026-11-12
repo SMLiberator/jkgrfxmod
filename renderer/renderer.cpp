@@ -10241,7 +10241,7 @@ namespace jkgm {
                         // rotating to avoid large per-frame scans.
                         constexpr size_t sample_budget=16U;
                         std::vector<planar_reflection_model_thing> sample;
-                        size_t const remaining=work.uncovered_things.size();
+                        size_t const remaining=scan.models.size();
                         size_t const sample_count=std::min(
                             sample_budget,remaining);
                         sample.reserve(sample_count);
