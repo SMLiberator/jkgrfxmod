@@ -4052,6 +4052,17 @@ namespace jkgm {
                                    the_config->use_gpu_cache &&
                                    the_config->experimental_half_res_fluid_sprites &&
                                    ensure_smoke_half_target();
+            // The lazy FBO constructor may bind its texture on the
+            // previously active sampler unit (including scene-depth unit 8).
+            // Restore opaque depth even when target creation failed and we
+            // fall back to full-resolution smoke.
+            if(transparent && ordinary_pass &&
+               the_config->experimental_half_res_fluid_sprites) {
+                gl::set_active_texture_unit(8);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 frame_screen->get_resolved_depth_texture());
+                gl::set_active_texture_unit(0);
+            }
             if(split_smoke) {
                 // FBO construction changes the binding on the first frame.
                 frame_screen->begin_transparency_pass();
