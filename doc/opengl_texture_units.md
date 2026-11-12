@@ -22,7 +22,7 @@ reference the same unit within a program.
 | 9 | Displacement / decal receiver light | Unused | EnvMap 2 | Spotlight 3 |
 | 10 | Spotlight shadow (depth compare) | Unused | Translucent spotlight shadow | Spotlight shadow |
 | 11 | Fullbright palette / decal AO | Fullbright palette | Unused | Unused |
-| 12–15 | Spotlight cookies 0–3 | Unused | Translucent spotlight cookies 0–3 | 13–15 sun shadows |
+| 12–15 | Spotlight cookies 0–3 | **15: Planar reflection capture** | Translucent spotlight cookies 0–3 | 13–15 sun shadows |
 | 16–18 | Sun near/far/dynamic shadow | Sun near/far/dynamic shadow (direct specular include) | Sun near/far/dynamic shadow | 16 sky aperture; 17–18 unused |
 | 19 | **Sector-crossing samplerBuffer** | Unused | Unused | Unused |
 | 20 | **Opt-in sky-aperture sampler2DArray** | **Opt-in sky-aperture sampler2DArray** | **Opt-in sky-aperture sampler2DArray** | Unused |
