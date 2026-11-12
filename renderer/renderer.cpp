@@ -4,6 +4,7 @@
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
 #include "planar_reflection_things.hpp"
+#include "planar_reflection_workset.hpp"
 #include "saber_light_rgb.hpp"
 #include "thing_light_rgb.hpp"
 #include "gpu_3do_uv.hpp"
@@ -10231,13 +10232,20 @@ namespace jkgm {
                     };
                     planar_reflection_thing_scan scan{};
                     if(collect_planar_reflection_things(read,world,scan)) {
+                        auto const work=build_planar_reflection_workset(
+                            scan,frame_gpu_3do_instances);
                         LOG_INFO("PLANAR discovery world=",world,
                                  " sectors=",scan.sectors,
                                  " linked_things=",scan.linked_things,
                                  " reflected_3do_candidates=",scan.models.size(),
                                  " excluded_flags=",scan.excluded_flags,
                                  " non_models=",scan.non_models,
-                                 " NOTE=independent_of_main_camera_no_capture_yet");
+                                 " matched_things=",work.matched_things,
+                                 " cached_nodes=",work.cached_instance_indices.size(),
+                                 " uncovered_things=",work.uncovered_things.size(),
+                                 " unowned_gpu_nodes=",work.unowned_gpu_nodes,
+                                 " unmatched_gpu_nodes=",work.unmatched_gpu_nodes,
+                                 " NOTE=inventory_only_no_capture_yet");
                     } else {
                         LOG_WARNING("PLANAR discovery unavailable world=",world,
                                     " error=",planar_reflection_thing_error_name(scan.error));
