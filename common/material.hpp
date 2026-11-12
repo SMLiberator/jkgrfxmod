@@ -11,9 +11,10 @@ namespace jkgm {
     // Distinct from alpha testing. Special modes always render in the
     // transparency pass, even when the original JK face was opaque.
     enum class material_blend_mode { normal, additive, multiply, fluid };
-    // Screen mode initially falls back to the world-aligned EnvMap; an SSR pass will
-    // consume this choice in the next stage.
-    enum class material_reflection_mode { envmap, screen, fixed, matcap };
+    // Keep 0..3 stable: these numeric values are passed to the renderer GLSL.
+    // "screen" (SSR) and "planar" use world-aligned EnvMap fallbacks until
+    // their dedicated reflection texture source is implemented.
+    enum class material_reflection_mode { envmap, screen, fixed, matcap, planar };
 
     enum class material_pulse_wave { sine, square, flicker, random };
 

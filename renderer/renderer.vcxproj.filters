@@ -380,6 +380,9 @@
     <ClInclude Include="native_thingface_friction.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="planar_reflection_camera.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="postfx.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>

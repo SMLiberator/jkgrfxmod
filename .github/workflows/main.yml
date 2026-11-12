@@ -276,6 +276,12 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sun_pcf_intensity.cpp /Fe:sun_pcf_intensity_test.exe || exit /b 1
         sun_pcf_intensity_test.exe || exit /b 1
         python3 tests/sun_pcf_intensity.py || exit /b 1
+    - name: Planar reflection camera and material metadata regression
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_camera.cpp /Fe:planar_reflection_camera_test.exe || exit /b 1
+        planar_reflection_camera_test.exe || exit /b 1
+        python3 tests/planar_reflection_camera.py || exit /b 1
     - name: Experimental sun sky-aperture gate source contracts
       run: python3 tests/sun_sky_aperture_experiment.py
     - name: GPU 3DO alpha partition tests

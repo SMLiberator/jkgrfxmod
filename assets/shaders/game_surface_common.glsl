@@ -100,7 +100,7 @@ vec3 compute_reflection(vec3 base_color, vec2 texcoords, vec3 view_normal,
     // fixed = camera-aligned equirectangular, matcap = view-normal UV on a square image.
     int mode = int(env_params.y + 0.5);
     vec3 env_dir = r;
-    if(mode <= 1 && have_camera) {
+    if((mode <= 1 || mode == 4) && have_camera) {
         vec3 world_r = camera_right.xyz * r.x + camera_forward.xyz * r.z + camera_up.xyz * r.y;
         env_dir = vec3(world_r.x, world_r.z, world_r.y);
     }
