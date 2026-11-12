@@ -26,6 +26,12 @@ int main() {
     assert(p.clip_view[3]<0.0f);
     auto q=make_planar_reflection_render_setup(1025,769,0.25f,main,mirrored,plane);
     assert(q.valid && q.width==257 && q.height==193);
+    auto low=make_planar_reflection_render_setup(
+        1920,1080,0.2f,main,mirrored,plane);
+    assert(low.valid && low.width==384 && low.height==216);
+    auto min_scale=make_planar_reflection_render_setup(
+        1920,1080,0.125f,main,mirrored,plane);
+    assert(min_scale.valid && min_scale.width==240 && min_scale.height==135);
     auto r=make_planar_reflection_render_setup(1920,1080,1.0f,main,mirrored,plane);
     assert(r.valid && r.width==1920 && r.height==1080);
     main.position[2]=0;
@@ -33,7 +39,7 @@ int main() {
         1920,1080,0.5f,main,mirrored,plane).valid);
     main.position[2]=10;
     assert(!make_planar_reflection_render_setup(
-        1920,1080,0.125f,main,mirrored,plane).valid);
+        1920,1080,0.1f,main,mirrored,plane).valid);
     assert(!make_planar_reflection_render_setup(
         1920,1080,std::numeric_limits<float>::quiet_NaN(),
         main,mirrored,plane).valid);
