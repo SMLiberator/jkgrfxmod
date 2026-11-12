@@ -30,6 +30,9 @@ assert "out={};out.error=reason" in header
 assert "read_active_render_camera()" not in header
 assert "read_active_rd_camera_view" not in header
 assert "0x80000U" in header
+assert "excluded_geo_mode" in header
+assert "current)+0xf8U" in header
+assert "current_geo<3" in header
 assert "render_type!=1U" in header
 assert "does NOT render" in docs
 assert "planar_reflection_workset.hpp" in renderer
