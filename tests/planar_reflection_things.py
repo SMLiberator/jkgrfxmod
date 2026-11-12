@@ -32,6 +32,10 @@ assert "read_active_rd_camera_view" not in header
 assert "0x80000U" in header
 assert "render_type!=1U" in header
 assert "does NOT render" in docs
+assert "planar_reflection_workset.hpp" in renderer
+assert "build_planar_reflection_workset(" in renderer
+assert "uncovered_things=" in renderer
+assert "experimental_planar_thing_discovery))" in read("renderer/main.cpp")
 for path in ("renderer/renderer.vcxproj","renderer/renderer.vcxproj.filters"):
     assert "planar_reflection_things.hpp" in read(path)
 print("Independent native Thing discovery guards OK")
