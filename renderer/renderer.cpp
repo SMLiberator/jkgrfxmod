@@ -10362,6 +10362,7 @@ namespace jkgm {
             auto const view=planar_camera_native_view(reflected);
             auto const begun=std::chrono::steady_clock::now();
             size_t world_drawn=0,model_drawn=0,model_candidates=0;
+            size_t hidden_by_flags=0,hidden_by_geo=0;
             // Acquisition does NOT mutate rdCamera; its refresh callback
             // updates only each Thing's native cached animation matrices.
             planar_reflection_offscreen_gpu offscreen{};
@@ -10374,6 +10375,8 @@ namespace jkgm {
                     };
                     planar_reflection_thing_scan scan{};
                     if(collect_planar_reflection_things(read,world,scan)) {
+                        hidden_by_flags=scan.excluded_flags;
+                        hidden_by_geo=scan.excluded_geo_mode;
                         auto &things=scan.models;
                         // Favor nearby Things, but never use the primary
                         // camera's frustum/portal subset as eligibility.
@@ -10471,6 +10474,7 @@ namespace jkgm {
             auto draw_model=[&](gpu_3do_instance const &inst) {
                 if(inst.shadow_only || inst.camera_hud ||
                    inst.is_projected_decal || inst.is_sprite_quad ||
+                   inst.effective_geometry_mode<3U ||
                    !inst.geometry || inst.geometry->groups.empty() ||
                    !gpu_3do_matrix_finite(inst.transform))return;
                 auto glmesh=gpu_3do_gl_cache.find(inst.id);
@@ -10526,6 +10530,10 @@ namespace jkgm {
                          " world_faces=",world_drawn,
                          " model_groups=",model_drawn,
                          " native_thing_candidates=",model_candidates,
+                         " hidden_by_thing_flags=",hidden_by_flags,
+                         " hidden_by_cur_geomode=",hidden_by_geo,
+                         " late_hidden_things=",
+                         offscreen.stats.excluded_by_flags_or_geomode,
                          " acquired_3do_nodes=",offscreen.stats.ready_nodes,
                          " incomplete_3do_things=",offscreen.stats.incomplete_things,
                          " ms_cpu=",float(us)/1000.0f,
