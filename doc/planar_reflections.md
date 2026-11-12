@@ -60,7 +60,8 @@ deliberately simplified and must be expanded when the reflection capture
 is connected.
 
 When `experimental_planar_thing_discovery` is enabled, approximately every
-120 frames a rotating batch of at most 16 uncovered Things is probed, and
+120 frames a rotating batch of at most 16 Things (including those partially submitted
+by the main camera) is probed independently, and
 `PLANAR discovery` logs pose, mesh snapshot, texture-readiness and node
 counts. These nodes are **not yet drawn**. Missing meshes, invalid poses or
 unready materials must not produce a partial reflection. Default is off.
