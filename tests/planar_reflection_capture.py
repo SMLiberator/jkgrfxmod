@@ -11,7 +11,7 @@ config=read("common/config.cpp")
 for name in ("experimental_planar_reflection_capture",
              "planar_reflection_resolution_scale","planar_reflection_debug_view"):
     assert f'j.contains("{name}")' in config
-assert 'std::isfinite(v)' in config and 'v<0.25f || v>1.0f' in config
+assert 'std::isfinite(v)' in config and 'v<0.125f || v>1.0f' in config
 renderer=read("renderer/renderer.cpp")
 target=read("renderer/planar_reflection_capture_target.hpp")
 shader=read("renderer/planar_reflection_capture_shader.hpp")
