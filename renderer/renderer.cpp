@@ -10250,7 +10250,7 @@ namespace jkgm {
                                 ((gpu_3do_present_serial/120U)*sample_budget)%
                                 remaining;
                             for(size_t i=0;i<sample_count;++i)
-                                sample.push_back(work.uncovered_things[
+                                sample.push_back(scan.models[
                                     (first+i)%remaining]);
                         }
                         auto const offscreen=acquire_planar_reflection_offscreen_gpu(
