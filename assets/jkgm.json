@@ -26,6 +26,7 @@
     "enable_dynamic_light_specular": false,
     "enable_baked_overbright": true,
     "experimental_continuous_ambient_gpu": false,
+    "experimental_sector_crossing_owner_cull": false,
     "gpu_pixel_lighting": false,
     "enable_ssao": true,
     "experimental_half_res_ssao": false,

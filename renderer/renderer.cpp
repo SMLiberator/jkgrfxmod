@@ -9750,20 +9750,58 @@ namespace jkgm {
             if(!read(0x0073A414U,&identity_cmp,sizeof(identity_cmp)) ||
                !decal_native_address_ok(identity_cmp))
                 identity_cmp=0;
+            // Counts are per-120-frame windows. Profiling computes the
+            // conservative owner proof even when the culling flag is OFF,
+            // so the expected potential is visible without altering lighting.
+            static thread_local sector_crossing_stage_stats profile_crossing{};
+            static thread_local uint64_t profile_crossing_us=0U;
+            static thread_local uint32_t profile_crossing_frames=0U;
+            bool const profile=the_config->profile_renderer;
+            auto const crossing_start=profile
+                ?profile_clock::now():profile_clock::time_point{};
             uint32_t crossing=0;
             for(auto &instance:frame_gpu_3do_instances) {
                 instance.crossing_lighting=sector_crossing_stage_instance(
                     sector_crossing_world,sector_crossing_ranges,
                     instance,read,true,identity_cmp,
-                    the_config->enable_baked_overbright);
+                    the_config->enable_baked_overbright,
+                    the_config->experimental_sector_crossing_owner_cull,
+                    profile?&profile_crossing:nullptr);
                 if(instance.crossing_lighting)++crossing;
             }
-            if(the_config->profile_renderer &&
-               gpu_3do_present_serial%120U==0U)
+            if(profile) {
+                profile_crossing_us+=elapsed_profile_us(
+                    crossing_start,profile_clock::now());
+                ++profile_crossing_frames;
+            }
+            if(profile && gpu_3do_present_serial%120U==0U) {
                 LOG_INFO("SECTOR CROSSING model_instances=",
                     frame_gpu_3do_instances.size(),
                     " crossing=",crossing,
-                    " budget=",sector_crossing_candidates::capacity);
+                    " budget=",sector_crossing_candidates::capacity,
+                    " owner_fast_path=",
+                    the_config->experimental_sector_crossing_owner_cull?1:0);
+                LOG_INFO("SECTOR CROSSING owner-proof window_frames=",
+                    profile_crossing_frames,
+                    " considered=",profile_crossing.considered,
+                    " eligible=",profile_crossing.eligible,
+                    " valid_spheres=",profile_crossing.sphere_valid,
+                    " proved_interior=",profile_crossing.proof_interior,
+                    " proved_sphere=",profile_crossing.proof_sphere,
+                    " proved_oriented_box=",
+                    profile_crossing.proof_oriented_box,
+                    " avoided_crossing=",profile_crossing.owner_culled,
+                    " multisector_candidates=",
+                    profile_crossing.multi_candidates,
+                    " staged=",profile_crossing.staged,
+                    " stage_cpu_us_per_frame=",
+                    profile_crossing_us/
+                        std::max<uint32_t>(1U,profile_crossing_frames),
+                    " NOTE=CPU_only; profile overhead includes owner checks");
+                profile_crossing={};
+                profile_crossing_us=0U;
+                profile_crossing_frames=0U;
+            }
         }
 
         void merge_thing_light_colors()
