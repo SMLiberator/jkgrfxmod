@@ -1,11 +1,12 @@
 # Planar reflection foundation
 
-**Status: independent reflected-scene render-to-texture debug capture available (opt-in).**
+**Status: experimental same-frame planar reflection capture and world-MAT compositing.**
 `reflection_mode: "planar"` is recognized in compiled material-pack
-`metadata.json`. The new capture renders real cached-world geometry and
+`metadata.json`. The capture renders real cached-world geometry and
 independently acquired animated 3DOs into a separate color/depth target.
-**The main material shaders do not sample this target yet**: until connected,
-`planar` still falls back to the existing environment mapping when supplied.
+The GPU cached-world shader now projects this scene onto coplanar world
+surfaces using that material mode. Native triangle and 3DO receiving-material
+paths still use their existing EnvMap fallback; those are future work.
 
 The existing modes retain numeric values 0–3; planar is 4. Probe and cube
 modes are intentionally not defined yet.
@@ -109,10 +110,16 @@ state after the pass. Captures are full frame, not yet cropped to the planar
 surface. It logs the dimensions, geometry counts and capture **CPU** time
 periodically; there is no independent GPU timestamp yet.
 
-**Limitations:** This is a raw diagnostic preview, not finished water or mirror
-materials. The renderer still needs planar texture sampling/projective UVs,
-correct reflected sky, alpha/VFX parity, independent reflection frustum and
-scissor pruning, multi-plane capture sharing and GPU-timing feedback.
+**Limitations:** World-MAT planar sampling and projective UVs are now
+experimental but not yet final-quality water/mirror shading. The capture is
+scheduled before main-world rendering to avoid one-frame motion lag.
+It uses the same Fluid coverage/absorption and material normal maps as the
+ordinary world shader. Captured geometry is marked with alpha; missing
+background/sky uses a configured EnvMap when available.
+Native triangles and 3DO faces are not yet planar reflection receivers;
+other capture omissions include correct reflected sky, alpha/VFX parity,
+independent reflection frustum/scissor pruning, multi-plane capture sharing,
+roughness-dependent blur and GPU-timing feedback.
 
 ## Capture contract
 
