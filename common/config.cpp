@@ -315,18 +315,8 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             float const v=s.get<float>();
             if(!std::isfinite(v) || v<0.125f || v>1.0f)
                 throw std::runtime_error(
-                    "planar_reflection_resolution_scale must be between 0.125 and 1.0");
+                    "planar_reflection_resolution_scale must be between 0.25 and 1.0");
             rv->planar_reflection_resolution_scale=v;
-        }
-        if(j.contains("planar_reflection_emissive_dilation")) {
-            auto const &value=j.at("planar_reflection_emissive_dilation");
-            if(!value.is_number())throw std::runtime_error(
-                "planar_reflection_emissive_dilation must be a number between 0 and 2");
-            float const v=value.get<float>();
-            if(!std::isfinite(v) || v<0.0f || v>2.0f)
-                throw std::runtime_error(
-                    "planar_reflection_emissive_dilation must be finite and between 0 and 2");
-            rv->planar_reflection_emissive_dilation=v;
         }
         if(j.contains("enable_gpu_sprite_instancing")) {
             j.at("enable_gpu_sprite_instancing").get_to(

@@ -10536,12 +10536,6 @@ namespace jkgm {
             shader.use_program();
             shader.set_projection(half_fov,aspect,far_plane);
             shader.set_clip(setup.clip_view);
-            // Once per capture: sublinear radius, exactly zero at full res.
-            float const dilation=the_config->planar_reflection_emissive_dilation;
-            float const dilation_radius=std::min(3.0f,
-                dilation*(1.0f/std::sqrt(
-                    the_config->planar_reflection_resolution_scale)-1.0f));
-            shader.set_emissive_dilation(dilation_radius);
             auto const fog=get_fog_settings();
             auto const fog_info=fog.info.value(),fog_rgb=fog.color.value();
             shader.set_fog(make_point(fog_info[0],fog_info[1],
@@ -10792,7 +10786,6 @@ namespace jkgm {
                          " emissive_world_batches=",emissive_world.size(),
                          " model_groups=",model_drawn,
                          " emissive_model_groups=",emissive_models.size(),
-                         " emissive_dilation_radius=",dilation_radius,
                          " model_culled=",model_culled,
                          " ms_acquire=",std::chrono::duration<float,std::milli>(
                              after_acquisition-begun).count(),

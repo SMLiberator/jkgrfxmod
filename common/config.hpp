@@ -72,8 +72,7 @@ namespace jkgm {
         bool use_gpu_cache = true; // unified GPU 3DO, sprite, and SithWorld rendering
         bool experimental_planar_thing_discovery = false; // read-only 120-frame native 3DO diagnostics
         bool experimental_planar_reflection_capture = false; // independent GPU reflected-scene FBO; opt-in
-        float planar_reflection_resolution_scale = 0.5f; // 0.125..1.0 of internal screen (0.5 default)
-        float planar_reflection_emissive_dilation = 0.0f; // capture-only, 0..2; 0=original sampling
+        float planar_reflection_resolution_scale = 0.5f; // 0.25..1.0 of internal screen (0.5 default)
         bool planar_reflection_debug_view = false; // display raw reflection capture over game
         bool enable_gpu_sprite_instancing = true; // compatible SPR instancing, disable for diagnostics
         bool experimental_half_res_fluid_sprites = false; // opt-in half-size fluid SPR layer

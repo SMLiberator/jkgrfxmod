@@ -11,29 +11,7 @@ uniform float alpha_cutoff;
 uniform vec4 fog_params;
 uniform vec3 fog_color;
 uniform vec4 clip_plane_view;
-// Radius in emissive-map texels; zero restores unmodified capture sampling.
-uniform float emissive_dilation_radius;
 out vec4 out_color;
-
-vec3 capture_emissive_texel(vec2 uv) {
-    vec3 best=texture(emissive_map,uv).rgb;
-    if(emissive_dilation_radius<=0.0)return best;
-    // Work in emissive TEXTURE coordinates, before reflected rasterization.
-    // Respect minified UV footprint for distant, subpixel windows.
-    vec2 texel=1.0/vec2(textureSize(emissive_map,0));
-    vec2 step_uv=max(texel,0.35*fwidth(uv))*emissive_dilation_radius;
-    float best_luma=dot(best,vec3(0.2126,0.7152,0.0722));
-    // Whole RGB sample preserves hue; independent channel maxima do not.
-    for(int y=-1;y<=1;++y)
-    for(int x=-1;x<=1;++x) {
-        if(x==0 && y==0)continue;
-        vec3 candidate=texture(emissive_map,
-                         uv+vec2(float(x),float(y))*step_uv).rgb;
-        float luma=dot(candidate,vec3(0.2126,0.7152,0.0722));
-        if(luma>best_luma) {best=candidate;best_luma=luma;}
-    }
-    return best;
-}
 
 float capture_fog_fraction(float depth) {
     return clamp((depth-fog_params.x)/
@@ -52,7 +30,7 @@ void main() {
     // will be submitted in a separate additive, depth-tested pass.
     vec3 emitted=emissive_factor.rgb;
     if(has_emissive!=0)
-        emitted*=capture_emissive_texel(tex_uv+emissive_scroll);
+        emitted*=texture(emissive_map,tex_uv+emissive_scroll).rgb;
     if(emissive_only==0 &&
        albedo.a*material_tint.a<alpha_cutoff)discard;
     if(emissive_only!=0 &&

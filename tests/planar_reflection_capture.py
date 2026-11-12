@@ -7,11 +7,9 @@ settings=json.loads(read("assets/jkgm.json"))
 assert settings["experimental_planar_reflection_capture"] is False
 assert settings["planar_reflection_resolution_scale"]==0.5
 assert settings["planar_reflection_debug_view"] is False
-assert settings["planar_reflection_emissive_dilation"]==0.0
 config=read("common/config.cpp")
 for name in ("experimental_planar_reflection_capture",
-             "planar_reflection_resolution_scale","planar_reflection_debug_view",
-             "planar_reflection_emissive_dilation"):
+             "planar_reflection_resolution_scale","planar_reflection_debug_view"):
     assert f'j.contains("{name}")' in config
 assert 'std::isfinite(v)' in config and 'v<0.125f || v>1.0f' in config
 renderer=read("renderer/renderer.cpp")
@@ -119,7 +117,7 @@ for start,end,opacity,total_depth,fraction in (
 # Emission is a separate sampled material contribution: it survives a
 # black/zero-alpha albedo and retains HDR values after capture.
 assert "uniform sampler2D emissive_map;" in f
-assert "emitted*=capture_emissive_texel(tex_uv+emissive_scroll);" in f
+assert "emitted*=texture(emissive_map,tex_uv+emissive_scroll).rgb;" in f
 assert "if(emissive_only!=0)" in f
 assert "vec3 lit=albedo.rgb*material_tint.rgb*baked_light+emitted;" in f
 assert "shader.set_emission(mat.has_emission,mat.emission_factor," in renderer
@@ -134,21 +132,6 @@ assert "GL_RGBA16F" in target
 assert "glActiveTexture(GL_TEXTURE1);" in target
 assert "glBindTexture(GL_TEXTURE_2D,GLuint(texture1_));" in target
 assert "void set_emission(bool textured" in shader
-assert "void set_emissive_dilation(float radius)" in shader
-assert "shader.set_emissive_dilation(dilation_radius);" in renderer
-assert "dilation*(1.0f/std::sqrt(" in renderer
-assert "if(emissive_dilation_radius<=0.0)return best;" in f
-assert "vec2 step_uv=max(texel,0.35*fwidth(uv))*emissive_dilation_radius;" in f
-assert "if(x==0 && y==0)continue;" in f
-assert "if(luma>best_luma) {best=candidate;best_luma=luma;}" in f
-assert "planar_reflection_emissive_dilation must be finite" in config
-import math
-for strength in (0.0,0.5,1.0,2.0):
-    radii=[min(3.0,strength*(1/math.sqrt(scale)-1.0))
-           for scale in (1.0,0.5,0.25,0.125)]
-    assert radii[0]==0.0
-    assert all(a<=b for a,b in zip(radii,radii[1:]))
-    assert all(0.0<=radius<=3.0 for radius in radii)
 assert "native_sector_tint" in v and "native_cmp_or_mode" in v
 assert "jk_capture_color(native_light,native_cmp_or_mode," in v
 assert "clamp(native_light,vec3(0.45)" not in v
