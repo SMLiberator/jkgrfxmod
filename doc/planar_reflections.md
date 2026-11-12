@@ -1,15 +1,16 @@
 # Planar reflection foundation
 
-**Status: groundwork only, no render-to-texture capture yet.**
+**Status: independent reflected-scene render-to-texture debug capture available (opt-in).**
 `reflection_mode: "planar"` is recognized in compiled material-pack
-`metadata.json`. Until a dedicated capture target is implemented, it falls
-back to the same world-aligned environment image as `envmap` and `screen`
-(when one is supplied); it does not produce actual scene reflections.
+`metadata.json`. The new capture renders real cached-world geometry and
+independently acquired animated 3DOs into a separate color/depth target.
+**The main material shaders do not sample this target yet**: until connected,
+`planar` still falls back to the existing environment mapping when supplied.
 
 The existing modes retain numeric values 0–3; planar is 4. Probe and cube
 modes are intentionally not defined yet.
 
-## Independent Thing discovery (implemented; capture still pending)
+## Independent Thing discovery (implemented)
 
 OpenJKDF2's `sithRender_RenderThings` walks the Thing lists of the
 sectors chosen by the camera. The new diagnostic scans **every**
@@ -37,9 +38,8 @@ signature (including with shadows and decals disabled). Matched Things may
 have multiple cached mesh nodes. The unmatched count is **not** strictly
 an offscreen count: native fallbacks and unloaded MATs can also be missing.
 `renderer/planar_reflection_workset.hpp` can prepare reflected model-view
-matrices for the matched nodes without touching JK's camera. This is still
-inventory only; it does not draw, and cannot invent the missing Things'
-animated joint poses.
+matrices for the matched nodes without touching JK's camera. The separate
+native-node path below handles Things not submitted for the main camera.
 
 ## Independent native 3DO pose and GPU mesh acquisition (experimental)
 
@@ -55,9 +55,8 @@ which can snapshot previously unseen native rdMeshes using the same shared
 GPU geometry cache and material-readiness/warmup mechanisms as ordinary
 GPU 3DOs. This generates `gpu_3do_instance` entries with independent
 world-space joint transforms. The code remains on-demand and separate from
-the gameplay frame, shadows and native renderer. Its initial lighting is
-deliberately simplified and must be expanded when the reflection capture
-is connected.
+the gameplay frame, shadows and native renderer. Initial capture lighting
+uses cheap baked/ambient values and no dynamic lights.
 
 When `experimental_planar_thing_discovery` is enabled, approximately every
 120 frames a rotating batch of at most 16 Things (including those partially submitted
@@ -66,10 +65,43 @@ by the main camera) is probed independently, and
 counts. These nodes are **not yet drawn**. Missing meshes, invalid poses or
 unready materials must not produce a partial reflection. Default is off.
 
-This proves the independent discovery method but not yet GPU-ready mesh
-acquisition for Things the normal view didn't submit. That will require
-offscreen rdModel3/geoset and joint-pose handling without modifying JK's
-live camera or submitting normal gameplay geometry.
+Independent GPU-ready mesh acquisition now feeds the debug capture.
+Animated Thing hierarchy completeness is checked before admission. The
+runtime visuals still need in-game verification.
+
+## Experimental capture and debug view
+
+In `jkgm.json`:
+
+```json
+"experimental_planar_reflection_capture": true,
+"planar_reflection_resolution_scale": 0.5,
+"planar_reflection_debug_view": true
+```
+
+The scale is validated to `[0.25, 1.0]`, defaults to `0.5`, and applies to
+the game's internal screen resolution. At 1920x1080, the default target is
+960x540. Debug view **replaces the displayed scene** after postprocessing
+and HUD, showing the raw framebuffer without modifying gameplay rendering.
+Turn `planar_reflection_debug_view` off to keep the normal picture.
+`experimental_planar_reflection_capture` is disabled by default.
+
+The first version chooses one planar-material world surface, preferring
+the nearest plane; without an explicit planar MAT it can choose a world Fluid
+surface for water diagnostics. No arbitrary fallback plane is fabricated.
+It uses all cached world-sector geometry rather than the main camera's portal
+candidate list, draws the animated 3DO nodes from up to 128 nearest native
+Thing owners (with primary GPU nodes as fallback), and excludes sky, HUD,
+projected decals, dynamic lighting, transparent Fluid blending, shadows,
+GGX, SSAO and postprocessing. It restores GL framebuffer/texture/render
+state after the pass. Captures are full frame, not yet cropped to the planar
+surface. It logs the dimensions, geometry counts and capture **CPU** time
+periodically; there is no independent GPU timestamp yet.
+
+**Limitations:** This is a raw diagnostic preview, not finished water or mirror
+materials. The renderer still needs planar texture sampling/projective UVs,
+correct reflected sky, alpha/VFX parity, independent reflection frustum and
+scissor pruning, multi-plane capture sharing and GPU-timing feedback.
 
 ## Capture contract
 
@@ -105,4 +137,8 @@ live camera or submitting normal gameplay geometry.
 `tests/planar_reflection_camera.cpp` validates reflection geometry and 3DO
 native model-view compatibility, including nonunit and oblique plane normals.
 `tests/planar_reflection_camera.py` verifies mode registration and shader
-fallbacks. These tests do **not** validate live reflection captures.
+fallbacks; `tests/planar_reflection_render_math.cpp` verifies resolution and
+signed clip-plane computations; `tests/planar_reflection_capture.py` checks
+native offscreen/FBO/GL-state/shader/config integration. Automated tests do
+**not** establish correct live reflection visuals; inspect the debug view
+in Wine/Windows before connecting it to MATs.
