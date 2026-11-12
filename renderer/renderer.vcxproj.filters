@@ -515,6 +515,9 @@
     <ClInclude Include="sun_shadow.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="sun_pcf_intensity.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="sun_shadow_gpu.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
