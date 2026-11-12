@@ -156,6 +156,8 @@ namespace jkgm {
         std::unique_ptr<shaders::post_ssao_half_upsample_shader>
             post_ssao_half_upsample_program;
         shaders::game_post_opaque_composite_shader game_post_opaque_composite_program;
+        std::unique_ptr<shaders::game_post_opaque_composite_shader>
+            game_post_opaque_half_sun_program;
         std::unique_ptr<shaders::spotlight_shadow_depth_shader> spotlight_shadow_depth_program;
         shaders::game_transparency_pass_shader game_transparency_pass_program;
 
@@ -198,6 +200,8 @@ namespace jkgm {
 
         post_buffer screen_postbuffer1;
         post_buffer screen_postbuffer2;
+        // Allocated only for optional quarter-pixel sun shadow evaluation.
+        std::unique_ptr<post_buffer> sun_half_visibility;
         // Allocate only when Retro is actually active. This buffer contains
         // the linear scene PLUS both HUD layers before final CMP quantization.
         std::unique_ptr<post_buffer> retro_present_buffer;

@@ -427,6 +427,15 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , bloom_layers(screen_res)
 {
     LOG_DEBUG("Loading OpenGL assets");
+    if(the_config->enable_sun && the_config->enable_sun_shadows &&
+       the_config->experimental_half_res_sun_visibility) {
+        game_post_opaque_half_sun_program=std::make_unique<
+            shaders::game_post_opaque_composite_shader>(data_root,true);
+        auto const dims=make_size(
+            std::max(1,(get<x>(screen_res)+1)/2),
+            std::max(1,(get<y>(screen_res)+1)/2));
+        sun_half_visibility=std::make_unique<post_buffer>(dims);
+    }
     if(the_config->enable_ssao && the_config->experimental_half_res_ssao) {
         game_post_ssao_half_program=std::make_unique<
             shaders::game_post_ssao_shader>(data_root,true);

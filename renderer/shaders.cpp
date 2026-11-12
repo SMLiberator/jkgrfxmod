@@ -1542,10 +1542,11 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(
 }
 
 jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_shader(
-    fs::path const &data_root)
-    : opengl_shader("game_post_opaque_composite",
+    fs::path const &data_root,bool half_sun)
+    : opengl_shader(half_sun?"game_post_opaque_half_sun":"game_post_opaque_composite",
                     data_root / "shaders/postprocess.vert",
-                    data_root / "shaders/post_opaque_composite.frag")
+                    data_root / (half_sun?"shaders/post_sun_visibility_half.frag":
+                                          "shaders/post_opaque_composite.frag"))
     , color_image(gl::get_uniform_location(the_program, "color_image"))
     , emissive_image(gl::get_uniform_location(the_program, "emissive_image"))
     , occlusion_image(gl::get_uniform_location(the_program, "occlusion_image"))
@@ -1592,6 +1593,10 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , sun_sky_aperture_depth_transform(gl::get_uniform_location(
         the_program,"sun_sky_aperture_depth_transform"))
     , sun_max_distance(gl::get_uniform_location(the_program,"sun_max_distance"))
+    , sun_half_visibility_active(gl::get_uniform_location(
+        the_program,"sun_half_visibility_active"))
+    , sun_half_visibility_image(gl::get_uniform_location(
+        the_program,"sun_half_visibility_image"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
  
@@ -1761,6 +1766,13 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_max_distance(
     float distance)
 {
     gl::set_uniform_float(sun_max_distance,distance);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_half_visibility(
+    bool active,int sampler)
+{
+    gl::set_uniform_integer(sun_half_visibility_image,sampler);
+    gl::set_uniform_integer(sun_half_visibility_active,active?1:0);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_count(

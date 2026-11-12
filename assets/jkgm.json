@@ -29,6 +29,7 @@
     "gpu_pixel_lighting": false,
     "enable_ssao": true,
     "experimental_half_res_ssao": false,
+    "experimental_half_res_sun_visibility": false,
     "enable_parallax": true,
     "enable_texture_filtering": true,
     "retro_mode": false,

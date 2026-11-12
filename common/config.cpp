@@ -250,6 +250,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_half_res_ssao").get_to(
                 rv->experimental_half_res_ssao);
         }
+        if(j.contains("experimental_half_res_sun_visibility")) {
+            j.at("experimental_half_res_sun_visibility").get_to(
+                rv->experimental_half_res_sun_visibility);
+        }
 
         if(j.contains("enable_parallax")) {
             j.at("enable_parallax").get_to(rv->enable_parallax);

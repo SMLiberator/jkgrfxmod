@@ -56,6 +56,7 @@ namespace jkgm {
         bool experimental_continuous_ambient_gpu = false; // GL 3.3 sparse buffer-texture ambient for GPU 3DOs; opt-in
         bool enable_ssao = true;
         bool experimental_half_res_ssao = false; // quarter-pixel AO + depth-aware reconstruction
+        bool experimental_half_res_sun_visibility = false; // half-res opaque shadow visibility only
         bool debug_void_pixels = false; // show raw unresolved empty-depth pixels as neon checkerboard
         bool retain_hom_pixels = true; // vanilla JK HOM default; false = Clear Display
         bool enable_parallax = true;

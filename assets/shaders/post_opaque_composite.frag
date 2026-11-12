@@ -229,6 +229,46 @@ float sun_dynamic_shadow_visibility(vec3 position,float incidence)
     return mix(1.0,visibility,near_fade);
 }
 
+// Only the costly shadow-map lookups are low-resolution. In particular,
+// the actual SKY opening gate is always evaluated per full-resolution pixel.
+uniform int sun_half_visibility_active;
+uniform sampler2D sun_half_visibility_image;
+vec3 sun_half_decode_oct(vec2 encoded)
+{
+    vec2 f=encoded*2.0-1.0;
+    vec3 n=vec3(f,1.0-abs(f.x)-abs(f.y));
+    if(n.z<0.0)n.xy=(vec2(1.0)-abs(n.yx))*sign(n.xy);
+    return normalize(n);
+}
+float sun_half_reconstruct_shadow(ivec2 pixel,float depth,vec3 view_normal)
+{
+    ivec2 half_dims=textureSize(sun_half_visibility_image,0);
+    ivec2 full_dims=textureSize(depth_image,0);
+    vec2 pos=(vec2(pixel)+vec2(0.5))*vec2(half_dims)/vec2(full_dims)-0.5;
+    ivec2 base=ivec2(floor(pos));
+    vec2 fraction=fract(pos);
+    vec3 N=normalize(view_normal);
+    float sum=0.0,weights=0.0;
+    float depth_tolerance=max(0.125,depth*0.002);
+    for(int y=0;y<2;++y)for(int x=0;x<2;++x) {
+        ivec2 p=clamp(base+ivec2(x,y),ivec2(0),half_dims-1);
+        vec4 half_sample=texelFetch(sun_half_visibility_image,p,0);
+        if(half_sample.g<=0.0 || half_sample.g>=65500.0 ||
+           abs(half_sample.g-depth)>=depth_tolerance ||
+           dot(N,sun_half_decode_oct(half_sample.ba))<0.96)continue;
+        float bilinear=(x==0?1.0-fraction.x:fraction.x)*
+                       (y==0?1.0-fraction.y:fraction.y);
+        // Favor same-depth geometry while filtering soft shadow transitions.
+        float weight=bilinear*(1.0-smoothstep(
+            0.0,depth_tolerance,abs(half_sample.g-depth)));
+        sum+=half_sample.r*weight;
+        weights+=weight;
+    }
+    // Negative means no matching low-res receiver; the compositor uses
+    // the original full-resolution shadow lookup for this pixel.
+    return weights>0.00001?sum/weights:-1.0;
+}
+
 float spotlight_shadow_visibility(vec2 uv,float receiver_distance,float facing)
 {
     float n=spotlight_shadow_near_range.x;
@@ -428,9 +468,12 @@ void main()
                 :max(dot(normal,sun_shadow_direction),0.0);
             if(incidence>0.0) {
                 vec3 world_position=reconstruct_scene_world(depth);
-                float visibility=min(
-                    sun_shadow_visibility(world_position,incidence),
-                    sun_dynamic_shadow_visibility(world_position,incidence));
+                float visibility=sun_half_visibility_active!=0
+                    ?sun_half_reconstruct_shadow(tc,depth,vn):-1.0;
+                if(visibility<0.0)
+                    visibility=min(
+                        sun_shadow_visibility(world_position,incidence),
+                        sun_dynamic_shadow_visibility(world_position,incidence));
                 // Treat an absent sky aperture exactly like a blocked sun
                 // ray. It must suppress direct light AND allow the shadow
                 // baseline to darken authored brightness indoors, rather

@@ -527,6 +527,7 @@ namespace jkgm {
             gl::uniform_location_id sun_sky_aperture_active,sun_sky_aperture_map;
             gl::uniform_location_id sun_sky_aperture_depth_transform;
             gl::uniform_location_id sun_max_distance;
+            gl::uniform_location_id sun_half_visibility_active,sun_half_visibility_image;
             gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
             std::vector<gl::uniform_location_id> sun_dynamic_atlas_rects;
             std::vector<gl::uniform_location_id> sun_dynamic_origin;
@@ -544,7 +545,7 @@ namespace jkgm {
 
         public:
             explicit game_post_opaque_composite_shader(
-                fs::path const &data_root);
+                fs::path const &data_root,bool half_sun=false);
 
             void set_color_sampler(int sampler);
             void set_emissive_sampler(int sampler);
@@ -574,6 +575,7 @@ namespace jkgm {
             void set_sun_sky_aperture(bool active,int sampler,
                                      point<4,float> near_far_depth_transform);
             void set_sun_max_distance(float distance);
+            void set_sun_half_visibility(bool active,int sampler);
             void set_sun_dynamic_count(int count);
             void set_sun_dynamic_atlas_rect(int slot,point<4,float> rect);
             void set_sun_dynamic(int slot,point<3,float> origin,

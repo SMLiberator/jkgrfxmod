@@ -116,6 +116,7 @@ constexpr binding post_opaque_composite[]={
     {"spotlight_image_2",8,sampler_kind::tex2d},
     {"spotlight_image_3",9,sampler_kind::tex2d},
     {"spotlight_shadow_image",10,sampler_kind::shadow},
+    {"sun_half_visibility_image",11,sampler_kind::tex2d},
     {"sun_shadow_image",13,sampler_kind::shadow},
     {"sun_shadow_far_image",14,sampler_kind::shadow},
     {"sun_dynamic_image",15,sampler_kind::shadow},

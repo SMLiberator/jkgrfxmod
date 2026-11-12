@@ -7510,6 +7510,35 @@ namespace jkgm {
                 LOG_INFO("SUN composite diffuse=",sun_lit && cam.valid?1:0,
                          " shadow=",sun_shadow_ready?1:0,
                          " intensity=",std::to_string(sun_power));
+            bool const half_sun_active=sun_lit && cam.valid &&
+                sun_shadow_ready && sun_shadow_target &&
+                the_config->experimental_half_res_sun_visibility &&
+                ogs->game_post_opaque_half_sun_program &&
+                ogs->sun_half_visibility &&
+                glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE &&
+                glIsEnabled(GL_BLEND)==GL_FALSE;
+            auto *half_sun_shader=half_sun_active
+                ?ogs->game_post_opaque_half_sun_program.get():nullptr;
+            if(half_sun_shader) {
+                half_sun_shader->use_program();
+                half_sun_shader->set_depth_sampler(3);
+                half_sun_shader->set_coverage_normal_sampler(5);
+                half_sun_shader->set_sun_shadow_receiver_bias_scale(
+                    the_config->sun_shadow_receiver_bias_scale);
+                half_sun_shader->set_sun_shadow_pcf_radius(
+                    the_config->sun_shadow_near_pcf_radius,
+                    the_config->sun_shadow_far_pcf_radius);
+                half_sun_shader->set_sun_dynamic_count(0);
+                prog.use_program();
+            }
+            auto set_sun_programs=[&](auto const &apply) {
+                apply(prog);
+                if(half_sun_shader) {
+                    half_sun_shader->use_program();
+                    apply(*half_sun_shader);
+                    prog.use_program();
+                }
+            };
             if(cam.valid && (the_config->enable_spotlights || sun_lit)) {
                 float const h=std::tan(cam.fov*(3.14159265358979323846f/360.0f));
                 float const v=h*float(get<y>(conf_scr_res))/
@@ -7517,11 +7546,13 @@ namespace jkgm {
                 auto point_axis=[](std::array<float,3> const &a,float w) {
                     return make_point(a[0],a[1],a[2],w);
                 };
-                prog.set_projector_camera(
-                    point_axis(cam.position,0.0f),
-                    point_axis(cam.right,h),
-                    point_axis(cam.forward,0.0f),
-                    point_axis(cam.up,v));
+                set_sun_programs([&](auto &target) {
+                    target.set_projector_camera(
+                        point_axis(cam.position,0.0f),
+                        point_axis(cam.right,h),
+                        point_axis(cam.forward,0.0f),
+                        point_axis(cam.up,v));
+                });
                 int active=0;
                 auto spots=(the_config->enable_spotlights)
                     ? collect_spotlights_for_frame()
@@ -7574,7 +7605,8 @@ namespace jkgm {
                     bool const shadows=sun_shadow_ready && bool(sun_shadow_target);
                     auto const direction=normalized_sun_direction(sun.direction.value());
                     auto const rgb=sun.color.value();
-                    prog.set_sun_shadow(true,shadows,
+                    set_sun_programs([&](auto &target) {
+                    target.set_sun_shadow(true,shadows,
                         make_point(direction[0],direction[1],direction[2]),
                         make_point(rgb[0],rgb[1],rgb[2],sun_power),
                         make_point(sun_shadow_views[0].origin[0],sun_shadow_views[0].origin[1],sun_shadow_views[0].origin[2]),
@@ -7582,6 +7614,7 @@ namespace jkgm {
                         make_point(sun_shadow_views[0].up[0],sun_shadow_views[0].up[1],sun_shadow_views[0].up[2]),
                         make_point(sun_shadow_views[0].forward[0],sun_shadow_views[0].forward[1],sun_shadow_views[0].forward[2]),
                         make_point(sun_shadow_views[0].width,sun_shadow_views[0].height,sun_shadow_views[0].range));
+                    });
                     bool const sky_aperture=shadows &&
                         sun_sky_aperture_ready();
                     if(sky_aperture) {
@@ -7595,13 +7628,15 @@ namespace jkgm {
                     }
                     if(shadows) {
                         auto const &far_view=sun_shadow_views[1];
-                        prog.set_sun_shadow_far(
+                        set_sun_programs([&](auto &target) {
+                        target.set_sun_shadow_far(
                             make_point(far_view.origin[0],far_view.origin[1],far_view.origin[2]),
                             make_point(far_view.right[0],far_view.right[1],far_view.right[2]),
                             make_point(far_view.up[0],far_view.up[1],far_view.up[2]),
                             make_point(far_view.forward[0],far_view.forward[1],far_view.forward[2]),
                             make_point(far_view.width,far_view.height,far_view.range),
                             the_config->sun_shadow_near_distance);
+                        });
                         gl::set_active_texture_unit(13);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                             sun_shadow_target->depth);
@@ -7617,17 +7652,23 @@ namespace jkgm {
                         for(size_t i=0;i<sun_dynamic_views.size();++i) {
                             auto const &v=sun_dynamic_views[i];
                             auto const &tile=sun_dynamic_tiles[i];
-                            prog.set_sun_dynamic_atlas_rect(int(i),
+                            set_sun_programs([&](auto &target) {
+                            target.set_sun_dynamic_atlas_rect(int(i),
                                 make_point(float(tile.x),float(tile.y),
                                            float(tile.size),float(tile.size)));
-                            prog.set_sun_dynamic(int(i),
+                            });
+                            set_sun_programs([&](auto &target) {
+                            target.set_sun_dynamic(int(i),
                                 make_point(v.origin[0],v.origin[1],v.origin[2]),
                                 make_point(v.right[0],v.right[1],v.right[2]),
                                 make_point(v.up[0],v.up[1],v.up[2]),
                                 make_point(v.forward[0],v.forward[1],v.forward[2]),
                                 make_point(v.width,v.height,v.range));
+                            });
                         }
-                        prog.set_sun_dynamic_count(int(sun_dynamic_views.size()));
+                        set_sun_programs([&](auto &target) {
+                            target.set_sun_dynamic_count(int(sun_dynamic_views.size()));
+                        });
                     }
                 }
             }
@@ -7640,6 +7681,31 @@ namespace jkgm {
                     color_rgb(rgb[0],rgb[1],rgb[2]));
             }
 
+            // Evaluate ONLY opaque sun-caster visibility at quarter pixels.
+            // Restore the opaque composition FBO without clearing it; the
+            // existing full-resolution compositor applies the sky gate,
+            // incidence, fog and spotlight exactly as before.
+            if(half_sun_shader) {
+                auto &buffer=*ogs->sun_half_visibility;
+                gl::bind_framebuffer(gl::framebuffer_bind_target::any,buffer.fbo);
+                gl::set_viewport(buffer.viewport);
+                half_sun_shader->use_program();
+                gl::set_active_texture_unit(5);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                    frame_screen->get_resolved_normal_texture());
+                gl::set_active_texture_unit(3);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                    frame_screen->get_resolved_depth_texture());
+                gl::bind_vertex_array(ogs->postmdl.vao);
+                gl::draw_elements(gl::element_type::triangles,
+                    ogs->postmdl.num_indices,gl::index_type::uint32);
+                frame_screen->begin_compose_opaque_pass(true);
+                gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+                prog.use_program();
+                gl::set_active_texture_unit(11);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,buffer.tex);
+            }
+            prog.set_sun_half_visibility(half_sun_active,11);
             // HOM coverage reads normal.A on EVERY frame, including rooms
             // without sunlight or active spotlights. Always bind this
             // G-buffer attachment, not only when light shaders need RGB.
