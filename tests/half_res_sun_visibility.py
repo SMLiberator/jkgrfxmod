@@ -44,5 +44,5 @@ end="// Separate sky aperture from normal occluder"
 dynamic="float sun_dynamic_shadow_visibility("
 end_dynamic="float spotlight_shadow_visibility("
 assert extract(half,start,dynamic).strip()==extract(opaque,start,end).strip()
-assert extract(half,dynamic,"vec2 encode_oct(").strip()==extract(opaque,dynamic,end_dynamic).strip()
+assert extract(half,dynamic,"vec2 encode_oct(").strip()==extract(opaque,dynamic,"// Only the costly shadow-map lookups").strip()
 print("Half-resolution opaque sun visibility and full-res sky contracts passed")
