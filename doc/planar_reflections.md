@@ -101,25 +101,51 @@ water boundaries authored as traversable sector adjoins. The selector logs
 `planar_matches`, `fluid_matches`, and `passable_reflection_receivers` to
 diagnose whether eligible planes were found. No arbitrary fallback plane is
 fabricated.
-It uses all cached world-sector geometry rather than the main camera's portal
-candidate list, draws the animated 3DO nodes from up to 128 nearest native
-Thing owners (with primary GPU nodes as fallback), and excludes sky, HUD,
-projected decals, dynamic lighting, transparent Fluid blending, shadows,
-GGX, SSAO and postprocessing. It restores GL framebuffer/texture/render
-state after the pass. Captures are full frame, not yet cropped to the planar
-surface. It logs the dimensions, geometry counts and capture **CPU** time
-periodically; there is no independent GPU timestamp yet.
+It stages live lighting and animated UVs for world surfaces visible to the
+**reflected** frustum independently of the primary camera's portal traversal.
+Captured world geometry is frustum-culled *before* material resolution, grouped
+by material/cel/GeoMode and submitted with multi-draw. Existing primary
+opaque/alpha draw lists do not receive offscreen-only geometry.
+The capture draws animated 3DO nodes from up to 128 nearest native Thing owners
+(with primary GPU nodes as fallback). Cached 3DO mesh groups are independently
+culled against the reflected frustum before material resolution. Sky, HUD,
+projected decals, dynamic point/sun lighting, transparent Fluid blending,
+shadows, GGX, SSAO and postprocessing remain excluded. It restores GL
+framebuffer/texture/render state after the pass. Captures are full frame, not
+yet cropped to the planar surface. The periodic PLANAR log reports CPU phase
+durations (acquisition, world submission, model submission plus mip generation)
+and cull/group counts; these CPU times can include driver stalls. Independent
+GPU timestamps are still needed to establish GPU execution cost.
 
-**Limitations:** World-MAT planar sampling and projective UVs are now
-experimental but not yet final-quality water/mirror shading. The capture is
-scheduled before main-world rendering to avoid one-frame motion lag.
-It uses the same Fluid coverage/absorption and material normal maps as the
-ordinary world shader. Captured geometry is marked with alpha; missing
-background/sky uses a configured EnvMap when available.
-Native triangles and 3DO faces are not yet planar reflection receivers;
-other capture omissions include correct reflected sky, alpha/VFX parity,
-independent reflection frustum/scissor pruning, multi-plane capture sharing,
-roughness-dependent blur and GPU-timing feedback.
+**Visual parity and limits:** The lightweight capture now uses the
+GPU world shader's Gouraud/CMP/sector tint and global JK color-effect
+operations and applies reflected-camera fog. Offscreen-only 3DOs read a
+live sector ambient/extra floor, but still lack full primary-camera Thing
+lighting overrides, colored dynamic lights, shadows and some CMP metadata.
+Normal-map distortion projects a finite point along the reflected ray from
+the water surface, instead of adding a fixed UV displacement. Roughness
+selects a generated capture mip level; standard mipmaps approximate, but
+do not fully prefilter, a physical specular BRDF. Very high-frequency normal
+maps and extreme grazing angles can push projected samples outside the target.
+Reflected lighting uses the original 8-bit capture format, which clips HDR
+values; a floating-point target and explicit exposure parity remain future
+work. The capture is scheduled before main-world rendering to avoid one-frame
+motion lag. It uses the existing Fluid absorption and material normal maps,
+and missing reflected sky/background uses a configured EnvMap where available.
+Native triangles and 3DO faces are not yet planar reflection receivers.
+Other omissions include reflected sky, alpha/VFX parity, projected receiver
+scissor cropping, multi-plane sharing, proper glossy BRDF filtering and
+independent GPU timing.
+
+### Capture performance caveat
+
+Even at `planar_reflection_resolution_scale: 0.125`, the secondary
+camera still visits native Thing lists and can refresh up to 128 Thing
+hierarchies every frame. Its cost is not proportional to rendered pixels.
+Frustum and multi-draw improvements reduce world/model submissions but
+do not yet eliminate this expensive acquisition path. Profile a large
+scene before/after and use the reported stage times to decide whether
+pose reuse, source caching, capture update cadence or 3DO LOD bias is next.
 
 ## Capture contract
 

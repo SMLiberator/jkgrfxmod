@@ -28,7 +28,7 @@ assert "if(surface.passable_adjoin)++matched_passable;" in selector
 assert "mat.blend==material_blend_mode::fluid ? 1 : 0" in selector
 assert "passable_reflection_receivers=" in selector
 capture=renderer.split("void render_planar_capture()",1)[1]
-assert "surface.count==0U || surface.passable_adjoin" in capture
+assert "face.count==0U || face.passable_adjoin" in capture
 assert "make_planar_reflection_camera(" in renderer
 assert "make_planar_reflection_render_setup(" in renderer
 assert "planar_reflection_gl_scope restore;" in renderer
@@ -60,6 +60,36 @@ assert "glClearColor(0.0f,0.0f,0.0f,0.0f)" in renderer
 assert renderer.index("render_planar_capture();") < renderer.index(
     "draw_game_gbuffer_pass(trimdl, posterize_lighting);")
 assert "NOTE=planar_world_material_sampling_no_sky_yet" in renderer
+# Visual-parity and performance regressions: reflected world data must be
+# staged independently of the primary portal subset, without leaking into
+# the primary camera's alpha draw queue.
+assert "planar_frame_candidates.clear();" in renderer
+assert "append_world_cache_candidate(" in renderer
+assert "stage_candidate(candidate,false)" in renderer
+assert "reflection_staged.push_back(candidate)" in renderer
+assert "stream_candidates.insert(stream_candidates.end()," in renderer
+assert "for(auto const &face:planar_frame_candidates)" in renderer
+assert "gpu_3do_batch_outside_frustum(" in renderer
+assert "glMultiDrawElements(GL_TRIANGLES,world_counts.data()" in renderer
+assert "ms_acquire=" in renderer and "ms_world=" in renderer
+assert "ms_models_and_mips=" in renderer
+assert "shader.set_color_effects(" in renderer
+assert "shader.set_fog(" in renderer
+assert "shader.set_model_lighting(" in renderer
+assert "world_planar_reflection(nw,roughness)" in world_shader
+assert "ray=reflect(incident,normalize(mapped_normal))" in world_shader
+assert "textureLod(planar_reflection_map,uv,lod)" in world_shader
+assert "uv+=vec2(dot(bump" not in world_shader
+assert "glGenerateMipmap(GL_TEXTURE_2D);" in renderer
+assert "GL_LINEAR_MIPMAP_LINEAR" in target
+assert "glGenerateMipmap(GL_TEXTURE_2D);" in target
+assert "uniform vec4 fog_params;" in f
+assert "mix(lit,fog_color,fog)" in f
+assert "native_sector_tint" in v and "native_cmp_or_mode" in v
+assert "jk_capture_color(native_light,native_cmp_or_mode," in v
+assert "clamp(native_light,vec3(0.45)" not in v
+assert "instance.ambient=1.0f;" not in main
+
 
 assert "glBlitFramebuffer(" in renderer
 assert "GL_COLOR_ATTACHMENT0" in target

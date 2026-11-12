@@ -47,10 +47,13 @@ public:
         // Linear color, with depth for proper reflected world/3DO occlusion.
         glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,width,height,0,
                      GL_RGBA,GL_UNSIGNED_BYTE,nullptr);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        // Allocate the mip chain so the texture is complete before the first
+        // capture; subsequent frames refresh it once after drawing.
+        glGenerateMipmap(GL_TEXTURE_2D);
         glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,
                                GL_TEXTURE_2D,color_,0);
         glBindRenderbuffer(GL_RENDERBUFFER,depth_);

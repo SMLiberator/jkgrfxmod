@@ -596,6 +596,8 @@ namespace jkgm {
         std::optional<planar_reflection_plane> planar_capture_plane;
         engine_camera planar_capture_camera{};
         bool planar_plane_from_material=false;
+        // Independent reflected-camera draw list, never added to main visibility.
+        std::vector<world_cache_draw_candidate> planar_frame_candidates;
 
 
         HGDIOBJ indexed_bitmap_dc = NULL;
@@ -8014,6 +8016,7 @@ namespace jkgm {
         void stage_world_cache()
         {
             frame_world_cache_camera.valid=false;
+            planar_frame_candidates.clear();
             if(world_cache_target)
                 world_cache_target->frame_render_candidates.clear();
             if(!the_config->use_gpu_cache ||
@@ -8510,7 +8513,9 @@ namespace jkgm {
             bool const suppress_sector_tint=
                 native_sector_palette_mode().load(
                     std::memory_order_relaxed)==1;
-            auto stage_candidate=[&](world_cache_draw_candidate const &candidate) {
+            std::vector<world_cache_draw_candidate> reflection_staged;
+            auto stage_candidate=[&](world_cache_draw_candidate const &candidate,
+                                      bool main_view)->bool {
                 world_cache_light_sample info{};
                 char const *failure=nullptr;
                 if(!sample_world_cache_surface_light(
@@ -8524,7 +8529,7 @@ namespace jkgm {
                     ++light_fallback;
                     ++light_read_rejected;
                     log_stage_rejection(candidate,"lighting",failure,info);
-                    return;
+                    return false;
                 }
                 // Native JK has already advanced SlideSurface UV offsets.
                 // The GPU mesh retains its immutable authored coordinates.
@@ -8534,7 +8539,7 @@ namespace jkgm {
                     ++light_fallback;
                     ++uv_prepare_rejected;
                     log_stage_rejection(candidate,"uv_animation",failure,info);
-                    return;
+                    return false;
                 }
                 // FreeColorEffect must suppress only surfaces actually
                 // submitted. Do not clear every world vertex each frame.
@@ -8546,17 +8551,63 @@ namespace jkgm {
                 }
                 if(info.mode==3U)++gouraud_faces;
                 if(info.authored_mode==4U)++mode4_faces;
-                ordered.push_back(&candidate);
-                cache.frame_render_candidates.push_back(candidate);
+                if(main_view) {
+                    ordered.push_back(&candidate);
+                    cache.frame_render_candidates.push_back(candidate);
+                } else reflection_staged.push_back(candidate);
+                return true;
             };
             for(auto const &candidate:cache.sector_candidates)
-                stage_candidate(candidate);
+                stage_candidate(candidate,true);
             // Even exclusively translucent native faces need their live
             // lighting, sector tint and animated UVs uploaded here.
             // They are submitted only in the later forward-alpha pass.
             for(auto const &candidate:cache.sector_special_candidates)
-                stage_candidate(candidate);
-            if(ordered.empty() && cache.sector_sky_candidates.empty()) {
+                stage_candidate(candidate,true);
+            // The reflected camera may see faces that JK's primary portal
+            // traversal never staged. Prepare their LIVE vertex light, CMP,
+            // sector tint and UV offsets, but never submit them in the normal
+            // opaque or forward-alpha main-camera draw list.
+            if(the_config->experimental_planar_reflection_capture &&
+               the_config->enable_reflections && can_cull) {
+                select_planar_capture_plane(camera.camera);
+                if(planar_capture_plane) {
+                    auto const reflected=make_planar_reflection_camera(
+                        camera.camera,*planar_capture_plane);
+                    if(reflected.valid) {
+                        auto const reflection_view=
+                            planar_camera_native_view(reflected);
+                        world_cache_frame_stats reflection_stats{};
+                        reflection_stats.frustum_available=true;
+                        std::vector<world_cache_draw_candidate> reflected_candidates;
+                        std::vector<world_cache_draw_candidate> special_candidates;
+                        reflected_candidates.reserve(cache.mesh.surfaces.size()/4U);
+                        for(auto const &surface:cache.mesh.surfaces)
+                            append_world_cache_candidate(
+                                safe_read,cache.world.surfaces_addr,surface,
+                                reflected_candidates,reflection_stats,
+                                &camera.frustum,&reflection_view,
+                                &special_candidates);
+                        reflected_candidates.insert(reflected_candidates.end(),
+                            special_candidates.begin(),special_candidates.end());
+                        std::unordered_set<uint32_t> ready;
+                        ready.reserve(cache.frame_render_candidates.size()+
+                                      reflected_candidates.size());
+                        for(auto const &c:cache.frame_render_candidates)
+                            ready.insert(c.surface_index);
+                        for(auto const &candidate:reflected_candidates) {
+                            if(candidate.passable_adjoin ||
+                               (candidate.face_type&0x2U)!=0U)continue;
+                            if(ready.insert(candidate.surface_index).second &&
+                               !stage_candidate(candidate,false))
+                                continue;
+                            planar_frame_candidates.push_back(candidate);
+                        }
+                    }
+                }
+            }
+            if(ordered.empty() && cache.sector_sky_candidates.empty() &&
+               reflection_staged.empty()) {
                 // Still report diagnostic totals if every candidate failed
                 // before the GPU pass had anything to draw.
                 if(the_config->profile_renderer &&
@@ -8576,8 +8627,11 @@ namespace jkgm {
             // whose live vertex attributes need refreshing this frame.
             // The full-upload fallback avoids dozens of small GL calls or
             // stalling in glBufferSubData on heavily visible/fragmented maps.
+            auto stream_candidates=cache.frame_render_candidates;
+            stream_candidates.insert(stream_candidates.end(),
+                reflection_staged.begin(),reflection_staged.end());
             auto const stream=plan_world_cache_vertex_stream(
-                cache.mesh,cache.frame_render_candidates);
+                cache.mesh,stream_candidates);
             auto upload_live=[&](auto const &buffer,auto const &values) {
                 gl::bind_buffer(gl::buffer_bind_target::array,buffer);
                 if(stream.partial) {
@@ -8592,7 +8646,7 @@ namespace jkgm {
                         gl::buffer_usage::stream_draw);
                 }
             };
-            if(!cache.frame_render_candidates.empty()) {
+            if(!stream_candidates.empty()) {
                 upload_live(cache.lighting,cache.frame_light_rgb);
                 upload_live(cache.light_state,cache.frame_light_state);
                 upload_live(cache.sector_tint,cache.frame_sector_tint);
@@ -10415,6 +10469,7 @@ namespace jkgm {
             auto const view=planar_camera_native_view(reflected);
             auto const begun=std::chrono::steady_clock::now();
             size_t world_drawn=0,model_drawn=0,model_candidates=0;
+            size_t world_culled=0,model_culled=0;
             size_t hidden_by_flags=0,hidden_by_geo=0;
             // Acquisition does NOT mutate rdCamera; its refresh callback
             // updates only each Thing's native cached animation matrices.
@@ -10453,6 +10508,7 @@ namespace jkgm {
                     }
                 }
             }
+            auto const after_acquisition=std::chrono::steady_clock::now();
             // Prefer complete offscreen native hierarchy snapshots; add only
             // primary-camera nodes of Things that were not independently
             // acquired. Each Thing with a complete hierarchy is drawn once.
@@ -10479,6 +10535,22 @@ namespace jkgm {
             shader.use_program();
             shader.set_projection(half_fov,aspect,far_plane);
             shader.set_clip(setup.clip_view);
+            auto const fog=get_fog_settings();
+            auto const fog_info=fog.info.value(),fog_rgb=fog.color.value();
+            shader.set_fog(make_point(fog_info[0],fog_info[1],
+                the_config->enable_fog?fog_info[2]:0.0f,0.0f),
+                make_point(fog_rgb[0],fog_rgb[1],fog_rgb[2]));
+            jk_palette_effect effect{};
+            if(native_sector_palette_mode().load(
+                   std::memory_order_relaxed)!=0)
+                effect=read_native_jk_hardware_color_effects();
+            shader.set_color_effects(
+                make_point(float(effect.filter[0]),float(effect.filter[1]),
+                    float(effect.filter[2]),effect.active?1.0f:0.0f),
+                make_point(effect.tint[0],effect.tint[1],effect.tint[2],0.0f),
+                make_point(effect.add[0]/255.0f,effect.add[1]/255.0f,
+                    effect.add[2]/255.0f,effect.fade),
+                authored_light_limit(the_config->enable_baked_overbright));
             shader.set_modelview(view,false);
             auto submit_material=[&](gpu_3do_texture const &mat,
                                       bool solid)->bool {
@@ -10501,31 +10573,57 @@ namespace jkgm {
                         ?mat.alpha_cutoff:0.0f);
                 return true;
             };
+            // The stage produced a reflected-frustum-only LIVE draw list.
+            // Group by material/cel/GeoMode to avoid a GL call and a native
+            // MAT lookup for every world polygon in JkGR's huge levels.
             auto &cache=*world_cache_target;
-            // These ranges include all cached world sectors. Unlike
-            // frame_render_candidates, they are NOT main-portal-culled.
             gl::bind_vertex_array(cache.vao);
             glFrontFace(GL_CW); // reflected camera reverses handedness
-            for(auto const &surface:cache.mesh.surfaces) {
-                if(surface.count==0U || surface.passable_adjoin ||
-                   (surface.surface_flags&0x600U)!=0U ||
-                   surface.first_index>=cache.mesh.indices.size())
+            std::map<std::tuple<uintptr_t,int32_t,uint32_t>,
+                std::vector<world_cache_draw_candidate const *>> world_groups;
+            for(auto const &face:planar_frame_candidates) {
+                if(face.count==0U || face.passable_adjoin ||
+                   face.sky_flags!=0U ||
+                   face.first_index>=cache.mesh.indices.size())
                     continue;
+                auto const index=cache.cached_surface_lookup.size()>face.surface_index
+                    ?cache.cached_surface_lookup[face.surface_index]
+                    :std::numeric_limits<uint32_t>::max();
+                if(index>=cache.mesh.surfaces.size())continue;
+                auto const &surface=cache.mesh.surfaces[index];
+                if(gpu_3do_batch_outside_frustum(
+                       frame_world_cache_camera.frustum,view,
+                       surface.bounds_min,surface.bounds_max)) {
+                    ++world_culled;continue;
+                }
+                world_groups[std::make_tuple(face.material,face.cel,
+                    face.geometry_mode)].push_back(&face);
+            }
+            std::vector<GLsizei> world_counts;
+            std::vector<void const *> world_offsets;
+            for(auto const &entry:world_groups) {
+                auto const &first=*entry.second.front();
                 gpu_3do_group group{};
-                group.material=surface.material;
-                group.cel=surface.cel;
-                bool const solid=!surface.has_uv;
+                group.material=first.material;
+                group.cel=first.cel;
+                bool const solid=first.geometry_mode==3U;
                 auto const mat=solid
                     ?resolve_gpu_3do_solid_material(group,false)
                     :resolve_gpu_3do_material(group);
                 if(!submit_material(mat,solid))continue;
-                gl::draw_elements(gl::element_type::triangles,
-                    static_cast<GLsizei>(surface.count),
-                    gl::index_type::uint32,
-                    static_cast<ptrdiff_t>(
-                        surface.first_index*sizeof(uint32_t)));
-                ++world_drawn;
+                world_counts.clear();
+                world_offsets.clear();
+                for(auto const *face:entry.second) {
+                    world_counts.push_back(static_cast<GLsizei>(face->count));
+                    world_offsets.push_back(reinterpret_cast<void const *>(
+                        uintptr_t(face->first_index)*sizeof(uint32_t)));
+                }
+                glMultiDrawElements(GL_TRIANGLES,world_counts.data(),
+                    GL_UNSIGNED_INT,world_offsets.data(),
+                    static_cast<GLsizei>(world_counts.size()));
+                world_drawn+=entry.second.size();
             }
+            auto const after_world=std::chrono::steady_clock::now();
             auto draw_model=[&](gpu_3do_instance const &inst) {
                 if(inst.shadow_only || inst.camera_hud ||
                    inst.is_projected_decal || inst.is_sprite_quad ||
@@ -10543,12 +10641,22 @@ namespace jkgm {
                     view,inst.transform);
                 if(!gpu_3do_matrix_finite(modelview))return;
                 shader.set_modelview(modelview,true);
+                shader.set_model_lighting(inst.ambient,inst.effective_light_mode,
+                    make_point(inst.colormap_tint[0],inst.colormap_tint[1],
+                               inst.colormap_tint[2]),
+                    make_point(inst.sector_tint[0],inst.sector_tint[1],
+                               inst.sector_tint[2]));
                 gl::bind_vertex_array(glmesh->second->vao);
                 // Both the reflected camera and negative-scale models
                 // reverse winding. Two reversals restore the normal front.
                 glFrontFace(gpu_3do_reversed_winding(inst.transform)
                     ?GL_CCW:GL_CW);
                 for(auto const &group:inst.geometry->groups) {
+                    if(gpu_3do_batch_outside_frustum(
+                           frame_world_cache_camera.frustum,modelview,
+                           group.bounds_min,group.bounds_max)) {
+                        ++model_culled;continue;
+                    }
                     bool const solid=group.solid_color ||
                         inst.effective_geometry_mode==3U;
                     auto const mat=solid
@@ -10571,7 +10679,12 @@ namespace jkgm {
                 if(inst.shadow_owner==0U ||
                    !acquired_owners.count(inst.shadow_owner))
                     draw_model(inst);
+            // Refresh the reflection mip chain once, not once per surface.
+            // GL scope restores the previous unit-0 material binding.
             gl::set_active_texture_unit(0);
+            glBindTexture(GL_TEXTURE_2D,planar_capture_target->color_texture());
+            glGenerateMipmap(GL_TEXTURE_2D);
+            auto const after_capture=std::chrono::steady_clock::now();
             planar_capture_camera=reflected;
             planar_capture_ready=true;
             if((gpu_3do_present_serial%120U)==0U) {
@@ -10584,7 +10697,16 @@ namespace jkgm {
                          " plane_source=",
                          planar_plane_from_material?"material":"fluid",
                          " world_faces=",world_drawn,
+                         " world_culled=",world_culled,
+                         " world_batches=",world_groups.size(),
                          " model_groups=",model_drawn,
+                         " model_culled=",model_culled,
+                         " ms_acquire=",std::chrono::duration<float,std::milli>(
+                             after_acquisition-begun).count(),
+                         " ms_world=",std::chrono::duration<float,std::milli>(
+                             after_world-after_acquisition).count(),
+                         " ms_models_and_mips=",std::chrono::duration<float,std::milli>(
+                             after_capture-after_world).count(),
                          " native_thing_candidates=",model_candidates,
                          " hidden_by_thing_flags=",hidden_by_flags,
                          " hidden_by_cur_geomode=",hidden_by_geo,

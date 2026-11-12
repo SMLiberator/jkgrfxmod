@@ -2515,9 +2515,22 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 flags,false);
             instance.world_lighting_exempt=instance.skybox_vertex_lighting;
             instance.casts_sun_shadows=false;
-            // Simplified lighting only; this array is NOT inserted into the
-            // normal gameplay frame, spotlight or sun shadow map.
-            instance.ambient=1.0f;
+            // Approximate the Thing's live sector floor rather than forcing
+            // all offscreen-only Things to full brightness. Native per-Thing
+            // lighting overrides remain unavailable outside the draw hook.
+            float ambient=0.0f,extra=0.0f;
+            if(read(uintptr_t(thing.sector)+0x04U,&ambient,4U) &&
+               read(uintptr_t(thing.sector)+0x08U,&extra,4U) &&
+               std::isfinite(ambient) && std::isfinite(extra))
+                instance.ambient=std::clamp(std::max(ambient,extra),0.0f,2.0f);
+            else instance.ambient=0.0f;
+            std::array<float,3> tint{};
+            if(read(uintptr_t(thing.sector)+0x10U,tint.data(),sizeof(tint)) &&
+               std::isfinite(tint[0]) && std::isfinite(tint[1]) &&
+               std::isfinite(tint[2])) {
+                instance.sector_tint=tint;
+                instance.sector_tint_valid=true;
+            }
             instance.num_lights=0;
             complete_thing_nodes.emplace_back(std::move(instance));
         }

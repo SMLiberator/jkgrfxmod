@@ -117,7 +117,7 @@ vec3 world_mapped_normal(vec2 uv)
 // A pixel can use this capture only if it lies on the selected world
 // reflection plane. One captured MAT may be shared by non-coplanar faces.
 // Pixel-space reflected camera projection is independent of texture UVs.
-vec4 world_planar_reflection(vec3 mapped_normal)
+vec4 world_planar_reflection(vec3 mapped_normal,float roughness)
 {
     if(planar_reflection_ready==0)return vec4(0.0);
     vec3 const_geom=normalize(cached_world_normal);
@@ -126,21 +126,27 @@ vec4 world_planar_reflection(vec3 mapped_normal)
            planar_receiver_plane.w)>
                max(0.02,abs(planar_receiver_plane.w)*0.000002))
         return vec4(0.0);
-    vec3 d=cached_world_position-planar_camera_origin;
+    // Project a point along the normal-mapped reflected ray through the
+    // mirrored camera. With the geometric normal this is exactly the
+    // original planar projection; unlike a fixed UV offset, changes in
+    // view angle, normal slope and distance now affect the distortion.
+    vec3 incident=normalize(cached_world_position-camera_world_origin);
+    vec3 ray=reflect(incident,normalize(mapped_normal));
+    float distance_to_surface=length(cached_world_position-camera_world_origin);
+    vec3 point_on_ray=cached_world_position+ray*distance_to_surface;
+    vec3 d=point_on_ray-planar_camera_origin;
     float z=dot(d,planar_camera_forward);
     if(z<=0.001)return vec4(0.0);
     vec2 uv=0.5+0.5*vec2(
         dot(d,planar_camera_right),
         dot(d,planar_camera_up))/
         (z*max(planar_tan_half_fov,vec2(0.0001)));
-    // Small, cheap perturbation from existing water normal maps. Reflective
-    // geometry still uses a stable planar projection when maps are absent.
-    vec3 bump=mapped_normal-const_geom;
-    uv+=vec2(dot(bump,planar_camera_right),
-             dot(bump,planar_camera_up))*0.015;
     if(any(lessThan(uv,vec2(0.0))) ||
        any(greaterThan(uv,vec2(1.0))))return vec4(0.0);
-    vec4 sample_color=texture(planar_reflection_map,uv);
+    ivec2 dimensions=textureSize(planar_reflection_map,0);
+    float lod=roughness*log2(
+        max(float(max(dimensions.x,dimensions.y)),1.0));
+    vec4 sample_color=textureLod(planar_reflection_map,uv,lod);
     // Captured geometry writes opaque RGB against a transparent black clear.
     // Bilinear filtering premultiplies edge colors; unpremultiply before
     // mixing coverage against the optional sky/environment fallback.
@@ -171,7 +177,7 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
                           dot(vw,camera_up_axis),dot(vw,camera_forward_axis)));
     if(dot(n,v)>0.0)n=-n;
     vec3 reflection=reflect(v,n);
-    vec4 planar=has_planar?world_planar_reflection(nw):vec4(0.0);
+    vec4 planar=has_planar?world_planar_reflection(nw,roughness):vec4(0.0);
     vec3 env=vec3(0.0);
     if(has_env && planar.a<0.999) {
         vec3 dir=reflection;
