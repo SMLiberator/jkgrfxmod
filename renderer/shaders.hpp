@@ -86,6 +86,10 @@ namespace jkgm {
             gl::uniform_location_id reflection_scroll,reflection_scroll2,environment_info;
             gl::uniform_location_id camera_world_origin,camera_right_axis;
             gl::uniform_location_id camera_forward_axis,camera_up_axis;
+            gl::uniform_location_id planar_sampler,planar_ready,planar_plane;
+            gl::uniform_location_id planar_camera_origin,planar_camera_right;
+            gl::uniform_location_id planar_camera_forward,planar_camera_up;
+            gl::uniform_location_id planar_tan_half_fov;
             gl::uniform_location_id alpha_cutout,alpha_cutoff;
             gl::uniform_location_id transparent_pass,alpha_mode,face_opacity;
             gl::uniform_location_id blend_mode;
@@ -123,6 +127,12 @@ namespace jkgm {
                                        std::array<float,3> const &right,
                                        std::array<float,3> const &forward,
                                        std::array<float,3> const &up);
+            void set_planar_reflection(bool ready,point<4,float> plane,
+                                       point<3,float> origin,
+                                       point<3,float> right,
+                                       point<3,float> forward,
+                                       point<3,float> up,
+                                       point<2,float> tan_half_fov);
             void set_alpha_cutout(float cutoff);
             void set_scene_depth(int sampler);
             void set_fluid_thickness(float thickness);
