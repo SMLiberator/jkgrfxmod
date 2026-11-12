@@ -389,6 +389,12 @@
     <ClInclude Include="planar_reflection_workset.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="planar_reflection_native_nodes.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="planar_reflection_offscreen_gpu.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="postfx.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
