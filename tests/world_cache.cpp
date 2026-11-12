@@ -103,11 +103,11 @@ int main()
            scattered.touched_vertices==12U);
     auto all_ids=std::vector<size_t>{};
     for(size_t i=0;i<32U;++i)all_ids.push_back(i);
-    auto const full=plan_world_cache_vertex_stream(
+    auto const full_stream_plan=plan_world_cache_vertex_stream(
         stream_mesh,make_stream_faces(all_ids));
-    assert(full.valid && !full.partial);
-    assert(full.ranges.size()==1U &&
-           full.touched_vertices==stream_mesh.vertices.size());
+    assert(full_stream_plan.valid && !full_stream_plan.partial);
+    assert(full_stream_plan.ranges.size()==1U &&
+           full_stream_plan.touched_vertices==stream_mesh.vertices.size());
     auto const no_faces=plan_world_cache_vertex_stream(stream_mesh,{});
     assert(no_faces.valid && !no_faces.partial &&
            no_faces.ranges.empty() && no_faces.touched_vertices==0U);
