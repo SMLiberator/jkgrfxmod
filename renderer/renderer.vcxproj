@@ -169,6 +169,7 @@
     <ClInclude Include="native_sprite_profile.hpp" />
     <ClInclude Include="native_thingface_friction.hpp" />
     <ClInclude Include="planar_reflection_camera.hpp" />
+    <ClInclude Include="planar_reflection_things.hpp" />
     <ClInclude Include="postfx.hpp" />
     <ClInclude Include="precise_type3_native.hpp" />
     <ClInclude Include="precise_type3_pose_bulk.hpp" />

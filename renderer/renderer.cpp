@@ -3,6 +3,7 @@
 #include "presentation_gpu_profile.hpp"
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
+#include "planar_reflection_things.hpp"
 #include "saber_light_rgb.hpp"
 #include "thing_light_rgb.hpp"
 #include "gpu_3do_uv.hpp"
@@ -10215,6 +10216,34 @@ namespace jkgm {
             // Keeping one frame snapshot avoids losing the second pass.
             gpu_frame_material_cache.clear();
             frame_gpu_3do_instances=consume_gpu_3do_instances();
+            // Discovery-only probe: walk ALL sectors rather than the primary
+            // camera's portal-visible subset. No pose updates, GL draws, or
+            // changes to native JK state occur here.
+            if(the_config->experimental_planar_thing_discovery &&
+               mode==renderer_mode::ingame &&
+               gpu_3do_present_serial%120U==0U &&
+               engine_material_debug::matches_tested_executable()) {
+                uint32_t world=0;
+                if(engine_material_debug::read_object(
+                       engine_material_debug::current_world_global,world)) {
+                    auto read=[](uintptr_t at,void *dst,size_t bytes)->bool {
+                        return engine_material_debug::read_bytes(at,dst,bytes);
+                    };
+                    planar_reflection_thing_scan scan{};
+                    if(collect_planar_reflection_things(read,world,scan)) {
+                        LOG_INFO("PLANAR discovery world=",world,
+                                 " sectors=",scan.sectors,
+                                 " linked_things=",scan.linked_things,
+                                 " reflected_3do_candidates=",scan.models.size(),
+                                 " excluded_flags=",scan.excluded_flags,
+                                 " non_models=",scan.non_models,
+                                 " NOTE=independent_of_main_camera_no_capture_yet");
+                    } else {
+                        LOG_WARNING("PLANAR discovery unavailable world=",world,
+                                    " error=",planar_reflection_thing_error_name(scan.error));
+                    }
+                }
+            }
             // One native camera frame, shared between cached world and 3DOs.
             frame_saber_light_colors=saber_light_rgb::get_registry().consume();
             // Ordinary colored Things annotate their EXISTING JK camera

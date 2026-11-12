@@ -9,6 +9,33 @@ back to the same world-aligned environment image as `envmap` and `screen`
 The existing modes retain numeric values 0–3; planar is 4. Probe and cube
 modes are intentionally not defined yet.
 
+## Independent Thing discovery (implemented; capture still pending)
+
+OpenJKDF2's `sithRender_RenderThings` walks the Thing lists of the
+sectors chosen by the camera. The new diagnostic scans **every**
+SithSector and follows each native `pNextThingInSector`, without
+calling JK's render traversal or assuming a `SithThing` allocation stride.
+
+- `SithWorld`: sector count at `+0x4c`, sector array at `+0x50`,
+  loaded Thing capacity at `+0xbc`, Thing table at `+0xc4`.
+- `SithSector`: stride `0x98`, first Thing at `+0x30`.
+- `SithThing`: owner sector `+0x5c`, next Thing `+0x60`,
+  signature `+0x74`, position `+0xb8`, rdThing at `+0xc4`.
+- `rdThing`: render type at `+0x00`, rdModel3 pointer at `+0x04`.
+
+Every read is bounded, cycles/duplicate nodes cause failure, and malformed
+lists fail closed. No writes to native state occur. Flag `0x2` (destroyed),
+`0x8` (level geometry), `0x10`, and `0x80000` (disabled) are excluded;
+camera-type Things are excluded from the model candidate list.
+
+Set `experimental_planar_thing_discovery: true` to log diagnostic counts
+approximately every 120 frames. It **does NOT render** reflections.
+
+This proves the independent discovery method but not yet GPU-ready mesh
+acquisition for Things the normal view didn't submit. That will require
+offscreen rdModel3/geoset and joint-pose handling without modifying JK's
+live camera or submitting normal gameplay geometry.
+
 ## Capture contract
 
 - A source material selects planar reflections. Material effects (roughness,

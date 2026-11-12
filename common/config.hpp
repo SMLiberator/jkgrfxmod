@@ -70,6 +70,7 @@ namespace jkgm {
         bool profile_renderer_verbose = false; // opt-in detailed renderer diagnostics
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics
         bool use_gpu_cache = true; // unified GPU 3DO, sprite, and SithWorld rendering
+        bool experimental_planar_thing_discovery = false; // read-only 120-frame diagnostics; no reflection capture
         bool enable_gpu_sprite_instancing = true; // compatible SPR instancing, disable for diagnostics
         bool experimental_half_res_fluid_sprites = false; // opt-in half-size fluid SPR layer
         unsigned int fluid_sprite_layer_budget = 0U; // 0=unlimited; 1..255 surviving layers per half-size pixel
