@@ -13,6 +13,8 @@ class planar_reflection_capture_shader : public opengl_shader {
     gl::uniform_location_id tint_,has_albedo_,alpha_;
     gl::uniform_location_id fog_params_,fog_color_,jk_filter_,jk_tint_,jk_fade_,jk_limit_;
     gl::uniform_location_id model_ambient_,model_mode_,model_cmp_,model_sector_;
+    gl::uniform_location_id emission_sampler_,emission_factor_,emission_scroll_;
+    gl::uniform_location_id emission_enabled_,emission_only_;
 public:
     explicit planar_reflection_capture_shader(fs::path const &root)
         :opengl_shader("planar_capture",
@@ -40,7 +42,12 @@ public:
          model_ambient_(gl::get_uniform_location(the_program,"model_ambient")),
          model_mode_(gl::get_uniform_location(the_program,"model_effective_light_mode")),
          model_cmp_(gl::get_uniform_location(the_program,"model_cmp_tint")),
-         model_sector_(gl::get_uniform_location(the_program,"model_sector_tint"))
+         model_sector_(gl::get_uniform_location(the_program,"model_sector_tint")),
+         emission_sampler_(gl::get_uniform_location(the_program,"emissive_map")),
+         emission_factor_(gl::get_uniform_location(the_program,"emissive_factor")),
+         emission_scroll_(gl::get_uniform_location(the_program,"emissive_scroll")),
+         emission_enabled_(gl::get_uniform_location(the_program,"has_emissive")),
+         emission_only_(gl::get_uniform_location(the_program,"emissive_only"))
     {}
     void set_projection(float half_fov,float aspect,float far_plane) {
         gl::set_uniform_vector(projection_,make_point(
@@ -73,6 +80,14 @@ public:
         gl::set_uniform_float(model_mode_,mode);
         gl::set_uniform_vector(model_cmp_,cmp);
         gl::set_uniform_vector(model_sector_,sector_tint);
+    }
+    void set_emission(bool textured,point<4,float> strength,
+                      point<2,float> scroll,bool only) {
+        gl::set_uniform_integer(emission_sampler_,1);
+        gl::set_uniform_integer(emission_enabled_,textured?1:0);
+        gl::set_uniform_integer(emission_only_,only?1:0);
+        gl::set_uniform_vector(emission_factor_,strength);
+        gl::set_uniform_vector(emission_scroll_,scroll);
     }
     void set_material(float width,float height,
         point<4,float> tint,point<2,float> scroll,

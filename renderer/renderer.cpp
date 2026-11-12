@@ -10556,22 +10556,29 @@ namespace jkgm {
             auto submit_material=[&](gpu_3do_texture const &mat,
                                       bool solid)->bool {
                 if(mat.reflection_mode==4 ||
-                   mat.special || mat.emissive_only ||
+                   (mat.special && !mat.emissive_only) ||
                    mat.blend==material_blend_mode::fluid ||
-                   mat.blend==material_blend_mode::additive ||
                    mat.blend==material_blend_mode::multiply ||
-                   !std::isfinite(mat.opacity) || mat.opacity<0.999f)
+                   !std::isfinite(mat.opacity) ||
+                   (mat.opacity<0.999f && !mat.emissive_only))
                     return false;
                 bool const textured=!solid && mat.albedo_source==1 &&
                                      mat.has_image;
-                if(!textured && !(solid || mat.albedo_source==2))return false;
+                if(!textured && !(solid || mat.albedo_source==2 ||
+                                  mat.emissive_only))return false;
                 gl::set_active_texture_unit(0);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                                  textured?mat.texture:gl::default_texture);
+                gl::set_active_texture_unit(1);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                    mat.has_emission?mat.emission:gl::default_texture);
                 shader.set_material(mat.width,mat.height,mat.tint,
                     mat.albedo_scroll,textured,
                     (mat.masked || mat.dithered || mat.alpha)
                         ?mat.alpha_cutoff:0.0f);
+                shader.set_emission(mat.has_emission,mat.emission_factor,
+                                    mat.emissive_scroll,mat.emissive_only);
+                gl::set_active_texture_unit(0);
                 return true;
             };
             // The stage produced a reflected-frustum-only LIVE draw list.
@@ -10602,6 +10609,13 @@ namespace jkgm {
             }
             std::vector<GLsizei> world_counts;
             std::vector<void const *> world_offsets;
+            struct planar_emissive_world_batch {
+                gpu_3do_texture material;
+                bool solid=false;
+                std::vector<GLsizei> counts;
+                std::vector<void const *> offsets;
+            };
+            std::vector<planar_emissive_world_batch> emissive_world;
             for(auto const &entry:world_groups) {
                 auto const &first=*entry.second.front();
                 gpu_3do_group group{};
@@ -10611,7 +10625,6 @@ namespace jkgm {
                 auto const mat=solid
                     ?resolve_gpu_3do_solid_material(group,false)
                     :resolve_gpu_3do_material(group);
-                if(!submit_material(mat,solid))continue;
                 world_counts.clear();
                 world_offsets.clear();
                 for(auto const *face:entry.second) {
@@ -10619,12 +10632,29 @@ namespace jkgm {
                     world_offsets.push_back(reinterpret_cast<void const *>(
                         uintptr_t(face->first_index)*sizeof(uint32_t)));
                 }
+                // Pure emissive materials have no opaque base or depth.
+                // Defer them until ALL opaque world and 3DO geometry has
+                // populated the mirrored depth buffer.
+                if(mat.emissive_only) {
+                    emissive_world.push_back(
+                        {mat,solid,world_counts,world_offsets});
+                    continue;
+                }
+                if(!submit_material(mat,solid))continue;
                 glMultiDrawElements(GL_TRIANGLES,world_counts.data(),
                     GL_UNSIGNED_INT,world_offsets.data(),
                     static_cast<GLsizei>(world_counts.size()));
                 world_drawn+=entry.second.size();
             }
             auto const after_world=std::chrono::steady_clock::now();
+            struct planar_emissive_model_group {
+                gpu_3do_instance const *instance=nullptr;
+                gpu_3do_group const *group=nullptr;
+                gpu_3do_matrix34 modelview{};
+                gpu_3do_texture material;
+                bool solid=false,reversed=false,two_sided=false;
+            };
+            std::vector<planar_emissive_model_group> emissive_models;
             auto draw_model=[&](gpu_3do_instance const &inst) {
                 if(inst.shadow_only || inst.camera_hud ||
                    inst.is_projected_decal || inst.is_sprite_quad ||
@@ -10663,6 +10693,13 @@ namespace jkgm {
                     auto const mat=solid
                         ?resolve_gpu_3do_solid_material(group,false)
                         :resolve_gpu_3do_material(group);
+                    if(mat.emissive_only) {
+                        emissive_models.push_back({
+                            &inst,&group,modelview,mat,solid,
+                            gpu_3do_reversed_winding(inst.transform),
+                            group.nonplanar || (group.face_type&1U)!=0U});
+                        continue;
+                    }
                     if(!submit_material(mat,solid))continue;
                     if(group.nonplanar || (group.face_type&1U)) {
                         glDisable(GL_CULL_FACE);
@@ -10680,6 +10717,52 @@ namespace jkgm {
                 if(inst.shadow_owner==0U ||
                    !acquired_owners.count(inst.shadow_owner))
                     draw_model(inst);
+            // Source materials with opacity zero and emission must ADD
+            // radiance over opaque geometry without occluding it or writing
+            // depth. Preserve capture alpha coverage for EnvMap fallback.
+            if(!emissive_world.empty() || !emissive_models.empty()) {
+                glEnable(GL_BLEND);
+                glBlendFuncSeparate(GL_ONE,GL_ONE,GL_ONE,GL_ZERO);
+                glDepthMask(GL_FALSE);
+                glDepthFunc(GL_LEQUAL);
+                gl::bind_vertex_array(cache.vao);
+                glFrontFace(GL_CW);
+                glEnable(GL_CULL_FACE);
+                shader.set_modelview(view,false);
+                for(auto const &batch:emissive_world) {
+                    if(!submit_material(batch.material,batch.solid))continue;
+                    glMultiDrawElements(GL_TRIANGLES,batch.counts.data(),
+                        GL_UNSIGNED_INT,batch.offsets.data(),
+                        static_cast<GLsizei>(batch.counts.size()));
+                    world_drawn+=batch.counts.size();
+                }
+                for(auto const &batch:emissive_models) {
+                    auto const it=gpu_3do_gl_cache.find(batch.instance->id);
+                    if(it==gpu_3do_gl_cache.end())continue;
+                    shader.set_modelview(batch.modelview,true);
+                    auto const &inst=*batch.instance;
+                    shader.set_model_lighting(
+                        inst.ambient,inst.effective_light_mode,
+                        make_point(inst.colormap_tint[0],inst.colormap_tint[1],
+                                   inst.colormap_tint[2]),
+                        make_point(inst.sector_tint[0],inst.sector_tint[1],
+                                   inst.sector_tint[2]));
+                    gl::bind_vertex_array(it->second->vao);
+                    glFrontFace(batch.reversed?GL_CCW:GL_CW);
+                    if(batch.two_sided)glDisable(GL_CULL_FACE);
+                    else glEnable(GL_CULL_FACE);
+                    if(!submit_material(batch.material,batch.solid))continue;
+                    gl::draw_elements(gl::element_type::triangles,
+                        static_cast<GLsizei>(batch.group->count),
+                        gl::index_type::uint32,
+                        static_cast<ptrdiff_t>(
+                            batch.group->offset*sizeof(uint32_t)));
+                    ++model_drawn;
+                }
+                glDisable(GL_BLEND);
+                glDepthMask(GL_TRUE);
+                glDepthFunc(GL_LESS);
+            }
             // Refresh the reflection mip chain once, not once per surface.
             // GL scope restores the previous unit-0 material binding.
             gl::set_active_texture_unit(0);
@@ -10700,7 +10783,9 @@ namespace jkgm {
                          " world_faces=",world_drawn,
                          " world_culled=",world_culled,
                          " world_batches=",world_groups.size(),
+                         " emissive_world_batches=",emissive_world.size(),
                          " model_groups=",model_drawn,
+                         " emissive_model_groups=",emissive_models.size(),
                          " model_culled=",model_culled,
                          " ms_acquire=",std::chrono::duration<float,std::milli>(
                              after_acquisition-begun).count(),

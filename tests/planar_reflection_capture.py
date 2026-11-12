@@ -93,7 +93,45 @@ assert "glGenerateMipmap(GL_TEXTURE_2D);" in renderer
 assert "GL_LINEAR_MIPMAP_LINEAR" in target
 assert "glGenerateMipmap(GL_TEXTURE_2D);" in target
 assert "uniform vec4 fog_params;" in f
-assert "mix(lit,fog_color,fog)" in f
+assert "mix(lit,fog_color,fog_far)" in f
+# Reflection distance already includes the camera->receiver leg. Its
+# contribution must be removed from the capture fog, then reconstructed by
+# the primary renderer without counting the first leg twice.
+assert "float plane_fraction=clamp(" in f
+assert "float fog_total=capture_fog_fraction(total_depth);" in f
+assert "float fog_near=capture_fog_fraction(total_depth*plane_fraction);" in f
+assert "fog_far=clamp((fog_total-fog_near)/" in f
+def fog_at(depth,start,end,opacity):
+    return max(0.0,min(1.0,(depth-start)/(end-start)))*opacity
+for start,end,opacity,total_depth,fraction in (
+    (4.0,40.0,1.0,22.0,0.3),
+    (4.0,40.0,0.7,30.0,0.6),
+    (0.0,80.0,1.0,80.0,0.25),
+    (8.0,32.0,0.6,15.0,0.1),
+    (8.0,32.0,0.9,5.0,0.4),
+):
+    total=fog_at(total_depth,start,end,opacity)
+    near=fog_at(total_depth*fraction,start,end,opacity)
+    far=max(0.0,min(1.0,(total-near)/max(1.0-near,0.00001)))
+    assert abs(near+(1.0-near)*far-total)<1e-6
+# Emission is a separate sampled material contribution: it survives a
+# black/zero-alpha albedo and retains HDR values after capture.
+assert "uniform sampler2D emissive_map;" in f
+assert "emitted*=texture(emissive_map,tex_uv+emissive_scroll).rgb;" in f
+assert "if(emissive_only!=0)" in f
+assert "vec3 lit=albedo.rgb*material_tint.rgb*baked_light+emitted;" in f
+assert "shader.set_emission(mat.has_emission,mat.emission_factor," in renderer
+assert "glBlendFuncSeparate(GL_ONE,GL_ONE,GL_ONE,GL_ZERO);" in renderer
+assert "glDepthMask(GL_FALSE);" in renderer
+assert "glDepthFunc(GL_LEQUAL);" in renderer
+assert "emissive_world.push_back(" in renderer
+assert "emissive_models.push_back(" in renderer
+assert "mat.special || mat.emissive_only" not in capture
+assert "GL_RGBA16F" in target
+# A new sampler must have its GL unit restored for later native/GPU draws.
+assert "glActiveTexture(GL_TEXTURE1);" in target
+assert "glBindTexture(GL_TEXTURE_2D,GLuint(texture1_));" in target
+assert "void set_emission(bool textured" in shader
 assert "native_sector_tint" in v and "native_cmp_or_mode" in v
 assert "jk_capture_color(native_light,native_cmp_or_mode," in v
 assert "clamp(native_light,vec3(0.45)" not in v

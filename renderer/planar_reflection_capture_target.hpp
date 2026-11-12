@@ -44,9 +44,10 @@ public:
         glGenRenderbuffers(1,&depth_);
         glBindFramebuffer(GL_FRAMEBUFFER,fbo_);
         glBindTexture(GL_TEXTURE_2D,color_);
-        // Linear color, with depth for proper reflected world/3DO occlusion.
-        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,width,height,0,
-                     GL_RGBA,GL_UNSIGNED_BYTE,nullptr);
+        // Capture scene-linear HDR emission without clipping window/light
+        // intensities to 8-bit RGB before Fresnel and post-exposure.
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA16F,width,height,0,
+                     GL_RGBA,GL_HALF_FLOAT,nullptr);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
@@ -86,7 +87,7 @@ public:
 // very particular program/texture/VAO/blend/depth state after its draws.
 class planar_reflection_gl_scope {
     GLint draw_=0,read_=0,viewport_[4]{},program_=0,vao_=0;
-    GLint active_=0,texture0_=0,front_=GL_CCW,cull_=GL_BACK;
+    GLint active_=0,texture0_=0,texture1_=0,front_=GL_CCW,cull_=GL_BACK;
     GLint depth_func_=GL_LESS,blend_src_rgb_=GL_ONE,blend_dst_rgb_=GL_ZERO;
     GLint blend_src_alpha_=GL_ONE,blend_dst_alpha_=GL_ZERO;
     GLboolean depth_mask_=GL_TRUE,color_mask_[4]{};
@@ -105,6 +106,8 @@ public:
         glGetIntegerv(GL_ACTIVE_TEXTURE,&active_);
         glActiveTexture(GL_TEXTURE0);
         glGetIntegerv(GL_TEXTURE_BINDING_2D,&texture0_);
+        glActiveTexture(GL_TEXTURE1);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D,&texture1_);
         glActiveTexture(GLenum(active_));
         glGetIntegerv(GL_FRONT_FACE,&front_);
         glGetIntegerv(GL_CULL_FACE_MODE,&cull_);
@@ -135,6 +138,8 @@ public:
         glBindVertexArray(GLuint(vao_));
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D,GLuint(texture0_));
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D,GLuint(texture1_));
         glActiveTexture(GLenum(active_));
         glFrontFace(GLenum(front_));
         glCullFace(GLenum(cull_));

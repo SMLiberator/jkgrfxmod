@@ -110,8 +110,12 @@ The capture draws animated 3DO nodes from up to 128 nearest native Thing owners
 (with primary GPU nodes as fallback). Cached 3DO mesh groups are independently
 culled against the reflected frustum before material resolution. Sky, HUD,
 projected decals, dynamic point/sun lighting, transparent Fluid blending,
-shadows, GGX, SSAO and postprocessing remain excluded. It restores GL
-framebuffer/texture/render state after the pass. Captures are full frame, not
+shadows, GGX, SSAO and postprocessing remain excluded. The capture now
+samples ordinary emissive factors and optional emissive textures. Zero-alpha
+emissive-only surfaces render in a depth-tested additive overlay after opaque
+geometry, without writing depth or occluding captured buildings. It restores
+GL framebuffer/texture/render state, including both material texture units,
+after the pass. Captures are full frame, not
 yet cropped to the planar surface. The periodic PLANAR log reports CPU phase
 durations (acquisition, world submission, model submission plus mip generation)
 and cull/group counts; these CPU times can include driver stalls. Independent
@@ -119,16 +123,22 @@ GPU timestamps are still needed to establish GPU execution cost.
 
 **Visual parity and limits:** The lightweight capture now uses the
 GPU world shader's Gouraud/CMP/sector tint and global JK color-effect
-operations and applies reflected-camera fog. Offscreen-only 3DOs read a
-live sector ambient/extra floor, but still lack full primary-camera Thing
+operations and applies reflected-camera fog ONLY to the optical leg after
+the water/mirror plane. The mirrored depth already includes the near leg,
+which the primary Fluid shader subsequently fogs. Capture fog is factored
+as (totalFog - nearFog) / (1 - nearFog), so sequential compositing reproduces
+the original total transmittance instead of double-fogging the near leg.
+Offscreen-only 3DOs read a live sector ambient/extra floor, but still lack full primary-camera Thing
 lighting overrides, colored dynamic lights, shadows and some CMP metadata.
 Normal-map distortion projects a finite point along the reflected ray from
 the water surface, instead of adding a fixed UV displacement. Roughness
 selects a generated capture mip level; standard mipmaps approximate, but
 do not fully prefilter, a physical specular BRDF. Very high-frequency normal
 maps and extreme grazing angles can push projected samples outside the target.
-Reflected lighting uses the original 8-bit capture format, which clips HDR
-values; a floating-point target and explicit exposure parity remain future
+The planar capture uses RGBA16F to preserve HDR emissive values. Those values
+still pass through the receiving material's Fresnel/strength and main scene's
+tonemapping; independent bloom processing is not run in the capture. Other
+translucent/additive/multiply effects and full exposure parity remain future
 work. The capture is scheduled before main-world rendering to avoid one-frame
 motion lag. It uses the existing Fluid absorption and material normal maps,
 and missing reflected sky/background uses a configured EnvMap where available.
