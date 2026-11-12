@@ -200,6 +200,13 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                              rv->default_specular_strength);
         read_specular_scalar("default_specular_roughness",
                              rv->default_specular_roughness);
+        if(j.contains("experimental_specular_normal_mode")) {
+            auto const &v=j.at("experimental_specular_normal_mode");
+            if(!v.is_number_integer() || v.get<int>()<0 || v.get<int>()>2)
+                throw std::runtime_error(
+                    "experimental_specular_normal_mode must be 0, 1 or 2");
+            rv->experimental_specular_normal_mode=v.get<int>();
+        }
         if(j.contains("enable_dynamic_light_specular")) {
             j.at("enable_dynamic_light_specular").get_to(
                 rv->enable_dynamic_light_specular);

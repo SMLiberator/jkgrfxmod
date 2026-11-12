@@ -3541,6 +3541,8 @@ namespace jkgm {
             bool const have_perspective_frustum=frame_camera.perspective;
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
+            prog.set_specular_normal_mode(
+                the_config->experimental_specular_normal_mode);
             prog.set_smoke_half_resolution(false);
             prog.set_light_brightness_limit(
                 authored_light_limit(the_config->enable_baked_overbright));
@@ -4707,6 +4709,8 @@ namespace jkgm {
             gl::set_depth_function(gl::comparison_function::less);
 
             ogs->game_opaque_pass_program.use_program();
+            ogs->game_opaque_pass_program.set_specular_normal_mode(
+                the_config->experimental_specular_normal_mode);
             ogs->game_opaque_pass_program.set_screen_resolution(
                 static_cast<size<2, float>>(conf_scr_res));
             ogs->game_opaque_pass_program.set_albedo_map_sampler(0);
@@ -8508,6 +8512,8 @@ namespace jkgm {
                 });
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
+            shader.set_specular_normal_mode(
+                the_config->experimental_specular_normal_mode);
             shader.set_light_brightness_limit(
                 authored_light_limit(the_config->enable_baked_overbright));
             shader.set_normal_mapped_diffuse(
@@ -8946,6 +8952,8 @@ namespace jkgm {
                 });
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
+            shader.set_specular_normal_mode(
+                the_config->experimental_specular_normal_mode);
             shader.set_light_brightness_limit(
                 authored_light_limit(the_config->enable_baked_overbright));
             shader.set_normal_mapped_diffuse(

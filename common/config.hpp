@@ -46,6 +46,7 @@ namespace jkgm {
         bool enable_default_specular = false;
         float default_specular_strength = 0.25f;
         float default_specular_roughness = 0.85f;
+        int experimental_specular_normal_mode = 0; // 0=legacy camera flip; 1=unflipped; 2=triangle-facing flip
         bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
         bool enable_baked_overbright = true; // authored vertex/ambient/extra limit: false=1, true=2 (combined HDR is unbounded)
         bool gpu_pixel_lighting = false; // opt-in pixel dynamic lighting for all cached world/3DO geometry; false=JK Gouraud

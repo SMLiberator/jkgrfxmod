@@ -80,6 +80,7 @@ namespace jkgm {
             gl::uniform_location_id reflection_env2_sampler;
             gl::uniform_location_id reflection_params,reflection_normal_params;
             gl::uniform_location_id normal_mapped_diffuse;
+            gl::uniform_location_id specular_normal_mode;
             gl::uniform_location_id reflection_scroll,reflection_scroll2,environment_info;
             gl::uniform_location_id camera_world_origin,camera_right_axis;
             gl::uniform_location_id camera_forward_axis,camera_up_axis;
@@ -139,6 +140,7 @@ namespace jkgm {
                             std::array<std::array<float,3>,64> const &saber_rgb,
                             std::array<bool,64> const &saber_valid);
             void set_specular_lighting(bool pixel_diffuse,bool point_specular);
+            void set_specular_normal_mode(int mode);
             // World-cache world-space positions and camera axes are already
             // supplied by set_reflection_camera(). The shared sun binder
             // also calls the 3DO-specific camera setter: no extra state needed.
@@ -190,6 +192,7 @@ namespace jkgm {
             gl::uniform_location_id env_params;
             gl::uniform_location_id sun_direction;
             gl::uniform_location_id sun_color_intensity;
+            gl::uniform_location_id specular_normal_mode;
 
             gl::uniform_location_id camera_right;
             gl::uniform_location_id camera_forward;
@@ -260,6 +263,7 @@ namespace jkgm {
             // Direction in view-space (toward sun), with w=0 when camera invalid.
             // Color intensity is linear RGB plus brightness in w.
             void set_sun(point<4, float> direction, point<4, float> color_intensity);
+            void set_specular_normal_mode(int mode);
             void set_camera(point<4, float> right,
                             point<4, float> forward,
                             point<4, float> up,
@@ -308,6 +312,7 @@ namespace jkgm {
             gl::uniform_location_id solid_fullbright;
             gl::uniform_location_id palette_fullbright_sampler,has_palette_fullbright;
             gl::uniform_location_id specular_params,normal_specular_params;
+            gl::uniform_location_id specular_normal_mode;
             gl::uniform_location_id normal_mapped_diffuse;
             gl::uniform_location_id dynamic_light_specular_enabled;
             gl::uniform_location_id specular_surface_sampler,specular_normal_sampler;
@@ -398,6 +403,7 @@ namespace jkgm {
                 std::array<float,3> const &origin);
             void set_local_eye(std::array<float,3> const &eye);
             void set_dynamic_light_specular(bool enabled);
+            void set_specular_normal_mode(int mode);
             void set_normal_mapped_diffuse(bool enabled);
             void set_point_specular(point<4,float> material,
                                     point<4,float> normal,

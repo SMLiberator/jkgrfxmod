@@ -1,6 +1,7 @@
 // Direct GGX highlights for GPU-cached SithWorld geometry.
 // Reuse the SAME live sun cascade/dynamic-shadow uniforms as cached 3DOs.
 // Native Gouraud diffuse and environment reflections are intentionally unchanged.
+uniform int experimental_specular_normal_mode; // 0=viewer flip, 1=none, 2=triangle facing
 uniform int world_pixel_dynamic_lighting;
 uniform int world_dynamic_light_specular;
 uniform int translucent_sun_enabled;
@@ -177,7 +178,11 @@ vec3 world_direct_specular(vec3 base_color,vec2 uv)
     vec3 F0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
     vec3 N=world_mapped_normal(uv);
     vec3 V=normalize(camera_world_origin-cached_world_position);
-    if(dot(N,V)<0.0)N=-N;
+    if(experimental_specular_normal_mode==0) {
+        if(dot(N,V)<0.0)N=-N; // original path
+    } else if(experimental_specular_normal_mode==2 && !gl_FrontFacing) {
+        N=-N;
+    }
     vec3 sum=vec3(0.0);
     if(translucent_sun_enabled!=0 && translucent_sun_color.w>0.0) {
         vec3 L=normalize(translucent_sun_direction);

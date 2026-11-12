@@ -60,6 +60,7 @@ uniform vec3 camera_right_axis,camera_forward_axis,camera_up_axis;
 uniform vec4 environment_info; // from enabled, reflection_mode, to enabled, progress
 uniform vec4 sun_direction; // view-space direction TOWARD sun
 uniform vec4 sun_color_intensity; // rgb, intensity
+uniform int experimental_specular_normal_mode; // 0=viewer flip, 1=none, 2=triangle facing
 uniform vec4 specular_params; // strength, roughness, metalness, has surface map
 uniform vec4 normal_specular_params; // has normal map, strength, unused, unused
 uniform vec2 normal_specular_scroll;
@@ -278,7 +279,11 @@ vec3 point_light_specular(vec3 base_color,vec2 uv)
         V=vec3(v.x,v.z,v.y);
     }
     V=normalize(V);
-    if(dot(N,V)<0.0) N=-N;
+    if(experimental_specular_normal_mode==0) {
+        if(dot(N,V)<0.0) N=-N; // original path
+    } else if(experimental_specular_normal_mode==2 && !gl_FrontFacing) {
+        N=-N;
+    }
     float NdotV=max(dot(N,V),0.0001);
     vec3 map_value=specular_params.w>0.5
         ? texture(surface_map,uv).rgb : vec3(1.0);
@@ -394,7 +399,11 @@ vec3 gpu_sun_specular(vec3 base_color,vec2 uv)
             view_forward.xyz*local_fragment_position.y+
             view_up.xyz*local_fragment_position.z;
     vec3 V=-normalize(vec3(vp.x,vp.z,vp.y));
-    if(dot(N,V)<0.0) N=-N;
+    if(experimental_specular_normal_mode==0) {
+        if(dot(N,V)<0.0) N=-N; // original path
+    } else if(experimental_specular_normal_mode==2 && !gl_FrontFacing) {
+        N=-N;
+    }
     vec3 L=normalize(sun_direction.xyz);
     float NdotL=max(dot(N,L),0.0),NdotV=max(dot(N,V),0.0);
     if(NdotL<=0.0 || NdotV<=0.0) return vec3(0.0);

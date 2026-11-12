@@ -344,6 +344,7 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , reflection_params(gl::get_uniform_location(the_program,"specular_params"))
     , reflection_normal_params(gl::get_uniform_location(the_program,"normal_specular_params"))
     , normal_mapped_diffuse(gl::get_uniform_location(the_program,"normal_mapped_diffuse"))
+    , specular_normal_mode(gl::get_uniform_location(the_program,"experimental_specular_normal_mode"))
     , reflection_scroll(gl::get_uniform_location(the_program,"normal_specular_scroll"))
     , reflection_scroll2(gl::get_uniform_location(the_program,"normal_specular_scroll2"))
     , environment_info(gl::get_uniform_location(the_program,"environment_info"))
@@ -558,6 +559,12 @@ void jkgm::shaders::world_cache_preview_shader::set_jk_color_effects(
     gl::set_uniform_vector(jk_color_tint,tint);
     gl::set_uniform_vector(jk_color_add_fade,add_fade);
 }
+void jkgm::shaders::world_cache_preview_shader::set_specular_normal_mode(
+    int mode)
+{
+    gl::set_uniform_integer(specular_normal_mode,mode);
+}
+
 void jkgm::shaders::world_cache_preview_shader::set_specular_lighting(
     bool pixel_diffuse,bool point_specular)
 {
@@ -626,6 +633,7 @@ jkgm::shaders::game_pass_shader::game_pass_shader(std::string const &name,
     , env_params(gl::get_uniform_location(the_program, "env_params"))
     , sun_direction(gl::get_uniform_location(the_program, "sun_direction"))
     , sun_color_intensity(gl::get_uniform_location(the_program, "sun_color_intensity"))
+    , specular_normal_mode(gl::get_uniform_location(the_program, "experimental_specular_normal_mode"))
     , camera_right(gl::get_uniform_location(the_program, "camera_right"))
     , camera_forward(gl::get_uniform_location(the_program, "camera_forward"))
     , camera_up(gl::get_uniform_location(the_program, "camera_up"))
@@ -750,6 +758,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , palette_fullbright_sampler(gl::get_uniform_location(the_program,"palette_fullbright_mask"))
     , has_palette_fullbright(gl::get_uniform_location(the_program,"has_palette_fullbright"))
     , specular_params(gl::get_uniform_location(the_program,"specular_params"))
+    , specular_normal_mode(gl::get_uniform_location(the_program,"experimental_specular_normal_mode"))
     , normal_mapped_diffuse(gl::get_uniform_location(the_program,"normal_mapped_diffuse"))
     , dynamic_light_specular_enabled(gl::get_uniform_location(the_program,"dynamic_light_specular_enabled"))
     , specular_surface_sampler(gl::get_uniform_location(the_program,"surface_map"))
@@ -1090,6 +1099,12 @@ void jkgm::shaders::gpu_3do_preview_shader::set_local_eye(
     gl::set_uniform_vector(local_eye,make_point(eye[0],eye[1],eye[2]));
 }
 
+void jkgm::shaders::gpu_3do_preview_shader::set_specular_normal_mode(
+    int mode)
+{
+    gl::set_uniform_integer(specular_normal_mode,mode);
+}
+
 void jkgm::shaders::gpu_3do_preview_shader::set_dynamic_light_specular(bool enabled)
 {
     gl::set_uniform_integer(dynamic_light_specular_enabled,enabled?1:0);
@@ -1360,6 +1375,12 @@ void jkgm::shaders::game_pass_shader::set_reflection(point<4, float> reflection,
     // Shaders that do not declare these uniforms get location -1, which OpenGL ignores.
     gl::set_uniform_vector(reflection_params, reflection);
     gl::set_uniform_vector(env_params, env);
+}
+
+void jkgm::shaders::game_pass_shader::set_specular_normal_mode(
+    int mode)
+{
+    gl::set_uniform_integer(specular_normal_mode,mode);
 }
 
 void jkgm::shaders::game_pass_shader::set_sun(

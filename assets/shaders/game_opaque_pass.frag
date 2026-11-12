@@ -203,6 +203,7 @@ float sun_specular_shadow_factor(float depth,float incidence)
 // affected: the original Jedi Knight vertex lighting stays unchanged.
 uniform vec4 sun_direction;       // xyz unit view-space direction, w camera valid
 uniform vec4 sun_color_intensity; // RGB linear color, w intensity
+uniform int experimental_specular_normal_mode; // 0=viewer flip, 1=none, 2=triangle facing
 
 vec3 compute_sun_specular(vec3 base_color, vec2 texcoords, vec3 mapped_normal)
 {
@@ -231,7 +232,11 @@ vec3 compute_sun_specular(vec3 base_color, vec2 texcoords, vec3 mapped_normal)
     vec3 view_pos = vec3(vp_pos.xy * vec2(hscale, hscale / aspect), vp_pos.z);
     vec3 V = -normalize(view_pos);
     vec3 N = normalize(mapped_normal);
-    if(dot(N, V) < 0.0) N = -N;
+    if(experimental_specular_normal_mode==0) {
+        if(dot(N, V) < 0.0) N = -N; // original path
+    } else if(experimental_specular_normal_mode==2 && !gl_FrontFacing) {
+        N=-N;
+    }
     vec3 L = normalize(sun_direction.xyz);
     float NdotL = max(dot(N,L), 0.0);
     float NdotV = max(dot(N,V), 0.0);

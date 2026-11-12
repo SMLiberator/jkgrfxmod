@@ -23,6 +23,7 @@
     "enable_default_specular": false,
     "default_specular_strength": 0.25,
     "default_specular_roughness": 0.85,
+    "experimental_specular_normal_mode": 0,
     "enable_dynamic_light_specular": false,
     "enable_baked_overbright": true,
     "experimental_continuous_ambient_gpu": false,
