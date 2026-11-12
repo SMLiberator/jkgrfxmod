@@ -10252,9 +10252,14 @@ namespace jkgm {
             planar_plane_from_material=false;
             float best_distance=std::numeric_limits<float>::infinity();
             int best_priority=-1;
+            size_t matched_planar=0,matched_fluid=0,matched_passable=0;
             std::map<std::pair<uintptr_t,int32_t>,gpu_3do_texture> mats;
             for(auto const &surface:cache.mesh.surfaces) {
-                if(surface.count<3U || surface.passable_adjoin ||
+                // Reflection RECEIVERS may be passable adjoins (notably water).
+                // Exclude sky apertures, but never reject a valid Fluid/planar
+                // surface merely because its adjoin allows traversal.
+                // The mirrored SCENE render still skips passable portals.
+                if(surface.count<3U ||
                    (surface.surface_flags&0x600U)!=0U ||
                    surface.first_index>=cache.mesh.indices.size() ||
                    surface.material==0U)
@@ -10281,6 +10286,9 @@ namespace jkgm {
                 int const priority=mat.reflection_mode==4 ? 2 :
                     mat.blend==material_blend_mode::fluid ? 1 : 0;
                 if(priority==0)continue;
+                if(priority==2)++matched_planar;
+                else ++matched_fluid;
+                if(surface.passable_adjoin)++matched_passable;
                 planar_reflection_plane plane{};
                 plane.normal=normal;
                 plane.offset=normal[0]*v.position[0]+
@@ -10303,7 +10311,10 @@ namespace jkgm {
                               ?(planar_plane_from_material?"material":"fluid")
                               :"none",
                          " scale=",the_config->planar_reflection_resolution_scale,
-                         " candidate_surfaces=",cache.mesh.surfaces.size());
+                         " candidate_surfaces=",cache.mesh.surfaces.size(),
+                         " planar_matches=",matched_planar,
+                         " fluid_matches=",matched_fluid,
+                         " passable_reflection_receivers=",matched_passable);
         }
 
         void render_planar_capture()
