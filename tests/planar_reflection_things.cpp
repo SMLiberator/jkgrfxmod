@@ -44,6 +44,7 @@ int main()
         put(address+0x74U,uint32_t(idx+100));
         put(address+0xc4U,uint32_t(1));
         put(address+0xc8U,uint32_t(0x70000U+idx*0x100U));
+        put(address+0xf8U,int32_t(4)); // rdThing.curGeoMode
         float p[3]={float(idx),float(idx+1U),2.5f};
         for(size_t i=0;i<3;++i)put(address+0xb8U+i*4U,p[i]);
     };
@@ -58,6 +59,33 @@ int main()
     assert(scan.models[0].thing==a && scan.models[1].thing==c);
     assert(scan.models[1].index==3 && scan.models[1].signature==103);
     assert(scan.models[1].position[0]==3.0f);
+    assert(scan.models[0].current_geometry_mode==4U);
+
+    // Explicit GeoMode hiding is not main-camera frustum culling.
+    // Offscreen reflection discovery must honor it independently.
+    put(a+0xf8U,int32_t(0));
+    assert(collect_planar_reflection_things(get,world,scan));
+    assert(scan.models.size()==1 && scan.excluded_geo_mode==1);
+    assert(scan.models[0].thing==c);
+    put(a+0xf8U,int32_t(2));
+    assert(collect_planar_reflection_things(get,world,scan));
+    assert(scan.models.size()==1 && scan.excluded_geo_mode==1);
+    put(a+0xf8U,int32_t(3));
+    assert(collect_planar_reflection_things(get,world,scan));
+    assert(scan.models.size()==2 && scan.models[0].current_geometry_mode==3U);
+    put(a+0xf8U,int32_t(7)); // JKGM clamps unsupported high modes to 4.
+    assert(collect_planar_reflection_things(get,world,scan));
+    assert(scan.models.size()==2 && scan.models[0].current_geometry_mode==4U);
+    put(a+0xf8U,int32_t(4));
+
+    // Both explicit Thing hide bits must exclude models from reflections.
+    put(a+0x00U,uint32_t(0x10U));
+    assert(collect_planar_reflection_things(get,world,scan));
+    assert(scan.models.size()==1 && scan.excluded_flags==2U);
+    put(a+0x00U,uint32_t(0x80000U));
+    assert(collect_planar_reflection_things(get,world,scan));
+    assert(scan.models.size()==1 && scan.excluded_flags==2U);
+    put(a+0x00U,uint32_t(0));
 
     // A cycle must fail closed and clear all partial output.
     put(c+0x60U,uint32_t(c));
