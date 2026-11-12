@@ -36,6 +36,7 @@ namespace jkgm {
         struct translucent_sun_uniforms {
             gl::uniform_location_id enabled,maps_ready,dynamic_count;
             gl::uniform_location_id direction,color,split,bias_scale,pcf_radius;
+            gl::uniform_location_id dynamic_pcf_radius;
             gl::uniform_location_id near_depth,far_depth,dynamic_depth;
             gl::uniform_location_id sky_aperture_active,sky_aperture_map;
             gl::uniform_location_id sky_aperture_depth_transform;
@@ -47,6 +48,7 @@ namespace jkgm {
                            float split_distance,float receiver_bias,
                            float max_distance=0.0f);
             void set_pcf_radius(float near_radius,float far_radius);
+            void set_dynamic_pcf_radius(float radius);
             void set_sky_aperture(bool active,int sampler,
                                   point<4,float> near_far_depth_transform);
             void set_map(int slot,point<4,float> row_x,point<4,float> row_y,
@@ -537,6 +539,7 @@ namespace jkgm {
             gl::uniform_location_id sun_max_distance;
             gl::uniform_location_id sun_half_visibility_active,sun_half_visibility_image;
             gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
+            gl::uniform_location_id sun_dynamic_pcf_radius;
             std::vector<gl::uniform_location_id> sun_dynamic_atlas_rects;
             std::vector<gl::uniform_location_id> sun_dynamic_origin;
             std::vector<gl::uniform_location_id> sun_dynamic_right;
@@ -585,6 +588,7 @@ namespace jkgm {
             void set_sun_max_distance(float distance);
             void set_sun_half_visibility(bool active,int sampler);
             void set_sun_dynamic_count(int count);
+            void set_sun_dynamic_pcf_radius(float radius);
             void set_sun_dynamic_atlas_rect(int slot,point<4,float> rect);
             void set_sun_dynamic(int slot,point<3,float> origin,
                                  point<3,float> right,point<3,float> up,

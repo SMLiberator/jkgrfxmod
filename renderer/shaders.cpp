@@ -21,6 +21,8 @@ jkgm::shaders::translucent_sun_uniforms::translucent_sun_uniforms(
     , split(gl::get_uniform_location(program,"translucent_sun_split"))
     , bias_scale(gl::get_uniform_location(program,"translucent_sun_bias_scale"))
     , pcf_radius(gl::get_uniform_location(program,"translucent_sun_pcf_radius"))
+    , dynamic_pcf_radius(gl::get_uniform_location(program,
+        "translucent_sun_dynamic_pcf_radius"))
     , sky_aperture_active(gl::get_uniform_location(
         program,"translucent_sun_sky_aperture_active"))
     , sky_aperture_map(gl::get_uniform_location(
@@ -69,6 +71,12 @@ void jkgm::shaders::translucent_sun_uniforms::set_pcf_radius(
     float near_radius,float far_radius)
 {
     gl::set_uniform_vector(pcf_radius,make_point(near_radius,far_radius));
+}
+
+void jkgm::shaders::translucent_sun_uniforms::set_dynamic_pcf_radius(
+    float radius)
+{
+    gl::set_uniform_float(dynamic_pcf_radius,radius);
 }
 
 void jkgm::shaders::translucent_sun_uniforms::set_sky_aperture(
@@ -1628,6 +1636,8 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
         the_program,"sun_half_visibility_image"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
+    , sun_dynamic_pcf_radius(gl::get_uniform_location(
+        the_program,"sun_dynamic_pcf_radius"))
  
 {
     for(int i=0;i<8;++i) {
@@ -1779,6 +1789,12 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_pcf_radius
 {
     gl::set_uniform_vector(sun_shadow_pcf_radius,
                            make_point(near_radius,far_radius));
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_pcf_radius(
+    float radius)
+{
+    gl::set_uniform_float(sun_dynamic_pcf_radius,radius);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_sky_aperture(

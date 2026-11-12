@@ -98,6 +98,7 @@ namespace jkgm {
         bool sun_shadow_cull_back_faces = false; // 3DO sunlight: back-face culling is opt-in
         bool sun_shadow_cull_front_faces = true; // 3DO sunlight: front-face culling by default
         unsigned int sun_dynamic_shadow_resolution = 256U; // baseline 64..1024
+        float sun_dynamic_shadow_pcf_radius = 0.0f; // 0=original 1 bilinear shadow lookup; >0 guarded 4-tap PCF (0..2)
         float sun_shadow_receiver_bias_scale = 1.0f; // A/B contact-gap tuning (0..2)
         float sun_shadow_caster_bias_scale = 1.0f; // A/B shadow polygon offset (0..2)
         unsigned int sun_shadow_resolution = 512U; // near and default far 24-bit depth map

@@ -26,6 +26,9 @@ uniform sampler2DArray translucent_sun_sky_aperture_map;
 uniform vec4 translucent_sun_sky_aperture_depth_transform;
 #endif
 
+uniform float translucent_sun_dynamic_pcf_radius;
+#include "sun_dynamic_tile_pcf.glsl"
+
 vec3 world_sun_coordinates(int slot,vec3 p)
 {
     vec4 world=vec4(p,1.0);
@@ -56,10 +59,8 @@ float world_sun_sample(int slot,vec3 uv,float incidence)
         return world_sun_cascade_filter(translucent_sun_far_depth,
             vec3(uv.xy,comparison),length(translucent_sun_map_z[1].xyz));
     vec4 tile=translucent_sun_tile_rect[slot-2];
-    vec2 tex_size=vec2(textureSize(translucent_sun_dynamic_depth,0));
-    vec2 center=tile.xy+vec2(2.0)+uv.xy*(tile.zw-vec2(4.0));
-    return texture(translucent_sun_dynamic_depth,
-                   vec3(center/tex_size,comparison));
+    return sun_dynamic_tile_pcf(translucent_sun_dynamic_depth,tile,uv,
+                                comparison,translucent_sun_dynamic_pcf_radius);
 }
 // The cached world direct-GGX pass must obey the same sky-only sun gate as
 // opaque composition and native/GPU 3DO forward lighting.

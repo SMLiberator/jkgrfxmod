@@ -14,6 +14,7 @@ uniform vec3 sun_shadow_far_up,sun_shadow_far_forward,sun_shadow_far_limits;
 uniform float sun_shadow_split,sun_shadow_receiver_bias_scale;
 uniform vec2 sun_shadow_pcf_radius;
 uniform int sun_dynamic_count;
+uniform float sun_dynamic_pcf_radius; // 0=original single hardware PCF comparison
 uniform vec4 sun_dynamic_atlas_rects[8];
 uniform vec3 sun_dynamic_origin[8],sun_dynamic_right[8];
 uniform vec3 sun_dynamic_up[8],sun_dynamic_forward[8],sun_dynamic_limits[8];
@@ -23,6 +24,8 @@ layout(location=0) out vec4 out_color;
 // Keep the same bias, cascade overlap, dynamic atlas and PCF formulas as
 // post_opaque_composite.frag. This opt-in prototype duplicates only these
 // functions; tests guard source equivalence until shared extraction.
+#include "sun_dynamic_tile_pcf.glsl"
+
 vec3 sun_shadow_coordinates(vec3 position,vec3 origin,vec3 right,
                             vec3 up,vec3 forward,vec3 limits)
 {
@@ -114,18 +117,15 @@ float sun_dynamic_shadow_visibility(vec3 position,float incidence)
             sun_dynamic_limits[i]);
         if(!sun_shadow_inside(uv))continue;
         vec4 rect=sun_dynamic_atlas_rects[i];
-        vec2 atlas_uv=(rect.xy+vec2(2.0)+
-                       uv.xy*(rect.zw-vec2(4.0))) /
-                      vec2(textureSize(sun_dynamic_image,0));
+        // Tile-safe filter retains the original lookup for radius zero.
         float grazing=1.0-clamp(incidence,0.0,1.0);
         float bias_world=(0.006+0.032*grazing*grazing)*
                          sun_shadow_receiver_bias_scale;
         float bias=max(4.0/16777215.0,
                        bias_world/max(sun_dynamic_limits[i].z,0.001));
         float comparison=uv.z-bias;
-        // Fixed single-sample hardware PCF; no separation-dependent taps.
-        float object_visibility=texture(sun_dynamic_image,
-            vec3(atlas_uv,comparison));
+        float object_visibility=sun_dynamic_tile_pcf(
+            sun_dynamic_image,rect,uv,comparison,sun_dynamic_pcf_radius);
         visibility=min(visibility,object_visibility);
         if(visibility<=0.001)break;
     }

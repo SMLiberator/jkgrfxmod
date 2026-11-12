@@ -5,8 +5,8 @@ import json
 root=Path(__file__).resolve().parents[1]
 read=lambda name:(root/name).read_text(encoding="utf-8")
 data=json.loads(read("assets/jkgm.json"))
-assert data["experimental_sun_pcf_intensity_softness"]==0.0
-assert data["experimental_sun_pcf_intensity_reference"]==1.0
+assert data["experimental_sun_pcf_intensity_softness"]==1.0
+assert data["experimental_sun_pcf_intensity_reference"]==2.0
 cfg=read("common/config.cpp")
 assert 'parse_sun_intensity_pcf("experimental_sun_pcf_intensity_softness"' in cfg
 assert 'parse_sun_intensity_pcf("experimental_sun_pcf_intensity_reference"' in cfg
@@ -21,7 +21,8 @@ shader=read("assets/shaders/translucent_sun_sampling.glsl")
 assert 'if(radius<=0.0)return texture(map,uv);' in shader
 assert 'translucent_sun_pcf_radius.x' in shader
 assert 'translucent_sun_pcf_radius.y' in shader
-assert 'Fixed one-sample hardware PCF for atlas tiles' in shader
+assert '#include "sun_dynamic_tile_pcf.glsl"' in shader
+assert "sun_dynamic_tile_pcf(" in shader
 helper=read("renderer/sun_pcf_intensity.hpp")
 assert 'return {near_base,far_base};' in helper
 assert 'return {radius(near_base),radius(far_base)};' in helper
