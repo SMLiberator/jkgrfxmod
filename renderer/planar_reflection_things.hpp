@@ -16,6 +16,9 @@ namespace jkgm {
         uintptr_t thing=0;
         uint32_t index=0,signature=0;
         uint32_t model=0,sector=0;
+        // Native rdThing.curGeoMode, read independently of the primary camera.
+        // In JK's hardware renderer modes 0..2 do not emit filled meshes.
+        uint32_t current_geometry_mode=4;
         std::array<float,3> position{};
     };
     enum class planar_reflection_thing_error {
@@ -23,7 +26,8 @@ namespace jkgm {
     };
     struct planar_reflection_thing_scan {
         std::vector<planar_reflection_model_thing> models;
-        uint32_t sectors=0,linked_things=0,excluded_flags=0,non_models=0;
+        uint32_t sectors=0,linked_things=0,excluded_flags=0;
+        uint32_t excluded_geo_mode=0,non_models=0;
         planar_reflection_thing_error error=planar_reflection_thing_error::none;
     };
     inline char const *planar_reflection_thing_error_name(
@@ -113,6 +117,10 @@ namespace jkgm {
                     current=next;continue;
                 }
                 uint32_t render_type=0,model=0;
+                // SithThing embeds rdThing at +0xc4. Its current GeoMode
+                // is at rdThing +0x34, i.e. SithThing +0xf8. This is an
+                // explicit model-render override, NOT frustum visibility.
+                // SithRender only updates LOD/lighting/texture policies.
                 // SithThing.rdThing at +0xc4; rdThing.type == MODEL3 (1).
                 if(!read32(uintptr_t(current)+0xc4U,render_type) ||
                    !read32(uintptr_t(current)+0xc8U,model))
@@ -121,7 +129,17 @@ namespace jkgm {
                     ++out.non_models;
                     current=next;continue;
                 }
+                int32_t current_geo=0;
+                if(!read(uintptr_t(current)+0xf8U,
+                         &current_geo,sizeof(current_geo)))
+                    return fail(planar_reflection_thing_error::invalid_thing);
+                if(current_geo<3) {
+                    ++out.excluded_geo_mode;
+                    current=next;continue;
+                }
                 planar_reflection_model_thing item{};
+                item.current_geometry_mode=
+                    current_geo>4 ? 4U : uint32_t(current_geo);
                 item.thing=current;
                 item.index=index;
                 item.sector=sector;
