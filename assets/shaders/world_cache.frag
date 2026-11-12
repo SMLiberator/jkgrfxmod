@@ -140,7 +140,13 @@ vec4 world_planar_reflection(vec3 mapped_normal)
              dot(bump,planar_camera_up))*0.015;
     if(any(lessThan(uv,vec2(0.0))) ||
        any(greaterThan(uv,vec2(1.0))))return vec4(0.0);
-    return texture(planar_reflection_map,uv);
+    vec4 sample_color=texture(planar_reflection_map,uv);
+    // Captured geometry writes opaque RGB against a transparent black clear.
+    // Bilinear filtering premultiplies edge colors; unpremultiply before
+    // mixing coverage against the optional sky/environment fallback.
+    if(sample_color.a>0.0001)
+        sample_color.rgb/=sample_color.a;
+    return sample_color;
 }
 
 // Reuse the existing strength/roughness/metalness/Fresnel law for captured
