@@ -3500,7 +3500,7 @@ namespace jkgm {
 
         // Separate opaque and alpha passes. Native JK no longer processes
         // individual faces in either path: only GPU indexed ranges remain.
-        void draw_gpu_3do_preview(bool transparent,bool post_exempt=
+        void draw_gpu_3do_preview(bool transparent,bool post_exempt=false,
                                   bool decals_only=false)
         {
             auto const &instances=post_exempt ? deferred_gpu_3do_instances
