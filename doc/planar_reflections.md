@@ -41,6 +41,30 @@ matrices for the matched nodes without touching JK's camera. This is still
 inventory only; it does not draw, and cannot invent the missing Things'
 animated joint poses.
 
+## Independent native 3DO pose and GPU mesh acquisition (experimental)
+
+`renderer/planar_reflection_native_nodes.hpp` validates the tested binary's
+rdModel3 node accessor, the Thing signature/model owner, the active geoset,
+the entire parent hierarchy, amputations and the current contiguous joint
+pose. The native rdModel3_GetMeshMatrix accessor refreshes a Thing's
+animation cache once; no native camera or draw callback is changed.
+Malformed parent cycles and stale poses fail closed without partial output.
+
+`renderer/main.cpp` now exposes `acquire_planar_reflection_offscreen_gpu`,
+which can snapshot previously unseen native rdMeshes using the same shared
+GPU geometry cache and material-readiness/warmup mechanisms as ordinary
+GPU 3DOs. This generates `gpu_3do_instance` entries with independent
+world-space joint transforms. The code remains on-demand and separate from
+the gameplay frame, shadows and native renderer. Its initial lighting is
+deliberately simplified and must be expanded when the reflection capture
+is connected.
+
+When `experimental_planar_thing_discovery` is enabled, approximately every
+120 frames a rotating batch of at most 16 uncovered Things is probed, and
+`PLANAR discovery` logs pose, mesh snapshot, texture-readiness and node
+counts. These nodes are **not yet drawn**. Missing meshes, invalid poses or
+unready materials must not produce a partial reflection. Default is off.
+
 This proves the independent discovery method but not yet GPU-ready mesh
 acquisition for Things the normal view didn't submit. That will require
 offscreen rdModel3/geoset and joint-pose handling without modifying JK's
