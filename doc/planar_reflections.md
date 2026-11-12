@@ -31,6 +31,16 @@ camera-type Things are excluded from the model candidate list.
 Set `experimental_planar_thing_discovery: true` to log diagnostic counts
 approximately every 120 frames. It **does NOT render** reflections.
 
+The experimental diagnostic now also matches all-sector Things against the
+actual GPU 3DO node snapshot from the main camera, using Thing pointer plus
+signature (including with shadows and decals disabled). Matched Things may
+have multiple cached mesh nodes. The unmatched count is **not** strictly
+an offscreen count: native fallbacks and unloaded MATs can also be missing.
+`renderer/planar_reflection_workset.hpp` can prepare reflected model-view
+matrices for the matched nodes without touching JK's camera. This is still
+inventory only; it does not draw, and cannot invent the missing Things'
+animated joint poses.
+
 This proves the independent discovery method but not yet GPU-ready mesh
 acquisition for Things the normal view didn't submit. That will require
 offscreen rdModel3/geoset and joint-pose handling without modifying JK's
