@@ -10396,6 +10396,7 @@ namespace jkgm {
             glBindFramebuffer(GL_FRAMEBUFFER,planar_capture_target->framebuffer());
             glViewport(0,0,setup.width,setup.height);
             glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_STENCIL_TEST);
             glDisable(GL_BLEND);
             glDisable(GL_POLYGON_OFFSET_FILL);
             glEnable(GL_DEPTH_TEST);
