@@ -2379,6 +2379,23 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
     for(size_t i=0;i<candidates.size() && i<max_things;++i) {
         auto const &thing=candidates[i];
         ++out.stats.considered;
+        // Discovery and capture occur independently of the main-camera
+        // traversal. Re-read actual hide state before acquiring poses:
+        // SetThingCurGeoMode(0..2) hides filled geometry, whereas ordinary
+        // frustum clipping must NOT remove models from a reflection.
+        uint32_t flags=0;
+        int32_t native_geo=0;
+        if(!read(thing.thing,&flags,4U) ||
+           !read(thing.thing+0xf8U,&native_geo,4U)) {
+            ++out.stats.pose_failures;
+            continue;
+        }
+        if((flags&(0x2U|0x8U|0x10U|0x80000U))!=0U ||
+           native_geo<3) {
+            ++out.stats.excluded_by_flags_or_geomode;
+            continue;
+        }
+        int const cur_geo=std::min(native_geo,4);
         if(!collect_planar_reflection_native_nodes(
                read,thing,refresh,native_nodes)) {
             ++out.stats.pose_failures;
@@ -2386,11 +2403,6 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
         }
         ++out.stats.posed_things;
         out.stats.native_mesh_nodes+=native_nodes.size();
-        uint32_t flags=0;
-        if(!read(thing.thing,&flags,4U)) {
-            ++out.stats.pose_failures;
-            continue;
-        }
         std::vector<gpu_3do_instance> complete_thing_nodes;
         complete_thing_nodes.reserve(native_nodes.size());
         bool incomplete=false;
@@ -2407,11 +2419,11 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
             // Empty hierarchy meshes and modes 0..2 intentionally have no
             // filled triangles. Other invalid mesh data fails the Thing.
             if(mesh.num_faces==0 || mesh.num_vertices==0 ||
-               (gpu_3do_supports_geo_mode(4,mesh.geometry_mode) &&
-                !gpu_3do_geo_mode_draws_filled(4,mesh.geometry_mode)))
+               (gpu_3do_supports_geo_mode(cur_geo,mesh.geometry_mode) &&
+                !gpu_3do_geo_mode_draws_filled(cur_geo,mesh.geometry_mode)))
                 continue;
             if(mesh.num_faces<0 || mesh.num_vertices<3 ||
-               !gpu_3do_supports_geo_mode(4,mesh.geometry_mode)) {
+               !gpu_3do_supports_geo_mode(cur_geo,mesh.geometry_mode)) {
                 ++out.stats.empty_or_invalid_meshes;
                 incomplete=true;
                 continue;
@@ -2482,7 +2494,7 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                it->second.geometry->groups.empty())
                 continue;
             bool const solid=gpu_3do_effective_geo_mode(
-                4,mesh.geometry_mode)==3;
+                cur_geo,mesh.geometry_mode)==3;
             // Request native MAT warm-up through the existing safe queue.
             // Never upload texture memory from inside the offscreen probe.
             if(!gpu_mesh_materials_ready(*it->second.geometry,solid)) {
@@ -2498,7 +2510,7 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
             instance.owning_thing_world_position=thing.position;
             instance.owning_thing_world_position_valid=true;
             instance.effective_geometry_mode=static_cast<uint32_t>(
-                gpu_3do_effective_geo_mode(4,mesh.geometry_mode));
+                gpu_3do_effective_geo_mode(cur_geo,mesh.geometry_mode));
             instance.skybox_vertex_lighting=thing_uses_skybox_vertex_lights(
                 flags,false);
             instance.world_lighting_exempt=instance.skybox_vertex_lighting;
