@@ -58,7 +58,12 @@ vec2 encode_oct(vec3 n)
 {
     n/=max(abs(n.x)+abs(n.y)+abs(n.z),0.00001);
     vec2 e=n.xy;
-    if(n.z<0.0)e=(vec2(1.0)-abs(e.yx))*sign(e);
+    // GLSL sign(0.0) is zero. A zero XY component on the back
+    // hemisphere must still fold across the octahedron seam: otherwise
+    // (0,0,-1) incorrectly encodes as the +Z pole.
+    vec2 sign_nonzero=vec2(e.x>=0.0?1.0:-1.0,
+                           e.y>=0.0?1.0:-1.0);
+    if(n.z<0.0)e=(vec2(1.0)-abs(e.yx))*sign_nonzero;
     return e*0.5+0.5;
 }
 

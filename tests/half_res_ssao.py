@@ -19,6 +19,7 @@ for path in ("post_ssao_half.frag","post_ssao_half_blur.frag",
 sample=read("assets/shaders/post_ssao_half.frag")
 assert "for(int y=0;y<2;++y)for(int x=0;x<2;++x)" in sample
 assert "encode_oct(rndnrm)" in sample
+assert "vec2 sign_nonzero=vec2(e.x>=0.0?1.0:-1.0," in sample
 assert "vec3 origin = vec3(sample_uv, origin_depth);" in sample
 blur=read("assets/shaders/post_ssao_half_blur.frag")
 assert "for(int y=-2;y<2;++y)for(int x=-2;x<2;++x)" in blur
