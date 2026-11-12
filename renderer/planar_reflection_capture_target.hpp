@@ -89,7 +89,8 @@ class planar_reflection_gl_scope {
     GLboolean depth_mask_=GL_TRUE,color_mask_[4]{};
     GLfloat clear_color_[4]{};
     GLboolean blend_=GL_FALSE,depth_test_=GL_FALSE,cull_test_=GL_FALSE;
-    GLboolean scissor_=GL_FALSE,framebuffer_srgb_=GL_FALSE;
+    GLboolean scissor_=GL_FALSE,stencil_=GL_FALSE;
+    GLboolean framebuffer_srgb_=GL_FALSE;
     GLboolean polygon_offset_=GL_FALSE;
 public:
     planar_reflection_gl_scope() {
@@ -116,6 +117,7 @@ public:
         depth_test_=glIsEnabled(GL_DEPTH_TEST);
         cull_test_=glIsEnabled(GL_CULL_FACE);
         scissor_=glIsEnabled(GL_SCISSOR_TEST);
+        stencil_=glIsEnabled(GL_STENCIL_TEST);
         framebuffer_srgb_=glIsEnabled(GL_FRAMEBUFFER_SRGB);
         polygon_offset_=glIsEnabled(GL_POLYGON_OFFSET_FILL);
     }
@@ -148,6 +150,7 @@ public:
         restore(GL_DEPTH_TEST,depth_test_);
         restore(GL_CULL_FACE,cull_test_);
         restore(GL_SCISSOR_TEST,scissor_);
+        restore(GL_STENCIL_TEST,stencil_);
         restore(GL_FRAMEBUFFER_SRGB,framebuffer_srgb_);
         restore(GL_POLYGON_OFFSET_FILL,polygon_offset_);
     }
