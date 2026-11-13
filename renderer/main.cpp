@@ -766,6 +766,8 @@ namespace {
         }
     };
 
+    uint64_t elapsed_native_ns(std::chrono::steady_clock::time_point start);
+
     // A cheap face-material-only scan can isolate in-place COG material
     // replacements. Only changed rdMesh snapshots are discarded; no global
     // source revision is needed. Full source hashing remains as an audit.
