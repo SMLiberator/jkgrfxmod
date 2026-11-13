@@ -20,6 +20,7 @@
 #include "native_sprite_profile.hpp"
 #include "audio_module_probe.hpp"
 #include "gpu_3do_compat.hpp"
+#include "gpu_mesh_cache_eviction.hpp"
 #include "gpu_3do_alpha.hpp"
 #include "native_jk_palette_effects.hpp"
 #include "native_screenshot.hpp"
@@ -1078,6 +1079,22 @@ namespace jkgm {
                          profile_window.gpu_source_invalidations,
                          " failed_snapshot_reuses_total=",
                          profile_window.gpu_failed_snapshot_reuses);
+                LOG_INFO("PERF gpu_3do mesh_cache entries_avg=",
+                         profile_window.gpu_cache_entries/frames,
+                         " peak=",profile_window.gpu_cache_peak,
+                         " soft_limit=",jkgm::gpu_mesh_cache_soft_limit,
+                         " hits_avg=",profile_window.gpu_cache_hits/frames,
+                         " misses_avg=",profile_window.gpu_cache_misses/frames,
+                         " evictions_total=",profile_window.gpu_cache_evictions,
+                         " deferred_trims_total=",
+                         profile_window.gpu_cache_trim_deferred);
+                LOG_INFO("PERF gpu_3do hash_causes_total new=",
+                         profile_window.gpu_cache_hash_new,
+                         " header=",profile_window.gpu_cache_hash_header,
+                         " revision=",profile_window.gpu_cache_hash_revision,
+                         " audit=",profile_window.gpu_cache_hash_audit,
+                         " fallback=",profile_window.gpu_cache_hash_fallback,
+                         " NOTE=includes_offscreen_planar_hashes");
                 LOG_INFO("PERF gpu_3do CPU_us_avg=",profile_window.gpu_preview_cpu_us/frames,
                          " draws_avg=",profile_window.gpu_draw_calls/frames,
                          " triangles_avg=",profile_window.gpu_draw_triangles/frames,
@@ -11534,6 +11551,17 @@ namespace jkgm {
                 profile_frame.gpu_source_checks+=stats.source_checks;
                 profile_frame.gpu_source_ns+=stats.source_ns;
                 profile_frame.gpu_source_invalidations+=stats.source_invalidations;
+                profile_frame.gpu_cache_entries+=stats.cache_entries;
+                profile_frame.gpu_cache_peak=stats.cache_peak;
+                profile_frame.gpu_cache_hits+=stats.cache_hits;
+                profile_frame.gpu_cache_misses+=stats.cache_misses;
+                profile_frame.gpu_cache_evictions+=stats.cache_evictions;
+                profile_frame.gpu_cache_trim_deferred+=stats.cache_trim_deferred;
+                profile_frame.gpu_cache_hash_new+=stats.cache_hash_new;
+                profile_frame.gpu_cache_hash_header+=stats.cache_hash_header;
+                profile_frame.gpu_cache_hash_revision+=stats.cache_hash_revision;
+                profile_frame.gpu_cache_hash_audit+=stats.cache_hash_audit;
+                profile_frame.gpu_cache_hash_fallback+=stats.cache_hash_fallback;
                 profile_frame.gpu_failed_snapshot_reuses+=stats.failed_snapshot_reuses;
                 profile_frame.gpu_ready_checks+=stats.ready_checks;
                 profile_frame.gpu_ready_material_refs+=stats.ready_material_refs;
