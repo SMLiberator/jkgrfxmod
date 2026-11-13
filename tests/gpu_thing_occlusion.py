@@ -12,7 +12,9 @@ config=read("common/config.cpp")
 settings=json.loads(read("assets/jkgm.json"))
 assert settings["experimental_3do_occlusion_culling"] is False
 assert settings["gpu_3do_occlusion_query_budget"]==24
+assert settings["gpu_3do_occlusion_min_triangles"]==96
 assert "gpu_3do_occlusion_query_budget must be between 1 and 64" in config
+assert "gpu_3do_occlusion_min_triangles must be between 1 and 50000" in config
 assert "glBeginQuery(GL_ANY_SAMPLES_PASSED" in header
 assert "GL_QUERY_RESULT_AVAILABLE" in header
 assert "consecutive_hidden>=2U" in header
@@ -25,8 +27,11 @@ assert "glDrawArrays(GL_TRIANGLES,0,36)" in renderer
 assert "glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE);" in renderer
 assert "glDepthMask(GL_FALSE);" in renderer
 assert "glDepthFunc(GL_LEQUAL);" in renderer
-assert "item.triangles>=500U" not in renderer # grouped type varies
-assert "p.second.triangles>=500U" in renderer
+# Eligibility must follow the configurable threshold, not a hardcoded
+# historical 500-triangle cutoff. The fixed query budget is unchanged.
+assert "p.second.triangles>=500U" not in renderer
+assert "triangles>=size_t(the_config->gpu_3do_occlusion_min_triangles)" in renderer
+assert "owners_ge32=" in renderer and "owners_ge500=" in renderer
 assert "query_gpu_thing_occlusion();" in renderer
 assert "void query_gpu_thing_occlusion()" in renderer
 assert "3DO OCCLUSION candidates=" in renderer
