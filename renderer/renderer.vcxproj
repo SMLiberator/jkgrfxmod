@@ -129,6 +129,7 @@
     <ClInclude Include="frame_profile.hpp" />
     <ClInclude Include="gpu_3do_alpha.hpp" />
     <ClInclude Include="gpu_3do_cache_signature.hpp" />
+    <ClInclude Include="gpu_mesh_cache_eviction.hpp" />
     <ClInclude Include="gpu_3do_colormap.hpp" />
     <ClInclude Include="gpu_3do_compat.hpp" />
     <ClInclude Include="gpu_3do_frustum.hpp" />
