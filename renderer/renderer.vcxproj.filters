@@ -263,6 +263,9 @@
     <ClInclude Include="gpu_3do_cache_signature.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="gpu_mesh_cache_eviction.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="gpu_3do_colormap.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
