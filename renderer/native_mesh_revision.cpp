@@ -10,7 +10,6 @@
 // this preserves original arguments/results and detects modifications
 // immediately after the verb handler returns.
 namespace mesh_revision {
-    constexpr size_t mutator_count=16U;
     constexpr std::array<char const *,mutator_count> names{{
         "setmodelmesh","clonemodel","changemodelmaterial",
         "replacemodelmaterial","appendthingmaterial","appendmodelmaterial",
@@ -19,6 +18,7 @@ namespace mesh_revision {
         "overwritemodel","reloadmodel","setmodelnodemesh","swapmodelmesh"
     }};
     std::array<handler,mutator_count> originals{};
+    mutator_counts calls{}; // per-verb counts since last profiling sample
     registrar original_registrar=nullptr;
     uint32_t registered_mask=0U;
     uint64_t generation=1U;
@@ -32,6 +32,7 @@ namespace mesh_revision {
         // touching the interpreter's stack or its returned result.
         originals[I](ctx);
         ++generation; // global invalidation; only actual verb calls do this
+        ++calls[I]; // count real invocations, not individual mesh hashes
     }
     constexpr std::array<handler,mutator_count> wrappers{{
         invoke<0>,invoke<1>,invoke<2>,invoke<3>,
@@ -60,6 +61,7 @@ namespace mesh_revision {
         original_registrar=fn;
         registered_mask=0U;
         originals.fill(nullptr);
+        calls.fill(0U);
         complete=false;
         untracked_write=false;
     }
@@ -77,6 +79,16 @@ namespace mesh_revision {
     }
     bool active() {return complete && !untracked_write;}
     uint64_t current() {return generation;}
+    mutator_counts take_mutator_counts()
+    {
+        auto const sample=calls;
+        calls.fill(0U);
+        return sample;
+    }
+    char const *mutator_name(std::size_t index)
+    {
+        return index<names.size()?names[index]:"unknown";
+    }
     void report_untracked()
     {
         if(untracked_write)return;
