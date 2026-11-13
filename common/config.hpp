@@ -70,6 +70,7 @@ namespace jkgm {
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics
         bool use_gpu_cache = true; // unified GPU 3DO, sprite, and SithWorld rendering
         bool experimental_3do_occlusion_culling = false; // async main camera GPU Thing submission
+        int gpu_3do_occlusion_proxy_mode = 0; // 0=enclosing box; 1=screen-facing sphere silhouette at Thing-center depth
         int gpu_3do_occlusion_query_budget = 24; // max GL queries/frame, 1..64
         int gpu_3do_occlusion_min_triangles = 96; // queried per-Thing cached triangle count, 1..50000
         bool experimental_planar_thing_discovery = false; // read-only 120-frame native 3DO diagnostics
