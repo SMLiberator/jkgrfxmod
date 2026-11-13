@@ -5041,12 +5041,32 @@ namespace jkgm {
                 for(auto const &g:inst.geometry->groups)
                     c.triangles+=g.count/3U;
             }
+            // Most JK 3DOs are far smaller than 500 triangles. Measure
+            // eligibility tiers while retaining the existing fixed query
+            // budget; triangle counts cover the whole Thing, not one mesh.
+            size_t owners_32=0,owners_96=0,owners_256=0,owners_500=0;
             std::vector<candidate> expensive;
             expensive.reserve(grouped.size());
-            for(auto const &p:grouped)
-                if(p.second.triangles>=500U)
+            for(auto const &p:grouped) {
+                size_t const triangles=p.second.triangles;
+                if(triangles>=32U)++owners_32;
+                if(triangles>=96U)++owners_96;
+                if(triangles>=256U)++owners_256;
+                if(triangles>=500U)++owners_500;
+                if(triangles>=size_t(the_config->gpu_3do_occlusion_min_triangles))
                     expensive.push_back(p.second);
-            if(expensive.empty())return;
+            }
+            if(expensive.empty()) {
+                if(the_config->profile_renderer &&
+                   gpu_3do_present_serial%120U==0U)
+                    LOG_INFO("3DO OCCLUSION candidates=0 min_triangles=",
+                        the_config->gpu_3do_occlusion_min_triangles,
+                        " owners_total=",grouped.size(),
+                        " owners_ge32=",owners_32," owners_ge96=",owners_96,
+                        " owners_ge256=",owners_256," owners_ge500=",owners_500,
+                        " NOTE=no_eligible_Things");
+                return;
+            }
             std::sort(expensive.begin(),expensive.end(),
                 [](candidate const &a,candidate const &b) {
                     if(a.triangles!=b.triangles)
@@ -5132,6 +5152,11 @@ namespace jkgm {
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("3DO OCCLUSION candidates=",expensive.size(),
+                    " min_triangles=",
+                    the_config->gpu_3do_occlusion_min_triangles,
+                    " owners_total=",grouped.size(),
+                    " owners_ge32=",owners_32," owners_ge96=",owners_96,
+                    " owners_ge256=",owners_256," owners_ge500=",owners_500,
                     " queried=",issued," query_budget=",
                     the_config->gpu_3do_occlusion_query_budget,
                     " records=",queries.entries(),
