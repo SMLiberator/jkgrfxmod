@@ -21,7 +21,9 @@ namespace mesh_revision {
     mutator_counts calls{}; // per-verb counts since last profiling sample
     registrar original_registrar=nullptr;
     uint32_t registered_mask=0U;
-    uint64_t generation=1U;
+    uint64_t generation=1U; // still invalidates precise Type-3 collision caches
+    uint64_t source_generation=1U; // changes only on tracking fallback
+    unsigned pending_source_effects=source_none;
     bool complete=false;
     bool untracked_write=false;
 
@@ -31,7 +33,12 @@ namespace mesh_revision {
         // Call the original JK.dll COG handler exactly once, without
         // touching the interpreter's stack or its returned result.
         originals[I](ctx);
-        ++generation; // global invalidation; only actual verb calls do this
+        ++generation; // retain original conservative collision revision
+        // GPU geometry is keyed by rdMesh address. New/attached meshes get
+        // cache misses; header-changing swaps are detected on next lookup.
+        // Only in-place material/source edits require a one-off targeted
+        // scan, coalesced across all COG calls until the next GPU lookup.
+        pending_source_effects|=source_effect_for(I);
         ++calls[I]; // count real invocations, not individual mesh hashes
     }
     constexpr std::array<handler,mutator_count> wrappers{{
@@ -62,6 +69,7 @@ namespace mesh_revision {
         registered_mask=0U;
         originals.fill(nullptr);
         calls.fill(0U);
+        pending_source_effects=source_none;
         complete=false;
         untracked_write=false;
     }
@@ -79,6 +87,13 @@ namespace mesh_revision {
     }
     bool active() {return complete && !untracked_write;}
     uint64_t current() {return generation;}
+    uint64_t source_current() {return source_generation;}
+    unsigned take_pending_source_effects()
+    {
+        unsigned const effects=pending_source_effects;
+        pending_source_effects=source_none;
+        return effects;
+    }
     mutator_counts take_mutator_counts()
     {
         auto const sample=calls;
@@ -93,6 +108,7 @@ namespace mesh_revision {
     {
         if(untracked_write)return;
         untracked_write=true;
+        ++source_generation;
         LOG_WARNING("GPU 3DO revision audit detected a mesh write outside "
                     "tracked JK.dll COG verbs; disabling fast path, "
                     "restoring full per-frame hashing for this session");
