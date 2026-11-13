@@ -1,8 +1,15 @@
 #version 330 core
-// 12-triangle conservative box proxy for JK's Thing-centered model radius.
+// Mode 0: 12-triangle Thing-centered box. Mode 1: two-triangle
+// screen-facing rectangle at center depth, covering sphere silhouette.
 // No VBO needed: positions are indexed using gl_VertexID, OpenGL core 3.3.
 uniform vec4 view_right,view_forward,view_up,view_origin;
 uniform vec4 projection,center_radius;
+uniform int proxy_mode;
+uniform vec4 rect_ndc; // left, right, bottom, top
+uniform float rect_forward; // Thing-center view depth
+const vec2 rect_corners[6]=vec2[6](
+ vec2(0,0),vec2(1,0),vec2(1,1),
+ vec2(0,0),vec2(1,1),vec2(0,1));
 const vec3 corners[8]=vec3[8](
  vec3(-1,-1,-1),vec3(1,-1,-1),vec3(1,1,-1),vec3(-1,1,-1),
  vec3(-1,-1,1),vec3(1,-1,1),vec3(1,1,1),vec3(-1,1,1));
@@ -11,6 +18,14 @@ const int ids[36]=int[36](
  0,4,5,0,5,1, 1,5,6,1,6,2,
  2,6,7,2,7,3, 3,7,4,3,4,0);
 void main(){
+    if(proxy_mode==1){
+        vec2 corner=rect_corners[gl_VertexID];
+        vec2 ndc=mix(rect_ndc.xz,rect_ndc.yw,corner);
+        // Same depth convention as the 3D proxy, but CONSTANT at
+        // Thing center; this intentionally permits aggressive occlusion.
+        gl_Position=vec4(ndc*rect_forward,-projection.z,rect_forward);
+        return;
+    }
     vec3 world=center_radius.xyz+
                center_radius.w*corners[ids[gl_VertexID]];
     vec3 p=world.x*view_right.xyz+
