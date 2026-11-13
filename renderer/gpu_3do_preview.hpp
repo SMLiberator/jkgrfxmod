@@ -172,6 +172,9 @@ namespace jkgm {
         uint64_t cache_hash_new=0,cache_hash_header=0;
         uint64_t cache_hash_revision=0,cache_hash_audit=0;
         uint64_t cache_hash_fallback=0;
+        // One-off selective source validation after COG material/overwrite.
+        uint64_t mutation_scans=0,mutation_scanned=0;
+        uint64_t mutation_invalidated=0,mutation_ns=0;
         uint64_t geometry_native=0,snapshot_native=0;
         // Diagnostic taxonomy for the native 3DO fallback hot path.
         uint64_t geo_thing_not_full=0,geo_mesh_not_full=0;
