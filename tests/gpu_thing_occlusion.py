@@ -58,5 +58,11 @@ assert opaque.index("draw_gpu_3do_preview(false);")<opaque.index(
 offscreen=renderer.split("void render_planar_capture()",1)[1].split(
     "void present_game()",1)[0]
 assert "thing_occlusion_queries->hidden(" not in offscreen
-assert "thing_occlusion_queries" not in read("renderer/main.cpp")
+main=read("renderer/main.cpp")
+assert "thing_occlusion_queries" not in main
+# The native draw hook records per-Thing identity/world origin ONLY when
+# this feature is enabled (or when an existing feature needs it).
+assert "the_config->experimental_3do_occlusion_culling" in main
+assert "own_world_position_valid=read(" in main
+assert "active_native_shadow_owner=owner_key;" in main
 print("3DO GPU Thing occlusion source contracts passed")

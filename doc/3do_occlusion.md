@@ -8,6 +8,10 @@ uses asynchronous OpenGL 3.3 `GL_ANY_SAMPLES_PASSED` queries with small
 has rendered the cached world and opaque 3DOs. It then suppresses GPU 3DO
 draw-list construction for fully hidden Things in subsequent frames.
 
+The native hook snapshots stable Thing identity and world position when
+occlusion is enabled, even if sun shadows, decals and continuous ambient
+are independently disabled. With this option off the extra read is absent.
+
 This first iteration intentionally leaves native `rdModel3_Draw` / pose
 callbacks, simulation, shadows, planar reflections, HUD Things, sprites,
 projected decals and non-GPU native fallbacks untouched.

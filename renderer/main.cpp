@@ -1291,7 +1291,8 @@ namespace {
             // Unlike rdMesh, the linked
             // SithThing position is WORLD-space and common to every node.
             // Capture once for continuous ambient when enabled.
-            if(the_config->experimental_continuous_ambient_gpu) {
+            if(the_config->experimental_continuous_ambient_gpu ||
+               the_config->experimental_3do_occlusion_culling) {
                 own_world_position_valid=read(
                     uintptr_t(hud_owner)+0xb8U,
                     own_world_position.data(),sizeof(own_world_position));
@@ -1331,7 +1332,8 @@ namespace {
         bool const have_thing_flags=
             jkgm::read_native_model_thing_flags(read,rd,flags);
         if(shadow_enabled || (the_config && the_config->enable_decals) ||
-           (the_config && the_config->experimental_planar_thing_discovery)) {
+           (the_config && the_config->experimental_planar_thing_discovery) ||
+           (the_config && the_config->experimental_3do_occlusion_culling)) {
             if(have_thing_flags) {
                 uint32_t owner=0,signature=0;
                 if(read(rd+0x44U,&owner,4) &&
