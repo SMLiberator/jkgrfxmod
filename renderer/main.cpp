@@ -75,6 +75,7 @@
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_triangulation.hpp"
 #include "gpu_3do_cache_signature.hpp"
+#include "gpu_mesh_cache_eviction.hpp"
 #include "gpu_3do_colormap.hpp"
 #include "native_jk_palette_effects.hpp"
 #include "native_sector_palette_bridge.hpp"
@@ -284,6 +285,7 @@ namespace {
         int lighting_mode=0;
         uint64_t source_signature=0,source_checked_frame=0;
         uint64_t source_checked_generation=0,last_audit_frame=0;
+        uint64_t last_used_frame=0; // primary + planar camera references
         char const *snapshot_failure=nullptr; // memoized failed snapshots
         std::string snapshot_failure_detail;
         uint64_t id=0;
@@ -292,6 +294,8 @@ namespace {
         bool ready_for_frame=false;
     };
     std::unordered_map<void const *,cached_gpu_mesh> gpu_mesh_cache;
+    uint64_t gpu_mesh_cache_last_trim_frame=0;
+    size_t gpu_mesh_cache_peak=0;
     std::vector<jkgm::gpu_3do_instance> pending_gpu_instances;
     struct cached_gpu_sprite_quad {
         jkgm::sprite_decal_resource resource{};
@@ -345,6 +349,42 @@ namespace {
     // opaque mesh must still contribute to sunlight depth if it falls back.
     thread_local bool gpu_mesh_light_overflow=false;
     jkgm::gpu_3do_native_stats gpu_native_stats;
+    // Soft-cap sweep is at most once per frame, never per Thing instance.
+    // The shared_ptr on pending instances preserves current-frame geometry.
+    // Geometry IDs are not reused; GL owns independently expiring uploads.
+    void gpu_mesh_cache_make_room()
+    {
+        if(gpu_mesh_cache.size()<jkgm::gpu_mesh_cache_soft_limit ||
+           gpu_mesh_cache_last_trim_frame==gpu_frame_serial)
+            return;
+        gpu_mesh_cache_last_trim_frame=gpu_frame_serial;
+        auto const r=jkgm::trim_gpu_mesh_cache(
+            gpu_mesh_cache,gpu_frame_serial);
+        if(the_config && the_config->profile_renderer) {
+            gpu_native_stats.cache_evictions+=r.evicted;
+            gpu_native_stats.cache_trim_deferred+=r.deferred?1U:0U;
+        }
+    }
+    void gpu_mesh_cache_inserted()
+    {
+        gpu_mesh_cache_peak=(std::max)(gpu_mesh_cache_peak,
+                                        gpu_mesh_cache.size());
+    }
+    // Mutually exclusive signature triggers, including hashes requested
+    // by the independent planar camera (shared CPU cache and revision path).
+    void gpu_mesh_hash_reason(bool existing,bool header_ready,
+                              bool revision_fastpath,
+                              uint64_t checked_generation,
+                              uint64_t current_generation)
+    {
+        if(!the_config || !the_config->profile_renderer)return;
+        if(!existing)++gpu_native_stats.cache_hash_new;
+        else if(!header_ready)++gpu_native_stats.cache_hash_header;
+        else if(!revision_fastpath)++gpu_native_stats.cache_hash_fallback;
+        else if(checked_generation!=current_generation)
+            ++gpu_native_stats.cache_hash_revision;
+        else ++gpu_native_stats.cache_hash_audit;
+    }
     jkgm::gpu_mat_ready_cache gpu_mat_residency;
     std::atomic<uint64_t> native_mat_upload_generation{1};
     // Debug-only fallback names, capped to avoid filling the performance log
@@ -2013,6 +2053,11 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         return !shadow_only;
     }
     auto it=gpu_mesh_cache.find(mesh);
+    if(it!=gpu_mesh_cache.end()) {
+        it->second.last_used_frame=gpu_frame_serial;
+        if(the_config->profile_renderer)++gpu_native_stats.cache_hits;
+    } else if(the_config->profile_renderer)
+        ++gpu_native_stats.cache_misses;
     bool snapshot_attempted_this_call=false;
     // Read immutable-looking header fields on each instance, but hash all
     // underlying vertex/UV/face content at most once per mesh per frame.
@@ -2035,6 +2080,11 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
              (audit_frame && it->second.last_audit_frame!=gpu_frame_serial))
           : it->second.source_checked_frame!=gpu_frame_serial);
     if(should_hash) {
+        gpu_mesh_hash_reason(it!=gpu_mesh_cache.end(),header_unchanged,
+                             revision_fastpath,
+                             it!=gpu_mesh_cache.end()
+                                 ?it->second.source_checked_generation:0U,
+                             current_generation);
         bool const profiling=the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
@@ -2068,7 +2118,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             std::string failure_detail;
             snapshot_attempted_this_call=true;
             auto geom=snapshot_gpu_mesh(m,vertex_rgb,&failure,&failure_detail);
-            if(gpu_mesh_cache.size()>4096) gpu_mesh_cache.clear();
+            gpu_mesh_cache_make_room();
             if(profiling && header_unchanged)
                 ++gpu_native_stats.source_invalidations;
             cached_gpu_mesh updated{};
@@ -2086,6 +2136,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             updated.source_checked_frame=gpu_frame_serial;
             updated.source_checked_generation=current_generation;
             updated.last_audit_frame=audit_frame ? gpu_frame_serial : 0U;
+            updated.last_used_frame=gpu_frame_serial;
             if(geom) {
                 if(geom->self_intersecting_faces_skipped>0) {
                     // Log once per authored model/mesh, not once per frame
@@ -2113,6 +2164,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                 gpu_log_fallback(m,failure);
             }
             gpu_mesh_cache[mesh]=std::move(updated);
+            gpu_mesh_cache_inserted();
             it=gpu_mesh_cache.find(mesh);
         }
         else {
@@ -2450,6 +2502,11 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                     source.mesh)+0x6cU,sizeof(rgb));
             void const *const key=reinterpret_cast<void const *>(source.mesh);
             auto it=gpu_mesh_cache.find(key);
+            if(it!=gpu_mesh_cache.end()) {
+                it->second.last_used_frame=gpu_frame_serial;
+                if(the_config->profile_renderer)++gpu_native_stats.cache_hits;
+            } else if(the_config->profile_renderer)
+                ++gpu_native_stats.cache_misses;
             // Exactly the ordinary GPU 3DO source-validation policy: compare
             // native header fields on every encounter, but hash vertex/UV/
             // face arrays only on revision changes and every 32nd audit
@@ -2480,6 +2537,12 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
             uint64_t signature=it!=gpu_mesh_cache.end()
                 ?it->second.source_signature:0U;
             if(should_hash) {
+                gpu_mesh_hash_reason(it!=gpu_mesh_cache.end(),
+                                     cached_geometry_ready,
+                                     revision_fastpath,
+                                     it!=gpu_mesh_cache.end()
+                                         ?it->second.source_checked_generation:0U,
+                                     generation);
                 ++out.stats.source_hashes;
                 if(!gpu_mesh_source_signature(
                        mesh,rgb,signature,nullptr)) {
@@ -2507,12 +2570,7 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
             if(!same) {
                 // The shared cache is also used by JK's ordinary 3DO hook.
                 // Preserve its usual revision checks and bounded growth.
-                if(it==gpu_mesh_cache.end() &&
-                   gpu_mesh_cache.size()>=4096U) {
-                    ++out.stats.empty_or_invalid_meshes;
-                    incomplete=true;
-                    continue;
-                }
+                gpu_mesh_cache_make_room();
                 char const *failure=nullptr;
                 auto geometry=snapshot_gpu_mesh(mesh,rgb,&failure);
                 if(!geometry) {
@@ -2535,9 +2593,11 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 entry.source_checked_frame=gpu_frame_serial;
                 entry.source_checked_generation=mesh_revision::current();
                 entry.last_audit_frame=audit_frame ? gpu_frame_serial : 0U;
+                entry.last_used_frame=gpu_frame_serial;
                 entry.id=next_gpu_id++;
                 entry.geometry=std::move(geometry);
                 gpu_mesh_cache[key]=std::move(entry);
+                gpu_mesh_cache_inserted();
                 it=gpu_mesh_cache.find(key);
                 ++out.stats.new_gpu_snapshots;
             } else ++out.stats.reused_gpu_meshes;
@@ -2598,7 +2658,9 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
 
 jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
 {
-    auto const sample=gpu_native_stats;
+    auto sample=gpu_native_stats;
+    sample.cache_entries=gpu_mesh_cache.size();
+    sample.cache_peak=gpu_mesh_cache_peak;
     gpu_native_stats={};
     // Aggregate across scenes/frames rather than logging thousands of
     // repeated fallback meshes. Distinguish unsupported render modes from
@@ -2655,7 +2717,9 @@ void jkgm::reset_gpu_3do_instances()
     native_decal_following=false;
     native_decal_capture_until=0;
     clear_moving_sprite_decals();
-    gpu_mesh_cache.clear();
+    gpu_mesh_cache.clear(); // level/renderer reset, never memory-pressure eviction
+    gpu_mesh_cache_peak=0;
+    gpu_mesh_cache_last_trim_frame=0;
     gpu_sprite_quads.clear();
     gpu_mat_residency.clear();
     ++gpu_frame_serial;
