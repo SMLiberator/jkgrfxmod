@@ -2343,7 +2343,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
 jkgm::planar_reflection_offscreen_gpu
 jkgm::acquire_planar_reflection_offscreen_gpu(
     std::vector<planar_reflection_model_thing> const &candidates,
-    size_t max_things)
+    size_t max_things,
+    gpu_3do_native_frustum const *reflected_frustum,
+    gpu_3do_matrix34 const *reflected_view)
 {
     planar_reflection_offscreen_gpu out{};
     if(!the_config || !the_config->use_gpu_cache ||
@@ -2426,6 +2428,18 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                !gpu_3do_supports_geo_mode(cur_geo,mesh.geometry_mode)) {
                 ++out.stats.empty_or_invalid_meshes;
                 incomplete=true;
+                continue;
+            }
+            // JK rdModel3_DrawMesh performs this sphere test before
+            // validating or drawing a mesh. The offscreen camera now does
+            // the same after the Thing-level sphere test, using the CURRENT
+            // animated joint placement. Do not pay for source hashing or
+            // material resolution for a mesh wholly outside its frustum.
+            if(reflected_frustum && reflected_view &&
+               planar_reflection_mesh_outside_frustum(
+                   *reflected_frustum,*reflected_view,
+                   source.world_transform,mesh.radius)) {
+                ++out.stats.mesh_radius_culled;
                 continue;
             }
             float const *rgb=nullptr;

@@ -6,6 +6,7 @@
 #include "planar_reflection_things.hpp"
 #include "planar_reflection_workset.hpp"
 #include "planar_reflection_offscreen_gpu.hpp"
+#include "planar_reflection_culling.hpp"
 #include "planar_reflection_render_math.hpp"
 #include "offscreen_capture_target.hpp"
 #include "offscreen_capture_projection.hpp"
@@ -10456,7 +10457,7 @@ namespace jkgm {
             auto const view=planar_camera_native_view(reflected);
             auto const begun=std::chrono::steady_clock::now();
             size_t world_drawn=0,model_drawn=0,model_candidates=0;
-            size_t world_culled=0,model_culled=0;
+            size_t world_culled=0,model_culled=0,thing_radius_culled=0;
             size_t hidden_by_flags=0,hidden_by_geo=0;
             // Acquisition does NOT mutate rdCamera; its refresh callback
             // updates only each Thing's native cached animation matrices.
@@ -10473,8 +10474,30 @@ namespace jkgm {
                         hidden_by_flags=scan.excluded_flags;
                         hidden_by_geo=scan.excluded_geo_mode;
                         auto &things=scan.models;
-                        // Favor nearby Things, but never use the primary
-                        // camera's frustum/portal subset as eligibility.
+                        model_candidates=things.size();
+                        // JK rdModel3_Draw tests the model radius BEFORE
+                        // refreshing its animated hierarchy. Use the same
+                        // model's authored radius (+0x5c) in the reflected
+                        // camera's own view, not main-camera visibility.
+                        // Fail open for missing/invalid native bounds.
+                        bool const radius_cull_available=
+                            frame_world_cache_camera.perspective &&
+                            frame_world_cache_camera.frustum.far_plane>0.1f;
+                        if(radius_cull_available) {
+                            auto const first_rejected=std::remove_if(
+                                things.begin(),things.end(),
+                                [&](auto const &thing) {
+                                    bool const outside=
+                                        planar_reflection_thing_outside_frustum(
+                                            read,thing,
+                                            frame_world_cache_camera.frustum,view);
+                                    if(outside)++thing_radius_culled;
+                                    return outside;
+                                });
+                            things.erase(first_rejected,things.end());
+                        }
+                        // Budget only reflected-visible Things. Do not use
+                        // primary-camera portal visibility as eligibility.
                         std::sort(things.begin(),things.end(),
                             [&](auto const &a,auto const &b) {
                                 auto dist2=[&](auto const &p) {
@@ -10488,10 +10511,12 @@ namespace jkgm {
                                 };
                                 return dist2(a)<dist2(b);
                             });
-                        model_candidates=things.size();
                         constexpr size_t max_native_things=128U;
                         offscreen=acquire_planar_reflection_offscreen_gpu(
-                            things,max_native_things);
+                            things,max_native_things,
+                            radius_cull_available
+                                ?&frame_world_cache_camera.frustum:nullptr,
+                            radius_cull_available?&view:nullptr);
                     }
                 }
             }
@@ -10795,6 +10820,9 @@ namespace jkgm {
                          " model_groups=",model_drawn,
                          " emissive_model_groups=",emissive_models.size(),
                          " model_culled=",model_culled,
+                         " thing_radius_culled=",thing_radius_culled,
+                         " mesh_radius_culled=",
+                         offscreen.stats.mesh_radius_culled,
                          " ms_acquire=",std::chrono::duration<float,std::milli>(
                              after_acquisition-begun).count(),
                          " ms_world=",std::chrono::duration<float,std::milli>(

@@ -99,6 +99,16 @@ assert "planar_gpu_queries.end();" in renderer
 assert "planar_gpu_queries.release();" in renderer
 assert "source_hashes=" in renderer and "source_hash_skips=" in renderer
 assert "source_untracked_changes=" in renderer
+assert "thing_radius_culled=" in renderer
+assert "mesh_radius_culled=" in renderer
+# Native 3DO model-radius rejection must happen before sorting or spending
+# the capped acquisition budget; the mirrored camera is independent.
+cap=renderer.split("void render_planar_capture()",1)[1].split(
+    "void present_game()",1)[0]
+assert cap.index("planar_reflection_thing_outside_frustum(") < cap.index(
+    "std::sort(things.begin(),things.end()")
+assert "frame_world_cache_camera.frustum,view" in cap
+assert "radius_cull_available?&view:nullptr" in cap
 assert "shader.set_color_effects(" in renderer
 assert "shader.set_fog(" in renderer
 assert "shader.set_model_lighting(" in renderer

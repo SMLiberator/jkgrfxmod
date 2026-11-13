@@ -152,17 +152,36 @@ independent GPU timing.
 Even at `planar_reflection_resolution_scale: 0.125`, the secondary
 camera still visits native Thing lists and can refresh up to 128 Thing
 hierarchies every frame. Its cost is not proportional to rendered pixels.
+JK originally tests rdModel3's full model radius before animated joint
+matrix updates, then tests each posed rdMesh radius. The main GPU renderer
+retains the native model-radius rejection and performs its own native
+mesh-radius rejection before caching; the GPU draw phase also uses
+conservative per-batch AABB rejection.
+
+The reflection camera now applies the same two-stage sphere pruning:
+it reads the 3DO model's native radius at `rdModel3+0x5c`, testing against
+the reflected camera's frustum **before sorting/capping Thing candidates
+or refreshing poses**. After the visible Thing's pose is acquired, it checks
+each active mesh's radius and animated placement before mesh signature
+hashing and material lookup. Scaled/sheared placements are conservatively
+expanded and missing/invalid radii fail open (no accidental disappearances).
+`thing_radius_culled` and `mesh_radius_culled` report the savings.
+These checks are independent of main-camera sector/portal visibility and
+retain ThingFlags/CurGeoMode handling.
+
 Frustum and multi-draw improvements reduce world/model submissions but
-do not yet eliminate the expensive native hierarchy/pose acquisition path.
+do not yet eliminate the cost of refreshing poses for Things whose
+overall model sphere overlaps the reflected frustum.
 The offscreen path now shares the ordinary 3DO mesh-revision fast path,
 hashing full source arrays only when their revision changes or a periodic
 32-frame audit is due (or once per frame if mutation tracking is disabled).
 `source_hashes`, `source_hash_skips`, `source_new_snapshots` and
 `source_untracked_changes` reveal whether it is working. A detected
 untracked modification disables the fast path. This avoids redundant
-geometry hashing, **not** hierarchy pose refreshes; subsequent optimization
-should target independent model frustum rejection and pose traversal,
-followed by capture cadence and selective LOD bias.
+geometry hashing, **not** hierarchy pose refreshes; radius culling now
+reduces the number of refreshed Things and processed meshes. Remaining
+work includes reusing complete primary-camera model instances where
+available, then capture cadence and selective LOD bias.
 
 ## Capture contract
 

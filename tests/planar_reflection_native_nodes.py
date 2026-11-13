@@ -6,6 +6,7 @@ native=read("renderer/planar_reflection_native_nodes.hpp")
 renderer=read("renderer/renderer.cpp")
 loader=read("renderer/main.cpp")
 header=read("renderer/planar_reflection_offscreen_gpu.hpp")
+culling=read("renderer/planar_reflection_culling.hpp")
 doc=read("doc/planar_reflections.md")
 assert "collect_planar_reflection_native_nodes(" in native
 assert "validate_native_thing_node_accessor(read)" in native
@@ -18,6 +19,27 @@ assert "out=std::move(found)" in native
 assert "acquire_planar_reflection_offscreen_gpu(" in header
 assert "acquire_planar_reflection_offscreen_gpu(" in loader
 assert "gpu_mesh_source_signature(" in loader
+# JK's primary renderer already does rdModel3 model-sphere and per-mesh
+# radius culling before this hook. The GPU mesh hook also duplicates
+# the native mesh sphere test, and the GPU draw pass adds group AABB tests.
+assert "gpu_mesh_outside_native_frustum(" in loader
+assert "gpu_3do_sphere_outside(" in loader
+main_queue=loader.split("bool jkgm::queue_gpu_3do_mesh(",1)[1].split(
+    "jkgm::planar_reflection_offscreen_gpu",1)[0]
+assert main_queue.index("gpu_mesh_outside_native_frustum(") < main_queue.index("gpu_mesh_cache.find(mesh)")
+assert "gpu_3do_batch_outside_frustum(" in renderer
+# Reflected cameras must use two-tier radius rejection too. Model rejection
+# is BEFORE sort, budget and pose refresh; mesh rejection is BEFORE hashing.
+assert "planar_reflection_thing_outside_frustum(" in renderer
+assert "planar_reflection_mesh_outside_frustum(" in loader
+assert "thing.model+0x5cU" in culling
+assert "thing.thing+0x88U" in culling
+assert "planar_reflection_radius_scale(" in culling
+assert "return false; // fail open if radius" in culling
+assert "mesh_radius_culled" in header
+offscreen_cull=loader.split("jkgm::acquire_planar_reflection_offscreen_gpu(",1)[1].split(
+    "jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()",1)[0]
+assert offscreen_cull.index("planar_reflection_mesh_outside_frustum(") < offscreen_cull.index("gpu_mesh_source_signature(")
 # Offscreen acquisition must honor the SAME generation/audit policy as
 # ordinary GPU 3DOs, not rehash every native rdMesh every frame.
 offscreen=loader.split("jkgm::acquire_planar_reflection_offscreen_gpu(",1)[1].split(
@@ -47,5 +69,6 @@ assert "NOTE=offscreen_acquisition_only_no_capture_yet" in renderer
 for project in ("renderer/renderer.vcxproj","renderer/renderer.vcxproj.filters"):
     assert "planar_reflection_native_nodes.hpp" in read(project)
     assert "planar_reflection_offscreen_gpu.hpp" in read(project)
+    assert "planar_reflection_culling.hpp" in read(project)
 assert "not yet drawn" in doc
 print("Planar reflection native 3DO geometry and current pose contracts OK")

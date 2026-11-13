@@ -5,6 +5,7 @@
 // No native draw callback is invoked; no rdCamera state is changed.
 #include "gpu_3do_preview.hpp"
 #include "planar_reflection_things.hpp"
+#include "planar_reflection_culling.hpp"
 #include <cstddef>
 #include <vector>
 
@@ -15,6 +16,7 @@ namespace jkgm {
         size_t native_mesh_nodes=0,empty_or_invalid_meshes=0;
         size_t reused_gpu_meshes=0,new_gpu_snapshots=0;
         size_t source_hashes=0,source_hash_skips=0;
+        size_t mesh_radius_culled=0;
         size_t untracked_source_changes=0;
         size_t material_unready=0,incomplete_things=0,ready_nodes=0;
     };
@@ -26,5 +28,7 @@ namespace jkgm {
     // is only called by an opt-in diagnostic, never the gameplay render pass.
     planar_reflection_offscreen_gpu acquire_planar_reflection_offscreen_gpu(
         std::vector<planar_reflection_model_thing> const &candidates,
-        size_t max_things);
+        size_t max_things,
+        gpu_3do_native_frustum const *reflected_frustum=nullptr,
+        gpu_3do_matrix34 const *reflected_view=nullptr);
 }
