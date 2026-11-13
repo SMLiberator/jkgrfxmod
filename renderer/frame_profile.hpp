@@ -1,5 +1,6 @@
 #pragma once
 // Optional CPU submission timings: NOT GPU elapsed time.
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <chrono>
