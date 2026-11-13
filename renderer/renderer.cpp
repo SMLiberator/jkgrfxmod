@@ -5016,6 +5016,8 @@ namespace jkgm {
                 thing_occlusion_queries=
                     std::make_unique<gpu_thing_occlusion_queries>();
             auto &queries=*thing_occlusion_queries;
+            int const proxy_mode=the_config->gpu_3do_occlusion_proxy_mode;
+            queries.set_proxy_mode(unsigned(proxy_mode));
             queries.set_world(world_cache_target->loaded_world);
             queries.poll();
             queries.prune(gpu_3do_present_serial);
@@ -5059,7 +5061,9 @@ namespace jkgm {
             if(expensive.empty()) {
                 if(the_config->profile_renderer &&
                    gpu_3do_present_serial%120U==0U)
-                    LOG_INFO("3DO OCCLUSION candidates=0 min_triangles=",
+                    LOG_INFO("3DO OCCLUSION candidates=0 mode=",
+                        the_config->gpu_3do_occlusion_proxy_mode,
+                        " min_triangles=",
                         the_config->gpu_3do_occlusion_min_triangles,
                         " owners_total=",grouped.size(),
                         " owners_ge32=",owners_32," owners_ge96=",owners_96,
@@ -5094,6 +5098,7 @@ namespace jkgm {
             program.use_program();
             program.set_camera(camera.native_view,half_fov,aspect,
                                camera.far_plane);
+            program.set_proxy_mode(proxy_mode);
             glBindVertexArray(thing_occlusion_proxy_vao);
             auto read=[](uintptr_t at,void *dst,size_t count) {
                 return engine_material_debug::read_bytes(at,dst,count);
@@ -5117,19 +5122,29 @@ namespace jkgm {
                 float const scale=planar_reflection_radius_scale(basis);
                 gpu_thing_occlusion_bound bound{};
                 bound.center=item.position;
-                // Authored radius is NOT expanded by animated pose changes.
-                // A small conservative guard band accommodates rounding.
-                bound.radius=radius*scale*1.1f+0.15f;
+                // JK authored radius already encloses animation; test the
+                // same radius for both proxies (no extra inflation).
+                bound.radius=radius*scale;
                 bound.valid=true;
                 if(!gpu_thing_occlusion_bound_valid(bound) ||
                    !std::isfinite(scale) || scale<=0.0f ||
                    gpu_thing_occlusion_camera_inside(bound,camera.camera))
                     return;
+                gpu_thing_occlusion_screen_rect rect{};
+                if(proxy_mode==1 &&
+                   !gpu_thing_occlusion_project_sphere_rect(
+                       bound,camera.native_view,half_fov,aspect,rect))
+                    return; // camera intersects sphere or unsafe projection
                 if(!queries.begin(item.owner,bound,camera.camera,
                                   gpu_3do_present_serial))
                     return;
-                program.set_bound(bound);
-                glDrawArrays(GL_TRIANGLES,0,36);
+                if(proxy_mode==1) {
+                    program.set_rect(rect);
+                    glDrawArrays(GL_TRIANGLES,0,6);
+                } else {
+                    program.set_bound(bound);
+                    glDrawArrays(GL_TRIANGLES,0,36);
+                }
                 queries.end();
                 ++issued;
             };
@@ -5152,6 +5167,7 @@ namespace jkgm {
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("3DO OCCLUSION candidates=",expensive.size(),
+                    " mode=",proxy_mode,
                     " min_triangles=",
                     the_config->gpu_3do_occlusion_min_triangles,
                     " owners_total=",grouped.size(),
