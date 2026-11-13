@@ -164,6 +164,14 @@ namespace jkgm {
         uint64_t attempted=0,culled=0,queued=0,snapshots=0,ready_checks=0;
         uint64_t source_checks=0,source_ns=0,source_invalidations=0;
         uint64_t failed_snapshot_reuses=0;
+        // Primary + independent planar camera share one CPU snapshot cache.
+        // Entry count/peak are gauges; other fields are window event counts.
+        uint64_t cache_entries=0,cache_peak=0;
+        uint64_t cache_hits=0,cache_misses=0;
+        uint64_t cache_evictions=0,cache_trim_deferred=0;
+        uint64_t cache_hash_new=0,cache_hash_header=0;
+        uint64_t cache_hash_revision=0,cache_hash_audit=0;
+        uint64_t cache_hash_fallback=0;
         uint64_t geometry_native=0,snapshot_native=0;
         // Diagnostic taxonomy for the native 3DO fallback hot path.
         uint64_t geo_thing_not_full=0,geo_mesh_not_full=0;
