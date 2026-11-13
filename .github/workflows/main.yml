@@ -61,6 +61,7 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_math.cpp /Fe:cog_math_test.exe
         cog_math_test.exe
         python3 tests/cog_math_wiring.py
+        python3 tests/cog_model_radius.py
 
     - name: Compressed MP3 OGG FLAC decoder regression tests
       shell: cmd
