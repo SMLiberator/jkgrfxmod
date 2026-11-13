@@ -1095,6 +1095,14 @@ namespace jkgm {
                          " audit=",profile_window.gpu_cache_hash_audit,
                          " fallback=",profile_window.gpu_cache_hash_fallback,
                          " NOTE=includes_offscreen_planar_hashes");
+                LOG_INFO("PERF gpu_3do targeted_mutations scans=",
+                         profile_window.gpu_mutation_scans,
+                         " entries_checked=",profile_window.gpu_mutation_scanned,
+                         " entries_invalidated=",
+                         profile_window.gpu_mutation_invalidated,
+                         " CPU_us_avg=",
+                         (profile_window.gpu_mutation_ns/1000)/frames,
+                         " NOTE=scan_is_coalesced_per_source_mutation_window");
                 LOG_INFO("PERF gpu_3do CPU_us_avg=",profile_window.gpu_preview_cpu_us/frames,
                          " draws_avg=",profile_window.gpu_draw_calls/frames,
                          " triangles_avg=",profile_window.gpu_draw_triangles/frames,
@@ -11562,6 +11570,10 @@ namespace jkgm {
                 profile_frame.gpu_cache_hash_revision+=stats.cache_hash_revision;
                 profile_frame.gpu_cache_hash_audit+=stats.cache_hash_audit;
                 profile_frame.gpu_cache_hash_fallback+=stats.cache_hash_fallback;
+                profile_frame.gpu_mutation_scans+=stats.mutation_scans;
+                profile_frame.gpu_mutation_scanned+=stats.mutation_scanned;
+                profile_frame.gpu_mutation_invalidated+=stats.mutation_invalidated;
+                profile_frame.gpu_mutation_ns+=stats.mutation_ns;
                 profile_frame.gpu_failed_snapshot_reuses+=stats.failed_snapshot_reuses;
                 profile_frame.gpu_ready_checks+=stats.ready_checks;
                 profile_frame.gpu_ready_material_refs+=stats.ready_material_refs;
