@@ -78,8 +78,9 @@ namespace mesh_revision {
         complete=registered_mask==((1U<<mutator_count)-1U);
         if(complete) {
             LOG_INFO("GPU 3DO revision tracking: ",mutator_count,
-                     " JK.dll mesh/material COG mutation verbs wrapped; "
-                     "periodic signature audit every 32 frames");
+                     " JK.dll model COG verbs wrapped; GPU uses targeted "
+                     "material/source refresh plus 32-frame audit; "
+                     "collision generation remains global");
         } else {
             LOG_WARNING("GPU 3DO revision tracking unavailable: missing JK.dll "
                         "mesh/material verb registrations; full hashing retained");
@@ -109,8 +110,8 @@ namespace mesh_revision {
         if(untracked_write)return;
         untracked_write=true;
         ++source_generation;
-        LOG_WARNING("GPU 3DO revision audit detected a mesh write outside "
-                    "tracked JK.dll COG verbs; disabling fast path, "
-                    "restoring full per-frame hashing for this session");
+        LOG_WARNING("GPU 3DO audit found an in-place source edit not covered "
+                    "by the targeted material/header policy; disabling GPU "
+                    "source fast path and restoring per-frame hashing");
     }
 }
