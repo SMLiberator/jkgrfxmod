@@ -147,6 +147,30 @@ Other omissions include reflected sky, alpha/VFX parity, projected receiver
 scissor cropping, multi-plane sharing, proper glossy BRDF filtering and
 independent GPU timing.
 
+### Receiver visibility / GPU occlusion query
+
+The reflected scene is only useful when at least one pixel of a reflective
+receiver is visible to the **main camera**. In levels whose buildings are
+opaque 3DOs, frustum culling alone still wastes a capture when the water
+surface is hidden behind interiors.
+
+The receiver now issues an asynchronous OpenGL 3.3
+`GL_ANY_SAMPLES_PASSED` query at the **end of the main opaque G-buffer pass**,
+after both world and 3DO depth have been written. It draws only the
+main-camera-staged reflective faces belonging to the selected capture plane,
+with no color or depth writes. Both normal and MSAA screen paths share their
+opaque depth with this pass. Results are consumed in later frames (never a
+blocking query read) to skip the entire secondary capture, including native
+Thing scanning and 3DO submissions, when no pixel survived depth testing.
+
+Unfinished/stale queries, changed levels, missing receiver-stage data and
+larger changes in camera pose **fail open** and render reflections normally.
+The previous capture image remains available while hidden, avoiding stale
+resource binding. This is necessarily a lagged visibility decision because
+the reflection image must exist BEFORE the current frame's water shader
+samples it. The log shows `PLANAR receiver_visibility=occluded` with query
+and skip counts when the pass is bypassed.
+
 ### Capture performance caveat
 
 Even at `planar_reflection_resolution_scale: 0.125`, the secondary

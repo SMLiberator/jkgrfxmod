@@ -12,6 +12,9 @@ for name in ("experimental_planar_reflection_capture",
     assert f'j.contains("{name}")' in config
 assert 'std::isfinite(v)' in config and 'v<0.125f || v>1.0f' in config
 renderer=read("renderer/renderer.cpp")
+visibility=read("renderer/planar_receiver_visibility.hpp")
+visibility_vert=read("assets/shaders/planar_receiver_visibility.vert")
+visibility_frag=read("assets/shaders/planar_receiver_visibility.frag")
 target=read("renderer/offscreen_capture_target.hpp")
 projection=read("renderer/offscreen_capture_projection.hpp")
 shader=read("renderer/planar_reflection_capture_shader.hpp")
@@ -181,3 +184,30 @@ for p in ("renderer/renderer.vcxproj","renderer/renderer.vcxproj.filters"):
         assert name in s
 assert 'Copy-Item -Path \'assets/shaders/*\'' in read(".github/workflows/main.yml")
 print("Configurable planar FBO/camera/mirror capture source contracts OK")
+
+# Visibility of the RECEIVER must be tested against the *main camera*
+# opaque depth, AFTER its cached 3DOs wrote depth; the query is polled only
+# on later frames, before spending CPU time on native acquisition.
+assert "query_planar_receiver_visibility();" in renderer
+assert "glBeginQuery(GL_ANY_SAMPLES_PASSED" in visibility
+assert "GL_QUERY_RESULT_AVAILABLE" in visibility
+assert "GL_QUERY_RESULT," in visibility
+assert "glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE)" in renderer
+assert "glDepthMask(GL_FALSE);" in renderer
+assert "glDepthFunc(GL_LEQUAL)" in renderer
+assert "gl::bind_vertex_array(cache.vao);" in renderer
+assert "planar_receiver_camera_near" in visibility
+assert "frame-latest_frame_<=3U" in visibility
+assert "planar_receiver_queries->invalidate()" in renderer
+assert "receiver_visibility=occluded" in renderer
+assert "mode!=renderer_mode::ingame" in renderer
+assert "void main()" in visibility_vert
+assert "gl_Position=" in visibility_vert
+assert "void main()" in visibility_frag
+assert "planar_receiver_visibility.hpp" in read("renderer/renderer.vcxproj")
+assert "planar_receiver_visibility.hpp" in read("renderer/renderer.vcxproj.filters")
+# Calls must occur in the correct order, not just have matching strings.
+opaque=renderer.split("void draw_game_opaque_into_gbuffer(",1)[1].split("void release_spotlight_images()",1)[0]
+assert opaque.index("draw_gpu_3do_preview(false);") < opaque.index("query_planar_receiver_visibility();")
+capture=renderer.split("void render_planar_capture()",1)[1].split("void present_game()",1)[0]
+assert capture.index("visibility.hidden(") < capture.index("acquire_planar_reflection_offscreen_gpu(")

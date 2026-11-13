@@ -178,6 +178,7 @@
     <ClInclude Include="offscreen_capture_target.hpp" />
     <ClInclude Include="offscreen_capture_projection.hpp" />
     <ClInclude Include="planar_reflection_capture_shader.hpp" />
+    <ClInclude Include="planar_receiver_visibility.hpp" />
     <ClInclude Include="postfx.hpp" />
     <ClInclude Include="precise_type3_native.hpp" />
     <ClInclude Include="precise_type3_pose_bulk.hpp" />

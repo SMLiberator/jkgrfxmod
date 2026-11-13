@@ -410,6 +410,9 @@
     <ClInclude Include="planar_reflection_capture_shader.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="planar_receiver_visibility.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="postfx.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>

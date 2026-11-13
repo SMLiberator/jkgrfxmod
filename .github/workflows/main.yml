@@ -297,6 +297,8 @@ jobs:
         python3 tests/planar_reflection_capture.py || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\offscreen_capture_projection.cpp /Fe:offscreen_capture_projection_test.exe || exit /b 1
         offscreen_capture_projection_test.exe || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_receiver_visibility.cpp /Fe:planar_receiver_visibility_test.exe || exit /b 1
+        planar_receiver_visibility_test.exe || exit /b 1
     - name: Experimental sun sky-aperture gate source contracts
       run: python3 tests/sun_sky_aperture_experiment.py
     - name: GPU 3DO alpha partition tests

@@ -11,6 +11,7 @@
 #include "offscreen_capture_target.hpp"
 #include "offscreen_capture_projection.hpp"
 #include "planar_reflection_capture_shader.hpp"
+#include "planar_receiver_visibility.hpp"
 #include "saber_light_rgb.hpp"
 #include "thing_light_rgb.hpp"
 #include "gpu_3do_uv.hpp"
@@ -591,6 +592,10 @@ namespace jkgm {
         // scene, never by the normal GPU renderer or menus.
         std::unique_ptr<offscreen_capture_target> planar_capture_target;
         std::unique_ptr<planar_reflection_capture_shader> planar_capture_program;
+        // Depth-tested receiver pixels from last frame's main opaque 3DO pass.
+        // Query answers are asynchronous; never stall the driver to read them.
+        std::unique_ptr<planar_receiver_visibility> planar_receiver_queries;
+        std::unique_ptr<planar_receiver_visibility_shader> planar_receiver_program;
         // Asynchronous offscreen GPU timestamps: world, models, mipmaps.
         // Read only completed frames, with no GL query waits on the hot path.
         presentation_gpu_profile planar_gpu_queries;
@@ -1230,6 +1235,8 @@ namespace jkgm {
                 smoke_half_buffer.reset();
                 planar_capture_program.reset();
                 planar_capture_target.reset();
+                planar_receiver_program.reset();
+                planar_receiver_queries.reset();
                 planar_gpu_queries.release();
                 present_gpu_queries.release();
                 scene_gpu_queries.release();
@@ -1249,6 +1256,7 @@ namespace jkgm {
                 deferred_gpu_3do_camera={};
                 frame_has_exempt_gpu=false;
                 planar_capture_ready=false;
+                if(planar_receiver_queries)planar_receiver_queries->invalidate();
                 planar_capture_plane.reset();
                 planar_plane_world=0;
                 planar_plane_world_revision=0;
@@ -4815,6 +4823,105 @@ namespace jkgm {
             // GPU preview changes the active GL shader. Render it LAST within
             // the opaque pass, after all batches that expect game_opaque_pass.
             draw_gpu_3do_preview(false);
+            // The opaque G-buffer now includes ALL 3DO depth. Ask whether
+            // any pixel of the selected reflective world plane would pass
+            // that depth test. The result is consumed asynchronously by a
+            // future frame's planar capture, never by this draw itself.
+            query_planar_receiver_visibility();
+        }
+
+        // Secondary capture is rendered BEFORE the main opaque scene. The
+        // receiver query deliberately runs AFTER its opaque 3DO depth has
+        // been written, so an interior can hide the entire water plane.
+        // Depth results are always for the MAIN camera, never the mirror.
+        void query_planar_receiver_visibility()
+        {
+            if(!the_config->experimental_planar_reflection_capture ||
+               !the_config->enable_reflections ||
+               mode!=renderer_mode::ingame ||
+               !world_cache_target || !world_cache_target->ready ||
+               !planar_capture_plane || !frame_world_cache_camera.valid ||
+               !frame_world_cache_camera.perspective)return;
+            auto const &cache=*world_cache_target;
+            if(cache.frame_render_candidates.empty()) {
+                if(planar_receiver_queries)planar_receiver_queries->invalidate();
+                return; // no receiver proof: fail open, capture normally
+            }
+            auto const &cam=frame_world_cache_camera;
+            auto const &plane=*planar_capture_plane;
+            float const aspect=float(get<x>(internal_scr_res_f))/
+                               float(get<y>(internal_scr_res_f));
+            if(!(std::isfinite(aspect) && aspect>0.0f &&
+                 cam.far_plane>0.1f))return;
+
+            // Query only LIVE main-camera staged water/mirror faces on the
+            // selected plane. A large nonreflective floor at the same height
+            // must not incorrectly keep the mirror pass running.
+            std::vector<world_cache_draw_candidate const *> receivers;
+            for(auto const &candidate:cache.frame_render_candidates) {
+                if(candidate.count<3U ||
+                   candidate.surface_index>=cache.cached_surface_lookup.size())
+                    continue;
+                auto const index=cache.cached_surface_lookup[candidate.surface_index];
+                if(index>=cache.mesh.surfaces.size())continue;
+                auto const &surface=cache.mesh.surfaces[index];
+                if(surface.first_index>=cache.mesh.indices.size())continue;
+                auto const vi=cache.mesh.indices[surface.first_index];
+                if(vi>=cache.mesh.vertices.size())continue;
+                auto const &v=cache.mesh.vertices[vi];
+                auto const &n=v.normal;
+                float dot=0.0f,dist=-plane.offset;
+                for(int i=0;i<3;++i) {
+                    dot+=n[i]*plane.normal[i];
+                    dist+=v.position[i]*plane.normal[i];
+                }
+                if(!std::isfinite(dot) || !std::isfinite(dist) ||
+                   dot<0.999f || std::fabs(dist)>0.02f)continue;
+                gpu_3do_group group{};
+                group.material=candidate.material;group.cel=candidate.cel;
+                auto const material=resolve_gpu_3do_material(group);
+                bool const eligible=planar_plane_from_material
+                    ?material.reflection_mode==4
+                    :material.reflection_mode==4 ||
+                     material.blend==material_blend_mode::fluid;
+                if(eligible)receivers.push_back(&candidate);
+            }
+            if(receivers.empty()) {
+                if(planar_receiver_queries)planar_receiver_queries->invalidate();
+                return; // invalid staging cannot prove occlusion
+            }
+            if(!planar_receiver_queries)
+                planar_receiver_queries=
+                    std::make_unique<planar_receiver_visibility>();
+            auto &visibility=*planar_receiver_queries;
+            visibility.select(cache.loaded_world,cache.revision,plane);
+            visibility.poll();
+            if(!planar_receiver_program)
+                planar_receiver_program=
+                    std::make_unique<planar_receiver_visibility_shader>(
+                        the_config->data_path);
+            // Scoped restoration is essential: the following main-frame
+            // color/depth state must not inherit any query-only changes.
+            offscreen_capture_gl_scope restore;
+            glDisable(GL_BLEND);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_STENCIL_TEST);
+            glDisable(GL_CULL_FACE);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LEQUAL); // allow already-depth-written opaque mirrors
+            glDepthMask(GL_FALSE);
+            glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE);
+            auto &shader=*planar_receiver_program;
+            shader.use_program();
+            shader.set_camera(cam.native_view,cam.camera.fov,aspect,cam.far_plane);
+            gl::bind_vertex_array(cache.vao);
+            if(!visibility.begin(cam.camera,gpu_3do_present_serial))return;
+            for(auto const *face:receivers)
+                glDrawElements(GL_TRIANGLES,GLsizei(face->count),
+                    GL_UNSIGNED_INT,reinterpret_cast<void const *>(
+                        uintptr_t(face->first_index)*sizeof(uint32_t)));
+            visibility.end();
         }
 
         void release_spotlight_images()
@@ -10423,6 +10530,24 @@ namespace jkgm {
             auto const &camera=frame_world_cache_camera.camera;
             select_planar_capture_plane(camera);
             if(!planar_capture_plane)return;
+            if(planar_receiver_queries && world_cache_target &&
+               world_cache_target->ready) {
+                auto &visibility=*planar_receiver_queries;
+                visibility.select(world_cache_target->loaded_world,
+                    world_cache_target->revision,*planar_capture_plane);
+                if(visibility.hidden(camera,gpu_3do_present_serial)) {
+                    // Keep the previous capture texture intact. The receiver
+                    // is behind opaque depth so it is not sampled this frame.
+                    // Query is resubmitted after the main opaque pass.
+                    if(the_config->profile_renderer &&
+                       gpu_3do_present_serial%120U==0U)
+                        LOG_INFO("PLANAR receiver_visibility=occluded",
+                            " skip_capture=1 queries=",visibility.submitted(),
+                            " completed=",visibility.completed(),
+                            " skipped=",visibility.skipped());
+                    return;
+                }
+            }
             auto const reflected=make_planar_reflection_camera(
                 camera,*planar_capture_plane);
             auto const setup=make_planar_reflection_render_setup(
