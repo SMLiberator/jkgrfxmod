@@ -768,13 +768,32 @@ namespace {
 
     uint64_t elapsed_native_ns(std::chrono::steady_clock::time_point start);
 
+    // COG clear/reload may decommit an rdMesh's storage *inside* the current
+    // frame. Do not trust the ordinary frame-local positive VirtualQuery
+    // cache when scanning old native pointers after one of those verbs.
+    bool gpu_mutation_span_readable(void const *ptr,size_t bytes)
+    {
+        if(!ptr || bytes==0U)return false;
+        uintptr_t const start=reinterpret_cast<uintptr_t>(ptr);
+        if(start+bytes<start)return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if(VirtualQuery(ptr,&mbi,sizeof(mbi))==0 ||
+           mbi.State!=MEM_COMMIT ||
+           (mbi.Protect&(PAGE_GUARD|PAGE_NOACCESS)))
+            return false;
+        uintptr_t const base=reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+        if(mbi.RegionSize>std::numeric_limits<uintptr_t>::max()-base)
+            return false;
+        return start>=base && start+bytes<=base+mbi.RegionSize;
+    }
+
     // A cheap face-material-only scan can isolate in-place COG material
     // replacements. Only changed rdMesh snapshots are discarded; no global
     // source revision is needed. Full source hashing remains as an audit.
     bool gpu_mesh_material_signature(native_mesh const &m,uint64_t &value)
     {
         if(m.num_faces<0 || m.num_faces>65536 ||
-           (m.num_faces && !gpu_span_readable(
+           (m.num_faces && !gpu_mutation_span_readable(
                 m.faces,size_t(m.num_faces)*sizeof(native_face))))
             return false;
         jkgm::gpu_3do_byte_signature h;
@@ -888,7 +907,7 @@ namespace {
         for(auto it=gpu_mesh_cache.begin();it!=gpu_mesh_cache.end();) {
             ++scanned;
             native_mesh m{};
-            if(!gpu_span_readable(it->first,sizeof(m))) {
+            if(!gpu_mutation_span_readable(it->first,sizeof(m))) {
                 it=gpu_mesh_cache.erase(it);
                 ++invalidated;
                 continue;
@@ -907,10 +926,23 @@ namespace {
                 m.lighting_mode==cached.lighting_mode;
             uint64_t material_signature=0,source_signature=0;
             bool same=header_same;
-            if(same && full)
-                same=gpu_mesh_source_signature(
-                    m,cached.rgb,source_signature,nullptr,&material_signature) &&
-                    source_signature==cached.source_signature;
+            if(same && full) {
+                // Required source arrays are revalidated against *current*
+                // page state before invoking the cached-readability path.
+                same=m.num_vertices>=3 && m.num_vertices<=65536 &&
+                    m.num_faces>=1 && m.num_faces<=65536 &&
+                    gpu_mutation_span_readable(
+                        m.vertices,size_t(m.num_vertices)*3*sizeof(float)) &&
+                    gpu_mutation_span_readable(
+                        m.faces,size_t(m.num_faces)*sizeof(native_face)) &&
+                    (!cached.rgb || gpu_mutation_span_readable(
+                        cached.rgb,size_t(m.num_vertices)*3*sizeof(float)));
+                if(same)
+                    same=gpu_mesh_source_signature(
+                        m,cached.rgb,source_signature,nullptr,
+                        &material_signature) &&
+                        source_signature==cached.source_signature;
+            }
             else if(same)
                 same=gpu_mesh_material_signature(m,material_signature) &&
                     material_signature==cached.material_signature;
