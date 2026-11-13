@@ -47,3 +47,37 @@ for runs with the eviction change and the prior build.
 This change does **not** introduce fine-grained COG mesh mutation tracking.
 JK.dll mutation verbs still bump the global revision, so frequent unrelated
 edits may legitimately explain continued expensive source rehashing.
+
+## Targeted COG mesh-source invalidation (follow-up)
+
+The 16 wrapped JK.dll model verbs still advance the **original global**
+revision counter used by the precise Type-3 collision cache. GPU geometry
+snapshots now use a separate source generation, so clones, append operations,
+hierarchy reference changes and header-changing mesh swaps no longer force
+every cached mesh to hash its complete contents.
+
+In-place face material edits from `ChangeModelMaterial`,
+`ReplaceModelMaterial` and `ReplaceModelMeshMaterial` schedule one
+coalesced material-pointer scan at the next primary/offscreen 3DO lookup.
+Only CPU snapshots with actually changed face material references are
+discarded. `OverwriteModel` and `ReloadModel` conservatively schedule a
+coalesced full-source comparison, still discarding only changed snapshots.
+For mesh-slot replacements/clears, existing per-mesh header comparisons
+handle pointer/count changes. Geometry is not rebuilt until it is used.
+
+The 32-frame full-source audit remains: an unclassified in-place change
+switches the renderer back to per-frame hashing to protect correctness.
+The shader-facing GL resource IDs remain unique and pending draw instances
+retain their own shared geometry references.
+
+`PERF gpu_3do targeted_mutations` reports the number of coalesced scans,
+entries checked/invalidated, and average scan CPU cost. In the normal
+steady-state, global COG mutations should no longer inflate
+`hash_causes_total revision`. Before interpreting a performance improvement,
+check the selective-scan CPU cost too.
+
+The mutation effect table lives in `renderer/native_mesh_revision.hpp`.
+The implementation does not inspect COG argument stacks or assume every
+handler succeeded; consequently a material scan checks the resident cache
+rather than relying on an unverified model argument. For safety, the native
+memory of potential released meshes is revalidated before the scan.
