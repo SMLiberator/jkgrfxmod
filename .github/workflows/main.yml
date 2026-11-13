@@ -36,7 +36,10 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\cog_pyr_math.cpp /Fe:cog_pyr_math_test.exe
         cog_pyr_math_test.exe
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_cache_signature.cpp /Fe:gpu_3do_cache_signature_test.exe
-        gpu_3do_cache_signature_test.exe\n        cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_mesh_cache_eviction.cpp /Fe:gpu_mesh_cache_eviction_test.exe\n        gpu_mesh_cache_eviction_test.exe\n        python3 tests/gpu_mesh_cache_wiring.py
+        gpu_3do_cache_signature_test.exe
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_mesh_cache_eviction.cpp /Fe:gpu_mesh_cache_eviction_test.exe
+        gpu_mesh_cache_eviction_test.exe
+        python3 tests/gpu_mesh_cache_wiring.py
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_uv.cpp /Fe:gpu_3do_uv_test.exe
         gpu_3do_uv_test.exe
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
