@@ -42,6 +42,7 @@
     "use_gpu_cache": true,
     "experimental_3do_occlusion_culling": false,
     "gpu_3do_occlusion_query_budget": 24,
+  "gpu_3do_occlusion_min_triangles": 96,
     "experimental_planar_thing_discovery": false,
     "experimental_planar_reflection_capture": false,
     "planar_reflection_resolution_scale": 0.5,
