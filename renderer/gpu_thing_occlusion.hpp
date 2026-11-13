@@ -16,6 +16,7 @@
 namespace jkgm {
 class gpu_thing_occlusion_shader : public opengl_shader {
     gl::uniform_location_id right_,forward_,up_,origin_,projection_,bound_;
+    gl::uniform_location_id proxy_mode_,rect_ndc_,rect_forward_;
 public:
     explicit gpu_thing_occlusion_shader(fs::path const &root)
         :opengl_shader("gpu_thing_occlusion",
@@ -26,7 +27,10 @@ public:
          up_(gl::get_uniform_location(the_program,"view_up")),
          origin_(gl::get_uniform_location(the_program,"view_origin")),
          projection_(gl::get_uniform_location(the_program,"projection")),
-         bound_(gl::get_uniform_location(the_program,"center_radius")) {}
+         bound_(gl::get_uniform_location(the_program,"center_radius")),
+         proxy_mode_(gl::get_uniform_location(the_program,"proxy_mode")),
+         rect_ndc_(gl::get_uniform_location(the_program,"rect_ndc")),
+         rect_forward_(gl::get_uniform_location(the_program,"rect_forward")) {}
     void set_camera(gpu_3do_matrix34 const &v,float half_horizontal_fov,
                     float aspect,float far_plane) {
         gl::set_uniform_vector(right_,make_point(v[0],v[1],v[2],0.0f));
@@ -35,6 +39,14 @@ public:
         gl::set_uniform_vector(origin_,make_point(v[9],v[10],v[11],1.0f));
         gl::set_uniform_vector(projection_,make_point(
             half_horizontal_fov,aspect,1.0f/far_plane,0.0f));
+    }
+    void set_proxy_mode(int mode) {
+        gl::set_uniform_integer(proxy_mode_,mode);
+    }
+    void set_rect(gpu_thing_occlusion_screen_rect const &r) {
+        gl::set_uniform_vector(rect_ndc_,make_point(
+            r.left,r.right,r.bottom,r.top));
+        gl::set_uniform_float(rect_forward_,r.center_forward);
     }
     void set_bound(gpu_thing_occlusion_bound const &b) {
         gl::set_uniform_vector(bound_,make_point(
@@ -52,6 +64,7 @@ class gpu_thing_occlusion_queries {
     };
     std::unordered_map<uint64_t,record> entries_;
     uintptr_t world_=0;
+    unsigned proxy_mode_=0U;
     uint64_t submitted_=0,completed_=0,skipped_=0;
     bool invalidated_=false;
 public:
@@ -66,6 +79,12 @@ public:
         entries_.clear();world_=0;
     }
     void invalidate() { invalidated_=true; }
+    void set_proxy_mode(unsigned mode) {
+        if(proxy_mode_!=mode) {
+            clear();
+            proxy_mode_=mode;
+        }
+    }
     void set_world(uintptr_t world) {
         if(world_!=world || invalidated_) {
             clear();world_=world;invalidated_=false;
