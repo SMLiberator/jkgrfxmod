@@ -877,7 +877,8 @@ namespace {
     void gpu_mesh_cache_apply_mutations()
     {
         unsigned const effects=mesh_revision::take_pending_source_effects();
-        if(effects==mesh_revision::source_none || gpu_mesh_cache.empty())
+        if(effects==mesh_revision::source_none || gpu_mesh_cache.empty() ||
+           !mesh_revision::active())
             return;
         bool const full=(effects&mesh_revision::source_full)!=0U;
         bool const profiling=the_config && the_config->profile_renderer;
@@ -2196,8 +2197,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         if(revision_fastpath && audit_frame && header_unchanged &&
            it->second.source_checked_generation==current_generation &&
            it->second.source_signature!=signature) {
-            // A periodic audit caught a modification that bypassed every
-            // known JK.dll mutation verb. Switch back to exact old behavior.
+            // A periodic audit caught an unclassified in-place source edit.
+            // Switch back to full per-frame hashing for safety.
             mesh_revision::report_untracked();
         }
         if(!header_unchanged || it->second.source_signature!=signature) {
