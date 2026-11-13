@@ -28,6 +28,11 @@ namespace mesh_revision {
         switch(verb) {
             case 2U: case 3U: case 9U:
                 return source_materials; // in-place face.material edits
+            case 0U: case 11U:
+                // Player/model rebuilds commonly invoke these thousands of
+                // times. A single pending bit coalesces the whole burst;
+                // only changed cached meshes are refreshed on next use.
+                return source_full; // mesh slot source can change in place
             case 12U: case 13U:
                 return source_full; // overwrite/reload may alter contents in place
             default:
