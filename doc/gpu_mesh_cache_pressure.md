@@ -60,8 +60,13 @@ In-place face material edits from `ChangeModelMaterial`,
 `ReplaceModelMaterial` and `ReplaceModelMeshMaterial` schedule one
 coalesced material-pointer scan at the next primary/offscreen 3DO lookup.
 Only CPU snapshots with actually changed face material references are
-discarded. `OverwriteModel` and `ReloadModel` conservatively schedule a
-coalesced full-source comparison, still discarding only changed snapshots.
+discarded. `SetModelMesh` and `ClearModelMesh` (commonly issued repeatedly
+during a model rebuild), along with `OverwriteModel` and `ReloadModel`,
+schedule a coalesced full-source comparison at the next mesh-consumption
+boundary. Thousands of COG calls collapse to the same pending dirty bit
+until that point; only actually changed cached meshes are discarded.
+This boundary is before reading the model for rendering, not literally at
+the end of the JK frame: deferring beyond a draw could render stale geometry.
 For mesh-slot replacements/clears, existing per-mesh header comparisons
 handle pointer/count changes. Geometry is not rebuilt until it is used.
 
