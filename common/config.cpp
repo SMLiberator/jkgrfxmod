@@ -296,6 +296,21 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("use_gpu_cache")) {
             j.at("use_gpu_cache").get_to(rv->use_gpu_cache);
         }
+        if(j.contains("experimental_3do_occlusion_culling")) {
+            j.at("experimental_3do_occlusion_culling").get_to(
+                rv->experimental_3do_occlusion_culling);
+        }
+        if(j.contains("gpu_3do_occlusion_query_budget")) {
+            auto const &v=j.at("gpu_3do_occlusion_query_budget");
+            if(!v.is_number_integer())
+                throw std::runtime_error(
+                    "gpu_3do_occlusion_query_budget must be integer 1..64");
+            int const n=v.get<int>();
+            if(n<1 || n>64)
+                throw std::runtime_error(
+                    "gpu_3do_occlusion_query_budget must be between 1 and 64");
+            rv->gpu_3do_occlusion_query_budget=n;
+        }
         if(j.contains("experimental_planar_thing_discovery")) {
             j.at("experimental_planar_thing_discovery").get_to(
                 rv->experimental_planar_thing_discovery);

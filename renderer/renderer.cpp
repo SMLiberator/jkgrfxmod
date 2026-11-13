@@ -12,6 +12,7 @@
 #include "offscreen_capture_projection.hpp"
 #include "planar_reflection_capture_shader.hpp"
 #include "planar_receiver_visibility.hpp"
+#include "gpu_thing_occlusion.hpp"
 #include "saber_light_rgb.hpp"
 #include "thing_light_rgb.hpp"
 #include "gpu_3do_uv.hpp"
@@ -596,6 +597,10 @@ namespace jkgm {
         // Query answers are asynchronous; never stall the driver to read them.
         std::unique_ptr<planar_receiver_visibility> planar_receiver_queries;
         std::unique_ptr<planar_receiver_visibility_shader> planar_receiver_program;
+        // Opt-in main-view Thing sphere occlusion; no native/shadow/camera skip.
+        std::unique_ptr<gpu_thing_occlusion_queries> thing_occlusion_queries;
+        std::unique_ptr<gpu_thing_occlusion_shader> thing_occlusion_program;
+        GLuint thing_occlusion_proxy_vao=0;
         // Asynchronous offscreen GPU timestamps: world, models, mipmaps.
         // Read only completed frames, with no GL query waits on the hot path.
         presentation_gpu_profile planar_gpu_queries;
@@ -1237,6 +1242,12 @@ namespace jkgm {
                 planar_capture_target.reset();
                 planar_receiver_program.reset();
                 planar_receiver_queries.reset();
+                thing_occlusion_program.reset();
+                thing_occlusion_queries.reset();
+                if(thing_occlusion_proxy_vao) {
+                    glDeleteVertexArrays(1,&thing_occlusion_proxy_vao);
+                    thing_occlusion_proxy_vao=0;
+                }
                 planar_gpu_queries.release();
                 present_gpu_queries.release();
                 scene_gpu_queries.release();
@@ -1257,6 +1268,7 @@ namespace jkgm {
                 frame_has_exempt_gpu=false;
                 planar_capture_ready=false;
                 if(planar_receiver_queries)planar_receiver_queries->invalidate();
+                if(thing_occlusion_queries)thing_occlusion_queries->invalidate();
                 planar_capture_plane.reset();
                 planar_plane_world=0;
                 planar_plane_world_revision=0;
@@ -3792,6 +3804,14 @@ namespace jkgm {
             auto &modelviews=ordinary_pass
                 ?ordinary_modelviews:isolated_modelviews;
             draws.clear();
+            if(!transparent && ordinary_pass && !decals_only &&
+               the_config->experimental_3do_occlusion_culling &&
+               thing_occlusion_queries) {
+                thing_occlusion_queries->set_world(
+                    world_cache_target && world_cache_target->ready
+                       ?world_cache_target->loaded_world:0U);
+                thing_occlusion_queries->poll();
+            }
             for(auto &bucket:sprite_buckets)bucket.draws.clear();
             sprite_lookup.clear();
             size_t used_sprite_buckets=0;
@@ -3810,6 +3830,21 @@ namespace jkgm {
             if(!reuse_alpha) for(auto const &inst:instances) {
                 if(!inst.geometry || inst.shadow_only ||
                    (!post_exempt && inst.is_projected_decal!=decals_only))
+                    continue;
+                // Only skip MAIN view GPU draw setup, never native JK
+                // traversal, reflected cameras, sun/shadow atlases or
+                // projected decals. Unusable/stale query records fail open.
+                bool const occlusion_eligible=ordinary_pass &&
+                    !decals_only && the_config->experimental_3do_occlusion_culling &&
+                    thing_occlusion_queries && inst.shadow_owner &&
+                    inst.owning_thing_world_position_valid &&
+                    !inst.camera_hud && !inst.skybox_vertex_lighting &&
+                    !inst.is_sprite_quad && !inst.transient_procedural &&
+                    !inst.saber_trail_active;
+                if(occlusion_eligible &&
+                   thing_occlusion_queries->hidden(
+                       inst.shadow_owner,inst.owning_thing_world_position,
+                       cam,gpu_3do_present_serial))
                     continue;
                 modelviews.push_back(gpu_3do_native_modelview(native_view,inst.transform));
                 std::array<float,3> local_eye{};
@@ -4823,6 +4858,9 @@ namespace jkgm {
             // GPU preview changes the active GL shader. Render it LAST within
             // the opaque pass, after all batches that expect game_opaque_pass.
             draw_gpu_3do_preview(false);
+            // Check main-camera 3DO spheres against the completed opaque
+            // depth without binding any secondary-camera visibility state.
+            query_gpu_thing_occlusion();
             // The opaque G-buffer now includes ALL 3DO depth. Ask whether
             // any pixel of the selected reflective world plane would pass
             // that depth test. The result is consumed asynchronously by a
@@ -4845,6 +4883,7 @@ namespace jkgm {
             auto const &cache=*world_cache_target;
             if(cache.frame_render_candidates.empty()) {
                 if(planar_receiver_queries)planar_receiver_queries->invalidate();
+                if(thing_occlusion_queries)thing_occlusion_queries->invalidate();
                 return; // no receiver proof: fail open, capture normally
             }
             auto const &cam=frame_world_cache_camera;
@@ -4888,6 +4927,7 @@ namespace jkgm {
             }
             if(receivers.empty()) {
                 if(planar_receiver_queries)planar_receiver_queries->invalidate();
+                if(thing_occlusion_queries)thing_occlusion_queries->invalidate();
                 return; // invalid staging cannot prove occlusion
             }
             if(!planar_receiver_queries)
@@ -4922,6 +4962,157 @@ namespace jkgm {
                     GL_UNSIGNED_INT,reinterpret_cast<void const *>(
                         uintptr_t(face->first_index)*sizeof(uint32_t)));
             visibility.end();
+        }
+
+        // Low-cost GPU-only main-camera visibility experiment. We query
+        // authored rdModel3 radii, not animated mesh poses. Query cost is
+        // bounded and old results NEVER affect the independent reflection
+        // camera, sun shadows or native JK callbacks.
+        void query_gpu_thing_occlusion()
+        {
+            if(!the_config->experimental_3do_occlusion_culling ||
+               !the_config->use_gpu_cache ||
+               mode!=renderer_mode::ingame ||
+               !frame_gpu_3do_camera.valid ||
+               !frame_gpu_3do_camera.perspective ||
+               !world_cache_target || !world_cache_target->ready)
+                return;
+            if(!engine_material_debug::matches_tested_executable())return;
+            auto const &camera=frame_gpu_3do_camera;
+            float const aspect=float(get<x>(internal_scr_res_f))/
+                               float(get<y>(internal_scr_res_f));
+            float const half_fov=std::tan(
+                camera.camera.fov*0.008726646259971648f);
+            if(!std::isfinite(aspect) || aspect<=0.0f ||
+               !std::isfinite(half_fov) || half_fov<=0.0f ||
+               !std::isfinite(camera.far_plane) ||
+               camera.far_plane<=0.1f)return;
+            if(!thing_occlusion_queries)
+                thing_occlusion_queries=
+                    std::make_unique<gpu_thing_occlusion_queries>();
+            auto &queries=*thing_occlusion_queries;
+            queries.set_world(world_cache_target->loaded_world);
+            queries.poll();
+            queries.prune(gpu_3do_present_serial);
+            struct candidate {
+                uint64_t owner=0;
+                std::array<float,3> position{};
+                size_t triangles=0;
+            };
+            // Query models with significant triangle cost; sprites, HUDs,
+            // 0x20 skyboxes and transient/decals never enter this shortcut.
+            std::unordered_map<uint64_t,candidate> grouped;
+            for(auto const &inst:frame_gpu_3do_instances) {
+                if(!inst.geometry || !inst.shadow_owner ||
+                   inst.shadow_only || inst.camera_hud ||
+                   inst.skybox_vertex_lighting || inst.is_projected_decal ||
+                   inst.is_sprite_quad || inst.transient_procedural ||
+                   inst.saber_trail_active ||
+                   !inst.owning_thing_world_position_valid)
+                    continue;
+                auto &c=grouped[inst.shadow_owner];
+                c.owner=inst.shadow_owner;
+                c.position=inst.owning_thing_world_position;
+                for(auto const &g:inst.geometry->groups)
+                    c.triangles+=g.count/3U;
+            }
+            std::vector<candidate> expensive;
+            expensive.reserve(grouped.size());
+            for(auto const &p:grouped)
+                if(p.second.triangles>=500U)
+                    expensive.push_back(p.second);
+            if(expensive.empty())return;
+            std::sort(expensive.begin(),expensive.end(),
+                [](candidate const &a,candidate const &b) {
+                    if(a.triangles!=b.triangles)
+                        return a.triangles>b.triangles;
+                    return a.owner<b.owner;
+                });
+            if(!thing_occlusion_program)
+                thing_occlusion_program=
+                    std::make_unique<gpu_thing_occlusion_shader>(
+                        the_config->data_path);
+            if(!thing_occlusion_proxy_vao)
+                glGenVertexArrays(1,&thing_occlusion_proxy_vao);
+            if(!thing_occlusion_proxy_vao)return;
+            offscreen_capture_gl_scope restore;
+            glDisable(GL_BLEND);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_STENCIL_TEST);
+            glDisable(GL_CULL_FACE);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LEQUAL);
+            glDepthMask(GL_FALSE);
+            glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE);
+            auto &program=*thing_occlusion_program;
+            program.use_program();
+            program.set_camera(camera.native_view,half_fov,aspect,
+                               camera.far_plane);
+            glBindVertexArray(thing_occlusion_proxy_vao);
+            auto read=[](uintptr_t at,void *dst,size_t count) {
+                return engine_material_debug::read_bytes(at,dst,count);
+            };
+            size_t issued=0;
+            auto submit=[&](candidate const &item) {
+                if(issued>=size_t(the_config->gpu_3do_occlusion_query_budget))
+                    return;
+                uintptr_t const thing=uintptr_t(uint32_t(item.owner>>32));
+                uint32_t signature=0,model=0;
+                float radius=0.0f;
+                std::array<float,9> basis{};
+                if(!planar_reflection_valid_native_pointer(thing) ||
+                   !read(thing+0x74U,&signature,4) ||
+                   signature!=uint32_t(item.owner) ||
+                   !read(thing+0xc8U,&model,4) ||
+                   !planar_reflection_valid_native_pointer(model) ||
+                   !read(uintptr_t(model)+0x5cU,&radius,4) ||
+                   !read(thing+0x88U,basis.data(),sizeof(basis)))
+                    return;
+                float const scale=planar_reflection_radius_scale(basis);
+                gpu_thing_occlusion_bound bound{};
+                bound.center=item.position;
+                // Authored radius is NOT expanded by animated pose changes.
+                // A small conservative guard band accommodates rounding.
+                bound.radius=radius*scale*1.1f+0.15f;
+                bound.valid=true;
+                if(!gpu_thing_occlusion_bound_valid(bound) ||
+                   !std::isfinite(scale) || scale<=0.0f ||
+                   gpu_thing_occlusion_camera_inside(bound,camera.camera))
+                    return;
+                if(!queries.begin(item.owner,bound,camera.camera,
+                                  gpu_3do_present_serial))
+                    return;
+                program.set_bound(bound);
+                glDrawArrays(GL_TRIANGLES,0,36);
+                queries.end();
+                ++issued;
+            };
+            // Refresh hidden Things first, to recover promptly when an
+            // occluder moves while the tested Thing remains stationary.
+            for(auto const &item:expensive) {
+                if(issued>=size_t(the_config->gpu_3do_occlusion_query_budget/2))
+                    break;
+                if(queries.needs_retest(item.owner))submit(item);
+            }
+            // Rotate cold query candidates. We don't need 600 queries
+            // every frame for a level containing 600 static buildings.
+            size_t const start=(
+                gpu_3do_present_serial*
+                size_t(the_config->gpu_3do_occlusion_query_budget))%
+                expensive.size();
+            for(size_t i=0;i<expensive.size() &&
+                issued<size_t(the_config->gpu_3do_occlusion_query_budget);++i)
+                submit(expensive[(start+i)%expensive.size()]);
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("3DO OCCLUSION candidates=",expensive.size(),
+                    " queried=",issued," query_budget=",
+                    the_config->gpu_3do_occlusion_query_budget,
+                    " records=",queries.entries(),
+                    " submitted_total=",queries.submitted(),
+                    " completed_total=",queries.completed(),
+                    " skipped_instance_total=",queries.skipped());
         }
 
         void release_spotlight_images()

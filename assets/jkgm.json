@@ -40,6 +40,8 @@
     "profile_renderer": false,
     "profile_audio": false,
     "use_gpu_cache": true,
+    "experimental_3do_occlusion_culling": false,
+    "gpu_3do_occlusion_query_budget": 24,
     "experimental_planar_thing_discovery": false,
     "experimental_planar_reflection_capture": false,
     "planar_reflection_resolution_scale": 0.5,
