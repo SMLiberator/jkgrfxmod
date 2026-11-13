@@ -1,5 +1,6 @@
 #include <cassert>
 #include <cstddef>
+#include <initializer_list>
 
 // This small, pure policy test runs independently of JK.dll and OpenGL.
 // The COG interpreter ABI is Windows cdecl; only the policy is exercised.
