@@ -311,6 +311,17 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                     "gpu_3do_occlusion_query_budget must be between 1 and 64");
             rv->gpu_3do_occlusion_query_budget=n;
         }
+        if(j.contains("gpu_3do_occlusion_min_triangles")) {
+            auto const &v=j.at("gpu_3do_occlusion_min_triangles");
+            if(!v.is_number_integer())
+                throw std::runtime_error(
+                    "gpu_3do_occlusion_min_triangles must be integer 1..50000");
+            int const n=v.get<int>();
+            if(n<1 || n>50000)
+                throw std::runtime_error(
+                    "gpu_3do_occlusion_min_triangles must be between 1 and 50000");
+            rv->gpu_3do_occlusion_min_triangles=n;
+        }
         if(j.contains("experimental_planar_thing_discovery")) {
             j.at("experimental_planar_thing_discovery").get_to(
                 rv->experimental_planar_thing_discovery);
