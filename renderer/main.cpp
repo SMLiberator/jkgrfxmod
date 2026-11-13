@@ -2668,6 +2668,10 @@ jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
     if(the_config && the_config->profile_renderer) {
         static unsigned frames=0;
         static gpu_3do_native_stats window{};
+        static mesh_revision::mutator_counts mutation_window{};
+        auto const mutations=mesh_revision::take_mutator_counts();
+        for(size_t i=0;i<mutations.size();++i)
+            mutation_window[i]+=mutations[i];
         ++frames;
         window.geometry_native+=sample.geometry_native;
         window.geo_thing_not_full+=sample.geo_thing_not_full;
@@ -2693,8 +2697,21 @@ jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
                      " material=",window.material_native,
                      " lighting=",window.lighting_native,
                      " nonrigid_lit_GPU=",window.nonrigid_lit_cached);
+            uint64_t mutation_total=0;
+            std::ostringstream mutation_detail;
+            for(size_t i=0;i<mutation_window.size();++i) {
+                auto const count=mutation_window[i];
+                mutation_total+=count;
+                if(count)
+                    mutation_detail<<" "<<mesh_revision::mutator_name(i)
+                                   <<"="<<count;
+            }
+            LOG_INFO("PERF JK.dll model_mutators frames=",frames,
+                     " total=",mutation_total,mutation_detail.str(),
+                     " NOTE=each_call_bumps_global_revision_once");
             frames=0;
             window={};
+            mutation_window.fill(0U);
         }
     }
     return sample;
