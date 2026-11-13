@@ -284,6 +284,7 @@ namespace {
         int num_vertices=0,num_faces=0,num_uvs=0;
         int lighting_mode=0;
         uint64_t source_signature=0,source_checked_frame=0;
+        uint64_t material_signature=0; // face references, not model transforms
         uint64_t source_checked_generation=0,last_audit_frame=0;
         uint64_t last_used_frame=0; // primary + planar camera references
         char const *snapshot_failure=nullptr; // memoized failed snapshots
@@ -765,13 +766,35 @@ namespace {
         }
     };
 
+    // A cheap face-material-only scan can isolate in-place COG material
+    // replacements. Only changed rdMesh snapshots are discarded; no global
+    // source revision is needed. Full source hashing remains as an audit.
+    bool gpu_mesh_material_signature(native_mesh const &m,uint64_t &value)
+    {
+        if(m.num_faces<0 || m.num_faces>65536 ||
+           (m.num_faces && !gpu_span_readable(
+                m.faces,size_t(m.num_faces)*sizeof(native_face))))
+            return false;
+        jkgm::gpu_3do_byte_signature h;
+        h.add(m.num_faces);
+        for(int i=0;i<m.num_faces;++i) {
+            native_face f{};
+            std::memcpy(&f,m.faces+size_t(i)*sizeof(f),sizeof(f));
+            h.add(f.material);
+            h.add(f.cel);
+        }
+        value=h.value;
+        return true;
+    }
+
     // A full source signature once per *unique mesh per frame* detects
     // in-place COG/JK.dll changes without relying on a particular verb list.
     // All array reads are guarded; the old cache never noticed writes when
     // allocations, face/vertex counts, and pointers stayed identical.
     bool gpu_mesh_source_signature(native_mesh const &m,
                                    float const *vertex_rgb,uint64_t &value,
-                                   char const **failure=nullptr) {
+                                   char const **failure=nullptr,
+                                   uint64_t *material_value=nullptr) {
         auto const reject=[&](char const *reason) {
             if(failure)*failure=reason;
             return false;
@@ -786,6 +809,8 @@ namespace {
             return reject("unreadable_required_mesh_arrays");
 
         jkgm::gpu_3do_byte_signature h;
+        jkgm::gpu_3do_byte_signature materials;
+        materials.add(m.num_faces);
         h.add(m.vertices);h.add(m.faces);h.add(m.uvs);
         h.add(m.vertex_lights);h.add(m.normals);h.add(vertex_rgb);
         h.add(m.num_vertices);h.add(m.num_faces);h.add(m.num_uvs);
@@ -819,6 +844,7 @@ namespace {
             h.add(f.num);h.add(f.type);h.add(f.geo);h.add(f.light);
             h.add(f.count);h.add(f.pos_indices);
             h.add(f.uv_indices);h.add(f.material);h.add(f.cel);
+            materials.add(f.material);materials.add(f.cel);
             h.add(f.uv_x);h.add(f.uv_y);h.add(f.extra_light);
             h.add_bytes(f.normal,sizeof(f.normal));
             // Modes 0..2 have no triangles in JK hardware rendering.
@@ -837,7 +863,65 @@ namespace {
                 h.add_bytes(f.uv_indices,bytes);
         }
         value=h.value;
+        if(material_value)*material_value=materials.value;
         return true;
+    }
+
+    // Consume coalesced COG edits before either the main camera or the
+    // independent planar camera looks up a CPU snapshot. Scan material
+    // references only for in-place MAT edits; resort to full source bytes
+    // for rare model overwrite/reload operations. Never invalidate an
+    // unchanged mesh because another model was edited.
+    void gpu_mesh_cache_apply_mutations()
+    {
+        unsigned const effects=mesh_revision::take_pending_source_effects();
+        if(effects==mesh_revision::source_none || gpu_mesh_cache.empty())
+            return;
+        bool const full=(effects&mesh_revision::source_full)!=0U;
+        bool const profiling=the_config && the_config->profile_renderer;
+        auto const began=profiling ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
+        uint64_t scanned=0,invalidated=0;
+        for(auto it=gpu_mesh_cache.begin();it!=gpu_mesh_cache.end();) {
+            ++scanned;
+            native_mesh m{};
+            if(!gpu_span_readable(it->first,sizeof(m))) {
+                it=gpu_mesh_cache.erase(it);
+                ++invalidated;
+                continue;
+            }
+            std::memcpy(&m,it->first,sizeof(m));
+            auto const &cached=it->second;
+            // A freed or replaced rdMesh slot may already have been
+            // repurposed. Discard on header mismatch before touching its
+            // previous vertex/face buffers.
+            bool const header_same=
+                m.vertices==cached.vertices && m.faces==cached.faces &&
+                m.uvs==cached.uvs && m.normals==cached.normals &&
+                m.vertex_lights==cached.vertex_lights &&
+                m.num_vertices==cached.num_vertices &&
+                m.num_faces==cached.num_faces && m.num_uvs==cached.num_uvs &&
+                m.lighting_mode==cached.lighting_mode;
+            uint64_t material_signature=0,source_signature=0;
+            bool same=header_same;
+            if(same && full)
+                same=gpu_mesh_source_signature(
+                    m,cached.rgb,source_signature,nullptr,&material_signature) &&
+                    source_signature==cached.source_signature;
+            else if(same)
+                same=gpu_mesh_material_signature(m,material_signature) &&
+                    material_signature==cached.material_signature;
+            if(!same) {
+                it=gpu_mesh_cache.erase(it);
+                ++invalidated;
+            } else ++it;
+        }
+        if(profiling) {
+            ++gpu_native_stats.mutation_scans;
+            gpu_native_stats.mutation_scanned+=scanned;
+            gpu_native_stats.mutation_invalidated+=invalidated;
+            gpu_native_stats.mutation_ns+=elapsed_native_ns(began);
+        }
     }
 
     std::shared_ptr<jkgm::gpu_3do_geometry const>
@@ -1939,6 +2023,7 @@ bool native_mesh_overlaps_shadow_light(native_mesh const &mesh,
 bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                               bool force_shadow_only)
 {
+    gpu_mesh_cache_apply_mutations();
     if(active_native_model_camera_hud)
         gpu_last_camera_hud_failure.clear();
     // The exact RGB/smooth-normal JK patch has an additional float3*
@@ -2072,7 +2157,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         it->second.num_uvs==m.num_uvs &&
         it->second.lighting_mode==m.lighting_mode;
     bool const revision_fastpath=mesh_revision::active();
-    uint64_t const current_generation=mesh_revision::current();
+    uint64_t const current_generation=mesh_revision::source_current();
     bool const audit_frame=(gpu_frame_serial%32U)==0U;
     bool const should_hash=!header_unchanged ||
         (revision_fastpath
@@ -2088,10 +2173,10 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         bool const profiling=the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
-        uint64_t signature=0;
+        uint64_t signature=0,material_signature=0;
         char const *source_failure=nullptr;
         bool const readable=gpu_mesh_source_signature(
-            m,vertex_rgb,signature,&source_failure);
+            m,vertex_rgb,signature,&source_failure,&material_signature);
         if(profiling) {
             ++gpu_native_stats.source_checks;
             gpu_native_stats.source_ns+=elapsed_native_ns(start);
@@ -2133,6 +2218,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             updated.num_uvs=m.num_uvs;
             updated.lighting_mode=m.lighting_mode;
             updated.source_signature=signature;
+            updated.material_signature=material_signature;
             updated.source_checked_frame=gpu_frame_serial;
             updated.source_checked_generation=current_generation;
             updated.last_audit_frame=audit_frame ? gpu_frame_serial : 0U;
@@ -2402,6 +2488,7 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
     gpu_3do_matrix34 const *reflected_view)
 {
     planar_reflection_offscreen_gpu out{};
+    gpu_mesh_cache_apply_mutations();
     if(!the_config || !the_config->use_gpu_cache ||
        !engine_material_debug::matches_tested_executable() ||
        max_things==0U)return out;
@@ -2524,7 +2611,7 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 it->second.num_uvs==mesh.num_uvs &&
                 it->second.lighting_mode==mesh.lighting_mode;
             bool const revision_fastpath=mesh_revision::active();
-            uint64_t const generation=mesh_revision::current();
+            uint64_t const generation=mesh_revision::source_current();
             bool const audit_frame=(gpu_frame_serial%32U)==0U;
             bool const cached_geometry_ready=header_unchanged &&
                 it->second.geometry!=nullptr;
@@ -2536,6 +2623,8 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                  : it->second.source_checked_frame!=gpu_frame_serial);
             uint64_t signature=it!=gpu_mesh_cache.end()
                 ?it->second.source_signature:0U;
+            uint64_t material_signature=it!=gpu_mesh_cache.end()
+                ?it->second.material_signature:0U;
             if(should_hash) {
                 gpu_mesh_hash_reason(it!=gpu_mesh_cache.end(),
                                      cached_geometry_ready,
@@ -2545,7 +2634,7 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                                      generation);
                 ++out.stats.source_hashes;
                 if(!gpu_mesh_source_signature(
-                       mesh,rgb,signature,nullptr)) {
+                       mesh,rgb,signature,nullptr,&material_signature)) {
                     ++out.stats.empty_or_invalid_meshes;
                     incomplete=true;
                     continue;
@@ -2590,8 +2679,9 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 entry.num_uvs=mesh.num_uvs;
                 entry.lighting_mode=mesh.lighting_mode;
                 entry.source_signature=signature;
+                entry.material_signature=material_signature;
                 entry.source_checked_frame=gpu_frame_serial;
-                entry.source_checked_generation=mesh_revision::current();
+                entry.source_checked_generation=mesh_revision::source_current();
                 entry.last_audit_frame=audit_frame ? gpu_frame_serial : 0U;
                 entry.last_used_frame=gpu_frame_serial;
                 entry.id=next_gpu_id++;
