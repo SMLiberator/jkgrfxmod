@@ -46,7 +46,7 @@ offscreen=loader.split("jkgm::acquire_planar_reflection_offscreen_gpu(",1)[1].sp
     "jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()",1)[0]
 for needle in ("bool const header_unchanged=",
                "bool const revision_fastpath=mesh_revision::active()",
-               "generation=mesh_revision::current()",
+               "generation=mesh_revision::source_current()",
                "gpu_frame_serial%32U",
                "source_checked_generation!=generation",
                "last_audit_frame!=gpu_frame_serial",
