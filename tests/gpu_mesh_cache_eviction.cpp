@@ -18,7 +18,7 @@ int main()
     cache_type cache;
     for(int i=0;i<8;++i) {
         entry e{};
-        e.last_used_frame=i<4?10U:197U;
+        e.last_used_frame=i<4?10U:199U;
         e.geometry=std::make_shared<int const>(i+1);
         cache.emplace(&keys[i],std::move(e));
     }
