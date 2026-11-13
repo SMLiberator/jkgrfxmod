@@ -6839,6 +6839,7 @@ namespace {
     using cog_pop_int_type = int(__cdecl *)(void *ctx);
     using cog_pop_vector_type = void(__cdecl *)(void *ctx, float *out_xyz);
     using cog_pop_thing_type = void *(__cdecl *)(void *ctx);
+    using cog_pop_model_type = void *(__cdecl *)(void *ctx);
     using cog_push_float_type = void(__cdecl *)(void *ctx, float value);
     using cog_push_int_type = void(__cdecl *)(void *ctx, int value);
     using cog_push_vector_type = void(__cdecl *)(void *ctx, float const *xyz);
@@ -6847,6 +6848,9 @@ namespace {
     constexpr uintptr_t pop_int_address = 0x4E2850;
     constexpr uintptr_t pop_vector_address = 0x4E2970;
     constexpr uintptr_t pop_thing_address = 0x4E2B50;
+    // JK.dll GetModelRadius/GetModelMeshRadius both call this JKGM
+    // sithCogExec_PopModel3 address. Confirmed against the supplied DLL.
+    constexpr uintptr_t pop_model_address = 0x4E3140;
     constexpr uintptr_t push_float_address = 0x4E3650;
     constexpr uintptr_t push_int_address = 0x4E35D0;
     constexpr uintptr_t push_vector_address = 0x4E36E0;
@@ -6857,6 +6861,8 @@ namespace {
         reinterpret_cast<cog_pop_vector_type>(pop_vector_address);
     cog_pop_thing_type const cog_pop_thing =
         reinterpret_cast<cog_pop_thing_type>(pop_thing_address);
+    cog_pop_model_type const cog_pop_model =
+        reinterpret_cast<cog_pop_model_type>(pop_model_address);
     cog_push_float_type const cog_push_float =
         reinterpret_cast<cog_push_float_type>(push_float_address);
     cog_push_int_type const cog_push_int = reinterpret_cast<cog_push_int_type>(push_int_address);
@@ -9707,6 +9713,72 @@ namespace {
         cog_push_int(ctx,hud_ammo_selection.get());
     }
 
+    // JK.dll's getters read rdModel3.radius at +0x5c and the first
+    // GeoSet's rdMesh.radius at +0x54 in a 0x70-byte mesh record.
+    // The model is resolved through the very same native PopModel3 helper,
+    // so CloneModel() entries remain independent of their source model.
+    // These are model attributes, NEVER SithThing size/movesize.
+    bool cog_write_model_radius_field(uintptr_t address,float radius)
+    {
+        if(!std::isfinite(radius) || radius<0.0f ||
+           !jkgm::engine_material_debug::matches_tested_executable() ||
+           address<0x10000U || address>0x7ff00000U)
+            return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if(VirtualQuery(reinterpret_cast<void const *>(address),&mbi,
+                        sizeof(mbi))==0 || mbi.State!=MEM_COMMIT ||
+           (mbi.Protect&(PAGE_GUARD|PAGE_NOACCESS)))
+            return false;
+        DWORD const protection=mbi.Protect&0xffU;
+        if(protection!=PAGE_READWRITE && protection!=PAGE_WRITECOPY &&
+           protection!=PAGE_EXECUTE_READWRITE &&
+           protection!=PAGE_EXECUTE_WRITECOPY)
+            return false;
+        uintptr_t const start=reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+        uintptr_t const end=start+mbi.RegionSize;
+        if(end<start || address<start || address>end ||
+           end-address<sizeof(radius))
+            return false;
+        std::memcpy(reinterpret_cast<void *>(address),&radius,sizeof(radius));
+        return true;
+    }
+
+    // SetModelRadius(model, radius). Exact counterpart of JK.dll's
+    // GetModelRadius: callers should CloneModel() first for per-chunk bounds.
+    void __cdecl cog_set_model_radius(void *ctx)
+    {
+        float const radius=cog_pop_float(ctx);
+        void *const model=cog_pop_model(ctx);
+        if(!model)return;
+        uintptr_t const base=reinterpret_cast<uintptr_t>(model);
+        if(!cog_write_model_radius_field(base+0x5cU,radius))
+            LOG_WARNING("SetModelRadius rejected invalid model/radius");
+    }
+
+    // SetModelMeshRadius(model, mesh_index, radius). Matches JK.dll's
+    // GetModelMeshRadius: mesh_index selects GeoSet 0, NOT all GeoSets.
+    void __cdecl cog_set_model_mesh_radius(void *ctx)
+    {
+        float const radius=cog_pop_float(ctx);
+        int const mesh_index=cog_pop_int(ctx);
+        void *const model=cog_pop_model(ctx);
+        if(!model || mesh_index<0 || !std::isfinite(radius) || radius<0.0f)
+            return;
+        uintptr_t const base=reinterpret_cast<uintptr_t>(model);
+        uint32_t num_geos=0,mesh_count=0,meshes=0;
+        using jkgm::engine_material_debug::read_object;
+        if(!read_object(base+0x44U,num_geos) || num_geos==0 ||
+           !read_object(base+0x24U,mesh_count) ||
+           !read_object(base+0x28U,meshes) || !meshes ||
+           mesh_count>65536U || uint32_t(mesh_index)>=mesh_count)
+            return;
+        uint64_t const address=uint64_t(meshes)+
+            uint64_t(uint32_t(mesh_index))*0x70U+0x54U;
+        if(address>0x7ff00000U ||
+           !cog_write_model_radius_field(uintptr_t(address),radius))
+            LOG_WARNING("SetModelMeshRadius rejected invalid mesh/radius");
+    }
+
     struct cog_verb_entry {
         char const *name;
         cog_handler_type handler;
@@ -9797,6 +9869,8 @@ namespace {
         cog_verb_entry{"setmaterialalbedo", cog_set_material_albedo},
         cog_verb_entry{"resetmaterialalbedo", cog_reset_material_albedo},
         cog_verb_entry{"setmaterialcolor", cog_set_material_color},
+        cog_verb_entry{"setmodelradius", cog_set_model_radius},
+        cog_verb_entry{"setmodelmeshradius", cog_set_model_mesh_radius},
         cog_verb_entry{"resetmaterialcolor", cog_reset_material_color},
         cog_verb_entry{"setspriteinfo", cog_set_sprite_info},
         cog_verb_entry{"getspriteinfo", cog_get_sprite_info},
@@ -9874,7 +9948,7 @@ namespace {
             register_verb(ctx, verb.handler, verb.name);
         }
 
-        LOG_DEBUG("Registered math, fog, sun, spotlight, saber light, post-processing, material, SPR, AI and ThingNode attachment COG verbs");
+        LOG_DEBUG("Registered math, fog, sun, spotlight, saber light, post-processing, material/model radius, SPR, AI and ThingNode attachment COG verbs");
     }
 }
 
