@@ -13,6 +13,23 @@ settings=json.loads(read("assets/jkgm.json"))
 assert settings["experimental_3do_occlusion_culling"] is False
 assert settings["gpu_3do_occlusion_query_budget"]==24
 assert settings["gpu_3do_occlusion_min_triangles"]==96
+assert settings["gpu_3do_occlusion_proxy_mode"]==0
+assert "gpu_3do_occlusion_proxy_mode must be between 0 and 1" in config
+assert "proxy_mode=the_config->gpu_3do_occlusion_proxy_mode" in renderer
+assert "queries.set_proxy_mode(unsigned(proxy_mode))" in renderer
+assert "program.set_proxy_mode(proxy_mode)" in renderer
+assert "gpu_thing_occlusion_project_sphere_rect(" in renderer
+assert "glDrawArrays(GL_TRIANGLES,0,6)" in renderer
+assert "glDrawArrays(GL_TRIANGLES,0,36)" in renderer
+assert "bound.radius=radius*scale;" in renderer
+assert "if(proxy_mode==1)" in renderer
+assert "rect_ndc" in shader and "rect_forward" in shader
+assert "rect_corners[6]" in shader and "proxy_mode==1" in shader
+assert "struct gpu_thing_occlusion_screen_rect" in math
+assert "thing_occlusion_gpu_timers.timestamp(0U,true)" in renderer
+assert "thing_occlusion_gpu_timers.timestamp(0U,false)" in renderer
+assert "3DO OCCLUSION proxy_perf mode=" in renderer
+
 assert "gpu_3do_occlusion_query_budget must be between 1 and 64" in config
 assert "gpu_3do_occlusion_min_triangles must be between 1 and 50000" in config
 assert "glBeginQuery(GL_ANY_SAMPLES_PASSED" in header
