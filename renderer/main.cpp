@@ -936,7 +936,14 @@ namespace {
                     gpu_mutation_span_readable(
                         m.faces,size_t(m.num_faces)*sizeof(native_face)) &&
                     (!cached.rgb || gpu_mutation_span_readable(
-                        cached.rgb,size_t(m.num_vertices)*3*sizeof(float)));
+                        cached.rgb,size_t(m.num_vertices)*3*sizeof(float))) &&
+                    (!m.uvs || m.num_uvs<=0 || m.num_uvs>65536 ||
+                     gpu_mutation_span_readable(
+                        m.uvs,size_t(m.num_uvs)*2*sizeof(float))) &&
+                    (!m.vertex_lights || gpu_mutation_span_readable(
+                        m.vertex_lights,size_t(m.num_vertices)*sizeof(float))) &&
+                    (!m.normals || gpu_mutation_span_readable(
+                        m.normals,size_t(m.num_vertices)*3*sizeof(float)));
                 if(same)
                     same=gpu_mesh_source_signature(
                         m,cached.rgb,source_signature,nullptr,
