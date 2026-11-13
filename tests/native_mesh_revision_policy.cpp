@@ -19,13 +19,17 @@ int main()
                   "ReplaceModelMaterial edits face material pointers");
     static_assert(source_effect_for(9U)==source_materials,
                   "ReplaceModelMeshMaterial edits face material pointers");
+    static_assert(source_effect_for(0U)==source_full,
+                  "SetModelMesh may overwrite an existing rdMesh slot");
+    static_assert(source_effect_for(11U)==source_full,
+                  "ClearModelMesh can invalidate existing mesh contents");
     static_assert(source_effect_for(12U)==source_full,
                   "OverwriteModel can replace existing source bytes");
     static_assert(source_effect_for(13U)==source_full,
                   "ReloadModel can replace existing source bytes");
-    // Clones and appended resources are new cache keys. Mesh/node swaps
-    // are caught by per-rdMesh header verification, not global hashing.
-    for(std::size_t index: {0U,1U,4U,5U,6U,7U,8U,10U,11U,14U,15U})
+    // Clones and appended resources are new cache keys. Pure node swaps
+    // and structurally clear model references use per-mesh header validation.
+    for(std::size_t index: {1U,4U,5U,6U,7U,8U,10U,14U,15U})
         assert(source_effect_for(index)==source_none);
     assert(source_effect_for(99U)==source_none);
 }
