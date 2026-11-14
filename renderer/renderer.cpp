@@ -5185,11 +5185,15 @@ namespace jkgm {
             auto read=[](uintptr_t at,void *dst,size_t count) {
                 return engine_material_debug::read_bytes(at,dst,count);
             };
+            size_t const query_budget=
+                the_config->gpu_3do_occlusion_query_budget==0
+                ?expensive.size()
+                :size_t(the_config->gpu_3do_occlusion_query_budget);
             size_t issued=0;
             size_t submit_attempts=0,reject_identity=0,reject_bound=0;
             size_t reject_projection=0,reject_query_state=0;
             auto submit=[&](candidate const &item) {
-                if(issued>=size_t(the_config->gpu_3do_occlusion_query_budget))
+                if(issued>=query_budget)
                     return;
                 ++submit_attempts;
                 uintptr_t const thing=uintptr_t(uint32_t(item.owner>>32));
@@ -5247,21 +5251,30 @@ namespace jkgm {
             // Refresh hidden Things first, to recover promptly when an
             // occluder moves while the tested Thing remains stationary.
             for(auto const &item:expensive) {
-                if(issued>=size_t(the_config->gpu_3do_occlusion_query_budget/2))
+                if(issued>=(
+                    the_config->gpu_3do_occlusion_query_budget==0
+                        ?query_budget:query_budget/2U))
                     break;
                 if(queries.needs_retest(item.owner))submit(item);
             }
             // Rotate cold query candidates. We don't need 600 queries
             // every frame for a level containing 600 static buildings.
-            size_t const start=(
-                gpu_3do_present_serial*
-                size_t(the_config->gpu_3do_occlusion_query_budget))%
-                expensive.size();
+            size_t const start=
+                the_config->gpu_3do_occlusion_query_budget==0?0U:(
+                gpu_3do_present_serial*query_budget)%expensive.size();
             for(size_t i=0;i<expensive.size() &&
-                issued<size_t(the_config->gpu_3do_occlusion_query_budget);++i)
+                issued<query_budget;++i)
                 submit(expensive[(start+i)%expensive.size()]);
             if(gpu_timing) {
                 thing_occlusion_gpu_timers.timestamp(0U,false);
+                // The 3-stage profiler checks its LAST timestamp to
+                // determine readiness. The old occlusion path only wrote
+                // stage 0, so gpu_samples stayed at zero forever.
+                for(size_t stage=1U;
+                    stage<presentation_gpu_profile::num_stages;++stage) {
+                    thing_occlusion_gpu_timers.timestamp(stage,true);
+                    thing_occlusion_gpu_timers.timestamp(stage,false);
+                }
                 thing_occlusion_gpu_timers.end();
             }
             if(profiling) {
