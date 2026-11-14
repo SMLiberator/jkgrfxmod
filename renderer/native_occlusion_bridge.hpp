@@ -94,7 +94,7 @@ public:
         auto const snap=load_snapshot();
         if(!snap || !snap->world ||
            std::chrono::steady_clock::now()-snap->published_at>
-               std::chrono::milliseconds(250))
+               std::chrono::milliseconds(500))
             return false;
         auto it=snap->hidden.find(owner);
         if(it==snap->hidden.end() || it->second.model!=model ||
