@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstddef>
 
 namespace jkgm {
 struct gpu_thing_occlusion_bound {
@@ -36,6 +37,17 @@ inline gpu_thing_occlusion_bound gpu_sprite_occlusion_bound(
     out.radius=float(radius);
     out.valid=true;
     return out;
+}
+// A sprite can rotate/tilt about its center without changing the bounding
+// sphere. Reject previously-hidden query results if any quad axis changes.
+inline bool gpu_sprite_occlusion_same_pose(
+    gpu_3do_matrix34 const &a,gpu_3do_matrix34 const &b)
+{
+    for(size_t i=0;i<a.size();++i)
+        if(!std::isfinite(a[i]) || !std::isfinite(b[i]) ||
+           std::fabs(a[i]-b[i])>0.003f)
+            return false;
+    return true;
 }
 inline bool gpu_thing_occlusion_bound_valid(gpu_thing_occlusion_bound const &b) {
     if(!b.valid || !std::isfinite(b.radius) || b.radius<=0.0f)return false;
