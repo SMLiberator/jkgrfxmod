@@ -108,6 +108,50 @@ int main() {
     offscreen.center[0]=100.0f;
     assert(!gpu_thing_occlusion_project_sphere_rect(
         offscreen,view,1.0f,1.0f,rect));
+    // SPR bounds use the ACTUAL rendered quad pose (including camera
+    // alignment, authored scaling, roll and offsets), not rdModel3 radius.
+    gpu_3do_matrix34 sprite_pose{{
+        3.0f,0.0f,0.0f,
+        0.0f,1.0f,0.0f,
+        0.0f,0.0f,4.0f,
+        2.0f,10.0f,3.0f
+    }};
+    auto sprite_bound=gpu_sprite_occlusion_bound(sprite_pose);
+    assert(gpu_thing_occlusion_bound_valid(sprite_bound));
+    assert(sprite_bound.center[0]==2.0f &&
+           sprite_bound.center[1]==10.0f &&
+           sprite_bound.center[2]==3.0f);
+    assert(sprite_bound.radius>7.0f);
+    // All transformed corners must fit, even with nonorthogonal axes.
+    sprite_pose[6]=1.0f; // shear the up axis toward the right
+    sprite_bound=gpu_sprite_occlusion_bound(sprite_pose);
+    for(int sx : {-1,1})for(int sz : {-1,1}) {
+        double len2=0.0;
+        for(int axis=0;axis<3;++axis) {
+            auto const d=double(sx)*sprite_pose[axis]+
+                         double(sz)*sprite_pose[6+axis];
+            len2+=d*d;
+        }
+        assert(std::sqrt(len2)<sprite_bound.radius);
+    }
+    auto scaled_sprite=sprite_pose;
+    for(int axis=0;axis<3;++axis)scaled_sprite[axis]*=2.0f;
+    auto const changed=gpu_sprite_occlusion_bound(scaled_sprite);
+    assert(!gpu_thing_occlusion_same_bound(sprite_bound,changed));
+    auto moved_sprite=sprite_pose;
+    moved_sprite[9]+=1.0f;
+    assert(!gpu_thing_occlusion_same_bound(
+        sprite_bound,gpu_sprite_occlusion_bound(moved_sprite)));
+    auto invalid_sprite=sprite_pose;
+    invalid_sprite[6]=std::numeric_limits<float>::quiet_NaN();
+    assert(!gpu_thing_occlusion_bound_valid(
+        gpu_sprite_occlusion_bound(invalid_sprite)));
+    // Near-plane SPRs must fail open rather than query a truncated quad.
+    gpu_3do_matrix34 near_sprite_pose=sprite_pose;
+    near_sprite_pose[10]=1.0f;
+    assert(!gpu_thing_occlusion_project_sphere_rect(
+        gpu_sprite_occlusion_bound(near_sprite_pose),
+        view,1.0f,1.0f,rect));
     // Native hook and GPU renderer exchange only immutable snapshots.
     // Verify skipped candidates remain available for subsequent queries.
     auto &bridge=get_native_occlusion_bridge();
