@@ -656,6 +656,9 @@ namespace jkgm {
         bool planar_plane_from_material=false;
         // Independent reflected-camera draw list, never added to main visibility.
         std::vector<world_cache_draw_candidate> planar_frame_candidates;
+        std::vector<uint8_t> planar_thing_sector_visibility;
+        uintptr_t planar_thing_visibility_world=0;
+        uint64_t planar_thing_visibility_frame=~uint64_t(0);
 
 
         HGDIOBJ indexed_bitmap_dc = NULL;
@@ -8756,6 +8759,8 @@ namespace jkgm {
         {
             frame_world_cache_camera.valid=false;
             planar_frame_candidates.clear();
+            planar_thing_sector_visibility.clear();
+            planar_thing_visibility_frame=~uint64_t(0);
             if(world_cache_target)
                 world_cache_target->frame_render_candidates.clear();
             if(!the_config->use_gpu_cache ||
@@ -9374,6 +9379,7 @@ namespace jkgm {
                             } else {
                                 std::vector<world_cache_sector_span> reflected_spans;
                                 std::vector<planar_reflection_portal_rect> sector_windows;
+                                std::vector<uint8_t> thing_sector_mask;
                                 float const aspect=
                                     float(get<x>(internal_scr_res_f))/
                                     float(get<y>(internal_scr_res_f));
@@ -9385,7 +9391,7 @@ namespace jkgm {
                                         cache.cached_surface_lookup,
                                         reflection_view,reflected.position,
                                         half_fov,aspect,reflected_spans,
-                                        &sector_windows);
+                                        &sector_windows,&thing_sector_mask);
                                 if(reflected_portal_stats.valid) {
                                     auto const stage=
                                         collect_world_cache_sector_candidates(
@@ -9398,6 +9404,14 @@ namespace jkgm {
                                             &special_candidates);
                                     reflected_portals_used=stage.valid;
                                     if(stage.valid) {
+                                        // Only publish masks produced by the
+                                        // same reflected camera/world/frame.
+                                        planar_thing_sector_visibility=
+                                            std::move(thing_sector_mask);
+                                        planar_thing_visibility_world=
+                                            cache.loaded_world;
+                                        planar_thing_visibility_frame=
+                                            gpu_3do_present_serial;
                                         // As in native sithRender_RenderSectors,
                                         // use the inherited per-sector portal
                                         // frustum for final surface eligibility.
@@ -11373,6 +11387,7 @@ namespace jkgm {
             auto const begun=std::chrono::steady_clock::now();
             size_t world_drawn=0,model_drawn=0,model_candidates=0;
             size_t world_culled=0,model_culled=0,thing_radius_culled=0;
+            size_t thing_sector_culled=0;
             size_t hidden_by_flags=0,hidden_by_geo=0;
             // Acquisition does NOT mutate rdCamera; its refresh callback
             // updates only each Thing's native cached animation matrices.
@@ -11407,6 +11422,26 @@ namespace jkgm {
                                             read,thing,
                                             frame_world_cache_camera.frustum,view);
                                     if(outside)++thing_radius_culled;
+                                    return outside;
+                                });
+                            things.erase(first_rejected,things.end());
+                        }
+                        // Apply the independently generated native-style
+                        // reflected portal mask BEFORE acquiring 3DO poses.
+                        // The mask includes adjacent Thing sectors, and
+                        // missing/invalid native state fails open.
+                        if(the_config->experimental_planar_reflection_portal_culling &&
+                           planar_thing_visibility_world==world &&
+                           planar_thing_visibility_frame==gpu_3do_present_serial &&
+                           !planar_thing_sector_visibility.empty() &&
+                           world_cache_target) {
+                            auto const &portals=world_cache_target->reflected_portal_graph;
+                            auto const first_rejected=std::remove_if(
+                                things.begin(),things.end(),
+                                [&](auto const &thing) {
+                                    bool const outside=!portals.thing_sector_visible(
+                                        thing.sector,planar_thing_sector_visibility);
+                                    if(outside)++thing_sector_culled;
                                     return outside;
                                 });
                             things.erase(first_rejected,things.end());
@@ -11736,6 +11771,7 @@ namespace jkgm {
                          " emissive_model_groups=",emissive_models.size(),
                          " model_culled=",model_culled,
                          " thing_radius_culled=",thing_radius_culled,
+                         " thing_sector_culled=",thing_sector_culled,
                          " mesh_radius_culled=",
                          offscreen.stats.mesh_radius_culled,
                          " ms_acquire=",std::chrono::duration<float,std::milli>(
