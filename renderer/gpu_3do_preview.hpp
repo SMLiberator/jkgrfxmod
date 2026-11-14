@@ -152,6 +152,10 @@ namespace jkgm {
         // matrix is view-space and differs from one hierarchy node to another.
         std::array<float,3> owning_thing_world_position{};
         bool owning_thing_world_position_valid=false;
+        // Scaled rdModel3 authored radius, captured once from rdModel3_Draw
+        // and inherited by every hierarchy mesh regardless of animation.
+        float owning_thing_lod_radius=0.0f;
+        bool owning_thing_lod_radius_valid=false;
         std::shared_ptr<gpu_3do_crossing_state const> crossing_lighting;
         // Independent sparse continuous-ambient GPU experiment. Store the
         // owning sector's eight-corner SPARSE-MISS fallback and live floor
