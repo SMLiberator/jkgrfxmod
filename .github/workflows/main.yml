@@ -315,6 +315,8 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_thing_occlusion_math.cpp /Fe:gpu_thing_occlusion_math_test.exe || exit /b 1
         gpu_thing_occlusion_math_test.exe || exit /b 1
         python3 tests/gpu_thing_occlusion.py || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_flare_visibility.cpp /Fe:sprite_flare_visibility_test.exe || exit /b 1
+        sprite_flare_visibility_test.exe || exit /b 1
     - name: Experimental sun sky-aperture gate source contracts
       run: python3 tests/sun_sky_aperture_experiment.py
     - name: GPU 3DO alpha partition tests
