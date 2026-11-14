@@ -26,6 +26,8 @@ struct profile_sample {
   uint64_t frames_with_execute=0;
   uint64_t native_model_calls=0, native_model_drawn=0, native_mesh_calls=0;
   uint64_t native_model_occlusion_skipped=0;
+  uint64_t native_occlusion_tests=0,native_occlusion_lookups=0;
+  uint64_t native_occlusion_lookup_hits=0,native_occlusion_ns=0;
   uint64_t native_face_calls=0, native_face_emitted=0;
   uint64_t native_model_ns=0, native_mesh_ns=0, native_face_ns=0;
   uint64_t native_model_hook_ns=0,native_model_engine_ns=0;
@@ -96,6 +98,10 @@ struct profile_sample {
     native_model_calls+=o.native_model_calls;
     native_model_drawn+=o.native_model_drawn;
     native_model_occlusion_skipped+=o.native_model_occlusion_skipped;
+    native_occlusion_tests+=o.native_occlusion_tests;
+    native_occlusion_lookups+=o.native_occlusion_lookups;
+    native_occlusion_lookup_hits+=o.native_occlusion_lookup_hits;
+    native_occlusion_ns+=o.native_occlusion_ns;
     native_mesh_calls+=o.native_mesh_calls;
     native_face_calls+=o.native_face_calls;
     native_face_emitted+=o.native_face_emitted;
