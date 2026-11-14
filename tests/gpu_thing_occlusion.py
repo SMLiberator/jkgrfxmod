@@ -91,6 +91,7 @@ bridge=read("renderer/native_occlusion_bridge.hpp")
 assert "thing_occlusion_queries" not in main
 assert "native_occlusion_enabled" in main
 assert "!shadow_enabled" in main
+assert "!the_config->experimental_planar_reflection_capture" in main
 assert "owner_type>1U && owner_type!=10U" in main
 assert "!(flags&0x20U)" in main
 assert "same_center" in main and "native_placement" in main
