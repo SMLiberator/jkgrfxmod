@@ -39,11 +39,53 @@ int main() {
     sphere.center={{0.0f,5.0f,0.0f}};
     assert(gpu_thing_occlusion_project_sphere_rect(
         sphere,view,1.0f,1.0f,rect));
-    assert(rect.valid && rect.center_forward==5.0f);
+    assert(rect.valid && rect.near_forward==4.0f);
     // Perspective tangents enclose the sphere more tightly/correctly
     // than projecting (center +/- radius) at the center's depth.
     assert(rect.left< -0.2f && rect.right>0.2f);
     assert(rect.bottom< -0.2f && rect.top>0.2f);
+    // Camera rotation/translation MUST use the same column-vector
+    // convention as gpu_3do_native_transform_point and the GPU shader.
+    // An identity-only test incorrectly passed the old transposed basis.
+    gpu_3do_matrix34 yaw_view{{
+        0.0f,1.0f,0.0f,
+       -1.0f,0.0f,0.0f,
+        0.0f,0.0f,1.0f,
+        2.0f,3.0f,4.0f}};
+    gpu_thing_occlusion_bound rotated_sphere{};
+    rotated_sphere.center={{5.0f,-1.0f,-3.0f}};
+    rotated_sphere.radius=1.0f;
+    rotated_sphere.valid=true;
+    auto const yaw_center=gpu_3do_native_transform_point(
+        yaw_view,rotated_sphere.center);
+    assert(yaw_center[0]==3.0f && yaw_center[1]==8.0f &&
+           yaw_center[2]==1.0f);
+    assert(gpu_thing_occlusion_project_sphere_rect(
+        rotated_sphere,yaw_view,1.0f,1.0f,rect));
+    assert(rect.near_forward==7.0f);
+    assert(rect.left<3.0f/8.0f && rect.right>3.0f/8.0f);
+    assert(rect.bottom<1.0f/8.0f && rect.top>1.0f/8.0f);
+    // A pitched camera catches a second transposition that swaps
+    // forward and up, even if yaw alone happens to align.
+    gpu_3do_matrix34 pitch_view{{
+        1.0f,0.0f,0.0f,
+        0.0f,0.6f,-0.8f,
+        0.0f,0.8f,0.6f,
+        0.0f,0.0f,0.0f}};
+    gpu_thing_occlusion_bound pitched_sphere{};
+    pitched_sphere.center={{1.0f,10.0f,5.0f}};
+    pitched_sphere.radius=1.0f;
+    pitched_sphere.valid=true;
+    auto const pitch_center=gpu_3do_native_transform_point(
+        pitch_view,pitched_sphere.center);
+    assert(std::fabs(pitch_center[0]-1.0f)<0.0001f);
+    assert(std::fabs(pitch_center[1]-10.0f)<0.0001f);
+    assert(std::fabs(pitch_center[2]+5.0f)<0.0001f);
+    assert(gpu_thing_occlusion_project_sphere_rect(
+        pitched_sphere,pitch_view,1.0f,1.0f,rect));
+    assert(std::fabs(rect.near_forward-9.0f)<0.0001f);
+    assert(rect.left<0.1f && rect.right>0.1f);
+    assert(rect.bottom< -0.5f && rect.top> -0.5f);
     auto shifted=sphere;
     shifted.center[0]=3.0f;
     assert(gpu_thing_occlusion_project_sphere_rect(
