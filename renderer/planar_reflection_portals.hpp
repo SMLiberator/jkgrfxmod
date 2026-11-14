@@ -413,7 +413,14 @@ public:
             // A mirror can place the virtual camera across a water adjoin.
             // Keep both sides only for such an actual receiver adjoin.
             for(auto const &portal:sectors_[owner].portals)
-                if(portal.surface_index==si)seed_sector(portal.destination);
+                if(portal.surface_index==si) {
+                    uint32_t flags=0;
+                    if(!read(portal.native_adjoin,&flags,4U)) {
+                        stats.reason="unreadable_receiver_adjoin";
+                        return stats;
+                    }
+                    if(flags&1U)seed_sector(portal.destination);
+                }
         }
         if(seeds.empty()) {
             stats.reason="no_visible_receiver_seeds";return stats;
