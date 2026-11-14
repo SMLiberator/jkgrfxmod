@@ -69,6 +69,7 @@ namespace jkgm {
         bool profile_renderer_verbose = false; // opt-in detailed renderer diagnostics
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics
         bool use_gpu_cache = true; // unified GPU 3DO, sprite, and SithWorld rendering
+        bool experimental_auto_3do_lod = false; // stage 0: force native GeoSet 0 per draw; GPU simplification follows
         bool experimental_3do_occlusion_culling = false; // async main camera GPU Thing submission
         bool experimental_3do_native_occlusion_culling = false; // early rdModel3_Draw skip using completed GPU Thing queries
         int gpu_3do_occlusion_proxy_mode = 0; // 0=box; 1=nearest sphere depth; 2=center sphere depth (self-occlusion experiment)
