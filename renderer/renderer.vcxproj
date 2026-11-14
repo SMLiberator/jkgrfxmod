@@ -137,6 +137,7 @@
     <ClInclude Include="gpu_3do_preview.hpp" />
     <ClInclude Include="gpu_thing_occlusion.hpp" />
     <ClInclude Include="gpu_thing_occlusion_math.hpp" />
+    <ClInclude Include="native_occlusion_bridge.hpp" />
     <ClInclude Include="texture_units.hpp" />
     <ClInclude Include="gpu_3do_triangulation.hpp" />
     <ClInclude Include="gpu_3do_uv.hpp" />
