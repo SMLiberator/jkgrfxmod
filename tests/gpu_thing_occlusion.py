@@ -115,6 +115,20 @@ assert "program.set_sprite_pose(item.sprite_pose);" in renderer
 assert "layout(location=0) in vec3 sprite_local_position;" in shader
 assert "if(proxy_mode==3)" in shader
 assert "gpu_sprite_occlusion_same_pose(" in math
+# Native flare type 4 is a DISTINCT center-only test: no whole-quad
+# query, no screen-space UV derivatives or per-pixel edge clipping.
+flare_shader=read("assets/shaders/game_trns_pass.frag")
+flare_math=read("renderer/sprite_flare_projection.hpp")
+assert "reconstruct_sprite_flare_triangle_center(" in renderer
+assert "reconstruct_sprite_flare_triangle_center(" in flare_math
+assert "sprite_flare_center center{};" in renderer
+assert "tri.normal=valid" in renderer
+assert "is_flare?0U:native1" in renderer
+assert "vec3 center=vp_normal;" in flare_shader
+assert "texelFetch(scene_depth,texel,0).r" in flare_shader
+assert "dFdx(vp_texcoords)" not in flare_shader
+assert "dFdy(vp_texcoords)" not in flare_shader
+assert "if(flare_mode==0 && reflection_params.x" in flare_shader
 assert "entry.issued_has_sprite_pose=sprite_pose!=nullptr;" in header
 assert "current_sprite_pose" in header
 assert "gpu_sprite_occlusion_bound(" in math
