@@ -628,6 +628,12 @@ namespace jkgm {
         uint64_t thing_occlusion_cpu_ns_window=0;
         uint64_t thing_occlusion_cpu_calls_window=0;
         uint64_t thing_occlusion_issued_window=0;
+        uint64_t thing_occlusion_poll_ns_window=0;
+        uint64_t thing_occlusion_poll_calls_window=0;
+        uint64_t thing_occlusion_prepare_ns_window=0;
+        uint64_t thing_occlusion_visibility_ns_window=0;
+        uint64_t thing_occlusion_visibility_calls_window=0;
+        uint64_t thing_occlusion_visibility_skips_window=0;
         // Asynchronous offscreen GPU timestamps: world, models, mipmaps.
         // Read only completed frames, with no GL query waits on the hot path.
         presentation_gpu_profile planar_gpu_queries;
@@ -3870,7 +3876,16 @@ namespace jkgm {
                 thing_occlusion_queries->set_world(
                     world_cache_target && world_cache_target->ready
                        ?world_cache_target->loaded_world:0U);
+                auto const poll_start=the_config->profile_renderer
+                    ?std::chrono::steady_clock::now()
+                    :std::chrono::steady_clock::time_point{};
                 thing_occlusion_queries->poll();
+                if(the_config->profile_renderer) {
+                    thing_occlusion_poll_ns_window+=uint64_t(
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now()-poll_start).count());
+                    ++thing_occlusion_poll_calls_window;
+                }
             }
             for(auto &bucket:sprite_buckets)bucket.draws.clear();
             sprite_lookup.clear();
@@ -3901,11 +3916,23 @@ namespace jkgm {
                     !inst.camera_hud && !inst.skybox_vertex_lighting &&
                     !inst.is_sprite_quad && !inst.transient_procedural &&
                     !inst.saber_trail_active;
-                if(occlusion_eligible &&
-                   thing_occlusion_queries->hidden(
-                       inst.shadow_owner,inst.owning_thing_world_position,
-                       cam,gpu_3do_present_serial))
-                    continue;
+                if(occlusion_eligible) {
+                    auto const visibility_start=the_config->profile_renderer
+                        ?std::chrono::steady_clock::now()
+                        :std::chrono::steady_clock::time_point{};
+                    bool const occluded=thing_occlusion_queries->hidden(
+                        inst.shadow_owner,inst.owning_thing_world_position,
+                        cam,gpu_3do_present_serial);
+                    if(the_config->profile_renderer) {
+                        thing_occlusion_visibility_ns_window+=uint64_t(
+                            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::steady_clock::now()-
+                                visibility_start).count());
+                        ++thing_occlusion_visibility_calls_window;
+                        if(occluded)++thing_occlusion_visibility_skips_window;
+                    }
+                    if(occluded)continue;
+                }
                 modelviews.push_back(gpu_3do_native_modelview(native_view,inst.transform));
                 std::array<float,3> local_eye{};
                 bool const can_cpu_cull=gpu_3do_local_eye(modelviews.back(),local_eye);
@@ -5063,8 +5090,21 @@ namespace jkgm {
                 get_native_occlusion_bridge().clear();
             }
             queries.set_world(world);
+            bool const profiling=the_config->profile_renderer;
+            auto const poll_start=profiling
+                ?std::chrono::steady_clock::now()
+                :std::chrono::steady_clock::time_point{};
             queries.poll();
             queries.prune(gpu_3do_present_serial);
+            if(profiling) {
+                thing_occlusion_poll_ns_window+=uint64_t(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now()-poll_start).count());
+                ++thing_occlusion_poll_calls_window;
+            }
+            auto const prepare_start=profiling
+                ?std::chrono::steady_clock::now()
+                :std::chrono::steady_clock::time_point{};
             // Profile the negatives actually published to native CPU culling.
             size_t confirmed_hidden_count=0;
             if(native_enabled) {
@@ -5164,9 +5204,12 @@ namespace jkgm {
             if(!thing_occlusion_proxy_vao)
                 glGenVertexArrays(1,&thing_occlusion_proxy_vao);
             if(!thing_occlusion_proxy_vao)return;
-            bool const profiling=the_config->profile_renderer;
             auto const cpu_start=profiling?std::chrono::steady_clock::now():
                 std::chrono::steady_clock::time_point{};
+            if(profiling)
+                thing_occlusion_prepare_ns_window+=uint64_t(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        cpu_start-prepare_start).count());
             presentation_gpu_profile::completed_sample completed{};
             bool const gpu_timing=profiling &&
                 thing_occlusion_gpu_timers.begin(completed);
@@ -5310,6 +5353,21 @@ namespace jkgm {
                               thing_occlusion_gpu_samples_window:0U,
                         " gpu_samples=",thing_occlusion_gpu_samples_window,
                         " gpu_ring_busy_skips=",thing_occlusion_gpu_skipped_window,
+                        " poll_us_total=",thing_occlusion_poll_ns_window/1000U,
+                        " poll_calls=",thing_occlusion_poll_calls_window,
+                        " prepare_us_avg=",
+                        thing_occlusion_cpu_calls_window
+                            ?(thing_occlusion_prepare_ns_window/1000U)/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " visibility_us_total=",
+                        thing_occlusion_visibility_ns_window/1000U,
+                        " visibility_checks=",
+                        thing_occlusion_visibility_calls_window,
+                        " visibility_skips=",
+                        thing_occlusion_visibility_skips_window,
+                        " debug_us_total=",thing_occlusion_debug_ns_window/1000U,
+                        " debug_draws=",thing_occlusion_debug_draws_window,
+                        " debug_frames=",thing_occlusion_debug_frames_window,
                         " issued_total=",thing_occlusion_issued_window,
                         " NOTE=async_GPU_timestamps_no_sync");
                     thing_occlusion_cpu_ns_window=0;
@@ -5318,6 +5376,15 @@ namespace jkgm {
                     thing_occlusion_gpu_ns_window=0;
                     thing_occlusion_gpu_samples_window=0;
                     thing_occlusion_gpu_skipped_window=0;
+                    thing_occlusion_poll_ns_window=0;
+                    thing_occlusion_poll_calls_window=0;
+                    thing_occlusion_prepare_ns_window=0;
+                    thing_occlusion_visibility_ns_window=0;
+                    thing_occlusion_visibility_calls_window=0;
+                    thing_occlusion_visibility_skips_window=0;
+                    thing_occlusion_debug_ns_window=0;
+                    thing_occlusion_debug_draws_window=0;
+                    thing_occlusion_debug_frames_window=0;
                 }
             }
             if(the_config->profile_renderer &&
