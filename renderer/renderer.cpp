@@ -3699,6 +3699,7 @@ namespace jkgm {
                 }
             }
             unsigned generated=0U,selected[3]={0U,0U,0U};
+            uint64_t generated_cpu_ns=0U;
             struct thing_lod_decision {
                 unsigned level=0U;
                 float radius_px=-1.0f;
@@ -3706,7 +3707,9 @@ namespace jkgm {
             // Compute the projected native Thing radius only once per
             // owner each frame. All sibling hierarchy meshes (including
             // tiny feet/hands) share that selection and hysteresis.
-            std::unordered_map<uint64_t,thing_lod_decision> thing_levels;
+            static thread_local std::unordered_map<uint64_t,thing_lod_decision>
+                thing_levels;
+            thing_levels.clear();
             thing_levels.reserve(frame_gpu_3do_instances.size());
             for(auto &inst:frame_gpu_3do_instances) {
                 if(!inst.geometry || inst.id==0U ||
@@ -3770,8 +3773,18 @@ namespace jkgm {
                        generated,the_config->gpu_3do_auto_lod_generation_budget)) {
                     entry.attempted[index]=true;
                     ++generated;
+                    auto const cpu_started=the_config->profile_renderer
+                        ?std::chrono::steady_clock::now()
+                        :std::chrono::steady_clock::time_point{};
                     entry.levels[index]=generate_gpu_3do_auto_lod(
                         *entry.source,level);
+                    uint64_t cpu_ns=0U;
+                    if(the_config->profile_renderer) {
+                        cpu_ns=static_cast<uint64_t>(
+                            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::steady_clock::now()-cpu_started).count());
+                        generated_cpu_ns+=cpu_ns;
+                    }
                     if(!entry.levels[index] &&
                        the_config->profile_renderer) {
                         LOG_INFO("AUTO 3DO LOD unreduced source=",source_id,
@@ -3779,6 +3792,7 @@ namespace jkgm {
                                  " triangles=",
                                  entry.source->indices.size()/3U,
                                  " groups=",entry.source->groups.size(),
+                                 " cpu_generation_us=",cpu_ns/1000U,
                                  " reason=no_nonempty_reduction");
                     }
                     if(entry.levels[index]) {
@@ -3798,7 +3812,8 @@ namespace jkgm {
                                      entry.levels[index]->indices.size()/3U,
                                      " groups_source=",entry.source->groups.size(),
                                      " groups_reduced=",entry.levels[index]->groups.size(),
-                                     " screen_radius_px=",pixel_radius);
+                                     " screen_radius_px=",pixel_radius,
+                                     " cpu_generation_us=",cpu_ns/1000U);
                         }
                     }
                 }
@@ -3819,7 +3834,8 @@ namespace jkgm {
                          " cpu_variants=",auto_3do_lod_cache.size(),
                          " thing_decisions=",thing_levels.size(),
                          " generation_budget=",the_config->gpu_3do_auto_lod_generation_budget,
-                         " generated_this_frame=",generated);
+                         " generated_this_frame=",generated,
+                         " cpu_generation_us=",generated_cpu_ns/1000U);
         }
 
         // Separate opaque and alpha passes. Native JK no longer processes
