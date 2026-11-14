@@ -9363,7 +9363,10 @@ namespace jkgm {
                                     continue;
                                 receiver_seeds.push_back(candidate.surface_index);
                             }
-                            if(!cache.reflected_portal_graph.ensure(
+                            if(receiver_seeds.empty()) {
+                                reflected_portal_stats.reason=
+                                    "no_main_camera_reflective_receivers";
+                            } else if(!cache.reflected_portal_graph.ensure(
                                    safe_read,cache.loaded_world,cache.revision,
                                    cache.world,cache.mesh,
                                    cache.cached_surface_lookup)) {
