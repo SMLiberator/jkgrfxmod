@@ -80,7 +80,8 @@ int main() {
     std::vector<world_cache_sector_span> spans;
     auto result=graph.traverse({0U},mesh,lookup,view,1.0f,1.0f,spans);
     assert(result.valid);
-    assert(result.seed_sectors==1U);
+    // Receiver 0 is an adjoin: both sides are conservatively seeded.
+    assert(result.seed_sectors==2U);
     assert(result.visible_sectors==3U);
     assert(result.surfaces_reachable==3U);
     assert(spans.size()==3U);
@@ -142,6 +143,14 @@ int main() {
     result=graph.traverse({0U},untextured_mesh,untextured_lookup,
                           view,1.0f,1.0f,spans);
     assert(result.valid && result.visible_sectors==3U);
+    // When the receiver is NOT an adjoin, disconnected sectors remain
+    // inaccessible through portal-space traversal.
+    put(sectors+0x2cU,0U);
+    graph.clear();
+    assert(graph.ensure(read,world,5U,geometry,mesh,lookup));
+    result=graph.traverse({0U},mesh,lookup,view,1.0f,1.0f,spans);
+    assert(result.valid && result.visible_sectors==1U);
+    put(sectors+0x2cU,uint32_t(link0));
     // Invalid next-sector pointers fail OPEN to the whole-world path.
     put(link1+4U,0x12345U);
     graph.clear();
