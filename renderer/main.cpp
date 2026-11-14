@@ -1664,8 +1664,8 @@ namespace {
                         if(bridge.lookup(owner_key,native_model_ptr,
                                          bound,hidden,published_world)) {
                             uint32_t current_world=0;
-                            if(engine_material_debug::read_object(
-                                   engine_material_debug::current_world_global,
+                            if(jkgm::engine_material_debug::read_object(
+                                   jkgm::engine_material_debug::current_world_global,
                                    current_world) &&
                                current_world==published_world) {
                                 auto const camera=
