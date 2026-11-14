@@ -9321,13 +9321,116 @@ namespace jkgm {
                         reflection_stats.frustum_available=true;
                         std::vector<world_cache_draw_candidate> reflected_candidates;
                         std::vector<world_cache_draw_candidate> special_candidates;
-                        reflected_candidates.reserve(cache.mesh.surfaces.size()/4U);
-                        for(auto const &surface:cache.mesh.surfaces)
-                            append_world_cache_candidate(
-                                safe_read,cache.world.surfaces_addr,surface,
-                                reflected_candidates,reflection_stats,
-                                &cam.frustum,&reflection_view,
-                                &special_candidates);
+                        planar_reflection_portal_stats reflected_portal_stats{};
+                        bool reflected_portals_used=false;
+                        auto const portal_stage_start=profile_clock::now();
+                        if(the_config->experimental_planar_reflection_portal_culling) {
+                            // A virtual reflected eye may lie below the water,
+                            // outside all JK sectors. Seed from real reflective
+                            // RECEIVERS in the native main-camera sector list.
+                            // Never reuse the main camera's sector visibility.
+                            std::vector<uint32_t> receiver_seeds;
+                            for(auto const &candidate:cache.frame_render_candidates) {
+                                if(candidate.surface_index>=
+                                   cache.cached_surface_lookup.size())continue;
+                                auto const cached=
+                                    cache.cached_surface_lookup[candidate.surface_index];
+                                if(cached>=cache.mesh.surfaces.size())continue;
+                                auto const &surface=cache.mesh.surfaces[cached];
+                                if(surface.first_index>=cache.mesh.indices.size())
+                                    continue;
+                                auto const index=cache.mesh.indices[surface.first_index];
+                                if(index>=cache.mesh.vertices.size())continue;
+                                auto const &vertex=cache.mesh.vertices[index];
+                                float normal_dot=0.0f,plane_dist=-planar_capture_plane->offset;
+                                for(int axis=0;axis<3;++axis) {
+                                    normal_dot+=vertex.normal[axis]*
+                                        planar_capture_plane->normal[axis];
+                                    plane_dist+=vertex.position[axis]*
+                                        planar_capture_plane->normal[axis];
+                                }
+                                if(!std::isfinite(normal_dot) ||
+                                   !std::isfinite(plane_dist) ||
+                                   std::fabs(normal_dot)<0.999f ||
+                                   std::fabs(plane_dist)>0.02f)continue;
+                                gpu_3do_group group{};
+                                group.material=candidate.material;
+                                group.cel=candidate.cel;
+                                auto const mat=resolve_gpu_3do_material(group);
+                                if(mat.reflection_mode!=4 &&
+                                   (planar_plane_from_material ||
+                                    mat.blend!=material_blend_mode::fluid))
+                                    continue;
+                                receiver_seeds.push_back(candidate.surface_index);
+                            }
+                            if(!cache.reflected_portal_graph.ensure(
+                                   safe_read,cache.loaded_world,cache.revision,
+                                   cache.world,cache.mesh,
+                                   cache.cached_surface_lookup)) {
+                                reflected_portal_stats.reason="invalid_native_topology";
+                            } else {
+                                std::vector<world_cache_sector_span> reflected_spans;
+                                float const aspect=
+                                    float(get<x>(internal_scr_res_f))/
+                                    float(get<y>(internal_scr_res_f));
+                                float const half_fov=std::tan(
+                                    cam.camera.fov*0.008726646259971648f);
+                                reflected_portal_stats=
+                                    cache.reflected_portal_graph.traverse(
+                                        receiver_seeds,cache.mesh,
+                                        cache.cached_surface_lookup,
+                                        reflection_view,half_fov,aspect,
+                                        reflected_spans);
+                                if(reflected_portal_stats.valid) {
+                                    auto const stage=
+                                        collect_world_cache_sector_candidates(
+                                            safe_read,cache.world.surfaces_addr,
+                                            cache.mesh,cache.cached_surface_lookup,
+                                            reflected_spans,cache.sector_seen_epochs,
+                                            cache.sector_seen_epoch,
+                                            reflected_candidates,
+                                            &cam.frustum,&reflection_view,
+                                            &special_candidates);
+                                    reflected_portals_used=stage.valid;
+                                    if(!stage.valid)
+                                        reflected_portal_stats.reason=
+                                            "reflected_sector_stage_invalid";
+                                }
+                            }
+                        }
+                        if(!reflected_portals_used) {
+                            // Any missing receiver or unverified pointer
+                            // FAILS OPEN: keep the original independent
+                            // full-world reflected-frustum path.
+                            reflected_candidates.clear();
+                            special_candidates.clear();
+                            reflected_candidates.reserve(
+                                cache.mesh.surfaces.size()/4U);
+                            for(auto const &surface:cache.mesh.surfaces)
+                                append_world_cache_candidate(
+                                    safe_read,cache.world.surfaces_addr,surface,
+                                    reflected_candidates,reflection_stats,
+                                    &cam.frustum,&reflection_view,
+                                    &special_candidates);
+                        }
+                        if(the_config->profile_renderer &&
+                           gpu_3do_present_serial%120U==0U)
+                            LOG_INFO("PLANAR reflected_portals enabled=",
+                                the_config->experimental_planar_reflection_portal_culling?1:0,
+                                " used=",reflected_portals_used?1:0,
+                                " reason=",reflected_portal_stats.reason,
+                                " seeds=",reflected_portal_stats.seed_sectors,
+                                " sectors_total=",reflected_portal_stats.sectors_total,
+                                " sectors_visible=",reflected_portal_stats.visible_sectors,
+                                " portal_tests=",reflected_portal_stats.portals_considered,
+                                " portal_passes=",reflected_portal_stats.portals_reached,
+                                " reachable_surfaces=",reflected_portal_stats.surfaces_reachable,
+                                " staged=",reflected_candidates.size()+
+                                             special_candidates.size(),
+                                " cached_world_surfaces=",cache.mesh.surfaces.size(),
+                                " stage_cpu_us=",elapsed_profile_us(
+                                    portal_stage_start,profile_clock::now()),
+                                " NOTE=independent_mirrored_camera_fail_open");
                         reflected_candidates.insert(reflected_candidates.end(),
                             special_candidates.begin(),special_candidates.end());
                         std::unordered_set<uint32_t> ready;
