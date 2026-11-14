@@ -78,7 +78,7 @@ int main() {
     planar_reflection_portal_graph graph{};
     assert(graph.ensure(read,world,1U,geometry,mesh,lookup));
     std::vector<world_cache_sector_span> spans;
-    auto result=graph.traverse({0U},mesh,lookup,view,1.0f,1.0f,spans);
+    auto result=graph.traverse(read,{0U},mesh,lookup,view,{{0.0f,0.0f,0.0f}},1.0f,1.0f,spans);
     assert(result.valid);
     // Receiver 0 is an adjoin: both sides are conservatively seeded.
     assert(result.seed_sectors==2U);
@@ -86,15 +86,18 @@ int main() {
     assert(result.surfaces_reachable==3U);
     assert(spans.size()==3U);
     // Disconnected or unprojectable portals must not invent reachability.
-    auto distant_mesh=mesh;
-    auto &portal=distant_mesh.surfaces[1];
-    portal.bounds_min[0]=100.0f;
-    portal.bounds_max[0]=102.0f;
-    result=graph.traverse({0U},distant_mesh,lookup,view,1.0f,1.0f,spans);
-    // Geometry bounds were cached by graph: rebuild on topology revision.
+    // Unlike the former AABB implementation, actual authored portal vertices
+    // determine visibility. Moving only the GPU bounds must not affect it.
+    auto distant_geometry=geometry;
+    for(auto &point:distant_geometry.receivers[1].polygon)
+        point[0]+=100.0f;
+    distant_geometry.receivers[1].bounds_min[0]+=100.0f;
+    distant_geometry.receivers[1].bounds_max[0]+=100.0f;
+    world_cache_mesh distant_mesh{};
+    assert(build_world_cache_mesh(distant_geometry,distant_mesh));
     graph.clear();
-    assert(graph.ensure(read,world,2U,geometry,distant_mesh,lookup));
-    result=graph.traverse({0U},distant_mesh,lookup,view,1.0f,1.0f,spans);
+    assert(graph.ensure(read,world,2U,distant_geometry,distant_mesh,lookup));
+    result=graph.traverse(read,{0U},distant_mesh,lookup,view,{{0.0f,0.0f,0.0f}},1.0f,1.0f,spans);
     assert(result.valid && result.visible_sectors==2U);
     // A near-plane crossing AABB fails OPEN to full viewport.
     auto near_rect=planar_reflection_portal_project_aabb(
@@ -123,6 +126,10 @@ int main() {
     constexpr uintptr_t indices=0x60000U;
     put(surfaces+0x5cU+0x28U,4U);
     put(surfaces+0x5cU+0x2cU,uint32_t(indices));
+    // Native rdFace.normal lives at SithSurface +0x44.
+    put(surfaces+0x5cU+0x44U,0U);
+    put(surfaces+0x5cU+0x48U,0xbf800000U); // -1.0f
+    put(surfaces+0x5cU+0x4cU,0U);
     auto put_float=[&](uintptr_t at,float value) {
         uint32_t bits=0;std::memcpy(&bits,&value,sizeof(bits));
         put(at,bits);
@@ -140,22 +147,50 @@ int main() {
     graph.clear();
     assert(graph.ensure(read,world,4U,untextured_geometry,
                         untextured_mesh,untextured_lookup));
-    result=graph.traverse({0U},untextured_mesh,untextured_lookup,
-                          view,1.0f,1.0f,spans);
+    result=graph.traverse(read,{0U},untextured_mesh,untextured_lookup,
+                          view,{{0.0f,0.0f,0.0f}},1.0f,1.0f,spans);
     assert(result.valid && result.visible_sectors==3U);
     // When the receiver is NOT an adjoin, disconnected sectors remain
     // inaccessible through portal-space traversal.
     put(sectors+0x2cU,0U);
     graph.clear();
     assert(graph.ensure(read,world,5U,geometry,mesh,lookup));
-    result=graph.traverse({0U},mesh,lookup,view,1.0f,1.0f,spans);
+    result=graph.traverse(read,{0U},mesh,lookup,view,{{0.0f,0.0f,0.0f}},1.0f,1.0f,spans);
     assert(result.valid && result.visible_sectors==1U);
     put(sectors+0x2cU,uint32_t(link0));
+    // A portal clipped against the inherited rectangle should not pass to
+    // a neighbor on the other side of the screen.
+    bool valid_clip=false;
+    std::vector<std::array<float,3>> polygon{{
+        {{-1.0f,5.0f,-1.0f}},{{1.0f,5.0f,-1.0f}},
+        {{1.0f,5.0f,1.0f}},{{-1.0f,5.0f,1.0f}}
+    }};
+    planar_reflection_portal_rect right_window{};
+    right_window.left=0.6f;
+    auto projected=planar_reflection_portal_clip_polygon(
+        polygon,view,1.0f,1.0f,right_window,valid_clip);
+    assert(valid_clip && projected.empty);
+    // Near-plane crossings are polygon-clipped, not widened to the full
+    // viewport just because an AABB has a corner behind the camera.
+    polygon[0][1]=-1.0f;
+    projected=planar_reflection_portal_clip_polygon(
+        polygon,view,1.0f,1.0f,{},valid_clip);
+    assert(valid_clip && !projected.empty);
+    assert(projected.left>=-1.0f && projected.right<=1.0f);
+    // The traversal reads current COG-modified adjoin flags, not a stale
+    // snapshot. Closing the first portal must isolate its destination.
+    put(link0,0U);
+    graph.clear();
+    assert(graph.ensure(read,world,6U,geometry,mesh,lookup));
+    result=graph.traverse(read,{0U},mesh,lookup,view,
+        {{0.0f,0.0f,0.0f}},1.0f,1.0f,spans);
+    assert(result.valid && result.visible_sectors==1U);
+    put(link0,1U);
     // Invalid next-sector pointers fail OPEN to the whole-world path.
     put(link1+4U,0x12345U);
     graph.clear();
     assert(!graph.ensure(read,world,3U,geometry,mesh,lookup));
-    result=graph.traverse({0U},mesh,lookup,view,1.0f,1.0f,spans);
+    result=graph.traverse(read,{0U},mesh,lookup,view,{{0.0f,0.0f,0.0f}},1.0f,1.0f,spans);
     assert(!result.valid && spans.empty());
     return 0;
 }
