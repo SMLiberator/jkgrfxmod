@@ -49,10 +49,10 @@ int main() {
     assert(gpu_thing_occlusion_project_sphere_rect(
         shifted,view,1.0f,1.0f,rect));
     assert(rect.left<0.4f && rect.right>0.8f);
-    auto near=sphere;
-    near.center[1]=1.05f;
+    auto near_sphere=sphere;
+    near_sphere.center[1]=1.05f;
     assert(!gpu_thing_occlusion_project_sphere_rect(
-        near,view,1.0f,1.0f,rect));
+        near_sphere,view,1.0f,1.0f,rect));
     assert(!rect.valid);
     auto behind=sphere;
     behind.center[1]= -5.0f;
