@@ -17,6 +17,12 @@ for key in ("enable_gpu_camera_hud", "enable_gpu_sprite_instancing",
     assert sample[key] is True
     assert f'j.at("{key}").get_to(' in config
 assert 'j.at("use_gpu_cache").get_to(rv->use_gpu_cache);' in config
+assert "bool experimental_auto_3do_lod = false;" in header
+assert sample["experimental_auto_3do_lod"] is False
+assert 'j.at("experimental_auto_3do_lod").get_to(' in config
+assert "jkgm::prepare_native_3do_lod0_override(" in main
+assert "lod0.previous" in main
+
 assert "bool enable_baked_vertex_overbrightness = false;" in header
 assert sample["enable_baked_vertex_overbrightness"] is False
 assert 'j.contains("enable_baked_vertex_overbrightness")' in config
