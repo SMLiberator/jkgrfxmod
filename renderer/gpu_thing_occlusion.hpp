@@ -71,6 +71,7 @@ class gpu_thing_occlusion_queries {
         engine_camera result_camera{},issued_camera{};
         gpu_thing_occlusion_bound bound{},issued_bound{};
         uint32_t model=0,issued_model=0;
+        bool native_model=true,issued_native_model=true;
     };
     std::unordered_map<uint64_t,record> entries_;
     // Only in-flight GL query owners require glGetQueryObject polling.
@@ -137,6 +138,7 @@ public:
             e.result_camera=e.issued_camera;
             e.bound=e.issued_bound;
             e.model=e.issued_model;
+            e.native_model=e.issued_native_model;
             e.consecutive_hidden=e.visible?0U:
                 std::min(3U,e.consecutive_hidden+1U);
             ++completed_;
@@ -178,7 +180,8 @@ public:
         if(invalidated_)return out;
         for(auto const &p:entries_) {
             auto const &e=p.second;
-            if(!e.model || e.visible || e.consecutive_hidden<1U ||
+            if(!e.native_model || !e.model || e.visible ||
+               e.consecutive_hidden<1U ||
                frame<e.result_frame || frame-e.result_frame>12U ||
                !gpu_thing_occlusion_bound_valid(e.bound) ||
                !gpu_thing_occlusion_camera_compatible(camera,e.result_camera))
@@ -208,7 +211,7 @@ public:
     }
     bool begin(uint64_t owner,gpu_thing_occlusion_bound const &bound,
                engine_camera const &camera,uint64_t frame,
-               uint32_t model=0) {
+               uint32_t model=0,bool native_model=true) {
         if(!owner || !gpu_thing_occlusion_bound_valid(bound) ||
            gpu_thing_occlusion_camera_inside(bound,camera))return false;
         auto it=entries_.find(owner);
@@ -225,11 +228,12 @@ public:
         // Invalidate accumulated negatives when Thing center/radius changes.
         if(entry.result_frame &&
            (!gpu_thing_occlusion_same_bound(bound,entry.bound) ||
-            entry.model!=model))
+            entry.model!=model || entry.native_model!=native_model))
             entry.consecutive_hidden=0;
         entry.pending=true;entry.issued_frame=frame;
         entry.issued_camera=camera;entry.issued_bound=bound;
         entry.issued_model=model;
+        entry.issued_native_model=native_model;
         glBeginQuery(GL_ANY_SAMPLES_PASSED,entry.query);
         pending_owners_.push_back(owner);
         ++submitted_;
