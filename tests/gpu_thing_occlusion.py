@@ -119,8 +119,23 @@ assert "gpu_sprite_occlusion_same_pose(" in math
 # query, no screen-space UV derivatives or per-pixel edge clipping.
 flare_shader=read("assets/shaders/game_trns_pass.frag")
 flare_math=read("renderer/sprite_flare_projection.hpp")
-assert "reconstruct_sprite_flare_triangle_center(" in renderer
-assert "reconstruct_sprite_flare_triangle_center(" in flare_math
+# Type 4 flares now project the owning SithThing position. The source
+# marker survives native face conversion, so no clipped-triangle UV center
+# reconstruction is permitted in either the converter or its helper.
+assert "reconstruct_sprite_flare_triangle_center(" not in renderer
+assert "reconstruct_sprite_flare_triangle_center(" not in flare_math
+assert "project_sprite_flare_thing_center(" in renderer
+assert "project_sprite_flare_thing_center(" in flare_math
+assert "sprite_flare_sources().lookup(marker,world)" in renderer
+assert "read_active_rd_camera_view(flare_view)" in renderer
+assert "sprite_flare_sources().clear();" in renderer
+assert "sprite_flare_is_marker(v1.specular)" in renderer
+assert "v1.specular==v2.specular" in renderer
+assert "v1.specular==v3.specular" in renderer
+assert "sprite_flare_source_magic=0xB6A90000U" in flare_math
+assert "source.position.data()" in read("renderer/main.cpp")
+assert "sprite_flare_sources().add(" in read("renderer/main.cpp")
+assert "sprite_center_occluded_flare=4U" in read("renderer/sprite_orientation.hpp")
 assert "sprite_flare_center center{};" in renderer
 assert "tri.normal=valid" in renderer
 assert "is_flare?0U:native1" in renderer
