@@ -6,7 +6,7 @@ read=lambda path:(root/path).read_text(encoding="utf-8")
 settings=json.loads(read("assets/jkgm.json"))
 assert settings["experimental_planar_reflection_capture"] is False
 assert settings["planar_reflection_resolution_scale"]==0.5
-assert settings.get("experimental_planar_reflection_portal_culling",False) is False
+assert settings["experimental_planar_reflection_portal_culling"] is False
 portals=read("renderer/planar_reflection_portals.hpp")
 assert "planar_reflection_portal_graph" in portals
 assert "std::vector<world_cache_sector_span>" in portals
