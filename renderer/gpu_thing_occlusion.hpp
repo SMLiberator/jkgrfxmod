@@ -1,7 +1,8 @@
 #pragma once
-// Bounded asynchronous per-Thing GL 3.3 occlusion queries. This is a
-// main-camera GPU draw-submission experiment, NOT a native rdModel3 skip.
-// Other cameras, shadows and physics always retain their source Things.
+// Asynchronous per-Thing GL 3.3 occlusion queries: configurable budget,
+// including an uncapped stress mode. Main-camera GPU submission and opt-in
+// native rdModel3 early skips consume completed results independently.
+// This does NOT disable engine simulation or physics.
 #include "gpu_thing_occlusion_math.hpp"
 #include "native_occlusion_bridge.hpp"
 #include "gpu_3do_preview.hpp"
