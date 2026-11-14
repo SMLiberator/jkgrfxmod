@@ -7,6 +7,7 @@
 #include "world_cache_portals.hpp"
 #include "world_cache_lighting.hpp"
 #include "world_cache_uv_animation.hpp"
+#include "planar_reflection_portals.hpp"
 #include "base/log.hpp"
 #include "glutil/buffer.hpp"
 #include "glutil/vertex_array.hpp"
@@ -34,6 +35,7 @@ struct world_cache_gpu {
     std::vector<world_cache_sector_span> visible_sector_spans;
     std::vector<uint32_t> cached_surface_lookup,sector_seen_epochs;
     std::vector<uint32_t> native_visible_sector_scratch;
+    planar_reflection_portal_graph reflected_portal_graph;
     uint32_t sector_seen_epoch=0;
     uintptr_t loaded_world=0;
     uint64_t revision=0;
@@ -103,6 +105,7 @@ struct world_cache_gpu {
         portal_surface_membership.clear();
         visible_sector_spans.clear();
         native_visible_sector_scratch.clear();
+        reflected_portal_graph.clear();
         cached_surface_lookup.clear();
         sector_seen_epochs.clear();
         sector_seen_epoch=0;
