@@ -20,6 +20,7 @@ namespace jkgm {
 class gpu_thing_occlusion_shader : public opengl_shader {
     gl::uniform_location_id right_,forward_,up_,origin_,projection_,bound_;
     gl::uniform_location_id proxy_mode_,rect_ndc_,rect_forward_,debug_color_;
+    gl::uniform_location_id sprite_right_,sprite_forward_,sprite_up_,sprite_translation_;
 public:
     explicit gpu_thing_occlusion_shader(fs::path const &root)
         :opengl_shader("gpu_thing_occlusion",
@@ -34,7 +35,21 @@ public:
          proxy_mode_(gl::get_uniform_location(the_program,"proxy_mode")),
          rect_ndc_(gl::get_uniform_location(the_program,"rect_ndc")),
          rect_forward_(gl::get_uniform_location(the_program,"rect_forward")),
-         debug_color_(gl::get_uniform_location(the_program,"debug_color")) {}
+         debug_color_(gl::get_uniform_location(the_program,"debug_color")),
+         sprite_right_(gl::get_uniform_location(the_program,"sprite_right")),
+         sprite_forward_(gl::get_uniform_location(the_program,"sprite_forward")),
+         sprite_up_(gl::get_uniform_location(the_program,"sprite_up")),
+         sprite_translation_(gl::get_uniform_location(the_program,"sprite_translation")) {}
+    void set_sprite_pose(gpu_3do_matrix34 const &p) {
+        gl::set_uniform_vector(sprite_right_,
+            make_point(p[0],p[1],p[2]));
+        gl::set_uniform_vector(sprite_forward_,
+            make_point(p[3],p[4],p[5]));
+        gl::set_uniform_vector(sprite_up_,
+            make_point(p[6],p[7],p[8]));
+        gl::set_uniform_vector(sprite_translation_,
+            make_point(p[9],p[10],p[11]));
+    }
     void set_camera(gpu_3do_matrix34 const &v,float half_horizontal_fov,
                     float aspect,float far_plane) {
         gl::set_uniform_vector(right_,make_point(v[0],v[1],v[2],0.0f));
