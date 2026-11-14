@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <functional>
 #include <unordered_set>
 #include <vector>
 
@@ -84,10 +85,111 @@ inline planar_reflection_portal_rect planar_reflection_portal_intersect(
     return out;
 }
 
+
+/*
+ * OpenJKDF2 sithRender_BuildVisibleSectorList uses rdPrimit3_ClipFace on
+ * the *actual portal polygon*, then projects the clipped vertices and
+ * constructs a smaller screen rectangle for the adjoining sector.  The old
+ * reflected path projected the portal AABB instead (and returned the full
+ * screen whenever one corner touched the near plane).  This CPU-only
+ * Sutherland-Hodgman equivalent keeps a separate virtual-camera state and
+ * avoids touching JK's rdCamera, render ticks, or COG messages.
+ */
+inline planar_reflection_portal_rect planar_reflection_portal_clip_polygon(
+    std::vector<std::array<float,3>> const &world_vertices,
+    gpu_3do_matrix34 const &view,float tan_half_fov,float aspect,
+    planar_reflection_portal_rect const &parent,bool &valid,
+    float near_plane=0.05f)
+{
+    valid=false;
+    planar_reflection_portal_rect empty{};empty.empty=true;
+    if(world_vertices.size()<3U || world_vertices.size()>128U ||
+       !gpu_3do_matrix_finite(view) ||
+       !std::isfinite(tan_half_fov) || tan_half_fov<=0.0f ||
+       !std::isfinite(aspect) || aspect<=0.0f ||
+       !std::isfinite(near_plane) || near_plane<=0.0f ||
+       parent.empty || parent.left>parent.right ||
+       parent.bottom>parent.top)return empty;
+    float const h=tan_half_fov,v=h/aspect;
+    std::vector<std::array<float,3>> polygon;
+    polygon.reserve(world_vertices.size()+12U);
+    for(auto const &p:world_vertices) {
+        for(float x:p)if(!std::isfinite(x))return empty;
+        auto const q=gpu_3do_native_transform_point(view,p);
+        for(float x:q)if(!std::isfinite(x))return empty;
+        polygon.push_back(q);
+    }
+    // Camera coordinates: X right, Y forward, Z up (Sith rdCamera).
+    // Clip first to near, then to the inherited four perspective planes.
+    for(int plane=0;plane<5;++plane) {
+        if(polygon.empty())break;
+        auto distance=[&](std::array<float,3> const &p)->double {
+            switch(plane) {
+            case 0:return double(p[1])-near_plane;
+            case 1:return double(p[0])-double(parent.left)*h*p[1];
+            case 2:return double(parent.right)*h*p[1]-p[0];
+            case 3:return double(p[2])-double(parent.bottom)*v*p[1];
+            default:return double(parent.top)*v*p[1]-p[2];
+            }
+        };
+        std::vector<std::array<float,3>> clipped;
+        clipped.reserve(polygon.size()+2U);
+        auto previous=polygon.back();
+        double previous_distance=distance(previous);
+        bool previous_inside=previous_distance>= -1e-6;
+        for(auto const &current:polygon) {
+            double const current_distance=distance(current);
+            bool const current_inside=current_distance>= -1e-6;
+            if(previous_inside!=current_inside) {
+                double const denom=previous_distance-current_distance;
+                if(std::fabs(denom)<1e-20)return empty;
+                double const t=std::max(0.0,std::min(1.0,
+                    previous_distance/denom));
+                std::array<float,3> cut{};
+                for(int a=0;a<3;++a)
+                    cut[a]=float(double(previous[a])+t*
+                                  (double(current[a])-previous[a]));
+                clipped.push_back(cut);
+            }
+            if(current_inside)clipped.push_back(current);
+            previous=current;
+            previous_distance=current_distance;
+            previous_inside=current_inside;
+        }
+        polygon.swap(clipped);
+        if(polygon.size()>256U)return empty;
+    }
+    valid=true;
+    if(polygon.size()<3U)return empty;
+    float lo_x=std::numeric_limits<float>::infinity();
+    float hi_x=-lo_x,lo_y=lo_x,hi_y=-lo_x;
+    for(auto const &p:polygon) {
+        if(p[1]<=0.0f) {valid=false;return empty;}
+        float const x=p[0]/(h*p[1]), y=p[2]/(v*p[1]);
+        if(!std::isfinite(x) || !std::isfinite(y)) {
+            valid=false;return empty;
+        }
+        lo_x=std::min(lo_x,x);hi_x=std::max(hi_x,x);
+        lo_y=std::min(lo_y,y);hi_y=std::max(hi_y,y);
+    }
+    // The source uses a small pixel guard band for raster precision.
+    // Work with normalized viewport bounds; 0.01 is intentionally generous.
+    constexpr float pad=0.01f;
+    planar_reflection_portal_rect out{};
+    out.left=std::max(parent.left,lo_x-pad);
+    out.right=std::min(parent.right,hi_x+pad);
+    out.bottom=std::max(parent.bottom,lo_y-pad);
+    out.top=std::min(parent.top,hi_y+pad);
+    out.empty=out.left>out.right || out.bottom>out.top;
+    return out;
+}
+
 class planar_reflection_portal_graph {
     struct edge {
         uint32_t destination=0,surface_index=0;
-        std::array<float,3> low{},high{};
+        uintptr_t native_adjoin=0;
+        std::array<float,3> low{},high{},normal{};
+        std::vector<std::array<float,3>> polygon;
     };
     struct sector {
         world_cache_sector_span span{};
@@ -142,6 +244,13 @@ public:
            !count || count>65536U ||
            !pointer_ok(table,uint64_t(count)*0x98U))return false;
         sectors_.resize(count);
+        // World geometry retains the authored n-gon, unlike the triangulated
+        // GPU cache. It also covers opaque portals without a GPU MAT.
+        std::vector<decal_world_surface_geometry const*> authored(
+            geometry.surface_count,nullptr);
+        for(auto const &surface:geometry.receivers)
+            if(surface.surface_index<authored.size())
+                authored[surface.surface_index]=&surface;
         surface_owner_.assign(geometry.surface_count,-1);
         std::vector<uint32_t> heads(count,0U);
         for(uint32_t i=0;i<count;++i) {
@@ -193,37 +302,42 @@ public:
                 if(si>=surface_owner_.size() ||
                    surface_owner_[size_t(si)]!=int32_t(i))return false;
                 surface_index=uint32_t(si);
-                edge e{};e.destination=dest;e.surface_index=surface_index;
-                auto const cached=lookup[si];
-                if(cached<mesh.surfaces.size() &&
-                   mesh.surfaces[cached].surface_index==si) {
-                    e.low=mesh.surfaces[cached].bounds_min;
-                    e.high=mesh.surfaces[cached].bounds_max;
+                edge e{};
+                e.destination=dest;e.surface_index=surface_index;
+                e.native_adjoin=next;
+                auto const *original=authored[si];
+                if(original && original->polygon.size()>=3U &&
+                   original->polygon.size()<=128U) {
+                    e.polygon=original->polygon;
+                    e.normal=original->normal;
                 } else {
+                    // A material-less portal can be missing from the GPU
+                    // mesh. Read its native face indices and world vertices.
                     uint32_t nv=0,indices=0;
                     if(!read32(uintptr_t(link[2])+0x28U,nv) ||
                        !read32(uintptr_t(link[2])+0x2cU,indices) ||
                        nv<3U || nv>128U ||
-                       !pointer_ok(indices,uint64_t(nv)*4U))return false;
-                    e.low.fill(std::numeric_limits<float>::infinity());
-                    e.high.fill(-std::numeric_limits<float>::infinity());
+                       !pointer_ok(indices,uint64_t(nv)*4U) ||
+                       !read(uintptr_t(link[2])+0x44U,
+                             e.normal.data(),sizeof(e.normal)))return false;
+                    e.polygon.reserve(nv);
                     for(uint32_t j=0;j<nv;++j) {
                         uint32_t vi=0;std::array<float,3> pos{};
                         if(!read32(uintptr_t(indices)+j*4U,vi) ||
                            vi>=geometry.vertex_count ||
                            !read(geometry.vertices_addr+uintptr_t(vi)*12U,
                                  pos.data(),sizeof(pos)))return false;
-                        for(int a=0;a<3;++a) {
-                            if(!std::isfinite(pos[a]))return false;
-                            e.low[a]=std::min(e.low[a],pos[a]);
-                            e.high[a]=std::max(e.high[a],pos[a]);
-                        }
+                        e.polygon.push_back(pos);
                     }
                 }
-                for(int a=0;a<3;++a)
-                    if(!std::isfinite(e.low[a]) ||
-                       !std::isfinite(e.high[a]) ||
-                       e.high[a]<e.low[a])return false;
+                e.low.fill(std::numeric_limits<float>::infinity());
+                e.high.fill(-std::numeric_limits<float>::infinity());
+                for(float n:e.normal)if(!std::isfinite(n))return false;
+                for(auto const &p:e.polygon)for(int a=0;a<3;++a) {
+                    if(!std::isfinite(p[a]))return false;
+                    e.low[a]=std::min(e.low[a],p[a]);
+                    e.high[a]=std::max(e.high[a],p[a]);
+                }
                 sectors_[i].portals.push_back(e);
                 next=link[4]; // SithSurfaceAdjoin.next +0x10
             }
@@ -232,103 +346,136 @@ public:
         return true;
     }
 
-    // Receivers are MAIN-camera staged real reflective surfaces on the
-    // selected plane. Their own sectors are seed regions; no assumption is
-    // made about the virtual eye's position inside SithWorld.
+    // These spans are consumed by the same GPU cache used for the normal
+    // camera. A failed native read or numerical instability fails OPEN to the
+    // existing whole-world reflected-frustum fallback.
     planar_reflection_portal_stats traverse(
+        decal_native_read const &read,
         std::vector<uint32_t> const &receiver_surfaces,
         world_cache_mesh const &mesh,
         std::vector<uint32_t> const &lookup,
-        gpu_3do_matrix34 const &reflection_view,float tan_half_fov,
-        float aspect,std::vector<world_cache_sector_span> &out)const
+        gpu_3do_matrix34 const &reflection_view,
+        std::array<float,3> const &reflection_eye,
+        float tan_half_fov,float aspect,
+        std::vector<world_cache_sector_span> &out,
+        std::vector<planar_reflection_portal_rect> *sector_windows=nullptr)const
     {
         out.clear();
+        if(sector_windows)sector_windows->clear();
         planar_reflection_portal_stats stats{};
         stats.sectors_total=uint32_t(sectors_.size());
-        if(!ready() || receiver_surfaces.empty() ||
-           lookup.size()!=surface_owner_.size()) {
+        if(!ready() || !read || receiver_surfaces.empty() ||
+           lookup.size()!=surface_owner_.size() ||
+           !gpu_3do_matrix_finite(reflection_view) ||
+           !std::isfinite(tan_half_fov) || tan_half_fov<=0.0f ||
+           !std::isfinite(aspect) || aspect<=0.0f) {
             stats.reason="topology_or_receivers_unavailable";return stats;
         }
+        for(float x:reflection_eye)if(!std::isfinite(x)) {
+            stats.reason="invalid_reflected_eye";return stats;
+        }
         std::vector<planar_reflection_portal_rect> windows(sectors_.size());
-        std::vector<uint8_t> reachable(sectors_.size(),0U);
-        std::vector<uint32_t> pending;
+        std::vector<uint8_t> reached(sectors_.size(),0U);
+        std::vector<uint8_t> path(sectors_.size(),0U);
+        struct seed {uint32_t sector=0;planar_reflection_portal_rect window{};};
+        std::vector<seed> seeds;
+        std::vector<uint8_t> seeded(sectors_.size(),0U);
+        planar_reflection_portal_rect const full{};
         for(uint32_t const si:receiver_surfaces) {
             if(si>=lookup.size() || surface_owner_[si]<0)continue;
             uint32_t const cached=lookup[si];
             if(cached>=mesh.surfaces.size() ||
                mesh.surfaces[cached].surface_index!=si)continue;
             auto const &surface=mesh.surfaces[cached];
+            // Conservative footprint of the visible reflective receiver.
             auto rect=planar_reflection_portal_project_aabb(
                 surface.bounds_min,surface.bounds_max,reflection_view,
                 tan_half_fov,aspect);
             if(rect.empty)continue;
             uint32_t const owner=uint32_t(surface_owner_[si]);
-            auto seed=[&](uint32_t sector_id) {
-                if(!reachable[sector_id]) {
-                    reachable[sector_id]=1U;windows[sector_id]=rect;
-                    pending.push_back(sector_id);++stats.seed_sectors;
-                } else {
-                    auto &w=windows[sector_id];
-                    w.left=std::min(w.left,rect.left);
-                    w.right=std::max(w.right,rect.right);
-                    w.bottom=std::min(w.bottom,rect.bottom);
-                    w.top=std::max(w.top,rect.top);
+            auto seed_sector=[&](uint32_t id) {
+                if(!seeded[id]) {
+                    seeded[id]=1U;seeds.push_back({id,rect});
+                    ++stats.seed_sectors;
+                } else for(auto &existing:seeds)if(existing.sector==id) {
+                    existing.window.left=std::min(existing.window.left,rect.left);
+                    existing.window.right=std::max(existing.window.right,rect.right);
+                    existing.window.bottom=std::min(existing.window.bottom,rect.bottom);
+                    existing.window.top=std::max(existing.window.top,rect.top);
+                    break;
                 }
             };
-            seed(owner);
-            // A passable water/mirror adjoin may be owned by the sector
-            // opposite the physical reflecting half-space. Seed BOTH
-            // adjoining sectors where the receiver itself is a portal:
-            // the mirror's virtual eye cannot identify a unique side.
+            seed_sector(owner);
+            // A mirror can place the virtual camera across a water adjoin.
+            // Keep both sides only for such an actual receiver adjoin.
             for(auto const &portal:sectors_[owner].portals)
-                if(portal.surface_index==si)seed(portal.destination);
+                if(portal.surface_index==si)seed_sector(portal.destination);
         }
-        if(pending.empty()) {
+        if(seeds.empty()) {
             stats.reason="no_visible_receiver_seeds";return stats;
         }
-        // Worklist union converges conservatively. A safety cap never
-        // returns an incomplete set: the caller falls back to full scan.
-        size_t edges=0;
-        for(auto const &s:sectors_)edges+=s.portals.size();
-        size_t const max_iterations=4U*(edges+sectors_.size()+1U);
-        size_t visits=0;
-        for(size_t q=0;q<pending.size();++q) {
-            if(++visits>max_iterations) {
-                stats.reason="portal_iteration_limit";out.clear();
-                return stats;
+        bool failed=false;
+        char const *error="ok";
+        size_t call_count=0;
+        size_t const call_limit=sectors_.size()*8U+1U;
+        std::function<void(uint32_t,planar_reflection_portal_rect const&)> visit;
+        visit=[&](uint32_t owner,planar_reflection_portal_rect const &window) {
+            if(failed || path[owner])return;
+            if(++call_count>call_limit) {
+                failed=true;error="recursive_visit_limit";return;
             }
-            uint32_t const owner=pending[q];
-            auto const window=windows[owner];
+            if(reached[owner]) {
+                // Native sithRender_BuildVisibleSectorList widens an already
+                // rendered sector to the FULL camera frustum on a revisit.
+                windows[owner]=full;
+                return;
+            }
+            reached[owner]=1U;
+            windows[owner]=window;
+            path[owner]=1U;
             for(auto const &portal:sectors_[owner].portals) {
                 ++stats.portals_considered;
-                auto const rect=planar_reflection_portal_project_aabb(
-                    portal.low,portal.high,reflection_view,
-                    tan_half_fov,aspect);
-                auto const clipped=planar_reflection_portal_intersect(
-                    window,rect);
+                uint32_t live_flags=0;
+                if(!read(portal.native_adjoin,&live_flags,4U)) {
+                    failed=true;error="unreadable_live_adjoin";break;
+                }
+                if((live_flags&1U)==0U)continue;
+                // Native JK rejects adjoins seen from their back side.
+                auto const &p=portal.polygon.front();
+                float const distance=
+                    (reflection_eye[0]-p[0])*portal.normal[0]+
+                    (reflection_eye[1]-p[1])*portal.normal[1]+
+                    (reflection_eye[2]-p[2])*portal.normal[2];
+                if(!std::isfinite(distance)) {
+                    failed=true;error="nonfinite_portal_plane";break;
+                }
+                // An imprecise normal must never silently hide a sector.
+                float normal2=0.0f;
+                for(float n:portal.normal)normal2+=n*n;
+                if(normal2>1e-8f && distance< -0.0001f)continue;
+                bool clip_valid=false;
+                auto const clipped=planar_reflection_portal_clip_polygon(
+                    portal.polygon,reflection_view,tan_half_fov,aspect,
+                    window,clip_valid);
+                if(!clip_valid) {
+                    failed=true;error="invalid_portal_clip";break;
+                }
                 if(clipped.empty)continue;
                 ++stats.portals_reached;
-                uint32_t const dest=portal.destination;
-                if(!reachable[dest]) {
-                    reachable[dest]=1U;windows[dest]=clipped;
-                    pending.push_back(dest);
-                    continue;
-                }
-                auto &known=windows[dest];
-                constexpr float epsilon=0.0001f;
-                if(clipped.left>=known.left-epsilon &&
-                   clipped.right<=known.right+epsilon &&
-                   clipped.bottom>=known.bottom-epsilon &&
-                   clipped.top<=known.top+epsilon)continue;
-                known.left=std::min(known.left,clipped.left);
-                known.right=std::max(known.right,clipped.right);
-                known.bottom=std::min(known.bottom,clipped.bottom);
-                known.top=std::max(known.top,clipped.top);
-                pending.push_back(dest);
+                visit(portal.destination,clipped);
+                if(failed)break;
             }
+            path[owner]=0U;
+        };
+        for(auto const &entry:seeds) {
+            visit(entry.sector,entry.window);
+            if(failed)break;
+        }
+        if(failed) {
+            out.clear();stats.reason=error;return stats;
         }
         out.reserve(sectors_.size());
-        for(size_t i=0;i<sectors_.size();++i)if(reachable[i]) {
+        for(size_t i=0;i<sectors_.size();++i)if(reached[i]) {
             ++stats.visible_sectors;
             auto const span=sectors_[i].span;
             if(span.surface_count) {
@@ -339,7 +486,27 @@ public:
         stats.valid=stats.visible_sectors>0U;
         stats.used_portals=stats.valid;
         stats.reason=stats.valid?"ok":"no_reachable_sector";
+        if(stats.valid && sector_windows)
+            *sector_windows=std::move(windows);
         return stats;
     }
+
+    // The native sector's clipped window applies to geometry as well as
+    // traversal. AABB projection is deliberately conservative here: if a
+    // face intersects the near plane, retaining it is safer than a hole.
+    bool surface_in_window(uint32_t index,
+        std::array<float,3> const &lo,std::array<float,3> const &hi,
+        gpu_3do_matrix34 const &view,float tan_half_fov,float aspect,
+        std::vector<planar_reflection_portal_rect> const &windows)const
+    {
+        if(index>=surface_owner_.size() || surface_owner_[index]<0 ||
+           windows.size()!=sectors_.size())return true;
+        auto const window=windows[size_t(surface_owner_[index])];
+        auto const projected=planar_reflection_portal_project_aabb(
+            lo,hi,view,tan_half_fov,aspect);
+        return !planar_reflection_portal_intersect(
+            window,projected).empty;
+    }
+
 };
 } // namespace jkgm
