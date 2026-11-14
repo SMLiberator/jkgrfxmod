@@ -6454,9 +6454,22 @@ namespace {
             instance.camera_hud=thing_type==1U && render_type==4U;
             instance.camera_hud_world_depth=jkgm::camera_hud_uses_world_depth(
                 instance.camera_hud,thingflags);
-            if(!instance.camera_hud)
+            if(!instance.camera_hud) {
                 instance.sector_tint_valid=jkgm::read_jk_thing_sector_tint(
                     read,owner,instance.sector_tint);
+                // Occlusion eligibility is per SithThing, not per shared
+                // .SPR resource or cel. Use the fully constructed WORLD
+                // billboard pose; native Thing.position omits offsets and
+                // its authored size may differ from the rendered quad.
+                uint32_t signature=0;
+                if(thing_type>1U && render_type==4U &&
+                   (thingflags&0x20U)==0U &&
+                   read(uintptr_t(owner)+0x74U,&signature,4U) &&
+                   signature!=0U) {
+                    instance.shadow_owner=(uint64_t(owner)<<32)|signature;
+                    instance.sprite_occlusion_resource=sprite;
+                }
+            }
         }
         // The displayed billboard is a normal shadow RECEIVER; it does not
         // cast merely because it participates in lighting. 0x20 suppresses
