@@ -178,6 +178,7 @@
     <ClInclude Include="planar_reflection_native_nodes.hpp" />
     <ClInclude Include="planar_reflection_offscreen_gpu.hpp" />
     <ClInclude Include="planar_reflection_culling.hpp" />
+    <ClInclude Include="planar_reflection_portals.hpp" />
     <ClInclude Include="planar_reflection_render_math.hpp" />
     <ClInclude Include="offscreen_capture_target.hpp" />
     <ClInclude Include="offscreen_capture_projection.hpp" />
