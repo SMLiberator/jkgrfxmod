@@ -18,7 +18,7 @@
 
 namespace jkgm {
 struct planar_reflection_portal_stats {
-    bool valid=false,used_portals=false;
+    bool valid=false,used_portals=false,eye_sector_seed=false;
     uint32_t sectors_total=0,seed_sectors=0,visible_sectors=0;
     uint32_t portals_considered=0,portals_reached=0;
     uint32_t surfaces_reachable=0;
@@ -192,8 +192,14 @@ class planar_reflection_portal_graph {
         std::vector<std::array<float,3>> polygon;
     };
     struct sector {
+        struct boundary {
+            std::array<float,3> point{},normal{};
+        };
         world_cache_sector_span span{};
         std::vector<edge> portals;
+        std::vector<boundary> containment;
+        std::array<float,3> bbox_low{},bbox_high{};
+        bool has_bbox=false;
     };
     std::vector<sector> sectors_;
     std::vector<int32_t> surface_owner_;
@@ -278,6 +284,40 @@ public:
                 auto &owner=surface_owner_[size_t(first)+j];
                 if(owner>=0)return false;
                 owner=int32_t(i);
+            }
+        }
+        // JK's sithSector_FindSectorAtPos first tests the sector bounding
+        // box, then sithIntersect_IsSphereInSector tests collision/passable
+        // surface planes. Cache the immutable subset, without touching any
+        // native scene render state. If the virtual eye lies outside the map,
+        // receiver-based fallback seeds are still available.
+        for(uint32_t i=0;i<count;++i) {
+            auto &sector=sectors_[i];
+            std::array<float,6> box{};
+            uintptr_t const native=uintptr_t(table)+uint64_t(i)*0x98U;
+            if(read(native+0x70U,box.data(),sizeof(box))) {
+                sector.has_bbox=true;
+                for(int a=0;a<3;++a) {
+                    sector.bbox_low[a]=box[a];
+                    sector.bbox_high[a]=box[a+3];
+                    if(!std::isfinite(box[a]) ||
+                       !std::isfinite(box[a+3]) ||
+                       box[a]>box[a+3])sector.has_bbox=false;
+                }
+            }
+            auto const span=sector.span;
+            for(uint32_t j=0;j<span.surface_count;++j) {
+                auto const *original=authored[size_t(span.first_surface)+j];
+                if(!original || original->polygon.empty() ||
+                   ((original->surface_flags&0x4U)==0U &&
+                    !original->passable_adjoin))continue;
+                sector::boundary boundary{};
+                boundary.point=original->polygon.front();
+                boundary.normal=original->normal;
+                bool finite=true;
+                for(float v:boundary.point)finite&=std::isfinite(v);
+                for(float v:boundary.normal)finite&=std::isfinite(v);
+                if(finite)sector.containment.push_back(boundary);
             }
         }
         // Linked adjoins can have no MAT and so can be absent from the
@@ -385,7 +425,37 @@ public:
         std::vector<seed> seeds;
         std::vector<uint8_t> seeded(sectors_.size(),0U);
         planar_reflection_portal_rect const full{};
-        for(uint32_t const si:receiver_surfaces) {
+        // Prefer the actual virtual eye's containing sector, exactly as
+        // normal JK does. Ambiguous/out-of-world points fail back to the
+        // receiver-adjoin seeds rather than trusting a guessed sector.
+        int32_t eye_sector=-1;
+        for(size_t i=0;i<sectors_.size();++i) {
+            auto const &sector=sectors_[i];
+            if(!sector.has_bbox || sector.containment.size()<4U)continue;
+            bool inside=true;
+            for(int a=0;a<3;++a)
+                if(reflection_eye[a]<sector.bbox_low[a]-0.001f ||
+                   reflection_eye[a]>sector.bbox_high[a]+0.001f)
+                    inside=false;
+            if(!inside)continue;
+            for(auto const &boundary:sector.containment) {
+                float dist=0.0f;
+                for(int a=0;a<3;++a)
+                    dist+=(reflection_eye[a]-boundary.point[a])*
+                          boundary.normal[a];
+                if(dist< -0.001f) {inside=false;break;}
+            }
+            if(!inside)continue;
+            if(eye_sector>=0) {eye_sector=-2;break;}
+            eye_sector=int32_t(i);
+        }
+        if(eye_sector>=0) {
+            seeded[size_t(eye_sector)]=1U;
+            seeds.push_back({uint32_t(eye_sector),full});
+            stats.seed_sectors=1U;
+            stats.eye_sector_seed=true;
+        }
+        if(seeds.empty())for(uint32_t const si:receiver_surfaces) {
             if(si>=lookup.size() || surface_owner_[si]<0)continue;
             uint32_t const cached=lookup[si];
             if(cached>=mesh.surfaces.size() ||
