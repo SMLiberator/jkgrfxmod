@@ -5015,10 +5015,10 @@ namespace jkgm {
             visibility.end();
         }
 
-        // Low-cost GPU-only main-camera visibility experiment. We query
-        // authored rdModel3 radii, not animated mesh poses. Query cost is
-        // bounded and old results NEVER affect the independent reflection
-        // camera, sun shadows or native JK callbacks.
+        // Async Thing-occlusion experiment. Queries test authored rdModel3
+        // radii, never animated poses. Completed negatives optionally feed
+        // the guarded native rdModel3_Draw early return next frame; shadows
+        // and offscreen reflected acquisition retain their own work.
         void query_gpu_thing_occlusion()
         {
             if(!the_config->experimental_3do_occlusion_culling ||
