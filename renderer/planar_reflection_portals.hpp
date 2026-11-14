@@ -263,16 +263,25 @@ public:
                 tan_half_fov,aspect);
             if(rect.empty)continue;
             uint32_t const owner=uint32_t(surface_owner_[si]);
-            if(!reachable[owner]) {
-                reachable[owner]=1U;windows[owner]=rect;
-                pending.push_back(owner);++stats.seed_sectors;
-            } else {
-                auto &w=windows[owner];
-                w.left=std::min(w.left,rect.left);
-                w.right=std::max(w.right,rect.right);
-                w.bottom=std::min(w.bottom,rect.bottom);
-                w.top=std::max(w.top,rect.top);
-            }
+            auto seed=[&](uint32_t sector_id) {
+                if(!reachable[sector_id]) {
+                    reachable[sector_id]=1U;windows[sector_id]=rect;
+                    pending.push_back(sector_id);++stats.seed_sectors;
+                } else {
+                    auto &w=windows[sector_id];
+                    w.left=std::min(w.left,rect.left);
+                    w.right=std::max(w.right,rect.right);
+                    w.bottom=std::min(w.bottom,rect.bottom);
+                    w.top=std::max(w.top,rect.top);
+                }
+            };
+            seed(owner);
+            // A passable water/mirror adjoin may be owned by the sector
+            // opposite the physical reflecting half-space. Seed BOTH
+            // adjoining sectors where the receiver itself is a portal:
+            // the mirror's virtual eye cannot identify a unique side.
+            for(auto const &portal:sectors_[owner].portals)
+                if(portal.surface_index==si)seed(portal.destination);
         }
         if(pending.empty()) {
             stats.reason="no_visible_receiver_seeds";return stats;
