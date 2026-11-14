@@ -611,6 +611,10 @@ namespace jkgm {
         uint64_t thing_occlusion_debug_ns_window=0;
         uint64_t thing_occlusion_debug_draws_window=0;
         uint64_t thing_occlusion_debug_frames_window=0;
+        presentation_gpu_profile thing_occlusion_debug_gpu_timers;
+        uint64_t thing_occlusion_debug_gpu_ns_window=0;
+        uint64_t thing_occlusion_debug_gpu_samples_window=0;
+        uint64_t thing_occlusion_debug_gpu_skips_window=0;
         // Lightweight last-known triangle cost survives native CPU early skips.
         struct native_occlusion_cost {
             size_t triangles=0;
@@ -1319,6 +1323,7 @@ namespace jkgm {
                     thing_occlusion_proxy_vao=0;
                 }
                 thing_occlusion_gpu_timers.release();
+                thing_occlusion_debug_gpu_timers.release();
                 planar_gpu_queries.release();
                 present_gpu_queries.release();
                 scene_gpu_queries.release();
@@ -5379,6 +5384,14 @@ namespace jkgm {
                         " debug_us_total=",thing_occlusion_debug_ns_window/1000U,
                         " debug_draws=",thing_occlusion_debug_draws_window,
                         " debug_frames=",thing_occlusion_debug_frames_window,
+                        " debug_gpu_us_avg=",
+                        thing_occlusion_debug_gpu_samples_window
+                            ?(thing_occlusion_debug_gpu_ns_window/1000U)/
+                             thing_occlusion_debug_gpu_samples_window:0U,
+                        " debug_gpu_samples=",
+                        thing_occlusion_debug_gpu_samples_window,
+                        " debug_gpu_ring_skips=",
+                        thing_occlusion_debug_gpu_skips_window,
                         " issued_total=",thing_occlusion_issued_window,
                         " NOTE=async_GPU_timestamps_no_sync");
                     thing_occlusion_cpu_ns_window=0;
@@ -5396,6 +5409,9 @@ namespace jkgm {
                     thing_occlusion_debug_ns_window=0;
                     thing_occlusion_debug_draws_window=0;
                     thing_occlusion_debug_frames_window=0;
+                    thing_occlusion_debug_gpu_ns_window=0;
+                    thing_occlusion_debug_gpu_samples_window=0;
+                    thing_occlusion_debug_gpu_skips_window=0;
                 }
             }
             if(the_config->profile_renderer &&
