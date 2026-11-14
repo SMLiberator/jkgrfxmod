@@ -15,6 +15,28 @@ struct gpu_thing_occlusion_bound {
     float radius=0.0f;
     bool valid=false;
 };
+// SPR quads use the camera-facing WORLD pose from make_gpu_sprite_pose.
+// Local vertices are (+/-1,0,+/-1). The triangle inequality gives a
+// conservative sphere even if nonorthogonal axes/shear are authored.
+// Billboard rotation and scale must invalidate earlier hidden results.
+inline gpu_thing_occlusion_bound gpu_sprite_occlusion_bound(
+    gpu_3do_matrix34 const &world_pose)
+{
+    gpu_thing_occlusion_bound out{};
+    if(!gpu_3do_matrix_finite(world_pose))return out;
+    double r2=0.0,u2=0.0;
+    for(int i=0;i<3;++i) {
+        r2+=double(world_pose[i])*world_pose[i];
+        u2+=double(world_pose[6+i])*world_pose[6+i];
+        out.center[i]=world_pose[9+i];
+    }
+    double const radius=std::sqrt(r2)+std::sqrt(u2)+0.02;
+    if(!std::isfinite(radius) || radius<=0.02 ||
+       radius>100000.0)return {};
+    out.radius=float(radius);
+    out.valid=true;
+    return out;
+}
 inline bool gpu_thing_occlusion_bound_valid(gpu_thing_occlusion_bound const &b) {
     if(!b.valid || !std::isfinite(b.radius) || b.radius<=0.0f)return false;
     for(float f:b.center)if(!std::isfinite(f))return false;
