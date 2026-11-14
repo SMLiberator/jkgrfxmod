@@ -5055,11 +5055,14 @@ namespace jkgm {
             queries.set_world(world);
             queries.poll();
             queries.prune(gpu_3do_present_serial);
-            // Publish only completed, camera-compatible negatives.
-            if(native_enabled)
-                get_native_occlusion_bridge().publish(
-                    world,queries.confirmed_hidden(
-                        camera.camera,gpu_3do_present_serial));
+            // Profile the negatives actually published to native CPU culling.
+            size_t confirmed_hidden_count=0;
+            if(native_enabled) {
+                auto confirmed=queries.confirmed_hidden(
+                    camera.camera,gpu_3do_present_serial);
+                confirmed_hidden_count=confirmed.size();
+                get_native_occlusion_bridge().publish(world,confirmed);
+            }
             struct candidate {
                 uint64_t owner=0;
                 std::array<float,3> position{};
@@ -5183,9 +5186,12 @@ namespace jkgm {
                 return engine_material_debug::read_bytes(at,dst,count);
             };
             size_t issued=0;
+            size_t submit_attempts=0,reject_identity=0,reject_bound=0;
+            size_t reject_projection=0,reject_query_state=0;
             auto submit=[&](candidate const &item) {
                 if(issued>=size_t(the_config->gpu_3do_occlusion_query_budget))
                     return;
+                ++submit_attempts;
                 uintptr_t const thing=uintptr_t(uint32_t(item.owner>>32));
                 uint32_t signature=0,model=0;
                 float radius=0.0f;
@@ -5196,8 +5202,10 @@ namespace jkgm {
                    !read(thing+0xc8U,&model,4) ||
                    !planar_reflection_valid_native_pointer(model) ||
                    !read(uintptr_t(model)+0x5cU,&radius,4) ||
-                   !read(thing+0x88U,basis.data(),sizeof(basis)))
+                   !read(thing+0x88U,basis.data(),sizeof(basis))) {
+                    ++reject_identity;
                     return;
+                }
                 float const scale=planar_reflection_radius_scale(basis);
                 gpu_thing_occlusion_bound bound{};
                 bound.center=item.position;
@@ -5207,19 +5215,25 @@ namespace jkgm {
                 bound.valid=true;
                 if(!gpu_thing_occlusion_bound_valid(bound) ||
                    !std::isfinite(scale) || scale<=0.0f ||
-                   gpu_thing_occlusion_camera_inside(bound,camera.camera))
+                   gpu_thing_occlusion_camera_inside(bound,camera.camera)) {
+                    ++reject_bound;
                     return;
+                }
                 gpu_thing_occlusion_screen_rect rect{};
                 if(proxy_mode==1 &&
                    !gpu_thing_occlusion_project_sphere_rect(
-                       bound,camera.native_view,half_fov,aspect,rect))
-                    return; // camera intersects sphere or unsafe projection
+                       bound,camera.native_view,half_fov,aspect,rect)) {
+                    ++reject_projection;
+                    return; // unsafe/outside sphere projection
+                }
                 if(native_enabled)
                     thing_occlusion_cost_history[item.owner]={
                         item.triangles,model,gpu_3do_present_serial};
                 if(!queries.begin(item.owner,bound,camera.camera,
-                                  gpu_3do_present_serial,model))
+                                  gpu_3do_present_serial,model)) {
+                    ++reject_query_state;
                     return;
+                }
                 if(proxy_mode==1) {
                     program.set_rect(rect);
                     glDrawArrays(GL_TRIANGLES,0,6);
@@ -5289,6 +5303,12 @@ namespace jkgm {
                     " owners_ge256=",owners_256," owners_ge500=",owners_500,
                     " queried=",issued," query_budget=",
                     the_config->gpu_3do_occlusion_query_budget,
+                    " attempts=",submit_attempts,
+                    " reject_identity=",reject_identity,
+                    " reject_bound_or_camera_inside=",reject_bound,
+                    " reject_projection=",reject_projection,
+                    " reject_query_state=",reject_query_state,
+                    " confirmed_hidden=",confirmed_hidden_count,
                     " records=",queries.entries(),
                     " submitted_total=",queries.submitted(),
                     " completed_total=",queries.completed(),
