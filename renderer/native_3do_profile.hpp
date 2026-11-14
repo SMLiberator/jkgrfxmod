@@ -4,6 +4,7 @@
 namespace jkgm {
     struct native_3do_sample {
         uint64_t model_calls=0, model_drawn=0, mesh_calls=0;
+        uint64_t model_lod0_forced=0; // stage-0 auto LOD: native rdThing GeoSet 0 override
         uint64_t model_occlusion_skipped=0;
         uint64_t model_occlusion_tests=0,model_occlusion_lookups=0;
         uint64_t model_occlusion_lookup_hits=0,model_occlusion_ns=0;
@@ -15,6 +16,7 @@ namespace jkgm {
         uint64_t mesh_gpu_calls=0,mesh_native_calls=0;
         void add(native_3do_sample const &o) {
             model_calls+=o.model_calls;
+            model_lod0_forced+=o.model_lod0_forced;
             model_drawn+=o.model_drawn;
             model_occlusion_skipped+=o.model_occlusion_skipped;
             model_occlusion_tests+=o.model_occlusion_tests;
