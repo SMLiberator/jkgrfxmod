@@ -598,7 +598,8 @@ namespace jkgm {
         // Query answers are asynchronous; never stall the driver to read them.
         std::unique_ptr<planar_receiver_visibility> planar_receiver_queries;
         std::unique_ptr<planar_receiver_visibility_shader> planar_receiver_program;
-        // Opt-in main-view Thing sphere occlusion; no native/shadow/camera skip.
+        // Opt-in Thing-sphere queries shared by GPU and native CPU skips.
+        // Query draws only use the main-camera opaque depth buffer.
         std::unique_ptr<gpu_thing_occlusion_queries> thing_occlusion_queries;
         std::unique_ptr<gpu_thing_occlusion_shader> thing_occlusion_program;
         GLuint thing_occlusion_proxy_vao=0;
