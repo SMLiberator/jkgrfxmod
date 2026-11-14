@@ -643,6 +643,7 @@ namespace jkgm {
         uint64_t thing_occlusion_visibility_ns_window=0;
         uint64_t thing_occlusion_visibility_calls_window=0;
         uint64_t thing_occlusion_visibility_skips_window=0;
+        uint64_t sprite_occlusion_visibility_skips_window=0;
         // Asynchronous offscreen GPU timestamps: world, models, mipmaps.
         // Read only completed frames, with no GL query waits on the hot path.
         presentation_gpu_profile planar_gpu_queries;
@@ -3964,7 +3965,11 @@ namespace jkgm {
                                 std::chrono::steady_clock::now()-
                                 visibility_start).count());
                         ++thing_occlusion_visibility_calls_window;
-                        if(occluded)++thing_occlusion_visibility_skips_window;
+                        if(occluded) {
+                            ++thing_occlusion_visibility_skips_window;
+                            if(sprite_occlusion_eligible)
+                                ++sprite_occlusion_visibility_skips_window;
+                        }
                     }
                     if(occluded)continue;
                 }
@@ -5488,6 +5493,10 @@ namespace jkgm {
                         " visibility_skips_avg=",thing_occlusion_cpu_calls_window
                             ?thing_occlusion_visibility_skips_window/
                              thing_occlusion_cpu_calls_window:0U,
+                        " sprite_visibility_skips_avg=",
+                        thing_occlusion_cpu_calls_window
+                            ?sprite_occlusion_visibility_skips_window/
+                             thing_occlusion_cpu_calls_window:0U,
                         " debug_us_avg=",thing_occlusion_cpu_calls_window
                             ?(thing_occlusion_debug_ns_window/1000U)/
                              thing_occlusion_cpu_calls_window:0U,
@@ -5520,6 +5529,7 @@ namespace jkgm {
                     thing_occlusion_visibility_ns_window=0;
                     thing_occlusion_visibility_calls_window=0;
                     thing_occlusion_visibility_skips_window=0;
+                    sprite_occlusion_visibility_skips_window=0;
                     thing_occlusion_debug_ns_window=0;
                     thing_occlusion_debug_draws_window=0;
                     thing_occlusion_debug_frames_window=0;
