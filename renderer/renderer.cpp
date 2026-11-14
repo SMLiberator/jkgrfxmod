@@ -561,8 +561,8 @@ namespace jkgm {
             uint64_t last_seen=0;
         };
         std::unordered_map<uint64_t,auto_3do_lod_entry> auto_3do_lod_cache;
-        // Hysteresis is per source Thing AND hierarchy mesh, never per shared
-        // model resource (many Things can use one 3DO at different distances).
+        // Hysteresis is per owning Thing, shared by ALL hierarchy nodes.
+        // Different Things can still share one immutable 3DO asset.
         std::unordered_map<uint64_t,std::pair<unsigned,uint64_t>>
             auto_3do_lod_history;
         // Resolved MAT surfaces are identical for all instances within one
@@ -3666,11 +3666,10 @@ namespace jkgm {
 
         // Stage 1 GPU LOD experiment: JK already draws GeoSet 0 whenever
         // experimental_auto_3do_lod is set. Select a GENERATED GPU mesh for
-        // main-view model nodes using their projected screen radius, without
-        // modifying native 3DO data or rebuilding animated vertex positions.
-        // Budget CPU simplification to one newly attempted mesh variant
-        // per presentation. This amortizes startup work, NOT mesh quality:
-        // every eligible source will be attempted on subsequent frames.
+        // main-view mesh nodes according to the owning SithThing's ONE
+        // authored rdModel3 radius, not each hand/foot/torso mesh radius.
+        // Configurable new-variant budget only limits CPU generation work,
+        // never mesh eligibility or reduction aggressiveness.
         // Reflection cameras can select independent LODs in a later step.
         void apply_experimental_auto_3do_lods()
         {
@@ -3700,70 +3699,58 @@ namespace jkgm {
                 }
             }
             unsigned generated=0U,selected[3]={0U,0U,0U};
+            struct thing_lod_decision {
+                unsigned level=0U;
+                float radius_px=-1.0f;
+            };
+            // Compute the projected native Thing radius only once per
+            // owner each frame. All sibling hierarchy meshes (including
+            // tiny feet/hands) share that selection and hysteresis.
+            std::unordered_map<uint64_t,thing_lod_decision> thing_levels;
+            thing_levels.reserve(frame_gpu_3do_instances.size());
             for(auto &inst:frame_gpu_3do_instances) {
-                // No mesh size, alpha, light or procedural exclusion for
-                // main-camera 3DOs. Other geometry families and the separate
-                // HUD/shadow passes are not part of this 3DO LOD experiment.
                 if(!inst.geometry || inst.id==0U ||
                    inst.shadow_only || inst.is_projected_decal ||
                    inst.is_sprite_quad || inst.camera_hud)continue;
-                float pixel_radius=0.0f; // forced debug never needs a camera projection
-                if(the_config->gpu_3do_auto_lod_debug_mode==0) {
-                auto const &source=*inst.geometry;
-                std::array<float,3> lo{{1.e30f,1.e30f,1.e30f}};
-                std::array<float,3> hi{{-1.e30f,-1.e30f,-1.e30f}};
-                for(auto const &g:source.groups) {
-                    for(unsigned k=0;k<3;++k) {
-                        lo[k]=std::min(lo[k],g.bounds_min[k]);
-                        hi[k]=std::max(hi[k],g.bounds_max[k]);
+                float pixel_radius=-1.0f;
+                unsigned level=0U;
+                int const debug_mode=the_config->gpu_3do_auto_lod_debug_mode;
+                if(debug_mode!=0) {
+                    // Explicit debug overrides include ownerless procedural
+                    // geometry; normal auto-LOD requires a native Thing.
+                    level=select_gpu_3do_auto_lod(
+                        0.0f,0U,
+                        the_config->gpu_3do_auto_lod_lod1_radius_px,
+                        the_config->gpu_3do_auto_lod_lod2_radius_px,
+                        debug_mode);
+                } else if(inst.shadow_owner &&
+                          inst.owning_thing_world_position_valid &&
+                          inst.owning_thing_lod_radius_valid) {
+                    auto const inserted=thing_levels.try_emplace(
+                        inst.shadow_owner,thing_lod_decision{});
+                    auto &decision=inserted.first->second;
+                    if(inserted.second) {
+                        decision.radius_px=gpu_3do_auto_lod_projected_radius_px(
+                            inst.owning_thing_world_position,
+                            cam.position,cam.forward,
+                            inst.owning_thing_lod_radius,screen_half,tangent);
+                        if(decision.radius_px>=0.0f) {
+                            unsigned previous=0U;
+                            auto const history=auto_3do_lod_history.find(
+                                inst.shadow_owner);
+                            if(history!=auto_3do_lod_history.end())
+                                previous=history->second.first;
+                            decision.level=select_gpu_3do_auto_lod(
+                                decision.radius_px,previous,
+                                the_config->gpu_3do_auto_lod_lod1_radius_px,
+                                the_config->gpu_3do_auto_lod_lod2_radius_px);
+                            auto_3do_lod_history[inst.shadow_owner]={
+                                decision.level,gpu_3do_present_serial};
+                        }
                     }
+                    pixel_radius=decision.radius_px;
+                    level=decision.level;
                 }
-                std::array<float,3> center{};
-                double radius2=0.0;
-                for(unsigned k=0;k<3;++k) {
-                    if(!std::isfinite(lo[k]) || !std::isfinite(hi[k]) ||
-                       lo[k]>hi[k]){radius2=0.0;break;}
-                    center[k]=(lo[k]+hi[k])*0.5f;
-                    double const half=(double(hi[k])-lo[k])*0.5;
-                    radius2+=half*half;
-                }
-                if(!(radius2>1.e-10))continue;
-                // The native mesh node matrix is world-space.
-                auto const world_center=gpu_3do_native_transform_point(
-                    inst.transform,center);
-                double max_scale2=0.0;
-                for(unsigned axis=0;axis<3;++axis) {
-                    double len2=0.0;
-                    for(unsigned k=0;k<3;++k) {
-                        double const x=inst.transform[axis*3U+k];
-                        len2+=x*x;
-                    }
-                    max_scale2=std::max(max_scale2,len2);
-                }
-                double const radius=std::sqrt(radius2*max_scale2);
-                pixel_radius=gpu_3do_auto_lod_projected_radius_px(
-                    world_center,cam.position,cam.forward,
-                    radius,screen_half,tangent);
-                if(pixel_radius<0.0f)continue;
-                } // automatic screen-size selection only
-                uint64_t const source_id=inst.id;
-                unsigned previous=0U;
-                uint64_t const history_id=inst.shadow_owner
-                    ? inst.shadow_owner^(source_id*0x9e3779b97f4a7c15ULL)
-                    :0U;
-                if(history_id) {
-                    auto const found=auto_3do_lod_history.find(history_id);
-                    if(found!=auto_3do_lod_history.end())
-                        previous=found->second.first;
-                }
-                unsigned const level=select_gpu_3do_auto_lod(
-                    pixel_radius,previous,
-                    the_config->gpu_3do_auto_lod_lod1_radius_px,
-                    the_config->gpu_3do_auto_lod_lod2_radius_px,
-                    the_config->gpu_3do_auto_lod_debug_mode);
-                if(history_id && the_config->gpu_3do_auto_lod_debug_mode==0)
-                    auto_3do_lod_history[history_id]={
-                        level,gpu_3do_present_serial};
                 if(level==0U) {++selected[0];continue;}
                 auto &entry=auto_3do_lod_cache[source_id];
                 if(entry.source!=inst.geometry) {
@@ -3778,7 +3765,9 @@ namespace jkgm {
                 }
                 entry.last_seen=gpu_3do_present_serial;
                 unsigned const index=level-1U;
-                if(!entry.attempted[index] && generated<1U) {
+                if(!entry.attempted[index] &&
+                   gpu_3do_auto_lod_budget_allows(
+                       generated,the_config->gpu_3do_auto_lod_generation_budget)) {
                     entry.attempted[index]=true;
                     ++generated;
                     entry.levels[index]=generate_gpu_3do_auto_lod(
@@ -3828,6 +3817,8 @@ namespace jkgm {
                          " lod1_radius_px=",the_config->gpu_3do_auto_lod_lod1_radius_px,
                          " lod2_radius_px=",the_config->gpu_3do_auto_lod_lod2_radius_px,
                          " cpu_variants=",auto_3do_lod_cache.size(),
+                         " thing_decisions=",thing_levels.size(),
+                         " generation_budget=",the_config->gpu_3do_auto_lod_generation_budget,
                          " generated_this_frame=",generated);
         }
 
