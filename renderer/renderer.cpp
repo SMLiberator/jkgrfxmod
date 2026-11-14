@@ -9373,6 +9373,7 @@ namespace jkgm {
                                 reflected_portal_stats.reason="invalid_native_topology";
                             } else {
                                 std::vector<world_cache_sector_span> reflected_spans;
+                                std::vector<planar_reflection_portal_rect> sector_windows;
                                 float const aspect=
                                     float(get<x>(internal_scr_res_f))/
                                     float(get<y>(internal_scr_res_f));
@@ -9380,10 +9381,11 @@ namespace jkgm {
                                     cam.camera.fov*0.008726646259971648f);
                                 reflected_portal_stats=
                                     cache.reflected_portal_graph.traverse(
-                                        receiver_seeds,cache.mesh,
+                                        safe_read,receiver_seeds,cache.mesh,
                                         cache.cached_surface_lookup,
-                                        reflection_view,half_fov,aspect,
-                                        reflected_spans);
+                                        reflection_view,reflected.position,
+                                        half_fov,aspect,reflected_spans,
+                                        &sector_windows);
                                 if(reflected_portal_stats.valid) {
                                     auto const stage=
                                         collect_world_cache_sector_candidates(
@@ -9395,6 +9397,39 @@ namespace jkgm {
                                             &cam.frustum,&reflection_view,
                                             &special_candidates);
                                     reflected_portals_used=stage.valid;
+                                    if(stage.valid) {
+                                        // As in native sithRender_RenderSectors,
+                                        // use the inherited per-sector portal
+                                        // frustum for final surface eligibility.
+                                        auto within_window=[&](auto const &candidate) {
+                                            if(candidate.surface_index>=
+                                               cache.cached_surface_lookup.size())
+                                                return true;
+                                            auto const cached=cache.cached_surface_lookup[
+                                                candidate.surface_index];
+                                            if(cached>=cache.mesh.surfaces.size())
+                                                return true;
+                                            auto const &range=cache.mesh.surfaces[cached];
+                                            return cache.reflected_portal_graph.surface_in_window(
+                                                candidate.surface_index,range.bounds_min,
+                                                range.bounds_max,reflection_view,
+                                                half_fov,aspect,sector_windows);
+                                        };
+                                        reflected_candidates.erase(
+                                            std::remove_if(reflected_candidates.begin(),
+                                                reflected_candidates.end(),
+                                                [&](auto const &candidate) {
+                                                    return !within_window(candidate);
+                                                }),
+                                            reflected_candidates.end());
+                                        special_candidates.erase(
+                                            std::remove_if(special_candidates.begin(),
+                                                special_candidates.end(),
+                                                [&](auto const &candidate) {
+                                                    return !within_window(candidate);
+                                                }),
+                                            special_candidates.end());
+                                    }
                                     if(!stage.valid)
                                         reflected_portal_stats.reason=
                                             "reflected_sector_stage_invalid";
