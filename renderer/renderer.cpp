@@ -3668,9 +3668,10 @@ namespace jkgm {
         // experimental_auto_3do_lod is set. Select a GENERATED GPU mesh for
         // main-view model nodes using their projected screen radius, without
         // modifying native 3DO data or rebuilding animated vertex positions.
-        // Generate every first-seen variant immediately, including the
-        // initial CPU spike. Reflection cameras can
-        // select their own screen-space LOD in a later independent step.
+        // Budget CPU simplification to one newly attempted mesh variant
+        // per presentation. This amortizes startup work, NOT mesh quality:
+        // every eligible source will be attempted on subsequent frames.
+        // Reflection cameras can select independent LODs in a later step.
         void apply_experimental_auto_3do_lods()
         {
             if(!the_config || !the_config->experimental_auto_3do_lod ||
@@ -3777,7 +3778,7 @@ namespace jkgm {
                 }
                 entry.last_seen=gpu_3do_present_serial;
                 unsigned const index=level-1U;
-                if(!entry.attempted[index]) {
+                if(!entry.attempted[index] && generated<1U) {
                     entry.attempted[index]=true;
                     ++generated;
                     entry.levels[index]=generate_gpu_3do_auto_lod(
