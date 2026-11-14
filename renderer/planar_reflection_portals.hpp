@@ -197,6 +197,7 @@ class planar_reflection_portal_graph {
     };
     std::vector<sector> sectors_;
     std::vector<int32_t> surface_owner_;
+    uintptr_t sector_table_=0;
     uintptr_t world_=0;
     uint64_t revision_=0;
     bool built_=false,valid_=false;
@@ -216,7 +217,7 @@ class planar_reflection_portal_graph {
 public:
     void clear() {
         sectors_.clear();surface_owner_.clear();
-        world_=0;revision_=0;built_=false;valid_=false;
+        world_=0;revision_=0;sector_table_=0;built_=false;valid_=false;
     }
     bool ready()const{return built_ && valid_;}
 
@@ -244,6 +245,7 @@ public:
            !count || count>65536U ||
            !pointer_ok(table,uint64_t(count)*0x98U))return false;
         sectors_.resize(count);
+        sector_table_=table;
         // World geometry retains the authored n-gon, unlike the triangulated
         // GPU cache. It also covers opaque portals without a GPU MAT.
         std::vector<decal_world_surface_geometry const*> authored(
@@ -358,10 +360,12 @@ public:
         std::array<float,3> const &reflection_eye,
         float tan_half_fov,float aspect,
         std::vector<world_cache_sector_span> &out,
-        std::vector<planar_reflection_portal_rect> *sector_windows=nullptr)const
+        std::vector<planar_reflection_portal_rect> *sector_windows=nullptr,
+        std::vector<uint8_t> *thing_sector_mask=nullptr)const
     {
         out.clear();
         if(sector_windows)sector_windows->clear();
+        if(thing_sector_mask)thing_sector_mask->clear();
         planar_reflection_portal_stats stats{};
         stats.sectors_total=uint32_t(sectors_.size());
         if(!ready() || !read || receiver_surfaces.empty() ||
@@ -488,7 +492,45 @@ public:
         stats.reason=stats.valid?"ok":"no_reachable_sector";
         if(stats.valid && sector_windows)
             *sector_windows=std::move(windows);
+        if(stats.valid && thing_sector_mask) {
+            // SithRender_BuildVisibleSectorsThingList includes Things from
+            // nearby adjoining sectors in addition to world-visible ones.
+            // Conservatively extend one and two links from the native list,
+            // without excluding an object whose owner pointer is invalid.
+            *thing_sector_mask=reached;
+            std::vector<uint8_t> frontier=reached;
+            for(int depth=0;depth<2;++depth) {
+                std::vector<uint8_t> next(frontier.size(),0U);
+                for(size_t i=0;i<frontier.size();++i)if(frontier[i]) {
+                    for(auto const &portal:sectors_[i].portals) {
+                        uint32_t flags=0;
+                        if(!read(portal.native_adjoin,&flags,4U)) {
+                            thing_sector_mask->clear();
+                            return stats; // fail open for models only
+                        }
+                        if((flags&1U) &&
+                           !(*thing_sector_mask)[portal.destination]) {
+                            (*thing_sector_mask)[portal.destination]=1U;
+                            next[portal.destination]=1U;
+                        }
+                    }
+                }
+                frontier.swap(next);
+            }
+        }
         return stats;
+    }
+
+    // Native SithThing.sector pointer to our independent reflected
+    // sector mask. Unknown/stale addresses always keep the Thing.
+    bool thing_sector_visible(uintptr_t sector_ptr,
+                              std::vector<uint8_t> const &mask)const
+    {
+        if(!ready() || mask.size()!=sectors_.size() ||
+           sector_table_==0 || sector_ptr<sector_table_)return true;
+        uint64_t const delta=uint64_t(sector_ptr)-sector_table_;
+        if(delta%0x98U || delta/0x98U>=sectors_.size())return true;
+        return mask[size_t(delta/0x98U)]!=0U;
     }
 
     // The native sector's clipped window applies to geometry as well as
