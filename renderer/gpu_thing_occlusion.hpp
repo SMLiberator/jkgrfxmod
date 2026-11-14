@@ -46,10 +46,12 @@ public:
     void set_proxy_mode(int mode) {
         gl::set_uniform_integer(proxy_mode_,mode);
     }
-    void set_rect(gpu_thing_occlusion_screen_rect const &r) {
+    void set_rect(gpu_thing_occlusion_screen_rect const &r,
+                  int proxy_mode) {
         gl::set_uniform_vector(rect_ndc_,make_point(
             r.left,r.right,r.bottom,r.top));
-        gl::set_uniform_float(rect_forward_,r.near_forward);
+        gl::set_uniform_float(rect_forward_,
+            proxy_mode==2?r.center_forward:r.near_forward);
     }
     void set_debug_color(float r,float g,float b,float a) {
         gl::set_uniform_vector(debug_color_,make_point(r,g,b,a));
