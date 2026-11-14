@@ -608,7 +608,9 @@ namespace jkgm {
             gpu_thing_occlusion_bound bound{};
             gpu_thing_occlusion_screen_rect rect{};
             unsigned result=0; // 0=unknown, 1=visible, 2=occluded
-            unsigned mode=0; // actual geometry issued (SPR uses rect mode 1)
+            unsigned mode=0; // model proxy 0..2; original SPR mesh=3
+            uint64_t sprite_id=0;
+            gpu_3do_matrix34 sprite_pose{};
         };
         std::vector<thing_occlusion_debug_proxy> thing_occlusion_debug_proxies;
         uint64_t thing_occlusion_debug_ns_window=0;
@@ -5164,6 +5166,9 @@ namespace jkgm {
                 bool sprite=false;
                 uintptr_t sprite_resource=0;
                 gpu_thing_occlusion_bound sprite_bound{};
+                gpu_3do_matrix34 sprite_pose{};
+                uint64_t sprite_id=0;
+                std::shared_ptr<gpu_3do_geometry const> sprite_geometry;
             };
             // Query model Things and eligible GPU SPR quads independently
             // of native draw submission. HUD, 0x20 skyboxes, projected
@@ -5188,6 +5193,9 @@ namespace jkgm {
                     c.sprite=true;
                     c.sprite_resource=inst.sprite_occlusion_resource;
                     c.sprite_bound=bound;
+                    c.sprite_pose=inst.transform;
+                    c.sprite_id=inst.id;
+                    c.sprite_geometry=inst.geometry;
                     c.position=bound.center;
                     for(auto const &g:inst.geometry->groups)
                         c.triangles+=g.count/3U;
@@ -5376,32 +5384,60 @@ namespace jkgm {
                     ++reject_bound;
                     return;
                 }
-                // SPRs always use a conservative two-triangle screen rect
-                // at the nearest point of their bound. Mode 0's 3D box
-                // often costs more geometry than the underlying sprite.
-                int const draw_mode=item.sprite ? 1 : proxy_mode;
+                // Ordinary sprites draw THEIR ACTUAL indexed, GPU-cached
+                // quad. It is already camera-facing (or fixed) and needs
+                // no second rectangle, sphere projection, or new upload.
+                int const draw_mode=item.sprite ? 3 : proxy_mode;
                 gpu_thing_occlusion_screen_rect rect{};
-                if(draw_mode!=0 &&
+                if(!item.sprite && draw_mode!=0 &&
                    !gpu_thing_occlusion_project_sphere_rect(
                        bound,camera.native_view,half_fov,aspect,rect)) {
                     ++reject_projection;
                     return; // unsafe/outside sphere projection
                 }
+                gpu_3do_gl_mesh *sprite_mesh=nullptr;
+                if(item.sprite) {
+                    if(!item.sprite_id || !item.sprite_geometry ||
+                       item.sprite_geometry->indices.size()!=6U ||
+                       item.sprite_geometry->vertices.size()!=4U) {
+                        ++reject_identity;
+                        return;
+                    }
+                    auto mesh=gpu_3do_gl_cache.find(item.sprite_id);
+                    if(mesh==gpu_3do_gl_cache.end()) {
+                        if(gpu_3do_gl_cache.size()>=8192U) {
+                            ++reject_query_state;
+                            return;
+                        }
+                        mesh=gpu_3do_gl_cache.emplace(item.sprite_id,
+                            std::make_unique<gpu_3do_gl_mesh>(
+                                *item.sprite_geometry)).first;
+                    }
+                    sprite_mesh=mesh->second.get();
+                }
                 if(native_enabled && !item.sprite)
                     thing_occlusion_cost_history[item.owner]={
                         item.triangles,model,gpu_3do_present_serial};
                 if(!queries.begin(item.owner,bound,camera.camera,
-                                  gpu_3do_present_serial,model,!item.sprite)) {
+                                  gpu_3do_present_serial,model,!item.sprite,
+                                  item.sprite?&item.sprite_pose:nullptr)) {
                     ++reject_query_state;
                     return;
                 }
                 program.set_proxy_mode(draw_mode);
-                if(draw_mode!=0) {
-                    program.set_rect(rect,draw_mode);
-                    glDrawArrays(GL_TRIANGLES,0,6);
+                if(item.sprite) {
+                    program.set_sprite_pose(item.sprite_pose);
+                    gl::bind_vertex_array(sprite_mesh->vao);
+                    glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
                 } else {
-                    program.set_bound(bound);
-                    glDrawArrays(GL_TRIANGLES,0,36);
+                    glBindVertexArray(thing_occlusion_proxy_vao);
+                    if(draw_mode!=0) {
+                        program.set_rect(rect,draw_mode);
+                        glDrawArrays(GL_TRIANGLES,0,6);
+                    } else {
+                        program.set_bound(bound);
+                        glDrawArrays(GL_TRIANGLES,0,36);
+                    }
                 }
                 queries.end();
                 if(the_config->gpu_3do_occlusion_debug_view!=0) {
@@ -5409,6 +5445,8 @@ namespace jkgm {
                     proxy.bound=bound;
                     proxy.rect=rect;
                     proxy.mode=unsigned(draw_mode);
+                    proxy.sprite_id=item.sprite?item.sprite_id:0U;
+                    if(item.sprite)proxy.sprite_pose=item.sprite_pose;
                     proxy.result=queries.debug_result_state(item.owner);
                     thing_occlusion_debug_proxies.push_back(proxy);
                 }
@@ -5629,9 +5667,18 @@ namespace jkgm {
                 float const b=item.result==0U?0.10f:0.12f;
                 program.set_debug_color(r*alpha,g*alpha,b*alpha,alpha);
                 program.set_proxy_mode(int(item.mode));
-                if(item.mode!=0U)program.set_rect(item.rect,int(item.mode));
-                else program.set_bound(item.bound);
-                glDrawArrays(GL_TRIANGLES,0,item.mode!=0U?6:36);
+                if(item.mode==3U) {
+                    auto const sprite=gpu_3do_gl_cache.find(item.sprite_id);
+                    if(sprite==gpu_3do_gl_cache.end())continue;
+                    program.set_sprite_pose(item.sprite_pose);
+                    gl::bind_vertex_array(sprite->second->vao);
+                    glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
+                } else {
+                    glBindVertexArray(thing_occlusion_proxy_vao);
+                    if(item.mode!=0U)program.set_rect(item.rect,int(item.mode));
+                    else program.set_bound(item.bound);
+                    glDrawArrays(GL_TRIANGLES,0,item.mode!=0U?6:36);
+                }
             }
             if(gpu_timing) {
                 thing_occlusion_debug_gpu_timers.timestamp(0U,false);
