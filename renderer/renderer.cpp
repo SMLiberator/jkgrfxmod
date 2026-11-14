@@ -3958,7 +3958,8 @@ namespace jkgm {
                             inst.shadow_owner,
                             gpu_sprite_occlusion_bound(inst.transform),
                             cam,gpu_3do_present_serial,
-                            uint32_t(inst.sprite_occlusion_resource))
+                            uint32_t(inst.sprite_occlusion_resource),
+                            &inst.transform)
                         :thing_occlusion_queries->hidden(
                             inst.shadow_owner,inst.owning_thing_world_position,
                             cam,gpu_3do_present_serial);
