@@ -1,4 +1,5 @@
 #include "renderer/gpu_thing_occlusion_math.hpp"
+#include "renderer/native_occlusion_bridge.hpp"
 #include <cassert>
 #include <limits>
 int main() {
@@ -61,5 +62,40 @@ int main() {
     offscreen.center[0]=100.0f;
     assert(!gpu_thing_occlusion_project_sphere_rect(
         offscreen,view,1.0f,1.0f,rect));
+    // Native hook and GPU renderer exchange only immutable snapshots.
+    // Verify skipped candidates remain available for subsequent queries.
+    auto &bridge=get_native_occlusion_bridge();
+    bridge.clear();
+    native_occlusion_candidate candidate{};
+    candidate.owner=0x1234000056ULL;
+    candidate.model=0x1234U;
+    candidate.bound=sphere;
+    bridge.register_candidate(candidate);
+    bridge.register_candidate(candidate); // deduplicated per Thing
+    auto candidates=bridge.take_candidates();
+    assert(candidates.size()==1U);
+    assert(candidates[0].model==candidate.model);
+    assert(bridge.take_candidates().empty());
+    native_occlusion_result result{};
+    result.owner=candidate.owner;
+    result.model=candidate.model;
+    result.bound=sphere;
+    result.camera=prior; // valid camera from above
+    bridge.publish(0x102030U,{result});
+    native_occlusion_result lookup{};
+    uintptr_t seen_world=0;
+    assert(bridge.lookup(candidate.owner,candidate.model,
+                         sphere,lookup,seen_world));
+    assert(seen_world==0x102030U);
+    assert(lookup.owner==candidate.owner);
+    auto different_bound=sphere;
+    different_bound.center[0]+=0.25f;
+    assert(!bridge.lookup(candidate.owner,candidate.model,
+                          different_bound,lookup,seen_world));
+    assert(!bridge.lookup(candidate.owner,candidate.model+1U,
+                          sphere,lookup,seen_world));
+    bridge.clear();
+    assert(!bridge.lookup(candidate.owner,candidate.model,
+                          sphere,lookup,seen_world));
     return 0;
 }
