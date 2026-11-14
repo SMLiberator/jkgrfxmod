@@ -300,6 +300,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_3do_occlusion_culling").get_to(
                 rv->experimental_3do_occlusion_culling);
         }
+        if(j.contains("experimental_3do_native_occlusion_culling")) {
+            j.at("experimental_3do_native_occlusion_culling").get_to(
+                rv->experimental_3do_native_occlusion_culling);
+        }
         if(j.contains("gpu_3do_occlusion_proxy_mode")) {
             auto const &v=j.at("gpu_3do_occlusion_proxy_mode");
             if(!v.is_number_integer())
