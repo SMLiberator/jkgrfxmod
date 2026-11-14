@@ -151,12 +151,15 @@ public:
     // reusable for up to 12 frames. Camera/bound checks still invalidate
     // stale evidence. Moving occluders may expose temporal errors to test.
     bool hidden(uint64_t owner,gpu_thing_occlusion_bound const &current,
-                engine_camera const &camera,uint64_t frame) {
+                engine_camera const &camera,uint64_t frame,
+                uint32_t expected_model=0U) {
         if(invalidated_)return false;
         auto it=entries_.find(owner);
         if(it==entries_.end())return false;
         auto const &e=it->second;
-        bool const hide=e.consecutive_hidden>=1U && !e.visible &&
+        bool const hide=(expected_model==0U ||
+                                e.model==expected_model) &&
+            e.consecutive_hidden>=1U && !e.visible &&
             frame>=e.result_frame && frame-e.result_frame<=12U &&
             gpu_thing_occlusion_same_bound(current,e.bound) &&
             gpu_thing_occlusion_camera_compatible(camera,e.result_camera) &&
