@@ -43,7 +43,8 @@ assert "draw_gpu_thing_occlusion_debug();" in renderer
 assert "glPolygonMode(GL_FRONT_AND_BACK" in renderer
 assert "thing_occlusion_debug_gpu_timers.timestamp(stage,false)" in renderer
 assert "debug_gpu_us_avg=" in renderer
-assert "native_occlusion_lookup_hits_avg=" in renderer
+assert '" occlusion_lookup_hits_avg="' in renderer
+assert "profile_window.native_occlusion_lookup_hits/frames" in renderer
 assert "thing_occlusion_visibility_ns_window" in renderer
 assert "thing_occlusion_poll_ns_window" in renderer
 assert "thing_occlusion_prepare_ns_window" in renderer
