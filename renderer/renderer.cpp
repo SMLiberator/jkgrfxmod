@@ -3668,8 +3668,8 @@ namespace jkgm {
         // experimental_auto_3do_lod is set. Select a GENERATED GPU mesh for
         // main-view model nodes using their projected screen radius, without
         // modifying native 3DO data or rebuilding animated vertex positions.
-        // Only one CPU generation per frame; unmapped candidates temporarily
-        // keep GeoSet 0 until their variant is ready. Reflection cameras can
+        // Generate every first-seen variant immediately, including the
+        // initial CPU spike. Reflection cameras can
         // select their own screen-space LOD in a later independent step.
         void apply_experimental_auto_3do_lods()
         {
@@ -3700,12 +3700,12 @@ namespace jkgm {
             }
             unsigned generated=0U,selected[3]={0U,0U,0U};
             for(auto &inst:frame_gpu_3do_instances) {
+                // No mesh size, alpha, light or procedural exclusion for
+                // main-camera 3DOs. Other geometry families and the separate
+                // HUD/shadow passes are not part of this 3DO LOD experiment.
                 if(!inst.geometry || inst.id==0U ||
-                   inst.geometry->indices.size()<72U ||
-                   inst.shadow_only || inst.transient_procedural ||
-                   inst.is_projected_decal || inst.is_sprite_quad ||
-                   inst.camera_hud || inst.world_lighting_exempt ||
-                   inst.saber_trail_active)continue;
+                   inst.shadow_only || inst.is_projected_decal ||
+                   inst.is_sprite_quad || inst.camera_hud)continue;
                 float pixel_radius=0.0f; // forced debug never needs a camera projection
                 if(the_config->gpu_3do_auto_lod_debug_mode==0) {
                 auto const &source=*inst.geometry;
@@ -3764,9 +3764,6 @@ namespace jkgm {
                     auto_3do_lod_history[history_id]={
                         level,gpu_3do_present_serial};
                 if(level==0U) {++selected[0];continue;}
-                if(auto_3do_lod_cache.size()>=4096U &&
-                   auto_3do_lod_cache.find(source_id)==auto_3do_lod_cache.end())
-                    continue; // bounded CPU mesh ownership
                 auto &entry=auto_3do_lod_cache[source_id];
                 if(entry.source!=inst.geometry) {
                     // Live SetModelMesh may replace geometry under the same
@@ -3780,7 +3777,7 @@ namespace jkgm {
                 }
                 entry.last_seen=gpu_3do_present_serial;
                 unsigned const index=level-1U;
-                if(!entry.attempted[index] && generated<1U) {
+                if(!entry.attempted[index]) {
                     entry.attempted[index]=true;
                     ++generated;
                     entry.levels[index]=generate_gpu_3do_auto_lod(
@@ -3792,7 +3789,7 @@ namespace jkgm {
                                  " triangles=",
                                  entry.source->indices.size()/3U,
                                  " groups=",entry.source->groups.size(),
-                                 " reason=no_safe_reduction");
+                                 " reason=no_nonempty_reduction");
                     }
                     if(entry.levels[index]) {
                         // Include resource identity AND the generated level:

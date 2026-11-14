@@ -150,7 +150,8 @@ int main() {
     auto part2=fragment_groups(grid(8U));
     assert(generate_gpu_3do_auto_lod(part1,1U));
     assert(generate_gpu_3do_auto_lod(part2,2U));
-    // No material boundary may move or tear; a second MAT still renders.
+    // Material boundaries may move; remaining draw ranges still retain
+    // their source MAT identities for testing the visual consequences.
     auto mixed=fragment_groups(grid(18U),true,false);
     auto mixed_lod=generate_gpu_3do_auto_lod(mixed,2U);
     assert(mixed_lod);
@@ -160,8 +161,8 @@ int main() {
         if(g.material==0x4321U)saw_b=true;
     }
     assert(saw_a && saw_b);
-    // Entirely translucent meshes remain untouched, and opaque areas
-    // never collapse across an adjacent alpha material boundary.
+    // Alpha faces participate in the same aggressive simplification as
+    // opaque ones, even when they border another draw group.
     auto mixed_alpha=fragment_groups(grid(18U),false,true);
     auto mixed_alpha_lod=generate_gpu_3do_auto_lod(mixed_alpha,1U);
     assert(mixed_alpha_lod);
@@ -170,13 +171,27 @@ int main() {
         if(g.face_type&2U)original_alpha+=g.count;
     for(auto const &g:mixed_alpha_lod->groups)
         if(g.face_type&2U)generated_alpha+=g.count;
-    assert(generated_alpha==original_alpha);
-    // Low-poly models stay untouched, avoiding pointless memory and
-    // silhouette quality loss.
+    assert(generated_alpha<original_alpha);
+    // Even very small meshes (well under the old 24-triangle threshold)
+    // are attempted; no minimum improvement percentage is enforced.
     auto small=grid(3U);
-    assert(!generate_gpu_3do_auto_lod(small,1U));
-    // Opaque-only simplification: alpha faces cannot lose painter order.
+    auto reduced_small=generate_gpu_3do_auto_lod(small,1U);
+    assert(reduced_small);
+    assert(reduced_small->indices.size()<small.indices.size());
+    auto quad=grid(1U);
+    auto reduced_quad=generate_gpu_3do_auto_lod(quad,1U);
+    assert(reduced_quad);
+    assert(reduced_quad->indices.size()==3U);
+    // A single triangle cannot be collapsed into a nonempty triangle.
+    auto single=quad;
+    single.indices.resize(3U);
+    single.groups[0].count=3U;
+    assert(!generate_gpu_3do_auto_lod(single,1U));
+    // Entirely transparent groups reduce too.
     auto alpha=grid(18U);
     alpha.groups[0].face_type=2U;
-    assert(!generate_gpu_3do_auto_lod(alpha,2U));
+    auto reduced_alpha=generate_gpu_3do_auto_lod(alpha,2U);
+    assert(reduced_alpha);
+    assert(reduced_alpha->indices.size()<alpha.indices.size());
+    assert(reduced_alpha->groups[0].face_type&2U);
 }
