@@ -66,6 +66,15 @@ assert "layout(location=0) out vec4 out_color;" in frag
 assert "gpu_3do_occlusion_min_triangles must be between 0 and 50000" in config
 assert "glBeginQuery(GL_ANY_SAMPLES_PASSED" in header
 assert "GL_QUERY_RESULT_AVAILABLE" in header
+assert "std::vector<uint64_t> pending_owners_;" in header
+assert "for(size_t i=0;i<pending_owners_.size();" in header
+assert "pending_owners_.push_back(owner);" in header
+assert "pending_owners_.clear();" in header
+assert "thing_occlusion_poll_checked_window" in renderer
+assert "poll_checked_avg=" in renderer
+assert "poll_completed_avg=" in renderer
+assert "poll_pending_avg=" in renderer
+assert "issued_avg=" in renderer
 assert "consecutive_hidden>=1U" in header
 assert "frame-e.result_frame<=12U" in header
 assert "gpu_thing_occlusion_camera_compatible" in header
