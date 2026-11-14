@@ -5333,8 +5333,8 @@ namespace jkgm {
                     break;
                 if(queries.needs_retest(item.owner))submit(item);
             }
-            // Rotate cold query candidates. We don't need 600 queries
-            // every frame for a level containing 600 static buildings.
+            // Rotate budgeted candidates; stress mode (budget=0)
+            // attempts every eligible owner rather than rotating a subset.
             size_t const start=
                 the_config->gpu_3do_occlusion_query_budget==0?0U:(
                 gpu_3do_present_serial*query_budget)%expensive.size();
