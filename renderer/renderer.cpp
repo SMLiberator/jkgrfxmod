@@ -3,6 +3,7 @@
 #include "presentation_gpu_profile.hpp"
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
+#include "gpu_3do_auto_lod.hpp"
 #include "planar_reflection_things.hpp"
 #include "planar_reflection_workset.hpp"
 #include "planar_reflection_offscreen_gpu.hpp"
@@ -550,6 +551,20 @@ namespace jkgm {
         std::unordered_map<uint64_t,std::unique_ptr<gpu_3do_gl_mesh>> gpu_3do_gl_cache;
         std::unordered_map<uint64_t,uint64_t> gpu_3do_last_drawn;
         uint64_t gpu_3do_present_serial=0;
+        // Lazy CPU simplification per immutable source, keyed by original
+        // GPU mesh ID. Variant GL IDs are distinct from the authored mesh.
+        struct auto_3do_lod_entry {
+            std::shared_ptr<gpu_3do_geometry const> source;
+            std::array<std::shared_ptr<gpu_3do_geometry const>,2> levels{};
+            std::array<uint64_t,2> ids{};
+            std::array<bool,2> attempted{{false,false}};
+            uint64_t last_seen=0;
+        };
+        std::unordered_map<uint64_t,auto_3do_lod_entry> auto_3do_lod_cache;
+        // Hysteresis is per source Thing AND hierarchy mesh, never per shared
+        // model resource (many Things can use one 3DO at different distances).
+        std::unordered_map<uint64_t,std::pair<unsigned,uint64_t>>
+            auto_3do_lod_history;
         // Resolved MAT surfaces are identical for all instances within one
         // frame; share costly native memory reads across both GPU passes.
         std::unordered_map<uint64_t,gpu_3do_texture> gpu_frame_material_cache;
@@ -1380,6 +1395,8 @@ namespace jkgm {
                     reset_gpu_3do_instances();
                     gpu_3do_gl_cache.clear();
                     gpu_3do_last_drawn.clear();
+                    auto_3do_lod_cache.clear();
+                    auto_3do_lod_history.clear();
                     gpu_3do_present_serial=0;
                     gpu_frame_material_cache.clear();
                     frame_gpu_3do_instances.clear();
@@ -3644,6 +3661,155 @@ namespace jkgm {
                      " budget=",the_config->fluid_sprite_layer_budget,
                      " NOTE=fluid_SPR_only_back_to_front_no_world_changes");
             return true;
+        }
+
+
+        // Stage 1 GPU LOD experiment: JK already draws GeoSet 0 whenever
+        // experimental_auto_3do_lod is set. Select a GENERATED GPU mesh for
+        // main-view model nodes using their projected screen radius, without
+        // modifying native 3DO data or rebuilding animated vertex positions.
+        // Only one CPU generation per frame; unmapped candidates temporarily
+        // keep GeoSet 0 until their variant is ready. Reflection cameras can
+        // select their own screen-space LOD in a later independent step.
+        void apply_experimental_auto_3do_lods()
+        {
+            if(!the_config || !the_config->experimental_auto_3do_lod ||
+               !the_config->use_gpu_cache || frame_gpu_3do_instances.empty())
+                return;
+            auto const cam=read_active_render_camera();
+            if(!cam.valid)return;
+            double const tangent=std::tan(double(cam.fov)*
+                                         0.008726646259971648);
+            double const screen_half=get<x>(internal_scr_res_f)*0.5;
+            if(!(tangent>0.0) || !(screen_half>0.0))return;
+            if((gpu_3do_present_serial&63U)==0U) {
+                for(auto it=auto_3do_lod_cache.begin();
+                    it!=auto_3do_lod_cache.end();) {
+                    if(gpu_3do_present_serial>=it->second.last_seen &&
+                       gpu_3do_present_serial-it->second.last_seen>96U)
+                        it=auto_3do_lod_cache.erase(it);
+                    else ++it;
+                }
+                for(auto it=auto_3do_lod_history.begin();
+                    it!=auto_3do_lod_history.end();) {
+                    if(gpu_3do_present_serial>=it->second.second &&
+                       gpu_3do_present_serial-it->second.second>96U)
+                        it=auto_3do_lod_history.erase(it);
+                    else ++it;
+                }
+            }
+            unsigned generated=0U,selected[3]={0U,0U,0U};
+            for(auto &inst:frame_gpu_3do_instances) {
+                if(!inst.geometry || inst.id==0U ||
+                   inst.geometry->indices.size()<192U ||
+                   inst.shadow_only || inst.transient_procedural ||
+                   inst.is_projected_decal || inst.is_sprite_quad ||
+                   inst.camera_hud || inst.world_lighting_exempt ||
+                   inst.saber_trail_active)continue;
+                auto const &source=*inst.geometry;
+                std::array<float,3> lo{{1.e30f,1.e30f,1.e30f}};
+                std::array<float,3> hi{{-1.e30f,-1.e30f,-1.e30f}};
+                for(auto const &g:source.groups) {
+                    for(unsigned k=0;k<3;++k) {
+                        lo[k]=std::min(lo[k],g.bounds_min[k]);
+                        hi[k]=std::max(hi[k],g.bounds_max[k]);
+                    }
+                }
+                std::array<float,3> center{};
+                double radius2=0.0;
+                for(unsigned k=0;k<3;++k) {
+                    if(!std::isfinite(lo[k]) || !std::isfinite(hi[k]) ||
+                       lo[k]>hi[k]){radius2=0.0;break;}
+                    center[k]=(lo[k]+hi[k])*0.5f;
+                    double const half=(double(hi[k])-lo[k])*0.5;
+                    radius2+=half*half;
+                }
+                if(!(radius2>1.e-10))continue;
+                auto const view=gpu_3do_native_transform_point(
+                    inst.transform,center);
+                double max_scale2=0.0;
+                for(unsigned axis=0;axis<3;++axis) {
+                    double len2=0.0;
+                    for(unsigned k=0;k<3;++k) {
+                        double const x=inst.transform[axis*3U+k];
+                        len2+=x*x;
+                    }
+                    max_scale2=std::max(max_scale2,len2);
+                }
+                double const radius=std::sqrt(radius2*max_scale2);
+                double const front=double(view[1])-radius;
+                if(!(front>0.01) || !std::isfinite(front))continue;
+                float const pixel_radius=float(radius*screen_half/
+                                                 (tangent*front));
+                uint64_t const source_id=inst.id;
+                unsigned previous=0U;
+                uint64_t const history_id=inst.shadow_owner
+                    ? inst.shadow_owner^(source_id*0x9e3779b97f4a7c15ULL)
+                    :0U;
+                if(history_id) {
+                    auto const found=auto_3do_lod_history.find(history_id);
+                    if(found!=auto_3do_lod_history.end())
+                        previous=found->second.first;
+                }
+                unsigned const level=select_gpu_3do_auto_lod(
+                    pixel_radius,previous);
+                if(history_id)
+                    auto_3do_lod_history[history_id]={
+                        level,gpu_3do_present_serial};
+                if(level==0U) {++selected[0];continue;}
+                if(auto_3do_lod_cache.size()>=4096U &&
+                   auto_3do_lod_cache.find(source_id)==auto_3do_lod_cache.end())
+                    continue; // bounded CPU mesh ownership
+                auto &entry=auto_3do_lod_cache[source_id];
+                if(entry.source!=inst.geometry) {
+                    // Live SetModelMesh may replace geometry under the same
+                    // native mesh ID. Never reuse a stale variant GL buffer.
+                    for(uint64_t old_id:entry.ids)if(old_id) {
+                        gpu_3do_gl_cache.erase(old_id);
+                        gpu_3do_last_drawn.erase(old_id);
+                    }
+                    entry={};
+                    entry.source=inst.geometry;
+                }
+                entry.last_seen=gpu_3do_present_serial;
+                unsigned const index=level-1U;
+                if(!entry.attempted[index] && generated<1U) {
+                    entry.attempted[index]=true;
+                    ++generated;
+                    entry.levels[index]=generate_gpu_3do_auto_lod(
+                        *entry.source,level);
+                    if(entry.levels[index]) {
+                        // Include resource identity AND the generated level:
+                        // GL buffers may not alias base-mesh GPU cache IDs.
+                        uint64_t const pointer=static_cast<uint64_t>(
+                            reinterpret_cast<uintptr_t>(entry.source.get()));
+                        entry.ids[index]=source_id ^
+                            (pointer*0x9e3779b97f4a7c15ULL) ^
+                            (uint64_t(level)*0xbf58476d1ce4e5b9ULL);
+                        if(the_config->profile_renderer) {
+                            LOG_INFO("AUTO 3DO LOD generated source=",source_id,
+                                     " level=",level,
+                                     " triangles_native=",
+                                     entry.source->indices.size()/3U,
+                                     " triangles_generated=",
+                                     entry.levels[index]->indices.size()/3U,
+                                     " screen_radius_px=",pixel_radius);
+                        }
+                    }
+                }
+                if(!entry.levels[index]) {
+                    ++selected[0];continue;
+                }
+                inst.geometry=entry.levels[index];
+                inst.id=entry.ids[index];
+                ++selected[level];
+            }
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("AUTO 3DO LOD main-camera base=",selected[0],
+                         " lod1=",selected[1]," lod2=",selected[2],
+                         " cpu_variants=",auto_3do_lod_cache.size(),
+                         " generated_this_frame=",generated);
         }
 
         // Separate opaque and alpha passes. Native JK no longer processes
@@ -12016,6 +12182,7 @@ namespace jkgm {
             // Keeping one frame snapshot avoids losing the second pass.
             gpu_frame_material_cache.clear();
             frame_gpu_3do_instances=consume_gpu_3do_instances();
+            apply_experimental_auto_3do_lods();
             // Discovery-only probe: walk ALL sectors rather than the primary
             // camera's portal-visible subset. No pose updates, GL draws, or
             // changes to native JK state occur here.

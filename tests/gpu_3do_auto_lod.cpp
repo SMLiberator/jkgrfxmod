@@ -34,6 +34,12 @@ static gpu_3do_geometry grid(unsigned n) {
     return mesh;
 }
 int main() {
+    assert(select_gpu_3do_auto_lod(150.0f)==0U);
+    assert(select_gpu_3do_auto_lod(60.0f)==1U);
+    assert(select_gpu_3do_auto_lod(4.0f)==2U);
+    assert(select_gpu_3do_auto_lod(99.0f,1U)==1U);
+    assert(select_gpu_3do_auto_lod(35.0f,2U)==2U);
+    assert(select_gpu_3do_auto_lod(120.0f,2U)==0U);
     auto source=grid(18U);
     assert(!generate_gpu_3do_auto_lod(source,0U));
     assert(!generate_gpu_3do_auto_lod(source,3U));

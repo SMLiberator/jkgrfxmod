@@ -287,6 +287,8 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\native_3do_lod_override.cpp /Fe:native_3do_lod_override_test.exe || exit /b 1
         native_3do_lod_override_test.exe || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_auto_lod.cpp /Fe:gpu_3do_auto_lod_test.exe || exit /b 1
+        gpu_3do_auto_lod_test.exe || exit /b 1
     - name: Planar reflection camera and material metadata regression
       shell: cmd
       run: |

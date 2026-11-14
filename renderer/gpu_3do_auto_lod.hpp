@@ -54,6 +54,18 @@ namespace auto_lod_detail {
     struct candidate { edge endpoints; xyz position; double error; };
 }
 
+// Screen-space LOD selection with hysteresis; radius is projected pixels.
+// Model nodes retain LOD0 near the camera, independent of JK's GeoSet.
+// A 4-pixel 20k-triangle mesh can select LOD2 without distance constants.
+inline unsigned select_gpu_3do_auto_lod(float radius,unsigned previous=0) {
+    if(!std::isfinite(radius) || radius<0.0f)return 0U;
+    if(previous>=2U)
+        return radius>110.0f?0U:(radius>40.0f?1U:2U);
+    if(previous==1U)
+        return radius>110.0f?0U:(radius<28.0f?2U:1U);
+    return radius<28.0f?2U:(radius<90.0f?1U:0U);
+}
+
 // Returns null if the source is too small, malformed, or cannot be reduced
 // without moving a material boundary. Output is a separate immutable GPU
 // geometry; original vertex attributes/UVs are kept at every surviving
