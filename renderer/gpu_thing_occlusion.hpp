@@ -10,6 +10,7 @@
 #include "shaders.hpp"
 #include "glad/glad.h"
 #include <unordered_map>
+#include <vector>
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -72,6 +73,9 @@ class gpu_thing_occlusion_queries {
         uint32_t model=0,issued_model=0;
     };
     std::unordered_map<uint64_t,record> entries_;
+    // Only in-flight GL query owners require glGetQueryObject polling.
+    // Completed records stay cached for reuse without being scanned.
+    std::vector<uint64_t> pending_owners_;
     uintptr_t world_=0;
     unsigned proxy_mode_=0U;
     uint64_t submitted_=0,completed_=0,skipped_=0;
@@ -85,7 +89,7 @@ public:
     void clear() {
         for(auto &e:entries_)if(e.second.query)
             glDeleteQueries(1,&e.second.query);
-        entries_.clear();world_=0;
+        entries_.clear();pending_owners_.clear();world_=0;
     }
     void invalidate() { invalidated_=true; }
     void set_proxy_mode(unsigned mode) {
@@ -99,16 +103,34 @@ public:
             clear();world_=world;invalidated_=false;
         }
     }
-    void poll() {
-        for(auto &entry:entries_) {
-            auto &e=entry.second;
-            if(!e.pending)continue;
+    struct poll_counters {
+        size_t checked=0,completed=0,pending_after=0;
+    };
+    poll_counters poll() {
+        poll_counters stats{};
+        // Swap-remove resolved owners; do NOT walk every cached result.
+        // This matters with thousands of resident Things and unlimited
+        // query coverage, where most records have no in-flight GL work.
+        for(size_t i=0;i<pending_owners_.size();) {
+            auto const it=entries_.find(pending_owners_[i]);
+            if(it==entries_.end() || !it->second.pending) {
+                pending_owners_[i]=pending_owners_.back();
+                pending_owners_.pop_back();
+                continue;
+            }
+            auto &e=it->second;
+            ++stats.checked;
             GLuint available=0;
             glGetQueryObjectuiv(e.query,GL_QUERY_RESULT_AVAILABLE,&available);
-            if(!available)continue;
+            if(!available) {
+                ++i;
+                continue;
+            }
             GLuint visible=1;
             glGetQueryObjectuiv(e.query,GL_QUERY_RESULT,&visible);
             e.pending=false;
+            pending_owners_[i]=pending_owners_.back();
+            pending_owners_.pop_back();
             if(e.issued_frame<e.result_frame)continue;
             e.visible=visible!=0;
             e.result_frame=e.issued_frame;
@@ -118,7 +140,10 @@ public:
             e.consecutive_hidden=e.visible?0U:
                 std::min(3U,e.consecutive_hidden+1U);
             ++completed_;
+            ++stats.completed;
         }
+        stats.pending_after=pending_owners_.size();
+        return stats;
     }
     // Experimental coverage: one completed negative suffices and remains
     // reusable for up to 12 frames. Camera/bound checks still invalidate
@@ -206,6 +231,7 @@ public:
         entry.issued_camera=camera;entry.issued_bound=bound;
         entry.issued_model=model;
         glBeginQuery(GL_ANY_SAMPLES_PASSED,entry.query);
+        pending_owners_.push_back(owner);
         ++submitted_;
         return true;
     }
@@ -221,6 +247,7 @@ public:
         }
     }
     size_t entries()const{return entries_.size();}
+    size_t pending()const{return pending_owners_.size();}
     uint64_t submitted()const{return submitted_;}
     uint64_t completed()const{return completed_;}
     uint64_t skipped()const{return skipped_;}
