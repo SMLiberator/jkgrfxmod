@@ -5461,6 +5461,14 @@ namespace jkgm {
                 camera.camera.fov*0.008726646259971648f);
             if(!std::isfinite(aspect) || aspect<=0.0f ||
                !std::isfinite(half_fov) || half_fov<=0.0f)return;
+            presentation_gpu_profile::completed_sample completed{};
+            bool const gpu_timing=the_config->profile_renderer &&
+                thing_occlusion_debug_gpu_timers.begin(completed);
+            if(completed.ready) {
+                thing_occlusion_debug_gpu_ns_window+=completed.nanoseconds[0];
+                ++thing_occlusion_debug_gpu_samples_window;
+            }
+            if(completed.skipped)++thing_occlusion_debug_gpu_skips_window;
             {
             offscreen_capture_gl_scope restore;
             GLint polygon_mode[2]={GL_FILL,GL_FILL};
@@ -5486,6 +5494,7 @@ namespace jkgm {
             glBindVertexArray(thing_occlusion_proxy_vao);
             float const alpha=
                 the_config->gpu_3do_occlusion_debug_view==1?0.80f:0.13f;
+            if(gpu_timing)thing_occlusion_debug_gpu_timers.timestamp(0U,true);
             for(auto const &item:thing_occlusion_debug_proxies) {
                 // Green=previously visible; red=previously hidden;
                 // yellow=no completed visibility result available.
@@ -5496,6 +5505,15 @@ namespace jkgm {
                 if(proxy_mode==1)program.set_rect(item.rect);
                 else program.set_bound(item.bound);
                 glDrawArrays(GL_TRIANGLES,0,proxy_mode==1?6:36);
+            }
+            if(gpu_timing) {
+                thing_occlusion_debug_gpu_timers.timestamp(0U,false);
+                for(size_t stage=1U;
+                    stage<presentation_gpu_profile::num_stages;++stage) {
+                    thing_occlusion_debug_gpu_timers.timestamp(stage,true);
+                    thing_occlusion_debug_gpu_timers.timestamp(stage,false);
+                }
+                thing_occlusion_debug_gpu_timers.end();
             }
             if(polygon_mode[0]==polygon_mode[1])
                 glPolygonMode(GL_FRONT_AND_BACK,GLenum(polygon_mode[0]));
