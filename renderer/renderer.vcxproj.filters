@@ -287,6 +287,9 @@
     <ClInclude Include="gpu_thing_occlusion_math.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="native_occlusion_bridge.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="texture_units.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
