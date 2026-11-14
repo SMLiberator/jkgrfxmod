@@ -31,6 +31,14 @@ assert "if(proxy_mode==1)" in renderer
 assert "rect_ndc" in shader and "rect_forward" in shader
 assert "rect_corners[6]" in shader and "proxy_mode==1" in shader
 assert "struct gpu_thing_occlusion_screen_rect" in math
+# CPU rectangle projection MUST follow the exact rdMatrix34 transform that
+# the 3D box and cached models use in their GLSL vertex shaders.
+assert "gpu_3do_native_transform_point(" in math
+assert "double const x=view_center[0],depth=view_center[1],z=view_center[2];" in math
+assert "out.near_forward=float(depth-r);" in math
+assert "gl::set_uniform_float(rect_forward_,r.near_forward);" in header
+assert "rotated_sphere,yaw_view" in read("tests/gpu_thing_occlusion_math.cpp")
+assert "pitched_sphere,pitch_view" in read("tests/gpu_thing_occlusion_math.cpp")
 assert "thing_occlusion_gpu_timers.timestamp(0U,true)" in renderer
 assert "thing_occlusion_gpu_timers.timestamp(0U,false)" in renderer
 assert "3DO OCCLUSION proxy_perf mode=" in renderer
