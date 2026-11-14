@@ -17,7 +17,7 @@
 namespace jkgm {
 class gpu_thing_occlusion_shader : public opengl_shader {
     gl::uniform_location_id right_,forward_,up_,origin_,projection_,bound_;
-    gl::uniform_location_id proxy_mode_,rect_ndc_,rect_forward_;
+    gl::uniform_location_id proxy_mode_,rect_ndc_,rect_forward_,debug_color_;
 public:
     explicit gpu_thing_occlusion_shader(fs::path const &root)
         :opengl_shader("gpu_thing_occlusion",
@@ -31,7 +31,8 @@ public:
          bound_(gl::get_uniform_location(the_program,"center_radius")),
          proxy_mode_(gl::get_uniform_location(the_program,"proxy_mode")),
          rect_ndc_(gl::get_uniform_location(the_program,"rect_ndc")),
-         rect_forward_(gl::get_uniform_location(the_program,"rect_forward")) {}
+         rect_forward_(gl::get_uniform_location(the_program,"rect_forward")),
+         debug_color_(gl::get_uniform_location(the_program,"debug_color")) {}
     void set_camera(gpu_3do_matrix34 const &v,float half_horizontal_fov,
                     float aspect,float far_plane) {
         gl::set_uniform_vector(right_,make_point(v[0],v[1],v[2],0.0f));
@@ -48,6 +49,9 @@ public:
         gl::set_uniform_vector(rect_ndc_,make_point(
             r.left,r.right,r.bottom,r.top));
         gl::set_uniform_float(rect_forward_,r.center_forward);
+    }
+    void set_debug_color(float r,float g,float b,float a) {
+        gl::set_uniform_vector(debug_color_,make_point(r,g,b,a));
     }
     void set_bound(gpu_thing_occlusion_bound const &b) {
         gl::set_uniform_vector(bound_,make_point(
@@ -160,6 +164,13 @@ public:
         }
         return out;
     }
+    // Read-only previous visibility state for query-proxy visual diagnostics.
+    // 0=unresolved, 1=visible, 2=hidden. Not a fresh synchronous GL read.
+    unsigned debug_result_state(uint64_t owner) const {
+        auto const it=entries_.find(owner);
+        if(it==entries_.end() || !it->second.result_frame)return 0U;
+        return it->second.visible?1U:2U;
+    }
     // A previously negative result must be refreshed promptly: an opaque
     // door can move even when the Thing being tested stays stationary.
     bool needs_retest(uint64_t owner)const {
@@ -174,7 +185,8 @@ public:
            gpu_thing_occlusion_camera_inside(bound,camera))return false;
         auto it=entries_.find(owner);
         if(it==entries_.end()) {
-            if(entries_.size()>=1024U)return false;
+            // Do not silently cap active Things during unlimited-budget
+            // stress tests; idle query objects are pruned periodically.
             it=entries_.emplace(owner,record{}).first;
         }
         auto &entry=it->second;
