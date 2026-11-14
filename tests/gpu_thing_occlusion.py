@@ -11,6 +11,10 @@ frag=read("assets/shaders/gpu_thing_occlusion.frag")
 config=read("common/config.cpp")
 settings=json.loads(read("assets/jkgm.json"))
 assert settings["experimental_3do_occlusion_culling"] is False
+assert settings["experimental_3do_native_occlusion_culling"] is False
+assert "experimental_3do_native_occlusion_culling" in config
+assert "experimental_3do_native_occlusion_culling" in read("common/config.hpp")
+
 assert settings["gpu_3do_occlusion_query_budget"]==24
 assert settings["gpu_3do_occlusion_min_triangles"]==96
 assert settings["gpu_3do_occlusion_proxy_mode"]==0
@@ -76,12 +80,38 @@ opaque=renderer.split("void draw_game_opaque_into_gbuffer(",1)[1].split(
     "void query_gpu_thing_occlusion()",1)[0]
 assert opaque.index("draw_gpu_3do_preview(false);")<opaque.index(
     "query_gpu_thing_occlusion();")
-# Never alter offscreen capture eligibility or native rdModel3 callback.
+# Native rejection must not affect reflected-camera captures, animation
+# simulation, or GL query execution. Live Thing and camera validation is
+# required before the early return; hidden Things must be re-queried.
 offscreen=renderer.split("void render_planar_capture()",1)[1].split(
     "void present_game()",1)[0]
 assert "thing_occlusion_queries->hidden(" not in offscreen
 main=read("renderer/main.cpp")
+bridge=read("renderer/native_occlusion_bridge.hpp")
 assert "thing_occlusion_queries" not in main
+assert "native_occlusion_enabled" in main
+assert "!shadow_enabled" in main
+assert "owner_type>1U && owner_type!=10U" in main
+assert "!(flags&0x20U)" in main
+assert "same_center" in main and "native_placement" in main
+assert "native_decal_active_things.count(owner_key)" in main
+assert "gpu_thing_occlusion_camera_compatible(" in main
+assert "gpu_thing_occlusion_camera_inside(" in main
+assert main.index("bridge.register_candidate(candidate);") < main.index(
+    "return 0;", main.index("bridge.register_candidate(candidate);"))
+assert main.index("bridge.register_candidate(candidate);") < main.index(
+    "int const result=RealNativeModel(thing,placement);")
+assert "get_native_occlusion_bridge().take_candidates()" in renderer
+assert "thing_occlusion_cost_history" in renderer
+assert "queries.confirmed_hidden(" in renderer
+assert "gpu_3do_present_serial,model" in renderer
+assert "published_world" in bridge and "std::atomic_load_explicit(" in bridge
+assert "std::atomic_store_explicit(" in bridge
+assert "gpu_thing_occlusion_same_bound(" in bridge
+assert "std::chrono::milliseconds(250)" in bridge
+assert "model_occlusion_skipped_avg=" in renderer
+assert "native_occlusion_bridge.hpp" in read("renderer/renderer.vcxproj")
+assert "native_occlusion_bridge.hpp" in read("renderer/renderer.vcxproj.filters")
 # The native draw hook records per-Thing identity/world origin ONLY when
 # this feature is enabled (or when an existing feature needs it).
 assert "the_config->experimental_3do_occlusion_culling" in main
