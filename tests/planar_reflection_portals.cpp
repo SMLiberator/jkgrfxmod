@@ -78,8 +78,15 @@ int main() {
     planar_reflection_portal_graph graph{};
     assert(graph.ensure(read,world,1U,geometry,mesh,lookup));
     std::vector<world_cache_sector_span> spans;
-    auto result=graph.traverse(read,{0U},mesh,lookup,view,{{0.0f,0.0f,0.0f}},1.0f,1.0f,spans);
+    std::vector<planar_reflection_portal_rect> windows;
+    std::vector<uint8_t> thing_mask;
+    auto result=graph.traverse(read,{0U},mesh,lookup,view,
+        {{0.0f,0.0f,0.0f}},1.0f,1.0f,spans,&windows,&thing_mask);
     assert(result.valid);
+    assert(windows.size()==3U && thing_mask.size()==3U);
+    assert(graph.thing_sector_visible(sectors,thing_mask));
+    assert(graph.thing_sector_visible(sectors+0x98U,thing_mask));
+    assert(graph.thing_sector_visible(0x12345U,thing_mask)); // fail open
     // Receiver 0 is an adjoin: both sides are conservatively seeded.
     assert(result.seed_sectors==2U);
     assert(result.visible_sectors==3U);
@@ -183,8 +190,11 @@ int main() {
     graph.clear();
     assert(graph.ensure(read,world,6U,geometry,mesh,lookup));
     result=graph.traverse(read,{0U},mesh,lookup,view,
-        {{0.0f,0.0f,0.0f}},1.0f,1.0f,spans);
+        {{0.0f,0.0f,0.0f}},1.0f,1.0f,spans,&windows,&thing_mask);
     assert(result.valid && result.visible_sectors==1U);
+    assert(thing_mask.size()==3U && thing_mask[0]==1U &&
+           thing_mask[1]==0U && thing_mask[2]==0U);
+    assert(!graph.thing_sector_visible(sectors+0x98U,thing_mask));
     put(link0,1U);
     // Invalid next-sector pointers fail OPEN to the whole-world path.
     put(link1+4U,0x12345U);
