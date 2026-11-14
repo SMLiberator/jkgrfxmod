@@ -348,6 +348,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                     "gpu_3do_occlusion_min_triangles must be between 0 and 50000");
             rv->gpu_3do_occlusion_min_triangles=n;
         }
+        if(j.contains("experimental_auto_3do_lod")) {
+            j.at("experimental_auto_3do_lod").get_to(
+                rv->experimental_auto_3do_lod);
+        }
         if(j.contains("experimental_planar_thing_discovery")) {
             j.at("experimental_planar_thing_discovery").get_to(
                 rv->experimental_planar_thing_discovery);
