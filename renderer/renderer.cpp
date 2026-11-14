@@ -9472,6 +9472,10 @@ namespace jkgm {
                                 " used=",reflected_portals_used?1:0,
                                 " reason=",reflected_portal_stats.reason,
                                 " seeds=",reflected_portal_stats.seed_sectors,
+                                 " eye_sector_seed=",reflected_portal_stats.eye_sector_seed?1:0,
+                                 " thing_candidate_sectors=",std::count(
+                                     planar_thing_sector_visibility.begin(),
+                                     planar_thing_sector_visibility.end(),uint8_t(1)),
                                 " sectors_total=",reflected_portal_stats.sectors_total,
                                 " sectors_visible=",reflected_portal_stats.visible_sectors,
                                 " portal_tests=",reflected_portal_stats.portals_considered,
