@@ -59,6 +59,10 @@ int main() {
         {{800.0f,600.0f}},center));
     // Former regression: a wall at Y=5 (scene depth 160) failed to hide
     // a flare at Y=10 because raw view Y=10 was compared against 160.
+    // Prior negative test cases reset center, so reproject the source.
+    assert(project_sprite_flare_thing_center(
+        thing_position,identity_camera,1.0f,4.0f/3.0f,
+        {{800.0f,600.0f}},center));
     assert(center.view_depth==320.0f);
     assert(160.0f+std::max(0.01f,320.0f*0.0005f)<center.view_depth);
     assert(!project_sprite_flare_thing_center(
