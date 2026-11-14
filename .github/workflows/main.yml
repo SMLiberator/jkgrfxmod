@@ -292,6 +292,8 @@ jobs:
         planar_reflection_things_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_culling.cpp /Fe:planar_reflection_culling_test.exe || exit /b 1
         planar_reflection_culling_test.exe || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_portals.cpp /Fe:planar_reflection_portals_test.exe || exit /b 1
+        planar_reflection_portals_test.exe || exit /b 1
         python3 tests/planar_reflection_things.py || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\planar_reflection_workset.cpp /Fe:planar_reflection_workset_test.exe || exit /b 1
         planar_reflection_workset_test.exe || exit /b 1
