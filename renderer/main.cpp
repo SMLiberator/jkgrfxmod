@@ -1638,7 +1638,6 @@ namespace {
                     candidate.model=native_model_ptr;
                     candidate.bound=bound;
                     auto &bridge=jkgm::get_native_occlusion_bridge();
-                    bridge.register_candidate(candidate);
                     // A moving projected decal needs the receiver's
                     // current node transforms. Never skip it during active
                     // decal follow or the short hit-capture window.
@@ -1647,26 +1646,35 @@ namespace {
                          (native_decal_following &&
                           native_decal_active_things.count(owner_key)>0U));
                     if(!needs_decal_pose) {
-                        uint32_t current_world=0;
                         jkgm::native_occlusion_result hidden{};
-                        if(engine_material_debug::read_object(
-                               engine_material_debug::current_world_global,
-                               current_world) &&
-                           bridge.lookup(owner_key,native_model_ptr,
-                                         current_world,bound,hidden)) {
-                            auto const camera=jkgm::read_active_render_camera();
-                            if(jkgm::gpu_thing_occlusion_camera_compatible(
-                                   camera,hidden.camera) &&
-                               !jkgm::gpu_thing_occlusion_camera_inside(
-                                   bound,camera)) {
-                                if(profiling) {
+                        uintptr_t published_world=0;
+                        if(bridge.lookup(owner_key,native_model_ptr,
+                                         bound,hidden,published_world)) {
+                            uint32_t current_world=0;
+                            if(engine_material_debug::read_object(
+                                   engine_material_debug::current_world_global,
+                                   current_world) &&
+                               current_world==published_world) {
+                                auto const camera=
+                                    jkgm::read_active_render_camera();
+                                if(jkgm::gpu_thing_occlusion_camera_compatible(
+                                       camera,hidden.camera) &&
+                                   !jkgm::gpu_thing_occlusion_camera_inside(
+                                       bound,camera)) {
+                                    // Register only SKIPPED Things; ordinary
+                                    // ones already reach the GPU instance
+                                    // query collector. No per-visible-Thing
+                                    // mutex/map insertion on the hot path.
+                                    bridge.register_candidate(candidate);
+                                    if(profiling) {
                                     ++native_totals.model_calls;
                                     ++native_totals.model_occlusion_skipped;
                                     auto const elapsed=elapsed_native_ns(start);
                                     native_totals.model_ns+=elapsed;
                                     native_totals.model_hook_ns+=elapsed;
+                                    }
+                                    return 0;
                                 }
-                                return 0;
                             }
                         }
                     }
