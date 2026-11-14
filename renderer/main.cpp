@@ -12,6 +12,8 @@
 #include "native_sprite_profile.hpp"
 #include "native_particle_texture.hpp"
 #include "gpu_3do_preview.hpp"
+#include "native_occlusion_bridge.hpp"
+#include "engine_camera.hpp"
 #include "planar_reflection_native_nodes.hpp"
 #include "planar_reflection_offscreen_gpu.hpp"
 #include "light_intensity_range.hpp"
@@ -1575,6 +1577,96 @@ namespace {
                                         it=native_shadow_poses.erase(it);
                                     else ++it;
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Native CPU occlusion: reuse CONFIRMED asynchronous GPU negatives.
+        // This runs at exactly the same stage as JK's own sphere-frustum
+        // short-circuit (before any joint-matrix or mesh callback work).
+        // Record eligible models even when skipped so GPU queries continue
+        // refreshing them; otherwise they could become permanently invisible.
+        //
+        // Auxiliary shadow caster traversal still depends on this native
+        // walk, so fail open whenever sunlight/spotlight shadows are active.
+        bool const native_occlusion_enabled=the_config &&
+            the_config->use_gpu_cache &&
+            the_config->experimental_3do_occlusion_culling &&
+            the_config->experimental_3do_native_occlusion_culling &&
+            !shadow_enabled;
+        if(native_occlusion_enabled && owner_key && have_thing_flags &&
+           !camera_hud && !(flags&0x20U) &&
+           own_world_position_valid && native_model_ptr>=0x10000U &&
+           placement && gpu_span_readable(placement,12U*sizeof(float))) {
+            uint32_t owner_type=0,owner_model=0;
+            float radius=0.0f;
+            std::array<float,9> owner_basis{};
+            std::array<float,3> native_placement{};
+            if(read(uintptr_t(hud_owner)+0x0cU,&owner_type,4U) &&
+               // Exclude player/HUD from this first experiment. The player
+               // owns additional first-person and saber-specific callbacks.
+               owner_type>1U && owner_type!=10U &&
+               read(uintptr_t(hud_owner)+0xc8U,&owner_model,4U) &&
+               owner_model==native_model_ptr &&
+               read(uintptr_t(native_model_ptr)+0x5cU,&radius,4U) &&
+               read(uintptr_t(hud_owner)+0x88U,
+                    owner_basis.data(),sizeof(owner_basis)) &&
+               read(reinterpret_cast<uintptr_t>(placement)+36U,
+                    native_placement.data(),sizeof(native_placement))) {
+                // JK frustum culls around pPlacement->scale, NOT a
+                // newly computed animated mesh radius. Require this
+                // to match the SithThing origin used by GPU queries.
+                bool same_center=true;
+                for(unsigned i=0;i<3;++i) {
+                    if(!std::isfinite(native_placement[i]) ||
+                       std::fabs(native_placement[i]-
+                                 own_world_position[i])>0.05f)
+                        same_center=false;
+                }
+                float const scale=
+                    jkgm::planar_reflection_radius_scale(owner_basis);
+                jkgm::gpu_thing_occlusion_bound bound{};
+                bound.center=own_world_position;
+                bound.radius=radius*scale;
+                bound.valid=same_center;
+                if(jkgm::gpu_thing_occlusion_bound_valid(bound) &&
+                   std::isfinite(scale) && scale>0.0f) {
+                    jkgm::native_occlusion_candidate candidate{};
+                    candidate.owner=owner_key;
+                    candidate.model=native_model_ptr;
+                    candidate.bound=bound;
+                    auto &bridge=jkgm::get_native_occlusion_bridge();
+                    bridge.register_candidate(candidate);
+                    // A moving projected decal needs the receiver's
+                    // current node transforms. Never skip it during active
+                    // decal follow or the short hit-capture window.
+                    bool const needs_decal_pose=the_config->enable_decals &&
+                        (gpu_frame_serial<=native_decal_capture_until ||
+                         (native_decal_following &&
+                          native_decal_active_things.count(owner_key)>0U));
+                    if(!needs_decal_pose) {
+                        uint32_t current_world=0;
+                        jkgm::native_occlusion_result hidden{};
+                        if(engine_material_debug::read_object(
+                               engine_material_debug::current_world_global,
+                               current_world) &&
+                           bridge.lookup(owner_key,native_model_ptr,
+                                         current_world,bound,hidden)) {
+                            auto const camera=jkgm::read_active_render_camera();
+                            if(jkgm::gpu_thing_occlusion_camera_compatible(
+                                   camera,hidden.camera) &&
+                               !jkgm::gpu_thing_occlusion_camera_inside(
+                                   bound,camera)) {
+                                if(profiling) {
+                                    ++native_totals.model_calls;
+                                    ++native_totals.model_occlusion_skipped;
+                                    auto const elapsed=elapsed_native_ns(start);
+                                    native_totals.model_ns+=elapsed;
+                                    native_totals.model_hook_ns+=elapsed;
+                                }
+                                return 0;
                             }
                         }
                     }
