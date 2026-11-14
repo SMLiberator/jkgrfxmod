@@ -19,7 +19,7 @@ assert settings["gpu_3do_occlusion_query_budget"]==128
 assert settings["gpu_3do_occlusion_debug_view"]==0
 assert settings["gpu_3do_occlusion_min_triangles"]==0
 assert settings["gpu_3do_occlusion_proxy_mode"]==0
-assert "gpu_3do_occlusion_proxy_mode must be between 0 and 1" in config
+assert "gpu_3do_occlusion_proxy_mode must be between 0 and 2" in config
 assert "proxy_mode=the_config->gpu_3do_occlusion_proxy_mode" in renderer
 assert "queries.set_proxy_mode(unsigned(proxy_mode))" in renderer
 assert "program.set_proxy_mode(proxy_mode)" in renderer
@@ -27,16 +27,21 @@ assert "gpu_thing_occlusion_project_sphere_rect(" in renderer
 assert "glDrawArrays(GL_TRIANGLES,0,6)" in renderer
 assert "glDrawArrays(GL_TRIANGLES,0,36)" in renderer
 assert "bound.radius=radius*scale;" in renderer
-assert "if(proxy_mode==1)" in renderer
+assert "if(proxy_mode!=0)" in renderer
+assert "program.set_rect(rect,proxy_mode);" in renderer
+assert "program.set_rect(item.rect,proxy_mode);" in renderer
 assert "rect_ndc" in shader and "rect_forward" in shader
-assert "rect_corners[6]" in shader and "proxy_mode==1" in shader
+assert "rect_corners[6]" in shader and "proxy_mode!=0" in shader
+assert "proxy_mode==2?r.center_forward:r.near_forward" in header
 assert "struct gpu_thing_occlusion_screen_rect" in math
 # CPU rectangle projection MUST follow the exact rdMatrix34 transform that
 # the 3D box and cached models use in their GLSL vertex shaders.
 assert "gpu_3do_native_transform_point(" in math
 assert "double const x=view_center[0],depth=view_center[1],z=view_center[2];" in math
 assert "out.near_forward=float(depth-r);" in math
-assert "gl::set_uniform_float(rect_forward_,r.near_forward);" in header
+assert "out.center_forward=float(depth);" in math
+assert "rect.center_forward==5.0f" in read("tests/gpu_thing_occlusion_math.cpp")
+assert "void set_rect(gpu_thing_occlusion_screen_rect const &r," in header
 assert "rotated_sphere,yaw_view" in read("tests/gpu_thing_occlusion_math.cpp")
 assert "pitched_sphere,pitch_view" in read("tests/gpu_thing_occlusion_math.cpp")
 assert "thing_occlusion_gpu_timers.timestamp(0U,true)" in renderer
