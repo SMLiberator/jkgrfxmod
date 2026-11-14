@@ -154,27 +154,17 @@ inline std::shared_ptr<gpu_3do_geometry const> generate_gpu_3do_auto_lod(
 
     size_t remaining=faces.size();
     size_t const target=faces.size()/(level==1U?2U:4U);
-    struct edge_info {
-        uint32_t first_face=0,second_face=0;
-        unsigned count=0;
-    };
     // Recompute topology/QEM after each parallel independent collapse
     // batch. In particular, do not operate on stale edges after a merge.
     for(unsigned pass=0;pass<64U && remaining>target;++pass) {
-        std::map<edge,edge_info> edges;
+        std::set<edge> edges;
         std::vector<quadric> q(points.size());
         std::vector<std::set<uint32_t>> neighbors(points.size());
-        std::vector<std::vector<uint32_t>> incident(points.size());
-        for(uint32_t fidx=0;fidx<faces.size();++fidx) {
-            auto const &f=faces[fidx];
+        for(auto const &f:faces) {
             if(!f.live)continue;
             uint32_t const a=f.points[0],b=f.points[1],c=f.points[2];
-            for(uint32_t p:f.points)incident[p].push_back(fidx);
             for(auto const &e:{make_edge(a,b),make_edge(b,c),make_edge(c,a)}) {
-                auto &record=edges[e];
-                if(record.count==0U)record.first_face=fidx;
-                else if(record.count==1U)record.second_face=fidx;
-                ++record.count;
+                edges.insert(e);
                 neighbors[e.first].insert(e.second);
                 neighbors[e.second].insert(e.first);
             }
@@ -194,13 +184,13 @@ inline std::shared_ptr<gpu_3do_geometry const> generate_gpu_3do_auto_lod(
 
         std::vector<candidate> options;
         for(auto const &entry:edges) {
-            uint32_t const a=entry.first.first,b=entry.first.second;
+            uint32_t const a=entry.first,b=entry.second;
             if(a==b)continue;
             quadric combined=q[a];combined+=q[b];
             lod_point const mid=midpoint(points[a],points[b]);
             double const error=combined.error(mid);
             if(!std::isfinite(error))continue;
-            options.push_back({entry.first,mid,
+            options.push_back({entry,mid,
                 std::max(error,0.0)+
                 1.e-8*distance2(points[a],points[b])});
         }
