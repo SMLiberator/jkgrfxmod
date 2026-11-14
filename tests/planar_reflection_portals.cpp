@@ -108,6 +108,40 @@ int main() {
         {{10.0f,5.0f,-1.0f}},{{11.0f,5.0f,1.0f}},
         view,1.0f,1.0f);
     assert(!first.empty && second.empty);
+    // An untextured portal can be ABSENT from the render mesh. Native face
+    // indices and world vertices still allow a safe screen-space window.
+    auto untextured_geometry=geometry;
+    untextured_geometry.receivers.erase(
+        untextured_geometry.receivers.begin()+1);
+    world_cache_mesh untextured_mesh{};
+    assert(build_world_cache_mesh(untextured_geometry,untextured_mesh));
+    std::vector<uint32_t> untextured_lookup;
+    assert(build_world_cache_surface_lookup(
+        untextured_mesh,3U,untextured_lookup));
+    assert(untextured_lookup[1]==std::numeric_limits<uint32_t>::max());
+    constexpr uintptr_t indices=0x60000U;
+    put(surfaces+0x5cU+0x28U,4U);
+    put(surfaces+0x5cU+0x2cU,uint32_t(indices));
+    auto put_float=[&](uintptr_t at,float value) {
+        uint32_t bits=0;std::memcpy(&bits,&value,sizeof(bits));
+        put(at,bits);
+    };
+    std::array<std::array<float,3>,4> portal_vertices{{
+        {{-1.0f,10.0f,-1.0f}},{{1.0f,10.0f,-1.0f}},
+        {{1.0f,10.0f,1.0f}},{{-1.0f,10.0f,1.0f}}
+    }};
+    for(uint32_t i=0;i<4;++i) {
+        put(indices+uintptr_t(i)*4U,i);
+        for(unsigned axis=0;axis<3;++axis)
+            put_float(vertices+uintptr_t(i)*12U+uintptr_t(axis)*4U,
+                      portal_vertices[i][axis]);
+    }
+    graph.clear();
+    assert(graph.ensure(read,world,4U,untextured_geometry,
+                        untextured_mesh,untextured_lookup));
+    result=graph.traverse({0U},untextured_mesh,untextured_lookup,
+                          view,1.0f,1.0f,spans);
+    assert(result.valid && result.visible_sectors==3U);
     // Invalid next-sector pointers fail OPEN to the whole-world path.
     put(link1+4U,0x12345U);
     graph.clear();
