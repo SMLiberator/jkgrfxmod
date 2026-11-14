@@ -602,6 +602,15 @@ namespace jkgm {
         std::unique_ptr<gpu_thing_occlusion_queries> thing_occlusion_queries;
         std::unique_ptr<gpu_thing_occlusion_shader> thing_occlusion_program;
         GLuint thing_occlusion_proxy_vao=0;
+        struct thing_occlusion_debug_proxy {
+            gpu_thing_occlusion_bound bound{};
+            gpu_thing_occlusion_screen_rect rect{};
+            unsigned result=0; // 0=unknown, 1=visible, 2=occluded
+        };
+        std::vector<thing_occlusion_debug_proxy> thing_occlusion_debug_proxies;
+        uint64_t thing_occlusion_debug_ns_window=0;
+        uint64_t thing_occlusion_debug_draws_window=0;
+        uint64_t thing_occlusion_debug_frames_window=0;
         // Lightweight last-known triangle cost survives native CPU early skips.
         struct native_occlusion_cost {
             size_t triangles=0;
@@ -5021,6 +5030,7 @@ namespace jkgm {
         // and offscreen reflected acquisition retain their own work.
         void query_gpu_thing_occlusion()
         {
+            thing_occlusion_debug_proxies.clear();
             if(!the_config->experimental_3do_occlusion_culling ||
                !the_config->use_gpu_cache ||
                mode!=renderer_mode::ingame ||
@@ -5246,6 +5256,13 @@ namespace jkgm {
                     glDrawArrays(GL_TRIANGLES,0,36);
                 }
                 queries.end();
+                if(the_config->gpu_3do_occlusion_debug_view!=0) {
+                    thing_occlusion_debug_proxy proxy{};
+                    proxy.bound=bound;
+                    proxy.rect=rect;
+                    proxy.result=queries.debug_result_state(item.owner);
+                    thing_occlusion_debug_proxies.push_back(proxy);
+                }
                 ++issued;
             };
             // Refresh hidden Things first, to recover promptly when an
@@ -5326,6 +5343,79 @@ namespace jkgm {
                     " submitted_total=",queries.submitted(),
                     " completed_total=",queries.completed(),
                     " skipped_instance_total=",queries.skipped());
+        }
+
+        // Draw the EXACT proxy geometry issued by the occlusion test,
+        // in the main scene's composed-color target after transparency.
+        // X-ray display intentionally bypasses the depth test so even
+        // fully occluded objects reveal the region that was queried.
+        // This is a separate pass; color writes never affect GL queries.
+        void draw_gpu_thing_occlusion_debug()
+        {
+            if(!the_config->experimental_3do_occlusion_culling ||
+               the_config->gpu_3do_occlusion_debug_view==0 ||
+               !thing_occlusion_program || !thing_occlusion_proxy_vao ||
+               thing_occlusion_debug_proxies.empty() ||
+               !frame_gpu_3do_camera.valid)return;
+            auto const begin=the_config->profile_renderer
+                ?std::chrono::steady_clock::now()
+                :std::chrono::steady_clock::time_point{};
+            auto const &camera=frame_gpu_3do_camera;
+            float const aspect=float(get<x>(internal_scr_res_f))/
+                               float(get<y>(internal_scr_res_f));
+            float const half_fov=std::tan(
+                camera.camera.fov*0.008726646259971648f);
+            if(!std::isfinite(aspect) || aspect<=0.0f ||
+               !std::isfinite(half_fov) || half_fov<=0.0f)return;
+            offscreen_capture_gl_scope restore;
+            GLint polygon_mode[2]={GL_FILL,GL_FILL};
+            glGetIntegerv(GL_POLYGON_MODE,polygon_mode);
+            glDisable(GL_DEPTH_TEST);
+            glDepthMask(GL_FALSE);
+            glDisable(GL_CULL_FACE);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_STENCIL_TEST);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+            glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+            glPolygonMode(GL_FRONT_AND_BACK,
+                the_config->gpu_3do_occlusion_debug_view==1
+                    ?GL_LINE:GL_FILL);
+            auto &program=*thing_occlusion_program;
+            program.use_program();
+            program.set_camera(camera.native_view,half_fov,aspect,
+                               camera.far_plane);
+            int const proxy_mode=the_config->gpu_3do_occlusion_proxy_mode;
+            program.set_proxy_mode(proxy_mode);
+            glBindVertexArray(thing_occlusion_proxy_vao);
+            float const alpha=
+                the_config->gpu_3do_occlusion_debug_view==1?0.80f:0.13f;
+            for(auto const &item:thing_occlusion_debug_proxies) {
+                // Green=previously visible; red=previously hidden;
+                // yellow=no completed visibility result available.
+                float const r=item.result==1U?0.08f:0.95f;
+                float const g=item.result==2U?0.10f:0.85f;
+                float const b=item.result==0U?0.10f:0.12f;
+                program.set_debug_color(r*alpha,g*alpha,b*alpha,alpha);
+                if(proxy_mode==1)program.set_rect(item.rect);
+                else program.set_bound(item.bound);
+                glDrawArrays(GL_TRIANGLES,0,proxy_mode==1?6:36);
+            }
+            if(polygon_mode[0]==polygon_mode[1])
+                glPolygonMode(GL_FRONT_AND_BACK,GLenum(polygon_mode[0]));
+            else {
+                glPolygonMode(GL_FRONT,GLenum(polygon_mode[0]));
+                glPolygonMode(GL_BACK,GLenum(polygon_mode[1]));
+            }
+            if(the_config->profile_renderer) {
+                thing_occlusion_debug_ns_window+=uint64_t(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now()-begin).count());
+                thing_occlusion_debug_draws_window+=
+                    thing_occlusion_debug_proxies.size();
+                ++thing_occlusion_debug_frames_window;
+            }
         }
 
         void release_spotlight_images()
@@ -9955,6 +10045,9 @@ namespace jkgm {
                        posterize_lighting,
                        batch_blend_filter::all);
 
+            // Debug on the composed scene, not the G-buffer or query depth.
+            // Draw last so x-ray proxies remain visible behind geometry.
+            draw_gpu_thing_occlusion_debug();
             // HUD and menu draw calls assume the original alpha blend state.
             // Restore it after any special additive/multiply draw.
             gl::set_blend_function(gl::blend_function::one,
