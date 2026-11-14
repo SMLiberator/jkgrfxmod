@@ -13,6 +13,7 @@
 #include "planar_reflection_capture_shader.hpp"
 #include "planar_receiver_visibility.hpp"
 #include "gpu_thing_occlusion.hpp"
+#include "sprite_flare_projection.hpp"
 #include "saber_light_rgb.hpp"
 #include "thing_light_rgb.hpp"
 #include "gpu_3do_uv.hpp"
@@ -10699,24 +10700,44 @@ namespace jkgm {
                                          current_material));
                         }
                         else {
-                            (is_flare ? static_cast<triangle_batch *>(&world_flare_batch)
-                                      : current_triangle_batch)->insert(
-                                triangle(triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
-                                                                        internal_scr_offset_f,
-                                                                        v1),
-                                                         make_point(v1.tu, v1.tv),
-                                                         c1, native1),
-                                         triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
-                                                                        internal_scr_offset_f,
-                                                                        v2),
-                                                         make_point(v2.tu, v2.tv),
-                                                         c2, native2),
-                                         triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
-                                                                        internal_scr_offset_f,
-                                                                        v3),
-                                                         make_point(v3.tu, v3.tv),
-                                                         c3, native3),
-                                         current_material));
+                            triangle tri(
+                                triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
+                                                               internal_scr_offset_f,v1),
+                                                make_point(v1.tu,v1.tv),c1,
+                                                is_flare?0U:native1),
+                                triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
+                                                               internal_scr_offset_f,v2),
+                                                make_point(v2.tu,v2.tv),c2,
+                                                is_flare?0U:native2),
+                                triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
+                                                               internal_scr_offset_f,v3),
+                                                make_point(v3.tu,v3.tv),c3,
+                                                is_flare?0U:native3),
+                                current_material);
+                            if(is_flare) {
+                                // The flare never uses a surface normal.
+                                // Reuse the existing flat normal attribute to
+                                // carry ONE CPU-reconstructed screen center
+                                // (x/y in framebuffer pixels, z=view depth)
+                                // to every fragment. No derivative seam and
+                                // no added vertex bandwidth or draw calls.
+                                auto project=[](triangle_vertex const &v) {
+                                    return sprite_flare_triangle_vertex{
+                                        get<x>(v.pos),get<y>(v.pos),
+                                        get<w>(v.pos),get<x>(v.texcoords),
+                                        get<y>(v.texcoords)};
+                                };
+                                sprite_flare_center center{};
+                                bool const valid=reconstruct_sprite_flare_triangle_center(
+                                    {{project(tri.v0),project(tri.v1),project(tri.v2)}},
+                                    {{get<x>(internal_scr_res_f),
+                                      get<y>(internal_scr_res_f)}},center);
+                                tri.normal=valid
+                                    ?make_direction(center.pixel[0],
+                                        center.pixel[1],center.view_depth)
+                                    :make_direction(-1.0f,-1.0f,-1.0f);
+                                world_flare_batch.insert(tri);
+                            } else current_triangle_batch->insert(tri);
                         }
                     } break;
 
