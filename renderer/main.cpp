@@ -8,6 +8,7 @@
 #include "renderer.hpp"
 #include "runtime_material.hpp"
 #include "native_3do_profile.hpp"
+#include "native_3do_lod_override.hpp"
 #include "native_mesh_revision.hpp"
 #include "native_sprite_profile.hpp"
 #include "native_particle_texture.hpp"
@@ -1732,7 +1733,30 @@ namespace {
         auto const engine_start=profiling ? std::chrono::steady_clock::now()
                                           : std::chrono::steady_clock::time_point{};
         uint64_t const mesh_before=profiling?native_totals.mesh_ns:0;
+        // Stage 0 of experimental automatic LOD: bypass JK's distance-
+        // selected GeoSet by temporarily overriding only THIS rdThing's
+        // selection. Never change rdModel3::geosetSelect (shared by Things)
+        // or the world's LOD distances. The original field is restored
+        // before returning, including for native fallback / HUD meshes.
+        // Once generated GPU LODs exist, they will be selected downstream
+        // from captured original GeoSet 0 geometry.
+        jkgm::native_3do_lod0_plan lod0{};
+        if(the_config && the_config->use_gpu_cache &&
+           the_config->experimental_auto_3do_lod) {
+            lod0=jkgm::prepare_native_3do_lod0_override(
+                read,native_rd,native_model_ptr);
+            if(lod0.valid) {
+                int32_t const original_geoset=0;
+                std::memcpy(reinterpret_cast<void *>(
+                    lod0.selection_address),&original_geoset,
+                    sizeof(original_geoset));
+                if(profiling)++native_totals.model_lod0_forced;
+            }
+        }
         int const result=RealNativeModel(thing,placement);
+        if(lod0.valid)
+            std::memcpy(reinterpret_cast<void *>(lod0.selection_address),
+                &lod0.previous,sizeof(lod0.previous));
         uint64_t const engine_ns=profiling?elapsed_native_ns(engine_start):0;
         active_native_model_thing_flags=previous_flags;
         active_native_model_camera_hud=previous_camera_hud;
