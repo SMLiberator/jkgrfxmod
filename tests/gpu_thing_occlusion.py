@@ -105,7 +105,18 @@ assert "inst.sprite_occlusion_resource" in renderer
 assert "c.sprite=true;" in renderer
 assert "sprite_visibility_skips_avg=" in renderer
 assert "sprite_queried=" in renderer
-assert "int const draw_mode=item.sprite ? 1 : proxy_mode;" in renderer
+# SPR query geometry is the immutable GPU-cached four-vertex quad itself,
+# using its original VBO/VAO/EBO. No projected rectangle is generated.
+assert "int const draw_mode=item.sprite ? 3 : proxy_mode;" in renderer
+assert "glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);" in renderer
+assert "gl::bind_vertex_array(sprite_mesh->vao);" in renderer
+assert "item.sprite_geometry->indices.size()!=6U" in renderer
+assert "program.set_sprite_pose(item.sprite_pose);" in renderer
+assert "layout(location=0) in vec3 sprite_local_position;" in shader
+assert "if(proxy_mode==3)" in shader
+assert "gpu_sprite_occlusion_same_pose(" in math
+assert "entry.issued_has_sprite_pose=sprite_pose!=nullptr;" in header
+assert "current_sprite_pose" in header
 assert "gpu_sprite_occlusion_bound(" in math
 assert "entry.native_model!=native_model" in header
 assert "if(!e.native_model || !e.model" in header
