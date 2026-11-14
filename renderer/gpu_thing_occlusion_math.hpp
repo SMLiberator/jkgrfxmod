@@ -69,7 +69,7 @@ inline bool gpu_thing_occlusion_camera_compatible(
 // plane instead of risking an invalid quad.
 struct gpu_thing_occlusion_screen_rect {
     float left=0.0f,right=0.0f,bottom=0.0f,top=0.0f;
-    float near_forward=0.0f;
+    float near_forward=0.0f,center_forward=0.0f;
     bool valid=false;
 };
 inline bool gpu_thing_occlusion_project_sphere_rect(
@@ -115,7 +115,9 @@ inline bool gpu_thing_occlusion_project_sphere_rect(
     out.bottom=float((std::max)(-1.0,zlo));
     out.top=float((std::min)(1.0,zhi));
     out.near_forward=float(depth-r);
+    out.center_forward=float(depth);
     out.valid=std::isfinite(out.near_forward) &&
+              std::isfinite(out.center_forward) &&
               out.near_forward>0.1f &&
               out.right>out.left && out.top>out.bottom;
     return out.valid;
