@@ -5293,7 +5293,7 @@ namespace jkgm {
                     return;
                 }
                 gpu_thing_occlusion_screen_rect rect{};
-                if(proxy_mode==1 &&
+                if(proxy_mode!=0 &&
                    !gpu_thing_occlusion_project_sphere_rect(
                        bound,camera.native_view,half_fov,aspect,rect)) {
                     ++reject_projection;
@@ -5307,8 +5307,8 @@ namespace jkgm {
                     ++reject_query_state;
                     return;
                 }
-                if(proxy_mode==1) {
-                    program.set_rect(rect);
+                if(proxy_mode!=0) {
+                    program.set_rect(rect,proxy_mode);
                     glDrawArrays(GL_TRIANGLES,0,6);
                 } else {
                     program.set_bound(bound);
@@ -5514,9 +5514,9 @@ namespace jkgm {
                 float const g=item.result==2U?0.10f:0.85f;
                 float const b=item.result==0U?0.10f:0.12f;
                 program.set_debug_color(r*alpha,g*alpha,b*alpha,alpha);
-                if(proxy_mode==1)program.set_rect(item.rect);
+                if(proxy_mode!=0)program.set_rect(item.rect,proxy_mode);
                 else program.set_bound(item.bound);
-                glDrawArrays(GL_TRIANGLES,0,proxy_mode==1?6:36);
+                glDrawArrays(GL_TRIANGLES,0,proxy_mode!=0?6:36);
             }
             if(gpu_timing) {
                 thing_occlusion_debug_gpu_timers.timestamp(0U,false);
