@@ -40,6 +40,7 @@
     "profile_renderer": false,
     "profile_audio": false,
     "use_gpu_cache": true,
+    "experimental_auto_3do_lod": false,
     "experimental_3do_occlusion_culling": false,
     "experimental_3do_native_occlusion_culling": false,
     "gpu_3do_occlusion_proxy_mode": 0,
