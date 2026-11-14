@@ -1605,6 +1605,9 @@ namespace {
                          "experimental_3do_occlusion_culling");
             }
         }
+        auto const occlusion_test_start=profiling && native_occlusion_enabled
+            ?std::chrono::steady_clock::now()
+            :std::chrono::steady_clock::time_point{};
         if(native_occlusion_enabled && owner_key && have_thing_flags &&
            !camera_hud && !(flags&0x20U) &&
            own_world_position_valid && native_model_ptr>=0x10000U) {
@@ -1641,8 +1644,11 @@ namespace {
                     {
                         jkgm::native_occlusion_result hidden{};
                         uintptr_t published_world=0;
+                        if(profiling)++native_totals.model_occlusion_lookups;
                         if(bridge.lookup(owner_key,native_model_ptr,
                                          bound,hidden,published_world)) {
+                            if(profiling)
+                                ++native_totals.model_occlusion_lookup_hits;
                             uint32_t current_world=0;
                             if(jkgm::engine_material_debug::read_object(
                                    jkgm::engine_material_debug::current_world_global,
@@ -1660,6 +1666,9 @@ namespace {
                                     // mutex/map insertion on the hot path.
                                     bridge.register_candidate(candidate);
                                     if(profiling) {
+                                        ++native_totals.model_occlusion_tests;
+                                        native_totals.model_occlusion_ns+=
+                                            elapsed_native_ns(occlusion_test_start);
                                         ++native_totals.model_calls;
                                         ++native_totals.model_occlusion_skipped;
                                         auto const elapsed=elapsed_native_ns(start);
@@ -1673,6 +1682,11 @@ namespace {
                     }
                 }
             }
+        }
+        if(profiling && native_occlusion_enabled) {
+            ++native_totals.model_occlusion_tests;
+            native_totals.model_occlusion_ns+=
+                elapsed_native_ns(occlusion_test_start);
         }
         // A nominally static collide=3 Thing may still be moved/animated
         // by COG. When the sun pose tracker already detects that motion,
