@@ -1317,6 +1317,9 @@ namespace jkgm {
                 planar_capture_ready=false;
                 if(planar_receiver_queries)planar_receiver_queries->invalidate();
                 if(thing_occlusion_queries)thing_occlusion_queries->invalidate();
+                get_native_occlusion_bridge().clear();
+                thing_occlusion_cost_history.clear();
+                thing_occlusion_history_world=0;
                 planar_capture_plane.reset();
                 planar_plane_world=0;
                 planar_plane_world_revision=0;
