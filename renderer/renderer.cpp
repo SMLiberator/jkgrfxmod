@@ -10590,11 +10590,22 @@ namespace jkgm {
                         read_active_rd_camera_view(flare_view);
                 }
                 if(!flare_camera_valid)return false;
-                return project_sprite_flare_thing_center(
-                    world,flare_view,
-                    std::tan(flare_camera.fov*0.008726646259971648f),
-                    float(get<x>(conf_scr_res))/float(get<y>(conf_scr_res)),
-                    {{float(get<x>(conf_scr_res)),float(get<y>(conf_scr_res))}},out);
+                // JK can render a 4:3 virtual screen letterboxed inside
+                // the configured framebuffer. Project with the NATIVE
+                // screen's aspect, then offset into its actual GL viewport.
+                if(!project_sprite_flare_thing_center(
+                       world,flare_view,
+                       std::tan(flare_camera.fov*0.008726646259971648f),
+                       get<x>(internal_scr_res_f)/get<y>(internal_scr_res_f),
+                       {{get<x>(internal_scr_res_f),
+                         get<y>(internal_scr_res_f)}},out))
+                    return false;
+                out.pixel[0]+=float(get<x>(actual_display_area.start));
+                out.pixel[1]+=float(get<y>(actual_display_area.start));
+                return out.pixel[0]>=0.0f &&
+                       out.pixel[0]<float(get<x>(conf_scr_res)) &&
+                       out.pixel[1]>=0.0f &&
+                       out.pixel[1]<float(get<y>(conf_scr_res));
             };
 
             auto cmd_span = make_span((char const *)ebd.lpData + ed.dwInstructionOffset,
