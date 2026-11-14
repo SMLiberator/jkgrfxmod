@@ -3933,20 +3933,29 @@ namespace jkgm {
                 // Only skip MAIN view GPU draw setup, never native JK
                 // traversal, reflected cameras, sun/shadow atlases or
                 // projected decals. Unusable/stale query records fail open.
+                bool const sprite_occlusion_eligible=
+                    inst.is_sprite_quad && inst.sprite_occlusion_resource &&
+                    !inst.world_lighting_exempt;
                 bool const occlusion_eligible=ordinary_pass &&
                     !decals_only && the_config->experimental_3do_occlusion_culling &&
                     thing_occlusion_queries && inst.shadow_owner &&
-                    inst.owning_thing_world_position_valid &&
+                    (sprite_occlusion_eligible ||
+                     (!inst.is_sprite_quad &&
+                      inst.owning_thing_world_position_valid)) &&
                     !inst.camera_hud && !inst.skybox_vertex_lighting &&
-                    !inst.is_sprite_quad && !inst.transient_procedural &&
-                    !inst.saber_trail_active;
+                    !inst.transient_procedural && !inst.saber_trail_active;
                 if(occlusion_eligible) {
                     auto const visibility_start=the_config->profile_renderer
                         ?std::chrono::steady_clock::now()
                         :std::chrono::steady_clock::time_point{};
-                    bool const occluded=thing_occlusion_queries->hidden(
-                        inst.shadow_owner,inst.owning_thing_world_position,
-                        cam,gpu_3do_present_serial);
+                    bool const occluded=sprite_occlusion_eligible
+                        ?thing_occlusion_queries->hidden(
+                            inst.shadow_owner,
+                            gpu_sprite_occlusion_bound(inst.transform),
+                            cam,gpu_3do_present_serial)
+                        :thing_occlusion_queries->hidden(
+                            inst.shadow_owner,inst.owning_thing_world_position,
+                            cam,gpu_3do_present_serial);
                     if(the_config->profile_renderer) {
                         thing_occlusion_visibility_ns_window+=uint64_t(
                             std::chrono::duration_cast<std::chrono::nanoseconds>(
