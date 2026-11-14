@@ -1607,12 +1607,10 @@ namespace {
         }
         if(native_occlusion_enabled && owner_key && have_thing_flags &&
            !camera_hud && !(flags&0x20U) &&
-           own_world_position_valid && native_model_ptr>=0x10000U &&
-           placement && gpu_span_readable(placement,12U*sizeof(float))) {
+           own_world_position_valid && native_model_ptr>=0x10000U) {
             uint32_t owner_type=0,owner_model=0;
             float radius=0.0f;
             std::array<float,9> owner_basis{};
-            std::array<float,3> native_placement{};
             if(read(uintptr_t(hud_owner)+0x0cU,&owner_type,4U) &&
                // Exclude player/HUD from this first experiment. The player
                // owns additional first-person and saber-specific callbacks.
@@ -1621,25 +1619,16 @@ namespace {
                owner_model==native_model_ptr &&
                read(uintptr_t(native_model_ptr)+0x5cU,&radius,4U) &&
                read(uintptr_t(hud_owner)+0x88U,
-                    owner_basis.data(),sizeof(owner_basis)) &&
-               read(reinterpret_cast<uintptr_t>(placement)+36U,
-                    native_placement.data(),sizeof(native_placement))) {
-                // JK frustum culls around pPlacement->scale, NOT a
-                // newly computed animated mesh radius. Require this
-                // to match the SithThing origin used by GPU queries.
-                bool same_center=true;
-                for(unsigned i=0;i<3;++i) {
-                    if(!std::isfinite(native_placement[i]) ||
-                       std::fabs(native_placement[i]-
-                                 own_world_position[i])>0.05f)
-                        same_center=false;
-                }
+                    owner_basis.data(),sizeof(owner_basis))) {
+                // This experiment uses JK's authored Thing-centered sphere,
+                // not the current animated placement of individual meshes.
+                // Placement mismatch must not silently suppress all culling.
                 float const scale=
                     jkgm::planar_reflection_radius_scale(owner_basis);
                 jkgm::gpu_thing_occlusion_bound bound{};
                 bound.center=own_world_position;
                 bound.radius=radius*scale;
-                bound.valid=same_center;
+                bound.valid=true;
                 if(jkgm::gpu_thing_occlusion_bound_valid(bound) &&
                    std::isfinite(scale) && scale>0.0f) {
                     jkgm::native_occlusion_candidate candidate{};
