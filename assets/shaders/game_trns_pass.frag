@@ -17,7 +17,7 @@ uniform vec2 emissive_uv_offset;
 uniform float alpha_cutoff;
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
 uniform float fluid_thickness; // native depth-buffer units (32 per game unit)
-uniform int flare_mode; // SPR type 0x40: center-only depth occlusion
+uniform int flare_mode; // SPR type 4: center-only depth occlusion
 uniform sampler2D scene_depth; // Resolved opaque linear view depth (R16F)
 
 uniform sampler2D displacement_map;

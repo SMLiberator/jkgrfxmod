@@ -10404,7 +10404,7 @@ namespace jkgm {
                            batch_blend_filter::special);
             }
 
-            // SPR 0x40 flare quads use center-only occlusion against the
+            // SPR type 4 flare quads use center-only occlusion against the
             // resolved opaque depth texture. Never write or test ordinary
             // per-fragment depth: the sprite's EDGES may cover world geometry.
             if(world_flare_batch.size()!=0U) {
@@ -10739,7 +10739,7 @@ namespace jkgm {
                         c3 = extend(get<rgb>(c3) * get<rgb>(tint3), get<a>(c3));
 
                         // An exact native vertex marker means the three
-                        // vertices came from an authored SPR with type 0x40.
+                        // vertices came from an authored SPR with type 4.
                         // Route separately; a regular world triangle can
                         // never accidentally inherit flare depth behavior.
                         bool const is_flare=!is_gun &&

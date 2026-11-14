@@ -1,5 +1,5 @@
 #pragma once
-// Source-Thing flare visibility. A native SPR type 0x40 tests its source
+// Source-Thing flare visibility. A native SPR type 4 tests its source
 // SithThing.position, not a center reconstructed from clipped billboard UVs.
 // The native D3D vertex specular word carries an indexed source reference
 // until the renderer converts that triangle into the OpenGL flare batch.
