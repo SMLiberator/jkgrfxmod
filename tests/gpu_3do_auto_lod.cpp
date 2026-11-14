@@ -80,6 +80,27 @@ int main() {
         400.0f/9.0f)<0.001f);
     assert(gpu_3do_auto_lod_projected_radius_px(
         world,camera0,along_x,1.0,400.0,1.0)<0.0f);
+    // One Thing-wide sphere selects the SAME level for its torso,
+    // hands and feet, irrespective of their individual mesh dimensions.
+    std::array<float,3> const thing_center{{0.0f,30.0f,0.0f}};
+    float const model_px=gpu_3do_auto_lod_projected_radius_px(
+        thing_center,camera0,along_y,5.0,400.0,1.0);
+    assert(std::fabs(model_px-80.0f)<0.001f);
+    assert(select_gpu_3do_auto_lod(model_px)==1U);
+    float const hand_px=gpu_3do_auto_lod_projected_radius_px(
+        thing_center,camera0,along_y,0.2,400.0,1.0);
+    assert(select_gpu_3do_auto_lod(hand_px)==2U);
+    // Old mesh-local screen sizing disagreed; Thing-wide sizing does not.
+    unsigned const torso_lod=select_gpu_3do_auto_lod(model_px);
+    unsigned const hand_lod=select_gpu_3do_auto_lod(model_px);
+    assert(torso_lod==hand_lod);
+    // CPU generation budget is independent from geometric quality.
+    assert(gpu_3do_auto_lod_budget_allows(0U,0));
+    assert(gpu_3do_auto_lod_budget_allows(10000U,0));
+    assert(gpu_3do_auto_lod_budget_allows(0U,1));
+    assert(!gpu_3do_auto_lod_budget_allows(1U,1));
+    assert(gpu_3do_auto_lod_budget_allows(1U,2));
+    assert(!gpu_3do_auto_lod_budget_allows(2U,2));
     assert(select_gpu_3do_auto_lod(150.0f)==0U);
     assert(select_gpu_3do_auto_lod(60.0f)==1U);
     assert(select_gpu_3do_auto_lod(4.0f)==2U);
