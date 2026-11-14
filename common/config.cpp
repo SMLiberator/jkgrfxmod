@@ -356,6 +356,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_planar_reflection_capture").get_to(
                 rv->experimental_planar_reflection_capture);
         }
+        if(j.contains("experimental_planar_reflection_portal_culling")) {
+            j.at("experimental_planar_reflection_portal_culling").get_to(
+                rv->experimental_planar_reflection_portal_culling);
+        }
         if(j.contains("planar_reflection_resolution_scale")) {
             auto const &s=j.at("planar_reflection_resolution_scale");
             if(!s.is_number())throw std::runtime_error(
