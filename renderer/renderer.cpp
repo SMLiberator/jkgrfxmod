@@ -5177,9 +5177,9 @@ namespace jkgm {
                         else ++it;
                     }
             }
-            // Most JK 3DOs are far smaller than 500 triangles. Measure
-            // eligibility tiers while retaining the existing fixed query
-            // budget; triangle counts cover the whole Thing, not one mesh.
+            // Track triangle-count eligibility tiers for performance tests.
+            // With min_triangles=0 and budget=0, query every eligible Thing
+            // whose previous query has completed; no fixed cost gate.
             size_t owners_32=0,owners_96=0,owners_256=0,owners_500=0;
             std::vector<candidate> expensive;
             expensive.reserve(grouped.size());
