@@ -602,6 +602,15 @@ namespace jkgm {
         std::unique_ptr<gpu_thing_occlusion_queries> thing_occlusion_queries;
         std::unique_ptr<gpu_thing_occlusion_shader> thing_occlusion_program;
         GLuint thing_occlusion_proxy_vao=0;
+        // Lightweight last-known triangle cost survives native CPU early skips.
+        struct native_occlusion_cost {
+            size_t triangles=0;
+            uint32_t model=0;
+            uint64_t last_seen=0;
+        };
+        std::unordered_map<uint64_t,native_occlusion_cost>
+            thing_occlusion_cost_history;
+        uintptr_t thing_occlusion_history_world=0;
         // Nonblocking timestamps and CPU timings for box-vs-rectangle A/B.
         presentation_gpu_profile thing_occlusion_gpu_timers;
         uint64_t thing_occlusion_gpu_ns_window=0;
@@ -918,6 +927,8 @@ namespace jkgm {
                          " face=", (profile_window.native_face_ns / 1000) / frames,
                          " model_calls_avg=", profile_window.native_model_calls / frames,
                          " model_drawn_avg=", profile_window.native_model_drawn / frames,
+                         " model_occlusion_skipped_avg=",
+                         profile_window.native_model_occlusion_skipped / frames,
                          " mesh_calls_avg=", profile_window.native_mesh_calls / frames,
                          " face_calls_avg=", profile_window.native_face_calls / frames,
                          " face_emitted_avg=", profile_window.native_face_emitted / frames);
@@ -1277,6 +1288,9 @@ namespace jkgm {
                 planar_receiver_queries.reset();
                 thing_occlusion_program.reset();
                 thing_occlusion_queries.reset();
+                thing_occlusion_cost_history.clear();
+                thing_occlusion_history_world=0;
+                get_native_occlusion_bridge().clear();
                 if(thing_occlusion_proxy_vao) {
                     glDeleteVertexArrays(1,&thing_occlusion_proxy_vao);
                     thing_occlusion_proxy_vao=0;
@@ -5027,9 +5041,22 @@ namespace jkgm {
             auto &queries=*thing_occlusion_queries;
             int const proxy_mode=the_config->gpu_3do_occlusion_proxy_mode;
             queries.set_proxy_mode(unsigned(proxy_mode));
-            queries.set_world(world_cache_target->loaded_world);
+            auto const world=world_cache_target->loaded_world;
+            bool const native_enabled=
+                the_config->experimental_3do_native_occlusion_culling;
+            if(thing_occlusion_history_world!=world) {
+                thing_occlusion_cost_history.clear();
+                thing_occlusion_history_world=world;
+                get_native_occlusion_bridge().clear();
+            }
+            queries.set_world(world);
             queries.poll();
             queries.prune(gpu_3do_present_serial);
+            // Publish only completed, camera-compatible negatives.
+            if(native_enabled)
+                get_native_occlusion_bridge().publish(
+                    world,queries.confirmed_hidden(
+                        camera.camera,gpu_3do_present_serial));
             struct candidate {
                 uint64_t owner=0;
                 std::array<float,3> position{};
@@ -5051,6 +5078,34 @@ namespace jkgm {
                 c.position=inst.owning_thing_world_position;
                 for(auto const &g:inst.geometry->groups)
                     c.triangles+=g.count/3U;
+            }
+            if(native_enabled) {
+                auto &history=thing_occlusion_cost_history;
+                for(auto const &native:
+                    get_native_occlusion_bridge().take_candidates()) {
+                    auto known=history.find(native.owner);
+                    if(known==history.end() ||
+                       known->second.model!=native.model ||
+                       gpu_3do_present_serial>known->second.last_seen+120U)
+                        continue;
+                    known->second.last_seen=gpu_3do_present_serial;
+                    // A CPU-skipped model has no main-view GPU instances.
+                    // Keep the native Thing in the query rotation anyway.
+                    if(grouped.find(native.owner)==grouped.end()) {
+                        candidate c{};
+                        c.owner=native.owner;
+                        c.position=native.bound.center;
+                        c.triangles=known->second.triangles;
+                        grouped.emplace(c.owner,c);
+                    }
+                }
+                if((gpu_3do_present_serial%120U)==0U)
+                    for(auto it=history.begin();it!=history.end();) {
+                        if(gpu_3do_present_serial>
+                           it->second.last_seen+240U)
+                            it=history.erase(it);
+                        else ++it;
+                    }
             }
             // Most JK 3DOs are far smaller than 500 triangles. Measure
             // eligibility tiers while retaining the existing fixed query
@@ -5156,8 +5211,11 @@ namespace jkgm {
                    !gpu_thing_occlusion_project_sphere_rect(
                        bound,camera.native_view,half_fov,aspect,rect))
                     return; // camera intersects sphere or unsafe projection
+                if(native_enabled)
+                    thing_occlusion_cost_history[item.owner]={
+                        item.triangles,model,gpu_3do_present_serial};
                 if(!queries.begin(item.owner,bound,camera.camera,
-                                  gpu_3do_present_serial))
+                                  gpu_3do_present_serial,model))
                     return;
                 if(proxy_mode==1) {
                     program.set_rect(rect);
@@ -5218,6 +5276,8 @@ namespace jkgm {
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("3DO OCCLUSION candidates=",expensive.size(),
+                    " native=",native_enabled?1:0,
+                    " native_history=",thing_occlusion_cost_history.size(),
                     " mode=",proxy_mode,
                     " min_triangles=",
                     the_config->gpu_3do_occlusion_min_triangles,
@@ -11681,6 +11741,8 @@ namespace jkgm {
                 auto const native = consume_native_3do_sample();
                 profile_frame.native_model_calls += native.model_calls;
                 profile_frame.native_model_drawn += native.model_drawn;
+                profile_frame.native_model_occlusion_skipped +=
+                    native.model_occlusion_skipped;
                 profile_frame.native_mesh_calls += native.mesh_calls;
                 profile_frame.native_face_calls += native.face_calls;
                 profile_frame.native_face_emitted += native.face_emitted;
