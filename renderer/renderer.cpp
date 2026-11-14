@@ -944,6 +944,14 @@ namespace jkgm {
                          " model_drawn_avg=", profile_window.native_model_drawn / frames,
                          " model_occlusion_skipped_avg=",
                          profile_window.native_model_occlusion_skipped / frames,
+                         " occlusion_cpu_us_avg=",
+                         (profile_window.native_occlusion_ns/1000U)/frames,
+                         " occlusion_tests_avg=",
+                         profile_window.native_occlusion_tests/frames,
+                         " occlusion_lookups_avg=",
+                         profile_window.native_occlusion_lookups/frames,
+                         " occlusion_lookup_hits_avg=",
+                         profile_window.native_occlusion_lookup_hits/frames,
                          " mesh_calls_avg=", profile_window.native_mesh_calls / frames,
                          " face_calls_avg=", profile_window.native_face_calls / frames,
                          " face_emitted_avg=", profile_window.native_face_emitted / frames);
@@ -11939,6 +11947,11 @@ namespace jkgm {
                 profile_frame.native_model_drawn += native.model_drawn;
                 profile_frame.native_model_occlusion_skipped +=
                     native.model_occlusion_skipped;
+                profile_frame.native_occlusion_tests+=native.model_occlusion_tests;
+                profile_frame.native_occlusion_lookups+=native.model_occlusion_lookups;
+                profile_frame.native_occlusion_lookup_hits+=
+                    native.model_occlusion_lookup_hits;
+                profile_frame.native_occlusion_ns+=native.model_occlusion_ns;
                 profile_frame.native_mesh_calls += native.mesh_calls;
                 profile_frame.native_face_calls += native.face_calls;
                 profile_frame.native_face_emitted += native.face_emitted;
