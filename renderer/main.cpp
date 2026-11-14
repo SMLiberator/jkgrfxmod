@@ -1595,7 +1595,10 @@ namespace {
             the_config->use_gpu_cache &&
             the_config->experimental_3do_occlusion_culling &&
             the_config->experimental_3do_native_occlusion_culling &&
-            !shadow_enabled;
+            !shadow_enabled &&
+            // Planar reflection can fall back to nodes from the main camera
+            // when independent reflected acquisition hits its budget.
+            !the_config->experimental_planar_reflection_capture;
         if(native_occlusion_enabled && owner_key && have_thing_flags &&
            !camera_hud && !(flags&0x20U) &&
            own_world_position_valid && native_model_ptr>=0x10000U &&
