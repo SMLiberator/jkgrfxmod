@@ -113,16 +113,17 @@ public:
             ++completed_;
         }
     }
-    // Query results are deliberately short-lived: moving doors and other
-    // occluders can change without the target Thing moving.
+    // Experimental coverage: one completed negative suffices and remains
+    // reusable for up to 12 frames. Camera/bound checks still invalidate
+    // stale evidence. Moving occluders may expose temporal errors to test.
     bool hidden(uint64_t owner,gpu_thing_occlusion_bound const &current,
                 engine_camera const &camera,uint64_t frame) {
         if(invalidated_)return false;
         auto it=entries_.find(owner);
         if(it==entries_.end())return false;
         auto const &e=it->second;
-        bool const hide=e.consecutive_hidden>=2U && !e.visible &&
-            frame>=e.result_frame && frame-e.result_frame<=4U &&
+        bool const hide=e.consecutive_hidden>=1U && !e.visible &&
+            frame>=e.result_frame && frame-e.result_frame<=12U &&
             gpu_thing_occlusion_same_bound(current,e.bound) &&
             gpu_thing_occlusion_camera_compatible(camera,e.result_camera) &&
             !gpu_thing_occlusion_camera_inside(current,camera);
@@ -137,7 +138,7 @@ public:
         bound.center=position;
         return hidden(owner,bound,camera,frame);
     }
-    // Publish only recently confirmed negatives; the native hook rechecks
+    // Publish a single confirmed negative while it is fresh; the native hook rechecks
     // model identity, current bound, world and camera before early rejection.
     std::vector<native_occlusion_result> confirmed_hidden(
         engine_camera const &camera,uint64_t frame) const {
@@ -145,8 +146,8 @@ public:
         if(invalidated_)return out;
         for(auto const &p:entries_) {
             auto const &e=p.second;
-            if(!e.model || e.visible || e.consecutive_hidden<2U ||
-               frame<e.result_frame || frame-e.result_frame>4U ||
+            if(!e.model || e.visible || e.consecutive_hidden<1U ||
+               frame<e.result_frame || frame-e.result_frame>12U ||
                !gpu_thing_occlusion_bound_valid(e.bound) ||
                !gpu_thing_occlusion_camera_compatible(camera,e.result_camera))
                 continue;
@@ -173,7 +174,7 @@ public:
            gpu_thing_occlusion_camera_inside(bound,camera))return false;
         auto it=entries_.find(owner);
         if(it==entries_.end()) {
-            if(entries_.size()>=256U)return false;
+            if(entries_.size()>=1024U)return false;
             it=entries_.emplace(owner,record{}).first;
         }
         auto &entry=it->second;
