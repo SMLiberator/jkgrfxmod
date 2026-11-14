@@ -62,14 +62,14 @@ inline bool gpu_thing_occlusion_camera_compatible(
     return moved<=0.0625f && rotated<=0.001f;
 }
 // Exact perspective silhouette bounds of a sphere, projected onto a
-// camera-facing rectangle at the Thing CENTER depth. Unlike the 3D box
-// this is intentionally aggressive: a nearer portion of the model can
-// still be visible when the rectangle at center depth fails the depth test.
-// The rectangle must nevertheless enclose the authored sphere's projection.
-// Reject spheres crossing the camera/near plane instead of risking a bad quad.
+// camera-facing rectangle. Draw the proxy at the sphere's NEAREST depth:
+// using center depth can incorrectly mark a nearer, visible part of the
+// model as occluded. This near-depth choice intentionally favors extra
+// visible queries over false occlusion. Reject spheres crossing the near
+// plane instead of risking an invalid quad.
 struct gpu_thing_occlusion_screen_rect {
     float left=0.0f,right=0.0f,bottom=0.0f,top=0.0f;
-    float center_forward=0.0f;
+    float near_forward=0.0f;
     bool valid=false;
 };
 inline bool gpu_thing_occlusion_project_sphere_rect(
@@ -82,13 +82,12 @@ inline bool gpu_thing_occlusion_project_sphere_rect(
        !std::isfinite(tan_half_fov) || tan_half_fov<=0.0f ||
        !std::isfinite(aspect) || aspect<=0.0f)
         return false;
-    auto const axis=[&](int index)->double {
-        return double(bound.center[0])*view[index]+
-               double(bound.center[1])*view[index+1]+
-               double(bound.center[2])*view[index+2]+
-               double(view[9+index/3]);
-    };
-    double const x=axis(0), depth=axis(3), z=axis(6);
+    // Use the EXACT same rdMatrix34 column-vector transform as the
+    // GPU 3DO and mode-0 box shaders. The old row-wise access transposed
+    // the camera basis, displacing rectangles whenever the camera rotated.
+    auto const view_center=gpu_3do_native_transform_point(
+        view,bound.center);
+    double const x=view_center[0],depth=view_center[1],z=view_center[2];
     double const r=bound.radius;
     // A center-depth rectangle cannot safely represent a sphere that
     // intersects the near plane or camera. Fail open in that case.
@@ -115,9 +114,9 @@ inline bool gpu_thing_occlusion_project_sphere_rect(
     out.right=float((std::min)(1.0,xhi));
     out.bottom=float((std::max)(-1.0,zlo));
     out.top=float((std::min)(1.0,zhi));
-    out.center_forward=float(depth);
-    out.valid=std::isfinite(out.center_forward) &&
-              out.center_forward>0.0f &&
+    out.near_forward=float(depth-r);
+    out.valid=std::isfinite(out.near_forward) &&
+              out.near_forward>0.1f &&
               out.right>out.left && out.top>out.bottom;
     return out.valid;
 }
