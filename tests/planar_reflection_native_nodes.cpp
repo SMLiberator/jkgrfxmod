@@ -87,6 +87,17 @@ int main()
     assert(nodes[1].world_transform[9]==30.0f);
     assert(nodes[0].owner==((uint64_t(thing)<<32)|23U));
 
+    // Auto LOD must ALWAYS acquire authored GeoSet 0, even when JK's
+    // per-Thing override still points to another GeoSet. Reflections do
+    // not call rdModel3_Draw, so the main hook cannot enforce this for us.
+    assert(collect_planar_reflection_native_nodes(
+        read,source,refresh,nodes,true));
+    assert(nodes.size()==2U && nodes[0].geoset==0U &&
+           nodes[1].geoset==0U);
+    assert(nodes[0].mesh==0x51000U && nodes[1].mesh==0x51000U);
+    assert(nodes[0].hierarchy_index==0U &&
+           nodes[1].hierarchy_index==3U);
+
     // Stale/disagreeing native matrix state must clear partial output.
     auto bad_refresh=refresh;
     put(pose,float(77)); // First component mismatch.
