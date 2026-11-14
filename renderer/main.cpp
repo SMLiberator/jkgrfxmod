@@ -1667,11 +1667,11 @@ namespace {
                                     // mutex/map insertion on the hot path.
                                     bridge.register_candidate(candidate);
                                     if(profiling) {
-                                    ++native_totals.model_calls;
-                                    ++native_totals.model_occlusion_skipped;
-                                    auto const elapsed=elapsed_native_ns(start);
-                                    native_totals.model_ns+=elapsed;
-                                    native_totals.model_hook_ns+=elapsed;
+                                        ++native_totals.model_calls;
+                                        ++native_totals.model_occlusion_skipped;
+                                        auto const elapsed=elapsed_native_ns(start);
+                                        native_totals.model_ns+=elapsed;
+                                        native_totals.model_hook_ns+=elapsed;
                                     }
                                     return 0;
                                 }
