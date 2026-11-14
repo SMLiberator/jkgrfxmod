@@ -71,7 +71,7 @@ namespace jkgm {
         bool use_gpu_cache = true; // unified GPU 3DO, sprite, and SithWorld rendering
         bool experimental_3do_occlusion_culling = false; // async main camera GPU Thing submission
         bool experimental_3do_native_occlusion_culling = false; // early rdModel3_Draw skip using completed GPU Thing queries
-        int gpu_3do_occlusion_proxy_mode = 0; // 0=enclosing box; 1=screen-facing silhouette at nearest sphere depth
+        int gpu_3do_occlusion_proxy_mode = 0; // 0=box; 1=nearest sphere depth; 2=center sphere depth (self-occlusion experiment)
         int gpu_3do_occlusion_query_budget = 128; // 0=unlimited stress test; 1..256 budgeted queries/frame
         int gpu_3do_occlusion_debug_view = 0; // 0=off, 1=x-ray wireframe proxies, 2=x-ray translucent filled proxies
         int gpu_3do_occlusion_min_triangles = 0; // test coverage: query any sized Thing, 0..50000
