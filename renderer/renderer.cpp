@@ -635,6 +635,9 @@ namespace jkgm {
         uint64_t thing_occlusion_issued_window=0;
         uint64_t thing_occlusion_poll_ns_window=0;
         uint64_t thing_occlusion_poll_calls_window=0;
+        uint64_t thing_occlusion_poll_checked_window=0;
+        uint64_t thing_occlusion_poll_completed_window=0;
+        uint64_t thing_occlusion_poll_pending_window=0;
         uint64_t thing_occlusion_prepare_ns_window=0;
         uint64_t thing_occlusion_visibility_ns_window=0;
         uint64_t thing_occlusion_visibility_calls_window=0;
@@ -3893,8 +3896,11 @@ namespace jkgm {
                 auto const poll_start=the_config->profile_renderer
                     ?std::chrono::steady_clock::now()
                     :std::chrono::steady_clock::time_point{};
-                thing_occlusion_queries->poll();
+                auto const poll_stats=thing_occlusion_queries->poll();
                 if(the_config->profile_renderer) {
+                    thing_occlusion_poll_checked_window+=poll_stats.checked;
+                    thing_occlusion_poll_completed_window+=poll_stats.completed;
+                    thing_occlusion_poll_pending_window+=poll_stats.pending_after;
                     thing_occlusion_poll_ns_window+=uint64_t(
                         std::chrono::duration_cast<std::chrono::nanoseconds>(
                             std::chrono::steady_clock::now()-poll_start).count());
@@ -5108,9 +5114,12 @@ namespace jkgm {
             auto const poll_start=profiling
                 ?std::chrono::steady_clock::now()
                 :std::chrono::steady_clock::time_point{};
-            queries.poll();
+            auto const poll_stats=queries.poll();
             queries.prune(gpu_3do_present_serial);
             if(profiling) {
+                thing_occlusion_poll_checked_window+=poll_stats.checked;
+                thing_occlusion_poll_completed_window+=poll_stats.completed;
+                thing_occlusion_poll_pending_window+=poll_stats.pending_after;
                 thing_occlusion_poll_ns_window+=uint64_t(
                     std::chrono::duration_cast<std::chrono::nanoseconds>(
                         std::chrono::steady_clock::now()-poll_start).count());
@@ -5362,6 +5371,11 @@ namespace jkgm {
                 thing_occlusion_issued_window+=issued;
                 if(gpu_3do_present_serial%120U==0U) {
                     LOG_INFO("3DO OCCLUSION proxy_perf mode=",proxy_mode,
+                        " query_budget=",
+                        the_config->gpu_3do_occlusion_query_budget,
+                        " issued_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_issued_window/
+                             thing_occlusion_cpu_calls_window:0U,
                         " cpu_us_avg=",thing_occlusion_cpu_calls_window
                             ?(thing_occlusion_cpu_ns_window/1000U)/
                               thing_occlusion_cpu_calls_window:0U,
@@ -5375,6 +5389,15 @@ namespace jkgm {
                              thing_occlusion_cpu_calls_window:0U,
                         " poll_calls_avg=",thing_occlusion_cpu_calls_window
                             ?thing_occlusion_poll_calls_window/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " poll_checked_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_poll_checked_window/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " poll_completed_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_poll_completed_window/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " poll_pending_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_poll_pending_window/
                              thing_occlusion_cpu_calls_window:0U,
                         " prepare_us_avg=",
                         thing_occlusion_cpu_calls_window
@@ -5414,6 +5437,9 @@ namespace jkgm {
                     thing_occlusion_gpu_skipped_window=0;
                     thing_occlusion_poll_ns_window=0;
                     thing_occlusion_poll_calls_window=0;
+                    thing_occlusion_poll_checked_window=0;
+                    thing_occlusion_poll_completed_window=0;
+                    thing_occlusion_poll_pending_window=0;
                     thing_occlusion_prepare_ns_window=0;
                     thing_occlusion_visibility_ns_window=0;
                     thing_occlusion_visibility_calls_window=0;
