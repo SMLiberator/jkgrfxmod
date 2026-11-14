@@ -953,6 +953,7 @@ namespace jkgm {
                          " face=", (profile_window.native_face_ns / 1000) / frames,
                          " model_calls_avg=", profile_window.native_model_calls / frames,
                          " model_drawn_avg=", profile_window.native_model_drawn / frames,
+                         " model_lod0_forced_avg=", profile_window.native_model_lod0_forced / frames,
                          " model_occlusion_skipped_avg=",
                          profile_window.native_model_occlusion_skipped / frames,
                          " occlusion_cpu_us_avg=",
@@ -12203,6 +12204,7 @@ namespace jkgm {
                 auto const native = consume_native_3do_sample();
                 profile_frame.native_model_calls += native.model_calls;
                 profile_frame.native_model_drawn += native.model_drawn;
+                profile_frame.native_model_lod0_forced += native.model_lod0_forced;
                 profile_frame.native_model_occlusion_skipped +=
                     native.model_occlusion_skipped;
                 profile_frame.native_occlusion_tests+=native.model_occlusion_tests;
