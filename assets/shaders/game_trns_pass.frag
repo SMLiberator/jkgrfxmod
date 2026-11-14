@@ -393,7 +393,10 @@ void main()
     bool has_env_reflection = env_params.x > 0.5;
     bool has_sun_specular =
         sun_direction.w > 0.5 && sun_color_intensity.w > 0.0;
-    if(reflection_params.x > 0.0 && (has_env_reflection || has_sun_specular)) {
+    // In flare mode vp_normal carries the PRECOMPUTED CENTER, not a
+    // surface normal. Flare sprites are not reflective receivers.
+    if(flare_mode==0 && reflection_params.x > 0.0 &&
+       (has_env_reflection || has_sun_specular)) {
         vec3 mapped_normal = surface_view_normal(adj_texcoords);
         if(has_env_reflection) {
             reflection = compute_reflection(unlit_base_color, adj_texcoords,
