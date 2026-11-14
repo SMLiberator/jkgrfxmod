@@ -1,6 +1,7 @@
 #include "renderer/sprite_flare_visibility.hpp"
 #include "renderer/sprite_flare_projection.hpp"
 #include "renderer/sprite_orientation.hpp"
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <limits>
@@ -32,14 +33,14 @@ int main() {
         {{800.0f,600.0f}},center));
     assert(near(center.pixel[0],400.0f));
     assert(near(center.pixel[1],300.0f));
-    assert(near(center.view_depth,10.0f));
+    assert(near(center.view_depth,320.0f));
     // The source stays at the same pixel/depth regardless of flare quad
     // dimensions, roll, clipping or its UVs: none are inputs here.
     assert(project_sprite_flare_thing_center(
         {{5.0f,10.0f,0.0f}},identity_camera,1.0f,4.0f/3.0f,
         {{800.0f,600.0f}},center));
     assert(near(center.pixel[0],600.0f));
-    assert(near(center.view_depth,10.0f));
+    assert(near(center.view_depth,320.0f));
     assert(project_sprite_flare_thing_center(
         {{0.0f,10.0f,3.75f}},identity_camera,1.0f,4.0f/3.0f,
         {{800.0f,600.0f}},center));
@@ -56,6 +57,17 @@ int main() {
     assert(!project_sprite_flare_thing_center(
         {{30.0f,10.0f,0.0f}},identity_camera,1.0f,4.0f/3.0f,
         {{800.0f,600.0f}},center));
+    // Former regression: a wall at Y=5 (scene depth 160) failed to hide
+    // a flare at Y=10 because raw view Y=10 was compared against 160.
+    assert(center.view_depth==320.0f);
+    assert(160.0f+std::max(0.01f,320.0f*0.0005f)<center.view_depth);
+    assert(!project_sprite_flare_thing_center(
+        {{0.0f,2047.0f,0.0f}},identity_camera,1.0f,4.0f/3.0f,
+        {{800.0f,600.0f}},center)); // 65504: R16F sky sentinel
+    assert(project_sprite_flare_thing_center(
+        {{0.0f,2046.0f,0.0f}},identity_camera,1.0f,4.0f/3.0f,
+        {{800.0f,600.0f}},center));
+    assert(near(center.view_depth,65472.0f));
     sources.clear();
     assert(!sources.lookup(marker,resolved));
 

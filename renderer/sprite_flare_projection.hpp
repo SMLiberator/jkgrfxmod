@@ -56,8 +56,10 @@ inline sprite_flare_source_registry &sprite_flare_sources() {
 
 // Project the source Thing through JK's *actual* rdCamera world-to-view
 // matrix. Matrix34 uses column-vector coordinates (right/look/up/translation).
-// The R16F scene-depth buffer stores the same linear view Y as the GPU
-// world/3DO path. No UV derivatives, triangle-center solve or temporal fade.
+// The resolved R16F scene-depth buffer stores native JK depth (32 * view Y),
+// matching game_opaque_pass.frag and gpu_3do_preview.frag. The projected
+// center must use these SAME units, not raw world-space view Y.
+// No UV derivatives, triangle-center solve or temporal fade.
 inline bool project_sprite_flare_thing_center(
     std::array<float,3> const &source,
     std::array<float,12> const &view,
@@ -78,7 +80,11 @@ inline bool project_sprite_flare_thing_center(
                double(view[6+axis])*source[2]+view[9+axis];
     };
     double const x=transform(0),depth=transform(1),z=transform(2);
-    if(!std::isfinite(depth) || depth<=0.0 || depth>=65500.0)
+    // JK's linear depth target stores 32 units per meter, not view Y.
+    // The R16F sky sentinel begins at 65500; reject unsampleable centers.
+    double const native_depth=depth*32.0;
+    if(!std::isfinite(native_depth) || native_depth<=0.0 ||
+       native_depth>=65500.0)
         return false;
     double const h=tan_half_horizontal_fov;
     double const v=h/aspect;
@@ -89,7 +95,7 @@ inline bool project_sprite_flare_thing_center(
        px<0.0 || px>=viewport[0] || py<0.0 || py>=viewport[1])
         return false;
     out.pixel={{float(px),float(py)}};
-    out.view_depth=float(depth);
+    out.view_depth=float(native_depth);
     return true;
 }
 } // namespace jkgm

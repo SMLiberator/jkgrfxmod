@@ -194,7 +194,8 @@ vec2 parallax_mapping(vec2 tc)
 // The flare's source SithThing.position is projected once on the CPU and
 // packed into the otherwise-unused triangle normal. All three vertices
 // share the same value; clipping and UV orientation do not affect the test.
-// Position: x/y framebuffer pixels, z=linear camera-forward depth.
+// Position: x/y framebuffer pixels, z=native linear depth (32 * view Y).
+// Opaque scene_depth also stores 32 * view Y; never compare it with raw Y.
 float flare_center_visibility()
 {
     vec3 center=vp_normal;
