@@ -1599,6 +1599,16 @@ namespace {
             // Planar reflection can fall back to nodes from the main camera
             // when independent reflected acquisition hits its budget.
             !the_config->experimental_planar_reflection_capture;
+        if(the_config && the_config->experimental_3do_native_occlusion_culling &&
+           !native_occlusion_enabled) {
+            static bool reported_native_occlusion_gate=false;
+            if(!reported_native_occlusion_gate) {
+                reported_native_occlusion_gate=true;
+                LOG_INFO("NATIVE 3DO OCCLUSION early skip gated: "
+                         "requires GPU cache + GPU Thing occlusion, "
+                         "and sun/spotlight shadows and planar capture OFF");
+            }
+        }
         if(native_occlusion_enabled && owner_key && have_thing_flags &&
            !camera_hud && !(flags&0x20U) &&
            own_world_position_valid && native_model_ptr>=0x10000U &&
