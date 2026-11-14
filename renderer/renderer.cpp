@@ -5318,48 +5318,79 @@ namespace jkgm {
                 ++submit_attempts;
                 uintptr_t const thing=uintptr_t(uint32_t(item.owner>>32));
                 uint32_t signature=0,model=0;
-                float radius=0.0f;
-                std::array<float,9> basis{};
                 if(!planar_reflection_valid_native_pointer(thing) ||
-                   !read(thing+0x74U,&signature,4) ||
-                   signature!=uint32_t(item.owner) ||
-                   !read(thing+0xc8U,&model,4) ||
-                   !planar_reflection_valid_native_pointer(model) ||
-                   !read(uintptr_t(model)+0x5cU,&radius,4) ||
-                   !read(thing+0x88U,basis.data(),sizeof(basis))) {
+                   !read(thing+0x74U,&signature,4U) ||
+                   signature!=uint32_t(item.owner)) {
                     ++reject_identity;
                     return;
                 }
-                float const scale=planar_reflection_radius_scale(basis);
                 gpu_thing_occlusion_bound bound{};
-                bound.center=item.position;
-                // JK authored radius already encloses animation; test the
-                // same radius for both proxies (no extra inflation).
-                bound.radius=radius*scale;
-                bound.valid=true;
+                if(item.sprite) {
+                    // A native SPR is not an rdModel3. Revalidate its
+                    // Thing/rdThing identity and current resource before
+                    // issuing a query; changing the SPR cannot reuse a
+                    // previous negative for an unrelated object.
+                    uint32_t type=0,render_type=0,flags=0;
+                    if(!read(thing+0x0cU,&type,4U) ||
+                       !read(thing+0xc4U,&render_type,4U) ||
+                       !read(thing+0xc8U,&model,4U) ||
+                       !read(thing,&flags,4U) ||
+                       type<=1U || render_type!=4U ||
+                       (flags&0x20U)!=0U ||
+                       !planar_reflection_valid_native_pointer(model) ||
+                       uintptr_t(model)!=item.sprite_resource) {
+                        ++reject_identity;
+                        return;
+                    }
+                    bound=item.sprite_bound;
+                } else {
+                    float radius=0.0f;
+                    std::array<float,9> basis{};
+                    if(!read(thing+0xc8U,&model,4U) ||
+                       !planar_reflection_valid_native_pointer(model) ||
+                       !read(uintptr_t(model)+0x5cU,&radius,4U) ||
+                       !read(thing+0x88U,basis.data(),sizeof(basis))) {
+                        ++reject_identity;
+                        return;
+                    }
+                    float const scale=planar_reflection_radius_scale(basis);
+                    // JK's authored Thing-centered sphere already encloses
+                    // its animation. Keep the established model behavior.
+                    if(!std::isfinite(scale) || scale<=0.0f) {
+                        ++reject_bound;
+                        return;
+                    }
+                    bound.center=item.position;
+                    bound.radius=radius*scale;
+                    bound.valid=true;
+                }
                 if(!gpu_thing_occlusion_bound_valid(bound) ||
-                   !std::isfinite(scale) || scale<=0.0f ||
                    gpu_thing_occlusion_camera_inside(bound,camera.camera)) {
                     ++reject_bound;
                     return;
                 }
+                // SPRs always use a conservative two-triangle screen rect
+                // at the nearest point of their bound. Mode 0's 3D box
+                // often costs more geometry than the underlying sprite.
+                int const draw_mode=item.sprite ? 1 : proxy_mode;
                 gpu_thing_occlusion_screen_rect rect{};
-                if(proxy_mode!=0 &&
+                if(draw_mode!=0 &&
                    !gpu_thing_occlusion_project_sphere_rect(
                        bound,camera.native_view,half_fov,aspect,rect)) {
                     ++reject_projection;
                     return; // unsafe/outside sphere projection
                 }
-                if(native_enabled)
+                if(native_enabled && !item.sprite)
                     thing_occlusion_cost_history[item.owner]={
                         item.triangles,model,gpu_3do_present_serial};
                 if(!queries.begin(item.owner,bound,camera.camera,
-                                  gpu_3do_present_serial,model)) {
+                                  gpu_3do_present_serial,model,!item.sprite)) {
                     ++reject_query_state;
                     return;
                 }
-                if(proxy_mode!=0) {
-                    program.set_rect(rect,proxy_mode);
+                program.set_proxy_mode(draw_mode);
+                if(draw_mode!=0) {
+                    program.set_rect(rect,draw_mode);
                     glDrawArrays(GL_TRIANGLES,0,6);
                 } else {
                     program.set_bound(bound);
@@ -5370,9 +5401,11 @@ namespace jkgm {
                     thing_occlusion_debug_proxy proxy{};
                     proxy.bound=bound;
                     proxy.rect=rect;
+                    proxy.mode=unsigned(draw_mode);
                     proxy.result=queries.debug_result_state(item.owner);
                     thing_occlusion_debug_proxies.push_back(proxy);
                 }
+                if(item.sprite)++sprite_issued;
                 ++issued;
             };
             // Refresh hidden Things first, to recover promptly when an
@@ -5499,6 +5532,8 @@ namespace jkgm {
                 LOG_INFO("3DO OCCLUSION candidates=",expensive.size(),
                     " native=",native_enabled?1:0,
                     " native_history=",thing_occlusion_cost_history.size(),
+                    " sprite_owners=",sprite_owners,
+                    " sprite_queried=",sprite_issued,
                     " mode=",proxy_mode,
                     " min_triangles=",
                     the_config->gpu_3do_occlusion_min_triangles,
@@ -5570,7 +5605,6 @@ namespace jkgm {
             program.set_camera(camera.native_view,half_fov,aspect,
                                camera.far_plane);
             int const proxy_mode=the_config->gpu_3do_occlusion_proxy_mode;
-            program.set_proxy_mode(proxy_mode);
             glBindVertexArray(thing_occlusion_proxy_vao);
             float const alpha=
                 the_config->gpu_3do_occlusion_debug_view==1?0.80f:0.13f;
@@ -5582,9 +5616,10 @@ namespace jkgm {
                 float const g=item.result==2U?0.10f:0.85f;
                 float const b=item.result==0U?0.10f:0.12f;
                 program.set_debug_color(r*alpha,g*alpha,b*alpha,alpha);
-                if(proxy_mode!=0)program.set_rect(item.rect,proxy_mode);
+                program.set_proxy_mode(int(item.mode));
+                if(item.mode!=0U)program.set_rect(item.rect,int(item.mode));
                 else program.set_bound(item.bound);
-                glDrawArrays(GL_TRIANGLES,0,proxy_mode!=0?6:36);
+                glDrawArrays(GL_TRIANGLES,0,item.mode!=0U?6:36);
             }
             if(gpu_timing) {
                 thing_occlusion_debug_gpu_timers.timestamp(0U,false);
