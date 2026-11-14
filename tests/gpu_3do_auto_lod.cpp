@@ -1,4 +1,5 @@
 #include "renderer/gpu_3do_auto_lod.hpp"
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -31,6 +32,35 @@ static gpu_3do_geometry grid(unsigned n) {
         }
     group.count=static_cast<uint32_t>(mesh.indices.size());
     mesh.groups.push_back(group);
+    return mesh;
+}
+// Simulate authored JK 3DOs with many 1-triangle draw ranges. Previously
+// each range failed the 64-triangle minimum even if the WHOLE mesh was dense.
+static gpu_3do_geometry fragment_groups(gpu_3do_geometry mesh,
+                                         bool half_different_mat=false,
+                                         bool half_alpha=false)
+{
+    auto const basis=mesh.groups.front();
+    mesh.groups.clear();
+    for(uint32_t offset=0;offset<mesh.indices.size();offset+=3U) {
+        gpu_3do_group g=basis;
+        g.offset=offset;
+        g.count=3U;
+        auto const &v=mesh.vertices[mesh.indices[offset]];
+        bool const right=v.x>=9.0f;
+        if(half_different_mat && right)g.material=0x4321U;
+        if(half_alpha && right)g.face_type|=2U;
+        g.bounds_min={{v.x,v.y,v.z}};
+        g.bounds_max=g.bounds_min;
+        for(unsigned k=1;k<3U;++k) {
+            auto const &p=mesh.vertices[mesh.indices[offset+k]];
+            g.bounds_min[0]=std::min(g.bounds_min[0],p.x);
+            g.bounds_min[1]=std::min(g.bounds_min[1],p.y);
+            g.bounds_max[0]=std::max(g.bounds_max[0],p.x);
+            g.bounds_max[1]=std::max(g.bounds_max[1],p.y);
+        }
+        mesh.groups.push_back(g);
+    }
     return mesh;
 }
 int main() {
@@ -80,6 +110,49 @@ int main() {
             assert(v.y>=0.0f&&v.y<=18.0f);
         }
     }
+    // One 3DO may have many independent rdMesh nodes, each with dozens
+    // of small material groups. ALL reducible meshes must be considered.
+    auto many=fragment_groups(grid(18U));
+    assert(many.groups.size()==18U*18U*2U);
+    auto fragmented1=generate_gpu_3do_auto_lod(many,1U);
+    auto fragmented2=generate_gpu_3do_auto_lod(many,2U);
+    assert(fragmented1 && fragmented2);
+    assert(fragmented1->indices.size()<many.indices.size());
+    assert(fragmented2->indices.size()<=fragmented1->indices.size());
+    assert(fragmented1->groups.size()<=many.groups.size());
+    for(auto const &g:fragmented1->groups) {
+        assert(g.material==0x1234U);
+        assert(g.count>0U);
+        assert(g.count%3U==0U);
+        assert(g.offset+g.count<=fragmented1->indices.size());
+    }
+    // Multiple medium-sized independent 3DO meshes must also reduce,
+    // even though neither contains a single 64-triangle group.
+    auto part1=fragment_groups(grid(8U));
+    auto part2=fragment_groups(grid(8U));
+    assert(generate_gpu_3do_auto_lod(part1,1U));
+    assert(generate_gpu_3do_auto_lod(part2,2U));
+    // No material boundary may move or tear; a second MAT still renders.
+    auto mixed=fragment_groups(grid(18U),true,false);
+    auto mixed_lod=generate_gpu_3do_auto_lod(mixed,2U);
+    assert(mixed_lod);
+    bool saw_a=false,saw_b=false;
+    for(auto const &g:mixed_lod->groups) {
+        if(g.material==0x1234U)saw_a=true;
+        if(g.material==0x4321U)saw_b=true;
+    }
+    assert(saw_a && saw_b);
+    // Entirely translucent meshes remain untouched, and opaque areas
+    // never collapse across an adjacent alpha material boundary.
+    auto mixed_alpha=fragment_groups(grid(18U),false,true);
+    auto mixed_alpha_lod=generate_gpu_3do_auto_lod(mixed_alpha,1U);
+    assert(mixed_alpha_lod);
+    size_t original_alpha=0U,generated_alpha=0U;
+    for(auto const &g:mixed_alpha.groups)
+        if(g.face_type&2U)original_alpha+=g.count;
+    for(auto const &g:mixed_alpha_lod->groups)
+        if(g.face_type&2U)generated_alpha+=g.count;
+    assert(generated_alpha==original_alpha);
     // Low-poly models stay untouched, avoiding pointless memory and
     // silhouette quality loss.
     auto small=grid(3U);

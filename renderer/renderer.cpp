@@ -3701,7 +3701,7 @@ namespace jkgm {
             unsigned generated=0U,selected[3]={0U,0U,0U};
             for(auto &inst:frame_gpu_3do_instances) {
                 if(!inst.geometry || inst.id==0U ||
-                   inst.geometry->indices.size()<192U ||
+                   inst.geometry->indices.size()<72U ||
                    inst.shadow_only || inst.transient_procedural ||
                    inst.is_projected_decal || inst.is_sprite_quad ||
                    inst.camera_hud || inst.world_lighting_exempt ||
@@ -3783,6 +3783,15 @@ namespace jkgm {
                     ++generated;
                     entry.levels[index]=generate_gpu_3do_auto_lod(
                         *entry.source,level);
+                    if(!entry.levels[index] &&
+                       the_config->profile_renderer) {
+                        LOG_INFO("AUTO 3DO LOD unreduced source=",source_id,
+                                 " level=",level,
+                                 " triangles=",
+                                 entry.source->indices.size()/3U,
+                                 " groups=",entry.source->groups.size(),
+                                 " reason=no_safe_reduction");
+                    }
                     if(entry.levels[index]) {
                         // Include resource identity AND the generated level:
                         // GL buffers may not alias base-mesh GPU cache IDs.
@@ -3798,6 +3807,8 @@ namespace jkgm {
                                      entry.source->indices.size()/3U,
                                      " triangles_generated=",
                                      entry.levels[index]->indices.size()/3U,
+                                     " groups_source=",entry.source->groups.size(),
+                                     " groups_reduced=",entry.levels[index]->groups.size(),
                                      " screen_radius_px=",pixel_radius);
                         }
                     }
