@@ -1588,25 +1588,21 @@ namespace {
         // short-circuit (before any joint-matrix or mesh callback work).
         // Record eligible models even when skipped so GPU queries continue
         // refreshing them; otherwise they could become permanently invisible.
-        //
-        // Auxiliary shadow caster traversal still depends on this native
-        // walk, so fail open whenever sunlight/spotlight shadows are active.
+        // This is an experiment: do not silently disable CPU occlusion
+        // because shadows, planar reflections or moving decals are enabled.
+        // Any auxiliary-pass regressions must be measured and fixed instead
+        // of hiding the experiment behind feature-level gates.
         bool const native_occlusion_enabled=the_config &&
             the_config->use_gpu_cache &&
             the_config->experimental_3do_occlusion_culling &&
-            the_config->experimental_3do_native_occlusion_culling &&
-            !shadow_enabled &&
-            // Planar reflection can fall back to nodes from the main camera
-            // when independent reflected acquisition hits its budget.
-            !the_config->experimental_planar_reflection_capture;
+            the_config->experimental_3do_native_occlusion_culling;
         if(the_config && the_config->experimental_3do_native_occlusion_culling &&
            !native_occlusion_enabled) {
             static bool reported_native_occlusion_gate=false;
             if(!reported_native_occlusion_gate) {
                 reported_native_occlusion_gate=true;
-                LOG_INFO("NATIVE 3DO OCCLUSION early skip gated: "
-                         "requires GPU cache + GPU Thing occlusion, "
-                         "and sun/spotlight shadows and planar capture OFF");
+                LOG_INFO("NATIVE 3DO OCCLUSION requires GPU cache and "
+                         "experimental_3do_occlusion_culling");
             }
         }
         if(native_occlusion_enabled && owner_key && have_thing_flags &&
@@ -1651,14 +1647,9 @@ namespace {
                     candidate.model=native_model_ptr;
                     candidate.bound=bound;
                     auto &bridge=jkgm::get_native_occlusion_bridge();
-                    // A moving projected decal needs the receiver's
-                    // current node transforms. Never skip it during active
-                    // decal follow or the short hit-capture window.
-                    bool const needs_decal_pose=the_config->enable_decals &&
-                        (gpu_frame_serial<=native_decal_capture_until ||
-                         (native_decal_following &&
-                          native_decal_active_things.count(owner_key)>0U));
-                    if(!needs_decal_pose) {
+                    // Do not gate native occlusion on decal-follow state.
+                    // Keep the experiment measurable across feature setups.
+                    {
                         jkgm::native_occlusion_result hidden{};
                         uintptr_t published_world=0;
                         if(bridge.lookup(owner_key,native_model_ptr,
