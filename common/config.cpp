@@ -352,8 +352,8 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_auto_3do_lod").get_to(
                 rv->experimental_auto_3do_lod);
         }
-        // Both thresholds are PROJECTED MESH RADIUS in internal-screen
-        // pixels (not camera distance and not full-screen diameter).
+        // Both thresholds are PROJECTED THING MODEL RADIUS in internal
+        // screen pixels (not per-hierarchy-mesh size or full diameter).
         if(j.contains("gpu_3do_auto_lod_lod1_radius_px")) {
             auto const &v=j.at("gpu_3do_auto_lod_lod1_radius_px");
             if(!v.is_number())throw std::runtime_error(
@@ -382,6 +382,17 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             if(n<0 || n>3)throw std::runtime_error(
                 "gpu_3do_auto_lod_debug_mode must be between 0 and 3");
             rv->gpu_3do_auto_lod_debug_mode=n;
+        }
+        if(j.contains("gpu_3do_auto_lod_generation_budget")) {
+            auto const &v=j.at("gpu_3do_auto_lod_generation_budget");
+            if(!v.is_number_integer())
+                throw std::runtime_error(
+                    "gpu_3do_auto_lod_generation_budget must be a nonnegative integer (0=unlimited)");
+            int const n=v.get<int>();
+            if(n<0)
+                throw std::runtime_error(
+                    "gpu_3do_auto_lod_generation_budget cannot be negative");
+            rv->gpu_3do_auto_lod_generation_budget=n;
         }
         if(j.contains("experimental_planar_thing_discovery")) {
             j.at("experimental_planar_thing_discovery").get_to(

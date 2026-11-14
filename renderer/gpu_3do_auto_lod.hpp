@@ -83,9 +83,9 @@ inline unsigned select_gpu_3do_auto_lod(
            (radius<lod1_radius_px?1U:0U);
 }
 
-// The 3DO hierarchy node matrix is WORLD-space, not camera-relative.
-// Project from the active camera position/forward axis, never world Y.
-// Return -1 if conservative projected radius is invalid.
+// Project an authored SithThing-centered rdModel3 bounding sphere from
+// the Thing's WORLD position, not the per-node rdMesh view-space matrix.
+// Return -1 if the projected radius is invalid.
 inline float gpu_3do_auto_lod_projected_radius_px(
     std::array<float,3> const &world_center,
     std::array<float,3> const &camera_position,
@@ -105,6 +105,14 @@ inline float gpu_3do_auto_lod_projected_radius_px(
     if(!std::isfinite(projected) || projected>1.e8)
         return -1.0f;
     return static_cast<float>(projected);
+}
+
+// CPU generation scheduling is independent of visual simplification.
+inline bool gpu_3do_auto_lod_budget_allows(
+    unsigned generated_this_frame,int budget)
+{
+    return budget==0 ||
+           generated_this_frame<static_cast<unsigned>(budget);
 }
 
 // AGGRESSIVE experiment: all native 3DO mesh sizes, opaque/alpha groups,
