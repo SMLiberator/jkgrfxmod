@@ -15,7 +15,7 @@
 
 namespace jkgm {
 namespace auto_lod_detail {
-    using xyz=std::array<float,3>;
+    using lod_point=std::array<float,3>;
     using tri=std::array<uint32_t,3>;
     struct face { tri corners{},points{}; bool live=true; };
     struct quadric {
@@ -30,19 +30,19 @@ namespace auto_lod_detail {
             for(int i=0;i<10;++i)q[i]+=b.q[i];
             return *this;
         }
-        double error(xyz const &v) const {
+        double error(lod_point const &v) const {
             double x=v[0],y=v[1],z=v[2];
             return q[0]*x*x+2*q[1]*x*y+2*q[2]*x*z+2*q[3]*x+
                    q[4]*y*y+2*q[5]*y*z+2*q[6]*y+
                    q[7]*z*z+2*q[8]*z+q[9];
         }
     };
-    inline double distance2(xyz const &a,xyz const &b) {
+    inline double distance2(lod_point const &a,lod_point const &b) {
         double x=double(a[0])-b[0],y=double(a[1])-b[1],
                z=double(a[2])-b[2];
         return x*x+y*y+z*z;
     }
-    inline xyz midpoint(xyz const &a,xyz const &b) {
+    inline lod_point midpoint(lod_point const &a,lod_point const &b) {
         return {{float((double(a[0])+b[0])*0.5),
                  float((double(a[1])+b[1])*0.5),
                  float((double(a[2])+b[2])*0.5)}};
@@ -51,19 +51,36 @@ namespace auto_lod_detail {
     inline edge make_edge(uint32_t a,uint32_t b) {
         return a<b ? edge{a,b}:edge{b,a};
     }
-    struct candidate { edge endpoints; xyz position; double error; };
+    struct candidate { edge endpoints; lod_point position; double error; };
 }
 
 // Screen-space LOD selection with hysteresis; radius is projected pixels.
 // Model nodes retain LOD0 near the camera, independent of JK's GeoSet.
 // A 4-pixel 20k-triangle mesh can select LOD2 without distance constants.
-inline unsigned select_gpu_3do_auto_lod(float radius,unsigned previous=0) {
-    if(!std::isfinite(radius) || radius<0.0f)return 0U;
+inline unsigned select_gpu_3do_auto_lod(
+    float radius,unsigned previous=0,
+    float lod1_radius_px=90.0f,float lod2_radius_px=28.0f,
+    int debug_mode=0)
+{
+    // Debug forcing ignores ALL camera-distance and screen-size rules,
+    // but cannot make an ineligible/low-poly/alpha mesh reducible.
+    if(debug_mode>=1 && debug_mode<=3)
+        return static_cast<unsigned>(debug_mode-1);
+    if(!std::isfinite(radius) || radius<0.0f ||
+       !std::isfinite(lod1_radius_px) ||
+       !std::isfinite(lod2_radius_px) ||
+       lod2_radius_px<1.0f || lod1_radius_px<=lod2_radius_px)
+        return 0U;
+    // Hysteresis: leaving LOD1/2 requires a ~20-43% larger radius
+    // than entering them; user-configured thresholds scale both edges.
+    float const lod1_exit=lod1_radius_px*(110.0f/90.0f);
+    float const lod2_exit=lod2_radius_px*(40.0f/28.0f);
     if(previous>=2U)
-        return radius>110.0f?0U:(radius>40.0f?1U:2U);
+        return radius>lod1_exit?0U:(radius>lod2_exit?1U:2U);
     if(previous==1U)
-        return radius>110.0f?0U:(radius<28.0f?2U:1U);
-    return radius<28.0f?2U:(radius<90.0f?1U:0U);
+        return radius>lod1_exit?0U:(radius<lod2_radius_px?2U:1U);
+    return radius<lod2_radius_px?2U:
+           (radius<lod1_radius_px?1U:0U);
 }
 
 // Returns null if the source is too small, malformed, or cannot be reduced
@@ -87,8 +104,8 @@ inline std::shared_ptr<gpu_3do_geometry const> generate_gpu_3do_auto_lod(
         gpu_3do_group next=group;
         next.offset=static_cast<uint32_t>(out->indices.size());
         std::vector<face> faces;
-        std::vector<xyz> points;
-        std::map<xyz,uint32_t> point_ids;
+        std::vector<lod_point> points;
+        std::map<lod_point,uint32_t> point_ids;
         faces.reserve(group.count/3U);
         bool valid=true;
         for(uint32_t i=0;i<group.count;i+=3U) {
@@ -97,7 +114,7 @@ inline std::shared_ptr<gpu_3do_geometry const> generate_gpu_3do_auto_lod(
                 uint32_t const corner=source.indices[group.offset+i+k];
                 if(corner>=source.vertices.size()){valid=false;break;}
                 auto const &v=source.vertices[corner];
-                xyz position{{v.x,v.y,v.z}};
+                lod_point position{{v.x,v.y,v.z}};
                 if(!std::isfinite(v.x)||!std::isfinite(v.y)||
                    !std::isfinite(v.z)){valid=false;break;}
                 auto const inserted=point_ids.emplace(
@@ -118,7 +135,7 @@ inline std::shared_ptr<gpu_3do_geometry const> generate_gpu_3do_auto_lod(
         if(eligible) {
             size_t const target=faces.size()*(level==1U?1U:1U)/
                                 (level==1U?2U:4U);
-            xyz lo=points.front(),hi=points.front();
+            lod_point lo=points.front(),hi=points.front();
             for(auto const &p:points)
                 for(unsigned k=0;k<3;++k) {
                     lo[k]=std::min(lo[k],p[k]);
@@ -176,7 +193,7 @@ inline std::shared_ptr<gpu_3do_geometry const> generate_gpu_3do_auto_lod(
                         if(neighbors[b].count(n))++shared;
                     if(shared!=2U)continue;
                     quadric combined=q[a];combined+=q[b];
-                    xyz const mid=midpoint(points[a],points[b]);
+                    lod_point const mid=midpoint(points[a],points[b]);
                     double const error=combined.error(mid);
                     if(!std::isfinite(error))continue;
                     options.push_back({entry.first,mid,

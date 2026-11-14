@@ -69,7 +69,10 @@ namespace jkgm {
         bool profile_renderer_verbose = false; // opt-in detailed renderer diagnostics
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics
         bool use_gpu_cache = true; // unified GPU 3DO, sprite, and SithWorld rendering
-        bool experimental_auto_3do_lod = false; // stage 0: force native GeoSet 0 per draw; GPU simplification follows
+        bool experimental_auto_3do_lod = false; // force native GeoSet 0; select automatically generated GPU mesh LODs
+        float gpu_3do_auto_lod_lod1_radius_px = 90.0f; // enter generated LOD1 below this projected radius
+        float gpu_3do_auto_lod_lod2_radius_px = 28.0f; // enter generated LOD2 below this projected radius
+        int gpu_3do_auto_lod_debug_mode = 0; // 0=screen-size auto; 1=force original; 2=force LOD1; 3=force LOD2
         bool experimental_3do_occlusion_culling = false; // async main camera GPU Thing submission
         bool experimental_3do_native_occlusion_culling = false; // early rdModel3_Draw skip using completed GPU Thing queries
         int gpu_3do_occlusion_proxy_mode = 0; // 0=box; 1=nearest sphere depth; 2=center sphere depth (self-occlusion experiment)

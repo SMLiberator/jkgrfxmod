@@ -3706,6 +3706,8 @@ namespace jkgm {
                    inst.is_projected_decal || inst.is_sprite_quad ||
                    inst.camera_hud || inst.world_lighting_exempt ||
                    inst.saber_trail_active)continue;
+                float pixel_radius=0.0f; // forced debug never needs a camera projection
+                if(the_config->gpu_3do_auto_lod_debug_mode==0) {
                 auto const &source=*inst.geometry;
                 std::array<float,3> lo{{1.e30f,1.e30f,1.e30f}};
                 std::array<float,3> hi{{-1.e30f,-1.e30f,-1.e30f}};
@@ -3739,8 +3741,8 @@ namespace jkgm {
                 double const radius=std::sqrt(radius2*max_scale2);
                 double const front=double(view[1])-radius;
                 if(!(front>0.01) || !std::isfinite(front))continue;
-                float const pixel_radius=float(radius*screen_half/
-                                                 (tangent*front));
+                pixel_radius=float(radius*screen_half/(tangent*front));
+                } // automatic screen-size selection only
                 uint64_t const source_id=inst.id;
                 unsigned previous=0U;
                 uint64_t const history_id=inst.shadow_owner
@@ -3752,8 +3754,11 @@ namespace jkgm {
                         previous=found->second.first;
                 }
                 unsigned const level=select_gpu_3do_auto_lod(
-                    pixel_radius,previous);
-                if(history_id)
+                    pixel_radius,previous,
+                    the_config->gpu_3do_auto_lod_lod1_radius_px,
+                    the_config->gpu_3do_auto_lod_lod2_radius_px,
+                    the_config->gpu_3do_auto_lod_debug_mode);
+                if(history_id && the_config->gpu_3do_auto_lod_debug_mode==0)
                     auto_3do_lod_history[history_id]={
                         level,gpu_3do_present_serial};
                 if(level==0U) {++selected[0];continue;}
@@ -3808,6 +3813,9 @@ namespace jkgm {
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("AUTO 3DO LOD main-camera base=",selected[0],
                          " lod1=",selected[1]," lod2=",selected[2],
+                         " debug_mode=",the_config->gpu_3do_auto_lod_debug_mode,
+                         " lod1_radius_px=",the_config->gpu_3do_auto_lod_lod1_radius_px,
+                         " lod2_radius_px=",the_config->gpu_3do_auto_lod_lod2_radius_px,
                          " cpu_variants=",auto_3do_lod_cache.size(),
                          " generated_this_frame=",generated);
         }

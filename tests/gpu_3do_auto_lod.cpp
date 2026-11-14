@@ -40,6 +40,21 @@ int main() {
     assert(select_gpu_3do_auto_lod(99.0f,1U)==1U);
     assert(select_gpu_3do_auto_lod(35.0f,2U)==2U);
     assert(select_gpu_3do_auto_lod(120.0f,2U)==0U);
+    // Altering the screen-size thresholds moves both transition bands
+    // without changing native model GeoSets or the projected-radius units.
+    assert(select_gpu_3do_auto_lod(60.0f,0U,50.0f,12.0f)==0U);
+    assert(select_gpu_3do_auto_lod(30.0f,0U,50.0f,12.0f)==1U);
+    assert(select_gpu_3do_auto_lod(10.0f,0U,50.0f,12.0f)==2U);
+    assert(select_gpu_3do_auto_lod(65.0f,1U,50.0f,12.0f)==0U);
+    assert(select_gpu_3do_auto_lod(14.0f,2U,50.0f,12.0f)==2U);
+    assert(select_gpu_3do_auto_lod(20.0f,2U,50.0f,12.0f)==1U);
+    // Forced debug makes reduced geometry visible directly at point-blank
+    // range; a separate mode explicitly selects the untouched GeoSet 0.
+    assert(select_gpu_3do_auto_lod(10000.0f,0U,90.0f,28.0f,1)==0U);
+    assert(select_gpu_3do_auto_lod(10000.0f,0U,90.0f,28.0f,2)==1U);
+    assert(select_gpu_3do_auto_lod(10000.0f,0U,90.0f,28.0f,3)==2U);
+    assert(select_gpu_3do_auto_lod(0.0f,0U,90.0f,28.0f,3)==2U);
+    assert(select_gpu_3do_auto_lod(NAN,0U,90.0f,28.0f,2)==1U);
     auto source=grid(18U);
     assert(!generate_gpu_3do_auto_lod(source,0U));
     assert(!generate_gpu_3do_auto_lod(source,3U));

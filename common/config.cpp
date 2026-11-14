@@ -352,6 +352,37 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_auto_3do_lod").get_to(
                 rv->experimental_auto_3do_lod);
         }
+        // Both thresholds are PROJECTED MESH RADIUS in internal-screen
+        // pixels (not camera distance and not full-screen diameter).
+        if(j.contains("gpu_3do_auto_lod_lod1_radius_px")) {
+            auto const &v=j.at("gpu_3do_auto_lod_lod1_radius_px");
+            if(!v.is_number())throw std::runtime_error(
+                "gpu_3do_auto_lod_lod1_radius_px must be a number");
+            rv->gpu_3do_auto_lod_lod1_radius_px=v.get<float>();
+        }
+        if(j.contains("gpu_3do_auto_lod_lod2_radius_px")) {
+            auto const &v=j.at("gpu_3do_auto_lod_lod2_radius_px");
+            if(!v.is_number())throw std::runtime_error(
+                "gpu_3do_auto_lod_lod2_radius_px must be a number");
+            rv->gpu_3do_auto_lod_lod2_radius_px=v.get<float>();
+        }
+        if(!std::isfinite(rv->gpu_3do_auto_lod_lod1_radius_px) ||
+           !std::isfinite(rv->gpu_3do_auto_lod_lod2_radius_px) ||
+           rv->gpu_3do_auto_lod_lod2_radius_px<1.0f ||
+           rv->gpu_3do_auto_lod_lod1_radius_px>4096.0f ||
+           rv->gpu_3do_auto_lod_lod1_radius_px<=
+               rv->gpu_3do_auto_lod_lod2_radius_px)
+            throw std::runtime_error(
+                "Auto 3DO LOD radii must satisfy 1 <= LOD2 < LOD1 <= 4096");
+        if(j.contains("gpu_3do_auto_lod_debug_mode")) {
+            auto const &v=j.at("gpu_3do_auto_lod_debug_mode");
+            if(!v.is_number_integer())throw std::runtime_error(
+                "gpu_3do_auto_lod_debug_mode must be integer 0..3");
+            int const n=v.get<int>();
+            if(n<0 || n>3)throw std::runtime_error(
+                "gpu_3do_auto_lod_debug_mode must be between 0 and 3");
+            rv->gpu_3do_auto_lod_debug_mode=n;
+        }
         if(j.contains("experimental_planar_thing_discovery")) {
             j.at("experimental_planar_thing_discovery").get_to(
                 rv->experimental_planar_thing_discovery);
