@@ -308,11 +308,11 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             auto const &v=j.at("gpu_3do_occlusion_proxy_mode");
             if(!v.is_number_integer())
                 throw std::runtime_error(
-                    "gpu_3do_occlusion_proxy_mode must be integer 0..1");
+                    "gpu_3do_occlusion_proxy_mode must be integer 0..2");
             int const n=v.get<int>();
-            if(n<0 || n>1)
+            if(n<0 || n>2)
                 throw std::runtime_error(
-                    "gpu_3do_occlusion_proxy_mode must be between 0 and 1");
+                    "gpu_3do_occlusion_proxy_mode must be between 0 and 2");
             rv->gpu_3do_occlusion_proxy_mode=n;
         }
         if(j.contains("gpu_3do_occlusion_query_budget")) {
