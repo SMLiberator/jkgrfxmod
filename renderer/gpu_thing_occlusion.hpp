@@ -3,6 +3,7 @@
 // main-camera GPU draw-submission experiment, NOT a native rdModel3 skip.
 // Other cameras, shadows and physics always retain their source Things.
 #include "gpu_thing_occlusion_math.hpp"
+#include "native_occlusion_bridge.hpp"
 #include "gpu_3do_preview.hpp"
 #include "gpu_3do_modelview.hpp"
 #include "shaders.hpp"
@@ -61,6 +62,7 @@ class gpu_thing_occlusion_queries {
         uint64_t result_frame=0,issued_frame=0,last_seen=0;
         engine_camera result_camera{},issued_camera{};
         gpu_thing_occlusion_bound bound{},issued_bound{};
+        uint32_t model=0,issued_model=0;
     };
     std::unordered_map<uint64_t,record> entries_;
     uintptr_t world_=0;
@@ -105,6 +107,7 @@ public:
             e.result_frame=e.issued_frame;
             e.result_camera=e.issued_camera;
             e.bound=e.issued_bound;
+            e.model=e.issued_model;
             e.consecutive_hidden=e.visible?0U:
                 std::min(3U,e.consecutive_hidden+1U);
             ++completed_;
@@ -134,6 +137,28 @@ public:
         bound.center=position;
         return hidden(owner,bound,camera,frame);
     }
+    // Publish only recently confirmed negatives; the native hook rechecks
+    // model identity, current bound, world and camera before early rejection.
+    std::vector<native_occlusion_result> confirmed_hidden(
+        engine_camera const &camera,uint64_t frame) const {
+        std::vector<native_occlusion_result> out;
+        if(invalidated_)return out;
+        for(auto const &p:entries_) {
+            auto const &e=p.second;
+            if(!e.model || e.visible || e.consecutive_hidden<2U ||
+               frame<e.result_frame || frame-e.result_frame>4U ||
+               !gpu_thing_occlusion_bound_valid(e.bound) ||
+               !gpu_thing_occlusion_camera_compatible(camera,e.result_camera))
+                continue;
+            native_occlusion_result record{};
+            record.owner=p.first;
+            record.model=e.model;
+            record.bound=e.bound;
+            record.camera=e.result_camera;
+            out.push_back(record);
+        }
+        return out;
+    }
     // A previously negative result must be refreshed promptly: an opaque
     // door can move even when the Thing being tested stays stationary.
     bool needs_retest(uint64_t owner)const {
@@ -142,7 +167,8 @@ public:
                it->second.consecutive_hidden>0U;
     }
     bool begin(uint64_t owner,gpu_thing_occlusion_bound const &bound,
-               engine_camera const &camera,uint64_t frame) {
+               engine_camera const &camera,uint64_t frame,
+               uint32_t model=0) {
         if(!owner || !gpu_thing_occlusion_bound_valid(bound) ||
            gpu_thing_occlusion_camera_inside(bound,camera))return false;
         auto it=entries_.find(owner);
@@ -157,10 +183,12 @@ public:
         if(!entry.query)return false;
         // Invalidate accumulated negatives when Thing center/radius changes.
         if(entry.result_frame &&
-           !gpu_thing_occlusion_same_bound(bound,entry.bound))
+           (!gpu_thing_occlusion_same_bound(bound,entry.bound) ||
+            entry.model!=model))
             entry.consecutive_hidden=0;
         entry.pending=true;entry.issued_frame=frame;
         entry.issued_camera=camera;entry.issued_bound=bound;
+        entry.issued_model=model;
         glBeginQuery(GL_ANY_SAMPLES_PASSED,entry.query);
         ++submitted_;
         return true;
