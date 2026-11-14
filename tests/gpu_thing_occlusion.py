@@ -40,6 +40,10 @@ assert "gpu_3do_occlusion_debug_view must be between 0 and 2" in config
 assert "gpu_3do_occlusion_debug_view" in read("common/config.hpp")
 assert "gpu_3do_occlusion_query_budget==0" in renderer
 assert "draw_gpu_thing_occlusion_debug();" in renderer
+assert "glPolygonMode(GL_FRONT_AND_BACK" in renderer
+assert "thing_occlusion_debug_gpu_timers.timestamp(stage,false)" in renderer
+assert "debug_gpu_us_avg=" in renderer
+assert "native_occlusion_lookup_hits_avg=" in renderer
 assert "thing_occlusion_visibility_ns_window" in renderer
 assert "thing_occlusion_poll_ns_window" in renderer
 assert "thing_occlusion_prepare_ns_window" in renderer
@@ -112,6 +116,8 @@ assert "needs_decal_pose" not in main.split(
     "// A nominally static",1)[0]
 assert "gpu_thing_occlusion_camera_compatible(" in main
 assert "gpu_thing_occlusion_camera_inside(" in main
+assert "native_totals.model_occlusion_lookups" in main
+assert "native_totals.model_occlusion_ns" in main
 assert main.index("bridge.register_candidate(candidate);") < main.index(
     "return 0;", main.index("bridge.register_candidate(candidate);"))
 assert main.index("bridge.register_candidate(candidate);") < main.index(
