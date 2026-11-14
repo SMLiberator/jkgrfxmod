@@ -31,6 +31,11 @@ void main(){
         vec3 p=world.x*view_right.xyz+
                world.y*view_forward.xyz+
                world.z*view_up.xyz+view_origin.xyz;
+        // The source SPR may have written opaque cutout pixels into this
+        // SAME depth buffer earlier in the frame. A small nearward bias
+        // makes the occlusion probe conservative against tiny arithmetic
+        // differences between the main 3DO and probe transforms.
+        p.y=max(p.y-0.015,0.01);
         float h=max(projection.x,0.0001);
         float v=h/max(projection.y,0.0001);
         gl_Position=vec4(p.x/h,p.z/v,-projection.z,p.y);
