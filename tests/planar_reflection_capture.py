@@ -6,6 +6,19 @@ read=lambda path:(root/path).read_text(encoding="utf-8")
 settings=json.loads(read("assets/jkgm.json"))
 assert settings["experimental_planar_reflection_capture"] is False
 assert settings["planar_reflection_resolution_scale"]==0.5
+assert settings.get("experimental_planar_reflection_portal_culling",False) is False
+portals=read("renderer/planar_reflection_portals.hpp")
+assert "planar_reflection_portal_graph" in portals
+assert "std::vector<world_cache_sector_span>" in portals
+assert "planar_reflection_portal_project_aabb" in portals
+assert "void clear()" in portals
+assert 'j.contains("experimental_planar_reflection_portal_culling")' in read("common/config.cpp")
+assert "experimental_planar_reflection_portal_culling = false" in read("common/config.hpp")
+assert "planar_reflection_portals.hpp" in read("renderer/world_cache_gpu.hpp")
+assert "planar_reflection_portals.hpp" in read("renderer/renderer.vcxproj")
+assert "planar_reflection_portals.hpp" in read("renderer/renderer.vcxproj.filters")
+assert "planar_reflection_portals.cpp" in read(".github/workflows/main.yml")
+
 config=read("common/config.cpp")
 for name in ("experimental_planar_reflection_capture",
              "planar_reflection_resolution_scale"):
@@ -74,6 +87,15 @@ assert "NOTE=planar_world_material_sampling_no_sky_yet" in renderer
 # staged independently of the primary portal subset, without leaking into
 # the primary camera's alpha draw queue.
 assert "planar_frame_candidates.clear();" in renderer
+# Reflected portal visibility must not borrow the main-camera sector
+# spans. On any invalid link/receiver the entire original frustum walk remains.
+assert "cache.reflected_portal_graph.ensure(" in renderer
+assert "cache.reflected_portal_graph.traverse(" in renderer
+assert "collect_world_cache_sector_candidates(" in renderer
+assert "if(!reflected_portals_used)" in renderer
+assert "reflected_portals enabled=" in renderer
+assert "independent_mirrored_camera_fail_open" in renderer
+
 assert "append_world_cache_candidate(" in renderer
 # Inside draw_world_cache_preview(), the captured camera is named cam.
 reflect_stage=renderer.split(
