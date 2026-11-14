@@ -5227,6 +5227,11 @@ namespace jkgm {
             }
             if(completed.skipped)++thing_occlusion_gpu_skipped_window;
             if(gpu_timing)thing_occlusion_gpu_timers.timestamp(0U,true);
+            // Include GL state restoration in the measured CPU query cost.
+            size_t issued=0;
+            size_t submit_attempts=0,reject_identity=0,reject_bound=0;
+            size_t reject_projection=0,reject_query_state=0;
+            {
             offscreen_capture_gl_scope restore;
             glDisable(GL_BLEND);
             glDisable(GL_SCISSOR_TEST);
@@ -5250,9 +5255,6 @@ namespace jkgm {
                 the_config->gpu_3do_occlusion_query_budget==0
                 ?expensive.size()
                 :size_t(the_config->gpu_3do_occlusion_query_budget);
-            size_t issued=0;
-            size_t submit_attempts=0,reject_identity=0,reject_bound=0;
-            size_t reject_projection=0,reject_query_state=0;
             auto submit=[&](candidate const &item) {
                 if(issued>=query_budget)
                     return;
@@ -5345,6 +5347,7 @@ namespace jkgm {
                 }
                 thing_occlusion_gpu_timers.end();
             }
+            } // restore the query GL state before recording CPU cost
             if(profiling) {
                 thing_occlusion_cpu_ns_window+=uint64_t(
                     std::chrono::duration_cast<std::chrono::nanoseconds>(
