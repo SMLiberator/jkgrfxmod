@@ -134,6 +134,15 @@ int main() {
         }
         assert(std::sqrt(len2)<sprite_bound.radius);
     }
+    // Rotating a square in place preserves center/radius but changes its
+    // visible footprint. Never reuse a hidden result across such rotation.
+    gpu_3do_matrix34 rotated_sprite=sprite_pose;
+    rotated_sprite[0]=0.0f;
+    rotated_sprite[1]=3.0f;
+    rotated_sprite[3]=-1.0f;
+    rotated_sprite[4]=0.0f;
+    assert(!gpu_sprite_occlusion_same_pose(sprite_pose,rotated_sprite));
+    assert(gpu_sprite_occlusion_same_pose(sprite_pose,sprite_pose));
     auto scaled_sprite=sprite_pose;
     for(int axis=0;axis<3;++axis)scaled_sprite[axis]*=2.0f;
     auto const changed=gpu_sprite_occlusion_bound(scaled_sprite);
