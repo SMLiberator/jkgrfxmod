@@ -157,6 +157,8 @@ namespace {
     // nodes; the rdMesh callback's transform is view-space and node-local.
     thread_local std::array<float,3> active_native_model_world_position{};
     thread_local bool active_native_model_world_position_valid=false;
+    thread_local float active_native_model_lod_radius=0.0f;
+    thread_local bool active_native_model_lod_radius_valid=false;
     // rdThing->model3 at +4 points to rdModel3, whose first 32 bytes
     // contain the source 3DO filename. Keep this context for the nested
     // rdModel3_DrawMesh callback and restore it on recursive model draws.
@@ -1460,9 +1462,11 @@ namespace {
                 read,hud_owner,own_sector_tint);
             // Unlike rdMesh, the linked
             // SithThing position is WORLD-space and common to every node.
-            // Capture once for continuous ambient when enabled.
+            // World position is shared by ALL animated hierarchy meshes.
+            // Capture once for ambient, Thing occlusion or automatic LOD.
             if(the_config->experimental_continuous_ambient_gpu ||
-               the_config->experimental_3do_occlusion_culling) {
+               the_config->experimental_3do_occlusion_culling ||
+               the_config->experimental_auto_3do_lod) {
                 own_world_position_valid=read(
                     uintptr_t(hud_owner)+0xb8U,
                     own_world_position.data(),sizeof(own_world_position));
@@ -1501,9 +1505,38 @@ namespace {
         uintptr_t const rd=reinterpret_cast<uintptr_t>(thing);
         bool const have_thing_flags=
             jkgm::read_native_model_thing_flags(read,rd,flags);
+        float own_lod_radius=0.0f;
+        bool own_lod_radius_valid=false;
+        if(the_config && the_config->use_gpu_cache &&
+           the_config->experimental_auto_3do_lod &&
+           !camera_hud && own_world_position_valid &&
+           have_thing_flags && hud_owner>=0x10000U &&
+           uintptr_t(hud_owner)+0xc4U==rd &&
+           native_model_ptr>=0x10000U) {
+            uint32_t owner_model=0;
+            float authored_radius=0.0f;
+            std::array<float,9> owner_basis{};
+            if(read(uintptr_t(hud_owner)+0xc8U,&owner_model,4U) &&
+               owner_model==native_model_ptr &&
+               read(uintptr_t(native_model_ptr)+0x5cU,
+                    &authored_radius,sizeof(authored_radius)) &&
+               read(uintptr_t(hud_owner)+0x88U,
+                    owner_basis.data(),sizeof(owner_basis))) {
+                // Identical authored Thing-centered sphere used in the
+                // native occlusion and reflected camera paths.
+                float const scale=
+                    jkgm::planar_reflection_radius_scale(owner_basis);
+                float const scaled=authored_radius*scale;
+                if(std::isfinite(scaled) && scaled>0.0f) {
+                    own_lod_radius=scaled;
+                    own_lod_radius_valid=true;
+                }
+            }
+        }
         if(shadow_enabled || (the_config && the_config->enable_decals) ||
            (the_config && the_config->experimental_planar_thing_discovery) ||
-           (the_config && the_config->experimental_3do_occlusion_culling)) {
+           (the_config && the_config->experimental_3do_occlusion_culling) ||
+           (the_config && the_config->experimental_auto_3do_lod)) {
             if(have_thing_flags) {
                 uint32_t owner=0,signature=0;
                 if(read(rd+0x44U,&owner,4) &&
@@ -1710,6 +1743,9 @@ namespace {
         auto const previous_world_position=active_native_model_world_position;
         bool const previous_world_position_valid=
             active_native_model_world_position_valid;
+        float const previous_lod_radius=active_native_model_lod_radius;
+        bool const previous_lod_radius_valid=
+            active_native_model_lod_radius_valid;
         uint64_t const previous_owner=active_native_shadow_owner;
         uint64_t const previous_family=active_native_spotlight_family;
         bool const previous_moving=active_native_shadow_dynamic;
@@ -1725,6 +1761,8 @@ namespace {
         active_native_model_sector_id_valid=own_sector_id_valid;
         active_native_model_world_position=own_world_position;
         active_native_model_world_position_valid=own_world_position_valid;
+        active_native_model_lod_radius=own_lod_radius;
+        active_native_model_lod_radius_valid=own_lod_radius_valid;
         active_native_shadow_owner=owner_key;
         active_native_spotlight_family=owner_key &&
             the_config && the_config->enable_spotlights &&
@@ -1767,6 +1805,8 @@ namespace {
         active_native_model_sector_id_valid=previous_sector_id_valid;
         active_native_model_world_position=previous_world_position;
         active_native_model_world_position_valid=previous_world_position_valid;
+        active_native_model_lod_radius=previous_lod_radius;
+        active_native_model_lod_radius_valid=previous_lod_radius_valid;
         active_native_model_filename=previous_model_filename;
         active_native_model_ptr=previous_model_ptr;
         active_native_rdthing_ptr=previous_rdthing_ptr;
@@ -2582,6 +2622,13 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     inst.shadow_owner=active_native_shadow_owner;
     inst.spotlight_shadow_family=active_native_spotlight_family;
     inst.dynamic_sun_caster=active_native_shadow_dynamic;
+    // Snapshot ONCE from rdModel3_Draw; every hierarchy node inherits
+    // identical Thing radius/center even if animated node matrices differ.
+    inst.owning_thing_world_position=active_native_model_world_position;
+    inst.owning_thing_world_position_valid=
+        active_native_model_world_position_valid;
+    inst.owning_thing_lod_radius=active_native_model_lod_radius;
+    inst.owning_thing_lod_radius_valid=active_native_model_lod_radius_valid;
     // Depth-only casters need no native MAT residency, point lights,
     // colormap or per-Thing lighting cap. Preserve the native render call.
     std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
@@ -2596,9 +2643,6 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             inst.sector_tint_valid=active_native_model_sector_tint_valid;
             inst.owning_sector_id=active_native_model_sector_id;
             inst.owning_sector_valid=active_native_model_sector_id_valid;
-            inst.owning_thing_world_position=active_native_model_world_position;
-            inst.owning_thing_world_position_valid=
-                active_native_model_world_position_valid;
         }
         // curLightingMode (rdModel3_Draw's effective Thing/global cap):
         // the verified rdModel3 global block is +0x48 from original JK.
