@@ -49,7 +49,7 @@ public:
     void set_rect(gpu_thing_occlusion_screen_rect const &r) {
         gl::set_uniform_vector(rect_ndc_,make_point(
             r.left,r.right,r.bottom,r.top));
-        gl::set_uniform_float(rect_forward_,r.center_forward);
+        gl::set_uniform_float(rect_forward_,r.near_forward);
     }
     void set_debug_color(float r,float g,float b,float a) {
         gl::set_uniform_vector(debug_color_,make_point(r,g,b,a));
