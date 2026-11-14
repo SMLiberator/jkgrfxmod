@@ -48,6 +48,7 @@
     "gpu_3do_occlusion_min_triangles": 0,
     "experimental_planar_thing_discovery": false,
     "experimental_planar_reflection_capture": false,
+    "experimental_planar_reflection_portal_culling": false,
     "planar_reflection_resolution_scale": 0.5,
     "enable_gpu_sprite_instancing": true,
     "experimental_half_res_fluid_sprites": false,
