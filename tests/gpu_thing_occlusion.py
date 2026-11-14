@@ -22,14 +22,15 @@ assert settings["gpu_3do_occlusion_proxy_mode"]==0
 assert "gpu_3do_occlusion_proxy_mode must be between 0 and 2" in config
 assert "proxy_mode=the_config->gpu_3do_occlusion_proxy_mode" in renderer
 assert "queries.set_proxy_mode(unsigned(proxy_mode))" in renderer
-assert "program.set_proxy_mode(proxy_mode)" in renderer
+assert "program.set_proxy_mode(draw_mode)" in renderer
+assert "program.set_proxy_mode(int(item.mode))" in renderer
 assert "gpu_thing_occlusion_project_sphere_rect(" in renderer
 assert "glDrawArrays(GL_TRIANGLES,0,6)" in renderer
 assert "glDrawArrays(GL_TRIANGLES,0,36)" in renderer
 assert "bound.radius=radius*scale;" in renderer
-assert "if(proxy_mode!=0)" in renderer
-assert "program.set_rect(rect,proxy_mode);" in renderer
-assert "program.set_rect(item.rect,proxy_mode);" in renderer
+assert "if(draw_mode!=0)" in renderer
+assert "program.set_rect(rect,draw_mode);" in renderer
+assert "program.set_rect(item.rect,int(item.mode));" in renderer
 assert "rect_ndc" in shader and "rect_forward" in shader
 assert "rect_corners[6]" in shader and "proxy_mode!=0" in shader
 assert "proxy_mode==2?r.center_forward:r.near_forward" in header
@@ -96,6 +97,21 @@ assert "void query_gpu_thing_occlusion()" in renderer
 assert "3DO OCCLUSION candidates=" in renderer
 assert "queries.needs_retest(item.owner)" in renderer
 assert "thing_occlusion_queries->hidden(" in renderer
+# Ordinary GPU SPRs use their actual transformed billboard size, not
+# rdModel3 radius. They share the async budget but cannot feed native
+# rdModel3_Draw early-return decisions.
+assert "gpu_sprite_occlusion_bound(inst.transform)" in renderer
+assert "inst.sprite_occlusion_resource" in renderer
+assert "c.sprite=true;" in renderer
+assert "sprite_visibility_skips_avg=" in renderer
+assert "sprite_queried=" in renderer
+assert "int const draw_mode=item.sprite ? 1 : proxy_mode;" in renderer
+assert "gpu_sprite_occlusion_bound(" in math
+assert "entry.native_model!=native_model" in header
+assert "if(!e.native_model || !e.model" in header
+assert "gpu_3do_present_serial,model,!item.sprite" in renderer
+assert "instance.sprite_occlusion_resource=sprite;" in read("renderer/main.cpp")
+
 assert "planar_reflection_radius_scale(basis)" in renderer
 assert "thing+0xc8U" in renderer and "+0x5cU" in renderer
 assert "shadow_owner" in renderer and "owning_thing_world_position" in renderer
