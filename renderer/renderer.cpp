@@ -10573,6 +10573,30 @@ namespace jkgm {
                 native_normals = reinterpret_cast<uint32_t const *>(normal_slots_address);
             }
 
+            // A flare's specular marker indexes its originating SithThing
+            // position. Cache the native view once per ExecuteBuffer, only
+            // when flare geometry actually reaches the converter.
+            bool flare_camera_checked=false,flare_camera_valid=false;
+            gpu_3do_matrix34 flare_view{};
+            engine_camera flare_camera{};
+            auto project_flare_source=[&](uint32_t marker,
+                                          sprite_flare_center &out) {
+                std::array<float,3> world{};
+                if(!sprite_flare_sources().lookup(marker,world))return false;
+                if(!flare_camera_checked) {
+                    flare_camera_checked=true;
+                    flare_camera=read_active_render_camera();
+                    flare_camera_valid=flare_camera.valid &&
+                        read_active_rd_camera_view(flare_view);
+                }
+                if(!flare_camera_valid)return false;
+                return project_sprite_flare_thing_center(
+                    world,flare_view,
+                    std::tan(flare_camera.fov*0.008726646259971648f),
+                    float(get<x>(conf_scr_res))/float(get<y>(conf_scr_res)),
+                    {{float(get<x>(conf_scr_res)),float(get<y>(conf_scr_res))}},out);
+            };
+
             auto cmd_span = make_span((char const *)ebd.lpData + ed.dwInstructionOffset,
                                       ed.dwInstructionLength);
 
@@ -10684,7 +10708,7 @@ namespace jkgm {
                         // D3DTLVERTEX.specular. Vanilla output uses specular=0, so treat zero
                         // as neutral white to preserve compatibility with an unpatched engine.
                         auto unpack_vertex_tint = [](DWORD packed) {
-                            if(packed == 0U || packed == 0xB6A9D000U) {
+                            if(packed == 0U || sprite_flare_is_marker(packed)) {
                                 return color::fill(1.0f);
                             }
                             return to_float_color(color_rgba8((uint8_t)RGBA_GETRED(packed),
@@ -10708,9 +10732,9 @@ namespace jkgm {
                         // Route separately; a regular world triangle can
                         // never accidentally inherit flare depth behavior.
                         bool const is_flare=!is_gun &&
-                            v1.specular==0xB6A9D000U &&
-                            v2.specular==0xB6A9D000U &&
-                            v3.specular==0xB6A9D000U;
+                            sprite_flare_is_marker(v1.specular) &&
+                            v1.specular==v2.specular &&
+                            v1.specular==v3.specular;
                         if(is_flare && the_config->profile_renderer &&
                            flare_gpu_trace_count++<6U)
                             LOG_INFO("SPR flare stage=d3d_triangle material=",
@@ -10763,23 +10787,12 @@ namespace jkgm {
                                                 is_flare?0U:native3),
                                 current_material);
                             if(is_flare) {
-                                // The flare never uses a surface normal.
-                                // Reuse the existing flat normal attribute to
-                                // carry ONE CPU-reconstructed screen center
-                                // (x/y in framebuffer pixels, z=view depth)
-                                // to every fragment. No derivative seam and
-                                // no added vertex bandwidth or draw calls.
-                                auto project=[](triangle_vertex const &v) {
-                                    return sprite_flare_triangle_vertex{
-                                        get<x>(v.pos),get<y>(v.pos),
-                                        get<w>(v.pos),get<x>(v.texcoords),
-                                        get<y>(v.texcoords)};
-                                };
+                                // Carry one screen-space source Thing position
+                                // in the unused flat normal for this flare.
+                                // Never infer the center from the clipped quad.
                                 sprite_flare_center center{};
-                                bool const valid=reconstruct_sprite_flare_triangle_center(
-                                    {{project(tri.v0),project(tri.v1),project(tri.v2)}},
-                                    {{get<x>(internal_scr_res_f),
-                                      get<y>(internal_scr_res_f)}},center);
+                                bool const valid=project_flare_source(
+                                    v1.specular,center);
                                 tri.normal=valid
                                     ?make_direction(center.pixel[0],
                                         center.pixel[1],center.view_depth)
@@ -12315,6 +12328,7 @@ namespace jkgm {
             world_batch.clear();
             world_transparent_batch.clear();
             world_flare_batch.clear();
+            sprite_flare_sources().clear();
             gun_batch.clear();
             gun_transparent_batch.clear();
             overlay_batch.clear();

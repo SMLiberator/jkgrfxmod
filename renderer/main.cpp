@@ -74,6 +74,7 @@
 #include "sprite_decal_multimesh.hpp"
 #include "sprite_decal_geoset.hpp"
 #include "sprite_alpha_tag.hpp"
+#include "sprite_flare_projection.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_triangulation.hpp"
@@ -3052,7 +3053,6 @@ namespace {
     constexpr uintptr_t sprite_hw_upload_addr=0x00429C60U;
     constexpr uintptr_t sprite_hw_buffer_addr=0x0063A400U;
     constexpr uintptr_t sprite_hw_vertex_count_addr=0x005F53F0U;
-    constexpr uint32_t sprite_flare_vertex_magic=0xB6A9D000U;
     // The supported patched executables redirect this function to
     // the extended vertex upload implementation through a rel32 JMP.
     constexpr uint8_t sprite_hw_upload_bytes[]={
@@ -3545,7 +3545,17 @@ namespace {
     using sprite_hw_upload_fn=int(__cdecl *)(void const *,uint32_t);
     sprite_hw_upload_fn RealSpriteHWUpload=
         reinterpret_cast<sprite_hw_upload_fn>(sprite_hw_upload_addr);
-    struct sprite_flare_span {uint32_t start=0,count=0;};
+    struct sprite_flare_proc_source {
+        std::array<float,3> position{};
+        bool valid=false;
+    };
+    // Indexed by native rdProcEntry slot; captures the originating Thing
+    // before JK's cache converter loses its rdThing association.
+    thread_local std::array<sprite_flare_proc_source,1024> sprite_flare_proc_sources{};
+    struct sprite_flare_span {
+        uint32_t start=0,count=0;
+        sprite_flare_proc_source source{};
+    };
     // Only used while the native render cache is converting a face list.
     // Reset when that vertex batch is submitted to D3D; no stale Thing refs.
     thread_local std::vector<sprite_flare_span> pending_sprite_flare_spans;
@@ -4682,6 +4692,22 @@ namespace {
         if(!jkgm::sprite_alpha_encode(
                opacity,(face_type&2U)!=0U,alpha_tag,is_flare)) return result;
         std::memcpy(entry,&alpha_tag,4);
+        if(is_flare && before<sprite_flare_proc_sources.size()) {
+            auto &source=sprite_flare_proc_sources[before];
+            source={};
+            void const *owner=nullptr;
+            auto const *rd=static_cast<uint8_t const *>(sprite_draw_active.thing);
+            if(gpu_span_readable(rd,0x48U))
+                std::memcpy(&owner,rd+0x44U,sizeof(owner)); // rdThing.pThing
+            if(owner && gpu_span_readable(
+                   static_cast<uint8_t const *>(owner)+0xb8U,12U)) {
+                std::memcpy(source.position.data(),
+                    static_cast<uint8_t const *>(owner)+0xb8U,12U);
+                source.valid=true;
+                for(float coordinate:source.position)
+                    if(!std::isfinite(coordinate))source.valid=false;
+            }
+        }
         face_type|=2U; // Force native translucent render state, without MAT mutation.
         std::memcpy(entry+4,&face_type,4);
         return result;
@@ -4706,8 +4732,18 @@ namespace {
                 LOG_INFO("SPR flare stage=alpha_converter num_vertices=",n,
                          " first_hw_vertex=",start," tag=",tag,
                          " accepted=",n>=3U && n<=32U && start+n<=4096U);
-            if(n>=3U && n<=32U && start+n<=4096U)
-                pending_sprite_flare_spans.push_back({start,n});
+            if(n>=3U && n<=32U && start+n<=4096U) {
+                sprite_flare_proc_source source{};
+                uintptr_t const addr=reinterpret_cast<uintptr_t>(face);
+                if(addr>=sprite_proc_base_addr &&
+                   (addr-sprite_proc_base_addr)%sprite_proc_stride==0U) {
+                    size_t const index=(addr-sprite_proc_base_addr)/
+                                       sprite_proc_stride;
+                    if(index<sprite_flare_proc_sources.size())
+                        source=sprite_flare_proc_sources[index];
+                }
+                pending_sprite_flare_spans.push_back({start,n,source});
+            }
         }
         return jkgm::sprite_alpha_override(tag,native_alpha);
     }
@@ -4733,10 +4769,11 @@ namespace {
                gpu_span_readable(vertices,uintptr_t(count)*32U)) {
                 for(auto const &span:pending_sprite_flare_spans) {
                     if(span.start+span.count>count) continue;
+                    uint32_t const marker=jkgm::sprite_flare_sources().add(
+                        span.source.position,span.source.valid);
                     for(uint32_t i=span.start;i<span.start+span.count;i++) {
                         auto *specular=reinterpret_cast<uint8_t *>(
                             const_cast<void *>(vertices))+uintptr_t(i)*32U+20U;
-                        uint32_t const marker=sprite_flare_vertex_magic;
                         std::memcpy(specular,&marker,4);
                     }
                 }
