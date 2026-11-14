@@ -72,8 +72,8 @@ namespace jkgm {
         bool experimental_3do_occlusion_culling = false; // async main camera GPU Thing submission
         bool experimental_3do_native_occlusion_culling = false; // early rdModel3_Draw skip using completed GPU Thing queries
         int gpu_3do_occlusion_proxy_mode = 0; // 0=enclosing box; 1=screen-facing sphere silhouette at Thing-center depth
-        int gpu_3do_occlusion_query_budget = 24; // max GL queries/frame, 1..64
-        int gpu_3do_occlusion_min_triangles = 96; // queried per-Thing cached triangle count, 1..50000
+        int gpu_3do_occlusion_query_budget = 128; // test coverage: max GL queries/frame, 1..256
+        int gpu_3do_occlusion_min_triangles = 0; // test coverage: query any sized Thing, 0..50000
         bool experimental_planar_thing_discovery = false; // read-only 120-frame native 3DO diagnostics
         bool experimental_planar_reflection_capture = false; // independent GPU reflected-scene FBO; opt-in
         float planar_reflection_resolution_scale = 0.5f; // 0.25..1.0 of internal screen (0.5 default)
