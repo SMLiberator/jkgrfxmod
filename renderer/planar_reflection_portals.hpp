@@ -292,20 +292,20 @@ public:
         // native scene render state. If the virtual eye lies outside the map,
         // receiver-based fallback seeds are still available.
         for(uint32_t i=0;i<count;++i) {
-            auto &sector=sectors_[i];
+            auto &entry=sectors_[i];
             std::array<float,6> box{};
             uintptr_t const native=uintptr_t(table)+uint64_t(i)*0x98U;
             if(read(native+0x70U,box.data(),sizeof(box))) {
-                sector.has_bbox=true;
+                entry.has_bbox=true;
                 for(int a=0;a<3;++a) {
-                    sector.bbox_low[a]=box[a];
-                    sector.bbox_high[a]=box[a+3];
+                    entry.bbox_low[a]=box[a];
+                    entry.bbox_high[a]=box[a+3];
                     if(!std::isfinite(box[a]) ||
                        !std::isfinite(box[a+3]) ||
-                       box[a]>box[a+3])sector.has_bbox=false;
+                       box[a]>box[a+3])entry.has_bbox=false;
                 }
             }
-            auto const span=sector.span;
+            auto const span=entry.span;
             for(uint32_t j=0;j<span.surface_count;++j) {
                 auto const *original=authored[size_t(span.first_surface)+j];
                 if(!original || original->polygon.empty() ||
@@ -317,7 +317,7 @@ public:
                 bool finite=true;
                 for(float v:boundary.point)finite&=std::isfinite(v);
                 for(float v:boundary.normal)finite&=std::isfinite(v);
-                if(finite)sector.containment.push_back(boundary);
+                if(finite)entry.containment.push_back(boundary);
             }
         }
         // Linked adjoins can have no MAT and so can be absent from the
