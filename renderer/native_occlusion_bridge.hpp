@@ -69,12 +69,14 @@ public:
     }
     // Cheap eligibility check before the native hook reads the live camera.
     // Validate the complete current bound/camera/world AGAIN before skipping.
-    bool lookup(uint64_t owner,uint32_t model,uintptr_t current_world,
+    bool lookup(uint64_t owner,uint32_t model,
                 gpu_thing_occlusion_bound const &bound,
-                native_occlusion_result &out) const {
+                native_occlusion_result &out,
+                uintptr_t &published_world) const {
+        published_world=0;
         auto const snap=std::atomic_load_explicit(
             &published_,std::memory_order_acquire);
-        if(!snap || !current_world || current_world!=snap->world ||
+        if(!snap || !snap->world ||
            std::chrono::steady_clock::now()-snap->published_at>
                std::chrono::milliseconds(250))
             return false;
@@ -83,6 +85,7 @@ public:
            !gpu_thing_occlusion_same_bound(bound,it->second.bound))
             return false;
         out=it->second;
+        published_world=snap->world;
         return true;
     }
     void clear() {
