@@ -99,7 +99,9 @@ int main() {
         assert(result->groups[0].material==0x1234U);
         assert(result->groups[0].cel==2);
         assert(result->groups[0].plane_start==3U);
-        assert(result->groups[0].plane_count==7U);
+        // A simplified group must disable stale authored face-plane CPU
+        // backface culling; its original planes no longer match topology.
+        assert(result->groups[0].plane_count==0U);
         assert(result->groups[0].count==result->indices.size());
         assert(result->indices.size()%3U==0U);
         for(uint32_t i:result->indices) {
