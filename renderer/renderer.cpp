@@ -3755,6 +3755,9 @@ namespace jkgm {
                     level=decision.level;
                 }
                 if(level==0U) {++selected[0];continue;}
+                // Source mesh identity is independent of the shared Thing
+                // LOD decision; variants are still cached per rdMesh.
+                uint64_t const source_id=inst.id;
                 auto &entry=auto_3do_lod_cache[source_id];
                 if(entry.source!=inst.geometry) {
                     // Live SetModelMesh may replace geometry under the same
