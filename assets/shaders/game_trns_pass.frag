@@ -191,52 +191,27 @@ vec2 parallax_mapping(vec2 tc)
 
 
 
-// A flare is an ordinary native billboard with special depth behavior.
-// Rather than per-pixel occlusion, reconstruct its center from the
-// sprite's UV mapping and the screen-space derivatives of that mapping.
-// All pixels of one billboard therefore query the same opaque-scene point.
+// The flare's EXACT sprite center is reconstructed once per native
+// triangle on the CPU and packed into the otherwise-unused triangle normal.
+// All three vertices carry the SAME value, so interpolation leaves it
+// constant across the face; clipping cannot introduce derivative seams.
+// Center: x/y framebuffer pixels, z=linear camera-forward depth (32*Y).
 float flare_center_visibility()
 {
-    vec2 dx=dFdx(vp_texcoords);
-    vec2 dy=dFdy(vp_texcoords);
-    float determinant=dx.x*dy.y-dx.y*dy.x;
-    if(abs(determinant)<1e-8) return 0.0;
-
-    vec2 uv_to_center=vec2(0.5)-vp_texcoords;
-    vec2 offset=vec2(
-        (uv_to_center.x*dy.y-uv_to_center.y*dy.x)/determinant,
-        (dx.x*uv_to_center.y-dx.y*uv_to_center.x)/determinant
-    );
-    vec2 pixel=gl_FragCoord.xy+offset;
+    vec3 center=vp_normal;
     ivec2 dimensions=textureSize(scene_depth,0);
-    if(any(lessThan(pixel,vec2(0.0))) ||
-       any(greaterThanEqual(pixel,vec2(dimensions)))) return 0.0;
-
-    float center_depth=vp_z+dot(vec2(dFdx(vp_z),dFdy(vp_z)),offset);
-    if(center_depth<=0.0) return 0.0;
-    ivec2 texel=ivec2(pixel);
-    float sampled_depth=texelFetch(scene_depth,texel,0).r;
-
-    // A pixel marked 65504 is unoccupied. Do not require a background
-    // surface: flares also work against the sky. Reject the entire quad
-    // whenever its CENTER is behind an opaque object.
-    if(sampled_depth<65500.0 && sampled_depth+0.01<center_depth)
-        return 0.0;
-
-    // Spatial edge softening (not a CPU readback or temporal lag). This
-    // preserves the center test while avoiding an abrupt full-bright pop.
-    float visible=1.0;
-    const ivec2 taps[4]=ivec2[4](
-        ivec2(-1,0),ivec2(1,0),ivec2(0,-1),ivec2(0,1));
-    for(int i=0;i<4;i++) {
-        ivec2 xy=clamp(texel+taps[i],ivec2(0),dimensions-ivec2(1));
-        float d=texelFetch(scene_depth,xy,0).r;
-        if(d<65500.0 && d+0.01<center_depth)
-            visible-=0.125;
-    }
-    return visible;
+    if(any(lessThan(center.xy,vec2(0.0))) ||
+       any(greaterThanEqual(center.xy,vec2(dimensions))) ||
+       !(center.z>0.0) || center.z>=65500.0) return 0.0;
+    ivec2 texel=ivec2(center.xy);
+    float depth=texelFetch(scene_depth,texel,0).r;
+    // A missing opaque pixel (65504) means sky, not occlusion.
+    // Compare at the CENTER ONLY: the flare's edges may extend behind
+    // walls without being independently clipped or depth-tested.
+    if(depth>=65500.0) return 1.0;
+    float const_bias=max(0.01,center.z*0.0005);
+    return depth+const_bias>=center.z ? 1.0 : 0.0;
 }
-
 
 #include "translucent_spotlight_common.glsl"
 
