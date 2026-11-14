@@ -5445,6 +5445,7 @@ namespace jkgm {
                 camera.camera.fov*0.008726646259971648f);
             if(!std::isfinite(aspect) || aspect<=0.0f ||
                !std::isfinite(half_fov) || half_fov<=0.0f)return;
+            {
             offscreen_capture_gl_scope restore;
             GLint polygon_mode[2]={GL_FILL,GL_FILL};
             glGetIntegerv(GL_POLYGON_MODE,polygon_mode);
@@ -5486,6 +5487,7 @@ namespace jkgm {
                 glPolygonMode(GL_FRONT,GLenum(polygon_mode[0]));
                 glPolygonMode(GL_BACK,GLenum(polygon_mode[1]));
             }
+            } // include visual-overlay GL state restoration in debug timing
             if(the_config->profile_renderer) {
                 thing_occlusion_debug_ns_window+=uint64_t(
                     std::chrono::duration_cast<std::chrono::nanoseconds>(
