@@ -5069,6 +5069,12 @@ namespace {
                         read_lod,uintptr_t(owner)+0xc4U,
                         root.receiver.model);
             }
+            // Native distance LOD is disabled in this experiment, even
+            // outside the temporary rdModel3_Draw hook. Follow only the
+            // original GeoSet 0 fragments when their owning Thing is culled.
+            if(the_config && the_config->use_gpu_cache &&
+               the_config->experimental_auto_3do_lod)
+                active_lod=0U;
             for(auto &fragment:decal.fragments) {
                 if(active_lod!=0xffffffffU &&
                    fragment.geoset!=0xffffffffU &&
