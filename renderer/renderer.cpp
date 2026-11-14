@@ -3727,15 +3727,9 @@ namespace jkgm {
                     radius2+=half*half;
                 }
                 if(!(radius2>1.e-10))continue;
-                // inst.transform is the native hierarchy's WORLD matrix,
-                // not a camera-relative modelview. World Y is NOT camera
-                // forward distance once the camera turns or translates.
+                // The native mesh node matrix is world-space.
                 auto const world_center=gpu_3do_native_transform_point(
                     inst.transform,center);
-                double const view_forward=
-                    (double(world_center[0])-cam.position[0])*cam.forward[0]+
-                    (double(world_center[1])-cam.position[1])*cam.forward[1]+
-                    (double(world_center[2])-cam.position[2])*cam.forward[2];
                 double max_scale2=0.0;
                 for(unsigned axis=0;axis<3;++axis) {
                     double len2=0.0;
@@ -3746,9 +3740,10 @@ namespace jkgm {
                     max_scale2=std::max(max_scale2,len2);
                 }
                 double const radius=std::sqrt(radius2*max_scale2);
-                double const front=view_forward-radius;
-                if(!(front>0.01) || !std::isfinite(front))continue;
-                pixel_radius=float(radius*screen_half/(tangent*front));
+                pixel_radius=gpu_3do_auto_lod_projected_radius_px(
+                    world_center,cam.position,cam.forward,
+                    radius,screen_half,tangent);
+                if(pixel_radius<0.0f)continue;
                 } // automatic screen-size selection only
                 uint64_t const source_id=inst.id;
                 unsigned previous=0U;

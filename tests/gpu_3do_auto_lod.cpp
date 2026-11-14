@@ -64,6 +64,22 @@ static gpu_3do_geometry fragment_groups(gpu_3do_geometry mesh,
     return mesh;
 }
 int main() {
+    // Raw world Y must never be treated as camera-relative depth.
+    std::array<float,3> const world{{0.0f,10.0f,0.0f}};
+    std::array<float,3> const camera0{{0.0f,0.0f,0.0f}};
+    std::array<float,3> const along_y{{0.0f,1.0f,0.0f}};
+    assert(std::fabs(gpu_3do_auto_lod_projected_radius_px(
+        world,camera0,along_y,1.0,400.0,1.0)-400.0f/9.0f)<0.001f);
+    std::array<float,3> const camera_moved{{0.0f,5.0f,0.0f}};
+    assert(std::fabs(gpu_3do_auto_lod_projected_radius_px(
+        world,camera_moved,along_y,1.0,400.0,1.0)-100.0f)<0.001f);
+    std::array<float,3> const along_x{{1.0f,0.0f,0.0f}};
+    std::array<float,3> const sideways_world{{10.0f,0.0f,0.0f}};
+    assert(std::fabs(gpu_3do_auto_lod_projected_radius_px(
+        sideways_world,camera0,along_x,1.0,400.0,1.0)-
+        400.0f/9.0f)<0.001f);
+    assert(gpu_3do_auto_lod_projected_radius_px(
+        world,camera0,along_x,1.0,400.0,1.0)<0.0f);
     assert(select_gpu_3do_auto_lod(150.0f)==0U);
     assert(select_gpu_3do_auto_lod(60.0f)==1U);
     assert(select_gpu_3do_auto_lod(4.0f)==2U);

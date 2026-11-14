@@ -83,6 +83,30 @@ inline unsigned select_gpu_3do_auto_lod(
            (radius<lod1_radius_px?1U:0U);
 }
 
+// The 3DO hierarchy node matrix is WORLD-space, not camera-relative.
+// Project from the active camera position/forward axis, never world Y.
+// Return -1 if conservative projected radius is invalid.
+inline float gpu_3do_auto_lod_projected_radius_px(
+    std::array<float,3> const &world_center,
+    std::array<float,3> const &camera_position,
+    std::array<float,3> const &camera_forward,
+    double world_radius,double screen_half_px,double tan_half_fov)
+{
+    double const forward=
+        (double(world_center[0])-camera_position[0])*camera_forward[0]+
+        (double(world_center[1])-camera_position[1])*camera_forward[1]+
+        (double(world_center[2])-camera_position[2])*camera_forward[2];
+    double const near_depth=forward-world_radius;
+    if(!(near_depth>0.01) || !(world_radius>0.0) ||
+       !(screen_half_px>0.0) || !(tan_half_fov>0.0))
+        return -1.0f;
+    double const projected=world_radius*screen_half_px/
+                           (tan_half_fov*near_depth);
+    if(!std::isfinite(projected) || projected>1.e8)
+        return -1.0f;
+    return static_cast<float>(projected);
+}
+
 // Simplify one complete rdMesh at a time, not one MAT draw-range at a time.
 // In JK a visually continuous mesh may consist of hundreds of tiny material
 // groups. Shared position topology allows QEM to span compatible group
