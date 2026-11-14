@@ -25,7 +25,8 @@ namespace jkgm {
     template<class Read,class Refresh>
     bool collect_planar_reflection_native_nodes(
         Read const &read,planar_reflection_model_thing const &source,
-        Refresh const &refresh,std::vector<planar_reflection_native_node> &out)
+        Refresh const &refresh,std::vector<planar_reflection_native_node> &out,
+        bool source_geoset_zero=false)
     {
         out.clear();
         using namespace mots_native_layout;
@@ -52,8 +53,12 @@ namespace jkgm {
            !thing_node_valid_address(hierarchy,node_stride) ||
            !read(current.rd_thing+rd_amputations,&amputations,4))
             return false;
-        uint32_t const geo=read_sprite_decal_active_geoset(
-            read,current.rd_thing,source.model);
+        // Normal JK LOD is a mutable model/Thing selection. Automatic
+        // GPU LOD always starts from authored GeoSet 0, including the
+        // independent reflected-camera acquisition (no rdModel3_Draw hook).
+        uint32_t const geo=source_geoset_zero ? 0U :
+            read_sprite_decal_active_geoset(
+                read,current.rd_thing,source.model);
         if(geo==0xffffffffU ||
            !read(source.model+model_geosets+
                  uintptr_t(geo)*geoset_stride,&meshes_count,4) ||
