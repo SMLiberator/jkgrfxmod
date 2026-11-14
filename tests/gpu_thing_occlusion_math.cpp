@@ -40,6 +40,8 @@ int main() {
     assert(gpu_thing_occlusion_project_sphere_rect(
         sphere,view,1.0f,1.0f,rect));
     assert(rect.valid && rect.near_forward==4.0f);
+    assert(rect.center_forward==5.0f);
+    assert(rect.center_forward>rect.near_forward);
     // Perspective tangents enclose the sphere more tightly/correctly
     // than projecting (center +/- radius) at the center's depth.
     assert(rect.left< -0.2f && rect.right>0.2f);
@@ -63,6 +65,7 @@ int main() {
     assert(gpu_thing_occlusion_project_sphere_rect(
         rotated_sphere,yaw_view,1.0f,1.0f,rect));
     assert(rect.near_forward==7.0f);
+    assert(rect.center_forward==8.0f);
     assert(rect.left<3.0f/8.0f && rect.right>3.0f/8.0f);
     assert(rect.bottom<1.0f/8.0f && rect.top>1.0f/8.0f);
     // A pitched camera catches a second transposition that swaps
@@ -84,6 +87,7 @@ int main() {
     assert(gpu_thing_occlusion_project_sphere_rect(
         pitched_sphere,pitch_view,1.0f,1.0f,rect));
     assert(std::fabs(rect.near_forward-9.0f)<0.0001f);
+    assert(std::fabs(rect.center_forward-10.0f)<0.0001f);
     assert(rect.left<0.1f && rect.right>0.1f);
     assert(rect.bottom< -0.5f && rect.top> -0.5f);
     auto shifted=sphere;
