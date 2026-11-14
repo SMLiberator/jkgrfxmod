@@ -2713,7 +2713,8 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
         }
         int const cur_geo=std::min(native_geo,4);
         if(!collect_planar_reflection_native_nodes(
-               read,thing,refresh,native_nodes)) {
+               read,thing,refresh,native_nodes,
+               the_config->experimental_auto_3do_lod)) {
             ++out.stats.pose_failures;
             continue;
         }
