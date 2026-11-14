@@ -5369,20 +5369,31 @@ namespace jkgm {
                               thing_occlusion_gpu_samples_window:0U,
                         " gpu_samples=",thing_occlusion_gpu_samples_window,
                         " gpu_ring_busy_skips=",thing_occlusion_gpu_skipped_window,
-                        " poll_us_total=",thing_occlusion_poll_ns_window/1000U,
-                        " poll_calls=",thing_occlusion_poll_calls_window,
+                        " poll_us_avg=",thing_occlusion_cpu_calls_window
+                            ?(thing_occlusion_poll_ns_window/1000U)/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " poll_calls_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_poll_calls_window/
+                             thing_occlusion_cpu_calls_window:0U,
                         " prepare_us_avg=",
                         thing_occlusion_cpu_calls_window
                             ?(thing_occlusion_prepare_ns_window/1000U)/
                              thing_occlusion_cpu_calls_window:0U,
-                        " visibility_us_total=",
-                        thing_occlusion_visibility_ns_window/1000U,
-                        " visibility_checks=",
-                        thing_occlusion_visibility_calls_window,
-                        " visibility_skips=",
-                        thing_occlusion_visibility_skips_window,
-                        " debug_us_total=",thing_occlusion_debug_ns_window/1000U,
-                        " debug_draws=",thing_occlusion_debug_draws_window,
+                        " visibility_us_avg=",thing_occlusion_cpu_calls_window
+                            ?(thing_occlusion_visibility_ns_window/1000U)/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " visibility_checks_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_visibility_calls_window/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " visibility_skips_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_visibility_skips_window/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " debug_us_avg=",thing_occlusion_cpu_calls_window
+                            ?(thing_occlusion_debug_ns_window/1000U)/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " debug_draws_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_debug_draws_window/
+                             thing_occlusion_cpu_calls_window:0U,
                         " debug_frames=",thing_occlusion_debug_frames_window,
                         " debug_gpu_us_avg=",
                         thing_occlusion_debug_gpu_samples_window
