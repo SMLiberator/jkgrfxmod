@@ -1,4 +1,4 @@
-"""Source-contract regression for bounded main-camera GPU Thing occlusion."""
+"""Source-contract regression for experimental main-camera GPU Thing occlusion."""
 from pathlib import Path
 import json,re
 root=Path(__file__).resolve().parents[1]
@@ -34,22 +34,22 @@ assert "thing_occlusion_gpu_timers.timestamp(0U,true)" in renderer
 assert "thing_occlusion_gpu_timers.timestamp(0U,false)" in renderer
 assert "3DO OCCLUSION proxy_perf mode=" in renderer
 
-assert "gpu_3do_occlusion_query_budget must be between 1 and 64" in config
-assert "gpu_3do_occlusion_min_triangles must be between 1 and 50000" in config
+assert "gpu_3do_occlusion_query_budget must be between 1 and 256" in config
+assert "gpu_3do_occlusion_min_triangles must be between 0 and 50000" in config
 assert "glBeginQuery(GL_ANY_SAMPLES_PASSED" in header
 assert "GL_QUERY_RESULT_AVAILABLE" in header
-assert "consecutive_hidden>=2U" in header
-assert "frame-e.result_frame<=4U" in header
+assert "consecutive_hidden>=1U" in header
+assert "frame-e.result_frame<=12U" in header
 assert "gpu_thing_occlusion_camera_compatible" in header
 assert "gpu_thing_occlusion_same_bound" in header
 assert "gpu_thing_occlusion_camera_inside" in header
-assert "if(entries_.size()>=256U)return false;" in header
+assert "if(entries_.size()>=1024U)return false;" in header
 assert "glDrawArrays(GL_TRIANGLES,0,36)" in renderer
 assert "glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE);" in renderer
 assert "glDepthMask(GL_FALSE);" in renderer
 assert "glDepthFunc(GL_LEQUAL);" in renderer
 # Eligibility must follow the configurable threshold, not a hardcoded
-# historical 500-triangle cutoff. The fixed query budget is unchanged.
+# historical 500-triangle cutoff. The query budget is configurable.
 assert "p.second.triangles>=500U" not in renderer
 assert "triangles>=size_t(the_config->gpu_3do_occlusion_min_triangles)" in renderer
 assert "owners_ge32=" in renderer and "owners_ge500=" in renderer
@@ -90,12 +90,15 @@ main=read("renderer/main.cpp")
 bridge=read("renderer/native_occlusion_bridge.hpp")
 assert "thing_occlusion_queries" not in main
 assert "native_occlusion_enabled" in main
-assert "!shadow_enabled" in main
-assert "!the_config->experimental_planar_reflection_capture" in main
+assert "the_config->experimental_3do_native_occlusion_culling;" in main
+assert "experimental_planar_reflection_capture" not in main.split(
+    "bool const native_occlusion_enabled=",1)[1].split(";",1)[0]
 assert "owner_type>1U && owner_type!=10U" in main
 assert "!(flags&0x20U)" in main
-assert "same_center" in main and "native_placement" in main
-assert "native_decal_active_things.count(owner_key)" in main
+assert "bound.center=own_world_position;" in main
+assert "needs_decal_pose" not in main.split(
+    "bool const native_occlusion_enabled=",1)[1].split(
+    "// A nominally static",1)[0]
 assert "gpu_thing_occlusion_camera_compatible(" in main
 assert "gpu_thing_occlusion_camera_inside(" in main
 assert main.index("bridge.register_candidate(candidate);") < main.index(
@@ -109,7 +112,7 @@ assert "gpu_3do_present_serial,model" in renderer
 assert "published_world" in bridge and "std::atomic_load_explicit(" in bridge
 assert "std::atomic_store_explicit(" in bridge
 assert "gpu_thing_occlusion_same_bound(" in bridge
-assert "std::chrono::milliseconds(250)" in bridge
+assert "std::chrono::milliseconds(500)" in bridge
 assert "model_occlusion_skipped_avg=" in renderer
 assert "native_occlusion_bridge.hpp" in read("renderer/renderer.vcxproj")
 assert "native_occlusion_bridge.hpp" in read("renderer/renderer.vcxproj.filters")
