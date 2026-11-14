@@ -607,6 +607,7 @@ namespace jkgm {
             gpu_thing_occlusion_bound bound{};
             gpu_thing_occlusion_screen_rect rect{};
             unsigned result=0; // 0=unknown, 1=visible, 2=occluded
+            unsigned mode=0; // actual geometry issued (SPR uses rect mode 1)
         };
         std::vector<thing_occlusion_debug_proxy> thing_occlusion_debug_proxies;
         uint64_t thing_occlusion_debug_ns_window=0;
@@ -5153,18 +5154,39 @@ namespace jkgm {
                 uint64_t owner=0;
                 std::array<float,3> position{};
                 size_t triangles=0;
+                bool sprite=false;
+                uintptr_t sprite_resource=0;
+                gpu_thing_occlusion_bound sprite_bound{};
             };
-            // Query models with significant triangle cost; sprites, HUDs,
-            // 0x20 skyboxes and transient/decals never enter this shortcut.
+            // Query model Things and eligible GPU SPR quads independently
+            // of native draw submission. HUD, 0x20 skyboxes, projected
+            // decals and transient particle/geometry never enter this path.
             std::unordered_map<uint64_t,candidate> grouped;
             for(auto const &inst:frame_gpu_3do_instances) {
                 if(!inst.geometry || !inst.shadow_owner ||
                    inst.shadow_only || inst.camera_hud ||
                    inst.skybox_vertex_lighting || inst.is_projected_decal ||
-                   inst.is_sprite_quad || inst.transient_procedural ||
-                   inst.saber_trail_active ||
-                   !inst.owning_thing_world_position_valid)
+                   inst.transient_procedural || inst.saber_trail_active)
                     continue;
+                if(inst.is_sprite_quad) {
+                    if(!inst.sprite_occlusion_resource ||
+                       inst.world_lighting_exempt)continue;
+                    // Geometry is a camera-facing quad, not a rdModel3:
+                    // its actual world-space axes/offset/scale bound ALL
+                    // pixels, including thick fluid-blend smoke sprites.
+                    auto const bound=gpu_sprite_occlusion_bound(inst.transform);
+                    if(!gpu_thing_occlusion_bound_valid(bound))continue;
+                    auto &c=grouped[inst.shadow_owner];
+                    c.owner=inst.shadow_owner;
+                    c.sprite=true;
+                    c.sprite_resource=inst.sprite_occlusion_resource;
+                    c.sprite_bound=bound;
+                    c.position=bound.center;
+                    for(auto const &g:inst.geometry->groups)
+                        c.triangles+=g.count/3U;
+                    continue;
+                }
+                if(!inst.owning_thing_world_position_valid)continue;
                 auto &c=grouped[inst.shadow_owner];
                 c.owner=inst.shadow_owner;
                 c.position=inst.owning_thing_world_position;
@@ -5203,15 +5225,21 @@ namespace jkgm {
             // With min_triangles=0 and budget=0, query every eligible Thing
             // whose previous query has completed; no fixed cost gate.
             size_t owners_32=0,owners_96=0,owners_256=0,owners_500=0;
+            size_t sprite_owners=0,sprite_issued=0;
             std::vector<candidate> expensive;
             expensive.reserve(grouped.size());
             for(auto const &p:grouped) {
                 size_t const triangles=p.second.triangles;
+                if(p.second.sprite)++sprite_owners;
                 if(triangles>=32U)++owners_32;
                 if(triangles>=96U)++owners_96;
                 if(triangles>=256U)++owners_256;
                 if(triangles>=500U)++owners_500;
-                if(triangles>=size_t(the_config->gpu_3do_occlusion_min_triangles))
+                // The model triangle threshold is not meaningful for
+                // translucent sprites, where pixel overdraw dominates and
+                // the quad itself always contains just two triangles.
+                if(p.second.sprite ||
+                   triangles>=size_t(the_config->gpu_3do_occlusion_min_triangles))
                     expensive.push_back(p.second);
             }
             if(expensive.empty()) {
@@ -5222,6 +5250,7 @@ namespace jkgm {
                         " min_triangles=",
                         the_config->gpu_3do_occlusion_min_triangles,
                         " owners_total=",grouped.size(),
+                        " sprite_owners=",sprite_owners,
                         " owners_ge32=",owners_32," owners_ge96=",owners_96,
                         " owners_ge256=",owners_256," owners_ge500=",owners_500,
                         " NOTE=no_eligible_Things");
