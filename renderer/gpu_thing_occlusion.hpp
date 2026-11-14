@@ -87,6 +87,8 @@ class gpu_thing_occlusion_queries {
         gpu_thing_occlusion_bound bound{},issued_bound{};
         uint32_t model=0,issued_model=0;
         bool native_model=true,issued_native_model=true;
+        bool has_sprite_pose=false,issued_has_sprite_pose=false;
+        gpu_3do_matrix34 sprite_pose{},issued_sprite_pose{};
     };
     std::unordered_map<uint64_t,record> entries_;
     // Only in-flight GL query owners require glGetQueryObject polling.
@@ -154,6 +156,8 @@ public:
             e.bound=e.issued_bound;
             e.model=e.issued_model;
             e.native_model=e.issued_native_model;
+            e.has_sprite_pose=e.issued_has_sprite_pose;
+            if(e.has_sprite_pose)e.sprite_pose=e.issued_sprite_pose;
             e.consecutive_hidden=e.visible?0U:
                 std::min(3U,e.consecutive_hidden+1U);
             ++completed_;
@@ -167,13 +171,17 @@ public:
     // stale evidence. Moving occluders may expose temporal errors to test.
     bool hidden(uint64_t owner,gpu_thing_occlusion_bound const &current,
                 engine_camera const &camera,uint64_t frame,
-                uint32_t expected_model=0U) {
+                uint32_t expected_model=0U,
+                gpu_3do_matrix34 const *current_sprite_pose=nullptr) {
         if(invalidated_)return false;
         auto it=entries_.find(owner);
         if(it==entries_.end())return false;
         auto const &e=it->second;
-        bool const hide=(expected_model==0U ||
-                                e.model==expected_model) &&
+        bool const pose_matches=!current_sprite_pose ||
+            (e.has_sprite_pose && gpu_sprite_occlusion_same_pose(
+                *current_sprite_pose,e.sprite_pose));
+        bool const hide=pose_matches &&
+            (expected_model==0U || e.model==expected_model) &&
             e.consecutive_hidden>=1U && !e.visible &&
             frame>=e.result_frame && frame-e.result_frame<=12U &&
             gpu_thing_occlusion_same_bound(current,e.bound) &&
@@ -229,7 +237,8 @@ public:
     }
     bool begin(uint64_t owner,gpu_thing_occlusion_bound const &bound,
                engine_camera const &camera,uint64_t frame,
-               uint32_t model=0,bool native_model=true) {
+               uint32_t model=0,bool native_model=true,
+               gpu_3do_matrix34 const *sprite_pose=nullptr) {
         if(!owner || !gpu_thing_occlusion_bound_valid(bound) ||
            gpu_thing_occlusion_camera_inside(bound,camera))return false;
         auto it=entries_.find(owner);
@@ -246,12 +255,18 @@ public:
         // Invalidate accumulated negatives when Thing center/radius changes.
         if(entry.result_frame &&
            (!gpu_thing_occlusion_same_bound(bound,entry.bound) ||
-            entry.model!=model || entry.native_model!=native_model))
+            entry.model!=model || entry.native_model!=native_model ||
+            entry.has_sprite_pose!=(sprite_pose!=nullptr) ||
+            (sprite_pose && entry.has_sprite_pose &&
+             !gpu_sprite_occlusion_same_pose(*sprite_pose,
+                                             entry.sprite_pose))))
             entry.consecutive_hidden=0;
         entry.pending=true;entry.issued_frame=frame;
         entry.issued_camera=camera;entry.issued_bound=bound;
         entry.issued_model=model;
         entry.issued_native_model=native_model;
+        entry.issued_has_sprite_pose=sprite_pose!=nullptr;
+        if(sprite_pose)entry.issued_sprite_pose=*sprite_pose;
         glBeginQuery(GL_ANY_SAMPLES_PASSED,entry.query);
         pending_owners_.push_back(owner);
         ++submitted_;
