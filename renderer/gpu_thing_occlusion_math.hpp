@@ -111,10 +111,10 @@ inline bool gpu_thing_occlusion_project_sphere_rect(
     xlo/=h;xhi/=h;zlo/=v;zhi/=v;
     if(xhi< -1.0 || xlo>1.0 || zhi< -1.0 || zlo>1.0)
         return false;
-    out.left=float(std::max(-1.0,xlo));
-    out.right=float(std::min(1.0,xhi));
-    out.bottom=float(std::max(-1.0,zlo));
-    out.top=float(std::min(1.0,zhi));
+    out.left=float((std::max)(-1.0,xlo));
+    out.right=float((std::min)(1.0,xhi));
+    out.bottom=float((std::max)(-1.0,zlo));
+    out.top=float((std::min)(1.0,zhi));
     out.center_forward=float(depth);
     out.valid=std::isfinite(out.center_forward) &&
               out.center_forward>0.0f &&
