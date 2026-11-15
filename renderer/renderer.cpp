@@ -6495,7 +6495,8 @@ namespace jkgm {
                         auto const tex=solid
                             ?resolve_gpu_3do_solid_material(group,false)
                             :resolve_gpu_3do_material(group);
-                        bool const cutout=tex.masked||tex.alpha||tex.dithered;
+                        bool const cutout=tex.albedo_source==1 &&
+                            (tex.masked||tex.alpha||tex.dithered);
                         if(!sun_shadow_model_material_casts_depth(
                                tex.albedo_source,tex.special,tex.emissive_only,
                                tex.opacity,cutout,instance.thing_opacity))
@@ -7050,9 +7051,13 @@ namespace jkgm {
                         } else if(the_config->profile_renderer)
                             ++sun_profile_atlas_mat_hits;
                         auto const &tex=found->second;
-                        bool const cutout=tex.masked||tex.alpha||
-                            tex.dithered||
-                            (inst->is_sprite_quad && tex.albedo_source==1);
+                        // Textureless normal-alpha 3DOs still cast coverage
+                        // shadows using their MAT alpha factor alone.
+                        bool const cutout=inst->is_sprite_quad
+                            ?(tex.masked||tex.alpha||tex.dithered||
+                              tex.albedo_source==1)
+                            :(tex.albedo_source==1 &&
+                              (tex.masked||tex.alpha||tex.dithered));
                         bool const eligible=inst->is_sprite_quad
                             ?sun_shadow_material_casts_depth(
                                 tex.albedo_source,tex.special,tex.emissive_only,
@@ -7529,8 +7534,11 @@ namespace jkgm {
                     auto const mat_begin=sample
                         ?profile_clock::now():profile_clock::time_point{};
                     auto const &tex=sun_caster_material(group,instance);
-                    bool const cutout=tex.masked||tex.alpha||tex.dithered||
-                        (instance.is_sprite_quad && tex.albedo_source==1);
+                    bool const cutout=instance.is_sprite_quad
+                        ?(tex.masked||tex.alpha||tex.dithered||
+                          tex.albedo_source==1)
+                        :(tex.albedo_source==1 &&
+                          (tex.masked||tex.alpha||tex.dithered));
                     // Preserve the original SPR shadow policy; the new
                     // partial coverage eligibility is for model Things.
                     bool const eligible=instance.is_sprite_quad
