@@ -104,6 +104,7 @@ namespace jkgm {
         // Sky polygons as sunlight apertures; experimental, default-off.
         // Requires sunlight shadows so the per-cascade projection exists.
         bool experimental_sun_sky_aperture = false;
+        bool experimental_sun_caustics = false; // world/3DO Fluid transmission, never sprites
         // Phase 1 only: measure conservative sky-covered caster groups.
         // Does not yet prune any casters or change shadow texture contents.
         // Actual static WORLD caster pruning (independent of diagnostics).

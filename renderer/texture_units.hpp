@@ -121,6 +121,9 @@ constexpr binding post_opaque_composite[]={
     {"sun_shadow_image",13,sampler_kind::shadow},
     {"sun_shadow_far_image",14,sampler_kind::shadow},
     {"sun_dynamic_image",15,sampler_kind::shadow},
+    {"sun_caustics_depth",17,sampler_kind::texture_array},
+    {"sun_caustics_density",18,sampler_kind::texture_array},
+    {"sun_caustics_pattern",19,sampler_kind::tex2d},
 };
 
 template<std::size_t N>

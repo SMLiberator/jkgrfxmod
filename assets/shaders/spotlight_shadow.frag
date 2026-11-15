@@ -11,6 +11,9 @@ uniform float shadow_alpha_factor;
 uniform int shadow_dither_enabled;
 uniform float shadow_instance_opacity;
 uniform int shadow_alpha_masked;
+// Only the caustics FBO has a color attachment; depth-only passes ignore it.
+uniform float shadow_caustic_density;
+layout(location=0) out float caustic_density_output;
 void main()
 {
     float alpha=1.0;
@@ -44,4 +47,5 @@ void main()
         if(coverage<=threshold)discard;
     } else if(shadow_use_alpha!=0 &&
               alpha*shadow_alpha_factor<shadow_alpha_cutoff)discard;
+    caustic_density_output=shadow_caustic_density;
 }

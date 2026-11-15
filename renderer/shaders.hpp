@@ -495,7 +495,7 @@ namespace jkgm {
             gl::uniform_location_id shadow_alpha_transition,shadow_alpha_cutoff;
             gl::uniform_location_id shadow_alpha_factor;
             gl::uniform_location_id shadow_dither_enabled,shadow_instance_opacity,
-                                    shadow_alpha_masked;
+                                    shadow_alpha_masked,shadow_caustic_density;
             bool cached_dither_enabled_=false,cached_masked_=false;
             float cached_dither_opacity_=-1.0f;
         public:
@@ -516,6 +516,7 @@ namespace jkgm {
                 std::array<std::array<float,12>,max_shadow_instances> const &models,
                 size_t count);
             void set_shadow_dither(bool enabled,float opacity,bool masked);
+            void set_caustic_density(float coefficient);
             void set_shadow_alpha(bool enabled,point<2,float> uv_scale,
                                   point<2,float> uv_scroll,float cutoff,
                                   float factor,bool has_next,float progress);
@@ -552,6 +553,7 @@ namespace jkgm {
             gl::uniform_location_id sun_sky_aperture_active,sun_sky_aperture_map;
             gl::uniform_location_id sun_sky_aperture_depth_transform;
             gl::uniform_location_id sun_max_distance;
+            gl::uniform_location_id sun_caustics_active,sun_caustics_time;
             gl::uniform_location_id sun_half_visibility_active,sun_half_visibility_image;
             gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
             gl::uniform_location_id sun_dynamic_pcf_radius;
@@ -599,6 +601,7 @@ namespace jkgm {
             void set_sun_shadow_pcf_radius(float near_radius,float far_radius);
             void set_sun_sky_aperture(bool active,int sampler,
                                      point<4,float> near_far_depth_transform);
+            void set_sun_caustics(bool enabled,float time_seconds);
             void set_sun_max_distance(float distance);
             void set_sun_half_visibility(bool active,int sampler);
             void set_sun_dynamic_count(int count);

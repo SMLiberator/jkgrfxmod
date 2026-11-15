@@ -104,6 +104,7 @@ not all options appear in the minimal sample `assets/jkgm.json`.
 | --- | --- | --- |
 | `enable_post` | Master switch for renderer post-processing effects. | `true` |
 | `enable_sun` | Enable additional COG-controlled directional sunlight; independent of `enable_sun_shadows`. | `true` |
+| `experimental_sun_caustics` | Experimental sunlight transmission through Fluid world and 3DO faces, excluding sprites. One generated procedural pattern with mipmaps; existing `fluid_thickness` controls attenuation and spread. Requires `enable_sun` and `enable_sun_shadows`; no new material keys. | `false` |
 | `enable_blur` | Enable distance/peripheral spatial blur effects where configured by COG. | `true` |
 | `spatial_blur_mode` | Standard spatial blur quality/performance mode. `2` (default) runs both Gaussian passes at half width/height followed by full-resolution depth-aware four-tap reconstruction; preserves original unblurred pixels and blends original detail back into weakly blurred areas. Confirmed by in-game A/B testing to provide a substantial performance improvement with a small visual tradeoff. `1` keeps the vertical pass at full resolution; `0` uses the original full-resolution Gaussian for quality comparisons/rollback. GL scissor testing falls back to the original path. Does **not** change HDR, exposure, tone mapping, color grading, bloom or HUD. | `2` |
 | `experimental_spatial_blur_half_res` | Older compatibility alias: `true` selects mode `1` only when neither numeric mode key is supplied. | `false` |
