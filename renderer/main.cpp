@@ -8848,6 +8848,9 @@ namespace {
     constexpr uintptr_t node_attach_native_update=0x004CC4B0U;
     constexpr uintptr_t node_attach_native_attach=0x004CE5A0U;
     constexpr uintptr_t node_attach_native_detach=0x004CE660U;
+    // Native SithThing_DetachAttachedThings: walks the parent's child list
+    // and calls native DetachThing for every directly attached child.
+    constexpr uintptr_t node_attach_native_detach_children=0x004CE820U;
     // KillActor commits death before delayed corpse conversion (1000 ms).
     constexpr uintptr_t node_attach_native_actor_kill=0x004ED240U;
     // JKGM's single-Thing remove and free entrypoints both inline parts of
@@ -8911,6 +8914,27 @@ namespace {
         std::memcpy(&kind,reinterpret_cast<void const *>(thing+0x0c),4);
         std::memcpy(&signature,reinterpret_cast<void const *>(thing+0x74),4);
         return kind>0 && kind<=15 && signature!=0;
+    }
+
+    bool native_detach_attached_things_supported()
+    {
+        static bool const supported=[] {
+            if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=
+                   0x00400000U ||
+               !jkgm::engine_material_debug::matches_tested_executable())
+                return false;
+            // JKGM 0x4CE820 loads parent->pAttachedThing (+0x68), saves
+            // each child's next sibling (+0x6C), then calls 0x4CE660.
+            constexpr uint8_t expected[]{
+                0x8b,0x44,0x24,0x04,0x8b,0x40,0x68,0x85,0xc0,
+                0x74,0x14,0x56,0x8b,0x70,0x6c,0x50,0xe8,
+                0x2b,0xfe,0xff,0xff};
+            auto const *address=reinterpret_cast<void const *>(
+                node_attach_native_detach_children);
+            return gpu_span_readable(address,sizeof(expected)) &&
+                   std::memcmp(address,expected,sizeof(expected))==0;
+        }();
+        return supported;
     }
 
     // Advance native attachments AFTER Sith's normal Thing update and BEFORE
@@ -9232,6 +9256,24 @@ namespace {
         std::memcpy(static_cast<uint8_t *>(child)+0x34,&current,4);
         LOG_INFO("AttachThingToThingNode: node=",node,
                  " child=",a.child," attachFlags=",current);
+    }
+
+    // DetachAttachedThings(parent): detach all direct native children,
+    // including ordinary Thing, Thing-face, and animated-node attachments.
+    // The native loop calls DetachThing for each child; our DetachThing detour
+    // erases node sidecars and native JK clears NOMOVE and parent pointers.
+    void __cdecl cog_detach_attached_things(void *ctx)
+    {
+        void *parent=cog_pop_thing(ctx);
+        uint32_t parent_signature=0;
+        if(!native_detach_attached_things_supported() ||
+           !read_node_attachment_identity(
+               reinterpret_cast<uintptr_t>(parent),parent_signature))
+            return;
+        auto const native_detach_children=
+            reinterpret_cast<native_thing_detach_fn>(
+                node_attach_native_detach_children);
+        native_detach_children(parent);
     }
 
     // Returns the REAL attached face normal, not the transient sphere-
@@ -10593,6 +10635,7 @@ namespace {
         cog_verb_entry{"aigetlookdir", cog_ai_get_look_dir},
         cog_verb_entry{"getthingattachnormal", cog_get_thing_attach_normal},
         cog_verb_entry{"attachthingtothingnode", cog_attach_thing_to_thing_node},
+        cog_verb_entry{"detachattachedthings", cog_detach_attached_things},
         cog_verb_entry{"getthingnodepos", cog_get_thing_node_pos},
         cog_verb_entry{"getthingnodeoffsetpos", cog_get_thing_node_offset_pos},
         cog_verb_entry{"getthingnodeposoffset", cog_get_thing_node_pos_offset},
@@ -10718,6 +10761,9 @@ namespace {
             return;
         }
 
+        if(!native_detach_attached_things_supported())
+            LOG_WARNING("DetachAttachedThings unavailable: JKGM native "
+                        "function signature mismatch");
         // Resolve once at COG registration, not on each query.
         native_has_los=native_has_los_matches()
             ? reinterpret_cast<native_has_los_type>(native_has_los_addr)
