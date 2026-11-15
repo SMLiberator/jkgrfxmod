@@ -191,6 +191,13 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_raycast_ex.cpp /Fe:cog_raycast_ex_test.exe
         cog_raycast_ex_test.exe
 
+    - name: Procedural sun caustic pattern and Fluid transmission contracts
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\sun_caustics.cpp /Fe:sun_caustics_test.exe || exit /b 1
+        sun_caustics_test.exe || exit /b 1
+        python3 tests/sun_caustics_wiring.py || exit /b 1
+
     - name: COG camera depth and squared/exact distance regressions
       shell: cmd
       run: |
