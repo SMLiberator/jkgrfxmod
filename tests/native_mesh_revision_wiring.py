@@ -23,8 +23,7 @@ for signature in (
     "void finish();",
     "bool active();",
     "uint64_t current();",
-    "uint64_t current_for_model(uintptr_t model);",
-    "void reset_cache_state();",
+    "void report_untracked();",
 ):
     assert signature in header, signature
 for original in (
@@ -32,9 +31,8 @@ for original in (
     "mesh_revision::register_mutator",
     "mesh_revision::finish(",
     "mesh_revision::current(",
-    "mesh_revision::current_for_model(",
-    "mesh_revision::reset_cache_state(",
     "mesh_revision::active(",
+    "mesh_revision::report_untracked(",
 ):
     assert original in main, original
 
@@ -45,23 +43,16 @@ expected = (
     "appendthingemptymesh", "appendmodelemptymesh", "appendmodelnode",
     "replacemodelmeshmaterial", "clearmodel", "clearmodelmesh",
     "overwritemodel", "reloadmodel", "setmodelnodemesh", "swapmodelmesh",
-    "setthingmesh",
 )
 names = impl.split("names{{", 1)[1].split("}};", 1)[0]
 found = tuple(re.findall(r'"([a-z]+)"', names))
 assert found == expected, (found, expected)
-assert "constexpr size_t mutator_count=17U;" in impl
+assert "constexpr size_t mutator_count=16U;" in impl
 assert "originals[I](ctx);" in impl
 assert "++generation;" in impl
 assert "original_registrar(ctx,wrappers[i],name);" in impl
 assert "original_registrar(ctx,fn,name);" in impl
-assert "complete=(registered_mask&required_mask)==required_mask" in impl
-assert "constexpr uint32_t required_mask=(1U<<0)|(1U<<1)|(1U<<2)|(1U<<16);" in impl
-assert "model_epochs[target]=generation;" in impl
-assert "fallback_epoch=generation;" in impl
-assert "if constexpr(I==1)" in impl
-assert "target=thing_model(target);" in impl
-assert "supported_executable()" in impl
-assert "return complete;" in impl
-assert "untracked_write" not in impl
+assert "complete=registered_mask==((1U<<mutator_count)-1U);" in impl
+assert "return complete && !untracked_write;" in impl
+assert "if(untracked_write)return;" in impl
 print("Separate JK.dll COG mesh revision module wiring and ABI preserved")

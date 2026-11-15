@@ -16,7 +16,6 @@
 | **enable_saber_trails** | Draw a full-bright SideMat fan between the live and time-delayed saber tips, only during native KEY saber-damage marker windows (4=on, 5=off). Requires GPU caching and the verified native polyline hook. Swing state reads JKGM's native jkFlags directly; KEY/COG callbacks are not required. No new MAT is needed. | boolean | `true` |
 | **saber_trail_delay** | Temporal delay between the live blade and its following blade edge. Their relative movement expands/collapses the fan; it does not leave a static trail. Seconds, 0.005–0.25. | float | `0.06` |
 | **use_gpu_cache** | Enable unified GPU-cached 3DO meshes, ordinary sprites, and SithWorld rendering. Disable for a combined native-renderer comparison. Unsupported geometry may still require native fallback. Replaces the former `use_model_cache`, `use_sprite_cache`, and `world_cache_preview` switches. | boolean | `true` |
-| **gpu_mesh_integrity_audit_interval** | Optional integrity verification of visible cached 3DO mesh source data, at most once per configured number of seconds. `0` disables periodic audits entirely (default); positive values `0..3600` enable diagnostics and log checked mesh counts and unexpected source changes. Audits do not switch the renderer into permanent full-per-frame hashing. This is not a mesh-revision trigger; it only detects writes the registered hooks missed. | number (seconds, `0..3600`) | `0.0` |
 | **enable_gpu_sprite_instancing** | Batch compatible GPU-cached sprites into instanced draw calls. Set `false` for A/B performance testing. | boolean | `true` |
 | **enable_gpu_camera_hud** | Render Camera-type HUD 3DOs through the post-processing-exempt GPU path. Set `false` for native HUD diagnostics. | boolean | `true` |
 | **enable_native_fallback** | Preserve native mixed world batches when GPU world rendering is active. Set to `false` to isolate the cached world and expose unsupported/missing faces; ordinary native fallback Things in those batches may also be hidden. | boolean | `true` |
@@ -137,7 +136,8 @@ required.
 
 
 The previous `mesh_revision_tracking` and `optimize_hud_uploads` switches are
-no longer configurable: JK.dll mesh revision tracking and HUD slab-delta uploads are standard. Periodic mesh integrity audits are optional and disabled by default. Legacy configuration keys are ignored
+no longer configurable: JK.dll mesh revision tracking (with audited fallback)
+and HUD slab-delta uploads are standard. Legacy configuration keys are ignored
 with a warning. `use_gpu_cache`, `enable_gpu_camera_hud`,
 `enable_gpu_sprite_instancing`, `enable_gpu_mat_warmup`, and
 `enable_native_fallback` are enabled by default and individually configurable.

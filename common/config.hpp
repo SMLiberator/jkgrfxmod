@@ -66,7 +66,6 @@ namespace jkgm {
         bool profile_renderer_verbose = false; // opt-in detailed renderer diagnostics
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics
         bool use_gpu_cache = true; // unified GPU 3DO, sprite, and SithWorld rendering
-        double gpu_mesh_integrity_audit_interval = 0.0; // optional visible mesh audit, seconds; 0=disabled
         bool enable_gpu_sprite_instancing = true; // compatible SPR instancing, disable for diagnostics
         bool enable_saber_trails = true; // GPU-cached saber fan during marker 4/5 collision windows
         float saber_trail_delay = 0.06f; // seconds of delayed blade direction (0.005..0.25)

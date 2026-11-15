@@ -36,7 +36,6 @@
     "profile_renderer": false,
     "profile_audio": false,
     "use_gpu_cache": true,
-    "gpu_mesh_integrity_audit_interval": 0.0,
     "enable_gpu_sprite_instancing": true,
     "enable_saber_trails": true,
     "saber_trail_delay": 0.06,

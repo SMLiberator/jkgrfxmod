@@ -1845,43 +1845,22 @@ build in `jkgm/shaders/`. Keep the native `jkgm.exe` bootstrap.
 
 ### Automatic mesh revision tracking
 
-With `use_gpu_cache` enabled, source-state tracking intercepts registered
-JK.dll COG mutation verbs without changing their arguments or return values.
-The supplied `JK.dll` registers `SetModelMesh`, `SetThingMesh`,
-`ChangeModelMaterial` and `CloneModel`. On the supplied
-`jkgm(5).exe` these four registrations, plus verified COG interpreter
-entry signatures, enable **model-scoped GPU source revisions**. Model and
-Thing arguments are read without popping the COG stack. Thing mutations
-use the model assigned to the Thing **after** clone-on-write.
+With `use_gpu_cache` enabled, JK.dll COG mutation tracking is now standard,
+without a separate configuration option. The renderer wraps 16 mesh/material
+mutator verb registrations, preserving the original COG handlers and results. A mutation bumps a global generation: cached 3DOs only need a new
+source-byte signature when the generation changes, their mesh header changes, or
+once every 32 frames for an integrity audit. An audit mismatch permanently
+disables the shortcut for that session and restores original per-frame hashing.
+If the expected JK.dll registrations are missing, full hashing remains active.
 
-`SetModelMesh`, `SetThingMesh` and `ChangeModelMaterial` revalidate only
-the destination model's cached meshes. `CloneModel` creates independent
-model data and does **not** invalidate cached source meshes. Thus an edit
-to one model does not make every other model hash its source arrays.
-For other, unverified mutators, or an argument that cannot be resolved, a
-conservative *one-time global revalidation* is used rather than silently
-risking stale data. The native type-3 collision cache still maintains its
-separate global revision number. If mandatory registrations or supported
-executable signatures are missing, the old full-per-frame source hashing
-continues instead of enabling unsafe tracking.
-
-**Remaining optimization:** destination model invalidation is currently
-model-wide; the next step is mesh-slot-level tracking across geosets, with
-separate handling of material-reference-only changes. Unverified mutation
-paths originating outside the registered JK.dll verbs are still possible.
-
-The former mandatory 32-frame integrity audit was removed.
-`"gpu_mesh_integrity_audit_interval": 0.0` (default) disables periodic
-audits completely; a positive interval in seconds enables opt-in diagnostic
-hashing of encountered meshes. Logs report checks and any exact untracked
-source changes. A mismatch updates only its affected mesh and does not
-permanently switch every mesh to full-per-frame hashing.
-
-Set `"profile_renderer": true` to monitor
+**This is not yet a guarantee of instant invalidation for writes originating
+outside the known JK.dll verbs**; those can remain stale until the next audit.
+Texture uploads/residency and per-Thing lighting are separate from mesh
+revision tracking. Use `"profile_renderer": true` to monitor
 `PERF gpu_3do source_check_us_avg`, `checks_avg`, and
-`invalidations_total`. Test `SetModelMesh`, `SetThingMesh`,
-`ChangeModelMaterial`, `CloneModel`, and in-place edits with the optional
-audit enabled when investigating missing write hooks.
+`invalidations_total`. For compatibility tests, exercise CloneModel,
+SetModelMesh, ReloadModel, ReplaceModelMaterial and
+ReplaceModelMeshMaterial, as well as animated cels.
 
 ## Native MAT mip selection
 
