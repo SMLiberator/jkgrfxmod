@@ -48,41 +48,41 @@ This change does **not** introduce fine-grained COG mesh mutation tracking.
 JK.dll mutation verbs still bump the global revision, so frequent unrelated
 edits may legitimately explain continued expensive source rehashing.
 
-## Targeted COG mesh-source invalidation (follow-up)
+## On-demand COG mesh-source validation (SetModelMesh scaling fix)
 
-The 16 wrapped JK.dll model verbs still advance the **original global**
-revision counter used by the precise Type-3 collision cache. GPU geometry
-snapshots now use a separate source generation, so clones, append operations,
-hierarchy reference changes and header-changing mesh swaps no longer force
-every cached mesh to hash its complete contents.
+The 16 wrapped JK.dll model verbs continue to advance the original global
+collision/Type-3 revision. The GPU mesh cache now uses two separate
+constant-time mutation epochs, instead of walking every cached rdMesh:
 
-In-place face material edits from `ChangeModelMaterial`,
-`ReplaceModelMaterial` and `ReplaceModelMeshMaterial` schedule one
-coalesced material-pointer scan at the next primary/offscreen 3DO lookup.
-Only CPU snapshots with actually changed face material references are
-discarded. `SetModelMesh` and `ClearModelMesh` (commonly issued repeatedly
-during a model rebuild), along with `OverwriteModel` and `ReloadModel`,
-schedule a coalesced full-source comparison at the next mesh-consumption
-boundary. Thousands of COG calls collapse to the same pending dirty bit
-until that point; only actually changed cached meshes are discarded.
-This boundary is before reading the model for rendering, not literally at
-the end of the JK frame: deferring beyond a draw could render stale geometry.
-For mesh-slot replacements/clears, existing per-mesh header comparisons
-handle pointer/count changes. Geometry is not rebuilt until it is used.
+- Full-source epoch: SetModelMesh, ClearModelMesh, OverwriteModel and
+  ReloadModel. On the next actual GPU draw/capture of a cached mesh, it
+  revalidates native source memory, hashes source bytes and rebuilds the
+  CPU snapshot only if bytes changed.
+- Material epoch: ChangeModelMaterial, ReplaceModelMaterial and
+  ReplaceModelMeshMaterial. The next use of a mesh first checks only
+  its face MAT/cel signature; the full source is rebuilt only if changed.
+- Clones, append calls and node swaps retain their existing per-mesh
+  header comparison and new-cache-key detection.
 
-The 32-frame full-source audit remains: an unclassified in-place change
-switches the renderer back to per-frame hashing to protect correctness.
-The shader-facing GL resource IDs remain unique and pending draw instances
-retain their own shared geometry references.
+Both the main camera and independent planar-reflection camera share
+the same epochs and snapshot cache. No mutation scans hidden/unused
+mesh entries, so cost does not grow with historical cache population.
+Only meshes actually used AFTER a source mutation need source rehashing.
 
-`PERF gpu_3do targeted_mutations` reports the number of coalesced scans,
-entries checked/invalidated, and average scan CPU cost. In the normal
-steady-state, global COG mutations should no longer inflate
-`hash_causes_total revision`. Before interpreting a performance improvement,
-check the selective-scan CPU cost too.
+Every 32 frames, the integrity audit still detects untracked in-place
+writes and can revert to per-frame hashing. Deferred source rechecks
+guard against buffers decommitted earlier in the same frame.
 
-The mutation effect table lives in `renderer/native_mesh_revision.hpp`.
-The implementation does not inspect COG argument stacks or assume every
-handler succeeded; consequently a material scan checks the resident cache
-rather than relying on an unverified model argument. For safety, the native
-memory of potential released meshes is revalidated before the scan.
+Profiling with profile_renderer=true:
+
+- PERF gpu_3do lazy_mutations: face-material rechecks, differences and
+  CPU cost (no global scan).
+- PERF gpu_3do hash_causes_total: full-source revision hash counts.
+- PERF gpu_3do source_check_us_avg: main-camera full-source hash cost.
+
+Suggested A/B: accumulate thousands of cached models, call SetModelMesh
+repeatedly on a small set of actors, and compare CPU times with an older
+build. The cost should no longer track unused cache size. If many
+distinct active meshes are simultaneously rendered, their on-demand
+source rehashes are still necessary until we implement a verified
+model-specific mutation key.

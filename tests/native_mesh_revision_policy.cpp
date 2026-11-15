@@ -27,6 +27,13 @@ int main()
                   "OverwriteModel can replace existing source bytes");
     static_assert(source_effect_for(13U)==source_full,
                   "ReloadModel can replace existing source bytes");
+    // Source and material generations are independent: SetModelMesh
+    // cannot force a material-only scan, and MAT edits cannot force a
+    // full-source rehash of every visible mesh.
+    assert((source_effect_for(0U)&source_full)!=0U);
+    assert((source_effect_for(0U)&source_materials)==0U);
+    assert((source_effect_for(2U)&source_materials)!=0U);
+    assert((source_effect_for(2U)&source_full)==0U);
     // Clones and appended resources are new cache keys. Pure node swaps
     // and structurally clear model references use per-mesh header validation.
     for(std::size_t index: {1U,4U,5U,6U,7U,8U,10U,14U,15U})

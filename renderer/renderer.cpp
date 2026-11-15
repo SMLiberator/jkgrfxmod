@@ -1169,14 +1169,14 @@ namespace jkgm {
                          " audit=",profile_window.gpu_cache_hash_audit,
                          " fallback=",profile_window.gpu_cache_hash_fallback,
                          " NOTE=includes_offscreen_planar_hashes");
-                LOG_INFO("PERF gpu_3do targeted_mutations scans=",
+                LOG_INFO("PERF gpu_3do lazy_mutations material_checks=",
                          profile_window.gpu_mutation_scans,
-                         " entries_checked=",profile_window.gpu_mutation_scanned,
-                         " entries_invalidated=",
+                         " meshes_checked=",profile_window.gpu_mutation_scanned,
+                         " changed_materials=",
                          profile_window.gpu_mutation_invalidated,
                          " CPU_us_avg=",
                          (profile_window.gpu_mutation_ns/1000)/frames,
-                         " NOTE=scan_is_coalesced_per_source_mutation_window");
+                         " NOTE=no_cache_wide_scan_full_edits_hash_on_next_use");
                 LOG_INFO("PERF gpu_3do CPU_us_avg=",profile_window.gpu_preview_cpu_us/frames,
                          " draws_avg=",profile_window.gpu_draw_calls/frames,
                          " triangles_avg=",profile_window.gpu_draw_triangles/frames,

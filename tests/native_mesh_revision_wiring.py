@@ -23,6 +23,7 @@ for signature in (
     "void finish();",
     "bool active();",
     "uint64_t current();",
+    "uint64_t material_current();",
     "void report_untracked();",
 ):
     assert signature in header, signature
@@ -55,4 +56,16 @@ assert "original_registrar(ctx,fn,name);" in impl
 assert "complete=registered_mask==((1U<<mutator_count)-1U);" in impl
 assert "return complete && !untracked_write;" in impl
 assert "if(untracked_write)return;" in impl
+assert "if(effect&source_full)++source_generation;" in impl
+assert "if(effect&source_materials)++material_generation;" in impl
+assert "gpu_mesh_cache_apply_mutations()" not in main
+assert "take_pending_source_effects" not in impl
+assert "take_pending_source_effects" not in main
+assert "for(auto it=gpu_mesh_cache.begin()" not in main
+assert "gpu_mesh_lazy_material_changed(" in main
+assert main.count("gpu_mesh_lazy_material_changed(")==3
+assert main.count("gpu_mesh_dirty_source_readable(")==3
+assert "material_checked_generation=material_generation;" in main
+assert "mesh_revision::source_current()" in main
+assert "mesh_revision::material_current()" in main
 print("Separate JK.dll COG mesh revision module wiring and ABI preserved")
