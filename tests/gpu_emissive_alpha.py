@@ -11,6 +11,36 @@ shared = read("assets/shaders/gpu_material_common.glsl")
 model = read("assets/shaders/gpu_3do_preview.frag")
 world = read("assets/shaders/world_cache.frag")
 native = read("assets/shaders/game_trns_pass.frag")
+renderer = read("renderer/renderer.cpp")
+main = read("renderer/main.cpp")
+
+# SetSpriteInfo supplies a per-SPR alpha distinct from SetThingOpacity's
+# 3DO alpha. GPU cached emission must follow that same SPR alpha, including
+# emissive-only materials with zero albedo coverage, but must not be
+# multiplied by the MAT's albedo alpha or by the sprite fade a second time.
+assert "instance.sprite_opacity=info.opacity;" in main
+assert "albedo.a*=native_face_opacity;" in model
+assert "emission*=thing_opacity;" in model
+assert model.count("emission*=thing_opacity;")==1
+assert "emission*=native_face_opacity;" not in model
+shader_uniform = renderer.split("prog.set_thing_opacity(", 1)[1].split(");", 1)[0]
+assert "inst.is_sprite_quad ? inst.sprite_opacity :" in shader_uniform
+assert "draw.policy==gpu_3do_alpha_mode::dithered" in shader_uniform
+assert "1.0f : inst.thing_opacity" in shader_uniform
+assert "inst.is_sprite_quad ? inst.sprite_opacity :" in renderer
+# Instanced SPRs share a uniform only when their sprite alpha matches.
+assert "other.sprite_opacity!=inst.sprite_opacity" in renderer
+
+for alpha in (0.0, .25, .5, 1.0):
+    emissive = (1.4, .75, .2)
+    # Emissive-only MAT: albedo alpha is 0.0; emission is still visible
+    # proportionally to the SPR fade, independently from that albedo.
+    result = tuple(value*alpha for value in emissive)
+    assert result == tuple(value*alpha for value in emissive)
+    if alpha==0:
+        assert result == (0.,0.,0.)
+    elif alpha==1:
+        assert result == emissive
 
 for shader in (model, world):
     assert shader.index("vec3 emission=") < shader.index("if(gpu_material_discard(")

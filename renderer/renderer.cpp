@@ -4998,13 +4998,15 @@ namespace jkgm {
                     ? material.height
                     : gpu_3do_model_uv_extent(material.height);
                 prog.set_solid_fullbright(material.solid_fullbright);
-                // Dither already attenuates coverage; do not dim surviving
-                // emissive pixels a second time. Alpha-blended emission,
-                // including zero-alpha emissive-only MATs, fades normally.
+                // The same shader uniform fades emissive RGB for 3DOs and
+                // SPRs. SetSpriteInfo changes sprite_opacity, not the 3DO
+                // thing_opacity field. Keep emission independent of MAT
+                // albedo alpha, and do not double-fade dithered 3DO pixels.
                 prog.set_thing_opacity(
-                    !inst.is_sprite_quad && inst.thing_dither &&
-                    draw.policy==gpu_3do_alpha_mode::dithered ?
-                        1.0f : inst.thing_opacity);
+                    inst.is_sprite_quad ? inst.sprite_opacity :
+                    (inst.thing_dither &&
+                     draw.policy==gpu_3do_alpha_mode::dithered
+                        ? 1.0f : inst.thing_opacity));
                 prog.set_surface(material.albedo_source,uv_width,
                                  uv_height,transparent,
                                  static_cast<int>(material.blend),
