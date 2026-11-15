@@ -7053,9 +7053,14 @@ namespace jkgm {
                         bool const cutout=tex.masked||tex.alpha||
                             tex.dithered||
                             (inst->is_sprite_quad && tex.albedo_source==1);
-                        if(!sun_shadow_model_material_casts_depth(
-                               tex.albedo_source,tex.special,tex.emissive_only,
-                               tex.opacity,cutout,inst->thing_opacity))continue;
+                        bool const eligible=inst->is_sprite_quad
+                            ?sun_shadow_material_casts_depth(
+                                tex.albedo_source,tex.special,tex.emissive_only,
+                                tex.opacity,cutout)
+                            :sun_shadow_model_material_casts_depth(
+                                tex.albedo_source,tex.special,tex.emissive_only,
+                                tex.opacity,cutout,inst->thing_opacity);
+                        if(!eligible)continue;
                         if((!the_config->sun_shadow_cull_back_faces &&
                              !the_config->sun_shadow_cull_front_faces) ||
                            (g.face_type&1U) || g.nonplanar)
@@ -7526,9 +7531,15 @@ namespace jkgm {
                     auto const &tex=sun_caster_material(group,instance);
                     bool const cutout=tex.masked||tex.alpha||tex.dithered||
                         (instance.is_sprite_quad && tex.albedo_source==1);
-                    bool const eligible=sun_shadow_model_material_casts_depth(
-                        tex.albedo_source,tex.special,tex.emissive_only,
-                        tex.opacity,cutout,instance.thing_opacity);
+                    // Preserve the original SPR shadow policy; the new
+                    // partial coverage eligibility is for model Things.
+                    bool const eligible=instance.is_sprite_quad
+                        ?sun_shadow_material_casts_depth(
+                            tex.albedo_source,tex.special,tex.emissive_only,
+                            tex.opacity,cutout)
+                        :sun_shadow_model_material_casts_depth(
+                            tex.albedo_source,tex.special,tex.emissive_only,
+                            tex.opacity,cutout,instance.thing_opacity);
                     if(sample) {
                         sun_profile_candidate_material_sample_ns+=elapsed_profile_ns(
                             mat_begin,profile_clock::now());
