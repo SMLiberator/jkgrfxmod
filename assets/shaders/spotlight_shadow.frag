@@ -27,7 +27,13 @@ void main()
                                    shadow_alpha_factor : 1.0);
         if(shadow_alpha_masked!=0 &&
            material_alpha<shadow_alpha_cutoff)discard;
-        float coverage=clamp(material_alpha*shadow_instance_opacity,0.0,1.0);
+        // Alpha masks are binary cutouts: a surviving mask texel casts a
+        // full shadow at 100% Thing opacity. Only the Thing/MAT fade
+        // reduces its coverage, not the mask's antialiased edge alpha.
+        // Mixed-alpha and dither MATs retain their continuous source alpha.
+        float coverage=clamp(
+            (shadow_alpha_masked!=0 ? shadow_alpha_factor :
+               material_alpha)*shadow_instance_opacity,0.0,1.0);
         ivec2 p=ivec2(gl_FragCoord.xy);
         const float bayer[16]=float[16](
              0.0, 8.0, 2.0,10.0,
