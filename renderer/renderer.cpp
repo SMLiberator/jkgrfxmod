@@ -12152,7 +12152,7 @@ namespace jkgm {
             // Alpha-faded model groups must composite behind any opaque
             // reflected geometry; sort back-to-front in the mirrored camera.
             if(!faded_models.empty()) {
-                std::stable_sort(faded_models.begin(),faded_models.end(),
+                std::sort(faded_models.begin(),faded_models.end(),
                     [](planar_emissive_model_group const &a,
                        planar_emissive_model_group const &b) {
                         return a.depth>b.depth;
