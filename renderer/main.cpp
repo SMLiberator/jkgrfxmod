@@ -50,6 +50,7 @@
 #include "cog_math.hpp"
 #include "cog_create_thing.hpp"
 #include "cog_thing_joint_node.hpp"
+#include "cog_camera_distance.hpp"
 #include "cog_pyr_math.hpp"
 #include "cog_thing_offsets.hpp"
 #include "cog_raycast_head.hpp"
@@ -10629,6 +10630,39 @@ namespace {
             read,reinterpret_cast<uintptr_t>(thing),joint));
     }
 
+    // GetThingCameraDepth/DistSq/Dist query the ACTUAL active rdCamera
+    // world-to-view matrix, like JK's transformedPos.y. Cached transformedPos
+    // may belong to an earlier frame or an entirely different camera.
+    // No sqrt in the depth/squared versions; one sqrt for actual distance.
+    void cog_get_thing_camera_measure(void *ctx,
+                                      jkgm::cog_camera_measure measure)
+    {
+        void *const thing=cog_pop_thing(ctx);
+        float value=-1.0f;
+        // The camera and COG ABI addresses are tied to the tested JKGM exe.
+        // build_matches() validates native code signatures once.
+        if(jkgm::engine_camera_detail::build_matches()) {
+            auto const read=[](uintptr_t address,void *dst,size_t bytes)->bool {
+                if(!gpu_span_readable(reinterpret_cast<void const *>(address),
+                                      bytes))return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(address),bytes);
+                return true;
+            };
+            value=jkgm::cog_get_thing_camera_measure(
+                read,reinterpret_cast<uintptr_t>(thing),measure);
+        }
+        cog_push_float(ctx,value);
+    }
+    void __cdecl cog_get_thing_camera_depth(void *ctx) {
+        cog_get_thing_camera_measure(ctx,jkgm::cog_camera_measure::depth);
+    }
+    void __cdecl cog_get_thing_camera_dist_sq(void *ctx) {
+        cog_get_thing_camera_measure(ctx,jkgm::cog_camera_measure::distance_sq);
+    }
+    void __cdecl cog_get_thing_camera_dist(void *ctx) {
+        cog_get_thing_camera_measure(ctx,jkgm::cog_camera_measure::distance);
+    }
+
     // JK.dll's original handler compares attach_flags == 2 exactly. Both
     // THINGFACE (0x2) and THING (0x4), with arbitrary extra bits, refer to
     // a Thing in the shared +0x58 parent slot.
@@ -10765,6 +10799,9 @@ namespace {
         cog_verb_entry{"attachthingtothingnode", cog_attach_thing_to_thing_node},
         cog_verb_entry{"detachattachedthings", cog_detach_attached_things},
         cog_verb_entry{"getthingjointnode", cog_get_thing_joint_node},
+        cog_verb_entry{"getthingcameradepth", cog_get_thing_camera_depth},
+        cog_verb_entry{"getthingcameradistsq", cog_get_thing_camera_dist_sq},
+        cog_verb_entry{"getthingcameradist", cog_get_thing_camera_dist},
         cog_verb_entry{"getthingnodepos", cog_get_thing_node_pos},
         cog_verb_entry{"getthingnodeoffsetpos", cog_get_thing_node_offset_pos},
         cog_verb_entry{"getthingnodeposoffset", cog_get_thing_node_pos_offset},

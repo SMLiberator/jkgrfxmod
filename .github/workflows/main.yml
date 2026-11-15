@@ -191,6 +191,13 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_raycast_ex.cpp /Fe:cog_raycast_ex_test.exe
         cog_raycast_ex_test.exe
 
+    - name: COG camera depth and squared/exact distance regressions
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_camera_distance.cpp /Fe:cog_camera_distance_test.exe || exit /b 1
+        cog_camera_distance_test.exe || exit /b 1
+        python3 tests/cog_camera_distance_wiring.py || exit /b 1
+
     - name: COG Thing offset and position transforms regression tests
       shell: cmd
       run: |
