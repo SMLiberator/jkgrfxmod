@@ -14,56 +14,6 @@ uniform vec4 camera_right;       // XYZ world axis, W tan(horizontal_fov/2)
 uniform vec4 camera_forward;
 uniform vec4 camera_up;          // XYZ world axis, W tan(vertical_fov/2)
 
-// Forward declarations: full implementations follow the sun uniforms.
-vec3 sun_shadow_coordinates(vec3 position,vec3 origin,vec3 right,
-                            vec3 up,vec3 forward,vec3 limits);
-bool sun_shadow_inside(vec3 coord);
-
-// Optional Fluid transmission, using the same near/far SUN projections.
-// Source depth is the first Fluid interface along the sunlight ray.
-uniform int sun_caustics_active;
-#ifdef JKGM_SUN_CAUSTICS
-uniform sampler2DArray sun_caustics_depth;
-uniform sampler2DArray sun_caustics_density;
-uniform sampler2D sun_caustics_pattern;
-uniform float sun_caustics_time;
-float sample_sun_caustic_light(vec3 world_position,float camera_depth)
-{
-    if(sun_caustics_active==0)return 0.0;
-    bool near_cascade=camera_depth<sun_shadow_split;
-    int layer=near_cascade?0:1;
-    vec3 coord=near_cascade
-        ?sun_shadow_coordinates(world_position,sun_shadow_origin,
-            sun_shadow_right,sun_shadow_up,sun_shadow_forward,sun_shadow_limits)
-        :sun_shadow_coordinates(world_position,sun_shadow_far_origin,
-            sun_shadow_far_right,sun_shadow_far_up,sun_shadow_far_forward,
-            sun_shadow_far_limits);
-    if(!sun_shadow_inside(coord))return 0.0;
-    float interface_depth=texture(sun_caustics_depth,vec3(coord.xy,float(layer))).r;
-    if(interface_depth>=0.999999 || coord.z<=interface_depth+0.00015)return 0.0;
-    float ray_length=(coord.z-interface_depth)*
-        (near_cascade?sun_shadow_limits.z:sun_shadow_far_limits.z);
-    if(ray_length<=0.015)return 0.0;
-    float density=clamp(texture(
-        sun_caustics_density,vec3(coord.xy,float(layer))).r,0.0,8.0);
-    float decay=exp(-ray_length*(0.08+density*0.4));
-    if(decay<0.003)return 0.0;
-    float lod=clamp(log2(1.0+density*ray_length*2.75),0.0,7.5);
-    vec3 right=near_cascade?sun_shadow_right:sun_shadow_far_right;
-    vec3 up=near_cascade?sun_shadow_up:sun_shadow_far_up;
-    vec2 p=vec2(dot(world_position,right),dot(world_position,up))*0.095;
-    float a=textureLod(sun_caustics_pattern,
-        p+vec2(0.021,0.015)*sun_caustics_time,lod).r;
-    float b=textureLod(sun_caustics_pattern,
-        p*1.17+vec2(-0.013,0.019)*sun_caustics_time,lod).r;
-    float pattern=max(a*0.72+b*0.28-0.21,0.0);
-    return pattern*decay*0.75;
-}
-#else
-float sample_sun_caustic_light(vec3 world_position,float camera_depth)
-{ return 0.0; }
-#endif
-
 // Four independent COG MAT spotlights. Textures occupy units 6-9.
 // Avoid dynamic sampler-array indexing, which GLSL 330 cannot guarantee.
 uniform int spotlight_count;
@@ -277,6 +227,52 @@ float sun_dynamic_shadow_visibility(vec3 position,float incidence)
     }
     return mix(1.0,visibility,near_fade);
 }
+
+
+// Optional Fluid transmission, using the same near/far SUN projections.
+// Source depth is the first Fluid interface along the sunlight ray.
+uniform int sun_caustics_active;
+#ifdef JKGM_SUN_CAUSTICS
+uniform sampler2DArray sun_caustics_depth;
+uniform sampler2DArray sun_caustics_density;
+uniform sampler2D sun_caustics_pattern;
+uniform float sun_caustics_time;
+float sample_sun_caustic_light(vec3 world_position,float camera_depth)
+{
+    if(sun_caustics_active==0)return 0.0;
+    bool near_cascade=camera_depth<sun_shadow_split;
+    int layer=near_cascade?0:1;
+    vec3 coord=near_cascade
+        ?sun_shadow_coordinates(world_position,sun_shadow_origin,
+            sun_shadow_right,sun_shadow_up,sun_shadow_forward,sun_shadow_limits)
+        :sun_shadow_coordinates(world_position,sun_shadow_far_origin,
+            sun_shadow_far_right,sun_shadow_far_up,sun_shadow_far_forward,
+            sun_shadow_far_limits);
+    if(!sun_shadow_inside(coord))return 0.0;
+    float interface_depth=texture(sun_caustics_depth,vec3(coord.xy,float(layer))).r;
+    if(interface_depth>=0.999999 || coord.z<=interface_depth+0.00015)return 0.0;
+    float ray_length=(coord.z-interface_depth)*
+        (near_cascade?sun_shadow_limits.z:sun_shadow_far_limits.z);
+    if(ray_length<=0.015)return 0.0;
+    float density=clamp(texture(
+        sun_caustics_density,vec3(coord.xy,float(layer))).r,0.0,8.0);
+    float decay=exp(-ray_length*(0.08+density*0.4));
+    if(decay<0.003)return 0.0;
+    float lod=clamp(log2(1.0+density*ray_length*2.75),0.0,7.5);
+    vec3 right=near_cascade?sun_shadow_right:sun_shadow_far_right;
+    vec3 up=near_cascade?sun_shadow_up:sun_shadow_far_up;
+    vec2 p=vec2(dot(world_position,right),dot(world_position,up))*0.095;
+    float a=textureLod(sun_caustics_pattern,
+        p+vec2(0.021,0.015)*sun_caustics_time,lod).r;
+    float b=textureLod(sun_caustics_pattern,
+        p*1.17+vec2(-0.013,0.019)*sun_caustics_time,lod).r;
+    float pattern=max(a*0.72+b*0.28-0.21,0.0);
+    return pattern*decay*0.75;
+}
+#else
+float sample_sun_caustic_light(vec3 world_position,float camera_depth)
+{ return 0.0; }
+#endif
 
 // Only the costly shadow-map lookups are low-resolution. In particular,
 // the actual SKY opening gate is always evaluated per full-resolution pixel.

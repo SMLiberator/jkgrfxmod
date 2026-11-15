@@ -9016,6 +9016,267 @@ namespace jkgm {
                    std::fabs(spot.range-spotlight_shadow_light.range)<0.00001f;
         }
 
+
+        // Nearest Fluid interface along the SUN ray. Completely independent of
+        // opaque shadow maps: water does not become an opaque sun caster.
+        // Static geometry/projections reuse cached data; animation is entirely
+        // in the opaque compositor sampling a once-generated mipmapped pattern.
+        void draw_sun_caustics()
+        {
+            if(!the_config->experimental_sun_caustics ||
+               !the_config->enable_sun || !the_config->enable_sun_shadows ||
+               !sun_shadow_ready || !sun_level_has_sky ||
+               !sun_shadow_target || !ogs->spotlight_shadow_depth_program)
+                return;
+            GLint max_fragment_units=0;
+            glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&max_fragment_units);
+            if(max_fragment_units<20)return;
+            uint32_t native_world=0;
+            if(!engine_material_debug::read_object(
+                   engine_material_debug::current_world_global,native_world) ||
+               !decal_native_address_ok(native_world))
+                return;
+            decal_native_read const safe_read=[](
+                uintptr_t ptr,void *dst,size_t n)->bool {
+                if(n==0 || !engine_camera_detail::readable(ptr,n))return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(ptr),n);
+                return true;
+            };
+            if(!sun_caustic_target)
+                sun_caustic_target=std::make_unique<sun_caustics_gpu>(512U);
+            auto &map=*sun_caustic_target;
+            if(!map.update_world(safe_read,native_world))return;
+
+            struct fluid_world_draw {
+                spotlight_shadow_surface_range range;
+                float coefficient=0.0f;
+                uint32_t cel=0;
+                uint32_t material=0;
+            };
+            struct fluid_model_draw {
+                gpu_3do_instance const *inst;
+                gpu_3do_group const *group;
+                float coefficient=0.0f;
+            };
+            std::array<std::vector<fluid_world_draw>,2> world_draws;
+            std::array<std::vector<fluid_model_draw>,2> model_draws;
+            std::array<uint64_t,2> signatures{};
+            size_t total_faces=0;
+
+            for(int cascade=0;cascade<2;++cascade) {
+                auto const &view=sun_shadow_views[cascade];
+                auto const bounds=sun_shadow_volume_bounds(view);
+                uint64_t signature=14695981039346656037ULL;
+                auto hash_u32=[&](uint32_t v) {
+                    for(int byte=0;byte<4;++byte) {
+                        signature^=uint64_t((v>>(byte*8))&255U);
+                        signature*=1099511628211ULL;
+                    }
+                };
+                auto hash_float=[&](float v) {
+                    uint32_t bits=0;
+                    std::memcpy(&bits,&v,sizeof(bits));
+                    hash_u32(bits);
+                };
+                hash_u32(uint32_t(map.revision));
+                hash_u32(uint32_t(map.revision>>32));
+
+                std::vector<uint32_t> selected;
+                map.world.acceleration.query(map.world.receivers,
+                    bounds.low,bounds.high,selected);
+                for(uint32_t index:selected) {
+                    if(index>=map.world.receivers.size() ||
+                       index>=map.mesh.surfaces.size())continue;
+                    auto const &face=map.world.receivers[index];
+                    auto const &range=map.mesh.surfaces[index];
+                    if(range.count<3U)continue;
+                    uintptr_t const base=map.world.surfaces_addr+
+                        uintptr_t(face.surface_index)*0x5cU;
+                    uint32_t geomode=0;
+                    int32_t cel=face.cel;
+                    if(!safe_read(base+0x1cU,&geomode,sizeof(geomode)) ||
+                       !safe_read(base+0x38U,&cel,sizeof(cel)) ||
+                       geomode<2U)continue;
+                    gpu_3do_group group{};
+                    group.material=face.material;
+                    group.cel=cel;
+                    uint64_t const key=
+                        (uint64_t(face.material)<<32)|uint32_t(cel);
+                    auto found=gpu_frame_material_cache.find(key);
+                    if(found==gpu_frame_material_cache.end())
+                        found=gpu_frame_material_cache.emplace(key,
+                            resolve_gpu_3do_material(group)).first;
+                    auto const &mat=found->second;
+                    if(mat.blend!=material_blend_mode::fluid ||
+                       !std::isfinite(mat.fluid_thickness) ||
+                       mat.opacity<=0.0f)continue;
+                    float const coefficient=std::max(
+                        0.0f,std::min(mat.fluid_thickness,8.0f));
+                    world_draws[cascade].push_back({
+                        range,coefficient,uint32_t(cel),uint32_t(face.material)});
+                    hash_u32(face.surface_index);
+                    hash_u32(uint32_t(face.material));
+                    hash_u32(uint32_t(cel));
+                    hash_float(coefficient);
+                }
+                for(auto const &inst:frame_gpu_3do_instances) {
+                    // SPR, projected decal, camera/HUD and ephemeral VFX
+                    // must NEVER be caustic transmission surfaces.
+                    if(!inst.geometry || inst.is_sprite_quad ||
+                       inst.is_projected_decal || inst.camera_hud ||
+                       inst.transient_procedural ||
+                       inst.world_lighting_exempt ||
+                       inst.effective_geometry_mode<2U ||
+                       inst.thing_opacity<=0.0f)continue;
+                    for(auto const &group:inst.geometry->groups) {
+                        if(group.count<3U || group.solid_color)continue;
+                        auto const face_bounds=sun_shadow_transformed_aabb(
+                            group.bounds_min,group.bounds_max,inst.transform);
+                        if(!decal_aabbs_overlap(
+                            face_bounds.low,face_bounds.high,
+                            bounds.low,bounds.high))continue;
+                        uint64_t const key=(uint64_t(group.material)<<32)|
+                                            uint32_t(group.cel);
+                        auto found=gpu_frame_material_cache.find(key);
+                        if(found==gpu_frame_material_cache.end())
+                            found=gpu_frame_material_cache.emplace(key,
+                                resolve_gpu_3do_material(group)).first;
+                        auto const &mat=found->second;
+                        if(mat.blend!=material_blend_mode::fluid ||
+                           !std::isfinite(mat.fluid_thickness) ||
+                           mat.opacity<=0.0f)continue;
+                        float const coefficient=std::max(
+                            0.0f,std::min(mat.fluid_thickness,8.0f));
+                        model_draws[cascade].push_back({&inst,&group,coefficient});
+                        hash_u32(uint32_t(inst.id));
+                        hash_u32(uint32_t(inst.id>>32));
+                        hash_u32(group.offset);
+                        hash_u32(group.count);
+                        hash_u32(uint32_t(group.material));
+                        hash_u32(uint32_t(group.cel));
+                        hash_float(inst.thing_opacity);
+                        hash_float(coefficient);
+                        for(float v:inst.transform)hash_float(v);
+                    }
+                }
+                hash_u32(uint32_t(world_draws[cascade].size()));
+                hash_u32(uint32_t(model_draws[cascade].size()));
+                total_faces+=world_draws[cascade].size()+
+                             model_draws[cascade].size();
+                signatures[cascade]=signature;
+            }
+            // Clear previous results logically on zero Fluid sources.
+            // A level without water never incurs a light-space draw.
+            if(total_faces==0U) {
+                map.valid={{false,false}};
+                return;
+            }
+
+            GLint old_draw=0,old_read=0,old_vao=0,old_prog=0,old_viewport[4]{};
+            GLint old_active=0,old_depth_func=0;
+            GLboolean old_depth=glIsEnabled(GL_DEPTH_TEST);
+            GLboolean old_cull=glIsEnabled(GL_CULL_FACE);
+            GLboolean old_blend=glIsEnabled(GL_BLEND);
+            GLboolean old_scissor=glIsEnabled(GL_SCISSOR_TEST);
+            GLboolean old_offset=glIsEnabled(GL_POLYGON_OFFSET_FILL);
+            GLboolean old_depth_mask=GL_TRUE;
+            GLboolean old_color_mask[4]{};
+            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&old_draw);
+            glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&old_read);
+            glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&old_vao);
+            glGetIntegerv(GL_CURRENT_PROGRAM,&old_prog);
+            glGetIntegerv(GL_VIEWPORT,old_viewport);
+            glGetIntegerv(GL_ACTIVE_TEXTURE,&old_active);
+            glGetIntegerv(GL_DEPTH_FUNC,&old_depth_func);
+            glGetBooleanv(GL_DEPTH_WRITEMASK,&old_depth_mask);
+            glGetBooleanv(GL_COLOR_WRITEMASK,old_color_mask);
+
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_BLEND);
+            glDisable(GL_CULL_FACE);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glEnable(GL_DEPTH_TEST);
+            glDepthMask(GL_TRUE);
+            glDepthFunc(GL_LESS);
+            glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+            glViewport(0,0,GLsizei(map.resolution),GLsizei(map.resolution));
+            auto &prog=*ogs->spotlight_shadow_depth_program;
+            prog.use_program();
+            auto point3=[](decal_vec3 const &v) {
+                return make_point(v[0],v[1],v[2]);
+            };
+            for(int cascade=0;cascade<2;++cascade) {
+                auto const &view=sun_shadow_views[cascade];
+                if(map.valid[cascade] &&
+                   map.signatures[cascade]==signatures[cascade] &&
+                   sun_shadow_same_projection(map.views[cascade],view))
+                    continue;
+                gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                     map.fbo[cascade]);
+                float const clear_zero[4]{0.0f,0.0f,0.0f,0.0f};
+                float const clear_one=1.0f;
+                glClearBufferfv(GL_COLOR,0,clear_zero);
+                glClearBufferfv(GL_DEPTH,0,&clear_one);
+                prog.set_orthographic_light(point3(view.origin),
+                    point3(view.right),point3(view.up),point3(view.forward),
+                    make_point(view.width,view.height,view.range,0.0f));
+                prog.set_model(make_point(1.0f,0.0f,0.0f),
+                    make_point(0.0f,1.0f,0.0f),
+                    make_point(0.0f,0.0f,1.0f),
+                    make_point(0.0f,0.0f,0.0f));
+                prog.set_shadow_alpha(false,
+                    make_point(1.0f,1.0f),make_point(0.0f,0.0f),
+                    0.5f,1.0f,false,0.0f);
+                gl::bind_vertex_array(map.vao);
+                for(auto const &draw:world_draws[cascade]) {
+                    prog.set_caustic_density(draw.coefficient);
+                    gl::draw_elements(gl::element_type::triangles,
+                        draw.range.count,gl::index_type::uint32,
+                        static_cast<ptrdiff_t>(draw.range.first_index*
+                                              sizeof(uint32_t)));
+                }
+                for(auto const &draw:model_draws[cascade]) {
+                    auto const &inst=*draw.inst;
+                    auto const &group=*draw.group;
+                    auto it=gpu_3do_gl_cache.find(inst.id);
+                    if(it==gpu_3do_gl_cache.end())
+                        it=gpu_3do_gl_cache.emplace(inst.id,
+                            std::make_unique<gpu_3do_gl_mesh>(*inst.geometry)).first;
+                    auto const &m=inst.transform;
+                    prog.set_model(make_point(m[0],m[1],m[2]),
+                        make_point(m[3],m[4],m[5]),
+                        make_point(m[6],m[7],m[8]),
+                        make_point(m[9],m[10],m[11]));
+                    prog.set_caustic_density(draw.coefficient);
+                    gl::bind_vertex_array(it->second->vao);
+                    gl::draw_elements(gl::element_type::triangles,
+                        group.count,gl::index_type::uint32,
+                        static_cast<ptrdiff_t>(group.offset*
+                                              sizeof(uint32_t)));
+                }
+                map.signatures[cascade]=signatures[cascade];
+                map.views[cascade]=view;
+                map.valid[cascade]=true;
+            }
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER,GLuint(old_draw));
+            glBindFramebuffer(GL_READ_FRAMEBUFFER,GLuint(old_read));
+            glViewport(old_viewport[0],old_viewport[1],
+                       old_viewport[2],old_viewport[3]);
+            gl::bind_vertex_array(gl::vertex_array_view(GLuint(old_vao)));
+            gl::use_program(gl::program_view(GLuint(old_prog)));
+            glDepthMask(old_depth_mask);
+            glDepthFunc(GLenum(old_depth_func));
+            glColorMask(old_color_mask[0],old_color_mask[1],
+                        old_color_mask[2],old_color_mask[3]);
+            if(old_depth)glEnable(GL_DEPTH_TEST);else glDisable(GL_DEPTH_TEST);
+            if(old_cull)glEnable(GL_CULL_FACE);else glDisable(GL_CULL_FACE);
+            if(old_blend)glEnable(GL_BLEND);else glDisable(GL_BLEND);
+            if(old_scissor)glEnable(GL_SCISSOR_TEST);else glDisable(GL_SCISSOR_TEST);
+            if(old_offset)glEnable(GL_POLYGON_OFFSET_FILL);
+            else glDisable(GL_POLYGON_OFFSET_FILL);
+            glActiveTexture(GLenum(old_active));
+        }
+
         void draw_game_opaque_composite()
         {
             gl::disable(gl::capability::depth_test);
@@ -9173,6 +9434,28 @@ namespace jkgm {
                         gl::set_active_texture_unit(14);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                             sun_shadow_target->far_depth);
+                    }
+                    // Caustics use distinct non-comparison depth and
+                    // per-source fluid-density arrays plus one fixed pattern.
+                    // The ordinary shadow, dynamic atlas and sky gate remain
+                    // authoritative for preventing transmission through roofs.
+                    if(shadows && the_config->experimental_sun_caustics &&
+                       sun_caustic_target && sun_caustic_target->complete &&
+                       sun_caustic_target->valid[0] &&
+                       sun_caustic_target->valid[1]) {
+                        auto &caustics=*sun_caustic_target;
+                        gl::set_active_texture_unit(17);
+                        glBindTexture(GL_TEXTURE_2D_ARRAY,caustics.depth.value());
+                        gl::set_active_texture_unit(18);
+                        glBindTexture(GL_TEXTURE_2D_ARRAY,caustics.density.value());
+                        gl::set_active_texture_unit(19);
+                        glBindTexture(GL_TEXTURE_2D,caustics.pattern.value());
+                        gl::set_active_texture_unit(0);
+                        static auto const caustic_start=
+                            std::chrono::steady_clock::now();
+                        float const seconds=std::chrono::duration<float>(
+                            std::chrono::steady_clock::now()-caustic_start).count();
+                        target.set_sun_caustics(true,seconds);
                     }
                     if(the_config->enable_sun_dynamic_shadows &&
                        sun_dynamic_target && !sun_dynamic_views.empty()) {
@@ -12646,6 +12929,7 @@ namespace jkgm {
                     profile_frame.timings[profile_idx(profile_stage::opaque_pass)]);
                 draw_spotlight_shadow_map();
                 draw_sun_shadow_map();
+                draw_sun_caustics();
                 // A 0x20 Thing is expected to receive no added sunlight
                 // and contribute no shadow depth, but must never disable
                 // the shadow map for unrelated objects. Trace *transitions*
