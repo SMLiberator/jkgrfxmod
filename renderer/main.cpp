@@ -9039,10 +9039,12 @@ namespace {
     // but does not detach its children. Do that before freeing the parent:
     // native DetachThing clears flags (including NOMOVE/NODE), parent links,
     // and intrusive child-list pointers while both Thing slots are valid.
-    void detach_native_node_children_for_parent(void *thing)
+    void detach_native_node_children_for_parent(
+        void *thing,bool remove_own_entry=true)
     {
         uintptr_t const dying=reinterpret_cast<uintptr_t>(thing);
-        auto children=jkgm::get_node_attachment_registry().take_related(dying);
+        auto children=jkgm::get_node_attachment_registry().take_related(
+            dying,remove_own_entry);
         if(children.empty())return;
         uint32_t dying_signature=0;
         if(!read_node_attachment_identity(dying,dying_signature))return;
@@ -9083,7 +9085,9 @@ namespace {
         std::memcpy(&kind,reinterpret_cast<void const *>(ptr+0x0c),4);
         std::memcpy(&health,reinterpret_cast<void const *>(ptr+0x134),4);
         if(!jkgm::native_actor_death_confirmed(kind,health))return;
-        detach_native_node_children_for_parent(actor);
+        // Unlike Thing removal, killing an actor does not yet destroy its
+        // own native attachment to a different parent.
+        detach_native_node_children_for_parent(actor,false);
     }
 
     void __cdecl HookedNativeThingRemove(void *thing)

@@ -80,5 +80,18 @@ int main() {
     assert(lifecycle.take_related(0x202000U).empty());
     assert(lifecycle.take_related(0x606000U).size()==1);
     assert(lifecycle.snapshot().empty());
+
+    // A dying actor may itself be node-attached to another parent. Releasing
+    // its children must not remove its own attachment until final removal.
+    node_attachment_registry death;
+    assert(death.set(a));
+    assert(death.set(b));
+    assert(death.set(c));
+    auto detached_on_death=death.take_related(0x202000U,false);
+    assert(detached_on_death.size()==2);
+    auto after_death=death.snapshot();
+    assert(after_death.size()==1 && after_death[0].child==b.child);
+    assert(death.take_related(0x202000U).empty());
+    assert(death.snapshot().empty());
     return 0;
 }

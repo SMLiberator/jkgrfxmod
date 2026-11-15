@@ -96,16 +96,19 @@ namespace jkgm {
             std::lock_guard<std::mutex> lock(mutex_);
             entries_.erase(child);
         }
-        // Atomically remove the dying Thing's own node link and all node
-        // children it owns. Caller detaches children only after validating
-        // their native identities; no pointers are dereferenced under lock.
-        std::vector<node_attachment> take_related(uintptr_t thing) {
+        // During death the actor still exists, potentially as another
+        // parent's node child. Keep that link until actual Thing removal.
+        // On final removal, erase both its own link and its descendants.
+        // No native pointers are dereferenced while the registry is locked.
+        std::vector<node_attachment> take_related(
+            uintptr_t thing,bool remove_own_entry=true) {
             std::lock_guard<std::mutex> lock(mutex_);
             std::vector<node_attachment> children;
             for(auto it=entries_.begin();it!=entries_.end();) {
                 bool const is_child=it->second.parent==thing;
                 if(is_child)children.push_back(it->second);
-                if(is_child || it->first==thing)it=entries_.erase(it);
+                if(is_child || (remove_own_entry && it->first==thing))
+                    it=entries_.erase(it);
                 else ++it;
             }
             return children;
