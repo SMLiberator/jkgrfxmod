@@ -228,6 +228,7 @@ HRESULT WINAPI jkgm::DirectDraw_impl::SetDisplayMode(DWORD a, DWORD b, DWORD c)
 
 HRESULT WINAPI jkgm::DirectDraw_impl::WaitForVerticalBlank(DWORD a, HANDLE b)
 {
-    r->present_menu_surface_immediate();
+    // Waiting for vertical blank must not itself flip/present a menu buffer.
+    // Actual Blt/Flip/Unlock paths remain responsible for presentation.
     return DD_OK;
 }
