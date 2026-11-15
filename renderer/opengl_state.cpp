@@ -180,7 +180,11 @@ jkgm::hud_model::hud_model(size<2, int> scr_res,
     auto sel_off = (get<x>(int_scr_res_f) - get<x>(sel_sz)) * 0.5f;
     add_sprite(make_box(make_point(sel_off, 0.0f), sel_sz), select_tc);
 
-    auto con_sz = make_size(get<x>(int_scr_res_f), 64.0f) * scale;
+    // The console occupies only the central source strip (the left/right
+    // 64-pixel corners are separate sprites). Match its destination width
+    // before applying hud_scale; otherwise it is stretched by W/(W-128)
+    // even when hud_scale is 1.0.
+    auto con_sz = make_size(get<x>(int_scr_res_f) - 128.0f, 64.0f) * scale;
     auto con_off = (get<x>(int_scr_res_f) - get<x>(con_sz)) * 0.5f;
     add_sprite(make_box(make_point(con_off, get<y>(int_scr_res_f) - get<y>(con_sz)), con_sz),
                console_tc);
