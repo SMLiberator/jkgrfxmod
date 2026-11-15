@@ -40,6 +40,7 @@
 #include "spotlight.hpp"
 #include "spotlight_shadow_gpu.hpp"
 #include "sun_shadow_gpu.hpp"
+#include "sun_caustics_gpu.hpp"
 #include "sun_pcf_intensity.hpp"
 #include "sun_sky_aperture_gpu.hpp"
 #include "sun_sky_surface.hpp"
@@ -727,6 +728,7 @@ namespace jkgm {
         std::vector<translucent_spotlight_draw> translucent_spotlights_for_frame;
         std::unique_ptr<spotlight_shadow_gpu> spotlight_shadow_target;
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
+        std::unique_ptr<sun_caustics_gpu> sun_caustic_target;
         std::unique_ptr<sun_sky_aperture_gpu> sun_sky_aperture_target;
         // Fail-open physical-sky eligibility, cached per SithWorld. The
         // world surface table is audited occasionally rather than on every
@@ -1339,6 +1341,7 @@ namespace jkgm {
             release_spotlight_images();
             spotlight_shadow_target.reset();
             sun_shadow_target.reset();
+            sun_caustic_target.reset();
             sun_sky_aperture_target.reset();
             sun_dynamic_target.reset();
             // Context-owned GL queries must be deleted before the context
@@ -1443,6 +1446,7 @@ namespace jkgm {
                 sun_shadow_last_validation={};
                 // Sky projection cache cannot survive a level/mode reset.
                 sun_sky_aperture_target.reset();
+                sun_caustic_target.reset();
                 sun_level_has_sky=true;
                 sun_level_sky_known=false;
                 sun_level_sky_sun_active=false;
@@ -9025,6 +9029,7 @@ namespace jkgm {
             ogs->game_post_opaque_composite_program.set_coverage_normal_sampler(5);
             auto &prog=ogs->game_post_opaque_composite_program;
             prog.set_spotlight_count(0);
+            prog.set_sun_caustics(false,0.0f);
             prog.set_sun_dynamic_count(0);
             prog.set_retain_hom_pixels(the_config->retain_hom_pixels);
             prog.set_sun_shadow_receiver_bias_scale(

@@ -608,6 +608,12 @@
     <ClInclude Include="sun_shadow_gpu.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="sun_caustics.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sun_caustics_gpu.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="sun_sky_aperture_gpu.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>

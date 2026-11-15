@@ -244,6 +244,8 @@
     <ClInclude Include="sun_shadow.hpp" />
     <ClInclude Include="sun_pcf_intensity.hpp" />
     <ClInclude Include="sun_shadow_gpu.hpp" />
+    <ClInclude Include="sun_caustics.hpp" />
+    <ClInclude Include="sun_caustics_gpu.hpp" />
     <ClInclude Include="sun_sky_aperture_gpu.hpp" />
     <ClInclude Include="sun_sky_caster_mask.hpp" />
     <ClInclude Include="sun_sky_surface.hpp" />
