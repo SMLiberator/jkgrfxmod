@@ -1848,13 +1848,20 @@ build in `jkgm/shaders/`. Keep the native `jkgm.exe` bootstrap.
 With `use_gpu_cache` enabled, JK.dll COG mutation tracking is now standard,
 without a separate configuration option. The renderer wraps 16 mesh/material
 mutator verb registrations, preserving the original COG handlers and results. A mutation bumps a global generation: cached 3DOs only need a new
-source-byte signature when the generation changes, their mesh header changes, or
-once every 32 frames for an integrity audit. An audit mismatch permanently
-disables the shortcut for that session and restores original per-frame hashing.
-If the expected JK.dll registrations are missing, full hashing remains active.
+source-byte signature when the generation changes or their mesh header changes.
+The former mandatory 32-frame audit is removed. For troubleshooting, configure
+`"gpu_mesh_integrity_audit_interval": 60.0` to rehash visible cached meshes
+at most once every 60 seconds. Its default is `0.0`, meaning **no periodic
+audits**. Enabled audits log how many existing meshes were verified and any
+untracked changes, with the model/mesh identity, pointers and signatures.
+An unexpected change updates that mesh without silently switching all meshes
+to per-frame hashing. If the expected JK.dll registrations are missing,
+full per-frame hashing remains active.
 
 **This is not yet a guarantee of instant invalidation for writes originating
-outside the known JK.dll verbs**; those can remain stale until the next audit.
+outside the known JK.dll verbs**; with the audit disabled, in-place changes
+that preserve mesh header fields may remain stale. The opt-in audit is a
+diagnostic to identify such writes so their mutation paths can be tracked.
 Texture uploads/residency and per-Thing lighting are separate from mesh
 revision tracking. Use `"profile_renderer": true` to monitor
 `PERF gpu_3do source_check_us_avg`, `checks_avg`, and

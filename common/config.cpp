@@ -277,6 +277,15 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("use_gpu_cache")) {
             j.at("use_gpu_cache").get_to(rv->use_gpu_cache);
         }
+        if(j.contains("gpu_mesh_integrity_audit_interval")) {
+            auto const &v=j.at("gpu_mesh_integrity_audit_interval");
+            if(!v.is_number())
+                throw std::runtime_error("gpu_mesh_integrity_audit_interval must be numeric (0..3600 seconds)");
+            double const seconds=v.get<double>();
+            if(!std::isfinite(seconds) || seconds<0.0 || seconds>3600.0)
+                throw std::runtime_error("gpu_mesh_integrity_audit_interval must be between 0 and 3600 seconds");
+            rv->gpu_mesh_integrity_audit_interval=seconds;
+        }
         if(j.contains("enable_gpu_sprite_instancing")) {
             j.at("enable_gpu_sprite_instancing").get_to(
                 rv->enable_gpu_sprite_instancing);

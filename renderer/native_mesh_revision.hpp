@@ -14,5 +14,4 @@ namespace mesh_revision {
     void finish();
     bool active();
     uint64_t current();
-    void report_untracked();
 }

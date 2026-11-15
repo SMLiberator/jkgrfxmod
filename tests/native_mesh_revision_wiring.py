@@ -32,7 +32,6 @@ for original in (
     "mesh_revision::finish(",
     "mesh_revision::current(",
     "mesh_revision::active(",
-    "mesh_revision::report_untracked(",
 ):
     assert original in main, original
 
@@ -53,6 +52,6 @@ assert "++generation;" in impl
 assert "original_registrar(ctx,wrappers[i],name);" in impl
 assert "original_registrar(ctx,fn,name);" in impl
 assert "complete=registered_mask==((1U<<mutator_count)-1U);" in impl
-assert "return complete && !untracked_write;" in impl
-assert "if(untracked_write)return;" in impl
+assert "return complete;" in impl
+assert "untracked_write" not in impl
 print("Separate JK.dll COG mesh revision module wiring and ABI preserved")

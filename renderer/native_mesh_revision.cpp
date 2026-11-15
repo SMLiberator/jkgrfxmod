@@ -23,7 +23,6 @@ namespace mesh_revision {
     uint32_t registered_mask=0U;
     uint64_t generation=1U;
     bool complete=false;
-    bool untracked_write=false;
 
     template<size_t I>
     void __cdecl invoke(void *ctx)
@@ -61,7 +60,6 @@ namespace mesh_revision {
         registered_mask=0U;
         originals.fill(nullptr);
         complete=false;
-        untracked_write=false;
     }
     void finish()
     {
@@ -69,20 +67,12 @@ namespace mesh_revision {
         if(complete) {
             LOG_INFO("GPU 3DO revision tracking: ",mutator_count,
                      " JK.dll mesh/material COG mutation verbs wrapped; "
-                     "periodic signature audit every 32 frames");
+                     "integrity audits disabled by default (configurable timer)");
         } else {
             LOG_WARNING("GPU 3DO revision tracking unavailable: missing JK.dll "
                         "mesh/material verb registrations; full hashing retained");
         }
     }
-    bool active() {return complete && !untracked_write;}
+    bool active() {return complete;}
     uint64_t current() {return generation;}
-    void report_untracked()
-    {
-        if(untracked_write)return;
-        untracked_write=true;
-        LOG_WARNING("GPU 3DO revision audit detected a mesh write outside "
-                    "tracked JK.dll COG verbs; disabling fast path, "
-                    "restoring full per-frame hashing for this session");
-    }
 }

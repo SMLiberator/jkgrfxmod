@@ -338,6 +338,11 @@ namespace {
     void clear_moving_sprite_decals();
     uint64_t next_gpu_id=1;
     uint64_t gpu_frame_serial=1;
+    // Optional, wall-clock-gated diagnostic. Zero interval never schedules it.
+    uint64_t gpu_mesh_integrity_audit_frame=0;
+    uint64_t gpu_mesh_next_audit_ms=0;
+    uint64_t gpu_mesh_audit_checked=0;
+    uint64_t gpu_mesh_audit_untracked=0;
     // Per-mesh native fallback reason retained for the shadow-only sidecar.
     // Visible GPU lighting is limited to 16 point lights, but the original
     // opaque mesh must still contribute to sunlight depth if it falls back.
@@ -2023,13 +2028,18 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         it->second.lighting_mode==m.lighting_mode;
     bool const revision_fastpath=mesh_revision::active();
     uint64_t const current_generation=mesh_revision::current();
-    bool const audit_frame=(gpu_frame_serial%32U)==0U;
+    bool const audit_frame=gpu_mesh_integrity_audit_frame==gpu_frame_serial;
     bool const should_hash=!header_unchanged ||
         (revision_fastpath
           ? (it->second.source_checked_generation!=current_generation ||
              (audit_frame && it->second.last_audit_frame!=gpu_frame_serial))
           : it->second.source_checked_frame!=gpu_frame_serial);
     if(should_hash) {
+        // Count only audit-specific hash work, not verb-triggered rechecks.
+        bool const audit_only=revision_fastpath && audit_frame &&
+            header_unchanged &&
+            it->second.source_checked_generation==current_generation;
+        if(audit_only) ++gpu_mesh_audit_checked;
         bool const profiling=the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
@@ -2051,12 +2061,16 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                 "invalid_mesh_source_memory");
             return false;
         }
-        if(revision_fastpath && audit_frame && header_unchanged &&
-           it->second.source_checked_generation==current_generation &&
-           it->second.source_signature!=signature) {
-            // A periodic audit caught a modification that bypassed every
-            // known JK.dll mutation verb. Switch back to exact old behavior.
-            mesh_revision::report_untracked();
+        if(audit_only && it->second.source_signature!=signature) {
+            ++gpu_mesh_audit_untracked;
+            // Report exact source and rebuild that mesh. Do not permanently
+            // enable per-frame hashing as an undocumented fallback.
+            LOG_WARNING("GPU 3DO integrity audit found UNTRACKED source change: ",
+                        gpu_3do_source_detail(m),
+                        " cached_signature=",it->second.source_signature,
+                        " current_signature=",signature,
+                        " tracked_generation=",current_generation,
+                        " frame=",gpu_frame_serial);
         }
         if(!header_unchanged || it->second.source_signature!=signature) {
             char const *failure="unknown_snapshot_error";
@@ -2381,7 +2395,33 @@ std::vector<jkgm::gpu_3do_instance> jkgm::consume_gpu_3do_instances()
     out.swap(pending_gpu_instances);
     moving_mesh_occurrences.clear();
     native_moving_decal_receivers.clear();
+    // Report each completed diagnostic, including zero untracked changes.
+    if(gpu_mesh_integrity_audit_frame==gpu_frame_serial)
+        LOG_INFO("GPU 3DO integrity audit complete: frame=",
+                 gpu_frame_serial," verified_meshes=",gpu_mesh_audit_checked,
+                 " untracked_changes=",gpu_mesh_audit_untracked);
     ++gpu_frame_serial;
+    if(the_config && the_config->gpu_mesh_integrity_audit_interval>0.0 &&
+       mesh_revision::active()) {
+        uint64_t const now=GetTickCount64();
+        uint64_t const interval_ms=std::max<uint64_t>(1U,
+            static_cast<uint64_t>(
+                the_config->gpu_mesh_integrity_audit_interval*1000.0));
+        if(gpu_mesh_next_audit_ms==0U) {
+            gpu_mesh_next_audit_ms=now+interval_ms;
+            LOG_INFO("GPU 3DO integrity audit enabled: interval_seconds=",
+                     the_config->gpu_mesh_integrity_audit_interval);
+        }
+        if(now>=gpu_mesh_next_audit_ms) {
+            gpu_mesh_integrity_audit_frame=gpu_frame_serial;
+            gpu_mesh_audit_checked=0;
+            gpu_mesh_audit_untracked=0;
+            gpu_mesh_next_audit_ms=now+interval_ms;
+        } else gpu_mesh_integrity_audit_frame=0U;
+    } else {
+        gpu_mesh_integrity_audit_frame=0U;
+        gpu_mesh_next_audit_ms=0U;
+    }
     return out;
 }
 void jkgm::reset_gpu_3do_instances()
@@ -2396,6 +2436,10 @@ void jkgm::reset_gpu_3do_instances()
     gpu_sprite_quads.clear();
     gpu_mat_residency.clear();
     ++gpu_frame_serial;
+    gpu_mesh_integrity_audit_frame=0U;
+    gpu_mesh_next_audit_ms=0U;
+    gpu_mesh_audit_checked=0U;
+    gpu_mesh_audit_untracked=0U;
     gpu_native_stats={};
 }
 
