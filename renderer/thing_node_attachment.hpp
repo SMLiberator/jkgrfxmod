@@ -9,8 +9,12 @@
 #include <mutex>
 #include <vector>
 namespace jkgm {
+    constexpr uint32_t native_attach_thing_face=0x2U;
     constexpr uint32_t native_attach_thing=0x4U;
     constexpr uint32_t native_attach_no_move=0x8U;
+    inline bool native_attach_has_thing_parent(uint32_t flags) {
+        return (flags & (native_attach_thing_face|native_attach_thing))!=0U;
+    }
     // 0x80 is unused by stock JK/MotS attach flags (<= 0x10); reserved
     // for a live COG-readable animated-node attachment.
     constexpr uint32_t native_attach_node=0x80U;
@@ -85,6 +89,20 @@ namespace jkgm {
         void erase(uintptr_t child) {
             std::lock_guard<std::mutex> lock(mutex_);
             entries_.erase(child);
+        }
+        // Atomically remove the dying Thing's own node link and all node
+        // children it owns. Caller detaches children only after validating
+        // their native identities; no pointers are dereferenced under lock.
+        std::vector<node_attachment> take_related(uintptr_t thing) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            std::vector<node_attachment> children;
+            for(auto it=entries_.begin();it!=entries_.end();) {
+                bool const is_child=it->second.parent==thing;
+                if(is_child)children.push_back(it->second);
+                if(is_child || it->first==thing)it=entries_.erase(it);
+                else ++it;
+            }
+            return children;
         }
         std::vector<node_attachment> snapshot()const {
             std::lock_guard<std::mutex> lock(mutex_);

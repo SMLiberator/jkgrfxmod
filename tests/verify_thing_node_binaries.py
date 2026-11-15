@@ -106,6 +106,16 @@ def check_game(exe):
         raise ValueError("Native node accessor body no longer matches the audited function")
     print("  PASS hierarchy count, frame counter, puppet refresh, 12-float copy")
 
+    for label, address, expected in (
+        ("sithThing_RemoveThing", 0x004CD1F0, bytes.fromhex(
+            "a1 70 26 83 00 56 8b 74 24 08 57")),
+        ("sithThing_FreeThing", 0x004CD320, bytes.fromhex(
+            "56 8b 74 24 08 8b 46 34 85 c0")),
+    ):
+        if exe.va_bytes(address, len(expected)) != expected:
+            raise ValueError(f"{label} at 0x{address:X}: signature mismatch")
+        print(f"  PASS {label} at 0x{address:X}")
+
     # Separate identification of the JKGM collision routine. These checks
     # deliberately do NOT authorize a runtime detour: callers, ABI and
     # output collision records require independent verification.
@@ -134,6 +144,20 @@ def check_patch(dll):
         if ordinal != expected_ordinal or not fn_rva:
             raise ValueError(f"JK.dll: expected {name} at ordinal {expected_ordinal}")
         print(f"  PASS {name} export #{ordinal}")
+
+    # The original GetThingAttachThing COG handler only accepts flags == 2.
+    # Check its registration thunk and exact comparison before replacing it.
+    for label, address, expected in (
+        ("GetThingAttachThing thunk", dll.image_base + 0x4633D,
+         bytes.fromhex("e9 ae 38 00 00")),
+        ("GetThingAttachThing body", dll.image_base + 0x49BF0,
+         bytes.fromhex("55 8b ec 81 ec e4 00 00 00")),
+        ("GetThingAttachThing exact flag comparison", dll.image_base + 0x49C34,
+         bytes.fromhex("8b 45 f8 83 78 34 02 75 18")),
+    ):
+        if dll.va_bytes(address, len(expected)) != expected:
+            raise ValueError(f"{label} at 0x{address:X}: signature mismatch")
+        print(f"  PASS {label} at 0x{address:X}")
 
 
 def main():

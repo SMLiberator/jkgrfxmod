@@ -8848,6 +8848,10 @@ namespace {
     constexpr uintptr_t node_attach_native_update=0x004CC4B0U;
     constexpr uintptr_t node_attach_native_attach=0x004CE5A0U;
     constexpr uintptr_t node_attach_native_detach=0x004CE660U;
+    // JKGM's single-Thing remove and free entrypoints both inline parts of
+    // the destruction flow; intercept both before Thing slots are invalidated.
+    constexpr uintptr_t node_attach_native_remove=0x004CD1F0U;
+    constexpr uintptr_t node_attach_native_free=0x004CD320U;
     constexpr uintptr_t node_attach_native_setpose=0x004CDAB0U;
     constexpr uintptr_t node_attach_native_setsector=0x004CD4B0U;
     using native_thing_update_fn=void(__cdecl *)(float,int);
@@ -8859,6 +8863,10 @@ namespace {
         reinterpret_cast<native_thing_update_fn>(node_attach_native_update);
     native_thing_detach_fn RealNativeThingDetach=
         reinterpret_cast<native_thing_detach_fn>(node_attach_native_detach);
+    native_thing_detach_fn RealNativeThingRemove=
+        reinterpret_cast<native_thing_detach_fn>(node_attach_native_remove);
+    native_thing_detach_fn RealNativeThingFree=
+        reinterpret_cast<native_thing_detach_fn>(node_attach_native_free);
 
     bool node_attach_native_signatures_match()
     {
@@ -8876,6 +8884,10 @@ namespace {
                      {0x83,0xec,0x0c,0x56,0x8b,0x74,0x24,0x14,0x57}) &&
                match(node_attach_native_detach,
                      {0x83,0xec,0x0c,0x53,0x56,0x8b,0x74,0x24,0x18,0x57}) &&
+               match(node_attach_native_remove,
+                     {0xa1,0x70,0x26,0x83,0x00,0x56,0x8b,0x74,0x24,0x08,0x57}) &&
+               match(node_attach_native_free,
+                     {0x56,0x8b,0x74,0x24,0x08,0x8b,0x46,0x34,0x85,0xc0}) &&
                match(node_attach_native_setpose,
                      {0x8b,0x44,0x24,0x04,0x8b,0x54,0x24,0x08,0x56,0x57}) &&
                match(node_attach_native_setsector,
@@ -9015,6 +9027,46 @@ namespace {
         }
     }
 
+    // Sith's removal path detaches the dying Thing from its own parent,
+    // but does not detach its children. Do that before freeing the parent:
+    // native DetachThing clears flags (including NOMOVE/NODE), parent links,
+    // and intrusive child-list pointers while both Thing slots are valid.
+    void detach_native_node_children_before_free(void *thing)
+    {
+        uintptr_t const dying=reinterpret_cast<uintptr_t>(thing);
+        auto children=jkgm::get_node_attachment_registry().take_related(dying);
+        if(children.empty())return;
+        uint32_t dying_signature=0;
+        if(!read_node_attachment_identity(dying,dying_signature))return;
+        for(auto const &rec:children) {
+            if(rec.parent_signature!=dying_signature)continue;
+            uint32_t child_signature=0;
+            if(!read_node_attachment_identity(rec.child,child_signature) ||
+               child_signature!=rec.child_signature)continue;
+            uint32_t flags=0,attached=0;
+            std::memcpy(&flags,reinterpret_cast<void const *>(rec.child+0x34),4);
+            std::memcpy(&attached,reinterpret_cast<void const *>(rec.child+0x58),4);
+            if((flags & (jkgm::native_attach_thing |
+                          jkgm::native_attach_node)) !=
+                          (jkgm::native_attach_thing |
+                           jkgm::native_attach_node) ||
+               attached!=dying)continue; // vanilla DetachThing or reattach won
+            RealNativeThingDetach(reinterpret_cast<void *>(rec.child));
+        }
+    }
+
+    void __cdecl HookedNativeThingRemove(void *thing)
+    {
+        detach_native_node_children_before_free(thing);
+        RealNativeThingRemove(thing);
+    }
+
+    void __cdecl HookedNativeThingFree(void *thing)
+    {
+        detach_native_node_children_before_free(thing);
+        RealNativeThingFree(thing);
+    }
+
     void __cdecl HookedNativeThingDetach(void *child)
     {
         jkgm::get_node_attachment_registry().erase(
@@ -9038,9 +9090,15 @@ namespace {
         LONG const b=a==NO_ERROR ?
             DetourAttach(&(PVOID&)RealNativeThingDetach,
                          HookedNativeThingDetach):a;
-        if(a!=NO_ERROR || b!=NO_ERROR) {
+        LONG const c=b==NO_ERROR ?
+            DetourAttach(&(PVOID&)RealNativeThingRemove,
+                         HookedNativeThingRemove):b;
+        LONG const d=c==NO_ERROR ?
+            DetourAttach(&(PVOID&)RealNativeThingFree,
+                         HookedNativeThingFree):c;
+        if(d!=NO_ERROR) {
             DetourTransactionAbort();
-            LOG_WARNING("ThingNode attachment Detours failed: ",b);
+            LOG_WARNING("ThingNode attachment Detours failed: ",d);
             return false;
         }
         LONG const committed=DetourTransactionCommit();
@@ -9057,8 +9115,10 @@ namespace {
         saber_light_overrides().clear();
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
-        DetourDetach(&(PVOID&)RealNativeThingUpdate,HookedNativeThingUpdate);
+        DetourDetach(&(PVOID&)RealNativeThingFree,HookedNativeThingFree);
+        DetourDetach(&(PVOID&)RealNativeThingRemove,HookedNativeThingRemove);
         DetourDetach(&(PVOID&)RealNativeThingDetach,HookedNativeThingDetach);
+        DetourDetach(&(PVOID&)RealNativeThingUpdate,HookedNativeThingUpdate);
         DetourTransactionCommit();
     }
 
@@ -10360,6 +10420,33 @@ namespace {
             read,reinterpret_cast<uintptr_t>(thing)));
     }
 
+    // JK.dll's original handler compares attach_flags == 2 exactly. Both
+    // THINGFACE (0x2) and THING (0x4), with arbitrary extra bits, refer to
+    // a Thing in the shared +0x58 parent slot.
+    void __cdecl cog_get_thing_attach_thing(void *ctx)
+    {
+        int attached_index=-1;
+        void *thing=cog_pop_thing(ctx);
+        uintptr_t const child=reinterpret_cast<uintptr_t>(thing);
+        uint32_t child_signature=0;
+        if(read_node_attachment_identity(child,child_signature)) {
+            uint32_t flags=0,parent=0;
+            std::memcpy(&flags,reinterpret_cast<void const *>(child+0x34),4);
+            std::memcpy(&parent,reinterpret_cast<void const *>(child+0x58),4);
+            if(jkgm::native_attach_has_thing_parent(flags) &&
+               parent && uintptr_t(parent)!=child) {
+                uint32_t parent_signature=0;
+                if(read_node_attachment_identity(parent,parent_signature)) {
+                    int32_t index=-1;
+                    std::memcpy(&index,
+                        reinterpret_cast<void const *>(uintptr_t(parent)+0x04),4);
+                    if(index>=0)attached_index=index;
+                }
+            }
+        }
+        cog_push_int(ctx,attached_index);
+    }
+
     struct cog_verb_entry {
         char const *name;
         cog_handler_type handler;
@@ -10483,6 +10570,7 @@ namespace {
     // and do not modify JK.dll's code or its other registered handlers.
     thread_local cog_register_verb_type jk_register_forward=nullptr;
     thread_local bool jk_create_thing_getter_replaced=false;
+    thread_local bool jk_attach_thing_getter_replaced=false;
 
     bool jk_create_thing_getter_matches(cog_handler_type handler)
     {
@@ -10516,7 +10604,37 @@ namespace {
                         expected_unsafe_read,sizeof(expected_unsafe_read))==0;
     }
 
-    void __cdecl register_jk_verb_with_create_thing_fix(
+    // The supplied JK.dll registers GetThingAttachThing through this exact
+    // thunk. Only replace the verified handler; leave other DLLs untouched.
+    bool jk_attach_thing_getter_matches(cog_handler_type handler)
+    {
+        HMODULE const dll=GetModuleHandleA("JK.dll");
+        if(!dll)return false;
+        auto const base=reinterpret_cast<uintptr_t>(dll);
+        uintptr_t const thunk=base+0x4633dU;
+        uintptr_t const body=base+0x49bf0U;
+        uintptr_t const exact_compare=base+0x49c34U;
+        constexpr uint8_t thunk_bytes[]{0xe9,0xae,0x38,0x00,0x00};
+        constexpr uint8_t body_bytes[]{
+            0x55,0x8b,0xec,0x81,0xec,0xe4,0x00,0x00,0x00};
+        constexpr uint8_t compare_bytes[]{
+            0x8b,0x45,0xf8,0x83,0x78,0x34,0x02,0x75,0x18};
+        return reinterpret_cast<uintptr_t>(handler)==thunk &&
+            gpu_span_readable(reinterpret_cast<void const*>(thunk),
+                              sizeof(thunk_bytes)) &&
+            gpu_span_readable(reinterpret_cast<void const*>(body),
+                              sizeof(body_bytes)) &&
+            gpu_span_readable(reinterpret_cast<void const*>(exact_compare),
+                              sizeof(compare_bytes)) &&
+            std::memcmp(reinterpret_cast<void const*>(thunk),
+                        thunk_bytes,sizeof(thunk_bytes))==0 &&
+            std::memcmp(reinterpret_cast<void const*>(body),
+                        body_bytes,sizeof(body_bytes))==0 &&
+            std::memcmp(reinterpret_cast<void const*>(exact_compare),
+                        compare_bytes,sizeof(compare_bytes))==0;
+    }
+
+    void __cdecl register_jk_verb_with_compat_fixes(
         void *ctx,cog_handler_type handler,char const *name)
     {
         if(!jk_register_forward)return;
@@ -10525,6 +10643,13 @@ namespace {
            jk_create_thing_getter_matches(handler)) {
             jk_register_forward(ctx,cog_get_thing_create_thing,name);
             jk_create_thing_getter_replaced=true;
+            return;
+        }
+        if(name && std::strcmp(name,"getthingattachthing")==0 &&
+           cog_helpers_match() &&
+           jk_attach_thing_getter_matches(handler)) {
+            jk_register_forward(ctx,cog_get_thing_attach_thing,name);
+            jk_attach_thing_getter_replaced=true;
             return;
         }
         jk_register_forward(ctx,handler,name);
@@ -10538,12 +10663,15 @@ namespace {
         jk_register_forward=wrap_mesh ?
             mesh_revision::register_mutator : register_verb;
         jk_create_thing_getter_replaced=false;
+        jk_attach_thing_getter_replaced=false;
         TrueJkInitNewCogVerbs(register_verb ?
-            register_jk_verb_with_create_thing_fix : nullptr,ctx);
+            register_jk_verb_with_compat_fixes : nullptr,ctx);
         if(wrap_mesh)mesh_revision::finish();
         bool const getter_replaced=jk_create_thing_getter_replaced;
+        bool const attach_getter_replaced=jk_attach_thing_getter_replaced;
         jk_register_forward=nullptr;
         jk_create_thing_getter_replaced=false;
+        jk_attach_thing_getter_replaced=false;
 
         if(!cog_helpers_match()) {
             LOG_ERROR("jk.exe does not match the build the fog COG verbs were written for; "
@@ -10589,6 +10717,10 @@ namespace {
             LOG_DEBUG("JK.dll GetThingCreateThingTemplate left untouched: "
                       "unrecognized DLL handler or COG helper signatures");
         }
+        if(attach_getter_replaced)
+            LOG_INFO("JK.dll GetThingAttachThing bitmask getter enabled (0x2|0x4)");
+        else
+            LOG_DEBUG("JK.dll GetThingAttachThing left untouched: unrecognized handler");
         for(auto const &verb : fx_verbs) {
             if(!native_hud_ammo_hook_active &&
                (std::strcmp(verb.name,"setammobin")==0 ||
