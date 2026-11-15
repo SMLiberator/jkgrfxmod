@@ -9150,6 +9150,13 @@ namespace jkgm {
                         model_draws[cascade].push_back({&inst,&group,coefficient});
                         hash_u32(uint32_t(inst.id));
                         hash_u32(uint32_t(inst.id>>32));
+                        // Immutable cached geometry changes identity when
+                        // a model mesh is revised, even if its owner pose,
+                        // group count and material remain unchanged.
+                        auto const geometry_ptr=reinterpret_cast<uintptr_t>(
+                            inst.geometry.get());
+                        hash_u32(uint32_t(geometry_ptr));
+                        hash_u32(uint32_t(uint64_t(geometry_ptr)>>32));
                         hash_u32(group.offset);
                         hash_u32(group.count);
                         hash_u32(uint32_t(group.material));
