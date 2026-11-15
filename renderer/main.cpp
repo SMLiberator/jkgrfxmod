@@ -2391,6 +2391,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         }
         if(revision_fastpath && audit_frame && header_unchanged &&
            it->second.source_checked_generation==current_generation &&
+           it->second.material_checked_generation==material_generation &&
            it->second.source_signature!=signature) {
             // A periodic audit caught an unclassified in-place source edit.
             // Switch back to full per-frame hashing for safety.
@@ -2859,6 +2860,7 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 if(revision_fastpath && audit_frame &&
                    cached_geometry_ready &&
                    it->second.source_checked_generation==generation &&
+                   it->second.material_checked_generation==material_generation &&
                    it->second.source_signature!=signature) {
                     // A COG/binary mutation escaped tracked JK.dll verbs:
                     // use the standard fallback to per-frame hashing.
