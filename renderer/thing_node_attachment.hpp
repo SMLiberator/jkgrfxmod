@@ -18,6 +18,12 @@ namespace jkgm {
     // 0x80 is unused by stock JK/MotS attach flags (<= 0x10); reserved
     // for a live COG-readable animated-node attachment.
     constexpr uint32_t native_attach_node=0x80U;
+    constexpr uint32_t native_thing_corpse=9U;
+    constexpr uint32_t native_thing_actor=10U;
+    inline bool native_actor_death_confirmed(uint32_t kind,float health) {
+        return (kind==native_thing_actor || kind==native_thing_corpse) &&
+               std::isfinite(health) && health<=0.0f;
+    }
     struct node_attachment {
         uintptr_t child=0,parent=0;
         uint32_t child_signature=0,parent_signature=0;

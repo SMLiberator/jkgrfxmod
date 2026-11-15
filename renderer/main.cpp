@@ -8848,6 +8848,8 @@ namespace {
     constexpr uintptr_t node_attach_native_update=0x004CC4B0U;
     constexpr uintptr_t node_attach_native_attach=0x004CE5A0U;
     constexpr uintptr_t node_attach_native_detach=0x004CE660U;
+    // KillActor commits death before delayed corpse conversion (1000 ms).
+    constexpr uintptr_t node_attach_native_actor_kill=0x004ED240U;
     // JKGM's single-Thing remove and free entrypoints both inline parts of
     // the destruction flow; intercept both before Thing slots are invalidated.
     constexpr uintptr_t node_attach_native_remove=0x004CD1F0U;
@@ -8857,6 +8859,7 @@ namespace {
     using native_thing_update_fn=void(__cdecl *)(float,int);
     using native_thing_attach_fn=void(__cdecl *)(void*,void*);
     using native_thing_detach_fn=void(__cdecl *)(void*);
+    using native_thing_actor_kill_fn=void(__cdecl *)(void*,void*,int);
     using native_thing_setpose_fn=void(__cdecl *)(void*,float const*,float const*);
     using native_thing_setsector_fn=void(__cdecl *)(void*,void*,int);
     native_thing_update_fn RealNativeThingUpdate=
@@ -8867,6 +8870,8 @@ namespace {
         reinterpret_cast<native_thing_detach_fn>(node_attach_native_remove);
     native_thing_detach_fn RealNativeThingFree=
         reinterpret_cast<native_thing_detach_fn>(node_attach_native_free);
+    native_thing_actor_kill_fn RealNativeActorKill=
+        reinterpret_cast<native_thing_actor_kill_fn>(node_attach_native_actor_kill);
 
     bool node_attach_native_signatures_match()
     {
@@ -8888,6 +8893,9 @@ namespace {
                      {0xa1,0x70,0x26,0x83,0x00,0x56,0x8b,0x74,0x24,0x08,0x57}) &&
                match(node_attach_native_free,
                      {0x56,0x8b,0x74,0x24,0x08,0x8b,0x46,0x34,0x85,0xc0}) &&
+               match(node_attach_native_actor_kill,
+                     {0x53,0x56,0x8b,0x74,0x24,0x0c,0x57,0x8b,0x06,
+                      0xf6,0xc4,0x02}) &&
                match(node_attach_native_setpose,
                      {0x8b,0x44,0x24,0x04,0x8b,0x54,0x24,0x08,0x56,0x57}) &&
                match(node_attach_native_setsector,
@@ -9031,7 +9039,7 @@ namespace {
     // but does not detach its children. Do that before freeing the parent:
     // native DetachThing clears flags (including NOMOVE/NODE), parent links,
     // and intrusive child-list pointers while both Thing slots are valid.
-    void detach_native_node_children_before_free(void *thing)
+    void detach_native_node_children_for_parent(void *thing)
     {
         uintptr_t const dying=reinterpret_cast<uintptr_t>(thing);
         auto children=jkgm::get_node_attachment_registry().take_related(dying);
@@ -9055,15 +9063,38 @@ namespace {
         }
     }
 
+    // The normal ground-actor death path does not free the Thing yet:
+    // it schedules corpse conversion one second later. Detach now, after
+    // the killed COG was delivered and native KillActor accepted the death.
+    void __cdecl HookedNativeActorKill(void *actor,void *attacker,int damage_type)
+    {
+        uintptr_t const ptr=reinterpret_cast<uintptr_t>(actor);
+        uint32_t original_signature=0;
+        bool const had_identity=read_node_attachment_identity(
+            ptr,original_signature);
+        RealNativeActorKill(actor,attacker,damage_type);
+        if(!had_identity)return;
+        uint32_t current_signature=0;
+        if(!read_node_attachment_identity(ptr,current_signature) ||
+           current_signature!=original_signature ||
+           !gpu_span_readable(actor,0x138U))return;
+        uint32_t kind=0;
+        float health=0.0f;
+        std::memcpy(&kind,reinterpret_cast<void const *>(ptr+0x0c),4);
+        std::memcpy(&health,reinterpret_cast<void const *>(ptr+0x134),4);
+        if(!jkgm::native_actor_death_confirmed(kind,health))return;
+        detach_native_node_children_for_parent(actor);
+    }
+
     void __cdecl HookedNativeThingRemove(void *thing)
     {
-        detach_native_node_children_before_free(thing);
+        detach_native_node_children_for_parent(thing);
         RealNativeThingRemove(thing);
     }
 
     void __cdecl HookedNativeThingFree(void *thing)
     {
-        detach_native_node_children_before_free(thing);
+        detach_native_node_children_for_parent(thing);
         RealNativeThingFree(thing);
     }
 
@@ -9096,9 +9127,12 @@ namespace {
         LONG const d=c==NO_ERROR ?
             DetourAttach(&(PVOID&)RealNativeThingFree,
                          HookedNativeThingFree):c;
-        if(d!=NO_ERROR) {
+        LONG const e=d==NO_ERROR ?
+            DetourAttach(&(PVOID&)RealNativeActorKill,
+                         HookedNativeActorKill):d;
+        if(e!=NO_ERROR) {
             DetourTransactionAbort();
-            LOG_WARNING("ThingNode attachment Detours failed: ",d);
+            LOG_WARNING("ThingNode attachment Detours failed: ",e);
             return false;
         }
         LONG const committed=DetourTransactionCommit();
@@ -9115,6 +9149,7 @@ namespace {
         saber_light_overrides().clear();
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
+        DetourDetach(&(PVOID&)RealNativeActorKill,HookedNativeActorKill);
         DetourDetach(&(PVOID&)RealNativeThingFree,HookedNativeThingFree);
         DetourDetach(&(PVOID&)RealNativeThingRemove,HookedNativeThingRemove);
         DetourDetach(&(PVOID&)RealNativeThingDetach,HookedNativeThingDetach);

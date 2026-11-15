@@ -111,6 +111,8 @@ def check_game(exe):
             "a1 70 26 83 00 56 8b 74 24 08 57")),
         ("sithThing_FreeThing", 0x004CD320, bytes.fromhex(
             "56 8b 74 24 08 8b 46 34 85 c0")),
+        ("sithActor_KillActor", 0x004ED240, bytes.fromhex(
+            "53 56 8b 74 24 0c 57 8b 06 f6 c4 02")),
     ):
         if exe.va_bytes(address, len(expected)) != expected:
             raise ValueError(f"{label} at 0x{address:X}: signature mismatch")

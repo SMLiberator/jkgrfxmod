@@ -29,6 +29,12 @@ int main() {
     assert(native_attach_has_thing_parent(native_attach_thing));
     assert(native_attach_has_thing_parent(0x8cU)); // Thing, NODE, NOMOVE
     assert(native_attach_has_thing_parent(0x82U)); // Thing-face, NODE
+    assert(native_actor_death_confirmed(native_thing_actor,0.0f));
+    assert(native_actor_death_confirmed(native_thing_corpse,0.0f));
+    assert(!native_actor_death_confirmed(native_thing_actor,100.0f));
+    assert(!native_actor_death_confirmed(native_thing_actor,NAN));
+    assert(!native_actor_death_confirmed(1U,0.0f)); // players unchanged
+    assert(!native_actor_death_confirmed(0U,0.0f)); // free Thing slots
     a.offset[0]=INFINITY;
     assert(!node_attachment_valid(a));
     a.offset[0]=0.5f;
