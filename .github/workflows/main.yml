@@ -42,6 +42,7 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\native_mesh_revision_policy.cpp /Fe:native_mesh_revision_policy_test.exe
         native_mesh_revision_policy_test.exe
         python3 tests/gpu_mesh_cache_wiring.py
+        python3 tests/native_mesh_revision_wiring.py
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_uv.cpp /Fe:gpu_3do_uv_test.exe
         gpu_3do_uv_test.exe
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe

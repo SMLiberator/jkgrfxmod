@@ -48,7 +48,7 @@ expected = (
 names = impl.split("names{{", 1)[1].split("}};", 1)[0]
 found = tuple(re.findall(r'"([a-z]+)"', names))
 assert found == expected, (found, expected)
-assert "constexpr size_t mutator_count=16U;" in impl
+assert "constexpr std::size_t mutator_count=16U;" in header
 assert "originals[I](ctx);" in impl
 assert "++generation;" in impl
 assert "original_registrar(ctx,wrappers[i],name);" in impl
