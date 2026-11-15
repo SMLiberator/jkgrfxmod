@@ -130,6 +130,9 @@ jobs:
         camera_hud_thing_test.exe
         python3 tests/camera_hud_deferred.py
 
+    - name: DirectDraw HUD overlay layout regression
+      run: python3 tests/hud_overlay_layout.py
+
     - name: COG RayCastEx native collideSize sphere regression tests
       shell: cmd
       run: |
