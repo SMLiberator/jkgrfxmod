@@ -383,13 +383,15 @@ namespace {
     void gpu_mesh_hash_reason(bool existing,bool header_ready,
                               bool revision_fastpath,
                               uint64_t checked_generation,
-                              uint64_t current_generation)
+                              uint64_t current_generation,
+                              bool material_changed=false)
     {
         if(!the_config || !the_config->profile_renderer)return;
         if(!existing)++gpu_native_stats.cache_hash_new;
         else if(!header_ready)++gpu_native_stats.cache_hash_header;
         else if(!revision_fastpath)++gpu_native_stats.cache_hash_fallback;
-        else if(checked_generation!=current_generation)
+        else if(material_changed ||
+                checked_generation!=current_generation)
             ++gpu_native_stats.cache_hash_revision;
         else ++gpu_native_stats.cache_hash_audit;
     }
@@ -811,6 +813,53 @@ namespace {
         }
         value=h.value;
         return true;
+    }
+
+    // A full source hash after SetModelMesh/Clear/Reload must not trust
+    // the ordinary positive VirtualQuery memo if the COG handler decommitted
+    // an old buffer earlier in the SAME native frame. These checks happen
+    // only for meshes actually reached by a camera, never for the cache.
+    bool gpu_mesh_dirty_source_readable(native_mesh const &m,
+                                        float const *rgb)
+    {
+        return m.num_vertices>=3 && m.num_vertices<=65536 &&
+            m.num_faces>=1 && m.num_faces<=65536 &&
+            gpu_mutation_span_readable(
+                m.vertices,size_t(m.num_vertices)*3*sizeof(float)) &&
+            gpu_mutation_span_readable(
+                m.faces,size_t(m.num_faces)*sizeof(native_face)) &&
+            (!rgb || gpu_mutation_span_readable(
+                rgb,size_t(m.num_vertices)*3*sizeof(float))) &&
+            (!m.uvs || m.num_uvs<=0 || m.num_uvs>65536 ||
+             gpu_mutation_span_readable(
+                m.uvs,size_t(m.num_uvs)*2*sizeof(float))) &&
+            (!m.vertex_lights || gpu_mutation_span_readable(
+                m.vertex_lights,size_t(m.num_vertices)*sizeof(float))) &&
+            (!m.normals || gpu_mutation_span_readable(
+                m.normals,size_t(m.num_vertices)*3*sizeof(float)));
+    }
+
+    // Called for one USED mesh when a face material mutation epoch changed.
+    // MAT edits are frequent and cheap to verify: avoid hashing all vertex,
+    // UV, normal and lighting buffers unless this material signature differs.
+    bool gpu_mesh_lazy_material_changed(native_mesh const &m,
+                                        cached_gpu_mesh &cached,
+                                        uint64_t material_generation)
+    {
+        bool const profiling=the_config && the_config->profile_renderer;
+        auto const start=profiling ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
+        uint64_t signature=0;
+        bool const changed=!gpu_mesh_material_signature(m,signature) ||
+                           signature!=cached.material_signature;
+        if(!changed)cached.material_checked_generation=material_generation;
+        if(profiling) {
+            ++gpu_native_stats.mutation_scans;
+            ++gpu_native_stats.mutation_scanned;
+            if(changed)++gpu_native_stats.mutation_invalidated;
+            gpu_native_stats.mutation_ns+=elapsed_native_ns(start);
+        }
+        return changed;
     }
 
     // A full source signature once per *unique mesh per frame* detects
@@ -2292,25 +2341,40 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         it->second.lighting_mode==m.lighting_mode;
     bool const revision_fastpath=mesh_revision::active();
     uint64_t const current_generation=mesh_revision::source_current();
+    uint64_t const material_generation=mesh_revision::material_current();
     bool const audit_frame=(gpu_frame_serial%32U)==0U;
-    bool const should_hash=!header_unchanged ||
+    bool const dirty_full_source=revision_fastpath && header_unchanged &&
+        it->second.source_checked_generation!=current_generation;
+    bool should_hash=!header_unchanged ||
         (revision_fastpath
-          ? (it->second.source_checked_generation!=current_generation ||
+          ? (dirty_full_source ||
              (audit_frame && it->second.last_audit_frame!=gpu_frame_serial))
           : it->second.source_checked_frame!=gpu_frame_serial);
+    bool material_changed=false;
+    if(!should_hash && revision_fastpath &&
+       it->second.material_checked_generation!=material_generation) {
+        material_changed=gpu_mesh_lazy_material_changed(
+            m,it->second,material_generation);
+        if(material_changed)should_hash=true;
+    }
     if(should_hash) {
         gpu_mesh_hash_reason(it!=gpu_mesh_cache.end(),header_unchanged,
                              revision_fastpath,
                              it!=gpu_mesh_cache.end()
                                  ?it->second.source_checked_generation:0U,
-                             current_generation);
+                             current_generation,material_changed);
         bool const profiling=the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
         uint64_t signature=0,material_signature=0;
         char const *source_failure=nullptr;
-        bool const readable=gpu_mesh_source_signature(
-            m,vertex_rgb,signature,&source_failure,&material_signature);
+        bool const readable=
+            (!dirty_full_source ||
+             gpu_mesh_dirty_source_readable(m,vertex_rgb)) &&
+            gpu_mesh_source_signature(
+                m,vertex_rgb,signature,&source_failure,&material_signature);
+        if(!readable && !source_failure)
+            source_failure="unreadable_changed_mesh_source";
         if(profiling) {
             ++gpu_native_stats.source_checks;
             gpu_native_stats.source_ns+=elapsed_native_ns(start);
@@ -2355,6 +2419,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             updated.material_signature=material_signature;
             updated.source_checked_frame=gpu_frame_serial;
             updated.source_checked_generation=current_generation;
+            updated.material_checked_generation=material_generation;
             updated.last_audit_frame=audit_frame ? gpu_frame_serial : 0U;
             updated.last_used_frame=gpu_frame_serial;
             if(geom) {
@@ -2390,6 +2455,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         else {
             it->second.source_checked_frame=gpu_frame_serial;
             it->second.source_checked_generation=current_generation;
+            it->second.material_checked_generation=material_generation;
             if(audit_frame)it->second.last_audit_frame=gpu_frame_serial;
         }
     }
@@ -2750,15 +2816,26 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 it->second.lighting_mode==mesh.lighting_mode;
             bool const revision_fastpath=mesh_revision::active();
             uint64_t const generation=mesh_revision::source_current();
+            uint64_t const material_generation=mesh_revision::material_current();
             bool const audit_frame=(gpu_frame_serial%32U)==0U;
             bool const cached_geometry_ready=header_unchanged &&
                 it->second.geometry!=nullptr;
-            bool const should_hash=!cached_geometry_ready ||
+            bool const dirty_full_source=revision_fastpath &&
+                cached_geometry_ready &&
+                it->second.source_checked_generation!=generation;
+            bool should_hash=!cached_geometry_ready ||
                 (revision_fastpath
-                 ? (it->second.source_checked_generation!=generation ||
+                 ? (dirty_full_source ||
                     (audit_frame &&
                      it->second.last_audit_frame!=gpu_frame_serial))
                  : it->second.source_checked_frame!=gpu_frame_serial);
+            bool material_changed=false;
+            if(!should_hash && revision_fastpath &&
+               it->second.material_checked_generation!=material_generation) {
+                material_changed=gpu_mesh_lazy_material_changed(
+                    mesh,it->second,material_generation);
+                if(material_changed)should_hash=true;
+            }
             uint64_t signature=it!=gpu_mesh_cache.end()
                 ?it->second.source_signature:0U;
             uint64_t material_signature=it!=gpu_mesh_cache.end()
@@ -2769,9 +2846,11 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                                      revision_fastpath,
                                      it!=gpu_mesh_cache.end()
                                          ?it->second.source_checked_generation:0U,
-                                     generation);
+                                     generation,material_changed);
                 ++out.stats.source_hashes;
-                if(!gpu_mesh_source_signature(
+                if((dirty_full_source &&
+                    !gpu_mesh_dirty_source_readable(mesh,rgb)) ||
+                   !gpu_mesh_source_signature(
                        mesh,rgb,signature,nullptr,&material_signature)) {
                     ++out.stats.empty_or_invalid_meshes;
                     incomplete=true;
@@ -2792,6 +2871,7 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
             if(same && should_hash) {
                 it->second.source_checked_frame=gpu_frame_serial;
                 it->second.source_checked_generation=generation;
+                it->second.material_checked_generation=material_generation;
                 if(audit_frame)it->second.last_audit_frame=gpu_frame_serial;
             }
             if(!same) {
@@ -2820,6 +2900,7 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 entry.material_signature=material_signature;
                 entry.source_checked_frame=gpu_frame_serial;
                 entry.source_checked_generation=mesh_revision::source_current();
+                entry.material_checked_generation=material_generation;
                 entry.last_audit_frame=audit_frame ? gpu_frame_serial : 0U;
                 entry.last_used_frame=gpu_frame_serial;
                 entry.id=next_gpu_id++;
