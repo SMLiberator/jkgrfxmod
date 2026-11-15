@@ -51,6 +51,7 @@
 #include "cog_create_thing.hpp"
 #include "cog_thing_joint_node.hpp"
 #include "cog_camera_distance.hpp"
+#include "cog_camera_axes.hpp"
 #include "cog_pyr_math.hpp"
 #include "cog_thing_offsets.hpp"
 #include "cog_raycast_head.hpp"
@@ -10663,6 +10664,33 @@ namespace {
         cog_get_thing_camera_measure(ctx,jkgm::cog_camera_measure::distance);
     }
 
+    // JK.dll GetCurrentCameraRLUVecs pushes the current SithCamera's
+    // orientation U, L, then R. These independent getters read those
+    // same native fields, without matrix multiplication or normalization.
+    void cog_get_current_camera_axis(void *ctx,jkgm::cog_camera_axis axis)
+    {
+        std::array<float,3> vector{};
+        if(jkgm::engine_camera_detail::build_matches()) {
+            auto const read=[](uintptr_t address,void *dst,size_t bytes)->bool {
+                if(!gpu_span_readable(reinterpret_cast<void const *>(address),
+                                      bytes))return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(address),bytes);
+                return true;
+            };
+            jkgm::cog_current_camera_axis(read,axis,vector);
+        }
+        cog_push_vector(ctx,vector.data());
+    }
+    void __cdecl cog_get_current_camera_rvec(void *ctx) {
+        cog_get_current_camera_axis(ctx,jkgm::cog_camera_axis::right);
+    }
+    void __cdecl cog_get_current_camera_lvec(void *ctx) {
+        cog_get_current_camera_axis(ctx,jkgm::cog_camera_axis::look);
+    }
+    void __cdecl cog_get_current_camera_uvec(void *ctx) {
+        cog_get_current_camera_axis(ctx,jkgm::cog_camera_axis::up);
+    }
+
     // JK.dll's original handler compares attach_flags == 2 exactly. Both
     // THINGFACE (0x2) and THING (0x4), with arbitrary extra bits, refer to
     // a Thing in the shared +0x58 parent slot.
@@ -10802,6 +10830,9 @@ namespace {
         cog_verb_entry{"getthingcameradepth", cog_get_thing_camera_depth},
         cog_verb_entry{"getthingcameradistsq", cog_get_thing_camera_dist_sq},
         cog_verb_entry{"getthingcameradist", cog_get_thing_camera_dist},
+        cog_verb_entry{"getcurrentcamerarvec", cog_get_current_camera_rvec},
+        cog_verb_entry{"getcurrentcameralvec", cog_get_current_camera_lvec},
+        cog_verb_entry{"getcurrentcamerauvec", cog_get_current_camera_uvec},
         cog_verb_entry{"getthingnodepos", cog_get_thing_node_pos},
         cog_verb_entry{"getthingnodeoffsetpos", cog_get_thing_node_offset_pos},
         cog_verb_entry{"getthingnodeposoffset", cog_get_thing_node_pos_offset},

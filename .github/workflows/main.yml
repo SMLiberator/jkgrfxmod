@@ -198,6 +198,13 @@ jobs:
         cog_camera_distance_test.exe || exit /b 1
         python3 tests/cog_camera_distance_wiring.py || exit /b 1
 
+    - name: Current camera RLU orientation COG getter regressions
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_camera_axes.cpp /Fe:cog_camera_axes_test.exe || exit /b 1
+        cog_camera_axes_test.exe || exit /b 1
+        python3 tests/cog_camera_axes_wiring.py || exit /b 1
+
     - name: COG Thing offset and position transforms regression tests
       shell: cmd
       run: |

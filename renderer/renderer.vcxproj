@@ -181,6 +181,7 @@
     <ClInclude Include="cog_create_thing.hpp" />
     <ClInclude Include="cog_thing_joint_node.hpp" />
     <ClInclude Include="cog_camera_distance.hpp" />
+    <ClInclude Include="cog_camera_axes.hpp" />
     <ClInclude Include="native_sprite_cel.hpp" />
     <ClInclude Include="native_sprite_profile.hpp" />
     <ClInclude Include="native_thingface_friction.hpp" />
