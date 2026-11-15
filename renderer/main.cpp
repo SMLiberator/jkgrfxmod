@@ -41,6 +41,7 @@
 #include "native_earth_hit_sound.hpp"
 #include "compressed_sound_io.hpp"
 #include "native_compressed_sound_hook.hpp"
+#include "native_spawn_parent_hook.hpp"
 #include "native_cog_symbol_extensions.hpp"
 #include "mots_native_collision_bridge.hpp"
 #include "precise_type3_native.hpp"
@@ -11057,11 +11058,17 @@ bool attach_hooks()
         force_native_mat_mip_zero();
         LOG_INFO("Native MAT mip selection forced to level 0; OpenGL mipmaps remain active");
     }
+    // Patch explicit native creation CALL sites only after the Detours
+    // transaction commits. If it fails, no native Thing-parent code changes.
+    if(error==NO_ERROR)
+        jkgm::native_spawn_parent_hook::install();
     return error == NO_ERROR;
 }
 
 bool detach_hooks()
 {
+    // Undo all five native CALL-site modifications before DLL unload.
+    jkgm::native_spawn_parent_hook::uninstall();
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
     jkgm::native_cog_symbol_extensions::detach();

@@ -30,6 +30,9 @@
     <ClCompile Include="native_cog_symbol_extensions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="native_spawn_parent_hook.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ddraw_impl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -396,6 +399,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="native_cog_symbol_extensions.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="native_spawn_parent_hook.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="native_spawn_parent.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="cog_symbol_extensions.hpp">

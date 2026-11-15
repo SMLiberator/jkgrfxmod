@@ -136,6 +136,13 @@ jobs:
     - name: Gameplay-to-menu 2D presentation regression
       run: python3 tests/menu_presentation_transitions.py
 
+    - name: Native template-spawn parent inheritance regression
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\native_spawn_parent.cpp /Fe:native_spawn_parent_test.exe || exit /b 1
+        native_spawn_parent_test.exe || exit /b 1
+        python3 tests/native_spawn_parent_wiring.py || exit /b 1
+
     - name: JK.dll GetThingCreateThingTemplate null-guard regression
       shell: cmd
       run: |
