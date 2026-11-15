@@ -136,6 +136,12 @@ jobs:
     - name: Gameplay-to-menu 2D presentation regression
       run: python3 tests/menu_presentation_transitions.py
 
+    - name: Native ThingNode attachment death and cleanup regression
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\thing_node_attachment.cpp /Fe:thing_node_attachment_test.exe || exit /b 1
+        thing_node_attachment_test.exe || exit /b 1
+
     - name: Native template-spawn parent inheritance regression
       shell: cmd
       run: |
