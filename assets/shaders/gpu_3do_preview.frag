@@ -844,7 +844,10 @@ void main() {
         float vertex_rgb_alpha=pow(clamp(native_face_opacity,0.0,1.0),1.8);
         vec3 diffuse=(lit_rgb*(1.0-fog)*vertex_rgb_alpha+
                       fog_color*(fog*albedo.a))*absorption;
-        out_color=vec4(diffuse+emission+specular+projected_light,opacity);
+        // Fluid's specular is normally independent of its MAT alpha, but
+        // an explicit per-Thing fade must attenuate the highlight too.
+        out_color=vec4(diffuse+emission+specular*thing_opacity+
+                       projected_light,opacity);
     } else if(transparent_pass!=0 && blend_mode==2) {
         // With (DST_COLOR, ZERO) the RGB output is a multiplier, not
         // premultiplied color. Alpha zero must multiply by WHITE (identity).
