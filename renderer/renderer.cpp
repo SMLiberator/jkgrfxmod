@@ -283,6 +283,12 @@ namespace jkgm {
             return 0;
         }
 
+        case WM_ERASEBKGND:
+            // OpenGL owns the complete window. Letting wKernel/GDI erase the
+            // client area between SwapBuffers causes visible blank flashes,
+            // especially when Wine sends an extra background-erase message.
+            return 1;
+
         case WM_MOUSEMOVE: {
             // Scale the mouse position so JK thinks it's over the menu
             auto xPos = (int16_t)lParam;
@@ -509,6 +515,7 @@ namespace jkgm {
         renderer_mode mode = renderer_mode::menu;
         // Actual GDI/8-bit menu presentation need not switch display mode.
         bool menu_frame_pending = false;
+        bool menu_present_in_progress = false;
         std::atomic<unsigned> pending_png_screenshots{0};
         unsigned next_png_screenshot_number=0U;
         size<2, int> conf_scr_res;
@@ -2136,6 +2143,7 @@ namespace jkgm {
             gl::texture_view scene = frame_screen->get_resolved_final_texture();
 
             if(presenting_menu) {
+                menu_present_in_progress = true;
                 deferred_gpu_3do_instances.clear();
                 clear_deferred_gpu_hud_materials();
                 deferred_gpu_3do_camera={};
@@ -2166,6 +2174,7 @@ namespace jkgm {
                 gl::set_depth_mask(true);
                 capture_pending_screenshot_png();
                 SwapBuffers(hDC);
+                menu_present_in_progress = false;
                 begin_frame();
                 return;
             }
@@ -2376,12 +2385,16 @@ namespace jkgm {
 
         void present_menu_gdi() override
         {
+            // GdiFlush is a global hook and can fire for unrelated GDI work,
+            // other threads, or recursively from Wine's SwapBuffers path.
+            // Never present a cleared/partial GL frame in those cases.
+            if(mode != renderer_mode::menu ||
+               !indexed_bitmap_source ||
+               menu_present_in_progress ||
+               wglGetCurrentContext() != hGLRC)
+                return;
             poll_audio_modules();
             menu_frame_pending=true;
-            if(!indexed_bitmap_source) {
-                end_frame();
-                return;
-            }
 
             // Copy new data from menu source
             if(indexed_bitmap_source) {
