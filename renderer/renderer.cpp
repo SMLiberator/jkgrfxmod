@@ -11964,6 +11964,7 @@ namespace jkgm {
                     effect.add[2]/255.0f,effect.fade),
                 authored_light_limit(the_config->enable_baked_overbright));
             shader.set_modelview(view,false);
+            shader.set_thing_fade(1.0f,0); // ordinary world has no Thing fade
             auto submit_material=[&](gpu_3do_texture const &mat,
                                       bool solid)->bool {
                 if(mat.reflection_mode==4 ||
@@ -12069,11 +12070,14 @@ namespace jkgm {
                 gpu_3do_matrix34 modelview{};
                 gpu_3do_texture material;
                 bool solid=false,reversed=false,two_sided=false;
+                float depth=0.0f;
             };
             std::vector<planar_emissive_model_group> emissive_models;
+            std::vector<planar_emissive_model_group> faded_models;
             auto draw_model=[&](gpu_3do_instance const &inst) {
                 if(inst.shadow_only || inst.camera_hud ||
                    inst.is_projected_decal || inst.is_sprite_quad ||
+                   inst.thing_opacity<=0.0f ||
                    inst.effective_geometry_mode<3U ||
                    !inst.geometry || inst.geometry->groups.empty() ||
                    !gpu_3do_matrix_finite(inst.transform))return;
@@ -12088,6 +12092,8 @@ namespace jkgm {
                     view,inst.transform);
                 if(!gpu_3do_matrix_finite(modelview))return;
                 shader.set_modelview(modelview,true);
+                shader.set_thing_fade(inst.thing_opacity,
+                    inst.thing_dither && inst.thing_opacity<0.999f?2:0);
                 shader.set_model_lighting(inst.ambient,inst.effective_light_mode,
                     make_point(inst.colormap_tint[0],inst.colormap_tint[1],
                                inst.colormap_tint[2]),
@@ -12116,6 +12122,16 @@ namespace jkgm {
                             group.nonplanar || (group.face_type&1U)!=0U});
                         continue;
                     }
+                    if(inst.thing_opacity<0.999f && !inst.thing_dither) {
+                        auto const &c=group.centroid;
+                        float const depth=modelview[1]*c[0]+
+                            modelview[4]*c[1]+modelview[7]*c[2]+modelview[10];
+                        faded_models.push_back({
+                            &inst,&group,modelview,mat,solid,
+                            gpu_3do_reversed_winding(inst.transform),
+                            group.nonplanar || (group.face_type&1U)!=0U,depth});
+                        continue;
+                    }
                     if(!submit_material(mat,solid))continue;
                     if(group.nonplanar || (group.face_type&1U)) {
                         glDisable(GL_CULL_FACE);
@@ -12133,6 +12149,46 @@ namespace jkgm {
                 if(inst.shadow_owner==0U ||
                    !acquired_owners.count(inst.shadow_owner))
                     draw_model(inst);
+            // Alpha-faded model groups must composite behind any opaque
+            // reflected geometry; sort back-to-front in the mirrored camera.
+            if(!faded_models.empty()) {
+                std::stable_sort(faded_models.begin(),faded_models.end(),
+                    [](planar_emissive_model_group const &a,
+                       planar_emissive_model_group const &b) {
+                        return a.depth>b.depth;
+                    });
+                glEnable(GL_BLEND);
+                glBlendFuncSeparate(GL_ONE,GL_ONE_MINUS_SRC_ALPHA,
+                                    GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+                glDepthMask(GL_FALSE);
+                glDepthFunc(GL_LEQUAL);
+                for(auto const &draw:faded_models) {
+                    auto const &inst=*draw.instance;
+                    auto const it=gpu_3do_gl_cache.find(inst.id);
+                    if(it==gpu_3do_gl_cache.end())continue;
+                    shader.set_modelview(draw.modelview,true);
+                    shader.set_thing_fade(inst.thing_opacity,1);
+                    shader.set_model_lighting(inst.ambient,inst.effective_light_mode,
+                        make_point(inst.colormap_tint[0],inst.colormap_tint[1],
+                                   inst.colormap_tint[2]),
+                        make_point(inst.sector_tint[0],inst.sector_tint[1],
+                                   inst.sector_tint[2]));
+                    gl::bind_vertex_array(it->second->vao);
+                    glFrontFace(draw.reversed?GL_CCW:GL_CW);
+                    if(draw.two_sided)glDisable(GL_CULL_FACE);
+                    else glEnable(GL_CULL_FACE);
+                    if(!submit_material(draw.material,draw.solid))continue;
+                    gl::draw_elements(gl::element_type::triangles,
+                        static_cast<GLsizei>(draw.group->count),
+                        gl::index_type::uint32,
+                        static_cast<ptrdiff_t>(
+                            draw.group->offset*sizeof(uint32_t)));
+                    ++model_drawn;
+                }
+                glDisable(GL_BLEND);
+                glDepthMask(GL_TRUE);
+                glDepthFunc(GL_LESS);
+            }
             // Source materials with opacity zero and emission must ADD
             // radiance over opaque geometry without occluding it or writing
             // depth. Preserve capture alpha coverage for EnvMap fallback.
@@ -12145,6 +12201,7 @@ namespace jkgm {
                 glFrontFace(GL_CW);
                 glEnable(GL_CULL_FACE);
                 shader.set_modelview(view,false);
+                shader.set_thing_fade(1.0f,0);
                 for(auto const &batch:emissive_world) {
                     if(!submit_material(batch.material,batch.solid))continue;
                     glMultiDrawElements(GL_TRIANGLES,batch.counts.data(),
@@ -12157,6 +12214,7 @@ namespace jkgm {
                     if(it==gpu_3do_gl_cache.end())continue;
                     shader.set_modelview(batch.modelview,true);
                     auto const &inst=*batch.instance;
+                    shader.set_thing_fade(inst.thing_opacity,0);
                     shader.set_model_lighting(
                         inst.ambient,inst.effective_light_mode,
                         make_point(inst.colormap_tint[0],inst.colormap_tint[1],

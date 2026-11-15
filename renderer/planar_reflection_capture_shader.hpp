@@ -17,6 +17,7 @@ class planar_reflection_capture_shader : public opengl_shader {
     gl::uniform_location_id model_ambient_,model_mode_,model_cmp_,model_sector_;
     gl::uniform_location_id emission_sampler_,emission_factor_,emission_scroll_;
     gl::uniform_location_id emission_enabled_,emission_only_;
+    gl::uniform_location_id thing_opacity_,thing_mode_;
 public:
     explicit planar_reflection_capture_shader(fs::path const &root)
         :opengl_shader("planar_capture",
@@ -51,8 +52,15 @@ public:
          emission_factor_(gl::get_uniform_location(the_program,"emissive_factor")),
          emission_scroll_(gl::get_uniform_location(the_program,"emissive_scroll")),
          emission_enabled_(gl::get_uniform_location(the_program,"has_emissive")),
-         emission_only_(gl::get_uniform_location(the_program,"emissive_only"))
+         emission_only_(gl::get_uniform_location(the_program,"emissive_only")),
+         thing_opacity_(gl::get_uniform_location(the_program,"capture_thing_opacity")),
+         thing_mode_(gl::get_uniform_location(the_program,"capture_thing_mode"))
     {}
+    // 0=opaque/emissive, 1=premultiplied alpha blend, 2=depth dither.
+    void set_thing_fade(float opacity,int mode) {
+        gl::set_uniform_float(thing_opacity_,opacity);
+        gl::set_uniform_integer(thing_mode_,mode);
+    }
     void set_projection(offscreen_capture_projection const &p) {
         gl::set_uniform_vector(projection_,make_point(
             p.half_horizontal,p.aspect,p.reciprocal_far,

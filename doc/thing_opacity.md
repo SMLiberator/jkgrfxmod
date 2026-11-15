@@ -48,9 +48,11 @@ cached coverage, without invalidating their source geometry.
 - Original translucent multi-mesh 3DOs can still exhibit painter-order
   artifacts when rendered with true alpha blending. The dither option
   avoids many of these issues.
-- Primary visibility, spotlight, sun and native offscreen 3DO acquisition
-  use per-Thing state. The separate planar capture currently uses a simplified
-  opaque pass; its partial-fade appearance should be tested explicitly.
+- Main-camera and planar-reflection 3DOs both honor the opacity. The
+  secondary capture composites alpha-faded model groups back-to-front after
+  opaque reflected geometry and performs dithered fades in the depth-writing
+  opaque pass. Unrelated pre-existing special/Fluid effects retain the planar
+  capture's simplified material exclusions.
 - Fully transparent **special** materials, like emissive-only VFX, keep
   their original no-shadow policy.
 

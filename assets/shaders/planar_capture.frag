@@ -13,6 +13,8 @@ uniform vec4 fog_params;
 uniform vec3 fog_color;
 uniform vec4 clip_plane_view;
 uniform int clip_enabled,orthographic_mode;
+uniform float capture_thing_opacity;
+uniform int capture_thing_mode; // 0 full, 1 premultiplied alpha, 2 dither
 out vec4 out_color;
 
 float capture_fog_fraction(float depth) {
@@ -37,6 +39,18 @@ void main() {
        albedo.a*material_tint.a<alpha_cutoff)discard;
     if(emissive_only!=0 &&
        max(max(emitted.r,emitted.g),emitted.b)<=0.00001)discard;
+    if(capture_thing_opacity<=0.0)discard;
+    if(emissive_only==0 && capture_thing_mode==2) {
+        // Stable coverage in reflected-camera pixels, preserving depth.
+        ivec2 p=ivec2(gl_FragCoord.xy);
+        const float bayer[16]=float[16](
+             0.0, 8.0, 2.0,10.0,
+            12.0, 4.0,14.0, 6.0,
+             3.0,11.0, 1.0, 9.0,
+            15.0, 7.0,13.0, 5.0);
+        if(capture_thing_opacity<=
+           (bayer[(p.y&3)*4+(p.x&3)]+0.5)/16.0)discard;
+    }
 
     // The mirrored camera's depth contains BOTH optical legs: camera ->
     // receiver and receiver -> reflected scene. The primary water pass
@@ -59,9 +73,13 @@ void main() {
     if(emissive_only!=0) {
         // Add only emitted energy over captured opaque geometry; do not add
         // fog-colored translucent quads in the emission-only overlay.
-        out_color=vec4(emitted*(1.0-fog_far),1.0);
+        out_color=vec4(emitted*(1.0-fog_far)*capture_thing_opacity,1.0);
     } else {
         vec3 lit=albedo.rgb*material_tint.rgb*baked_light+emitted;
         out_color=vec4(mix(lit,fog_color,fog_far),1.0);
+        // Capture RGBA is premultiplied; receiver unpremultiplies before
+        // mixing against its environment fallback using capture alpha.
+        if(capture_thing_mode==1)
+            out_color*=capture_thing_opacity;
     }
 }

@@ -35,6 +35,15 @@ assert "emission*=thing_opacity;" in shader
 assert "shadow_dither_enabled" in shadow
 assert "shadow_instance_opacity" in shadow
 assert "const float bayer[16]" in shadow
+capture=load("assets/shaders/planar_capture.frag")
+planar=load("renderer/planar_reflection_capture_shader.hpp")
+assert "capture_thing_mode" in capture and "capture_thing_opacity" in capture
+assert "out_color*=capture_thing_opacity;" in capture
+assert "set_thing_fade(float opacity,int mode)" in planar
+assert "std::vector<planar_emissive_model_group> faded_models;" in preview
+assert "shader.set_thing_fade(inst.thing_opacity,1)" in preview
+assert "shader.set_thing_fade(inst.thing_opacity," in preview
+assert "glBlendFuncSeparate(GL_ONE,GL_ONE_MINUS_SRC_ALPHA," in preview
 assert "set_shadow_dither(" in shaders
 assert "sun_shadow_model_material_casts_depth(" in sun
 assert preview.count("sun_shadow_model_material_casts_depth(")>=3
