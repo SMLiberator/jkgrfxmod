@@ -1,4 +1,5 @@
 #include "renderer.hpp"
+#include "hud_dirty_regions.hpp"
 #include "frame_profile.hpp"
 #include "presentation_gpu_profile.hpp"
 #include "native_3do_profile.hpp"
@@ -1082,6 +1083,16 @@ namespace jkgm {
                      " post_swap=", avg(profile_stage::present_swap),
                      " HUDupload=", avg(profile_stage::hud_upload),
                      " HUDdraw=", avg(profile_stage::hud_draw));
+            LOG_INFO("PERF HUD_updates mode=",the_config->experimental_hud_updates,
+                     " bytes_uploaded_avg=",hud_bytes_uploaded_window/frames,
+                     " gl_upload_calls_avg=",hud_upload_calls_window/frames,
+                     " converted_pixels_avg=",hud_converted_pixels_window/frames,
+                     " changed_pixels_avg=",hud_changed_pixels_window/frames,
+                     " full_uploads=",hud_full_uploads_window,
+                     " skipped_frames=",hud_skipped_frames_window);
+            hud_bytes_uploaded_window=hud_upload_calls_window=0;
+            hud_converted_pixels_window=hud_changed_pixels_window=0;
+            hud_full_uploads_window=hud_skipped_frames_window=0;
             LOG_INFO("PERF present_cpu_us resolve=",avg(profile_stage::present_resolve),
                      " blur=",avg(profile_stage::present_blur),
                      " retro=",avg(profile_stage::present_retro),
@@ -1379,6 +1390,8 @@ namespace jkgm {
                 clear_deferred_gpu_hud_materials();
                 deferred_gpu_3do_camera={};
                 frame_has_exempt_gpu=false;
+                // A new game scene must not reuse an old HUD texture snapshot.
+                hud_previous_source.clear();
                 planar_capture_ready=false;
                 if(planar_receiver_queries)planar_receiver_queries->invalidate();
                 if(thing_occlusion_queries)thing_occlusion_queries->invalidate();
@@ -1411,6 +1424,9 @@ namespace jkgm {
                     frame_gpu_3do_instances.clear();
                 }
                 if(the_config->profile_renderer) {
+                    hud_bytes_uploaded_window=hud_upload_calls_window=0;
+                    hud_converted_pixels_window=hud_changed_pixels_window=0;
+                    hud_full_uploads_window=hud_skipped_frames_window=0;
                     last_profile_frame = {};
                     profile_window_start = {};
                     profile_window = {};
@@ -2313,6 +2329,14 @@ namespace jkgm {
                 // trails. It overlays Camera Thing HUDs, but Retro is the
                 // ONLY effect applied afterwards, to the complete image.
                 if(mode==renderer_mode::ingame) {
+                    // Unlike the legacy four-frame slab pipeline, live HUD
+                    // updates capture the most recent DirectDraw pixels at
+                    // the actual presentation boundary, before HUD blending.
+                    if(the_config->experimental_hud_updates!=0) {
+                        profile_scope hud_upload_cpu(measure,profile_frame.timings[
+                            profile_idx(profile_stage::hud_upload)]);
+                        update_hud_texture_live();
+                    }
                     profile_scope hud_cpu(measure,profile_frame.timings[
                         profile_idx(profile_stage::hud_draw)]);
                     draw_hud();
@@ -2490,6 +2514,14 @@ namespace jkgm {
         static constexpr int hud_texture_num_slabs = 4;
 
         int curr_slab = 0;
+        // Experimental 1/2 render from one persistent live texture. The
+        // previous RGB565 snapshot makes arbitrary Lock() writes observable.
+        std::vector<uint16_t> hud_previous_source;
+        uint16_t hud_previous_color_key=0;
+        std::vector<color_rgba8> hud_region_scratch;
+        uint64_t hud_bytes_uploaded_window=0, hud_upload_calls_window=0;
+        uint64_t hud_converted_pixels_window=0, hud_changed_pixels_window=0;
+        uint64_t hud_full_uploads_window=0, hud_skipped_frames_window=0;
         // Mirror the contents of each actual OpenGL HUD texture. Front/back
         // swap every four frames; their contents can differ. Comparing against
         // just the previous source bitmap would therefore be incorrect.
@@ -2501,6 +2533,8 @@ namespace jkgm {
             if(curr_slab == 0) {
                 // Convert the source bitmap once every four frames.
                 // Every output pixel is overwritten, so no ZeroMemory needed.
+                if(the_config->profile_renderer)
+                    hud_converted_pixels_window+=ddraw1_backbuffer_surface.buffer.size();
                 for(size_t i=0;i<ddraw1_backbuffer_surface.buffer.size();++i) {
                     auto const in_em=ddraw1_backbuffer_surface.buffer[i];
                     ogs->hud_texture_data[i]=rgb565_key_to_srgb_a8(
@@ -2550,6 +2584,10 @@ namespace jkgm {
                                            make_point(width,last_changed));
                 size_t const offset=size_t(first_changed)*size_t(width);
                 size_t const num_pixels=size_t(last_changed-first_changed)*size_t(width);
+                if(the_config->profile_renderer) {
+                    hud_bytes_uploaded_window+=num_pixels*sizeof(color_rgba8);
+                    ++hud_upload_calls_window;
+                }
                 gl::tex_sub_image_2d(
                     gl::texture_bind_target::texture_2d,
                     /*level*/ 0,region,gl::texture_pixel_format::rgba,
@@ -2573,6 +2611,73 @@ namespace jkgm {
                 hud_back_index^=1U;
                 curr_slab=0;
             }
+        }
+
+        void update_hud_texture_live()
+        {
+            auto &source=ddraw1_backbuffer_surface.buffer;
+            if(source.empty())return;
+            int const width=get<x>(internal_scr_res);
+            int const height=get<y>(internal_scr_res);
+            uint16_t const key=ddraw1_backbuffer_surface.color_key;
+            bool const dirty_mode=the_config->experimental_hud_updates==2;
+            bool const force_full=!dirty_mode ||
+                hud_previous_source.size()!=source.size() ||
+                hud_previous_color_key!=key;
+            if(dirty_mode && hud_previous_source.size()!=source.size())
+                hud_previous_source.resize(source.size());
+            auto const dirty=find_hud_dirty_regions(
+                source.data(),
+                dirty_mode && !force_full?hud_previous_source.data():nullptr,
+                width,height,force_full);
+
+            if(!dirty.rects.empty()) {
+                // Both live modes write the texture currently displayed.
+                // No four-frame front/back swap or GPU readback is required.
+                gl::set_active_texture_unit(0);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 ogs->hud_texture_front);
+                for(auto const &rect:dirty.rects) {
+                    int const rw=rect.right-rect.left;
+                    int const rh=rect.bottom-rect.top;
+                    size_t const count=size_t(rw)*size_t(rh);
+                    hud_region_scratch.resize(count);
+                    for(int y=rect.top;y<rect.bottom;++y) {
+                        size_t const src_row=size_t(y)*size_t(width);
+                        size_t const dst_row=size_t(y-rect.top)*size_t(rw);
+                        for(int x=rect.left;x<rect.right;++x) {
+                            uint16_t const pixel=source[src_row+size_t(x)];
+                            hud_region_scratch[dst_row+size_t(x-rect.left)]=
+                                rgb565_key_to_srgb_a8(pixel,pixel==key);
+                        }
+                        // Update the raw mirror only for uploaded pixels.
+                        // Every other pixel is already identical to the GPU.
+                        if(dirty_mode)
+                            std::memcpy(hud_previous_source.data()+src_row+rect.left,
+                                        source.data()+src_row+rect.left,
+                                        size_t(rw)*sizeof(uint16_t));
+                    }
+                    gl::tex_sub_image_2d(
+                        gl::texture_bind_target::texture_2d,0,
+                        make_box(make_point(rect.left,rect.top),
+                                 make_point(rect.right,rect.bottom)),
+                        gl::texture_pixel_format::rgba,
+                        gl::texture_pixel_type::uint8,
+                        make_span(hud_region_scratch).as_const_bytes());
+                }
+            }
+            if(dirty_mode)hud_previous_color_key=key;
+            if(the_config->profile_renderer) {
+                hud_bytes_uploaded_window+=dirty.upload_pixels*sizeof(color_rgba8);
+                hud_upload_calls_window+=dirty.rects.size();
+                hud_converted_pixels_window+=dirty.upload_pixels;
+                hud_changed_pixels_window+=dirty.changed_pixels;
+                if(dirty.full_upload)++hud_full_uploads_window;
+                if(dirty.rects.empty())++hud_skipped_frames_window;
+            }
+            // Source is an ephemeral alpha/keyed overlay. Clear EVERY live
+            // frame so removed HUD elements cannot persist on the next frame.
+            std::fill(source.begin(),source.end(),key);
         }
 
         void draw_hud()
@@ -12462,7 +12567,8 @@ namespace jkgm {
             {
                 profile_scope timer(profiling,
                     profile_frame.timings[profile_idx(profile_stage::hud_upload)]);
-                update_hud_texture();
+                if(the_config->experimental_hud_updates==0)
+                    update_hud_texture();
             }
 
             ogs->tribuf.swap_next();

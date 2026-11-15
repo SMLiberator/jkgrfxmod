@@ -39,6 +39,13 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("hud_scale")) {
             j.at("hud_scale").get_to(rv->hud_scale);
         }
+        if(j.contains("experimental_hud_updates")) {
+            auto const &v=j.at("experimental_hud_updates");
+            if(!v.is_number_integer() || v.get<int>()<0 || v.get<int>()>2)
+                throw std::runtime_error(
+                    "experimental_hud_updates must be 0, 1 or 2");
+            rv->experimental_hud_updates=v.get<int>();
+        }
 
         if(j.contains("max_anisotropy")) {
             j.at("max_anisotropy").get_to(rv->max_anisotropy);

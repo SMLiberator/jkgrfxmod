@@ -133,6 +133,13 @@ jobs:
     - name: DirectDraw HUD overlay layout regression
       run: python3 tests/hud_overlay_layout.py
 
+    - name: Per-frame HUD update modes and dirty-region regressions
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /Irenderer tests\hud_dirty_regions.cpp /Fe:hud_dirty_regions_test.exe
+        hud_dirty_regions_test.exe
+        python3 tests/hud_updates_wiring.py
+
     - name: COG RayCastEx native collideSize sphere regression tests
       shell: cmd
       run: |

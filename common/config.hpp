@@ -19,6 +19,7 @@ namespace jkgm {
         bool correct_game_aspect_ratio = false;
         bool correct_menu_aspect_ratio = true;
         float hud_scale = 1.0f;
+        int experimental_hud_updates = 0; // 0=legacy four-frame slabs; 1=full per-frame; 2=adaptive dirty regions
         float max_anisotropy = 2.0f;
         std::optional<antialiasing_config> antialiasing;
         bool enable_bloom = true;

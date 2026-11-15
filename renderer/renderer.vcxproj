@@ -146,6 +146,7 @@
     <ClInclude Include="gpu_particle_cloud.hpp" />
     <ClInclude Include="gpu_polyline.hpp" />
     <ClInclude Include="hud_ammo_override.hpp" />
+    <ClInclude Include="hud_dirty_regions.hpp" />
     <ClInclude Include="jk_cmp_fullbright_mask.hpp" />
     <ClInclude Include="jk_cmp_gpu.hpp" />
     <ClInclude Include="jk_colormap_layout.hpp" />

@@ -314,6 +314,9 @@
     <ClInclude Include="hud_ammo_override.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="hud_dirty_regions.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="jk_cmp_fullbright_mask.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
