@@ -2388,10 +2388,10 @@ namespace jkgm {
             // GdiFlush is a global hook and can fire for unrelated GDI work,
             // other threads, or recursively from Wine's SwapBuffers path.
             // Never present a cleared/partial GL frame in those cases.
-            if(mode != renderer_mode::menu ||
+            if(wglGetCurrentContext() != hGLRC ||
+               mode != renderer_mode::menu ||
                !indexed_bitmap_source ||
-               menu_present_in_progress ||
-               wglGetCurrentContext() != hGLRC)
+               menu_present_in_progress)
                 return;
             poll_audio_modules();
             menu_frame_pending=true;
