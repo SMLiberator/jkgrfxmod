@@ -2628,7 +2628,7 @@ namespace jkgm {
                     int const rw=rect.right-rect.left;
                     int const rh=rect.bottom-rect.top;
                     size_t const count=size_t(rw)*size_t(rh);
-                    hud_region_scratch.resize(count);
+                    hud_region_scratch.resize(count,color_rgba8::zero());
                     for(int y=rect.top;y<rect.bottom;++y) {
                         size_t const src_row=size_t(y)*size_t(width);
                         size_t const dst_row=size_t(y-rect.top)*size_t(rw);
