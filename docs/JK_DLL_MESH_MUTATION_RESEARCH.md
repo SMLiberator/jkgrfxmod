@@ -57,7 +57,41 @@ audit has separately been made opt-in and defaults to disabled.
 - `SetThingMesh` (`0x10050BC0`): resolves a `SithThing` and its model,
   with a clone-on-write path using `0x10087020`, then updates the
   thing's target mesh. The *post-clone* model identity must be used
-  for targeted cache invalidation.
+  for targeted cache invalidation. This is **not merely conceptual**:
+  its implementation jumps directly into `SetModelMesh`'s shared selector
+  and mesh-copy block at `0x1004E937`; both paths use the actual mesh
+  copying code at `0x1004EA0D`–`0x1004EA90`.
+
+## Previously agreed invalidation scope (November 12–13)
+
+The 16-entry registration array was a broad historical approximation,
+**not** the agreed list of operations that should cause global geometry
+rehashing. The prior design agreement was:
+
+| Operation | Intended cache action |
+| --- | --- |
+| `SetModelMesh`, `SetThingMesh` | Revalidate/rebuild only the overwritten destination mesh slot(s), across affected geosets; Thing variants resolve the final model after copy-on-write |
+| `ClearModelMesh` | Remove only the cleared mesh entries |
+| `ClearModel`, `OverwriteModel`, `ReloadModel` | Invalidate/remove entries belonging to that model; never global |
+| `ChangeModelMaterial`, `ReplaceModelMaterial`, `ReplaceModelMeshMaterial` | Refresh affected material references/render groups; do not rebuild position/UV buffers just because a material changed |
+| `SwapModelMesh`, `SetModelNodeMesh` | Update changed mesh references/hierarchy mapping; do not treat pure swaps as geometry writes |
+| `CloneModel` | Track creation/ownership of newly allocated model data, not changes to the original model |
+| Append-only material/mesh/node verbs | Ensure new entries are discoverable on first use; no invalidation of unrelated existing entries |
+| Thing-form wrappers | Reuse the corresponding model-level invalidation semantics, after resolving ownership/clone-on-write |
+
+These are **design decisions**, not claims that every verb listed is
+implemented/registered in the supplied DLL. In particular, the strings
+`ClearModel`, `ClearModelMesh`, `OverwriteModel`,
+`ReplaceModelMeshMaterial`, `SwapModelMesh`, etc. appear in
+the supplied DLL's data, but there are **no direct code references to
+their string addresses** in this binary, unlike the four confirmed
+registrations. The actual implementations/registrations for those verbs
+must be checked in the module(s) that provide them.
+
+A mutation wrapper's mere invocation should **not** automatically
+increment a global geometry generation. No-op/failed calls, cloning,
+append-only operations and material-reference changes must be handled
+according to their actual effects.
 
 ## Recommended cache design
 
