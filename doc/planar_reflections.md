@@ -207,6 +207,31 @@ reduces the number of refreshed Things and processed meshes. Remaining
 work includes reusing complete primary-camera model instances where
 available, then capture cadence and selective LOD bias.
 
+## To-do: planar abyss/edge policy (not implemented)
+
+Water captures can expose dark discontinuities near the horizon or where
+normal-map distortion projects outside the mirrored camera's image. The
+current target already uses `GL_CLAMP_TO_EDGE`, but
+`world_planar_reflection()` rejects projected UVs outside `[0,1]`
+and returns zero coverage. Transparent black pixels **inside** the capture
+are a distinct case and cannot be repaired by clamping texture edges.
+
+**Deferred experiment, after mesh-revision testing:**
+
+1. Compare a shader-only clamp beyond the projection boundary against the
+   current zero-coverage behavior, without changing capture geometry.
+2. If confirmed, allow a bounded edge extension, then smoothly blend into
+   an available sky/environment fallback. Preserve alpha-based coverage for
+   uncovered pixels; avoid repeating/wrapping the image.
+3. Evaluate optional camera-projection overscan to provide real reflected
+   pixels for normal-map distortion, with matching receiver projection.
+4. Diagnose internal capture holes separately (alpha-aware dilation or sky
+   fallback, if necessary). Check horizon artifacts with and without
+   environment maps and at different water roughness/FOV settings.
+
+Do not unconditionally smear the last texel across an unbounded area or
+introduce additional full-screen passes without measuring their cost.
+
 ## Capture contract
 
 - A source material selects planar reflections. Material effects (roughness,
