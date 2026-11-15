@@ -15,12 +15,18 @@ for needle in (
     "cog_verb_entry{\"getthingopacity\", cog_get_thing_opacity}",
     "thing_opacity_instances.set(",
     "thing_opacity_instances.sample(",
-    "inst.thing_opacity=state.opacity;",
-    "inst.thing_dither=state.dither;",
+    "inst.thing_opacity=active_native_thing_opacity.opacity;",
+    "inst.thing_dither=active_native_thing_opacity.dither;",
+    "active_native_thing_opacity=previous_thing_opacity;",
+    "auto const thing_fade=sample_3do_opacity(",
     "instance.thing_opacity=thing_fade.opacity;",
     "instance.thing_dither=thing_fade.dither;",
 ):
     assert needle in main, needle
+# Sampling happens once per native model draw and once per independent
+# reflected Thing, never once for each hierarchy mesh.
+assert main.count("auto const thing_fade=sample_3do_opacity(")==1
+assert "uintptr_t(hud_owner)+0xc4U==native_rd" in main
 assert "class thing_opacity_registry" in state
 assert "entry.signature==signature" in state
 assert "bool dither=false" in state

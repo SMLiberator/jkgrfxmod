@@ -165,6 +165,7 @@ namespace {
     thread_local std::array<char,33> active_native_model_filename{{0}};
     thread_local uintptr_t active_native_model_ptr=0U;
     thread_local uintptr_t active_native_rdthing_ptr=0U;
+    thread_local jkgm::thing_opacity_state active_native_thing_opacity{};
     // Defined beside the native SPR registry; only samples Thing state.
     jkgm::thing_opacity_state sample_3do_opacity(void const *thing);
     thread_local uint64_t active_native_shadow_owner=0;
@@ -1708,6 +1709,11 @@ namespace {
         auto const previous_model_filename=active_native_model_filename;
         uintptr_t const previous_model_ptr=active_native_model_ptr;
         uintptr_t const previous_rdthing_ptr=active_native_rdthing_ptr;
+        auto const previous_thing_opacity=active_native_thing_opacity;
+        active_native_thing_opacity=
+            uintptr_t(hud_owner)+0xc4U==native_rd
+                ?sample_3do_opacity(reinterpret_cast<void const *>(
+                    uintptr_t(hud_owner))) : jkgm::thing_opacity_state{};
         active_native_model_filename=native_model_filename;
         active_native_model_ptr=native_model_ptr;
         active_native_rdthing_ptr=native_rd;
@@ -1787,6 +1793,7 @@ namespace {
         active_native_model_filename=previous_model_filename;
         active_native_model_ptr=previous_model_ptr;
         active_native_rdthing_ptr=previous_rdthing_ptr;
+        active_native_thing_opacity=previous_thing_opacity;
         active_native_shadow_owner=previous_owner;
         active_native_spotlight_family=previous_family;
         active_native_shadow_dynamic=previous_moving;
@@ -2613,13 +2620,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     gpu_3do_instance inst;
     inst.id=it->second.id;
     inst.geometry=it->second.geometry;
-    // rdThing is embedded at SithThing+0xC4 on the verified JK executable.
-    if(active_native_rdthing_ptr>=0xc4U) {
-        auto const state=sample_3do_opacity(reinterpret_cast<void const *>(
-            active_native_rdthing_ptr-0xc4U));
-        inst.thing_opacity=state.opacity;
-        inst.thing_dither=state.dither;
-    }
+    // Copied once per owning Thing in rdModel3_Draw, not per mesh callback.
+    inst.thing_opacity=active_native_thing_opacity.opacity;
+    inst.thing_dither=active_native_thing_opacity.dither;
     inst.shadow_only=shadow_only;
     inst.effective_geometry_mode=static_cast<uint32_t>(
         jkgm::gpu_3do_effective_geo_mode(current_geo_mode,m.geometry_mode));
@@ -2777,6 +2780,8 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
         }
         ++out.stats.posed_things;
         out.stats.native_mesh_nodes+=native_nodes.size();
+        auto const thing_fade=sample_3do_opacity(
+            reinterpret_cast<void const *>(thing.thing));
         std::vector<gpu_3do_instance> complete_thing_nodes;
         complete_thing_nodes.reserve(native_nodes.size());
         bool incomplete=false;
@@ -2959,8 +2964,6 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 continue;
             }
             gpu_3do_instance instance{};
-            auto const thing_fade=sample_3do_opacity(
-                reinterpret_cast<void const *>(thing.thing));
             instance.thing_opacity=thing_fade.opacity;
             instance.thing_dither=thing_fade.dither;
             instance.id=it->second.id;
