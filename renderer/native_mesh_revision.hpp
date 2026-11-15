@@ -13,8 +13,8 @@ namespace mesh_revision {
 
     // A COG model mutation is not necessarily a mutation of an rdMesh.
     // Preserve the original global generation for collision/model consumers,
-    // but the GPU cache only needs a targeted scan when existing face
-    // materials or arbitrary model source bytes might have changed.
+    // but GPU cached meshes need validation only when actually used after
+    // a material or full-source edit; never scan the entire cache.
     enum source_effect : unsigned {
         source_none=0U,
         source_materials=1U,
@@ -29,9 +29,9 @@ namespace mesh_revision {
             case 2U: case 3U: case 9U:
                 return source_materials; // in-place face.material edits
             case 0U: case 11U:
-                // Player/model rebuilds commonly invoke these thousands of
-                // times. A single pending bit coalesces the whole burst;
-                // only changed cached meshes are refreshed on next use.
+                // Player/model rebuilds can invoke these thousands of
+                // times. Advance the source epoch in O(1); only used
+                // cached meshes rehash when they are next encountered.
                 return source_full; // mesh slot source can change in place
             case 12U: case 13U:
                 return source_full; // overwrite/reload may alter contents in place
@@ -47,10 +47,10 @@ namespace mesh_revision {
     void finish();
     bool active();
     uint64_t current(); // unchanged global generation for collision caches
-    uint64_t source_current(); // GPU source fast path; targeted changes do not bump
-    unsigned take_pending_source_effects(); // consumed before next GPU lookup
-    // Profiling only; reading these counters does not change generation or
-    // the conservative source-hash invalidation policy.
+    uint64_t source_current(); // full-source changes (lazy validation)
+    uint64_t material_current(); // face-material changes (lazy validation)
+    // Profiling only; reading counters does not change revision epochs
+    // or the periodic source-integrity audit.
     mutator_counts take_mutator_counts();
     char const *mutator_name(std::size_t index);
     void report_untracked();

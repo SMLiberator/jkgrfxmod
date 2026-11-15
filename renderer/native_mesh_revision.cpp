@@ -22,8 +22,8 @@ namespace mesh_revision {
     registrar original_registrar=nullptr;
     uint32_t registered_mask=0U;
     uint64_t generation=1U; // still invalidates precise Type-3 collision caches
-    uint64_t source_generation=1U; // changes only on tracking fallback
-    unsigned pending_source_effects=source_none;
+    uint64_t source_generation=1U; // lazy full-source validation
+    uint64_t material_generation=1U; // lazy face-material validation
     bool complete=false;
     bool untracked_write=false;
 
@@ -34,11 +34,11 @@ namespace mesh_revision {
         // touching the interpreter's stack or its returned result.
         originals[I](ctx);
         ++generation; // retain original conservative collision revision
-        // GPU geometry is keyed by rdMesh address. New/attached meshes get
-        // cache misses; header-changing swaps are detected on next lookup.
-        // Only in-place material/source edits require a one-off targeted
-        // scan, coalesced across all COG calls until the next GPU lookup.
-        pending_source_effects|=source_effect_for(I);
+        // O(1) mutation recording, independent of resident GPU mesh
+        // cache size. Validate individual cached meshes only when used.
+        constexpr unsigned effect=source_effect_for(I);
+        if(effect&source_full)++source_generation;
+        if(effect&source_materials)++material_generation;
         ++calls[I]; // count real invocations, not individual mesh hashes
     }
     constexpr std::array<handler,mutator_count> wrappers{{
@@ -69,7 +69,6 @@ namespace mesh_revision {
         registered_mask=0U;
         originals.fill(nullptr);
         calls.fill(0U);
-        pending_source_effects=source_none;
         complete=false;
         untracked_write=false;
     }
@@ -78,8 +77,8 @@ namespace mesh_revision {
         complete=registered_mask==((1U<<mutator_count)-1U);
         if(complete) {
             LOG_INFO("GPU 3DO revision tracking: ",mutator_count,
-                     " JK.dll model COG verbs wrapped; GPU uses targeted "
-                     "material/source refresh plus 32-frame audit; "
+                     " JK.dll model COG verbs wrapped; GPU uses lazy "
+                     "material/source epochs plus 32-frame audit; "
                      "collision generation remains global");
         } else {
             LOG_WARNING("GPU 3DO revision tracking unavailable: missing JK.dll "
@@ -89,12 +88,7 @@ namespace mesh_revision {
     bool active() {return complete && !untracked_write;}
     uint64_t current() {return generation;}
     uint64_t source_current() {return source_generation;}
-    unsigned take_pending_source_effects()
-    {
-        unsigned const effects=pending_source_effects;
-        pending_source_effects=source_none;
-        return effects;
-    }
+    uint64_t material_current() {return material_generation;}
     mutator_counts take_mutator_counts()
     {
         auto const sample=calls;

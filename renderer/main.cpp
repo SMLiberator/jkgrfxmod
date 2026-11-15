@@ -292,6 +292,7 @@ namespace {
         uint64_t source_signature=0,source_checked_frame=0;
         uint64_t material_signature=0; // face references, not model transforms
         uint64_t source_checked_generation=0,last_audit_frame=0;
+        uint64_t material_checked_generation=0; // face MAT mutation epoch
         uint64_t last_used_frame=0; // primary + planar camera references
         char const *snapshot_failure=nullptr; // memoized failed snapshots
         std::string snapshot_failure_detail;
@@ -774,9 +775,8 @@ namespace {
 
     uint64_t elapsed_native_ns(std::chrono::steady_clock::time_point start);
 
-    // COG clear/reload may decommit an rdMesh's storage *inside* the current
-    // frame. Do not trust the ordinary frame-local positive VirtualQuery
-    // cache when scanning old native pointers after one of those verbs.
+    // COG clear/reload may decommit rdMesh memory within the frame.
+    // Revalidate actual pages on the mesh's next use.
     bool gpu_mutation_span_readable(void const *ptr,size_t bytes)
     {
         if(!ptr || bytes==0U)return false;
@@ -793,9 +793,8 @@ namespace {
         return start>=base && start+bytes<=base+mbi.RegionSize;
     }
 
-    // A cheap face-material-only scan can isolate in-place COG material
-    // replacements. Only changed rdMesh snapshots are discarded; no global
-    // source revision is needed. Full source hashing remains as an audit.
+    // On-demand face-MAT comparison for USED cached meshes after a COG
+    // material mutation, never a global cache scan.
     bool gpu_mesh_material_signature(native_mesh const &m,uint64_t &value)
     {
         if(m.num_faces<0 || m.num_faces>65536 ||
@@ -892,84 +891,6 @@ namespace {
         value=h.value;
         if(material_value)*material_value=materials.value;
         return true;
-    }
-
-    // Consume coalesced COG edits before either the main camera or the
-    // independent planar camera looks up a CPU snapshot. Scan material
-    // references only for in-place MAT edits; resort to full source bytes
-    // for rare model overwrite/reload operations. Never invalidate an
-    // unchanged mesh because another model was edited.
-    void gpu_mesh_cache_apply_mutations()
-    {
-        unsigned const effects=mesh_revision::take_pending_source_effects();
-        if(effects==mesh_revision::source_none || gpu_mesh_cache.empty() ||
-           !mesh_revision::active())
-            return;
-        bool const full=(effects&mesh_revision::source_full)!=0U;
-        bool const profiling=the_config && the_config->profile_renderer;
-        auto const began=profiling ? std::chrono::steady_clock::now()
-                                   : std::chrono::steady_clock::time_point{};
-        uint64_t scanned=0,invalidated=0;
-        for(auto it=gpu_mesh_cache.begin();it!=gpu_mesh_cache.end();) {
-            ++scanned;
-            native_mesh m{};
-            if(!gpu_mutation_span_readable(it->first,sizeof(m))) {
-                it=gpu_mesh_cache.erase(it);
-                ++invalidated;
-                continue;
-            }
-            std::memcpy(&m,it->first,sizeof(m));
-            auto const &cached=it->second;
-            // A freed or replaced rdMesh slot may already have been
-            // repurposed. Discard on header mismatch before touching its
-            // previous vertex/face buffers.
-            bool const header_same=
-                m.vertices==cached.vertices && m.faces==cached.faces &&
-                m.uvs==cached.uvs && m.normals==cached.normals &&
-                m.vertex_lights==cached.vertex_lights &&
-                m.num_vertices==cached.num_vertices &&
-                m.num_faces==cached.num_faces && m.num_uvs==cached.num_uvs &&
-                m.lighting_mode==cached.lighting_mode;
-            uint64_t material_signature=0,source_signature=0;
-            bool same=header_same;
-            if(same && full) {
-                // Required source arrays are revalidated against *current*
-                // page state before invoking the cached-readability path.
-                same=m.num_vertices>=3 && m.num_vertices<=65536 &&
-                    m.num_faces>=1 && m.num_faces<=65536 &&
-                    gpu_mutation_span_readable(
-                        m.vertices,size_t(m.num_vertices)*3*sizeof(float)) &&
-                    gpu_mutation_span_readable(
-                        m.faces,size_t(m.num_faces)*sizeof(native_face)) &&
-                    (!cached.rgb || gpu_mutation_span_readable(
-                        cached.rgb,size_t(m.num_vertices)*3*sizeof(float))) &&
-                    (!m.uvs || m.num_uvs<=0 || m.num_uvs>65536 ||
-                     gpu_mutation_span_readable(
-                        m.uvs,size_t(m.num_uvs)*2*sizeof(float))) &&
-                    (!m.vertex_lights || gpu_mutation_span_readable(
-                        m.vertex_lights,size_t(m.num_vertices)*sizeof(float))) &&
-                    (!m.normals || gpu_mutation_span_readable(
-                        m.normals,size_t(m.num_vertices)*3*sizeof(float)));
-                if(same)
-                    same=gpu_mesh_source_signature(
-                        m,cached.rgb,source_signature,nullptr,
-                        &material_signature) &&
-                        source_signature==cached.source_signature;
-            }
-            else if(same)
-                same=gpu_mesh_material_signature(m,material_signature) &&
-                    material_signature==cached.material_signature;
-            if(!same) {
-                it=gpu_mesh_cache.erase(it);
-                ++invalidated;
-            } else ++it;
-        }
-        if(profiling) {
-            ++gpu_native_stats.mutation_scans;
-            gpu_native_stats.mutation_scanned+=scanned;
-            gpu_native_stats.mutation_invalidated+=invalidated;
-            gpu_native_stats.mutation_ns+=elapsed_native_ns(began);
-        }
     }
 
     std::shared_ptr<jkgm::gpu_3do_geometry const>
@@ -2237,7 +2158,6 @@ bool native_mesh_overlaps_shadow_light(native_mesh const &mesh,
 bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                               bool force_shadow_only)
 {
-    gpu_mesh_cache_apply_mutations();
     if(active_native_model_camera_hud)
         gpu_last_camera_hud_failure.clear();
     // The exact RGB/smooth-normal JK patch has an additional float3*
@@ -2706,7 +2626,6 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
     gpu_3do_matrix34 const *reflected_view)
 {
     planar_reflection_offscreen_gpu out{};
-    gpu_mesh_cache_apply_mutations();
     if(!the_config || !the_config->use_gpu_cache ||
        !engine_material_debug::matches_tested_executable() ||
        max_things==0U)return out;
