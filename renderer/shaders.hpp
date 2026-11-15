@@ -496,6 +496,8 @@ namespace jkgm {
             gl::uniform_location_id shadow_alpha_factor;
             gl::uniform_location_id shadow_dither_enabled,shadow_instance_opacity,
                                     shadow_alpha_masked;
+            bool cached_dither_enabled_=false,cached_masked_=false;
+            float cached_dither_opacity_=-1.0f;
         public:
             explicit spotlight_shadow_depth_shader(fs::path const &data_root);
             void set_light(point<3,float> origin,point<3,float> right,

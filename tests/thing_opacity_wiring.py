@@ -27,6 +27,7 @@ for needle in (
 # reflected Thing, never once for each hierarchy mesh.
 assert main.count("auto const thing_fade=sample_3do_opacity(")==1
 assert "uintptr_t(hud_owner)+0xc4U==native_rd" in main
+assert "clear_thing_opacity(); // levels may recycle Thing pointers/signatures" in main
 assert "class thing_opacity_registry" in state
 assert "entry.signature==signature" in state
 assert "bool dither=false" in state
@@ -51,6 +52,7 @@ assert "shader.set_thing_fade(inst.thing_opacity,1)" in preview
 assert "shader.set_thing_fade(inst.thing_opacity," in preview
 assert "glBlendFuncSeparate(GL_ONE,GL_ONE_MINUS_SRC_ALPHA," in preview
 assert "set_shadow_dither(" in shaders
+assert "cached_dither_enabled_!=enabled" in shaders
 assert "sun_shadow_model_material_casts_depth(" in sun
 assert preview.count("sun_shadow_model_material_casts_depth(")>=3
 assert "hash_float(caster.instance->thing_opacity)" in preview

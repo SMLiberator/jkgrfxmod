@@ -168,6 +168,7 @@ namespace {
     thread_local jkgm::thing_opacity_state active_native_thing_opacity{};
     // Defined beside the native SPR registry; only samples Thing state.
     jkgm::thing_opacity_state sample_3do_opacity(void const *thing);
+    void clear_thing_opacity();
     thread_local uint64_t active_native_shadow_owner=0;
     thread_local uint64_t active_native_spotlight_family=0;
     thread_local bool active_native_shadow_dynamic=false;
@@ -3112,6 +3113,7 @@ void jkgm::reset_gpu_3do_instances()
     native_decal_capture_until=0;
     clear_moving_sprite_decals();
     gpu_mesh_cache.clear(); // level/renderer reset, never memory-pressure eviction
+    clear_thing_opacity(); // levels may recycle Thing pointers/signatures
     gpu_mesh_integrity_audit_frame=0U;
     gpu_mesh_next_audit_ms=0U;
     gpu_mesh_audit_checked=0U;
@@ -3209,6 +3211,7 @@ namespace {
     jkgm::sprite_type_registry sprite_types;
     jkgm::sprite_instance_registry sprite_instances;
     jkgm::thing_opacity_registry thing_opacity_instances;
+    void clear_thing_opacity() {thing_opacity_instances.clear();}
     // Thing pointer + engine signature survives slot reuse without leaking
     // a fade onto the next owner of the same SithThing allocation.
     jkgm::thing_opacity_state sample_3do_opacity(void const *thing)

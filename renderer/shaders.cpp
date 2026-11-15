@@ -1601,10 +1601,21 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_instanced_models(
 void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_dither(
     bool enabled,float opacity,bool masked)
 {
-    gl::set_uniform_integer(shadow_dither_enabled,enabled?1:0);
+    // Preserve the original opaque fast path: repeated normal casters
+    // should not issue additional glUniform calls when coverage is solid.
+    if(cached_dither_enabled_!=enabled) {
+        gl::set_uniform_integer(shadow_dither_enabled,enabled?1:0);
+        cached_dither_enabled_=enabled;
+    }
     if(!enabled)return;
-    gl::set_uniform_float(shadow_instance_opacity,opacity);
-    gl::set_uniform_integer(shadow_alpha_masked,masked?1:0);
+    if(cached_dither_opacity_!=opacity) {
+        gl::set_uniform_float(shadow_instance_opacity,opacity);
+        cached_dither_opacity_=opacity;
+    }
+    if(cached_masked_!=masked) {
+        gl::set_uniform_integer(shadow_alpha_masked,masked?1:0);
+        cached_masked_=masked;
+    }
 }
 void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(
     bool enabled,point<2,float> uv_scale,point<2,float> uv_scroll,
