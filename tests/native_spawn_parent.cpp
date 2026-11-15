@@ -38,5 +38,5 @@ int main() {
         assert(actual==known[i]);
     }
     std::array<std::uint8_t,5> unused{};
-    assert(!make_call(0U,0x80000000U,unused));
+    assert(!make_call(0U,0x90000000U,unused));
 }
