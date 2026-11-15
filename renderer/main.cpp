@@ -2402,7 +2402,10 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             std::string failure_detail;
             snapshot_attempted_this_call=true;
             auto geom=snapshot_gpu_mesh(m,vertex_rgb,&failure,&failure_detail);
-            gpu_mesh_cache_make_room();
+            // SetModelMesh may replace this SAME native mesh thousands
+            // of times. Only a NEW cache key can increase cache size;
+            // replacing an entry must not trigger an O(cache-size) trim.
+            if(it==gpu_mesh_cache.end())gpu_mesh_cache_make_room();
             if(profiling && header_unchanged)
                 ++gpu_native_stats.source_invalidations;
             cached_gpu_mesh updated{};
@@ -2877,9 +2880,9 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 if(audit_frame)it->second.last_audit_frame=gpu_frame_serial;
             }
             if(!same) {
-                // The shared cache is also used by JK's ordinary 3DO hook.
-                // Preserve its usual revision checks and bounded growth.
-                gpu_mesh_cache_make_room();
+                // A source replacement at an existing key needs no
+                // cache-pressure sweep; only insertions increase size.
+                if(it==gpu_mesh_cache.end())gpu_mesh_cache_make_room();
                 char const *failure=nullptr;
                 auto geometry=snapshot_gpu_mesh(mesh,rgb,&failure);
                 if(!geometry) {

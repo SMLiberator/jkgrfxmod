@@ -13,7 +13,9 @@ full-clear / planar hard-fail limit is replaced with one selective policy:
 - Pressure reclaim target: 7,168 entries.
 - Only entries **not referenced for more than 128 rendering frames** are
   eligible, oldest first.
-- Sweep at most once per rendering frame and only under pressure.
+- Sweep at most once per rendering frame, **only for new cache keys** and
+  only under pressure. Repeated SetModelMesh rewrites of an existing key
+  cannot increase entry count and must not trigger an O(cache-size) sweep.
 - When all entries are recent, temporarily exceed the soft limit rather
   than drop currently visible or reflected geometry.
 - World/renderer resets still clear the cache intentionally.

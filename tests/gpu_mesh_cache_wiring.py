@@ -13,6 +13,9 @@ assert "gpu_mesh_cache.size()>=4096U" not in main
 assert "gpu_mesh_cache.clear(); // level/renderer reset" in main
 assert "gpu_mesh_cache_make_room();" in main
 assert main.count("gpu_mesh_cache_make_room();")==2 # normal + planar
+# Rebuilding an existing mesh does NOT add an entry and must not cause
+# cache-wide eviction sweeps at 8,192+ resident meshes.
+assert main.count("if(it==gpu_mesh_cache.end())gpu_mesh_cache_make_room();")==2
 assert main.count("gpu_mesh_cache_inserted();")==2
 assert main.count("last_used_frame=gpu_frame_serial")>=4
 assert "gpu_mesh_cache_last_trim_frame==gpu_frame_serial" in main
