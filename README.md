@@ -2180,6 +2180,18 @@ when its center is behind a wall. To see the difference, position the
 the building: a type-4 flare should remain whole while a default sprite
 would be partially clipped.
 
+## Per-Thing GPU 3DO opacity fades
+
+GPU-cached model Things expose
+`SetThingOpacity(thing, opacity, dither, fadeTime)` and
+`GetThingOpacity(thing)`. The Getter returns the *current* interpolated
+opacity. A `dither` value >= 1 switches ordinary 3DOs to opaque-pass
+screen-door fading; values below 1 use regular alpha blending. Shadow maps
+always use stable dithered coverage for partial model/material opacity,
+including previously alpha-blended 3DOs, and retain their stationary
+shadow-cache invalidation. This does not modify shared models or native
+mesh revision epochs. See [3DO opacity fade documentation](doc/thing_opacity.md).
+
 ## Per-Thing SPR animation (JK23, work in progress)
 
 The experimental `SetSpriteInfo` / `GetSpriteInfo` COG verbs operate on **a

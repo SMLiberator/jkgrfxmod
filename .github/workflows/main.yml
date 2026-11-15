@@ -327,6 +327,12 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_alpha.cpp /Fe:gpu_3do_alpha_test.exe
         gpu_3do_alpha_test.exe
+    - name: Per-Thing 3DO opacity fade and dithered shadow contracts
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\thing_opacity.cpp /Fe:thing_opacity_test.exe || exit /b 1
+        thing_opacity_test.exe || exit /b 1
+        python3 tests/thing_opacity_wiring.py || exit /b 1
     - name: Native JKGM EXE bootstrap PE regression tests
       run: python tests/test_bootstrap_patcher.py
     - name: Package standalone development binaries

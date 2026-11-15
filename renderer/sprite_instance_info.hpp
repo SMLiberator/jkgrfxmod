@@ -119,4 +119,56 @@ namespace jkgm {
         std::unordered_map<void const *,animation> entries_;
         std::unordered_map<void const *,roll_animation> rolls_;
     };
+    // Independent 3DO Thing opacity, not an rdModel3/rdMesh mutation.
+    // Instance identity is (SithThing*, native signature), as for SPR fades.
+    struct thing_opacity_state {
+        float opacity=1.0f;
+        bool dither=false;
+    };
+    class thing_opacity_registry {
+    public:
+        bool set(void const *thing,uint32_t signature,float opacity,
+                 bool dither,uint32_t now_ms,float seconds) {
+            if(!thing || !std::isfinite(opacity) || opacity<0.0f ||
+               opacity>1.0f || !std::isfinite(seconds) ||
+               seconds<0.0f || seconds>3600.0f)
+                return false;
+            auto &entry=entries_[thing];
+            float const start=entry.signature==signature
+                ? evaluate(entry,now_ms) : 1.0f;
+            entry.signature=signature;
+            entry.start=start;
+            entry.target=opacity;
+            entry.dither=dither; // mode changes immediately, never interpolated
+            entry.started=now_ms;
+            entry.duration=static_cast<uint32_t>(seconds*1000.0f);
+            if(entry.duration==0U)entry.start=opacity;
+            return true;
+        }
+        thing_opacity_state sample(void const *thing,uint32_t signature,
+                                   uint32_t now_ms) const {
+            auto const it=entries_.find(thing);
+            if(it==entries_.end() || it->second.signature!=signature)
+                return {};
+            return {evaluate(it->second,now_ms),it->second.dither};
+        }
+        void forget(void const *thing) { entries_.erase(thing); }
+        void clear() { entries_.clear(); }
+        size_t size() const {return entries_.size();}
+    private:
+        struct animation {
+            uint32_t signature=0;
+            float start=1.0f,target=1.0f;
+            bool dither=false;
+            uint32_t started=0,duration=0;
+        };
+        static float evaluate(animation const &a,uint32_t now_ms) {
+            if(a.duration==0U)return a.target;
+            float const t=std::min(1.0f,
+                float(now_ms-a.started)/float(a.duration));
+            return a.start+(a.target-a.start)*t;
+        }
+        std::unordered_map<void const *,animation> entries_;
+    };
+
 }

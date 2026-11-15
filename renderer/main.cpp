@@ -165,6 +165,8 @@ namespace {
     thread_local std::array<char,33> active_native_model_filename{{0}};
     thread_local uintptr_t active_native_model_ptr=0U;
     thread_local uintptr_t active_native_rdthing_ptr=0U;
+    // Defined beside the native SPR registry; only samples Thing state.
+    jkgm::thing_opacity_state sample_3do_opacity(void const *thing);
     thread_local uint64_t active_native_shadow_owner=0;
     thread_local uint64_t active_native_spotlight_family=0;
     thread_local bool active_native_shadow_dynamic=false;
@@ -2611,6 +2613,13 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     gpu_3do_instance inst;
     inst.id=it->second.id;
     inst.geometry=it->second.geometry;
+    // rdThing is embedded at SithThing+0xC4 on the verified JK executable.
+    if(active_native_rdthing_ptr>=0xc4U) {
+        auto const state=sample_3do_opacity(reinterpret_cast<void const *>(
+            active_native_rdthing_ptr-0xc4U));
+        inst.thing_opacity=state.opacity;
+        inst.thing_dither=state.dither;
+    }
     inst.shadow_only=shadow_only;
     inst.effective_geometry_mode=static_cast<uint32_t>(
         jkgm::gpu_3do_effective_geo_mode(current_geo_mode,m.geometry_mode));
@@ -2950,6 +2959,10 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 continue;
             }
             gpu_3do_instance instance{};
+            auto const thing_fade=sample_3do_opacity(
+                reinterpret_cast<void const *>(thing.thing));
+            instance.thing_opacity=thing_fade.opacity;
+            instance.thing_dither=thing_fade.dither;
             instance.id=it->second.id;
             instance.geometry=it->second.geometry;
             instance.transform=source.world_transform;
@@ -3192,6 +3205,20 @@ namespace {
     };
     jkgm::sprite_type_registry sprite_types;
     jkgm::sprite_instance_registry sprite_instances;
+    jkgm::thing_opacity_registry thing_opacity_instances;
+    // Thing pointer + engine signature survives slot reuse without leaking
+    // a fade onto the next owner of the same SithThing allocation.
+    jkgm::thing_opacity_state sample_3do_opacity(void const *thing)
+    {
+        if(!thing || !gpu_span_readable(thing,0xc8U))return {};
+        auto const *p=static_cast<uint8_t const *>(thing);
+        uint32_t type=0,rd_type=0,signature=0;
+        std::memcpy(&type,p+0x0cU,4U);
+        std::memcpy(&rd_type,p+0xc4U,4U);
+        if(type==0U || rd_type!=1U)return {};
+        std::memcpy(&signature,p+0x74U,4U);
+        return thing_opacity_instances.sample(thing,signature,GetTickCount());
+    }
     std::unordered_set<uint64_t> sprite_decal_diagnostic_keys;
     native_sprite_newentry_fn RealNativeSpriteNewEntry=
         reinterpret_cast<native_sprite_newentry_fn>(sprite_newentry_addr);
@@ -9265,6 +9292,34 @@ namespace {
         cog_push_vector(ctx,values);
     }
 
+    // SetThingOpacity(thing, opacity, dither, fadeTime). Like SPR, this is
+    // per-Thing and never edits the shared rdModel3 or cached mesh source.
+    void __cdecl cog_set_thing_opacity(void *ctx)
+    {
+        float const seconds=cog_pop_float(ctx);
+        float const dither=cog_pop_float(ctx);
+        float const opacity=cog_pop_float(ctx);
+        void *thing=cog_pop_thing(ctx);
+        uint32_t signature=0;
+        if(!std::isfinite(dither) || !thing ||
+           !gpu_span_readable(thing,0xc8U))return;
+        auto const *p=static_cast<uint8_t const *>(thing);
+        uint32_t type=0,rd_type=0;
+        std::memcpy(&type,p+0x0cU,4U);
+        std::memcpy(&rd_type,p+0xc4U,4U);
+        if(type==0U || rd_type!=1U)return;
+        std::memcpy(&signature,p+0x74U,4U);
+        if(!thing_opacity_instances.set(thing,signature,opacity,
+                                       dither>=1.0f,GetTickCount(),seconds))
+            LOG_WARNING("SetThingOpacity: invalid opacity or duration");
+    }
+    // Returns the currently interpolated alpha, not the pending target.
+    void __cdecl cog_get_thing_opacity(void *ctx)
+    {
+        void *thing=cog_pop_thing(ctx);
+        cog_push_float(ctx,sample_3do_opacity(thing).opacity);
+    }
+
     // SetFogColor(vector rgb, float fadeTime)
     //   rgb components 0.0 - 1.0, e.g. '0.45 0.50 0.58'
     //   fadeTime in seconds; 0.0 changes the color immediately
@@ -10373,6 +10428,8 @@ namespace {
         cog_verb_entry{"setmodelradius", cog_set_model_radius},
         cog_verb_entry{"setmodelmeshradius", cog_set_model_mesh_radius},
         cog_verb_entry{"resetmaterialcolor", cog_reset_material_color},
+        cog_verb_entry{"setthingopacity", cog_set_thing_opacity},
+        cog_verb_entry{"getthingopacity", cog_get_thing_opacity},
         cog_verb_entry{"setspriteinfo", cog_set_sprite_info},
         cog_verb_entry{"getspriteinfo", cog_get_sprite_info},
         cog_verb_entry{"setspriteroll", cog_set_sprite_roll},
@@ -10988,6 +11045,7 @@ bool detach_hooks()
         native_sprite_hook_active=false;
         sprite_types.clear();
         sprite_instances.clear();
+        thing_opacity_instances.clear();
         sprite_decal_diagnostic_keys.clear();
         sprite_gpu_decals.clear();
         clear_moving_sprite_decals();

@@ -763,6 +763,8 @@ namespace jkgm {
             decal_volume_aabb bounds{};
             uint64_t opaque_signature=0,cutout_signature=0;
             std::array<uint32_t,5> cutout_inputs{};
+            float thing_opacity=1.0f,material_opacity=1.0f;
+            uint32_t face_type=0;
             uint32_t offset=0,count=0;
             uintptr_t material=0;
             int32_t cel=-1;
@@ -4128,6 +4130,8 @@ namespace jkgm {
                 ?profile_clock::now():profile_clock::time_point{};
             if(!reuse_alpha) for(auto const &inst:instances) {
                 if(!inst.geometry || inst.shadow_only ||
+                   (!inst.is_sprite_quad && !inst.is_projected_decal &&
+                    inst.thing_opacity<=0.0f) ||
                    (!post_exempt && inst.is_projected_decal!=decals_only))
                     continue;
                 // Only skip MAIN view GPU draw setup, never native JK
@@ -4260,14 +4264,19 @@ namespace jkgm {
                     // the existing opaque architecture and depth-tested.
                     // The MAT may be fully opaque; its native SPR instance
                     // opacity (including SetSpriteInfo) is independent.
+                    bool const fading_3do=!inst.is_sprite_quad &&
+                        !inst.is_projected_decal &&
+                        inst.thing_opacity<0.999f;
                     auto const material_policy=inst.is_projected_decal
                         ? gpu_3do_alpha_mode::blend_only
                         : choose_gpu_3do_alpha_mode(
                             (group.face_type&0x2U)!=0 ||
-                                (inst.is_sprite_quad && inst.sprite_opacity<0.999f),
+                                (inst.is_sprite_quad && inst.sprite_opacity<0.999f) ||
+                                (fading_3do && !inst.thing_dither),
                             tex.alpha,tex.masked,
                             tex.special||tex.emissive_only,
-                            tex.opacity,tex.dithered);
+                            tex.opacity,tex.dithered ||
+                                (fading_3do && inst.thing_dither));
                     // A live saber SideMat can contain fully opaque core
                     // texels. The ordinary "mixed" route writes those to
                     // the opaque depth buffer, which then rejects the final
@@ -4715,7 +4724,8 @@ namespace jkgm {
                 // its MAT texture is fully opaque (JK uses alpha=90/255).
                 float const face_opacity=inst.is_projected_decal
                     ? inst.decal_opacity
-                    : (inst.is_sprite_quad ? inst.sprite_opacity : 1.0f) *
+                    : (inst.is_sprite_quad ? inst.sprite_opacity :
+                        inst.thing_opacity) *
                       ((group.face_type&0x2U)!=0 ? 90.0f/255.0f : 1.0f);
                 if(transparent) {
                     switch(material.blend) {
@@ -4883,6 +4893,13 @@ namespace jkgm {
                     ? material.height
                     : gpu_3do_model_uv_extent(material.height);
                 prog.set_solid_fullbright(material.solid_fullbright);
+                // Dither already attenuates coverage; do not dim surviving
+                // emissive pixels a second time. Alpha-blended emission,
+                // including zero-alpha emissive-only MATs, fades normally.
+                prog.set_thing_opacity(
+                    !inst.is_sprite_quad && inst.thing_dither &&
+                    draw.policy==gpu_3do_alpha_mode::dithered ?
+                        1.0f : inst.thing_opacity);
                 prog.set_surface(material.albedo_source,uv_width,
                                  uv_height,transparent,
                                  static_cast<int>(material.blend),
@@ -6425,7 +6442,7 @@ namespace jkgm {
                     }
                     auto const &m=instance.transform;
                     for(auto const &group:instance.geometry->groups) {
-                        if(group.count<3U)continue;
+                        if(group.count<3U || instance.thing_opacity<=0.0f)continue;
                         decal_vec3 low{{std::numeric_limits<float>::max(),
                                         std::numeric_limits<float>::max(),
                                         std::numeric_limits<float>::max()}};
@@ -6471,19 +6488,17 @@ namespace jkgm {
                         // have that mesh's inside/backside block its own beam.
                         if(spotlight_shadow_origin_inside(chosen.origin,low,high))
                             continue;
-                        // A blended effect never writes opaque shadow
-                        // depth. Masked/mixed MATs cast cutout silhouettes
-                        // using the same UVs/textures as visible geometry.
+                        // Material alpha and Thing fades use dithered depth
+                        // instead of simply removing alpha-blended casters.
                         bool const solid=instance.effective_geometry_mode==3 ||
                             group.solid_color;
                         auto const tex=solid
                             ?resolve_gpu_3do_solid_material(group,false)
                             :resolve_gpu_3do_material(group);
                         bool const cutout=tex.masked||tex.alpha||tex.dithered;
-                        if(tex.albedo_source==0 || tex.special ||
-                           tex.emissive_only ||
-                           tex.opacity<0.999f || (group.face_type&0x2U) ||
-                           (cutout && tex.albedo_source!=1))
+                        if(!sun_shadow_model_material_casts_depth(
+                               tex.albedo_source,tex.special,tex.emissive_only,
+                               tex.opacity,cutout,instance.thing_opacity))
                             continue;
                         model_casters.push_back({&instance,&group,tex,cutout});
                     }
@@ -6607,9 +6622,10 @@ namespace jkgm {
                 hash_material(surface.material,draw.current_cel,draw.texture);
             }
             for(auto const &caster:model_casters) {
-                if(caster.cutout)
-                    hash_material(caster.group->material,
-                                  caster.group->cel,caster.texture);
+                hash_material(caster.group->material,
+                              caster.group->cel,caster.texture);
+                hash_float(caster.instance->thing_opacity);
+                hash_u32(caster.group->face_type);
                 hash_u32(uint32_t(caster.instance->id));
                 hash_u32(uint32_t(caster.instance->id>>32));
                 hash_u32(caster.group->offset);
@@ -6753,6 +6769,15 @@ namespace jkgm {
                 else
                     prog.set_shadow_alpha(false,make_point(1.0f,1.0f),
                         make_point(0.0f,0.0f),0.5f,1.0f,false,0.0f);
+                float const face_opacity=(group.face_type&0x2U)!=0U
+                    ?90.0f/255.0f:1.0f;
+                bool const dither=caster.cutout ||
+                    instance.thing_opacity<0.999f ||
+                    caster.texture.opacity<0.999f ||face_opacity<1.0f;
+                prog.set_shadow_dither(dither,
+                    instance.thing_opacity*face_opacity*
+                        (caster.cutout?1.0f:caster.texture.opacity),
+                    caster.texture.masked);
                 gl::draw_elements(gl::element_type::triangles,group.count,
                                   gl::index_type::uint32,
                                   static_cast<ptrdiff_t>(
@@ -7005,7 +7030,7 @@ namespace jkgm {
                             std::make_unique<gpu_3do_gl_mesh>(
                                 *inst->geometry)).first;
                     for(auto const &g:inst->geometry->groups) {
-                        if(g.count<3U || (g.face_type&2U))continue;
+                        if(g.count<3U || inst->thing_opacity<=0.0f)continue;
                         // Share the same MAT/cel snapshot with both sun
                         // cascades. This avoids repeating native MAT lookups
                         // and VirtualQuery work per dynamic Thing/group.
@@ -7028,10 +7053,9 @@ namespace jkgm {
                         bool const cutout=tex.masked||tex.alpha||
                             tex.dithered||
                             (inst->is_sprite_quad && tex.albedo_source==1);
-                        if(tex.albedo_source==0 || tex.special ||
-                           tex.emissive_only ||
-                           tex.opacity<0.999f ||
-                           (cutout && tex.albedo_source!=1))continue;
+                        if(!sun_shadow_model_material_casts_depth(
+                               tex.albedo_source,tex.special,tex.emissive_only,
+                               tex.opacity,cutout,inst->thing_opacity))continue;
                         if((!the_config->sun_shadow_cull_back_faces &&
                              !the_config->sun_shadow_cull_front_faces) ||
                            (g.face_type&1U) || g.nonplanar)
@@ -7044,6 +7068,14 @@ namespace jkgm {
                                 ?gl::face_mode::front:gl::face_mode::back);
                         }
                         shadow_material(tex,cutout,inst->is_sprite_quad);
+                        float const face_opacity=(g.face_type&0x2U)!=0U
+                            ?90.0f/255.0f:1.0f;
+                        bool const dither=cutout ||
+                            inst->thing_opacity<0.999f ||
+                            tex.opacity<0.999f ||face_opacity<1.0f;
+                        prog.set_shadow_dither(dither,
+                            inst->thing_opacity*face_opacity*
+                                (cutout?1.0f:tex.opacity),tex.masked);
                         gl::bind_vertex_array(it->second->vao);
                         gl::draw_elements(gl::element_type::triangles,g.count,
                             gl::index_type::uint32,static_cast<ptrdiff_t>(
@@ -7484,7 +7516,7 @@ namespace jkgm {
                 auto const &groups=instance.geometry->groups;
                 for(size_t group_idx=0;group_idx<groups.size();++group_idx) {
                     auto const &group=groups[group_idx];
-                    if(group.count<3U || (group.face_type&0x2U))continue;
+                    if(group.count<3U || instance.thing_opacity<=0.0f)continue;
                     // One of every 64 eligible-for-testing groups is timed.
                     // Avoid thousands of expensive clock calls per frame.
                     bool const sample=the_config->profile_renderer &&
@@ -7494,9 +7526,9 @@ namespace jkgm {
                     auto const &tex=sun_caster_material(group,instance);
                     bool const cutout=tex.masked||tex.alpha||tex.dithered||
                         (instance.is_sprite_quad && tex.albedo_source==1);
-                    bool const eligible=sun_shadow_material_casts_depth(
+                    bool const eligible=sun_shadow_model_material_casts_depth(
                         tex.albedo_source,tex.special,tex.emissive_only,
-                        tex.opacity,cutout);
+                        tex.opacity,cutout,instance.thing_opacity);
                     if(sample) {
                         sun_profile_candidate_material_sample_ns+=elapsed_profile_ns(
                             mat_begin,profile_clock::now());
@@ -7517,6 +7549,7 @@ namespace jkgm {
                             group_cache->count==group.count &&
                             group_cache->material==group.material &&
                             group_cache->cel==group.cel &&
+                            group_cache->face_type==group.face_type &&
                             group_cache->bounds_min==group.bounds_min &&
                             group_cache->bounds_max==group.bounds_max;
                         if(!same_group) {
@@ -7527,6 +7560,7 @@ namespace jkgm {
                             group_cache->count=group.count;
                             group_cache->material=group.material;
                             group_cache->cel=group.cel;
+                            group_cache->face_type=group.face_type;
                             group_cache->bounds_min=group.bounds_min;
                             group_cache->bounds_max=group.bounds_max;
                             group_cache->descriptor_valid=true;
@@ -7568,9 +7602,12 @@ namespace jkgm {
                                 get<y>(tex.albedo_scroll),
                                 tex.albedo_transition)
                             :std::array<uint32_t,5>{};
-                        bool const reuse_opaque=!cutout && group_cache &&
+                        bool const coverage_unchanged=group_cache &&
+                            group_cache->thing_opacity==instance.thing_opacity &&
+                            group_cache->material_opacity==tex.opacity;
+                        bool const reuse_opaque=!cutout && coverage_unchanged &&
                             group_cache->opaque_signature_valid;
-                        bool const reuse_cutout=cutout && group_cache &&
+                        bool const reuse_cutout=cutout && coverage_unchanged &&
                             group_cache->cutout_signature_valid &&
                             group_cache->cutout_inputs==cutout_inputs;
                         bool const reuse_signature=reuse_opaque||reuse_cutout;
@@ -7602,6 +7639,11 @@ namespace jkgm {
                         member_u32(uint32_t(instance.shadow_owner>>32));
                         member_u32(uint32_t(group.material));
                         member_u32(uint32_t(group.cel));
+                        member_u32(group.face_type);
+                        // Fade animation must invalidate cached static-depth
+                        // and full-cascade signatures without touching meshes.
+                        member_float(instance.thing_opacity);
+                        member_float(tex.opacity);
                         if(cutout) {
                             member_float(tex.alpha_cutoff);
                             member_float(tex.opacity);
@@ -7612,6 +7654,8 @@ namespace jkgm {
                         for(float v:instance.transform)member_float(v);
                         member=mix_model_signature(member);
                         if(group_cache) {
+                            group_cache->thing_opacity=instance.thing_opacity;
+                            group_cache->material_opacity=tex.opacity;
                             if(cutout) {
                                 group_cache->cutout_signature=member;
                                 group_cache->cutout_inputs=cutout_inputs;
@@ -8354,6 +8398,9 @@ namespace jkgm {
                     std::map<key,std::vector<size_t>> occurrences;
                     for(size_t i=0;i<scheduled.size();++i) {
                         auto const &d=*scheduled[i];
+                        // One uniform opacity per instanced call. Keep faded
+                        // Thing casters in the singleton/multidraw path.
+                        if(d.instance->thing_opacity<0.999f)continue;
                         bool const flipped=gpu_3do_reversed_winding(
                             d.instance->transform);
                         occurrences[std::make_tuple(
@@ -8397,6 +8444,13 @@ namespace jkgm {
                             else prog.set_shadow_alpha(false,
                                 make_point(1.0f,1.0f),make_point(0.0f,0.0f),
                                 0.5f,1.0f,false,0.0f);
+                            float const face_opacity=(g.face_type&0x2U)!=0U
+                                ?90.0f/255.0f:1.0f;
+                            bool const dither=d.cutout || d.texture.opacity<0.999f ||
+                                face_opacity<1.0f;
+                            prog.set_shadow_dither(dither,
+                                face_opacity*(d.cutout?1.0f:d.texture.opacity),
+                                d.texture.masked);
                             std::array<std::array<float,12>,
                                 shaders::spotlight_shadow_depth_shader::
                                     max_shadow_instances> transforms{};
@@ -8437,6 +8491,8 @@ namespace jkgm {
                         if(other.instance!=draw.instance ||
                            other.cutout!=draw.cutout ||
                            shadow_no_cull(other)!=uncullable)break;
+                        if(other.group->face_type!=group.face_type ||
+                           other.texture.opacity!=draw.texture.opacity)break;
                         if(draw.cutout &&
                            (other.group->material!=group.material ||
                             other.group->cel!=group.cel))break;
@@ -8465,6 +8521,15 @@ namespace jkgm {
                     else prog.set_shadow_alpha(false,
                         make_point(1.0f,1.0f),make_point(0.0f,0.0f),
                         0.5f,1.0f,false,0.0f);
+                    float const face_opacity=(group.face_type&0x2U)!=0U
+                        ?90.0f/255.0f:1.0f;
+                    bool const dither=draw.cutout ||
+                        instance.thing_opacity<0.999f ||
+                        draw.texture.opacity<0.999f ||face_opacity<1.0f;
+                    prog.set_shadow_dither(dither,
+                        instance.thing_opacity*face_opacity*
+                            (draw.cutout?1.0f:draw.texture.opacity),
+                        draw.texture.masked);
                     if(last==first+1) {
                         gl::draw_elements(gl::element_type::triangles,
                             group.count,gl::index_type::uint32,

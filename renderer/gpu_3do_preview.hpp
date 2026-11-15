@@ -115,6 +115,8 @@ namespace jkgm {
         bool transient_procedural=false; // particles/polylines: evict after this frame
         bool saber_trail_active=false; // diagnostics: procedural blade fan was appended
         float sprite_opacity=1.0f; // SetSpriteInfo opacity
+        float thing_opacity=1.0f; // GetThingOpacity; per-Thing, not mesh state
+        bool thing_dither=false; // opaque-pass screen-door fade
         uintptr_t sprite_occlusion_resource=0; // native rdSprite pointer; 0 when not a Thing-owned SPR
         // Stable identity of the model mesh this instance came from.
         // Used by moving decals; zero when not captured or not an eligible

@@ -304,7 +304,7 @@ namespace jkgm {
             gl::uniform_location_id projection;
             gl::uniform_location_id albedo_sampler,emissive_sampler,uv_scale,has_texture,
                                     has_emissive,transparent_pass,blend_mode,alpha_mode,alpha_cutoff,
-                                    native_face_opacity,albedo_factor,emissive_factor,
+                                    native_face_opacity,thing_opacity,albedo_factor,emissive_factor,
                                     albedo_scroll,emissive_scroll,fog_params,fog_color,
                                     emissive_only;
             gl::uniform_location_id jk_color_filter,jk_color_tint,jk_color_add_fade;
@@ -393,6 +393,7 @@ namespace jkgm {
                              int blend,int alpha_policy,float cutoff,float face_opacity,
                              point<4,float> tint,point<2,float> scroll,
                              bool emissive_only);
+            void set_thing_opacity(float value);
             void set_emissive(bool textured,point<4,float> intensity,
                               point<2,float> scroll);
             void set_fog(point<4,float> params,point<4,float> color);
@@ -493,6 +494,8 @@ namespace jkgm {
             gl::uniform_location_id shadow_alpha_uv_scale,shadow_alpha_uv_scroll;
             gl::uniform_location_id shadow_alpha_transition,shadow_alpha_cutoff;
             gl::uniform_location_id shadow_alpha_factor;
+            gl::uniform_location_id shadow_dither_enabled,shadow_instance_opacity,
+                                    shadow_alpha_masked;
         public:
             explicit spotlight_shadow_depth_shader(fs::path const &data_root);
             void set_light(point<3,float> origin,point<3,float> right,
@@ -510,6 +513,7 @@ namespace jkgm {
             void set_instanced_models(
                 std::array<std::array<float,12>,max_shadow_instances> const &models,
                 size_t count);
+            void set_shadow_dither(bool enabled,float opacity,bool masked);
             void set_shadow_alpha(bool enabled,point<2,float> uv_scale,
                                   point<2,float> uv_scroll,float cutoff,
                                   float factor,bool has_next,float progress);

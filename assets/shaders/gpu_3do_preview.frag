@@ -20,6 +20,7 @@ uniform sampler2D displacement_map;
 uniform float displacement_factor;
 uniform float alpha_cutoff;
 uniform float native_face_opacity;
+uniform float thing_opacity; // independent emissive fade multiplier
 uniform int has_texture; // 0=unresolved diagnostic, 1=albedo map, 2=intentionally no albedo
 uniform int solid_fullbright; // exact 8-bit CMP light-table invariant for GeoMode 3
 uniform sampler2D palette_fullbright_mask;
@@ -695,6 +696,9 @@ void main() {
     // by albedo coverage in the shared policy.
     vec3 emission=gpu_material_emission(
         emissive_map,uv,emissive_scroll,emissive_factor,has_emissive);
+    // Emissive-only 3DOs must fade too, even though emission has no
+    // ordinary albedo alpha. Normal opaque pass uses default 1.0.
+    emission*=thing_opacity;
     // Projected-decal feather and native sprite opacity must continue to
     // suppress pixels at zero overall coverage; this is an albedo-texture
     // exception, not permission to revive a completely faded effect.

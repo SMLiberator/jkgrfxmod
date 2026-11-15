@@ -771,6 +771,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , alpha_mode(gl::get_uniform_location(the_program,"alpha_mode"))
     , alpha_cutoff(gl::get_uniform_location(the_program,"alpha_cutoff"))
     , native_face_opacity(gl::get_uniform_location(the_program,"native_face_opacity"))
+    , thing_opacity(gl::get_uniform_location(the_program,"thing_opacity"))
     , albedo_factor(gl::get_uniform_location(the_program,"albedo_factor"))
     , emissive_factor(gl::get_uniform_location(the_program,"emissive_factor"))
     , albedo_scroll(gl::get_uniform_location(the_program,"albedo_scroll"))
@@ -1009,6 +1010,10 @@ void jkgm::shaders::gpu_3do_preview_shader::set_surface(
     gl::set_uniform_vector(albedo_factor,tint);
     gl::set_uniform_vector(albedo_scroll,scroll);
     gl::set_uniform_vector(uv_scale,make_point(1.0f/width,1.0f/height));
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_thing_opacity(float value)
+{
+    gl::set_uniform_float(thing_opacity,value);
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_emissive(
     bool textured,point<4,float> intensity,point<2,float> scroll)
@@ -1511,6 +1516,9 @@ jkgm::shaders::spotlight_shadow_depth_shader::spotlight_shadow_depth_shader(
     , shadow_alpha_transition(gl::get_uniform_location(the_program,"shadow_alpha_transition"))
     , shadow_alpha_cutoff(gl::get_uniform_location(the_program,"shadow_alpha_cutoff"))
     , shadow_alpha_factor(gl::get_uniform_location(the_program,"shadow_alpha_factor"))
+    , shadow_dither_enabled(gl::get_uniform_location(the_program,"shadow_dither_enabled"))
+    , shadow_instance_opacity(gl::get_uniform_location(the_program,"shadow_instance_opacity"))
+    , shadow_alpha_masked(gl::get_uniform_location(the_program,"shadow_alpha_masked"))
 {
 }
 
@@ -1519,6 +1527,7 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_light(
     point<3,float> forward,point<4,float> limits)
 {
     gl::set_uniform_integer(shadow_orthographic,0);
+    set_shadow_dither(false,1.0f,false);
     gl::set_uniform_vector(shadow_origin,origin);
     gl::set_uniform_vector(shadow_right,right);
     gl::set_uniform_vector(shadow_up,up);
@@ -1531,6 +1540,7 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_orthographic_light(
     point<3,float> forward,point<4,float> limits)
 {
     gl::set_uniform_integer(shadow_orthographic,1);
+    set_shadow_dither(false,1.0f,false);
     gl::set_uniform_vector(shadow_origin,origin);
     gl::set_uniform_vector(shadow_right,right);
     gl::set_uniform_vector(shadow_up,up);
@@ -1588,6 +1598,14 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_instanced_models(
     shadow_instance_active=true;
 }
 
+void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_dither(
+    bool enabled,float opacity,bool masked)
+{
+    gl::set_uniform_integer(shadow_dither_enabled,enabled?1:0);
+    if(!enabled)return;
+    gl::set_uniform_float(shadow_instance_opacity,opacity);
+    gl::set_uniform_integer(shadow_alpha_masked,masked?1:0);
+}
 void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(
     bool enabled,point<2,float> uv_scale,point<2,float> uv_scroll,
     float cutoff,float factor,bool has_next,float progress)
