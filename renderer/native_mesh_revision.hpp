@@ -2,9 +2,9 @@
 
 #include <cstdint>
 
-// Wrap the 16 JK.dll model/material COG mutators at registration time.
-// The original handler and registrar ABI are preserved; callers query whether
-// the optimized GPU cache revision fast path remains safe for this session.
+// Wrap known JK.dll COG model mutators at registration time. The native
+// call ABI and stack contents are preserved. Model-scoped GPU epochs avoid
+// rehashing unrelated meshes; collision queries retain a global epoch.
 namespace mesh_revision {
     using handler = void(__cdecl *)(void *);
     using registrar = void(__cdecl *)(void *,handler,char const *);
@@ -13,5 +13,7 @@ namespace mesh_revision {
     void begin(registrar fn);
     void finish();
     bool active();
-    uint64_t current();
+    uint64_t current(); // global generation for type-3 collision queries
+    uint64_t current_for_model(uintptr_t model); // GPU meshes only
+    void reset_cache_state(); // clear epochs with the GPU source cache
 }

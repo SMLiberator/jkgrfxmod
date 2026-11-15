@@ -2027,7 +2027,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         it->second.num_uvs==m.num_uvs &&
         it->second.lighting_mode==m.lighting_mode;
     bool const revision_fastpath=mesh_revision::active();
-    uint64_t const current_generation=mesh_revision::current();
+    // Changes to other models must not invalidate this mesh's CPU source.
+    uint64_t const current_generation=mesh_revision::current_for_model(
+        active_native_model_ptr);
     bool const audit_frame=gpu_mesh_integrity_audit_frame==gpu_frame_serial;
     bool const should_hash=!header_unchanged ||
         (revision_fastpath
@@ -2433,6 +2435,7 @@ void jkgm::reset_gpu_3do_instances()
     native_decal_capture_until=0;
     clear_moving_sprite_decals();
     gpu_mesh_cache.clear();
+    mesh_revision::reset_cache_state();
     gpu_sprite_quads.clear();
     gpu_mat_residency.clear();
     ++gpu_frame_serial;

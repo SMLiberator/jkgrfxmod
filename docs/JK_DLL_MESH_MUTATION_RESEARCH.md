@@ -20,18 +20,16 @@ The DLL's `InitNewCogVerbs` registration sequence includes:
 | `ChangeModelMaterial` | `0x10053751` | `0x1004E7B0` |
 | `SetThingMesh` | `0x10053BF6` | `0x10050BC0` |
 
-Only the first **three** are in the original 16-verb tracker in
-`renderer/native_mesh_revision.cpp`; the fourth is not tracked. The
-13 other verb names from that tracker are not directly registered by
-**this DLL's** initializer. Their textual presence in read-only data is
-not proof of registration. Other modules may register additional COG
-verbs; inspecting this DLL alone cannot rule them out.
-
-At the time of this analysis, `finish()` requires all 16 registrations,
-so `mesh_revision::active()` is false and the GPU cache hashes its source
-data every frame. Do **not** treat missing registrations as harmless until
-other registration paths are identified. The former automatic 32-frame
-audit has separately been made opt-in and defaults to disabled.
+The **original** 16-verb tracker included only the first three and
+required all 16 registrations, which left the revision fast path inactive
+and forced full-per-frame hashing. The updated implementation recognizes
+`SetThingMesh`, enables scoped tracking only when all four known DLL
+registrations and the supplied executable signatures are present, and
+instruments those handlers without changing COG arguments or results.
+Other mutators remain optional: if they register and execute with unverified
+argument semantics, they trigger a one-time global revalidation. Additional
+registration paths in other modules have **not** yet been verified.
+The integrity audit remains opt-in, with interval `0` disabling it.
 
 ## Handler behavior
 
@@ -93,6 +91,38 @@ increment a global geometry generation. No-op/failed calls, cloning,
 append-only operations and material-reference changes must be handled
 according to their actual effects.
 
+## Executable verification and first implementation (2026-11-14)
+
+User-provided `jkgm(5).exe`: PE32 x86, base `0x00400000`, SHA-256
+`afb4605c8259075c151ad6b034b98562be87ebe90369d4d9abaee09b396ed50f`.
+
+Disassembly confirms the JK.dll native calls:
+
+- `0x004E3140` — `PopModel3`; COG stack count at `ctx+0x498`,
+  16-byte entries at `ctx+0x98`, symbol table at `ctx+0x94`.
+- `0x004E2B50` — `PopThing`; same COG stack representation.
+- `0x004FD660` — symbol lookup: 28-byte symbol entries, value +4,
+  optionally the global symbol table from `0x008B5368`.
+- Current/static world pointers `0x00833A10`/`0x00833A14`.
+- `PopModel3` uses model count `world+0x64`, model array
+  `world+0x6C`, stride `0x84`.
+- `PopThing` uses Thing count `world+0xC0`, Thing array
+  `world+0xC4`, stride `0x2B0`.
+- The DLL's `SetThingMesh` reads the Thing's `rdThing.type`
+  at `thing+0xC4` and the **post-clone** model pointer at `thing+0xC8`.
+
+The implementation now records a revision for that destination **model**
+without scanning any other model's mesh bytes, while `CloneModel`
+skips invalidating source geometry entirely. For supported COG variables,
+the original argument is read through the symbol table without popping it.
+Unknown or unverified mutations conservatively advance a separate global
+GPU fallback epoch. Type-3 collision revision tracking remains separate.
+
+The implementation is **model-scoped**, not yet mesh-slot scoped. One
+`SetModelMesh` call can update its selected slot across multiple geosets;
+once that selector parsing is verified, the target epoch can be narrowed
+further. Runtime confirmation and a Windows CI build are still required.
+
 ## Recommended cache design
 
 1. Intercept mutation calls that **actually execute**, across **all
@@ -114,7 +144,7 @@ according to their actual effects.
    `PopModel3` is referenced by the DLL at `0x004E3140`, but this
    **does not establish a safe detour signature** for every executable.
 
-Static disassembly is sufficient for the registration and handler
-observations above; runtime validation is still required before replacing
-cache invalidation semantics. No per-mesh invalidation implementation is
-claimed by this document.
+Static disassembly supports the listed addresses and layouts, but runtime
+validation is still required. Model-level (not mesh-level) invalidation is
+implemented with a signature-gated COG stack reader; no mesh-slot-specific
+implementation is claimed.
