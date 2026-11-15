@@ -8937,6 +8937,13 @@ namespace {
         return supported;
     }
 
+    // The engine inlines destruction in sithThing_Update (0x4CC4E5):
+    // neither of our RemoveThing / FreeThing entrypoint detours runs there.
+    // Detach parents already marked destroyed before native update can
+    // invalidate their type (+0x0C) and signature (+0x74).
+    void detach_native_children_from_parent(void *thing,bool remove_own_entry);
+    void detach_native_destroyed_children_pre_update();
+
     // Advance native attachments AFTER Sith's normal Thing update and BEFORE
     // rendering/culling. Keep sector membership, COG position and render pose
     // synchronized, not just a render-only sprite transform.
@@ -8962,6 +8969,7 @@ namespace {
         }
         bool const previous_tick_state=saber_light_native_update_active;
         saber_light_native_update_active=true;
+        detach_native_destroyed_children_pre_update();
         RealNativeThingUpdate(seconds,milliseconds);
         saber_light_native_update_active=previous_tick_state;
         // The alternative native MAT format variant previously crashed at
@@ -9007,11 +9015,47 @@ namespace {
                 completed.insert(rec.child);
                 uint32_t child_sig=0,parent_sig=0;
                 if(!read_node_attachment_identity(rec.child,child_sig) ||
-                   !read_node_attachment_identity(rec.parent,parent_sig) ||
-                   child_sig!=rec.child_signature ||
+                   child_sig!=rec.child_signature) {
+                    // Child slot was freed or recycled; its native attachment
+                    // cannot be repaired through this stale sidecar.
+                    jkgm::get_node_attachment_registry().erase(rec.child);
+                    continue;
+                }
+                if(!read_node_attachment_identity(rec.parent,parent_sig) ||
                    parent_sig!=rec.parent_signature) {
-                    // Never touch the memory of a recycled/destroyed child.
-                    // The native detach/destruction routine owns flag cleanup.
+                    // A Thing can be destroyed later in the same native tick,
+                    // bypassing our pre-update scan and direct remove hooks.
+                    // The old parent is no longer safe to pass to native
+                    // DetachThing; clear only this still-live node child's
+                    // native attachment payload instead of silently erasing
+                    // its registry entry and leaving flags 0x8C behind.
+                    uint32_t kind=0,live_parent_signature=0;
+                    bool const parent_readable=
+                        gpu_span_readable(
+                            reinterpret_cast<void const *>(rec.parent),0x78U);
+                    if(parent_readable) {
+                        std::memcpy(&kind,reinterpret_cast<void const *>(
+                            rec.parent+0x0c),4);
+                        std::memcpy(&live_parent_signature,
+                            reinterpret_cast<void const *>(rec.parent+0x74),4);
+                    }
+                    if(!parent_readable || kind==0 ||
+                       live_parent_signature==0) {
+                        uint32_t flags=0,linked=0;
+                        std::memcpy(&flags,reinterpret_cast<void const *>(
+                            rec.child+0x34),4);
+                        std::memcpy(&linked,reinterpret_cast<void const *>(
+                            rec.child+0x58),4);
+                        if(jkgm::native_orphan_node_link_matches(
+                            flags,linked,rec.parent)) {
+                            std::memset(reinterpret_cast<void *>(
+                                rec.child+0x34),0,0x28U);
+                            std::memset(reinterpret_cast<void *>(
+                                rec.child+0x6c),0,0x08U);
+                            LOG_WARNING("ThingNode: repaired orphan node "
+                                        "attachment after inline parent removal");
+                        }
+                    }
                     jkgm::get_node_attachment_registry().erase(rec.child);
                     continue;
                 }
@@ -9089,6 +9133,72 @@ namespace {
         }
     }
 
+    // Use the complete native child list before consulting the node
+    // registry. This covers ordinary Thing/Thing-face attachments too.
+    // Native DetachAttachedThings invokes DetachThing, whose detour erases
+    // the node records; registry-only detachment remains a fallback for
+    // mismatched or missing native child-list links.
+    void detach_native_children_from_parent(
+        void *thing,bool remove_own_entry)
+    {
+        uintptr_t const parent=reinterpret_cast<uintptr_t>(thing);
+        uint32_t signature=0;
+        if(!read_node_attachment_identity(parent,signature))return;
+        uint32_t head=0;
+        std::memcpy(&head,reinterpret_cast<void const *>(parent+0x68),4);
+        if(head && native_detach_attached_things_supported() &&
+           gpu_span_readable(reinterpret_cast<void const *>(
+               uintptr_t(head)),0x5cU)) {
+            uint32_t flags=0,attached=0;
+            std::memcpy(&flags,reinterpret_cast<void const *>(
+                uintptr_t(head)+0x34),4);
+            std::memcpy(&attached,reinterpret_cast<void const *>(
+                uintptr_t(head)+0x58),4);
+            if(jkgm::native_attach_has_thing_parent(flags) &&
+               attached==parent) {
+                auto const detach_children=reinterpret_cast<
+                    native_thing_detach_fn>(
+                        node_attach_native_detach_children);
+                detach_children(thing);
+            }
+        }
+        detach_native_node_children_for_parent(thing,remove_own_entry);
+    }
+
+    void detach_native_destroyed_children_pre_update()
+    {
+        uint32_t world=0,things=0;
+        int32_t highest=-1,capacity=0;
+        if(!jkgm::engine_material_debug::read_object(
+                 jkgm::engine_material_debug::current_world_global,world) ||
+           world<0x10000U ||
+           !jkgm::engine_material_debug::read_object(
+                 uintptr_t(world)+0xc0U,highest) ||
+           !jkgm::engine_material_debug::read_object(
+                 uintptr_t(world)+0xbcU,capacity) ||
+           !jkgm::engine_material_debug::read_object(
+                 uintptr_t(world)+0xc4U,things) ||
+           highest<0 || capacity<=0 || highest>=capacity ||
+           capacity>16384 || things<0x10000U)return;
+        constexpr uintptr_t stride=0x2b0U;
+        uintptr_t const base=uintptr_t(things);
+        uintptr_t const last=base+uintptr_t(highest)*stride;
+        if(last<base ||
+           !gpu_span_readable(reinterpret_cast<void const *>(base),0x74U) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(last),0x74U))
+            return;
+        jkgm::get_node_attachment_registry().prepare_world(world);
+        for(int32_t i=0;i<=highest;++i) {
+            uintptr_t const parent=base+uintptr_t(i)*stride;
+            uint32_t flags=0,kind=0;
+            std::memcpy(&flags,reinterpret_cast<void const *>(parent),4);
+            std::memcpy(&kind,reinterpret_cast<void const *>(parent+0x0c),4);
+            if(!jkgm::native_thing_requires_child_detach(kind,flags))continue;
+            detach_native_children_from_parent(
+                reinterpret_cast<void *>(parent),true);
+        }
+    }
+
     // The normal ground-actor death path does not free the Thing yet:
     // it schedules corpse conversion one second later. Detach now, after
     // the killed COG was delivered and native KillActor accepted the death.
@@ -9111,18 +9221,18 @@ namespace {
         if(!jkgm::native_actor_death_confirmed(kind,health))return;
         // Unlike Thing removal, killing an actor does not yet destroy its
         // own native attachment to a different parent.
-        detach_native_node_children_for_parent(actor,false);
+        detach_native_children_from_parent(actor,false);
     }
 
     void __cdecl HookedNativeThingRemove(void *thing)
     {
-        detach_native_node_children_for_parent(thing);
+        detach_native_children_from_parent(thing,true);
         RealNativeThingRemove(thing);
     }
 
     void __cdecl HookedNativeThingFree(void *thing)
     {
-        detach_native_node_children_for_parent(thing);
+        detach_native_children_from_parent(thing,true);
         RealNativeThingFree(thing);
     }
 

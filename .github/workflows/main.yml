@@ -142,6 +142,7 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\thing_node_attachment.cpp /Fe:thing_node_attachment_test.exe || exit /b 1
         thing_node_attachment_test.exe || exit /b 1
         python3 tests/thing_node_detach_wiring.py || exit /b 1
+        python3 tests/thing_node_removal_wiring.py || exit /b 1
 
     - name: Native template-spawn parent inheritance regression
       shell: cmd

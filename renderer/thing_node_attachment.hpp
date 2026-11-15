@@ -20,6 +20,19 @@ namespace jkgm {
     constexpr uint32_t native_attach_node=0x80U;
     constexpr uint32_t native_thing_corpse=9U;
     constexpr uint32_t native_thing_actor=10U;
+    constexpr uint32_t native_thing_destroyed=0x2U;
+    inline bool native_thing_requires_child_detach(
+        uint32_t kind,uint32_t flags)
+    {
+        return kind>0 && kind<=15 && (flags&native_thing_destroyed)!=0U;
+    }
+    inline bool native_orphan_node_link_matches(
+        uint32_t flags,uintptr_t attached_parent,uintptr_t expected_parent)
+    {
+        return (flags&(native_attach_thing|native_attach_node))==
+                   (native_attach_thing|native_attach_node) &&
+               attached_parent==expected_parent && expected_parent>=0x10000U;
+    }
     inline bool native_actor_death_confirmed(uint32_t kind,float health) {
         return (kind==native_thing_actor || kind==native_thing_corpse) &&
                std::isfinite(health) && health<=0.0f;

@@ -29,6 +29,14 @@ int main() {
     assert(native_attach_has_thing_parent(native_attach_thing));
     assert(native_attach_has_thing_parent(0x8cU)); // Thing, NODE, NOMOVE
     assert(native_attach_has_thing_parent(0x82U)); // Thing-face, NODE
+    assert(native_thing_requires_child_detach(10,0x2U));
+    assert(native_thing_requires_child_detach(3,0x80002U));
+    assert(!native_thing_requires_child_detach(10,0x10U));
+    assert(!native_thing_requires_child_detach(0,0x2U));
+    assert(!native_thing_requires_child_detach(16,0x2U));
+    assert(native_orphan_node_link_matches(0x8cU,0x202000U,0x202000U));
+    assert(!native_orphan_node_link_matches(0x88U,0x202000U,0x202000U));
+    assert(!native_orphan_node_link_matches(0x8cU,0x303000U,0x202000U));
     assert(native_actor_death_confirmed(native_thing_actor,0.0f));
     assert(native_actor_death_confirmed(native_thing_corpse,0.0f));
     assert(!native_actor_death_confirmed(native_thing_actor,100.0f));

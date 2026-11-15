@@ -121,6 +121,23 @@ def check_game(exe):
             raise ValueError(f"{label} at 0x{address:X}: signature mismatch")
         print(f"  PASS {label} at 0x{address:X}")
 
+    # Inline destroyed-Thing branch of native sithThing_Update:
+    # it detaches the removed Thing from its own parent, then clears the
+    # Thing type/signature without invoking RemoveThing/FreeThing.
+    for label, address, expected in (
+        ("update inlined destroyed branch", 0x004CC4E5,
+         bytes.fromhex("8b 06 a8 02 0f 84")),
+        ("update child-unaware detach", 0x004CC512,
+         bytes.fromhex("39 5e 34 74 09 56 e8 43 21 00 00")),
+        ("update clears Thing type", 0x004CC59F,
+         bytes.fromhex("89 5e 0c")),
+        ("update clears Thing signature", 0x004CC5A8,
+         bytes.fromhex("89 5e 74")),
+    ):
+        if exe.va_bytes(address, len(expected)) != expected:
+            raise ValueError(f"{label} at 0x{address:X}: signature mismatch")
+        print(f"  PASS {label} at 0x{address:X}")
+
     # Separate identification of the JKGM collision routine. These checks
     # deliberately do NOT authorize a runtime detour: callers, ABI and
     # output collision records require independent verification.
