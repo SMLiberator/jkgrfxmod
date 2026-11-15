@@ -133,6 +133,9 @@ jobs:
     - name: DirectDraw HUD overlay layout regression
       run: python3 tests/hud_overlay_layout.py
 
+    - name: Gameplay-to-menu 2D presentation regression
+      run: python3 tests/menu_presentation_transitions.py
+
     - name: Per-frame HUD update modes and dirty-region regressions
       shell: cmd
       run: |
