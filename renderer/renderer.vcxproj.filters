@@ -401,6 +401,9 @@
     <ClInclude Include="cog_symbol_extensions.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="cog_create_thing.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="native_sprite_cel.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>

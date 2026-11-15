@@ -175,6 +175,7 @@
     <ClInclude Include="native_compressed_sound_hook.hpp" />
     <ClInclude Include="native_cog_symbol_extensions.hpp" />
     <ClInclude Include="cog_symbol_extensions.hpp" />
+    <ClInclude Include="cog_create_thing.hpp" />
     <ClInclude Include="native_sprite_cel.hpp" />
     <ClInclude Include="native_sprite_profile.hpp" />
     <ClInclude Include="native_thingface_friction.hpp" />

@@ -136,6 +136,13 @@ jobs:
     - name: Gameplay-to-menu 2D presentation regression
       run: python3 tests/menu_presentation_transitions.py
 
+    - name: JK.dll GetThingCreateThingTemplate null-guard regression
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_create_thing.cpp /Fe:cog_create_thing_test.exe || exit /b 1
+        cog_create_thing_test.exe || exit /b 1
+        python3 tests/cog_create_thing_wiring.py || exit /b 1
+
     - name: Native COG symbol declaration extensions
       shell: cmd
       run: |

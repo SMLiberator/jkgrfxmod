@@ -47,6 +47,7 @@
 #include "precise_type3_pose_bulk.hpp"
 #include "mots_collision_snapshot_cache.hpp"
 #include "cog_math.hpp"
+#include "cog_create_thing.hpp"
 #include "cog_pyr_math.hpp"
 #include "cog_thing_offsets.hpp"
 #include "cog_raycast_head.hpp"
@@ -10342,6 +10343,22 @@ namespace {
             LOG_WARNING("SetModelMeshRadius rejected invalid mesh/radius");
     }
 
+    // JK.dll's GetThingCreateThingTemplate checks the Thing pointer but
+    // dereferences Thing+0x7c (createThing template) without a null guard.
+    // Preserve its return contract: template index, or -1 if unset.
+    void __cdecl cog_get_thing_create_thing(void *ctx)
+    {
+        void *const thing=cog_pop_thing(ctx);
+        auto const read=[](uintptr_t address,void *dst,size_t bytes)->bool {
+            if(!gpu_span_readable(reinterpret_cast<void const*>(address),bytes))
+                return false;
+            std::memcpy(dst,reinterpret_cast<void const*>(address),bytes);
+            return true;
+        };
+        cog_push_int(ctx,jkgm::cog_get_create_thing_template_id(
+            read,reinterpret_cast<uintptr_t>(thing)));
+    }
+
     struct cog_verb_entry {
         char const *name;
         cog_handler_type handler;
@@ -10460,15 +10477,72 @@ namespace {
 
     JkInitNewCogVerbs_type TrueJkInitNewCogVerbs = nullptr;
 
+    // Intercept exactly the supplied JK.dll's getter during its normal verb
+    // registration. Do not rely on duplicate-symbol replacement semantics,
+    // and do not modify JK.dll's code or its other registered handlers.
+    thread_local cog_register_verb_type jk_register_forward=nullptr;
+    thread_local bool jk_create_thing_getter_replaced=false;
+
+    bool jk_create_thing_getter_matches(cog_handler_type handler)
+    {
+        HMODULE const dll=GetModuleHandleA("JK.dll");
+        if(!dll)return false;
+        auto const base=reinterpret_cast<uintptr_t>(dll);
+        uintptr_t const thunk=base+0x46ba8U;
+        uintptr_t const body=base+0x51130U;
+        uintptr_t const unsafe_read=base+0x51187U;
+        constexpr uint8_t expected_thunk[]{
+            0xe9,0x83,0xa5,0x00,0x00
+        };
+        constexpr uint8_t expected_body[]{
+            0x55,0x8b,0xec,0x81,0xec,0xcc,0x00,0x00,0x00
+        };
+        constexpr uint8_t expected_unsafe_read[]{
+            0x8b,0x45,0xf8,0x8b,0x48,0x7c,0x8b,0xf4,0x8b,0x51,0x04
+        };
+        return reinterpret_cast<uintptr_t>(handler)==thunk &&
+            gpu_span_readable(reinterpret_cast<void const*>(thunk),
+                              sizeof(expected_thunk)) &&
+            gpu_span_readable(reinterpret_cast<void const*>(body),
+                              sizeof(expected_body)) &&
+            gpu_span_readable(reinterpret_cast<void const*>(unsafe_read),
+                              sizeof(expected_unsafe_read)) &&
+            std::memcmp(reinterpret_cast<void const*>(thunk),
+                        expected_thunk,sizeof(expected_thunk))==0 &&
+            std::memcmp(reinterpret_cast<void const*>(body),
+                        expected_body,sizeof(expected_body))==0 &&
+            std::memcmp(reinterpret_cast<void const*>(unsafe_read),
+                        expected_unsafe_read,sizeof(expected_unsafe_read))==0;
+    }
+
+    void __cdecl register_jk_verb_with_create_thing_fix(
+        void *ctx,cog_handler_type handler,char const *name)
+    {
+        if(!jk_register_forward)return;
+        if(name && std::strcmp(name,"getthingcreatethingtemplate")==0 &&
+           cog_helpers_match() &&
+           jk_create_thing_getter_matches(handler)) {
+            jk_register_forward(ctx,cog_get_thing_create_thing,name);
+            jk_create_thing_getter_replaced=true;
+            return;
+        }
+        jk_register_forward(ctx,handler,name);
+    }
+
     void __cdecl HookedJkInitNewCogVerbs(cog_register_verb_type register_verb, void *ctx)
     {
-        if(the_config && the_config->use_gpu_cache && register_verb) {
-            mesh_revision::begin(register_verb);
-            TrueJkInitNewCogVerbs(mesh_revision::register_mutator,ctx);
-            mesh_revision::finish();
-        } else {
-            TrueJkInitNewCogVerbs(register_verb,ctx);
-        }
+        bool const wrap_mesh=the_config && the_config->use_gpu_cache &&
+                              register_verb;
+        if(wrap_mesh)mesh_revision::begin(register_verb);
+        jk_register_forward=wrap_mesh ?
+            mesh_revision::register_mutator : register_verb;
+        jk_create_thing_getter_replaced=false;
+        TrueJkInitNewCogVerbs(register_verb ?
+            register_jk_verb_with_create_thing_fix : nullptr,ctx);
+        if(wrap_mesh)mesh_revision::finish();
+        bool const getter_replaced=jk_create_thing_getter_replaced;
+        jk_register_forward=nullptr;
+        jk_create_thing_getter_replaced=false;
 
         if(!cog_helpers_match()) {
             LOG_ERROR("jk.exe does not match the build the fog COG verbs were written for; "
@@ -10506,6 +10580,14 @@ namespace {
                         "JKGM native containment routine");
         cog_sector_history.clear();
         cog_raycast_history.clear();
+        if(getter_replaced && register_verb) {
+            register_verb(ctx,cog_get_thing_create_thing,"getthingcreatething");
+            LOG_INFO("JK.dll GetThingCreateThingTemplate null guard enabled; "
+                     "GetThingCreateThing alias registered");
+        } else {
+            LOG_DEBUG("JK.dll GetThingCreateThingTemplate left untouched: "
+                      "unrecognized DLL handler or COG helper signatures");
+        }
         for(auto const &verb : fx_verbs) {
             if(!native_hud_ammo_hook_active &&
                (std::strcmp(verb.name,"setammobin")==0 ||
