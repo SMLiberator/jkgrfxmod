@@ -74,7 +74,10 @@ uintptr_t last_symbol(uintptr_t script) {
 }
 void fix_vector_declaration(uintptr_t script) {
     auto const *value=arg(1,true);
-    if(!value || !*value)return;
+    auto const *name=arg(1);
+    // stdConffile uses key as value when there is no '=' assignment.
+    // Leave ordinary uninitialized vectors at their native zero default.
+    if(!value || !*value || (name && std::strcmp(value,name)==0))return;
     std::array<float,3> xyz{};
     if(!cogex::parse_initial_vector(value,xyz)) {
         LOG_WARNING("COG vector initializer rejected: ",value);
