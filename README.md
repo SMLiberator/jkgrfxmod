@@ -1845,22 +1845,31 @@ build in `jkgm/shaders/`. Keep the native `jkgm.exe` bootstrap.
 
 ### Automatic mesh revision tracking
 
-With `use_gpu_cache` enabled, JK.dll COG mutation tracking is now standard,
-without a separate configuration option. The renderer wraps 16 mesh/material
-mutator verb registrations, preserving the original COG handlers and results. A mutation bumps a global generation: cached 3DOs only need a new
-source-byte signature when the generation changes, their mesh header changes, or
-once every 32 frames for an integrity audit. An audit mismatch permanently
-disables the shortcut for that session and restores original per-frame hashing.
-If the expected JK.dll registrations are missing, full hashing remains active.
+With `use_gpu_cache` enabled, the renderer wraps known JK.dll model-related
+COG verbs without consuming interpreter arguments or changing return values.
+The performance branch has independent source-geometry and face-material
+revision generations. Source mutations lazily verify cached source bytes,
+while material-only operations first compare affected material references;
+clones, appends and reference-only changes do not automatically require a
+full geometry rehash. Type-3 collision caching retains its independent
+conservative global mutation generation. Per-verb counts and detailed
+hash-reason diagnostics are available with `profile_renderer=true`.
 
-**This is not yet a guarantee of instant invalidation for writes originating
-outside the known JK.dll verbs**; those can remain stale until the next audit.
-Texture uploads/residency and per-Thing lighting are separate from mesh
-revision tracking. Use `"profile_renderer": true` to monitor
-`PERF gpu_3do source_check_us_avg`, `checks_avg`, and
-`invalidations_total`. For compatibility tests, exercise CloneModel,
-SetModelMesh, ReloadModel, ReplaceModelMaterial and
-ReplaceModelMeshMaterial, as well as animated cels.
+**Revision hook compatibility:** The existing registration gate still
+requires all 16 known verb registrations. A version of JK.dll which
+registers fewer verbs may leave the fast path disabled and use full per-frame
+source verification; this is distinct from the optional audit and is still
+under investigation. Do not assume the audit timer controls that fallback.
+
+**Opt-in mesh integrity audit:** The old automatic every-32-frame audit is
+removed. `"gpu_mesh_integrity_audit_interval": 0.0` (default) means
+**never audit**. A positive number of seconds (maximum 3600) schedules
+source rehashes of encountered meshes in both main and planar acquisition
+paths. Every completed scheduled audit reports how many source checks were
+made and how many changed without a tracked mutation; mismatches log mesh
+identity and signatures. A mismatch refreshes its affected cache entry
+without silently switching the entire renderer to permanent full hashing.
+This diagnostic is not part of normal gameplay when the setting is zero.
 
 ## Native MAT mip selection
 

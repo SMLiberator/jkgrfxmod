@@ -50,8 +50,7 @@ namespace mesh_revision {
     uint64_t source_current(); // full-source changes (lazy validation)
     uint64_t material_current(); // face-material changes (lazy validation)
     // Profiling only; reading counters does not change revision epochs
-    // or the periodic source-integrity audit.
+    // or the optional source-integrity audit.
     mutator_counts take_mutator_counts();
     char const *mutator_name(std::size_t index);
-    void report_untracked();
 }

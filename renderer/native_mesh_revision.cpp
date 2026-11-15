@@ -25,7 +25,6 @@ namespace mesh_revision {
     uint64_t source_generation=1U; // lazy full-source validation
     uint64_t material_generation=1U; // lazy face-material validation
     bool complete=false;
-    bool untracked_write=false;
 
     template<size_t I>
     void __cdecl invoke(void *ctx)
@@ -70,7 +69,6 @@ namespace mesh_revision {
         originals.fill(nullptr);
         calls.fill(0U);
         complete=false;
-        untracked_write=false;
     }
     void finish()
     {
@@ -78,14 +76,14 @@ namespace mesh_revision {
         if(complete) {
             LOG_INFO("GPU 3DO revision tracking: ",mutator_count,
                      " JK.dll model COG verbs wrapped; GPU uses lazy "
-                     "material/source epochs plus 32-frame audit; "
+                     "material/source epochs; timed integrity audit is opt-in; "
                      "collision generation remains global");
         } else {
             LOG_WARNING("GPU 3DO revision tracking unavailable: missing JK.dll "
                         "mesh/material verb registrations; full hashing retained");
         }
     }
-    bool active() {return complete && !untracked_write;}
+    bool active() {return complete;}
     uint64_t current() {return generation;}
     uint64_t source_current() {return source_generation;}
     uint64_t material_current() {return material_generation;}
@@ -98,14 +96,5 @@ namespace mesh_revision {
     char const *mutator_name(std::size_t index)
     {
         return index<names.size()?names[index]:"unknown";
-    }
-    void report_untracked()
-    {
-        if(untracked_write)return;
-        untracked_write=true;
-        ++source_generation;
-        LOG_WARNING("GPU 3DO audit found an in-place source edit not covered "
-                    "by the targeted material/header policy; disabling GPU "
-                    "source fast path and restoring per-frame hashing");
     }
 }

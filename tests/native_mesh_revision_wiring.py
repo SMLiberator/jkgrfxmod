@@ -24,7 +24,6 @@ for signature in (
     "bool active();",
     "uint64_t current();",
     "uint64_t material_current();",
-    "void report_untracked();",
 ):
     assert signature in header, signature
 for original in (
@@ -33,7 +32,6 @@ for original in (
     "mesh_revision::finish(",
     "mesh_revision::current(",
     "mesh_revision::active(",
-    "mesh_revision::report_untracked(",
 ):
     assert original in main, original
 
@@ -54,8 +52,13 @@ assert "++generation;" in impl
 assert "original_registrar(ctx,wrappers[i],name);" in impl
 assert "original_registrar(ctx,fn,name);" in impl
 assert "complete=registered_mask==((1U<<mutator_count)-1U);" in impl
-assert "return complete && !untracked_write;" in impl
-assert "if(untracked_write)return;" in impl
+assert "return complete;" in impl
+assert "untracked_write" not in impl
+assert "gpu_mesh_integrity_audit_interval>0.0" in main
+assert main.count("bool const audit_frame=gpu_mesh_integrity_audit_frame==gpu_frame_serial;")==2
+assert "gpu_frame_serial%32U" not in main
+assert "mesh_revision::report_untracked" not in main
+assert main.count("integrity audit UNTRACKED source change:")==2
 assert "if(effect&source_full)++source_generation;" in impl
 assert "if(effect&source_materials)++material_generation;" in impl
 assert "gpu_mesh_cache_apply_mutations()" not in main
