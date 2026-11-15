@@ -98,8 +98,7 @@ void jkgm::primary_menu_surface::no_present_blt(LPRECT a,
 
         std::optional<uint8_t> colorkey;
         if(d & DDBLT_KEYSRC) {
-            colorkey = static_cast<uint8_t>(
-                osd_sd.ddckCKSrcBlt.dwColorSpaceLowValue);
+            osd_sd.ddckCKSrcBlt.dwColorSpaceLowValue;
         }
 
         auto width_to_copy = std::min(a->right - a->left, c->right - c->left);
@@ -142,11 +141,6 @@ HRESULT WINAPI
 
 {
     no_present_blt(a, b, c, d, e);
-
-    // A color-only clear is often just preparation for the next menu blit.
-    // Presenting it immediately flashes an incomplete frame under Wine.
-    if(!b && (d & DDBLT_COLORFILL))
-        return DD_OK;
 
     if(d & DDBLT_WAIT) {
         // Smacker blits to the primary surface to synchronize with the display.

@@ -7135,18 +7135,7 @@ HBITMAP WINAPI HookedCreateDIBSection(HDC hDC,
                                       HANDLE hSection,
                                       DWORD offset)
 {
-    // The global GDI detour must never return our fake 640x480 bitmap for
-    // unrelated Wine/GDI DIB allocations. Only JK's 8-bit menu DIB uses it.
-    if(!pbmi || !ppvBits ||
-       pbmi->bmiHeader.biSize < sizeof(BITMAPINFOHEADER) ||
-       pbmi->bmiHeader.biWidth != 640 ||
-       (pbmi->bmiHeader.biHeight != 480 && pbmi->bmiHeader.biHeight != -480) ||
-       pbmi->bmiHeader.biPlanes != 1 ||
-       pbmi->bmiHeader.biBitCount != 8 ||
-       pbmi->bmiHeader.biCompression != BI_RGB) {
-        return TrueCreateDIBSection(hDC,pbmi,usage,ppvBits,hSection,offset);
-    }
-    LOG_DEBUG("CreateDIBSection: JK 640x480 8-bit menu bitmap");
+    LOG_DEBUG("CreateDIBSection hook called");
     *ppvBits = phony_dibsection_memory.data();
     the_renderer->set_menu_source(phony_dibsection_bitmap,
                                   reinterpret_cast<char const *>(*ppvBits));
