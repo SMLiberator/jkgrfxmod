@@ -151,6 +151,13 @@ jobs:
         native_spawn_parent_test.exe || exit /b 1
         python3 tests/native_spawn_parent_wiring.py || exit /b 1
 
+    - name: JK.dll GetThingJointNode puppet joint mapping regression
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_thing_joint_node.cpp /Fe:cog_thing_joint_node_test.exe || exit /b 1
+        cog_thing_joint_node_test.exe || exit /b 1
+        python3 tests/cog_thing_joint_node_wiring.py || exit /b 1
+
     - name: JK.dll GetThingCreateThingTemplate null-guard regression
       shell: cmd
       run: |

@@ -49,6 +49,7 @@
 #include "mots_collision_snapshot_cache.hpp"
 #include "cog_math.hpp"
 #include "cog_create_thing.hpp"
+#include "cog_thing_joint_node.hpp"
 #include "cog_pyr_math.hpp"
 #include "cog_thing_offsets.hpp"
 #include "cog_raycast_head.hpp"
@@ -10611,6 +10612,23 @@ namespace {
             read,reinterpret_cast<uintptr_t>(thing)));
     }
 
+    // Equivalent to GetPuppetJointNode(GetThingPuppet(thing),joint), using
+    // the same class ID, current/static world mapping and 0..9 joint slots
+    // as the two original JK.dll handlers. Return -1 for invalid inputs.
+    void __cdecl cog_get_thing_joint_node(void *ctx)
+    {
+        int const joint=cog_pop_int(ctx);
+        void *const thing=cog_pop_thing(ctx);
+        auto const read=[](uintptr_t address,void *dst,size_t bytes)->bool {
+            if(!gpu_span_readable(reinterpret_cast<void const *>(address),bytes))
+                return false;
+            std::memcpy(dst,reinterpret_cast<void const *>(address),bytes);
+            return true;
+        };
+        cog_push_int(ctx,jkgm::cog_get_thing_joint_node(
+            read,reinterpret_cast<uintptr_t>(thing),joint));
+    }
+
     // JK.dll's original handler compares attach_flags == 2 exactly. Both
     // THINGFACE (0x2) and THING (0x4), with arbitrary extra bits, refer to
     // a Thing in the shared +0x58 parent slot.
@@ -10746,6 +10764,7 @@ namespace {
         cog_verb_entry{"getthingattachnormal", cog_get_thing_attach_normal},
         cog_verb_entry{"attachthingtothingnode", cog_attach_thing_to_thing_node},
         cog_verb_entry{"detachattachedthings", cog_detach_attached_things},
+        cog_verb_entry{"getthingjointnode", cog_get_thing_joint_node},
         cog_verb_entry{"getthingnodepos", cog_get_thing_node_pos},
         cog_verb_entry{"getthingnodeoffsetpos", cog_get_thing_node_offset_pos},
         cog_verb_entry{"getthingnodeposoffset", cog_get_thing_node_pos_offset},

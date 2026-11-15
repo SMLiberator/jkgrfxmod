@@ -167,6 +167,35 @@ def check_patch(dll):
             raise ValueError(f"JK.dll: expected {name} at ordinal {expected_ordinal}")
         print(f"  PASS {name} export #{ordinal}")
 
+    # JK.dll GetThingPuppet -> puppet class pointer at Thing+0x128,
+    # class ID at +0x1e. GetPuppetJointNode -> 10 joint slots at +0x1040,
+    # resolving class ids through current/static world puppet arrays.
+    for label, address, expected in (
+        ("GetThingPuppet handler", dll.image_base + 0x47950,
+         bytes.fromhex("55 8b ec 8b 55 08 52 b8 50 2b 4e 00")),
+        ("GetThingPuppet class pointer", dll.image_base + 0x47963,
+         bytes.fromhex("8b 80 28 01 00 00")),
+        ("GetThingPuppet class ID", dll.image_base + 0x4796D,
+         bytes.fromhex("0f b7 48 1e")),
+        ("GetPuppetJointNode handler", dll.image_base + 0x48560,
+         bytes.fromhex("53 56 57 55 8b ec 8b 5d 14")),
+        ("GetPuppetJointNode joint bound", dll.image_base + 0x4857F,
+         bytes.fromhex("83 fe 0a")),
+        ("GetPuppetJointNode node slot", dll.image_base + 0x48584,
+         bytes.fromhex("ff b4 b7 40 10 00 00")),
+        ("GetPuppet class count", dll.image_base + 0x47A68,
+         bytes.fromhex("3b 82 74 01 00 00")),
+        ("GetPuppet class table", dll.image_base + 0x47A70,
+         bytes.fromhex("8b 92 7c 01 00 00")),
+        ("GetThingPuppet registration", dll.image_base + 0x54220,
+         bytes.fromhex("8d 8b c0 ac 0f 00 8d 93 50 79 04 00")),
+        ("GetPuppetJointNode registration", dll.image_base + 0x54442,
+         bytes.fromhex("8d 8b 97 a7 0f 00 8d 93 60 85 04 00")),
+    ):
+        if dll.va_bytes(address, len(expected)) != expected:
+            raise ValueError(f"{label} at 0x{address:X}: signature mismatch")
+        print(f"  PASS {label} at 0x{address:X}")
+
     # The original GetThingAttachThing COG handler only accepts flags == 2.
     # Check its registration thunk and exact comparison before replacing it.
     for label, address, expected in (

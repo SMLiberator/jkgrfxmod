@@ -179,6 +179,7 @@
     <ClInclude Include="native_spawn_parent.hpp" />
     <ClInclude Include="cog_symbol_extensions.hpp" />
     <ClInclude Include="cog_create_thing.hpp" />
+    <ClInclude Include="cog_thing_joint_node.hpp" />
     <ClInclude Include="native_sprite_cel.hpp" />
     <ClInclude Include="native_sprite_profile.hpp" />
     <ClInclude Include="native_thingface_friction.hpp" />
