@@ -39,7 +39,11 @@ assert "vec3 diffuse = (surface_color * (1.0 - fog_amount) +" in native
 assert "out_color = vec4(diffuse + specular, opacity);" in native
 assert "float opacity=albedo.a*absorption;" in cached
 assert "vec3 diffuse=(lit_rgb*(1.0-fog)*vertex_rgb_alpha+" in cached
-assert "out_color=vec4(diffuse+emission+specular+projected_light,opacity);" in cached
+# Per-Thing fades also dim Fluid's otherwise alpha-independent specular.
+# Keep the split expression in the shader so the contract validates that
+# specular, but not the independently calculated Fluid opacity, is faded.
+assert ("out_color=vec4(diffuse+emission+specular*thing_opacity+" in cached and
+        "projected_light,opacity);" in cached)
 
 # Fluid still routes exclusively to alpha; do not allow new dithered
 # depth/SSAO behavior or touch world-fluid’s existing lighting path.
