@@ -49,5 +49,5 @@ for name,slot,target in (
     ("sun_caustics_pattern",19,"tex2d")
 ):
     assert '{"%s",%s,sampler_kind::%s}'%(name,slot,target) in registry
-assert "No additional material" in docs
+assert "no new material fields" in docs
 print("Procedural caustics Fluid source and compositor contracts passed")
