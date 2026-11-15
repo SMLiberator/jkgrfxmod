@@ -205,7 +205,7 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     source.insert(newline+1U,
                                   "#define JKGM_SUN_SKY_APERTURE 1\n");
                 }
-                if(units>=20 && the_config->experimental_sun_caustics) {
+                if(units>=20) {
                     auto const newline=source.find('\n');
                     source.insert(newline+1U,"#define JKGM_SUN_CAUSTICS 1\n");
                 }
