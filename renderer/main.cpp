@@ -41,6 +41,7 @@
 #include "native_earth_hit_sound.hpp"
 #include "compressed_sound_io.hpp"
 #include "native_compressed_sound_hook.hpp"
+#include "native_cog_symbol_extensions.hpp"
 #include "mots_native_collision_bridge.hpp"
 #include "precise_type3_native.hpp"
 #include "precise_type3_pose_bulk.hpp"
@@ -10910,9 +10911,11 @@ bool attach_hooks()
     bool const ice_thing_hook_requested=request_native_thingface_friction_hook();
     bool const earth_sound_hook_requested=request_native_earth_sound_hook();
     bool const sound_formats_hook_requested=jkgm::native_compressed_sound_hook::request();
+    bool const cog_symbols_hook_requested=jkgm::native_cog_symbol_extensions::request();
 
     LONG error = DetourTransactionCommit();
     if(error!=NO_ERROR) {
+        jkgm::native_cog_symbol_extensions::on_failed_commit();
         key_callback_hook_active=false;
         key_callback_registration_hook_active=false;
         key_callback_message_registered=false;
@@ -10953,6 +10956,8 @@ bool attach_hooks()
                  the_config->enable_mesh_collision,
                  " precise_type3=RayCastEx-only");
     }
+    if(error==NO_ERROR && cog_symbols_hook_requested)
+        LOG_INFO("COG symbols: initialized vectors, sprite, soundclass, puppet enabled");
     if(error==NO_ERROR && sound_formats_hook_requested) {
         native_compressed_sound_hook_active=true;
         LOG_INFO("JKGM compressed OGG/FLAC/MP3 sound loader enabled");
@@ -10977,6 +10982,7 @@ bool detach_hooks()
 {
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
+    jkgm::native_cog_symbol_extensions::detach();
 
     if(native_save_template_hook_active) {
         DetourDetach(&(PVOID &)RealSaveTemplateGate,HookedSaveTemplateGate);

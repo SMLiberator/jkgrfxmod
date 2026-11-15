@@ -136,6 +136,13 @@ jobs:
     - name: Gameplay-to-menu 2D presentation regression
       run: python3 tests/menu_presentation_transitions.py
 
+    - name: Native COG symbol declaration extensions
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\cog_symbol_extensions.cpp /Fe:cog_symbol_extensions_test.exe || exit /b 1
+        cog_symbol_extensions_test.exe || exit /b 1
+        python3 tests/cog_symbol_extensions_wiring.py || exit /b 1
+
     - name: Per-frame HUD update modes and dirty-region regressions
       shell: cmd
       run: |
