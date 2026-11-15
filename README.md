@@ -1846,12 +1846,18 @@ build in `jkgm/shaders/`. Keep the native `jkgm.exe` bootstrap.
 ### Automatic mesh revision tracking
 
 With `use_gpu_cache` enabled, JK.dll COG mutation tracking is now standard,
-without a separate configuration option. The renderer recognizes 17 possible
-mutation verbs, including SetThingMesh, and wraps all of those actually
-registered by JK.dll. The supplied JK.dll registers four of the 17; only
-SetModelMesh, CloneModel and ChangeModelMaterial are required to enable the
-fast path. Missing optional verbs no longer force per-frame hashing.
-A mutation bumps a global generation: cached 3DOs only need a new
+without a separate configuration option.
+
+**Compatibility finding (user-supplied JK.dll, Nov 2026):** the DLL's
+`InitNewCogVerbs` registers only three of the 16 verb names required by the
+current tracker (`SetModelMesh`, `CloneModel`, `ChangeModelMaterial`). It also
+registers `SetThingMesh`, which the tracker does not currently wrap. Thus the
+native revision fast path is **inactive** for this DLL and full per-frame
+source hashing is used. Other model-editing verbs may be registered by other
+modules, so lowering the required count without intercepting all registration
+paths is not proven safe. This needs a targeted, verified design rather than
+blindly enabling partial tracking. The renderer wraps 16 mesh/material
+mutator verb registrations, preserving the original COG handlers and results. A mutation bumps a global generation: cached 3DOs only need a new
 source-byte signature when the generation changes or their mesh header changes.
 The former mandatory 32-frame audit is removed. For troubleshooting, configure
 `"gpu_mesh_integrity_audit_interval": 60.0` to rehash visible cached meshes
@@ -1859,7 +1865,7 @@ at most once every 60 seconds. Its default is `0.0`, meaning **no periodic
 audits**. Enabled audits log how many existing meshes were verified and any
 untracked changes, with the model/mesh identity, pointers and signatures.
 An unexpected change updates that mesh without silently switching all meshes
-to per-frame hashing. If the three required JK.dll registrations are missing,
+to per-frame hashing. If the expected JK.dll registrations are missing,
 full per-frame hashing remains active.
 
 **This is not yet a guarantee of instant invalidation for writes originating
