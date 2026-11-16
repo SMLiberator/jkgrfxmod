@@ -26,9 +26,10 @@ texture units (at least 20). There are **no new material fields**.
   redrawing stationary Fluid geometry solely because time changed.
 - Fluid density/thickness and sun-ray travel distance soften the pattern
   using mip selection (\`textureLod\`) and attenuate intensity exponentially.
-  The preset is hardcoded in `assets/shaders/post_opaque_composite.frag`:
-  intensity `6.0`, scale `10.0`, spread `8.0`, attenuation `8.0`
-  and speed `1.0`. Edit the shader constants to tune this effect;
+  The visual preset is authored directly in
+  `assets/shaders/post_opaque_composite.frag`. Edit its intensity,
+  pattern projection, animation offsets, spread and attenuation to tune
+  the appearance; these numerical settings are deliberately not in JSON.
   `jkgm.json` retains only the `experimental_sun_caustics` enable flag.
   These changes do not regenerate the procedural texture or Fluid layers.
 - On **opaque** world/3DO receivers, caustics transition smoothly over
@@ -40,7 +41,7 @@ texture units (at least 20). There are **no new material fields**.
   `1.0`). This attenuation is intentionally slower than caustic falloff;
   normal sunlight is unchanged above water, when no Fluid is captured, or
   when the experiment is disabled. A new shader-only constant,
-  `SUN_WATER_TINT_STRENGTH = 1.0`, controls selective RGB absorption: water
+  `SUN_WATER_TINT_STRENGTH`, controls selective RGB absorption: water
   with lower red albedo absorbs more red sunlight; white Fluid albedo keeps
   the previous neutral attenuation. Use `0.0` for old grayscale sunlight.
   Caustics inherit the relative hue but retain the tuned overall brightness.
