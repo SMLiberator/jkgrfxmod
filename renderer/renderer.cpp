@@ -9297,7 +9297,8 @@ namespace jkgm {
             ogs->game_post_opaque_composite_program.set_coverage_normal_sampler(5);
             auto &prog=ogs->game_post_opaque_composite_program;
             prog.set_spotlight_count(0);
-            prog.set_sun_caustics(false,0.0f);
+            prog.set_sun_caustics(false,0.0f,
+                make_point(1.0f,1.0f,1.0f,1.0f));
             prog.set_sun_dynamic_count(0);
             prog.set_retain_hom_pixels(the_config->retain_hom_pixels);
             prog.set_sun_shadow_receiver_bias_scale(
@@ -9462,7 +9463,12 @@ namespace jkgm {
                             std::chrono::steady_clock::now();
                         float const seconds=std::chrono::duration<float>(
                             std::chrono::steady_clock::now()-caustic_start).count();
-                        target.set_sun_caustics(true,seconds);
+                        target.set_sun_caustics(
+                            true,seconds*the_config->sun_caustics_speed,
+                            make_point(the_config->sun_caustics_intensity,
+                                       the_config->sun_caustics_scale,
+                                       the_config->sun_caustics_spread,
+                                       the_config->sun_caustics_attenuation));
                     }
                     if(the_config->enable_sun_dynamic_shadows &&
                        sun_dynamic_target && !sun_dynamic_views.empty()) {

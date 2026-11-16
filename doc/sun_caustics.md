@@ -18,8 +18,20 @@ texture units (at least 20). There are **no new material fields**.
   redrawing stationary Fluid geometry solely because time changed.
 - Fluid density/thickness and sun-ray travel distance soften the pattern
   using mip selection (\`textureLod\`) and attenuate intensity exponentially.
-  There are no caustic strength, speed, texture or material configuration
-  keys in this initial experiment.
+  Five global `sun_caustics_*` controls adjust appearance with
+  no new material fields:
+
+  | JSON key | Default | Range | Effect |
+  | --- | ---: | ---: | --- |
+  | `sun_caustics_intensity` | `3.0` | `0..16` | Overall brightness |
+  | `sun_caustics_scale` | `3.0` | `0.25..16` | Higher means finer/smaller patterns |
+  | `sun_caustics_spread` | `1.0` | `0..8` | Density/distance mipmap softness |
+  | `sun_caustics_attenuation` | `1.0` | `0..8` | Density/distance fading |
+  | `sun_caustics_speed` | `1.0` | `0..8` | Animation rate; 0 freezes movement |
+
+  For a strong first test try intensity `5.0`, scale `4.0`,
+  spread `0.5` and attenuation `0.5`. These controls do not
+  regenerate the procedural texture or the Fluid shadow layers.
 - On **opaque** world/3DO receivers, caustics obey the ordinary sun
   visibility, dynamic caster shadows, sky aperture and distance fog.
   The visible receiver must lie farther from the sun than the Fluid

@@ -41,7 +41,24 @@ assert "sun_dynamic_shadow_visibility(world_position,incidence)" in frag
 assert "sun_shadow_visibility(world_position,incidence)" in frag
 assert "textureLod(sun_caustics_pattern" in frag
 assert "density*ray_length" in frag
-assert "exp(-ray_length*(0.08+density*0.4))" in frag
+assert "exp(-ray_length*(0.08+density*0.4)*sun_caustics_params.w)" in frag
+assert "(0.095*sun_caustics_params.y)" in frag
+assert "sun_caustics_params.z" in frag
+assert "pattern*decay*0.75*sun_caustics_params.x" in frag
+assert "seconds*the_config->sun_caustics_speed" in renderer
+assert "gl::set_uniform_vector(sun_caustics_params,params);" in shaders
+assert "sun_caustics_params" in read("renderer/shaders.hpp")
+for field,value in (
+    ("sun_caustics_intensity","3.0f"),
+    ("sun_caustics_scale","3.0f"),
+    ("sun_caustics_spread","1.0f"),
+    ("sun_caustics_attenuation","1.0f"),
+    ("sun_caustics_speed","1.0f")
+):
+    assert f"float {field} = {value};" in cfg
+    assert f'parse_caustics_number("{field}"' in parser
+    assert field in docs
+    assert field in read("assets/jkgm.json")
 assert "JKGM_SUN_CAUSTICS 1" in shaders
 for name,slot,target in (
     ("sun_caustics_depth",17,"texture_array"),

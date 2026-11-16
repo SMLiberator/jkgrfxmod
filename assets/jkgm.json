@@ -77,6 +77,12 @@
     "experimental_sun_pcf_intensity_reference": 2.0,
     "sun_shadow_update_interval": 0.0,
     "sun_shadow_resolution": 512,
+    "experimental_sun_caustics": false,
+    "sun_caustics_intensity": 3.0,
+    "sun_caustics_scale": 3.0,
+    "sun_caustics_spread": 1.0,
+    "sun_caustics_attenuation": 1.0,
+    "sun_caustics_speed": 1.0,
     "enable_decals": true,
     "enable_mesh_collision": false,
     "use_vanilla_renderer": false

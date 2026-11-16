@@ -538,6 +538,29 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("experimental_sun_caustics")) {
             j.at("experimental_sun_caustics").get_to(rv->experimental_sun_caustics);
         }
+        // Global compositor tuning only; Fluid MAT properties stay unchanged.
+        auto parse_caustics_number=[&](char const *name,float &field,
+                                       double minimum,double maximum) {
+            if(!j.contains(name))return;
+            auto const &value=j.at(name);
+            if(!value.is_number())
+                throw std::runtime_error(std::string(name)+" must be numeric");
+            double const n=value.get<double>();
+            if(!std::isfinite(n) || n<minimum || n>maximum)
+                throw std::runtime_error(std::string(name)+
+                                         " must be within its documented range");
+            field=static_cast<float>(n);
+        };
+        parse_caustics_number("sun_caustics_intensity",
+                              rv->sun_caustics_intensity,0.0,16.0);
+        parse_caustics_number("sun_caustics_scale",
+                              rv->sun_caustics_scale,0.25,16.0);
+        parse_caustics_number("sun_caustics_spread",
+                              rv->sun_caustics_spread,0.0,8.0);
+        parse_caustics_number("sun_caustics_attenuation",
+                              rv->sun_caustics_attenuation,0.0,8.0);
+        parse_caustics_number("sun_caustics_speed",
+                              rv->sun_caustics_speed,0.0,8.0);
         if(j.contains("experimental_sun_sky_aperture")) {
             j.at("experimental_sun_sky_aperture").get_to(
                 rv->experimental_sun_sky_aperture);

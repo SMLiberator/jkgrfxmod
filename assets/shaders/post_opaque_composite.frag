@@ -237,6 +237,7 @@ uniform sampler2DArray sun_caustics_depth;
 uniform sampler2DArray sun_caustics_density;
 uniform sampler2D sun_caustics_pattern;
 uniform float sun_caustics_time;
+uniform vec4 sun_caustics_params; // intensity, scale, spread, attenuation
 float sample_sun_caustic_light(vec3 world_position,float camera_depth)
 {
     if(sun_caustics_active==0)return 0.0;
@@ -256,18 +257,20 @@ float sample_sun_caustic_light(vec3 world_position,float camera_depth)
     if(ray_length<=0.015)return 0.0;
     float density=clamp(texture(
         sun_caustics_density,vec3(coord.xy,float(layer))).r,0.0,8.0);
-    float decay=exp(-ray_length*(0.08+density*0.4));
+    float decay=exp(-ray_length*(0.08+density*0.4)*sun_caustics_params.w);
     if(decay<0.003)return 0.0;
-    float lod=clamp(log2(1.0+density*ray_length*2.75),0.0,7.5);
+    float lod=clamp(log2(1.0+density*ray_length*2.75*
+                           sun_caustics_params.z),0.0,7.5);
     vec3 right=near_cascade?sun_shadow_right:sun_shadow_far_right;
     vec3 up=near_cascade?sun_shadow_up:sun_shadow_far_up;
-    vec2 p=vec2(dot(world_position,right),dot(world_position,up))*0.095;
+    vec2 p=vec2(dot(world_position,right),dot(world_position,up))*
+           (0.095*sun_caustics_params.y);
     float a=textureLod(sun_caustics_pattern,
         p+vec2(0.021,0.015)*sun_caustics_time,lod).r;
     float b=textureLod(sun_caustics_pattern,
         p*1.17+vec2(-0.013,0.019)*sun_caustics_time,lod).r;
     float pattern=max(a*0.72+b*0.28-0.21,0.0);
-    return pattern*decay*0.75;
+    return pattern*decay*0.75*sun_caustics_params.x;
 }
 #else
 float sample_sun_caustic_light(vec3 world_position,float camera_depth)
