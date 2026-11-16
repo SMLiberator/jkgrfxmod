@@ -19,6 +19,11 @@ assert "| **experimental_packed_3do_vertices** |" in docs
 assert "sizeof(gpu_3do_packed_vertex)==52" in packed
 assert "sizeof(gpu_3do_vertex)==80" in read("renderer/gpu_3do_preview.hpp")
 assert "gpu_3do_pack_vertices" in packed and "v.light_mode>3.0f" in packed
+assert "std::fabs(length_squared-1.0f)" not in packed
+assert "std::fabs(value-std::round(value*255.0f)" not in packed
+assert "512.0f+(limited<0.0f" in packed
+assert "decode_packed_normal(local_face_normal_mode.xyz)" in vertex
+assert "decode_packed_normal(local_light_normal_input)" in vertex
 assert "uint32_t(v.light_mode)" in packed
 assert renderer.count("the_config->experimental_packed_3do_vertices")==8
 assert "gl::vertex_element_type::uint_2_10_10_10_rev" in renderer

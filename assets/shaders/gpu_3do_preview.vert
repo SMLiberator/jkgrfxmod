@@ -180,13 +180,22 @@ float continuous_ambient_at(vec3 view_position)
 }
 #endif
 
+// Decode zero-preserving centered UNORM10. Unlike linear -1..1 decoding,
+// code 512 maps exactly to zero. This preserves zero-length and non-unit
+// native normals without creating spurious normalized directions.
+vec3 decode_packed_normal(vec3 input_codes) {
+    vec3 centered=round(input_codes*1023.0)-512.0;
+    return max(centered,vec3(0.0))*(1.0/511.0)+
+           min(centered,vec3(0.0))*(1.0/512.0);
+}
+
 void main() {
     // GPU-decode packed unsigned 10:10:10:2 normalized attributes.
     // Legacy attributes retain their native floats with w=1.
     vec3 local_normal=packed_vertex_format!=0
-        ?local_face_normal_mode.xyz*2.0-1.0:local_face_normal_mode.xyz;
+        ?decode_packed_normal(local_face_normal_mode.xyz):local_face_normal_mode.xyz;
     vec3 local_light_normal=packed_vertex_format!=0
-        ?local_light_normal_input*2.0-1.0:local_light_normal_input;
+        ?decode_packed_normal(local_light_normal_input):local_light_normal_input;
     float decoded_light_mode=packed_vertex_format!=0
         ?round(local_face_normal_mode.w*3.0):local_light_mode;
     vec4 model_right=view_right;

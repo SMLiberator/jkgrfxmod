@@ -1,7 +1,8 @@
 #pragma once
 // GPU-only packed 3DO format. The native rdModel3 geometry remains unmodified.
-// Face normal XYZ are UNORM10, W contains LightMode 0..3. Nonstandard modes
-// (including MotS modes 4..6) and unrepresentable geometry use float80.
+// Face normal XYZ use zero-preserving centered UNORM10, W contains LightMode
+// 0..3. Nonstandard modes (including MotS modes 4..6) and values that cannot
+// be represented without significant clipping use the original float80 path.
 #include "gpu_3do_preview.hpp"
 #include <algorithm>
 #include <cmath>
@@ -30,30 +31,38 @@ static_assert(offsetof(gpu_3do_packed_vertex,rgba)==48,
 inline uint32_t gpu_3do_encode_normal10(float x,float y,float z,
                                          uint32_t mode=0U)
 {
+    // Bias around 512 instead of 511.5: the all-zero normal remains exactly
+    // zero after decoding. Otherwise zero can turn into an arbitrary normal
+    // direction, defeating the shader's zero-normal fallback for SSAO.
     auto channel=[](float v)->uint32_t {
+        float const limited=std::max(-1.0f,std::min(v,1.0f));
         return static_cast<uint32_t>(std::lround(
-            (std::max(-1.0f,std::min(v,1.0f))*0.5f+0.5f)*1023.0f));
+            512.0f+(limited<0.0f?limited*512.0f:limited*511.0f)));
     };
     return channel(x)|(channel(y)<<10U)|(channel(z)<<20U)|
            ((mode&3U)<<30U);
 }
 inline float gpu_3do_decode_normal10_component(uint32_t packed,unsigned shift)
 {
-    return (float((packed>>shift)&1023U)*(2.0f/1023.0f))-1.0f;
+    float const centered=float((packed>>shift)&1023U)-512.0f;
+    return centered<0.0f?centered/512.0f:centered/511.0f;
 }
 inline bool gpu_3do_pack_normal_valid(float x,float y,float z)
 {
-    if(!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z))
-        return false;
-    float length_squared=x*x+y*y+z*z;
-    return std::isfinite(length_squared)&&
-           std::fabs(length_squared-1.0f)<=0.02f;
+    // Native JK accepts non-unit normals, including zero-length ones.
+    // Preserve their magnitude instead of silently normalizing them.
+    // Allow one quantization step of harmless rounding overshoot.
+    constexpr float margin=1.0f/511.0f;
+    return std::isfinite(x)&&std::isfinite(y)&&std::isfinite(z)&&
+           std::fabs(x)<=1.0f+margin&&
+           std::fabs(y)<=1.0f+margin&&
+           std::fabs(z)<=1.0f+margin;
 }
 inline bool gpu_3do_pack_color_valid(float value)
 {
-    if(!std::isfinite(value)||value<0.0f||value>1.0f)return false;
-    // No loss of custom HDR or non-RGB8 tint: those meshes use float80.
-    return std::fabs(value-std::round(value*255.0f)/255.0f)<0.0001f;
+    // Round ordinary 0..1 tints to the nearest RGB8 code; exact multiples
+    // of 1/255 are not required. Keep HDR/negative tint in float80 instead.
+    return std::isfinite(value)&&value>=0.0f&&value<=1.0f;
 }
 inline uint32_t gpu_3do_encode_rgba8(float r,float g,float b)
 {

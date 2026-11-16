@@ -45,12 +45,36 @@ int main()
     source[1].light_mode=1.5f;
     assert(!gpu_3do_pack_vertices(source,packed));
     source[1].light_mode=1.0f;
+    // Zero-length normals are legal in native geometry, and must remain
+    // exactly zero after decode rather than becoming arbitrary directions.
     source[0].nx=0.0f;source[0].ny=0.0f;source[0].nz=0.0f;
+    source[0].lnx=0.0f;source[0].lny=0.0f;source[0].lnz=0.0f;
+    assert(gpu_3do_pack_vertices(source,packed));
+    for(unsigned shift:{0U,10U,20U}) {
+        assert(gpu_3do_decode_normal10_component(
+            packed[0].normal_mode,shift)==0.0f);
+        assert(gpu_3do_decode_normal10_component(
+            packed[0].light_normal,shift)==0.0f);
+    }
+    // Finite non-unit normals remain eligible and retain their magnitude.
+    source[0].nz=0.5f;
+    source[0].lnx=-0.25f;
+    assert(gpu_3do_pack_vertices(source,packed));
+    assert(std::fabs(gpu_3do_decode_normal10_component(
+        packed[0].normal_mode,20U)-0.5f)<0.002f);
+    assert(std::fabs(gpu_3do_decode_normal10_component(
+        packed[0].light_normal,0U)+0.25f)<0.002f);
+    source[0].nx=1.1f;
     assert(!gpu_3do_pack_vertices(source,packed));
-    source[0].nz=1.0f;
+    source[0].nx=0.0f;
+    // Valid fractional colors quantize to RGB8 rather than forcing float80.
+    source[0].cr=0.25f;source[0].cg=0.5f;source[0].cb=0.0f;
+    assert(gpu_3do_pack_vertices(source,packed));
+    assert((packed[0].rgba&255U)==64U);
+    assert(((packed[0].rgba>>8U)&255U)==128U);
     source[0].cr=1.2f;
-    assert(!gpu_3do_pack_vertices(source,packed));
-    source[0].cr=0.25f;
-    assert(!gpu_3do_pack_vertices(source,packed)); // not exact RGB8
+    assert(!gpu_3do_pack_vertices(source,packed)); // HDR tint
+    source[0].cr=-0.1f;
+    assert(!gpu_3do_pack_vertices(source,packed)); // negative tint
     return 0;
 }
