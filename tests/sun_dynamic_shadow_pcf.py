@@ -82,6 +82,14 @@ for tile_size in (64,128,256,512):
 def cut(s,start,end):
     return s.split(start,1)[1].split(end,1)[0].strip()
 dyn="float sun_dynamic_shadow_visibility("
+# The full-resolution compositor adds Fluid-caustics code after the
+# common dynamic-shadow helper. Compare the identical shadow math only;
+# caustics must not enter the half-resolution shadow visibility pass.
+caustics_marker="// Optional Fluid transmission, using the same near/far SUN projections."
+assert opaque.count(caustics_marker)==1
 assert cut(half,dyn,"vec2 encode_oct(")==cut(
-    opaque,dyn,"// Only the costly shadow-map lookups")
+    opaque,dyn,caustics_marker)
+assert "sun_caustics_depth" in cut(
+    opaque,caustics_marker,"// Only the costly shadow-map lookups")
+assert "sun_caustics_depth" not in half
 print("tile-safe dynamic sunlight atlas four-tap PCF contracts passed")
