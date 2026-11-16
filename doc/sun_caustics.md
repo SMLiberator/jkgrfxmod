@@ -8,17 +8,15 @@ texture units (at least 20). There are **no new material fields**.
 - Sources are **Fluid-blend SithWorld surfaces**, including passable
   adjoins, and **GPU-cached 3DO Fluid faces**. Sprites, projected decals,
   HUD/camera models and procedural particle meshes never generate caustics.
-- The first Fluid intersection along each sunlight ray writes depth and
-  water albedo RGB sampled at that precise light-space point. MAT tint,
-  original/replacement texture changes, UV scrolling and texture transitions
-  are reflected in the capture; animated scroll/transition invalidates the
-  map and may increase GPU capture frequency. The albedo and tint can give
-  sun rays a colored underwater appearance. This uses the existing texture
-  sampler, replacing the thickness R16F map with RGBA16F (R=thickness,
-  GBA=sampled water RGB).
-  its material's existing \`fluid_thickness\` coefficient. The ordinary
-  opaque sun shadow map is unaffected. Two 512×512 layers match the near
-  and far sun cascade projections.
+- The first Fluid intersection along each sunlight ray writes depth,
+  the material's existing `fluid_thickness` coefficient, and water albedo
+  RGB sampled at that precise light-space point. MAT tint, texture
+  transitions and UV scrolling are reflected in the capture. Animated
+  scroll/transition invalidates the map and can increase GPU capture work.
+  This reuses the existing transmission sampler, replacing the R16F
+  thickness map with RGBA16F (R=thickness, GBA=sampled water RGB).
+  The ordinary opaque sun shadow map is unaffected. Two 512×512 layers
+  match the near and far sun cascade projections.
 - A deterministic, tileable 256×256 cellular-ridge texture is generated
   **once per GL context**, with GPU mipmaps generated once. Animation
   samples it twice in light-space, without re-generating textures or
