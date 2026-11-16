@@ -18,9 +18,10 @@ assert "0.6*sun_applied)*" in opaque
 assert "sun_shadow_strength;" in opaque
 # Underwater absorption multiplies effective direct visibility, while the
 # original intensity-dependent shadow baseline remains unchanged.
-assert "vec2 water_light=sample_sun_fluid_light(world_position,depth/32.0);" in opaque
-assert "float submerged_visibility=direct_visibility*water_light.y;" in opaque
-assert "surface_rgb*=1.0-shadowed_baseline*(1.0-submerged_visibility);" in opaque
+assert "vec4 water_light=sample_sun_fluid_light(world_position,depth/32.0);" in opaque
+assert "vec3 submerged_visibility=direct_visibility*water_light.yzw;" in opaque
+assert "surface_rgb*=vec3(1.0)-shadowed_baseline*" in opaque
+assert "(vec3(1.0)-submerged_visibility);" in opaque
 assert "sun_shadow_color_intensity.a*sun_applied*submerged_visibility;" in opaque
 assert "float caustic=water_light.x;" in opaque
 

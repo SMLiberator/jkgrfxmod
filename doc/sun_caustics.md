@@ -9,6 +9,13 @@ texture units (at least 20). There are **no new material fields**.
   adjoins, and **GPU-cached 3DO Fluid faces**. Sprites, projected decals,
   HUD/camera models and procedural particle meshes never generate caustics.
 - The first Fluid intersection along each sunlight ray writes depth and
+  water albedo RGB sampled at that precise light-space point. MAT tint,
+  original/replacement texture changes, UV scrolling and texture transitions
+  are reflected in the capture; animated scroll/transition invalidates the
+  map and may increase GPU capture frequency. The albedo and tint can give
+  sun rays a colored underwater appearance. This uses the existing texture
+  sampler, replacing the thickness R16F map with RGBA16F (R=thickness,
+  GBA=sampled water RGB).
   its material's existing \`fluid_thickness\` coefficient. The ordinary
   opaque sun shadow map is unaffected. Two 512×512 layers match the near
   and far sun cascade projections.
@@ -31,8 +38,12 @@ texture units (at least 20). There are **no new material fields**.
   shader-editable `SUN_WATER_DIRECT_ATTENUATION` coefficient (default
   `1.0`). This attenuation is intentionally slower than caustic falloff;
   normal sunlight is unchanged above water, when no Fluid is captured, or
-  when the experiment is disabled. It doesn't change underwater ambient light
-  or the Fluid's camera-ray absorption.
+  when the experiment is disabled. A new shader-only constant,
+  `SUN_WATER_TINT_STRENGTH = 1.0`, controls selective RGB absorption: water
+  with lower red albedo absorbs more red sunlight; white Fluid albedo keeps
+  the previous neutral attenuation. Use `0.0` for old grayscale sunlight.
+  Caustics inherit the relative hue but retain the tuned overall brightness.
+  This doesn't change underwater ambient light or Fluid camera-ray absorption.
 - The transmission depth/density maps still use nearest sampling; raster
   precision at water polygon edges and the water surface's own shoreline
   compositing are independent from this lighting correction.

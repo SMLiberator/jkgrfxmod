@@ -64,9 +64,9 @@ assert "sprite ? 0.75*sun_fade" in opaque
 assert "0.75*sun_fade*sky_access" not in opaque
 # Fluid sunlight transmission is applied after the sky-aperture gate.
 # A blocked sky still yields zero direct light and shadowed baked brightness.
-assert "vec2 water_light=sample_sun_fluid_light(world_position,depth/32.0);" in opaque
-assert "float submerged_visibility=direct_visibility*water_light.y;" in opaque
-assert "1.0-submerged_visibility" in opaque
+assert "vec4 water_light=sample_sun_fluid_light(world_position,depth/32.0);" in opaque
+assert "vec3 submerged_visibility=direct_visibility*water_light.yzw;" in opaque
+assert "vec3(1.0)-submerged_visibility" in opaque
 assert "sun_applied*submerged_visibility" in opaque
 assert "float sun_sky_aperture_sample(vec3 uv,int layer)" in opaque
 assert "translucent_sun_sky_aperture_active==0)return 1.0;" in shared

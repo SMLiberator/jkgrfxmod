@@ -23,10 +23,20 @@ assert "glGenerateMipmap(GL_TEXTURE_2D)" in gpu
 assert "GL_LINEAR_MIPMAP_LINEAR" in gpu
 assert "sun_caustic_cell_count" in pattern
 # Source-depth + source-fluid coefficient at the same nearest intersection.
-assert "GL_DEPTH_COMPONENT24" in gpu and "GL_R16F" in gpu
+assert "GL_DEPTH_COMPONENT24" in gpu and "GL_RGBA16F" in gpu
 assert "glFramebufferTextureLayer" in gpu
 assert "world.load(read,current,250000U,true,false,true)" in gpu
-assert "caustic_density_output=shadow_caustic_density;" in shadow
+assert "caustic_density_output=vec4(shadow_caustic_density," in shadow
+assert "shadow_caustic_from_texture" in shadow
+assert "shadow_caustic_color_factor" in shadow
+assert "shadow_caustic_color_blend" in shadow
+assert "shadow_caustic_tint" not in shadow
+assert "set_caustic_color(textured,next_textured," in renderer
+assert renderer.count("hash_fluid_color(mat);")==2
+assert "GL_TEXTURE_BINDING_2D,&old_tex11" in renderer
+assert "GL_TEXTURE_BINDING_2D,&old_tex12" in renderer
+assert "set_caustic_color(bool textured,bool next_textured" in read("renderer/shaders.hpp")
+assert "shadow_caustic_to_texture,next_textured?1:0" in shaders
 assert "set_caustic_density(draw.coefficient)" in renderer
 assert "mat.fluid_thickness" in renderer
 assert "mat.blend!=material_blend_mode::fluid" in renderer
@@ -47,7 +57,10 @@ assert "smoothstep(0.0,CAUSTICS_SHORE_FADE_DISTANCE" in frag
 assert "sample_sun_fluid_cascade(world_position,0,near_coord)" in frag
 assert "sample_sun_fluid_cascade(world_position,1,far_coord)" in frag
 assert "smoothstep(transition_start,transition_end,camera_depth)" in frag
-assert "submerged_visibility=direct_visibility*water_light.y" in frag
+assert "submerged_visibility=direct_visibility*water_light.yzw" in frag
+assert "SUN_WATER_TINT_STRENGTH = 1.0" in frag
+assert "water.gba" in frag
+assert "vec3 hue=water_light.yzw/" in frag
 assert "float caustic=water_light.x" in frag
 assert "CAUSTICS_INTENSITY = 6.0" in frag
 assert "CAUSTICS_SCALE = 10.0" in frag
@@ -70,4 +83,17 @@ for name,slot,target in (
 ):
     assert '{"%s",%s,sampler_kind::%s}'%(name,slot,target) in registry
 assert "no new material fields" in docs
+# White materials retain the previous neutral dimming; blue/green water
+# progressively attenuates red light without tinting the surface at depth 0.
+from math import exp,isclose
+def transmission(depth, color, strength=1.0):
+    return tuple(exp(-depth*(1+strength*(1-c))) for c in color)
+for depth in (0.0,0.1,0.5,2.0):
+    assert all(isclose(v,exp(-depth)) for v in
+               transmission(depth,(1.0,1.0,1.0)))
+    assert all(isclose(v,exp(-depth)) for v in
+               transmission(depth,(0.1,0.5,0.9),0.0))
+    red,green,blue=transmission(depth,(0.1,0.5,0.9))
+    assert red<=green<=blue
+    if depth>0.0:assert red<green<blue
 print("Procedural caustics Fluid source and compositor contracts passed")
