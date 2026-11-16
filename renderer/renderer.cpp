@@ -4,6 +4,7 @@
 #include "presentation_gpu_profile.hpp"
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
+#include "gpu_3do_packed_vertex.hpp"
 #include "gpu_3do_auto_lod.hpp"
 #include "planar_reflection_things.hpp"
 #include "planar_reflection_workset.hpp"
@@ -402,50 +403,90 @@ namespace jkgm {
         gl::buffer vertices;
         gl::buffer indices;
         unsigned num_indices = 0;
-        explicit gpu_3do_gl_mesh(gpu_3do_geometry const &source)
+        bool packed_vertex_format = false;
+        explicit gpu_3do_gl_mesh(bool enable_packing,
+                                 gpu_3do_geometry const &source)
         {
             num_indices=static_cast<unsigned>(source.indices.size());
+            std::vector<gpu_3do_packed_vertex> packed_vertices;
+            packed_vertex_format=enable_packing &&
+                gpu_3do_pack_vertices(source.vertices,packed_vertices);
             gl::bind_vertex_array(vao);
             gl::bind_buffer(gl::buffer_bind_target::array,vertices);
-            gl::buffer_data(gl::buffer_bind_target::array,
-                            make_span(source.vertices).as_const_bytes(),
-                            gl::buffer_usage::static_draw);
-            gl::enable_vertex_attrib_array(0U);
-            gl::vertex_attrib_pointer(0U,3U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,x));
-            gl::enable_vertex_attrib_array(1U);
-            gl::vertex_attrib_pointer(1U,2U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,u));
-            gl::enable_vertex_attrib_array(2U);
-            gl::vertex_attrib_pointer(2U,3U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,nx));
-            gl::enable_vertex_attrib_array(3U);
-            gl::vertex_attrib_pointer(3U,1U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,static_light));
-            gl::enable_vertex_attrib_array(4U);
-            gl::vertex_attrib_pointer(4U,3U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,lnx));
-            gl::enable_vertex_attrib_array(5U);
-            gl::vertex_attrib_pointer(5U,3U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,fax));
-            gl::enable_vertex_attrib_array(6U);
-            gl::vertex_attrib_pointer(6U,1U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,face_extra));
-            gl::enable_vertex_attrib_array(7U);
-            gl::vertex_attrib_pointer(7U,1U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,light_mode));
-            gl::enable_vertex_attrib_array(8U);
-            gl::vertex_attrib_pointer(8U,3U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,cr));
+            if(packed_vertex_format) {
+                gl::buffer_data(gl::buffer_bind_target::array,
+                    make_span(packed_vertices).as_const_bytes(),
+                    gl::buffer_usage::static_draw);
+                constexpr auto stride=sizeof(gpu_3do_packed_vertex);
+                gl::enable_vertex_attrib_array(0U);
+                gl::vertex_attrib_pointer(0U,3U,gl::vertex_element_type::float32,
+                    false,stride,offsetof(gpu_3do_packed_vertex,x));
+                gl::enable_vertex_attrib_array(1U);
+                gl::vertex_attrib_pointer(1U,2U,gl::vertex_element_type::float32,
+                    false,stride,offsetof(gpu_3do_packed_vertex,u));
+                gl::enable_vertex_attrib_array(2U);
+                gl::vertex_attrib_pointer(2U,4U,
+                    gl::vertex_element_type::uint_2_10_10_10_rev,
+                    true,stride,offsetof(gpu_3do_packed_vertex,normal_mode));
+                gl::enable_vertex_attrib_array(3U);
+                gl::vertex_attrib_pointer(3U,1U,gl::vertex_element_type::float32,
+                    false,stride,offsetof(gpu_3do_packed_vertex,static_light));
+                gl::enable_vertex_attrib_array(4U);
+                gl::vertex_attrib_pointer(4U,4U,
+                    gl::vertex_element_type::uint_2_10_10_10_rev,
+                    true,stride,offsetof(gpu_3do_packed_vertex,light_normal));
+                gl::enable_vertex_attrib_array(5U);
+                gl::vertex_attrib_pointer(5U,3U,gl::vertex_element_type::float32,
+                    false,stride,offsetof(gpu_3do_packed_vertex,fax));
+                gl::enable_vertex_attrib_array(6U);
+                gl::vertex_attrib_pointer(6U,1U,gl::vertex_element_type::float32,
+                    false,stride,offsetof(gpu_3do_packed_vertex,face_extra));
+                // Location 7 is disabled: mode occupies the two spare
+                // face-normal bits at location 2.
+                gl::enable_vertex_attrib_array(8U);
+                gl::vertex_attrib_pointer(8U,4U,gl::vertex_element_type::uint8,
+                    true,stride,offsetof(gpu_3do_packed_vertex,rgba));
+            } else {
+                gl::buffer_data(gl::buffer_bind_target::array,
+                                make_span(source.vertices).as_const_bytes(),
+                                gl::buffer_usage::static_draw);
+                gl::enable_vertex_attrib_array(0U);
+                gl::vertex_attrib_pointer(0U,3U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,x));
+                gl::enable_vertex_attrib_array(1U);
+                gl::vertex_attrib_pointer(1U,2U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,u));
+                gl::enable_vertex_attrib_array(2U);
+                gl::vertex_attrib_pointer(2U,3U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,nx));
+                gl::enable_vertex_attrib_array(3U);
+                gl::vertex_attrib_pointer(3U,1U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,static_light));
+                gl::enable_vertex_attrib_array(4U);
+                gl::vertex_attrib_pointer(4U,3U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,lnx));
+                gl::enable_vertex_attrib_array(5U);
+                gl::vertex_attrib_pointer(5U,3U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,fax));
+                gl::enable_vertex_attrib_array(6U);
+                gl::vertex_attrib_pointer(6U,1U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,face_extra));
+                gl::enable_vertex_attrib_array(7U);
+                gl::vertex_attrib_pointer(7U,1U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,light_mode));
+                gl::enable_vertex_attrib_array(8U);
+                gl::vertex_attrib_pointer(8U,3U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,cr));
+            }
             gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
             gl::buffer_data(gl::buffer_bind_target::element_array,
                             make_span(source.indices).as_const_bytes(),
@@ -4738,7 +4779,8 @@ namespace jkgm {
                 }
                 auto it=gpu_3do_gl_cache.find(inst.id);
                 if(it==gpu_3do_gl_cache.end()) {
-                    auto ptr=std::make_unique<gpu_3do_gl_mesh>(*inst.geometry);
+                    auto ptr=std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,*inst.geometry);
                     if(the_config->profile_renderer) ++profile_frame.gpu_uploads;
                     it=gpu_3do_gl_cache.emplace(inst.id,std::move(ptr)).first;
                     // Count uploads through PERF; do not log every temporary
@@ -4757,6 +4799,7 @@ namespace jkgm {
                                          make_point(m[6],m[7],m[8],0.0f),
                                          make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(it->second->vao);
+                    prog.set_packed_vertex_format(it->second->packed_vertex_format);
                     // Persistent GL uniforms must reset on each Thing.
                     prog.set_continuous_ambient(
                         continuous_buffer_ready && inst.continuous_ambient_fallback
@@ -5742,6 +5785,7 @@ namespace jkgm {
                         }
                         mesh=gpu_3do_gl_cache.emplace(item.sprite_id,
                             std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,
                                 *item.sprite_geometry)).first;
                     }
                     sprite_mesh=mesh->second.get();
@@ -6862,7 +6906,8 @@ namespace jkgm {
                 auto it=gpu_3do_gl_cache.find(instance.id);
                 if(it==gpu_3do_gl_cache.end()) {
                     it=gpu_3do_gl_cache.emplace(instance.id,
-                        std::make_unique<gpu_3do_gl_mesh>(*instance.geometry)).first;
+                        std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,*instance.geometry)).first;
                     if(the_config->profile_renderer)
                         ++profile_frame.gpu_uploads;
                 }
@@ -7147,6 +7192,7 @@ namespace jkgm {
                     if(it==gpu_3do_gl_cache.end())
                         it=gpu_3do_gl_cache.emplace(inst->id,
                             std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,
                                 *inst->geometry)).first;
                     for(auto const &g:inst->geometry->groups) {
                         if(g.count<3U || inst->thing_opacity<=0.0f)continue;
@@ -8564,6 +8610,7 @@ namespace jkgm {
                             if(mesh==gpu_3do_gl_cache.end())
                                 mesh=gpu_3do_gl_cache.emplace(inst.id,
                                     std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,
                                         *inst.geometry)).first;
                             if(shadow_no_cull(d))
                                 gl::disable(gl::capability::cull_face);
@@ -8638,7 +8685,8 @@ namespace jkgm {
                     auto it=gpu_3do_gl_cache.find(instance.id);
                     if(it==gpu_3do_gl_cache.end())
                         it=gpu_3do_gl_cache.emplace(instance.id,
-                            std::make_unique<gpu_3do_gl_mesh>(*instance.geometry)).first;
+                            std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,*instance.geometry)).first;
                     auto const &m=instance.transform;
                     prog.set_model(make_point(m[0],m[1],m[2]),
                         make_point(m[3],m[4],m[5]),make_point(m[6],m[7],m[8]),
@@ -9293,7 +9341,8 @@ namespace jkgm {
                     auto it=gpu_3do_gl_cache.find(inst.id);
                     if(it==gpu_3do_gl_cache.end())
                         it=gpu_3do_gl_cache.emplace(inst.id,
-                            std::make_unique<gpu_3do_gl_mesh>(*inst.geometry)).first;
+                            std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,*inst.geometry)).first;
                     auto const &m=inst.transform;
                     prog.set_model(make_point(m[0],m[1],m[2]),
                         make_point(m[3],m[4],m[5]),
@@ -12578,12 +12627,14 @@ namespace jkgm {
                     if(gpu_3do_gl_cache.size()>8192U)return;
                     glmesh=gpu_3do_gl_cache.emplace(inst.id,
                         std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,
                             *inst.geometry)).first;
                 }
                 auto const modelview=gpu_3do_native_modelview(
                     view,inst.transform);
                 if(!gpu_3do_matrix_finite(modelview))return;
-                shader.set_modelview(modelview,true);
+                shader.set_modelview(modelview,true,
+                    glmesh->second->packed_vertex_format);
                 shader.set_thing_fade(inst.thing_opacity,
                     inst.thing_dither && inst.thing_opacity<0.999f?2:0);
                 shader.set_model_lighting(inst.ambient,inst.effective_light_mode,
@@ -12658,7 +12709,8 @@ namespace jkgm {
                     auto const &inst=*draw.instance;
                     auto const it=gpu_3do_gl_cache.find(inst.id);
                     if(it==gpu_3do_gl_cache.end())continue;
-                    shader.set_modelview(draw.modelview,true);
+                    shader.set_modelview(draw.modelview,true,
+                        it->second->packed_vertex_format);
                     shader.set_thing_fade(inst.thing_opacity,1);
                     shader.set_model_lighting(inst.ambient,inst.effective_light_mode,
                         make_point(inst.colormap_tint[0],inst.colormap_tint[1],
@@ -12704,7 +12756,8 @@ namespace jkgm {
                 for(auto const &batch:emissive_models) {
                     auto const it=gpu_3do_gl_cache.find(batch.instance->id);
                     if(it==gpu_3do_gl_cache.end())continue;
-                    shader.set_modelview(batch.modelview,true);
+                    shader.set_modelview(batch.modelview,true,
+                        it->second->packed_vertex_format);
                     auto const &inst=*batch.instance;
                     shader.set_thing_fade(inst.thing_opacity,0);
                     shader.set_model_lighting(

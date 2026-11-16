@@ -764,6 +764,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , sprite_instance_matrix(gl::get_uniform_location(
           the_program,"sprite_instance_matrix[0]"))
     , projection(gl::get_uniform_location(the_program,"projection"))
+    , packed_vertex_format(gl::get_uniform_location(the_program,"packed_vertex_format"))
     , albedo_sampler(gl::get_uniform_location(the_program,"albedo_map"))
     , emissive_sampler(gl::get_uniform_location(the_program,"emissive_map"))
     , uv_scale(gl::get_uniform_location(the_program,"uv_scale"))
@@ -967,6 +968,10 @@ void jkgm::shaders::gpu_3do_preview_shader::set_view_matrix(
     gl::set_uniform_vector(view_forward,f);
     gl::set_uniform_vector(view_up,u);
     gl::set_uniform_vector(view_origin,t);
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_packed_vertex_format(bool enabled)
+{
+    gl::set_uniform_integer(packed_vertex_format,enabled?1:0);
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_sprite_instances(
     std::array<std::array<float,12>,max_sprite_instances> const &models,

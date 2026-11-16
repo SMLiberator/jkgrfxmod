@@ -15,6 +15,7 @@ class planar_reflection_capture_shader : public opengl_shader {
     gl::uniform_location_id tint_,has_albedo_,alpha_;
     gl::uniform_location_id fog_params_,fog_color_,jk_filter_,jk_tint_,jk_fade_,jk_limit_;
     gl::uniform_location_id model_ambient_,model_mode_,model_cmp_,model_sector_;
+    gl::uniform_location_id packed_vertex_format_;
     gl::uniform_location_id emission_sampler_,emission_factor_,emission_scroll_;
     gl::uniform_location_id emission_enabled_,emission_only_;
     gl::uniform_location_id thing_opacity_,thing_mode_;
@@ -48,6 +49,7 @@ public:
          model_mode_(gl::get_uniform_location(the_program,"model_effective_light_mode")),
          model_cmp_(gl::get_uniform_location(the_program,"model_cmp_tint")),
          model_sector_(gl::get_uniform_location(the_program,"model_sector_tint")),
+         packed_vertex_format_(gl::get_uniform_location(the_program,"packed_vertex_format")),
          emission_sampler_(gl::get_uniform_location(the_program,"emissive_map")),
          emission_factor_(gl::get_uniform_location(the_program,"emissive_factor")),
          emission_scroll_(gl::get_uniform_location(the_program,"emissive_scroll")),
@@ -67,8 +69,9 @@ public:
             p.orthographic?1.0f:0.0f));
         gl::set_uniform_integer(ortho_mode_,p.orthographic?1:0);
     }
-    void set_modelview(gpu_3do_matrix34 const &m,bool model) {
+    void set_modelview(gpu_3do_matrix34 const &m,bool model,bool packed=false) {
         gl::set_uniform_integer(model_,model?1:0);
+        gl::set_uniform_integer(packed_vertex_format_,model && packed?1:0);
         gl::set_uniform_vector(vr_,make_point(m[0],m[1],m[2],0.0f));
         gl::set_uniform_vector(vf_,make_point(m[3],m[4],m[5],0.0f));
         gl::set_uniform_vector(vu_,make_point(m[6],m[7],m[8],0.0f));

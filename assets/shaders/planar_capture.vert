@@ -3,6 +3,7 @@
 // JK gamma/CMP/sector color math as world_cache.vert, before interpolation.
 layout(location=0) in vec3 local_position;
 layout(location=1) in vec2 local_uv;
+layout(location=2) in vec4 model_face_normal_mode; // packed 2-bit mode lives in W
 layout(location=3) in vec3 native_light;
 layout(location=4) in vec3 native_light_state; // world light state / model normal
 layout(location=5) in vec3 native_sector_tint; // world tint / model face anchor
@@ -12,6 +13,7 @@ layout(location=8) in vec3 native_vertex_rgb; // 3DO only
 uniform vec4 view_right,view_forward,view_up,view_origin;
 uniform vec4 projection;
 uniform int is_model;
+uniform int packed_vertex_format;
 uniform vec4 clip_plane_view;
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
 uniform float jk_light_limit;
@@ -59,7 +61,9 @@ void main() {
     } else {
         // Model attributes 3,6,7,8 match gpu_3do_preview.vert. Preserve
         // its authored light-mode/ambient floor, without expensive point lights.
-        float mode=min(native_cmp_or_mode.x,model_effective_light_mode);
+        float authored_mode=packed_vertex_format!=0
+            ?round(model_face_normal_mode.w*3.0):native_cmp_or_mode.x;
+        float mode=min(authored_mode,model_effective_light_mode);
         if(mode>3.5)mode=1.0;
         float raw=clamp((mode>=2.5 ? native_light.x:0.0)+
                         native_uv_offset.x,0.0,jk_light_limit);

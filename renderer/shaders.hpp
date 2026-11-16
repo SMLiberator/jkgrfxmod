@@ -302,6 +302,7 @@ namespace jkgm {
             gl::uniform_location_id view_right,view_forward,view_up,view_origin;
             gl::uniform_location_id sprite_instance_count,sprite_instance_matrix;
             gl::uniform_location_id projection;
+            gl::uniform_location_id packed_vertex_format;
             gl::uniform_location_id albedo_sampler,emissive_sampler,uv_scale,has_texture,
                                     has_emissive,transparent_pass,blend_mode,alpha_mode,alpha_cutoff,
                                     native_face_opacity,thing_opacity,albedo_factor,emissive_factor,
@@ -389,6 +390,7 @@ namespace jkgm {
                 std::array<std::array<float,12>,max_sprite_instances> const &models,
                 size_t count);
             void set_projection(point<4,float> projection_params);
+            void set_packed_vertex_format(bool enabled);
             void set_surface(int albedo_source,float width,float height,bool transparent,
                              int blend,int alpha_policy,float cutoff,float face_opacity,
                              point<4,float> tint,point<2,float> scroll,

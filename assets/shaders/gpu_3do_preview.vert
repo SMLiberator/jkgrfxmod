@@ -4,13 +4,14 @@
 // Local mesh data remains permanently GPU resident; only 12 floats change.
 layout(location=0) in vec3 local_position;
 layout(location=1) in vec2 local_uv;
-layout(location=2) in vec3 local_normal;
+layout(location=2) in vec4 local_face_normal_mode; // float XYZ or UNORM10 XYZ + 2-bit mode
 layout(location=3) in float local_static_light;
-layout(location=4) in vec3 local_light_normal;
+layout(location=4) in vec3 local_light_normal_input;
 layout(location=5) in vec3 local_face_anchor;
 layout(location=6) in float local_extra_light;
 layout(location=7) in float local_light_mode;
 layout(location=8) in vec3 local_vertex_rgb;
+uniform int packed_vertex_format;
 uniform float ambient_light;
 uniform float jk_light_limit; // authored cap; 1 restores vanilla saturation
 uniform float effective_light_mode; // captured per Thing
@@ -180,6 +181,14 @@ float continuous_ambient_at(vec3 view_position)
 #endif
 
 void main() {
+    // GPU-decode packed unsigned 10:10:10:2 normalized attributes.
+    // Legacy attributes retain their native floats with w=1.
+    vec3 local_normal=packed_vertex_format!=0
+        ?local_face_normal_mode.xyz*2.0-1.0:local_face_normal_mode.xyz;
+    vec3 local_light_normal=packed_vertex_format!=0
+        ?local_light_normal_input*2.0-1.0:local_light_normal_input;
+    float decoded_light_mode=packed_vertex_format!=0
+        ?round(local_face_normal_mode.w*3.0):local_light_mode;
     vec4 model_right=view_right;
     vec4 model_forward=view_forward;
     vec4 model_up=view_up;
@@ -216,7 +225,7 @@ void main() {
     pixel_light_face_anchor=local_face_anchor;
     pixel_light_face_normal=local_normal;
     pixel_light_vertex_rgb=local_vertex_rgb;
-    pixel_light_state=vec3(local_static_light,local_extra_light,local_light_mode);
+    pixel_light_state=vec3(local_static_light,local_extra_light,decoded_light_mode);
     sector_vertex_cmp=colormap_tint;
     sector_vertex_tint=thing_sector_tint_delta;
     // A Camera-type Thing is a HUD overlay: no native ambient/dynamic
@@ -232,8 +241,8 @@ void main() {
     // JK: FullyLit=0, NotLit=1, Diffuse=2, Gouraud=3.
     // Per-face ExtraLight and the camera's ambient floor are evaluated
     // before the gamma-1.8 vertex conversion (like the native D3D path).
-    float mode=local_light_mode>3.5 ? 1.0
-        : min(local_light_mode,effective_light_mode);
+    float mode=decoded_light_mode>3.5 ? 1.0
+        : min(decoded_light_mode,effective_light_mode);
     float l=mode>=2.5 ? local_static_light : 0.0;
     float dynamic_added=0.0;
     if(mode>=1.5 && num_lights>0 && pixel_dynamic_lighting==0) {
