@@ -22,7 +22,8 @@ namespace jkgm::gl {
         uint16 = 0x1403,
         int32 = 0x1404,
         uint32 = 0x1405,
-        float32 = 0x1406
+        float32 = 0x1406,
+        uint_2_10_10_10_rev = 0x8368 // GL_UNSIGNED_INT_2_10_10_10_REV
     };
 
     enum class element_type : enum_type { triangles = 0x0004 };

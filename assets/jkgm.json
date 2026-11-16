@@ -43,6 +43,7 @@
     "profile_renderer": false,
     "profile_audio": false,
     "use_gpu_cache": true,
+    "experimental_packed_3do_vertices": false,
     "gpu_mesh_integrity_audit_interval": 0.0,
     "experimental_auto_3do_lod": false,
     "gpu_3do_auto_lod_lod1_radius_px": 90.0,

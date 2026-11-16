@@ -287,6 +287,9 @@
     <ClInclude Include="gpu_3do_preview.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="gpu_3do_packed_vertex.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="gpu_3do_auto_lod.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>

@@ -309,6 +309,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("use_gpu_cache")) {
             j.at("use_gpu_cache").get_to(rv->use_gpu_cache);
         }
+        if(j.contains("experimental_packed_3do_vertices")) {
+            j.at("experimental_packed_3do_vertices").get_to(
+                rv->experimental_packed_3do_vertices);
+        }
         if(j.contains("gpu_mesh_integrity_audit_interval")) {
             auto const &v=j.at("gpu_mesh_integrity_audit_interval");
             if(!v.is_number())
