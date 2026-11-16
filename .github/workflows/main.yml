@@ -282,6 +282,12 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\sprite_decal_geoset.cpp /Fe:sprite_decal_geoset_test.exe
         sprite_decal_geoset_test.exe
+    - name: Packed GPU 3DO vertex compression and source contracts
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_packed_vertex.cpp /Fe:gpu_3do_packed_vertex_test.exe || exit /b 1
+        gpu_3do_packed_vertex_test.exe || exit /b 1
+        python3 tests/gpu_3do_packed_vertex.py || exit /b 1
     - name: Native world GPU cache geometry and live surface state tests
       shell: cmd
       run: |
