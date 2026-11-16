@@ -239,17 +239,15 @@ uniform sampler2D sun_caustics_pattern;
 uniform float sun_caustics_time;
 // Editable visual preset (no jkgm.json tuning keys).
 const float CAUSTICS_INTENSITY = 6.0;
-const float CAUSTICS_SCALE = 10.0;
 const float CAUSTICS_SPREAD = 8.0;
 const float CAUSTICS_ATTENUATION = 8.0;
-const float CAUSTICS_SPEED = 1.0;
 // Fade caustics smoothly in very shallow water instead of a depth step.
 // Units are JK world units measured along the sunlight ray.
 const float CAUSTICS_SHORE_FADE_DISTANCE = 0.35;
 // Direct sunlight is attenuated independently, more slowly than caustics.
 const float SUN_WATER_DIRECT_ATTENUATION = 1.0;
 // RGB wavelength-selective absorption from Fluid MAT color; zero is neutral.
-const float SUN_WATER_TINT_STRENGTH = 1.0;
+const float SUN_WATER_TINT_STRENGTH = 4.0;
 // Returns (additional caustic light, ordinary sunlight transmission).
 // A missing Fluid source has no effect on either part of sunlight.
 vec4 sample_sun_fluid_cascade(vec3 world_position,int layer,vec3 coord)
@@ -276,12 +274,11 @@ vec4 sample_sun_fluid_cascade(vec3 world_position,int layer,vec3 coord)
                            CAUSTICS_SPREAD),0.0,7.5);
     vec3 right=layer==0?sun_shadow_right:sun_shadow_far_right;
     vec3 up=layer==0?sun_shadow_up:sun_shadow_far_up;
-    vec2 p=vec2(dot(world_position,right),dot(world_position,up))*
-           (0.095*CAUSTICS_SCALE);
+    vec2 p=vec2(dot(world_position,right),dot(world_position,up));
     float a=textureLod(sun_caustics_pattern,
-        p+vec2(0.015,0.01)*(sun_caustics_time*CAUSTICS_SPEED),lod).r;
+        p+vec2(0.015,0.01)*(sun_caustics_time),lod).r;
     float b=textureLod(sun_caustics_pattern,
-        p*1.3+vec2(-0.012,-0.018)*(sun_caustics_time*CAUSTICS_SPEED),lod).r;
+        p*1.3+vec2(-0.012,-0.018)*(sun_caustics_time),lod).r;
     float pattern = min(a,b);
     float shore_fade=smoothstep(0.0,CAUSTICS_SHORE_FADE_DISTANCE,
                                ray_length);
