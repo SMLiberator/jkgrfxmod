@@ -16,7 +16,13 @@ opaque = shaders["opaque"]
 assert "sun_shadow_color_intensity.a,0.0,1.0" in opaque
 assert "0.6*sun_applied)*" in opaque
 assert "sun_shadow_strength;" in opaque
-assert "surface_rgb*=1.0-shadowed_baseline*(1.0-direct_visibility);" in opaque
+# Underwater absorption multiplies effective direct visibility, while the
+# original intensity-dependent shadow baseline remains unchanged.
+assert "vec2 water_light=sample_sun_fluid_light(world_position,depth/32.0);" in opaque
+assert "float submerged_visibility=direct_visibility*water_light.y;" in opaque
+assert "surface_rgb*=1.0-shadowed_baseline*(1.0-submerged_visibility);" in opaque
+assert "sun_shadow_color_intensity.a*sun_applied*submerged_visibility;" in opaque
+assert "float caustic=water_light.x;" in opaque
 
 for name in ("native_alpha", "gpu_alpha"):
     shader = shaders[name]
@@ -32,8 +38,11 @@ for name in ("native_alpha", "gpu_alpha"):
     assert "float direct_visibility=visibility*sky_access;" in shader
     assert "if(sky_access<=0.0)return baked;" not in shader
 
-def shade(base, strength, visibility, multiplier):
-    return base*(1.0-multiplier*min(max(strength,0.0),1.0)*(1.0-visibility))
+def shade(base, strength, visibility, multiplier, water_transmission=1.0):
+    # No Fluid crossing means transmission=1, preserving the original math.
+    effective_visibility=visibility*water_transmission
+    return base*(1.0-multiplier*min(max(strength,0.0),1.0)*
+                 (1.0-effective_visibility))
 
 for intensity in (0.0, 0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 16.0):
     for multiplier in (0.6, 0.75):
@@ -45,5 +54,17 @@ for intensity in (0.0, 0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 16.0):
             assert isclose((unshadowed-shadowed)/0.8,multiplier*0.001)
         if intensity >= 1.0:
             assert isclose(shadowed,0.8*(1.0-multiplier))
+
+# Fully sunlit underwater receivers lose some baseline/direct illumination
+# according to water transmission; zero sun intensity still cannot darken
+# baked light, and no-water receivers retain their old appearance.
+for transmission in (0.0,0.25,0.5,1.0):
+    for intensity in (0.0,0.001,0.5,1.0):
+        for multiplier in (0.6,0.75):
+            value=shade(0.8,intensity,1.0,multiplier,transmission)
+            assert isclose(value,shade(0.8,intensity,transmission,multiplier))
+            assert 0.0 <= value <= 0.8
+            if intensity==0.0 or transmission==1.0:
+                assert isclose(value,0.8)
 
 print("Sun shadow strength follows sunlight intensity on all receivers")
