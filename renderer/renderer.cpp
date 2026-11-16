@@ -4152,7 +4152,9 @@ namespace jkgm {
                 prog.set_fog(make_point(info[0],info[1],
                                         the_config->enable_fog?info[2]:0.0f,
                                (the_config->experimental_radial_fog &&
-                                the_config->enable_fog)?1.0f:0.0f),
+                                the_config->enable_fog)
+                                   ?(the_config->experimental_exponential_fog?2.0f:1.0f)
+                                   :0.0f),
                              make_point(color[0],color[1],color[2],0.0f));
             }
             struct pending_draw {
@@ -5267,7 +5269,9 @@ namespace jkgm {
                                current_info[1],
                                the_config->enable_fog ? current_info[2] : 0.0f,
                                (the_config->experimental_radial_fog &&
-                                the_config->enable_fog)?1.0f:0.0f),
+                                the_config->enable_fog)
+                                   ?(the_config->experimental_exponential_fog?2.0f:1.0f)
+                                   :0.0f),
                     color_rgb(current_color[0], current_color[1], current_color[2]));
             }
 
@@ -9572,7 +9576,7 @@ namespace jkgm {
                 auto const info=fog.info.value(), rgb=fog.color.value();
                 ogs->game_post_opaque_composite_program.set_fog(
                     make_point(info[0],info[1],
-                               the_config->enable_fog?info[2]:0.0f,radial_fog_active?1.0f:0.0f),
+                               the_config->enable_fog?info[2]:0.0f,radial_fog_active?(the_config->experimental_exponential_fog?2.0f:1.0f):0.0f),
                     color_rgb(rgb[0],rgb[1],rgb[2]));
             }
 
@@ -10939,7 +10943,9 @@ namespace jkgm {
             shader.set_fog(make_point(info[0],info[1],
                                the_config->enable_fog?info[2]:0.0f,
                                (the_config->experimental_radial_fog &&
-                                the_config->enable_fog)?1.0f:0.0f),
+                                the_config->enable_fog)
+                                   ?(the_config->experimental_exponential_fog?2.0f:1.0f)
+                                   :0.0f),
                            make_point(color[0],color[1],color[2]));
             // Diagnostic modes affect only GPU world Fluid in the forward
             // pass. Default 0 retains the normal rendering path.
@@ -11109,7 +11115,9 @@ namespace jkgm {
                                current_info[1],
                                the_config->enable_fog ? current_info[2] : 0.0f,
                                (the_config->experimental_radial_fog &&
-                                the_config->enable_fog)?1.0f:0.0f),
+                                the_config->enable_fog)
+                                   ?(the_config->experimental_exponential_fog?2.0f:1.0f)
+                                   :0.0f),
                     color_rgb(current_color[0], current_color[1], current_color[2]));
             }
             gl::set_active_texture_unit(0);

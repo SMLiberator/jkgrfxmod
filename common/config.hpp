@@ -36,6 +36,7 @@ namespace jkgm {
         bool enable_trails = true;
         bool enable_fog = true;
         bool experimental_radial_fog = false; // camera-to-fragment fog distance, not forward depth
+        bool experimental_exponential_fog = false; // smooth radial attenuation with no hard clear radius
         bool enable_post = true;
         bool enable_hdr = false; // strict master switch for tone mapping, auto exposure and HDR tuning
         float auto_exposure_sensitivity = 0.4f; // 0=fixed exposure, 0..2=adaptive

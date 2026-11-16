@@ -5,7 +5,7 @@ uniform sampler2D emissive_image;
 uniform sampler2D occlusion_image;
 uniform int retain_hom_pixels; // skip unwritten pixels, leaving prior scene buffer
 uniform sampler2D depth_image;
-uniform vec4 fog_params; // start, end, opacity, radial fog toggle
+uniform vec4 fog_params; // x=start, y=end, z=opacity, w=0 planar linear,1 radial linear,2 radial exponential
 uniform vec3 fog_color;
 
 uniform sampler2D normal_image; // scene normals for MAT spotlights
@@ -515,8 +515,15 @@ void main()
             fog_depth*=length(vec3(ndc.x*camera_right.w,
                                    ndc.y*camera_up.w,1.0));
         }
-        fog = clamp((fog_depth - fog_params.x) / span, 0.0, 1.0) *
-              fog_params.z;
+        float fog_fraction=clamp((fog_depth-fog_params.x)/span,0.0,1.0);
+        if(fog_params.w>1.5) {
+            // No hard clear-radius: density accumulates from the camera.
+            // SetFog end sets ~90% fog distance (at start=0); start
+            // increases the soft reach instead of creating a hard edge.
+            float reach=max(fog_params.y+0.5*max(fog_params.x,0.0),1.0);
+            fog_fraction=1.0-exp(-2.302585093*max(fog_depth,0.0)/reach);
+        }
+        fog=fog_fraction*fog_params.z;
     }
     vec3 surface_rgb=albedo.rgb*occlusion;
     // Blend the new light against the material's UNLIT pigment, not its

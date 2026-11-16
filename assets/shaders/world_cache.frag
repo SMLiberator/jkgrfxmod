@@ -58,7 +58,7 @@ uniform int blend_mode; // normal=0, additive=1, multiply=2, fluid=3
 uniform sampler2D scene_depth; // resolved opaque R16F depth, JK units 32*Y
 uniform float fluid_thickness; // Beer-Lambert absorption coefficient
 uniform int fluid_debug_mode; // GPU world Fluid diagnostics; 0 preserves ordinary rendering
-uniform vec4 fog_params; // native fog start/end/opacity, w=radial toggle
+uniform vec4 fog_params; // start/end/opacity, w=0 planar linear,1 radial linear,2 radial exp
 uniform vec3 fog_color;
 uniform int sky_mode;
 uniform vec4 sky_horizon; // x=horizonDistance*tanHalfFOV, y=pixels/rev, z=tanHalfFOV
@@ -354,9 +354,13 @@ void main() {
         // or the camera-ray Fluid absorption against opaque depth.
         float fog_depth=fog_params.w>0.5
             ?length(cached_world_position-camera_world_origin)*32.0:depth;
-        float fog=clamp((fog_depth-fog_params.x)/
-                        max(fog_params.y-fog_params.x,0.0001),0.0,1.0)*
-                  fog_params.z;
+        float fog_fraction=clamp((fog_depth-fog_params.x)/
+                            max(fog_params.y-fog_params.x,0.0001),0.0,1.0);
+        if(fog_params.w>1.5) {
+            float reach=max(fog_params.y+0.5*max(fog_params.x,0.0),1.0);
+            fog_fraction=1.0-exp(-2.302585093*max(fog_depth,0.0)/reach);
+        }
+        float fog=fog_fraction*fog_params.z;
         vec3 lit=mix(lit_diffuse,fog_color,fog);
         vec3 specular=(env_reflection+direct_specular)*(1.0-fog);
         if(blend_mode==3) {

@@ -34,7 +34,7 @@ layout(location = 3) out vec4 out_depth;
 // Dynamic fog: values are supplied by the runtime SetFog* COG verbs.
 // Keep this definition identical in opaque and transparent game passes.
 // ---------------------------------------------------------------------------
-uniform vec4 fog_params;  // x=start, y=end, z=opacity, w=radial fog toggle
+uniform vec4 fog_params;  // x=start, y=end, z=opacity, w=0 planar,1 radial,2 radial exponential
 uniform vec3 fog_color;
 
 // ---------------------------------------------------------------------------
@@ -65,7 +65,12 @@ float fog_factor(float dist)
         dist=length(vec3(vp_pos.xy*vec2(hscale,hscale/aspect),vp_z));
     }
     float span=max(fog_params.y-fog_params.x,0.0001);
-    return clamp((dist-fog_params.x)/span,0.0,1.0)*fog_params.z;
+    float fraction=clamp((dist-fog_params.x)/span,0.0,1.0);
+    if(fog_params.w>1.5) {
+        float reach=max(fog_params.y+0.5*max(fog_params.x,0.0),1.0);
+        fraction=1.0-exp(-2.302585093*max(dist,0.0)/reach);
+    }
+    return fraction*fog_params.z;
 }
 
 const float REFLECTION_HFOV_DEGREES = 90.0;

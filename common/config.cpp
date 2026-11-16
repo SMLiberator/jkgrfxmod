@@ -117,6 +117,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("experimental_radial_fog")) {
             j.at("experimental_radial_fog").get_to(rv->experimental_radial_fog);
         }
+        if(j.contains("experimental_exponential_fog")) {
+            j.at("experimental_exponential_fog").get_to(rv->experimental_exponential_fog);
+        }
 
         if(j.contains("enable_post")) {
             j.at("enable_post").get_to(rv->enable_post);

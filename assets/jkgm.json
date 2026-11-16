@@ -15,6 +15,7 @@
     "enable_trails": true,
     "enable_fog": true,
     "experimental_radial_fog": false,
+    "experimental_exponential_fog": false,
     "enable_post": true,
     "enable_hdr": false,
     "auto_exposure_sensitivity": 0.4,
