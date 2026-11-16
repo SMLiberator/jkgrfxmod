@@ -4150,7 +4150,9 @@ namespace jkgm {
                 auto const &fog=get_fog_settings();
                 auto const info=fog.info.value(),color=fog.color.value();
                 prog.set_fog(make_point(info[0],info[1],
-                                        the_config->enable_fog?info[2]:0.0f,(the_config->experimental_radial_fog && the_config->enable_fog)?1.0f:0.0f),
+                                        the_config->enable_fog?info[2]:0.0f,
+                               (the_config->experimental_radial_fog &&
+                                the_config->enable_fog)?1.0f:0.0f),
                              make_point(color[0],color[1],color[2],0.0f));
             }
             struct pending_draw {
@@ -5264,7 +5266,8 @@ namespace jkgm {
                     make_point(current_info[0],
                                current_info[1],
                                the_config->enable_fog ? current_info[2] : 0.0f,
-                               (the_config->experimental_radial_fog && the_config->enable_fog)?1.0f:0.0f),
+                               (the_config->experimental_radial_fog &&
+                                the_config->enable_fog)?1.0f:0.0f),
                     color_rgb(current_color[0], current_color[1], current_color[2]));
             }
 
@@ -10891,7 +10894,9 @@ namespace jkgm {
             auto const &fog=get_fog_settings();
             auto const info=fog.info.value(),color=fog.color.value();
             shader.set_fog(make_point(info[0],info[1],
-                               the_config->enable_fog?info[2]:0.0f,(the_config->experimental_radial_fog && the_config->enable_fog)?1.0f:0.0f),
+                               the_config->enable_fog?info[2]:0.0f,
+                               (the_config->experimental_radial_fog &&
+                                the_config->enable_fog)?1.0f:0.0f),
                            make_point(color[0],color[1],color[2]));
             // Diagnostic modes affect only GPU world Fluid in the forward
             // pass. Default 0 retains the normal rendering path.
@@ -11060,7 +11065,8 @@ namespace jkgm {
                     make_point(current_info[0],
                                current_info[1],
                                the_config->enable_fog ? current_info[2] : 0.0f,
-                               (the_config->experimental_radial_fog && the_config->enable_fog)?1.0f:0.0f),
+                               (the_config->experimental_radial_fog &&
+                                the_config->enable_fog)?1.0f:0.0f),
                     color_rgb(current_color[0], current_color[1], current_color[2]));
             }
             gl::set_active_texture_unit(0);
