@@ -32,10 +32,26 @@ assert "shadow_caustic_color_factor" in shadow
 assert "shadow_caustic_color_blend" in shadow
 assert "shadow_caustic_tint" not in shadow
 assert "set_caustic_color(textured,next_textured," in renderer
+assert "set_water_color(draw.texture);" in renderer
+assert "set_water_color(draw.texture,draw.has_uv,true)" not in renderer
+assert "face.has_shadow_uv" not in renderer[renderer.index("void draw_sun_caustics()"):renderer.index("void draw_game_opaque_composite()")]
+assert "hash_float(get<x>(mat.albedo_scroll))" not in renderer
+assert "hash_float(get<y>(mat.albedo_scroll))" not in renderer
+assert "hash_float(mat.albedo_transition);" in renderer
+assert "hash_float(get<0>(mat.tint));" in renderer
+assert "float last_mip=floor(log2(float(max(max(dims.x,dims.y),1))));" in shadow
+assert "textureLod(shadow_alpha_texture,vec2(0.5),last_mip).rgb" in shadow
+assert "textureLod(shadow_alpha_texture_next," in shadow
+assert "shadow_caustic_from_texture!=0" in shadow
+assert "vec3 water_rgb=vec3(1.0);" in shadow
+assert "clamp(water_rgb*shadow_caustic_color_factor" in shadow
+assert "shadow_material_uv*shadow_alpha_uv_scale+" in shadow # alpha masks still work
+assert "vec2 caustic_uv" not in shadow
 assert renderer.count("hash_fluid_color(mat);")==2
 assert "GL_TEXTURE_BINDING_2D,&old_tex11" in renderer
 assert "GL_TEXTURE_BINDING_2D,&old_tex12" in renderer
 assert "set_caustic_color(bool textured,bool next_textured" in read("renderer/shaders.hpp")
+assert "point<3,float> tint,float transition);" in read("renderer/shaders.hpp")
 assert "shadow_caustic_to_texture,next_textured?1:0" in shaders
 assert "set_caustic_density(draw.coefficient)" in renderer
 assert "mat.fluid_thickness" in renderer

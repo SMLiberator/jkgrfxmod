@@ -521,8 +521,7 @@ namespace jkgm {
             void set_shadow_dither(bool enabled,float opacity,bool masked);
             void set_caustic_density(float coefficient);
             void set_caustic_color(bool textured,bool next_textured,
-                point<3,float> tint,point<2,float> uv_scale,
-                point<2,float> scroll,float transition);
+                point<3,float> tint,float transition);
             void set_shadow_alpha(bool enabled,point<2,float> uv_scale,
                                   point<2,float> uv_scroll,float cutoff,
                                   float factor,bool has_next,float progress);

@@ -9054,7 +9054,6 @@ namespace jkgm {
                 spotlight_shadow_surface_range range;
                 float coefficient=0.0f;
                 gpu_3do_texture texture;
-                bool has_uv=false;
             };
             struct fluid_model_draw {
                 gpu_3do_instance const *inst;
@@ -9082,16 +9081,14 @@ namespace jkgm {
                     std::memcpy(&bits,&v,sizeof(bits));
                     hash_u32(bits);
                 };
-                // Color, texture transitions and scrolls invalidate cached RGB.
+                // Tint, active MAT texture and transitions invalidate RGB.
+                // UV scroll no longer affects the average color or cache.
                 auto hash_fluid_color=[&](gpu_3do_texture const &mat) {
                     hash_u32(uint32_t(mat.albedo_source));
                     hash_u32(uint32_t(mat.albedo_source2));
                     hash_u32(uint32_t(mat.texture.value()));
                     hash_u32(uint32_t(mat.texture2.value()));
                     hash_float(mat.albedo_transition);
-                    hash_float(mat.width);hash_float(mat.height);
-                    hash_float(get<x>(mat.albedo_scroll));
-                    hash_float(get<y>(mat.albedo_scroll));
                     hash_float(get<0>(mat.tint));
                     hash_float(get<1>(mat.tint));
                     hash_float(get<2>(mat.tint));
@@ -9130,14 +9127,11 @@ namespace jkgm {
                        mat.opacity<=0.0f)continue;
                     float const coefficient=std::max(
                         0.0f,std::min(mat.fluid_thickness,8.0f));
-                    bool const uv_valid=face.has_shadow_uv &&
-                        face.shadow_uv.size()==face.polygon.size();
-                    world_draws[cascade].push_back({range,coefficient,mat,uv_valid});
+                    world_draws[cascade].push_back({range,coefficient,mat});
                     hash_u32(face.surface_index);
                     hash_u32(uint32_t(face.material));
                     hash_u32(uint32_t(cel));
                     hash_float(coefficient);
-                    hash_u32(uv_valid?1U:0U);
                     hash_fluid_color(mat);
                 }
                 for(auto const &inst:frame_gpu_3do_instances) {
@@ -9239,23 +9233,15 @@ namespace jkgm {
             auto point3=[](decal_vec3 const &v) {
                 return make_point(v[0],v[1],v[2]);
             };
-            auto set_water_color=[&](gpu_3do_texture const &mat,bool allow_uv,
-                                     bool world_uv) {
-                bool const textured=allow_uv && mat.albedo_source==1 &&
+            auto set_water_color=[&](gpu_3do_texture const &mat) {
+                bool const textured=mat.albedo_source==1 &&
                     mat.has_image && mat.texture.value()!=0U;
-                bool const next_textured=allow_uv && mat.albedo_source2==1 &&
+                bool const next_textured=mat.albedo_source2==1 &&
                     mat.texture2.value()!=0U && mat.albedo_transition>0.0f;
-                float const w=world_uv ? mat.width
-                    : gpu_3do_model_uv_extent(mat.width);
-                float const h=world_uv ? mat.height
-                    : gpu_3do_model_uv_extent(mat.height);
                 prog.set_caustic_color(textured,next_textured,
                     make_point(get<0>(mat.tint),get<1>(mat.tint),
                                get<2>(mat.tint)),
-                    make_point(1.0f/std::max(w,1.0f),
-                               1.0f/std::max(h,1.0f)),
-                    mat.albedo_scroll,
-                    allow_uv?mat.albedo_transition:0.0f);
+                    mat.albedo_transition);
                 if(textured) {
                     glActiveTexture(GL_TEXTURE0+11);
                     glBindTexture(GL_TEXTURE_2D,mat.texture.value());
@@ -9291,7 +9277,7 @@ namespace jkgm {
                 gl::bind_vertex_array(map.vao);
                 for(auto const &draw:world_draws[cascade]) {
                     prog.set_caustic_density(draw.coefficient);
-                    set_water_color(draw.texture,draw.has_uv,true);
+                    set_water_color(draw.texture);
                     gl::draw_elements(gl::element_type::triangles,
                         draw.range.count,gl::index_type::uint32,
                         static_cast<ptrdiff_t>(draw.range.first_index*
@@ -9310,7 +9296,7 @@ namespace jkgm {
                         make_point(m[6],m[7],m[8]),
                         make_point(m[9],m[10],m[11]));
                     prog.set_caustic_density(draw.coefficient);
-                    set_water_color(draw.texture,true,false);
+                    set_water_color(draw.texture);
                     gl::bind_vertex_array(it->second->vao);
                     gl::draw_elements(gl::element_type::triangles,
                         group.count,gl::index_type::uint32,

@@ -1638,15 +1638,13 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_caustic_density(float coe
 }
 
 void jkgm::shaders::spotlight_shadow_depth_shader::set_caustic_color(
-    bool textured,bool next_textured,point<3,float> tint,
-    point<2,float> uv_scale,point<2,float> scroll,float transition)
+    bool textured,bool next_textured,point<3,float> tint,float transition)
 {
     gl::set_uniform_integer(shadow_caustic_from_texture,textured?1:0);
     gl::set_uniform_integer(shadow_caustic_to_texture,next_textured?1:0);
     gl::set_uniform_vector(shadow_caustic_color_factor,tint);
     gl::set_uniform_float(shadow_caustic_color_blend,transition);
-    gl::set_uniform_vector(shadow_alpha_uv_scale,uv_scale);
-    gl::set_uniform_vector(shadow_alpha_uv_scroll,scroll);
+    // These existing samplers now always read the final 1x1 mip.
     gl::set_uniform_integer(shadow_alpha_texture,11);
     gl::set_uniform_integer(shadow_alpha_texture_next,12);
 }

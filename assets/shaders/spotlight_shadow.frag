@@ -52,13 +52,23 @@ void main()
               alpha*shadow_alpha_factor<shadow_alpha_cutoff)discard;
     // Only the Fluid capture has the color attachment; depth-only passes
     // are unaffected by the output. Reuse the shadow-alpha samplers.
-    vec2 caustic_uv=shadow_material_uv*shadow_alpha_uv_scale+
-                    shadow_alpha_uv_scroll;
-    vec3 water_rgb=shadow_caustic_from_texture!=0
-        ?texture(shadow_alpha_texture,caustic_uv).rgb:vec3(1.0);
+    // The texture cache builds a full mip chain, ending at one pixel.
+    // Use the representative material color, NOT its spatial pattern or
+    // scroll offset. Untextured materials fall back to their RGB factor.
+    vec3 water_rgb=vec3(1.0);
+    if(shadow_caustic_from_texture!=0) {
+        ivec2 dims=textureSize(shadow_alpha_texture,0);
+        float last_mip=floor(log2(float(max(max(dims.x,dims.y),1))));
+        water_rgb=textureLod(shadow_alpha_texture,vec2(0.5),last_mip).rgb;
+    }
     if(shadow_caustic_color_blend>0.0) {
-        vec3 next_rgb=shadow_caustic_to_texture!=0
-            ?texture(shadow_alpha_texture_next,caustic_uv).rgb:vec3(1.0);
+        vec3 next_rgb=vec3(1.0);
+        if(shadow_caustic_to_texture!=0) {
+            ivec2 next_dims=textureSize(shadow_alpha_texture_next,0);
+            float last_mip=floor(log2(float(max(max(next_dims.x,next_dims.y),1))));
+            next_rgb=textureLod(shadow_alpha_texture_next,
+                                vec2(0.5),last_mip).rgb;
+        }
         water_rgb=mix(water_rgb,next_rgb,
                       clamp(shadow_caustic_color_blend,0.0,1.0));
     }

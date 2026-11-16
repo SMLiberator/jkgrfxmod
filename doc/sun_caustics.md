@@ -10,11 +10,14 @@ texture units (at least 20). There are **no new material fields**.
   HUD/camera models and procedural particle meshes never generate caustics.
 - The first Fluid intersection along each sunlight ray writes depth,
   the material's existing `fluid_thickness` coefficient, and water albedo
-  RGB sampled at that precise light-space point. MAT tint, texture
-  transitions and UV scrolling are reflected in the capture. Animated
-  scroll/transition invalidates the map and can increase GPU capture work.
+  RGB represented by the final 1×1 mip of its albedo texture,
+  multiplied by the material albedo factor. If no texture is present, the
+  factor alone provides the tint. Material texture transitions blend the
+  two representative colors. No surface-UV sampling is necessary and
+  UV scrolling alone no longer invalidates the Fluid transmission capture.
+  A MAT cel/texture, color-factor or transition change still invalidates it.
   This reuses the existing transmission sampler, replacing the R16F
-  thickness map with RGBA16F (R=thickness, GBA=sampled water RGB).
+  thickness map with RGBA16F (R=thickness, GBA=material-average RGB).
   The ordinary opaque sun shadow map is unaffected. Two 512×512 layers
   match the near and far sun cascade projections.
 - A deterministic, tileable 256×256 cellular-ridge texture is generated
