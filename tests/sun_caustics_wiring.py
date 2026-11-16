@@ -41,6 +41,14 @@ assert "sun_dynamic_shadow_visibility(world_position,incidence)" in frag
 assert "sun_shadow_visibility(world_position,incidence)" in frag
 assert "textureLod(sun_caustics_pattern" in frag
 assert "density*ray_length" in frag
+assert "CAUSTICS_SHORE_FADE_DISTANCE = 0.35" in frag
+assert "SUN_WATER_DIRECT_ATTENUATION = 1.0" in frag
+assert "smoothstep(0.0,CAUSTICS_SHORE_FADE_DISTANCE" in frag
+assert "sample_sun_fluid_cascade(world_position,0,near_coord)" in frag
+assert "sample_sun_fluid_cascade(world_position,1,far_coord)" in frag
+assert "smoothstep(transition_start,transition_end,camera_depth)" in frag
+assert "submerged_visibility=direct_visibility*water_light.y" in frag
+assert "float caustic=water_light.x" in frag
 assert "CAUSTICS_INTENSITY = 6.0" in frag
 assert "CAUSTICS_SCALE = 10.0" in frag
 assert "CAUSTICS_SPREAD = 8.0" in frag

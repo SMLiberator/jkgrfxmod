@@ -243,31 +243,34 @@ const float CAUSTICS_SCALE = 10.0;
 const float CAUSTICS_SPREAD = 8.0;
 const float CAUSTICS_ATTENUATION = 8.0;
 const float CAUSTICS_SPEED = 1.0;
-float sample_sun_caustic_light(vec3 world_position,float camera_depth)
+// Fade caustics smoothly in very shallow water instead of a depth step.
+// Units are JK world units measured along the sunlight ray.
+const float CAUSTICS_SHORE_FADE_DISTANCE = 0.35;
+// Direct sunlight is attenuated independently, more slowly than caustics.
+const float SUN_WATER_DIRECT_ATTENUATION = 1.0;
+// Returns (additional caustic light, ordinary sunlight transmission).
+// A missing Fluid source has no effect on either part of sunlight.
+vec2 sample_sun_fluid_cascade(vec3 world_position,int layer,vec3 coord)
 {
-    if(sun_caustics_active==0)return 0.0;
-    bool near_cascade=camera_depth<sun_shadow_split;
-    int layer=near_cascade?0:1;
-    vec3 coord=near_cascade
-        ?sun_shadow_coordinates(world_position,sun_shadow_origin,
-            sun_shadow_right,sun_shadow_up,sun_shadow_forward,sun_shadow_limits)
-        :sun_shadow_coordinates(world_position,sun_shadow_far_origin,
-            sun_shadow_far_right,sun_shadow_far_up,sun_shadow_far_forward,
-            sun_shadow_far_limits);
-    if(!sun_shadow_inside(coord))return 0.0;
-    float interface_depth=texture(sun_caustics_depth,vec3(coord.xy,float(layer))).r;
-    if(interface_depth>=0.999999 || coord.z<=interface_depth+0.00015)return 0.0;
+    if(!sun_shadow_inside(coord))return vec2(0.0,1.0);
+    float interface_depth=texture(sun_caustics_depth,
+        vec3(coord.xy,float(layer))).r;
+    if(interface_depth>=0.999999 || coord.z<=interface_depth)
+        return vec2(0.0,1.0);
     float ray_length=(coord.z-interface_depth)*
-        (near_cascade?sun_shadow_limits.z:sun_shadow_far_limits.z);
-    if(ray_length<=0.015)return 0.0;
+        (layer==0?sun_shadow_limits.z:sun_shadow_far_limits.z);
+    if(ray_length<=0.0)return vec2(0.0,1.0);
     float density=clamp(texture(
         sun_caustics_density,vec3(coord.xy,float(layer))).r,0.0,8.0);
-    float decay=exp(-ray_length*(0.08+density*0.4)*CAUSTICS_ATTENUATION);
-    if(decay<0.003)return 0.0;
+    float extinction=ray_length*(0.08+density*0.4);
+    float sunlight_transmission=exp(
+        -extinction*SUN_WATER_DIRECT_ATTENUATION);
+    float decay=exp(-extinction*CAUSTICS_ATTENUATION);
+    if(decay<0.003)return vec2(0.0,sunlight_transmission);
     float lod=clamp(log2(1.0+density*ray_length*2.75*
                            CAUSTICS_SPREAD),0.0,7.5);
-    vec3 right=near_cascade?sun_shadow_right:sun_shadow_far_right;
-    vec3 up=near_cascade?sun_shadow_up:sun_shadow_far_up;
+    vec3 right=layer==0?sun_shadow_right:sun_shadow_far_right;
+    vec3 up=layer==0?sun_shadow_up:sun_shadow_far_up;
     vec2 p=vec2(dot(world_position,right),dot(world_position,up))*
            (0.095*CAUSTICS_SCALE);
     float a=textureLod(sun_caustics_pattern,
@@ -275,11 +278,38 @@ float sample_sun_caustic_light(vec3 world_position,float camera_depth)
     float b=textureLod(sun_caustics_pattern,
         p*1.3+vec2(-0.012,-0.018)*(sun_caustics_time*CAUSTICS_SPEED),lod).r;
     float pattern = min(a,b);
-    return pattern*decay*CAUSTICS_INTENSITY;
+    float shore_fade=smoothstep(0.0,CAUSTICS_SHORE_FADE_DISTANCE,
+                               ray_length);
+    return vec2(pattern*decay*CAUSTICS_INTENSITY*shore_fade,
+                sunlight_transmission);
+}
+vec2 sample_sun_fluid_light(vec3 world_position,float camera_depth)
+{
+    if(sun_caustics_active==0)return vec2(0.0,1.0);
+    vec3 near_coord=sun_shadow_coordinates(world_position,sun_shadow_origin,
+        sun_shadow_right,sun_shadow_up,sun_shadow_forward,sun_shadow_limits);
+    vec3 far_coord=sun_shadow_coordinates(world_position,sun_shadow_far_origin,
+        sun_shadow_far_right,sun_shadow_far_up,sun_shadow_far_forward,
+        sun_shadow_far_limits);
+    bool use_near=camera_depth<sun_shadow_split && sun_shadow_inside(near_coord);
+    bool use_far=sun_shadow_inside(far_coord);
+    if(!use_near)return use_far
+        ?sample_sun_fluid_cascade(world_position,1,far_coord):vec2(0.0,1.0);
+    if(!use_far)return sample_sun_fluid_cascade(world_position,0,near_coord);
+    // Match the regular sun shadow cascade blend: no hard transition where
+    // the two water-depth captures have different texel footprints.
+    float transition_start=sun_shadow_split*0.8125;
+    float transition_end=sun_shadow_split*0.9375;
+    if(camera_depth<transition_start)
+        return sample_sun_fluid_cascade(world_position,0,near_coord);
+    vec2 near_light=sample_sun_fluid_cascade(world_position,0,near_coord);
+    vec2 far_light=sample_sun_fluid_cascade(world_position,1,far_coord);
+    return mix(near_light,far_light,
+               smoothstep(transition_start,transition_end,camera_depth));
 }
 #else
-float sample_sun_caustic_light(vec3 world_position,float camera_depth)
-{ return 0.0; }
+vec2 sample_sun_fluid_light(vec3 world_position,float camera_depth)
+{ return vec2(0.0,1.0); }
 #endif
 
 // Only the costly shadow-map lookups are low-resolution. In particular,
@@ -533,11 +563,16 @@ void main()
                 float shadowed_baseline=(sprite ? 0.75*sun_fade
                                                : 0.6*sun_applied)*
                                         sun_shadow_strength;
-                surface_rgb*=1.0-shadowed_baseline*(1.0-direct_visibility);
+                // Water depth reduces direct sunlight as well as the
+                // positive caustic contribution. Preserve full sunlight
+                // above/outside Fluid and keep shadow/sky gating unchanged.
+                vec2 water_light=sample_sun_fluid_light(world_position,depth/32.0);
+                float submerged_visibility=direct_visibility*water_light.y;
+                surface_rgb*=1.0-shadowed_baseline*(1.0-submerged_visibility);
                 vec3 sun_light=pigment*sun_shadow_color_intensity.rgb*
-                    sun_shadow_color_intensity.a*sun_applied*direct_visibility;
+                    sun_shadow_color_intensity.a*sun_applied*submerged_visibility;
                 surface_rgb+=sun_light*(vec3(1.0)-clamp(surface_rgb,0.0,1.0));
-                float caustic=sample_sun_caustic_light(world_position,depth/32.0);
+                float caustic=water_light.x;
                 if(caustic>0.0 && direct_visibility>0.0) {
                     vec3 transmitted=pigment*sun_shadow_color_intensity.rgb*
                         sun_shadow_color_intensity.a*sun_applied*

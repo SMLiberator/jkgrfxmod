@@ -23,6 +23,19 @@ texture units (at least 20). There are **no new material fields**.
   and speed `1.0`. Edit the shader constants to tune this effect;
   `jkgm.json` retains only the `experimental_sun_caustics` enable flag.
   These changes do not regenerate the procedural texture or Fluid layers.
+- On **opaque** world/3DO receivers, caustics transition smoothly over
+  `CAUSTICS_SHORE_FADE_DISTANCE` of sunlight-ray water depth rather than
+  disappearing at a fixed depth bias. Near/far Fluid transmission maps blend
+  over the same camera-depth range as regular sun shadows.
+- Ordinary direct sunlight also fades through Fluid with the separately
+  shader-editable `SUN_WATER_DIRECT_ATTENUATION` coefficient (default
+  `1.0`). This attenuation is intentionally slower than caustic falloff;
+  normal sunlight is unchanged above water, when no Fluid is captured, or
+  when the experiment is disabled. It doesn't change underwater ambient light
+  or the Fluid's camera-ray absorption.
+- The transmission depth/density maps still use nearest sampling; raster
+  precision at water polygon edges and the water surface's own shoreline
+  compositing are independent from this lighting correction.
 - On **opaque** world/3DO receivers, caustics obey the ordinary sun
   visibility, dynamic caster shadows, sky aperture and distance fog.
   The visible receiver must lie farther from the sun than the Fluid
