@@ -266,11 +266,11 @@ float sample_sun_caustic_light(vec3 world_position,float camera_depth)
     vec2 p=vec2(dot(world_position,right),dot(world_position,up))*
            (0.095*sun_caustics_params.y);
     float a=textureLod(sun_caustics_pattern,
-        p+vec2(0.021,0.015)*sun_caustics_time,lod).r;
+        p+vec2(0.015,0.01)*sun_caustics_time,lod).r;
     float b=textureLod(sun_caustics_pattern,
-        p*1.17+vec2(-0.013,0.019)*sun_caustics_time,lod).r;
-    float pattern=max(a*0.72+b*0.28-0.21,0.0);
-    return pattern*decay*0.75*sun_caustics_params.x;
+        p*1.3+vec2(-0.012,-0.018)*sun_caustics_time,lod).r;
+    float pattern = min(a,b);
+    return pattern*decay*sun_caustics_params.x;
 }
 #else
 float sample_sun_caustic_light(vec3 world_position,float camera_depth)
