@@ -105,11 +105,6 @@ namespace jkgm {
         // Requires sunlight shadows so the per-cascade projection exists.
         bool experimental_sun_sky_aperture = false;
         bool experimental_sun_caustics = false; // world/3DO Fluid transmission, never sprites
-        float sun_caustics_intensity = 3.0f; // added caustic illumination (0..16)
-        float sun_caustics_scale = 3.0f; // pattern frequency, higher = smaller (0.25..16)
-        float sun_caustics_spread = 1.0f; // mipmap softening with Fluid distance (0..8)
-        float sun_caustics_attenuation = 1.0f; // depth/density falloff (0..8)
-        float sun_caustics_speed = 1.0f; // animation speed multiplier (0..8)
         // Phase 1 only: measure conservative sky-covered caster groups.
         // Does not yet prune any casters or change shadow texture contents.
         // Actual static WORLD caster pruning (independent of diagnostics).

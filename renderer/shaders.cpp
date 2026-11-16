@@ -1696,7 +1696,6 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , sun_max_distance(gl::get_uniform_location(the_program,"sun_max_distance"))
     , sun_caustics_active(gl::get_uniform_location(the_program,"sun_caustics_active"))
     , sun_caustics_time(gl::get_uniform_location(the_program,"sun_caustics_time"))
-    , sun_caustics_params(gl::get_uniform_location(the_program,"sun_caustics_params"))
     , sun_half_visibility_active(gl::get_uniform_location(
         the_program,"sun_half_visibility_active"))
     , sun_half_visibility_image(gl::get_uniform_location(
@@ -1869,12 +1868,11 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_sky_aperture(
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_caustics(
-    bool enabled,float time_seconds,point<4,float> params)
+    bool enabled,float time_seconds)
 {
     gl::set_uniform_integer(sun_caustics_active,enabled?1:0);
     if(!enabled)return;
     gl::set_uniform_float(sun_caustics_time,time_seconds);
-    gl::set_uniform_vector(sun_caustics_params,params);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_max_distance(

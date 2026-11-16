@@ -237,7 +237,12 @@ uniform sampler2DArray sun_caustics_depth;
 uniform sampler2DArray sun_caustics_density;
 uniform sampler2D sun_caustics_pattern;
 uniform float sun_caustics_time;
-uniform vec4 sun_caustics_params; // intensity, scale, spread, attenuation
+// Editable visual preset (no jkgm.json tuning keys).
+const float CAUSTICS_INTENSITY = 6.0;
+const float CAUSTICS_SCALE = 10.0;
+const float CAUSTICS_SPREAD = 8.0;
+const float CAUSTICS_ATTENUATION = 8.0;
+const float CAUSTICS_SPEED = 1.0;
 float sample_sun_caustic_light(vec3 world_position,float camera_depth)
 {
     if(sun_caustics_active==0)return 0.0;
@@ -257,20 +262,20 @@ float sample_sun_caustic_light(vec3 world_position,float camera_depth)
     if(ray_length<=0.015)return 0.0;
     float density=clamp(texture(
         sun_caustics_density,vec3(coord.xy,float(layer))).r,0.0,8.0);
-    float decay=exp(-ray_length*(0.08+density*0.4)*sun_caustics_params.w);
+    float decay=exp(-ray_length*(0.08+density*0.4)*CAUSTICS_ATTENUATION);
     if(decay<0.003)return 0.0;
     float lod=clamp(log2(1.0+density*ray_length*2.75*
-                           sun_caustics_params.z),0.0,7.5);
+                           CAUSTICS_SPREAD),0.0,7.5);
     vec3 right=near_cascade?sun_shadow_right:sun_shadow_far_right;
     vec3 up=near_cascade?sun_shadow_up:sun_shadow_far_up;
     vec2 p=vec2(dot(world_position,right),dot(world_position,up))*
-           (0.095*sun_caustics_params.y);
+           (0.095*CAUSTICS_SCALE);
     float a=textureLod(sun_caustics_pattern,
-        p+vec2(0.015,0.01)*sun_caustics_time,lod).r;
+        p+vec2(0.015,0.01)*(sun_caustics_time*CAUSTICS_SPEED),lod).r;
     float b=textureLod(sun_caustics_pattern,
-        p*1.3+vec2(-0.012,-0.018)*sun_caustics_time,lod).r;
+        p*1.3+vec2(-0.012,-0.018)*(sun_caustics_time*CAUSTICS_SPEED),lod).r;
     float pattern = min(a,b);
-    return pattern*decay*sun_caustics_params.x;
+    return pattern*decay*CAUSTICS_INTENSITY;
 }
 #else
 float sample_sun_caustic_light(vec3 world_position,float camera_depth)

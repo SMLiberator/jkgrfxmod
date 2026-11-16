@@ -553,8 +553,7 @@ namespace jkgm {
             gl::uniform_location_id sun_sky_aperture_active,sun_sky_aperture_map;
             gl::uniform_location_id sun_sky_aperture_depth_transform;
             gl::uniform_location_id sun_max_distance;
-            gl::uniform_location_id sun_caustics_active,sun_caustics_time,
-                                    sun_caustics_params;
+            gl::uniform_location_id sun_caustics_active,sun_caustics_time;
             gl::uniform_location_id sun_half_visibility_active,sun_half_visibility_image;
             gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
             gl::uniform_location_id sun_dynamic_pcf_radius;
@@ -602,9 +601,7 @@ namespace jkgm {
             void set_sun_shadow_pcf_radius(float near_radius,float far_radius);
             void set_sun_sky_aperture(bool active,int sampler,
                                      point<4,float> near_far_depth_transform);
-            // Params: intensity, scale, softness and depth attenuation.
-            void set_sun_caustics(bool enabled,float time_seconds,
-                                  point<4,float> params);
+            void set_sun_caustics(bool enabled,float time_seconds);
             void set_sun_max_distance(float distance);
             void set_sun_half_visibility(bool active,int sampler);
             void set_sun_dynamic_count(int count);

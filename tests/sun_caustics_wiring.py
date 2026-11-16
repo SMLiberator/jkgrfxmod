@@ -41,24 +41,19 @@ assert "sun_dynamic_shadow_visibility(world_position,incidence)" in frag
 assert "sun_shadow_visibility(world_position,incidence)" in frag
 assert "textureLod(sun_caustics_pattern" in frag
 assert "density*ray_length" in frag
-assert "exp(-ray_length*(0.08+density*0.4)*sun_caustics_params.w)" in frag
-assert "(0.095*sun_caustics_params.y)" in frag
-assert "sun_caustics_params.z" in frag
-assert "pattern*decay*0.75*sun_caustics_params.x" in frag
-assert "seconds*the_config->sun_caustics_speed" in renderer
-assert "gl::set_uniform_vector(sun_caustics_params,params);" in shaders
-assert "sun_caustics_params" in read("renderer/shaders.hpp")
-for field,value in (
-    ("sun_caustics_intensity","3.0f"),
-    ("sun_caustics_scale","3.0f"),
-    ("sun_caustics_spread","1.0f"),
-    ("sun_caustics_attenuation","1.0f"),
-    ("sun_caustics_speed","1.0f")
-):
-    assert f"float {field} = {value};" in cfg
-    assert f'parse_caustics_number("{field}"' in parser
-    assert field in docs
-    assert field in read("assets/jkgm.json")
+assert "CAUSTICS_INTENSITY = 6.0" in frag
+assert "CAUSTICS_SCALE = 10.0" in frag
+assert "CAUSTICS_SPREAD = 8.0" in frag
+assert "CAUSTICS_ATTENUATION = 8.0" in frag
+assert "CAUSTICS_SPEED = 1.0" in frag
+assert "pattern*decay*CAUSTICS_INTENSITY" in frag
+assert "target.set_sun_caustics(true,seconds);" in renderer
+assert "set_sun_caustics(bool enabled,float time_seconds)" in read("renderer/shaders.hpp")
+for key in ("sun_caustics_intensity","sun_caustics_scale","sun_caustics_spread",
+            "sun_caustics_attenuation","sun_caustics_speed"):
+    assert key not in cfg and key not in parser and key not in renderer
+    assert key not in read("assets/jkgm.json") and key not in read("doc/config.md")
+assert "sun_caustics_params" not in frag and "sun_caustics_params" not in shaders
 assert "JKGM_SUN_CAUSTICS 1" in shaders
 for name,slot,target in (
     ("sun_caustics_depth",17,"texture_array"),
