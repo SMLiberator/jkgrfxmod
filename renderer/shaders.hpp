@@ -496,6 +496,9 @@ namespace jkgm {
             gl::uniform_location_id shadow_alpha_factor;
             gl::uniform_location_id shadow_dither_enabled,shadow_instance_opacity,
                                     shadow_alpha_masked,shadow_caustic_density;
+            gl::uniform_location_id shadow_caustic_from_texture,
+                shadow_caustic_to_texture,shadow_caustic_color_factor,
+                shadow_caustic_color_blend;
             bool cached_dither_enabled_=false,cached_masked_=false;
             float cached_dither_opacity_=-1.0f;
         public:
@@ -517,6 +520,9 @@ namespace jkgm {
                 size_t count);
             void set_shadow_dither(bool enabled,float opacity,bool masked);
             void set_caustic_density(float coefficient);
+            void set_caustic_color(bool textured,bool next_textured,
+                point<3,float> tint,point<2,float> uv_scale,
+                point<2,float> scroll,float transition);
             void set_shadow_alpha(bool enabled,point<2,float> uv_scale,
                                   point<2,float> uv_scroll,float cutoff,
                                   float factor,bool has_next,float progress);

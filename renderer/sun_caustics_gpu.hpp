@@ -56,7 +56,8 @@ struct sun_caustics_gpu {
         };
         allocate(depth,GL_DEPTH_COMPONENT24,GL_DEPTH_COMPONENT);
         glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_COMPARE_MODE,GL_NONE);
-        allocate(density,GL_R16F,GL_RED);
+        // R=Fluid thickness; GBA=water MAT RGB at first sun intersection.
+        allocate(density,GL_RGBA16F,GL_RGBA);
         complete=true;
         for(int layer=0;layer<2;++layer) {
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,fbo[layer]);

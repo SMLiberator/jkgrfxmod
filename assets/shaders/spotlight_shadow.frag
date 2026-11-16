@@ -13,7 +13,10 @@ uniform float shadow_instance_opacity;
 uniform int shadow_alpha_masked;
 // Only the caustics FBO has a color attachment; depth-only passes ignore it.
 uniform float shadow_caustic_density;
-layout(location=0) out float caustic_density_output;
+uniform int shadow_caustic_from_texture,shadow_caustic_to_texture;
+uniform vec3 shadow_caustic_color_factor;
+uniform float shadow_caustic_color_blend;
+layout(location=0) out vec4 caustic_density_output;
 void main()
 {
     float alpha=1.0;
@@ -47,5 +50,18 @@ void main()
         if(coverage<=threshold)discard;
     } else if(shadow_use_alpha!=0 &&
               alpha*shadow_alpha_factor<shadow_alpha_cutoff)discard;
-    caustic_density_output=shadow_caustic_density;
+    // Only the Fluid capture has the color attachment; depth-only passes
+    // are unaffected by the output. Reuse the shadow-alpha samplers.
+    vec2 caustic_uv=shadow_material_uv*shadow_alpha_uv_scale+
+                    shadow_alpha_uv_scroll;
+    vec3 water_rgb=shadow_caustic_from_texture!=0
+        ?texture(shadow_alpha_texture,caustic_uv).rgb:vec3(1.0);
+    if(shadow_caustic_color_blend>0.0) {
+        vec3 next_rgb=shadow_caustic_to_texture!=0
+            ?texture(shadow_alpha_texture_next,caustic_uv).rgb:vec3(1.0);
+        water_rgb=mix(water_rgb,next_rgb,
+                      clamp(shadow_caustic_color_blend,0.0,1.0));
+    }
+    caustic_density_output=vec4(shadow_caustic_density,
+        clamp(water_rgb*shadow_caustic_color_factor,vec3(0.0),vec3(1.0)));
 }

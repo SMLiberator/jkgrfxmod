@@ -1524,6 +1524,10 @@ jkgm::shaders::spotlight_shadow_depth_shader::spotlight_shadow_depth_shader(
     , shadow_instance_opacity(gl::get_uniform_location(the_program,"shadow_instance_opacity"))
     , shadow_alpha_masked(gl::get_uniform_location(the_program,"shadow_alpha_masked"))
     , shadow_caustic_density(gl::get_uniform_location(the_program,"shadow_caustic_density"))
+    , shadow_caustic_from_texture(gl::get_uniform_location(the_program,"shadow_caustic_from_texture"))
+    , shadow_caustic_to_texture(gl::get_uniform_location(the_program,"shadow_caustic_to_texture"))
+    , shadow_caustic_color_factor(gl::get_uniform_location(the_program,"shadow_caustic_color_factor"))
+    , shadow_caustic_color_blend(gl::get_uniform_location(the_program,"shadow_caustic_color_blend"))
 {
 }
 
@@ -1532,6 +1536,9 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_light(
     point<3,float> forward,point<4,float> limits)
 {
     gl::set_uniform_integer(shadow_orthographic,0);
+    gl::set_uniform_integer(shadow_caustic_from_texture,0);
+    gl::set_uniform_integer(shadow_caustic_to_texture,0);
+    gl::set_uniform_float(shadow_caustic_color_blend,0.0f);
     set_shadow_dither(false,1.0f,false);
     gl::set_uniform_vector(shadow_origin,origin);
     gl::set_uniform_vector(shadow_right,right);
@@ -1545,6 +1552,9 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_orthographic_light(
     point<3,float> forward,point<4,float> limits)
 {
     gl::set_uniform_integer(shadow_orthographic,1);
+    gl::set_uniform_integer(shadow_caustic_from_texture,0);
+    gl::set_uniform_integer(shadow_caustic_to_texture,0);
+    gl::set_uniform_float(shadow_caustic_color_blend,0.0f);
     set_shadow_dither(false,1.0f,false);
     gl::set_uniform_vector(shadow_origin,origin);
     gl::set_uniform_vector(shadow_right,right);
@@ -1625,6 +1635,20 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_dither(
 void jkgm::shaders::spotlight_shadow_depth_shader::set_caustic_density(float coefficient)
 {
     gl::set_uniform_float(shadow_caustic_density,coefficient);
+}
+
+void jkgm::shaders::spotlight_shadow_depth_shader::set_caustic_color(
+    bool textured,bool next_textured,point<3,float> tint,
+    point<2,float> uv_scale,point<2,float> scroll,float transition)
+{
+    gl::set_uniform_integer(shadow_caustic_from_texture,textured?1:0);
+    gl::set_uniform_integer(shadow_caustic_to_texture,next_textured?1:0);
+    gl::set_uniform_vector(shadow_caustic_color_factor,tint);
+    gl::set_uniform_float(shadow_caustic_color_blend,transition);
+    gl::set_uniform_vector(shadow_alpha_uv_scale,uv_scale);
+    gl::set_uniform_vector(shadow_alpha_uv_scroll,scroll);
+    gl::set_uniform_integer(shadow_alpha_texture,11);
+    gl::set_uniform_integer(shadow_alpha_texture_next,12);
 }
 
 void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(

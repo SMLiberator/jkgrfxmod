@@ -9053,13 +9053,14 @@ namespace jkgm {
             struct fluid_world_draw {
                 spotlight_shadow_surface_range range;
                 float coefficient=0.0f;
-                uint32_t cel=0;
-                uint32_t material=0;
+                gpu_3do_texture texture;
+                bool has_uv=false;
             };
             struct fluid_model_draw {
                 gpu_3do_instance const *inst;
                 gpu_3do_group const *group;
                 float coefficient=0.0f;
+                gpu_3do_texture texture;
             };
             std::array<std::vector<fluid_world_draw>,2> world_draws;
             std::array<std::vector<fluid_model_draw>,2> model_draws;
@@ -9080,6 +9081,20 @@ namespace jkgm {
                     uint32_t bits=0;
                     std::memcpy(&bits,&v,sizeof(bits));
                     hash_u32(bits);
+                };
+                // Color, texture transitions and scrolls invalidate cached RGB.
+                auto hash_fluid_color=[&](gpu_3do_texture const &mat) {
+                    hash_u32(uint32_t(mat.albedo_source));
+                    hash_u32(uint32_t(mat.albedo_source2));
+                    hash_u32(uint32_t(mat.texture.value()));
+                    hash_u32(uint32_t(mat.texture2.value()));
+                    hash_float(mat.albedo_transition);
+                    hash_float(mat.width);hash_float(mat.height);
+                    hash_float(get<x>(mat.albedo_scroll));
+                    hash_float(get<y>(mat.albedo_scroll));
+                    hash_float(get<0>(mat.tint));
+                    hash_float(get<1>(mat.tint));
+                    hash_float(get<2>(mat.tint));
                 };
                 hash_u32(uint32_t(map.revision));
                 hash_u32(uint32_t(map.revision>>32));
@@ -9115,12 +9130,15 @@ namespace jkgm {
                        mat.opacity<=0.0f)continue;
                     float const coefficient=std::max(
                         0.0f,std::min(mat.fluid_thickness,8.0f));
-                    world_draws[cascade].push_back({
-                        range,coefficient,uint32_t(cel),uint32_t(face.material)});
+                    bool const uv_valid=face.has_shadow_uv &&
+                        face.shadow_uv.size()==face.polygon.size();
+                    world_draws[cascade].push_back({range,coefficient,mat,uv_valid});
                     hash_u32(face.surface_index);
                     hash_u32(uint32_t(face.material));
                     hash_u32(uint32_t(cel));
                     hash_float(coefficient);
+                    hash_u32(uv_valid?1U:0U);
+                    hash_fluid_color(mat);
                 }
                 for(auto const &inst:frame_gpu_3do_instances) {
                     // SPR, projected decal, camera/HUD and ephemeral VFX
@@ -9150,7 +9168,7 @@ namespace jkgm {
                            mat.opacity<=0.0f)continue;
                         float const coefficient=std::max(
                             0.0f,std::min(mat.fluid_thickness,8.0f));
-                        model_draws[cascade].push_back({&inst,&group,coefficient});
+                        model_draws[cascade].push_back({&inst,&group,coefficient,mat});
                         hash_u32(uint32_t(inst.id));
                         hash_u32(uint32_t(inst.id>>32));
                         // Immutable cached geometry changes identity when
@@ -9166,6 +9184,7 @@ namespace jkgm {
                         hash_u32(uint32_t(group.cel));
                         hash_float(inst.thing_opacity);
                         hash_float(coefficient);
+                        hash_fluid_color(mat);
                         for(float v:inst.transform)hash_float(v);
                     }
                 }
@@ -9183,7 +9202,7 @@ namespace jkgm {
             }
 
             GLint old_draw=0,old_read=0,old_vao=0,old_prog=0,old_viewport[4]{};
-            GLint old_active=0,old_depth_func=0;
+            GLint old_active=0,old_depth_func=0,old_tex11=0,old_tex12=0;
             GLboolean old_depth=glIsEnabled(GL_DEPTH_TEST);
             GLboolean old_cull=glIsEnabled(GL_CULL_FACE);
             GLboolean old_blend=glIsEnabled(GL_BLEND);
@@ -9197,6 +9216,11 @@ namespace jkgm {
             glGetIntegerv(GL_CURRENT_PROGRAM,&old_prog);
             glGetIntegerv(GL_VIEWPORT,old_viewport);
             glGetIntegerv(GL_ACTIVE_TEXTURE,&old_active);
+            glActiveTexture(GL_TEXTURE0+11);
+            glGetIntegerv(GL_TEXTURE_BINDING_2D,&old_tex11);
+            glActiveTexture(GL_TEXTURE0+12);
+            glGetIntegerv(GL_TEXTURE_BINDING_2D,&old_tex12);
+            glActiveTexture(GLenum(old_active));
             glGetIntegerv(GL_DEPTH_FUNC,&old_depth_func);
             glGetBooleanv(GL_DEPTH_WRITEMASK,&old_depth_mask);
             glGetBooleanv(GL_COLOR_WRITEMASK,old_color_mask);
@@ -9214,6 +9238,33 @@ namespace jkgm {
             prog.use_program();
             auto point3=[](decal_vec3 const &v) {
                 return make_point(v[0],v[1],v[2]);
+            };
+            auto set_water_color=[&](gpu_3do_texture const &mat,bool allow_uv,
+                                     bool world_uv) {
+                bool const textured=allow_uv && mat.albedo_source==1 &&
+                    mat.has_image && mat.texture.value()!=0U;
+                bool const next_textured=allow_uv && mat.albedo_source2==1 &&
+                    mat.texture2.value()!=0U && mat.albedo_transition>0.0f;
+                float const w=world_uv ? mat.width
+                    : gpu_3do_model_uv_extent(mat.width);
+                float const h=world_uv ? mat.height
+                    : gpu_3do_model_uv_extent(mat.height);
+                prog.set_caustic_color(textured,next_textured,
+                    make_point(get<0>(mat.tint),get<1>(mat.tint),
+                               get<2>(mat.tint)),
+                    make_point(1.0f/std::max(w,1.0f),
+                               1.0f/std::max(h,1.0f)),
+                    mat.albedo_scroll,
+                    allow_uv?mat.albedo_transition:0.0f);
+                if(textured) {
+                    glActiveTexture(GL_TEXTURE0+11);
+                    glBindTexture(GL_TEXTURE_2D,mat.texture.value());
+                }
+                if(next_textured) {
+                    glActiveTexture(GL_TEXTURE0+12);
+                    glBindTexture(GL_TEXTURE_2D,mat.texture2.value());
+                }
+                glActiveTexture(GL_TEXTURE0);
             };
             for(int cascade=0;cascade<2;++cascade) {
                 auto const &view=sun_shadow_views[cascade];
@@ -9240,6 +9291,7 @@ namespace jkgm {
                 gl::bind_vertex_array(map.vao);
                 for(auto const &draw:world_draws[cascade]) {
                     prog.set_caustic_density(draw.coefficient);
+                    set_water_color(draw.texture,draw.has_uv,true);
                     gl::draw_elements(gl::element_type::triangles,
                         draw.range.count,gl::index_type::uint32,
                         static_cast<ptrdiff_t>(draw.range.first_index*
@@ -9258,6 +9310,7 @@ namespace jkgm {
                         make_point(m[6],m[7],m[8]),
                         make_point(m[9],m[10],m[11]));
                     prog.set_caustic_density(draw.coefficient);
+                    set_water_color(draw.texture,true,false);
                     gl::bind_vertex_array(it->second->vao);
                     gl::draw_elements(gl::element_type::triangles,
                         group.count,gl::index_type::uint32,
@@ -9284,6 +9337,10 @@ namespace jkgm {
             if(old_scissor)glEnable(GL_SCISSOR_TEST);else glDisable(GL_SCISSOR_TEST);
             if(old_offset)glEnable(GL_POLYGON_OFFSET_FILL);
             else glDisable(GL_POLYGON_OFFSET_FILL);
+            glActiveTexture(GL_TEXTURE0+11);
+            glBindTexture(GL_TEXTURE_2D,GLuint(old_tex11));
+            glActiveTexture(GL_TEXTURE0+12);
+            glBindTexture(GL_TEXTURE_2D,GLuint(old_tex12));
             glActiveTexture(GLenum(old_active));
         }
 
