@@ -44,5 +44,13 @@ end="// Separate sky aperture from normal occluder"
 dynamic="float sun_dynamic_shadow_visibility("
 end_dynamic="float spotlight_shadow_visibility("
 assert extract(half,start,dynamic).strip()==extract(opaque,start,end).strip()
-assert extract(half,dynamic,"vec2 encode_oct(").strip()==extract(opaque,dynamic,"// Only the costly shadow-map lookups").strip()
+# The full-res compositor inserts its optional Fluid-caustics block AFTER
+# the shared dynamic shadow helpers. Compare only the duplicated shadow code,
+# then ensure caustics remain out of the half-resolution visibility pass.
+caustics_marker="// Optional Fluid transmission, using the same near/far SUN projections."
+assert opaque.count(caustics_marker)==1
+assert extract(half,dynamic,"vec2 encode_oct(").strip()==extract(opaque,dynamic,caustics_marker).strip()
+assert "sun_caustics_depth" in extract(opaque,caustics_marker,"// Only the costly shadow-map lookups")
+assert "sun_caustics_depth" not in half
+assert "sample_sun_caustic_light(" not in half
 print("Half-resolution opaque sun visibility and full-res sky contracts passed")
