@@ -4150,7 +4150,7 @@ namespace jkgm {
                 auto const &fog=get_fog_settings();
                 auto const info=fog.info.value(),color=fog.color.value();
                 prog.set_fog(make_point(info[0],info[1],
-                                        the_config->enable_fog?info[2]:0.0f,0.0f),
+                                        the_config->enable_fog?info[2]:0.0f,(the_config->experimental_radial_fog && the_config->enable_fog)?1.0f:0.0f),
                              make_point(color[0],color[1],color[2],0.0f));
             }
             struct pending_draw {
@@ -5264,7 +5264,7 @@ namespace jkgm {
                     make_point(current_info[0],
                                current_info[1],
                                the_config->enable_fog ? current_info[2] : 0.0f,
-                               0.0f),
+                               (the_config->experimental_radial_fog && the_config->enable_fog)?1.0f:0.0f),
                     color_rgb(current_color[0], current_color[1], current_color[2]));
             }
 
@@ -9325,6 +9325,8 @@ namespace jkgm {
                 sun_level_has_sky &&
                 std::isfinite(sun_power) && sun_power>0.0f;
             auto const cam=read_active_render_camera();
+            bool const radial_fog_active=the_config->experimental_radial_fog &&
+                                         the_config->enable_fog && cam.valid;
             if((the_config->enable_sun || the_config->enable_sun_shadows) &&
                the_config->profile_renderer_verbose && gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN composite diffuse=",sun_lit && cam.valid?1:0,
@@ -9339,6 +9341,18 @@ namespace jkgm {
                 glIsEnabled(GL_BLEND)==GL_FALSE;
             auto *half_sun_shader=half_sun_active
                 ?ogs->game_post_opaque_half_sun_program.get():nullptr;
+            // Fog needs camera FOV even when spotlights and sunlight are off.
+            if(radial_fog_active && !the_config->enable_spotlights && !sun_lit) {
+                float const h=std::tan(cam.fov*(3.14159265358979323846f/360.0f));
+                float const v=h*float(get<y>(conf_scr_res))/
+                                  float(get<x>(conf_scr_res));
+                auto axis=[](std::array<float,3> const &a,float w) {
+                    return make_point(a[0],a[1],a[2],w);
+                };
+                prog.set_projector_camera(
+                    axis(cam.position,0.0f),axis(cam.right,h),
+                    axis(cam.forward,0.0f),axis(cam.up,v));
+            }
             if(cam.valid && (the_config->enable_spotlights || sun_lit)) {
                 float const h=std::tan(cam.fov*(3.14159265358979323846f/360.0f));
                 float const v=h*float(get<y>(conf_scr_res))/
@@ -9512,7 +9526,7 @@ namespace jkgm {
                 auto const info=fog.info.value(), rgb=fog.color.value();
                 ogs->game_post_opaque_composite_program.set_fog(
                     make_point(info[0],info[1],
-                               the_config->enable_fog?info[2]:0.0f,0.0f),
+                               the_config->enable_fog?info[2]:0.0f,radial_fog_active?1.0f:0.0f),
                     color_rgb(rgb[0],rgb[1],rgb[2]));
             }
 
@@ -10877,7 +10891,7 @@ namespace jkgm {
             auto const &fog=get_fog_settings();
             auto const info=fog.info.value(),color=fog.color.value();
             shader.set_fog(make_point(info[0],info[1],
-                               the_config->enable_fog?info[2]:0.0f,0.0f),
+                               the_config->enable_fog?info[2]:0.0f,(the_config->experimental_radial_fog && the_config->enable_fog)?1.0f:0.0f),
                            make_point(color[0],color[1],color[2]));
             // Diagnostic modes affect only GPU world Fluid in the forward
             // pass. Default 0 retains the normal rendering path.
@@ -11046,7 +11060,7 @@ namespace jkgm {
                     make_point(current_info[0],
                                current_info[1],
                                the_config->enable_fog ? current_info[2] : 0.0f,
-                               0.0f),
+                               (the_config->experimental_radial_fog && the_config->enable_fog)?1.0f:0.0f),
                     color_rgb(current_color[0], current_color[1], current_color[2]));
             }
             gl::set_active_texture_unit(0);

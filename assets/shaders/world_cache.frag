@@ -58,7 +58,7 @@ uniform int blend_mode; // normal=0, additive=1, multiply=2, fluid=3
 uniform sampler2D scene_depth; // resolved opaque R16F depth, JK units 32*Y
 uniform float fluid_thickness; // Beer-Lambert absorption coefficient
 uniform int fluid_debug_mode; // GPU world Fluid diagnostics; 0 preserves ordinary rendering
-uniform vec4 fog_params; // native fog start/end/opacity
+uniform vec4 fog_params; // native fog start/end/opacity, w=radial toggle
 uniform vec3 fog_color;
 uniform int sky_mode;
 uniform vec4 sky_horizon; // x=horizonDistance*tanHalfFOV, y=pixels/rev, z=tanHalfFOV
@@ -350,7 +350,11 @@ void main() {
         // Only one color attachment exists in the forward alpha target.
         // The framebuffer uses premultiplied (ONE, ONE_MINUS_SRC_ALPHA).
         float depth=32.0/max(gl_FragCoord.w,0.00000001);
-        float fog=clamp((depth-fog_params.x)/
+        // Radial fog affects ONLY forward shading: don't change scene depth
+        // or the camera-ray Fluid absorption against opaque depth.
+        float fog_depth=fog_params.w>0.5
+            ?length(cached_world_position-camera_world_origin)*32.0:depth;
+        float fog=clamp((fog_depth-fog_params.x)/
                         max(fog_params.y-fog_params.x,0.0001),0.0,1.0)*
                   fog_params.z;
         vec3 lit=mix(lit_diffuse,fog_color,fog);

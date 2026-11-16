@@ -35,6 +35,7 @@ namespace jkgm {
         bool experimental_spatial_blur_half_res = false; // legacy JSON alias for mode 1
         bool enable_trails = true;
         bool enable_fog = true;
+        bool experimental_radial_fog = false; // camera-to-fragment fog distance, not forward depth
         bool enable_post = true;
         bool enable_hdr = false; // strict master switch for tone mapping, auto exposure and HDR tuning
         float auto_exposure_sensitivity = 0.4f; // 0=fixed exposure, 0..2=adaptive

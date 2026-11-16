@@ -5,7 +5,7 @@ uniform sampler2D emissive_image;
 uniform sampler2D occlusion_image;
 uniform int retain_hom_pixels; // skip unwritten pixels, leaving prior scene buffer
 uniform sampler2D depth_image;
-uniform vec4 fog_params; // start, end, opacity, unused
+uniform vec4 fog_params; // start, end, opacity, radial fog toggle
 uniform vec3 fog_color;
 
 uniform sampler2D normal_image; // scene normals for MAT spotlights
@@ -505,7 +505,15 @@ void main()
     float fog = 0.0;
     if(depth > 0.0 && depth < 65500.0) {
         float span = max(fog_params.y - fog_params.x, 0.0001);
-        fog = clamp((depth - fog_params.x) / span, 0.0, 1.0) *
+        // Camera ray length gives exact radial depth without reconstructing
+        // a world position for every opaque pixel (even when sun is off).
+        float fog_depth=depth;
+        if(fog_params.w>0.5) {
+            vec2 ndc=gl_FragCoord.xy/vec2(textureSize(depth_image,0))*2.0-1.0;
+            fog_depth*=length(vec3(ndc.x*camera_right.w,
+                                   ndc.y*camera_up.w,1.0));
+        }
+        fog = clamp((fog_depth - fog_params.x) / span, 0.0, 1.0) *
               fog_params.z;
     }
     vec3 surface_rgb=albedo.rgb*occlusion;

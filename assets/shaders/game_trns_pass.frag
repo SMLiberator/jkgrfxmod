@@ -37,15 +37,8 @@ layout(location = 0) out vec4 out_color;
 // Dynamic fog: values are supplied by the runtime SetFog* COG verbs.
 // Keep this definition identical in opaque and transparent game passes.
 // ---------------------------------------------------------------------------
-uniform vec4 fog_params;  // x=start, y=end, z=opacity, w=reserved
+uniform vec4 fog_params;  // x=start, y=end, z=opacity, w=radial fog toggle
 uniform vec3 fog_color;
-
-float fog_factor(float dist)
-{
-    float span = max(fog_params.y - fog_params.x, 0.0001);
-    float f = clamp((dist - fog_params.x) / span, 0.0, 1.0);
-    return fog_params.z * f;
-}
 
 // ---------------------------------------------------------------------------
 // Reflections (environment mapping). Keep this block identical in the opaque
@@ -64,6 +57,19 @@ uniform vec4 camera_forward;    // xyz=camera forward in world space
 uniform vec4 camera_up;         // xyz=camera up in world space
 uniform vec4 view_params;       // x=tan(horizontal FOV / 2)
 uniform vec2 screen_resolution;
+
+// Interpolated clip XY contains clip W, so this ray length uses the same
+// 32x-JK fog units as vp_z. The native projection is left unchanged.
+float fog_factor(float dist)
+{
+    if(fog_params.w>0.5) {
+        float aspect=screen_resolution.x/max(screen_resolution.y,1.0);
+        float hscale=view_params.x>0.0?view_params.x:1.0;
+        dist=length(vec3(vp_pos.xy*vec2(hscale,hscale/aspect),vp_z));
+    }
+    float span=max(fog_params.y-fog_params.x,0.0001);
+    return clamp((dist-fog_params.x)/span,0.0,1.0)*fog_params.z;
+}
 
 const float REFLECTION_HFOV_DEGREES = 90.0;
 const float ENV_YAW_DEGREES = 0.0;

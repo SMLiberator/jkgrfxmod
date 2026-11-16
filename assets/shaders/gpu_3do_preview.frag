@@ -11,7 +11,7 @@ uniform vec2 albedo_scroll;
 uniform vec2 emissive_scroll;
 uniform vec4 albedo_factor;
 uniform vec3 emissive_factor;
-uniform vec4 fog_params;   // start, end, opacity, unused
+uniform vec4 fog_params;   // start, end, opacity, radial fog toggle
 uniform vec3 fog_color;
 uniform sampler2D scene_depth; // completed opaque depth, native units 32*Y
 uniform int smoke_half_resolution; // 1 during half-size fluid SPR rendering
@@ -736,7 +736,11 @@ void main() {
         out_depth=vec4(0.0);
         return;
     }
-    float fog=clamp((view_depth-fog_params.x)/
+    // GPU view-position units are JK units; fog/depth use 32x JK units.
+    // Scene depth, HUD exemptions, and Fluid absorption remain unchanged.
+    float fog_depth=fog_params.w>0.5
+        ?length(gpu_view_position())*32.0:view_depth;
+    float fog=clamp((fog_depth-fog_params.x)/
                     max(fog_params.y-fog_params.x,0.0001),0.0,1.0)*fog_params.z;
     // Match the native vertex-by-vertex tint and lighting interpolation.
     // Keep it separate from alpha and from emissive output.
