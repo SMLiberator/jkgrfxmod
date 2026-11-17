@@ -149,6 +149,32 @@ int main() {
             auto const &c=mesh->vertices[mesh->indices[i+2U]];
             assert((b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x)>0.0f);
         }
+    // A folded sheet has a hard 90-degree ridge. Original crease
+    // vertices must remain intact even when both broad panels simplify.
+    auto folded=grid(18U);
+    for(auto &v:folded.vertices) {
+        if(v.x>9.0f) {
+            v.z=v.x-9.0f;
+            v.x=9.0f;
+        }
+    }
+    auto folded_quality=generate_gpu_3do_auto_lod(folded,2U,1,0.03f);
+    assert(folded_quality);
+    assert(folded_quality->indices.size()<folded.indices.size());
+    for(unsigned y=0;y<=18U;++y)
+        assert(has_vertex(*folded_quality,9.0f,float(y)));
+    // A MAT seam on an otherwise flat mesh remains a protected feature.
+    auto split_mats=fragment_groups(grid(18U),true,false);
+    auto split_quality=generate_gpu_3do_auto_lod(split_mats,1U,1,0.01f);
+    assert(split_quality);
+    bool mat_left=false,mat_right=false;
+    for(auto const &g:split_quality->groups) {
+        mat_left|=g.material==0x1234U;
+        mat_right|=g.material==0x4321U;
+    }
+    assert(mat_left&&mat_right);
+    for(unsigned y=0;y<=18U;++y)
+        assert(has_vertex(*split_quality,9.0f,float(y)));
     // A single two-triangle outline must remain intact in quality mode.
     auto square=grid(1U);
     assert(!generate_gpu_3do_auto_lod(square,1U,1,0.03f));
