@@ -139,22 +139,21 @@
                 auto const far_plane=std::min(
                     frame_world_cache_camera.far_plane,96.0f);
                 if(!(std::isfinite(far_plane)&&far_plane>0.1f))continue;
-                int const shorter=std::min(get<x>(internal_scr_res),
-                                           get<y>(internal_scr_res));
-                float const scale=cube_mode
-                    ?the_config->cube_reflection_resolution_scale
-                    :the_config->hemi_reflection_resolution_scale;
+                // Unified per-face capture size. The 160-degree hemi
+                // view uses twice the linear resolution to recover some
+                // peripheral detail at its extreme perspective angles.
                 int const side=candidate.is_global
                     ?the_config->envmap_capture_face_resolution
-                    :std::max(32,int(std::ceil(float(shorter)*scale)));
+                    :the_config->reflection_capture_resolution*
+                        (cube_mode?1:2);
                 auto &entry=reflection_probes[candidate.owner];
                 entry.seen_frame=gpu_3do_present_serial;
                 bool const needs_reconfigure=entry.mode!=selected_mode ||
                     !entry.target || !entry.target->ready() ||
                     entry.target->width()!=side ||
                     entry.target->layers()!=face_count;
-                float const interval=cube_mode && !candidate.is_global
-                    ?the_config->cube_reflection_update_interval:0.0f;
+                float const interval=candidate.is_global?0.0f:
+                    the_config->reflection_capture_update_interval;
                 if(entry.ready && !needs_reconfigure && interval>0.0f &&
                    std::chrono::duration<float>(
                        now-entry.last_refresh).count()<interval)
