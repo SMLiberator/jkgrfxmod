@@ -40,6 +40,8 @@
 #include "gpu_3do_frustum.hpp"
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
+#include "global_env_capture.hpp"
+#include "global_env_equirect_converter.hpp"
 #include "spotlight.hpp"
 #include "spotlight_shadow_gpu.hpp"
 #include "sun_shadow_gpu.hpp"
@@ -674,7 +676,53 @@ namespace jkgm {
             std::chrono::steady_clock::time_point last_refresh{};
         };
         std::map<uint64_t,reflection_probe_entry> reflection_probes;
+        // Complete world-captured equirectangular HDR textures, shared by
+        // ordinary envmap materials. The old completed texture survives until
+        // fadeTime finishes; no partially rendered capture becomes visible.
+        std::unique_ptr<global_env_equirect_converter> global_env_converter;
+        std::unique_ptr<offscreen_capture_target> global_env_current;
+        std::unique_ptr<offscreen_capture_target> global_env_previous;
+        uint64_t global_env_completed_sequence=0U;
+        std::chrono::steady_clock::time_point global_env_fade_start{};
+        float global_env_fade_seconds=0.0f;
         std::unique_ptr<planar_reflection_capture_shader> hemi_capture_program;
+
+        struct global_env_binding {
+            bool active=false,from_capture=false,transition=false;
+            gl::texture_view from=gl::default_texture;
+            gl::texture_view to=gl::default_texture;
+            float mix=0.0f;
+        };
+        global_env_binding generated_global_env_binding() const {
+            global_env_binding out{};
+            if(!global_env_current || !global_env_current->ready() ||
+               !global_env_completed_sequence)return out;
+            auto const request=get_global_env_capture_controls().snapshot();
+            if(!request || request->sequence!=global_env_completed_sequence)
+                return out;
+            float blend=1.0f;
+            if(global_env_fade_seconds>0.0f) {
+                blend=std::clamp(
+                    std::chrono::duration<float>(
+                        std::chrono::steady_clock::now()-
+                        global_env_fade_start).count()/global_env_fade_seconds,
+                    0.0f,1.0f);
+            }
+            out.active=true;
+            if(blend>=1.0f) {
+                out.from_capture=true;
+                out.from=gl::texture_view(global_env_current->color_texture());
+            } else {
+                if(global_env_previous && global_env_previous->ready()) {
+                    out.from_capture=true;
+                    out.from=gl::texture_view(global_env_previous->color_texture());
+                }
+                out.transition=true;
+                out.to=gl::texture_view(global_env_current->color_texture());
+                out.mix=blend;
+            }
+            return out;
+        }
         // Transparent world screen-mode ray tracing only, allocated lazily.
         std::unique_ptr<offscreen_capture_target> ssr_receivers,ssr_image;
         std::unique_ptr<ssr_world_receiver_shader> ssr_receiver_program;
@@ -1490,6 +1538,9 @@ namespace jkgm {
                 planar_capture_program.reset();
                 planar_capture_target.reset();
                 reflection_probes.clear();
+                global_env_current.reset();
+                global_env_previous.reset();
+                global_env_converter.reset();
                 hemi_capture_program.reset();
                 ssr_receiver_program.reset();
                 ssr_trace_program.reset();
@@ -1536,6 +1587,10 @@ namespace jkgm {
                 planar_capture_ready=false;
                 // New scenes may reuse native owner IDs; never sample old probes.
                 reflection_probes.clear();
+                global_env_current.reset();
+                global_env_previous.reset();
+                global_env_completed_sequence=0U;
+                get_global_env_capture_controls().clear();
                 ssr_ready=false;
                 ssr_opaque_ready=false;
                 if(planar_receiver_queries)planar_receiver_queries->invalidate();
