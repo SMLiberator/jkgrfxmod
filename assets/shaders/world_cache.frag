@@ -210,10 +210,15 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     env=mix(env,planar.rgb,planar.a);
     // Receiver rays are evaluated on a separate low-resolution texture;
     // this material still applies its own strength, Fresnel and roughness.
+    ivec2 screen_dimensions=has_screen
+        ?textureSize(screen_reflection_map,0):ivec2(1);
+    float screen_lod=roughness*log2(
+        max(float(max(screen_dimensions.x,screen_dimensions.y)),1.0));
     vec4 screen=has_screen
-        ?texture(screen_reflection_map,
-                 gl_FragCoord.xy/vec2(textureSize(scene_depth,0)))
+        ?textureLod(screen_reflection_map,
+            gl_FragCoord.xy/vec2(textureSize(scene_depth,0)),screen_lod)
         :vec4(0.0);
+    if(screen.a>0.0001)screen.rgb/=screen.a;
     env=mix(env,screen.rgb,clamp(screen.a,0.0,1.0));
     float source_coverage=max(
         mix(environment_info.x,environment_info.z,environment_info.w),

@@ -73,7 +73,10 @@ void main() {
                 float edge=min(min(found.x,1.0-found.x),
                                min(found.y,1.0-found.y));
                 float confidence=smoothstep(0.0,0.035,edge);
-                out_reflection=vec4(texture(opaque_color,found).rgb,confidence);
+                // Premultiplied coverage keeps roughness mip levels from
+                // leaking dark/black uncovered texels into valid hits.
+                out_reflection=vec4(
+                    texture(opaque_color,found).rgb*confidence,confidence);
                 return;
             }
         }

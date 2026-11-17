@@ -71,6 +71,10 @@ assert "float final_delta=delta;" in trace
 assert "if(final_delta<=thickness)" in trace
 assert "smoothstep(0.0,0.035,edge)" in trace
 assert "out_reflection=vec4(0.0);" in trace
+assert "texture(opaque_color,found).rgb*confidence" in trace
+assert "glGenerateMipmap(GL_TEXTURE_2D);" in ssr
+assert "textureLod(screen_reflection_map," in world
+assert "screen.rgb/=screen.a;" in world
 # Only the material receiving SSR combines it with an EnvMap; no forced
 # world-only reflection fallback and no bounce feedback during opaque draw.
 assert "bool has_screen=mode==1 && screen_reflection_ready!=0;" in world

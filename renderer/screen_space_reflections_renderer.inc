@@ -141,6 +141,13 @@
             gl::bind_vertex_array(ogs->postmdl.vao);
             gl::draw_elements(gl::element_type::triangles,
                 ogs->postmdl.num_indices,gl::index_type::uint32);
+            // Rough MATs sample lower-resolution SSR mips, analogous to
+            // planar capture roughness. Render first, then mipmap exactly
+            // once per frame. The destination is no longer bound for drawing.
+            glBindFramebuffer(GL_FRAMEBUFFER,0);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D,ssr_image->color_texture());
+            glGenerateMipmap(GL_TEXTURE_2D);
             glActiveTexture(GL_TEXTURE2);
             glBindTexture(GL_TEXTURE_2D,GLuint(previous_unit2));
             glActiveTexture(GL_TEXTURE0);
