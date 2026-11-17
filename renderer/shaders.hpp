@@ -430,7 +430,7 @@ namespace jkgm {
             void set_environment(bool from,bool to,float weight,int mode);
             void set_hemi_reflection(bool ready,
                 point<3,float> right,point<3,float> forward,
-                point<3,float> up,float half_fov,float aspect);
+                point<3,float> up,float half_fov,float aspect,int capture_mode);
             void set_albedo_transition(int source2,float weight);
             void set_scene_depth(int sampler);
             void set_smoke_half_resolution(bool enabled);
