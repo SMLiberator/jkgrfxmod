@@ -450,12 +450,24 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
             capture_uv=clamp(capture_uv,inset,vec2(1.0)-inset);
             float capture_lod=roughness*log2(
                 max(float(max(size.x,size.y)),1.0));
-            vec4 capture=textureLod(hemi_reflection_map,
-                                    vec3(capture_uv,float(layer)),capture_lod);
-            // Captured pixels are premultiplied by coverage; missing
-            // geometry/sky uses the same authored EnvMap fallback as hemi.
-            if(capture.a>0.0001)capture.rgb/=capture.a;
-            env=mix(env,capture.rgb,clamp(capture.a*softness,0.0,1.0));
+            // Coverage is a geometric visibility decision. Never use a
+            // roughness-filtered mip alpha to decide whether this direction
+            // was captured: lower mip levels average sky/holes into the
+            // result and made valid reflected geometry fade to EnvMap.
+            float coverage=textureLod(hemi_reflection_map,
+                vec3(capture_uv,float(layer)),0.0).a;
+            if(coverage>0.0001) {
+                vec4 capture=textureLod(hemi_reflection_map,
+                    vec3(capture_uv,float(layer)),capture_lod);
+                // Captured RGB is premultiplied by coverage. Unpremultiply
+                // only when its filtered mip actually contains scene color.
+                // Base-level alpha remains authoritative for the fallback.
+                if(capture.a>0.0001) {
+                    capture.rgb/=capture.a;
+                    env=mix(env,capture.rgb,
+                        clamp(coverage*softness,0.0,1.0));
+                }
+            }
         }
     }
 #endif
