@@ -368,6 +368,12 @@ jobs:
         native_3do_lod_override_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_auto_lod.cpp /Fe:gpu_3do_auto_lod_test.exe || exit /b 1
         gpu_3do_auto_lod_test.exe || exit /b 1
+    - name: COG CaptureEnvMap request and GPU global environment capture wiring
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\global_env_capture.cpp /Fe:global_env_capture_test.exe || exit /b 1
+        global_env_capture_test.exe || exit /b 1
+        python3 tests/global_env_capture_wiring.py || exit /b 1
     - name: Experimental camera-facing hemi reflection probe
       shell: cmd
       run: |
