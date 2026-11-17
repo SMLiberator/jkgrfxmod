@@ -481,6 +481,26 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
            rv->cube_reflection_resolution_scale>1.0f)
             throw std::runtime_error(
                 "cube_reflection_resolution_scale must be between 0.125 and 1.0");
+        if(j.contains("reflection_probe_max_owners")) {
+            auto const &v=j.at("reflection_probe_max_owners");
+            if(!v.is_number_integer())throw std::runtime_error(
+                "reflection_probe_max_owners must be an integer 1..16");
+            int const value=v.get<int>();
+            if(value<1 || value>16)throw std::runtime_error(
+                "reflection_probe_max_owners must be between 1 and 16");
+            rv->reflection_probe_max_owners=unsigned(value);
+        }
+        if(j.contains("cube_reflection_update_interval")) {
+            auto const &v=j.at("cube_reflection_update_interval");
+            if(!v.is_number())throw std::runtime_error(
+                "cube_reflection_update_interval must be a number");
+            rv->cube_reflection_update_interval=v.get<float>();
+        }
+        if(!std::isfinite(rv->cube_reflection_update_interval) ||
+           rv->cube_reflection_update_interval<0.0f ||
+           rv->cube_reflection_update_interval>60.0f)
+            throw std::runtime_error(
+                "cube_reflection_update_interval must be between 0 and 60 seconds");
         if(j.contains("experimental_screen_space_reflections")) {
             j.at("experimental_screen_space_reflections").get_to(
                 rv->experimental_screen_space_reflections);
