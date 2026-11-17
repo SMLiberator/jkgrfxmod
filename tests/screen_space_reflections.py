@@ -75,10 +75,10 @@ assert "out_reflection=vec4(0.0);" in trace
 # world-only reflection fallback and no bounce feedback during opaque draw.
 assert "bool has_screen=mode==1 && screen_reflection_ready!=0;" in world
 assert "env=mix(env,screen.rgb,clamp(screen.a,0.0,1.0));" in world
-assert "shader.set_screen_reflection(false,23);" in renderer
-assert "shader.set_screen_reflection(ssr_ready,23);" in renderer
+assert "shader.set_screen_reflection(false,9);" in renderer
+assert "shader.set_screen_reflection(ssr_ready,9);" in renderer
 assert "if(has_fluid || ssr_ready)" in renderer
-assert '{"screen_reflection_map",23,sampler_kind::tex2d}' in units
+assert '{"screen_reflection_map",9,sampler_kind::tex2d}' in units
 for p in ("renderer/renderer.vcxproj","renderer/renderer.vcxproj.filters"):
     assert "screen_space_reflections.hpp" in read(p)
     assert "screen_space_reflections_renderer.inc" in read(p)

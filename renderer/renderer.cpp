@@ -10671,7 +10671,7 @@ namespace jkgm {
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
             bind_world_planar_reflection(shader);
-            shader.set_screen_reflection(false,23);
+            shader.set_screen_reflection(false,9);
             shader.set_specular_normal_mode(
                 the_config->experimental_specular_normal_mode);
             shader.set_light_brightness_limit(
@@ -11114,9 +11114,9 @@ namespace jkgm {
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
             bind_world_planar_reflection(shader);
-            shader.set_screen_reflection(ssr_ready,23);
+            shader.set_screen_reflection(ssr_ready,9);
             if(ssr_ready && ssr_image && ssr_image->ready()) {
-                gl::set_active_texture_unit(23);
+                gl::set_active_texture_unit(9);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                     gl::texture_view(ssr_image->color_texture()));
                 gl::set_active_texture_unit(0);

@@ -59,7 +59,7 @@ constexpr binding world_cache[]={
     {"palette_fullbright_mask",11,sampler_kind::tex2d},
     {"scene_depth",8,sampler_kind::tex2d},
     {"planar_reflection_map",15,sampler_kind::tex2d},
-    {"screen_reflection_map",23,sampler_kind::tex2d},
+    {"screen_reflection_map",9,sampler_kind::tex2d},
     {"translucent_sun_near_depth",16,sampler_kind::shadow},
     {"translucent_sun_far_depth",17,sampler_kind::shadow},
     {"translucent_sun_dynamic_depth",18,sampler_kind::shadow},

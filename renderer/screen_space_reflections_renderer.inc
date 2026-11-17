@@ -53,17 +53,6 @@
                 receivers.push_back({&face,mat});
             }
             if(receivers.empty())return;
-            GLint max_units=0;
-            glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&max_units);
-            if(max_units<=23) {
-                static bool warned=false;
-                if(!warned) {
-                    warned=true;
-                    LOG_WARNING("SSR needs texture unit 23; fragment units=",
-                                max_units,"; keeping EnvMap fallback");
-                }
-                return;
-            }
             auto const width=std::max(1,int(std::ceil(
                 float(get<x>(conf_scr_res))*the_config->ssr_resolution_scale-1.e-4f)));
             auto const height=std::max(1,int(std::ceil(
