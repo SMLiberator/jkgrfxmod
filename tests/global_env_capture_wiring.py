@@ -38,6 +38,8 @@ assert 'GL_TEXTURE_WRAP_S,GL_REPEAT' in converter
 assert 'glGenerateMipmap(GL_TEXTURE_2D)' in converter
 assert 'glDrawArrays(GL_TRIANGLES,0,3)' in converter
 assert 'sample_face(direction_for(' in converter
+assert 'draw_reflection_capture_sky(shader,camera,view,frustum,' in capture
+assert 'capture_sky_mode' in read('assets/shaders/planar_capture.frag')
 assert 'global_env_equirect_converter.hpp' in read('renderer/renderer.vcxproj')
 assert 'global_env_capture.hpp' in read('renderer/renderer.vcxproj.filters')
 print("CaptureEnvMap COG, independent capture, equirect, and fade contracts OK")
