@@ -663,10 +663,11 @@ namespace jkgm {
         // Independent low-cost planar capture: allocated on first enabled
         // scene, never by the normal GPU renderer or menus.
         std::unique_ptr<offscreen_capture_target> planar_capture_target;
-        std::unique_ptr<offscreen_capture_target> hemi_capture_target;
+        std::unique_ptr<reflection_probe_capture_target> hemi_capture_target;
         std::unique_ptr<planar_reflection_capture_shader> hemi_capture_program;
         engine_camera hemi_capture_camera{};
         uint64_t hemi_capture_owner=0U;
+        int hemi_capture_mode=0; // 5=hemi, 6=cube
         bool hemi_capture_ready=false;
         // Transparent world screen-mode ray tracing only, allocated lazily.
         std::unique_ptr<offscreen_capture_target> ssr_receivers,ssr_image;
@@ -1529,6 +1530,7 @@ namespace jkgm {
                 planar_capture_ready=false;
                 hemi_capture_ready=false;
                 hemi_capture_owner=0U;
+                hemi_capture_mode=0;
                 ssr_ready=false;
                 ssr_opaque_ready=false;
                 if(planar_receiver_queries)planar_receiver_queries->invalidate();
@@ -4964,8 +4966,8 @@ namespace jkgm {
                         hemi_capture_target && hemi_capture_target->ready();
                     if(probe_active) {
                         gl::set_active_texture_unit(23);
-                        gl::bind_texture(gl::texture_bind_target::texture_2d,
-                            gl::texture_view(hemi_capture_target->color_texture()));
+                        glBindTexture(GL_TEXTURE_2D_ARRAY,
+                            hemi_capture_target->color_texture());
                         gl::set_active_texture_unit(0);
                     }
                     auto const &hemi=hemi_capture_camera;
@@ -5163,7 +5165,7 @@ namespace jkgm {
                 bool const hemi_active=hemi_capture_ready &&
                     inst.shadow_owner!=0U &&
                     inst.shadow_owner==hemi_capture_owner &&
-                    material.reflection_mode==5;
+                    material.reflection_mode==hemi_capture_mode;
                 bool const spec_active=!inst.camera_hud &&
                     specular.first>0.0f &&
                     (material.has_environment ||
@@ -13310,7 +13312,8 @@ namespace jkgm {
                 // exist here; the offscreen camera does not touch rdCamera.
                 if(the_config->experimental_planar_reflection_capture)
                     render_planar_capture();
-                if(the_config->experimental_hemi_reflection_capture)
+                if(the_config->experimental_hemi_reflection_capture ||
+                   the_config->experimental_cube_reflection_capture)
                     render_hemi_capture();
                 if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,true);
                 draw_game_gbuffer_pass(trimdl, posterize_lighting);
