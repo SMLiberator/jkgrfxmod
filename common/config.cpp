@@ -441,46 +441,34 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_planar_reflection_portal_culling").get_to(
                 rv->experimental_planar_reflection_portal_culling);
         }
-        if(j.contains("planar_reflection_resolution_scale")) {
-            auto const &s=j.at("planar_reflection_resolution_scale");
-            if(!s.is_number())throw std::runtime_error(
-                "planar_reflection_resolution_scale must be a finite number between 0.125 and 1.0");
-            float const v=s.get<float>();
-            if(!std::isfinite(v) || v<0.125f || v>1.0f)
-                throw std::runtime_error(
-                    "planar_reflection_resolution_scale must be between 0.25 and 1.0");
-            rv->planar_reflection_resolution_scale=v;
-        }
         if(j.contains("experimental_hemi_reflection_capture")) {
             j.at("experimental_hemi_reflection_capture").get_to(
                 rv->experimental_hemi_reflection_capture);
         }
-        if(j.contains("hemi_reflection_resolution_scale")) {
-            auto const &v=j.at("hemi_reflection_resolution_scale");
-            if(!v.is_number())throw std::runtime_error(
-                "hemi_reflection_resolution_scale must be a number");
-            rv->hemi_reflection_resolution_scale=v.get<float>();
-        }
-        if(!std::isfinite(rv->hemi_reflection_resolution_scale) ||
-           rv->hemi_reflection_resolution_scale<0.125f ||
-           rv->hemi_reflection_resolution_scale>1.0f)
-            throw std::runtime_error(
-                "hemi_reflection_resolution_scale must be between 0.125 and 1.0");
         if(j.contains("experimental_cube_reflection_capture")) {
             j.at("experimental_cube_reflection_capture").get_to(
                 rv->experimental_cube_reflection_capture);
         }
-        if(j.contains("cube_reflection_resolution_scale")) {
-            auto const &v=j.at("cube_reflection_resolution_scale");
-            if(!v.is_number())throw std::runtime_error(
-                "cube_reflection_resolution_scale must be a number");
-            rv->cube_reflection_resolution_scale=v.get<float>();
+        if(j.contains("reflection_capture_resolution")) {
+            auto const &v=j.at("reflection_capture_resolution");
+            if(!v.is_number_integer())
+                throw std::runtime_error("reflection_capture_resolution must be an integer");
+            rv->reflection_capture_resolution=v.get<int>();
         }
-        if(!std::isfinite(rv->cube_reflection_resolution_scale) ||
-           rv->cube_reflection_resolution_scale<0.125f ||
-           rv->cube_reflection_resolution_scale>1.0f)
+        if(rv->reflection_capture_resolution<32 ||
+           rv->reflection_capture_resolution>1024)
+            throw std::runtime_error("reflection_capture_resolution must be 32..1024");
+        if(j.contains("reflection_capture_update_interval")) {
+            auto const &v=j.at("reflection_capture_update_interval");
+            if(!v.is_number())throw std::runtime_error(
+                "reflection_capture_update_interval must be a number");
+            rv->reflection_capture_update_interval=v.get<float>();
+        }
+        if(!std::isfinite(rv->reflection_capture_update_interval) ||
+           rv->reflection_capture_update_interval<0.0f ||
+           rv->reflection_capture_update_interval>60.0f)
             throw std::runtime_error(
-                "cube_reflection_resolution_scale must be between 0.125 and 1.0");
+                "reflection_capture_update_interval must be between 0 and 60 seconds");
         if(j.contains("envmap_capture_face_resolution")) {
             auto const &v=j.at("envmap_capture_face_resolution");
             if(!v.is_number_integer())throw std::runtime_error(
@@ -500,17 +488,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                 "reflection_probe_max_owners must be between 1 and 16");
             rv->reflection_probe_max_owners=unsigned(value);
         }
-        if(j.contains("cube_reflection_update_interval")) {
-            auto const &v=j.at("cube_reflection_update_interval");
-            if(!v.is_number())throw std::runtime_error(
-                "cube_reflection_update_interval must be a number");
-            rv->cube_reflection_update_interval=v.get<float>();
-        }
-        if(!std::isfinite(rv->cube_reflection_update_interval) ||
-           rv->cube_reflection_update_interval<0.0f ||
-           rv->cube_reflection_update_interval>60.0f)
-            throw std::runtime_error(
-                "cube_reflection_update_interval must be between 0 and 60 seconds");
         if(j.contains("experimental_screen_space_reflections")) {
             j.at("experimental_screen_space_reflections").get_to(
                 rv->experimental_screen_space_reflections);
