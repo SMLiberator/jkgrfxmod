@@ -466,6 +466,21 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
            rv->hemi_reflection_resolution_scale>1.0f)
             throw std::runtime_error(
                 "hemi_reflection_resolution_scale must be between 0.125 and 1.0");
+        if(j.contains("experimental_cube_reflection_capture")) {
+            j.at("experimental_cube_reflection_capture").get_to(
+                rv->experimental_cube_reflection_capture);
+        }
+        if(j.contains("cube_reflection_resolution_scale")) {
+            auto const &v=j.at("cube_reflection_resolution_scale");
+            if(!v.is_number())throw std::runtime_error(
+                "cube_reflection_resolution_scale must be a number");
+            rv->cube_reflection_resolution_scale=v.get<float>();
+        }
+        if(!std::isfinite(rv->cube_reflection_resolution_scale) ||
+           rv->cube_reflection_resolution_scale<0.125f ||
+           rv->cube_reflection_resolution_scale>1.0f)
+            throw std::runtime_error(
+                "cube_reflection_resolution_scale must be between 0.125 and 1.0");
         if(j.contains("experimental_screen_space_reflections")) {
             j.at("experimental_screen_space_reflections").get_to(
                 rv->experimental_screen_space_reflections);
