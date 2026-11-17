@@ -59,6 +59,8 @@
     "gpu_3do_occlusion_min_triangles": 0,
     "experimental_planar_thing_discovery": false,
     "experimental_planar_reflection_capture": false,
+    "experimental_hemi_reflection_capture": false,
+    "hemi_reflection_resolution_scale": 0.25,
     "experimental_planar_reflection_portal_culling": false,
     "planar_reflection_resolution_scale": 0.5,
     "experimental_screen_space_reflections": false,
