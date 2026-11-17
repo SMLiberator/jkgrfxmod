@@ -4,7 +4,7 @@ root=Path(__file__).resolve().parents[1]
 read=lambda p:(root/p).read_text(encoding="utf-8")
 enums=read("common/material.hpp")
 parser=read("common/material_map.cpp")
-assert "enum class material_reflection_mode { envmap, screen, fixed, matcap, planar };" in enums
+assert "enum class material_reflection_mode { envmap, screen, fixed, matcap, planar, hemi };" in enums
 assert 'else if(v == "planar")' in parser
 assert "material_reflection_mode::planar" in parser
 for path in ("assets/shaders/game_surface_common.glsl",
