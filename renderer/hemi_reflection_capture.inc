@@ -5,8 +5,20 @@
         // previous image between refreshes; no sharing of another car's map.
         void render_hemi_capture()
         {
+            // The COG capture is independent of realtime per-Thing probes.
+            // Retain completed EnvMaps between frames, dropping them only
+            // when SetGlobalEnvMap/ResetGlobalEnvMap cancels the request.
+            auto const global_request=get_global_env_capture_controls().snapshot();
+            if(!global_request) {
+                global_env_current.reset();
+                global_env_previous.reset();
+                global_env_completed_sequence=0U;
+            }
+            bool const capture_global=global_request &&
+                global_request->sequence!=global_env_completed_sequence;
             if((!the_config->experimental_hemi_reflection_capture &&
-                !the_config->experimental_cube_reflection_capture) ||
+                !the_config->experimental_cube_reflection_capture &&
+                !capture_global) ||
                !the_config->enable_reflections || !the_config->use_gpu_cache ||
                mode!=renderer_mode::ingame || !ogs ||
                !world_cache_target || !world_cache_target->ready ||
@@ -28,6 +40,8 @@
                 int mode=0;
                 std::array<float,3> position{};
                 float distance2=0.0f;
+                uint64_t exclude_owner=0U;
+                bool is_global=false;
             };
             std::vector<candidate> candidates;
             std::unordered_set<uint64_t> visited;
@@ -78,6 +92,16 @@
                 candidates.resize(the_config->reflection_probe_max_owners);
             std::unordered_set<uint64_t> active_owners;
             for(auto const &c:candidates)active_owners.insert(c.owner);
+            if(capture_global) {
+                candidate global{};
+                global.owner=0U; // never matches a real GPU 3DO owner
+                global.mode=6;
+                global.position=global_request->position;
+                global.exclude_owner=global_request->exclude_owner;
+                global.is_global=true;
+                candidates.push_back(global);
+                active_owners.insert(0U);
+            }
             // Free targets belonging to missing/non-selected owners, including
             // destroyed Things; the cached images cannot leak across worlds.
             for(auto it=reflection_probes.begin();it!=reflection_probes.end();) {
@@ -93,7 +117,8 @@
             auto &shader=*hemi_capture_program;
             auto const now=std::chrono::steady_clock::now();
             for(auto const &candidate:candidates) {
-                uint64_t const selected_owner=candidate.owner;
+                uint64_t const selected_owner=candidate.is_global
+                    ?candidate.exclude_owner:candidate.owner;
                 int const selected_mode=candidate.mode;
                 auto const &focus=candidate.position;
                 bool const cube_mode=selected_mode==6;
@@ -106,14 +131,16 @@
                 float const scale=cube_mode
                     ?the_config->cube_reflection_resolution_scale
                     :the_config->hemi_reflection_resolution_scale;
-                int const side=std::max(32,int(std::ceil(float(shorter)*scale)));
-                auto &entry=reflection_probes[selected_owner];
+                int const side=candidate.is_global
+                    ?the_config->envmap_capture_face_resolution
+                    :std::max(32,int(std::ceil(float(shorter)*scale)));
+                auto &entry=reflection_probes[candidate.owner];
                 entry.seen_frame=gpu_3do_present_serial;
                 bool const needs_reconfigure=entry.mode!=selected_mode ||
                     !entry.target || !entry.target->ready() ||
                     entry.target->width()!=side ||
                     entry.target->layers()!=face_count;
-                float const interval=cube_mode
+                float const interval=cube_mode && !candidate.is_global
                     ?the_config->cube_reflection_update_interval:0.0f;
                 if(entry.ready && !needs_reconfigure && interval>0.0f &&
                    std::chrono::duration<float>(
@@ -206,7 +233,14 @@
             glCullFace(GL_BACK);
             glFrontFace(GL_CCW);
             glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
-            glClearColor(0.0f,0.0f,0.0f,0.0f);
+            // A globally captured EnvMap must remain opaque even where
+            // sky faces or translucent surfaces are not rendered. Use fog
+            // as an approximate environment background; never leak black.
+            auto const background=get_fog_settings().color.value();
+            glClearColor(candidate.is_global?background[0]:0.0f,
+                         candidate.is_global?background[1]:0.0f,
+                         candidate.is_global?background[2]:0.0f,
+                         candidate.is_global?1.0f:0.0f);
             glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
             shader.use_program();
             shader.set_projection(projection);
@@ -371,6 +405,30 @@
             entry.mode=selected_mode;
             entry.ready=true;
             entry.last_refresh=now;
+            if(candidate.is_global) {
+                // Publish only after all six scene views and the complete
+                // equirectangular image have been drawn. A failure leaves
+                // the previous global map untouched and retries next frame.
+                if(!global_env_converter)
+                    global_env_converter=
+                        std::make_unique<global_env_equirect_converter>();
+                auto output=std::make_unique<offscreen_capture_target>();
+                auto const background=get_fog_settings().color.value();
+                if(global_env_converter->convert(
+                        *probe_target,*output,side,
+                        {{background[0],background[1],background[2]}})) {
+                    global_env_previous=std::move(global_env_current);
+                    global_env_current=std::move(output);
+                    global_env_fade_seconds=global_request->fade_time;
+                    global_env_fade_start=now;
+                    global_env_completed_sequence=global_request->sequence;
+                    LOG_INFO("CaptureEnvMap published: source=",selected_owner,
+                             " face=",side," equirect=",side*4,"x",side*2,
+                             " fade=",global_env_fade_seconds);
+                }
+                reflection_probes.erase(0U);
+                continue;
+            }
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
                 LOG_INFO(cube_mode?"CUBE capture owner=":"HEMI capture owner=",
                          selected_owner,
