@@ -481,6 +481,16 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
            rv->cube_reflection_resolution_scale>1.0f)
             throw std::runtime_error(
                 "cube_reflection_resolution_scale must be between 0.125 and 1.0");
+        if(j.contains("envmap_capture_face_resolution")) {
+            auto const &v=j.at("envmap_capture_face_resolution");
+            if(!v.is_number_integer())throw std::runtime_error(
+                "envmap_capture_face_resolution must be 32..1024 pixels");
+            rv->envmap_capture_face_resolution=v.get<int>();
+        }
+        if(rv->envmap_capture_face_resolution<32 ||
+           rv->envmap_capture_face_resolution>1024)
+            throw std::runtime_error(
+                "envmap_capture_face_resolution must be 32..1024 pixels");
         if(j.contains("reflection_probe_max_owners")) {
             auto const &v=j.at("reflection_probe_max_owners");
             if(!v.is_number_integer())throw std::runtime_error(
