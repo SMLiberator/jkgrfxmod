@@ -1203,7 +1203,9 @@ void jkgm::shaders::gpu_3do_preview_shader::set_hemi_reflection(
     bool ready,point<3,float> right,point<3,float> forward,
     point<3,float> up,float half_fov,float aspect)
 {
-    gl::set_uniform_integer(hemi_map,23);
+    // GLSL samplers must be valid even when the optional capture is off.
+    // A driver with fewer than 24 units therefore retains unit 0.
+    gl::set_uniform_integer(hemi_map,ready?23:0);
     gl::set_uniform_vector(hemi_right,right);
     gl::set_uniform_vector(hemi_forward,forward);
     gl::set_uniform_vector(hemi_up,up);
