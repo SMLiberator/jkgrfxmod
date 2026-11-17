@@ -1,12 +1,13 @@
-        // Experimental single-camera probe. The 160-degree square
-        // perspective capture is deliberately an APPROXIMATION of a
-        // hemisphere; unsupported directions fade to the original EnvMap.
-        // One nearest eligible GPU 3DO owner gets one capture per frame.
+        // Experimental nearest-owner reflection probe: one 160-degree
+        // perspective view for hemi, or six independent 90-degree cube
+        // views for full-sphere coverage. Missing pixels use authored EnvMap.
         void render_hemi_capture()
         {
             hemi_capture_ready=false;
             hemi_capture_owner=0U;
-            if(!the_config->experimental_hemi_reflection_capture ||
+            hemi_capture_mode=0;
+            if((!the_config->experimental_hemi_reflection_capture &&
+                !the_config->experimental_cube_reflection_capture) ||
                !the_config->enable_reflections || !the_config->use_gpu_cache ||
                mode!=renderer_mode::ingame || !ogs ||
                !world_cache_target || !world_cache_target->ready ||
@@ -21,6 +22,7 @@
             auto const &viewer=frame_world_cache_camera.camera;
             std::array<float,3> focus{};
             uint64_t selected_owner=0;
+            int selected_mode=0;
             float best=std::numeric_limits<float>::infinity();
             std::unordered_set<uint64_t> visited;
             std::map<std::pair<uintptr_t,int32_t>,gpu_3do_texture> mats;
@@ -32,18 +34,22 @@
                    instance.is_sprite_quad || instance.is_projected_decal ||
                    instance.camera_hud || instance.thing_opacity<=0.0f)
                     continue;
-                bool reflective=false;
+                int candidate_mode=0;
                 for(auto const &group:instance.geometry->groups) {
                     auto const key=std::make_pair(group.material,group.cel);
                     auto it=mats.find(key);
                     if(it==mats.end())
                         it=mats.emplace(key,resolve_gpu_3do_material(group)).first;
-                    if(it->second.reflection_mode==5 &&
-                       it->second.reflection_strength>0.0f) {
-                        reflective=true;break;
+                    int const reflection_mode=it->second.reflection_mode;
+                    if(((reflection_mode==5 &&
+                         the_config->experimental_hemi_reflection_capture) ||
+                        (reflection_mode==6 &&
+                         the_config->experimental_cube_reflection_capture)) &&
+                        it->second.reflection_strength>0.0f) {
+                        candidate_mode=reflection_mode;break;
                     }
                 }
-                if(!reflective)continue;
+                if(!candidate_mode)continue;
                 visited.insert(instance.shadow_owner);
                 float d2=0.0f;
                 for(unsigned a=0;a<3;++a) {
@@ -55,41 +61,52 @@
                     best=d2;
                     focus=instance.owning_thing_world_position;
                     selected_owner=instance.shadow_owner;
+                    selected_mode=candidate_mode;
                 }
             }
             if(!selected_owner)return;
-            auto const camera=make_hemi_reflection_camera(focus,viewer,160.0f);
-            if(!camera.valid)return;
-            auto const view=planar_camera_native_view(camera);
-            float const far_plane=std::min(
+            bool const cube_mode=selected_mode==6;
+            int const face_count=cube_mode?6:1;
+            auto const far_plane=std::min(
                 frame_world_cache_camera.far_plane,96.0f);
             if(!(std::isfinite(far_plane)&&far_plane>0.1f))return;
-            // Square capture: horizontal and vertical FOV are both 160
-            // degrees. Neither ordinary perspective nor this approximation
-            // can reach an exact 180-degree horizon.
             int const shorter=std::min(get<x>(internal_scr_res),
                                        get<y>(internal_scr_res));
-            int const side=std::max(32,int(std::ceil(
-                float(shorter)*the_config->hemi_reflection_resolution_scale)));
-            auto const projection=make_offscreen_capture_projection(
-                side,side,camera.fov,0.0f,far_plane);
-            if(!projection.valid)return;
-            gpu_3do_native_frustum frustum=frame_world_cache_camera.frustum;
-            frustum.clip_far=1;
-            frustum.near_plane=0.01f;
-            frustum.far_plane=far_plane;
-            frustum.far_left=-projection.half_horizontal;
-            frustum.right=projection.half_horizontal;
-            frustum.far_top=projection.half_horizontal;
-            frustum.bottom=-projection.half_horizontal;
+            float const scale=cube_mode
+                ?the_config->cube_reflection_resolution_scale
+                :the_config->hemi_reflection_resolution_scale;
+            int const side=std::max(32,int(std::ceil(float(shorter)*scale)));
             if(!hemi_capture_target)
-                hemi_capture_target=std::make_unique<offscreen_capture_target>();
-            if(!hemi_capture_target->ensure(side,side))return;
+                hemi_capture_target=
+                    std::make_unique<reflection_probe_capture_target>();
+            if(!hemi_capture_target->ensure(side,face_count))return;
             if(!hemi_capture_program)
                 hemi_capture_program=
                     std::make_unique<planar_reflection_capture_shader>(
                         the_config->data_path);
             auto &shader=*hemi_capture_program;
+            size_t total_world_drawn=0,total_model_drawn=0;
+            size_t total_acquired_nodes=0;
+            engine_camera first_camera{};
+            for(int face=0;face<face_count;++face) {
+                auto const camera=cube_mode
+                    ?make_cube_reflection_camera(focus,unsigned(face))
+                    :make_hemi_reflection_camera(focus,viewer,160.0f);
+                if(!camera.valid)return;
+                if(face==0)first_camera=camera;
+                auto const view=planar_camera_native_view(camera);
+                auto const projection=make_offscreen_capture_projection(
+                    side,side,camera.fov,0.0f,far_plane);
+                if(!projection.valid)return;
+                gpu_3do_native_frustum frustum=
+                    frame_world_cache_camera.frustum;
+                frustum.clip_far=1;
+                frustum.near_plane=0.01f;
+                frustum.far_plane=far_plane;
+                frustum.far_left=-projection.half_horizontal;
+                frustum.right=projection.half_horizontal;
+                frustum.far_top=projection.half_horizontal;
+                frustum.bottom=-projection.half_horizontal;
             // Independent model discovery allows the probe to see animated
             // Things outside the primary camera. The reflecting Thing itself
             // must not be captured from the inside.
@@ -133,6 +150,7 @@
                 if(inst.shadow_owner)acquired.insert(inst.shadow_owner);
             offscreen_capture_gl_scope restore;
             glBindFramebuffer(GL_FRAMEBUFFER,hemi_capture_target->framebuffer());
+            if(!hemi_capture_target->select_layer(face))return;
             glViewport(0,0,side,side);
             glDisable(GL_BLEND);
             glDisable(GL_SCISSOR_TEST);
@@ -292,18 +310,31 @@
             for(auto const &inst:frame_gpu_3do_instances)
                 if(!inst.shadow_owner||!acquired.count(inst.shadow_owner))
                     draw_model(inst);
+            total_world_drawn+=world_drawn;
+            total_model_drawn+=model_drawn;
+            total_acquired_nodes+=offscreen.stats.ready_nodes;
+            } // Capture each independent cube face (or one hemi view).
+            // Texture-array mip levels are filtered independently per face.
+            // Restore the array binding at texture unit zero so other passes
+            // never inherit this optional capture target.
             gl::set_active_texture_unit(0);
-            glBindTexture(GL_TEXTURE_2D,hemi_capture_target->color_texture());
-            glGenerateMipmap(GL_TEXTURE_2D);
-            hemi_capture_camera=camera;
+            GLint previous_array=0;
+            glGetIntegerv(GL_TEXTURE_BINDING_2D_ARRAY,&previous_array);
+            glBindTexture(GL_TEXTURE_2D_ARRAY,
+                          hemi_capture_target->color_texture());
+            glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+            glBindTexture(GL_TEXTURE_2D_ARRAY,GLuint(previous_array));
+            hemi_capture_camera=first_camera;
             hemi_capture_owner=selected_owner;
+            hemi_capture_mode=selected_mode;
             hemi_capture_ready=true;
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
-                LOG_INFO("HEMI capture owner=",selected_owner,
-                         " side=",side," fov=",camera.fov,
-                         " world_faces=",world_drawn,
-                         " model_groups=",model_drawn,
-                         " acquired_nodes=",offscreen.stats.ready_nodes,
-                         " NOTE=one_wide_angle_view_not_true_fisheye");
+                LOG_INFO(cube_mode?"CUBE capture owner=":"HEMI capture owner=",
+                         selected_owner,
+                         " side=",side," faces=",face_count,
+                         " fov=",first_camera.fov,
+                         " world_faces=",total_world_drawn,
+                         " model_groups=",total_model_drawn,
+                         " acquired_nodes=",total_acquired_nodes);
         }
 
