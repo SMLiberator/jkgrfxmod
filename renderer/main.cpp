@@ -7,6 +7,7 @@
 #include "postfx.hpp"
 #include "renderer.hpp"
 #include "runtime_material.hpp"
+#include "global_env_capture.hpp"
 #include "native_3do_profile.hpp"
 #include "native_3do_lod_override.hpp"
 #include "native_mesh_revision.hpp"
@@ -9933,12 +9934,49 @@ namespace {
         return id >= 0 && id <= 65535;
     }
 
+    // CaptureEnvMap(sourceThing,fadeTime): queue a fresh full-sphere world
+    // capture without changing JK's live camera or rendering from COG.
+    void __cdecl cog_capture_env_map(void *ctx)
+    {
+        float const fade=cog_pop_float(ctx);
+        void *thing=cog_pop_thing(ctx);
+        if(!thing || !gpu_span_readable(thing,0xc4U)) {
+            LOG_WARNING("CaptureEnvMap rejected invalid source Thing");
+            return;
+        }
+        auto const *bytes=static_cast<uint8_t const *>(thing);
+        uint32_t kind=0,signature=0,world=0;
+        std::array<float,3> position{};
+        std::memcpy(&kind,bytes+0x0cU,4U);
+        std::memcpy(&signature,bytes+0x74U,4U);
+        std::memcpy(position.data(),bytes+0xb8U,sizeof(position));
+        if(kind<1U || kind>15U || signature==0U ||
+           !jkgm::engine_material_debug::read_object(
+               jkgm::engine_material_debug::current_world_global,world) ||
+           !world) {
+            LOG_WARNING("CaptureEnvMap rejected invalid Thing identity/world");
+            return;
+        }
+        uint64_t const owner=
+            (uint64_t(uint32_t(reinterpret_cast<uintptr_t>(thing)))<<32)|
+            signature;
+        if(!jkgm::get_global_env_capture_controls().request(
+               position,owner,world,fade)) {
+            LOG_WARNING("CaptureEnvMap rejected nonfinite position/fade");
+            return;
+        }
+        cog_material_controls().snapshot(); // ensure world is prepared
+        LOG_DEBUG("COG CaptureEnvMap queued: source Thing=",owner,
+                  " fade=",fade);
+    }
+
     void __cdecl cog_set_global_env_map(void *ctx)
     {
         float fade = cog_pop_float(ctx);
         int image = cog_pop_int(ctx);
         int source = cog_pop_int(ctx);
         if(valid_mat_index(source) && valid_image_id(image)) {
+            jkgm::get_global_env_capture_controls().clear();
             cog_material_controls().set_global_env(
                 static_cast<uint32_t>(source), image, fade);
             LOG_DEBUG("COG SetGlobalEnvMap: source MAT=", source,
@@ -10284,6 +10322,7 @@ namespace {
     void __cdecl cog_reset_global_env_map(void *ctx)
     {
         float fade = cog_pop_float(ctx);
+        jkgm::get_global_env_capture_controls().clear();
         cog_material_controls().reset_global_env(fade);
         LOG_DEBUG("COG ResetGlobalEnvMap: fade=", std::to_string(fade));
     }
@@ -10801,6 +10840,7 @@ namespace {
         cog_verb_entry{"clearspotlight", cog_clear_spotlight},
         cog_verb_entry{"resetspotlight", cog_clear_spotlight},
         cog_verb_entry{"setglobalenvmap", cog_set_global_env_map},
+        cog_verb_entry{"captureenvmap", cog_capture_env_map},
         cog_verb_entry{"resetglobalenvmap", cog_reset_global_env_map},
         cog_verb_entry{"setmatenvmap", cog_set_mat_env_map},
         cog_verb_entry{"setmatenvmapfrom", cog_set_mat_env_map_from},
