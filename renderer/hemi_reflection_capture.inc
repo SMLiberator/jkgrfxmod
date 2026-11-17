@@ -26,7 +26,7 @@
             std::map<std::pair<uintptr_t,int32_t>,gpu_3do_texture> mats;
             for(auto const &instance:frame_gpu_3do_instances) {
                 if(!instance.shadow_owner ||
-                   !visited.insert(instance.shadow_owner).second ||
+                   visited.count(instance.shadow_owner)!=0U ||
                    !instance.owning_thing_world_position_valid ||
                    !instance.geometry || instance.shadow_only ||
                    instance.is_sprite_quad || instance.is_projected_decal ||
@@ -44,6 +44,7 @@
                     }
                 }
                 if(!reflective)continue;
+                visited.insert(instance.shadow_owner);
                 float d2=0.0f;
                 for(unsigned a=0;a<3;++a) {
                     float const d=instance.owning_thing_world_position[a]-
@@ -167,8 +168,9 @@
                     effect.add[2]/255.0f,effect.fade),
                 authored_light_limit(the_config->enable_baked_overbright));
             auto submit_material=[&](gpu_3do_texture const &mat,bool solid) {
-                if(mat.reflection_mode==5 || mat.reflection_mode==4 ||
-                   (mat.special&&!mat.emissive_only) ||
+                // Captured shaders draw only base pigment, not nested
+                // reflections. Other shiny cars remain opaque geometry.
+                if((mat.special&&!mat.emissive_only) ||
                    mat.blend==material_blend_mode::fluid ||
                    mat.blend==material_blend_mode::multiply ||
                    mat.emissive_only ||
