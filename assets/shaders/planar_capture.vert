@@ -13,6 +13,7 @@ layout(location=8) in vec3 native_vertex_rgb; // 3DO only
 uniform vec4 view_right,view_forward,view_up,view_origin;
 uniform vec4 projection;
 uniform int is_model;
+uniform int capture_sky_mode; // world aperture at far depth
 uniform int packed_vertex_format;
 uniform vec4 clip_plane_view;
 uniform vec4 jk_color_filter,jk_color_tint,jk_color_add_fade;
@@ -52,7 +53,9 @@ void main() {
     if(projection.w>0.5)
         gl_Position=vec4(p.x/half_h,p.z/half_v,
                          2.0*p.y*projection.z-1.0,1.0);
-    else gl_Position=vec4(p.x/half_h,p.z/half_v,-projection.z,p.y);
+    else gl_Position=vec4(p.x/half_h,p.z/half_v,
+        capture_sky_mode!=0 && is_model==0
+            ?p.y*(1.0-0.000002):-projection.z,p.y);
     capture_forward_depth=p.y;
     pixel_uv=local_uv+(is_model!=0 ? vec2(0.0):native_uv_offset);
     if(is_model==0) {
