@@ -38,7 +38,11 @@
             static GLint fragment_units=0;
             if(fragment_units==0)
                 glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);
-            if(fragment_units<=23) {
+            // Realtime probe sampling needs the extended sampler on unit 23,
+            // but one-off COG captures use only units 0/1 and must also work
+            // on ordinary GL 3.3 hardware with fewer fragment texture units.
+            bool const realtime_supported=fragment_units>23;
+            if(!realtime_supported && !capture_global) {
                 reflection_probes.clear();
                 return;
             }
@@ -69,7 +73,8 @@
                     if(it==mats.end())
                         it=mats.emplace(key,resolve_gpu_3do_material(group)).first;
                     int const reflection_mode=it->second.reflection_mode;
-                    if(((reflection_mode==5 &&
+                    if(realtime_supported &&
+                       ((reflection_mode==5 &&
                          the_config->experimental_hemi_reflection_capture) ||
                         (reflection_mode==6 &&
                          the_config->experimental_cube_reflection_capture)) &&
