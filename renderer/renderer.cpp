@@ -3920,6 +3920,29 @@ namespace jkgm {
             }
             unsigned generated=0U,selected[3]={0U,0U,0U};
             uint64_t generated_cpu_ns=0U;
+            auto eligible=[](gpu_3do_instance const &inst) {
+                return inst.geometry && inst.id!=0U &&
+                    !inst.shadow_only && !inst.is_projected_decal &&
+                    !inst.is_sprite_quad && !inst.camera_hud;
+            };
+            // The minimum is per owning SithThing, not per hierarchy rdMesh.
+            // Count original main-view mesh nodes before replacing any IDs.
+            std::unordered_map<uint64_t,uint64_t> original_by_owner;
+            for(auto const &inst:frame_gpu_3do_instances)
+                if(eligible(inst) && inst.shadow_owner)
+                    original_by_owner[inst.shadow_owner]+=
+                        inst.geometry->indices.size()/3U;
+            auto proposed_by_owner=original_by_owner;
+            struct planned_lod {
+                gpu_3do_instance *instance=nullptr;
+                std::shared_ptr<gpu_3do_geometry const> geometry;
+                uint64_t id=0,owner=0;
+                unsigned level=0;
+            };
+            std::vector<planned_lod> pending;
+            pending.reserve(frame_gpu_3do_instances.size());
+            std::set<uint64_t> floor_rejected_owners;
+            uint64_t floor_rejected_nodes=0U;
             struct thing_lod_decision {
                 unsigned level=0U;
                 float radius_px=-1.0f;
@@ -3932,9 +3955,7 @@ namespace jkgm {
             thing_levels.clear();
             thing_levels.reserve(frame_gpu_3do_instances.size());
             for(auto &inst:frame_gpu_3do_instances) {
-                if(!inst.geometry || inst.id==0U ||
-                   inst.shadow_only || inst.is_projected_decal ||
-                   inst.is_sprite_quad || inst.camera_hud)continue;
+                if(!eligible(inst))continue;
                 float pixel_radius=-1.0f;
                 unsigned level=0U;
                 int const debug_mode=the_config->gpu_3do_auto_lod_debug_mode;
@@ -3975,6 +3996,17 @@ namespace jkgm {
                     level=decision.level;
                 }
                 if(level==0U) {++selected[0];continue;}
+                // Skip generating any variants for objects already at the
+                // minimum. This also protects a standalone 12-triangle box.
+                auto const owner_total=original_by_owner.find(inst.shadow_owner);
+                if(owner_total!=original_by_owner.end() &&
+                   owner_total->second<=static_cast<uint64_t>(
+                       the_config->gpu_3do_auto_lod_min_object_triangles)) {
+                    ++selected[0];
+                    floor_rejected_owners.insert(inst.shadow_owner);
+                    ++floor_rejected_nodes;
+                    continue;
+                }
                 // Source mesh identity is independent of the shared Thing
                 // LOD decision; variants are still cached per rdMesh.
                 uint64_t const source_id=inst.id;
@@ -3999,15 +4031,8 @@ namespace jkgm {
                     auto const cpu_started=the_config->profile_renderer
                         ?std::chrono::steady_clock::now()
                         :std::chrono::steady_clock::time_point{};
-                    gpu_3do_auto_lod_prune_stats prune_stats{};
                     entry.levels[index]=generate_gpu_3do_auto_lod(
-                        *entry.source,level,
-                        the_config->gpu_3do_auto_lod_simplifier_mode,
-                        level==1U
-                            ?the_config->gpu_3do_auto_lod_lod1_max_error_ratio
-                            :the_config->gpu_3do_auto_lod_lod2_max_error_ratio,
-                        the_config->gpu_3do_auto_lod_detail_prune_ratio,
-                        the_config->profile_renderer?&prune_stats:nullptr);
+                        *entry.source,level);
                     uint64_t cpu_ns=0U;
                     if(the_config->profile_renderer) {
                         cpu_ns=static_cast<uint64_t>(
@@ -4019,14 +4044,9 @@ namespace jkgm {
                        the_config->profile_renderer) {
                         LOG_INFO("AUTO 3DO LOD unreduced source=",source_id,
                                  " level=",level,
-                                 " simplifier_mode=",
-                                 the_config->gpu_3do_auto_lod_simplifier_mode,
                                  " triangles=",
                                  entry.source->indices.size()/3U,
                                  " groups=",entry.source->groups.size(),
-                                 " components=",prune_stats.components,
-                                 " detail_components_pruned=",prune_stats.removed_components,
-                                 " detail_triangles_pruned=",prune_stats.removed_triangles,
                                  " cpu_generation_us=",cpu_ns/1000U,
                                  " reason=no_nonempty_reduction");
                     }
@@ -4041,17 +4061,12 @@ namespace jkgm {
                         if(the_config->profile_renderer) {
                             LOG_INFO("AUTO 3DO LOD generated source=",source_id,
                                      " level=",level,
-                                     " simplifier_mode=",
-                                     the_config->gpu_3do_auto_lod_simplifier_mode,
                                      " triangles_native=",
                                      entry.source->indices.size()/3U,
                                      " triangles_generated=",
                                      entry.levels[index]->indices.size()/3U,
                                      " groups_source=",entry.source->groups.size(),
                                      " groups_reduced=",entry.levels[index]->groups.size(),
-                                     " components=",prune_stats.components,
-                                     " detail_components_pruned=",prune_stats.removed_components,
-                                     " detail_triangles_pruned=",prune_stats.removed_triangles,
                                      " screen_radius_px=",pixel_radius,
                                      " cpu_generation_us=",cpu_ns/1000U);
                         }
@@ -4060,27 +4075,53 @@ namespace jkgm {
                 if(!entry.levels[index]) {
                     ++selected[0];continue;
                 }
-                inst.geometry=entry.levels[index];
-                inst.id=entry.ids[index];
-                ++selected[level];
+                if(inst.shadow_owner) {
+                    auto &proposed=proposed_by_owner[inst.shadow_owner];
+                    proposed-=inst.geometry->indices.size()/3U;
+                    proposed+=entry.levels[index]->indices.size()/3U;
+                }
+                pending.push_back({&inst,entry.levels[index],entry.ids[index],
+                                   inst.shadow_owner,level});
+            }
+            // The proposal must be checked after ALL sibling rdMeshes have
+            // been considered. Never simplify only part of a low-poly Thing.
+            for(auto const &plan:pending) {
+                bool accept=true;
+                if(plan.owner!=0U) {
+                    auto const original=original_by_owner.find(plan.owner);
+                    auto const proposed=proposed_by_owner.find(plan.owner);
+                    if(original!=original_by_owner.end() &&
+                       proposed!=proposed_by_owner.end())
+                        accept=gpu_3do_auto_lod_object_allows(
+                            original->second,proposed->second,
+                            static_cast<unsigned>(
+                                the_config->gpu_3do_auto_lod_min_object_triangles));
+                }
+                if(!accept) {
+                    ++selected[0];
+                    floor_rejected_owners.insert(plan.owner);
+                    ++floor_rejected_nodes;
+                    continue;
+                }
+                plan.instance->geometry=plan.geometry;
+                plan.instance->id=plan.id;
+                ++selected[plan.level];
             }
             if(the_config->profile_renderer &&
                gpu_3do_present_serial%120U==0U)
                 LOG_INFO("AUTO 3DO LOD main-camera base=",selected[0],
                          " lod1=",selected[1]," lod2=",selected[2],
                          " debug_mode=",the_config->gpu_3do_auto_lod_debug_mode,
-                         " simplifier_mode=",the_config->gpu_3do_auto_lod_simplifier_mode,
-                         " detail_prune_ratio=",std::to_string(
-                             the_config->gpu_3do_auto_lod_detail_prune_ratio),
-                         " lod1_error_ratio=",std::to_string(
-                             the_config->gpu_3do_auto_lod_lod1_max_error_ratio),
-                         " lod2_error_ratio=",std::to_string(
-                             the_config->gpu_3do_auto_lod_lod2_max_error_ratio),
                          " lod1_radius_px=",the_config->gpu_3do_auto_lod_lod1_radius_px,
                          " lod2_radius_px=",the_config->gpu_3do_auto_lod_lod2_radius_px,
                          " cpu_variants=",auto_3do_lod_cache.size(),
                          " thing_decisions=",thing_levels.size(),
                          " generation_budget=",the_config->gpu_3do_auto_lod_generation_budget,
+                         " min_object_triangles=",
+                         the_config->gpu_3do_auto_lod_min_object_triangles,
+                         " owning_things=",original_by_owner.size(),
+                         " floor_rejected_things=",floor_rejected_owners.size(),
+                         " floor_rejected_nodes=",floor_rejected_nodes,
                          " generated_this_frame=",generated,
                          " cpu_generation_us=",generated_cpu_ns/1000U);
         }
