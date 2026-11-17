@@ -344,6 +344,7 @@ namespace jkgm {
             gl::uniform_location_id decal_receiver_lighting;
             gl::uniform_location_id displacement_sampler,displacement_factor;
             gl::uniform_location_id environment_info;
+            gl::uniform_location_id hemi_map,hemi_right,hemi_forward,hemi_up,hemi_info;
             gl::uniform_location_id camera_right_axis,camera_forward_axis,camera_up_axis;
             gl::uniform_location_id sun_direction,sun_color_intensity;
             gl::uniform_location_id normal_specular_scroll,normal_specular_scroll2,local_eye;
@@ -427,6 +428,9 @@ namespace jkgm {
                                     point<2,float> normal_scroll,
                                     point<2,float> normal_scroll2);
             void set_environment(bool from,bool to,float weight,int mode);
+            void set_hemi_reflection(bool ready,
+                point<3,float> right,point<3,float> forward,
+                point<3,float> up,float half_fov,float aspect);
             void set_albedo_transition(int source2,float weight);
             void set_scene_depth(int sampler);
             void set_smoke_half_resolution(bool enabled);

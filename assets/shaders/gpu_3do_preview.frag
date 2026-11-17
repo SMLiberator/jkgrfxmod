@@ -55,6 +55,11 @@ uniform sampler2D normal_map;  // tangent-space RGB
 uniform sampler2D normal_map2; // second slope layer
 uniform sampler2D env_map;     // equirectangular / matcap
 uniform sampler2D env_map2;
+// One independent camera-facing 160-degree perspective probe. Normalized
+// reflected directions outside the capture fade into the ordinary EnvMap.
+uniform sampler2D hemi_reflection_map;
+uniform vec3 hemi_right_axis,hemi_forward_axis,hemi_up_axis;
+uniform vec4 hemi_capture_info; // tan(halfFOV), aspect, ready, unused
 uniform vec4 view_right, view_forward, view_up, view_origin;
 uniform vec4 projection; // FOV scale for the deferred spotlight/sun normal
 uniform vec3 camera_right_axis,camera_forward_axis,camera_up_axis;
@@ -332,7 +337,9 @@ vec3 point_light_specular(vec3 base_color,vec2 uv)
 vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
 {
     metalness=0.0;
-    if((environment_info.x<0.5 && environment_info.z<0.5) ||
+    int mode=int(environment_info.y+0.5);
+    bool has_hemi=mode==5 && hemi_capture_info.z>0.5;
+    if((environment_info.x<0.5 && environment_info.z<0.5 && !has_hemi) ||
        specular_params.x<=0.0)
         return vec3(0.0);
     vec3 surf=specular_params.w>0.5 ? texture(surface_map,uv).rgb:vec3(1.0);
@@ -340,7 +347,8 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     if(strength<=0.0) return vec3(0.0);
     float roughness=clamp(specular_params.y*surf.g,0.0,1.0);
     metalness=clamp(specular_params.z*surf.b,0.0,1.0)*
-              mix(environment_info.x,environment_info.z,environment_info.w);
+              max(mix(environment_info.x,environment_info.z,
+                      environment_info.w),has_hemi?1.0:0.0);
     vec3 n_local=mapped_local_normal(uv);
     vec3 n=gpu_view_normal_from_local(n_local);
     vec3 vp=view_origin.xyz+
@@ -350,9 +358,8 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     vec3 v=normalize(vec3(vp.x,vp.z,vp.y)); // camera -> surface
     if(dot(n,v)>0.0) n=-n;
     vec3 reflection=reflect(v,n);
-    int mode=int(environment_info.y+0.5);
     vec3 dir=reflection;
-    if(mode<=1 || mode==4) {
+    if(mode<=1 || mode==4 || mode==5) {
         vec3 world=camera_right_axis*reflection.x+
                    camera_forward_axis*reflection.z+
                    camera_up_axis*reflection.y;
@@ -371,6 +378,35 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     if(environment_info.z>0.5 && environment_info.w>0.0)
         env_to=textureLod(env_map2,env_uv,lod).rgb;
     vec3 env=mix(env_from,env_to,environment_info.w);
+    if(has_hemi) {
+        // X/Y/Z are world coordinates in camera-space convention.
+        // Reflective models use their own unmodified normals and normal
+        // maps, with exactly the existing strength/roughness/Fresnel path.
+        vec3 world_dir=camera_right_axis*reflection.x+
+                       camera_forward_axis*reflection.z+
+                       camera_up_axis*reflection.y;
+        float dy=dot(world_dir,hemi_forward_axis);
+        float h=max(hemi_capture_info.x,0.00001);
+        float v=h/max(hemi_capture_info.y,0.00001);
+        if(dy>0.0001) {
+            vec2 ndc=vec2(dot(world_dir,hemi_right_axis)/h,
+                          dot(world_dir,hemi_up_axis)/v)/dy;
+            if(all(lessThan(abs(ndc),vec2(1.0)))) {
+                vec2 capture_uv=ndc*0.5+0.5;
+                vec2 edge=1.0-abs(ndc);
+                float softness=smoothstep(0.0,0.10,min(edge.x,edge.y));
+                ivec2 size=textureSize(hemi_reflection_map,0);
+                float capture_lod=roughness*log2(
+                    max(float(max(size.x,size.y)),1.0));
+                vec4 capture=textureLod(hemi_reflection_map,
+                                        capture_uv,capture_lod);
+                // Capture RGB is premultiplied by coverage, so mip filtering
+                // does not leak cleared-black texels at object boundaries.
+                if(capture.a>0.0001)capture.rgb/=capture.a;
+                env=mix(env,capture.rgb,clamp(capture.a*softness,0.0,1.0));
+            }
+        }
+    }
     vec3 f0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
     float cos_theta=clamp(dot(n,-v),0.0,1.0);
     vec3 fresnel=f0+(vec3(1.0)-f0)*pow(1.0-cos_theta,5.0);

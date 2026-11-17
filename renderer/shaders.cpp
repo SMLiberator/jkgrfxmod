@@ -831,6 +831,11 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , displacement_sampler(gl::get_uniform_location(the_program,"displacement_map"))
     , displacement_factor(gl::get_uniform_location(the_program,"displacement_factor"))
     , environment_info(gl::get_uniform_location(the_program,"environment_info"))
+    , hemi_map(gl::get_uniform_location(the_program,"hemi_reflection_map"))
+    , hemi_right(gl::get_uniform_location(the_program,"hemi_right_axis"))
+    , hemi_forward(gl::get_uniform_location(the_program,"hemi_forward_axis"))
+    , hemi_up(gl::get_uniform_location(the_program,"hemi_up_axis"))
+    , hemi_info(gl::get_uniform_location(the_program,"hemi_capture_info"))
     , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
     , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
     , camera_up_axis(gl::get_uniform_location(the_program,"camera_up_axis"))
@@ -1193,6 +1198,17 @@ void jkgm::shaders::gpu_3do_preview_shader::set_environment(
     gl::set_uniform_vector(environment_info,
         make_point(from?1.0f:0.0f,static_cast<float>(mode),
                    to?1.0f:0.0f,weight));
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_hemi_reflection(
+    bool ready,point<3,float> right,point<3,float> forward,
+    point<3,float> up,float half_fov,float aspect)
+{
+    gl::set_uniform_integer(hemi_map,23);
+    gl::set_uniform_vector(hemi_right,right);
+    gl::set_uniform_vector(hemi_forward,forward);
+    gl::set_uniform_vector(hemi_up,up);
+    gl::set_uniform_vector(hemi_info,make_point(
+        half_fov,aspect,ready?1.0f:0.0f,0.0f));
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_albedo_transition(
     int source2,float weight)
