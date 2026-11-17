@@ -52,7 +52,14 @@ namespace auto_lod_detail {
     inline edge make_edge(uint32_t a,uint32_t b) {
         return a<b ? edge{a,b}:edge{b,a};
     }
-    struct candidate { edge endpoints; lod_point position; double error; };
+    struct candidate {
+        edge endpoints;
+        lod_point position;
+        double error;
+        // Quality mode may collapse b into a to retain an original
+        // silhouette/crease vertex; the aggressive path keeps b as before.
+        bool keep_first=false;
+    };
 
     inline std::array<double,3> qem_cross(lod_point const &p,
                                            lod_point const &q,
@@ -103,7 +110,8 @@ namespace auto_lod_detail {
         uint32_t a,uint32_t b,lod_point const &replacement,
         std::vector<lod_point> const &points,
         std::vector<face> const &faces,
-        std::vector<std::vector<size_t>> const &incident)
+        std::vector<std::vector<size_t>> const &incident,
+        size_t expected_removed=2U)
     {
         size_t removed=0;
         auto check=[&](size_t index)->bool {
@@ -134,7 +142,26 @@ namespace auto_lod_detail {
             for(uint32_t p:faces[index].points)duplicate|=p==a;
             if(!duplicate&&!check(index))return false;
         }
-        return removed==2U;
+        return removed==expected_removed;
+    }
+    // Squared distance of the removed contour vertex to the new contour
+    // chord. This measures silhouette deviation even on coplanar surfaces
+    // where conventional face-plane QEM has zero error.
+    inline double qem_point_segment_distance2(
+        lod_point const &p,lod_point const &a,lod_point const &b)
+    {
+        double d[3]={double(b[0])-a[0],double(b[1])-a[1],
+                     double(b[2])-a[2]};
+        double v[3]={double(p[0])-a[0],double(p[1])-a[1],
+                     double(p[2])-a[2]};
+        double const d2=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
+        if(!(d2>1.e-24))return distance2(p,a);
+        double const t=std::max(0.0,std::min(1.0,
+            (d[0]*v[0]+d[1]*v[1]+d[2]*v[2])/d2));
+        lod_point const closest{{float(double(a[0])+t*d[0]),
+                                 float(double(a[1])+t*d[1]),
+                                 float(double(a[2])+t*d[2])}};
+        return distance2(p,closest);
     }
 }
 
@@ -217,7 +244,6 @@ inline std::shared_ptr<gpu_3do_geometry const> generate_gpu_3do_auto_lod(
     std::vector<face> faces;
     std::vector<lod_point> points;
     std::map<lod_point,uint32_t> point_ids;
-    std::vector<gpu_3do_vertex> first_corner;
     std::vector<uint8_t> locked;
     std::vector<size_t> group_begins;
     faces.reserve(source.indices.size()/3U);
@@ -242,19 +268,12 @@ inline std::shared_ptr<gpu_3do_geometry const> generate_gpu_3do_auto_lod(
                     position,static_cast<uint32_t>(points.size()));
                 if(inserted.second) {
                     points.push_back(position);
-                    if(quality) {
-                        first_corner.push_back(v);
-                        locked.push_back(0U);
-                    }
-                } else if(quality) {
-                    auto const &first=first_corner[inserted.first->second];
-                    // UV, tint and baked-light discontinuities must remain
-                    // stationary even when positions were welded together.
-                    if(first.u!=v.u||first.v!=v.v||
-                       first.cr!=v.cr||first.cg!=v.cg||first.cb!=v.cb||
-                       first.static_light!=v.static_light)
-                        locked[inserted.first->second]=1U;
+                    if(quality)locked.push_back(0U);
                 }
+                // Preserve original UV, tint and lighting attributes on
+                // surviving per-face corners, but do not hard-lock a shared
+                // position merely because those corners differ. Such seams
+                // are widespread in JK 3DOs and previously froze meshes.
                 f.corners[k]=corner;
                 f.points[k]=inserted.first->second;
             }
@@ -292,11 +311,16 @@ inline std::shared_ptr<gpu_3do_geometry const> generate_gpu_3do_auto_lod(
         std::map<edge,edge_faces> edge_data;
         std::vector<std::vector<size_t>> incident;
         std::vector<std::array<double,3>> normals;
-        std::vector<uint8_t> pinned;
+        std::vector<uint8_t> pinned,feature_vertex;
+        std::map<edge,uint8_t> feature_edges;
+        using feature_neighbor=std::pair<uint32_t,uint8_t>;
+        std::vector<std::vector<feature_neighbor>> feature_neighbors;
         if(quality) {
             incident.resize(points.size());
             normals.resize(faces.size());
             pinned=locked;
+            feature_vertex.resize(points.size());
+            feature_neighbors.resize(points.size());
         }
         for(size_t face_id=0;face_id<faces.size();++face_id) {
             auto const &f=faces[face_id];
@@ -337,40 +361,86 @@ inline std::shared_ptr<gpu_3do_geometry const> generate_gpu_3do_auto_lod(
             for(auto const &entry:edge_data) {
                 auto const &e=entry.first;
                 auto const &info=entry.second;
-                bool protect=info.count!=2U; // open or nonmanifold
-                if(!protect) {
+                uint8_t kind=0U;
+                if(info.count==1U)kind|=1U; // open silhouette
+                if(info.count>2U)kind|=8U; // nonmanifold, never collapse
+                if(info.count==2U) {
                     auto const &a=faces[info.first],&b=faces[info.second];
                     auto const &ga=source.groups[a.group];
                     auto const &gb=source.groups[b.group];
-                    protect=ga.material!=gb.material||ga.cel!=gb.cel||
-                        ga.face_type!=gb.face_type||
-                        ga.solid_color!=gb.solid_color||
-                        ga.saber_trail_join!=gb.saber_trail_join||
-                        ga.saber_trail_tip_bridge!=gb.saber_trail_tip_bridge;
+                    if(ga.material!=gb.material||ga.cel!=gb.cel||
+                       ga.face_type!=gb.face_type||
+                       ga.solid_color!=gb.solid_color||
+                       ga.saber_trail_join!=gb.saber_trail_join||
+                       ga.saber_trail_tip_bridge!=gb.saber_trail_tip_bridge)
+                        kind|=2U; // material/alpha draw boundary
                     auto const &na=normals[info.first],&nb=normals[info.second];
                     double const la=qem_length2(na),lb=qem_length2(nb);
                     if(!(la>1.e-24&&lb>1.e-24) ||
                        na[0]*nb[0]+na[1]*nb[1]+na[2]*nb[2]<
                            0.7071067811865476*std::sqrt(la*lb))
-                        protect=true; // hard crease (>45 degrees)
+                        kind|=4U; // crease sharper than 45 degrees
                 }
-                if(protect)pinned[e.first]=pinned[e.second]=1U;
+                if(kind!=0U) {
+                    feature_edges[e]=kind;
+                    feature_neighbors[e.first].push_back({e.second,kind});
+                    feature_neighbors[e.second].push_back({e.first,kind});
+                }
             }
-            if(pass==0)locked=pinned; // original silhouette stays fixed
+            for(uint32_t i=0;i<points.size();++i) {
+                auto const &chain=feature_neighbors[i];
+                if(chain.empty())continue;
+                feature_vertex[i]=1U;
+                // Only genuine corners, feature intersections/endpoints,
+                // and nonmanifold geometry are immovable. Intermediate
+                // vertices along a straight boundary or crease may go.
+                if(chain.size()!=2U ||
+                   chain[0].second!=chain[1].second ||
+                   (chain[0].second&8U)!=0U) {
+                    pinned[i]=1U;
+                    continue;
+                }
+                auto const &p=points[i];
+                auto const &a=points[chain[0].first];
+                auto const &b=points[chain[1].first];
+                double const ax=double(a[0])-p[0],ay=double(a[1])-p[1],
+                             az=double(a[2])-p[2];
+                double const bx=double(b[0])-p[0],by=double(b[1])-p[1],
+                             bz=double(b[2])-p[2];
+                double const dot=ax*bx+ay*by+az*bz;
+                double const len2=(ax*ax+ay*ay+az*az)*
+                                  (bx*bx+by*by+bz*bz);
+                // >~26 degrees of turn remains a hard silhouette corner.
+                if(!(len2>1.e-24) ||
+                   dot>-0.9*std::sqrt(len2))
+                    pinned[i]=1U;
+            }
+            if(pass==0)locked=pinned; // preserve original hard corners
         }
 
         std::vector<candidate> options;
         for(auto const &entry:edges) {
             uint32_t const a=entry.first,b=entry.second;
             if(a==b)continue;
+            bool keep_first=false;
+            uint8_t kind=0U;
             if(quality) {
-                if(pinned[a]||pinned[b]||edge_data[entry].count!=2U)
+                auto const &info=edge_data.at(entry);
+                if(info.count>2U || (pinned[a]&&pinned[b]))continue;
+                auto const feature=feature_edges.find(entry);
+                kind=feature==feature_edges.end()?0U:feature->second;
+                // Never bridge unrelated silhouette or crease chains.
+                if(kind==0U && feature_vertex[a]&&feature_vertex[b])
                     continue;
-                // Link condition prevents pinches and disconnected fans.
+                if(kind!=0U && ((kind&8U)!=0U ||
+                                 !feature_vertex[a]||!feature_vertex[b]))
+                    continue;
+                // Manifold boundary edges remove one face; interior edges
+                // remove two. Both satisfy their respective link condition.
                 unsigned shared=0U;
                 for(uint32_t n:neighbors[a])
                     if(neighbors[b].count(n)!=0)++shared;
-                if(shared!=2U)continue;
+                if(shared!=(info.count==1U?1U:2U))continue;
             }
             quadric combined=quality?original_quadrics[a]:q[a];
             combined+=(quality?original_quadrics[b]:q[b]);
@@ -379,32 +449,69 @@ inline std::shared_ptr<gpu_3do_geometry const> generate_gpu_3do_auto_lod(
             double error=combined.error(mid);
             if(!std::isfinite(error))continue;
             if(quality) {
-                error=std::max(0.0,error);
-                auto consider=[&](lod_point const &p) {
-                    double const candidate_error=combined.error(p);
-                    if(std::isfinite(candidate_error)&&candidate_error<error) {
-                        error=std::max(0.0,candidate_error);
-                        chosen=p;
+                // Feature vertices remain ON their original contour. Choose
+                // which endpoint survives rather than repositioning either
+                // into the interior of the model.
+                if(feature_vertex[a]||feature_vertex[b]) {
+                    if(feature_vertex[a]&&!feature_vertex[b])
+                        keep_first=true;
+                    else if(!feature_vertex[a]&&feature_vertex[b])
+                        keep_first=false;
+                    else if(pinned[a])keep_first=true;
+                    else if(pinned[b])keep_first=false;
+                    else keep_first=combined.error(points[a])<=
+                                    combined.error(points[b]);
+                    chosen=keep_first?points[a]:points[b];
+                    error=combined.error(chosen);
+                } else {
+                    if(pinned[a]||pinned[b])continue;
+                    error=std::max(0.0,error);
+                    auto consider=[&](lod_point const &p) {
+                        double const candidate_error=combined.error(p);
+                        if(std::isfinite(candidate_error)&&candidate_error<error) {
+                            error=std::max(0.0,candidate_error);
+                            chosen=p;
+                        }
+                    };
+                    consider(points[a]);consider(points[b]);
+                    lod_point optimum{};
+                    if(qem_optimal(combined,optimum)) {
+                        bool local=true;
+                        for(unsigned k=0;k<3;++k) {
+                            double const low=std::min(points[a][k],points[b][k]);
+                            double const high=std::max(points[a][k],points[b][k]);
+                            double const margin=(high-low)*0.25+diagonal*1.e-6;
+                            local&=optimum[k]>=low-margin&&
+                                   optimum[k]<=high+margin;
+                        }
+                        if(local)consider(optimum);
                     }
-                };
-                consider(points[a]);consider(points[b]);
-                lod_point optimum{};
-                if(qem_optimal(combined,optimum)) {
-                    bool local=true;
-                    for(unsigned k=0;k<3;++k) {
-                        double const low=std::min(points[a][k],points[b][k]);
-                        double const high=std::max(points[a][k],points[b][k]);
-                        double const margin=(high-low)*0.25+diagonal*1.e-6;
-                        local&=optimum[k]>=low-margin&&
-                               optimum[k]<=high+margin;
-                    }
-                    if(local)consider(optimum);
                 }
-                if(error>allowed_error+1.e-12)continue;
+                if(!std::isfinite(error) ||
+                   std::max(0.0,error)>allowed_error+1.e-12)continue;
+                if(kind!=0U) {
+                    uint32_t const removed=keep_first?b:a;
+                    uint32_t const survivor=keep_first?a:b;
+                    // A straight chain is cheap to simplify, but a curved
+                    // contour must additionally satisfy the error limit in
+                    // geometric space, even on a perfectly flat face.
+                    bool found_other=false;
+                    for(auto const &n:feature_neighbors[removed]) {
+                        if(n.first==survivor)continue;
+                        if(qem_point_segment_distance2(
+                               points[removed],points[n.first],
+                               points[survivor])>allowed_error+1.e-12) {
+                            found_other=false;
+                            break;
+                        }
+                        found_other=true;
+                    }
+                    if(!found_other)continue;
+                }
             }
             options.push_back({entry,chosen,
                 std::max(error,0.0)+
-                1.e-8*distance2(points[a],points[b])});
+                1.e-8*distance2(points[a],points[b]),keep_first});
         }
         std::sort(options.begin(),options.end(),
             [](candidate const &a,candidate const &b) {
@@ -425,16 +532,22 @@ inline std::shared_ptr<gpu_3do_geometry const> generate_gpu_3do_auto_lod(
             for(uint32_t n:neighbors[a])if(touched[n]){conflict=true;break;}
             if(!conflict)
                 for(uint32_t n:neighbors[b])if(touched[n]){conflict=true;break;}
+            size_t expected_removed=2U;
+            if(quality && edge_data.at(choice.endpoints).count==1U)
+                expected_removed=1U;
             if(conflict ||
-               (quality && (!qem_safe_collapse(a,b,choice.position,
-                                             points,faces,incident) ||
-                            remaining<=2U)))continue;
+               (quality && (!qem_safe_collapse(
+                                 a,b,choice.position,points,faces,incident,
+                                 expected_removed) ||
+                            remaining<=expected_removed)))continue;
             touched[a]=touched[b]=1U;
             for(uint32_t n:neighbors[a])touched[n]=1U;
             for(uint32_t n:neighbors[b])touched[n]=1U;
-            remap[a]=b;
-            points[b]=choice.position;
-            if(quality)original_quadrics[b]+=original_quadrics[a];
+            uint32_t const keep=quality&&choice.keep_first?a:b;
+            uint32_t const discard=quality&&choice.keep_first?b:a;
+            remap[discard]=keep;
+            points[keep]=choice.position;
+            if(quality)original_quadrics[keep]+=original_quadrics[discard];
             ++collapses;
             if(collapses>=remaining-target)break;
         }

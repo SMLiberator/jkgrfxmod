@@ -123,8 +123,8 @@ int main() {
     assert(select_gpu_3do_auto_lod(0.0f,0U,90.0f,28.0f,3)==2U);
     assert(select_gpu_3do_auto_lod(NAN,0U,90.0f,28.0f,2)==1U);
     auto source=grid(18U);
-    // Quality mode reduces flat interiors while keeping the entire original
-    // open silhouette intact, including all perimeter grid vertices.
+    // Quality mode reduces flat interiors and also collapses straight
+    // boundary segments, while preserving the outer rectangular silhouette.
     auto quality1=generate_gpu_3do_auto_lod(source,1U,1,0.01f);
     auto quality2=generate_gpu_3do_auto_lod(source,2U,1,0.03f);
     assert(quality1 && quality2);
@@ -135,13 +135,17 @@ int main() {
             if(v.x==x && v.y==y && v.z==0.0f)return true;
         return false;
     };
-    for(unsigned i=0;i<=18U;++i)
-        for(auto const &mesh:{quality1,quality2}) {
-            assert(has_vertex(*mesh,float(i),0.0f));
-            assert(has_vertex(*mesh,float(i),18.0f));
-            assert(has_vertex(*mesh,0.0f,float(i)));
-            assert(has_vertex(*mesh,18.0f,float(i)));
+    for(auto const &mesh:{quality1,quality2}) {
+        for(auto const &corner:std::array<std::array<float,2>,4>{{
+            {{0.0f,0.0f}},{{0.0f,18.0f}},{{18.0f,0.0f}},
+            {{18.0f,18.0f}}
+        }})
+            assert(has_vertex(*mesh,corner[0],corner[1]));
+        for(auto const &v:mesh->vertices) {
+            assert(v.x>=0.0f&&v.x<=18.0f);
+            assert(v.y>=0.0f&&v.y<=18.0f);
         }
+    }
     for(auto const &mesh:{quality1,quality2})
         for(size_t i=0;i<mesh->indices.size();i+=3U) {
             auto const &a=mesh->vertices[mesh->indices[i]];
@@ -161,8 +165,13 @@ int main() {
     auto folded_quality=generate_gpu_3do_auto_lod(folded,2U,1,0.03f);
     assert(folded_quality);
     assert(folded_quality->indices.size()<folded.indices.size());
-    for(unsigned y=0;y<=18U;++y)
-        assert(has_vertex(*folded_quality,9.0f,float(y)));
+    assert(has_vertex(*folded_quality,9.0f,0.0f));
+    assert(has_vertex(*folded_quality,9.0f,18.0f));
+    // The ridge can lose intermediate vertices but cannot leave its
+    // original straight line.
+    for(auto const &v:folded_quality->vertices)
+        if(v.x==9.0f&&v.z==0.0f)
+            assert(v.y>=0.0f&&v.y<=18.0f);
     // A MAT seam on an otherwise flat mesh remains a protected feature.
     auto split_mats=fragment_groups(grid(18U),true,false);
     auto split_quality=generate_gpu_3do_auto_lod(split_mats,1U,1,0.01f);
@@ -173,9 +182,10 @@ int main() {
         mat_right|=g.material==0x4321U;
     }
     assert(mat_left&&mat_right);
-    for(unsigned y=0;y<=18U;++y)
-        assert(has_vertex(*split_quality,9.0f,float(y)));
-    // A single two-triangle outline must remain intact in quality mode.
+    assert(has_vertex(*split_quality,9.0f,0.0f));
+    assert(has_vertex(*split_quality,9.0f,18.0f));
+    // A single two-triangle outline must remain intact in quality mode:
+    // deleting a corner would change the rectangular silhouette.
     auto square=grid(1U);
     assert(!generate_gpu_3do_auto_lod(square,1U,1,0.03f));
     assert(!generate_gpu_3do_auto_lod(source,1U,1,-1.0f));
