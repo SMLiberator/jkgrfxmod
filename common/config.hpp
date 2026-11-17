@@ -94,6 +94,7 @@ namespace jkgm {
         float hemi_reflection_resolution_scale = 0.25f; // fraction of shortest screen edge; square
         bool experimental_cube_reflection_capture = false; // six independent 90-degree probe views
         float cube_reflection_resolution_scale = 0.25f; // per-face fraction of shortest screen edge
+        int envmap_capture_face_resolution = 128; // on-demand CaptureEnvMap: 128x128 faces -> 512x256 equirect
         unsigned reflection_probe_max_owners = 4U; // max independently cached hemi/cube owners
         float cube_reflection_update_interval = 0.0f; // seconds between six-face refreshes; 0=each frame
         bool experimental_screen_space_reflections = false; // low-res cached-world and GPU 3DO SSR
