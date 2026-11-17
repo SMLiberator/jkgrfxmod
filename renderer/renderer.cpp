@@ -13312,9 +13312,9 @@ namespace jkgm {
                 // exist here; the offscreen camera does not touch rdCamera.
                 if(the_config->experimental_planar_reflection_capture)
                     render_planar_capture();
-                if(the_config->experimental_hemi_reflection_capture ||
-                   the_config->experimental_cube_reflection_capture)
-                    render_hemi_capture();
+                // Always reset per-frame probe readiness when both experiments
+                // are disabled; never reuse a stale capture after a toggle.
+                render_hemi_capture();
                 if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,true);
                 draw_game_gbuffer_pass(trimdl, posterize_lighting);
                 if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,false);
