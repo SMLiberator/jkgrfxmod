@@ -304,6 +304,8 @@
             };
             size_t world_drawn=0,model_drawn=0;
             auto &cache=*world_cache_target;
+            draw_reflection_capture_sky(shader,camera,view,frustum,
+                projection,side,side,{{0.0f,0.0f,0.0f,0.0f}},false,false);
             shader.set_modelview(view,false);
             shader.set_thing_fade(1.0f,0);
             gl::bind_vertex_array(cache.vao);
