@@ -799,6 +799,9 @@ namespace jkgm {
         uint64_t planar_plane_scanned_frame=~uint64_t(0);
         std::optional<planar_reflection_plane> planar_capture_plane;
         engine_camera planar_capture_camera{};
+        std::optional<planar_reflection_plane> planar_last_completed_plane;
+        uint64_t planar_last_capture_revision=0U;
+        std::chrono::steady_clock::time_point planar_last_refresh{};
         // Independent reflected-camera draw list, never added to main visibility.
         std::vector<world_cache_draw_candidate> planar_frame_candidates;
         std::vector<world_cache_draw_candidate> reflection_sky_candidates;
@@ -1593,6 +1596,9 @@ namespace jkgm {
                 // A new game scene must not reuse an old HUD texture snapshot.
                 hud_previous_source.clear();
                 planar_capture_ready=false;
+                planar_last_completed_plane.reset();
+                planar_last_capture_revision=0U;
+                planar_last_refresh={};
                 // New scenes may reuse native owner IDs; never sample old probes.
                 reflection_probes.clear();
                 reflection_sky_candidates.clear();
@@ -12638,7 +12644,7 @@ namespace jkgm {
             if(the_config->profile_renderer)
                 LOG_INFO("PLANAR plane select: world=",cache.loaded_world,
                          " source=",planar_capture_plane?"material":"none",
-                         " scale=",the_config->planar_reflection_resolution_scale,
+                         " resolution=",the_config->reflection_capture_resolution,
                          " candidate_surfaces=",cache.mesh.surfaces.size(),
                          " planar_matches=",matched_planar,
                          " passable_reflection_receivers=",matched_passable);
@@ -12677,11 +12683,47 @@ namespace jkgm {
             }
             auto const reflected=make_planar_reflection_camera(
                 camera,*planar_capture_plane);
-            auto const setup=make_planar_reflection_render_setup(
+            // The common resolution is the SHORT edge of the mirrored
+            // image. Preserve aspect ratio, regardless of screen size.
+            auto setup=make_planar_reflection_render_setup(
                 get<x>(internal_scr_res),get<y>(internal_scr_res),
-                the_config->planar_reflection_resolution_scale,
-                camera,reflected,*planar_capture_plane);
+                1.0f,camera,reflected,*planar_capture_plane);
             if(!setup.valid)return;
+            int const display_w=get<x>(internal_scr_res);
+            int const display_h=get<y>(internal_scr_res);
+            double const capture_scale=
+                double(the_config->reflection_capture_resolution)/
+                double(std::min(display_w,display_h));
+            setup.width=std::clamp(
+                int(std::lround(double(display_w)*capture_scale)),32,16384);
+            setup.height=std::clamp(
+                int(std::lround(double(display_h)*capture_scale)),32,16384);
+            float const interval=the_config->reflection_capture_update_interval;
+            bool same_plane=planar_last_completed_plane.has_value() &&
+                planar_last_capture_revision==world_cache_target->revision;
+            if(same_plane) {
+                for(int j=0;j<3;++j) {
+                    if(std::fabs(planar_capture_plane->normal[j]-
+                                 planar_last_completed_plane->normal[j])>1.e-5f)
+                        same_plane=false;
+                }
+                if(std::fabs(planar_capture_plane->offset-
+                             planar_last_completed_plane->offset)>1.e-4f)
+                    same_plane=false;
+            }
+            if(interval>0.0f && same_plane && planar_capture_target &&
+               planar_capture_target->ready() &&
+               planar_capture_target->width()==setup.width &&
+               planar_capture_target->height()==setup.height &&
+               std::chrono::duration<float>(
+                   std::chrono::steady_clock::now()-planar_last_refresh
+               ).count()<interval) {
+                // Keep previous reflected camera matrices in the lookup
+                // shader: reusing the image with the *new* camera would
+                // make reflections swim while the interval is throttled.
+                planar_capture_ready=true;
+                return;
+            }
             // Reuse the same perspective coordinates through the generic
             // offscreen projection descriptor. The FOV=0 orthographic mode
             // is reserved for arbitrary camera captures, not reflections.
@@ -13144,6 +13186,9 @@ namespace jkgm {
             auto const after_capture=std::chrono::steady_clock::now();
             planar_capture_camera=reflected;
             planar_capture_ready=true;
+            planar_last_completed_plane=*planar_capture_plane;
+            planar_last_capture_revision=world_cache_target->revision;
+            planar_last_refresh=std::chrono::steady_clock::now();
             if((gpu_3do_present_serial%120U)==0U) {
                 auto const us=std::chrono::duration_cast<
                     std::chrono::microseconds>(
