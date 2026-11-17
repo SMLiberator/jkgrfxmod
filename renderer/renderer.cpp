@@ -9,6 +9,7 @@
 #include "planar_reflection_things.hpp"
 #include "planar_reflection_workset.hpp"
 #include "planar_reflection_offscreen_gpu.hpp"
+#include "screen_space_reflections.hpp"
 #include "planar_reflection_culling.hpp"
 #include "planar_reflection_render_math.hpp"
 #include "offscreen_capture_target.hpp"
@@ -661,6 +662,11 @@ namespace jkgm {
         // Independent low-cost planar capture: allocated on first enabled
         // scene, never by the normal GPU renderer or menus.
         std::unique_ptr<offscreen_capture_target> planar_capture_target;
+        // Transparent world screen-mode ray tracing only, allocated lazily.
+        std::unique_ptr<offscreen_capture_target> ssr_receivers,ssr_image;
+        std::unique_ptr<ssr_world_receiver_shader> ssr_receiver_program;
+        std::unique_ptr<ssr_trace_shader> ssr_trace_program;
+        bool ssr_ready=false;
         std::unique_ptr<planar_reflection_capture_shader> planar_capture_program;
         // Depth-tested receiver pixels from last frame's main opaque 3DO pass.
         // Query answers are asynchronous; never stall the driver to read them.
@@ -1463,6 +1469,10 @@ namespace jkgm {
                 smoke_half_buffer.reset();
                 planar_capture_program.reset();
                 planar_capture_target.reset();
+                ssr_receiver_program.reset();
+                ssr_trace_program.reset();
+                ssr_receivers.reset();
+                ssr_image.reset();
                 planar_receiver_program.reset();
                 planar_receiver_queries.reset();
                 thing_occlusion_program.reset();
@@ -1497,6 +1507,7 @@ namespace jkgm {
                 // A new game scene must not reuse an old HUD texture snapshot.
                 hud_previous_source.clear();
                 planar_capture_ready=false;
+                ssr_ready=false;
                 if(planar_receiver_queries)planar_receiver_queries->invalidate();
                 if(thing_occlusion_queries)thing_occlusion_queries->invalidate();
                 get_native_occlusion_bridge().clear();
@@ -10014,6 +10025,7 @@ namespace jkgm {
 
         void draw_game_gbuffer_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
         {
+            ssr_ready=false; // old frame's result is never sampled by G-buffer
             frame_screen->begin_opaque_pass();
             draw_game_opaque_into_gbuffer(trimdl, posterize_lighting);
             frame_screen->end_opaque_pass();
@@ -10026,6 +10038,8 @@ namespace jkgm {
                 the_config->retain_hom_pixels && mode==renderer_mode::ingame);
             draw_game_opaque_composite();
             frame_screen->end_compose_opaque_pass();
+            // Same-frame opaque color/depth is now safe to sample.
+            render_world_screen_reflections();
         }
 
         // One MAT binder shared by opaque and transparent world geometry.
@@ -10086,6 +10100,7 @@ namespace jkgm {
                  (material.reflection_mode==4 &&
                   the_config->experimental_planar_reflection_capture &&
                   planar_capture_ready) ||
+                 (material.reflection_mode==1 && ssr_ready) ||
                  direct_sun || direct_points);
             bool const diffuse_mapping=
                 the_config->enable_normal_mapped_diffuse &&
@@ -10656,6 +10671,7 @@ namespace jkgm {
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
             bind_world_planar_reflection(shader);
+            shader.set_screen_reflection(false,23);
             shader.set_specular_normal_mode(
                 the_config->experimental_specular_normal_mode);
             shader.set_light_brightness_limit(
@@ -11027,6 +11043,7 @@ namespace jkgm {
         // premultiplied scene transparency target as GPU 3DOs.
         // This uses the *opaque pass's* vertex lighting and UV upload:
         // never sample mutable JK native pointers after stage_world_cache().
+#include "screen_space_reflections_renderer.inc"
         void draw_world_cache_transparency()
         {
             if(!the_config->use_gpu_cache ||
@@ -11097,6 +11114,13 @@ namespace jkgm {
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
             bind_world_planar_reflection(shader);
+            shader.set_screen_reflection(ssr_ready,23);
+            if(ssr_ready && ssr_image && ssr_image->ready()) {
+                gl::set_active_texture_unit(23);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                    gl::texture_view(ssr_image->color_texture()));
+                gl::set_active_texture_unit(0);
+            }
             shader.set_specular_normal_mode(
                 the_config->experimental_specular_normal_mode);
             shader.set_light_brightness_limit(
@@ -11149,7 +11173,7 @@ namespace jkgm {
                 [&](world_cache_draw_candidate const *face) {
                     return resolve(*face).blend==material_blend_mode::fluid;
                 });
-            if(has_fluid) {
+            if(has_fluid || ssr_ready) {
                 gl::set_active_texture_unit(8);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                                  frame_screen->get_resolved_depth_texture());
