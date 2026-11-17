@@ -4,6 +4,7 @@
 #include "shaders.hpp"
 #include "gpu_3do_modelview.hpp"
 #include "offscreen_capture_projection.hpp"
+#include "world_cache_sky.hpp"
 #include <array>
 #include <algorithm>
 
@@ -19,6 +20,9 @@ class planar_reflection_capture_shader : public opengl_shader {
     gl::uniform_location_id emission_sampler_,emission_factor_,emission_scroll_;
     gl::uniform_location_id emission_enabled_,emission_only_;
     gl::uniform_location_id thing_opacity_,thing_mode_;
+    gl::uniform_location_id sky_mode_,sky_horizon_,sky_angles_;
+    gl::uniform_location_id sky_origin_,sky_right_,sky_forward_,sky_up_;
+    gl::uniform_location_id sky_ceiling_,sky_offset_,sky_face_,sky_viewport_;
 public:
     explicit planar_reflection_capture_shader(fs::path const &root)
         :opengl_shader("planar_capture",
@@ -56,8 +60,48 @@ public:
          emission_enabled_(gl::get_uniform_location(the_program,"has_emissive")),
          emission_only_(gl::get_uniform_location(the_program,"emissive_only")),
          thing_opacity_(gl::get_uniform_location(the_program,"capture_thing_opacity")),
-         thing_mode_(gl::get_uniform_location(the_program,"capture_thing_mode"))
+         thing_mode_(gl::get_uniform_location(the_program,"capture_thing_mode")),
+         sky_mode_(gl::get_uniform_location(the_program,"capture_sky_mode")),
+         sky_horizon_(gl::get_uniform_location(the_program,"capture_sky_horizon")),
+         sky_angles_(gl::get_uniform_location(the_program,"capture_sky_angles")),
+         sky_origin_(gl::get_uniform_location(the_program,"capture_sky_camera_origin")),
+         sky_right_(gl::get_uniform_location(the_program,"capture_sky_camera_right")),
+         sky_forward_(gl::get_uniform_location(the_program,"capture_sky_camera_forward")),
+         sky_up_(gl::get_uniform_location(the_program,"capture_sky_camera_up")),
+         sky_ceiling_(gl::get_uniform_location(the_program,"capture_sky_ceiling_height")),
+         sky_offset_(gl::get_uniform_location(the_program,"capture_sky_offset")),
+         sky_face_(gl::get_uniform_location(the_program,"capture_sky_face_offset")),
+         sky_viewport_(gl::get_uniform_location(the_program,"capture_sky_viewport"))
     {}
+    void set_capture_sky(int mode,world_cache_sky_info const &info,
+        std::array<float,3> const &angles,engine_camera const &camera,
+        float half_fov,int width,int height,
+        std::array<float,2> const &face_offset)
+    {
+        gl::set_uniform_integer(sky_mode_,mode);
+        if(!mode)return;
+        auto const &offset=mode==1
+            ?info.horizon_offset:info.ceiling_offset;
+        gl::set_uniform_vector(sky_horizon_,make_point(
+            info.horizon_distance*half_fov,
+            info.pixels_per_revolution,half_fov,0.0f));
+        gl::set_uniform_vector(sky_angles_,make_point(
+            angles[0],angles[1],angles[2]));
+        gl::set_uniform_vector(sky_origin_,make_point(
+            camera.position[0],camera.position[1],camera.position[2]));
+        gl::set_uniform_vector(sky_right_,make_point(
+            camera.right[0],camera.right[1],camera.right[2]));
+        gl::set_uniform_vector(sky_forward_,make_point(
+            camera.forward[0],camera.forward[1],camera.forward[2]));
+        gl::set_uniform_vector(sky_up_,make_point(
+            camera.up[0],camera.up[1],camera.up[2]));
+        gl::set_uniform_float(sky_ceiling_,info.ceiling_height);
+        gl::set_uniform_vector(sky_offset_,make_point(offset[0],offset[1]));
+        gl::set_uniform_vector(sky_face_,make_point(
+            face_offset[0],face_offset[1]));
+        gl::set_uniform_vector(sky_viewport_,make_point(
+            float(width),float(height)));
+    }
     // 0=opaque/emissive, 1=premultiplied alpha blend, 2=depth dither.
     void set_thing_fade(float opacity,int mode) {
         gl::set_uniform_float(thing_opacity_,opacity);
