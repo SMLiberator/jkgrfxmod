@@ -4977,7 +4977,7 @@ namespace jkgm {
                         make_point(hemi.up[0],hemi.up[1],hemi.up[2]),
                         probe_active?
                             std::tan(hemi.fov*0.008726646259971648f):1.0f,
-                        1.0f);
+                        1.0f,hemi_capture_mode);
                     // Multiple cars can instance the same cached mesh ID with
                     // different world matrices. Compare instances, not IDs.
                     // Match JK rdModel3_DrawMesh: combine the original
