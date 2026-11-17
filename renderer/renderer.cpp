@@ -663,12 +663,18 @@ namespace jkgm {
         // Independent low-cost planar capture: allocated on first enabled
         // scene, never by the normal GPU renderer or menus.
         std::unique_ptr<offscreen_capture_target> planar_capture_target;
-        std::unique_ptr<reflection_probe_capture_target> hemi_capture_target;
+        // Each reflective Thing owns its own retained six-face (or hemi)
+        // capture. Avoid the former global-owner aliasing/fallback problem.
+        struct reflection_probe_entry {
+            std::unique_ptr<reflection_probe_capture_target> target;
+            engine_camera camera{};
+            int mode=0;
+            bool ready=false;
+            uint64_t seen_frame=0U;
+            std::chrono::steady_clock::time_point last_refresh{};
+        };
+        std::map<uint64_t,reflection_probe_entry> reflection_probes;
         std::unique_ptr<planar_reflection_capture_shader> hemi_capture_program;
-        engine_camera hemi_capture_camera{};
-        uint64_t hemi_capture_owner=0U;
-        int hemi_capture_mode=0; // 5=hemi, 6=cube
-        bool hemi_capture_ready=false;
         // Transparent world screen-mode ray tracing only, allocated lazily.
         std::unique_ptr<offscreen_capture_target> ssr_receivers,ssr_image;
         std::unique_ptr<ssr_world_receiver_shader> ssr_receiver_program;
@@ -1483,8 +1489,8 @@ namespace jkgm {
                 smoke_half_buffer.reset();
                 planar_capture_program.reset();
                 planar_capture_target.reset();
+                reflection_probes.clear();
                 hemi_capture_program.reset();
-                hemi_capture_target.reset();
                 ssr_receiver_program.reset();
                 ssr_trace_program.reset();
                 ssr_receivers.reset();
@@ -1528,9 +1534,8 @@ namespace jkgm {
                 // A new game scene must not reuse an old HUD texture snapshot.
                 hud_previous_source.clear();
                 planar_capture_ready=false;
-                hemi_capture_ready=false;
-                hemi_capture_owner=0U;
-                hemi_capture_mode=0;
+                // New scenes may reuse native owner IDs; never sample old probes.
+                reflection_probes.clear();
                 ssr_ready=false;
                 ssr_opaque_ready=false;
                 if(planar_receiver_queries)planar_receiver_queries->invalidate();
@@ -4958,26 +4963,29 @@ namespace jkgm {
                 }
                 gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                 if(active_instance!=draw.instance) {
-                    bool const probe_active=hemi_capture_ready &&
-                        inst.shadow_owner!=0U &&
-                        inst.shadow_owner==hemi_capture_owner &&
-                        !post_exempt && !decals_only &&
+                    auto const probe_it=reflection_probes.find(inst.shadow_owner);
+                    auto const *probe=(probe_it!=reflection_probes.end() &&
+                        inst.shadow_owner!=0U && !post_exempt && !decals_only &&
                         !inst.is_sprite_quad && !inst.is_projected_decal &&
-                        hemi_capture_target && hemi_capture_target->ready();
-                    if(probe_active) {
+                        probe_it->second.ready &&
+                        probe_it->second.seen_frame==gpu_3do_present_serial &&
+                        probe_it->second.target &&
+                        probe_it->second.target->ready())
+                        ? &probe_it->second:nullptr;
+                    if(probe) {
                         gl::set_active_texture_unit(23);
                         glBindTexture(GL_TEXTURE_2D_ARRAY,
-                            hemi_capture_target->color_texture());
+                            probe->target->color_texture());
                         gl::set_active_texture_unit(0);
                     }
-                    auto const &hemi=hemi_capture_camera;
-                    prog.set_hemi_reflection(probe_active,
-                        make_point(hemi.right[0],hemi.right[1],hemi.right[2]),
-                        make_point(hemi.forward[0],hemi.forward[1],hemi.forward[2]),
-                        make_point(hemi.up[0],hemi.up[1],hemi.up[2]),
-                        probe_active?
-                            std::tan(hemi.fov*0.008726646259971648f):1.0f,
-                        1.0f,hemi_capture_mode);
+                    auto const &camera=probe?probe->camera:frame_camera.camera;
+                    prog.set_hemi_reflection(probe!=nullptr,
+                        make_point(camera.right[0],camera.right[1],camera.right[2]),
+                        make_point(camera.forward[0],camera.forward[1],camera.forward[2]),
+                        make_point(camera.up[0],camera.up[1],camera.up[2]),
+                        probe?
+                            std::tan(camera.fov*0.008726646259971648f):1.0f,
+                        1.0f,probe?probe->mode:0);
                     // Multiple cars can instance the same cached mesh ID with
                     // different world matrices. Compare instances, not IDs.
                     // Match JK rdModel3_DrawMesh: combine the original
@@ -5162,10 +5170,15 @@ namespace jkgm {
                     material.blend!=material_blend_mode::multiply;
                 auto const specular=gpu_specular_parameters(
                     material,default_eligible);
-                bool const hemi_active=hemi_capture_ready &&
-                    inst.shadow_owner!=0U &&
-                    inst.shadow_owner==hemi_capture_owner &&
-                    material.reflection_mode==hemi_capture_mode;
+                auto const owner_probe=reflection_probes.find(inst.shadow_owner);
+                bool const hemi_active=owner_probe!=reflection_probes.end() &&
+                    owner_probe->second.ready &&
+                    owner_probe->second.seen_frame==gpu_3do_present_serial &&
+                    owner_probe->second.target &&
+                    owner_probe->second.target->ready() &&
+                    !inst.camera_hud && !inst.is_sprite_quad &&
+                    !inst.is_projected_decal &&
+                    material.reflection_mode==owner_probe->second.mode;
                 bool const spec_active=!inst.camera_hud &&
                     specular.first>0.0f &&
                     (material.has_environment ||
