@@ -209,6 +209,10 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     auto const newline=source.find('\n');
                     source.insert(newline+1U,"#define JKGM_SUN_CAUSTICS 1\n");
                 }
+                if(units>=24) {
+                    auto const newline=source.find('\n');
+                    source.insert(newline+1U,"#define JKGM_REFLECTION_PROBE 1\n");
+                }
             }
             gl::shader_source(rv,make_string_span(""),make_span(source));
             gl::compile_shader(rv);
@@ -1203,9 +1207,9 @@ void jkgm::shaders::gpu_3do_preview_shader::set_hemi_reflection(
     bool ready,point<3,float> right,point<3,float> forward,
     point<3,float> up,float half_fov,float aspect)
 {
-    // GLSL samplers must be valid even when the optional capture is off.
-    // A driver with fewer than 24 units therefore retains unit 0.
-    gl::set_uniform_integer(hemi_map,ready?23:0);
+    // The array sampler must never alias the 2D albedo sampler at unit 0.
+    // On <24-unit drivers the optional sampler is compiled out entirely.
+    gl::set_uniform_integer(hemi_map,23);
     gl::set_uniform_vector(hemi_right,right);
     gl::set_uniform_vector(hemi_forward,forward);
     gl::set_uniform_vector(hemi_up,up);
