@@ -92,6 +92,8 @@ namespace jkgm {
         float planar_reflection_resolution_scale = 0.5f; // 0.125..1.0
         bool experimental_hemi_reflection_capture = false; // one view-facing approximate hemispherical probe
         float hemi_reflection_resolution_scale = 0.25f; // fraction of shortest screen edge; square
+        bool experimental_cube_reflection_capture = false; // six independent 90-degree probe views
+        float cube_reflection_resolution_scale = 0.25f; // per-face fraction of shortest screen edge
         bool experimental_screen_space_reflections = false; // low-res cached-world and GPU 3DO SSR
         float ssr_resolution_scale = 0.125f; // 0.125..1.0 of internal screen
         int ssr_ray_steps = 32; // 4..96 depth search samples per half-res pixel
