@@ -368,6 +368,12 @@ jobs:
         native_3do_lod_override_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_auto_lod.cpp /Fe:gpu_3do_auto_lod_test.exe || exit /b 1
         gpu_3do_auto_lod_test.exe || exit /b 1
+    - name: Experimental camera-facing hemi reflection probe
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\hemi_reflection_camera.cpp /Fe:hemi_reflection_camera_test.exe || exit /b 1
+        hemi_reflection_camera_test.exe || exit /b 1
+        python3 tests/hemi_reflection_wiring.py || exit /b 1
     - name: Experimental screen-space reflections integration
       run: python3 tests/screen_space_reflections.py
     - name: Planar reflection camera and material metadata regression

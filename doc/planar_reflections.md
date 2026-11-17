@@ -8,8 +8,11 @@ The GPU cached-world shader now projects this scene onto coplanar world
 surfaces using that material mode. Native triangle and 3DO receiving-material
 paths still use their existing EnvMap fallback; those are future work.
 
-The existing modes retain numeric values 0–3; planar is 4. Probe and cube
-modes are intentionally not defined yet.
+The existing modes retain numeric values 0–3; planar is 4. Experimental
+`reflection_mode: "hemi"` is 5, describing a single camera-facing 160°
+perspective approximation to a hemisphere. This is not a cubemap or a true
+180° fisheye; the regular EnvMap supplies uncovered angles. A future cubemap
+mode can use the distinct name `"cubemap"` if needed.
 
 ## Independent Thing discovery (implemented)
 

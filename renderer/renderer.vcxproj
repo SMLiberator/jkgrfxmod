@@ -187,6 +187,7 @@
     <ClInclude Include="native_sprite_profile.hpp" />
     <ClInclude Include="native_thingface_friction.hpp" />
     <ClInclude Include="planar_reflection_camera.hpp" />
+    <ClInclude Include="hemi_reflection_camera.hpp" />
     <ClInclude Include="planar_reflection_things.hpp" />
     <ClInclude Include="planar_reflection_workset.hpp" />
     <ClInclude Include="planar_reflection_native_nodes.hpp" />
