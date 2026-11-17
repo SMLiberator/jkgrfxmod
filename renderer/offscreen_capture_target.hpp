@@ -83,6 +83,87 @@ public:
     bool ready()const{return fbo_!=0 && color_!=0 && depth_!=0;}
 };
 
+
+
+// Independent mipmaps for each probe face avoid the cross-face bleeding of a
+// tiled 2D atlas. The same object can allocate one layer for hemi or six for
+// cube, without consuming more fragment texture units. OpenGL 3.3 compatible.
+class reflection_probe_capture_target {
+    GLuint fbo_=0,color_=0,depth_=0;
+    int side_=0,layers_=0;
+public:
+    reflection_probe_capture_target()=default;
+    reflection_probe_capture_target(reflection_probe_capture_target const &)=delete;
+    reflection_probe_capture_target &operator=(
+        reflection_probe_capture_target const &)=delete;
+    ~reflection_probe_capture_target(){release();}
+    void release() {
+        if(depth_)glDeleteRenderbuffers(1,&depth_);
+        if(color_)glDeleteTextures(1,&color_);
+        if(fbo_)glDeleteFramebuffers(1,&fbo_);
+        depth_=color_=fbo_=0;side_=layers_=0;
+    }
+    bool ensure(int side,int layers) {
+        if(side<1 || layers<1 || layers>6)return false;
+        if(ready() && side==side_ && layers==layers_)return true;
+        GLint max_size=0,max_layers=0;
+        glGetIntegerv(GL_MAX_TEXTURE_SIZE,&max_size);
+        glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS,&max_layers);
+        if(side>max_size || layers>max_layers)return false;
+        GLint old_draw=0,old_read=0,old_active=0,old_array=0,old_rb=0;
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&old_draw);
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&old_read);
+        glGetIntegerv(GL_ACTIVE_TEXTURE,&old_active);
+        glActiveTexture(GL_TEXTURE0);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D_ARRAY,&old_array);
+        glGetIntegerv(GL_RENDERBUFFER_BINDING,&old_rb);
+        release();
+        glGenFramebuffers(1,&fbo_);
+        glGenTextures(1,&color_);
+        glGenRenderbuffers(1,&depth_);
+        glBindFramebuffer(GL_FRAMEBUFFER,fbo_);
+        glBindTexture(GL_TEXTURE_2D_ARRAY,color_);
+        glTexImage3D(GL_TEXTURE_2D_ARRAY,0,GL_RGBA16F,
+                     side,side,layers,0,GL_RGBA,GL_HALF_FLOAT,nullptr);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MIN_FILTER,
+                        GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+        glFramebufferTextureLayer(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,
+                                  color_,0,0);
+        glBindRenderbuffer(GL_RENDERBUFFER,depth_);
+        glRenderbufferStorage(GL_RENDERBUFFER,GL_DEPTH_COMPONENT24,side,side);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,
+                                  GL_RENDERBUFFER,depth_);
+        GLenum const draw=GL_COLOR_ATTACHMENT0;
+        glDrawBuffers(1,&draw);
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        GLenum const status=glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,GLuint(old_draw));
+        glBindFramebuffer(GL_READ_FRAMEBUFFER,GLuint(old_read));
+        glBindRenderbuffer(GL_RENDERBUFFER,GLuint(old_rb));
+        glBindTexture(GL_TEXTURE_2D_ARRAY,GLuint(old_array));
+        glActiveTexture(GLenum(old_active));
+        if(status!=GL_FRAMEBUFFER_COMPLETE) {release();return false;}
+        side_=side;layers_=layers;
+        return true;
+    }
+    // Call with this framebuffer already bound; depth is cleared by caller.
+    bool select_layer(int layer)const {
+        if(!ready() || layer<0 || layer>=layers_)return false;
+        glFramebufferTextureLayer(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,
+                                  color_,0,layer);
+        return glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE;
+    }
+    GLuint framebuffer()const{return fbo_;}
+    GLuint color_texture()const{return color_;}
+    int width()const{return side_;}
+    int height()const{return side_;}
+    bool ready()const{return fbo_!=0 && color_!=0 && depth_!=0;}
+};
+
 // Scoped GL state for the experimental pass. The legacy renderer expects
 // very particular program/texture/VAO/blend/depth state after its draws.
 class offscreen_capture_gl_scope {
