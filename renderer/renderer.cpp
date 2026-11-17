@@ -3234,7 +3234,17 @@ namespace jkgm {
                     env_command = override_mat->env->from.has_value() ||
                                   override_mat->env->to.has_value();
                 }
-                bool const has_env_map = env_from.has_value() || env_to.has_value();
+                // A completed COG world capture replaces the global image
+                // only. Explicit/per-MAT EnvMaps keep their precedence, and
+                // authored reflection strength is never changed.
+                auto const generated_env=generated_global_env_binding();
+                bool const generated_allowed=
+                    generated_env.active && global_allowed &&
+                    !(override_mat && override_mat->env) &&
+                    static_cast<int>(mat->reflection_mode)!=2 &&
+                    static_cast<int>(mat->reflection_mode)!=3;
+                bool const has_env_map=env_from.has_value() ||
+                    env_to.has_value() || generated_allowed;
                 // Runtime reflection commands can activate previously matte
                 // materials (neutral dielectric Fresnel, not metallic).
                 float const reflection_strength =
@@ -3246,14 +3256,34 @@ namespace jkgm {
                 if(runtime_reflections && env_from) {
                     env_map = texture_cache->get_texture_handle(*env_from);
                 }
+                bool from_env_valid=env_from.has_value();
+                bool to_env_valid=env_to.has_value();
                 if(runtime_reflections && env_weight > 0.0f && env_to) {
                     gl::set_active_texture_unit(9);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
                                      texture_cache->get_texture_handle(*env_to));
                 }
+                if(runtime_reflections && generated_allowed) {
+                    if(generated_env.from_capture) {
+                        env_map=generated_env.from;
+                        from_env_valid=true;
+                    }
+                    if(generated_env.transition) {
+                        gl::set_active_texture_unit(9);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         generated_env.to);
+                        to_env_valid=true;
+                        env_weight=generated_env.mix;
+                    } else {
+                        // Fade completed: sample only the generated map.
+                        to_env_valid=false;
+                        env_weight=0.0f;
+                    }
+                }
                 prog->set_env_transition(
-                    9, make_point(env_from ? 1.0f : 0.0f,
-                                  env_to ? 1.0f : 0.0f, env_weight, 0.0f));
+                    9, make_point(from_env_valid ? 1.0f : 0.0f,
+                                  to_env_valid ? 1.0f : 0.0f,
+                                  env_weight, 0.0f));
 
                 // Units 6/7 are for linear normal textures; unit 5 is the
                 // already established opaque scene-depth sampler for decals.
@@ -3814,6 +3844,27 @@ namespace jkgm {
                     if(env_to) {
                         out.environment2=texture_cache->get_texture_handle(*env_to);
                         out.has_environment2=true;
+                    }
+                }
+                auto const generated_env=generated_global_env_binding();
+                bool const generated_allowed=generated_env.active &&
+                    (!surface->replacement_material ||
+                     !surface->replacement_material->has_explicit_env_map) &&
+                    !(ctl && ctl->env) &&
+                    out.reflection_mode!=2 && out.reflection_mode!=3;
+                if(strength>0.0f && generated_allowed) {
+                    if(generated_env.from_capture) {
+                        out.environment=generated_env.from;
+                        out.has_environment=true;
+                    }
+                    if(generated_env.transition) {
+                        out.environment2=generated_env.to;
+                        out.has_environment2=true;
+                        out.environment_transition=generated_env.mix;
+                    } else {
+                        out.environment2=gl::default_texture;
+                        out.has_environment2=false;
+                        out.environment_transition=0.0f;
                     }
                 }
                 if(surface->normal_map2) {
