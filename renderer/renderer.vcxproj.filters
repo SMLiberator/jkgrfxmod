@@ -470,9 +470,6 @@
     <ClInclude Include="screen_space_reflections.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="screen_space_reflections_renderer.inc">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="planar_receiver_visibility.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>

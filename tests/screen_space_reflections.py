@@ -85,6 +85,6 @@ assert "if(has_fluid || ssr_ready)" in renderer
 assert '{"screen_reflection_map",9,sampler_kind::tex2d}' in units
 for p in ("renderer/renderer.vcxproj","renderer/renderer.vcxproj.filters"):
     assert "screen_space_reflections.hpp" in read(p)
-    assert "screen_space_reflections_renderer.inc" in read(p)
+    assert "screen_space_reflections_renderer.inc" not in read(p)
 assert "tests/screen_space_reflections.py" in read(".github/workflows/main.yml")
 print("Low-resolution cached-world SSR source contracts OK")

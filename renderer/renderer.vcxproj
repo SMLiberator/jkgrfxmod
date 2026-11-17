@@ -198,7 +198,6 @@
     <ClInclude Include="offscreen_capture_projection.hpp" />
     <ClInclude Include="planar_reflection_capture_shader.hpp" />
     <ClInclude Include="screen_space_reflections.hpp" />
-    <ClInclude Include="screen_space_reflections_renderer.inc" />
     <ClInclude Include="planar_receiver_visibility.hpp" />
     <ClInclude Include="postfx.hpp" />
     <ClInclude Include="precise_type3_native.hpp" />
