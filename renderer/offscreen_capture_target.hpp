@@ -161,6 +161,7 @@ public:
     GLuint color_texture()const{return color_;}
     int width()const{return side_;}
     int height()const{return side_;}
+    int layers()const{return layers_;}
     bool ready()const{return fbo_!=0 && color_!=0 && depth_!=0;}
 };
 
