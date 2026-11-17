@@ -7,6 +7,13 @@ uniform sampler2D receiver_normal_depth,opaque_depth,opaque_color;
 uniform vec3 camera_origin,camera_right,camera_forward,camera_up;
 uniform vec2 tan_half_fov;
 uniform vec4 trace_params; // max distance, thickness, number of steps, refine steps
+uniform int opaque_receiver_mode; // 0=transparent receiver, 1=opaque 3DO/world
+vec3 decode_oct(vec2 oct) {
+    vec2 p=oct*2.0-1.0;
+    vec3 v=vec3(p,1.0-abs(p.x)-abs(p.y));
+    if(v.z<0.0)v.xy=(1.0-abs(p.yx))*sign(p);
+    return normalize(v);
+}
 layout(location=0) out vec4 out_reflection;
 
 vec3 world_point(vec2 uv,float linear_depth) {
@@ -30,10 +37,20 @@ void main() {
     // Trace target and receiver target have identical dimensions. Nearest
     // texel fetch avoids filtering normals/depth across surface silhouettes.
     vec4 receiver=texelFetch(receiver_normal_depth,ivec2(gl_FragCoord.xy),0);
-    if(receiver.w<=0.0||receiver.w>=65500.0 ||
-       dot(receiver.xyz,receiver.xyz)<0.1)return;
-    vec3 normal=normalize(receiver.xyz);
-    vec3 point=world_point(vp_texcoords,receiver.w);
+    vec3 normal;
+    vec3 point;
+    if(opaque_receiver_mode!=0) {
+        if(receiver.z<=0.0)return;
+        float opaque_distance=texture(opaque_depth,vp_texcoords).r;
+        if(opaque_distance<=0.0||opaque_distance>=65500.0)return;
+        normal=decode_oct(receiver.xy);
+        point=world_point(vp_texcoords,opaque_distance);
+    } else {
+        if(receiver.w<=0.0||receiver.w>=65500.0 ||
+           dot(receiver.xyz,receiver.xyz)<0.1)return;
+        normal=normalize(receiver.xyz);
+        point=world_point(vp_texcoords,receiver.w);
+    }
     vec3 incident=normalize(point-camera_origin);
     // The same normal-map reflection direction the receiving material uses.
     vec3 reflected=normalize(reflect(incident,normal));
