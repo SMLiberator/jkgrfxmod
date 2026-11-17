@@ -9,6 +9,14 @@
             // Retain completed EnvMaps between frames, dropping them only
             // when SetGlobalEnvMap/ResetGlobalEnvMap cancels the request.
             auto const global_request=get_global_env_capture_controls().snapshot();
+            global_env_active_sequence=global_request
+                ?global_request->sequence:0U;
+            if(global_env_previous && global_env_current &&
+               (global_env_fade_seconds<=0.0f ||
+                std::chrono::duration<float>(
+                    std::chrono::steady_clock::now()-
+                    global_env_fade_start).count()>=global_env_fade_seconds))
+                global_env_previous.reset();
             if(!global_request) {
                 global_env_current.reset();
                 global_env_previous.reset();
