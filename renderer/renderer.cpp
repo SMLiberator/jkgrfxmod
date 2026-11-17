@@ -801,6 +801,10 @@ namespace jkgm {
         engine_camera planar_capture_camera{};
         // Independent reflected-camera draw list, never added to main visibility.
         std::vector<world_cache_draw_candidate> planar_frame_candidates;
+        std::vector<world_cache_draw_candidate> reflection_sky_candidates;
+        uint64_t reflection_sky_frame=~uint64_t(0);
+        uint64_t reflection_sky_revision=0;
+        uintptr_t reflection_sky_world=0;
         std::vector<uint8_t> planar_thing_sector_visibility;
         uintptr_t planar_thing_visibility_world=0;
         uint64_t planar_thing_visibility_frame=~uint64_t(0);
@@ -1538,6 +1542,10 @@ namespace jkgm {
                 planar_capture_program.reset();
                 planar_capture_target.reset();
                 reflection_probes.clear();
+                reflection_sky_candidates.clear();
+                reflection_sky_frame=~uint64_t(0);
+                reflection_sky_revision=0;
+                reflection_sky_world=0;
                 global_env_current.reset();
                 global_env_previous.reset();
                 global_env_converter.reset();
@@ -1587,6 +1595,10 @@ namespace jkgm {
                 planar_capture_ready=false;
                 // New scenes may reuse native owner IDs; never sample old probes.
                 reflection_probes.clear();
+                reflection_sky_candidates.clear();
+                reflection_sky_frame=~uint64_t(0);
+                reflection_sky_revision=0;
+                reflection_sky_world=0;
                 global_env_current.reset();
                 global_env_previous.reset();
                 global_env_completed_sequence=0U;
@@ -12632,6 +12644,7 @@ namespace jkgm {
                          " passable_reflection_receivers=",matched_passable);
         }
 
+#include "reflection_sky_capture.inc"
         void render_planar_capture()
         {
             planar_capture_ready=false;
@@ -12866,6 +12879,9 @@ namespace jkgm {
             // Group by material/cel/GeoMode to avoid a GL call and a native
             // MAT lookup for every world polygon in JkGR's huge levels.
             auto &cache=*world_cache_target;
+            draw_reflection_capture_sky(shader,reflected,view,
+                frame_world_cache_camera.frustum,projection,
+                setup.width,setup.height,setup.clip_view,true,true);
             gl::bind_vertex_array(cache.vao);
             glFrontFace(GL_CW); // reflected camera reverses handedness
             std::map<std::tuple<uintptr_t,int32_t,uint32_t>,
