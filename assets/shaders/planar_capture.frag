@@ -15,6 +15,13 @@ uniform vec4 clip_plane_view;
 uniform int clip_enabled,orthographic_mode;
 uniform float capture_thing_opacity;
 uniform int capture_thing_mode; // 0 full, 1 premultiplied alpha, 2 dither
+uniform int capture_sky_mode; // 0=world, 1=JK horizon, 2=JK ceiling
+uniform vec4 capture_sky_horizon; // x=distance*tanHalfFOV,y=pixelsPerRevolution,z=tanHalfFOV
+uniform vec3 capture_sky_angles;
+uniform vec3 capture_sky_camera_origin,capture_sky_camera_right;
+uniform vec3 capture_sky_camera_forward,capture_sky_camera_up;
+uniform float capture_sky_ceiling_height;
+uniform vec2 capture_sky_offset,capture_sky_face_offset,capture_sky_viewport;
 out vec4 out_color;
 
 float capture_fog_fraction(float depth) {
@@ -24,6 +31,44 @@ float capture_fog_fraction(float depth) {
 }
 
 void main() {
+    if(capture_sky_mode!=0) {
+        // Mirror the normal GPU-world sky UV mapping. Sky polygons are
+        // visible apertures, not ordinary world-textured geometry, and
+        // never receive object lighting, fog, or receiver clip-plane tests.
+        vec2 ndc=gl_FragCoord.xy*2.0/max(capture_sky_viewport,vec2(1.0))-1.0;
+        vec2 uv;
+        if(capture_sky_mode==1) {
+            float h=capture_sky_horizon.x;
+            vec2 screen=vec2(ndc.x*h,
+                -ndc.y*h*capture_sky_viewport.y/capture_sky_viewport.x);
+            float roll=radians(capture_sky_angles.z);
+            float cr=cos(roll),sr=sin(roll);
+            uv=vec2(screen.x*cr-screen.y*sr,
+                    screen.y*cr+screen.x*sr);
+            uv-=capture_sky_angles.yx*(capture_sky_horizon.y/360.0);
+        } else {
+            float hfov=capture_sky_horizon.z;
+            vec3 ray=capture_sky_camera_forward+
+                capture_sky_camera_right*(ndc.x*hfov)+
+                capture_sky_camera_up*(ndc.y*hfov*
+                    capture_sky_viewport.y/capture_sky_viewport.x);
+            vec3 dir=normalize(ray);
+            float distance_to_sky=1000.0;
+            if(abs(dir.z)>0.000001) {
+                float t=(capture_sky_ceiling_height-
+                         capture_sky_camera_origin.z)/dir.z;
+                if(t>=0.0 && t<=1000.0)distance_to_sky=t;
+            }
+            uv=(capture_sky_camera_origin.xy+
+                dir.xy*distance_to_sky)*16.0;
+        }
+        uv+=capture_sky_offset+capture_sky_face_offset;
+        vec4 texel=use_albedo!=0 ?
+            texture(albedo_map,uv*uv_scale+uv_scroll):vec4(1.0);
+        if(texel.a*material_tint.a<alpha_cutoff)discard;
+        out_color=vec4(texel.rgb*material_tint.rgb,1.0);
+        return;
+    }
     // The reflected ray only retains the observer's side of the plane.
     if(clip_enabled!=0 && clip_side<0.0001)discard;
     vec2 tex_uv=pixel_uv*uv_scale;
