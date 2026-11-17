@@ -61,6 +61,8 @@
     "experimental_planar_reflection_capture": false,
     "experimental_hemi_reflection_capture": false,
     "hemi_reflection_resolution_scale": 0.25,
+    "experimental_cube_reflection_capture": false,
+    "cube_reflection_resolution_scale": 0.25,
     "experimental_planar_reflection_portal_culling": false,
     "planar_reflection_resolution_scale": 0.5,
     "experimental_screen_space_reflections": false,
