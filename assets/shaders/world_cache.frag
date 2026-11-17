@@ -186,7 +186,7 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     vec3 env=vec3(0.0);
     if(has_env && planar.a<0.999) {
         vec3 dir=reflection;
-        if(mode<=1 || mode==4) {
+        if(mode<=1 || mode==4 || mode==5) {
             vec3 world=camera_right_axis*reflection.x+
                        camera_forward_axis*reflection.z+
                        camera_up_axis*reflection.y;
