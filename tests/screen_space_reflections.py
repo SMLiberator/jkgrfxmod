@@ -84,6 +84,33 @@ assert "shader.set_screen_reflection(false,9);" in renderer
 assert "shader.set_screen_reflection(ssr_ready,9);" in renderer
 assert "if(has_fluid || ssr_ready)" in renderer
 assert '{"screen_reflection_map",9,sampler_kind::tex2d}' in units
+# Opaque world and cached model groups reuse the same screen-mode opt-in.
+opaque=read("renderer/screen_space_reflections_opaque.inc")
+receiver_opaque=read("assets/shaders/ssr_opaque_receiver.frag")
+model_vert=read("assets/shaders/ssr_opaque_model.vert")
+compositor=read("assets/shaders/ssr_opaque_composite.frag")
+assert '#include "screen_space_reflections_opaque.inc"' in renderer
+assert "render_opaque_screen_reflections();" in gbuf
+assert "if(mat.reflection_mode!=1 ||" in opaque
+assert "world_cache_pass::opaque" in opaque
+assert "gpu_3do_draws_in_pass(policy,false)" in opaque
+assert "gpu_3do_native_modelview(" in opaque
+assert "packed_vertex_format?1:0" in opaque
+assert "ssr_opaque_receivers->framebuffer()" in opaque
+assert "ssr_opaque_image->framebuffer()" in opaque
+assert "frame_screen->begin_compose_opaque_pass(true);" in opaque
+assert "glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA," in opaque
+assert "GL_ZERO,GL_ONE);" in opaque
+assert "gl::texture_view(ssr_opaque_image->color_texture())" in opaque
+assert "gl::texture_view(ssr_opaque_receivers->color_texture())" in opaque
+assert "material_params.z" in receiver_opaque and "mode==2" in receiver_opaque
+assert "abs(linear_depth-scene_depth)" in receiver_opaque
+assert "packed_vertex_format" in model_vert
+assert "decode_oct(receiver.xy)" in trace
+assert "if(opaque_receiver_mode!=0)" in trace
+assert "receiver.z" in compositor
+assert "glGenerateMipmap(GL_TEXTURE_2D);" in opaque
+assert "render_opaque_screen_reflections();" in renderer
 for p in ("renderer/renderer.vcxproj","renderer/renderer.vcxproj.filters"):
     assert "screen_space_reflections.hpp" in read(p)
     assert "screen_space_reflections_renderer.inc" not in read(p)

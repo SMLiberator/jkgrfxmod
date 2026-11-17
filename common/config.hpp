@@ -90,7 +90,7 @@ namespace jkgm {
         bool experimental_planar_reflection_capture = false; // independent GPU reflected-scene FBO; opt-in
         bool experimental_planar_reflection_portal_culling = false; // independent reflected-sector traversal, fail open
         float planar_reflection_resolution_scale = 0.5f; // 0.125..1.0
-        bool experimental_screen_space_reflections = false; // low-res transparent-world SSR
+        bool experimental_screen_space_reflections = false; // low-res cached-world and GPU 3DO SSR
         float ssr_resolution_scale = 0.125f; // 0.125..1.0 of internal screen
         int ssr_ray_steps = 32; // 4..96 depth search samples per half-res pixel
         float ssr_ray_thickness = 0.6f; // world-space depth tolerance
