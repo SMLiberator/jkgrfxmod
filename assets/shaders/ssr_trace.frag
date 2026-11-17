@@ -27,7 +27,9 @@ bool project_ray(vec3 position,out vec2 uv,out float depth) {
 }
 void main() {
     out_reflection=vec4(0.0);
-    vec4 receiver=texture(receiver_normal_depth,vp_texcoords);
+    // Trace target and receiver target have identical dimensions. Nearest
+    // texel fetch avoids filtering normals/depth across surface silhouettes.
+    vec4 receiver=texelFetch(receiver_normal_depth,ivec2(gl_FragCoord.xy),0);
     if(receiver.w<=0.0||receiver.w>=65500.0 ||
        dot(receiver.xyz,receiver.xyz)<0.1)return;
     vec3 normal=normalize(receiver.xyz);

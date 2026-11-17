@@ -63,6 +63,7 @@ assert "gl_FragCoord.w" in receive_f
 assert "if(depth>opaque+" in receive_f
 assert "normal_map2" in receive_f and "dFdx" in receive_f
 assert "out_normal_depth=vec4(n,depth);" in receive_f
+assert "texelFetch(receiver_normal_depth,ivec2(gl_FragCoord.xy),0)" in trace
 # Bounded true SSR raymarch, refinement, edge fade, zero-coverage fallback.
 assert "for(int i=1;i<=96;++i)" in trace
 assert "if(i>steps)break;" in trace
