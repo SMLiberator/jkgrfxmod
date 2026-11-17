@@ -28,8 +28,8 @@ assert "decode_packed_normal(local_light_normal_input)" in vertex
 assert "uint32_t(v.light_mode)" in packed
 # Count the eight GPU mesh upload constructors, not unrelated config reads.
 assert len(re.findall(
-    r"std::make_unique<gpu_3do_gl_mesh>\\(\\s*"
-    r"the_config->experimental_packed_3do_vertices\\s*,", renderer))==8
+    r"std::make_unique<gpu_3do_gl_mesh>\(\s*"
+    r"the_config->experimental_packed_3do_vertices\s*,", renderer))==8
 assert renderer.count("&packed_3do_upload_profile : nullptr")==8
 assert "PERF gpu_3do vertex_packing uploads_cumulative=" in renderer
 assert "PERF gpu_3do packing_rejections empty=" in renderer
