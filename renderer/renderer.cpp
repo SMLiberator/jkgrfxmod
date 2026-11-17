@@ -725,7 +725,6 @@ namespace jkgm {
         uint64_t planar_plane_scanned_frame=~uint64_t(0);
         std::optional<planar_reflection_plane> planar_capture_plane;
         engine_camera planar_capture_camera{};
-        bool planar_plane_from_material=false;
         // Independent reflected-camera draw list, never added to main visibility.
         std::vector<world_cache_draw_candidate> planar_frame_candidates;
         std::vector<uint8_t> planar_thing_sector_visibility;
@@ -5558,11 +5557,10 @@ namespace jkgm {
                 gpu_3do_group group{};
                 group.material=candidate.material;group.cel=candidate.cel;
                 auto const material=resolve_gpu_3do_material(group);
-                bool const eligible=planar_plane_from_material
-                    ?material.reflection_mode==4
-                    :material.reflection_mode==4 ||
-                     material.blend==material_blend_mode::fluid;
-                if(eligible)receivers.push_back(&candidate);
+                // A Fluid blend alone never requests a planar capture.
+                // The material must opt in with reflection_mode="planar".
+                if(material.reflection_mode==4)
+                    receivers.push_back(&candidate);
             }
             if(receivers.empty()) {
                 if(planar_receiver_queries)planar_receiver_queries->invalidate();
@@ -10437,10 +10435,7 @@ namespace jkgm {
                                 group.material=candidate.material;
                                 group.cel=candidate.cel;
                                 auto const mat=resolve_gpu_3do_material(group);
-                                if(mat.reflection_mode!=4 &&
-                                   (planar_plane_from_material ||
-                                    mat.blend!=material_blend_mode::fluid))
-                                    continue;
+                                if(mat.reflection_mode!=4)continue;
                                 receiver_seeds.push_back(candidate.surface_index);
                             }
                             if(receiver_seeds.empty()) {
@@ -12365,9 +12360,9 @@ namespace jkgm {
                          " saber_override=",saber_override);
         }
 
-        // Choose a real reflected plane. An explicit planar MAT always wins
-        // over a Fluid-only diagnostic fallback; the nearest candidate of
-        // that tier is used for the one-target first implementation.
+        // Only explicit planar MATs are reflection receivers. Fluid alpha
+        // blending is orthogonal to whether a material requests reflections.
+        // One-target implementation: choose the nearest eligible plane.
         void select_planar_capture_plane(engine_camera const &camera)
         {
             if(!world_cache_target || !world_cache_target->ready) {
@@ -12384,15 +12379,12 @@ namespace jkgm {
             planar_plane_world=cache.loaded_world;
             planar_plane_world_revision=cache.revision;
             planar_capture_plane.reset();
-            planar_plane_from_material=false;
             float best_distance=std::numeric_limits<float>::infinity();
-            int best_priority=-1;
-            size_t matched_planar=0,matched_fluid=0,matched_passable=0;
+            size_t matched_planar=0,matched_passable=0;
             std::map<std::pair<uintptr_t,int32_t>,gpu_3do_texture> mats;
             for(auto const &surface:cache.mesh.surfaces) {
-                // Reflection RECEIVERS may be passable adjoins (notably water).
-                // Exclude sky apertures, but never reject a valid Fluid/planar
-                // surface merely because its adjoin allows traversal.
+                // Explicit planar receivers may be passable adjoins (e.g.
+                // water). Exclude sky apertures but not passable portals.
                 // The mirrored SCENE render still skips passable portals.
                 if(surface.count<3U ||
                    (surface.surface_flags&0x600U)!=0U ||
@@ -12418,11 +12410,8 @@ namespace jkgm {
                         resolve_gpu_3do_material(group)).first;
                 }
                 auto const &mat=it->second;
-                int const priority=mat.reflection_mode==4 ? 2 :
-                    mat.blend==material_blend_mode::fluid ? 1 : 0;
-                if(priority==0)continue;
-                if(priority==2)++matched_planar;
-                else ++matched_fluid;
+                if(mat.reflection_mode!=4)continue;
+                ++matched_planar;
                 if(surface.passable_adjoin)++matched_passable;
                 planar_reflection_plane plane{};
                 plane.normal=normal;
@@ -12432,23 +12421,16 @@ namespace jkgm {
                 float const distance=std::fabs(
                     engine_camera_detail::dot(camera.position,plane.normal)-
                     plane.offset);
-                if(priority<best_priority ||
-                   (priority==best_priority && distance>=best_distance))
-                    continue;
-                best_priority=priority;
+                if(distance>=best_distance)continue;
                 best_distance=distance;
                 planar_capture_plane=plane;
-                planar_plane_from_material=priority==2;
             }
             if(the_config->profile_renderer)
                 LOG_INFO("PLANAR plane select: world=",cache.loaded_world,
-                         " source=",planar_capture_plane
-                              ?(planar_plane_from_material?"material":"fluid")
-                              :"none",
+                         " source=",planar_capture_plane?"material":"none",
                          " scale=",the_config->planar_reflection_resolution_scale,
                          " candidate_surfaces=",cache.mesh.surfaces.size(),
                          " planar_matches=",matched_planar,
-                         " fluid_matches=",matched_fluid,
                          " passable_reflection_receivers=",matched_passable);
         }
 
@@ -12955,8 +12937,7 @@ namespace jkgm {
                 LOG_INFO("PLANAR capture: resolution=",setup.width,"x",
                          setup.height," scale=",
                          the_config->planar_reflection_resolution_scale,
-                         " plane_source=",
-                         planar_plane_from_material?"material":"fluid",
+                         " plane_source=material",
                          " world_faces=",world_drawn,
                          " world_culled=",world_culled,
                          " world_batches=",world_groups.size(),

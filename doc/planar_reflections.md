@@ -89,15 +89,14 @@ the game's internal screen resolution. At 1920x1080, the default target is
 960x540. The experimental capture is disabled by default and has no
 on-screen debug blit; test it through a reflective material in gameplay.
 
-The first version chooses one planar-material world surface, preferring
-the nearest plane; without an explicit planar MAT it can choose a world Fluid
-surface for water diagnostics. A passable-adjoin surface is an eligible
-reflection RECEIVER when its material is planar or Fluid, even though such
-portal geometry is excluded from the mirrored SCENE render. This matters for
-water boundaries authored as traversable sector adjoins. The selector logs
-`planar_matches`, `fluid_matches`, and `passable_reflection_receivers` to
-diagnose whether eligible planes were found. No arbitrary fallback plane is
-fabricated.
+The first version chooses the nearest eligible world plane whose material
+explicitly sets `"reflection_mode": "planar"`. Fluid blending alone never
+triggers planar reflection capture, including on passable-adjoin water.
+Passable-adjoin surfaces with an explicitly planar material remain eligible
+reflection RECEIVERS, even though such portal geometry is excluded from the
+mirrored SCENE render. The selector logs `planar_matches` and
+`passable_reflection_receivers` to diagnose which surfaces opted in.
+Without an explicit planar MAT no capture plane is selected.
 It stages live lighting and animated UVs for world surfaces visible to the
 **reflected** frustum independently of the primary camera's portal traversal.
 Captured world geometry is frustum-culled *before* material resolution, grouped
@@ -237,7 +236,8 @@ introduce additional full-screen passes without measuring their cost.
 - A source material selects planar reflections. Material effects (roughness,
   specular strength, normal maps, fluid absorption, etc.) remain independent.
 - Surfaces that share an equivalent plane may reuse one reflected image.
-  A visible plane must be selected before any capture work.
+  Fluid blending alone does not imply planar reflection. A visible plane
+  with an explicit planar material must be selected before capture work.
 - A secondary `engine_camera` is reflected using the plane normal and
   offset `dot(normal, world_position)==offset`.
 - `renderer/offscreen_capture_target.hpp` provides a reusable HDR/depth
