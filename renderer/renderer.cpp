@@ -13234,7 +13234,7 @@ namespace jkgm {
                          " source_new_snapshots=",offscreen.stats.new_gpu_snapshots,
                          " incomplete_3do_things=",offscreen.stats.incomplete_things,
                          " ms_cpu=",float(us)/1000.0f,
-                         " NOTE=planar_world_material_sampling_no_sky_yet");
+                         " NOTE=planar_world_material_sampling_with_sky");
             }
         }
 
