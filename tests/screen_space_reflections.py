@@ -109,6 +109,8 @@ assert "packed_vertex_format" in model_vert
 assert "decode_oct(receiver.xy)" in trace
 assert "if(opaque_receiver_mode!=0)" in trace
 assert "receiver.z" in compositor
+assert "texelFetch(receiver_image,pixel,0)" in compositor
+assert "item.group->face_type&0x1U" in opaque
 assert "glGenerateMipmap(GL_TEXTURE_2D);" in opaque
 assert "render_opaque_screen_reflections();" in renderer
 for p in ("renderer/renderer.vcxproj","renderer/renderer.vcxproj.filters"):

@@ -190,6 +190,9 @@
                         width,height,it->second->packed_vertex_format?1:0);
                     glFrontFace(gpu_3do_reversed_winding(inst.transform)
                                 ?GL_CW:GL_CCW);
+                    if((item.group->face_type&0x1U)!=0U)
+                        glDisable(GL_CULL_FACE);
+                    else glEnable(GL_CULL_FACE);
                     bind_material(program,item.material,item.alpha_mode,
                         item.material.opacity*inst.thing_opacity);
                     gl::bind_vertex_array(it->second->vao);
