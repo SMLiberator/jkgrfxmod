@@ -5,7 +5,8 @@ root=Path(__file__).resolve().parents[1]
 read=lambda path:(root/path).read_text(encoding="utf-8")
 settings=json.loads(read("assets/jkgm.json"))
 assert settings["experimental_planar_reflection_capture"] is False
-assert settings["planar_reflection_resolution_scale"]==0.5
+assert settings["reflection_capture_resolution"]==128
+assert settings["reflection_capture_update_interval"]==0.0
 assert settings["experimental_planar_reflection_portal_culling"] is False
 portals=read("renderer/planar_reflection_portals.hpp")
 assert "planar_reflection_portal_graph" in portals
@@ -21,9 +22,11 @@ assert "planar_reflection_portals.cpp" in read(".github/workflows/main.yml")
 
 config=read("common/config.cpp")
 for name in ("experimental_planar_reflection_capture",
-             "planar_reflection_resolution_scale"):
+             "reflection_capture_resolution",
+             "reflection_capture_update_interval"):
     assert f'j.contains("{name}")' in config
-assert 'std::isfinite(v)' in config and 'v<0.125f || v>1.0f' in config
+assert 'reflection_capture_resolution must be 32..1024' in config
+assert 'reflection_capture_update_interval must be between 0 and 60 seconds' in config
 renderer=read("renderer/renderer.cpp")
 visibility=read("renderer/planar_receiver_visibility.hpp")
 visibility_vert=read("assets/shaders/planar_receiver_visibility.vert")
@@ -93,7 +96,9 @@ assert "planar_capture_camera=reflected;" in renderer
 assert "glClearColor(0.0f,0.0f,0.0f,0.0f)" in renderer
 assert renderer.index("render_planar_capture();") < renderer.index(
     "draw_game_gbuffer_pass(trimdl, posterize_lighting);")
-assert "NOTE=planar_world_material_sampling_no_sky_yet" in renderer
+assert "NOTE=planar_world_material_sampling_with_sky" in renderer
+assert "draw_reflection_capture_sky(shader,reflected,view," in renderer
+assert "planar_last_refresh=std::chrono::steady_clock::now();" in renderer
 # Visual-parity and performance regressions: reflected world data must be
 # staged independently of the primary portal subset, without leaking into
 # the primary camera's alpha draw queue.
