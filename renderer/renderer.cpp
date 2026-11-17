@@ -13195,7 +13195,7 @@ namespace jkgm {
                         std::chrono::steady_clock::now()-begun).count();
                 LOG_INFO("PLANAR capture: resolution=",setup.width,"x",
                          setup.height," scale=",
-                         the_config->planar_reflection_resolution_scale,
+                         the_config->reflection_capture_resolution,
                          " plane_source=material",
                          " world_faces=",world_drawn,
                          " world_culled=",world_culled,
