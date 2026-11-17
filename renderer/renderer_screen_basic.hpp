@@ -60,6 +60,7 @@ namespace jkgm {
 
         void begin_compose_opaque_pass(bool retain_hom_pixels) override;
         void end_compose_opaque_pass() override;
+        gl::texture_view get_opaque_composite_texture() override;
 
         void begin_transparency_pass() override;
         void end_transparency_pass() override;

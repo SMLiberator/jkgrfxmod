@@ -325,6 +325,12 @@ void jkgm::renderer_screen_msaa::begin_compose_opaque_pass(bool retain_hom_pixel
 
 void jkgm::renderer_screen_msaa::end_compose_opaque_pass() {}
 
+jkgm::gl::texture_view
+jkgm::renderer_screen_msaa::get_opaque_composite_texture()
+{
+    return screen_buffer.tex;
+}
+
 void jkgm::renderer_screen_msaa::begin_transparency_pass()
 {
     gl::bind_framebuffer(gl::framebuffer_bind_target::any, screen_buffer.fbo);

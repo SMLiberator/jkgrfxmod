@@ -25,6 +25,9 @@ namespace jkgm {
 
         virtual void begin_compose_opaque_pass(bool retain_hom_pixels) = 0;
         virtual void end_compose_opaque_pass() = 0;
+        // Finished opaque HDR color BEFORE the transparent pass. Unlike the
+        // final MSAA resolve this is up-to-date at SSR evaluation time.
+        virtual gl::texture_view get_opaque_composite_texture() = 0;
 
         virtual void begin_transparency_pass() = 0;
         virtual void end_transparency_pass() = 0;

@@ -217,6 +217,12 @@ void jkgm::renderer_screen_basic::begin_compose_opaque_pass(bool retain_hom_pixe
 
 void jkgm::renderer_screen_basic::end_compose_opaque_pass() {}
 
+jkgm::gl::texture_view
+jkgm::renderer_screen_basic::get_opaque_composite_texture()
+{
+    return screen_buffer.tex;
+}
+
 void jkgm::renderer_screen_basic::begin_transparency_pass()
 {
     gl::bind_framebuffer(gl::framebuffer_bind_target::any, screen_buffer.fbo);
