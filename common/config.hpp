@@ -89,14 +89,12 @@ namespace jkgm {
         bool experimental_planar_thing_discovery = false; // read-only 120-frame native 3DO diagnostics
         bool experimental_planar_reflection_capture = false; // independent GPU reflected-scene FBO; opt-in
         bool experimental_planar_reflection_portal_culling = false; // independent reflected-sector traversal, fail open
-        float planar_reflection_resolution_scale = 0.5f; // 0.125..1.0
         bool experimental_hemi_reflection_capture = false; // one view-facing approximate hemispherical probe
-        float hemi_reflection_resolution_scale = 0.25f; // fraction of shortest screen edge; square
         bool experimental_cube_reflection_capture = false; // six independent 90-degree probe views
-        float cube_reflection_resolution_scale = 0.25f; // per-face fraction of shortest screen edge
+        int reflection_capture_resolution = 128; // cube face/short planar dimension; hemi doubles this
+        float reflection_capture_update_interval = 0.0f; // all realtime capture types; 0=every frame
         int envmap_capture_face_resolution = 128; // on-demand CaptureEnvMap: 128x128 faces -> 512x256 equirect
-        unsigned reflection_probe_max_owners = 4U; // max independently cached hemi/cube owners
-        float cube_reflection_update_interval = 0.0f; // seconds between six-face refreshes; 0=each frame
+        unsigned int reflection_probe_max_owners = 4U; // max independently cached hemi/cube owners
         bool experimental_screen_space_reflections = false; // low-res cached-world and GPU 3DO SSR
         float ssr_resolution_scale = 0.125f; // 0.125..1.0 of internal screen
         int ssr_ray_steps = 32; // 4..96 depth search samples per half-res pixel
