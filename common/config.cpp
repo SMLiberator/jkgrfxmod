@@ -429,6 +429,17 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                 "gpu_3do_auto_lod_simplifier_mode must be between 0 and 1");
             rv->gpu_3do_auto_lod_simplifier_mode=n;
         }
+        if(j.contains("gpu_3do_auto_lod_detail_prune_ratio")) {
+            auto const &v=j.at("gpu_3do_auto_lod_detail_prune_ratio");
+            if(!v.is_number())throw std::runtime_error(
+                "gpu_3do_auto_lod_detail_prune_ratio must be a number");
+            rv->gpu_3do_auto_lod_detail_prune_ratio=v.get<float>();
+        }
+        if(!std::isfinite(rv->gpu_3do_auto_lod_detail_prune_ratio)||
+           rv->gpu_3do_auto_lod_detail_prune_ratio<0.0f||
+           rv->gpu_3do_auto_lod_detail_prune_ratio>0.25f)
+            throw std::runtime_error(
+                "gpu_3do_auto_lod_detail_prune_ratio must be between 0 and 0.25");
         if(j.contains("gpu_3do_auto_lod_lod1_max_error_ratio")) {
             auto const &v=j.at("gpu_3do_auto_lod_lod1_max_error_ratio");
             if(!v.is_number())throw std::runtime_error(

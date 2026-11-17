@@ -80,6 +80,7 @@ namespace jkgm {
         int gpu_3do_auto_lod_debug_mode = 0; // 0=screen-size auto; 1=force original; 2=force LOD1; 3=force LOD2
         int gpu_3do_auto_lod_generation_budget = 1; // 0 = unlimited CPU generation attempts per frame
         int gpu_3do_auto_lod_simplifier_mode = 0; // 0=aggressive, 1=silhouette-aware QEM
+        float gpu_3do_auto_lod_detail_prune_ratio = 0.0f; // 0=off; relative small-island AABB diagonal, LOD2 full / LOD1 half
         float gpu_3do_auto_lod_lod1_max_error_ratio = 0.01f; // local mesh bounds diagonal
         float gpu_3do_auto_lod_lod2_max_error_ratio = 0.03f; // local mesh bounds diagonal
         bool experimental_3do_occlusion_culling = false; // async main camera GPU Thing submission

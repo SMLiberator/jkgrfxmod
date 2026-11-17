@@ -15,6 +15,11 @@
 #include <vector>
 
 namespace jkgm {
+struct gpu_3do_auto_lod_prune_stats {
+    uint32_t components=0;
+    uint32_t removed_components=0;
+    uint32_t removed_triangles=0;
+};
 namespace auto_lod_detail {
     using lod_point=std::array<float,3>;
     using tri=std::array<uint32_t,3>;
@@ -163,6 +168,111 @@ namespace auto_lod_detail {
                                  float(double(a[2])+t*d[2])}};
         return distance2(p,closest);
     }
+
+    // Identify disconnected pieces in the SAME rdMesh using the exact-
+    // position welded topology already used by QEM. A badge/decal polygon
+    // island can be small even if it contains many triangles. Remove a
+    // whole island only if its bounding-box diagonal is below the chosen
+    // fraction of the source mesh diagonal; never remove the largest island.
+    // This deliberately does not cut connected protrusions or other nodes.
+    inline void qem_prune_small_components(
+        std::vector<face> &faces,
+        std::vector<lod_point> const &points,
+        double relative_diameter,
+        gpu_3do_auto_lod_prune_stats *stats)
+    {
+        if(!(relative_diameter>0.0)||points.empty()||faces.empty())
+            return;
+        std::vector<uint32_t> parent(points.size());
+        for(uint32_t i=0;i<parent.size();++i)parent[i]=i;
+        auto root=[&](uint32_t i)->uint32_t {
+            while(parent[i]!=i) {
+                parent[i]=parent[parent[i]];
+                i=parent[i];
+            }
+            return i;
+        };
+        auto join=[&](uint32_t a,uint32_t b) {
+            a=root(a);b=root(b);
+            if(a!=b)parent[std::max(a,b)]=std::min(a,b);
+        };
+        for(auto const &f:faces) {
+            join(f.points[0],f.points[1]);
+            join(f.points[1],f.points[2]);
+        }
+        struct component {
+            lod_point lo{},hi{};
+            uint32_t triangles=0;
+        };
+        std::map<uint32_t,component> components;
+        bool global_valid=false;
+        lod_point global_lo{},global_hi{};
+        for(auto const &f:faces) {
+            uint32_t const id=root(f.points[0]);
+            auto it=components.find(id);
+            if(it==components.end()) {
+                auto const &p=points[f.points[0]];
+                it=components.emplace(id,component{p,p,0U}).first;
+            }
+            auto &item=it->second;
+            ++item.triangles;
+            for(uint32_t index:f.points) {
+                auto const &p=points[index];
+                for(unsigned axis=0;axis<3;++axis) {
+                    item.lo[axis]=std::min(item.lo[axis],p[axis]);
+                    item.hi[axis]=std::max(item.hi[axis],p[axis]);
+                    if(!global_valid) {
+                        global_lo[axis]=p[axis];
+                        global_hi[axis]=p[axis];
+                    } else {
+                        global_lo[axis]=std::min(global_lo[axis],p[axis]);
+                        global_hi[axis]=std::max(global_hi[axis],p[axis]);
+                    }
+                }
+                global_valid=true;
+            }
+        }
+        if(stats)stats->components=static_cast<uint32_t>(components.size());
+        if(components.size()<2U)return;
+        double const source_diagonal2=distance2(global_lo,global_hi);
+        if(!(source_diagonal2>0.0)||!std::isfinite(source_diagonal2))
+            return;
+        double const cutoff2=source_diagonal2*
+                             relative_diameter*relative_diameter;
+        // Preserve the spatially largest part even if the user requests
+        // extreme detail pruning; a small disconnected single-triangle
+        // model is not considered disposable by itself.
+        uint32_t largest=components.begin()->first;
+        double largest_diagonal2=-1.0;
+        uint32_t largest_triangles=0U;
+        for(auto const &pair:components) {
+            auto const &component=pair.second;
+            double const d2=distance2(component.lo,component.hi);
+            if(d2>largest_diagonal2 ||
+               (d2==largest_diagonal2 &&
+                component.triangles>largest_triangles)) {
+                largest=pair.first;
+                largest_diagonal2=d2;
+                largest_triangles=component.triangles;
+            }
+        }
+        std::set<uint32_t> rejected;
+        for(auto const &pair:components) {
+            if(pair.first==largest)continue;
+            auto const &item=pair.second;
+            if(distance2(item.lo,item.hi)<cutoff2)
+                rejected.insert(pair.first);
+        }
+        if(rejected.empty())return;
+        for(auto &f:faces) {
+            if(rejected.count(root(f.points[0]))!=0U) {
+                f.live=false;
+                if(stats)++stats->removed_triangles;
+            }
+        }
+        if(stats)stats->removed_components=
+            static_cast<uint32_t>(rejected.size());
+    }
 }
 
 // Screen-space LOD selection with hysteresis; radius is projected pixels.
@@ -232,14 +342,20 @@ inline bool gpu_3do_auto_lod_budget_allows(
 // empty result or no triangle reduction reuses source geometry.
 inline std::shared_ptr<gpu_3do_geometry const> generate_gpu_3do_auto_lod(
     gpu_3do_geometry const &source,unsigned level,
-    int simplifier_mode=0,float max_error_ratio=0.01f)
+    int simplifier_mode=0,float max_error_ratio=0.01f,
+    float detail_prune_ratio=0.0f,
+    gpu_3do_auto_lod_prune_stats *prune_stats=nullptr)
 {
     using namespace auto_lod_detail;
     bool const quality=simplifier_mode==1;
+    if(prune_stats)*prune_stats={};
     if(level<1U || level>2U || source.indices.empty() ||
        source.groups.empty() ||
        (quality && (!std::isfinite(max_error_ratio) ||
-                    max_error_ratio<0.0f)))return {};
+                    max_error_ratio<0.0f ||
+                    !std::isfinite(detail_prune_ratio) ||
+                    detail_prune_ratio<0.0f ||
+                    detail_prune_ratio>0.25f)))return {};
 
     std::vector<face> faces;
     std::vector<lod_point> points;
@@ -282,8 +398,15 @@ inline std::shared_ptr<gpu_3do_geometry const> generate_gpu_3do_auto_lod(
     }
     group_begins.push_back(faces.size());
     if(faces.empty() || points.empty())return {};
-
+    // LOD1 removes only half as large detail islands as LOD2. Both are
+    // explicit opt-in; 0.0 preserves the previous quality-mode output.
+    if(quality && detail_prune_ratio>0.0f)
+        qem_prune_small_components(
+            faces,points,double(detail_prune_ratio)*
+                (level==1U?0.5:1.0),prune_stats);
     size_t remaining=faces.size();
+    if(quality && detail_prune_ratio>0.0f)
+        for(auto const &f:faces)if(!f.live)--remaining;
     size_t const target=faces.size()/(level==1U?2U:4U);
     // QEM errors have squared world-space units. Keep ORIGINAL face-plane
     // quadrics accumulated across passes in quality mode, avoiding drift.

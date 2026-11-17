@@ -51,6 +51,7 @@
     "gpu_3do_auto_lod_debug_mode": 0,
     "gpu_3do_auto_lod_generation_budget": 1,
     "gpu_3do_auto_lod_simplifier_mode": 0,
+    "gpu_3do_auto_lod_detail_prune_ratio": 0.0,
     "gpu_3do_auto_lod_lod1_max_error_ratio": 0.01,
     "gpu_3do_auto_lod_lod2_max_error_ratio": 0.03,
     "experimental_3do_occlusion_culling": false,

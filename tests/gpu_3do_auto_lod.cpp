@@ -274,6 +274,56 @@ int main() {
     single.indices.resize(3U);
     single.groups[0].count=3U;
     assert(!generate_gpu_3do_auto_lod(single,1U));
+    // Tiny decorative islands can be pruned even when every one of their
+    // individual boundary edges is protected by quality-mode topology.
+    // Keep native source untouched and ensure the original material range
+    // containing the badge is omitted only when pruning is enabled.
+    auto badge_car=grid(18U);
+    gpu_3do_group badge_group=badge_car.groups[0];
+    badge_group.material=0xBADD;
+    badge_group.offset=static_cast<uint32_t>(badge_car.indices.size());
+    badge_group.count=0U;
+    for(unsigned y=0;y<4U;++y)for(unsigned x=0;x<4U;++x) {
+        float const x0=5.27f+float(x)*0.04f;
+        float const y0=5.37f+float(y)*0.04f;
+        float const x1=x0+0.04f,y1=y0+0.04f;
+        float const p[4][2]={{x0,y0},{x1,y0},{x1,y1},{x0,y1}};
+        for(auto const &t:{std::array<int,3>{{0,1,2}},
+                           std::array<int,3>{{0,2,3}}})for(int k:t) {
+            gpu_3do_vertex v{};
+            v.x=p[k][0];v.y=p[k][1];v.z=0.02f;
+            v.u=p[k][0];v.v=p[k][1];v.nz=v.lnz=1.0f;
+            v.cr=v.cg=v.cb=1.0f;
+            badge_car.indices.push_back(uint32_t(badge_car.vertices.size()));
+            badge_car.vertices.push_back(v);
+            ++badge_group.count;
+        }
+    }
+    badge_car.groups.push_back(badge_group);
+    auto contains_badge=[](gpu_3do_geometry const &mesh) {
+        for(auto const &g:mesh.groups)if(g.material==0xBADD)return true;
+        return false;
+    };
+    gpu_3do_auto_lod_prune_stats no_prune_stats{},prune_stats{};
+    auto unpruned=generate_gpu_3do_auto_lod(
+        badge_car,2U,1,0.03f,0.0f,&no_prune_stats);
+    assert(unpruned && contains_badge(*unpruned));
+    auto pruned=generate_gpu_3do_auto_lod(
+        badge_car,2U,1,0.03f,0.02f,&prune_stats);
+    assert(pruned && !contains_badge(*pruned));
+    assert(prune_stats.components==2U);
+    assert(prune_stats.removed_components==1U);
+    assert(prune_stats.removed_triangles==32U);
+    assert(badge_car.groups.size()==2U); // source unchanged
+    assert(badge_car.indices.size()==18U*18U*6U+32U*3U);
+    // A low-poly single-component object must not be discarded just for
+    // being small in absolute terms.
+    gpu_3do_auto_lod_prune_stats single_stats{};
+    (void)generate_gpu_3do_auto_lod(
+        grid(1U),2U,1,0.03f,0.25f,&single_stats);
+    assert(single_stats.components==1U);
+    assert(single_stats.removed_components==0U);
+
     // Entirely transparent groups reduce too.
     auto alpha=grid(18U);
     alpha.groups[0].face_type=2U;

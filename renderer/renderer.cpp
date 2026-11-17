@@ -3999,12 +3999,15 @@ namespace jkgm {
                     auto const cpu_started=the_config->profile_renderer
                         ?std::chrono::steady_clock::now()
                         :std::chrono::steady_clock::time_point{};
+                    gpu_3do_auto_lod_prune_stats prune_stats{};
                     entry.levels[index]=generate_gpu_3do_auto_lod(
                         *entry.source,level,
                         the_config->gpu_3do_auto_lod_simplifier_mode,
                         level==1U
                             ?the_config->gpu_3do_auto_lod_lod1_max_error_ratio
-                            :the_config->gpu_3do_auto_lod_lod2_max_error_ratio);
+                            :the_config->gpu_3do_auto_lod_lod2_max_error_ratio,
+                        the_config->gpu_3do_auto_lod_detail_prune_ratio,
+                        the_config->profile_renderer?&prune_stats:nullptr);
                     uint64_t cpu_ns=0U;
                     if(the_config->profile_renderer) {
                         cpu_ns=static_cast<uint64_t>(
@@ -4021,6 +4024,9 @@ namespace jkgm {
                                  " triangles=",
                                  entry.source->indices.size()/3U,
                                  " groups=",entry.source->groups.size(),
+                                 " components=",prune_stats.components,
+                                 " detail_components_pruned=",prune_stats.removed_components,
+                                 " detail_triangles_pruned=",prune_stats.removed_triangles,
                                  " cpu_generation_us=",cpu_ns/1000U,
                                  " reason=no_nonempty_reduction");
                     }
@@ -4043,6 +4049,9 @@ namespace jkgm {
                                      entry.levels[index]->indices.size()/3U,
                                      " groups_source=",entry.source->groups.size(),
                                      " groups_reduced=",entry.levels[index]->groups.size(),
+                                     " components=",prune_stats.components,
+                                     " detail_components_pruned=",prune_stats.removed_components,
+                                     " detail_triangles_pruned=",prune_stats.removed_triangles,
                                      " screen_radius_px=",pixel_radius,
                                      " cpu_generation_us=",cpu_ns/1000U);
                         }
@@ -4061,6 +4070,8 @@ namespace jkgm {
                          " lod1=",selected[1]," lod2=",selected[2],
                          " debug_mode=",the_config->gpu_3do_auto_lod_debug_mode,
                          " simplifier_mode=",the_config->gpu_3do_auto_lod_simplifier_mode,
+                         " detail_prune_ratio=",std::to_string(
+                             the_config->gpu_3do_auto_lod_detail_prune_ratio),
                          " lod1_error_ratio=",std::to_string(
                              the_config->gpu_3do_auto_lod_lod1_max_error_ratio),
                          " lod2_error_ratio=",std::to_string(
