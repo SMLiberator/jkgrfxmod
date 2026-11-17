@@ -1,29 +1,35 @@
-        // Experimental nearest-owner reflection probe: one 160-degree
-        // perspective view for hemi, or six independent 90-degree cube
-        // views for full-sphere coverage. Missing pixels use authored EnvMap.
+
+        // Multiple independently retained GPU reflection probes. Owners are
+        // selected from main-camera 3DOs, sorted nearest first, then capped to
+        // limit memory and six-face capture cost. Each owner retains its
+        // previous image between refreshes; no sharing of another car's map.
         void render_hemi_capture()
         {
-            hemi_capture_ready=false;
-            hemi_capture_owner=0U;
-            hemi_capture_mode=0;
             if((!the_config->experimental_hemi_reflection_capture &&
                 !the_config->experimental_cube_reflection_capture) ||
                !the_config->enable_reflections || !the_config->use_gpu_cache ||
                mode!=renderer_mode::ingame || !ogs ||
                !world_cache_target || !world_cache_target->ready ||
                !frame_world_cache_camera.valid ||
-               !frame_world_cache_camera.perspective)return;
-            // Extended fragment units are needed only with the new mode.
-            // Fail open to the ordinary EnvMap on older GL 3.3 drivers.
+               !frame_world_cache_camera.perspective) {
+                reflection_probes.clear();
+                return;
+            }
             static GLint fragment_units=0;
             if(fragment_units==0)
                 glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);
-            if(fragment_units<=23)return;
+            if(fragment_units<=23) {
+                reflection_probes.clear();
+                return;
+            }
             auto const &viewer=frame_world_cache_camera.camera;
-            std::array<float,3> focus{};
-            uint64_t selected_owner=0;
-            int selected_mode=0;
-            float best=std::numeric_limits<float>::infinity();
+            struct candidate {
+                uint64_t owner=0U;
+                int mode=0;
+                std::array<float,3> position{};
+                float distance2=0.0f;
+            };
+            std::vector<candidate> candidates;
             std::unordered_set<uint64_t> visited;
             std::map<std::pair<uintptr_t,int32_t>,gpu_3do_texture> mats;
             for(auto const &instance:frame_gpu_3do_instances) {
@@ -46,67 +52,103 @@
                         (reflection_mode==6 &&
                          the_config->experimental_cube_reflection_capture)) &&
                         it->second.reflection_strength>0.0f) {
-                        candidate_mode=reflection_mode;break;
+                        candidate_mode=reflection_mode;
+                        break;
                     }
                 }
                 if(!candidate_mode)continue;
                 visited.insert(instance.shadow_owner);
-                float d2=0.0f;
+                candidate item{};
+                item.owner=instance.shadow_owner;
+                item.mode=candidate_mode;
+                item.position=instance.owning_thing_world_position;
                 for(unsigned a=0;a<3;++a) {
-                    float const d=instance.owning_thing_world_position[a]-
-                                  viewer.position[a];
-                    d2+=d*d;
+                    float const delta=item.position[a]-viewer.position[a];
+                    item.distance2+=delta*delta;
                 }
-                if(d2<best) {
-                    best=d2;
-                    focus=instance.owning_thing_world_position;
-                    selected_owner=instance.shadow_owner;
-                    selected_mode=candidate_mode;
-                }
+                candidates.push_back(item);
             }
-            if(!selected_owner)return;
-            bool const cube_mode=selected_mode==6;
-            int const face_count=cube_mode?6:1;
-            auto const far_plane=std::min(
-                frame_world_cache_camera.far_plane,96.0f);
-            if(!(std::isfinite(far_plane)&&far_plane>0.1f))return;
-            int const shorter=std::min(get<x>(internal_scr_res),
-                                       get<y>(internal_scr_res));
-            float const scale=cube_mode
-                ?the_config->cube_reflection_resolution_scale
-                :the_config->hemi_reflection_resolution_scale;
-            int const side=std::max(32,int(std::ceil(float(shorter)*scale)));
-            if(!hemi_capture_target)
-                hemi_capture_target=
-                    std::make_unique<reflection_probe_capture_target>();
-            if(!hemi_capture_target->ensure(side,face_count))return;
+            std::sort(candidates.begin(),candidates.end(),
+                [](candidate const &a,candidate const &b) {
+                    if(a.distance2!=b.distance2)
+                        return a.distance2<b.distance2;
+                    return a.owner<b.owner;
+                });
+            if(candidates.size()>the_config->reflection_probe_max_owners)
+                candidates.resize(the_config->reflection_probe_max_owners);
+            std::unordered_set<uint64_t> active_owners;
+            for(auto const &c:candidates)active_owners.insert(c.owner);
+            // Free targets belonging to missing/non-selected owners, including
+            // destroyed Things; the cached images cannot leak across worlds.
+            for(auto it=reflection_probes.begin();it!=reflection_probes.end();) {
+                if(active_owners.count(it->first)==0U)
+                    it=reflection_probes.erase(it);
+                else ++it;
+            }
+            if(candidates.empty())return;
             if(!hemi_capture_program)
                 hemi_capture_program=
                     std::make_unique<planar_reflection_capture_shader>(
                         the_config->data_path);
             auto &shader=*hemi_capture_program;
-            size_t total_world_drawn=0,total_model_drawn=0;
-            size_t total_acquired_nodes=0;
-            engine_camera first_camera{};
-            for(int face=0;face<face_count;++face) {
-                auto const camera=cube_mode
-                    ?make_cube_reflection_camera(focus,unsigned(face))
-                    :make_hemi_reflection_camera(focus,viewer,160.0f);
-                if(!camera.valid)return;
-                if(face==0)first_camera=camera;
-                auto const view=planar_camera_native_view(camera);
-                auto const projection=make_offscreen_capture_projection(
-                    side,side,camera.fov,0.0f,far_plane);
-                if(!projection.valid)return;
-                gpu_3do_native_frustum frustum=
-                    frame_world_cache_camera.frustum;
-                frustum.clip_far=1;
-                frustum.near_plane=0.01f;
-                frustum.far_plane=far_plane;
-                frustum.far_left=-projection.half_horizontal;
-                frustum.right=projection.half_horizontal;
-                frustum.far_top=projection.half_horizontal;
-                frustum.bottom=-projection.half_horizontal;
+            auto const now=std::chrono::steady_clock::now();
+            for(auto const &candidate:candidates) {
+                uint64_t const selected_owner=candidate.owner;
+                int const selected_mode=candidate.mode;
+                auto const &focus=candidate.position;
+                bool const cube_mode=selected_mode==6;
+                int const face_count=cube_mode?6:1;
+                auto const far_plane=std::min(
+                    frame_world_cache_camera.far_plane,96.0f);
+                if(!(std::isfinite(far_plane)&&far_plane>0.1f))continue;
+                int const shorter=std::min(get<x>(internal_scr_res),
+                                           get<y>(internal_scr_res));
+                float const scale=cube_mode
+                    ?the_config->cube_reflection_resolution_scale
+                    :the_config->hemi_reflection_resolution_scale;
+                int const side=std::max(32,int(std::ceil(float(shorter)*scale)));
+                auto &entry=reflection_probes[selected_owner];
+                entry.seen_frame=gpu_3do_present_serial;
+                bool const needs_reconfigure=entry.mode!=selected_mode ||
+                    !entry.target || !entry.target->ready() ||
+                    entry.target->width()!=side ||
+                    entry.target->layers()!=face_count;
+                float const interval=cube_mode
+                    ?the_config->cube_reflection_update_interval:0.0f;
+                if(entry.ready && !needs_reconfigure && interval>0.0f &&
+                   std::chrono::duration<float>(
+                       now-entry.last_refresh).count()<interval)
+                    continue; // Reuse this Thing's complete previous probe.
+                entry.ready=false;
+                entry.mode=selected_mode;
+                if(!entry.target)
+                    entry.target=
+                        std::make_unique<reflection_probe_capture_target>();
+                auto *probe_target=entry.target.get();
+                if(!probe_target->ensure(side,face_count))continue;
+                size_t total_world_drawn=0,total_model_drawn=0;
+                size_t total_acquired_nodes=0;
+                engine_camera first_camera{};
+                bool all_faces_ready=true;
+                for(int face=0;face<face_count;++face) {
+                    auto const camera=cube_mode
+                        ?make_cube_reflection_camera(focus,unsigned(face))
+                        :make_hemi_reflection_camera(focus,viewer,160.0f);
+                    if(!camera.valid) {all_faces_ready=false;break;}
+                    if(face==0)first_camera=camera;
+                    auto const view=planar_camera_native_view(camera);
+                    auto const projection=make_offscreen_capture_projection(
+                        side,side,camera.fov,0.0f,far_plane);
+                    if(!projection.valid) {all_faces_ready=false;break;}
+                    gpu_3do_native_frustum frustum=
+                        frame_world_cache_camera.frustum;
+                    frustum.clip_far=1;
+                    frustum.near_plane=0.01f;
+                    frustum.far_plane=far_plane;
+                    frustum.far_left=-projection.half_horizontal;
+                    frustum.right=projection.half_horizontal;
+                    frustum.far_top=projection.half_horizontal;
+                    frustum.bottom=-projection.half_horizontal;
             // Independent model discovery allows the probe to see animated
             // Things outside the primary camera. The reflecting Thing itself
             // must not be captured from the inside.
@@ -149,8 +191,8 @@
             for(auto const &inst:offscreen.nodes)
                 if(inst.shadow_owner)acquired.insert(inst.shadow_owner);
             offscreen_capture_gl_scope restore;
-            glBindFramebuffer(GL_FRAMEBUFFER,hemi_capture_target->framebuffer());
-            if(!hemi_capture_target->select_layer(face))return;
+            glBindFramebuffer(GL_FRAMEBUFFER,probe_target->framebuffer());
+            if(!probe_target->select_layer(face)) {all_faces_ready=false;break;}
             glViewport(0,0,side,side);
             glDisable(GL_BLEND);
             glDisable(GL_SCISSOR_TEST);
@@ -321,13 +363,14 @@
             GLint previous_array=0;
             glGetIntegerv(GL_TEXTURE_BINDING_2D_ARRAY,&previous_array);
             glBindTexture(GL_TEXTURE_2D_ARRAY,
-                          hemi_capture_target->color_texture());
+                          probe_target->color_texture());
             glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
             glBindTexture(GL_TEXTURE_2D_ARRAY,GLuint(previous_array));
-            hemi_capture_camera=first_camera;
-            hemi_capture_owner=selected_owner;
-            hemi_capture_mode=selected_mode;
-            hemi_capture_ready=true;
+            if(!all_faces_ready)continue;
+            entry.camera=first_camera;
+            entry.mode=selected_mode;
+            entry.ready=true;
+            entry.last_refresh=now;
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
                 LOG_INFO(cube_mode?"CUBE capture owner=":"HEMI capture owner=",
                          selected_owner,
@@ -335,6 +378,8 @@
                          " fov=",first_camera.fov,
                          " world_faces=",total_world_drawn,
                          " model_groups=",total_model_drawn,
-                         " acquired_nodes=",total_acquired_nodes);
+                         " acquired_nodes=",total_acquired_nodes,
+                         " cached_owners=",reflection_probes.size());
+            } // Each owner receives its own independently retained probe.
         }
 
