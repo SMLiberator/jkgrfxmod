@@ -667,6 +667,13 @@ namespace jkgm {
         std::unique_ptr<ssr_world_receiver_shader> ssr_receiver_program;
         std::unique_ptr<ssr_trace_shader> ssr_trace_program;
         bool ssr_ready=false;
+        // Opaque cached-world and GPU 3DO SSR compositing, staged separately
+        // from the existing transparent-world SSR receiver capture.
+        std::unique_ptr<offscreen_capture_target> ssr_opaque_receivers,ssr_opaque_image;
+        std::unique_ptr<ssr_opaque_receiver_shader> ssr_opaque_world_program;
+        std::unique_ptr<ssr_opaque_receiver_shader> ssr_opaque_model_program;
+        std::unique_ptr<ssr_opaque_composite_shader> ssr_opaque_composite_program;
+        bool ssr_opaque_ready=false;
         std::unique_ptr<planar_reflection_capture_shader> planar_capture_program;
         // Depth-tested receiver pixels from last frame's main opaque 3DO pass.
         // Query answers are asynchronous; never stall the driver to read them.
@@ -1473,6 +1480,11 @@ namespace jkgm {
                 ssr_trace_program.reset();
                 ssr_receivers.reset();
                 ssr_image.reset();
+                ssr_opaque_world_program.reset();
+                ssr_opaque_model_program.reset();
+                ssr_opaque_composite_program.reset();
+                ssr_opaque_receivers.reset();
+                ssr_opaque_image.reset();
                 planar_receiver_program.reset();
                 planar_receiver_queries.reset();
                 thing_occlusion_program.reset();
@@ -1508,6 +1520,7 @@ namespace jkgm {
                 hud_previous_source.clear();
                 planar_capture_ready=false;
                 ssr_ready=false;
+                ssr_opaque_ready=false;
                 if(planar_receiver_queries)planar_receiver_queries->invalidate();
                 if(thing_occlusion_queries)thing_occlusion_queries->invalidate();
                 get_native_occlusion_bridge().clear();
@@ -10026,6 +10039,7 @@ namespace jkgm {
         void draw_game_gbuffer_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
         {
             ssr_ready=false; // old frame's result is never sampled by G-buffer
+            ssr_opaque_ready=false;
             frame_screen->begin_opaque_pass();
             draw_game_opaque_into_gbuffer(trimdl, posterize_lighting);
             frame_screen->end_opaque_pass();
@@ -10040,6 +10054,7 @@ namespace jkgm {
             frame_screen->end_compose_opaque_pass();
             // Same-frame opaque color/depth is now safe to sample.
             render_world_screen_reflections();
+            render_opaque_screen_reflections();
         }
 
         // One MAT binder shared by opaque and transparent world geometry.
@@ -11044,6 +11059,7 @@ namespace jkgm {
         // This uses the *opaque pass's* vertex lighting and UV upload:
         // never sample mutable JK native pointers after stage_world_cache().
 #include "screen_space_reflections_renderer.inc"
+#include "screen_space_reflections_opaque.inc"
         void draw_world_cache_transparency()
         {
             if(!the_config->use_gpu_cache ||
