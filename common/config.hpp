@@ -79,6 +79,9 @@ namespace jkgm {
         float gpu_3do_auto_lod_lod2_radius_px = 28.0f; // enter generated LOD2 below this projected radius
         int gpu_3do_auto_lod_debug_mode = 0; // 0=screen-size auto; 1=force original; 2=force LOD1; 3=force LOD2
         int gpu_3do_auto_lod_generation_budget = 1; // 0 = unlimited CPU generation attempts per frame
+        int gpu_3do_auto_lod_simplifier_mode = 0; // 0=aggressive, 1=silhouette-aware QEM
+        float gpu_3do_auto_lod_lod1_max_error_ratio = 0.01f; // local mesh bounds diagonal
+        float gpu_3do_auto_lod_lod2_max_error_ratio = 0.03f; // local mesh bounds diagonal
         bool experimental_3do_occlusion_culling = false; // async main camera GPU Thing submission
         bool experimental_3do_native_occlusion_culling = false; // early rdModel3_Draw skip using completed GPU Thing queries
         int gpu_3do_occlusion_proxy_mode = 0; // 0=box; 1=nearest sphere depth; 2=center sphere depth (self-occlusion experiment)

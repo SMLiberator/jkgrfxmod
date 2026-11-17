@@ -420,6 +420,35 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                     "gpu_3do_auto_lod_generation_budget cannot be negative");
             rv->gpu_3do_auto_lod_generation_budget=n;
         }
+        if(j.contains("gpu_3do_auto_lod_simplifier_mode")) {
+            auto const &v=j.at("gpu_3do_auto_lod_simplifier_mode");
+            if(!v.is_number_integer())throw std::runtime_error(
+                "gpu_3do_auto_lod_simplifier_mode must be integer 0..1");
+            int const n=v.get<int>();
+            if(n<0||n>1)throw std::runtime_error(
+                "gpu_3do_auto_lod_simplifier_mode must be between 0 and 1");
+            rv->gpu_3do_auto_lod_simplifier_mode=n;
+        }
+        if(j.contains("gpu_3do_auto_lod_lod1_max_error_ratio")) {
+            auto const &v=j.at("gpu_3do_auto_lod_lod1_max_error_ratio");
+            if(!v.is_number())throw std::runtime_error(
+                "gpu_3do_auto_lod_lod1_max_error_ratio must be a number");
+            rv->gpu_3do_auto_lod_lod1_max_error_ratio=v.get<float>();
+        }
+        if(j.contains("gpu_3do_auto_lod_lod2_max_error_ratio")) {
+            auto const &v=j.at("gpu_3do_auto_lod_lod2_max_error_ratio");
+            if(!v.is_number())throw std::runtime_error(
+                "gpu_3do_auto_lod_lod2_max_error_ratio must be a number");
+            rv->gpu_3do_auto_lod_lod2_max_error_ratio=v.get<float>();
+        }
+        if(!std::isfinite(rv->gpu_3do_auto_lod_lod1_max_error_ratio)||
+           !std::isfinite(rv->gpu_3do_auto_lod_lod2_max_error_ratio)||
+           rv->gpu_3do_auto_lod_lod1_max_error_ratio<0.0f||
+           rv->gpu_3do_auto_lod_lod2_max_error_ratio<0.0f||
+           rv->gpu_3do_auto_lod_lod1_max_error_ratio>0.5f||
+           rv->gpu_3do_auto_lod_lod2_max_error_ratio>0.5f)
+            throw std::runtime_error(
+                "Auto 3DO LOD error ratios must be finite and between 0 and 0.5");
         if(j.contains("experimental_planar_thing_discovery")) {
             j.at("experimental_planar_thing_discovery").get_to(
                 rv->experimental_planar_thing_discovery);

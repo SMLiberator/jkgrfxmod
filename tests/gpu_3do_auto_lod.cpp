@@ -123,6 +123,36 @@ int main() {
     assert(select_gpu_3do_auto_lod(0.0f,0U,90.0f,28.0f,3)==2U);
     assert(select_gpu_3do_auto_lod(NAN,0U,90.0f,28.0f,2)==1U);
     auto source=grid(18U);
+    // Quality mode reduces flat interiors while keeping the entire original
+    // open silhouette intact, including all perimeter grid vertices.
+    auto quality1=generate_gpu_3do_auto_lod(source,1U,1,0.01f);
+    auto quality2=generate_gpu_3do_auto_lod(source,2U,1,0.03f);
+    assert(quality1 && quality2);
+    assert(quality1->indices.size()<source.indices.size());
+    assert(quality2->indices.size()<=quality1->indices.size());
+    auto has_vertex=[](gpu_3do_geometry const &mesh,float x,float y) {
+        for(auto const &v:mesh.vertices)
+            if(v.x==x && v.y==y && v.z==0.0f)return true;
+        return false;
+    };
+    for(unsigned i=0;i<=18U;++i)
+        for(auto const &mesh:{quality1,quality2}) {
+            assert(has_vertex(*mesh,float(i),0.0f));
+            assert(has_vertex(*mesh,float(i),18.0f));
+            assert(has_vertex(*mesh,0.0f,float(i)));
+            assert(has_vertex(*mesh,18.0f,float(i)));
+        }
+    for(auto const &mesh:{quality1,quality2})
+        for(size_t i=0;i<mesh->indices.size();i+=3U) {
+            auto const &a=mesh->vertices[mesh->indices[i]];
+            auto const &b=mesh->vertices[mesh->indices[i+1U]];
+            auto const &c=mesh->vertices[mesh->indices[i+2U]];
+            assert((b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x)>0.0f);
+        }
+    // A single two-triangle outline must remain intact in quality mode.
+    auto square=grid(1U);
+    assert(!generate_gpu_3do_auto_lod(square,1U,1,0.03f));
+    assert(!generate_gpu_3do_auto_lod(source,1U,1,-1.0f));
     assert(!generate_gpu_3do_auto_lod(source,0U));
     assert(!generate_gpu_3do_auto_lod(source,3U));
     auto one=generate_gpu_3do_auto_lod(source,1U);

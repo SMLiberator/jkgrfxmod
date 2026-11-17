@@ -4000,7 +4000,11 @@ namespace jkgm {
                         ?std::chrono::steady_clock::now()
                         :std::chrono::steady_clock::time_point{};
                     entry.levels[index]=generate_gpu_3do_auto_lod(
-                        *entry.source,level);
+                        *entry.source,level,
+                        the_config->gpu_3do_auto_lod_simplifier_mode,
+                        level==1U
+                            ?the_config->gpu_3do_auto_lod_lod1_max_error_ratio
+                            :the_config->gpu_3do_auto_lod_lod2_max_error_ratio);
                     uint64_t cpu_ns=0U;
                     if(the_config->profile_renderer) {
                         cpu_ns=static_cast<uint64_t>(
@@ -4012,6 +4016,8 @@ namespace jkgm {
                        the_config->profile_renderer) {
                         LOG_INFO("AUTO 3DO LOD unreduced source=",source_id,
                                  " level=",level,
+                                 " simplifier_mode=",
+                                 the_config->gpu_3do_auto_lod_simplifier_mode,
                                  " triangles=",
                                  entry.source->indices.size()/3U,
                                  " groups=",entry.source->groups.size(),
@@ -4029,6 +4035,8 @@ namespace jkgm {
                         if(the_config->profile_renderer) {
                             LOG_INFO("AUTO 3DO LOD generated source=",source_id,
                                      " level=",level,
+                                     " simplifier_mode=",
+                                     the_config->gpu_3do_auto_lod_simplifier_mode,
                                      " triangles_native=",
                                      entry.source->indices.size()/3U,
                                      " triangles_generated=",
@@ -4052,6 +4060,11 @@ namespace jkgm {
                 LOG_INFO("AUTO 3DO LOD main-camera base=",selected[0],
                          " lod1=",selected[1]," lod2=",selected[2],
                          " debug_mode=",the_config->gpu_3do_auto_lod_debug_mode,
+                         " simplifier_mode=",the_config->gpu_3do_auto_lod_simplifier_mode,
+                         " lod1_error_ratio=",std::to_string(
+                             the_config->gpu_3do_auto_lod_lod1_max_error_ratio),
+                         " lod2_error_ratio=",std::to_string(
+                             the_config->gpu_3do_auto_lod_lod2_max_error_ratio),
                          " lod1_radius_px=",the_config->gpu_3do_auto_lod_lod1_radius_px,
                          " lod2_radius_px=",the_config->gpu_3do_auto_lod_lod2_radius_px,
                          " cpu_variants=",auto_3do_lod_cache.size(),
