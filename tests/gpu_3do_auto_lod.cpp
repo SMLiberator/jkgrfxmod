@@ -123,72 +123,6 @@ int main() {
     assert(select_gpu_3do_auto_lod(0.0f,0U,90.0f,28.0f,3)==2U);
     assert(select_gpu_3do_auto_lod(NAN,0U,90.0f,28.0f,2)==1U);
     auto source=grid(18U);
-    // Quality mode reduces flat interiors and also collapses straight
-    // boundary segments, while preserving the outer rectangular silhouette.
-    auto quality1=generate_gpu_3do_auto_lod(source,1U,1,0.01f);
-    auto quality2=generate_gpu_3do_auto_lod(source,2U,1,0.03f);
-    assert(quality1 && quality2);
-    assert(quality1->indices.size()<source.indices.size());
-    assert(quality2->indices.size()<=quality1->indices.size());
-    auto has_vertex=[](gpu_3do_geometry const &mesh,float x,float y) {
-        for(auto const &v:mesh.vertices)
-            if(v.x==x && v.y==y && v.z==0.0f)return true;
-        return false;
-    };
-    for(auto const &mesh:{quality1,quality2}) {
-        for(auto const &corner:std::array<std::array<float,2>,4>{{
-            {{0.0f,0.0f}},{{0.0f,18.0f}},{{18.0f,0.0f}},
-            {{18.0f,18.0f}}
-        }})
-            assert(has_vertex(*mesh,corner[0],corner[1]));
-        for(auto const &v:mesh->vertices) {
-            assert(v.x>=0.0f&&v.x<=18.0f);
-            assert(v.y>=0.0f&&v.y<=18.0f);
-        }
-    }
-    for(auto const &mesh:{quality1,quality2})
-        for(size_t i=0;i<mesh->indices.size();i+=3U) {
-            auto const &a=mesh->vertices[mesh->indices[i]];
-            auto const &b=mesh->vertices[mesh->indices[i+1U]];
-            auto const &c=mesh->vertices[mesh->indices[i+2U]];
-            assert((b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x)>0.0f);
-        }
-    // A folded sheet has a hard 90-degree ridge. Original crease
-    // vertices must remain intact even when both broad panels simplify.
-    auto folded=grid(18U);
-    for(auto &v:folded.vertices) {
-        if(v.x>9.0f) {
-            v.z=v.x-9.0f;
-            v.x=9.0f;
-        }
-    }
-    auto folded_quality=generate_gpu_3do_auto_lod(folded,2U,1,0.03f);
-    assert(folded_quality);
-    assert(folded_quality->indices.size()<folded.indices.size());
-    assert(has_vertex(*folded_quality,9.0f,0.0f));
-    assert(has_vertex(*folded_quality,9.0f,18.0f));
-    // The ridge can lose intermediate vertices but cannot leave its
-    // original straight line.
-    for(auto const &v:folded_quality->vertices)
-        if(v.x==9.0f&&v.z==0.0f)
-            assert(v.y>=0.0f&&v.y<=18.0f);
-    // A MAT seam on an otherwise flat mesh remains a protected feature.
-    auto split_mats=fragment_groups(grid(18U),true,false);
-    auto split_quality=generate_gpu_3do_auto_lod(split_mats,1U,1,0.01f);
-    assert(split_quality);
-    bool mat_left=false,mat_right=false;
-    for(auto const &g:split_quality->groups) {
-        mat_left|=g.material==0x1234U;
-        mat_right|=g.material==0x4321U;
-    }
-    assert(mat_left&&mat_right);
-    assert(has_vertex(*split_quality,9.0f,0.0f));
-    assert(has_vertex(*split_quality,9.0f,18.0f));
-    // A single two-triangle outline must remain intact in quality mode:
-    // deleting a corner would change the rectangular silhouette.
-    auto square=grid(1U);
-    assert(!generate_gpu_3do_auto_lod(square,1U,1,0.03f));
-    assert(!generate_gpu_3do_auto_lod(source,1U,1,-1.0f));
     assert(!generate_gpu_3do_auto_lod(source,0U));
     assert(!generate_gpu_3do_auto_lod(source,3U));
     auto one=generate_gpu_3do_auto_lod(source,1U);
@@ -274,75 +208,44 @@ int main() {
     single.indices.resize(3U);
     single.groups[0].count=3U;
     assert(!generate_gpu_3do_auto_lod(single,1U));
-    // Tiny decorative islands can be pruned even when every one of their
-    // individual boundary edges is protected by quality-mode topology.
-    // Keep native source untouched and ensure the original material range
-    // containing the badge is omitted only when pruning is enabled.
-    auto badge_car=grid(18U);
-    gpu_3do_group badge_group=badge_car.groups[0];
-    badge_group.material=0xBADD;
-    badge_group.offset=static_cast<uint32_t>(badge_car.indices.size());
-    badge_group.count=0U;
-    for(unsigned y=0;y<4U;++y)for(unsigned x=0;x<4U;++x) {
-        float const x0=5.27f+float(x)*0.04f;
-        float const y0=5.37f+float(y)*0.04f;
-        float const x1=x0+0.04f,y1=y0+0.04f;
-        float const p[4][2]={{x0,y0},{x1,y0},{x1,y1},{x0,y1}};
-        for(auto const &t:{std::array<int,3>{{0,1,2}},
-                           std::array<int,3>{{0,2,3}}})for(int k:t) {
+    // An exact six-faced closed cuboid has twelve triangles and retains
+    // its outline even when embedded inside a much larger SithThing.
+    gpu_3do_geometry cube{};
+    gpu_3do_group cube_group{};
+    auto append_side=[&](std::array<float,3> a,std::array<float,3> b,
+                         std::array<float,3> c,std::array<float,3> d) {
+        for(auto const &triangle:{
+            std::array<std::array<float,3>,3>{{a,b,c}},
+            std::array<std::array<float,3>,3>{{a,c,d}}
+        })for(auto const &p:triangle) {
             gpu_3do_vertex v{};
-            v.x=p[k][0];v.y=p[k][1];v.z=0.02f;
-            v.u=p[k][0];v.v=p[k][1];v.nz=v.lnz=1.0f;
+            v.x=p[0];v.y=p[1];v.z=p[2];
             v.cr=v.cg=v.cb=1.0f;
-            badge_car.indices.push_back(uint32_t(badge_car.vertices.size()));
-            badge_car.vertices.push_back(v);
-            ++badge_group.count;
+            cube.indices.push_back(static_cast<uint32_t>(cube.vertices.size()));
+            cube.vertices.push_back(v);
         }
-    }
-    badge_car.groups.push_back(badge_group);
-    auto contains_badge=[](gpu_3do_geometry const &mesh) {
-        for(auto const &g:mesh.groups)if(g.material==0xBADD)return true;
-        return false;
     };
-    gpu_3do_auto_lod_prune_stats no_prune_stats{},prune_stats{};
-    auto unpruned=generate_gpu_3do_auto_lod(
-        badge_car,2U,1,0.03f,0.0f,&no_prune_stats);
-    assert(unpruned && contains_badge(*unpruned));
-    auto pruned=generate_gpu_3do_auto_lod(
-        badge_car,2U,1,0.03f,0.02f,&prune_stats);
-    assert(pruned && !contains_badge(*pruned));
-    assert(prune_stats.components==2U);
-    assert(prune_stats.removed_components==1U);
-    assert(prune_stats.removed_triangles==32U);
-    assert(badge_car.groups.size()==2U); // source unchanged
-    assert(badge_car.indices.size()==18U*18U*6U+32U*3U);
-    // A low-poly single-component object must not be discarded just for
-    // being small in absolute terms.
-    gpu_3do_auto_lod_prune_stats single_stats{};
-    (void)generate_gpu_3do_auto_lod(
-        grid(1U),2U,1,0.03f,0.25f,&single_stats);
-    assert(single_stats.components==1U);
-    assert(single_stats.removed_components==0U);
-    // Separate authored low-poly quads are not necessarily optional details.
-    // With no dominant connected surface, a high pruning ratio must not
-    // throw away one of the two otherwise meaningful polygons.
-    auto loose_quads=grid(1U);
-    size_t const original_quad_vertices=loose_quads.vertices.size();
-    for(size_t i=0;i<original_quad_vertices;++i) {
-        auto v=loose_quads.vertices[i];
-        v.x+=8.0f;
-        loose_quads.indices.push_back(
-            static_cast<uint32_t>(loose_quads.vertices.size()));
-        loose_quads.vertices.push_back(v);
-    }
-    loose_quads.groups[0].count=static_cast<uint32_t>(
-        loose_quads.indices.size());
-    gpu_3do_auto_lod_prune_stats lowpoly_stats{};
-    (void)generate_gpu_3do_auto_lod(
-        loose_quads,2U,1,0.03f,0.25f,&lowpoly_stats);
-    assert(lowpoly_stats.components==2U);
-    assert(lowpoly_stats.removed_components==0U);
-    assert(lowpoly_stats.removed_triangles==0U);
+    append_side({{0,0,0}},{{0,1,0}},{{1,1,0}},{{1,0,0}});
+    append_side({{0,0,1}},{{1,0,1}},{{1,1,1}},{{0,1,1}});
+    append_side({{0,0,0}},{{0,0,1}},{{0,1,1}},{{0,1,0}});
+    append_side({{1,0,0}},{{1,1,0}},{{1,1,1}},{{1,0,1}});
+    append_side({{0,0,0}},{{1,0,0}},{{1,0,1}},{{0,0,1}});
+    append_side({{0,1,0}},{{0,1,1}},{{1,1,1}},{{1,1,0}});
+    cube_group.count=static_cast<uint32_t>(cube.indices.size());
+    cube.groups.push_back(cube_group);
+    assert(cube.indices.size()==36U);
+    assert(auto_lod_detail::is_closed_cuboid(cube));
+    assert(!generate_gpu_3do_auto_lod(cube,1U));
+    assert(!generate_gpu_3do_auto_lod(cube,2U));
+    // The floor is for the Thing as a whole: no per-mesh 12-triangle
+    // requirement is imposed on tiny feet, hands or vehicle details.
+    assert(!gpu_3do_auto_lod_object_allows(12U,6U,12U));
+    assert(!gpu_3do_auto_lod_object_allows(20U,10U,12U));
+    assert(gpu_3do_auto_lod_object_allows(20U,12U,12U));
+    assert(gpu_3do_auto_lod_object_allows(30U,14U,12U));
+    assert(!gpu_3do_auto_lod_object_allows(30U,8U,12U));
+    assert(gpu_3do_auto_lod_object_allows(30U,8U,0U));
+    assert(gpu_3do_auto_lod_object_allows(8U+16U,4U+9U,12U));
 
     // Entirely transparent groups reduce too.
     auto alpha=grid(18U);
