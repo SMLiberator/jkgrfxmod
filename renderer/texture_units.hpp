@@ -32,7 +32,7 @@ constexpr binding gpu_3do_preview[]={
     {"normal_map2",5,sampler_kind::tex2d},
     {"env_map",4,sampler_kind::tex2d},
     {"env_map2",7,sampler_kind::tex2d},
-    {"hemi_reflection_map",23,sampler_kind::tex2d},
+    {"hemi_reflection_map",23,sampler_kind::texture_array},
     {"sector_crossing_planes",19,sampler_kind::buffer},
     {"continuous_voxel_keys",21,sampler_kind::buffer},
     {"continuous_voxel_values",22,sampler_kind::buffer},
