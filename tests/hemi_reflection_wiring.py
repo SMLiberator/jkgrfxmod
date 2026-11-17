@@ -5,9 +5,9 @@ root=Path(__file__).resolve().parents[1]
 read=lambda p:(root/p).read_text(encoding="utf-8")
 settings=json.loads(read("assets/jkgm.json"))
 assert settings["experimental_hemi_reflection_capture"] is False
-assert settings["hemi_reflection_resolution_scale"]==0.25
+assert settings["reflection_capture_resolution"]==128
 assert settings["experimental_cube_reflection_capture"] is False
-assert settings["cube_reflection_resolution_scale"]==0.25
+assert settings["reflection_capture_update_interval"]==0.0
 mat=read("common/material.hpp")
 parser=read("common/material_map.cpp")
 config=read("common/config.cpp")
@@ -20,13 +20,13 @@ assert 'v == "hemi"' in parser
 assert 'v == "cube"' in parser
 assert "material_reflection_mode::cube" in parser
 assert "material_reflection_mode::hemi" in parser
-assert "0.125f" in config and "hemi_reflection_resolution_scale" in config
+assert "reflection_capture_resolution" in config
 assert "experimental_cube_reflection_capture" in config
-assert "cube_reflection_resolution_scale" in config
+assert "reflection_capture_update_interval" in config
 assert "reflection_probe_max_owners" in config
-assert "cube_reflection_update_interval" in config
+assert "reflection_capture_update_interval" in config
 assert settings["reflection_probe_max_owners"] == 4
-assert settings["cube_reflection_update_interval"] == 0.0
+assert settings["reflection_capture_update_interval"] == 0.0
 assert '#include "hemi_reflection_camera.hpp"' in renderer
 assert '#include "hemi_reflection_capture.inc"' in renderer
 assert "render_hemi_capture();" in renderer
@@ -48,6 +48,9 @@ assert "owner_probe->second.ready" in renderer
 assert "owner_probe->second.mode" in renderer
 assert "textureLod(hemi_reflection_map," in shader
 assert "make_cube_reflection_camera(" in capture
+assert "draw_reflection_capture_sky(shader,camera,view,frustum," in capture
+assert "the_config->reflection_capture_resolution*" in capture
+assert "the_config->reflection_capture_update_interval" in capture
 assert "glGenerateMipmap(GL_TEXTURE_2D_ARRAY)" in capture
 assert "reflection_probe_capture_target" in read("renderer/offscreen_capture_target.hpp")
 assert "(mode==5 || mode==6) && hemi_capture_info.z>0.5" in shader
