@@ -89,7 +89,12 @@ namespace jkgm {
         bool experimental_planar_thing_discovery = false; // read-only 120-frame native 3DO diagnostics
         bool experimental_planar_reflection_capture = false; // independent GPU reflected-scene FBO; opt-in
         bool experimental_planar_reflection_portal_culling = false; // independent reflected-sector traversal, fail open
-        float planar_reflection_resolution_scale = 0.5f; // 0.25..1.0 of internal screen (0.5 default)
+        float planar_reflection_resolution_scale = 0.5f; // 0.125..1.0
+        bool experimental_screen_space_reflections = false; // low-res transparent-world SSR
+        float ssr_resolution_scale = 0.125f; // 0.125..1.0 of internal screen
+        int ssr_ray_steps = 32; // 4..96 depth search samples per half-res pixel
+        float ssr_ray_thickness = 0.6f; // world-space depth tolerance
+        float ssr_max_distance = 64.0f; // JK world units
         bool enable_gpu_sprite_instancing = true; // compatible SPR instancing, disable for diagnostics
         bool experimental_half_res_fluid_sprites = false; // opt-in half-size fluid SPR layer
         unsigned int fluid_sprite_layer_budget = 0U; // 0=unlimited; 1..255 surviving layers per half-size pixel

@@ -451,6 +451,43 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                     "planar_reflection_resolution_scale must be between 0.25 and 1.0");
             rv->planar_reflection_resolution_scale=v;
         }
+        if(j.contains("experimental_screen_space_reflections")) {
+            j.at("experimental_screen_space_reflections").get_to(
+                rv->experimental_screen_space_reflections);
+        }
+        if(j.contains("ssr_resolution_scale")) {
+            auto const &v=j.at("ssr_resolution_scale");
+            if(!v.is_number())throw std::runtime_error(
+                "ssr_resolution_scale must be a number");
+            rv->ssr_resolution_scale=v.get<float>();
+        }
+        if(j.contains("ssr_ray_steps")) {
+            auto const &v=j.at("ssr_ray_steps");
+            if(!v.is_number_integer())throw std::runtime_error(
+                "ssr_ray_steps must be an integer 4..96");
+            rv->ssr_ray_steps=v.get<int>();
+        }
+        if(j.contains("ssr_ray_thickness")) {
+            auto const &v=j.at("ssr_ray_thickness");
+            if(!v.is_number())throw std::runtime_error(
+                "ssr_ray_thickness must be a number");
+            rv->ssr_ray_thickness=v.get<float>();
+        }
+        if(j.contains("ssr_max_distance")) {
+            auto const &v=j.at("ssr_max_distance");
+            if(!v.is_number())throw std::runtime_error(
+                "ssr_max_distance must be a number");
+            rv->ssr_max_distance=v.get<float>();
+        }
+        if(!std::isfinite(rv->ssr_resolution_scale) ||
+           rv->ssr_resolution_scale<0.125f ||
+           rv->ssr_resolution_scale>1.0f ||
+           rv->ssr_ray_steps<4 || rv->ssr_ray_steps>96 ||
+           !std::isfinite(rv->ssr_ray_thickness) ||
+           rv->ssr_ray_thickness<=0.0f || rv->ssr_ray_thickness>8.0f ||
+           !std::isfinite(rv->ssr_max_distance) ||
+           rv->ssr_max_distance<1.0f || rv->ssr_max_distance>2048.0f)
+            throw std::runtime_error("Invalid SSR resolution, steps, thickness or distance");
         if(j.contains("enable_gpu_sprite_instancing")) {
             j.at("enable_gpu_sprite_instancing").get_to(
                 rv->enable_gpu_sprite_instancing);
