@@ -21,8 +21,11 @@
                reflection_sky_world!=cache.loaded_world) {
                 reflection_sky_candidates.clear();
                 world_cache_frame_stats stats{};
+                std::vector<world_cache_draw_candidate> ordinary;
+                // Reuse the scratch vector for thousands of world surfaces
+                // instead of allocating on each candidate metadata read.
                 for(auto const &range:cache.mesh.surfaces) {
-                    std::vector<world_cache_draw_candidate> ordinary;
+                    ordinary.clear();
                     append_world_cache_candidate(read,cache.world.surfaces_addr,
                         range,ordinary,stats,nullptr,nullptr,nullptr,
                         &reflection_sky_candidates);
