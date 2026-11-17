@@ -342,7 +342,8 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     int mode=int(environment_info.y+0.5);
     bool has_hemi=false;
 #ifdef JKGM_REFLECTION_PROBE
-    has_hemi=(mode==5 || mode==6) && hemi_capture_info.z>0.5;
+    has_hemi=(mode==5 || mode==6) && hemi_capture_info.z>0.5 &&
+             abs(hemi_capture_info.w-float(mode))<0.5;
 #endif
     if((environment_info.x<0.5 && environment_info.z<0.5 && !has_hemi) ||
        specular_params.x<=0.0)
