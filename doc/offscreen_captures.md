@@ -30,9 +30,11 @@ touch OpenGL or switch the active JK camera.
 - The converter renders into HDR RGBA16F and samples the cubefaces with a
   small angular footprint to smooth face edges. Its output wraps at the
   longitude seam; mipmaps are generated only after the complete conversion.
-- Missing sky and surfaces not submitted by the reflection capture use the
-  scene fog color. This is deliberately approximate, but avoids black or
-  transparent gaps and makes the generated map seamless.
+- Visible JK sky-flagged apertures (0x200 horizon / 0x400 ceiling) now use
+  the **secondary camera's** native-style sky UV projection at far depth.
+  Real world/model geometry correctly occludes them. Only truly uncaptured
+  background, invalid sky settings and unsupported surfaces fall back to
+  the scene fog color, avoiding black transparent gaps.
 - A prior completed global capture remains visible while the new capture is
   built. `fadeTime` is measured from **successful publication** in seconds;
   `0` switches immediately. The previous texture is kept until the fade
@@ -48,6 +50,25 @@ touch OpenGL or switch the active JK camera.
 - Other scenes keep their ordinary `hemi`/`cube` realtime per-Thing probes.
   This global map can also serve as their authored-EnvMap fallback when those
   materials permit the global override.
+
+## Shared realtime reflection capture controls
+
+`reflection_capture_resolution` is the fixed square per-cube-face
+resolution (default 128), and the short edge of the planar target.
+The 160° `hemi` probe uses twice the linear resolution to recover
+peripheral detail. Planar targets preserve the main camera's aspect ratio.
+
+`reflection_capture_update_interval` (seconds, default 0) throttles
+complete per-Thing cube and hemi captures and visible planar captures.
+The last complete image and its original view transform remain bound until
+a refresh, avoiding texture jitter from mismatched camera matrices.
+The separate COG `CaptureEnvMap` command is still strictly on-demand and
+uses its own fixed `envmap_capture_face_resolution`.
+
+Visible JK 0x200/0x400 sky world faces are now explicitly rendered in all
+secondary cameras with far-depth and native-style horizon/ceiling mapping.
+These are apertures of the surrounding world, not ordinary UV faces; depth
+from buildings occludes them as it does in the main camera.
 
 ## Camera-to-MAT design — not yet an exposed COG verb
 
