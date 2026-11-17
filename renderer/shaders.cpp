@@ -1205,7 +1205,7 @@ void jkgm::shaders::gpu_3do_preview_shader::set_environment(
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_hemi_reflection(
     bool ready,point<3,float> right,point<3,float> forward,
-    point<3,float> up,float half_fov,float aspect)
+    point<3,float> up,float half_fov,float aspect,int capture_mode)
 {
     // The array sampler must never alias the 2D albedo sampler at unit 0.
     // On <24-unit drivers the optional sampler is compiled out entirely.
@@ -1214,7 +1214,7 @@ void jkgm::shaders::gpu_3do_preview_shader::set_hemi_reflection(
     gl::set_uniform_vector(hemi_forward,forward);
     gl::set_uniform_vector(hemi_up,up);
     gl::set_uniform_vector(hemi_info,make_point(
-        half_fov,aspect,ready?1.0f:0.0f,0.0f));
+        half_fov,aspect,ready?1.0f:0.0f,float(capture_mode)));
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_albedo_transition(
     int source2,float weight)
