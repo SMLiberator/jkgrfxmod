@@ -256,6 +256,14 @@ namespace auto_lod_detail {
                 largest_triangles=component.triangles;
             }
         }
+        // In many low-poly JK meshes, every authored polygon is a separate
+        // position-disconnected island. Never delete those small polygons
+        // merely because the entire mesh spans a much larger area. Require
+        // a substantial connected primary surface before treating other
+        // islands as optional surface detail.
+        if(largest_triangles<4U ||
+           largest_diagonal2<source_diagonal2*0.36)
+            return;
         std::set<uint32_t> rejected;
         for(auto const &pair:components) {
             if(pair.first==largest)continue;

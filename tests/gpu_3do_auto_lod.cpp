@@ -323,6 +323,26 @@ int main() {
         grid(1U),2U,1,0.03f,0.25f,&single_stats);
     assert(single_stats.components==1U);
     assert(single_stats.removed_components==0U);
+    // Separate authored low-poly quads are not necessarily optional details.
+    // With no dominant connected surface, a high pruning ratio must not
+    // throw away one of the two otherwise meaningful polygons.
+    auto loose_quads=grid(1U);
+    size_t const original_quad_vertices=loose_quads.vertices.size();
+    for(size_t i=0;i<original_quad_vertices;++i) {
+        auto v=loose_quads.vertices[i];
+        v.x+=8.0f;
+        loose_quads.indices.push_back(
+            static_cast<uint32_t>(loose_quads.vertices.size()));
+        loose_quads.vertices.push_back(v);
+    }
+    loose_quads.groups[0].count=static_cast<uint32_t>(
+        loose_quads.indices.size());
+    gpu_3do_auto_lod_prune_stats lowpoly_stats{};
+    (void)generate_gpu_3do_auto_lod(
+        loose_quads,2U,1,0.03f,0.25f,&lowpoly_stats);
+    assert(lowpoly_stats.components==2U);
+    assert(lowpoly_stats.removed_components==0U);
+    assert(lowpoly_stats.removed_triangles==0U);
 
     // Entirely transparent groups reduce too.
     auto alpha=grid(18U);
