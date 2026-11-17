@@ -40,6 +40,10 @@ uniform vec3 camera_forward_axis,camera_up_axis;
 // through to the legacy EnvMap when one is configured.
 uniform sampler2D planar_reflection_map;
 uniform int planar_reflection_ready;
+// Low-resolution SSR is available only AFTER the opaque pass; mode 1 keeps
+// EnvMap fallback when a ray cannot find geometry in the current screen.
+uniform sampler2D screen_reflection_map;
+uniform int screen_reflection_ready;
 uniform vec4 planar_receiver_plane;
 uniform vec3 planar_camera_origin,planar_camera_right,planar_camera_forward;
 uniform vec3 planar_camera_up;
@@ -163,7 +167,8 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     int mode=int(environment_info.y+0.5);
     bool has_env=environment_info.x>0.5 || environment_info.z>0.5;
     bool has_planar=mode==4 && planar_reflection_ready!=0;
-    if((!has_env && !has_planar) || specular_params.x<=0.0)
+    bool has_screen=mode==1 && screen_reflection_ready!=0;
+    if((!has_env && !has_planar && !has_screen) || specular_params.x<=0.0)
         return vec3(0.0);
     vec3 surf=specular_params.w>0.5?texture(surface_map,uv).rgb:vec3(1.0);
     float strength=max(specular_params.x*surf.r,0.0);
@@ -203,9 +208,16 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
         env=mix(env_from,env_to,environment_info.w);
     }
     env=mix(env,planar.rgb,planar.a);
+    // Receiver rays are evaluated on a separate low-resolution texture;
+    // this material still applies its own strength, Fresnel and roughness.
+    vec4 screen=has_screen
+        ?texture(screen_reflection_map,
+                 gl_FragCoord.xy/vec2(textureSize(scene_depth,0)))
+        :vec4(0.0);
+    env=mix(env,screen.rgb,clamp(screen.a,0.0,1.0));
     float source_coverage=max(
         mix(environment_info.x,environment_info.z,environment_info.w),
-        planar.a);
+        max(planar.a,screen.a));
     metalness=clamp(specular_params.z*surf.b,0.0,1.0)*source_coverage;
     vec3 f0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
     float cos_theta=clamp(dot(n,-v),0.0,1.0);

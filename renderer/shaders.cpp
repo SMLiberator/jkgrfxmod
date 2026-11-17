@@ -372,6 +372,8 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , planar_camera_forward(gl::get_uniform_location(the_program,"planar_camera_forward"))
     , planar_camera_up(gl::get_uniform_location(the_program,"planar_camera_up"))
     , planar_tan_half_fov(gl::get_uniform_location(the_program,"planar_tan_half_fov"))
+    , screen_reflection_sampler(gl::get_uniform_location(the_program,"screen_reflection_map"))
+    , screen_reflection_ready(gl::get_uniform_location(the_program,"screen_reflection_ready"))
     , alpha_cutout(gl::get_uniform_location(the_program,"alpha_cutout"))
     , alpha_cutoff(gl::get_uniform_location(the_program,"alpha_cutoff"))
     , transparent_pass(gl::get_uniform_location(the_program,"transparent_pass"))
@@ -528,6 +530,13 @@ void jkgm::shaders::world_cache_preview_shader::set_planar_reflection(
     gl::set_uniform_vector(planar_camera_forward,forward);
     gl::set_uniform_vector(planar_camera_up,up);
     gl::set_uniform_vector(planar_tan_half_fov,tan_half_fov);
+}
+
+void jkgm::shaders::world_cache_preview_shader::set_screen_reflection(
+    bool ready,int sampler)
+{
+    gl::set_uniform_integer(screen_reflection_sampler,sampler);
+    gl::set_uniform_integer(screen_reflection_ready,ready?1:0);
 }
 
 void jkgm::shaders::world_cache_preview_shader::set_alpha_cutout(

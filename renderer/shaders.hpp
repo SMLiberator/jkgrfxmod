@@ -90,6 +90,7 @@ namespace jkgm {
             gl::uniform_location_id planar_camera_origin,planar_camera_right;
             gl::uniform_location_id planar_camera_forward,planar_camera_up;
             gl::uniform_location_id planar_tan_half_fov;
+            gl::uniform_location_id screen_reflection_sampler,screen_reflection_ready;
             gl::uniform_location_id alpha_cutout,alpha_cutoff;
             gl::uniform_location_id transparent_pass,alpha_mode,face_opacity;
             gl::uniform_location_id blend_mode;
@@ -133,6 +134,7 @@ namespace jkgm {
                                        point<3,float> forward,
                                        point<3,float> up,
                                        point<2,float> tan_half_fov);
+            void set_screen_reflection(bool ready,int sampler);
             void set_alpha_cutout(float cutoff);
             void set_scene_depth(int sampler);
             void set_fluid_thickness(float thickness);
