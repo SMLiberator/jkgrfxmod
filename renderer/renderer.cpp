@@ -683,6 +683,7 @@ namespace jkgm {
         std::unique_ptr<offscreen_capture_target> global_env_current;
         std::unique_ptr<offscreen_capture_target> global_env_previous;
         uint64_t global_env_completed_sequence=0U;
+        uint64_t global_env_active_sequence=0U;
         std::chrono::steady_clock::time_point global_env_fade_start{};
         float global_env_fade_seconds=0.0f;
         std::unique_ptr<planar_reflection_capture_shader> hemi_capture_program;
@@ -697,8 +698,7 @@ namespace jkgm {
             global_env_binding out{};
             if(!global_env_current || !global_env_current->ready() ||
                !global_env_completed_sequence)return out;
-            auto const request=get_global_env_capture_controls().snapshot();
-            if(!request || request->sequence!=global_env_completed_sequence)
+            if(global_env_active_sequence!=global_env_completed_sequence)
                 return out;
             float blend=1.0f;
             if(global_env_fade_seconds>0.0f) {
@@ -1590,6 +1590,7 @@ namespace jkgm {
                 global_env_current.reset();
                 global_env_previous.reset();
                 global_env_completed_sequence=0U;
+                global_env_active_sequence=0U;
                 get_global_env_capture_controls().clear();
                 ssr_ready=false;
                 ssr_opaque_ready=false;
@@ -1910,6 +1911,7 @@ namespace jkgm {
                 // The COG layer may already have accepted commands from the
                 // *new* world's startup scripts; don't clear those commands.
                 get_runtime_material_controls().prepare_world(state.current_world);
+                get_global_env_capture_controls().prepare_world(state.current_world);
                 runtime_controls = get_runtime_material_controls().snapshot();
                 last_runtime_revision = runtime_controls.revision;
                 LOG_DEBUG("JK material image cache cleared on level change");
@@ -1926,6 +1928,7 @@ namespace jkgm {
             if(state.current_world) {
                 runtime_current_world = state.current_world;
                 get_runtime_material_controls().prepare_world(state.current_world);
+                get_global_env_capture_controls().prepare_world(state.current_world);
                 runtime_controls = get_runtime_material_controls().snapshot();
                 last_runtime_revision = runtime_controls.revision;
             }
