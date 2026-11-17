@@ -6,6 +6,7 @@
 #include "glad/glad.h"
 #include "base/log.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace jkgm {
