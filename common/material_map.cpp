@@ -204,6 +204,9 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             else if(v == "hemi") {
                 mat->reflection_mode = material_reflection_mode::hemi;
             }
+            else if(v == "cube") {
+                mat->reflection_mode = material_reflection_mode::cube;
+            }
             else if(v != "envmap") {
                 throw std::runtime_error("Unknown reflection_mode in metadata.json");
             }
