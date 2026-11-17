@@ -9,6 +9,7 @@
 #include "planar_reflection_things.hpp"
 #include "planar_reflection_workset.hpp"
 #include "planar_reflection_offscreen_gpu.hpp"
+#include "hemi_reflection_camera.hpp"
 #include "screen_space_reflections.hpp"
 #include "planar_reflection_culling.hpp"
 #include "planar_reflection_render_math.hpp"
@@ -662,6 +663,11 @@ namespace jkgm {
         // Independent low-cost planar capture: allocated on first enabled
         // scene, never by the normal GPU renderer or menus.
         std::unique_ptr<offscreen_capture_target> planar_capture_target;
+        std::unique_ptr<offscreen_capture_target> hemi_capture_target;
+        std::unique_ptr<planar_reflection_capture_shader> hemi_capture_program;
+        engine_camera hemi_capture_camera{};
+        uint64_t hemi_capture_owner=0U;
+        bool hemi_capture_ready=false;
         // Transparent world screen-mode ray tracing only, allocated lazily.
         std::unique_ptr<offscreen_capture_target> ssr_receivers,ssr_image;
         std::unique_ptr<ssr_world_receiver_shader> ssr_receiver_program;
@@ -1476,6 +1482,8 @@ namespace jkgm {
                 smoke_half_buffer.reset();
                 planar_capture_program.reset();
                 planar_capture_target.reset();
+                hemi_capture_program.reset();
+                hemi_capture_target.reset();
                 ssr_receiver_program.reset();
                 ssr_trace_program.reset();
                 ssr_receivers.reset();
@@ -1519,6 +1527,8 @@ namespace jkgm {
                 // A new game scene must not reuse an old HUD texture snapshot.
                 hud_previous_source.clear();
                 planar_capture_ready=false;
+                hemi_capture_ready=false;
+                hemi_capture_owner=0U;
                 ssr_ready=false;
                 ssr_opaque_ready=false;
                 if(planar_receiver_queries)planar_receiver_queries->invalidate();
@@ -4946,6 +4956,26 @@ namespace jkgm {
                 }
                 gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                 if(active_instance!=draw.instance) {
+                    bool const probe_active=hemi_capture_ready &&
+                        inst.shadow_owner!=0U &&
+                        inst.shadow_owner==hemi_capture_owner &&
+                        !post_exempt && !decals_only &&
+                        !inst.is_sprite_quad && !inst.is_projected_decal &&
+                        hemi_capture_target && hemi_capture_target->ready();
+                    if(probe_active) {
+                        gl::set_active_texture_unit(23);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                            gl::texture_view(hemi_capture_target->color_texture()));
+                        gl::set_active_texture_unit(0);
+                    }
+                    auto const &hemi=hemi_capture_camera;
+                    prog.set_hemi_reflection(probe_active,
+                        make_point(hemi.right[0],hemi.right[1],hemi.right[2]),
+                        make_point(hemi.forward[0],hemi.forward[1],hemi.forward[2]),
+                        make_point(hemi.up[0],hemi.up[1],hemi.up[2]),
+                        probe_active?
+                            std::tan(hemi.fov*0.008726646259971648f):1.0f,
+                        1.0f);
                     // Multiple cars can instance the same cached mesh ID with
                     // different world matrices. Compare instances, not IDs.
                     // Match JK rdModel3_DrawMesh: combine the original
@@ -5130,11 +5160,15 @@ namespace jkgm {
                     material.blend!=material_blend_mode::multiply;
                 auto const specular=gpu_specular_parameters(
                     material,default_eligible);
+                bool const hemi_active=hemi_capture_ready &&
+                    inst.shadow_owner!=0U &&
+                    inst.shadow_owner==hemi_capture_owner &&
+                    material.reflection_mode==5;
                 bool const spec_active=!inst.camera_hud &&
                     specular.first>0.0f &&
                     (material.has_environment ||
-                     material.has_environment2 || sun_active ||
-                     point_specular_active);
+                     material.has_environment2 || hemi_active ||
+                     sun_active || point_specular_active);
                 bool const diffuse_mapping=
                     the_config->enable_normal_mapped_diffuse &&
                     !inst.camera_hud && !inst.is_projected_decal &&
@@ -13019,6 +13053,7 @@ namespace jkgm {
             }
         }
 
+#include "hemi_reflection_capture.inc"
         void present_game() override
         {
             poll_audio_modules();
@@ -13275,6 +13310,8 @@ namespace jkgm {
                 // exist here; the offscreen camera does not touch rdCamera.
                 if(the_config->experimental_planar_reflection_capture)
                     render_planar_capture();
+                if(the_config->experimental_hemi_reflection_capture)
+                    render_hemi_capture();
                 if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,true);
                 draw_game_gbuffer_pass(trimdl, posterize_lighting);
                 if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,false);
