@@ -698,7 +698,7 @@ namespace jkgm {
             global_env_binding out{};
             if(!global_env_current || !global_env_current->ready() ||
                !global_env_completed_sequence)return out;
-            if(global_env_active_sequence!=global_env_completed_sequence)
+            if(!global_env_active_sequence)
                 return out;
             float blend=1.0f;
             if(global_env_fade_seconds>0.0f) {
