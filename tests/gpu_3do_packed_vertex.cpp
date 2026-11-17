@@ -1,6 +1,7 @@
 #include "renderer/gpu_3do_packed_vertex.hpp"
 #include <cassert>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 int main()
@@ -76,5 +77,40 @@ int main()
     assert(!gpu_3do_pack_vertices(source,packed)); // HDR tint
     source[0].cr=-0.1f;
     assert(!gpu_3do_pack_vertices(source,packed)); // negative tint
+
+    // Profiling scans the whole rejected mesh, counting every DISTINCT
+    // rejection category exactly once per upload, not once per vertex.
+    source[0].cr=1.2f;              // out-of-range RGB
+    source[0].nx=1.1f;              // out-of-range face normal
+    source[1].light_mode=4.0f;      // MotS mode
+    source[2].lnx=std::numeric_limits<float>::infinity();
+    uint32_t reasons=0;
+    assert(!gpu_3do_pack_vertices(source,packed,&reasons));
+    assert(packed.empty());
+    auto has=[&](gpu_3do_pack_reject_reason reason) {
+        return (reasons&gpu_3do_pack_reason_bit(reason))!=0;
+    };
+    assert(has(gpu_3do_pack_rgb_out_of_range));
+    assert(has(gpu_3do_pack_face_normal_out_of_range));
+    assert(has(gpu_3do_pack_mode_out_of_range));
+    assert(has(gpu_3do_pack_light_normal_nonfinite));
+    gpu_3do_pack_profile profile;
+    profile.record(false,source.size(),reasons);
+    assert(profile.rejected_uploads==1 && profile.accepted_uploads==0);
+    assert(profile.reasons[gpu_3do_pack_rgb_out_of_range]==1);
+    assert(profile.reasons[gpu_3do_pack_mode_out_of_range]==1);
+    assert(profile.reasons[gpu_3do_pack_face_normal_out_of_range]==1);
+    assert(profile.reasons[gpu_3do_pack_light_normal_nonfinite]==1);
+    source[0].cr=0.25f;source[0].nx=0.0f;
+    source[1].light_mode=1.0f;
+    source[2].lnx=0.0f;
+    assert(gpu_3do_pack_vertices(source,packed,&reasons));
+    assert(reasons==0);
+    profile.record(true,source.size(),reasons);
+    assert(profile.accepted_uploads==1 && profile.packed_vertices==4);
+    assert(profile.rejected_uploads==1 && profile.legacy_vertices==4);
+    std::vector<gpu_3do_vertex> empty;
+    assert(!gpu_3do_pack_vertices(empty,packed,&reasons));
+    assert(has(gpu_3do_pack_empty));
     return 0;
 }

@@ -26,6 +26,12 @@ assert "decode_packed_normal(local_face_normal_mode.xyz)" in vertex
 assert "decode_packed_normal(local_light_normal_input)" in vertex
 assert "uint32_t(v.light_mode)" in packed
 assert renderer.count("the_config->experimental_packed_3do_vertices")==8
+assert renderer.count("&packed_3do_upload_profile : nullptr")==8
+assert "PERF gpu_3do vertex_packing uploads_cumulative=" in renderer
+assert "PERF gpu_3do packing_rejections empty=" in renderer
+assert "PERF gpu_3do packing_live_cache packed=" in renderer
+assert "gpu_3do_pack_vertex_rejections" in packed
+assert "reason_buckets_overlap_one_mesh_can_have_multiple_reasons" in renderer
 assert "gl::vertex_element_type::uint_2_10_10_10_rev" in renderer
 for member in ("normal_mode","light_normal","rgba"):
     assert f"offsetof(gpu_3do_packed_vertex,{member})" in renderer
