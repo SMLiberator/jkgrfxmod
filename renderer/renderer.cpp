@@ -42,6 +42,7 @@
 #include "runtime_material.hpp"
 #include "global_env_capture.hpp"
 #include "global_env_equirect_converter.hpp"
+#include "dual_paraboloid_converter.hpp"
 #include "spotlight.hpp"
 #include "spotlight_shadow_gpu.hpp"
 #include "sun_shadow_gpu.hpp"
@@ -669,6 +670,8 @@ namespace jkgm {
         // capture. Avoid the former global-owner aliasing/fallback problem.
         struct reflection_probe_entry {
             std::unique_ptr<reflection_probe_capture_target> target;
+            // Hemi-only temporary cube used to validate paraboloid sampling.
+            std::unique_ptr<reflection_probe_capture_target> cube_source;
             engine_camera camera{};
             int mode=0;
             bool ready=false;
@@ -680,6 +683,8 @@ namespace jkgm {
         // ordinary envmap materials. The old completed texture survives until
         // fadeTime finishes; no partially rendered capture becomes visible.
         std::unique_ptr<global_env_equirect_converter> global_env_converter;
+        std::unique_ptr<dual_paraboloid_converter>
+            dual_paraboloid_convert_program;
         std::unique_ptr<offscreen_capture_target> global_env_current;
         std::unique_ptr<offscreen_capture_target> global_env_previous;
         uint64_t global_env_completed_sequence=0U;
@@ -1553,6 +1558,7 @@ namespace jkgm {
                 global_env_previous.reset();
                 global_env_converter.reset();
                 hemi_capture_program.reset();
+                dual_paraboloid_convert_program.reset();
                 ssr_receiver_program.reset();
                 ssr_trace_program.reset();
                 ssr_receivers.reset();
@@ -5110,9 +5116,9 @@ namespace jkgm {
                         make_point(camera.right[0],camera.right[1],camera.right[2]),
                         make_point(camera.forward[0],camera.forward[1],camera.forward[2]),
                         make_point(camera.up[0],camera.up[1],camera.up[2]),
-                        probe?
-                            std::tan(camera.fov*0.008726646259971648f):1.0f,
-                        1.0f,probe?probe->mode:0);
+                        // The dual-paraboloid sampler has no perspective FOV.
+                        // Cube rays likewise use a fixed 90-degree projection.
+                        1.0f,1.0f,probe?probe->mode:0);
                     // Multiple cars can instance the same cached mesh ID with
                     // different world matrices. Compare instances, not IDs.
                     // Match JK rdModel3_DrawMesh: combine the original

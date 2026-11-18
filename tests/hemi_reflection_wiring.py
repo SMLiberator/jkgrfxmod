@@ -1,4 +1,4 @@
-"""One camera-facing wide-angle probe source contracts."""
+"""Fixed dual-paraboloid hemi and six-face cube source contracts."""
 import json
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
@@ -31,7 +31,7 @@ assert '#include "hemi_reflection_camera.hpp"' in renderer
 assert '#include "hemi_reflection_capture.inc"' in renderer
 assert "render_hemi_capture();" in renderer
 assert "std::unordered_set<uint64_t> acquired;" in capture
-assert "planar_reflection_thing_owner_key(thing)==" in capture
+assert "planar_reflection_thing_owner_key(thing)" in capture
 assert "acquire_planar_reflection_offscreen_gpu(" in capture
 assert "for(auto const &surface:cache.mesh.surfaces)" in capture
 assert "mode!=renderer_mode::ingame" in capture
@@ -49,7 +49,7 @@ assert "owner_probe->second.mode" in renderer
 assert "textureLod(hemi_reflection_map," in shader
 assert "make_cube_reflection_camera(" in capture
 assert "draw_reflection_capture_sky(shader,camera,view,frustum," in capture
-assert "the_config->reflection_capture_resolution*" in capture
+assert "the_config->reflection_capture_resolution;" in capture
 assert "the_config->reflection_capture_update_interval" in capture
 assert "glGenerateMipmap(GL_TEXTURE_2D_ARRAY)" in capture
 assert "reflection_probe_capture_target" in read("renderer/offscreen_capture_target.hpp")
@@ -71,3 +71,18 @@ assert "hemi_reflection_capture.inc" not in read("renderer/renderer.vcxproj")
 assert "render_hemi_capture();" in renderer
 assert "JKGM_REFLECTION_PROBE 1" in read("renderer/shaders.cpp")
 print("HEMI and CUBE material, capture, sampling, and fallback contracts OK")
+
+# Hemi uses a reliable cube capture as a temporary conversion source.
+# Sampling itself is now fixed-axis up/down, independent of player view.
+assert '#include "dual_paraboloid_converter.hpp"' in renderer
+assert "std::unique_ptr<reflection_probe_capture_target> cube_source;" in renderer
+assert "dual_paraboloid_convert_program->convert(" in capture
+assert "int const output_layers=paraboloid_mode?2:6;" in capture
+assert "int const face_count=6;" in capture
+assert "make_hemi_reflection_camera(" not in capture
+assert "1.091308501" in shader
+assert "up_weight=smoothstep(" in shader
+assert "for(int hemisphere=0;hemisphere<2;++hemisphere)" in shader
+assert "weighted_coverage" in shader
+assert "dual_paraboloid_projection.hpp" in read("renderer/dual_paraboloid_converter.hpp")
+assert "dual_paraboloid_convert_program.reset();" in renderer

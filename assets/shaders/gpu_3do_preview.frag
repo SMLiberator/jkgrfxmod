@@ -55,13 +55,14 @@ uniform sampler2D normal_map;  // tangent-space RGB
 uniform sampler2D normal_map2; // second slope layer
 uniform sampler2D env_map;     // equirectangular / matcap
 uniform sampler2D env_map2;
-// Layer 0 holds the 160-degree hemi view, or layers 0..5 the fixed-axis
-// 90-degree cube faces. Each layer has independent mipmaps.
+// Hemi: layers 0/1 are fixed up/down paraboloid disks with horizon overlap.
+// Cube: layers 0..5 are fixed-axis 90-degree perspective views.
+// Every layer has independent mipmaps; coverage alpha is sampled at LOD 0.
 #ifdef JKGM_REFLECTION_PROBE
 uniform sampler2DArray hemi_reflection_map;
 #endif
 uniform vec3 hemi_right_axis,hemi_forward_axis,hemi_up_axis;
-uniform vec4 hemi_capture_info; // tan(halfFOV), aspect, ready, unused
+uniform vec4 hemi_capture_info; // legacy x/y, ready, reflection mode
 uniform vec4 view_right, view_forward, view_up, view_origin;
 uniform vec4 projection; // FOV scale for the deferred spotlight/sun normal
 uniform vec3 camera_right_axis,camera_forward_axis,camera_up_axis;
@@ -396,17 +397,43 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
         int layer=0;
         bool covered=false;
         if(mode==5) {
-            float dy=dot(world_dir,hemi_forward_axis);
-            float h=max(hemi_capture_info.x,0.00001);
-            float vh=h/max(hemi_capture_info.y,0.00001);
-            if(dy>0.0001) {
-                vec2 ndc=vec2(dot(world_dir,hemi_right_axis)/h,
-                              dot(world_dir,hemi_up_axis)/vh)/dy;
-                covered=all(lessThan(abs(ndc),vec2(1.0)));
-                capture_uv=ndc*0.5+0.5;
-                vec2 edge=1.0-abs(ndc);
-                softness=smoothstep(0.0,0.10,min(edge.x,edge.y));
+            // Fixed +Z/-Z dual paraboloid. Each disk covers 95 degrees from
+            // its pole; smoothly blend in the +/-5 degree horizon overlap.
+            vec3 d=normalize(world_dir);
+            float up_weight=smoothstep(
+                -0.087155743,0.087155743,d.z);
+            ivec3 dims=textureSize(hemi_reflection_map,0);
+            vec2 inset=0.5/vec2(dims.xy);
+            float capture_lod=roughness*log2(
+                max(float(max(dims.x,dims.y)),1.0));
+            vec3 weighted_color=vec3(0.0);
+            float weighted_coverage=0.0;
+            for(int hemisphere=0;hemisphere<2;++hemisphere) {
+                float weight=hemisphere==0?up_weight:1.0-up_weight;
+                if(weight<=0.00001)continue;
+                float axis_sign=hemisphere==0?1.0:-1.0;
+                float denom=1.0+axis_sign*d.z;
+                if(denom<=0.00001)continue;
+                // Keep lower hemisphere texel orientation consistent with
+                // the converter: local +Y is reversed on the bottom disk.
+                vec2 q=vec2(d.x,axis_sign*d.y)/denom;
+                vec2 uv_hemi=q*(0.5/1.091308501)+vec2(0.5);
+                if(any(lessThan(uv_hemi,vec2(0.0))) ||
+                   any(greaterThan(uv_hemi,vec2(1.0))))continue;
+                uv_hemi=clamp(uv_hemi,inset,vec2(1.0)-inset);
+                float alpha=textureLod(hemi_reflection_map,
+                    vec3(uv_hemi,float(hemisphere)),0.0).a;
+                if(alpha<=0.0001)continue;
+                vec4 color=textureLod(hemi_reflection_map,
+                    vec3(uv_hemi,float(hemisphere)),capture_lod);
+                if(color.a<=0.0001)continue;
+                float contribution=weight*alpha;
+                weighted_color+=(color.rgb/color.a)*contribution;
+                weighted_coverage+=contribution;
             }
+            if(weighted_coverage>0.0001)
+                env=mix(env,weighted_color/weighted_coverage,
+                    clamp(weighted_coverage,0.0,1.0));
         } else if(mode==6) {
             vec3 a=abs(world_dir);
             float major=0.0;

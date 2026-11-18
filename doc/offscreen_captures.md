@@ -63,8 +63,14 @@ touch OpenGL or switch the active JK camera.
 
 `reflection_capture_resolution` is the fixed square per-cube-face
 resolution (default 128), and the short edge of the planar target.
-The 160° `hemi` probe uses twice the linear resolution to recover
-peripheral detail. Planar targets preserve the main camera's aspect ratio.
+The `hemi` probe now stores **two fixed +Z/-Z dual-paraboloid disks**,
+each twice the cube-face linear resolution with 5-degree horizon overlap.
+In the first validation milestone it converts six accurate cube capture
+views to those two texture layers; this validates reflection direction,
+coverage, roughness mips and seam blending before attempting direct
+nonlinear geometry rendering. **This milestone is not yet a two-view
+performance optimization.** Planar targets preserve the main camera's aspect
+ratio.
 
 `reflection_capture_update_interval` (seconds, default 0) throttles
 complete per-Thing cube and hemi captures and visible planar captures.

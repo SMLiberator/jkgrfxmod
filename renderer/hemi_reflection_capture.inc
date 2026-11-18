@@ -164,24 +164,32 @@
                     static_capture_owners.emplace(owner,eligible);
                     return eligible;
                 };
-                bool const cube_mode=selected_mode==6;
-                int const face_count=cube_mode?6:1;
+                // Stage 1: hemi uses two up/down paraboloid texture
+                // layers converted from six accurate perspective views.
+                // Direct two-view capture will replace only this source.
+                bool const paraboloid_mode=selected_mode==5;
+                bool const cube_mode=!paraboloid_mode;
+                int const face_count=6;
                 auto const far_plane=std::min(
                     frame_world_cache_camera.far_plane,96.0f);
                 if(!(std::isfinite(far_plane)&&far_plane>0.1f))continue;
-                // Unified per-face capture size. The 160-degree hemi
-                // view uses twice the linear resolution to recover some
-                // peripheral detail at its extreme perspective angles.
+                // Capture source: original 128x128 cube face. Hemi output:
+                // two 256x256 disks with 5-degree overlap past the horizon.
                 int const side=candidate.is_global
                     ?the_config->envmap_capture_face_resolution
-                    :the_config->reflection_capture_resolution*
-                        (cube_mode?1:2);
+                    :the_config->reflection_capture_resolution;
+                int const output_side=paraboloid_mode?side*2:side;
+                int const output_layers=paraboloid_mode?2:6;
                 auto &entry=reflection_probes[candidate.owner];
                 entry.seen_frame=gpu_3do_present_serial;
                 bool const needs_reconfigure=entry.mode!=selected_mode ||
                     !entry.target || !entry.target->ready() ||
-                    entry.target->width()!=side ||
-                    entry.target->layers()!=face_count;
+                    entry.target->width()!=output_side ||
+                    entry.target->layers()!=output_layers ||
+                    (paraboloid_mode && (!entry.cube_source ||
+                        !entry.cube_source->ready() ||
+                        entry.cube_source->width()!=side ||
+                        entry.cube_source->layers()!=6));
                 float const interval=candidate.is_global?0.0f:
                     the_config->reflection_capture_update_interval;
                 if(entry.ready && !needs_reconfigure && interval>0.0f &&
@@ -193,16 +201,21 @@
                 if(!entry.target)
                     entry.target=
                         std::make_unique<reflection_probe_capture_target>();
-                auto *probe_target=entry.target.get();
-                if(!probe_target->ensure(side,face_count))continue;
+                if(paraboloid_mode && !entry.cube_source)
+                    entry.cube_source=
+                        std::make_unique<reflection_probe_capture_target>();
+                if(!paraboloid_mode)entry.cube_source.reset();
+                auto *probe_target=paraboloid_mode
+                    ?entry.cube_source.get():entry.target.get();
+                if(!entry.target->ensure(output_side,output_layers) ||
+                   !probe_target->ensure(side,face_count))continue;
                 size_t total_world_drawn=0,total_model_drawn=0;
                 size_t total_acquired_nodes=0;
                 engine_camera first_camera{};
                 bool all_faces_ready=true;
                 for(int face=0;face<face_count;++face) {
-                    auto const camera=cube_mode
-                        ?make_cube_reflection_camera(focus,unsigned(face))
-                        :make_hemi_reflection_camera(focus,viewer,160.0f);
+                    auto const camera=
+                        make_cube_reflection_camera(focus,unsigned(face));
                     if(!camera.valid) {all_faces_ready=false;break;}
                     if(face==0)first_camera=camera;
                     auto const view=planar_camera_native_view(camera);
@@ -440,7 +453,7 @@
             total_world_drawn+=world_drawn;
             total_model_drawn+=model_drawn;
             total_acquired_nodes+=offscreen.stats.ready_nodes;
-            } // Capture each independent cube face (or one hemi view).
+            } // Capture each of the six source cube faces.
             // Texture-array mip levels are filtered independently per face.
             // Restore the array binding at texture unit zero so other passes
             // never inherit this optional capture target.
@@ -452,6 +465,14 @@
             glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
             glBindTexture(GL_TEXTURE_2D_ARRAY,GLuint(previous_array));
             if(!all_faces_ready)continue;
+            if(paraboloid_mode) {
+                if(!dual_paraboloid_convert_program)
+                    dual_paraboloid_convert_program=
+                        std::make_unique<dual_paraboloid_converter>();
+                if(!dual_paraboloid_convert_program->convert(
+                        *probe_target,*entry.target,output_side))
+                    continue; // Never publish a partial dual-hemisphere map.
+            }
             entry.camera=first_camera;
             entry.mode=selected_mode;
             entry.ready=true;
@@ -481,10 +502,11 @@
                 continue;
             }
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
-                LOG_INFO(cube_mode?"CUBE capture owner=":"HEMI capture owner=",
+                LOG_INFO(paraboloid_mode?"HEMI paraboloid owner=":"CUBE capture owner=",
                          selected_owner,
-                         " side=",side," faces=",face_count,
-                         " fov=",first_camera.fov,
+                         " capture_side=",side," source_faces=",face_count,
+                         " result_side=",output_side,
+                         " result_layers=",output_layers,
                          " world_faces=",total_world_drawn,
                          " model_groups=",total_model_drawn,
                          " acquired_nodes=",total_acquired_nodes,
