@@ -263,5 +263,7 @@ assert "(candidate.is_global &&" in global_capture
 assert "!capture_static_owner(owner)" in global_capture
 assert "!capture_static_owner(inst.shadow_owner)" in global_capture
 assert "native_motion_tracking_enabled &&" in global_capture
+assert "recently_moving_owners.insert(inst.shadow_owner)" in global_capture
+assert "recently_moving_owners.count(owner)" in global_capture
 assert "inst.dynamic_sun_caster" in global_capture
 assert "draw_reflection_capture_sky(" in global_capture
