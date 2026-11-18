@@ -133,25 +133,16 @@
                     ?candidate.exclude_owner:candidate.owner;
                 int const selected_mode=candidate.mode;
                 auto const &focus=candidate.position;
-                // Sun pose tracking identifies COG-driven transforms even
-                // when move_type is NONE. Apply that signal to BOTH offscreen
-                // discovery and main-camera fallback, not only the latter.
-                bool const native_motion_tracking_enabled=
-                    the_config->enable_sun_shadows ||
-                    (the_config->enable_spotlights &&
-                     the_config->enable_spotlight_shadows);
-                std::unordered_set<uint64_t> recently_moving_owners;
-                if(candidate.is_global && native_motion_tracking_enabled)
-                    for(auto const &inst:frame_gpu_3do_instances)
-                        if(inst.shadow_owner && inst.dynamic_sun_caster)
-                            recently_moving_owners.insert(inst.shadow_owner);
+                // Global COG capture uses native Thing eligibility, not the
+                // sun-shadow dynamic-caster hint. That hint can be set by
+                // PATH movement or assigned puppet resources, both allowed
+                // in an explicit one-time environment snapshot.
                 std::unordered_map<uint64_t,bool> static_capture_owners;
                 // Keep each native ownership decision stable across six
                 // directions, including when shadows are disabled entirely.
                 auto capture_static_owner=[&](uint64_t owner)->bool {
                     if(!candidate.is_global)return true;
-                    if(!owner || recently_moving_owners.count(owner))
-                        return false; // Transients/unknowns never become scenery.
+                    if(!owner)return false; // Unknown owners are never scenery.
                     auto found=static_capture_owners.find(owner);
                     if(found!=static_capture_owners.end())return found->second;
                     auto read=[](uintptr_t address,void *dst,size_t bytes) {

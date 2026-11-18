@@ -87,6 +87,11 @@ int main()
     assert(collect_planar_reflection_things(get,world,scan));
     assert(scan.models.size()==1 && scan.excluded_flags==2U);
     put(a+0x00U,uint32_t(0));
+    // LEVELGEO is ordinary visible 3DO-built environment, not a hide bit.
+    put(a+0x00U,uint32_t(0x8U));
+    assert(collect_planar_reflection_things(get,world,scan));
+    assert(scan.models.size()==2 && scan.excluded_flags==1U);
+    put(a+0x00U,uint32_t(0));
 
     // A cycle must fail closed and clear all partial output.
     put(c+0x60U,uint32_t(c));
@@ -121,7 +126,7 @@ int main()
     put(a+0x0cU,uint32_t(1));
     assert(collect_planar_reflection_things(get,world,scan));
     assert(scan.models.size()==1 && scan.excluded_flags==2);
-    // On-demand EnvMaps include only persistent static 3DO scenery.
+    // On-demand EnvMaps capture Cog 3DOs, including LEVELGEO and PATH.
     // Both the offscreen scan and main-camera fallback use this same test.
     put(c+0x0cU,uint32_t(7)); // Cog
     put(c+0x10U,uint32_t(0)); // movetype none
@@ -132,25 +137,28 @@ int main()
     put(c+0x12cU,uint32_t(0)); // SithThing puppet
     uint64_t const static_owner=(uint64_t(uint32_t(c))<<32)|103U;
     assert(global_env_capture_static_thing(get,static_owner));
-    put(c+0x0cU,uint32_t(8)); // Ghost scenery
-    assert(global_env_capture_static_thing(get,static_owner));
+    put(c+0x0cU,uint32_t(8)); // Ghost is intentionally not captured
+    assert(!global_env_capture_static_thing(get,static_owner));
     for(uint32_t kind : {2U,3U,4U,5U,6U,9U,10U,11U}) {
         put(c+0x0cU,kind);
         assert(!global_env_capture_static_thing(get,static_owner));
     }
     put(c+0x0cU,uint32_t(7));
-    put(c+0x10U,uint32_t(1)); // physics/path-moving
+    put(c+0x10U,uint32_t(1)); // physics is excluded
     assert(!global_env_capture_static_thing(get,static_owner));
+    put(c+0x10U,uint32_t(2)); // PATH is included at its current pose
+    assert(global_env_capture_static_thing(get,static_owner));
     put(c+0x10U,uint32_t(0));
     for(uint32_t attached : {0x2U,0x4U,0x80U}) {
         put(c+0x34U,attached);
         assert(!global_env_capture_static_thing(get,static_owner));
     }
     put(c+0x34U,uint32_t(0));
+    // Assigned puppet/animation resources alone do not imply movement.
     for(uintptr_t offset : {uintptr_t(0xd8U),uintptr_t(0x128U),
                             uintptr_t(0x12cU)}) {
         put(c+offset,uint32_t(1));
-        assert(!global_env_capture_static_thing(get,static_owner));
+        assert(global_env_capture_static_thing(get,static_owner));
         put(c+offset,uint32_t(0));
     }
     put(c+0x74U,uint32_t(104)); // recycled native Thing
@@ -159,7 +167,10 @@ int main()
     put(c+0x108U,uint32_t(a)); // detached rdThing
     assert(!global_env_capture_static_thing(get,static_owner));
     put(c+0x108U,uint32_t(c));
-    for(uint32_t hidden : {0x2U,0x8U,0x10U,0x20U,0x80000U}) {
+    // 0x8 is the LEVELGEO flag, not an exclusion condition.
+    put(c+0x00U,uint32_t(0x8U));
+    assert(global_env_capture_static_thing(get,static_owner));
+    for(uint32_t hidden : {0x2U,0x10U,0x20U,0x80000U,0x8U|0x10U}) {
         put(c+0x00U,hidden);
         assert(!global_env_capture_static_thing(get,static_owner));
     }

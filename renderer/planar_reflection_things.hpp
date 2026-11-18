@@ -109,10 +109,11 @@ namespace jkgm {
                     ++out.non_models;
                     current=next;continue;
                 }
-                // OpenJKDF2: destroyed 0x2, LevelGeo 0x8, 0x10,
-                // disabled 0x80000. Camera Things are HUD-only here.
+                // LEVELGEO (0x8) is a rendered 3DO category and must not
+                // be mistaken for a hide flag. Exclude destroyed 0x2,
+                // hidden 0x10 and disabled 0x80000 (plus camera Things).
                 if(type==0U || type==1U ||
-                   (flags&(0x2U|0x8U|0x10U|0x80000U))!=0U) {
+                   (flags&(0x2U|0x10U|0x80000U))!=0U) {
                     ++out.excluded_flags;
                     current=next;continue;
                 }

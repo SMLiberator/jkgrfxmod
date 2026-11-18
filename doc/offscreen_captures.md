@@ -48,13 +48,14 @@ touch OpenGL or switch the active JK camera.
   native Thing identity only for self-exclusion: an immutable position is
   copied at request time. World changes cancel obsolete requests.
 - Global captures include world geometry and visible sky apertures, plus
-  verified, stationary, nonanimated Cog/Ghost 3DO scenery. They exclude
-  actors, corpses, projectiles, items, explosions, particle/sprite effects,
-  attached or moving 3DOs, and camera HUD models. Native Thing type,
-  movement/attachment state, puppet/animation state and ownership signature
-  are validated for both independent offscreen discovery and the main-camera
-  fallback. Available sun-motion history also rejects recently transformed
-  main-camera 3DOs. The realtime hemi/cube passes retain dynamic geometry.
+  validated Cog (type 7) MODEL3 scenery, including 0x8 LEVELGEO Things and
+  PATH (move type 2) Things at their current poses. Ghosts and all other
+  Thing types are excluded. PHYSICS movement, Thing-to-Thing attachments,
+  destroyed/hidden/disabled and camera HUD Things are excluded. Native
+  ownership/signature checks apply to offscreen discovery and main-camera
+  fallback equally. Assigned puppet resources and the sun-shadow dynamic
+  caster hint no longer suppress legitimate one-time Cog captures.
+  The realtime hemi/cube passes retain their own dynamic geometry policy.
 - Other scenes keep their ordinary `hemi`/`cube` realtime per-Thing probes.
   This global map can also serve as their authored-EnvMap fallback when those
   materials permit the global override.

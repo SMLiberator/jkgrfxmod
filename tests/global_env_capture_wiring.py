@@ -26,6 +26,12 @@ assert 'global_env_fade_seconds=global_request->fade_time;' in capture
 assert 'envmap_capture_face_resolution' in capture
 assert 'global_env_converter->convert(' in capture
 assert 'candidate.is_global' in capture
+# A global capture is intentionally a Cog snapshot, not a shadow-static pass.
+assert 'recently_moving_owners' not in capture
+assert 'type!=7U' in registry
+assert '(move_type!=0U && move_type!=2U)' in registry
+assert '(flags&(0x2U|0x10U|0x20U|0x80000U))' in registry
+assert '(flags&(0x2U|0x10U|0x80000U))' in read("renderer/planar_reflection_things.hpp")
 assert 'glClearColor(candidate.is_global?' in capture
 assert 'generated_global_env_binding() const' in renderer
 assert 'global_allowed &&' in renderer
