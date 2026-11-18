@@ -445,6 +445,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_hemi_reflection_capture").get_to(
                 rv->experimental_hemi_reflection_capture);
         }
+        if(j.contains("experimental_hemi_direct_capture")) {
+            j.at("experimental_hemi_direct_capture").get_to(
+                rv->experimental_hemi_direct_capture);
+        }
         if(j.contains("experimental_cube_reflection_capture")) {
             j.at("experimental_cube_reflection_capture").get_to(
                 rv->experimental_cube_reflection_capture);

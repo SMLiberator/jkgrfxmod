@@ -60,6 +60,7 @@
     "experimental_planar_thing_discovery": false,
     "experimental_planar_reflection_capture": false,
     "experimental_hemi_reflection_capture": false,
+    "experimental_hemi_direct_capture": false,
     "experimental_cube_reflection_capture": false,
     "reflection_capture_resolution": 128,
     "reflection_capture_update_interval": 0.0,

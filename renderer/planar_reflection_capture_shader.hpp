@@ -23,11 +23,17 @@ class planar_reflection_capture_shader : public opengl_shader {
     gl::uniform_location_id sky_mode_,sky_horizon_,sky_angles_;
     gl::uniform_location_id sky_origin_,sky_right_,sky_forward_,sky_up_;
     gl::uniform_location_id sky_ceiling_,sky_offset_,sky_face_,sky_viewport_;
+    gl::uniform_location_id paraboloid_hemisphere_,paraboloid_inv_far_;
 public:
-    explicit planar_reflection_capture_shader(fs::path const &root)
-        :opengl_shader("planar_capture",
-            root/"shaders/planar_capture.vert",
-            root/"shaders/planar_capture.frag"),
+    explicit planar_reflection_capture_shader(fs::path const &root,
+                                                bool paraboloid=false)
+        :opengl_shader(paraboloid?"dual_paraboloid_capture":"planar_capture",
+            root/(paraboloid?"shaders/dual_paraboloid_capture.vert":
+                "shaders/planar_capture.vert"),
+            root/(paraboloid?"shaders/dual_paraboloid_capture.frag":
+                "shaders/planar_capture.frag"),
+            paraboloid?root/"shaders/dual_paraboloid_capture.geom":
+                fs::path()),
          vr_(gl::get_uniform_location(the_program,"view_right")),
          vf_(gl::get_uniform_location(the_program,"view_forward")),
          vu_(gl::get_uniform_location(the_program,"view_up")),
@@ -71,8 +77,17 @@ public:
          sky_ceiling_(gl::get_uniform_location(the_program,"capture_sky_ceiling_height")),
          sky_offset_(gl::get_uniform_location(the_program,"capture_sky_offset")),
          sky_face_(gl::get_uniform_location(the_program,"capture_sky_face_offset")),
-         sky_viewport_(gl::get_uniform_location(the_program,"capture_sky_viewport"))
+         sky_viewport_(gl::get_uniform_location(the_program,"capture_sky_viewport")),
+         paraboloid_hemisphere_(gl::get_uniform_location(the_program,
+             "paraboloid_hemisphere")),
+         paraboloid_inv_far_(gl::get_uniform_location(the_program,
+             "paraboloid_inv_far"))
     {}
+    void set_paraboloid(unsigned hemisphere,float far_plane) {
+        gl::set_uniform_integer(paraboloid_hemisphere_,int(hemisphere));
+        gl::set_uniform_float(paraboloid_inv_far_,
+            far_plane>0.1f?1.0f/far_plane:0.0f);
+    }
     void set_capture_sky(int mode,world_cache_sky_info const &info,
         std::array<float,3> const &angles,engine_camera const &camera,
         float half_fov,int width,int height,

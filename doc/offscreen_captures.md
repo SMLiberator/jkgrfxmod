@@ -65,12 +65,16 @@ touch OpenGL or switch the active JK camera.
 resolution (default 128), and the short edge of the planar target.
 The `hemi` probe now stores **two fixed +Z/-Z dual-paraboloid disks**,
 each twice the cube-face linear resolution with 5-degree horizon overlap.
-In the first validation milestone it converts six accurate cube capture
-views to those two texture layers; this validates reflection direction,
-coverage, roughness mips and seam blending before attempting direct
-nonlinear geometry rendering. **This milestone is not yet a two-view
-performance optimization.** Planar targets preserve the main camera's aspect
-ratio.
+By default it converts six accurate cube capture views to those two texture
+layers, preserving a reliable visual reference. With the additional
+`experimental_hemi_direct_capture=true` switch, the renderer instead draws
+**two nonlinear paraboloid views directly**: the capture-only geometry shader
+subdivides triangles adaptively, clips each hemisphere, and writes radial
+depth; the sky pass reconstructs world-space directions. Both are kept under
+the same ordinary `hemi` material mode and disabled by default for
+unvalidated rendering. Direct capture is a performance experiment and may
+still show curvature, sky-UV or horizon artifacts pending in-game testing.
+Planar targets preserve the main camera's aspect ratio.
 
 `reflection_capture_update_interval` (seconds, default 0) throttles
 complete per-Thing cube and hemi captures and visible planar captures.

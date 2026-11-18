@@ -127,7 +127,6 @@
                 hemi_capture_program=
                     std::make_unique<planar_reflection_capture_shader>(
                         the_config->data_path);
-            auto &shader=*hemi_capture_program;
             auto const now=std::chrono::steady_clock::now();
             for(auto const &candidate:candidates) {
                 uint64_t const selected_owner=candidate.is_global
@@ -164,12 +163,19 @@
                     static_capture_owners.emplace(owner,eligible);
                     return eligible;
                 };
-                // Stage 1: hemi uses two up/down paraboloid texture
-                // layers converted from six accurate perspective views.
-                // Direct two-view capture will replace only this source.
                 bool const paraboloid_mode=selected_mode==5;
+                // The two-view geometry path remains opt-in until validated
+                // against the proven six-view conversion reference.
+                bool const direct_paraboloid=paraboloid_mode &&
+                    the_config->experimental_hemi_direct_capture;
                 bool const cube_mode=!paraboloid_mode;
-                int const face_count=6;
+                int const face_count=direct_paraboloid?2:6;
+                if(direct_paraboloid && !paraboloid_capture_program)
+                    paraboloid_capture_program=
+                        std::make_unique<planar_reflection_capture_shader>(
+                            the_config->data_path,true);
+                auto &shader=direct_paraboloid
+                    ?*paraboloid_capture_program:*hemi_capture_program;
                 auto const far_plane=std::min(
                     frame_world_cache_camera.far_plane,96.0f);
                 if(!(std::isfinite(far_plane)&&far_plane>0.1f))continue;
@@ -180,13 +186,16 @@
                     :the_config->reflection_capture_resolution;
                 int const output_side=paraboloid_mode?side*2:side;
                 int const output_layers=paraboloid_mode?2:6;
+                int const capture_side=direct_paraboloid?output_side:side;
                 auto &entry=reflection_probes[candidate.owner];
                 entry.seen_frame=gpu_3do_present_serial;
                 bool const needs_reconfigure=entry.mode!=selected_mode ||
+                    entry.direct_capture!=direct_paraboloid ||
                     !entry.target || !entry.target->ready() ||
                     entry.target->width()!=output_side ||
                     entry.target->layers()!=output_layers ||
-                    (paraboloid_mode && (!entry.cube_source ||
+                    (paraboloid_mode && !direct_paraboloid &&
+                     (!entry.cube_source ||
                         !entry.cube_source->ready() ||
                         entry.cube_source->width()!=side ||
                         entry.cube_source->layers()!=6));
@@ -198,29 +207,33 @@
                     continue; // Reuse this Thing's complete previous probe.
                 entry.ready=false;
                 entry.mode=selected_mode;
+                entry.direct_capture=direct_paraboloid;
                 if(!entry.target)
                     entry.target=
                         std::make_unique<reflection_probe_capture_target>();
-                if(paraboloid_mode && !entry.cube_source)
+                if(paraboloid_mode && !direct_paraboloid &&
+                   !entry.cube_source)
                     entry.cube_source=
                         std::make_unique<reflection_probe_capture_target>();
-                if(!paraboloid_mode)entry.cube_source.reset();
-                auto *probe_target=paraboloid_mode
+                if(!paraboloid_mode || direct_paraboloid)
+                    entry.cube_source.reset();
+                auto *probe_target=paraboloid_mode && !direct_paraboloid
                     ?entry.cube_source.get():entry.target.get();
                 if(!entry.target->ensure(output_side,output_layers) ||
-                   !probe_target->ensure(side,face_count))continue;
+                   !probe_target->ensure(capture_side,face_count))continue;
                 size_t total_world_drawn=0,total_model_drawn=0;
                 size_t total_acquired_nodes=0;
                 engine_camera first_camera{};
                 bool all_faces_ready=true;
                 for(int face=0;face<face_count;++face) {
-                    auto const camera=
-                        make_cube_reflection_camera(focus,unsigned(face));
+                    auto const camera=direct_paraboloid
+                        ?make_dual_paraboloid_camera(focus,unsigned(face))
+                        :make_cube_reflection_camera(focus,unsigned(face));
                     if(!camera.valid) {all_faces_ready=false;break;}
                     if(face==0)first_camera=camera;
                     auto const view=planar_camera_native_view(camera);
                     auto const projection=make_offscreen_capture_projection(
-                        side,side,camera.fov,0.0f,far_plane);
+                        capture_side,capture_side,camera.fov,0.0f,far_plane);
                     if(!projection.valid) {all_faces_ready=false;break;}
                     gpu_3do_native_frustum frustum=
                         frame_world_cache_camera.frustum;
@@ -252,8 +265,19 @@
                                 return owner==selected_owner ||
                                     (candidate.is_global &&
                                      !capture_static_owner(owner)) ||
-                                    planar_reflection_thing_outside_frustum(
-                                        read,thing,frustum,view);
+                                    (direct_paraboloid
+                                        ?([&] {
+                                            float distance2=0.0f;
+                                            for(unsigned i=0;i<3;++i) {
+                                                float const delta=
+                                                    thing.position[i]-focus[i];
+                                                distance2+=delta*delta;
+                                            }
+                                            float const range=far_plane+32.0f;
+                                            return distance2>range*range;
+                                        }())
+                                        :planar_reflection_thing_outside_frustum(
+                                            read,thing,frustum,view));
                             }),things.end());
                         std::sort(things.begin(),things.end(),
                             [&](auto const &a,auto const &b) {
@@ -268,7 +292,8 @@
                                 return distance2(a)<distance2(b);
                             });
                         offscreen=acquire_planar_reflection_offscreen_gpu(
-                            things,64U,&frustum,&view);
+                            things,64U,direct_paraboloid?nullptr:&frustum,
+                            direct_paraboloid?nullptr:&view);
                     }
                 }
             }
@@ -278,7 +303,7 @@
             offscreen_capture_gl_scope restore;
             glBindFramebuffer(GL_FRAMEBUFFER,probe_target->framebuffer());
             if(!probe_target->select_layer(face)) {all_faces_ready=false;break;}
-            glViewport(0,0,side,side);
+            glViewport(0,0,capture_side,capture_side);
             glDisable(GL_BLEND);
             glDisable(GL_SCISSOR_TEST);
             glDisable(GL_STENCIL_TEST);
@@ -289,7 +314,12 @@
             glDepthMask(GL_TRUE);
             glEnable(GL_CULL_FACE);
             glCullFace(GL_BACK);
-            glFrontFace(GL_CCW);
+            glFrontFace(direct_paraboloid?GL_CW:GL_CCW);
+            if(direct_paraboloid) {
+                glEnable(GL_CLIP_DISTANCE0);
+                glEnable(GL_CLIP_DISTANCE1);
+                glEnable(GL_CLIP_DISTANCE2);
+            }
             glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
             // A globally captured EnvMap must remain opaque even where
             // sky faces or translucent surfaces are not rendered. Use fog
@@ -302,6 +332,8 @@
             glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
             shader.use_program();
             shader.set_projection(projection);
+            if(direct_paraboloid)
+                shader.set_paraboloid(unsigned(face),far_plane);
             shader.set_clip({{0.0f,0.0f,0.0f,0.0f}},false);
             auto const fog=get_fog_settings();
             auto const fi=fog.info.value(),fc=fog.color.value();
@@ -350,7 +382,10 @@
             size_t world_drawn=0,model_drawn=0;
             auto &cache=*world_cache_target;
             draw_reflection_capture_sky(shader,camera,view,frustum,
-                projection,side,side,{{0.0f,0.0f,0.0f,0.0f}},false,false);
+                projection,capture_side,capture_side,
+                {{0.0f,0.0f,0.0f,0.0f}},false,false,
+                direct_paraboloid,far_plane);
+            glFrontFace(direct_paraboloid?GL_CW:GL_CCW);
             shader.set_modelview(view,false);
             shader.set_thing_fade(1.0f,0);
             gl::bind_vertex_array(cache.vao);
@@ -363,8 +398,11 @@
                 if(surface.count<3U || !surface.material ||
                    surface.passable_adjoin ||
                    (surface.surface_flags&0x600U)!=0U ||
-                   gpu_3do_batch_outside_frustum(
-                       frustum,view,surface.bounds_min,surface.bounds_max))
+                   (direct_paraboloid
+                    ?dual_paraboloid_outside_distance(
+                        surface.bounds_min,surface.bounds_max,focus,far_plane)
+                    :gpu_3do_batch_outside_frustum(
+                        frustum,view,surface.bounds_min,surface.bounds_max)))
                     continue;
                 groups[std::make_tuple(surface.material,surface.cel,
                                       !surface.has_uv)].push_back(&surface);
@@ -424,11 +462,13 @@
                                inst.sector_tint[2]));
                 shader.set_thing_fade(1.0f,0);
                 gl::bind_vertex_array(it->second->vao);
-                glFrontFace(gpu_3do_reversed_winding(inst.transform)
-                            ?GL_CW:GL_CCW);
+                glFrontFace(direct_paraboloid
+                    ?(gpu_3do_reversed_winding(inst.transform)?GL_CCW:GL_CW)
+                    :(gpu_3do_reversed_winding(inst.transform)?GL_CW:GL_CCW));
                 for(auto const &group:inst.geometry->groups) {
-                    if(gpu_3do_batch_outside_frustum(
-                        frustum,modelview,group.bounds_min,group.bounds_max))
+                    if(!direct_paraboloid &&
+                       gpu_3do_batch_outside_frustum(
+                           frustum,modelview,group.bounds_min,group.bounds_max))
                         continue;
                     bool const solid=group.solid_color ||
                                       inst.effective_geometry_mode==3U;
@@ -453,7 +493,7 @@
             total_world_drawn+=world_drawn;
             total_model_drawn+=model_drawn;
             total_acquired_nodes+=offscreen.stats.ready_nodes;
-            } // Capture each of the six source cube faces.
+            } // Direct: two paraboloid passes; otherwise six cube faces.
             // Texture-array mip levels are filtered independently per face.
             // Restore the array binding at texture unit zero so other passes
             // never inherit this optional capture target.
@@ -465,7 +505,7 @@
             glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
             glBindTexture(GL_TEXTURE_2D_ARRAY,GLuint(previous_array));
             if(!all_faces_ready)continue;
-            if(paraboloid_mode) {
+            if(paraboloid_mode && !direct_paraboloid) {
                 if(!dual_paraboloid_convert_program)
                     dual_paraboloid_convert_program=
                         std::make_unique<dual_paraboloid_converter>();
@@ -504,7 +544,9 @@
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
                 LOG_INFO(paraboloid_mode?"HEMI paraboloid owner=":"CUBE capture owner=",
                          selected_owner,
-                         " capture_side=",side," source_faces=",face_count,
+                         " capture_side=",capture_side,
+                         " direct=",direct_paraboloid?1:0,
+                         " source_faces=",face_count,
                          " result_side=",output_side,
                          " result_layers=",output_layers,
                          " world_faces=",total_world_drawn,

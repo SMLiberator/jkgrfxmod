@@ -90,6 +90,7 @@ namespace jkgm {
         bool experimental_planar_reflection_capture = false; // independent GPU reflected-scene FBO; opt-in
         bool experimental_planar_reflection_portal_culling = false; // independent reflected-sector traversal, fail open
         bool experimental_hemi_reflection_capture = false; // fixed up/down dual-paraboloid probe
+        bool experimental_hemi_direct_capture = false; // opt-in direct two-view capture; false retains reference conversion
         bool experimental_cube_reflection_capture = false; // six independent 90-degree probe views
         int reflection_capture_resolution = 128; // cube face/short planar dimension; hemi doubles this
         float reflection_capture_update_interval = 0.0f; // all realtime capture types; 0=every frame

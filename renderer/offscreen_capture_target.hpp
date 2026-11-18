@@ -178,6 +178,7 @@ class offscreen_capture_gl_scope {
     GLboolean scissor_=GL_FALSE,stencil_=GL_FALSE;
     GLboolean framebuffer_srgb_=GL_FALSE;
     GLboolean polygon_offset_=GL_FALSE;
+    GLboolean clip_distance_[3]{GL_FALSE,GL_FALSE,GL_FALSE};
 public:
     offscreen_capture_gl_scope() {
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw_);
@@ -208,6 +209,9 @@ public:
         stencil_=glIsEnabled(GL_STENCIL_TEST);
         framebuffer_srgb_=glIsEnabled(GL_FRAMEBUFFER_SRGB);
         polygon_offset_=glIsEnabled(GL_POLYGON_OFFSET_FILL);
+        clip_distance_[0]=glIsEnabled(GL_CLIP_DISTANCE0);
+        clip_distance_[1]=glIsEnabled(GL_CLIP_DISTANCE1);
+        clip_distance_[2]=glIsEnabled(GL_CLIP_DISTANCE2);
     }
     offscreen_capture_gl_scope(offscreen_capture_gl_scope const &)=delete;
     offscreen_capture_gl_scope &
@@ -243,6 +247,9 @@ public:
         restore(GL_STENCIL_TEST,stencil_);
         restore(GL_FRAMEBUFFER_SRGB,framebuffer_srgb_);
         restore(GL_POLYGON_OFFSET_FILL,polygon_offset_);
+        restore(GL_CLIP_DISTANCE0,clip_distance_[0]);
+        restore(GL_CLIP_DISTANCE1,clip_distance_[1]);
+        restore(GL_CLIP_DISTANCE2,clip_distance_[2]);
     }
 };
 } // namespace jkgm

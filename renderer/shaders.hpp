@@ -15,7 +15,8 @@ namespace jkgm {
 
         opengl_shader(std::string const &name,
                       fs::path const &vertex_part,
-                      fs::path const &fragment_part);
+                      fs::path const &fragment_part,
+                      fs::path const &geometry_part = fs::path());
 
     public:
         opengl_shader(opengl_shader const &) = delete;

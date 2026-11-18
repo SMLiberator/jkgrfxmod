@@ -271,7 +271,8 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
         void link_program_from_files(std::string const &name,
                                      gl::program_view prog,
                                      fs::path const &vx,
-                                     fs::path const &fg)
+                                     fs::path const &fg,
+                                     fs::path const &geom)
         {
             auto vx_shader = compile_shader_from_file(vx,gl::shader_type::vertex);
             auto fg_shader = compile_shader_from_file(
@@ -279,6 +280,11 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
 
             gl::attach_shader(prog, vx_shader);
             gl::attach_shader(prog, fg_shader);
+            if(!geom.empty()) {
+                auto geom_shader=compile_shader_from_file(
+                    geom,gl::shader_type::geometry);
+                gl::attach_shader(prog,geom_shader);
+            }
 
             gl::link_program(prog);
 
@@ -301,10 +307,11 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
 
 jkgm::opengl_shader::opengl_shader(std::string const &name,
                                    fs::path const &vertex_part,
-                                   fs::path const &fragment_part)
+                                   fs::path const &fragment_part,
+                                   fs::path const &geometry_part)
 {
     link_program_from_files(
-        name,the_program,vertex_part,fragment_part);
+        name,the_program,vertex_part,fragment_part,geometry_part);
 }
 
 void jkgm::opengl_shader::use_program()

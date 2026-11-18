@@ -9,7 +9,8 @@
             offscreen_capture_projection const &projection,
             int viewport_width,int viewport_height,
             std::array<float,4> const &restore_clip,bool clip_enabled,
-            bool mirrored)
+            bool mirrored,bool paraboloid=false,
+            float radial_far=0.0f)
         {
             if(!world_cache_target || !world_cache_target->ready)return;
             auto &cache=*world_cache_target;
@@ -43,7 +44,7 @@
             shader.set_thing_fade(1.0f,0);
             shader.set_clip({{0.0f,0.0f,0.0f,0.0f}},false);
             gl::bind_vertex_array(cache.vao);
-            glFrontFace(mirrored?GL_CW:GL_CCW);
+            glFrontFace(paraboloid?GL_CW:(mirrored?GL_CW:GL_CCW));
             glEnable(GL_CULL_FACE);
             size_t drawn=0;
             for(auto const &face:reflection_sky_candidates) {
@@ -59,8 +60,11 @@
                 auto const index=cache.cached_surface_lookup[face.surface_index];
                 if(index>=cache.mesh.surfaces.size())continue;
                 auto const &surface=cache.mesh.surfaces[index];
-                if(gpu_3do_batch_outside_frustum(
-                       frustum,view,surface.bounds_min,surface.bounds_max))
+                if(paraboloid
+                    ?dual_paraboloid_outside_distance(surface.bounds_min,
+                        surface.bounds_max,camera.position,radial_far)
+                    :gpu_3do_batch_outside_frustum(
+                        frustum,view,surface.bounds_min,surface.bounds_max))
                     continue;
                 gpu_3do_group group{};
                 group.material=face.material;

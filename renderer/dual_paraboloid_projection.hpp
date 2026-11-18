@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include "engine_camera.hpp"
 
 namespace jkgm {
 constexpr float dual_paraboloid_overlap_sine=0.08715574274765817f;
@@ -55,5 +56,40 @@ inline float dual_paraboloid_upper_weight(float direction_z) {
         (direction_z+dual_paraboloid_overlap_sine)/
         (2.0f*dual_paraboloid_overlap_sine)));
     return t*t*(3.0f-2.0f*t);
+}
+
+inline engine_camera make_dual_paraboloid_camera(
+    std::array<float,3> const &probe,unsigned hemisphere)
+{
+    engine_camera cam{};
+    if(hemisphere>1U || !engine_camera_detail::finite(probe))
+        return cam;
+    float const sign=hemisphere==0U?1.0f:-1.0f;
+    cam.position=probe;
+    cam.right={{1.0f,0.0f,0.0f}};
+    cam.forward={{0.0f,0.0f,sign}};
+    cam.up={{0.0f,-sign,0.0f}};
+    cam.fov=90.0f; // radial mapping happens in the geometry shader
+    cam.valid=true;
+    return cam;
+}
+// Spherical range test: don't use perspective-frustum culling for a full
+// hemisphere. This rejects only boxes strictly beyond capture far distance.
+inline bool dual_paraboloid_outside_distance(
+    std::array<float,3> const &bmin,
+    std::array<float,3> const &bmax,
+    std::array<float,3> const &origin,float far_distance)
+{
+    if(!(std::isfinite(far_distance) && far_distance>0.0f))
+        return false;
+    float distance2=0.0f;
+    for(int i=0;i<3;++i) {
+        if(!std::isfinite(bmin[i]) || !std::isfinite(bmax[i]) ||
+           !std::isfinite(origin[i]) || bmin[i]>bmax[i])return false;
+        float const delta=origin[i]<bmin[i]?bmin[i]-origin[i]:
+                          origin[i]>bmax[i]?origin[i]-bmax[i]:0.0f;
+        distance2+=delta*delta;
+    }
+    return distance2>far_distance*far_distance;
 }
 } // namespace jkgm

@@ -78,7 +78,7 @@ assert '#include "dual_paraboloid_converter.hpp"' in renderer
 assert "std::unique_ptr<reflection_probe_capture_target> cube_source;" in renderer
 assert "dual_paraboloid_convert_program->convert(" in capture
 assert "int const output_layers=paraboloid_mode?2:6;" in capture
-assert "int const face_count=6;" in capture
+assert "int const face_count=direct_paraboloid?2:6;" in capture
 assert "make_hemi_reflection_camera(" not in capture
 assert "1.091308501" in shader
 assert "up_weight=smoothstep(" in shader
@@ -86,3 +86,22 @@ assert "for(int hemisphere=0;hemisphere<2;++hemisphere)" in shader
 assert "weighted_coverage" in shader
 assert "dual_paraboloid_projection.hpp" in read("renderer/dual_paraboloid_converter.hpp")
 assert "dual_paraboloid_convert_program.reset();" in renderer
+
+# Direct capture is an opt-in two-view path; CUBE and global remain six-view.
+assert settings["experimental_hemi_direct_capture"] is False
+assert "experimental_hemi_direct_capture" in config
+assert "make_dual_paraboloid_camera(focus,unsigned(face))" in capture
+assert "direct_paraboloid?2:6" in capture
+assert "shader.set_paraboloid(unsigned(face),far_plane)" in capture
+assert "direct_paraboloid?nullptr:&frustum" in capture
+assert "direct_paraboloid?nullptr:&view" in capture
+assert "dual_paraboloid_outside_distance(" in capture
+assert "glEnable(GL_CLIP_DISTANCE0)" in capture
+assert "glEnable(GL_CLIP_DISTANCE1)" in capture
+assert "glEnable(GL_CLIP_DISTANCE2)" in capture
+assert "paraboloid_capture_program" in renderer
+assert "GL_CLIP_DISTANCE0" in read("renderer/offscreen_capture_target.hpp")
+assert "dual_paraboloid_capture.geom" in read("renderer/planar_reflection_capture_shader.hpp")
+assert "gl_ClipDistance[0]" in read("assets/shaders/dual_paraboloid_capture.geom")
+assert "gl_FragDepth" in read("assets/shaders/dual_paraboloid_capture.frag")
+assert "paraboloid" in read("renderer/reflection_sky_capture.inc")

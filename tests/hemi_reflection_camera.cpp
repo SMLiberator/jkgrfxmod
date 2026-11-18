@@ -60,6 +60,30 @@ int main() {
     auto y_down=jkgm::project_dual_paraboloid_direction(
         {{0.0f,1.0f,0.0f}},1U);
     assert(y_up.uv[1]>0.5f && y_down.uv[1]<0.5f);
+    // Two fixed upright/downward cameras, independent of player orientation.
+    auto const top=jkgm::make_dual_paraboloid_camera(
+        {{1.0f,2.0f,3.0f}},0U);
+    auto const bottom=jkgm::make_dual_paraboloid_camera(
+        {{1.0f,2.0f,3.0f}},1U);
+    assert(top.valid && bottom.valid);
+    assert(top.forward[2]==1.0f && bottom.forward[2]==-1.0f);
+    assert(top.right==bottom.right);
+    assert(top.up[1]==-1.0f && bottom.up[1]==1.0f);
+    assert(!jkgm::make_dual_paraboloid_camera(
+        {{0.0f,0.0f,0.0f}},2U).valid);
+    // AABB radial test is conservative: no narrow perspective-frustum test.
+    auto const origin=std::array<float,3>{{0.0f,0.0f,0.0f}};
+    assert(!jkgm::dual_paraboloid_outside_distance(
+        {{-1.0f,-1.0f,-1.0f}},{{1.0f,1.0f,1.0f}},origin,32.0f));
+    assert(!jkgm::dual_paraboloid_outside_distance(
+        {{32.0f,-1.0f,-1.0f}},{{40.0f,1.0f,1.0f}},origin,32.0f));
+    assert(jkgm::dual_paraboloid_outside_distance(
+        {{33.0f,-1.0f,-1.0f}},{{40.0f,1.0f,1.0f}},origin,32.0f));
+    assert(!jkgm::dual_paraboloid_outside_distance(
+        {{-100.0f,0.0f,0.0f}},{{100.0f,1.0f,1.0f}},origin,32.0f));
+    // Invalid world bounds must fail open, never silently erase geometry.
+    assert(!jkgm::dual_paraboloid_outside_distance(
+        {{2.0f,0.0f,0.0f}},{{1.0f,1.0f,1.0f}},origin,32.0f));
     // Six orthogonal 90-degree cube views must cover every axis and map
     // the direction to its corresponding face center.
     std::array<std::array<float,3>,6> const axes{{

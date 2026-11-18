@@ -674,6 +674,7 @@ namespace jkgm {
             std::unique_ptr<reflection_probe_capture_target> cube_source;
             engine_camera camera{};
             int mode=0;
+            bool direct_capture=false;
             bool ready=false;
             uint64_t seen_frame=0U;
             std::chrono::steady_clock::time_point last_refresh{};
@@ -692,6 +693,8 @@ namespace jkgm {
         std::chrono::steady_clock::time_point global_env_fade_start{};
         float global_env_fade_seconds=0.0f;
         std::unique_ptr<planar_reflection_capture_shader> hemi_capture_program;
+        std::unique_ptr<planar_reflection_capture_shader>
+            paraboloid_capture_program;
 
         struct global_env_binding {
             bool active=false,from_capture=false,transition=false;
@@ -1558,6 +1561,7 @@ namespace jkgm {
                 global_env_previous.reset();
                 global_env_converter.reset();
                 hemi_capture_program.reset();
+                paraboloid_capture_program.reset();
                 dual_paraboloid_convert_program.reset();
                 ssr_receiver_program.reset();
                 ssr_trace_program.reset();
