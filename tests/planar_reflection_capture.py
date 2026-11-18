@@ -249,3 +249,19 @@ opaque=renderer.split("void draw_game_opaque_into_gbuffer(",1)[1].split("void re
 assert opaque.index("draw_gpu_3do_preview(false);") < opaque.index("query_planar_receiver_visibility();")
 capture=renderer.split("void render_planar_capture()",1)[1].split("void present_game()",1)[0]
 assert capture.index("visibility.hidden(") < capture.index("acquire_planar_reflection_offscreen_gpu(")
+
+# Static-only global EnvMaps must filter both independent reflected-camera
+# discovery and visible main-camera fallback, without changing realtime probes.
+global_capture=read("renderer/hemi_reflection_capture.inc")
+static_policy=read("renderer/global_env_capture.hpp")
+assert "global_env_capture_static_thing(" in static_policy
+assert "type!=7U && type!=8U" in static_policy
+assert "move_type!=0U" in static_policy
+assert "animation_class!=0U" in static_policy
+assert "auto capture_static_owner=" in global_capture
+assert "(candidate.is_global &&" in global_capture
+assert "!capture_static_owner(owner)" in global_capture
+assert "!capture_static_owner(inst.shadow_owner)" in global_capture
+assert "native_motion_tracking_enabled &&" in global_capture
+assert "inst.dynamic_sun_caster" in global_capture
+assert "draw_reflection_capture_sky(" in global_capture

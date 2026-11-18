@@ -1,4 +1,5 @@
 #include "renderer/planar_reflection_things.hpp"
+#include "renderer/global_env_capture.hpp"
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -120,5 +121,52 @@ int main()
     put(a+0x0cU,uint32_t(1));
     assert(collect_planar_reflection_things(get,world,scan));
     assert(scan.models.size()==1 && scan.excluded_flags==2);
+    // On-demand EnvMaps include only persistent static 3DO scenery.
+    // Both the offscreen scan and main-camera fallback use this same test.
+    put(c+0x0cU,uint32_t(7)); // Cog
+    put(c+0x10U,uint32_t(0)); // movetype none
+    put(c+0x34U,uint32_t(0)); // no moving parent
+    put(c+0xd8U,uint32_t(0)); // rdThing puppet
+    put(c+0x108U,uint32_t(c)); // rdThing->SithThing owner
+    put(c+0x128U,uint32_t(0)); // animation class
+    put(c+0x12cU,uint32_t(0)); // SithThing puppet
+    uint64_t const static_owner=(uint64_t(uint32_t(c))<<32)|103U;
+    assert(global_env_capture_static_thing(get,static_owner));
+    put(c+0x0cU,uint32_t(8)); // Ghost scenery
+    assert(global_env_capture_static_thing(get,static_owner));
+    for(uint32_t kind : {2U,3U,4U,5U,6U,9U,10U,11U}) {
+        put(c+0x0cU,kind);
+        assert(!global_env_capture_static_thing(get,static_owner));
+    }
+    put(c+0x0cU,uint32_t(7));
+    put(c+0x10U,uint32_t(1)); // physics/path-moving
+    assert(!global_env_capture_static_thing(get,static_owner));
+    put(c+0x10U,uint32_t(0));
+    for(uint32_t attached : {0x2U,0x4U,0x80U}) {
+        put(c+0x34U,attached);
+        assert(!global_env_capture_static_thing(get,static_owner));
+    }
+    put(c+0x34U,uint32_t(0));
+    for(uintptr_t offset : {uintptr_t(0xd8U),uintptr_t(0x128U),
+                            uintptr_t(0x12cU)}) {
+        put(c+offset,uint32_t(1));
+        assert(!global_env_capture_static_thing(get,static_owner));
+        put(c+offset,uint32_t(0));
+    }
+    put(c+0x74U,uint32_t(104)); // recycled native Thing
+    assert(!global_env_capture_static_thing(get,static_owner));
+    put(c+0x74U,uint32_t(103));
+    put(c+0x108U,uint32_t(a)); // detached rdThing
+    assert(!global_env_capture_static_thing(get,static_owner));
+    put(c+0x108U,uint32_t(c));
+    for(uint32_t hidden : {0x2U,0x8U,0x10U,0x20U,0x80000U}) {
+        put(c+0x00U,hidden);
+        assert(!global_env_capture_static_thing(get,static_owner));
+    }
+    put(c+0x00U,uint32_t(0));
+    assert(global_env_capture_static_thing(get,static_owner));
+    assert(!global_env_capture_static_thing(get,0U));
+    assert(!global_env_capture_static_thing(get,
+        (uint64_t(0xdead0000U)<<32)|103U));
     return 0;
 }

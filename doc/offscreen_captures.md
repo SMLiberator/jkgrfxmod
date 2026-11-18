@@ -47,6 +47,14 @@ touch OpenGL or switch the active JK camera.
 - Captures are on-demand, not updated each frame. Each request records a
   native Thing identity only for self-exclusion: an immutable position is
   copied at request time. World changes cancel obsolete requests.
+- Global captures include world geometry and visible sky apertures, plus
+  verified, stationary, nonanimated Cog/Ghost 3DO scenery. They exclude
+  actors, corpses, projectiles, items, explosions, particle/sprite effects,
+  attached or moving 3DOs, and camera HUD models. Native Thing type,
+  movement/attachment state, puppet/animation state and ownership signature
+  are validated for both independent offscreen discovery and the main-camera
+  fallback. Available sun-motion history also rejects recently transformed
+  main-camera 3DOs. The realtime hemi/cube passes retain dynamic geometry.
 - Other scenes keep their ordinary `hemi`/`cube` realtime per-Thing probes.
   This global map can also serve as their authored-EnvMap fallback when those
   materials permit the global override.

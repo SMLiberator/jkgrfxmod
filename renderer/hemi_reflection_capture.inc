@@ -134,6 +134,29 @@
                     ?candidate.exclude_owner:candidate.owner;
                 int const selected_mode=candidate.mode;
                 auto const &focus=candidate.position;
+            std::unordered_map<uint64_t,bool> static_capture_owners;
+            // Keep each native ownership decision stable across all six
+            // directions. This must also work with sun shadows disabled.
+            auto capture_static_owner=[&](uint64_t owner)->bool {
+                if(!candidate.is_global)return true;
+                if(!owner)return false; // Unknown geometry is not persistent scenery.
+                auto found=static_capture_owners.find(owner);
+                if(found!=static_capture_owners.end())return found->second;
+                auto read=[](uintptr_t address,void *dst,size_t bytes) {
+                    return engine_material_debug::read_bytes(
+                        address,dst,bytes);
+                };
+                bool const eligible=global_env_capture_static_thing(
+                    read,owner);
+                static_capture_owners.emplace(owner,eligible);
+                return eligible;
+            };
+            // The native sun hook already records scripted pose changes for
+            // main-camera models when either shadow system is active.
+            bool const native_motion_tracking_enabled=
+                the_config->enable_sun_shadows ||
+                (the_config->enable_spotlights &&
+                 the_config->enable_spotlight_shadows);
                 bool const cube_mode=selected_mode==6;
                 int const face_count=cube_mode?6:1;
                 auto const far_plane=std::min(
@@ -204,8 +227,11 @@
                         auto &things=scan.models;
                         things.erase(std::remove_if(things.begin(),things.end(),
                             [&](auto const &thing) {
-                                return planar_reflection_thing_owner_key(thing)==
-                                           selected_owner ||
+                                uint64_t const owner=
+                                    planar_reflection_thing_owner_key(thing);
+                                return owner==selected_owner ||
+                                    (candidate.is_global &&
+                                     !capture_static_owner(owner)) ||
                                     planar_reflection_thing_outside_frustum(
                                         read,thing,frustum,view);
                             }),things.end());
@@ -352,6 +378,14 @@
                    inst.effective_geometry_mode<3U ||
                    !inst.geometry || !gpu_3do_matrix_finite(inst.transform))
                     return;
+                // The same eligibility applies to primary-camera instances,
+                // which otherwise bypass independent offscreen discovery.
+                // Sun motion history additionally rejects scripted pose edits
+                // on model Things whose movement type remains NONE.
+                if(candidate.is_global &&
+                   (!capture_static_owner(inst.shadow_owner) ||
+                    (native_motion_tracking_enabled &&
+                     inst.dynamic_sun_caster)))return;
                 auto it=gpu_3do_gl_cache.find(inst.id);
                 if(it==gpu_3do_gl_cache.end()) {
                     if(gpu_3do_gl_cache.size()>=8192U)return;
