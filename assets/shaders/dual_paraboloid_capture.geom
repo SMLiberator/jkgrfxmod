@@ -33,7 +33,7 @@ void projected_vertex(vec3 weights) {
     gl_Position=vec4(paraboloid/disk_radius,2.0*depth-1.0,1.0);
     gl_ClipDistance[0]=p.y+dist*overlap_sin;
     gl_ClipDistance[1]=dist-near_radius;
-    gl_ClipDistance[2]=1.0-depth;
+    gl_ClipDistance[2]=1.0-dist*projection.z;
     pixel_uv=vs_pixel_uv[0]*weights.x+
              vs_pixel_uv[1]*weights.y+
              vs_pixel_uv[2]*weights.z;

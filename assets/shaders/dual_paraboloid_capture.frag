@@ -52,7 +52,7 @@ void main() {
             // Use world yaw/elevation in JK pixels-per-revolution scale.
             float yaw=degrees(atan(dir.x,dir.y));
             float pitch=degrees(asin(clamp(dir.z,-1.0,1.0)));
-            uv=-vec2(yaw,pitch)*(capture_sky_horizon.y/360.0);
+            uv=vec2(yaw,-pitch)*(capture_sky_horizon.y/360.0);
         } else {
             float distance_to_sky=1000.0;
             if(abs(dir.z)>0.000001) {
