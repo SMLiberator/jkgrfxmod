@@ -13308,6 +13308,24 @@ namespace jkgm {
                    inst.effective_geometry_mode<3U ||
                    !inst.geometry || inst.geometry->groups.empty() ||
                    !gpu_3do_matrix_finite(inst.transform))return;
+                // The main-view GPU fallback can contain models invisible
+                // from the mirrored eye. Apply its independently constructed
+                // sector mask too, not just to offscreen pose acquisition.
+                // Unreadable or stale Things fail open to ordinary drawing.
+                if(!planar_thing_sector_visibility.empty() &&
+                   planar_thing_visibility_world==cache.loaded_world &&
+                   planar_thing_visibility_frame==gpu_3do_present_serial &&
+                   inst.shadow_owner) {
+                    uintptr_t const source_thing=
+                        uintptr_t(uint32_t(inst.shadow_owner>>32U));
+                    uint32_t sector=0U;
+                    if(planar_reflection_valid_native_pointer(source_thing) &&
+                       engine_material_debug::read_bytes(
+                           source_thing+0x5cU,&sector,4U) &&
+                       !cache.reflected_portal_graph.thing_sector_visible(
+                           sector,planar_thing_sector_visibility))
+                        return;
+                }
                 auto glmesh=gpu_3do_gl_cache.find(inst.id);
                 if(glmesh==gpu_3do_gl_cache.end()) {
                     if(gpu_3do_gl_cache.size()>8192U)return;
