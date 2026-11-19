@@ -13222,7 +13222,7 @@ namespace jkgm {
             auto &cache=*world_cache_target;
             draw_reflection_capture_sky(shader,reflected,view,
                 reflected_frustum,projection,
-                setup.width,setup.height,setup.clip_view,true,true,false,0.0f,
+                setup.width,setup.height,setup.clip_view,true,true,false,
                 planar_reflection_sky_visibility.empty()?nullptr:
                     &planar_reflection_sky_visibility);
             gl::bind_vertex_array(cache.vao);

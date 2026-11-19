@@ -10,7 +10,6 @@
             int viewport_width,int viewport_height,
             std::array<float,4> const &restore_clip,bool clip_enabled,
             bool mirrored,bool paraboloid=false,
-            float radial_far=0.0f,
             std::vector<uint8_t> const *visible_surfaces=nullptr)
         {
             if(!world_cache_target || !world_cache_target->ready)return;

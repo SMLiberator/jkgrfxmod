@@ -514,7 +514,7 @@
             draw_reflection_capture_sky(shader,camera,view,frustum,
                 projection,capture_side,capture_side,
                 {{0.0f,0.0f,0.0f,0.0f}},false,false,
-                paraboloid_mode,far_plane,surface_mask);
+                paraboloid_mode,surface_mask);
             glFrontFace(paraboloid_mode?GL_CW:GL_CCW);
             shader.set_modelview(view,false);
             shader.set_thing_fade(1.0f,0);
