@@ -250,20 +250,26 @@ assert opaque.index("draw_gpu_3do_preview(false);") < opaque.index("query_planar
 capture=renderer.split("void render_planar_capture()",1)[1].split("void present_game()",1)[0]
 assert capture.index("visibility.hidden(") < capture.index("acquire_planar_reflection_offscreen_gpu(")
 
-# Static-only global EnvMaps must filter both independent reflected-camera
-# discovery and visible main-camera fallback, without changing realtime probes.
+# On-demand global EnvMaps include only Cog MODEL3 scenery, including
+# LEVELGEO and PATH (which must not be mistaken for transience). Realtime
+# hemi/cube probes use a separate per-source attachment-family exclusion.
 global_capture=read("renderer/hemi_reflection_capture.inc")
 static_policy=read("renderer/global_env_capture.hpp")
 assert "global_env_capture_static_thing(" in static_policy
-assert "type!=7U && type!=8U" in static_policy
-assert "move_type!=0U" in static_policy
-assert "animation_class!=0U" in static_policy
+assert "type!=7U" in static_policy
+assert "type!=7U && type!=8U" not in static_policy
+assert "(move_type!=0U && move_type!=2U)" in static_policy
+assert "(flags&(0x2U|0x10U|0x20U|0x80000U))" in static_policy
+assert "animation_class!=0U" not in static_policy
 assert "auto capture_static_owner=" in global_capture
 assert "(candidate.is_global &&" in global_capture
 assert "!capture_static_owner(owner)" in global_capture
 assert "!capture_static_owner(inst.shadow_owner)" in global_capture
-assert "candidate.is_global && native_motion_tracking_enabled" in global_capture
-assert "recently_moving_owners.insert(inst.shadow_owner)" in global_capture
-assert "recently_moving_owners.count(owner)" in global_capture
-assert "inst.dynamic_sun_caster" in global_capture
+# Sun-shadow movement/puppet flags cannot override explicit Cog capture.
+assert "native_motion_tracking_enabled" not in global_capture
+assert "recently_moving_owners" not in global_capture
+assert "inst.dynamic_sun_caster" not in global_capture
+assert "build_reflection_attachment_family(" in global_capture
+assert "reflection_excluded_owners.count(owner)" in global_capture
+assert "reflection_excluded_owners.count(inst.shadow_owner)" in global_capture
 assert "draw_reflection_capture_sky(" in global_capture
