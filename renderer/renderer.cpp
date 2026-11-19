@@ -5415,7 +5415,7 @@ namespace jkgm {
                     1.0f,1.0f,hemi_active?material.reflection_mode:0);
                 bool const coat_active=clearcoat_available() &&
                     the_config->enable_reflections &&
-                    material.clearcoat_params.x>0.0f &&
+                    get<0>(material.clearcoat_params)>0.0f &&
                     !post_exempt && !decals_only && !inst.camera_hud &&
                     !inst.is_sprite_quad && !inst.is_projected_decal &&
                     !inst.world_lighting_exempt && !material.solid_fullbright &&
@@ -10436,7 +10436,7 @@ namespace jkgm {
                 material,default_eligible);
             bool const coat_active=clearcoat_available() &&
                 the_config->enable_reflections &&
-                material.clearcoat_params.x>0.0f &&
+                get<0>(material.clearcoat_params)>0.0f &&
                 !material.solid_fullbright && !material.emissive_only &&
                 material.albedo_source!=0 && geometry_mode>=3U;
             bool const reflective=the_config->enable_reflections &&

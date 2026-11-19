@@ -44,8 +44,8 @@ assert "prog.set_clearcoat(coat_active," in renderer
 assert 'gl::set_active_texture_unit(26);' in renderer
 assert 'gl::set_active_texture_unit(27);' in renderer
 assert 'shared_requested=wants_shared(cache.sector_candidates)' in capture
-assert 'mat.clearcoat_params.x>0.0f' in capture
-assert 'it->second.clearcoat_params.x>0.0f' in capture
+assert 'get<0>(mat.clearcoat_params)>0.0f' in capture
+assert 'get<0>(it->second.clearcoat_params)>0.0f' in capture
 assert 'JKGM_CLEARCOAT_LAYER 1' in shader_c
 assert 'units>=28' in shader_c
 for stage in (world,three):

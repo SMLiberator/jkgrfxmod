@@ -78,7 +78,7 @@
                          the_config->experimental_cube_reflection_capture)) &&
                         (it->second.reflection_strength>0.0f ||
                          (fragment_units>=28 &&
-                          it->second.clearcoat_params.x>0.0f))) {
+                          get<0>(it->second.clearcoat_params)>0.0f))) {
                         candidate_mode=reflection_mode;
                         break;
                     }
@@ -133,7 +133,7 @@
                         if(it->second.reflection_mode==7 &&
                            (it->second.reflection_strength>0.0f ||
                             (fragment_units>=28 &&
-                             it->second.clearcoat_params.x>0.0f))) {
+                             get<0>(it->second.clearcoat_params)>0.0f))) {
                             shared_requested=true;break;
                         }
                     }
@@ -158,7 +158,7 @@
                             if(mat.reflection_mode==7 &&
                                (mat.reflection_strength>0.0f ||
                                 (fragment_units>=28 &&
-                                 mat.clearcoat_params.x>0.0f)))return true;
+                                 get<0>(mat.clearcoat_params)>0.0f)))return true;
                         }
                         return false;
                     };
