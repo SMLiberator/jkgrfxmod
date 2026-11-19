@@ -6,6 +6,7 @@
 #include "renderer_fwd.hpp"
 #include <d3d.h>
 #include <ddraw.h>
+#include <array>
 #include <vector>
 #include <map>
 

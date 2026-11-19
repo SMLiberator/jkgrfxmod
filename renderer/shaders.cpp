@@ -219,6 +219,10 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     auto const newline=source.find('\n');
                     source.insert(newline+1U,"#define JKGM_MATCAP_LAYER 1\n");
                 }
+                if(units>=28) {
+                    auto const newline=source.find('\n');
+                    source.insert(newline+1U,"#define JKGM_CLEARCOAT_LAYER 1\n");
+                }
             }
             gl::shader_source(rv,make_string_span(""),make_span(source));
             gl::compile_shader(rv);
@@ -386,6 +390,18 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , matcap_enabled(gl::get_uniform_location(the_program,"matcap_enabled"))
     , matcap_has_surface(gl::get_uniform_location(
           the_program,"matcap_has_surface"))
+    , coat_surface_sampler(gl::get_uniform_location(
+          the_program,"clearcoat_surface_map"))
+    , coat_normal_sampler(gl::get_uniform_location(
+          the_program,"clearcoat_normal_map"))
+    , clearcoat_params(gl::get_uniform_location(
+          the_program,"clearcoat_params"))
+    , clearcoat_enabled(gl::get_uniform_location(
+          the_program,"clearcoat_enabled"))
+    , clearcoat_has_surface(gl::get_uniform_location(
+          the_program,"clearcoat_has_surface"))
+    , clearcoat_has_normal(gl::get_uniform_location(
+          the_program,"clearcoat_has_normal"))
     , camera_world_origin(gl::get_uniform_location(the_program,"camera_world_origin"))
     , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
     , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
@@ -524,6 +540,16 @@ void jkgm::shaders::world_cache_preview_shader::set_reflection(
     gl::set_uniform_vector(environment_info,
         make_point(from?1.0f:0.0f,static_cast<float>(mode),
                    to?1.0f:0.0f,weight));
+}
+void jkgm::shaders::world_cache_preview_shader::set_clearcoat(
+    bool enabled,point<4,float> params,bool has_surface,bool has_normal)
+{
+    gl::set_uniform_integer(coat_surface_sampler,26);
+    gl::set_uniform_integer(coat_normal_sampler,27);
+    gl::set_uniform_integer(clearcoat_enabled,enabled?1:0);
+    gl::set_uniform_integer(clearcoat_has_surface,has_surface?1:0);
+    gl::set_uniform_integer(clearcoat_has_normal,has_normal?1:0);
+    if(enabled)gl::set_uniform_vector(clearcoat_params,params);
 }
 void jkgm::shaders::world_cache_preview_shader::set_matcap(
     bool enabled,point<4,float> params,bool has_surface)
@@ -883,6 +909,18 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , matcap_enabled(gl::get_uniform_location(the_program,"matcap_enabled"))
     , matcap_has_surface(gl::get_uniform_location(
           the_program,"matcap_has_surface"))
+    , coat_surface_sampler(gl::get_uniform_location(
+          the_program,"clearcoat_surface_map"))
+    , coat_normal_sampler(gl::get_uniform_location(
+          the_program,"clearcoat_normal_map"))
+    , clearcoat_params(gl::get_uniform_location(
+          the_program,"clearcoat_params"))
+    , clearcoat_enabled(gl::get_uniform_location(
+          the_program,"clearcoat_enabled"))
+    , clearcoat_has_surface(gl::get_uniform_location(
+          the_program,"clearcoat_has_surface"))
+    , clearcoat_has_normal(gl::get_uniform_location(
+          the_program,"clearcoat_has_normal"))
     , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
     , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
     , camera_up_axis(gl::get_uniform_location(the_program,"camera_up_axis"))
@@ -1245,6 +1283,16 @@ void jkgm::shaders::gpu_3do_preview_shader::set_environment(
     gl::set_uniform_vector(environment_info,
         make_point(from?1.0f:0.0f,static_cast<float>(mode),
                    to?1.0f:0.0f,weight));
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_clearcoat(
+    bool enabled,point<4,float> params,bool has_surface,bool has_normal)
+{
+    gl::set_uniform_integer(coat_surface_sampler,26);
+    gl::set_uniform_integer(coat_normal_sampler,27);
+    gl::set_uniform_integer(clearcoat_enabled,enabled?1:0);
+    gl::set_uniform_integer(clearcoat_has_surface,has_surface?1:0);
+    gl::set_uniform_integer(clearcoat_has_normal,has_normal?1:0);
+    if(enabled)gl::set_uniform_vector(clearcoat_params,params);
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_matcap(
     bool enabled,point<4,float> params,bool has_surface)

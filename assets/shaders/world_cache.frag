@@ -37,6 +37,11 @@ uniform sampler2D matcap_map,matcap_surface_map;
 uniform vec4 matcap_params; // RGB factor, roughness
 uniform int matcap_enabled,matcap_has_surface;
 #endif
+#ifdef JKGM_CLEARCOAT_LAYER
+uniform sampler2D clearcoat_surface_map,clearcoat_normal_map;
+uniform vec4 clearcoat_params; // strength, roughness, transmission
+uniform int clearcoat_enabled,clearcoat_has_surface,clearcoat_has_normal;
+#endif
 uniform vec4 projection; // same FOV factors as world_cache.vert
 uniform int normal_mapped_diffuse; // opt-in added lights, not baked JK RGB
 uniform vec2 normal_specular_scroll,normal_specular_scroll2;
@@ -154,6 +159,41 @@ vec3 world_matcap_effect(vec2 uv)
 }
 #endif
 
+#ifdef JKGM_CLEARCOAT_LAYER
+vec3 world_clearcoat_normal(vec2 uv)
+{
+    vec3 n=normalize(cached_world_normal);
+    if(clearcoat_has_normal==0)return n;
+    vec3 texn=texture(clearcoat_normal_map,uv).xyz*2.0-1.0;
+    vec2 slope=texn.xy/max(texn.z,0.05);
+    vec3 dp1=dFdx(cached_world_position),dp2=dFdy(cached_world_position);
+    vec2 du1=dFdx(uv),du2=dFdy(uv);
+    vec3 t=cross(dp2,n)*du1.x+cross(n,dp1)*du2.x;
+    vec3 b=cross(dp2,n)*du1.y+cross(n,dp1)*du2.y;
+    float basis=max(dot(t,t),dot(b,b));
+    if(basis<1e-16)return n;
+    float inv_basis=inversesqrt(basis);
+    return normalize(mat3(t*inv_basis,b*inv_basis,n)*
+                     normalize(vec3(slope,1.0)));
+}
+vec3 world_clearcoat_values(vec2 uv)
+{
+    if(clearcoat_enabled==0)return vec3(0.0,0.1,1.0);
+    vec3 pixel=clearcoat_has_surface!=0
+        ?texture(clearcoat_surface_map,uv).rgb:vec3(1.0);
+    return vec3(
+        clamp(clearcoat_params.x*pixel.r,0.0,1.0),
+        clamp(clearcoat_params.y*pixel.g,0.0,1.0),
+        clamp(clearcoat_params.z*pixel.b,0.0,1.0));
+}
+float world_clearcoat_fresnel(vec3 N)
+{
+    float NV=clamp(abs(dot(normalize(N),
+        normalize(camera_world_origin-cached_world_position))),0.0,1.0);
+    return 0.04+0.96*pow(1.0-NV,5.0);
+}
+#endif
+
 // A pixel can use this capture only if it lies on the selected world
 // reflection plane. One captured MAT may be shared by non-coplanar faces.
 // Pixel-space reflected camera projection is independent of texture UVs.
@@ -197,7 +237,9 @@ vec4 world_planar_reflection(vec3 mapped_normal,float roughness)
 
 // Reuse the existing strength/roughness/metalness/Fresnel law for captured
 // geometry. Sky/uncaptured pixels retain optional equirectangular EnvMap.
-vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
+vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness,
+                                  bool coating,vec3 coat_normal,
+                                  float coat_roughness,float coat_strength)
 {
     metalness=0.0;
     int mode=int(environment_info.y+0.5);
@@ -209,13 +251,15 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     has_shared=mode==7 && shared_reflection_ready!=0;
 #endif
     if((!has_env && !has_planar && !has_screen && !has_shared) ||
-       specular_params.x<=0.0)
+       (coating?coat_strength<=0.0:specular_params.x<=0.0))
         return vec3(0.0);
-    vec3 surf=specular_params.w>0.5?texture(surface_map,uv).rgb:vec3(1.0);
-    float strength=max(specular_params.x*surf.r,0.0);
+    vec3 surf=coating?vec3(1.0):
+        (specular_params.w>0.5?texture(surface_map,uv).rgb:vec3(1.0));
+    float strength=coating?coat_strength:max(specular_params.x*surf.r,0.0);
     if(strength<=0.0)return vec3(0.0);
-    float roughness=clamp(specular_params.y*surf.g,0.0,1.0);
-    vec3 nw=world_mapped_normal(uv);
+    float roughness=coating?coat_roughness:
+        clamp(specular_params.y*surf.g,0.0,1.0);
+    vec3 nw=coating?coat_normal:world_mapped_normal(uv);
     vec3 vw=normalize(cached_world_position-camera_world_origin);
     vec3 n=normalize(vec3(dot(nw,camera_right_axis),
                           dot(nw,camera_up_axis),dot(nw,camera_forward_axis)));
@@ -306,11 +350,18 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     float source_coverage=max(
         mix(environment_info.x,environment_info.z,environment_info.w),
         max(max(planar.a,screen.a),has_shared?1.0:0.0));
-    metalness=clamp(specular_params.z*surf.b,0.0,1.0)*source_coverage;
-    vec3 f0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
+    metalness=coating?0.0:
+        clamp(specular_params.z*surf.b,0.0,1.0)*source_coverage;
+    vec3 f0=coating?vec3(0.04):
+        mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
     float cos_theta=clamp(dot(n,-v),0.0,1.0);
     vec3 fresnel=f0+(vec3(1.0)-f0)*pow(1.0-cos_theta,5.0);
     return env*fresnel*strength;
+}
+vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
+{
+    return world_environment_reflection(
+        base_color,uv,metalness,false,vec3(0.0),0.0,0.0);
 }
 
 #include "world_cache_direct_specular.glsl"
@@ -442,6 +493,26 @@ void main() {
     vec3 env_reflection=world_environment_reflection(
         albedo,material_texcoord,env_metalness);
     vec3 direct_specular=world_direct_specular(albedo,material_texcoord);
+    vec3 coat_specular=vec3(0.0);
+    float base_diffuse_trans=1.0,base_specular_trans=1.0;
+#ifdef JKGM_CLEARCOAT_LAYER
+    if(clearcoat_enabled!=0) {
+        vec3 coat=world_clearcoat_values(material_texcoord);
+        if(coat.x>0.0) {
+            vec3 N=world_clearcoat_normal(material_texcoord);
+            float f=world_clearcoat_fresnel(N);
+            base_specular_trans=clamp(1.0-coat.x*f,0.0,1.0);
+            base_diffuse_trans=base_specular_trans*
+                               mix(1.0,coat.z,coat.x);
+            float unused_coat_metalness=0.0;
+            coat_specular=world_environment_reflection(
+                albedo,material_texcoord,unused_coat_metalness,
+                true,N,coat.y,coat.x);
+            coat_specular+=world_direct_specular(
+                albedo,material_texcoord,true,N,coat.y,coat.x);
+        }
+    }
+#endif
     vec3 matcap_effect=vec3(0.0);
 #ifdef JKGM_MATCAP_LAYER
     matcap_effect=world_matcap_effect(material_texcoord);
@@ -449,7 +520,12 @@ void main() {
     env_metalness*=1.0-fullbright;
     env_reflection*=1.0-fullbright;
     direct_specular*=1.0-fullbright;
-    vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness);
+    vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness)*
+                     base_diffuse_trans;
+    // Coating attenuates the lower base lobe, not its own specular term.
+    vec3 layered_specular=(env_reflection+direct_specular)*
+                          base_specular_trans+coat_specular+
+                          matcap_effect*base_diffuse_trans;
     if(transparent_pass!=0) {
         // Only one color attachment exists in the forward alpha target.
         // The framebuffer uses premultiplied (ONE, ONE_MINUS_SRC_ALPHA).
@@ -468,7 +544,7 @@ void main() {
         vec3 lit=mix(lit_diffuse,fog_color,fog);
         // MatCap adds authored color but no dynamically evaluated
         // specular highlight; forward fog attenuates the artistic layer.
-        vec3 specular=(env_reflection+direct_specular+matcap_effect)*(1.0-fog);
+        vec3 specular=layered_specular*(1.0-fog);
         if(blend_mode==3) {
             // Match game_trns_pass.frag's *native* Fluid composition.
             // Native material/texture alpha changes destination blending,
@@ -570,7 +646,7 @@ void main() {
             // multiplied by the actual (unmodified) coverage.
             float vertex_rgb_alpha=pow(clamp(face_opacity,0.0,1.0),1.8);
             vec3 premultiplied=
-                albedo*lighting*(1.0-fog)*
+                albedo*lighting*base_diffuse_trans*(1.0-fog)*
                     (texture_material_alpha*vertex_rgb_alpha)
                 +fog_color*(fog*coverage);
             // Normal blending: ONE, ONE_MINUS_SRC_ALPHA.
@@ -582,7 +658,7 @@ void main() {
     }
     out_color=vec4(lit_diffuse,1.0);
     // Opaque reflections are composited after SSAO, as for GPU 3DOs.
-    out_emissive=vec4(emission+env_reflection+direct_specular+matcap_effect,
+    out_emissive=vec4(emission+layered_specular,
         dot(lighting,vec3(0.2126,0.7152,0.0722)));
     // Fullbright palette entries do not receive AO, sun or projected light.
     // G-buffer normal is consumed by both opaque projected spotlights

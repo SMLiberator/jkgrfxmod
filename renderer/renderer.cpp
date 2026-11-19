@@ -5413,6 +5413,13 @@ namespace jkgm {
                                capture_camera.up[1],
                                capture_camera.up[2]),
                     1.0f,1.0f,hemi_active?material.reflection_mode:0);
+                bool const coat_active=clearcoat_available() &&
+                    the_config->enable_reflections &&
+                    material.clearcoat_params.x>0.0f &&
+                    !post_exempt && !decals_only && !inst.camera_hud &&
+                    !inst.is_sprite_quad && !inst.is_projected_decal &&
+                    !inst.world_lighting_exempt && !material.solid_fullbright &&
+                    material.albedo_source!=0;
                 bool const spec_active=!inst.camera_hud &&
                     specular.first>0.0f &&
                     (material.has_environment ||
@@ -5430,7 +5437,9 @@ namespace jkgm {
                     !inst.is_projected_decal && !inst.world_lighting_exempt &&
                     material.albedo_source!=0;
                 bool const material_normals_active=
-                    spec_active || diffuse_mapping || matcap_active;
+                    spec_active || diffuse_mapping || matcap_active ||
+                    coat_active;
+                bool const needs_environment=spec_active || coat_active;
                 if(material_normals_active) {
                     if(spec_active) {
                         gl::set_active_texture_unit(2);
@@ -5447,12 +5456,12 @@ namespace jkgm {
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          material.normal2);
                     }
-                    if(spec_active && material.has_environment) {
+                    if(needs_environment && material.has_environment) {
                         gl::set_active_texture_unit(4);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          material.environment);
                     }
-                    if(spec_active &&
+                    if(needs_environment &&
                        material.environment_transition>0.0f &&
                        material.has_environment2) {
                         gl::set_active_texture_unit(7);
@@ -5460,9 +5469,9 @@ namespace jkgm {
                                          material.environment2);
                     }
                     prog.set_environment(
-                        spec_active && material.has_environment,
-                        spec_active && material.has_environment2,
-                        spec_active?material.environment_transition:0.0f,
+                        needs_environment && material.has_environment,
+                        needs_environment && material.has_environment2,
+                        needs_environment?material.environment_transition:0.0f,
                         material.reflection_mode);
                     prog.set_point_specular(
                         make_point(spec_active?specular.first:0.0f,
@@ -5494,6 +5503,21 @@ namespace jkgm {
                 }
                 prog.set_matcap(matcap_active,material.matcap_params,
                                 matcap_active && material.has_matcap_surface);
+                if(coat_active) {
+                    if(material.has_clearcoat_surface) {
+                        gl::set_active_texture_unit(26);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         material.clearcoat_surface);
+                    }
+                    if(material.has_clearcoat_normal) {
+                        gl::set_active_texture_unit(27);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         material.clearcoat_normal);
+                    }
+                }
+                prog.set_clearcoat(coat_active,material.clearcoat_params,
+                    coat_active && material.has_clearcoat_surface,
+                    coat_active && material.has_clearcoat_normal);
                 gl::set_active_texture_unit(0);
                 // JK's high-resolution MAT patch uses a 256x256 maximum UV
                 // reference area for *models*, independently per dimension.
@@ -10410,6 +10434,11 @@ namespace jkgm {
                 material.blend!=material_blend_mode::multiply;
             auto const specular=gpu_specular_parameters(
                 material,default_eligible);
+            bool const coat_active=clearcoat_available() &&
+                the_config->enable_reflections &&
+                material.clearcoat_params.x>0.0f &&
+                !material.solid_fullbright && !material.emissive_only &&
+                material.albedo_source!=0 && geometry_mode>=3U;
             bool const reflective=the_config->enable_reflections &&
                 specular.first>0.0f &&
                 (material.has_environment || material.has_environment2 ||
@@ -10427,8 +10456,9 @@ namespace jkgm {
             bool const matcap_active=matcap_available() &&
                 material.has_matcap && material.albedo_source!=0 &&
                 geometry_mode>=3U;
-            if(reflective) {
-                if(material.has_surface) {
+            bool const needs_environment=reflective || coat_active;
+            if(needs_environment) {
+                if(reflective && material.has_surface) {
                     gl::set_active_texture_unit(2);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
                                      material.surface);
@@ -10466,9 +10496,9 @@ namespace jkgm {
                            material.has_normal2?1.0f:0.0f,
                            material.normal_strength2),
                 material.normal_scroll,material.normal_scroll2,
-                reflective && material.has_environment,
-                reflective && material.has_environment2,
-                reflective?material.environment_transition:0.0f,
+                needs_environment && material.has_environment,
+                needs_environment && material.has_environment2,
+                needs_environment?material.environment_transition:0.0f,
                 material.reflection_mode);
             if(matcap_active) {
                 gl::set_active_texture_unit(24);
@@ -10482,6 +10512,21 @@ namespace jkgm {
             }
             shader.set_matcap(matcap_active,material.matcap_params,
                               matcap_active && material.has_matcap_surface);
+            if(coat_active) {
+                if(material.has_clearcoat_surface) {
+                    gl::set_active_texture_unit(26);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.clearcoat_surface);
+                }
+                if(material.has_clearcoat_normal) {
+                    gl::set_active_texture_unit(27);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.clearcoat_normal);
+                }
+            }
+            shader.set_clearcoat(coat_active,material.clearcoat_params,
+                coat_active && material.has_clearcoat_surface,
+                coat_active && material.has_clearcoat_normal);
             gl::set_active_texture_unit(0);
         }
 

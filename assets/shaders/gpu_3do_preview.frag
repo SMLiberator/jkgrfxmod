@@ -60,6 +60,11 @@ uniform sampler2D matcap_map,matcap_surface_map;
 uniform vec4 matcap_params; // artistic RGB factor and roughness, no BRDF
 uniform int matcap_enabled,matcap_has_surface;
 #endif
+#ifdef JKGM_CLEARCOAT_LAYER
+uniform sampler2D clearcoat_surface_map,clearcoat_normal_map;
+uniform vec4 clearcoat_params; // strength, roughness, transmission
+uniform int clearcoat_enabled,clearcoat_has_surface,clearcoat_has_normal;
+#endif
 // Hemi: layers 0/1 are fixed up/down paraboloid disks with horizon overlap.
 // Cube: layers 0..5 are fixed-axis 90-degree perspective views.
 // Every layer has independent mipmaps; coverage alpha is sampled at LOD 0.
@@ -296,13 +301,55 @@ vec3 gpu_matcap_effect(vec2 uv)
 }
 #endif
 
+#ifdef JKGM_CLEARCOAT_LAYER
+vec3 gpu_clearcoat_local_normal(vec2 uv)
+{
+    vec3 n=normalize(local_fragment_normal);
+    if(clearcoat_has_normal==0)return n;
+    vec3 texn=texture(clearcoat_normal_map,uv).xyz*2.0-1.0;
+    vec2 slope=texn.xy/max(texn.z,0.05);
+    vec3 dp1=dFdx(local_fragment_position),dp2=dFdy(local_fragment_position);
+    vec2 du1=dFdx(pixel_uv*uv_scale),du2=dFdy(pixel_uv*uv_scale);
+    vec3 t=cross(dp2,n)*du1.x+cross(n,dp1)*du2.x;
+    vec3 b=cross(dp2,n)*du1.y+cross(n,dp1)*du2.y;
+    float basis=max(dot(t,t),dot(b,b));
+    if(basis<1e-16)return n;
+    float inv_basis=inversesqrt(basis);
+    return normalize(mat3(t*inv_basis,b*inv_basis,n)*
+                     normalize(vec3(slope,1.0)));
+}
+vec3 gpu_clearcoat_values(vec2 uv)
+{
+    if(clearcoat_enabled==0)return vec3(0.0,0.1,1.0);
+    vec3 pixel=clearcoat_has_surface!=0
+        ?texture(clearcoat_surface_map,uv).rgb:vec3(1.0);
+    return vec3(
+        clamp(clearcoat_params.x*pixel.r,0.0,1.0),
+        clamp(clearcoat_params.y*pixel.g,0.0,1.0),
+        clamp(clearcoat_params.z*pixel.b,0.0,1.0));
+}
+float gpu_clearcoat_fresnel(vec3 N)
+{
+    vec3 vp=view_origin.xyz+
+            view_right.xyz*local_fragment_position.x+
+            view_forward.xyz*local_fragment_position.y+
+            view_up.xyz*local_fragment_position.z;
+    vec3 V=-normalize(vec3(vp.x,vp.z,vp.y));
+    float nv=clamp(abs(dot(normalize(N),V)),0.0,1.0);
+    return 0.04+0.96*pow(1.0-nv,5.0);
+}
+#endif
+
 // Local-space analytic point-light specular, with optional normal/surface
 // maps. Uses the same GGX microfacet form as the native sector sun shader.
 // Does not modify JK's diffuse Gouraud lighting.
-vec3 point_light_specular(vec3 base_color,vec2 uv)
+vec3 point_light_specular(vec3 base_color,vec2 uv,
+                          bool coating,vec3 coat_normal,
+                          float coat_roughness,float coat_strength)
 {
-    if(specular_params.x<=0.0 || num_lights==0) return vec3(0.0);
-    vec3 N=mapped_local_normal(uv);
+    if((coating?coat_strength<=0.0:specular_params.x<=0.0) ||
+       num_lights==0)return vec3(0.0);
+    vec3 N=coating?coat_normal:mapped_local_normal(uv);
     vec3 V=local_eye-local_fragment_position;
     if(nonrigid_light_transform!=0) {
         // Match scaled-mesh diffuse light attenuation: an affine local
@@ -320,13 +367,16 @@ vec3 point_light_specular(vec3 base_color,vec2 uv)
         N=-N;
     }
     float NdotV=max(dot(N,V),0.0001);
-    vec3 map_value=specular_params.w>0.5
-        ? texture(surface_map,uv).rgb : vec3(1.0);
-    float strength=max(specular_params.x*map_value.r,0.0);
-    if(strength<=0.0) return vec3(0.0);
-    float roughness=clamp(specular_params.y*map_value.g,0.08,1.0);
-    float metalness=clamp(specular_params.z*map_value.b,0.0,1.0);
-    vec3 F0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
+    vec3 map_value=coating?vec3(1.0):
+        (specular_params.w>0.5?texture(surface_map,uv).rgb:vec3(1.0));
+    float strength=coating?coat_strength:
+        max(specular_params.x*map_value.r,0.0);
+    if(strength<=0.0)return vec3(0.0);
+    float roughness=coating?clamp(coat_roughness,0.08,1.0):
+        clamp(specular_params.y*map_value.g,0.08,1.0);
+    float metalness=coating?0.0:clamp(specular_params.z*map_value.b,0.0,1.0);
+    vec3 F0=coating?vec3(0.04):
+        mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
     float a=roughness*roughness;
     float a2=a*a;
     float k=(roughness+1.0)*(roughness+1.0)/8.0;
@@ -358,12 +408,18 @@ vec3 point_light_specular(vec3 base_color,vec2 uv)
     }
     return min(sum*strength,vec3(32.0));
 }
-
+vec3 point_light_specular(vec3 base_color,vec2 uv)
+{
+    return point_light_specular(
+        base_color,uv,false,vec3(0.0),0.0,0.0);
+}
 
 // PS2-era style environment mapping, sharing the native material's
 // reflectivity/roughness/metalness and optional dual-layer mapped normal.
 // The sun/dynamic-COG EnvMap crossfade is a separate parity feature.
-vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
+vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness,
+                                bool coating,vec3 coat_normal,
+                                float coat_roughness,float coat_strength)
 {
     metalness=0.0;
     int mode=int(environment_info.y+0.5);
@@ -373,16 +429,19 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
              abs(hemi_capture_info.w-float(mode))<0.5;
 #endif
     if((environment_info.x<0.5 && environment_info.z<0.5 && !has_hemi) ||
-       specular_params.x<=0.0)
+       (coating?coat_strength<=0.0:specular_params.x<=0.0))
         return vec3(0.0);
-    vec3 surf=specular_params.w>0.5 ? texture(surface_map,uv).rgb:vec3(1.0);
-    float strength=max(specular_params.x*surf.r,0.0);
-    if(strength<=0.0) return vec3(0.0);
-    float roughness=clamp(specular_params.y*surf.g,0.0,1.0);
-    metalness=clamp(specular_params.z*surf.b,0.0,1.0)*
-              max(mix(environment_info.x,environment_info.z,
-                      environment_info.w),has_hemi?1.0:0.0);
-    vec3 n_local=mapped_local_normal(uv);
+    vec3 surf=coating?vec3(1.0):
+        (specular_params.w>0.5?texture(surface_map,uv).rgb:vec3(1.0));
+    float strength=coating?coat_strength:max(specular_params.x*surf.r,0.0);
+    if(strength<=0.0)return vec3(0.0);
+    float roughness=coating?coat_roughness:
+        clamp(specular_params.y*surf.g,0.0,1.0);
+    metalness=coating?0.0:
+        clamp(specular_params.z*surf.b,0.0,1.0)*
+        max(mix(environment_info.x,environment_info.z,
+                environment_info.w),has_hemi?1.0:0.0);
+    vec3 n_local=coating?coat_normal:mapped_local_normal(uv);
     vec3 n=gpu_view_normal_from_local(n_local);
     vec3 vp=view_origin.xyz+
             view_right.xyz*local_fragment_position.x+
@@ -522,29 +581,39 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
         }
     }
 #endif
-    vec3 f0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
+    vec3 f0=coating?vec3(0.04):
+        mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
     float cos_theta=clamp(dot(n,-v),0.0,1.0);
     vec3 fresnel=f0+(vec3(1.0)-f0)*pow(1.0-cos_theta,5.0);
     return env*fresnel*strength;
 }
-
+vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
+{
+    return gpu_environment_reflection(
+        base_color,uv,metalness,false,vec3(0.0),0.0,0.0);
+}
 
 // The same view-space GGX/Schlick/Smith sun term used by the native
 // opaque material shader; independent of the existing Gouraud diffuse.
 float sun_specular_shadow_factor(float depth,float incidence);
 
-vec3 gpu_sun_specular(vec3 base_color,vec2 uv)
+vec3 gpu_sun_specular(vec3 base_color,vec2 uv,
+                      bool coating,vec3 coat_normal,
+                      float coat_roughness,float coat_strength)
 {
-    if(world_lighting_exempt!=0 || specular_params.x<=0.0 ||
+    if(world_lighting_exempt!=0 ||
+       (coating?coat_strength<=0.0:specular_params.x<=0.0) ||
        sun_color_intensity.w<=0.0 || sun_direction.w<0.5)
         return vec3(0.0);
-    vec3 surface=specular_params.w>0.5 ?
-        texture(surface_map,uv).rgb : vec3(1.0);
-    float strength=max(specular_params.x*surface.r,0.0);
-    if(strength<=0.0) return vec3(0.0);
-    float roughness=clamp(specular_params.y*surface.g,0.08,1.0);
-    float metalness=clamp(specular_params.z*surface.b,0.0,1.0);
-    vec3 n_local=mapped_local_normal(uv);
+    vec3 surface=coating?vec3(1.0):
+        (specular_params.w>0.5?texture(surface_map,uv).rgb:vec3(1.0));
+    float strength=coating?coat_strength:
+        max(specular_params.x*surface.r,0.0);
+    if(strength<=0.0)return vec3(0.0);
+    float roughness=coating?clamp(coat_roughness,0.08,1.0):
+        clamp(specular_params.y*surface.g,0.08,1.0);
+    float metalness=coating?0.0:clamp(specular_params.z*surface.b,0.0,1.0);
+    vec3 n_local=coating?coat_normal:mapped_local_normal(uv);
     vec3 N=gpu_view_normal_from_local(n_local);
     vec3 vp=view_origin.xyz+
             view_right.xyz*local_fragment_position.x+
@@ -567,13 +636,18 @@ vec3 gpu_sun_specular(vec3 base_color,vec2 uv)
     float k=(roughness+1.0)*(roughness+1.0)/8.0;
     float Gv=NdotV/(NdotV*(1.0-k)+k);
     float Gl=NdotL/(NdotL*(1.0-k)+k);
-    vec3 F0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
+    vec3 F0=coating?vec3(0.04):
+        mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
     vec3 F=F0+(vec3(1.0)-F0)*pow(1.0-Vh,5.0);
     return min(F*(D*Gv*Gl/max(4.0*NdotV,0.0001))*
                sun_color_intensity.rgb*sun_color_intensity.w*strength,
                vec3(32.0)) * sun_specular_shadow_factor(vp.y*32.0,NdotL);
 }
-
+vec3 gpu_sun_specular(vec3 base_color,vec2 uv)
+{
+    return gpu_sun_specular(
+        base_color,uv,false,vec3(0.0),0.0,0.0);
+}
 
 // View position in JK units: X right, Y up, Z forward.
 vec3 gpu_view_position()
@@ -925,6 +999,29 @@ void main() {
     }
     float env_metalness=0.0;
     vec3 env_reflection=gpu_environment_reflection(albedo.rgb,uv,env_metalness);
+    vec3 coat_specular=vec3(0.0),coat_local_normal=vec3(0.0);
+    vec3 coat_values=vec3(0.0,0.1,1.0);
+    float base_diffuse_trans=1.0,base_specular_trans=1.0;
+#ifdef JKGM_CLEARCOAT_LAYER
+    if(clearcoat_enabled!=0) {
+        coat_values=gpu_clearcoat_values(uv);
+        if(coat_values.x>0.0) {
+            coat_local_normal=gpu_clearcoat_local_normal(uv);
+            vec3 coat_view_normal=gpu_view_normal_from_local(coat_local_normal);
+            float f=gpu_clearcoat_fresnel(coat_view_normal);
+            base_specular_trans=clamp(1.0-coat_values.x*f,0.0,1.0);
+            base_diffuse_trans=base_specular_trans*
+                               mix(1.0,coat_values.z,coat_values.x);
+            float unused_metalness=0.0;
+            coat_specular=gpu_environment_reflection(
+                albedo.rgb,uv,unused_metalness,true,coat_local_normal,
+                coat_values.y,coat_values.x);
+            coat_specular+=gpu_sun_specular(
+                albedo.rgb,uv,true,coat_local_normal,
+                coat_values.y,coat_values.x);
+        }
+    }
+#endif
     // CMP fullbright is immune to lighting, not an extra HDR source.
     // Author-provided emission stays separate.
     env_metalness*=1.0-fullbright;
@@ -942,7 +1039,8 @@ void main() {
           (sector_crossing_count>1 && sector_crossing_per_vertex==0
              ? sector_crossing_lit[sector_crossing_slot] : jk_lit_rgb),
         vec3(1.0),fullbright);
-    vec3 lit_rgb=albedo.rgb*jk_fragment_lit*(1.0-env_metalness);
+    vec3 lit_rgb=albedo.rgb*jk_fragment_lit*
+                 (1.0-env_metalness)*base_diffuse_trans;
     if(transparent_pass!=0 && post_exempt_pass==0 &&
        world_lighting_exempt==0 && decal_receiver_lighting==0 &&
        fullbright<0.999 &&
@@ -972,7 +1070,8 @@ void main() {
     // Optional dynamic Thing point-light -> GGX highlights. JK currently
     // supplies scalar light intensity (not independent per-light RGB), so
     // these experimental highlights are neutral/white. Diffuse remains JK.
-    vec3 specular=gpu_sun_specular(albedo.rgb,uv)+env_reflection;
+    vec3 specular=(gpu_sun_specular(albedo.rgb,uv)+env_reflection)*
+                  base_specular_trans+coat_specular;
     // Only forward-blended non-decal faces receive projected light.
     // Ordinary alpha-tested coverage already receives opaque-composite light.
     vec3 projected_light=vec3(0.0);
@@ -987,13 +1086,21 @@ void main() {
     }
     if(dynamic_light_specular_enabled!=0 && num_lights>0 &&
        specular_params.x>0.0)
-        specular+=point_light_specular(albedo.rgb,uv);
+        specular+=point_light_specular(albedo.rgb,uv)*
+                  base_specular_trans;
+#ifdef JKGM_CLEARCOAT_LAYER
+    if(clearcoat_enabled!=0 && coat_values.x>0.0 &&
+       dynamic_light_specular_enabled!=0 && num_lights>0)
+        specular+=point_light_specular(
+            albedo.rgb,uv,true,coat_local_normal,
+            coat_values.y,coat_values.x);
+#endif
     specular*=(1.0-fog)*(1.0-fullbright);
 #ifdef JKGM_MATCAP_LAYER
     // Artist-authored MatCaps do not generate direct-light GGX and are not
     // gated by reflection strength or CMP fullbright. They share the
     // regular surface visibility, fog and alpha/compositing conventions.
-    specular+=gpu_matcap_effect(uv)*(1.0-fog);
+    specular+=gpu_matcap_effect(uv)*(1.0-fog)*base_diffuse_trans;
 #endif
     projected_light*=1.0-fullbright;
     // The opaque pass composites this separate emissive attachment after

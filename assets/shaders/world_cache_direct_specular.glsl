@@ -163,21 +163,26 @@ vec3 world_ggx(vec3 n,vec3 v,vec3 l,vec3 f0,float roughness)
     return F*(D*Gv*Gl/max(4.0*nv,0.0001));
 }
 
-vec3 world_direct_specular(vec3 base_color,vec2 uv)
+vec3 world_direct_specular(vec3 base_color,vec2 uv,
+                           bool coating,vec3 coat_normal,
+                           float coat_roughness,float coat_strength)
 {
-    if(specular_params.x<=0.0 || solid_fullbright!=0 ||
+    if((coating?coat_strength<=0.0:specular_params.x<=0.0) ||
+       solid_fullbright!=0 ||
        cached_light_state.z<0.5 ||
        (translucent_sun_enabled==0 || translucent_sun_color.w<=0.0) &&
        (world_dynamic_light_specular==0 || num_lights==0))
         return vec3(0.0);
-    vec3 surf=specular_params.w>0.5
-        ? texture(surface_map,uv).rgb : vec3(1.0);
-    float strength=max(specular_params.x*surf.r,0.0);
+    vec3 surf=coating?vec3(1.0):
+        (specular_params.w>0.5 ?texture(surface_map,uv).rgb:vec3(1.0));
+    float strength=coating?coat_strength:max(specular_params.x*surf.r,0.0);
     if(strength<=0.0)return vec3(0.0);
-    float roughness=clamp(specular_params.y*surf.g,0.08,1.0);
-    float metalness=clamp(specular_params.z*surf.b,0.0,1.0);
-    vec3 F0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
-    vec3 N=world_mapped_normal(uv);
+    float roughness=coating?clamp(coat_roughness,0.08,1.0):
+        clamp(specular_params.y*surf.g,0.08,1.0);
+    float metalness=coating?0.0:clamp(specular_params.z*surf.b,0.0,1.0);
+    vec3 F0=coating?vec3(0.04):
+        mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
+    vec3 N=coating?coat_normal:world_mapped_normal(uv);
     vec3 V=normalize(camera_world_origin-cached_world_position);
     if(experimental_specular_normal_mode==0) {
         if(dot(N,V)<0.0)N=-N; // original path
@@ -208,4 +213,9 @@ vec3 world_direct_specular(vec3 base_color,vec2 uv)
         }
     }
     return min(sum*strength,vec3(32.0));
+}
+vec3 world_direct_specular(vec3 base_color,vec2 uv)
+{
+    return world_direct_specular(
+        base_color,uv,false,vec3(0.0),0.0,0.0);
 }

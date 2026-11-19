@@ -76,7 +76,9 @@
                          the_config->experimental_hemi_reflection_capture) ||
                         (reflection_mode==6 &&
                          the_config->experimental_cube_reflection_capture)) &&
-                        it->second.reflection_strength>0.0f) {
+                        (it->second.reflection_strength>0.0f ||
+                         (fragment_units>=28 &&
+                          it->second.clearcoat_params.x>0.0f))) {
                         candidate_mode=reflection_mode;
                         break;
                     }
@@ -129,7 +131,9 @@
                             it=mats.emplace(
                                 key,resolve_gpu_3do_material(group)).first;
                         if(it->second.reflection_mode==7 &&
-                           it->second.reflection_strength>0.0f) {
+                           (it->second.reflection_strength>0.0f ||
+                            (fragment_units>=28 &&
+                             it->second.clearcoat_params.x>0.0f))) {
                             shared_requested=true;break;
                         }
                     }
@@ -152,7 +156,9 @@
                                 ?resolve_gpu_3do_solid_material(group,false)
                                 :resolve_gpu_3do_material(group);
                             if(mat.reflection_mode==7 &&
-                               mat.reflection_strength>0.0f)return true;
+                               (mat.reflection_strength>0.0f ||
+                                (fragment_units>=28 &&
+                                 mat.clearcoat_params.x>0.0f)))return true;
                         }
                         return false;
                     };

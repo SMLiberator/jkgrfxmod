@@ -1,9 +1,9 @@
 # Independent matcap and clearcoat material layers
 
-**Status:** Independent MatCap rendering is implemented for GPU-cached
-world and 3DO materials, and the material pack compiler supports the
-metadata. Clearcoat metadata also compiles, but its shader and COG verbs
-are not yet registered. The `shared` reflection mode is independent.
+**Status:** Independent MatCap rendering and a second dielectric clearcoat
+specular layer are implemented for cached-world and GPU 3DO materials.
+The pack compiler supports both, and the clearcoat COG API is registered.
+The `shared` reflection mode remains independent.
 
 ## Artistic matcap (separate from reflection_mode)
 
@@ -62,11 +62,20 @@ are not yet registered. The `shared` reflection mode is independent.
   Coverage-weighted attenuation avoids darkening an uncoated surface.
 - Clearcoat has its own optional normal map and roughness. Initially it
   reuses the base material's reflection source, with no additional capture.
-- It must be skipped when effective coat strength is zero, and not interfere
-  with the base layer's authored specular defaults.
+- It is skipped when strength is zero or the GPU cannot support the
+  optional samplers. Both cached world and 3DO shaders reuse the same
+  EnvMap/planar/realtime probe sources as the base, but compute their own
+  dielectric sun and dynamic-point-light GGX highlights.
+- The coating partially attenuates underlying base reflections with its
+  Schlick Fresnel term, and applies coverage-weighted transmission primarily
+  to diffuse and MatCap colors; emission is not darkened.
+- A zero-strength authored material can be activated at runtime for rain.
+  Its clearcoat surface and normal maps remain available for such activation.
+- The extra coat samplers are at forward units 26/27, compiled out on
+  devices with fewer than 28 fragment texture units.
 - Scalar parameters are constrained to 0..1 and must be finite.
 
-## Planned runtime control
+## Runtime COG control
 
 ```c
 SetMatClearcoat(material, VectorSet(strength, roughness, transmission), fadeTime);
@@ -74,11 +83,13 @@ current = GetMatClearcoat(material);
 ResetMatClearcoat(material, fadeTime);
 ```
 
-The setter will animate absolute material-level values, starting interrupted
+The setter animates **absolute** material-level values, starting interrupted
 fades from the current interpolated value. Get returns the current
-interpolated values before pixel-map modulation. Reset animates back to
-authored defaults, not a hardcoded identity vector. These verbs are **not
-registered yet**.
+interpolated values before per-pixel modulation. Reset animates back to
+authored material defaults, not a hardcoded identity vector. Overrides
+follow the native MAT index and are cleared on world changes.
+The getter uses the last resolved authored defaults; a MAT never resolved
+by the renderer yet reports the fallback `(0, 0.1, 1)` until resident.
 
 `"reflection_mode":"shared"` now selects one lazy camera-centered
 realtime cubemap, shared across requesting cached-world and GPU 3DO
