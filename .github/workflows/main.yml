@@ -228,6 +228,12 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\runtime_material_state.cpp /Fe:runtime_material_state_test.exe
         runtime_material_state_test.exe
+    - name: Matcap and clearcoat metadata defaults and validation contracts
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\material_layer_metadata.cpp /Fe:material_layer_metadata_test.exe || exit /b 1
+        material_layer_metadata_test.exe || exit /b 1
+        python3 tests/material_layer_metadata.py || exit /b 1
     - name: GPU 3DO native model-view precision tests
       shell: cmd
       run: |

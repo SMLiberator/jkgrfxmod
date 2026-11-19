@@ -73,6 +73,28 @@ namespace jkgm {
         // override, unlike the implicit matte default of native JK MATs.
         bool has_explicit_specular_settings = false;
 
+        // Separate artistic matcap layer. This is not an additional specular
+        // lobe: the matcap texture is addressed by the view-space normal.
+        // Its optional linear surface map uses R=intensity, G=roughness;
+        // B is reserved. No shader work is needed without a matcap_map or
+        // when matcap_factor is zero.
+        std::optional<fs::path> matcap_map;
+        std::optional<fs::path> matcap_surface_map;
+        float matcap_roughness = 0.0f;
+        color_rgb matcap_factor = color_rgb::fill(1.0f);
+
+        // Dielectric clearcoat above the base material. Independent of base
+        // reflection metalness and roughness; it reuses the base environment
+        // source instead of triggering an additional scene capture.
+        // Linear surface map: R=coat strength, G=roughness, B=transmission.
+        // B=1 leaves the underlying layer at its authored brightness;
+        // lower B attenuates it only where coat coverage is nonzero.
+        std::optional<fs::path> clearcoat_surface_map;
+        std::optional<fs::path> clearcoat_normal_map;
+        float clearcoat_strength = 0.0f;
+        float clearcoat_roughness = 0.1f;
+        float clearcoat_transmission = 1.0f;
+
         // Equirectangular environment image this material reflects. A material that does not set
         // one gets its own pack's default environment image (if the pack has one).
         std::optional<fs::path> env_map;
