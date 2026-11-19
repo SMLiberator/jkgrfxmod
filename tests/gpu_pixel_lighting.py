@@ -158,7 +158,7 @@ assert "gpu_material_discard(coverage,alpha_mode,alpha_cutoff," in world_frag
 assert "gpu_material_emission(" in world_frag
 assert "gpu_material_sample_albedo(" in world_frag
 # Opaque world reflections share the emissive attachment so SSAO does not dim them.
-assert "out_emissive=vec4(emission+env_reflection+direct_specular," in world_frag
+assert "out_emissive=vec4(emission+layered_specular," in world_frag
 assert "if(world_pixel_dynamic_lighting!=0" in world_frag
 world_specular=(root/"assets/shaders/world_cache_direct_specular.glsl").read_text(
     encoding="utf-8")
