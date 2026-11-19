@@ -24,8 +24,9 @@ namespace jkgm {
         std::vector<gpu_3do_instance> nodes;
         planar_reflection_offscreen_stats stats{};
     };
-    // The caller controls the per-invocation Thing budget. The first version
-    // is only called by an opt-in diagnostic, never the gameplay render pass.
+    // The caller supplies the eligible Thing count. Realtime captures pass
+    // all portal/frustum-visible Things, never an arbitrary nearest-N budget.
+    // Diagnostics may still intentionally request a smaller work sample.
     planar_reflection_offscreen_gpu acquire_planar_reflection_offscreen_gpu(
         std::vector<planar_reflection_model_thing> const &candidates,
         size_t max_things,

@@ -422,7 +422,7 @@
                                 return distance2(a)<distance2(b);
                             });
                         offscreen=acquire_planar_reflection_offscreen_gpu(
-                            things,64U,paraboloid_mode?nullptr:&frustum,
+                            things,things.size(),paraboloid_mode?nullptr:&frustum,
                             paraboloid_mode?nullptr:&view);
                     }
                 }

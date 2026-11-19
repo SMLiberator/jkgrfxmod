@@ -113,8 +113,8 @@ rejection disabled but side-frustum and portal clipping preserved.
 Captured world geometry is frustum-culled *before* material resolution, grouped
 by material/cel/GeoMode and submitted with multi-draw. Existing primary
 opaque/alpha draw lists do not receive offscreen-only geometry.
-The capture draws animated 3DO nodes from up to 128 nearest native Thing owners
-(with primary GPU nodes as fallback). Cached 3DO mesh groups are independently
+The capture considers every reflected-visible 3DO Thing, without the
+former nearest-128 owner truncation (with primary GPU nodes as fallback). Cached 3DO mesh groups are independently
 culled against the reflected frustum before material resolution. Sky, HUD,
 projected decals, dynamic point/sun lighting, transparent Fluid blending,
 shadows, GGX, SSAO and postprocessing remain excluded. The capture now

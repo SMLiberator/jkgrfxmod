@@ -13074,8 +13074,9 @@ namespace jkgm {
                                 });
                             things.erase(first_rejected,things.end());
                         }
-                        // Budget only reflected-visible Things. Do not use
-                        // primary-camera portal visibility as eligibility.
+                        // Order eligible Things for stable cache reuse,
+                        // but never discard them based on distance/order.
+                        // Only independent portal/frustum visibility may cull.
                         std::sort(things.begin(),things.end(),
                             [&](auto const &a,auto const &b) {
                                 auto dist2=[&](auto const &p) {
@@ -13089,9 +13090,10 @@ namespace jkgm {
                                 };
                                 return dist2(a)<dist2(b);
                             });
-                        constexpr size_t max_native_things=128U;
+                        // No nearest-N truncation: distant architecture and
+                        // horizon Things must remain visible in reflections.
                         offscreen=acquire_planar_reflection_offscreen_gpu(
-                            things,max_native_things,
+                            things,things.size(),
                             radius_cull_available
                                 ?&reflected_frustum:nullptr,
                             radius_cull_available?&view:nullptr);

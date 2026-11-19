@@ -114,7 +114,8 @@ sector mask for Thing discovery before pose acquisition. Dual-paraboloid
 capture conservatively unions six ordinary 90-degree portal views to cover
 the sphere instead of using an invalid wide-angle perspective window.
 Unresolved source sectors, topology or portal clipping fail open to the
-original full-world frustum path.
+original full-world frustum path. The old nearest-64 offscreen-Thing limit
+has also been removed: source distance is not a capture-eligibility test.
 
 Realtime `hemi` and `cube` probes exclude their reflecting Thing and all
 Things connected through qualifying Thing-to-Thing/Thing-face attachments:
