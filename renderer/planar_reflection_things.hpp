@@ -50,7 +50,8 @@ namespace jkgm {
     // Things. This avoids passing stale or unsafe geometry to a later pass.
     template<class Read>
     bool collect_planar_reflection_things(
-        Read const &read,uintptr_t world,planar_reflection_thing_scan &out)
+        Read const &read,uintptr_t world,planar_reflection_thing_scan &out,
+        std::vector<uint8_t> const *visible_sectors=nullptr)
     {
         out={};
         auto fail=[&](planar_reflection_thing_error reason) {
@@ -83,7 +84,13 @@ namespace jkgm {
         visited.reserve(thing_capacity);
         std::unordered_set<uint32_t> indices;
         indices.reserve(thing_capacity);
+        // Match OpenJKDF2's sector-first Thing discovery, retaining the
+        // neighboring sectors included in the independently computed mask.
+        // Unknown/mismatched masks fail open to the original full scan.
+        bool const restricted=visible_sectors &&
+            visible_sectors->size()==sector_count;
         for(uint32_t sector_index=0;sector_index<sector_count;++sector_index) {
+            if(restricted && !(*visible_sectors)[sector_index])continue;
             uintptr_t const sector=uintptr_t(sector_base)+
                                    uintptr_t(sector_index)*0x98U;
             uint32_t current=0;

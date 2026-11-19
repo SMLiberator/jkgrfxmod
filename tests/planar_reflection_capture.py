@@ -109,6 +109,9 @@ assert "planar_frame_candidates.clear();" in renderer
 # spans. On any invalid link/receiver the entire original frustum walk remains.
 assert "cache.reflected_portal_graph.ensure(" in renderer
 assert "cache.reflected_portal_graph.traverse(" in renderer
+assert "&special_candidates,&reflected_sky_candidates" in renderer
+assert "planar_reflection_sky_visibility" in renderer
+assert "collect_planar_reflection_things(\n                           read,world,scan,sector_mask)" in renderer
 assert "collect_world_cache_sector_candidates(" in renderer
 assert "if(!reflected_portals_used)" in renderer
 assert "reflected_portals used=" in renderer

@@ -10,7 +10,8 @@
             int viewport_width,int viewport_height,
             std::array<float,4> const &restore_clip,bool clip_enabled,
             bool mirrored,bool paraboloid=false,
-            float radial_far=0.0f)
+            float radial_far=0.0f,
+            std::vector<uint8_t> const *visible_surfaces=nullptr)
         {
             if(!world_cache_target || !world_cache_target->ready)return;
             auto &cache=*world_cache_target;
@@ -59,7 +60,10 @@
                     !sky_info.horizon_valid) ||
                    (sky_type==world_cache_sky_kind::ceiling &&
                     !sky_info.ceiling_valid) ||
-                   face.surface_index>=cache.cached_surface_lookup.size())
+                   face.surface_index>=cache.cached_surface_lookup.size() ||
+                   (visible_surfaces &&
+                    (face.surface_index>=visible_surfaces->size() ||
+                     !(*visible_surfaces)[face.surface_index])))
                     continue;
                 auto const index=cache.cached_surface_lookup[face.surface_index];
                 if(index>=cache.mesh.surfaces.size())continue;

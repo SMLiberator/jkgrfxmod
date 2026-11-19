@@ -865,6 +865,7 @@ namespace jkgm {
         uint64_t reflection_sky_revision=0;
         uintptr_t reflection_sky_world=0;
         std::vector<uint8_t> planar_thing_sector_visibility;
+        std::vector<uint8_t> planar_reflection_sky_visibility;
         uintptr_t planar_thing_visibility_world=0;
         uint64_t planar_thing_visibility_frame=~uint64_t(0);
 
@@ -10213,6 +10214,7 @@ namespace jkgm {
             frame_world_cache_camera.valid=false;
             planar_frame_candidates.clear();
             planar_thing_sector_visibility.clear();
+            planar_reflection_sky_visibility.clear();
             planar_thing_visibility_frame=~uint64_t(0);
             if(world_cache_target)
                 world_cache_target->frame_render_candidates.clear();
@@ -10840,6 +10842,7 @@ namespace jkgm {
                         reflection_stats.frustum_available=true;
                         std::vector<world_cache_draw_candidate> reflected_candidates;
                         std::vector<world_cache_draw_candidate> special_candidates;
+                        std::vector<world_cache_draw_candidate> reflected_sky_candidates;
                         planar_reflection_portal_stats reflected_portal_stats{};
                         bool reflected_portals_used=false;
                         auto const portal_stage_start=profile_clock::now();
@@ -10914,7 +10917,7 @@ namespace jkgm {
                                             cache.sector_seen_epoch,
                                             reflected_candidates,
                                             &cam.frustum,&reflection_view,
-                                            &special_candidates);
+                                            &special_candidates,&reflected_sky_candidates);
                                     reflected_portals_used=stage.valid;
                                     if(stage.valid) {
                                         // Only publish masks produced by the
@@ -10942,6 +10945,16 @@ namespace jkgm {
                                                 range.bounds_max,reflection_view,
                                                 half_fov,aspect,sector_windows);
                                         };
+                                        // Reflection sky apertures use the same
+                                        // independent per-sector portal windows.
+                                        planar_reflection_sky_visibility.assign(
+                                            cache.cached_surface_lookup.size(),0U);
+                                        for(auto const &sky:reflected_sky_candidates)
+                                            if(sky.surface_index<
+                                                   planar_reflection_sky_visibility.size() &&
+                                               within_window(sky))
+                                                planar_reflection_sky_visibility[
+                                                    sky.surface_index]=1U;
                                         reflected_candidates.erase(
                                             std::remove_if(reflected_candidates.begin(),
                                                 reflected_candidates.end(),
@@ -13005,7 +13018,13 @@ namespace jkgm {
                         return engine_material_debug::read_bytes(at,dst,bytes);
                     };
                     planar_reflection_thing_scan scan{};
-                    if(collect_planar_reflection_things(read,world,scan)) {
+                    auto const *sector_mask=
+                        planar_thing_visibility_world==world &&
+                        planar_thing_visibility_frame==gpu_3do_present_serial &&
+                        !planar_thing_sector_visibility.empty()
+                        ?&planar_thing_sector_visibility:nullptr;
+                    if(collect_planar_reflection_things(
+                           read,world,scan,sector_mask)) {
                         hidden_by_flags=scan.excluded_flags;
                         hidden_by_geo=scan.excluded_geo_mode;
                         auto &things=scan.models;
@@ -13162,7 +13181,9 @@ namespace jkgm {
             auto &cache=*world_cache_target;
             draw_reflection_capture_sky(shader,reflected,view,
                 frame_world_cache_camera.frustum,projection,
-                setup.width,setup.height,setup.clip_view,true,true);
+                setup.width,setup.height,setup.clip_view,true,true,false,0.0f,
+                planar_reflection_sky_visibility.empty()?nullptr:
+                    &planar_reflection_sky_visibility);
             gl::bind_vertex_array(cache.vao);
             glFrontFace(GL_CW); // reflected camera reverses handedness
             std::map<std::tuple<uintptr_t,int32_t,uint32_t>,

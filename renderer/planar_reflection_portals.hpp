@@ -1,9 +1,9 @@
 #pragma once
 // Independent, read-only reflected-camera portal traversal. Do NOT reuse
 // JK's main-camera portal list or change native rdCamera/SithSector state.
-// The reflected eye can be behind a mirror (or below water), so traversal
-// starts at the sector(s) owning visible reflective receivers, not at the
-// physical sector containing the mirrored eye. Unknown topology fails open.
+// Prefer the virtual camera's containing sector; planar mirrors can place
+// the eye outside any sector and seed from visible receiver geometry.
+// Probe cameras without a containing sector always fail open.
 #include "world_cache_portals.hpp"
 #include "planar_reflection_camera.hpp"
 #include <algorithm>
@@ -408,7 +408,9 @@ public:
         if(thing_sector_mask)thing_sector_mask->clear();
         planar_reflection_portal_stats stats{};
         stats.sectors_total=uint32_t(sectors_.size());
-        if(!ready() || !read || receiver_surfaces.empty() ||
+        // Empty receivers are valid for cube/hemi/shared/COG probes.
+        // Such views must find one unambiguous containing sector.
+        if(!ready() || !read ||
            lookup.size()!=surface_owner_.size() ||
            !gpu_3do_matrix_finite(reflection_view) ||
            !std::isfinite(tan_half_fov) || tan_half_fov<=0.0f ||
