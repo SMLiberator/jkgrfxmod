@@ -40,6 +40,29 @@ int main()
     controls.reset_mat_color(76, 0.0f);
     assert(controls.snapshot().empty());
 
+    // Clearcoat is an absolute 0..1 triple. It can activate an authored
+    // strength of zero, fades from current interpolated values, and Reset
+    // returns to the actual authored triple (not [0,0.1,1]).
+    controls.register_mat_clearcoat_default(76,{{0.0f,0.12f,0.65f}});
+    assert(controls.get_mat_clearcoat(76)[2]==0.65f);
+    controls.set_mat_clearcoat(76,{{1.0f,0.05f,0.4f}},0.0f);
+    assert(controls.get_mat_clearcoat(76)[0]==1.0f);
+    assert(controls.get_mat_clearcoat(76)[2]==0.4f);
+    controls.reset_mat_clearcoat(76,0.0f);
+    assert(controls.snapshot().empty());
+    assert(controls.get_mat_clearcoat(76)[0]==0.0f);
+    assert(controls.get_mat_clearcoat(76)[1]==0.12f);
+    assert(controls.get_mat_clearcoat(76)[2]==0.65f);
+    controls.set_mat_clearcoat(76,{{0.8f,0.02f,0.5f}},120.0f);
+    auto faded=controls.get_mat_clearcoat(76);
+    assert(faded[0]>=0.0f && faded[0]<0.8f);
+    assert(faded[2]<=0.65f && faded[2]>=0.5f);
+    controls.set_mat_clearcoat(76,{{0.1f,0.2f,0.9f}},120.0f);
+    auto interrupted=controls.get_mat_clearcoat(76);
+    assert(interrupted[0]>=0.0f && interrupted[0]<0.8f);
+    controls.reset_mat_clearcoat(76,0.0f);
+    assert(controls.snapshot().empty());
+
     // A global image source and a per-material override can coexist.
     controls.set_global_env(32781, 1, 0.0f);
     controls.set_mat_env(76, 32781, 2, 0.0f);

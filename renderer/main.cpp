@@ -10433,6 +10433,52 @@ namespace {
     }
 
 
+    // SetMatClearcoat(mat, vector(strength,roughness,transmission),fade)
+    // Absolute, not multiplicative: authored strength may be zero, and a
+    // rain script must be able to enable a dry surface without replacing
+    // its texture or waiting for another material upload.
+    void __cdecl cog_set_mat_clearcoat(void *ctx)
+    {
+        float const fade=cog_pop_float(ctx);
+        float values[3]{0.0f,0.1f,1.0f};
+        cog_pop_vector(ctx,values);
+        int const mat=cog_pop_int(ctx);
+        if(!valid_mat_index(mat) ||
+           !std::isfinite(values[0]) || !std::isfinite(values[1]) ||
+           !std::isfinite(values[2])) {
+            LOG_WARNING("SetMatClearcoat rejected: MAT=",mat);
+            return;
+        }
+        cog_material_controls().set_mat_clearcoat(
+            static_cast<uint32_t>(mat),
+            {{clamp_float(values[0],0.0f,1.0f),
+              clamp_float(values[1],0.0f,1.0f),
+              clamp_float(values[2],0.0f,1.0f)}},fade);
+    }
+
+    // Get always returns the *current interpolated* material-level values.
+    // A missing override resolves to the last known authored MAT defaults.
+    void __cdecl cog_get_mat_clearcoat(void *ctx)
+    {
+        int const mat=cog_pop_int(ctx);
+        std::array<float,3> current{{0.0f,0.1f,1.0f}};
+        if(valid_mat_index(mat))
+            current=cog_material_controls().get_mat_clearcoat(
+                static_cast<uint32_t>(mat));
+        cog_push_vector(ctx,current.data());
+    }
+
+    // Reset transitions to the authored defaults; with fade=0 it is
+    // instantaneous, consistent with existing runtime MAT Reset verbs.
+    void __cdecl cog_reset_mat_clearcoat(void *ctx)
+    {
+        float const fade=cog_pop_float(ctx);
+        int const mat=cog_pop_int(ctx);
+        if(valid_mat_index(mat))
+            cog_material_controls().reset_mat_clearcoat(
+                static_cast<uint32_t>(mat),fade);
+    }
+
     // JKGM(5).exe: verified 1998 JK hud, inventory and weapon setter.
     // Native HUD: jkHud_GetWeaponAmmo(thing) at 0x408F40.
     // Bin lookup: sithInventory_GetBin(thing,bin) at 0x4D33B0.
@@ -10853,6 +10899,9 @@ namespace {
         cog_verb_entry{"setmodelradius", cog_set_model_radius},
         cog_verb_entry{"setmodelmeshradius", cog_set_model_mesh_radius},
         cog_verb_entry{"resetmaterialcolor", cog_reset_material_color},
+        cog_verb_entry{"setmatclearcoat", cog_set_mat_clearcoat},
+        cog_verb_entry{"getmatclearcoat", cog_get_mat_clearcoat},
+        cog_verb_entry{"resetmatclearcoat", cog_reset_mat_clearcoat},
         cog_verb_entry{"setthingopacity", cog_set_thing_opacity},
         cog_verb_entry{"getthingopacity", cog_get_thing_opacity},
         cog_verb_entry{"setspriteinfo", cog_set_sprite_info},

@@ -75,6 +75,9 @@ namespace jkgm {
         std::optional<linear_texture_id> matcap_surface_map;
         color_rgb matcap_factor=color_rgb::fill(1.0f);
         float matcap_roughness=0.0f;
+        std::optional<linear_texture_id> clearcoat_surface_map;
+        std::optional<linear_texture_id> clearcoat_normal_map;
+        std::array<float,3> clearcoat_defaults{{0.0f,0.1f,1.0f}};
         float reflection_strength = 0.0f;
         float roughness = 0.0f;
         float metalness = 0.0f;

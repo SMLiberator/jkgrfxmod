@@ -529,6 +529,10 @@ namespace jkgm {
             gl::texture_view matcap_surface = gl::default_texture;
             point<4,float> matcap_params=make_point(1.0f,1.0f,1.0f,0.0f);
             bool has_matcap=false,has_matcap_surface=false;
+            gl::texture_view clearcoat_surface=gl::default_texture;
+            gl::texture_view clearcoat_normal=gl::default_texture;
+            point<4,float> clearcoat_params=make_point(0.0f,0.1f,1.0f,0.0f);
+            bool has_clearcoat_surface=false,has_clearcoat_normal=false;
             gl::texture_view displacement = gl::default_texture;
             float displacement_factor=0.0f;
             gl::texture_view environment = gl::default_texture;
@@ -3708,6 +3712,14 @@ namespace jkgm {
             return fragment_units>=26;
         }
 
+        bool clearcoat_available() const
+        {
+            static GLint fragment_units=0;
+            if(fragment_units==0)
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);
+            return fragment_units>=28;
+        }
+
         gpu_3do_texture resolve_gpu_3do_material(gpu_3do_group const &group)
         {
             gpu_3do_texture out;
@@ -3774,6 +3786,10 @@ namespace jkgm {
                handle_it->second.surface==surface.get() &&
                handle_it->second.generation==surface->texture_generation)
                 native_id=handle_it->second.mat_id;
+            // COG MAT IDs and GPU D3D handles differ. Always register
+            // defaults under the native MAT ID after generation validation.
+            get_runtime_material_controls().register_mat_clearcoat_default(
+                native_id,surface->clearcoat_defaults);
             runtime_mat_override const *ctl=nullptr;
             auto ctl_it=runtime_controls.per_mat.find(native_id);
             if(ctl_it!=runtime_controls.per_mat.end()) ctl=&ctl_it->second;
@@ -3871,6 +3887,23 @@ namespace jkgm {
                             ctl->env->to.has_value();
             }
             bool const has_env=env_from.has_value()||env_to.has_value();
+            auto coat_values=surface->clearcoat_defaults;
+            if(ctl && ctl->clearcoat)
+                coat_values=ctl->clearcoat->value();
+            out.clearcoat_params=make_point(
+                coat_values[0],coat_values[1],coat_values[2],0.0f);
+            bool const coat_active=the_config->enable_reflections &&
+                coat_values[0]>0.0f && clearcoat_available();
+            if(coat_active && surface->clearcoat_surface_map) {
+                out.clearcoat_surface=texture_cache->get_texture_handle(
+                    *surface->clearcoat_surface_map);
+                out.has_clearcoat_surface=true;
+            }
+            if(coat_active && surface->clearcoat_normal_map) {
+                out.clearcoat_normal=texture_cache->get_texture_handle(
+                    *surface->clearcoat_normal_map);
+                out.has_clearcoat_normal=true;
+            }
             float const strength=surface->reflection_strength>0
                 ? surface->reflection_strength :
                 ((env_command && has_env)?1.0f:0.0f);
@@ -3881,7 +3914,7 @@ namespace jkgm {
             bool const default_normals=is_default_specular_enabled() &&
                 !out.has_authored_specular;
             if(the_config->enable_reflections &&
-               (strength>0.0f || default_normals)) {
+               (strength>0.0f || default_normals || coat_active)) {
                 out.reflection_strength=strength;
                 out.roughness=surface->roughness;
                 out.metalness=surface->metalness;
@@ -3890,11 +3923,11 @@ namespace jkgm {
                 out.normal_scroll=scroll_offset(surface->normal_scroll);
                 out.normal_scroll2=scroll_offset(surface->normal_scroll2);
                 out.reflection_mode=static_cast<int>(surface->reflection_mode);
-                if(strength>0.0f && env_from) {
+                if((strength>0.0f || coat_active) && env_from) {
                     out.environment=texture_cache->get_texture_handle(*env_from);
                     out.has_environment=true;
                 }
-                if(strength>0.0f && env_weight>0.0f) {
+                if((strength>0.0f || coat_active) && env_weight>0.0f) {
                     out.environment_transition=env_weight;
                     if(env_to) {
                         out.environment2=texture_cache->get_texture_handle(*env_to);
@@ -3907,7 +3940,7 @@ namespace jkgm {
                      !surface->replacement_material->has_explicit_env_map) &&
                     !(ctl && ctl->env) &&
                     out.reflection_mode!=2 && out.reflection_mode!=3;
-                if(strength>0.0f && generated_allowed) {
+                if((strength>0.0f || coat_active) && generated_allowed) {
                     if(generated_env.from_capture) {
                         out.environment=generated_env.from;
                         out.has_environment=true;
