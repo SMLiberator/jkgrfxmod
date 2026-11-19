@@ -127,7 +127,8 @@ reflect_stage=renderer.split(
 assert "cam.frustum.far_plane>0.1f" in reflect_stage
 assert "select_planar_capture_plane(cam.camera);" in reflect_stage
 assert "cam.camera,*planar_capture_plane" in reflect_stage
-assert "&cam.frustum,&reflection_view" in reflect_stage
+assert "&reflected_frustum,&reflection_view" in reflect_stage
+assert "reflected_frustum.clip_far=0" in reflect_stage
 assert "camera.camera" not in reflect_stage and "can_cull" not in reflect_stage
 assert "stage_candidate(candidate,false)" in renderer
 assert "reflection_staged.push_back(candidate)" in renderer
@@ -155,7 +156,8 @@ cap=renderer.split("void render_planar_capture()",1)[1].split(
     "void present_game()",1)[0]
 assert cap.index("planar_reflection_thing_outside_frustum(") < cap.index(
     "std::sort(things.begin(),things.end()")
-assert "frame_world_cache_camera.frustum,view" in cap
+assert "read,thing,reflected_frustum,view" in cap
+assert "reflection_capture_scene_far(" in cap
 assert "radius_cull_available?&view:nullptr" in cap
 assert "shader.set_color_effects(" in renderer
 assert "shader.set_fog(" in renderer

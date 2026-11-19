@@ -108,6 +108,8 @@ reduce reflected 3DO acquisition. If receiver seeds, topology, or traversal
 validation fail, it automatically stages the original full-world
 reflected-frustum candidate set. It never reuses the primary camera's
 visible-sector list as reflected visibility.
+The secondary capture uses a level-derived depth range, with CPU far-plane
+rejection disabled but side-frustum and portal clipping preserved.
 Captured world geometry is frustum-culled *before* material resolution, grouped
 by material/cel/GeoMode and submitted with multi-draw. Existing primary
 opaque/alpha draw lists do not receive offscreen-only geometry.

@@ -10838,6 +10838,8 @@ namespace jkgm {
                     if(reflected.valid) {
                         auto const reflection_view=
                             planar_camera_native_view(reflected);
+                        auto reflected_frustum=cam.frustum;
+                        reflected_frustum.clip_far=0; // No distance cull.
                         world_cache_frame_stats reflection_stats{};
                         reflection_stats.frustum_available=true;
                         std::vector<world_cache_draw_candidate> reflected_candidates;
@@ -10916,7 +10918,7 @@ namespace jkgm {
                                             reflected_spans,cache.sector_seen_epochs,
                                             cache.sector_seen_epoch,
                                             reflected_candidates,
-                                            &cam.frustum,&reflection_view,
+                                            &reflected_frustum,&reflection_view,
                                             &special_candidates,&reflected_sky_candidates);
                                     reflected_portals_used=stage.valid;
                                     if(stage.valid) {
@@ -10988,7 +10990,7 @@ namespace jkgm {
                                 append_world_cache_candidate(
                                     safe_read,cache.world.surfaces_addr,surface,
                                     reflected_candidates,reflection_stats,
-                                    &cam.frustum,&reflection_view,
+                                    &reflected_frustum,&reflection_view,
                                     &special_candidates);
                         }
                         if(the_config->profile_renderer &&
@@ -12980,7 +12982,11 @@ namespace jkgm {
             // Reuse the same perspective coordinates through the generic
             // offscreen projection descriptor. The FOV=0 orthographic mode
             // is reserved for arbitrary camera captures, not reflections.
-            float const far_plane=frame_world_cache_camera.far_plane;
+            float const far_plane=reflection_capture_scene_far(
+                reflected.position);
+            auto reflected_frustum=frame_world_cache_camera.frustum;
+            reflected_frustum.clip_far=0;
+            reflected_frustum.far_plane=far_plane;
             auto const projection=make_offscreen_capture_projection(
                 setup.width,setup.height,camera.fov,0.0f,far_plane);
             if(!projection.valid || projection.orthographic)return;
@@ -13043,8 +13049,7 @@ namespace jkgm {
                                 [&](auto const &thing) {
                                     bool const outside=
                                         planar_reflection_thing_outside_frustum(
-                                            read,thing,
-                                            frame_world_cache_camera.frustum,view);
+                                            read,thing,reflected_frustum,view);
                                     if(outside)++thing_radius_culled;
                                     return outside;
                                 });
@@ -13088,7 +13093,7 @@ namespace jkgm {
                         offscreen=acquire_planar_reflection_offscreen_gpu(
                             things,max_native_things,
                             radius_cull_available
-                                ?&frame_world_cache_camera.frustum:nullptr,
+                                ?&reflected_frustum:nullptr,
                             radius_cull_available?&view:nullptr);
                     }
                 }
@@ -13180,7 +13185,7 @@ namespace jkgm {
             // MAT lookup for every world polygon in JkGR's huge levels.
             auto &cache=*world_cache_target;
             draw_reflection_capture_sky(shader,reflected,view,
-                frame_world_cache_camera.frustum,projection,
+                reflected_frustum,projection,
                 setup.width,setup.height,setup.clip_view,true,true,false,0.0f,
                 planar_reflection_sky_visibility.empty()?nullptr:
                     &planar_reflection_sky_visibility);
@@ -13199,7 +13204,7 @@ namespace jkgm {
                 if(index>=cache.mesh.surfaces.size())continue;
                 auto const &surface=cache.mesh.surfaces[index];
                 if(gpu_3do_batch_outside_frustum(
-                       frame_world_cache_camera.frustum,view,
+                       reflected_frustum,view,
                        surface.bounds_min,surface.bounds_max)) {
                     ++world_culled;continue;
                 }
@@ -13296,7 +13301,7 @@ namespace jkgm {
                     ?GL_CCW:GL_CW);
                 for(auto const &group:inst.geometry->groups) {
                     if(gpu_3do_batch_outside_frustum(
-                           frame_world_cache_camera.frustum,modelview,
+                           reflected_frustum,modelview,
                            group.bounds_min,group.bounds_max)) {
                         ++model_culled;continue;
                     }

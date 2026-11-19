@@ -113,7 +113,9 @@ assert "paraboloid_mode?2:6" in capture
 assert "shader.set_paraboloid(unsigned(face),far_plane)" in capture
 assert "paraboloid_mode?nullptr:&frustum" in capture
 assert "paraboloid_mode?nullptr:&view" in capture
-assert "dual_paraboloid_outside_distance(" in capture
+assert "dual_paraboloid_outside_distance(" not in capture
+assert "frustum.clip_far=0" in capture
+assert "reflection_capture_scene_far(focus)" in capture
 assert "glEnable(GL_CLIP_DISTANCE0)" in capture
 assert "glEnable(GL_CLIP_DISTANCE1)" in capture
 assert "glEnable(GL_CLIP_DISTANCE2)" in capture
