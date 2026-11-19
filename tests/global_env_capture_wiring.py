@@ -32,6 +32,13 @@ assert 'type!=7U' in registry
 assert '(move_type!=0U && move_type!=2U)' in registry
 assert '(flags&(0x2U|0x10U|0x20U|0x80000U))' in registry
 assert '(flags&(0x2U|0x10U|0x80000U))' in read("renderer/planar_reflection_things.hpp")
+# Offscreen native pose acquisition must not discard LEVELGEO after discovery.
+native=read("renderer/main.cpp")
+pos=native.index("std::vector<planar_reflection_native_node> native_nodes;")
+assert pos>=0
+offscreen=native[pos:native.index("collect_planar_reflection_native_nodes(",pos)]
+assert "(flags&(0x2U|0x10U|0x80000U))" in offscreen
+assert "(flags&(0x2U|0x8U|0x10U|0x80000U))" not in offscreen
 assert 'glClearColor(candidate.is_global?' in capture
 assert 'generated_global_env_binding() const' in renderer
 assert 'global_allowed &&' in renderer

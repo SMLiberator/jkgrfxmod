@@ -2774,7 +2774,9 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
             ++out.stats.pose_failures;
             continue;
         }
-        if((flags&(0x2U|0x8U|0x10U|0x80000U))!=0U ||
+        // LEVELGEO (0x8) is valid visible 3DO scenery. Only native
+        // hide/destroy flags and non-filled geometry suppress capture.
+        if((flags&(0x2U|0x10U|0x80000U))!=0U ||
            native_geo<3) {
             ++out.stats.excluded_by_flags_or_geomode;
             continue;
