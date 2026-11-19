@@ -12864,7 +12864,8 @@ namespace jkgm {
         void render_planar_capture()
         {
             planar_capture_ready=false;
-            if(!the_config->enable_reflection_capture ||
+            if(!the_config->enable_reflections ||
+               !the_config->enable_reflection_capture ||
                !the_config->enable_reflection_probes ||
                !the_config->use_gpu_cache ||
                !world_cache_target || !world_cache_target->ready ||
