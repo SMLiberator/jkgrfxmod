@@ -200,22 +200,58 @@ int main() {
            thing_mask[1]==0U && thing_mask[2]==0U);
     assert(!graph.thing_sector_visible(sectors+0x98U,thing_mask));
     put(link0,1U);
-    // Cube/shared/COG captures can start at the virtual eye without a
-    // planar receiver. Seed from an unambiguous containing native sector.
+    // A probe-eye seed requires a truly closed 3D sector, not just a
+    // bounding box. Build six inward-facing collision planes in one sector.
+    auto closed=geometry;
+    closed.surface_count=6U;
+    closed.receivers.clear();
+    for(uint32_t i=0;i<6U;++i) {
+        uint32_t const axis=i/2U;
+        float const sign=(i&1U)?-1.0f:1.0f;
+        decal_world_surface_geometry face{};
+        face.surface_index=i;
+        face.surface_flags=0x4U; // native collision boundary
+        face.material=0x10000U;
+        face.normal[axis]=sign;
+        std::array<float,3> anchor{};
+        anchor[axis]=sign>0.0f?-2.0f:2.0f;
+        auto b=anchor,c=anchor;
+        b[(axis+1U)%3U]=1.0f;
+        c[(axis+2U)%3U]=1.0f;
+        face.polygon={anchor,b,c};
+        face.bounds_min=anchor;
+        face.bounds_max=anchor;
+        for(auto const &v:face.polygon)for(unsigned k=0;k<3;++k) {
+            face.bounds_min[k]=std::min(face.bounds_min[k],v[k]);
+            face.bounds_max[k]=std::max(face.bounds_max[k],v[k]);
+        }
+        closed.receivers.push_back(face);
+    }
+    world_cache_mesh closed_mesh{};
+    assert(build_world_cache_mesh(closed,closed_mesh));
+    std::vector<uint32_t> closed_lookup;
+    assert(build_world_cache_surface_lookup(closed_mesh,6U,closed_lookup));
+    put(world+0x4cU,1U); // independent one-sector closed test level
+    put(sectors+0x24U,6U);
+    put(sectors+0x2cU,0U);
     for(unsigned axis=0;axis<3U;++axis) {
-        put_float(sectors+0x70U+uintptr_t(axis)*4U,-2.0f);
-        put_float(sectors+0x70U+uintptr_t(axis+3U)*4U,2.0f);
+        put_float(sectors+0x70U+uintptr_t(axis)*4U,-3.0f);
+        put_float(sectors+0x70U+uintptr_t(axis+3U)*4U,3.0f);
     }
     graph.clear();
-    assert(graph.ensure(read,world,7U,geometry,mesh,lookup));
-    auto probe=graph.traverse(read,{},mesh,lookup,view,
+    assert(graph.ensure(read,world,7U,closed,closed_mesh,closed_lookup));
+    auto probe=graph.traverse(read,{},closed_mesh,closed_lookup,view,
         {{0.0f,0.0f,0.0f}},1.0f,1.0f,spans,&windows,&thing_mask);
     assert(probe.valid && probe.eye_sector_seed && probe.seed_sectors==1U);
-    assert(!spans.empty() && thing_mask.size()==3U);
+    assert(spans.size()==1U && thing_mask.size()==1U);
     // An out-of-world virtual eye has no reliable seed: fail open.
-    probe=graph.traverse(read,{},mesh,lookup,view,
+    probe=graph.traverse(read,{},closed_mesh,closed_lookup,view,
         {{300.0f,300.0f,300.0f}},1.0f,1.0f,spans,&windows,&thing_mask);
     assert(!probe.valid && spans.empty());
+    // Restore the original 3-sector fixture for invalid-link verification.
+    put(world+0x4cU,3U);
+    put(sectors+0x24U,1U);
+    put(sectors+0x2cU,uint32_t(link0));
     // Invalid next-sector pointers fail OPEN to the whole-world path.
     put(link1+4U,0x12345U);
     graph.clear();
