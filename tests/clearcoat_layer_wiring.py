@@ -25,7 +25,8 @@ assert "register_mat_clearcoat_default(" in renderer
 assert "std::optional<animated_floats<3>> clearcoat;" in runtime
 assert "em.clearcoat->is_fading(now)" in runtime
 assert "authored_clearcoat_.clear();" in runtime
-assert "em.clearcoat->fade_to" in runtime
+assert "entry.clearcoat->fade_to" in runtime
+assert "it->second.clearcoat->fade_to" in runtime
 assert "clearcoat_reset=true" in runtime
 for verb in ("setmatclearcoat","getmatclearcoat","resetmatclearcoat"):
     assert f'cog_verb_entry{{"{verb}"' in main
