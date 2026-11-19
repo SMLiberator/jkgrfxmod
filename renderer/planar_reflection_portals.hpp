@@ -572,29 +572,84 @@ public:
         if(stats.valid && sector_windows)
             *sector_windows=std::move(windows);
         if(stats.valid && thing_sector_mask) {
-            // SithRender_BuildVisibleSectorsThingList includes Things from
-            // nearby adjoining sectors in addition to world-visible ones.
-            // Conservatively extend one and two links from the native list,
-            // without excluding an object whose owner pointer is invalid.
+            // OpenJKDF2's sithRender_BuildVisibleSectorsThingList
+            // visits visible sectors and neighboring passable adjoins, then
+            // expands their Thing sectors while cumulative adjoin distance
+            // stays below 0.8. A fixed two-link hop count misses Things in
+            // chains of short portals. This distance is topological, NOT a
+            // camera/geometry render-distance cutoff.
             *thing_sector_mask=reached;
-            std::vector<uint8_t> frontier=reached;
-            for(int depth=0;depth<2;++depth) {
-                std::vector<uint8_t> next(frontier.size(),0U);
-                for(size_t i=0;i<frontier.size();++i)if(frontier[i]) {
-                    for(auto const &portal:sectors_[i].portals) {
-                        uint32_t flags=0;
-                        if(!read(portal.native_adjoin,&flags,4U)) {
-                            thing_sector_mask->clear();
-                            return stats; // fail open for models only
-                        }
-                        if((flags&1U) &&
-                           !(*thing_sector_mask)[portal.destination]) {
-                            (*thing_sector_mask)[portal.destination]=1U;
-                            next[portal.destination]=1U;
-                        }
+            struct pending_thing_sector {
+                uint32_t sector=0;
+                float travelled=0.0f,initial_adjoin_dist=0.0f;
+            };
+            std::vector<pending_thing_sector> pending;
+            std::vector<float> best(sectors_.size(),
+                std::numeric_limits<float>::infinity());
+            auto fail_open_things=[&] {
+                // No reliable short-portal proof: retain every sector's
+                // Things rather than introducing an incorrect horizon hole.
+                thing_sector_mask->assign(sectors_.size(),uint8_t(1));
+            };
+            auto read_dist=[&](uintptr_t at,float &distance)->bool {
+                if(!pointer_ok(at,0x1cU) ||
+                   !read(at+0x18U,&distance,sizeof(distance)))
+                    return false;
+                return std::isfinite(distance) && distance>=0.0f;
+            };
+            // Every sector immediately adjacent to a visible sector is
+            // eligible. The native initial adjoin distance is charged when
+            // trying to continue beyond that neighbor.
+            for(size_t i=0;i<reached.size();++i)if(reached[i]) {
+                for(auto const &edge:sectors_[i].portals) {
+                    uint32_t flags=0;
+                    if(!read(edge.native_adjoin,&flags,4U)) {
+                        fail_open_things();return stats;
+                    }
+                    if(!(flags&1U) || reached[edge.destination])continue;
+                    float initial=0.0f;
+                    if(!read_dist(edge.native_adjoin,initial)) {
+                        fail_open_things();return stats;
+                    }
+                    (*thing_sector_mask)[edge.destination]=1U;
+                    if(initial<best[edge.destination]) {
+                        best[edge.destination]=initial;
+                        pending.push_back({edge.destination,0.0f,initial});
                     }
                 }
-                frontier.swap(next);
+            }
+            constexpr float jk_thing_portal_distance=0.8f;
+            size_t const work_limit=sectors_.size()*16U+1U;
+            for(size_t head=0;head<pending.size();++head) {
+                if(head>=work_limit) {
+                    fail_open_things();return stats;
+                }
+                auto const current=pending[head];
+                for(auto const &edge:sectors_[current.sector].portals) {
+                    uint32_t flags=0,mirror=0;
+                    if(!read(edge.native_adjoin,&flags,4U)) {
+                        fail_open_things();return stats;
+                    }
+                    if(!(flags&1U))continue;
+                    if(!read(edge.native_adjoin+0x0cU,&mirror,4U)) {
+                        fail_open_things();return stats;
+                    }
+                    float local_dist=0.0f,mirror_dist=0.0f;
+                    if(!read_dist(edge.native_adjoin,local_dist) ||
+                       !read_dist(uintptr_t(mirror),mirror_dist)) {
+                        fail_open_things();return stats;
+                    }
+                    float const next=current.travelled+
+                        current.initial_adjoin_dist+local_dist+mirror_dist;
+                    if(!std::isfinite(next)) {
+                        fail_open_things();return stats;
+                    }
+                    if(next>=jk_thing_portal_distance ||
+                       next>=best[edge.destination])continue;
+                    best[edge.destination]=next;
+                    (*thing_sector_mask)[edge.destination]=1U;
+                    pending.push_back({edge.destination,next,0.0f});
+                }
             }
         }
         return stats;

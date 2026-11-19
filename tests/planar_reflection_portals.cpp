@@ -42,8 +42,12 @@ int main() {
         put(at,1U);                            // visibility flag
         put(at+4U,uint32_t(dest));              // neighboring sector
         put(at+8U,uint32_t(surf));              // portal surface in owner
-        put(at+12U,0U);                        // mirror link unused
+        put(at+12U,uint32_t(at));             // mock linked mirror
         put(at+16U,0U);                        // next
+        float const adjoin_dist=0.1f;
+        uint32_t distance_bits=0U;
+        std::memcpy(&distance_bits,&adjoin_dist,4);
+        put(at+24U,distance_bits);             // SithSurfaceAdjoin.dist
     };
     link(link0,sectors+0x98U,surfaces);
     link(link1,sectors+2U*0x98U,surfaces+0x5cU);
