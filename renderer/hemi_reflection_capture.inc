@@ -224,8 +224,7 @@
                             the_config->data_path,true);
                 auto &shader=paraboloid_mode
                     ?*paraboloid_capture_program:*hemi_capture_program;
-                auto const far_plane=std::min(
-                    frame_world_cache_camera.far_plane,96.0f);
+                auto const far_plane=reflection_capture_scene_far(focus);
                 if(!(std::isfinite(far_plane)&&far_plane>0.1f))continue;
                 // Capture source: original 128x128 cube face. Hemi output:
                 // two 256x256 disks with 5-degree overlap past the horizon.
@@ -284,7 +283,7 @@
                     if(!projection.valid) {all_faces_ready=false;break;}
                     gpu_3do_native_frustum frustum=
                         frame_world_cache_camera.frustum;
-                    frustum.clip_far=1;
+                    frustum.clip_far=0; // No artificial CPU far-distance cull.
                     frustum.near_plane=0.01f;
                     frustum.far_plane=far_plane;
                     frustum.far_left=-projection.half_horizontal;
@@ -312,19 +311,9 @@
                                 return reflection_excluded_owners.count(owner)!=0U ||
                                     (candidate.is_global &&
                                      !capture_static_owner(owner)) ||
-                                    (paraboloid_mode
-                                        ?([&] {
-                                            float distance2=0.0f;
-                                            for(unsigned i=0;i<3;++i) {
-                                                float const delta=
-                                                    thing.position[i]-focus[i];
-                                                distance2+=delta*delta;
-                                            }
-                                            float const range=far_plane+32.0f;
-                                            return distance2>range*range;
-                                        }())
-                                        :planar_reflection_thing_outside_frustum(
-                                            read,thing,frustum,view));
+                                    (!paraboloid_mode &&
+                                     planar_reflection_thing_outside_frustum(
+                                         read,thing,frustum,view));
                             }),things.end());
                         std::sort(things.begin(),things.end(),
                             [&](auto const &a,auto const &b) {
@@ -445,10 +434,8 @@
                 if(surface.count<3U || !surface.material ||
                    surface.passable_adjoin ||
                    (surface.surface_flags&0x600U)!=0U ||
-                   (paraboloid_mode
-                    ?dual_paraboloid_outside_distance(
-                        surface.bounds_min,surface.bounds_max,focus,far_plane)
-                    :gpu_3do_batch_outside_frustum(
+                   (!paraboloid_mode &&
+                    gpu_3do_batch_outside_frustum(
                         frustum,view,surface.bounds_min,surface.bounds_max)))
                     continue;
                 groups[std::make_tuple(surface.material,surface.cel,

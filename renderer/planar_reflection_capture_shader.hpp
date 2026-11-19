@@ -3,6 +3,7 @@
 // the main G-buffer and never alters the native JK camera or its draw queue.
 #include "shaders.hpp"
 #include "gpu_3do_modelview.hpp"
+#include "gpu_3do_uv.hpp"
 #include "offscreen_capture_projection.hpp"
 #include "world_cache_sky.hpp"
 #include <array>
@@ -24,6 +25,7 @@ class planar_reflection_capture_shader : public opengl_shader {
     gl::uniform_location_id sky_origin_,sky_right_,sky_forward_,sky_up_;
     gl::uniform_location_id sky_ceiling_,sky_offset_,sky_face_,sky_viewport_;
     gl::uniform_location_id paraboloid_hemisphere_,paraboloid_inv_far_;
+    bool model_uv_=false; // World/SKY UVs use full MAT size, 3DOs cap at 256.
 public:
     explicit planar_reflection_capture_shader(fs::path const &root,
                                                 bool paraboloid=false)
@@ -129,6 +131,7 @@ public:
         gl::set_uniform_integer(ortho_mode_,p.orthographic?1:0);
     }
     void set_modelview(gpu_3do_matrix34 const &m,bool model,bool packed=false) {
+        model_uv_=model;
         gl::set_uniform_integer(model_,model?1:0);
         gl::set_uniform_integer(packed_vertex_format_,model && packed?1:0);
         gl::set_uniform_vector(vr_,make_point(m[0],m[1],m[2],0.0f));
@@ -172,8 +175,13 @@ public:
     {
         gl::set_uniform_integer(sampler_,0);
         gl::set_uniform_integer(has_albedo_,textured?1:0);
+        float const reference_width=model_uv_
+            ?gpu_3do_model_uv_extent(width):width;
+        float const reference_height=model_uv_
+            ?gpu_3do_model_uv_extent(height):height;
         gl::set_uniform_vector(uv_scale_,make_point(
-            1.0f/std::max(width,1.0f),1.0f/std::max(height,1.0f)));
+            1.0f/std::max(reference_width,1.0f),
+            1.0f/std::max(reference_height,1.0f)));
         gl::set_uniform_vector(uv_scroll_,scroll);
         gl::set_uniform_vector(tint_,tint);
         gl::set_uniform_float(alpha_,alpha_cutoff);

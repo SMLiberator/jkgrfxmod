@@ -1,7 +1,7 @@
 #pragma once
 // Fixed-axis perspective cameras shared by CUBE and HEMI source captures.
 // HEMI now samples two up/down paraboloid disks, not a camera-facing 160-degree
-// perspective image. During validation six cube views feed the conversion.
+// perspective image. The two hemisphere images are captured directly.
 #include "planar_reflection_camera.hpp"
 #include "dual_paraboloid_projection.hpp"
 #include <array>

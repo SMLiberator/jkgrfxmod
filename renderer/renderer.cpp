@@ -696,6 +696,33 @@ namespace jkgm {
                 return 7; // shared camera-centered cubemap
             return mode;
         }
+        // No arbitrary probe/EnvMap draw distance. Derive a depth range from
+        // the complete immutable level geometry, not main-camera visibility.
+        // The far-plane value is required to encode depth in the FBO; it is
+        // NOT an independent CPU distance-rejection threshold.
+        float reflection_capture_scene_far(
+            std::array<float,3> const &focus) const {
+            float far_plane=frame_world_cache_camera.far_plane;
+            if(!world_cache_target || !world_cache_target->ready)
+                return far_plane;
+            float max_distance2=0.0f;
+            for(auto const &s:world_cache_target->mesh.surfaces) {
+                float distance2=0.0f;
+                bool valid=true;
+                for(int axis=0;axis<3;++axis) {
+                    float const lo=std::fabs(s.bounds_min[axis]-focus[axis]);
+                    float const hi=std::fabs(s.bounds_max[axis]-focus[axis]);
+                    float const extent=std::max(lo,hi);
+                    valid=valid && std::isfinite(extent);
+                    distance2+=extent*extent;
+                }
+                if(valid && std::isfinite(distance2))
+                    max_distance2=std::max(max_distance2,distance2);
+            }
+            float const scene_far=std::sqrt(max_distance2)*1.01f+1.0f;
+            if(std::isfinite(scene_far))far_plane=std::max(far_plane,scene_far);
+            return far_plane;
+        }
         bool shared_reflection_ready_this_frame() const {
             auto it=reflection_probes.find(shared_reflection_owner_key);
             return it!=reflection_probes.end() && it->second.ready &&

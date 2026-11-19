@@ -86,6 +86,12 @@ separate `matcap_map` artist layer when that layer's shader support lands.
 
 `reflection_capture_resolution` is the fixed square per-cube-face
 resolution (default 128), and the short edge of the planar target.
+Realtime and COG captures no longer impose the former 96-unit capture far
+limit or hemisphere 3DO distance budget. Depth range is derived from the
+native camera range and the cached level bounds. Sky apertures bypass CPU
+far-plane rejection. Capture 3DO UVs use the same 256-pixel-per-axis MAT
+reference cap as regular cached 3DOs; world and sky UVs retain their own
+native scaling.
 The `hemi` probe now stores **two fixed +Z/-Z dual-paraboloid disks**,
 each twice the cube-face linear resolution with 5-degree horizon overlap.
 It captures **two nonlinear paraboloid views directly**: the geometry shader
