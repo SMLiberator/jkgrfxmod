@@ -4,7 +4,9 @@ root=Path(__file__).resolve().parents[1]
 read=lambda p:(root/p).read_text(encoding="utf-8")
 enums=read("common/material.hpp")
 parser=read("common/material_map.cpp")
-assert "enum class material_reflection_mode { envmap, screen, fixed, matcap, planar, hemi, cube };" in enums
+# Preserve the established shader mode numbers when adding new modes.
+assert "envmap=0, screen=1, fixed=2, planar=4, hemi=5, cube=6, shared=7" in enums
+assert "matcap" not in enums.split("enum class material_reflection_mode",1)[1].split("};",1)[0]
 assert 'else if(v == "planar")' in parser
 assert "material_reflection_mode::planar" in parser
 for path in ("assets/shaders/game_surface_common.glsl",
