@@ -51,7 +51,7 @@ for stage in (world,three):
 assert 'world_matcap_effect(material_texcoord)' in world
 assert 'gpu_matcap_effect(uv)' in three
 assert 'out_emissive=vec4(emission+layered_specular,' in world
-assert 'specular+=gpu_matcap_effect(uv)*(1.0-fog);' in three
+assert 'specular+=gpu_matcap_effect(uv)*(1.0-fog)*base_diffuse_trans;' in three
 assert '"matcap_map",24,sampler_kind::tex2d' in units
 assert '"matcap_surface_map",25,sampler_kind::tex2d' in units
 assert 'units>=26' in shader_cpp
