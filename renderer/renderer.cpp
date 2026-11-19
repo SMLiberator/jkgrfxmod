@@ -696,31 +696,65 @@ namespace jkgm {
                 return 7; // shared camera-centered cubemap
             return mode;
         }
-        // No arbitrary probe/EnvMap draw distance. Derive a depth range from
-        // the complete immutable level geometry, not main-camera visibility.
-        // The far-plane value is required to encode depth in the FBO; it is
-        // NOT an independent CPU distance-rejection threshold.
+        // The static world's AABB must be reduced ONCE per world revision,
+        // not once for each of up to six faces on multiple reflection probes.
+        // The per-capture distance is then a cheap 3-axis calculation.
+        mutable uintptr_t reflection_far_bounds_world=0U;
+        mutable uint64_t reflection_far_bounds_revision=0U;
+        mutable bool reflection_far_bounds_known=false;
+        mutable bool reflection_far_bounds_valid=false;
+        mutable std::array<float,3> reflection_far_bounds_min{};
+        mutable std::array<float,3> reflection_far_bounds_max{};
         float reflection_capture_scene_far(
             std::array<float,3> const &focus) const {
             float far_plane=frame_world_cache_camera.far_plane;
             if(!world_cache_target || !world_cache_target->ready)
                 return far_plane;
-            float max_distance2=0.0f;
-            for(auto const &s:world_cache_target->mesh.surfaces) {
-                float distance2=0.0f;
-                bool valid=true;
-                for(int axis=0;axis<3;++axis) {
-                    float const lo=std::fabs(s.bounds_min[axis]-focus[axis]);
-                    float const hi=std::fabs(s.bounds_max[axis]-focus[axis]);
-                    float const extent=std::max(lo,hi);
-                    valid=valid && std::isfinite(extent);
-                    distance2+=extent*extent;
+            auto const &cache=*world_cache_target;
+            if(!reflection_far_bounds_known ||
+               reflection_far_bounds_world!=cache.loaded_world ||
+               reflection_far_bounds_revision!=cache.revision) {
+                reflection_far_bounds_known=true;
+                reflection_far_bounds_world=cache.loaded_world;
+                reflection_far_bounds_revision=cache.revision;
+                reflection_far_bounds_valid=false;
+                reflection_far_bounds_min.fill(
+                    std::numeric_limits<float>::infinity());
+                reflection_far_bounds_max.fill(
+                    -std::numeric_limits<float>::infinity());
+                for(auto const &surface:cache.mesh.surfaces) {
+                    bool finite=true;
+                    for(int i=0;i<3;++i)
+                        finite=finite &&
+                            std::isfinite(surface.bounds_min[i]) &&
+                            std::isfinite(surface.bounds_max[i]) &&
+                            surface.bounds_min[i]<=surface.bounds_max[i];
+                    if(!finite)continue;
+                    reflection_far_bounds_valid=true;
+                    for(int i=0;i<3;++i) {
+                        reflection_far_bounds_min[i]=std::min(
+                            reflection_far_bounds_min[i],surface.bounds_min[i]);
+                        reflection_far_bounds_max[i]=std::max(
+                            reflection_far_bounds_max[i],surface.bounds_max[i]);
+                    }
                 }
-                if(valid && std::isfinite(distance2))
-                    max_distance2=std::max(max_distance2,distance2);
             }
-            float const scene_far=std::sqrt(max_distance2)*1.01f+1.0f;
-            if(std::isfinite(scene_far))far_plane=std::max(far_plane,scene_far);
+            if(!reflection_far_bounds_valid)return far_plane;
+            double distance2=0.0;
+            for(int axis=0;axis<3;++axis) {
+                double const lo=std::fabs(
+                    double(reflection_far_bounds_min[axis])-focus[axis]);
+                double const hi=std::fabs(
+                    double(reflection_far_bounds_max[axis])-focus[axis]);
+                double const extent=std::max(lo,hi);
+                distance2+=extent*extent;
+            }
+            // This is a projection-depth range, not a geometry-distance
+            // culling policy. Sky still bypasses the far clipping plane.
+            double const scene_far=std::sqrt(distance2)*1.01+1.0;
+            if(std::isfinite(scene_far))
+                far_plane=std::max(far_plane,float(std::min(
+                    scene_far,double(std::numeric_limits<float>::max()))));
             return far_plane;
         }
         bool shared_reflection_ready_this_frame() const {
