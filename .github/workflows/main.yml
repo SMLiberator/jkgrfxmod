@@ -228,6 +228,8 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\runtime_material_state.cpp /Fe:runtime_material_state_test.exe
         runtime_material_state_test.exe
+    - name: Material pack compiler MatCap and clearcoat round-trip contracts
+      run: python3 tests/material_pack_layers.py
     - name: Matcap and clearcoat metadata defaults and validation contracts
       shell: cmd
       run: |

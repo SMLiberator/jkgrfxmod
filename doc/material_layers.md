@@ -1,10 +1,9 @@
 # Independent matcap and clearcoat material layers
 
-**Status:** Matcap/clearcoat properties are currently metadata-only, so they
-have no shader effect yet. The separate `shared` reflection mode is now
-implemented for world and 3DO materials. Clearcoat COG verbs are not yet
-registered. Older packs retain normal reflection behavior except the
-explicitly removed legacy `reflection_mode: matcap` value.
+**Status:** Matcap material metadata and pack compiler support are in place.
+Matcap shader compositing is being integrated for cached world and 3DOs.
+Clearcoat metadata also compiles, but its shader and COG verbs are not yet
+registered. The `shared` reflection mode is implemented separately.
 
 ## Artistic matcap (separate from reflection_mode)
 

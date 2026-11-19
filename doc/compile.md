@@ -293,3 +293,18 @@ Note also that the alpha mode only applies to translucent faces or faces which n
 The `alpha_cutoff` field is optional.
 
 The `alpha_cutoff` field describes how the material should interpret the alpha channel when the alpha mode is set to `mask`. Fragments with an albedo map alpha less than `alpha_cutoff` are discarded. The rest of the albedo map is considered solid.
+
+## Independent MatCap and clearcoat metadata
+
+The pack compiler accepts `matcap_map` (artistic sRGB image),
+`matcap_surface_map` (linear R=intensity, G=roughness),
+`matcap_roughness` (0..1), and `matcap_factor` (RGB components 0..4).
+It converts the image files, stores them in the compiled pack, and retains
+all scalar values. These properties can also be inherited from pack-wide
+defaults; individual materials override them.
+
+It also compiles the clearcoat fields `clearcoat_surface_map`,
+`clearcoat_normal_map`, `clearcoat_strength`, `clearcoat_roughness` and
+`clearcoat_transmission`. The clearcoat shader layer and COG verbs remain
+future work. For reflections, valid modes are `envmap`, `screen`, `fixed`,
+`planar`, `hemi`, `cube` and `shared`; `matcap` is not a reflection mode.

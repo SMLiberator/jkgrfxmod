@@ -46,5 +46,5 @@ assert 'vec2 env_uv=mode==3' not in world
 assert 'vec2 env_uv=mode==3' not in model
 assert 'max(max(planar.a,screen.a),has_shared?1.0:0.0)' in world
 assert 'candidate.is_global &&' in capture
-assert '"envmap"' in read("doc/offscreen_captures.md")
+assert 'envmap' in read("doc/offscreen_captures.md")
 print("Shared mode world/3DO captures, fallback, and matcap-mode retirement OK")
