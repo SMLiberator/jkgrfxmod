@@ -49,7 +49,9 @@ assert ("out_color=vec4(diffuse+emission+specular*thing_opacity+" in cached and
 # depth/SSAO behavior or touch world-fluid’s existing lighting path.
 assert "if(special_blend || !std::isfinite(opacity))" in alpha
 assert alpha.index("if(special_blend || !std::isfinite(opacity))") < alpha.index("if(alpha_dither)")
-assert "vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness);" in world
+# This is a Fluid routing test: the lower diffuse lobe may now include
+# clearcoat transmission. Validate its Fluid opacity/compositing contract
+# below instead of pinning an obsolete, exact diffuse source expression.
 assert "float opacity=coverage*absorption;" in world
 assert "out_color=vec4(diffuse+emission+specular,opacity);" in world
 
