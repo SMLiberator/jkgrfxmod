@@ -525,6 +525,10 @@ namespace jkgm {
             gl::texture_view normal = gl::default_texture;
             gl::texture_view normal2 = gl::default_texture;
             gl::texture_view surface = gl::default_texture;
+            gl::texture_view matcap = gl::default_texture;
+            gl::texture_view matcap_surface = gl::default_texture;
+            point<4,float> matcap_params=make_point(1.0f,1.0f,1.0f,0.0f);
+            bool has_matcap=false,has_matcap_surface=false;
             gl::texture_view displacement = gl::default_texture;
             float displacement_factor=0.0f;
             gl::texture_view environment = gl::default_texture;
@@ -3694,6 +3698,16 @@ namespace jkgm {
             return reason.str();
         }
 
+        // Matcap image and surface mask reserve fragment units 24/25. The
+        // matching shader paths are compiled out on smaller GL devices.
+        bool matcap_available() const
+        {
+            static GLint fragment_units=0;
+            if(fragment_units==0)
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);
+            return fragment_units>=26;
+        }
+
         gpu_3do_texture resolve_gpu_3do_material(gpu_3do_group const &group)
         {
             gpu_3do_texture out;
@@ -3919,6 +3933,42 @@ namespace jkgm {
                 if(surface->normal_map) {
                     out.normal=texture_cache->get_texture_handle(*surface->normal_map);
                     out.has_normal=true;
+                }
+            }
+            // Matcap is an *artistic* layer, completely independent of
+            // enable_reflections, inherited EnvMaps and GGX eligibility.
+            if(surface->matcap_map) {
+                auto const &factor=surface->matcap_factor;
+                float const red=get<0>(factor);
+                float const green=get<1>(factor);
+                float const blue=get<2>(factor);
+                if(red>0.0f || green>0.0f || blue>0.0f) {
+                    out.matcap=texture_cache->get_texture_handle(
+                        *surface->matcap_map);
+                    out.has_matcap=true;
+                    out.matcap_params=make_point(
+                        red,green,blue,surface->matcap_roughness);
+                    if(surface->matcap_surface_map) {
+                        out.matcap_surface=texture_cache->get_texture_handle(
+                            *surface->matcap_surface_map);
+                        out.has_matcap_surface=true;
+                    }
+                    // The optional existing material normal layers can
+                    // affect a Matcap even when reflections are disabled.
+                    out.normal_strength=surface->normal_strength;
+                    out.normal_strength2=surface->normal_strength2;
+                    out.normal_scroll=scroll_offset(surface->normal_scroll);
+                    out.normal_scroll2=scroll_offset(surface->normal_scroll2);
+                    if(surface->normal_map) {
+                        out.normal=texture_cache->get_texture_handle(
+                            *surface->normal_map);
+                        out.has_normal=true;
+                    }
+                    if(surface->normal_map2) {
+                        out.normal2=texture_cache->get_texture_handle(
+                            *surface->normal_map2);
+                        out.has_normal2=true;
+                    }
                 }
             }
             // GPU upload has erased the original 8-bit MAT indices.
@@ -5341,8 +5391,13 @@ namespace jkgm {
                     !inst.is_sprite_quad && !inst.world_lighting_exempt &&
                     !group.solid_color && !material.solid_fullbright &&
                     (material.has_normal || material.has_normal2);
+                bool const matcap_active=matcap_available() &&
+                    material.has_matcap && !post_exempt && !decals_only &&
+                    !inst.camera_hud && !inst.is_sprite_quad &&
+                    !inst.is_projected_decal && !inst.world_lighting_exempt &&
+                    material.albedo_source!=0;
                 bool const material_normals_active=
-                    spec_active || diffuse_mapping;
+                    spec_active || diffuse_mapping || matcap_active;
                 if(material_normals_active) {
                     if(spec_active) {
                         gl::set_active_texture_unit(2);
@@ -5394,6 +5449,19 @@ namespace jkgm {
                     prog.set_environment(false,false,0.0f,0);
                 }
                 prev_specular_active=material_normals_active;
+                if(matcap_active) {
+                    gl::set_active_texture_unit(24);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.matcap);
+                    if(material.has_matcap_surface) {
+                        gl::set_active_texture_unit(25);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         material.matcap_surface);
+                    }
+                }
+                prog.set_matcap(matcap_active,material.matcap_params,
+                                matcap_active && material.has_matcap_surface);
+                gl::set_active_texture_unit(0);
                 // JK's high-resolution MAT patch uses a 256x256 maximum UV
                 // reference area for *models*, independently per dimension.
                 // For a 64px MAT, 0..256 repeats four times; for >=256px,
@@ -10323,6 +10391,9 @@ namespace jkgm {
                 the_config->enable_normal_mapped_diffuse &&
                 geometry_mode==4U && !material.solid_fullbright &&
                 (material.has_normal || material.has_normal2);
+            bool const matcap_active=matcap_available() &&
+                material.has_matcap && material.albedo_source!=0 &&
+                geometry_mode>=3U;
             if(reflective) {
                 if(material.has_surface) {
                     gl::set_active_texture_unit(2);
@@ -10341,12 +10412,12 @@ namespace jkgm {
                                      material.environment2);
                 }
             }
-            if((reflective || diffuse_mapping) && material.has_normal) {
+            if((reflective || diffuse_mapping || matcap_active) && material.has_normal) {
                 gl::set_active_texture_unit(3);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                                  material.normal);
             }
-            if((reflective || diffuse_mapping) && material.has_normal2) {
+            if((reflective || diffuse_mapping || matcap_active) && material.has_normal2) {
                 gl::set_active_texture_unit(5);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                                  material.normal2);
@@ -10355,10 +10426,10 @@ namespace jkgm {
                 make_point(reflective?specular.first:0.0f,
                            specular.second,material.metalness,
                            reflective && material.has_surface?1.0f:0.0f),
-                make_point((reflective || diffuse_mapping) &&
+                make_point((reflective || diffuse_mapping || matcap_active) &&
                            material.has_normal?1.0f:0.0f,
                            material.normal_strength,
-                           (reflective || diffuse_mapping) &&
+                           (reflective || diffuse_mapping || matcap_active) &&
                            material.has_normal2?1.0f:0.0f,
                            material.normal_strength2),
                 material.normal_scroll,material.normal_scroll2,
@@ -10366,6 +10437,18 @@ namespace jkgm {
                 reflective && material.has_environment2,
                 reflective?material.environment_transition:0.0f,
                 material.reflection_mode);
+            if(matcap_active) {
+                gl::set_active_texture_unit(24);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 material.matcap);
+                if(material.has_matcap_surface) {
+                    gl::set_active_texture_unit(25);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.matcap_surface);
+                }
+            }
+            shader.set_matcap(matcap_active,material.matcap_params,
+                              matcap_active && material.has_matcap_surface);
             gl::set_active_texture_unit(0);
         }
 

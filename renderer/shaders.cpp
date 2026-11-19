@@ -213,6 +213,12 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     auto const newline=source.find('\n');
                     source.insert(newline+1U,"#define JKGM_REFLECTION_PROBE 1\n");
                 }
+                // Matcap uses independent sampler2D units 24 and 25.
+                // Compile the samplers out entirely on older GL hardware.
+                if(units>=26) {
+                    auto const newline=source.find('\n');
+                    source.insert(newline+1U,"#define JKGM_MATCAP_LAYER 1\n");
+                }
             }
             gl::shader_source(rv,make_string_span(""),make_span(source));
             gl::compile_shader(rv);
@@ -373,6 +379,13 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , environment_info(gl::get_uniform_location(the_program,"environment_info"))
     , shared_reflection_sampler(gl::get_uniform_location(the_program,"shared_reflection_map"))
     , shared_reflection_ready(gl::get_uniform_location(the_program,"shared_reflection_ready"))
+    , matcap_sampler(gl::get_uniform_location(the_program,"matcap_map"))
+    , matcap_surface_sampler(gl::get_uniform_location(
+          the_program,"matcap_surface_map"))
+    , matcap_params(gl::get_uniform_location(the_program,"matcap_params"))
+    , matcap_enabled(gl::get_uniform_location(the_program,"matcap_enabled"))
+    , matcap_has_surface(gl::get_uniform_location(
+          the_program,"matcap_has_surface"))
     , camera_world_origin(gl::get_uniform_location(the_program,"camera_world_origin"))
     , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
     , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
@@ -511,6 +524,15 @@ void jkgm::shaders::world_cache_preview_shader::set_reflection(
     gl::set_uniform_vector(environment_info,
         make_point(from?1.0f:0.0f,static_cast<float>(mode),
                    to?1.0f:0.0f,weight));
+}
+void jkgm::shaders::world_cache_preview_shader::set_matcap(
+    bool enabled,point<4,float> params,bool has_surface)
+{
+    gl::set_uniform_integer(matcap_sampler,24);
+    gl::set_uniform_integer(matcap_surface_sampler,25);
+    gl::set_uniform_integer(matcap_enabled,enabled?1:0);
+    gl::set_uniform_integer(matcap_has_surface,has_surface?1:0);
+    if(enabled)gl::set_uniform_vector(matcap_params,params);
 }
 void jkgm::shaders::world_cache_preview_shader::set_shared_reflection(bool ready)
 {
@@ -854,6 +876,13 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , hemi_forward(gl::get_uniform_location(the_program,"hemi_forward_axis"))
     , hemi_up(gl::get_uniform_location(the_program,"hemi_up_axis"))
     , hemi_info(gl::get_uniform_location(the_program,"hemi_capture_info"))
+    , matcap_sampler(gl::get_uniform_location(the_program,"matcap_map"))
+    , matcap_surface_sampler(gl::get_uniform_location(
+          the_program,"matcap_surface_map"))
+    , matcap_params(gl::get_uniform_location(the_program,"matcap_params"))
+    , matcap_enabled(gl::get_uniform_location(the_program,"matcap_enabled"))
+    , matcap_has_surface(gl::get_uniform_location(
+          the_program,"matcap_has_surface"))
     , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
     , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
     , camera_up_axis(gl::get_uniform_location(the_program,"camera_up_axis"))
@@ -1216,6 +1245,15 @@ void jkgm::shaders::gpu_3do_preview_shader::set_environment(
     gl::set_uniform_vector(environment_info,
         make_point(from?1.0f:0.0f,static_cast<float>(mode),
                    to?1.0f:0.0f,weight));
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_matcap(
+    bool enabled,point<4,float> params,bool has_surface)
+{
+    gl::set_uniform_integer(matcap_sampler,24);
+    gl::set_uniform_integer(matcap_surface_sampler,25);
+    gl::set_uniform_integer(matcap_enabled,enabled?1:0);
+    gl::set_uniform_integer(matcap_has_surface,has_surface?1:0);
+    if(enabled)gl::set_uniform_vector(matcap_params,params);
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_hemi_reflection(
     bool ready,point<3,float> right,point<3,float> forward,

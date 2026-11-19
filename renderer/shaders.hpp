@@ -86,6 +86,8 @@ namespace jkgm {
             gl::uniform_location_id specular_normal_mode;
             gl::uniform_location_id reflection_scroll,reflection_scroll2,environment_info;
             gl::uniform_location_id shared_reflection_sampler,shared_reflection_ready;
+            gl::uniform_location_id matcap_sampler,matcap_surface_sampler;
+            gl::uniform_location_id matcap_params,matcap_enabled,matcap_has_surface;
             gl::uniform_location_id camera_world_origin,camera_right_axis;
             gl::uniform_location_id camera_forward_axis,camera_up_axis;
             gl::uniform_location_id planar_sampler,planar_ready,planar_plane;
@@ -127,6 +129,7 @@ namespace jkgm {
                                 point<2,float> scroll,point<2,float> scroll2,
                                 bool from,bool to,float weight,int mode);
             void set_shared_reflection(bool ready);
+            void set_matcap(bool enabled,point<4,float> params,bool has_surface);
             void set_reflection_camera(std::array<float,3> const &position,
                                        std::array<float,3> const &right,
                                        std::array<float,3> const &forward,
@@ -348,6 +351,8 @@ namespace jkgm {
             gl::uniform_location_id displacement_sampler,displacement_factor;
             gl::uniform_location_id environment_info;
             gl::uniform_location_id hemi_map,hemi_right,hemi_forward,hemi_up,hemi_info;
+            gl::uniform_location_id matcap_sampler,matcap_surface_sampler;
+            gl::uniform_location_id matcap_params,matcap_enabled,matcap_has_surface;
             gl::uniform_location_id camera_right_axis,camera_forward_axis,camera_up_axis;
             gl::uniform_location_id sun_direction,sun_color_intensity;
             gl::uniform_location_id normal_specular_scroll,normal_specular_scroll2,local_eye;
@@ -431,6 +436,7 @@ namespace jkgm {
                                     point<2,float> normal_scroll,
                                     point<2,float> normal_scroll2);
             void set_environment(bool from,bool to,float weight,int mode);
+            void set_matcap(bool enabled,point<4,float> params,bool has_surface);
             void set_hemi_reflection(bool ready,
                 point<3,float> right,point<3,float> forward,
                 point<3,float> up,float half_fov,float aspect,int capture_mode);

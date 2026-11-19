@@ -30,6 +30,13 @@ uniform vec2 uv_scale,uv_scroll;
 // GPU 3DO-compatible EnvMap samplers, reflection modes, material parameters.
 uniform sampler2D surface_map,normal_map,normal_map2,env_map,env_map2;
 uniform vec4 specular_params,normal_specular_params,environment_info;
+// Matcap color is an artist-authored sRGB image. Its per-pixel intensity
+// and roughness are LINEAR mask channels, completely separate from GGX.
+#ifdef JKGM_MATCAP_LAYER
+uniform sampler2D matcap_map,matcap_surface_map;
+uniform vec4 matcap_params; // RGB factor, roughness
+uniform int matcap_enabled,matcap_has_surface;
+#endif
 uniform vec4 projection; // same FOV factors as world_cache.vert
 uniform int normal_mapped_diffuse; // opt-in added lights, not baked JK RGB
 uniform vec2 normal_specular_scroll,normal_specular_scroll2;
@@ -121,6 +128,31 @@ vec3 world_mapped_normal(vec2 uv)
     return normalize(mat3(t*inv_basis,b*inv_basis,n)*
                      normalize(vec3(slope,1.0)));
 }
+
+#ifdef JKGM_MATCAP_LAYER
+vec3 world_matcap_effect(vec2 uv)
+{
+    if(matcap_enabled==0)return vec3(0.0);
+    vec2 mask=matcap_has_surface!=0
+        ?texture(matcap_surface_map,uv).rg:vec2(1.0);
+    if(mask.r<=0.0)return vec3(0.0);
+    float roughness=clamp(matcap_params.w*mask.g,0.0,1.0);
+    vec3 world_normal=world_mapped_normal(uv);
+    // Use unprojected camera-space normals: MatCaps are view-oriented
+    // artistic textures, not rays into the scene.
+    vec3 n=normalize(vec3(
+        dot(world_normal,camera_right_axis),
+        dot(world_normal,camera_up_axis),
+        dot(world_normal,camera_forward_axis)));
+    if(n.z>0.0)n=-n;
+    vec2 map_uv=clamp(
+        vec2(0.5+0.5*n.x,0.5-0.5*n.y),vec2(0.001),vec2(0.999));
+    ivec2 dims=textureSize(matcap_map,0);
+    float lod=roughness*log2(max(float(max(dims.x,dims.y)),1.0));
+    return textureLod(matcap_map,map_uv,lod).rgb *
+           matcap_params.rgb*mask.r;
+}
+#endif
 
 // A pixel can use this capture only if it lies on the selected world
 // reflection plane. One captured MAT may be shared by non-coplanar faces.
@@ -410,6 +442,10 @@ void main() {
     vec3 env_reflection=world_environment_reflection(
         albedo,material_texcoord,env_metalness);
     vec3 direct_specular=world_direct_specular(albedo,material_texcoord);
+    vec3 matcap_effect=vec3(0.0);
+#ifdef JKGM_MATCAP_LAYER
+    matcap_effect=world_matcap_effect(material_texcoord);
+#endif
     env_metalness*=1.0-fullbright;
     env_reflection*=1.0-fullbright;
     direct_specular*=1.0-fullbright;
@@ -430,7 +466,9 @@ void main() {
         }
         float fog=fog_fraction*fog_params.z;
         vec3 lit=mix(lit_diffuse,fog_color,fog);
-        vec3 specular=(env_reflection+direct_specular)*(1.0-fog);
+        // MatCap adds authored color but no dynamically evaluated
+        // specular highlight; forward fog attenuates the artistic layer.
+        vec3 specular=(env_reflection+direct_specular+matcap_effect)*(1.0-fog);
         if(blend_mode==3) {
             // Match game_trns_pass.frag's *native* Fluid composition.
             // Native material/texture alpha changes destination blending,
@@ -544,7 +582,7 @@ void main() {
     }
     out_color=vec4(lit_diffuse,1.0);
     // Opaque reflections are composited after SSAO, as for GPU 3DOs.
-    out_emissive=vec4(emission+env_reflection+direct_specular,
+    out_emissive=vec4(emission+env_reflection+direct_specular+matcap_effect,
         dot(lighting,vec3(0.2126,0.7152,0.0722)));
     // Fullbright palette entries do not receive AO, sun or projected light.
     // G-buffer normal is consumed by both opaque projected spotlights

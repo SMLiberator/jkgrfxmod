@@ -1,9 +1,9 @@
 # Independent matcap and clearcoat material layers
 
-**Status:** Matcap material metadata and pack compiler support are in place.
-Matcap shader compositing is being integrated for cached world and 3DOs.
-Clearcoat metadata also compiles, but its shader and COG verbs are not yet
-registered. The `shared` reflection mode is implemented separately.
+**Status:** Independent MatCap rendering is implemented for GPU-cached
+world and 3DO materials, and the material pack compiler supports the
+metadata. Clearcoat metadata also compiles, but its shader and COG verbs
+are not yet registered. The `shared` reflection mode is independent.
 
 ## Artistic matcap (separate from reflection_mode)
 
@@ -26,6 +26,19 @@ registered. The `shared` reflection mode is implemented separately.
   are implicitly 1. When `matcap_map` is absent, the layer is inactive.
 - The old `"reflection_mode":"matcap"` is rejected; use
   `matcap_map` for the independently authored layer instead.
+- The RGB matcap image is imported as sRGB; its surface mask is imported
+  as linear data. The mask's R controls the color contribution, and G
+  multiplies the mip-based artistic blur. The layer is added as artistic
+  color in the emissive/compositing path, not as a second GGX lobe.
+- Existing material normal maps influence MatCap orientation, including
+  materials without reflection strength. The layer does not follow
+  sun/point-light specular or metallic Fresnel.
+- MatCap uniforms and texture binds are skipped when inactive. The
+  extra samplers use units 24/25 and are compiled out when the driver's
+  `GL_MAX_TEXTURE_IMAGE_UNITS` is below 26; on such GPUs the new MatCap
+  layer is unavailable while ordinary rendering continues unchanged.
+- Only GPU-cached world and GPU 3DO rendering supports the new layer at
+  this stage. Native triangle fallback still uses its existing shaders.
 
 ## Clearcoat (second dielectric specular lobe)
 

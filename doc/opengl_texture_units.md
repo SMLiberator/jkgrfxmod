@@ -27,6 +27,14 @@ reference the same unit within a program.
 | 19 | **Sector-crossing samplerBuffer** | Unused | Unused | Unused |
 | 20 | **Opt-in sky-aperture sampler2DArray** | **Opt-in sky-aperture sampler2DArray** | **Opt-in sky-aperture sampler2DArray** | Unused |
 | 21–22 | Continuous ambient voxel buffer textures | Unused | Unused | Unused |
+| 23 | Local hemi/cube or shared reflection array | Shared reflection array | Unused | Unused |
+| 24–25 | MatCap color (sRGB) and surface mask (linear) | MatCap color (sRGB) and surface mask (linear) | Unused | Unused |
+
+The optional MatCap artistic layer uses `sampler2D` units 24 and 25 in
+the GPU cached model/world programs only. `JKGM_MATCAP_LAYER` is compiled
+in when `GL_MAX_TEXTURE_IMAGE_UNITS >= 26`; otherwise MatCap samplers and
+texture binds are skipped, preserving normal scene rendering. MatCap is
+not another reflection mode and never allocates a cubemap.
 
 The two GPU 3DO same-type aliases are deliberately restricted to
 *mutually exclusive* decal and ordinary material draws:

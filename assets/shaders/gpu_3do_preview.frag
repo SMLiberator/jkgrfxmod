@@ -55,6 +55,11 @@ uniform sampler2D normal_map;  // tangent-space RGB
 uniform sampler2D normal_map2; // second slope layer
 uniform sampler2D env_map;     // equirectangular fallback
 uniform sampler2D env_map2;
+#ifdef JKGM_MATCAP_LAYER
+uniform sampler2D matcap_map,matcap_surface_map;
+uniform vec4 matcap_params; // artistic RGB factor and roughness, no BRDF
+uniform int matcap_enabled,matcap_has_surface;
+#endif
 // Hemi: layers 0/1 are fixed up/down paraboloid disks with horizon overlap.
 // Cube: layers 0..5 are fixed-axis 90-degree perspective views.
 // Every layer has independent mipmaps; coverage alpha is sampled at LOD 0.
@@ -269,6 +274,27 @@ vec3 mapped_local_normal(vec2 uv)
     return normalize(mat3(t*inv_basis,b*inv_basis,n)*
                      normalize(vec3(slope,1.0)));
 }
+
+#ifdef JKGM_MATCAP_LAYER
+vec3 gpu_matcap_effect(vec2 uv)
+{
+    if(matcap_enabled==0)return vec3(0.0);
+    vec2 mask=matcap_has_surface!=0
+        ?texture(matcap_surface_map,uv).rg:vec2(1.0);
+    if(mask.r<=0.0)return vec3(0.0);
+    float roughness=clamp(matcap_params.w*mask.g,0.0,1.0);
+    // Surface normals include the existing tangent-space normal layers,
+    // but bypass reflection-direction, Fresnel and metalness calculations.
+    vec3 n=gpu_view_normal_from_local(mapped_local_normal(uv));
+    if(n.z>0.0)n=-n;
+    vec2 map_uv=clamp(
+        vec2(0.5+0.5*n.x,0.5-0.5*n.y),vec2(0.001),vec2(0.999));
+    ivec2 dims=textureSize(matcap_map,0);
+    float lod=roughness*log2(max(float(max(dims.x,dims.y)),1.0));
+    return textureLod(matcap_map,map_uv,lod).rgb *
+           matcap_params.rgb*mask.r;
+}
+#endif
 
 // Local-space analytic point-light specular, with optional normal/surface
 // maps. Uses the same GGX microfacet form as the native sector sun shader.
@@ -963,6 +989,12 @@ void main() {
        specular_params.x>0.0)
         specular+=point_light_specular(albedo.rgb,uv);
     specular*=(1.0-fog)*(1.0-fullbright);
+#ifdef JKGM_MATCAP_LAYER
+    // Artist-authored MatCaps do not generate direct-light GGX and are not
+    // gated by reflection strength or CMP fullbright. They share the
+    // regular surface visibility, fog and alpha/compositing conventions.
+    specular+=gpu_matcap_effect(uv)*(1.0-fog);
+#endif
     projected_light*=1.0-fullbright;
     // The opaque pass composites this separate emissive attachment after
     // SSAO. The translucent pass has only the color target: emission must

@@ -236,6 +236,8 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\material_layer_metadata.cpp /Fe:material_layer_metadata_test.exe || exit /b 1
         material_layer_metadata_test.exe || exit /b 1
         python3 tests/material_layer_metadata.py || exit /b 1
+    - name: Independent GPU MatCap render, upload and compiler integration
+      run: python3 tests/matcap_layer_wiring.py
     - name: Shared camera-centered realtime cube and matcap-mode removal
       run: python3 tests/shared_reflection_wiring.py
     - name: GPU 3DO native model-view precision tests
