@@ -41,6 +41,7 @@
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
 #include "global_env_capture.hpp"
+#include "reflection_attachment_family.hpp"
 #include "global_env_equirect_converter.hpp"
 #include "dual_paraboloid_converter.hpp"
 #include "spotlight.hpp"

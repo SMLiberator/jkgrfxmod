@@ -440,6 +440,9 @@
     <ClInclude Include="global_env_capture.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="reflection_attachment_family.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="global_env_equirect_converter.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>

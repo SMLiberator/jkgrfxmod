@@ -84,6 +84,17 @@ a refresh, avoiding texture jitter from mismatched camera matrices.
 The separate COG `CaptureEnvMap` command is still strictly on-demand and
 uses its own fixed `envmap_capture_face_resolution`.
 
+Realtime `hemi` and `cube` probes exclude their reflecting Thing and all
+Things connected through qualifying Thing-to-Thing/Thing-face attachments:
+the CHILD attachment must include `NOMOVE` (0x8) or JKGM's `NODE` (0x80).
+Links are traversed bidirectionally across the connected assembly; ordinary
+parent references, surface attachments and ordinary movable Thing attachments
+do not join the exclusion family. Unrelated probes still reflect these parts.
+The validated exclusion set is shared across every capture view in a refresh,
+with bounded traversal for malformed native child lists. This is distinct
+from the **ThingFlag** `LEVELGEO` (also 0x8), which remains fully renderable,
+and does not alter the global `CaptureEnvMap` policy.
+
 Visible JK 0x200/0x400 sky world faces are now explicitly rendered in all
 secondary cameras with far-depth and native-style horizon/ceiling mapping.
 These are apertures of the surrounding world, not ordinary UV faces; depth

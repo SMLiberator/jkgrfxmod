@@ -191,6 +191,7 @@
     <ClInclude Include="dual_paraboloid_projection.hpp" />
     <ClInclude Include="dual_paraboloid_converter.hpp" />
     <ClInclude Include="global_env_capture.hpp" />
+    <ClInclude Include="reflection_attachment_family.hpp" />
     <ClInclude Include="global_env_equirect_converter.hpp" />
     <ClInclude Include="planar_reflection_things.hpp" />
     <ClInclude Include="planar_reflection_workset.hpp" />

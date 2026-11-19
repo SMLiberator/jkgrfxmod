@@ -28,6 +28,19 @@ assert "reflection_capture_update_interval" in config
 assert settings["reflection_probe_max_owners"] == 4
 assert settings["reflection_capture_update_interval"] == 0.0
 assert '#include "hemi_reflection_camera.hpp"' in renderer
+assert '#include "reflection_attachment_family.hpp"' in renderer
+assert 'build_reflection_attachment_family(' in capture
+assert 'reflection_excluded_owners.count(owner)' in capture
+assert 'reflection_excluded_owners.count(inst.shadow_owner)' in capture
+assert 'if(!candidate.is_global &&' in capture
+family=read("renderer/reflection_attachment_family.hpp")
+assert 'native_attach_has_thing_parent(attach_flags)' in family
+assert '(native_attach_no_move|native_attach_node)' in family
+assert 'thing+0x58U,parent' in family
+assert 'node.thing+0x68U,child' in family
+assert 'at+0x6cU,next' in family
+assert 'reflection_attachment_family.hpp' in read("renderer/renderer.vcxproj")
+assert 'reflection_attachment_family.hpp' in read("renderer/renderer.vcxproj.filters")
 assert '#include "hemi_reflection_capture.inc"' in renderer
 assert "render_hemi_capture();" in renderer
 assert "std::unordered_set<uint64_t> acquired;" in capture

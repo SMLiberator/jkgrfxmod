@@ -212,6 +212,20 @@
                     ?entry.cube_source.get():entry.target.get();
                 if(!entry.target->ensure(output_side,output_layers) ||
                    !probe_target->ensure(capture_side,face_count))continue;
+                // Build a Thing-attached reflection family once per probe
+                // refresh; all hemi/cube views share the same exclusions.
+                // CaptureEnvMap keeps its separate Cog-only capture policy.
+                std::unordered_set<uint64_t> reflection_excluded_owners{
+                    selected_owner};
+                if(!candidate.is_global &&
+                   engine_material_debug::matches_tested_executable()) {
+                    auto read=[](uintptr_t at,void *dst,size_t bytes) {
+                        return engine_material_debug::read_bytes(at,dst,bytes);
+                    };
+                    reflection_excluded_owners=
+                        build_reflection_attachment_family(
+                            read,selected_owner);
+                }
                 size_t total_world_drawn=0,total_model_drawn=0;
                 size_t total_acquired_nodes=0;
                 engine_camera first_camera{};
@@ -253,7 +267,7 @@
                             [&](auto const &thing) {
                                 uint64_t const owner=
                                     planar_reflection_thing_owner_key(thing);
-                                return owner==selected_owner ||
+                                return reflection_excluded_owners.count(owner)!=0U ||
                                     (candidate.is_global &&
                                      !capture_static_owner(owner)) ||
                                     (direct_paraboloid
@@ -420,7 +434,7 @@
                 world_drawn+=entry.second.size();
             }
             auto draw_model=[&](gpu_3do_instance const &inst) {
-                if(inst.shadow_owner==selected_owner ||
+                if(reflection_excluded_owners.count(inst.shadow_owner)!=0U ||
                    inst.shadow_only || inst.camera_hud ||
                    inst.is_sprite_quad || inst.is_projected_decal ||
                    inst.thing_opacity<0.999f ||
