@@ -498,8 +498,10 @@ void main() {
 #ifdef JKGM_CLEARCOAT_LAYER
     if(clearcoat_enabled!=0) {
         vec3 coat=world_clearcoat_values(material_texcoord);
+        // Derivatives for the optional normal map must run uniformly
+        // across the quad, even where the coverage mask is zero.
+        vec3 N=world_clearcoat_normal(material_texcoord);
         if(coat.x>0.0) {
-            vec3 N=world_clearcoat_normal(material_texcoord);
             float f=world_clearcoat_fresnel(N);
             base_specular_trans=clamp(1.0-coat.x*f,0.0,1.0);
             base_diffuse_trans=base_specular_trans*

@@ -1005,8 +1005,9 @@ void main() {
 #ifdef JKGM_CLEARCOAT_LAYER
     if(clearcoat_enabled!=0) {
         coat_values=gpu_clearcoat_values(uv);
+        // Evaluate derivatives before any per-pixel coverage branch.
+        coat_local_normal=gpu_clearcoat_local_normal(uv);
         if(coat_values.x>0.0) {
-            coat_local_normal=gpu_clearcoat_local_normal(uv);
             vec3 coat_view_normal=gpu_view_normal_from_local(coat_local_normal);
             float f=gpu_clearcoat_fresnel(coat_view_normal);
             base_specular_trans=clamp(1.0-coat_values.x*f,0.0,1.0);
