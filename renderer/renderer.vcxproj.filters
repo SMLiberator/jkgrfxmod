@@ -449,9 +449,6 @@
     <ClInclude Include="dual_paraboloid_projection.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="dual_paraboloid_converter.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="hemi_reflection_camera.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>

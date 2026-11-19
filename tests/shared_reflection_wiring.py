@@ -28,8 +28,8 @@ assert 'candidate.is_shared?0U:candidate.owner' in capture
 assert '!candidate.is_global && !candidate.is_shared &&' in capture
 assert 'capture_static_owner(owner)' in capture  # Cog-only global capture survives
 assert 'the_config->reflection_capture_update_interval' in capture
-assert 'int const face_count=direct_paraboloid?2:6;' in capture
-assert 'material.reflection_mode==7' in renderer
+assert 'int const face_count=paraboloid_mode?2:6;' in capture
+assert 'effective_capture_reflection_mode(material.reflection_mode)==7' in renderer
 assert 'reflection_probes.find(shared_reflection_owner_key)' in renderer
 assert 'bind_world_shared_reflection(shader);' in renderer
 assert renderer.count('bind_world_shared_reflection(shader);')==2

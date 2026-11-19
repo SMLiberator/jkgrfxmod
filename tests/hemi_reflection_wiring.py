@@ -4,9 +4,9 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 read=lambda p:(root/p).read_text(encoding="utf-8")
 settings=json.loads(read("assets/jkgm.json"))
-assert settings["experimental_hemi_reflection_capture"] is False
+assert settings["enable_reflection_capture"] is True
+assert settings["enable_reflection_probes"] is False
 assert settings["reflection_capture_resolution"]==128
-assert settings["experimental_cube_reflection_capture"] is False
 assert settings["reflection_capture_update_interval"]==0.0
 mat=read("common/material.hpp")
 parser=read("common/material_map.cpp")
@@ -21,7 +21,8 @@ assert 'v == "cube"' in parser
 assert "material_reflection_mode::cube" in parser
 assert "material_reflection_mode::hemi" in parser
 assert "reflection_capture_resolution" in config
-assert "experimental_cube_reflection_capture" in config
+assert "enable_reflection_capture" in config
+assert "enable_reflection_probes" in config
 assert "reflection_capture_update_interval" in config
 assert "reflection_probe_max_owners" in config
 assert "reflection_capture_update_interval" in config
@@ -85,29 +86,26 @@ assert "render_hemi_capture();" in renderer
 assert "JKGM_REFLECTION_PROBE 1" in read("renderer/shaders.cpp")
 print("HEMI and CUBE material, capture, sampling, and fallback contracts OK")
 
-# Hemi uses a reliable cube capture as a temporary conversion source.
-# Sampling itself is now fixed-axis up/down, independent of player view.
-assert '#include "dual_paraboloid_converter.hpp"' in renderer
-assert "std::unique_ptr<reflection_probe_capture_target> cube_source;" in renderer
-assert "dual_paraboloid_convert_program->convert(" in capture
+# Hemi always uses direct fixed-axis up/down paraboloid capture.
+assert '#include "dual_paraboloid_converter.hpp"' not in renderer
+assert "cube_source" not in renderer
+assert "dual_paraboloid_convert_program" not in capture
 assert "int const output_layers=paraboloid_mode?2:6;" in capture
-assert "int const face_count=direct_paraboloid?2:6;" in capture
+assert "int const face_count=paraboloid_mode?2:6;" in capture
 assert "make_hemi_reflection_camera(" not in capture
 assert "1.091308501" in shader
 assert "up_weight=smoothstep(" in shader
 assert "for(int hemisphere=0;hemisphere<2;++hemisphere)" in shader
 assert "weighted_coverage" in shader
-assert "dual_paraboloid_projection.hpp" in read("renderer/dual_paraboloid_converter.hpp")
-assert "dual_paraboloid_convert_program.reset();" in renderer
 
-# Direct capture is an opt-in two-view path; CUBE and global remain six-view.
-assert settings["experimental_hemi_direct_capture"] is False
-assert "experimental_hemi_direct_capture" in config
+# Direct hemi capture is permanent; cube/shared and COG remain six-view.
+assert "experimental_hemi_direct_capture" not in config
+assert "experimental_hemi_direct_capture" not in capture
 assert "make_dual_paraboloid_camera(focus,unsigned(face))" in capture
-assert "direct_paraboloid?2:6" in capture
+assert "paraboloid_mode?2:6" in capture
 assert "shader.set_paraboloid(unsigned(face),far_plane)" in capture
-assert "direct_paraboloid?nullptr:&frustum" in capture
-assert "direct_paraboloid?nullptr:&view" in capture
+assert "paraboloid_mode?nullptr:&frustum" in capture
+assert "paraboloid_mode?nullptr:&view" in capture
 assert "dual_paraboloid_outside_distance(" in capture
 assert "glEnable(GL_CLIP_DISTANCE0)" in capture
 assert "glEnable(GL_CLIP_DISTANCE1)" in capture

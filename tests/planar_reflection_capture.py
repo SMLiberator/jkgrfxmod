@@ -4,7 +4,8 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 read=lambda path:(root/path).read_text(encoding="utf-8")
 settings=json.loads(read("assets/jkgm.json"))
-assert settings["experimental_planar_reflection_capture"] is False
+assert settings["enable_reflection_capture"] is True
+assert settings["enable_reflection_probes"] is False
 assert settings["reflection_capture_resolution"]==128
 assert settings["reflection_capture_update_interval"]==0.0
 assert settings["experimental_planar_reflection_portal_culling"] is False
@@ -21,7 +22,8 @@ assert "planar_reflection_portals.hpp" in read("renderer/renderer.vcxproj.filter
 assert "planar_reflection_portals.cpp" in read(".github/workflows/main.yml")
 
 config=read("common/config.cpp")
-for name in ("experimental_planar_reflection_capture",
+for name in ("enable_reflection_capture",
+             "enable_reflection_probes",
              "reflection_capture_resolution",
              "reflection_capture_update_interval"):
     assert f'j.contains("{name}")' in config

@@ -87,11 +87,9 @@ namespace jkgm {
         int gpu_3do_occlusion_debug_view = 0; // 0=off, 1=x-ray wireframe proxies, 2=x-ray translucent filled proxies
         int gpu_3do_occlusion_min_triangles = 0; // test coverage: query any sized Thing, 0..50000
         bool experimental_planar_thing_discovery = false; // read-only 120-frame native 3DO diagnostics
-        bool experimental_planar_reflection_capture = false; // independent GPU reflected-scene FBO; opt-in
+        bool enable_reflection_capture = true; // realtime shared/cube/hemi/planar; EnvMaps and COG capture independent
+        bool enable_reflection_probes = false; // specialized cube/hemi/planar; false uses shared
         bool experimental_planar_reflection_portal_culling = false; // independent reflected-sector traversal, fail open
-        bool experimental_hemi_reflection_capture = false; // fixed up/down dual-paraboloid probe
-        bool experimental_hemi_direct_capture = false; // opt-in direct two-view capture; false retains reference conversion
-        bool experimental_cube_reflection_capture = false; // six independent 90-degree probe views
         int reflection_capture_resolution = 128; // cube face/short planar dimension; hemi doubles this
         float reflection_capture_update_interval = 0.0f; // all realtime capture types; 0=every frame
         int envmap_capture_face_resolution = 128; // on-demand CaptureEnvMap: 128x128 faces -> 512x256 equirect

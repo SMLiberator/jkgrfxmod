@@ -62,9 +62,17 @@ touch OpenGL or switch the active JK camera.
 
 ## Shared realtime reflection capture controls
 
+`enable_reflection_capture=true` allows realtime `shared`, `cube`, `hemi`
+and `planar`. If false, all four use EnvMaps, while explicit COG
+`CaptureEnvMap` remains independent. `enable_reflection_probes=false`
+disables individual cube/hemi and planar captures and routes these modes to
+the camera-centered `shared` projection, even when no material explicitly
+selects `shared`. The existing `enable_reflections` remains the master switch.
+
+
 `"reflection_mode":"shared"` is a lazy, camera-centered six-face cubemap
 (mode 7) for GPU-cached world and 3DO materials. When no visible material
-uses this mode, no shared probe is captured. The probe is refreshed using
+uses this mode or falls back from a specialized mode, no shared probe is captured. The probe is refreshed using
 `reflection_capture_update_interval` and `reflection_capture_resolution`;
 it is independent of `reflection_probe_max_owners` (the local Thing budget).
 It includes animated 3DOs and visible sky through the ordinary realtime
@@ -80,15 +88,10 @@ separate `matcap_map` artist layer when that layer's shader support lands.
 resolution (default 128), and the short edge of the planar target.
 The `hemi` probe now stores **two fixed +Z/-Z dual-paraboloid disks**,
 each twice the cube-face linear resolution with 5-degree horizon overlap.
-By default it converts six accurate cube capture views to those two texture
-layers, preserving a reliable visual reference. With the additional
-`experimental_hemi_direct_capture=true` switch, the renderer instead draws
-**two nonlinear paraboloid views directly**: the capture-only geometry shader
-subdivides triangles adaptively, clips each hemisphere, and writes radial
-depth; the sky pass reconstructs world-space directions. Both are kept under
-the same ordinary `hemi` material mode and disabled by default for
-unvalidated rendering. Direct capture is a performance experiment and may
-still show curvature, sky-UV or horizon artifacts pending in-game testing.
+It captures **two nonlinear paraboloid views directly**: the geometry shader
+subdivides triangles, clips each hemisphere, and writes radial depth;
+the sky pass reconstructs world-space directions. The old six-face cube
+conversion reference has been removed.
 Planar targets preserve the main camera's aspect ratio.
 
 `reflection_capture_update_interval` (seconds, default 0) throttles

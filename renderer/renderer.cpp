@@ -43,7 +43,6 @@
 #include "global_env_capture.hpp"
 #include "reflection_attachment_family.hpp"
 #include "global_env_equirect_converter.hpp"
-#include "dual_paraboloid_converter.hpp"
 #include "spotlight.hpp"
 #include "spotlight_shadow_gpu.hpp"
 #include "sun_shadow_gpu.hpp"
@@ -679,11 +678,8 @@ namespace jkgm {
         // capture. Avoid the former global-owner aliasing/fallback problem.
         struct reflection_probe_entry {
             std::unique_ptr<reflection_probe_capture_target> target;
-            // Hemi-only temporary cube used to validate paraboloid sampling.
-            std::unique_ptr<reflection_probe_capture_target> cube_source;
             engine_camera camera{};
             int mode=0;
-            bool direct_capture=false;
             bool ready=false;
             uint64_t seen_frame=0U;
             std::chrono::steady_clock::time_point last_refresh{};
@@ -691,6 +687,15 @@ namespace jkgm {
         std::map<uint64_t,reflection_probe_entry> reflection_probes;
         // Singleton reserved owner for the camera-centered shared probe.
         static constexpr uint64_t shared_reflection_owner_key=~uint64_t(0);
+        // Authored metadata stays unchanged; only sampling/capture changes.
+        // Explicit CaptureEnvMap remains an independent COG operation.
+        int effective_capture_reflection_mode(int mode) const {
+            if(mode<4 || mode>7)return mode;
+            if(!the_config->enable_reflection_capture)return 0; // EnvMap
+            if(!the_config->enable_reflection_probes && mode!=7)
+                return 7; // shared camera-centered cubemap
+            return mode;
+        }
         bool shared_reflection_ready_this_frame() const {
             auto it=reflection_probes.find(shared_reflection_owner_key);
             return it!=reflection_probes.end() && it->second.ready &&
@@ -702,8 +707,6 @@ namespace jkgm {
         // ordinary envmap materials. The old completed texture survives until
         // fadeTime finishes; no partially rendered capture becomes visible.
         std::unique_ptr<global_env_equirect_converter> global_env_converter;
-        std::unique_ptr<dual_paraboloid_converter>
-            dual_paraboloid_convert_program;
         std::unique_ptr<offscreen_capture_target> global_env_current;
         std::unique_ptr<offscreen_capture_target> global_env_previous;
         uint64_t global_env_completed_sequence=0U;
@@ -1580,8 +1583,7 @@ namespace jkgm {
                 global_env_converter.reset();
                 hemi_capture_program.reset();
                 paraboloid_capture_program.reset();
-                dual_paraboloid_convert_program.reset();
-                ssr_receiver_program.reset();
+                    ssr_receiver_program.reset();
                 ssr_trace_program.reset();
                 ssr_receivers.reset();
                 ssr_image.reset();
@@ -5379,16 +5381,17 @@ namespace jkgm {
                     material.blend!=material_blend_mode::multiply;
                 auto const specular=gpu_specular_parameters(
                     material,default_eligible);
-                auto const probe_it=material.reflection_mode==7
+                int const reflection_mode=effective_capture_reflection_mode(
+                    material.reflection_mode);
+                auto const probe_it=reflection_mode==7
                     ?reflection_probes.find(shared_reflection_owner_key)
                     :reflection_probes.find(inst.shadow_owner);
                 bool const hemi_active=
-                    (material.reflection_mode==5 ||
-                     material.reflection_mode==6 ||
-                     material.reflection_mode==7) &&
+                    (reflection_mode==5 || reflection_mode==6 ||
+                     reflection_mode==7) &&
                     probe_it!=reflection_probes.end() &&
                     probe_it->second.ready &&
-                    probe_it->second.mode==material.reflection_mode &&
+                    probe_it->second.mode==reflection_mode &&
                     probe_it->second.seen_frame==gpu_3do_present_serial &&
                     probe_it->second.target && probe_it->second.target->ready() &&
                     !post_exempt && !decals_only && !inst.camera_hud &&
@@ -5412,7 +5415,7 @@ namespace jkgm {
                     make_point(capture_camera.up[0],
                                capture_camera.up[1],
                                capture_camera.up[2]),
-                    1.0f,1.0f,hemi_active?material.reflection_mode:0);
+                    1.0f,1.0f,hemi_active?reflection_mode:0);
                 bool const coat_active=clearcoat_available() &&
                     the_config->enable_reflections &&
                     get<0>(material.clearcoat_params)>0.0f &&
@@ -5472,7 +5475,7 @@ namespace jkgm {
                         needs_environment && material.has_environment,
                         needs_environment && material.has_environment2,
                         needs_environment?material.environment_transition:0.0f,
-                        material.reflection_mode);
+                        reflection_mode);
                     prog.set_point_specular(
                         make_point(spec_active?specular.first:0.0f,
                                    specular.second,material.metalness,
@@ -5861,7 +5864,8 @@ namespace jkgm {
         // Depth results are always for the MAIN camera, never the mirror.
         void query_planar_receiver_visibility()
         {
-            if(!the_config->experimental_planar_reflection_capture ||
+            if(!the_config->enable_reflection_capture ||
+               !the_config->enable_reflection_probes ||
                !the_config->enable_reflections ||
                mode!=renderer_mode::ingame ||
                !world_cache_target || !world_cache_target->ready ||
@@ -10442,11 +10446,10 @@ namespace jkgm {
             bool const reflective=the_config->enable_reflections &&
                 specular.first>0.0f &&
                 (material.has_environment || material.has_environment2 ||
-                 (material.reflection_mode==4 &&
-                  the_config->experimental_planar_reflection_capture &&
+                 (effective_capture_reflection_mode(material.reflection_mode)==4 &&
                   planar_capture_ready) ||
                  (material.reflection_mode==1 && ssr_ready) ||
-                 (material.reflection_mode==7 &&
+                 (effective_capture_reflection_mode(material.reflection_mode)==7 &&
                   shared_reflection_ready_this_frame()) ||
                  direct_sun || direct_points);
             bool const diffuse_mapping=
@@ -10499,7 +10502,7 @@ namespace jkgm {
                 needs_environment && material.has_environment,
                 needs_environment && material.has_environment2,
                 needs_environment?material.environment_transition:0.0f,
-                material.reflection_mode);
+                effective_capture_reflection_mode(material.reflection_mode));
             if(matcap_active) {
                 gl::set_active_texture_unit(24);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
@@ -10535,6 +10538,7 @@ namespace jkgm {
             shaders::world_cache_preview_shader &shader)
         {
             bool const ready=the_config->enable_reflections &&
+                the_config->enable_reflection_capture &&
                 shared_reflection_ready_this_frame();
             shader.set_shared_reflection(ready);
             if(!ready)return;
@@ -10560,7 +10564,8 @@ namespace jkgm {
                     make_point(0.0f,0.0f,1.0f),
                     make_point(1.0f,1.0f));
             };
-            if(!the_config->experimental_planar_reflection_capture ||
+            if(!the_config->enable_reflection_capture ||
+               !the_config->enable_reflection_probes ||
                !the_config->enable_reflections ||
                !planar_capture_ready || !planar_capture_target ||
                !planar_capture_target->ready() || !planar_capture_plane ||
@@ -10793,7 +10798,8 @@ namespace jkgm {
             // traversal never staged. Prepare their LIVE vertex light, CMP,
             // sector tint and UV offsets, but never submit them in the normal
             // opaque or forward-alpha main-camera draw list.
-            if(the_config->experimental_planar_reflection_capture &&
+            if(the_config->enable_reflection_capture &&
+               the_config->enable_reflection_probes &&
                the_config->enable_reflections &&
                cam.frustum.far_plane>0.1f) {
                 select_planar_capture_plane(cam.camera);
@@ -12858,7 +12864,8 @@ namespace jkgm {
         void render_planar_capture()
         {
             planar_capture_ready=false;
-            if(!the_config->experimental_planar_reflection_capture ||
+            if(!the_config->enable_reflection_capture ||
+               !the_config->enable_reflection_probes ||
                !the_config->use_gpu_cache ||
                !world_cache_target || !world_cache_target->ready ||
                !ogs || !frame_world_cache_camera.valid ||
@@ -13697,8 +13704,8 @@ namespace jkgm {
                 // otherwise water would always display a one-frame-old view.
                 // The main frame 3DO snapshot and static-world cache already
                 // exist here; the offscreen camera does not touch rdCamera.
-                if(the_config->experimental_planar_reflection_capture)
-                    render_planar_capture();
+                // Clear stale planar readiness even when capture is disabled.
+                render_planar_capture();
                 // Always reset per-frame probe readiness when both experiments
                 // are disabled; never reuse a stale capture after a toggle.
                 render_hemi_capture();

@@ -38,7 +38,8 @@
             // Realtime probe sampling needs the extended sampler on unit 23,
             // but one-off COG captures use only units 0/1 and must also work
             // on ordinary GL 3.3 hardware with fewer fragment texture units.
-            bool const realtime_supported=fragment_units>23;
+            bool const realtime_supported=fragment_units>23 &&
+                the_config->enable_reflection_capture;
             if(!realtime_supported && !capture_global) {
                 reflection_probes.clear();
                 return;
@@ -72,10 +73,8 @@
                         it=mats.emplace(key,resolve_gpu_3do_material(group)).first;
                     int const reflection_mode=it->second.reflection_mode;
                     if(realtime_supported &&
-                       ((reflection_mode==5 &&
-                         the_config->experimental_hemi_reflection_capture) ||
-                        (reflection_mode==6 &&
-                         the_config->experimental_cube_reflection_capture)) &&
+                       the_config->enable_reflection_probes &&
+                       (reflection_mode==5 || reflection_mode==6) &&
                         (it->second.reflection_strength>0.0f ||
                          (fragment_units>=28 &&
                           get<0>(it->second.clearcoat_params)>0.0f))) {
@@ -130,7 +129,8 @@
                         if(it==mats.end())
                             it=mats.emplace(
                                 key,resolve_gpu_3do_material(group)).first;
-                        if(it->second.reflection_mode==7 &&
+                        if(effective_capture_reflection_mode(
+                               it->second.reflection_mode)==7 &&
                            (it->second.reflection_strength>0.0f ||
                             (fragment_units>=28 &&
                              get<0>(it->second.clearcoat_params)>0.0f))) {
@@ -155,7 +155,8 @@
                             auto const mat=solid
                                 ?resolve_gpu_3do_solid_material(group,false)
                                 :resolve_gpu_3do_material(group);
-                            if(mat.reflection_mode==7 &&
+                            if(effective_capture_reflection_mode(
+                                   mat.reflection_mode)==7 &&
                                (mat.reflection_strength>0.0f ||
                                 (fragment_units>=28 &&
                                  get<0>(mat.clearcoat_params)>0.0f)))return true;
@@ -216,17 +217,12 @@
                     return eligible;
                 };
                 bool const paraboloid_mode=selected_mode==5;
-                // The two-view geometry path remains opt-in until validated
-                // against the proven six-view conversion reference.
-                bool const direct_paraboloid=paraboloid_mode &&
-                    the_config->experimental_hemi_direct_capture;
-                bool const cube_mode=!paraboloid_mode;
-                int const face_count=direct_paraboloid?2:6;
-                if(direct_paraboloid && !paraboloid_capture_program)
+                int const face_count=paraboloid_mode?2:6;
+                if(paraboloid_mode && !paraboloid_capture_program)
                     paraboloid_capture_program=
                         std::make_unique<planar_reflection_capture_shader>(
                             the_config->data_path,true);
-                auto &shader=direct_paraboloid
+                auto &shader=paraboloid_mode
                     ?*paraboloid_capture_program:*hemi_capture_program;
                 auto const far_plane=std::min(
                     frame_world_cache_camera.far_plane,96.0f);
@@ -238,19 +234,13 @@
                     :the_config->reflection_capture_resolution;
                 int const output_side=paraboloid_mode?side*2:side;
                 int const output_layers=paraboloid_mode?2:6;
-                int const capture_side=direct_paraboloid?output_side:side;
+                int const capture_side=paraboloid_mode?output_side:side;
                 auto &entry=reflection_probes[candidate.owner];
                 entry.seen_frame=gpu_3do_present_serial;
                 bool const needs_reconfigure=entry.mode!=selected_mode ||
-                    entry.direct_capture!=direct_paraboloid ||
                     !entry.target || !entry.target->ready() ||
                     entry.target->width()!=output_side ||
-                    entry.target->layers()!=output_layers ||
-                    (paraboloid_mode && !direct_paraboloid &&
-                     (!entry.cube_source ||
-                        !entry.cube_source->ready() ||
-                        entry.cube_source->width()!=side ||
-                        entry.cube_source->layers()!=6));
+                    entry.target->layers()!=output_layers;
                 float const interval=candidate.is_global?0.0f:
                     the_config->reflection_capture_update_interval;
                 if(entry.ready && !needs_reconfigure && interval>0.0f &&
@@ -259,20 +249,11 @@
                     continue; // Reuse this Thing's complete previous probe.
                 entry.ready=false;
                 entry.mode=selected_mode;
-                entry.direct_capture=direct_paraboloid;
                 if(!entry.target)
                     entry.target=
                         std::make_unique<reflection_probe_capture_target>();
-                if(paraboloid_mode && !direct_paraboloid &&
-                   !entry.cube_source)
-                    entry.cube_source=
-                        std::make_unique<reflection_probe_capture_target>();
-                if(!paraboloid_mode || direct_paraboloid)
-                    entry.cube_source.reset();
-                auto *probe_target=paraboloid_mode && !direct_paraboloid
-                    ?entry.cube_source.get():entry.target.get();
-                if(!entry.target->ensure(output_side,output_layers) ||
-                   !probe_target->ensure(capture_side,face_count))continue;
+                auto *probe_target=entry.target.get();
+                if(!probe_target->ensure(output_side,output_layers))continue;
                 // Build a Thing-attached reflection family once per probe
                 // refresh; all hemi/cube views share the same exclusions.
                 // CaptureEnvMap keeps its separate Cog-only capture policy.
@@ -292,7 +273,7 @@
                 engine_camera first_camera{};
                 bool all_faces_ready=true;
                 for(int face=0;face<face_count;++face) {
-                    auto const camera=direct_paraboloid
+                    auto const camera=paraboloid_mode
                         ?make_dual_paraboloid_camera(focus,unsigned(face))
                         :make_cube_reflection_camera(focus,unsigned(face));
                     if(!camera.valid) {all_faces_ready=false;break;}
@@ -331,7 +312,7 @@
                                 return reflection_excluded_owners.count(owner)!=0U ||
                                     (candidate.is_global &&
                                      !capture_static_owner(owner)) ||
-                                    (direct_paraboloid
+                                    (paraboloid_mode
                                         ?([&] {
                                             float distance2=0.0f;
                                             for(unsigned i=0;i<3;++i) {
@@ -358,8 +339,8 @@
                                 return distance2(a)<distance2(b);
                             });
                         offscreen=acquire_planar_reflection_offscreen_gpu(
-                            things,64U,direct_paraboloid?nullptr:&frustum,
-                            direct_paraboloid?nullptr:&view);
+                            things,64U,paraboloid_mode?nullptr:&frustum,
+                            paraboloid_mode?nullptr:&view);
                     }
                 }
             }
@@ -380,8 +361,8 @@
             glDepthMask(GL_TRUE);
             glEnable(GL_CULL_FACE);
             glCullFace(GL_BACK);
-            glFrontFace(direct_paraboloid?GL_CW:GL_CCW);
-            if(direct_paraboloid) {
+            glFrontFace(paraboloid_mode?GL_CW:GL_CCW);
+            if(paraboloid_mode) {
                 glEnable(GL_CLIP_DISTANCE0);
                 glEnable(GL_CLIP_DISTANCE1);
                 glEnable(GL_CLIP_DISTANCE2);
@@ -398,7 +379,7 @@
             glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
             shader.use_program();
             shader.set_projection(projection);
-            if(direct_paraboloid)
+            if(paraboloid_mode)
                 shader.set_paraboloid(unsigned(face),far_plane);
             shader.set_clip({{0.0f,0.0f,0.0f,0.0f}},false);
             auto const fog=get_fog_settings();
@@ -450,8 +431,8 @@
             draw_reflection_capture_sky(shader,camera,view,frustum,
                 projection,capture_side,capture_side,
                 {{0.0f,0.0f,0.0f,0.0f}},false,false,
-                direct_paraboloid,far_plane);
-            glFrontFace(direct_paraboloid?GL_CW:GL_CCW);
+                paraboloid_mode,far_plane);
+            glFrontFace(paraboloid_mode?GL_CW:GL_CCW);
             shader.set_modelview(view,false);
             shader.set_thing_fade(1.0f,0);
             gl::bind_vertex_array(cache.vao);
@@ -464,7 +445,7 @@
                 if(surface.count<3U || !surface.material ||
                    surface.passable_adjoin ||
                    (surface.surface_flags&0x600U)!=0U ||
-                   (direct_paraboloid
+                   (paraboloid_mode
                     ?dual_paraboloid_outside_distance(
                         surface.bounds_min,surface.bounds_max,focus,far_plane)
                     :gpu_3do_batch_outside_frustum(
@@ -528,11 +509,11 @@
                                inst.sector_tint[2]));
                 shader.set_thing_fade(1.0f,0);
                 gl::bind_vertex_array(it->second->vao);
-                glFrontFace(direct_paraboloid
+                glFrontFace(paraboloid_mode
                     ?(gpu_3do_reversed_winding(inst.transform)?GL_CCW:GL_CW)
                     :(gpu_3do_reversed_winding(inst.transform)?GL_CW:GL_CCW));
                 for(auto const &group:inst.geometry->groups) {
-                    if(!direct_paraboloid &&
+                    if(!paraboloid_mode &&
                        gpu_3do_batch_outside_frustum(
                            frustum,modelview,group.bounds_min,group.bounds_max))
                         continue;
@@ -571,14 +552,6 @@
             glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
             glBindTexture(GL_TEXTURE_2D_ARRAY,GLuint(previous_array));
             if(!all_faces_ready)continue;
-            if(paraboloid_mode && !direct_paraboloid) {
-                if(!dual_paraboloid_convert_program)
-                    dual_paraboloid_convert_program=
-                        std::make_unique<dual_paraboloid_converter>();
-                if(!dual_paraboloid_convert_program->convert(
-                        *probe_target,*entry.target,output_side))
-                    continue; // Never publish a partial dual-hemisphere map.
-            }
             entry.camera=first_camera;
             entry.mode=selected_mode;
             entry.ready=true;
@@ -612,7 +585,6 @@
                          (paraboloid_mode?"HEMI paraboloid owner=":"CUBE capture owner="),
                          selected_owner,
                          " capture_side=",capture_side,
-                         " direct=",direct_paraboloid?1:0,
                          " source_faces=",face_count,
                          " result_side=",output_side,
                          " result_layers=",output_layers,

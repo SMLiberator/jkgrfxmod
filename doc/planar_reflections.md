@@ -83,7 +83,7 @@ color; 4 is fully textured. The runtime visuals still need in-game verification.
 In `jkgm.json`:
 
 ```json
-"experimental_planar_reflection_capture": true,
+"enable_reflection_probes": true,
 "planar_reflection_resolution_scale": 0.5
 ```
 
