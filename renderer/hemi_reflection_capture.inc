@@ -24,10 +24,7 @@
             }
             bool const capture_global=global_request &&
                 global_request->sequence!=global_env_completed_sequence;
-            if((!the_config->experimental_hemi_reflection_capture &&
-                !the_config->experimental_cube_reflection_capture &&
-                !capture_global) ||
-               !the_config->enable_reflections || !the_config->use_gpu_cache ||
+            if(!the_config->enable_reflections || !the_config->use_gpu_cache ||
                mode!=renderer_mode::ingame || !ogs ||
                !world_cache_target || !world_cache_target->ready ||
                !frame_world_cache_camera.valid ||
@@ -54,6 +51,7 @@
                 float distance2=0.0f;
                 uint64_t exclude_owner=0U;
                 bool is_global=false;
+                bool is_shared=false;
             };
             std::vector<candidate> candidates;
             std::unordered_set<uint64_t> visited;
@@ -115,6 +113,62 @@
                 candidates.push_back(global);
                 active_owners.insert(0U);
             }
+            // One camera-centered six-face probe, captured only while a
+            // currently eligible visible 3DO or world material requests it.
+            // It is outside the per-Thing probe budget.
+            bool shared_requested=false;
+            if(realtime_supported) {
+                for(auto const &inst:frame_gpu_3do_instances) {
+                    if(!inst.geometry || inst.shadow_only || inst.camera_hud ||
+                       inst.is_sprite_quad || inst.is_projected_decal ||
+                       inst.thing_opacity<=0.0f)continue;
+                    for(auto const &group:inst.geometry->groups) {
+                        auto const key=std::make_pair(group.material,group.cel);
+                        auto it=mats.find(key);
+                        if(it==mats.end())
+                            it=mats.emplace(
+                                key,resolve_gpu_3do_material(group)).first;
+                        if(it->second.reflection_mode==7 &&
+                           it->second.reflection_strength>0.0f) {
+                            shared_requested=true;break;
+                        }
+                    }
+                    if(shared_requested)break;
+                }
+                if(!shared_requested && world_cache_target &&
+                   world_cache_target->ready) {
+                    auto const &cache=*world_cache_target;
+                    std::set<std::tuple<uintptr_t,int32_t,bool>> checked;
+                    auto wants_shared=[&](auto const &faces) {
+                        for(auto const &face:faces) {
+                            if(face.count<3U || !face.material ||
+                               face.geometry_mode<3U)continue;
+                            bool const solid=face.geometry_mode==3U;
+                            if(!checked.emplace(
+                                face.material,face.cel,solid).second)continue;
+                            gpu_3do_group group{};
+                            group.material=face.material;group.cel=face.cel;
+                            auto const mat=solid
+                                ?resolve_gpu_3do_solid_material(group,false)
+                                :resolve_gpu_3do_material(group);
+                            if(mat.reflection_mode==7 &&
+                               mat.reflection_strength>0.0f)return true;
+                        }
+                        return false;
+                    };
+                    shared_requested=wants_shared(cache.sector_candidates) ||
+                        wants_shared(cache.sector_special_candidates);
+                }
+            }
+            if(shared_requested) {
+                candidate shared{};
+                shared.owner=shared_reflection_owner_key;
+                shared.mode=7;
+                shared.position=viewer.position;
+                shared.is_shared=true;
+                candidates.push_back(shared);
+                active_owners.insert(shared.owner);
+            }
             // Free targets belonging to missing/non-selected owners, including
             // destroyed Things; the cached images cannot leak across worlds.
             for(auto it=reflection_probes.begin();it!=reflection_probes.end();) {
@@ -130,7 +184,8 @@
             auto const now=std::chrono::steady_clock::now();
             for(auto const &candidate:candidates) {
                 uint64_t const selected_owner=candidate.is_global
-                    ?candidate.exclude_owner:candidate.owner;
+                    ?candidate.exclude_owner
+                    :(candidate.is_shared?0U:candidate.owner);
                 int const selected_mode=candidate.mode;
                 auto const &focus=candidate.position;
                 // Global COG capture uses native Thing eligibility, not the
@@ -217,7 +272,7 @@
                 // CaptureEnvMap keeps its separate Cog-only capture policy.
                 std::unordered_set<uint64_t> reflection_excluded_owners{
                     selected_owner};
-                if(!candidate.is_global &&
+                if(!candidate.is_global && !candidate.is_shared &&
                    engine_material_debug::matches_tested_executable()) {
                     auto read=[](uintptr_t at,void *dst,size_t bytes) {
                         return engine_material_debug::read_bytes(at,dst,bytes);
@@ -547,7 +602,8 @@
                 continue;
             }
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
-                LOG_INFO(paraboloid_mode?"HEMI paraboloid owner=":"CUBE capture owner=",
+                LOG_INFO(candidate.is_shared?"SHARED cube owner=":
+                         (paraboloid_mode?"HEMI paraboloid owner=":"CUBE capture owner="),
                          selected_owner,
                          " capture_side=",capture_side,
                          " direct=",direct_paraboloid?1:0,

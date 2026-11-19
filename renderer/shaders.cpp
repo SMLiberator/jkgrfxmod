@@ -371,6 +371,8 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , reflection_scroll(gl::get_uniform_location(the_program,"normal_specular_scroll"))
     , reflection_scroll2(gl::get_uniform_location(the_program,"normal_specular_scroll2"))
     , environment_info(gl::get_uniform_location(the_program,"environment_info"))
+    , shared_reflection_sampler(gl::get_uniform_location(the_program,"shared_reflection_map"))
+    , shared_reflection_ready(gl::get_uniform_location(the_program,"shared_reflection_ready"))
     , camera_world_origin(gl::get_uniform_location(the_program,"camera_world_origin"))
     , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
     , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
@@ -509,6 +511,11 @@ void jkgm::shaders::world_cache_preview_shader::set_reflection(
     gl::set_uniform_vector(environment_info,
         make_point(from?1.0f:0.0f,static_cast<float>(mode),
                    to?1.0f:0.0f,weight));
+}
+void jkgm::shaders::world_cache_preview_shader::set_shared_reflection(bool ready)
+{
+    gl::set_uniform_integer(shared_reflection_sampler,23);
+    gl::set_uniform_integer(shared_reflection_ready,ready?1:0);
 }
 void jkgm::shaders::world_cache_preview_shader::set_reflection_camera(
     std::array<float,3> const &position,

@@ -15,7 +15,7 @@ renderer=read("renderer/renderer.cpp")
 capture=read("renderer/hemi_reflection_capture.inc")
 shader=read("assets/shaders/gpu_3do_preview.frag")
 units=read("renderer/texture_units.hpp")
-assert "matcap, planar, hemi, cube" in mat
+assert "planar=4, hemi=5, cube=6, shared=7" in mat
 assert 'v == "hemi"' in parser
 assert 'v == "cube"' in parser
 assert "material_reflection_mode::cube" in parser
@@ -32,7 +32,7 @@ assert '#include "reflection_attachment_family.hpp"' in renderer
 assert 'build_reflection_attachment_family(' in capture
 assert 'reflection_excluded_owners.count(owner)' in capture
 assert 'reflection_excluded_owners.count(inst.shadow_owner)' in capture
-assert 'if(!candidate.is_global &&' in capture
+assert 'if(!candidate.is_global && !candidate.is_shared &&' in capture
 family=read("renderer/reflection_attachment_family.hpp")
 assert 'native_attach_has_thing_parent(attach_flags)' in family
 assert '(native_attach_no_move|native_attach_node)' in family
@@ -56,9 +56,9 @@ assert "entry.seen_frame=gpu_3do_present_serial" in capture
 assert "entry.last_refresh=now;" in capture
 assert "probe_target->select_layer(face)" in capture
 assert "reflection_probes.find(inst.shadow_owner)" in renderer
-assert "probe->target->color_texture()" in renderer
-assert "owner_probe->second.ready" in renderer
-assert "owner_probe->second.mode" in renderer
+assert "active_probe->target->color_texture()" in renderer
+assert "probe_it->second.ready" in renderer
+assert "probe_it->second.mode" in renderer
 assert "textureLod(hemi_reflection_map," in shader
 assert "make_cube_reflection_camera(" in capture
 assert "draw_reflection_capture_sky(shader,camera,view,frustum," in capture
@@ -66,7 +66,7 @@ assert "the_config->reflection_capture_resolution;" in capture
 assert "the_config->reflection_capture_update_interval" in capture
 assert "glGenerateMipmap(GL_TEXTURE_2D_ARRAY)" in capture
 assert "reflection_probe_capture_target" in read("renderer/offscreen_capture_target.hpp")
-assert "(mode==5 || mode==6) && hemi_capture_info.z>0.5" in shader
+assert "(mode==5 || mode==6 || mode==7) && hemi_capture_info.z>0.5" in shader
 assert "sampler2DArray hemi_reflection_map" in shader
 assert "layer=5" in shader
 assert "textureLod(hemi_reflection_map," in shader

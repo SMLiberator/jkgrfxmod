@@ -681,6 +681,15 @@ namespace jkgm {
             std::chrono::steady_clock::time_point last_refresh{};
         };
         std::map<uint64_t,reflection_probe_entry> reflection_probes;
+        // Singleton reserved owner for the camera-centered shared probe.
+        static constexpr uint64_t shared_reflection_owner_key=~uint64_t(0);
+        bool shared_reflection_ready_this_frame() const {
+            auto it=reflection_probes.find(shared_reflection_owner_key);
+            return it!=reflection_probes.end() && it->second.ready &&
+                it->second.mode==7 &&
+                it->second.seen_frame==gpu_3do_present_serial &&
+                it->second.target && it->second.target->ready();
+        }
         // Complete world-captured equirectangular HDR textures, shared by
         // ordinary envmap materials. The old completed texture survives until
         // fadeTime finishes; no partially rendered capture becomes visible.
@@ -5101,29 +5110,8 @@ namespace jkgm {
                 }
                 gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                 if(active_instance!=draw.instance) {
-                    auto const probe_it=reflection_probes.find(inst.shadow_owner);
-                    auto const *probe=(probe_it!=reflection_probes.end() &&
-                        inst.shadow_owner!=0U && !post_exempt && !decals_only &&
-                        !inst.is_sprite_quad && !inst.is_projected_decal &&
-                        probe_it->second.ready &&
-                        probe_it->second.seen_frame==gpu_3do_present_serial &&
-                        probe_it->second.target &&
-                        probe_it->second.target->ready())
-                        ? &probe_it->second:nullptr;
-                    if(probe) {
-                        gl::set_active_texture_unit(23);
-                        glBindTexture(GL_TEXTURE_2D_ARRAY,
-                            probe->target->color_texture());
-                        gl::set_active_texture_unit(0);
-                    }
-                    auto const &camera=probe?probe->camera:frame_camera.camera;
-                    prog.set_hemi_reflection(probe!=nullptr,
-                        make_point(camera.right[0],camera.right[1],camera.right[2]),
-                        make_point(camera.forward[0],camera.forward[1],camera.forward[2]),
-                        make_point(camera.up[0],camera.up[1],camera.up[2]),
-                        // The dual-paraboloid sampler has no perspective FOV.
-                        // Cube rays likewise use a fixed 90-degree projection.
-                        1.0f,1.0f,probe?probe->mode:0);
+                    // Probe selection is per material below, not per Thing:
+                    // a single model may mix shared and locally captured MATs.
                     // Multiple cars can instance the same cached mesh ID with
                     // different world matrices. Compare instances, not IDs.
                     // Match JK rdModel3_DrawMesh: combine the original
@@ -5308,15 +5296,40 @@ namespace jkgm {
                     material.blend!=material_blend_mode::multiply;
                 auto const specular=gpu_specular_parameters(
                     material,default_eligible);
-                auto const owner_probe=reflection_probes.find(inst.shadow_owner);
-                bool const hemi_active=owner_probe!=reflection_probes.end() &&
-                    owner_probe->second.ready &&
-                    owner_probe->second.seen_frame==gpu_3do_present_serial &&
-                    owner_probe->second.target &&
-                    owner_probe->second.target->ready() &&
-                    !inst.camera_hud && !inst.is_sprite_quad &&
-                    !inst.is_projected_decal &&
-                    material.reflection_mode==owner_probe->second.mode;
+                auto const probe_it=material.reflection_mode==7
+                    ?reflection_probes.find(shared_reflection_owner_key)
+                    :reflection_probes.find(inst.shadow_owner);
+                bool const hemi_active=
+                    (material.reflection_mode==5 ||
+                     material.reflection_mode==6 ||
+                     material.reflection_mode==7) &&
+                    probe_it!=reflection_probes.end() &&
+                    probe_it->second.ready &&
+                    probe_it->second.mode==material.reflection_mode &&
+                    probe_it->second.seen_frame==gpu_3do_present_serial &&
+                    probe_it->second.target && probe_it->second.target->ready() &&
+                    !post_exempt && !decals_only && !inst.camera_hud &&
+                    !inst.is_sprite_quad && !inst.is_projected_decal;
+                auto const *active_probe=hemi_active?&probe_it->second:nullptr;
+                if(active_probe) {
+                    gl::set_active_texture_unit(23);
+                    glBindTexture(GL_TEXTURE_2D_ARRAY,
+                                  active_probe->target->color_texture());
+                    gl::set_active_texture_unit(0);
+                }
+                auto const &capture_camera=active_probe
+                    ?active_probe->camera:frame_camera.camera;
+                prog.set_hemi_reflection(hemi_active,
+                    make_point(capture_camera.right[0],
+                               capture_camera.right[1],
+                               capture_camera.right[2]),
+                    make_point(capture_camera.forward[0],
+                               capture_camera.forward[1],
+                               capture_camera.forward[2]),
+                    make_point(capture_camera.up[0],
+                               capture_camera.up[1],
+                               capture_camera.up[2]),
+                    1.0f,1.0f,hemi_active?material.reflection_mode:0);
                 bool const spec_active=!inst.camera_hud &&
                     specular.first>0.0f &&
                     (material.has_environment ||
@@ -10303,6 +10316,8 @@ namespace jkgm {
                   the_config->experimental_planar_reflection_capture &&
                   planar_capture_ready) ||
                  (material.reflection_mode==1 && ssr_ready) ||
+                 (material.reflection_mode==7 &&
+                  shared_reflection_ready_this_frame()) ||
                  direct_sun || direct_points);
             bool const diffuse_mapping=
                 the_config->enable_normal_mapped_diffuse &&
@@ -10351,6 +10366,21 @@ namespace jkgm {
                 reflective && material.has_environment2,
                 reflective?material.environment_transition:0.0f,
                 material.reflection_mode);
+            gl::set_active_texture_unit(0);
+        }
+
+        // One shared texture-array binding for each world shader pass.
+        void bind_world_shared_reflection(
+            shaders::world_cache_preview_shader &shader)
+        {
+            bool const ready=the_config->enable_reflections &&
+                shared_reflection_ready_this_frame();
+            shader.set_shared_reflection(ready);
+            if(!ready)return;
+            auto const it=reflection_probes.find(shared_reflection_owner_key);
+            gl::set_active_texture_unit(23);
+            glBindTexture(GL_TEXTURE_2D_ARRAY,
+                          it->second.target->color_texture());
             gl::set_active_texture_unit(0);
         }
 
@@ -10873,6 +10903,7 @@ namespace jkgm {
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
             bind_world_planar_reflection(shader);
+            bind_world_shared_reflection(shader);
             shader.set_screen_reflection(false,9);
             shader.set_specular_normal_mode(
                 the_config->experimental_specular_normal_mode);
@@ -11317,6 +11348,7 @@ namespace jkgm {
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
             bind_world_planar_reflection(shader);
+            bind_world_shared_reflection(shader);
             shader.set_screen_reflection(ssr_ready,9);
             if(ssr_ready && ssr_image && ssr_image->ready()) {
                 gl::set_active_texture_unit(9);

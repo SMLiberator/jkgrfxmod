@@ -180,8 +180,8 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
                                                    : (has_surface_map ? 1.0f : 0.0f);
 
         // Artistic matcaps and dielectric clearcoat are separate from the
-        // base reflection mode. Preserve old "reflection_mode":"matcap"
-        // packs for compatibility until the dedicated shader layer is wired.
+        // base reflection mode. Matcaps now use matcap_map, not a reflection
+        // mode; legacy reflection_mode="matcap" is intentionally rejected.
         auto read_unit=[&](char const *key,float fallback)->float {
             if(!em.contains(key))return fallback;
             auto const &value=em[key];
@@ -242,9 +242,6 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             else if(v == "fixed") {
                 mat->reflection_mode = material_reflection_mode::fixed;
             }
-            else if(v == "matcap") {
-                mat->reflection_mode = material_reflection_mode::matcap;
-            }
             else if(v == "planar") {
                 mat->reflection_mode = material_reflection_mode::planar;
             }
@@ -253,6 +250,9 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             }
             else if(v == "cube") {
                 mat->reflection_mode = material_reflection_mode::cube;
+            }
+            else if(v == "shared") {
+                mat->reflection_mode = material_reflection_mode::shared;
             }
             else if(v != "envmap") {
                 throw std::runtime_error("Unknown reflection_mode in metadata.json");

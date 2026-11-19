@@ -24,5 +24,7 @@ assert "factor.size()!=3U" in parser
 assert "std::isfinite(values[i])" in parser
 assert '"matcap_strength"' not in parser
 assert '"reflection_factor"' not in parser
-assert 'material_reflection_mode { envmap, screen, fixed, matcap, planar, hemi, cube }' in model
+assert 'envmap=0, screen=1, fixed=2, planar=4, hemi=5, cube=6, shared=7' in model
+assert 'v == "shared"' in parser
+assert 'v == "matcap"' not in parser
 assert "material_layer_metadata_test.exe" in workflow

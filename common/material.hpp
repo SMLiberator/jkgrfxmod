@@ -12,9 +12,11 @@ namespace jkgm {
     // transparency pass, even when the original JK face was opaque.
     enum class material_blend_mode { normal, additive, multiply, fluid };
     // Numeric identities are passed directly to the renderer GLSL.
-    // 0=envmap, 1=screen, 2=fixed, 3=matcap, 4=planar, 5=hemi, 6=cube.
-    // "hemi" uses one 160-degree view; "cube" uses six 90-degree views.
-    enum class material_reflection_mode { envmap, screen, fixed, matcap, planar, hemi, cube };
+    // Shader mode 3 (legacy matcap) is intentionally unused.
+    // Keep numeric modes stable for existing materials.
+    enum class material_reflection_mode {
+        envmap=0, screen=1, fixed=2, planar=4, hemi=5, cube=6, shared=7
+    };
 
     enum class material_pulse_wave { sine, square, flicker, random };
 

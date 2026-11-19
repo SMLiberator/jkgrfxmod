@@ -62,6 +62,20 @@ touch OpenGL or switch the active JK camera.
 
 ## Shared realtime reflection capture controls
 
+`"reflection_mode":"shared"` is a lazy, camera-centered six-face cubemap
+(mode 7) for GPU-cached world and 3DO materials. When no visible material
+uses this mode, no shared probe is captured. The probe is refreshed using
+`reflection_capture_update_interval` and `reflection_capture_resolution`;
+it is independent of `reflection_probe_max_owners` (the local Thing budget).
+It includes animated 3DOs and visible sky through the ordinary realtime
+capture policy, not the Cog-only filter used by `CaptureEnvMap`. In
+uncovered directions the shader retains the author's/global EnvMap fallback.
+On GPUs without enough fragment sampler units the shared capture is
+unavailable and EnvMap fallback remains.
+The former `"reflection_mode":"matcap"` is no longer accepted; use a
+separate `matcap_map` artist layer when that layer's shader support lands.
+
+
 `reflection_capture_resolution` is the fixed square per-cube-face
 resolution (default 128), and the short edge of the planar target.
 The `hemi` probe now stores **two fixed +Z/-Z dual-paraboloid disks**,

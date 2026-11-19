@@ -35,6 +35,10 @@ uniform int normal_mapped_diffuse; // opt-in added lights, not baked JK RGB
 uniform vec2 normal_specular_scroll,normal_specular_scroll2;
 uniform vec3 camera_world_origin,camera_right_axis;
 uniform vec3 camera_forward_axis,camera_up_axis;
+#ifdef JKGM_REFLECTION_PROBE
+uniform sampler2DArray shared_reflection_map;
+#endif
+uniform int shared_reflection_ready;
 // Single opt-in, same-frame planar capture, bound only during world draws.
 // RGBA alpha marks actually reflected geometry; unfilled sky pixels fall
 // through to the legacy EnvMap when one is configured.
@@ -168,7 +172,12 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     bool has_env=environment_info.x>0.5 || environment_info.z>0.5;
     bool has_planar=mode==4 && planar_reflection_ready!=0;
     bool has_screen=mode==1 && screen_reflection_ready!=0;
-    if((!has_env && !has_planar && !has_screen) || specular_params.x<=0.0)
+    bool has_shared=false;
+#ifdef JKGM_REFLECTION_PROBE
+    has_shared=mode==7 && shared_reflection_ready!=0;
+#endif
+    if((!has_env && !has_planar && !has_screen && !has_shared) ||
+       specular_params.x<=0.0)
         return vec3(0.0);
     vec3 surf=specular_params.w>0.5?texture(surface_map,uv).rgb:vec3(1.0);
     float strength=max(specular_params.x*surf.r,0.0);
@@ -186,17 +195,14 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     vec3 env=vec3(0.0);
     if(has_env && planar.a<0.999) {
         vec3 dir=reflection;
-        if(mode<=1 || mode==4 || mode==5) {
+        if(mode==0 || mode==1 || mode>=4) {
             vec3 world=camera_right_axis*reflection.x+
                        camera_forward_axis*reflection.z+
                        camera_up_axis*reflection.y;
             dir=vec3(world.x,world.z,world.y);
         }
-        vec2 env_uv=mode==3
-            ?clamp(vec2(0.5+0.5*n.x,0.5-0.5*n.y),
-                   vec2(0.001),vec2(0.999))
-            :vec2(fract(atan(dir.x,dir.z)/6.28318530718+0.5),
-                  0.5-asin(clamp(dir.y,-1.0,1.0))/3.14159265359);
+        vec2 env_uv=vec2(fract(atan(dir.x,dir.z)/6.28318530718+0.5),
+                         0.5-asin(clamp(dir.y,-1.0,1.0))/3.14159265359);
         ivec2 dims=environment_info.x>0.5?
             textureSize(env_map,0):textureSize(env_map2,0);
         float lod=roughness*log2(max(float(max(dims.x,dims.y)),1.0));
@@ -207,6 +213,51 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
             env_to=textureLod(env_map2,env_uv,lod).rgb;
         env=mix(env_from,env_to,environment_info.w);
     }
+#ifdef JKGM_REFLECTION_PROBE
+    if(has_shared) {
+        // Share the six world-oriented cube faces. Sample alpha at LOD 0
+        // before roughness filtering, matching GPU 3DO probe fallback.
+        vec3 world_dir=camera_right_axis*reflection.x+
+                       camera_forward_axis*reflection.z+
+                       camera_up_axis*reflection.y;
+        vec3 a=abs(world_dir);
+        float major=max(a.x,max(a.y,a.z));
+        if(major>0.000001) {
+            int layer=0;
+            vec3 right_axis=vec3(0.0),up_axis=vec3(0.0);
+            if(a.x>=a.y && a.x>=a.z) {
+                layer=world_dir.x>=0.0?0:1;
+                right_axis=vec3(0.0,world_dir.x>=0.0?-1.0:1.0,0.0);
+                up_axis=vec3(0.0,0.0,1.0);
+            } else if(a.y>=a.z) {
+                layer=world_dir.y>=0.0?2:3;
+                right_axis=vec3(world_dir.y>=0.0?1.0:-1.0,0.0,0.0);
+                up_axis=vec3(0.0,0.0,1.0);
+            } else {
+                layer=world_dir.z>=0.0?4:5;
+                right_axis=vec3(0.0,world_dir.z>=0.0?1.0:-1.0,0.0);
+                up_axis=vec3(1.0,0.0,0.0);
+            }
+            ivec3 dims=textureSize(shared_reflection_map,0);
+            vec2 inset=0.5/vec2(dims.xy);
+            vec2 uv_cube=clamp(
+                0.5+0.5*vec2(dot(world_dir,right_axis),
+                             dot(world_dir,up_axis))/major,
+                inset,vec2(1.0)-inset);
+            float coverage=textureLod(shared_reflection_map,
+                vec3(uv_cube,float(layer)),0.0).a;
+            if(coverage>0.0001) {
+                float lod=roughness*log2(
+                    max(float(max(dims.x,dims.y)),1.0));
+                vec4 captured=textureLod(shared_reflection_map,
+                    vec3(uv_cube,float(layer)),lod);
+                if(captured.a>0.0001)
+                    env=mix(env,captured.rgb/captured.a,
+                            clamp(coverage,0.0,1.0));
+            }
+        }
+    }
+#endif
     env=mix(env,planar.rgb,planar.a);
     // Receiver rays are evaluated on a separate low-resolution texture;
     // this material still applies its own strength, Fresnel and roughness.
@@ -222,7 +273,7 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     env=mix(env,screen.rgb,clamp(screen.a,0.0,1.0));
     float source_coverage=max(
         mix(environment_info.x,environment_info.z,environment_info.w),
-        max(planar.a,screen.a));
+        max(max(planar.a,screen.a),has_shared?1.0:0.0));
     metalness=clamp(specular_params.z*surf.b,0.0,1.0)*source_coverage;
     vec3 f0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
     float cos_theta=clamp(dot(n,-v),0.0,1.0);

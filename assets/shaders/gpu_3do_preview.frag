@@ -53,7 +53,7 @@ in vec3 pixel_light_state; // original static light, face extra light, mode // p
 uniform sampler2D surface_map; // linear RGB: reflectivity, roughness, metalness
 uniform sampler2D normal_map;  // tangent-space RGB
 uniform sampler2D normal_map2; // second slope layer
-uniform sampler2D env_map;     // equirectangular / matcap
+uniform sampler2D env_map;     // equirectangular fallback
 uniform sampler2D env_map2;
 // Hemi: layers 0/1 are fixed up/down paraboloid disks with horizon overlap.
 // Cube: layers 0..5 are fixed-axis 90-degree perspective views.
@@ -343,7 +343,7 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     int mode=int(environment_info.y+0.5);
     bool has_hemi=false;
 #ifdef JKGM_REFLECTION_PROBE
-    has_hemi=(mode==5 || mode==6) && hemi_capture_info.z>0.5 &&
+    has_hemi=(mode==5 || mode==6 || mode==7) && hemi_capture_info.z>0.5 &&
              abs(hemi_capture_info.w-float(mode))<0.5;
 #endif
     if((environment_info.x<0.5 && environment_info.z<0.5 && !has_hemi) ||
@@ -366,16 +366,14 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
     if(dot(n,v)>0.0) n=-n;
     vec3 reflection=reflect(v,n);
     vec3 dir=reflection;
-    if(mode<=1 || mode==4 || mode==5 || mode==6) {
+    if(mode==0 || mode==1 || mode>=4) {
         vec3 world=camera_right_axis*reflection.x+
                    camera_forward_axis*reflection.z+
                    camera_up_axis*reflection.y;
         dir=vec3(world.x,world.z,world.y);
     }
-    vec2 env_uv=mode==3
-        ? clamp(vec2(0.5+0.5*n.x,0.5-0.5*n.y),vec2(0.001),vec2(0.999))
-        : vec2(fract(atan(dir.x,dir.z)/6.28318530718+0.5),
-               0.5-asin(clamp(dir.y,-1.0,1.0))/3.14159265359);
+    vec2 env_uv=vec2(fract(atan(dir.x,dir.z)/6.28318530718+0.5),
+                     0.5-asin(clamp(dir.y,-1.0,1.0))/3.14159265359);
     ivec2 dims=environment_info.x>0.5 ?
         textureSize(env_map,0) : textureSize(env_map2,0);
     float lod=roughness*log2(max(float(max(dims.x,dims.y)),1.0));
@@ -434,7 +432,7 @@ vec3 gpu_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
             if(weighted_coverage>0.0001)
                 env=mix(env,weighted_color/weighted_coverage,
                     clamp(weighted_coverage,0.0,1.0));
-        } else if(mode==6) {
+        } else if(mode==6 || mode==7) {
             vec3 a=abs(world_dir);
             float major=0.0;
             vec3 face_right=vec3(0.0),face_up=vec3(0.0);

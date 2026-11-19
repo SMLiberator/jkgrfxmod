@@ -1,9 +1,10 @@
 # Independent matcap and clearcoat material layers
 
-**Status:** metadata/schema foundation only. The new properties are parsed
-and stored but **do not affect rendering yet**. Shader binding, world/3DO
-compositing, COG verbs, and the shared realtime reflection mode will follow
-in separately testable changes. Older material packs retain existing visuals.
+**Status:** Matcap/clearcoat properties are currently metadata-only, so they
+have no shader effect yet. The separate `shared` reflection mode is now
+implemented for world and 3DO materials. Clearcoat COG verbs are not yet
+registered. Older packs retain normal reflection behavior except the
+explicitly removed legacy `reflection_mode: matcap` value.
 
 ## Artistic matcap (separate from reflection_mode)
 
@@ -24,8 +25,8 @@ in separately testable changes. Older material packs retain existing visuals.
 - The proposed linear `matcap_surface_map` uses R=intensity and
   G=roughness multiplier, with B reserved. With no map, both multipliers
   are implicitly 1. When `matcap_map` is absent, the layer is inactive.
-- For backwards compatibility, the old `"reflection_mode":"matcap"`
-  continues to be recognized separately.
+- The old `"reflection_mode":"matcap"` is rejected; use
+  `matcap_map` for the independently authored layer instead.
 
 ## Clearcoat (second dielectric specular lobe)
 
@@ -67,6 +68,8 @@ interpolated values before pixel-map modulation. Reset animates back to
 authored defaults, not a hardcoded identity vector. These verbs are **not
 registered yet**.
 
-The eventual `"reflection_mode":"shared"` will be opt-in, with one lazy,
-camera-centered realtime cubemap shared across requesting materials.
-`"envmap"` remains the lightweight default.
+`"reflection_mode":"shared"` now selects one lazy camera-centered
+realtime cubemap, shared across requesting cached-world and GPU 3DO
+materials. It uses the existing six-view capture, same interval and
+resolution, and is not subject to the persistent CaptureEnvMap Cog-only
+static scenery policy. `"envmap"` remains the lightweight default.

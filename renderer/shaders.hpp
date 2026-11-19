@@ -85,6 +85,7 @@ namespace jkgm {
             gl::uniform_location_id normal_mapped_diffuse;
             gl::uniform_location_id specular_normal_mode;
             gl::uniform_location_id reflection_scroll,reflection_scroll2,environment_info;
+            gl::uniform_location_id shared_reflection_sampler,shared_reflection_ready;
             gl::uniform_location_id camera_world_origin,camera_right_axis;
             gl::uniform_location_id camera_forward_axis,camera_up_axis;
             gl::uniform_location_id planar_sampler,planar_ready,planar_plane;
@@ -125,6 +126,7 @@ namespace jkgm {
             void set_reflection(point<4,float> material,point<4,float> normals,
                                 point<2,float> scroll,point<2,float> scroll2,
                                 bool from,bool to,float weight,int mode);
+            void set_shared_reflection(bool ready);
             void set_reflection_camera(std::array<float,3> const &position,
                                        std::array<float,3> const &right,
                                        std::array<float,3> const &forward,
