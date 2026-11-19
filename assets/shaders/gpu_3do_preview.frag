@@ -1127,7 +1127,8 @@ void main() {
         // premultiplied color. Alpha zero must multiply by WHITE (identity).
         // Match the native triangle path: emission biases the multiplier
         // toward white, but never adds light independently in Multiply mode.
-        vec3 tint=clamp(albedo.rgb*jk_fragment_lit+emission+specular*albedo.a,
+        vec3 tint=clamp(albedo.rgb*jk_fragment_lit*base_diffuse_trans+
+                        emission+specular*albedo.a,
                         0.0,1.0);
         out_color=vec4(mix(vec3(1.0),tint,albedo.a),0.0);
     } else {

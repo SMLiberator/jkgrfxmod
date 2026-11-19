@@ -156,7 +156,7 @@ for mode,expr in (
 ):
     assert f"if(fluid_debug_mode=={mode})" in world
     assert "out_color="+expr+";" in world
-assert "vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness);" in world
+assert "vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness)*" in world
 assert "world_cache_fluid_debug_mode must be an integer from 0 to 12" in parser
 # Trace why correct raw albedo produces a black cached Fluid diffuse.
 # The raw lighting stage is an independent varying, not reconstructed
