@@ -65,6 +65,13 @@ assert "make_cube_reflection_camera(" in capture
 assert "draw_reflection_capture_sky(shader,camera,view,frustum," in capture
 assert "the_config->reflection_capture_resolution;" in capture
 assert "the_config->reflection_capture_update_interval" in capture
+assert "build_capture_portal_view(" in capture
+assert "portals.traverse(" in capture
+assert "portal_views_used" in capture
+assert "surface_mask" in capture
+assert "thing_sector_mask" in capture
+assert "hemisphere_visibility" in capture
+assert "read,world,scan,thing_sector_mask" in capture
 assert "glGenerateMipmap(GL_TEXTURE_2D_ARRAY)" in capture
 assert "reflection_probe_capture_target" in read("renderer/offscreen_capture_target.hpp")
 assert "(mode==5 || mode==6 || mode==7) && hemi_capture_info.z>0.5" in shader

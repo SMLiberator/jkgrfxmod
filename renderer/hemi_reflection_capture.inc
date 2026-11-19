@@ -188,6 +188,55 @@
                 hemi_capture_program=
                     std::make_unique<planar_reflection_capture_shader>(
                         the_config->data_path);
+            // Share the planar portal graph, but traverse independently for
+            // each capture camera. Never borrow main-camera portal visibility.
+            auto read_portals=[](uintptr_t at,void *dst,size_t n) {
+                return engine_material_debug::read_bytes(at,dst,n);
+            };
+            auto &probe_world=*world_cache_target;
+            auto &portals=probe_world.reflected_portal_graph;
+            bool const portal_ready=
+                engine_material_debug::matches_tested_executable() &&
+                portals.ensure(read_portals,probe_world.loaded_world,
+                    probe_world.revision,probe_world.world,
+                    probe_world.mesh,probe_world.cached_surface_lookup);
+            struct capture_portal_view {
+                bool valid=false;
+                std::vector<uint8_t> surfaces,thing_sectors;
+            };
+            auto build_capture_portal_view=[&](
+                    engine_camera const &camera)->capture_portal_view {
+                capture_portal_view result{};
+                if(!portal_ready || !camera.valid)return result;
+                auto const view=planar_camera_native_view(camera);
+                float const half_fov=std::tan(
+                    camera.fov*0.008726646259971648f);
+                std::vector<world_cache_sector_span> spans;
+                std::vector<planar_reflection_portal_rect> windows;
+                auto const stats=portals.traverse(
+                    read_portals,{},probe_world.mesh,
+                    probe_world.cached_surface_lookup,view,camera.position,
+                    half_fov,1.0f,spans,&windows,&result.thing_sectors);
+                if(!stats.valid)return {};
+                auto const &lookup=probe_world.cached_surface_lookup;
+                result.surfaces.assign(lookup.size(),uint8_t(0));
+                for(auto const &span:spans) {
+                    for(uint32_t i=0;i<span.surface_count;++i) {
+                        uint32_t const si=span.first_surface+i;
+                        if(si>=lookup.size())continue;
+                        uint32_t const cached=lookup[si];
+                        if(cached>=probe_world.mesh.surfaces.size())continue;
+                        auto const &range=probe_world.mesh.surfaces[cached];
+                        if(range.surface_index!=si)continue;
+                        if(portals.surface_in_window(
+                            si,range.bounds_min,range.bounds_max,
+                            view,half_fov,1.0f,windows))
+                            result.surfaces[si]=1U;
+                    }
+                }
+                result.valid=true;
+                return result;
+            };
             auto const now=std::chrono::steady_clock::now();
             for(auto const &candidate:candidates) {
                 uint64_t const selected_owner=candidate.is_global
@@ -269,6 +318,39 @@
                 }
                 size_t total_world_drawn=0,total_model_drawn=0;
                 size_t total_acquired_nodes=0;
+                uint32_t portal_views_used=0U;
+                // Direct paraboloid cameras are nonlinear and each covers
+                // 190 degrees. Union six 90-degree portal views for the full
+                // sphere; never clip using a false perspective hemisphere.
+                // One invalid directional view fails open for both disks.
+                capture_portal_view hemisphere_visibility{};
+                if(paraboloid_mode && portal_ready) {
+                    bool complete=true;
+                    for(unsigned direction=0;direction<6U;++direction) {
+                        auto const cube_camera=
+                            make_cube_reflection_camera(focus,direction);
+                        auto face_visibility=
+                            build_capture_portal_view(cube_camera);
+                        if(!face_visibility.valid) {
+                            complete=false;break;
+                        }
+                        if(direction==0U)
+                            hemisphere_visibility=std::move(face_visibility);
+                        else {
+                            if(hemisphere_visibility.thing_sectors.size()!=
+                               face_visibility.thing_sectors.size()) {
+                                complete=false;break;
+                            }
+                            for(size_t i=0;i<hemisphere_visibility.surfaces.size();++i)
+                                hemisphere_visibility.surfaces[i] |=
+                                    face_visibility.surfaces[i];
+                            for(size_t i=0;i<hemisphere_visibility.thing_sectors.size();++i)
+                                hemisphere_visibility.thing_sectors[i] |=
+                                    face_visibility.thing_sectors[i];
+                        }
+                    }
+                    if(!complete)hemisphere_visibility={};
+                }
                 engine_camera first_camera{};
                 bool all_faces_ready=true;
                 for(int face=0;face<face_count;++face) {
@@ -281,6 +363,17 @@
                     auto const projection=make_offscreen_capture_projection(
                         capture_side,capture_side,camera.fov,0.0f,far_plane);
                     if(!projection.valid) {all_faces_ready=false;break;}
+                    auto face_visibility=paraboloid_mode
+                        ?capture_portal_view{}
+                        :build_capture_portal_view(camera);
+                    auto const &portal_visibility=paraboloid_mode
+                        ?hemisphere_visibility:face_visibility;
+                    if(portal_visibility.valid)++portal_views_used;
+                    auto const *thing_sector_mask=portal_visibility.valid &&
+                        !portal_visibility.thing_sectors.empty()
+                        ?&portal_visibility.thing_sectors:nullptr;
+                    auto const *surface_mask=portal_visibility.valid
+                        ?&portal_visibility.surfaces:nullptr;
                     gpu_3do_native_frustum frustum=
                         frame_world_cache_camera.frustum;
                     frustum.clip_far=0; // No artificial CPU far-distance cull.
@@ -302,7 +395,8 @@
                         return engine_material_debug::read_bytes(at,dst,bytes);
                     };
                     planar_reflection_thing_scan scan{};
-                    if(collect_planar_reflection_things(read,world,scan)) {
+                    if(collect_planar_reflection_things(
+                           read,world,scan,thing_sector_mask)) {
                         auto &things=scan.models;
                         things.erase(std::remove_if(things.begin(),things.end(),
                             [&](auto const &thing) {
@@ -420,17 +514,20 @@
             draw_reflection_capture_sky(shader,camera,view,frustum,
                 projection,capture_side,capture_side,
                 {{0.0f,0.0f,0.0f,0.0f}},false,false,
-                paraboloid_mode,far_plane);
+                paraboloid_mode,far_plane,surface_mask);
             glFrontFace(paraboloid_mode?GL_CW:GL_CCW);
             shader.set_modelview(view,false);
             shader.set_thing_fade(1.0f,0);
             gl::bind_vertex_array(cache.vao);
-            // The full cached world is considered, not the main camera's
-            // portal-visible subset. Frustum rejection keeps huge levels
-            // from submitting distant non-reflected geometry.
+            // Independently clipped portal sectors filter the world, while
+            // unknown/ambiguous eyes fail open to whole-world frustum tests.
+            // This never reuses the primary camera's visible sectors.
             std::map<std::tuple<uintptr_t,int32_t,bool>,
                      std::vector<world_cache_surface_range const *>> groups;
             for(auto const &surface:cache.mesh.surfaces) {
+                if(surface_mask &&
+                   (surface.surface_index>=surface_mask->size() ||
+                    !(*surface_mask)[surface.surface_index]))continue;
                 if(surface.count<3U || !surface.material ||
                    surface.passable_adjoin ||
                    (surface.surface_flags&0x600U)!=0U ||
@@ -474,6 +571,18 @@
                 // primary-camera instances, which bypass offscreen discovery.
                 if(candidate.is_global &&
                    !capture_static_owner(inst.shadow_owner))return;
+                // Main-view GPU fallback nodes are also filtered by this
+                // capture's sector mask. Unknown Thing pointers fail open.
+                if(thing_sector_mask && inst.shadow_owner) {
+                    uintptr_t const source_thing=
+                        uintptr_t(uint32_t(inst.shadow_owner>>32U));
+                    uint32_t source_sector=0U;
+                    if(planar_reflection_valid_native_pointer(source_thing) &&
+                       read_portals(source_thing+0x5cU,&source_sector,4U) &&
+                       !portals.thing_sector_visible(
+                           source_sector,*thing_sector_mask))
+                        return;
+                }
                 auto it=gpu_3do_gl_cache.find(inst.id);
                 if(it==gpu_3do_gl_cache.end()) {
                     if(gpu_3do_gl_cache.size()>=8192U)return;
@@ -573,6 +682,7 @@
                          selected_owner,
                          " capture_side=",capture_side,
                          " source_faces=",face_count,
+                         " portal_views=",portal_views_used,
                          " result_side=",output_side,
                          " result_layers=",output_layers,
                          " world_faces=",total_world_drawn,

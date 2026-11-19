@@ -107,6 +107,15 @@ a refresh, avoiding texture jitter from mismatched camera matrices.
 The separate COG `CaptureEnvMap` command is still strictly on-demand and
 uses its own fixed `envmap_capture_face_resolution`.
 
+All realtime cube, shared, hemisphere and explicit COG cubemap captures
+attempt independent, per-capture-sector portal visibility. Each 90-degree
+face uses clipped portal windows for sky/world surfaces and an extended
+sector mask for Thing discovery before pose acquisition. Dual-paraboloid
+capture conservatively unions six ordinary 90-degree portal views to cover
+the sphere instead of using an invalid wide-angle perspective window.
+Unresolved source sectors, topology or portal clipping fail open to the
+original full-world frustum path.
+
 Realtime `hemi` and `cube` probes exclude their reflecting Thing and all
 Things connected through qualifying Thing-to-Thing/Thing-face attachments:
 the CHILD attachment must include `NOMOVE` (0x8) or JKGM's `NODE` (0x80).
