@@ -35,6 +35,9 @@ assert "gpu_uploads" in renderer
 assert "gpu_mesh_cache_protected_frames=128U" in policy
 assert "result.evicted+=cache.erase(item.second)" in policy
 assert "result.deferred=result.remaining>=limit" in policy
-assert "mesh_revision::report_untracked()" in main
+# The older report_untracked hook was replaced by explicit source/material
+# revision generations; guard those live fast paths instead.
+assert "mesh_revision::source_current()" in main
+assert "mesh_revision::material_current()" in main
 assert "mesh_revision::current()" in main
 print("GPU 3DO cache eviction and profiling wiring OK")
