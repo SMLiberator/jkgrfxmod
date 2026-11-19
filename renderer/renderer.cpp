@@ -10816,7 +10816,9 @@ namespace jkgm {
                         planar_reflection_portal_stats reflected_portal_stats{};
                         bool reflected_portals_used=false;
                         auto const portal_stage_start=profile_clock::now();
-                        if(the_config->experimental_planar_reflection_portal_culling) {
+                        // Portal-first is the normal planar path. On missing
+                        // topology/receiver evidence, fail open below.
+                        {
                             // A virtual reflected eye may lie below the water,
                             // outside all JK sectors. Seed from real reflective
                             // RECEIVERS in the native main-camera sector list.
@@ -10951,9 +10953,8 @@ namespace jkgm {
                         }
                         if(the_config->profile_renderer &&
                            gpu_3do_present_serial%120U==0U)
-                            LOG_INFO("PLANAR reflected_portals enabled=",
-                                the_config->experimental_planar_reflection_portal_culling?1:0,
-                                " used=",reflected_portals_used?1:0,
+                            LOG_INFO("PLANAR reflected_portals used=",
+                                reflected_portals_used?1:0,
                                 " reason=",reflected_portal_stats.reason,
                                 " seeds=",reflected_portal_stats.seed_sectors,
                                  " eye_sector_seed=",reflected_portal_stats.eye_sector_seed?1:0,
@@ -13007,8 +13008,7 @@ namespace jkgm {
                         // reflected portal mask BEFORE acquiring 3DO poses.
                         // The mask includes adjacent Thing sectors, and
                         // missing/invalid native state fails open.
-                        if(the_config->experimental_planar_reflection_portal_culling &&
-                           planar_thing_visibility_world==world &&
+                        if(planar_thing_visibility_world==world &&
                            planar_thing_visibility_frame==gpu_3do_present_serial &&
                            !planar_thing_sector_visibility.empty() &&
                            world_cache_target) {

@@ -101,7 +101,13 @@ mirrored SCENE render. The selector logs `planar_matches` and
 `passable_reflection_receivers` to diagnose which surfaces opted in.
 Without an explicit planar MAT no capture plane is selected.
 It stages live lighting and animated UVs for world surfaces visible to the
-**reflected** frustum independently of the primary camera's portal traversal.
+**reflected** camera. The normal path builds its own sector and portal
+visibility from reflected-camera and visible-receiver evidence, applies
+conservative portal windows, and uses the resulting reachability mask to
+reduce reflected 3DO acquisition. If receiver seeds, topology, or traversal
+validation fail, it automatically stages the original full-world
+reflected-frustum candidate set. It never reuses the primary camera's
+visible-sector list as reflected visibility.
 Captured world geometry is frustum-culled *before* material resolution, grouped
 by material/cel/GeoMode and submitted with multi-draw. Existing primary
 opaque/alpha draw lists do not receive offscreen-only geometry.

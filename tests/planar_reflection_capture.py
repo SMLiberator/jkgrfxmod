@@ -8,14 +8,14 @@ assert settings["enable_reflection_capture"] is True
 assert settings["enable_reflection_probes"] is False
 assert settings["reflection_capture_resolution"]==128
 assert settings["reflection_capture_update_interval"]==0.0
-assert settings["experimental_planar_reflection_portal_culling"] is False
+assert "experimental_planar_reflection_portal_culling" not in settings
 portals=read("renderer/planar_reflection_portals.hpp")
 assert "planar_reflection_portal_graph" in portals
 assert "std::vector<world_cache_sector_span>" in portals
 assert "planar_reflection_portal_project_aabb" in portals
 assert "void clear()" in portals
-assert 'j.contains("experimental_planar_reflection_portal_culling")' in read("common/config.cpp")
-assert "experimental_planar_reflection_portal_culling = false" in read("common/config.hpp")
+assert "experimental_planar_reflection_portal_culling" not in read("common/config.cpp")
+assert "experimental_planar_reflection_portal_culling" not in read("common/config.hpp")
 assert "planar_reflection_portals.hpp" in read("renderer/world_cache_gpu.hpp")
 assert "planar_reflection_portals.hpp" in read("renderer/renderer.vcxproj")
 assert "planar_reflection_portals.hpp" in read("renderer/renderer.vcxproj.filters")
@@ -111,7 +111,9 @@ assert "cache.reflected_portal_graph.ensure(" in renderer
 assert "cache.reflected_portal_graph.traverse(" in renderer
 assert "collect_world_cache_sector_candidates(" in renderer
 assert "if(!reflected_portals_used)" in renderer
-assert "reflected_portals enabled=" in renderer
+assert "reflected_portals used=" in renderer
+assert "experimental_planar_reflection_portal_culling" not in renderer
+assert "planar_thing_visibility_world==world &&" in renderer
 assert "independent_mirrored_camera_fail_open" in renderer
 
 assert "append_world_cache_candidate(" in renderer

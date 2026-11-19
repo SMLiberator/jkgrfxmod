@@ -441,10 +441,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("enable_reflection_probes").get_to(
                 rv->enable_reflection_probes);
         }
-        if(j.contains("experimental_planar_reflection_portal_culling")) {
-            j.at("experimental_planar_reflection_portal_culling").get_to(
-                rv->experimental_planar_reflection_portal_culling);
-        }
         if(j.contains("reflection_capture_resolution")) {
             auto const &v=j.at("reflection_capture_resolution");
             if(!v.is_number_integer())
