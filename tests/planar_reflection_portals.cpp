@@ -196,6 +196,22 @@ int main() {
            thing_mask[1]==0U && thing_mask[2]==0U);
     assert(!graph.thing_sector_visible(sectors+0x98U,thing_mask));
     put(link0,1U);
+    // Cube/shared/COG captures can start at the virtual eye without a
+    // planar receiver. Seed from an unambiguous containing native sector.
+    for(unsigned axis=0;axis<3U;++axis) {
+        put_float(sectors+0x70U+uintptr_t(axis)*4U,-2.0f);
+        put_float(sectors+0x70U+uintptr_t(axis+3U)*4U,2.0f);
+    }
+    graph.clear();
+    assert(graph.ensure(read,world,7U,geometry,mesh,lookup));
+    auto probe=graph.traverse(read,{},mesh,lookup,view,
+        {{0.0f,0.0f,0.0f}},1.0f,1.0f,spans,&windows,&thing_mask);
+    assert(probe.valid && probe.eye_sector_seed && probe.seed_sectors==1U);
+    assert(!spans.empty() && thing_mask.size()==3U);
+    // An out-of-world virtual eye has no reliable seed: fail open.
+    probe=graph.traverse(read,{},mesh,lookup,view,
+        {{300.0f,300.0f,300.0f}},1.0f,1.0f,spans,&windows,&thing_mask);
+    assert(!probe.valid && spans.empty());
     // Invalid next-sector pointers fail OPEN to the whole-world path.
     put(link1+4U,0x12345U);
     graph.clear();
