@@ -359,6 +359,10 @@ int main()
     // Reset synthetic native state for the existing live-mutation tests.
     lf32(light_sector+0x10U,0.60f);
     lf32(sample_cmp+jk_cmp_tint_offset,0.25f);
+    // Reset the sampled vertex outputs too: the new regression above
+    // deliberately sampled the temporary 0.42 sector tint into face_tint.
+    // Restoring native memory alone does not rewrite that staging array.
+    assert(sample_cmp_face(0U));
 
     constexpr uintptr_t other_sector=light_base+0x900U;
     lu32(light_surfaces+7U*0x5cU+0x08U,uint32_t(other_sector));
