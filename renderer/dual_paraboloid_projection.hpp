@@ -130,8 +130,8 @@ inline bool dual_paraboloid_bounds_outside(
         max2+=far_axis*far_axis;
     }
     if(!std::isfinite(nearest2)||!std::isfinite(max2))return false;
-    double const far=double(far_distance)+0.02;
-    if(nearest2>far*far)return true;
+    double const max_capture_distance=double(far_distance)+0.02;
+    if(nearest2>max_capture_distance*max_capture_distance)return true;
     // If even maximum Y and maximum possible radial distance cannot
     // satisfy the overlap-aware shader clip, the box is fully behind.
     return double(p[1])+extent[1]+
