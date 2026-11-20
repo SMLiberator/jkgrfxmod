@@ -19,11 +19,13 @@ for key in ("experimental_fused_bloom_downsample",
     for source in (cfg,parser,doc,sample,state,ctor,renderer,bloom):
         assert key not in source, key
 assert "bool const full_viewport=glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE;" in bloom
-assert "bool const fused_bloom=full_viewport;" in bloom
-assert "bool const skip_bloom_clears=full_viewport;" in bloom
-assert "if(!fused_bloom) {" in bloom  # scissor fallback
-assert bloom.count("if(!skip_bloom_clears)") == 4
-assert "if(fused_bloom || skip_bloom_clears)" in bloom
+assert "bool const fused_bloom=full_viewport;" not in bloom
+assert "bool const skip_bloom_clears=full_viewport;" not in bloom
+assert "if(!full_viewport) {" in bloom  # scissor fallback
+assert bloom.count("if(!full_viewport)") == 5  # extraction + 4 clears
+assert "if(full_viewport) {" in bloom
+assert "gl::texture_view src_tx=full_viewport" in bloom
+assert "set_fused_bloom(full_viewport && level==0U" in bloom
 assert "gl::disable(gl::capability::blend);" in bloom
 assert "gl::disable(gl::capability::depth_test);" in bloom
 assert "gl::clear({gl::clear_flag::color" in bloom

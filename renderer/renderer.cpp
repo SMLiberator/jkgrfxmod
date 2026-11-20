@@ -1299,8 +1299,7 @@ namespace jkgm {
                      " post_swap=", avg(profile_stage::present_swap),
                      " HUDupload=", avg(profile_stage::hud_upload),
                      " HUDdraw=", avg(profile_stage::hud_draw));
-            LOG_INFO("PERF HUD_updates mode=adaptive_dirty_regions",
-                     " bytes_uploaded_avg=",hud_bytes_uploaded_window/frames,
+            LOG_INFO("PERF HUD_dirty_regions bytes_uploaded_avg=",hud_bytes_uploaded_window/frames,
                      " gl_upload_calls_avg=",hud_upload_calls_window/frames,
                      " converted_pixels_avg=",hud_converted_pixels_window/frames,
                      " changed_pixels_avg=",hud_changed_pixels_window/frames,
@@ -12588,9 +12587,7 @@ namespace jkgm {
                 LOG_INFO("SECTOR CROSSING model_instances=",
                     frame_gpu_3do_instances.size(),
                     " crossing=",crossing,
-                    " budget=",sector_crossing_candidates::capacity,
-                    " owner_fast_path=",
-                    1);
+                    " budget=",sector_crossing_candidates::capacity);
                 LOG_INFO("SECTOR CROSSING owner-proof window_frames=",
                     profile_crossing_frames,
                     " considered=",profile_crossing.considered,

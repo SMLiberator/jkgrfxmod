@@ -24,11 +24,14 @@ assert "cache_peak=gpu_mesh_cache_peak" in main
 assert "gpu_mesh_hash_reason" in main
 for name in ("cache_hits","cache_misses","cache_evictions","cache_trim_deferred",
              "cache_hash_new","cache_hash_header","cache_hash_revision",
-             "cache_hash_audit","cache_hash_fallback"):
+             "cache_hash_fallback"):
     assert name in gpu
     assert name in main
     assert "gpu_"+name in frame
     assert "stats."+name in renderer
+# Periodic integrity auditing was retired; no dead profiling field remains.
+for source in (gpu,main,frame,renderer):
+    assert "cache_hash_audit" not in source
 assert "PERF gpu_3do mesh_cache entries_avg=" in renderer
 assert "PERF gpu_3do hash_causes_total new=" in renderer
 assert "gpu_uploads" in renderer

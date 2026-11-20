@@ -54,21 +54,15 @@ namespace jkgm {
 
         gl::set_active_texture_unit(1);
         gl::bind_texture(gl::texture_bind_target::texture_2d, linear_depth);
-        if(halfres) {
-            // The original scene stays bound for the vertical pass, so
-            // regions where blur is inactive remain sharp at full resolution.
-            gl::set_active_texture_unit(2);
-            gl::bind_texture(gl::texture_bind_target::texture_2d,source);
-        }
         gl::set_active_texture_unit(0);
         gl::bind_texture(gl::texture_bind_target::texture_2d, source);
 
         // Horizontal pass: quarter-size target in the normal path.
         shader.set_blur_axis(0);
         if(halfres) {
-            shader.set_fast_inputs(2,make_size(
+            shader.set_output_size(make_size(
                 float(std::max(1,get<x>(screen_size)/2)),
-                float(std::max(1,get<y>(screen_size)/2))),false);
+                float(std::max(1,get<y>(screen_size)/2))));
         }
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,work.fbo);
         gl::set_viewport(work.viewport);
@@ -78,9 +72,9 @@ namespace jkgm {
         // Vertical pass: quarter-size target, then reconstruct.
         shader.set_blur_axis(1);
         if(halfres) {
-            shader.set_fast_inputs(2,make_size(
+            shader.set_output_size(make_size(
                 float(std::max(1,get<x>(screen_size)/2)),
-                float(std::max(1,get<y>(screen_size)/2))),false);
+                float(std::max(1,get<y>(screen_size)/2))));
         }
         auto &vertical_target=halfres
             ?*ogs->spatial_blur_half_result:ogs->spatial_blur_result;
@@ -100,6 +94,9 @@ namespace jkgm {
             rebuild.set_screen_size(static_cast<size<2,float>>(screen_size));
             rebuild.set_distance_params(distance_params);
             rebuild.set_peripheral_params(peripheral_params);
+            // Only reconstruction needs the full-resolution original.
+            gl::set_active_texture_unit(2);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,source);
             gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                                  ogs->spatial_blur_result.fbo);
             gl::set_viewport(ogs->spatial_blur_result.viewport);

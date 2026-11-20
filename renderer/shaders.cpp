@@ -2292,9 +2292,7 @@ jkgm::shaders::post_spatial_blur_shader::post_spatial_blur_shader(
     , screen_size(gl::get_uniform_location(the_program, "screen_size"))
     , distance_params(gl::get_uniform_location(the_program, "distance_params"))
     , peripheral_params(gl::get_uniform_location(the_program, "peripheral_params"))
-    , original_image(gl::get_uniform_location(the_program,"original_image"))
     , output_size(gl::get_uniform_location(the_program,"output_size"))
-    , restore_original(gl::get_uniform_location(the_program,"restore_original"))
 {
 }
 
@@ -2318,12 +2316,10 @@ void jkgm::shaders::post_spatial_blur_shader::set_screen_size(size<2, float> dim
     gl::set_uniform_vector(screen_size, dims);
 }
 
-void jkgm::shaders::post_spatial_blur_shader::set_fast_inputs(
-    int original_sampler,size<2,float> output_dims,bool fullres_unblurred)
+void jkgm::shaders::post_spatial_blur_shader::set_output_size(
+    size<2,float> output_dims)
 {
-    gl::set_uniform_integer(original_image,original_sampler);
     gl::set_uniform_vector(output_size,output_dims);
-    gl::set_uniform_integer(restore_original,fullres_unblurred?1:0);
 }
 
 void jkgm::shaders::post_spatial_blur_shader::set_distance_params(point<4, float> params)

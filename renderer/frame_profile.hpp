@@ -49,7 +49,7 @@ struct profile_sample {
   uint64_t gpu_cache_hits=0,gpu_cache_misses=0;
   uint64_t gpu_cache_evictions=0,gpu_cache_trim_deferred=0;
   uint64_t gpu_cache_hash_new=0,gpu_cache_hash_header=0;
-  uint64_t gpu_cache_hash_revision=0,gpu_cache_hash_audit=0;
+  uint64_t gpu_cache_hash_revision=0;
   uint64_t gpu_cache_hash_fallback=0;
   uint64_t gpu_mutation_scans=0,gpu_mutation_scanned=0;
   uint64_t gpu_mutation_invalidated=0,gpu_mutation_ns=0;
@@ -148,7 +148,6 @@ struct profile_sample {
     gpu_cache_hash_new+=o.gpu_cache_hash_new;
     gpu_cache_hash_header+=o.gpu_cache_hash_header;
     gpu_cache_hash_revision+=o.gpu_cache_hash_revision;
-    gpu_cache_hash_audit+=o.gpu_cache_hash_audit;
     gpu_cache_hash_fallback+=o.gpu_cache_hash_fallback;
     gpu_mutation_scans+=o.gpu_mutation_scans;
     gpu_mutation_scanned+=o.gpu_mutation_scanned;

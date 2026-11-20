@@ -40,29 +40,28 @@ assert "mesh_radius_culled" in header
 offscreen_cull=loader.split("jkgm::acquire_planar_reflection_offscreen_gpu(",1)[1].split(
     "jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()",1)[0]
 assert offscreen_cull.index("planar_reflection_mesh_outside_frustum(") < offscreen_cull.index("gpu_mesh_source_signature(")
-# Offscreen acquisition must honor the SAME revision policy as
-# ordinary GPU 3DOs, and use the optional elapsed-time integrity audit
-# (default 0: never). It must not reintroduce the removed 32-frame
-# forced audit or the global per-frame-hashing fallback on a mismatch.
+# Offscreen acquisition must honor the SAME mutation-epoch policy as
+# ordinary GPU 3DOs. Periodic auditing was removed; without native
+# mutation hooks only, conservative per-frame source checks remain.
 offscreen=loader.split("jkgm::acquire_planar_reflection_offscreen_gpu(",1)[1].split(
     "jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()",1)[0]
 for needle in ("bool const header_unchanged=",
                "bool const revision_fastpath=mesh_revision::active()",
                "generation=mesh_revision::source_current()",
-               "gpu_mesh_integrity_audit_frame==gpu_frame_serial",
                "source_checked_generation!=generation",
-               "last_audit_frame!=gpu_frame_serial",
                "source_checked_frame!=gpu_frame_serial",
                "if(should_hash)",
-               "if(audit_only && it->second.source_signature!=signature)",
-               "++gpu_mesh_audit_untracked",
                "it->second.source_checked_frame=gpu_frame_serial",
-               "entry.last_audit_frame=audit_frame ? gpu_frame_serial : 0U"):
+               "entry.source_checked_generation=mesh_revision::source_current()"):
     assert needle in offscreen,needle
 assert "gpu_frame_serial%32U" not in offscreen
 assert "mesh_revision::report_untracked()" not in offscreen
-assert "gpu_mesh_integrity_audit_interval>0.0" in loader
-assert "GPU 3DO integrity audit complete:" in loader
+for forbidden in ("gpu_mesh_integrity_audit_interval",
+                  "gpu_mesh_integrity_audit_frame",
+                  "last_audit_frame", "audit_only",
+                  "gpu_mesh_audit_untracked",
+                  "GPU 3DO integrity audit complete:"):
+    assert forbidden not in loader,forbidden
 assert "source_hashes" in header and "source_hash_skips" in header
 assert "snapshot_gpu_mesh(" in loader
 assert "gpu_mesh_materials_ready(" in loader

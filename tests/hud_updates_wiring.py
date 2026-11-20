@@ -27,5 +27,6 @@ end=render.index("void update_hud_texture_live()")
 present=render[start:end]
 assert present.index("update_hud_texture_live();") < present.index("draw_hud();")
 assert "profile_idx(profile_stage::hud_upload)" in present
-assert "PERF HUD_updates mode=" in render
+assert "PERF HUD_dirty_regions bytes_uploaded_avg=" in render
+assert "PERF HUD_updates mode=" not in render
 print("Adaptive DirectDraw HUD and presentation ordering OK")

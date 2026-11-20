@@ -1,14 +1,12 @@
 #version 330 core
-// EXPERIMENTAL HALF-RES HORIZONTAL BLUR. Default shader is unchanged.
-// Full-res color grading, tone mapping, and HUD never use this shader.
+// Standard half-resolution horizontal and vertical spatial blur.
+// Full-resolution detail restoration happens only in the reconstruction pass.
 
 uniform sampler2D source_image;
 uniform sampler2D depth_image; // Linear depth in JK world units; empty = 65504 (R16F).
 uniform int blur_axis;         // 0 = horizontal, 1 = vertical.
 uniform vec2 screen_size; // Full-resolution scene size for blur radius/aspect.
-uniform vec2 output_size; // Current destination: half-res horizontal, full-res vertical.
-uniform sampler2D original_image; // Full-resolution unblurred scene, never modified.
-uniform int restore_original; // 1 only on mode-1 full-resolution vertical pass.
+uniform vec2 output_size; // Both Gaussian destinations are half-resolution.
 
 // xyz = near, far, intensity in [0,1].
 // xyz = inner radius, outer radius, intensity in [0,1].
@@ -38,14 +36,10 @@ float blur_depth(float raw_depth)
 
 void main()
 {
-    ivec2 pixel = ivec2(gl_FragCoord.xy);
     vec2 uv = gl_FragCoord.xy / output_size;
-    // The horizontal pass filters into a half-size target. The vertical
-    // pass samples that target BUT restores untouched pixels from the
-    // original full-resolution image, preserving sharp no-blur regions.
-    vec4 source = restore_original!=0
-        ?texelFetch(original_image,pixel,0)
-        :texture(source_image,uv);
+    // Both passes filter into half-size targets; the reconstruction
+    // shader preserves the original scene where blur is inactive.
+    vec4 source = texture(source_image,uv);
 
     // Always sample the original full-resolution depth at the same UV.
     // The depth texture uses nearest filtering to retain object boundaries.
@@ -68,8 +62,8 @@ void main()
         return;
     }
 
-    // Separable 9-tap Gaussian at full-resolution UV radii; horizontal
-    // runs at 1/4 pixel count and vertical still covers the original image.
+    // Separable 9-tap Gaussian at full-resolution UV radii; both axes
+    // run at one-quarter the original screen pixel count.
     // Each axis reaches up to 12 screen pixels at
     // strength 1. Gradually scale kernel radius, rather than crossfade an
     // always-strong blur, to avoid a jump when fading the effect in.
