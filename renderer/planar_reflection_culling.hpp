@@ -33,10 +33,10 @@ inline float planar_reflection_radius_scale(std::array<float,9> const &m)
         float dot=0.0f;
         for(int k=0;k<3;++k)dot+=m[3*i+k]*m[3*j+k];
         if(!std::isfinite(dot) ||
-           std::fabs(dot)>0.0001f*std::max(1.0f,norms[i]*norms[j]))
+           std::fabs(dot)>0.0001f*(std::max)(1.0f,norms[i]*norms[j]))
             orthogonal=false;
     }
-    float bound=std::max(1.0f,std::max(norms[0],std::max(norms[1],norms[2])));
+    float bound=(std::max)(1.0f,(std::max)(norms[0],(std::max)(norms[1],norms[2])));
     if(!orthogonal) {
         // ||M||_2 <= sqrt(||M||_1 * ||M||_inf).
         float col_sum=0.0f,row_sum=0.0f;
@@ -46,10 +46,10 @@ inline float planar_reflection_radius_scale(std::array<float,9> const &m)
                 c+=std::fabs(m[3*i+j]);
                 r+=std::fabs(m[3*j+i]);
             }
-            col_sum=std::max(col_sum,c);
-            row_sum=std::max(row_sum,r);
+            col_sum=(std::max)(col_sum,c);
+            row_sum=(std::max)(row_sum,r);
         }
-        bound=std::max(bound,std::sqrt(col_sum*row_sum));
+        bound=(std::max)(bound,std::sqrt(col_sum*row_sum));
     }
     return std::isfinite(bound)?bound:0.0f;
 }
