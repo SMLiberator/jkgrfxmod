@@ -62,13 +62,38 @@ assert "float direct_visibility=visibility*sky_access;" in opaque
 assert "float sun_applied=incidence*sun_fade;" in opaque
 assert "sprite ? 0.75*sun_fade" in opaque
 assert "0.75*sun_fade*sky_access" not in opaque
-assert "1.0-direct_visibility" in opaque
-assert "sun_applied*direct_visibility" in opaque
+# Fluid sunlight transmission is applied after the sky-aperture gate.
+# A blocked sky still yields zero direct light and shadowed baked brightness.
+assert "vec4 water_light=sample_sun_fluid_light(world_position,depth/32.0);" in opaque
+assert "vec3 submerged_visibility=direct_visibility*water_light.yzw;" in opaque
+assert "vec3(1.0)-submerged_visibility" in opaque
+assert "sun_applied*submerged_visibility" in opaque
 assert "float sun_sky_aperture_sample(vec3 uv,int layer)" in opaque
 assert "translucent_sun_sky_aperture_active==0)return 1.0;" in shared
 assert "float translucent_sun_sky_aperture(vec3 world) { return 1.0; }" in shared
 assert "float translucent_sun_sky_sample(vec3 uv,int layer)" in shared
 world=read("assets/shaders/world_cache_direct_specular.glsl")
+# Shadow projections do not cover the full level. A receiver outside both
+# cascades must keep direct sunlight (fail open), not turn the shadow distance
+# into an implicit sun_max_distance. Inside coverage, retain sky tests.
+for shader,function in (
+    (opaque, "sun_sky_aperture(vec3 position)"),
+    (shared, "translucent_sun_sky_aperture(vec3 world)"),
+    (world, "world_sun_sky_aperture(vec3 world)"),
+):
+    signature="float "+function
+    assert shader.count(signature)==2, function # active branch and disabled fallback
+    body=shader.split(signature,1)[1].split("#else",1)[0]
+    assert "if(!n && !f)return 1.0;" in body, function
+    assert "if(!n && !f)return 0.0;" not in body, function
+    assert "if(n && !f)return " in body, function
+    assert "if(!n && f)return " in body, function
+    assert "float near_access=" in body and "float far_access=" in body, function
+# The explicit sun_max_distance fade remains independent of shadow coverage.
+assert "if(sun_max_distance<=0.0)return 1.0;" in opaque
+assert "sun_range_fade(depth/32.0)" in opaque
+assert "translucent_sun_max_distance>0.0" in world
+
 assert "#ifdef JKGM_SUN_SKY_APERTURE" in world
 assert "uniform sampler2DArray translucent_sun_sky_aperture_map;" in world
 assert "world_sun_sky_aperture(cached_world_position)" in world
@@ -116,8 +141,8 @@ print("Opt-in sunlight sky-aperture source contracts passed")
 
 # A sky-blocked receiver should remain unlit by DIRECT sun, but its
 # baked brightness is no longer protected from sun shadow contrast.
-def shaded_baked(base,intensity,visibility,sky_access,baseline):
-    direct_visibility=visibility*sky_access
+def shaded_baked(base,intensity,visibility,sky_access,baseline,water_transmission=1.0):
+    direct_visibility=visibility*sky_access*water_transmission
     contrast=baseline*min(max(intensity,0.0),1.0)
     return base*(1.0-contrast*(1.0-direct_visibility))
 
@@ -131,6 +156,17 @@ for baseline in (0.6,0.75):
         if intensity>=1.0:
             assert abs(shaded_baked(0.8,intensity,1.0,0.0,baseline) -
                        0.8*(1.0-baseline))<1e-9
+
+# Sky blocking wins over water transmission, and water with no opacity
+# leaves the pre-caustics aperture behavior unchanged.
+for baseline in (0.6,0.75):
+    for water_transmission in (0.0,0.25,0.5,1.0):
+        blocked_sky=shaded_baked(0.8,1.0,1.0,0.0,baseline,water_transmission)
+        blocked_shadow=shaded_baked(0.8,1.0,0.0,1.0,baseline,water_transmission)
+        assert abs(blocked_sky-blocked_shadow)<1e-9
+        assert abs(blocked_sky-0.8*(1.0-baseline))<1e-9
+        if water_transmission==1.0:
+            assert shaded_baked(0.8,0.5,1.0,1.0,baseline,water_transmission)==0.8
 
 # The atlas stores nearest depth, not interpolated depths.
 gpu_resource=read("renderer/sun_sky_aperture_gpu.hpp")

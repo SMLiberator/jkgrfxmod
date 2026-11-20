@@ -12,14 +12,10 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
 {
     update_auto_exposure(ogs,composed_screen);
 
-    // Scissored fullscreen draws cannot fully overwrite intermediate FBOs.
-    // Preserve the legacy sequence whenever scissor testing is enabled.
+    // Optimized fused bloom and redundant-clear elimination are standard.
+    // Scissored FBO draws cannot overwrite all pixels: preserve the safe path.
     bool const full_viewport=glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE;
-    bool const fused_bloom=ogs->experimental_fused_bloom_downsample &&
-                           full_viewport;
-    bool const skip_bloom_clears=ogs->experimental_skip_bloom_clears &&
-                                 full_viewport;
-    if(fused_bloom || skip_bloom_clears) {
+    if(full_viewport) {
         // A skipped clear is safe only if each pass overwrites ALL pixels.
         // In particular, retained GL blending would otherwise accumulate
         // previous-frame bloom data into the temporary FBOs.
@@ -27,12 +23,12 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
         gl::disable(gl::capability::depth_test);
     }
     gl::bind_vertex_array(ogs->postmdl.vao);
-    if(!fused_bloom) {
-        // Original full-resolution bloom extraction, unchanged by default.
+    if(!full_viewport) {
+        // Scissored fallback: extract full-resolution bloom first.
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                              ogs->screen_postbuffer2.fbo);
         gl::set_viewport(make_box(make_point(0,0),screen_size));
-        if(!skip_bloom_clears) {
+        if(!full_viewport) {
             gl::set_clear_color(solid(colors::black));
             gl::clear({gl::clear_flag::color,gl::clear_flag::depth});
         }
@@ -45,13 +41,13 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
                           ogs->postmdl.num_indices,gl::index_type::uint32);
     }
 
-    // Opt-in: threshold source pixels inside the first downsample shader.
-    // This avoids writing and reading the full-resolution bright-pass FBO.
-    gl::texture_view src_tx=fused_bloom
+    // Normally threshold source pixels within the first downsample shader,
+    // avoiding a full-resolution intermediate bright-pass texture.
+    gl::texture_view src_tx=full_viewport
         ?composed_screen:gl::texture_view(ogs->screen_postbuffer2.tex);
     bool const adaptive=auto_exposure_enabled(ogs) &&
                         ogs->auto_exposure_history_valid;
-    if(fused_bloom) {
+    if(full_viewport) {
         gl::set_active_texture_unit(1);
         gl::bind_texture(gl::texture_bind_target::texture_2d,
             adaptive
@@ -65,12 +61,12 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
     ogs->post_scale.set_fbuf_sampler(0);
     unsigned level=0U;
     for(auto &hdr_stack_em : ogs->bloom_layers.elements) {
-        ogs->post_scale.set_fused_bloom(fused_bloom && level==0U,1,
+        ogs->post_scale.set_fused_bloom(full_viewport && level==0U,1,
             adaptive,hdr_enabled(ogs)?ogs->hdr_exposure_compensation:0.0f);
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                              hdr_stack_em.a.fbo);
         gl::set_viewport(hdr_stack_em.a.viewport);
-        if(!skip_bloom_clears) {
+        if(!full_viewport) {
             gl::set_clear_color(solid(colors::black));
             gl::clear({gl::clear_flag::color,gl::clear_flag::depth});
         }
@@ -112,7 +108,7 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
         gl::bind_framebuffer(gl::framebuffer_bind_target::any, hdr_stack_em.b.fbo);
         gl::set_viewport(hdr_stack_em.b.viewport);
 
-        if(!skip_bloom_clears) {
+        if(!full_viewport) {
             gl::set_clear_color(solid(colors::black));
             gl::clear({gl::clear_flag::color,gl::clear_flag::depth});
         }
@@ -124,7 +120,7 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
         // Blur vertically
         gl::bind_framebuffer(gl::framebuffer_bind_target::any, hdr_stack_em.a.fbo);
 
-        if(!skip_bloom_clears) {
+        if(!full_viewport) {
             gl::set_clear_color(solid(colors::black));
             gl::clear({gl::clear_flag::color,gl::clear_flag::depth});
         }
@@ -134,10 +130,10 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
             gl::element_type::triangles, ogs->postmdl.num_indices, gl::index_type::uint32);
     }
 
-    // Without trails or Retro quantization, the completed linear frame can
-    // be drawn straight to the sRGB window. Avoid the otherwise redundant
-    // full-resolution history write and subsequent copy to the backbuffer.
-    bool const direct_present=!ogs->enable_trails && !ogs->retro_mode_active;
+    // The inactive-trail fast path writes directly to the window, skipping
+    // both full-resolution history passes. A future trail fade enters the
+    // history path on its first frame; Retro always retains its HUD staging.
+    bool const direct_present=frame_blend_can_present_directly(ogs);
     if(direct_present) {
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                              gl::default_framebuffer);

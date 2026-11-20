@@ -92,6 +92,17 @@ inline bool sun_shadow_material_casts_depth(
 // Exact world-space AABB of an affine-transformed 3DO mesh group, using its
 // center and half-extents. Computes nine absolute products instead of
 // transforming eight corners per group (and doing it once per cascade).
+// Separate 3DO policy: ordinary alpha-blended models cast dithered depth.
+// Preserve the original strict policy for non-model/translucent world VFX.
+inline bool sun_shadow_model_material_casts_depth(
+    uint32_t albedo_source,bool special,bool emissive_only,
+    float opacity,bool needs_texture_alpha,float thing_opacity)
+{
+    return albedo_source!=0U && !special && !emissive_only &&
+           opacity>0.0f && thing_opacity>0.0f &&
+           (!needs_texture_alpha || albedo_source==1U);
+}
+
 inline decal_volume_aabb sun_shadow_transformed_aabb(
     std::array<float,3> const &minimum,
     std::array<float,3> const &maximum,

@@ -43,7 +43,8 @@ assert "translucent_sun_uniforms::set_pcf_radius" in shade
 assert "if(radius<=0.0)return texture(map,uv);" in shared
 assert "translucent_sun_pcf_radius.x" in shared
 assert "translucent_sun_pcf_radius.y" in shared
-assert "return texture(translucent_sun_dynamic_depth," in shared
+assert '#include "sun_dynamic_tile_pcf.glsl"' in shared
+assert "sun_dynamic_tile_pcf(translucent_sun_dynamic_depth,tile,uv," in shared
 for path in ("assets/shaders/game_opaque_pass.frag",
              "assets/shaders/game_trns_pass.frag",
              "assets/shaders/gpu_3do_preview.frag"):

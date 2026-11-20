@@ -9,8 +9,9 @@ shaders=load("renderer/shaders.cpp")
 header=load("renderer/shaders.hpp")
 assert '#include "world_cache_direct_specular.glsl"' in fragment
 assert "world_direct_specular(albedo,material_texcoord)" in fragment
-assert "emission+env_reflection+direct_specular" in fragment
-assert "(env_reflection+direct_specular)*(1.0-fog)" in fragment
+assert "emission+layered_specular" in fragment
+assert "(env_reflection+direct_specular)*" in fragment
+assert "base_specular_trans+coat_specular" in fragment
 assert "if(world_pixel_dynamic_lighting!=0" in fragment
 assert "vec3 world_ggx(" in lighting
 assert "world_sun_visibility(cached_world_position" in lighting

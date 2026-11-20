@@ -32,7 +32,13 @@ assert "ogs->post_frame_blend.set_retro_palette(2,true);" in renderer
 assert "ogs->post_frame_blend.set_retro_palette(2,false);" in blend
 assert "ogs->retro_present_buffer->fbo" in blend
 assert "ogs->post_frame_blend.set_retro_palette(2,ogs->retro_mode_active)" not in blend
-assert "direct_present=!ogs->enable_trails && !ogs->retro_mode_active" in basic
-assert "direct_present=!ogs->enable_trails && !ogs->retro_mode_active" in bloom
+assert "inline bool frame_blend_can_present_directly(opengl_state const *ogs)" in blend
+assert "if(ogs->retro_mode_active)return false;" in blend
+assert "if(!ogs->enable_trails)return true;" in blend
+assert "blend.value()[0]<=0.0f && blend.target()[0]<=0.0f" in blend
+for compositor in (basic,bloom):
+    assert "bool const direct_present=frame_blend_can_present_directly(ogs);" in compositor
+    assert "ogs->frame_blend_history_valid=false;" in compositor
+    assert "present_frame_blend(ogs, screen_size);" in compositor
 assert "palette_quantize(current.rgb)" in shader
 print("Retro palette applied last over GPU and DirectDraw HUD; menus bypassed")

@@ -25,6 +25,9 @@ uniform sampler2DArray translucent_sun_sky_aperture_map;
 uniform vec4 translucent_sun_sky_aperture_depth_transform;
 #endif
 
+uniform float translucent_sun_dynamic_pcf_radius;
+#include "sun_dynamic_tile_pcf.glsl"
+
 vec3 world_sun_coordinates(int slot,vec3 p)
 {
     vec4 world=vec4(p,1.0);
@@ -55,10 +58,8 @@ float world_sun_sample(int slot,vec3 uv,float incidence)
         return world_sun_cascade_filter(translucent_sun_far_depth,
             vec3(uv.xy,comparison),length(translucent_sun_map_z[1].xyz));
     vec4 tile=translucent_sun_tile_rect[slot-2];
-    vec2 tex_size=vec2(textureSize(translucent_sun_dynamic_depth,0));
-    vec2 center=tile.xy+vec2(2.0)+uv.xy*(tile.zw-vec2(4.0));
-    return texture(translucent_sun_dynamic_depth,
-                   vec3(center/tex_size,comparison));
+    return sun_dynamic_tile_pcf(translucent_sun_dynamic_depth,tile,uv,
+                                comparison,translucent_sun_dynamic_pcf_radius);
 }
 // The cached world direct-GGX pass must obey the same sky-only sun gate as
 // opaque composition and native/GPU 3DO forward lighting.
@@ -84,7 +85,9 @@ float world_sun_sky_aperture(vec3 world)
     bool f=world_sun_inside(far_uv);
     if(n && !f)return world_sun_sky_sample(near_uv,0);
     if(!n && f)return world_sun_sky_sample(far_uv,1);
-    if(!n && !f)return 0.0;
+    // Neither cascade covers this receiver: visibility is unknown, not blocked.
+    // Fail open, as regular sun shadows do, rather than cutting off sunlight.
+    if(!n && !f)return 1.0;
     float near_access=world_sun_sky_sample(near_uv,0);
     if(depth<translucent_sun_split*0.8125)return near_access;
     float far_access=world_sun_sky_sample(far_uv,1);
@@ -161,21 +164,26 @@ vec3 world_ggx(vec3 n,vec3 v,vec3 l,vec3 f0,float roughness)
     return F*(D*Gv*Gl/max(4.0*nv,0.0001));
 }
 
-vec3 world_direct_specular(vec3 base_color,vec2 uv)
+vec3 world_direct_specular(vec3 base_color,vec2 uv,
+                           bool coating,vec3 coat_normal,
+                           float coat_roughness,float coat_strength)
 {
-    if(specular_params.x<=0.0 || solid_fullbright!=0 ||
+    if((coating?coat_strength<=0.0:specular_params.x<=0.0) ||
+       solid_fullbright!=0 ||
        cached_light_state.z<0.5 ||
        (translucent_sun_enabled==0 || translucent_sun_color.w<=0.0) &&
        (world_dynamic_light_specular==0 || num_lights==0))
         return vec3(0.0);
-    vec3 surf=specular_params.w>0.5
-        ? texture(surface_map,uv).rgb : vec3(1.0);
-    float strength=max(specular_params.x*surf.r,0.0);
+    vec3 surf=coating?vec3(1.0):
+        (specular_params.w>0.5 ?texture(surface_map,uv).rgb:vec3(1.0));
+    float strength=coating?coat_strength:max(specular_params.x*surf.r,0.0);
     if(strength<=0.0)return vec3(0.0);
-    float roughness=clamp(specular_params.y*surf.g,0.08,1.0);
-    float metalness=clamp(specular_params.z*surf.b,0.0,1.0);
-    vec3 F0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
-    vec3 N=world_mapped_normal(uv);
+    float roughness=coating?clamp(coat_roughness,0.08,1.0):
+        clamp(specular_params.y*surf.g,0.08,1.0);
+    float metalness=coating?0.0:clamp(specular_params.z*surf.b,0.0,1.0);
+    vec3 F0=coating?vec3(0.04):
+        mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
+    vec3 N=coating?coat_normal:world_mapped_normal(uv);
     vec3 V=normalize(camera_world_origin-cached_world_position);
     if(dot(N,V)<0.0)N=-N;
     vec3 sum=vec3(0.0);
@@ -202,4 +210,9 @@ vec3 world_direct_specular(vec3 base_color,vec2 uv)
         }
     }
     return min(sum*strength,vec3(32.0));
+}
+vec3 world_direct_specular(vec3 base_color,vec2 uv)
+{
+    return world_direct_specular(
+        base_color,uv,false,vec3(0.0),0.0,0.0);
 }

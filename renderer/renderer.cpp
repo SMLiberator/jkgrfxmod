@@ -1,8 +1,24 @@
 #include "renderer.hpp"
+#include "hud_dirty_regions.hpp"
 #include "frame_profile.hpp"
 #include "presentation_gpu_profile.hpp"
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
+#include "gpu_3do_packed_vertex.hpp"
+#include "gpu_3do_auto_lod.hpp"
+#include "planar_reflection_things.hpp"
+#include "planar_reflection_workset.hpp"
+#include "planar_reflection_offscreen_gpu.hpp"
+#include "hemi_reflection_camera.hpp"
+#include "screen_space_reflections.hpp"
+#include "planar_reflection_culling.hpp"
+#include "planar_reflection_render_math.hpp"
+#include "offscreen_capture_target.hpp"
+#include "offscreen_capture_projection.hpp"
+#include "planar_reflection_capture_shader.hpp"
+#include "planar_receiver_visibility.hpp"
+#include "gpu_thing_occlusion.hpp"
+#include "sprite_flare_projection.hpp"
 #include "saber_light_rgb.hpp"
 #include "thing_light_rgb.hpp"
 #include "gpu_3do_uv.hpp"
@@ -10,6 +26,7 @@
 #include "native_sprite_profile.hpp"
 #include "audio_module_probe.hpp"
 #include "gpu_3do_compat.hpp"
+#include "gpu_mesh_cache_eviction.hpp"
 #include "gpu_3do_alpha.hpp"
 #include "native_jk_palette_effects.hpp"
 #include "native_screenshot.hpp"
@@ -23,13 +40,19 @@
 #include "gpu_3do_frustum.hpp"
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
+#include "global_env_capture.hpp"
+#include "reflection_attachment_family.hpp"
+#include "global_env_equirect_converter.hpp"
 #include "spotlight.hpp"
 #include "spotlight_shadow_gpu.hpp"
 #include "sun_shadow_gpu.hpp"
+#include "sun_caustics_gpu.hpp"
+#include "sun_pcf_intensity.hpp"
 #include "sun_sky_aperture_gpu.hpp"
 #include "sun_sky_surface.hpp"
 #include "sun_sky_caster_mask.hpp"
 #include "world_cache_gpu.hpp"
+#include "world_cache_streaming.hpp"
 #include "continuous_ambient_capture.hpp"
 #include "continuous_ambient_gpu.hpp"
 #include "world_cache_alpha.hpp"
@@ -385,50 +408,98 @@ namespace jkgm {
         gl::buffer vertices;
         gl::buffer indices;
         unsigned num_indices = 0;
-        explicit gpu_3do_gl_mesh(gpu_3do_geometry const &source)
+        uint64_t vertex_count = 0;
+        bool packed_vertex_format = false;
+        explicit gpu_3do_gl_mesh(bool enable_packing,
+                                 gpu_3do_geometry const &source,
+                                 gpu_3do_pack_profile *pack_profile=nullptr)
         {
             num_indices=static_cast<unsigned>(source.indices.size());
+            vertex_count=uint64_t(source.vertices.size());
+            std::vector<gpu_3do_packed_vertex> packed_vertices;
+            uint32_t rejection_reasons=0;
+            packed_vertex_format=enable_packing &&
+                gpu_3do_pack_vertices(source.vertices,packed_vertices,
+                    pack_profile?&rejection_reasons:nullptr);
+            if(enable_packing && pack_profile)
+                pack_profile->record(packed_vertex_format,
+                                     source.vertices.size(),rejection_reasons);
             gl::bind_vertex_array(vao);
             gl::bind_buffer(gl::buffer_bind_target::array,vertices);
-            gl::buffer_data(gl::buffer_bind_target::array,
-                            make_span(source.vertices).as_const_bytes(),
-                            gl::buffer_usage::static_draw);
-            gl::enable_vertex_attrib_array(0U);
-            gl::vertex_attrib_pointer(0U,3U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,x));
-            gl::enable_vertex_attrib_array(1U);
-            gl::vertex_attrib_pointer(1U,2U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,u));
-            gl::enable_vertex_attrib_array(2U);
-            gl::vertex_attrib_pointer(2U,3U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,nx));
-            gl::enable_vertex_attrib_array(3U);
-            gl::vertex_attrib_pointer(3U,1U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,static_light));
-            gl::enable_vertex_attrib_array(4U);
-            gl::vertex_attrib_pointer(4U,3U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,lnx));
-            gl::enable_vertex_attrib_array(5U);
-            gl::vertex_attrib_pointer(5U,3U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,fax));
-            gl::enable_vertex_attrib_array(6U);
-            gl::vertex_attrib_pointer(6U,1U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,face_extra));
-            gl::enable_vertex_attrib_array(7U);
-            gl::vertex_attrib_pointer(7U,1U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,light_mode));
-            gl::enable_vertex_attrib_array(8U);
-            gl::vertex_attrib_pointer(8U,3U,gl::vertex_element_type::float32,
-                                      false,sizeof(gpu_3do_vertex),
-                                      offsetof(gpu_3do_vertex,cr));
+            if(packed_vertex_format) {
+                gl::buffer_data(gl::buffer_bind_target::array,
+                    make_span(packed_vertices).as_const_bytes(),
+                    gl::buffer_usage::static_draw);
+                constexpr auto stride=sizeof(gpu_3do_packed_vertex);
+                gl::enable_vertex_attrib_array(0U);
+                gl::vertex_attrib_pointer(0U,3U,gl::vertex_element_type::float32,
+                    false,stride,offsetof(gpu_3do_packed_vertex,x));
+                gl::enable_vertex_attrib_array(1U);
+                gl::vertex_attrib_pointer(1U,2U,gl::vertex_element_type::float32,
+                    false,stride,offsetof(gpu_3do_packed_vertex,u));
+                gl::enable_vertex_attrib_array(2U);
+                gl::vertex_attrib_pointer(2U,4U,
+                    gl::vertex_element_type::uint_2_10_10_10_rev,
+                    true,stride,offsetof(gpu_3do_packed_vertex,normal_mode));
+                gl::enable_vertex_attrib_array(3U);
+                gl::vertex_attrib_pointer(3U,1U,gl::vertex_element_type::float32,
+                    false,stride,offsetof(gpu_3do_packed_vertex,static_light));
+                gl::enable_vertex_attrib_array(4U);
+                gl::vertex_attrib_pointer(4U,4U,
+                    gl::vertex_element_type::uint_2_10_10_10_rev,
+                    true,stride,offsetof(gpu_3do_packed_vertex,light_normal));
+                gl::enable_vertex_attrib_array(5U);
+                gl::vertex_attrib_pointer(5U,3U,gl::vertex_element_type::float32,
+                    false,stride,offsetof(gpu_3do_packed_vertex,fax));
+                gl::enable_vertex_attrib_array(6U);
+                gl::vertex_attrib_pointer(6U,1U,gl::vertex_element_type::float32,
+                    false,stride,offsetof(gpu_3do_packed_vertex,face_extra));
+                // Location 7 is disabled: mode occupies the two spare
+                // face-normal bits at location 2.
+                gl::enable_vertex_attrib_array(8U);
+                gl::vertex_attrib_pointer(8U,4U,gl::vertex_element_type::uint8,
+                    true,stride,offsetof(gpu_3do_packed_vertex,rgba));
+            } else {
+                gl::buffer_data(gl::buffer_bind_target::array,
+                                make_span(source.vertices).as_const_bytes(),
+                                gl::buffer_usage::static_draw);
+                gl::enable_vertex_attrib_array(0U);
+                gl::vertex_attrib_pointer(0U,3U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,x));
+                gl::enable_vertex_attrib_array(1U);
+                gl::vertex_attrib_pointer(1U,2U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,u));
+                gl::enable_vertex_attrib_array(2U);
+                gl::vertex_attrib_pointer(2U,3U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,nx));
+                gl::enable_vertex_attrib_array(3U);
+                gl::vertex_attrib_pointer(3U,1U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,static_light));
+                gl::enable_vertex_attrib_array(4U);
+                gl::vertex_attrib_pointer(4U,3U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,lnx));
+                gl::enable_vertex_attrib_array(5U);
+                gl::vertex_attrib_pointer(5U,3U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,fax));
+                gl::enable_vertex_attrib_array(6U);
+                gl::vertex_attrib_pointer(6U,1U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,face_extra));
+                gl::enable_vertex_attrib_array(7U);
+                gl::vertex_attrib_pointer(7U,1U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,light_mode));
+                gl::enable_vertex_attrib_array(8U);
+                gl::vertex_attrib_pointer(8U,3U,gl::vertex_element_type::float32,
+                                          false,sizeof(gpu_3do_vertex),
+                                          offsetof(gpu_3do_vertex,cr));
+            }
             gl::bind_buffer(gl::buffer_bind_target::element_array,indices);
             gl::buffer_data(gl::buffer_bind_target::element_array,
                             make_span(source.indices).as_const_bytes(),
@@ -453,6 +524,14 @@ namespace jkgm {
             gl::texture_view normal = gl::default_texture;
             gl::texture_view normal2 = gl::default_texture;
             gl::texture_view surface = gl::default_texture;
+            gl::texture_view matcap = gl::default_texture;
+            gl::texture_view matcap_surface = gl::default_texture;
+            point<4,float> matcap_params=make_point(1.0f,1.0f,1.0f,0.0f);
+            bool has_matcap=false,has_matcap_surface=false;
+            gl::texture_view clearcoat_surface=gl::default_texture;
+            gl::texture_view clearcoat_normal=gl::default_texture;
+            point<4,float> clearcoat_params=make_point(0.0f,0.1f,1.0f,0.0f);
+            bool has_clearcoat_surface=false,has_clearcoat_normal=false;
             gl::texture_view displacement = gl::default_texture;
             float displacement_factor=0.0f;
             gl::texture_view environment = gl::default_texture;
@@ -534,8 +613,23 @@ namespace jkgm {
         std::unique_ptr<opengl_state> ogs;
         // One opt-in, level/world-space projector for initial decal parity tests.
         std::unordered_map<uint64_t,std::unique_ptr<gpu_3do_gl_mesh>> gpu_3do_gl_cache;
+        gpu_3do_pack_profile packed_3do_upload_profile;
         std::unordered_map<uint64_t,uint64_t> gpu_3do_last_drawn;
         uint64_t gpu_3do_present_serial=0;
+        // Lazy CPU simplification per immutable source, keyed by original
+        // GPU mesh ID. Variant GL IDs are distinct from the authored mesh.
+        struct auto_3do_lod_entry {
+            std::shared_ptr<gpu_3do_geometry const> source;
+            std::array<std::shared_ptr<gpu_3do_geometry const>,2> levels{};
+            std::array<uint64_t,2> ids{};
+            std::array<bool,2> attempted{{false,false}};
+            uint64_t last_seen=0;
+        };
+        std::unordered_map<uint64_t,auto_3do_lod_entry> auto_3do_lod_cache;
+        // Hysteresis is per owning Thing, shared by ALL hierarchy nodes.
+        // Different Things can still share one immutable 3DO asset.
+        std::unordered_map<uint64_t,std::pair<unsigned,uint64_t>>
+            auto_3do_lod_history;
         // Resolved MAT surfaces are identical for all instances within one
         // frame; share costly native memory reads across both GPU passes.
         std::unordered_map<uint64_t,gpu_3do_texture> gpu_frame_material_cache;
@@ -572,6 +666,243 @@ namespace jkgm {
         std::unique_ptr<renderer_compositor> frame_compositor;
         std::unique_ptr<renderer_ao> frame_ao;
         std::unique_ptr<renderer_screen> frame_screen;
+        // Opt-in cached fluid SPR target: half-size RGBA16F plus an 8-bit
+        // per-pixel stencil layer count. Never used for world fluids or cutouts.
+        std::unique_ptr<post_buffer> smoke_half_buffer;
+        GLuint smoke_half_stencil=0;
+        bool smoke_half_failed=false;
+        // Independent low-cost planar capture: allocated on first enabled
+        // scene, never by the normal GPU renderer or menus.
+        std::unique_ptr<offscreen_capture_target> planar_capture_target;
+        // Each reflective Thing owns its own retained six-face (or hemi)
+        // capture. Avoid the former global-owner aliasing/fallback problem.
+        struct reflection_probe_entry {
+            std::unique_ptr<reflection_probe_capture_target> target;
+            engine_camera camera{};
+            int mode=0;
+            bool ready=false;
+            uint64_t seen_frame=0U;
+            std::chrono::steady_clock::time_point last_refresh{};
+        };
+        std::map<uint64_t,reflection_probe_entry> reflection_probes;
+        // Singleton reserved owner for the camera-centered shared probe.
+        static constexpr uint64_t shared_reflection_owner_key=~uint64_t(0);
+        // Authored metadata stays unchanged; only sampling/capture changes.
+        // Explicit CaptureEnvMap remains an independent COG operation.
+        int effective_capture_reflection_mode(int mode) const {
+            if(mode<4 || mode>7)return mode;
+            if(!the_config->enable_reflection_capture)return 0; // EnvMap
+            if(!the_config->enable_reflection_probes && mode!=7)
+                return 7; // shared camera-centered cubemap
+            return mode;
+        }
+        // The static world's AABB must be reduced ONCE per world revision,
+        // not once for each of up to six faces on multiple reflection probes.
+        // The per-capture distance is then a cheap 3-axis calculation.
+        mutable uintptr_t reflection_far_bounds_world=0U;
+        mutable uint64_t reflection_far_bounds_revision=0U;
+        mutable bool reflection_far_bounds_known=false;
+        mutable bool reflection_far_bounds_valid=false;
+        mutable std::array<float,3> reflection_far_bounds_min{};
+        mutable std::array<float,3> reflection_far_bounds_max{};
+        float reflection_capture_scene_far(
+            std::array<float,3> const &focus) const {
+            float far_plane=frame_world_cache_camera.far_plane;
+            if(!world_cache_target || !world_cache_target->ready)
+                return far_plane;
+            auto const &cache=*world_cache_target;
+            if(!reflection_far_bounds_known ||
+               reflection_far_bounds_world!=cache.loaded_world ||
+               reflection_far_bounds_revision!=cache.revision) {
+                reflection_far_bounds_known=true;
+                reflection_far_bounds_world=cache.loaded_world;
+                reflection_far_bounds_revision=cache.revision;
+                reflection_far_bounds_valid=false;
+                reflection_far_bounds_min.fill(
+                    std::numeric_limits<float>::infinity());
+                reflection_far_bounds_max.fill(
+                    -std::numeric_limits<float>::infinity());
+                for(auto const &surface:cache.mesh.surfaces) {
+                    bool finite=true;
+                    for(int i=0;i<3;++i)
+                        finite=finite &&
+                            std::isfinite(surface.bounds_min[i]) &&
+                            std::isfinite(surface.bounds_max[i]) &&
+                            surface.bounds_min[i]<=surface.bounds_max[i];
+                    if(!finite)continue;
+                    reflection_far_bounds_valid=true;
+                    for(int i=0;i<3;++i) {
+                        reflection_far_bounds_min[i]=std::min(
+                            reflection_far_bounds_min[i],surface.bounds_min[i]);
+                        reflection_far_bounds_max[i]=std::max(
+                            reflection_far_bounds_max[i],surface.bounds_max[i]);
+                    }
+                }
+            }
+            if(!reflection_far_bounds_valid)return far_plane;
+            double distance2=0.0;
+            for(int axis=0;axis<3;++axis) {
+                double const lo=std::fabs(
+                    double(reflection_far_bounds_min[axis])-focus[axis]);
+                double const hi=std::fabs(
+                    double(reflection_far_bounds_max[axis])-focus[axis]);
+                double const extent=std::max(lo,hi);
+                distance2+=extent*extent;
+            }
+            // This is a projection-depth range, not a geometry-distance
+            // culling policy. Sky still bypasses the far clipping plane.
+            double const scene_far=std::sqrt(distance2)*1.01+1.0;
+            if(std::isfinite(scene_far))
+                far_plane=std::max(far_plane,float(std::min(
+                    scene_far,double(std::numeric_limits<float>::max()))));
+            return far_plane;
+        }
+        bool shared_reflection_ready_this_frame() const {
+            auto it=reflection_probes.find(shared_reflection_owner_key);
+            return it!=reflection_probes.end() && it->second.ready &&
+                it->second.mode==7 &&
+                it->second.seen_frame==gpu_3do_present_serial &&
+                it->second.target && it->second.target->ready();
+        }
+        // Complete world-captured equirectangular HDR textures, shared by
+        // ordinary envmap materials. The old completed texture survives until
+        // fadeTime finishes; no partially rendered capture becomes visible.
+        std::unique_ptr<global_env_equirect_converter> global_env_converter;
+        std::unique_ptr<offscreen_capture_target> global_env_current;
+        std::unique_ptr<offscreen_capture_target> global_env_previous;
+        uint64_t global_env_completed_sequence=0U;
+        uint64_t global_env_active_sequence=0U;
+        std::chrono::steady_clock::time_point global_env_fade_start{};
+        float global_env_fade_seconds=0.0f;
+        std::unique_ptr<planar_reflection_capture_shader> hemi_capture_program;
+        std::unique_ptr<planar_reflection_capture_shader>
+            paraboloid_capture_program;
+
+        struct global_env_binding {
+            bool active=false,from_capture=false,transition=false;
+            gl::texture_view from=gl::default_texture;
+            gl::texture_view to=gl::default_texture;
+            float mix=0.0f;
+        };
+        global_env_binding generated_global_env_binding() const {
+            global_env_binding out{};
+            if(!global_env_current || !global_env_current->ready() ||
+               !global_env_completed_sequence)return out;
+            if(!global_env_active_sequence)
+                return out;
+            float blend=1.0f;
+            if(global_env_fade_seconds>0.0f) {
+                blend=std::clamp(
+                    std::chrono::duration<float>(
+                        std::chrono::steady_clock::now()-
+                        global_env_fade_start).count()/global_env_fade_seconds,
+                    0.0f,1.0f);
+            }
+            out.active=true;
+            if(blend>=1.0f) {
+                out.from_capture=true;
+                out.from=gl::texture_view(global_env_current->color_texture());
+            } else {
+                if(global_env_previous && global_env_previous->ready()) {
+                    out.from_capture=true;
+                    out.from=gl::texture_view(global_env_previous->color_texture());
+                }
+                out.transition=true;
+                out.to=gl::texture_view(global_env_current->color_texture());
+                out.mix=blend;
+            }
+            return out;
+        }
+        // Transparent world screen-mode ray tracing only, allocated lazily.
+        std::unique_ptr<offscreen_capture_target> ssr_receivers,ssr_image;
+        std::unique_ptr<ssr_world_receiver_shader> ssr_receiver_program;
+        std::unique_ptr<ssr_trace_shader> ssr_trace_program;
+        bool ssr_ready=false;
+        // Opaque cached-world and GPU 3DO SSR compositing, staged separately
+        // from the existing transparent-world SSR receiver capture.
+        std::unique_ptr<offscreen_capture_target> ssr_opaque_receivers,ssr_opaque_image;
+        std::unique_ptr<ssr_opaque_receiver_shader> ssr_opaque_world_program;
+        std::unique_ptr<ssr_opaque_receiver_shader> ssr_opaque_model_program;
+        std::unique_ptr<ssr_opaque_composite_shader> ssr_opaque_composite_program;
+        bool ssr_opaque_ready=false;
+        std::unique_ptr<planar_reflection_capture_shader> planar_capture_program;
+        // Depth-tested receiver pixels from last frame's main opaque 3DO pass.
+        // Query answers are asynchronous; never stall the driver to read them.
+        std::unique_ptr<planar_receiver_visibility> planar_receiver_queries;
+        std::unique_ptr<planar_receiver_visibility_shader> planar_receiver_program;
+        // Opt-in Thing-sphere queries shared by GPU and native CPU skips.
+        // Query draws only use the main-camera opaque depth buffer.
+        std::unique_ptr<gpu_thing_occlusion_queries> thing_occlusion_queries;
+        std::unique_ptr<gpu_thing_occlusion_shader> thing_occlusion_program;
+        GLuint thing_occlusion_proxy_vao=0;
+        struct thing_occlusion_debug_proxy {
+            gpu_thing_occlusion_bound bound{};
+            gpu_thing_occlusion_screen_rect rect{};
+            unsigned result=0; // 0=unknown, 1=visible, 2=occluded
+            unsigned mode=0; // model proxy 0..2; original SPR mesh=3
+            uint64_t sprite_id=0;
+            gpu_3do_matrix34 sprite_pose{};
+        };
+        std::vector<thing_occlusion_debug_proxy> thing_occlusion_debug_proxies;
+        uint64_t thing_occlusion_debug_ns_window=0;
+        uint64_t thing_occlusion_debug_draws_window=0;
+        uint64_t thing_occlusion_debug_frames_window=0;
+        presentation_gpu_profile thing_occlusion_debug_gpu_timers;
+        uint64_t thing_occlusion_debug_gpu_ns_window=0;
+        uint64_t thing_occlusion_debug_gpu_samples_window=0;
+        uint64_t thing_occlusion_debug_gpu_skips_window=0;
+        // Lightweight last-known triangle cost survives native CPU early skips.
+        struct native_occlusion_cost {
+            size_t triangles=0;
+            uint32_t model=0;
+            uint64_t last_seen=0;
+        };
+        std::unordered_map<uint64_t,native_occlusion_cost>
+            thing_occlusion_cost_history;
+        uintptr_t thing_occlusion_history_world=0;
+        // Nonblocking timestamps and CPU timings for box-vs-rectangle A/B.
+        presentation_gpu_profile thing_occlusion_gpu_timers;
+        uint64_t thing_occlusion_gpu_ns_window=0;
+        uint64_t thing_occlusion_gpu_samples_window=0;
+        uint64_t thing_occlusion_gpu_skipped_window=0;
+        uint64_t thing_occlusion_cpu_ns_window=0;
+        uint64_t thing_occlusion_cpu_calls_window=0;
+        uint64_t thing_occlusion_issued_window=0;
+        uint64_t thing_occlusion_poll_ns_window=0;
+        uint64_t thing_occlusion_poll_calls_window=0;
+        uint64_t thing_occlusion_poll_checked_window=0;
+        uint64_t thing_occlusion_poll_completed_window=0;
+        uint64_t thing_occlusion_poll_pending_window=0;
+        uint64_t thing_occlusion_prepare_ns_window=0;
+        uint64_t thing_occlusion_visibility_ns_window=0;
+        uint64_t thing_occlusion_visibility_calls_window=0;
+        uint64_t thing_occlusion_visibility_skips_window=0;
+        uint64_t sprite_occlusion_visibility_skips_window=0;
+        // Asynchronous offscreen GPU timestamps: world, models, mipmaps.
+        // Read only completed frames, with no GL query waits on the hot path.
+        presentation_gpu_profile planar_gpu_queries;
+        std::array<uint64_t,presentation_gpu_profile::num_stages> planar_gpu_ns{};
+        uint64_t planar_gpu_samples=0,planar_gpu_skipped=0;
+        bool planar_capture_ready=false;
+        uintptr_t planar_plane_world=0;
+        uint64_t planar_plane_world_revision=0;
+        uint64_t planar_plane_scanned_frame=~uint64_t(0);
+        std::optional<planar_reflection_plane> planar_capture_plane;
+        engine_camera planar_capture_camera{};
+        std::optional<planar_reflection_plane> planar_last_completed_plane;
+        uint64_t planar_last_capture_revision=0U;
+        std::chrono::steady_clock::time_point planar_last_refresh{};
+        // Independent reflected-camera draw list, never added to main visibility.
+        std::vector<world_cache_draw_candidate> planar_frame_candidates;
+        std::vector<world_cache_draw_candidate> reflection_sky_candidates;
+        uint64_t reflection_sky_frame=~uint64_t(0);
+        uint64_t reflection_sky_revision=0;
+        uintptr_t reflection_sky_world=0;
+        std::vector<uint8_t> planar_thing_sector_visibility;
+        std::vector<uint8_t> planar_reflection_sky_visibility;
+        uintptr_t planar_thing_visibility_world=0;
+        uint64_t planar_thing_visibility_frame=~uint64_t(0);
+
 
         HGDIOBJ indexed_bitmap_dc = NULL;
         char const *indexed_bitmap_source = nullptr;
@@ -618,6 +949,7 @@ namespace jkgm {
         std::vector<translucent_spotlight_draw> translucent_spotlights_for_frame;
         std::unique_ptr<spotlight_shadow_gpu> spotlight_shadow_target;
         std::unique_ptr<sun_shadow_gpu> sun_shadow_target;
+        std::unique_ptr<sun_caustics_gpu> sun_caustic_target;
         std::unique_ptr<sun_sky_aperture_gpu> sun_sky_aperture_target;
         // Fail-open physical-sky eligibility, cached per SithWorld. The
         // world surface table is audited occasionally rather than on every
@@ -655,6 +987,8 @@ namespace jkgm {
             decal_volume_aabb bounds{};
             uint64_t opaque_signature=0,cutout_signature=0;
             std::array<uint32_t,5> cutout_inputs{};
+            float thing_opacity=1.0f,material_opacity=1.0f;
+            uint32_t face_type=0;
             uint32_t offset=0,count=0;
             uintptr_t material=0;
             int32_t cel=-1;
@@ -798,6 +1132,15 @@ namespace jkgm {
         std::array<uint64_t,presentation_gpu_profile::num_stages> present_gpu_ns{};
         uint64_t present_gpu_samples=0, present_gpu_skipped=0;
 
+        // Asynchronous GPU timings for the scene, separate from postFX and
+        // shadow profiling. No GL readbacks or query waits on the hot path.
+        // 0 = opaque gbuffer (no shadow capture), 1 = world/decal/flare alpha,
+        // 2 = cached 3DO/SPR alpha. Gun/overlay is not included in 1 or 2.
+        presentation_gpu_profile scene_gpu_queries;
+        std::array<uint64_t,presentation_gpu_profile::num_stages> scene_gpu_ns{};
+        uint64_t scene_gpu_samples=0, scene_gpu_skipped=0;
+        bool scene_gpu_timing=false;
+
         static uint64_t elapsed_profile_us(profile_clock::time_point a,
                                            profile_clock::time_point b)
         {
@@ -856,6 +1199,17 @@ namespace jkgm {
                          " face=", (profile_window.native_face_ns / 1000) / frames,
                          " model_calls_avg=", profile_window.native_model_calls / frames,
                          " model_drawn_avg=", profile_window.native_model_drawn / frames,
+                         " model_lod0_forced_avg=", profile_window.native_model_lod0_forced / frames,
+                         " model_occlusion_skipped_avg=",
+                         profile_window.native_model_occlusion_skipped / frames,
+                         " occlusion_cpu_us_avg=",
+                         (profile_window.native_occlusion_ns/1000U)/frames,
+                         " occlusion_tests_avg=",
+                         profile_window.native_occlusion_tests/frames,
+                         " occlusion_lookups_avg=",
+                         profile_window.native_occlusion_lookups/frames,
+                         " occlusion_lookup_hits_avg=",
+                         profile_window.native_occlusion_lookup_hits/frames,
                          " mesh_calls_avg=", profile_window.native_mesh_calls / frames,
                          " face_calls_avg=", profile_window.native_face_calls / frames,
                          " face_emitted_avg=", profile_window.native_face_emitted / frames);
@@ -945,6 +1299,15 @@ namespace jkgm {
                      " post_swap=", avg(profile_stage::present_swap),
                      " HUDupload=", avg(profile_stage::hud_upload),
                      " HUDdraw=", avg(profile_stage::hud_draw));
+            LOG_INFO("PERF HUD_dirty_regions bytes_uploaded_avg=",hud_bytes_uploaded_window/frames,
+                     " gl_upload_calls_avg=",hud_upload_calls_window/frames,
+                     " converted_pixels_avg=",hud_converted_pixels_window/frames,
+                     " changed_pixels_avg=",hud_changed_pixels_window/frames,
+                     " full_uploads=",hud_full_uploads_window,
+                     " skipped_frames=",hud_skipped_frames_window);
+            hud_bytes_uploaded_window=hud_upload_calls_window=0;
+            hud_converted_pixels_window=hud_changed_pixels_window=0;
+            hud_full_uploads_window=hud_skipped_frames_window=0;
             LOG_INFO("PERF present_cpu_us resolve=",avg(profile_stage::present_resolve),
                      " blur=",avg(profile_stage::present_blur),
                      " retro=",avg(profile_stage::present_retro),
@@ -962,6 +1325,19 @@ namespace jkgm {
                      " NOTE=delayed_nonblocking_GPU_timestamps_zero_if_no_samples");
             present_gpu_ns.fill(0U);
             present_gpu_samples=present_gpu_skipped=0U;
+            uint64_t const scene_samples=scene_gpu_samples;
+            LOG_INFO("PERF scene_gpu_us opaque_gbuffer=",
+                     scene_samples?(scene_gpu_ns[0]/1000U)/scene_samples:0U,
+                     " world_decal_flare_alpha=",
+                     scene_samples?(scene_gpu_ns[1]/1000U)/scene_samples:0U,
+                     " cached_3do_sprite_alpha=",
+                     scene_samples?(scene_gpu_ns[2]/1000U)/scene_samples:0U,
+                     " samples=",scene_samples,
+                     " ring_busy_skips=",scene_gpu_skipped,
+                     " supported=",scene_gpu_queries.is_supported(),
+                     " NOTE=async_GPU_only;opaque_excludes_shadow_maps;world_includes_decals;gun_overlay_excluded");
+            scene_gpu_ns.fill(0U);
+            scene_gpu_samples=scene_gpu_skipped=0U;
             if(the_config->use_gpu_cache ||
                the_config->enable_decals) {
                 LOG_INFO("PERF gpu_3do fallback_native_per_frame geometry=",
@@ -1012,6 +1388,88 @@ namespace jkgm {
                          profile_window.gpu_source_invalidations,
                          " failed_snapshot_reuses_total=",
                          profile_window.gpu_failed_snapshot_reuses);
+                LOG_INFO("PERF gpu_3do mesh_cache entries_avg=",
+                         profile_window.gpu_cache_entries/frames,
+                         " peak=",profile_window.gpu_cache_peak,
+                         " soft_limit=",jkgm::gpu_mesh_cache_soft_limit,
+                         " hits_avg=",profile_window.gpu_cache_hits/frames,
+                         " misses_avg=",profile_window.gpu_cache_misses/frames,
+                         " evictions_total=",profile_window.gpu_cache_evictions,
+                         " deferred_trims_total=",
+                         profile_window.gpu_cache_trim_deferred);
+                LOG_INFO("PERF gpu_3do hash_causes_total new=",
+                         profile_window.gpu_cache_hash_new,
+                         " header=",profile_window.gpu_cache_hash_header,
+                         " revision=",profile_window.gpu_cache_hash_revision,
+                         " fallback=",profile_window.gpu_cache_hash_fallback,
+                         " NOTE=includes_offscreen_planar_hashes");
+                LOG_INFO("PERF gpu_3do lazy_mutations material_checks=",
+                         profile_window.gpu_mutation_scans,
+                         " meshes_checked=",profile_window.gpu_mutation_scanned,
+                         " changed_materials=",
+                         profile_window.gpu_mutation_invalidated,
+                         " CPU_us_avg=",
+                         (profile_window.gpu_mutation_ns/1000)/frames,
+                         " NOTE=no_cache_wide_scan_full_edits_hash_on_next_use");
+                if(the_config->experimental_packed_3do_vertices) {
+                    auto const &packing=packed_3do_upload_profile;
+                    uint64_t const attempted=packing.accepted_uploads+
+                                             packing.rejected_uploads;
+                    LOG_INFO("PERF gpu_3do vertex_packing uploads_cumulative=",
+                             attempted,
+                             " packed=",packing.accepted_uploads,
+                             " rejected=",packing.rejected_uploads,
+                             " packed_pct=",attempted
+                                 ?(100U*packing.accepted_uploads)/attempted:0U,
+                             " packed_vertices=",packing.packed_vertices,
+                             " rejected_vertices=",packing.legacy_vertices,
+                             " upload_vertex_kib_saved=",
+                             (packing.packed_vertices*
+                                (sizeof(gpu_3do_vertex)-
+                                 sizeof(gpu_3do_packed_vertex)))/1024U,
+                             " NOTE=counts_uploads_since_renderer_creation_including_reuploads");
+                    auto const &why=packing.reasons;
+                    LOG_INFO("PERF gpu_3do packing_rejections empty=",
+                             why[gpu_3do_pack_empty],
+                             " mode_nonfinite=",why[gpu_3do_pack_mode_nonfinite],
+                             " mode_out_of_range=",why[gpu_3do_pack_mode_out_of_range],
+                             " mode_fractional=",why[gpu_3do_pack_mode_fractional],
+                             " face_normal_nonfinite=",
+                             why[gpu_3do_pack_face_normal_nonfinite],
+                             " face_normal_range=",
+                             why[gpu_3do_pack_face_normal_out_of_range],
+                             " smooth_normal_nonfinite=",
+                             why[gpu_3do_pack_light_normal_nonfinite],
+                             " smooth_normal_range=",
+                             why[gpu_3do_pack_light_normal_out_of_range],
+                             " rgb_nonfinite=",why[gpu_3do_pack_rgb_nonfinite],
+                             " rgb_out_of_range=",why[gpu_3do_pack_rgb_out_of_range],
+                             " NOTE=reason_buckets_overlap_one_mesh_can_have_multiple_reasons");
+                    uint64_t live_packed=0,live_legacy=0;
+                    uint64_t live_packed_vertices=0,live_legacy_vertices=0;
+                    for(auto const &entry:gpu_3do_gl_cache) {
+                        auto const &mesh=*entry.second;
+                        if(mesh.packed_vertex_format) {
+                            ++live_packed;
+                            live_packed_vertices+=mesh.vertex_count;
+                        } else {
+                            ++live_legacy;
+                            live_legacy_vertices+=mesh.vertex_count;
+                        }
+                    }
+                    LOG_INFO("PERF gpu_3do packing_live_cache packed=",
+                             live_packed," legacy=",live_legacy,
+                             " vertex_kib=",
+                             (live_packed_vertices*
+                                  sizeof(gpu_3do_packed_vertex)+
+                              live_legacy_vertices*
+                                  sizeof(gpu_3do_vertex))/1024U,
+                             " vertex_kib_saved=",
+                             (live_packed_vertices*
+                                 (sizeof(gpu_3do_vertex)-
+                                  sizeof(gpu_3do_packed_vertex)))/1024U,
+                             " NOTE=current_GPU_mesh_cache_only_excludes_index_buffers");
+                }
                 LOG_INFO("PERF gpu_3do CPU_us_avg=",profile_window.gpu_preview_cpu_us/frames,
                          " draws_avg=",profile_window.gpu_draw_calls/frames,
                          " triangles_avg=",profile_window.gpu_draw_triangles/frames,
@@ -1042,6 +1500,15 @@ namespace jkgm {
                          " multi_calls_avg=",
                          profile_window.gpu_multidraw_calls/frames,
                          " NOTE=opaque_material_sorted_alpha_consecutive_order_preserved");
+                LOG_INFO("PERF overdraw_ranges_avg fluid_sprites=",
+                         profile_window.gpu_alpha_fluid_sprite_ranges/frames,
+                         " other_alpha_sprites=",
+                         profile_window.gpu_alpha_other_sprite_ranges/frames,
+                         " alpha_models=",
+                         profile_window.gpu_alpha_model_ranges/frames,
+                         " opaque_cutout_sprites=",
+                         profile_window.gpu_opaque_cutout_sprite_ranges/frames,
+                         " NOTE=GPU_3DO_draw_ranges_not_fragments_or_GL_calls;fluid_only_sprite");
                 LOG_INFO("PERF gpu_3do passes opaque_GL_calls_avg=",
                          profile_window.gpu_opaque_draw_calls/frames,
                          " opaque_ranges_avg=",
@@ -1152,13 +1619,55 @@ namespace jkgm {
             release_spotlight_images();
             spotlight_shadow_target.reset();
             sun_shadow_target.reset();
+            sun_caustic_target.reset();
             sun_sky_aperture_target.reset();
             sun_dynamic_target.reset();
             // Context-owned GL queries must be deleted before the context
             // disappears. If the context is already gone, its objects go
             // away with it; do not issue GL calls on an invalid context.
             if(hGLRC && wglGetCurrentContext()==hGLRC) {
+                if(smoke_half_stencil) {
+                    glDeleteRenderbuffers(1,&smoke_half_stencil);
+                    smoke_half_stencil=0;
+                }
+                smoke_half_buffer.reset();
+                planar_capture_program.reset();
+                planar_capture_target.reset();
+                reflection_probes.clear();
+                reflection_sky_candidates.clear();
+                reflection_sky_frame=~uint64_t(0);
+                reflection_sky_revision=0;
+                reflection_sky_world=0;
+                global_env_current.reset();
+                global_env_previous.reset();
+                global_env_converter.reset();
+                hemi_capture_program.reset();
+                paraboloid_capture_program.reset();
+                    ssr_receiver_program.reset();
+                ssr_trace_program.reset();
+                ssr_receivers.reset();
+                ssr_image.reset();
+                ssr_opaque_world_program.reset();
+                ssr_opaque_model_program.reset();
+                ssr_opaque_composite_program.reset();
+                ssr_opaque_receivers.reset();
+                ssr_opaque_image.reset();
+                planar_receiver_program.reset();
+                planar_receiver_queries.reset();
+                thing_occlusion_program.reset();
+                thing_occlusion_queries.reset();
+                thing_occlusion_cost_history.clear();
+                thing_occlusion_history_world=0;
+                get_native_occlusion_bridge().clear();
+                if(thing_occlusion_proxy_vao) {
+                    glDeleteVertexArrays(1,&thing_occlusion_proxy_vao);
+                    thing_occlusion_proxy_vao=0;
+                }
+                thing_occlusion_gpu_timers.release();
+                thing_occlusion_debug_gpu_timers.release();
+                planar_gpu_queries.release();
                 present_gpu_queries.release();
+                scene_gpu_queries.release();
                 sun_gpu_queries.release();
             }
         }
@@ -1174,6 +1683,34 @@ namespace jkgm {
                 clear_deferred_gpu_hud_materials();
                 deferred_gpu_3do_camera={};
                 frame_has_exempt_gpu=false;
+                // A new game scene must not reuse an old HUD texture snapshot.
+                hud_previous_source.clear();
+                planar_capture_ready=false;
+                planar_last_completed_plane.reset();
+                planar_last_capture_revision=0U;
+                planar_last_refresh={};
+                // New scenes may reuse native owner IDs; never sample old probes.
+                reflection_probes.clear();
+                reflection_sky_candidates.clear();
+                reflection_sky_frame=~uint64_t(0);
+                reflection_sky_revision=0;
+                reflection_sky_world=0;
+                global_env_current.reset();
+                global_env_previous.reset();
+                global_env_completed_sequence=0U;
+                global_env_active_sequence=0U;
+                get_global_env_capture_controls().clear();
+                ssr_ready=false;
+                ssr_opaque_ready=false;
+                if(planar_receiver_queries)planar_receiver_queries->invalidate();
+                if(thing_occlusion_queries)thing_occlusion_queries->invalidate();
+                get_native_occlusion_bridge().clear();
+                thing_occlusion_cost_history.clear();
+                thing_occlusion_history_world=0;
+                planar_capture_plane.reset();
+                planar_plane_world=0;
+                planar_plane_world_revision=0;
+                planar_plane_scanned_frame=~uint64_t(0);
                 reset_sector_crossing();
                 reset_continuous_ambient_gpu();
                 continuous_ambient_cpu_cache.reset();
@@ -1189,11 +1726,16 @@ namespace jkgm {
                     reset_gpu_3do_instances();
                     gpu_3do_gl_cache.clear();
                     gpu_3do_last_drawn.clear();
+                    auto_3do_lod_cache.clear();
+                    auto_3do_lod_history.clear();
                     gpu_3do_present_serial=0;
                     gpu_frame_material_cache.clear();
                     frame_gpu_3do_instances.clear();
                 }
                 if(the_config->profile_renderer) {
+                    hud_bytes_uploaded_window=hud_upload_calls_window=0;
+                    hud_converted_pixels_window=hud_changed_pixels_window=0;
+                    hud_full_uploads_window=hud_skipped_frames_window=0;
                     last_profile_frame = {};
                     profile_window_start = {};
                     profile_window = {};
@@ -1217,6 +1759,7 @@ namespace jkgm {
                 sun_shadow_last_validation={};
                 // Sky projection cache cannot survive a level/mode reset.
                 sun_sky_aperture_target.reset();
+                sun_caustic_target.reset();
                 sun_level_has_sky=true;
                 sun_level_sky_known=false;
                 sun_level_sky_sun_active=false;
@@ -1476,6 +2019,7 @@ namespace jkgm {
                 // The COG layer may already have accepted commands from the
                 // *new* world's startup scripts; don't clear those commands.
                 get_runtime_material_controls().prepare_world(state.current_world);
+                get_global_env_capture_controls().prepare_world(state.current_world);
                 runtime_controls = get_runtime_material_controls().snapshot();
                 last_runtime_revision = runtime_controls.revision;
                 LOG_DEBUG("JK material image cache cleared on level change");
@@ -1492,6 +2036,7 @@ namespace jkgm {
             if(state.current_world) {
                 runtime_current_world = state.current_world;
                 get_runtime_material_controls().prepare_world(state.current_world);
+                get_global_env_capture_controls().prepare_world(state.current_world);
                 runtime_controls = get_runtime_material_controls().snapshot();
                 last_runtime_revision = runtime_controls.revision;
             }
@@ -2094,6 +2639,14 @@ namespace jkgm {
                 // trails. It overlays Camera Thing HUDs, but Retro is the
                 // ONLY effect applied afterwards, to the complete image.
                 if(mode==renderer_mode::ingame) {
+                    // Unlike the legacy four-frame slab pipeline, live HUD
+                    // updates capture the most recent DirectDraw pixels at
+                    // the actual presentation boundary, before HUD blending.
+                    {
+                        profile_scope hud_upload_cpu(measure,profile_frame.timings[
+                            profile_idx(profile_stage::hud_upload)]);
+                        update_hud_texture_live();
+                    }
                     profile_scope hud_cpu(measure,profile_frame.timings[
                         profile_idx(profile_stage::hud_draw)]);
                     draw_hud();
@@ -2264,92 +2817,75 @@ namespace jkgm {
             }
         }
 
-        static constexpr int hud_texture_num_slabs = 4;
-
-        int curr_slab = 0;
-        // Mirror the contents of each actual OpenGL HUD texture. Front/back
-        // swap every four frames; their contents can differ. Comparing against
-        // just the previous source bitmap would therefore be incorrect.
-        std::array<std::vector<color_rgba8>,2> hud_uploaded_pixels;
-        std::array<std::array<bool,hud_texture_num_slabs>,2> hud_slab_valid{};
-        unsigned hud_back_index = 1U; // hud_texture_a=front, hud_texture_b=back
-        void update_hud_texture()
+        // Live DirectDraw HUD with adaptive dirty rectangles.
+        std::vector<uint16_t> hud_previous_source;
+        uint16_t hud_previous_color_key=0;
+        std::vector<color_rgba8> hud_region_scratch;
+        uint64_t hud_bytes_uploaded_window=0, hud_upload_calls_window=0;
+        uint64_t hud_converted_pixels_window=0, hud_changed_pixels_window=0;
+        uint64_t hud_full_uploads_window=0, hud_skipped_frames_window=0;
+        void update_hud_texture_live()
         {
-            if(curr_slab == 0) {
-                // Convert the source bitmap once every four frames.
-                // Every output pixel is overwritten, so no ZeroMemory needed.
-                for(size_t i=0;i<ddraw1_backbuffer_surface.buffer.size();++i) {
-                    auto const in_em=ddraw1_backbuffer_surface.buffer[i];
-                    ogs->hud_texture_data[i]=rgb565_key_to_srgb_a8(
-                        in_em,in_em==ddraw1_backbuffer_surface.color_key);
-                }
-            }
-
+            auto &source=ddraw1_backbuffer_surface.buffer;
+            if(source.empty())return;
             int const width=get<x>(internal_scr_res);
-            int const slab_rows=get<y>(internal_scr_res)/hud_texture_num_slabs;
-            int const start_row=slab_rows*curr_slab;
-            int const stop_row=curr_slab==hud_texture_num_slabs-1
-                               ? get<y>(internal_scr_res)
-                               : slab_rows*(curr_slab+1);
-            int first_changed=start_row;
-            int last_changed=stop_row;
+            int const height=get<y>(internal_scr_res);
+            uint16_t const key=ddraw1_backbuffer_surface.color_key;
+            bool const force_full=hud_previous_source.size()!=source.size() ||
+                hud_previous_color_key!=key;
+            if(hud_previous_source.size()!=source.size())
+                hud_previous_source.resize(source.size());
+            auto const dirty=find_hud_dirty_regions(
+                source.data(),
+                !force_full?hud_previous_source.data():nullptr,
+                width,height,force_full);
 
-            auto &mirror=hud_uploaded_pixels[hud_back_index];
-            if(mirror.size()!=ogs->hud_texture_data.size()) {
-                mirror.resize(ogs->hud_texture_data.size(),color_rgba8::zero());
-                hud_slab_valid[hud_back_index].fill(false);
-            }
-            if(hud_slab_valid[hud_back_index][curr_slab]) {
-                // Find the first and last changed rows; keep exactly one
-                // contiguous upload. This avoids making many tiny GL calls
-                // for scattered UI pixels while shrinking unchanged slabs.
-                first_changed=stop_row;
-                last_changed=start_row;
-                size_t const row_bytes=size_t(width)*sizeof(color_rgba8);
-                for(int row=start_row;row<stop_row;++row) {
-                    size_t const offset=size_t(row)*size_t(width);
-                    if(std::memcmp(ogs->hud_texture_data.data()+offset,
-                                   mirror.data()+offset,row_bytes)!=0) {
-                        first_changed=std::min(first_changed,row);
-                        last_changed=row+1;
-                    }
-                }
-            }
-
-            if(first_changed<last_changed) {
-                // Texture mirrors track the actual back texture, not the
-                // previous source bitmap, so alternating front/back buffers
-                // never cause stale pixels or skipped updates.
+            if(!dirty.rects.empty()) {
+                // Both live modes write the texture currently displayed.
+                // No four-frame front/back swap or GPU readback is required.
                 gl::set_active_texture_unit(0);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                 ogs->hud_texture_back);
-                auto const region=make_box(make_point(0,first_changed),
-                                           make_point(width,last_changed));
-                size_t const offset=size_t(first_changed)*size_t(width);
-                size_t const num_pixels=size_t(last_changed-first_changed)*size_t(width);
-                gl::tex_sub_image_2d(
-                    gl::texture_bind_target::texture_2d,
-                    /*level*/ 0,region,gl::texture_pixel_format::rgba,
-                    gl::texture_pixel_type::uint8,
-                    make_span(ogs->hud_texture_data)
-                        .subspan(offset,num_pixels).as_const_bytes());
-                std::memcpy(mirror.data()+offset,
-                            ogs->hud_texture_data.data()+offset,
-                            num_pixels*sizeof(color_rgba8));
+                                 ogs->hud_texture_front);
+                for(auto const &rect:dirty.rects) {
+                    int const rw=rect.right-rect.left;
+                    int const rh=rect.bottom-rect.top;
+                    size_t const count=size_t(rw)*size_t(rh);
+                    hud_region_scratch.resize(count,color_rgba8::zero());
+                    for(int y=rect.top;y<rect.bottom;++y) {
+                        size_t const src_row=size_t(y)*size_t(width);
+                        size_t const dst_row=size_t(y-rect.top)*size_t(rw);
+                        for(int x=rect.left;x<rect.right;++x) {
+                            uint16_t const pixel=source[src_row+size_t(x)];
+                            hud_region_scratch[dst_row+size_t(x-rect.left)]=
+                                rgb565_key_to_srgb_a8(pixel,pixel==key);
+                        }
+                        // Update the raw mirror only for uploaded pixels.
+                        // Every other pixel is already identical to the GPU.
+                        std::memcpy(hud_previous_source.data()+src_row+rect.left,
+                                    source.data()+src_row+rect.left,
+                                    size_t(rw)*sizeof(uint16_t));
+                    }
+                    gl::tex_sub_image_2d(
+                        gl::texture_bind_target::texture_2d,0,
+                        make_box(make_point(rect.left,rect.top),
+                                 make_point(rect.right,rect.bottom)),
+                        gl::texture_pixel_format::rgba,
+                        gl::texture_pixel_type::uint8,
+                        make_span(hud_region_scratch).as_const_bytes());
+                }
             }
-            hud_slab_valid[hud_back_index][curr_slab]=true;
-
-            ++curr_slab;
-            if(curr_slab>=hud_texture_num_slabs) {
-                // Preserve JKGM's original four-slab presentation latency and
-                // backbuffer clear regardless of which rows needed upload.
-                std::fill(ddraw1_backbuffer_surface.buffer.begin(),
-                          ddraw1_backbuffer_surface.buffer.end(),
-                          ddraw1_backbuffer_surface.color_key);
-                std::swap(ogs->hud_texture_front,ogs->hud_texture_back);
-                hud_back_index^=1U;
-                curr_slab=0;
+            hud_previous_color_key=key;
+            if(the_config->profile_renderer) {
+                hud_bytes_uploaded_window+=dirty.upload_pixels*sizeof(color_rgba8);
+                hud_upload_calls_window+=dirty.rects.size();
+                hud_converted_pixels_window+=dirty.upload_pixels;
+                hud_changed_pixels_window+=dirty.changed_pixels;
+                if(dirty.full_upload)++hud_full_uploads_window;
+                if(dirty.rects.empty())++hud_skipped_frames_window;
             }
+            // Source is an ephemeral alpha/keyed overlay. Clear EVERY live
+            // frame so removed HUD elements cannot persist on the next frame.
+            std::fill(source.begin(),source.end(),key);
         }
 
         void draw_hud()
@@ -2711,7 +3247,17 @@ namespace jkgm {
                     env_command = override_mat->env->from.has_value() ||
                                   override_mat->env->to.has_value();
                 }
-                bool const has_env_map = env_from.has_value() || env_to.has_value();
+                // A completed COG world capture replaces the global image
+                // only. Explicit/per-MAT EnvMaps keep their precedence, and
+                // authored reflection strength is never changed.
+                auto const generated_env=generated_global_env_binding();
+                bool const generated_allowed=
+                    generated_env.active && global_allowed &&
+                    !(override_mat && override_mat->env) &&
+                    static_cast<int>(mat->reflection_mode)!=2 &&
+                    static_cast<int>(mat->reflection_mode)!=3;
+                bool const has_env_map=env_from.has_value() ||
+                    env_to.has_value() || generated_allowed;
                 // Runtime reflection commands can activate previously matte
                 // materials (neutral dielectric Fresnel, not metallic).
                 float const reflection_strength =
@@ -2723,14 +3269,34 @@ namespace jkgm {
                 if(runtime_reflections && env_from) {
                     env_map = texture_cache->get_texture_handle(*env_from);
                 }
+                bool from_env_valid=env_from.has_value();
+                bool to_env_valid=env_to.has_value();
                 if(runtime_reflections && env_weight > 0.0f && env_to) {
                     gl::set_active_texture_unit(9);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
                                      texture_cache->get_texture_handle(*env_to));
                 }
+                if(runtime_reflections && generated_allowed) {
+                    if(generated_env.from_capture) {
+                        env_map=generated_env.from;
+                        from_env_valid=true;
+                    }
+                    if(generated_env.transition) {
+                        gl::set_active_texture_unit(9);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         generated_env.to);
+                        to_env_valid=true;
+                        env_weight=generated_env.mix;
+                    } else {
+                        // Fade completed: sample only the generated map.
+                        to_env_valid=false;
+                        env_weight=0.0f;
+                    }
+                }
                 prog->set_env_transition(
-                    9, make_point(env_from ? 1.0f : 0.0f,
-                                  env_to ? 1.0f : 0.0f, env_weight, 0.0f));
+                    9, make_point(from_env_valid ? 1.0f : 0.0f,
+                                  to_env_valid ? 1.0f : 0.0f,
+                                  env_weight, 0.0f));
 
                 // Units 6/7 are for linear normal textures; unit 5 is the
                 // already established opaque scene-depth sampler for decals.
@@ -2881,17 +3447,13 @@ namespace jkgm {
 
         void fill_buffer(triangle_batch const &tb, triangle_buffer_model *mdl)
         {
-            // Opt-in: empty native batches need no GL map/unmap. Allocate
-            // populated GPU buffers from used counts rather than the CPU
-            // batch's 10,000-triangle reserve.
-            if(the_config->experimental_native_triangle_uploads &&
-               tb.size()==0U) {
+            // Skip empty batches; upload only the current used triangle count.
+            if(tb.size()==0U) {
                 mdl->num_vertices=0;
                 return;
             }
             mdl->maybe_grow_buffers(
-                (the_config->experimental_native_triangle_uploads
-                    ?tb.size():tb.capacity())*3);
+                tb.size()*3);
 
             auto *vx = mdl->mmio.data();
             auto const cam = read_engine_camera();
@@ -3100,6 +3662,24 @@ namespace jkgm {
             return reason.str();
         }
 
+        // Matcap image and surface mask reserve fragment units 24/25. The
+        // matching shader paths are compiled out on smaller GL devices.
+        bool matcap_available() const
+        {
+            static GLint fragment_units=0;
+            if(fragment_units==0)
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);
+            return fragment_units>=26;
+        }
+
+        bool clearcoat_available() const
+        {
+            static GLint fragment_units=0;
+            if(fragment_units==0)
+                glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);
+            return fragment_units>=28;
+        }
+
         gpu_3do_texture resolve_gpu_3do_material(gpu_3do_group const &group)
         {
             gpu_3do_texture out;
@@ -3166,6 +3746,10 @@ namespace jkgm {
                handle_it->second.surface==surface.get() &&
                handle_it->second.generation==surface->texture_generation)
                 native_id=handle_it->second.mat_id;
+            // COG MAT IDs and GPU D3D handles differ. Always register
+            // defaults under the native MAT ID after generation validation.
+            get_runtime_material_controls().register_mat_clearcoat_default(
+                native_id,surface->clearcoat_defaults);
             runtime_mat_override const *ctl=nullptr;
             auto ctl_it=runtime_controls.per_mat.find(native_id);
             if(ctl_it!=runtime_controls.per_mat.end()) ctl=&ctl_it->second;
@@ -3263,6 +3847,23 @@ namespace jkgm {
                             ctl->env->to.has_value();
             }
             bool const has_env=env_from.has_value()||env_to.has_value();
+            auto coat_values=surface->clearcoat_defaults;
+            if(ctl && ctl->clearcoat)
+                coat_values=ctl->clearcoat->value();
+            out.clearcoat_params=make_point(
+                coat_values[0],coat_values[1],coat_values[2],0.0f);
+            bool const coat_active=the_config->enable_reflections &&
+                coat_values[0]>0.0f && clearcoat_available();
+            if(coat_active && surface->clearcoat_surface_map) {
+                out.clearcoat_surface=texture_cache->get_texture_handle(
+                    *surface->clearcoat_surface_map);
+                out.has_clearcoat_surface=true;
+            }
+            if(coat_active && surface->clearcoat_normal_map) {
+                out.clearcoat_normal=texture_cache->get_texture_handle(
+                    *surface->clearcoat_normal_map);
+                out.has_clearcoat_normal=true;
+            }
             float const strength=surface->reflection_strength>0
                 ? surface->reflection_strength :
                 ((env_command && has_env)?1.0f:0.0f);
@@ -3273,7 +3874,7 @@ namespace jkgm {
             bool const default_normals=is_default_specular_enabled() &&
                 !out.has_authored_specular;
             if(the_config->enable_reflections &&
-               (strength>0.0f || default_normals)) {
+               (strength>0.0f || default_normals || coat_active)) {
                 out.reflection_strength=strength;
                 out.roughness=surface->roughness;
                 out.metalness=surface->metalness;
@@ -3282,15 +3883,36 @@ namespace jkgm {
                 out.normal_scroll=scroll_offset(surface->normal_scroll);
                 out.normal_scroll2=scroll_offset(surface->normal_scroll2);
                 out.reflection_mode=static_cast<int>(surface->reflection_mode);
-                if(strength>0.0f && env_from) {
+                if((strength>0.0f || coat_active) && env_from) {
                     out.environment=texture_cache->get_texture_handle(*env_from);
                     out.has_environment=true;
                 }
-                if(strength>0.0f && env_weight>0.0f) {
+                if((strength>0.0f || coat_active) && env_weight>0.0f) {
                     out.environment_transition=env_weight;
                     if(env_to) {
                         out.environment2=texture_cache->get_texture_handle(*env_to);
                         out.has_environment2=true;
+                    }
+                }
+                auto const generated_env=generated_global_env_binding();
+                bool const generated_allowed=generated_env.active &&
+                    (!surface->replacement_material ||
+                     !surface->replacement_material->has_explicit_env_map) &&
+                    !(ctl && ctl->env) &&
+                    out.reflection_mode!=2 && out.reflection_mode!=3;
+                if((strength>0.0f || coat_active) && generated_allowed) {
+                    if(generated_env.from_capture) {
+                        out.environment=generated_env.from;
+                        out.has_environment=true;
+                    }
+                    if(generated_env.transition) {
+                        out.environment2=generated_env.to;
+                        out.has_environment2=true;
+                        out.environment_transition=generated_env.mix;
+                    } else {
+                        out.environment2=gl::default_texture;
+                        out.has_environment2=false;
+                        out.environment_transition=0.0f;
                     }
                 }
                 if(surface->normal_map2) {
@@ -3304,6 +3926,42 @@ namespace jkgm {
                 if(surface->normal_map) {
                     out.normal=texture_cache->get_texture_handle(*surface->normal_map);
                     out.has_normal=true;
+                }
+            }
+            // Matcap is an *artistic* layer, completely independent of
+            // enable_reflections, inherited EnvMaps and GGX eligibility.
+            if(surface->matcap_map) {
+                auto const &factor=surface->matcap_factor;
+                float const red=get<0>(factor);
+                float const green=get<1>(factor);
+                float const blue=get<2>(factor);
+                if(red>0.0f || green>0.0f || blue>0.0f) {
+                    out.matcap=texture_cache->get_texture_handle(
+                        *surface->matcap_map);
+                    out.has_matcap=true;
+                    out.matcap_params=make_point(
+                        red,green,blue,surface->matcap_roughness);
+                    if(surface->matcap_surface_map) {
+                        out.matcap_surface=texture_cache->get_texture_handle(
+                            *surface->matcap_surface_map);
+                        out.has_matcap_surface=true;
+                    }
+                    // The optional existing material normal layers can
+                    // affect a Matcap even when reflections are disabled.
+                    out.normal_strength=surface->normal_strength;
+                    out.normal_strength2=surface->normal_strength2;
+                    out.normal_scroll=scroll_offset(surface->normal_scroll);
+                    out.normal_scroll2=scroll_offset(surface->normal_scroll2);
+                    if(surface->normal_map) {
+                        out.normal=texture_cache->get_texture_handle(
+                            *surface->normal_map);
+                        out.has_normal=true;
+                    }
+                    if(surface->normal_map2) {
+                        out.normal2=texture_cache->get_texture_handle(
+                            *surface->normal_map2);
+                        out.has_normal2=true;
+                    }
                 }
             }
             // GPU upload has erased the original 8-bit MAT indices.
@@ -3415,6 +4073,289 @@ namespace jkgm {
             return frame;
         }
 
+        // Allocate lazily: baseline builds never create the texture, stencil,
+        // FBO, or composite shader. A missing stencil FBO fails open to the
+        // original full-resolution draw, never to invisible smoke.
+        bool ensure_smoke_half_target()
+        {
+            if(smoke_half_failed || !ogs || !ogs->post_smoke_composite)
+                return false;
+            if(smoke_half_buffer) return true;
+            auto const dims=make_size(
+                std::max(1,(get<x>(conf_scr_res)+1)/2),
+                std::max(1,(get<y>(conf_scr_res)+1)/2));
+            auto buffer=std::make_unique<post_buffer>(dims);
+            glGenRenderbuffers(1,&smoke_half_stencil);
+            glBindRenderbuffer(GL_RENDERBUFFER,smoke_half_stencil);
+            glRenderbufferStorage(GL_RENDERBUFFER,GL_STENCIL_INDEX8,
+                                  get<x>(dims),get<y>(dims));
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,buffer->fbo);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_STENCIL_ATTACHMENT,
+                                      GL_RENDERBUFFER,smoke_half_stencil);
+            GLenum const status=glCheckFramebufferStatus(GL_FRAMEBUFFER);
+            glBindRenderbuffer(GL_RENDERBUFFER,0);
+            gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                 gl::default_framebuffer);
+            if(status!=GL_FRAMEBUFFER_COMPLETE) {
+                LOG_WARNING("SMOKE half-res unavailable: framebuffer status=",
+                            static_cast<unsigned>(status),
+                            " falling_back=full_resolution");
+                glDeleteRenderbuffers(1,&smoke_half_stencil);
+                smoke_half_stencil=0;
+                smoke_half_failed=true;
+                return false;
+            }
+            smoke_half_buffer=std::move(buffer);
+            LOG_INFO("SMOKE half-res ready dimensions=",get<x>(dims),
+                     "x",get<y>(dims),
+                     " budget=",the_config->fluid_sprite_layer_budget,
+                     " NOTE=fluid_SPR_only_back_to_front_no_world_changes");
+            return true;
+        }
+
+
+        // Stage 1 GPU LOD experiment: JK already draws GeoSet 0 whenever
+        // experimental_auto_3do_lod is set. Select a GENERATED GPU mesh for
+        // main-view mesh nodes according to the owning SithThing's ONE
+        // authored rdModel3 radius, not each hand/foot/torso mesh radius.
+        // Configurable new-variant budget only limits CPU generation work,
+        // never mesh eligibility or reduction aggressiveness.
+        // Reflection cameras can select independent LODs in a later step.
+        void apply_experimental_auto_3do_lods()
+        {
+            if(!the_config || !the_config->experimental_auto_3do_lod ||
+               !the_config->use_gpu_cache || frame_gpu_3do_instances.empty())
+                return;
+            auto const cam=read_active_render_camera();
+            if(!cam.valid)return;
+            double const tangent=std::tan(double(cam.fov)*
+                                         0.008726646259971648);
+            double const screen_half=get<x>(internal_scr_res_f)*0.5;
+            if(!(tangent>0.0) || !(screen_half>0.0))return;
+            if((gpu_3do_present_serial&63U)==0U) {
+                for(auto it=auto_3do_lod_cache.begin();
+                    it!=auto_3do_lod_cache.end();) {
+                    if(gpu_3do_present_serial>=it->second.last_seen &&
+                       gpu_3do_present_serial-it->second.last_seen>96U)
+                        it=auto_3do_lod_cache.erase(it);
+                    else ++it;
+                }
+                for(auto it=auto_3do_lod_history.begin();
+                    it!=auto_3do_lod_history.end();) {
+                    if(gpu_3do_present_serial>=it->second.second &&
+                       gpu_3do_present_serial-it->second.second>96U)
+                        it=auto_3do_lod_history.erase(it);
+                    else ++it;
+                }
+            }
+            unsigned generated=0U,selected[3]={0U,0U,0U};
+            uint64_t generated_cpu_ns=0U;
+            auto eligible=[](gpu_3do_instance const &inst) {
+                return inst.geometry && inst.id!=0U &&
+                    !inst.shadow_only && !inst.is_projected_decal &&
+                    !inst.is_sprite_quad && !inst.camera_hud;
+            };
+            // The minimum is per owning SithThing, not per hierarchy rdMesh.
+            // Count original main-view mesh nodes before replacing any IDs.
+            std::unordered_map<uint64_t,uint64_t> original_by_owner;
+            for(auto const &inst:frame_gpu_3do_instances)
+                if(eligible(inst) && inst.shadow_owner)
+                    original_by_owner[inst.shadow_owner]+=
+                        inst.geometry->indices.size()/3U;
+            auto proposed_by_owner=original_by_owner;
+            struct planned_lod {
+                gpu_3do_instance *instance=nullptr;
+                std::shared_ptr<gpu_3do_geometry const> geometry;
+                uint64_t id=0,owner=0;
+                unsigned level=0;
+            };
+            std::vector<planned_lod> pending;
+            pending.reserve(frame_gpu_3do_instances.size());
+            std::set<uint64_t> floor_rejected_owners;
+            uint64_t floor_rejected_nodes=0U;
+            struct thing_lod_decision {
+                unsigned level=0U;
+                float radius_px=-1.0f;
+            };
+            // Compute the projected native Thing radius only once per
+            // owner each frame. All sibling hierarchy meshes (including
+            // tiny feet/hands) share that selection and hysteresis.
+            static thread_local std::unordered_map<uint64_t,thing_lod_decision>
+                thing_levels;
+            thing_levels.clear();
+            thing_levels.reserve(frame_gpu_3do_instances.size());
+            for(auto &inst:frame_gpu_3do_instances) {
+                if(!eligible(inst))continue;
+                float pixel_radius=-1.0f;
+                unsigned level=0U;
+                int const debug_mode=the_config->gpu_3do_auto_lod_debug_mode;
+                if(debug_mode!=0) {
+                    // Explicit debug overrides include ownerless procedural
+                    // geometry; normal auto-LOD requires a native Thing.
+                    level=select_gpu_3do_auto_lod(
+                        0.0f,0U,
+                        the_config->gpu_3do_auto_lod_lod1_radius_px,
+                        the_config->gpu_3do_auto_lod_lod2_radius_px,
+                        debug_mode);
+                } else if(inst.shadow_owner &&
+                          inst.owning_thing_world_position_valid &&
+                          inst.owning_thing_lod_radius_valid) {
+                    auto const inserted=thing_levels.try_emplace(
+                        inst.shadow_owner,thing_lod_decision{});
+                    auto &decision=inserted.first->second;
+                    if(inserted.second) {
+                        decision.radius_px=gpu_3do_auto_lod_projected_radius_px(
+                            inst.owning_thing_world_position,
+                            cam.position,cam.forward,
+                            inst.owning_thing_lod_radius,screen_half,tangent);
+                        if(decision.radius_px>=0.0f) {
+                            unsigned previous=0U;
+                            auto const history=auto_3do_lod_history.find(
+                                inst.shadow_owner);
+                            if(history!=auto_3do_lod_history.end())
+                                previous=history->second.first;
+                            decision.level=select_gpu_3do_auto_lod(
+                                decision.radius_px,previous,
+                                the_config->gpu_3do_auto_lod_lod1_radius_px,
+                                the_config->gpu_3do_auto_lod_lod2_radius_px);
+                            auto_3do_lod_history[inst.shadow_owner]={
+                                decision.level,gpu_3do_present_serial};
+                        }
+                    }
+                    pixel_radius=decision.radius_px;
+                    level=decision.level;
+                }
+                if(level==0U) {++selected[0];continue;}
+                // Skip generating any variants for objects already at the
+                // minimum. This also protects a standalone 12-triangle box.
+                auto const owner_total=original_by_owner.find(inst.shadow_owner);
+                if(owner_total!=original_by_owner.end() &&
+                   owner_total->second<=static_cast<uint64_t>(
+                       the_config->gpu_3do_auto_lod_min_object_triangles)) {
+                    ++selected[0];
+                    floor_rejected_owners.insert(inst.shadow_owner);
+                    ++floor_rejected_nodes;
+                    continue;
+                }
+                // Source mesh identity is independent of the shared Thing
+                // LOD decision; variants are still cached per rdMesh.
+                uint64_t const source_id=inst.id;
+                auto &entry=auto_3do_lod_cache[source_id];
+                if(entry.source!=inst.geometry) {
+                    // Live SetModelMesh may replace geometry under the same
+                    // native mesh ID. Never reuse a stale variant GL buffer.
+                    for(uint64_t old_id:entry.ids)if(old_id) {
+                        gpu_3do_gl_cache.erase(old_id);
+                        gpu_3do_last_drawn.erase(old_id);
+                    }
+                    entry={};
+                    entry.source=inst.geometry;
+                }
+                entry.last_seen=gpu_3do_present_serial;
+                unsigned const index=level-1U;
+                if(!entry.attempted[index] &&
+                   gpu_3do_auto_lod_budget_allows(
+                       generated,the_config->gpu_3do_auto_lod_generation_budget)) {
+                    entry.attempted[index]=true;
+                    ++generated;
+                    auto const cpu_started=the_config->profile_renderer
+                        ?std::chrono::steady_clock::now()
+                        :std::chrono::steady_clock::time_point{};
+                    entry.levels[index]=generate_gpu_3do_auto_lod(
+                        *entry.source,level);
+                    uint64_t cpu_ns=0U;
+                    if(the_config->profile_renderer) {
+                        cpu_ns=static_cast<uint64_t>(
+                            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::steady_clock::now()-cpu_started).count());
+                        generated_cpu_ns+=cpu_ns;
+                    }
+                    if(!entry.levels[index] &&
+                       the_config->profile_renderer) {
+                        LOG_INFO("AUTO 3DO LOD unreduced source=",source_id,
+                                 " level=",level,
+                                 " triangles=",
+                                 entry.source->indices.size()/3U,
+                                 " groups=",entry.source->groups.size(),
+                                 " cpu_generation_us=",cpu_ns/1000U,
+                                 " reason=no_nonempty_reduction");
+                    }
+                    if(entry.levels[index]) {
+                        // Include resource identity AND the generated level:
+                        // GL buffers may not alias base-mesh GPU cache IDs.
+                        uint64_t const pointer=static_cast<uint64_t>(
+                            reinterpret_cast<uintptr_t>(entry.source.get()));
+                        entry.ids[index]=source_id ^
+                            (pointer*0x9e3779b97f4a7c15ULL) ^
+                            (uint64_t(level)*0xbf58476d1ce4e5b9ULL);
+                        if(the_config->profile_renderer) {
+                            LOG_INFO("AUTO 3DO LOD generated source=",source_id,
+                                     " level=",level,
+                                     " triangles_native=",
+                                     entry.source->indices.size()/3U,
+                                     " triangles_generated=",
+                                     entry.levels[index]->indices.size()/3U,
+                                     " groups_source=",entry.source->groups.size(),
+                                     " groups_reduced=",entry.levels[index]->groups.size(),
+                                     " screen_radius_px=",pixel_radius,
+                                     " cpu_generation_us=",cpu_ns/1000U);
+                        }
+                    }
+                }
+                if(!entry.levels[index]) {
+                    ++selected[0];continue;
+                }
+                if(inst.shadow_owner) {
+                    auto &proposed=proposed_by_owner[inst.shadow_owner];
+                    proposed-=inst.geometry->indices.size()/3U;
+                    proposed+=entry.levels[index]->indices.size()/3U;
+                }
+                pending.push_back({&inst,entry.levels[index],entry.ids[index],
+                                   inst.shadow_owner,level});
+            }
+            // The proposal must be checked after ALL sibling rdMeshes have
+            // been considered. Never simplify only part of a low-poly Thing.
+            for(auto const &plan:pending) {
+                bool accept=true;
+                if(plan.owner!=0U) {
+                    auto const original=original_by_owner.find(plan.owner);
+                    auto const proposed=proposed_by_owner.find(plan.owner);
+                    if(original!=original_by_owner.end() &&
+                       proposed!=proposed_by_owner.end())
+                        accept=gpu_3do_auto_lod_object_allows(
+                            original->second,proposed->second,
+                            static_cast<unsigned>(
+                                the_config->gpu_3do_auto_lod_min_object_triangles));
+                }
+                if(!accept) {
+                    ++selected[0];
+                    floor_rejected_owners.insert(plan.owner);
+                    ++floor_rejected_nodes;
+                    continue;
+                }
+                plan.instance->geometry=plan.geometry;
+                plan.instance->id=plan.id;
+                ++selected[plan.level];
+            }
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("AUTO 3DO LOD main-camera base=",selected[0],
+                         " lod1=",selected[1]," lod2=",selected[2],
+                         " debug_mode=",the_config->gpu_3do_auto_lod_debug_mode,
+                         " lod1_radius_px=",the_config->gpu_3do_auto_lod_lod1_radius_px,
+                         " lod2_radius_px=",the_config->gpu_3do_auto_lod_lod2_radius_px,
+                         " cpu_variants=",auto_3do_lod_cache.size(),
+                         " thing_decisions=",thing_levels.size(),
+                         " generation_budget=",the_config->gpu_3do_auto_lod_generation_budget,
+                         " min_object_triangles=",
+                         the_config->gpu_3do_auto_lod_min_object_triangles,
+                         " owning_things=",original_by_owner.size(),
+                         " floor_rejected_things=",floor_rejected_owners.size(),
+                         " floor_rejected_nodes=",floor_rejected_nodes,
+                         " generated_this_frame=",generated,
+                         " cpu_generation_us=",generated_cpu_ns/1000U);
+        }
+
         // Separate opaque and alpha passes. Native JK no longer processes
         // individual faces in either path: only GPU indexed ranges remain.
         void draw_gpu_3do_preview(bool transparent,bool post_exempt=false,
@@ -3458,6 +4399,7 @@ namespace jkgm {
             bool const have_perspective_frustum=frame_camera.perspective;
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
+            prog.set_smoke_half_resolution(false);
             prog.set_light_brightness_limit(
                 authored_light_limit(the_config->enable_baked_overbright));
             // Persistent GL program: reset instancing before every draw pass,
@@ -3610,7 +4552,11 @@ namespace jkgm {
                 auto const &fog=get_fog_settings();
                 auto const info=fog.info.value(),color=fog.color.value();
                 prog.set_fog(make_point(info[0],info[1],
-                                        the_config->enable_fog?info[2]:0.0f,0.0f),
+                                        the_config->enable_fog?info[2]:0.0f,
+                               (the_config->experimental_radial_fog &&
+                                the_config->enable_fog)
+                                   ?(the_config->experimental_exponential_fog?2.0f:1.0f)
+                                   :0.0f),
                              make_point(color[0],color[1],color[2],0.0f));
             }
             struct pending_draw {
@@ -3640,6 +4586,7 @@ namespace jkgm {
             // They are consumed entirely in this non-recursive draw call.
             static thread_local std::vector<pending_draw> draws;
             static thread_local std::vector<pending_draw> merged_draws;
+            static thread_local std::vector<pending_draw> smoke_draws;
             // Opaque prepares the ordinary alpha list too. Keep its matrices
             // alive across the intervening projected-decal pass; deferred
             // Camera HUD and decals have independent scratch matrices.
@@ -3661,6 +4608,26 @@ namespace jkgm {
             auto &modelviews=ordinary_pass
                 ?ordinary_modelviews:isolated_modelviews;
             draws.clear();
+            if(!transparent && ordinary_pass && !decals_only &&
+               the_config->experimental_3do_occlusion_culling &&
+               thing_occlusion_queries) {
+                thing_occlusion_queries->set_world(
+                    world_cache_target && world_cache_target->ready
+                       ?world_cache_target->loaded_world:0U);
+                auto const poll_start=the_config->profile_renderer
+                    ?std::chrono::steady_clock::now()
+                    :std::chrono::steady_clock::time_point{};
+                auto const poll_stats=thing_occlusion_queries->poll();
+                if(the_config->profile_renderer) {
+                    thing_occlusion_poll_checked_window+=poll_stats.checked;
+                    thing_occlusion_poll_completed_window+=poll_stats.completed;
+                    thing_occlusion_poll_pending_window+=poll_stats.pending_after;
+                    thing_occlusion_poll_ns_window+=uint64_t(
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now()-poll_start).count());
+                    ++thing_occlusion_poll_calls_window;
+                }
+            }
             for(auto &bucket:sprite_buckets)bucket.draws.clear();
             sprite_lookup.clear();
             size_t used_sprite_buckets=0;
@@ -3678,8 +4645,52 @@ namespace jkgm {
                 ?profile_clock::now():profile_clock::time_point{};
             if(!reuse_alpha) for(auto const &inst:instances) {
                 if(!inst.geometry || inst.shadow_only ||
+                   (!inst.is_sprite_quad && !inst.is_projected_decal &&
+                    inst.thing_opacity<=0.0f) ||
                    (!post_exempt && inst.is_projected_decal!=decals_only))
                     continue;
+                // Only skip MAIN view GPU draw setup, never native JK
+                // traversal, reflected cameras, sun/shadow atlases or
+                // projected decals. Unusable/stale query records fail open.
+                bool const sprite_occlusion_eligible=
+                    inst.is_sprite_quad && inst.sprite_occlusion_resource &&
+                    !inst.world_lighting_exempt;
+                bool const occlusion_eligible=ordinary_pass &&
+                    !decals_only && the_config->experimental_3do_occlusion_culling &&
+                    thing_occlusion_queries && inst.shadow_owner &&
+                    (sprite_occlusion_eligible ||
+                     (!inst.is_sprite_quad &&
+                      inst.owning_thing_world_position_valid)) &&
+                    !inst.camera_hud && !inst.skybox_vertex_lighting &&
+                    !inst.transient_procedural && !inst.saber_trail_active;
+                if(occlusion_eligible) {
+                    auto const visibility_start=the_config->profile_renderer
+                        ?std::chrono::steady_clock::now()
+                        :std::chrono::steady_clock::time_point{};
+                    bool const occluded=sprite_occlusion_eligible
+                        ?thing_occlusion_queries->hidden(
+                            inst.shadow_owner,
+                            gpu_sprite_occlusion_bound(inst.transform),
+                            cam,gpu_3do_present_serial,
+                            uint32_t(inst.sprite_occlusion_resource),
+                            &inst.transform)
+                        :thing_occlusion_queries->hidden(
+                            inst.shadow_owner,inst.owning_thing_world_position,
+                            cam,gpu_3do_present_serial);
+                    if(the_config->profile_renderer) {
+                        thing_occlusion_visibility_ns_window+=uint64_t(
+                            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::steady_clock::now()-
+                                visibility_start).count());
+                        ++thing_occlusion_visibility_calls_window;
+                        if(occluded) {
+                            ++thing_occlusion_visibility_skips_window;
+                            if(sprite_occlusion_eligible)
+                                ++sprite_occlusion_visibility_skips_window;
+                        }
+                    }
+                    if(occluded)continue;
+                }
                 modelviews.push_back(gpu_3do_native_modelview(native_view,inst.transform));
                 std::array<float,3> local_eye{};
                 bool const can_cpu_cull=gpu_3do_local_eye(modelviews.back(),local_eye);
@@ -3768,14 +4779,19 @@ namespace jkgm {
                     // the existing opaque architecture and depth-tested.
                     // The MAT may be fully opaque; its native SPR instance
                     // opacity (including SetSpriteInfo) is independent.
+                    bool const fading_3do=!inst.is_sprite_quad &&
+                        !inst.is_projected_decal &&
+                        inst.thing_opacity<0.999f;
                     auto const material_policy=inst.is_projected_decal
                         ? gpu_3do_alpha_mode::blend_only
                         : choose_gpu_3do_alpha_mode(
                             (group.face_type&0x2U)!=0 ||
-                                (inst.is_sprite_quad && inst.sprite_opacity<0.999f),
+                                (inst.is_sprite_quad && inst.sprite_opacity<0.999f) ||
+                                (fading_3do && !inst.thing_dither),
                             tex.alpha,tex.masked,
                             tex.special||tex.emissive_only,
-                            tex.opacity,tex.dithered);
+                            tex.opacity,tex.dithered ||
+                                (fading_3do && inst.thing_dither));
                     // A live saber SideMat can contain fully opaque core
                     // texels. The ordinary "mixed" route writes those to
                     // the opaque depth buffer, which then rejects the final
@@ -3959,6 +4975,44 @@ namespace jkgm {
             if(gpu_profiling)
                 profile_frame.gpu_preview_sort_us[pass_index]+=
                     elapsed_profile_us(sort_begin,profile_clock::now());
+            // Preserve original back-to-front order within BOTH partitions.
+            // Smoke is composed after the ordinary translucent 3DO pass.
+            // The split never touches native world, gun, opaque, or cutouts.
+            smoke_draws.clear();
+            bool const split_smoke=transparent && ordinary_pass &&
+                                   the_config->use_gpu_cache &&
+                                   the_config->experimental_half_res_fluid_sprites &&
+                                   ensure_smoke_half_target();
+            // The lazy FBO constructor may bind its texture on the
+            // previously active sampler unit (including scene-depth unit 8).
+            // Restore opaque depth even when target creation failed and we
+            // fall back to full-resolution smoke.
+            if(transparent && ordinary_pass &&
+               the_config->experimental_half_res_fluid_sprites) {
+                gl::set_active_texture_unit(8);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 frame_screen->get_resolved_depth_texture());
+                gl::set_active_texture_unit(0);
+            }
+            if(split_smoke) {
+                // FBO construction changes the binding on the first frame.
+                frame_screen->begin_transparency_pass();
+                size_t write=0;
+                for(size_t read=0;read<draws.size();++read) {
+                    auto &candidate=draws[read];
+                    bool const fluid_sprite=candidate.instance->is_sprite_quad &&
+                        !candidate.instance->camera_hud &&
+                        !candidate.instance->is_projected_decal &&
+                        candidate.texture->blend==material_blend_mode::fluid;
+                    if(fluid_sprite)
+                        smoke_draws.push_back(std::move(candidate));
+                    else {
+                        if(write!=read)draws[write]=std::move(candidate);
+                        ++write;
+                    }
+                }
+                draws.resize(write);
+            }
             gpu_3do_instance const *active_instance=nullptr;
             bool prev_specular_active=false;
             bool prev_albedo_transition=false;
@@ -3998,6 +5052,7 @@ namespace jkgm {
             static thread_local std::vector<void const *> multidraw_offsets;
             auto const submit_begin=gpu_profiling
                 ?profile_clock::now():profile_clock::time_point{};
+            auto submit_draws=[&] {
             for(size_t draw_start=0;draw_start<draws.size();) {
                 auto const &draw=draws[draw_start];
                 auto const &material=*draw.texture;
@@ -4085,7 +5140,10 @@ namespace jkgm {
                 }
                 auto it=gpu_3do_gl_cache.find(inst.id);
                 if(it==gpu_3do_gl_cache.end()) {
-                    auto ptr=std::make_unique<gpu_3do_gl_mesh>(*inst.geometry);
+                    auto ptr=std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,*inst.geometry,
+                            the_config->profile_renderer
+                                ? &packed_3do_upload_profile : nullptr);
                     if(the_config->profile_renderer) ++profile_frame.gpu_uploads;
                     it=gpu_3do_gl_cache.emplace(inst.id,std::move(ptr)).first;
                     // Count uploads through PERF; do not log every temporary
@@ -4093,6 +5151,8 @@ namespace jkgm {
                 }
                 gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                 if(active_instance!=draw.instance) {
+                    // Probe selection is per material below, not per Thing:
+                    // a single model may mix shared and locally captured MATs.
                     // Multiple cars can instance the same cached mesh ID with
                     // different world matrices. Compare instances, not IDs.
                     // Match JK rdModel3_DrawMesh: combine the original
@@ -4104,6 +5164,7 @@ namespace jkgm {
                                          make_point(m[6],m[7],m[8],0.0f),
                                          make_point(m[9],m[10],m[11],1.0f));
                     gl::bind_vertex_array(it->second->vao);
+                    prog.set_packed_vertex_format(it->second->packed_vertex_format);
                     // Persistent GL uniforms must reset on each Thing.
                     prog.set_continuous_ambient(
                         continuous_buffer_ready && inst.continuous_ambient_fallback
@@ -4184,7 +5245,8 @@ namespace jkgm {
                 // its MAT texture is fully opaque (JK uses alpha=90/255).
                 float const face_opacity=inst.is_projected_decal
                     ? inst.decal_opacity
-                    : (inst.is_sprite_quad ? inst.sprite_opacity : 1.0f) *
+                    : (inst.is_sprite_quad ? inst.sprite_opacity :
+                        inst.thing_opacity) *
                       ((group.face_type&0x2U)!=0 ? 90.0f/255.0f : 1.0f);
                 if(transparent) {
                     switch(material.blend) {
@@ -4275,19 +5337,68 @@ namespace jkgm {
                     material.blend!=material_blend_mode::multiply;
                 auto const specular=gpu_specular_parameters(
                     material,default_eligible);
+                int const reflection_mode=effective_capture_reflection_mode(
+                    material.reflection_mode);
+                auto const probe_it=reflection_mode==7
+                    ?reflection_probes.find(shared_reflection_owner_key)
+                    :reflection_probes.find(inst.shadow_owner);
+                bool const hemi_active=
+                    (reflection_mode==5 || reflection_mode==6 ||
+                     reflection_mode==7) &&
+                    probe_it!=reflection_probes.end() &&
+                    probe_it->second.ready &&
+                    probe_it->second.mode==reflection_mode &&
+                    probe_it->second.seen_frame==gpu_3do_present_serial &&
+                    probe_it->second.target && probe_it->second.target->ready() &&
+                    !post_exempt && !decals_only && !inst.camera_hud &&
+                    !inst.is_sprite_quad && !inst.is_projected_decal;
+                auto const *active_probe=hemi_active?&probe_it->second:nullptr;
+                if(active_probe) {
+                    gl::set_active_texture_unit(23);
+                    glBindTexture(GL_TEXTURE_2D_ARRAY,
+                                  active_probe->target->color_texture());
+                    gl::set_active_texture_unit(0);
+                }
+                auto const &capture_camera=active_probe
+                    ?active_probe->camera:frame_camera.camera;
+                prog.set_hemi_reflection(hemi_active,
+                    make_point(capture_camera.right[0],
+                               capture_camera.right[1],
+                               capture_camera.right[2]),
+                    make_point(capture_camera.forward[0],
+                               capture_camera.forward[1],
+                               capture_camera.forward[2]),
+                    make_point(capture_camera.up[0],
+                               capture_camera.up[1],
+                               capture_camera.up[2]),
+                    1.0f,1.0f,hemi_active?reflection_mode:0);
+                bool const coat_active=clearcoat_available() &&
+                    the_config->enable_reflections &&
+                    get<0>(material.clearcoat_params)>0.0f &&
+                    !post_exempt && !decals_only && !inst.camera_hud &&
+                    !inst.is_sprite_quad && !inst.is_projected_decal &&
+                    !inst.world_lighting_exempt && !material.solid_fullbright &&
+                    material.albedo_source!=0;
                 bool const spec_active=!inst.camera_hud &&
                     specular.first>0.0f &&
                     (material.has_environment ||
-                     material.has_environment2 || sun_active ||
-                     point_specular_active);
+                     material.has_environment2 || hemi_active ||
+                     sun_active || point_specular_active);
                 bool const diffuse_mapping=
                     the_config->enable_normal_mapped_diffuse &&
                     !inst.camera_hud && !inst.is_projected_decal &&
                     !inst.is_sprite_quad && !inst.world_lighting_exempt &&
                     !group.solid_color && !material.solid_fullbright &&
                     (material.has_normal || material.has_normal2);
+                bool const matcap_active=matcap_available() &&
+                    material.has_matcap && !post_exempt && !decals_only &&
+                    !inst.camera_hud && !inst.is_sprite_quad &&
+                    !inst.is_projected_decal && !inst.world_lighting_exempt &&
+                    material.albedo_source!=0;
                 bool const material_normals_active=
-                    spec_active || diffuse_mapping;
+                    spec_active || diffuse_mapping || matcap_active ||
+                    coat_active;
+                bool const needs_environment=spec_active || coat_active;
                 if(material_normals_active) {
                     if(spec_active) {
                         gl::set_active_texture_unit(2);
@@ -4304,12 +5415,12 @@ namespace jkgm {
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          material.normal2);
                     }
-                    if(spec_active && material.has_environment) {
+                    if(needs_environment && material.has_environment) {
                         gl::set_active_texture_unit(4);
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                                          material.environment);
                     }
-                    if(spec_active &&
+                    if(needs_environment &&
                        material.environment_transition>0.0f &&
                        material.has_environment2) {
                         gl::set_active_texture_unit(7);
@@ -4317,10 +5428,10 @@ namespace jkgm {
                                          material.environment2);
                     }
                     prog.set_environment(
-                        spec_active && material.has_environment,
-                        spec_active && material.has_environment2,
-                        spec_active?material.environment_transition:0.0f,
-                        material.reflection_mode);
+                        needs_environment && material.has_environment,
+                        needs_environment && material.has_environment2,
+                        needs_environment?material.environment_transition:0.0f,
+                        reflection_mode);
                     prog.set_point_specular(
                         make_point(spec_active?specular.first:0.0f,
                                    specular.second,material.metalness,
@@ -4339,6 +5450,34 @@ namespace jkgm {
                     prog.set_environment(false,false,0.0f,0);
                 }
                 prev_specular_active=material_normals_active;
+                if(matcap_active) {
+                    gl::set_active_texture_unit(24);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.matcap);
+                    if(material.has_matcap_surface) {
+                        gl::set_active_texture_unit(25);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         material.matcap_surface);
+                    }
+                }
+                prog.set_matcap(matcap_active,material.matcap_params,
+                                matcap_active && material.has_matcap_surface);
+                if(coat_active) {
+                    if(material.has_clearcoat_surface) {
+                        gl::set_active_texture_unit(26);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         material.clearcoat_surface);
+                    }
+                    if(material.has_clearcoat_normal) {
+                        gl::set_active_texture_unit(27);
+                        gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                         material.clearcoat_normal);
+                    }
+                }
+                prog.set_clearcoat(coat_active,material.clearcoat_params,
+                    coat_active && material.has_clearcoat_surface,
+                    coat_active && material.has_clearcoat_normal);
+                gl::set_active_texture_unit(0);
                 // JK's high-resolution MAT patch uses a 256x256 maximum UV
                 // reference area for *models*, independently per dimension.
                 // For a 64px MAT, 0..256 repeats four times; for >=256px,
@@ -4352,6 +5491,15 @@ namespace jkgm {
                     ? material.height
                     : gpu_3do_model_uv_extent(material.height);
                 prog.set_solid_fullbright(material.solid_fullbright);
+                // The same shader uniform fades emissive RGB for 3DOs and
+                // SPRs. SetSpriteInfo changes sprite_opacity, not the 3DO
+                // thing_opacity field. Keep emission independent of MAT
+                // albedo alpha, and do not double-fade dithered 3DO pixels.
+                prog.set_thing_opacity(
+                    inst.is_sprite_quad ? inst.sprite_opacity :
+                    (inst.thing_dither &&
+                     draw.policy==gpu_3do_alpha_mode::dithered
+                        ? 1.0f : inst.thing_opacity));
                 prog.set_surface(material.albedo_source,uv_width,
                                  uv_height,transparent,
                                  static_cast<int>(material.blend),
@@ -4447,11 +5595,98 @@ namespace jkgm {
                             sprite_batch_count;
                     } else if(draw_end>draw_start+1)
                         ++profile_frame.gpu_multidraw_calls;
-                    for(size_t n=draw_start;n<draw_end;n++)
-                        profile_frame.gpu_draw_triangles+=
-                            draws[n].group->count/3;
+                    for(size_t n=draw_start;n<draw_end;n++) {
+                        auto const &item=draws[n];
+                        profile_frame.gpu_draw_triangles+=item.group->count/3;
+                        if(post_exempt || decals_only)continue;
+                        if(transparent) {
+                            if(item.instance->is_sprite_quad) {
+                                if(item.texture->blend==material_blend_mode::fluid)
+                                    ++profile_frame.gpu_alpha_fluid_sprite_ranges;
+                                else ++profile_frame.gpu_alpha_other_sprite_ranges;
+                            } else ++profile_frame.gpu_alpha_model_ranges;
+                        } else if(item.instance->is_sprite_quad &&
+                                  (item.policy==gpu_3do_alpha_mode::masked ||
+                                   item.policy==gpu_3do_alpha_mode::dithered)) {
+                            ++profile_frame.gpu_opaque_cutout_sprite_ranges;
+                        }
+                    }
                 }
                 draw_start=draw_end;
+            }
+            };
+            submit_draws();
+            if(split_smoke && !smoke_draws.empty()) {
+                // No GL depth attachment: shader checks the original opaque
+                // R16F depth in its full-resolution 2x2 pixel footprint.
+                // Stencil counts only fragments surviving shader discard.
+                draws.swap(smoke_draws);
+                active_instance=nullptr;
+                auto const dims=make_size(
+                    std::max(1,(get<x>(conf_scr_res)+1)/2),
+                    std::max(1,(get<y>(conf_scr_res)+1)/2));
+                gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                     smoke_half_buffer->fbo);
+                gl::set_viewport(make_box(make_point(0,0),dims));
+                GLfloat const blank[4]={0.0f,0.0f,0.0f,0.0f};
+                GLint const stencil_clear=0;
+                glStencilMask(0xff);
+                glClearBufferfv(GL_COLOR,0,blank);
+                glClearBufferiv(GL_STENCIL,0,&stencil_clear);
+                glDisable(GL_DEPTH_TEST);
+                glDepthMask(GL_FALSE);
+                auto const budget=the_config->fluid_sprite_layer_budget;
+                if(budget>0U) {
+                    glEnable(GL_STENCIL_TEST);
+                    // GL compares reference OP stencil: ref > count.
+                    glStencilFunc(GL_GREATER,static_cast<GLint>(budget),0xff);
+                    glStencilOp(GL_KEEP,GL_KEEP,GL_INCR);
+                } else glDisable(GL_STENCIL_TEST);
+                // The shader still samples the full-res opaque depth image.
+                // Change screen-coordinate reconstruction to half-size.
+                auto const axis=[](std::array<float,3> const &a,float w) {
+                    return make_point(a[0],a[1],a[2],w);
+                };
+                float const h=std::tan(cam.fov*0.008726646259971648f);
+                float const v=h*float(get<y>(conf_scr_res))/
+                                float(get<x>(conf_scr_res));
+                prog.set_translucent_spotlight_camera(
+                    axis(cam.position,0.0f),axis(cam.right,h),
+                    axis(cam.forward,0.0f),axis(cam.up,v),
+                    make_point(float(get<x>(dims)),float(get<y>(dims))));
+                prog.set_smoke_half_resolution(true);
+                submit_draws();
+                prog.set_smoke_half_resolution(false);
+                glDisable(GL_STENCIL_TEST);
+                draws.swap(smoke_draws);
+                // Full-res framebuffer and viewport for all remaining passes.
+                frame_screen->begin_transparency_pass();
+                gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+                // The smoke texture contains premultiplied RGBA. Composite
+                // it once, without sampling the scene's color FBO itself.
+                glDisable(GL_DEPTH_TEST);
+                gl::disable(gl::capability::cull_face);
+                gl::enable(gl::capability::blend);
+                gl::set_blend_function(gl::blend_function::one,
+                    gl::blend_function::one_minus_source_alpha);
+                ogs->post_smoke_composite->use_program();
+                ogs->post_smoke_composite->set_samplers(0,1);
+                gl::set_active_texture_unit(0);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 smoke_half_buffer->tex);
+                gl::set_active_texture_unit(1);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 frame_screen->get_resolved_depth_texture());
+                gl::set_active_texture_unit(0);
+                gl::bind_vertex_array(ogs->postmdl.vao);
+                gl::draw_elements(gl::element_type::triangles,
+                    ogs->postmdl.num_indices,gl::index_type::uint32);
+                glEnable(GL_DEPTH_TEST);
+                if(gpu_profiling && gpu_3do_present_serial%120U==0U)
+                    LOG_INFO("SMOKE half-res drawn_ranges=",smoke_draws.size(),
+                             " budget=",budget,
+                             " stencil=",budget>0U?1:0,
+                             " NOTE=stencil_early_shader_reject_not_guaranteed_GL33");
             }
             if(gpu_profiling)
                 profile_frame.gpu_preview_submit_us[pass_index]+=
@@ -4516,7 +5751,10 @@ namespace jkgm {
                     make_point(current_info[0],
                                current_info[1],
                                the_config->enable_fog ? current_info[2] : 0.0f,
-                               0.0f),
+                               (the_config->experimental_radial_fog &&
+                                the_config->enable_fog)
+                                   ?(the_config->experimental_exponential_fog?2.0f:1.0f)
+                                   :0.0f),
                     color_rgb(current_color[0], current_color[1], current_color[2]));
             }
 
@@ -4564,6 +5802,725 @@ namespace jkgm {
             // GPU preview changes the active GL shader. Render it LAST within
             // the opaque pass, after all batches that expect game_opaque_pass.
             draw_gpu_3do_preview(false);
+            // Check main-camera 3DO spheres against the completed opaque
+            // depth without binding any secondary-camera visibility state.
+            query_gpu_thing_occlusion();
+            // The opaque G-buffer now includes ALL 3DO depth. Ask whether
+            // any pixel of the selected reflective world plane would pass
+            // that depth test. The result is consumed asynchronously by a
+            // future frame's planar capture, never by this draw itself.
+            query_planar_receiver_visibility();
+        }
+
+        // Secondary capture is rendered BEFORE the main opaque scene. The
+        // receiver query deliberately runs AFTER its opaque 3DO depth has
+        // been written, so an interior can hide the entire water plane.
+        // Depth results are always for the MAIN camera, never the mirror.
+        void query_planar_receiver_visibility()
+        {
+            if(!the_config->enable_reflection_capture ||
+               !the_config->enable_reflection_probes ||
+               !the_config->enable_reflections ||
+               mode!=renderer_mode::ingame ||
+               !world_cache_target || !world_cache_target->ready ||
+               !planar_capture_plane || !frame_world_cache_camera.valid ||
+               !frame_world_cache_camera.perspective)return;
+            auto const &cache=*world_cache_target;
+            if(cache.frame_render_candidates.empty()) {
+                if(planar_receiver_queries)planar_receiver_queries->invalidate();
+                if(thing_occlusion_queries)thing_occlusion_queries->invalidate();
+                return; // no receiver proof: fail open, capture normally
+            }
+            auto const &cam=frame_world_cache_camera;
+            auto const &plane=*planar_capture_plane;
+            float const aspect=float(get<x>(internal_scr_res_f))/
+                               float(get<y>(internal_scr_res_f));
+            if(!(std::isfinite(aspect) && aspect>0.0f &&
+                 cam.far_plane>0.1f))return;
+
+            // Query only LIVE main-camera staged water/mirror faces on the
+            // selected plane. A large nonreflective floor at the same height
+            // must not incorrectly keep the mirror pass running.
+            std::vector<world_cache_draw_candidate const *> receivers;
+            for(auto const &candidate:cache.frame_render_candidates) {
+                if(candidate.count<3U ||
+                   candidate.surface_index>=cache.cached_surface_lookup.size())
+                    continue;
+                auto const index=cache.cached_surface_lookup[candidate.surface_index];
+                if(index>=cache.mesh.surfaces.size())continue;
+                auto const &surface=cache.mesh.surfaces[index];
+                if(surface.first_index>=cache.mesh.indices.size())continue;
+                auto const vi=cache.mesh.indices[surface.first_index];
+                if(vi>=cache.mesh.vertices.size())continue;
+                auto const &v=cache.mesh.vertices[vi];
+                auto const &n=v.normal;
+                float dot=0.0f,dist=-plane.offset;
+                for(int i=0;i<3;++i) {
+                    dot+=n[i]*plane.normal[i];
+                    dist+=v.position[i]*plane.normal[i];
+                }
+                if(!std::isfinite(dot) || !std::isfinite(dist) ||
+                   dot<0.999f || std::fabs(dist)>0.02f)continue;
+                gpu_3do_group group{};
+                group.material=candidate.material;group.cel=candidate.cel;
+                auto const material=resolve_gpu_3do_material(group);
+                // A Fluid blend alone never requests a planar capture.
+                // The material must opt in with reflection_mode="planar".
+                if(material.reflection_mode==4)
+                    receivers.push_back(&candidate);
+            }
+            if(receivers.empty()) {
+                if(planar_receiver_queries)planar_receiver_queries->invalidate();
+                if(thing_occlusion_queries)thing_occlusion_queries->invalidate();
+                return; // invalid staging cannot prove occlusion
+            }
+            if(!planar_receiver_queries)
+                planar_receiver_queries=
+                    std::make_unique<planar_receiver_visibility>();
+            auto &visibility=*planar_receiver_queries;
+            visibility.select(cache.loaded_world,cache.revision,plane);
+            visibility.poll();
+            if(!planar_receiver_program)
+                planar_receiver_program=
+                    std::make_unique<planar_receiver_visibility_shader>(
+                        the_config->data_path);
+            // Scoped restoration is essential: the following main-frame
+            // color/depth state must not inherit any query-only changes.
+            offscreen_capture_gl_scope restore;
+            glDisable(GL_BLEND);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_STENCIL_TEST);
+            glDisable(GL_CULL_FACE);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LEQUAL); // allow already-depth-written opaque mirrors
+            glDepthMask(GL_FALSE);
+            glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE);
+            auto &shader=*planar_receiver_program;
+            shader.use_program();
+            shader.set_camera(cam.native_view,cam.camera.fov,aspect,cam.far_plane);
+            gl::bind_vertex_array(cache.vao);
+            if(!visibility.begin(cam.camera,gpu_3do_present_serial))return;
+            for(auto const *face:receivers)
+                glDrawElements(GL_TRIANGLES,GLsizei(face->count),
+                    GL_UNSIGNED_INT,reinterpret_cast<void const *>(
+                        uintptr_t(face->first_index)*sizeof(uint32_t)));
+            visibility.end();
+        }
+
+        // Async Thing-occlusion experiment. Queries test authored rdModel3
+        // radii, never animated poses. Completed negatives optionally feed
+        // the guarded native rdModel3_Draw early return next frame; shadows
+        // and offscreen reflected acquisition retain their own work.
+        void query_gpu_thing_occlusion()
+        {
+            thing_occlusion_debug_proxies.clear();
+            if(!the_config->experimental_3do_occlusion_culling ||
+               !the_config->use_gpu_cache ||
+               mode!=renderer_mode::ingame ||
+               !frame_gpu_3do_camera.valid ||
+               !frame_gpu_3do_camera.perspective ||
+               !world_cache_target || !world_cache_target->ready)
+                return;
+            if(!engine_material_debug::matches_tested_executable())return;
+            auto const &camera=frame_gpu_3do_camera;
+            float const aspect=float(get<x>(internal_scr_res_f))/
+                               float(get<y>(internal_scr_res_f));
+            float const half_fov=std::tan(
+                camera.camera.fov*0.008726646259971648f);
+            if(!std::isfinite(aspect) || aspect<=0.0f ||
+               !std::isfinite(half_fov) || half_fov<=0.0f ||
+               !std::isfinite(camera.far_plane) ||
+               camera.far_plane<=0.1f)return;
+            if(!thing_occlusion_queries)
+                thing_occlusion_queries=
+                    std::make_unique<gpu_thing_occlusion_queries>();
+            auto &queries=*thing_occlusion_queries;
+            int const proxy_mode=the_config->gpu_3do_occlusion_proxy_mode;
+            queries.set_proxy_mode(unsigned(proxy_mode));
+            auto const world=world_cache_target->loaded_world;
+            bool const native_enabled=
+                the_config->experimental_3do_native_occlusion_culling;
+            if(thing_occlusion_history_world!=world) {
+                thing_occlusion_cost_history.clear();
+                thing_occlusion_history_world=world;
+                get_native_occlusion_bridge().clear();
+            }
+            queries.set_world(world);
+            bool const profiling=the_config->profile_renderer;
+            auto const poll_start=profiling
+                ?std::chrono::steady_clock::now()
+                :std::chrono::steady_clock::time_point{};
+            auto const poll_stats=queries.poll();
+            queries.prune(gpu_3do_present_serial);
+            if(profiling) {
+                thing_occlusion_poll_checked_window+=poll_stats.checked;
+                thing_occlusion_poll_completed_window+=poll_stats.completed;
+                thing_occlusion_poll_pending_window+=poll_stats.pending_after;
+                thing_occlusion_poll_ns_window+=uint64_t(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now()-poll_start).count());
+                ++thing_occlusion_poll_calls_window;
+            }
+            auto const prepare_start=profiling
+                ?std::chrono::steady_clock::now()
+                :std::chrono::steady_clock::time_point{};
+            // Profile the negatives actually published to native CPU culling.
+            size_t confirmed_hidden_count=0;
+            if(native_enabled) {
+                auto confirmed=queries.confirmed_hidden(
+                    camera.camera,gpu_3do_present_serial);
+                confirmed_hidden_count=confirmed.size();
+                get_native_occlusion_bridge().publish(world,confirmed);
+            }
+            struct candidate {
+                uint64_t owner=0;
+                std::array<float,3> position{};
+                size_t triangles=0;
+                bool sprite=false;
+                uintptr_t sprite_resource=0;
+                gpu_thing_occlusion_bound sprite_bound{};
+                gpu_3do_matrix34 sprite_pose{};
+                uint64_t sprite_id=0;
+                std::shared_ptr<gpu_3do_geometry const> sprite_geometry;
+            };
+            // Query model Things and eligible GPU SPR quads independently
+            // of native draw submission. HUD, 0x20 skyboxes, projected
+            // decals and transient particle/geometry never enter this path.
+            std::unordered_map<uint64_t,candidate> grouped;
+            for(auto const &inst:frame_gpu_3do_instances) {
+                if(!inst.geometry || !inst.shadow_owner ||
+                   inst.shadow_only || inst.camera_hud ||
+                   inst.skybox_vertex_lighting || inst.is_projected_decal ||
+                   inst.transient_procedural || inst.saber_trail_active)
+                    continue;
+                if(inst.is_sprite_quad) {
+                    if(!inst.sprite_occlusion_resource ||
+                       inst.world_lighting_exempt)continue;
+                    // Geometry is a camera-facing quad, not a rdModel3:
+                    // its actual world-space axes/offset/scale bound ALL
+                    // pixels, including thick fluid-blend smoke sprites.
+                    auto const bound=gpu_sprite_occlusion_bound(inst.transform);
+                    if(!gpu_thing_occlusion_bound_valid(bound))continue;
+                    auto &c=grouped[inst.shadow_owner];
+                    c.owner=inst.shadow_owner;
+                    c.sprite=true;
+                    c.sprite_resource=inst.sprite_occlusion_resource;
+                    c.sprite_bound=bound;
+                    c.sprite_pose=inst.transform;
+                    c.sprite_id=inst.id;
+                    c.sprite_geometry=inst.geometry;
+                    c.position=bound.center;
+                    for(auto const &g:inst.geometry->groups)
+                        c.triangles+=g.count/3U;
+                    continue;
+                }
+                if(!inst.owning_thing_world_position_valid)continue;
+                auto &c=grouped[inst.shadow_owner];
+                c.owner=inst.shadow_owner;
+                c.position=inst.owning_thing_world_position;
+                for(auto const &g:inst.geometry->groups)
+                    c.triangles+=g.count/3U;
+            }
+            if(native_enabled) {
+                auto &history=thing_occlusion_cost_history;
+                for(auto const &native:
+                    get_native_occlusion_bridge().take_candidates()) {
+                    auto known=history.find(native.owner);
+                    if(known==history.end() ||
+                       known->second.model!=native.model ||
+                       gpu_3do_present_serial>known->second.last_seen+120U)
+                        continue;
+                    known->second.last_seen=gpu_3do_present_serial;
+                    // A CPU-skipped model has no main-view GPU instances.
+                    // Keep the native Thing in the query rotation anyway.
+                    if(grouped.find(native.owner)==grouped.end()) {
+                        candidate c{};
+                        c.owner=native.owner;
+                        c.position=native.bound.center;
+                        c.triangles=known->second.triangles;
+                        grouped.emplace(c.owner,c);
+                    }
+                }
+                if((gpu_3do_present_serial%120U)==0U)
+                    for(auto it=history.begin();it!=history.end();) {
+                        if(gpu_3do_present_serial>
+                           it->second.last_seen+240U)
+                            it=history.erase(it);
+                        else ++it;
+                    }
+            }
+            // Track triangle-count eligibility tiers for performance tests.
+            // With min_triangles=0 and budget=0, query every eligible Thing
+            // whose previous query has completed; no fixed cost gate.
+            size_t owners_32=0,owners_96=0,owners_256=0,owners_500=0;
+            size_t sprite_owners=0,sprite_issued=0;
+            std::vector<candidate> expensive;
+            expensive.reserve(grouped.size());
+            for(auto const &p:grouped) {
+                size_t const triangles=p.second.triangles;
+                if(p.second.sprite)++sprite_owners;
+                if(triangles>=32U)++owners_32;
+                if(triangles>=96U)++owners_96;
+                if(triangles>=256U)++owners_256;
+                if(triangles>=500U)++owners_500;
+                // The model triangle threshold is not meaningful for
+                // translucent sprites, where pixel overdraw dominates and
+                // the quad itself always contains just two triangles.
+                if(p.second.sprite ||
+                   triangles>=size_t(the_config->gpu_3do_occlusion_min_triangles))
+                    expensive.push_back(p.second);
+            }
+            if(expensive.empty()) {
+                if(the_config->profile_renderer &&
+                   gpu_3do_present_serial%120U==0U)
+                    LOG_INFO("3DO OCCLUSION candidates=0 mode=",
+                        the_config->gpu_3do_occlusion_proxy_mode,
+                        " min_triangles=",
+                        the_config->gpu_3do_occlusion_min_triangles,
+                        " owners_total=",grouped.size(),
+                        " sprite_owners=",sprite_owners,
+                        " owners_ge32=",owners_32," owners_ge96=",owners_96,
+                        " owners_ge256=",owners_256," owners_ge500=",owners_500,
+                        " NOTE=no_eligible_Things");
+                return;
+            }
+            std::sort(expensive.begin(),expensive.end(),
+                [](candidate const &a,candidate const &b) {
+                    if(a.triangles!=b.triangles)
+                        return a.triangles>b.triangles;
+                    return a.owner<b.owner;
+                });
+            if(!thing_occlusion_program)
+                thing_occlusion_program=
+                    std::make_unique<gpu_thing_occlusion_shader>(
+                        the_config->data_path);
+            if(!thing_occlusion_proxy_vao)
+                glGenVertexArrays(1,&thing_occlusion_proxy_vao);
+            if(!thing_occlusion_proxy_vao)return;
+            auto const cpu_start=profiling?std::chrono::steady_clock::now():
+                std::chrono::steady_clock::time_point{};
+            if(profiling)
+                thing_occlusion_prepare_ns_window+=uint64_t(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        cpu_start-prepare_start).count());
+            presentation_gpu_profile::completed_sample completed{};
+            bool const gpu_timing=profiling &&
+                thing_occlusion_gpu_timers.begin(completed);
+            if(completed.ready) {
+                thing_occlusion_gpu_ns_window+=completed.nanoseconds[0];
+                ++thing_occlusion_gpu_samples_window;
+            }
+            if(completed.skipped)++thing_occlusion_gpu_skipped_window;
+            if(gpu_timing)thing_occlusion_gpu_timers.timestamp(0U,true);
+            // Include GL state restoration in the measured CPU query cost.
+            size_t issued=0;
+            size_t submit_attempts=0,reject_identity=0,reject_bound=0;
+            size_t reject_projection=0,reject_query_state=0;
+            {
+            offscreen_capture_gl_scope restore;
+            glDisable(GL_BLEND);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_STENCIL_TEST);
+            glDisable(GL_CULL_FACE);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LEQUAL);
+            glDepthMask(GL_FALSE);
+            glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE);
+            auto &program=*thing_occlusion_program;
+            program.use_program();
+            program.set_camera(camera.native_view,half_fov,aspect,
+                               camera.far_plane);
+            program.set_proxy_mode(proxy_mode);
+            glBindVertexArray(thing_occlusion_proxy_vao);
+            auto read=[](uintptr_t at,void *dst,size_t count) {
+                return engine_material_debug::read_bytes(at,dst,count);
+            };
+            size_t const query_budget=
+                the_config->gpu_3do_occlusion_query_budget==0
+                ?expensive.size()
+                :size_t(the_config->gpu_3do_occlusion_query_budget);
+            auto submit=[&](candidate const &item) {
+                if(issued>=query_budget)
+                    return;
+                ++submit_attempts;
+                uintptr_t const thing=uintptr_t(uint32_t(item.owner>>32));
+                uint32_t signature=0,model=0;
+                if(!planar_reflection_valid_native_pointer(thing) ||
+                   !read(thing+0x74U,&signature,4U) ||
+                   signature!=uint32_t(item.owner)) {
+                    ++reject_identity;
+                    return;
+                }
+                gpu_thing_occlusion_bound bound{};
+                if(item.sprite) {
+                    // A native SPR is not an rdModel3. Revalidate its
+                    // Thing/rdThing identity and current resource before
+                    // issuing a query; changing the SPR cannot reuse a
+                    // previous negative for an unrelated object.
+                    uint32_t type=0,render_type=0,flags=0;
+                    if(!read(thing+0x0cU,&type,4U) ||
+                       !read(thing+0xc4U,&render_type,4U) ||
+                       !read(thing+0xc8U,&model,4U) ||
+                       !read(thing,&flags,4U) ||
+                       type<=1U || render_type!=4U ||
+                       (flags&0x20U)!=0U ||
+                       !planar_reflection_valid_native_pointer(model) ||
+                       uintptr_t(model)!=item.sprite_resource) {
+                        ++reject_identity;
+                        return;
+                    }
+                    bound=item.sprite_bound;
+                } else {
+                    float radius=0.0f;
+                    std::array<float,9> basis{};
+                    if(!read(thing+0xc8U,&model,4U) ||
+                       !planar_reflection_valid_native_pointer(model) ||
+                       !read(uintptr_t(model)+0x5cU,&radius,4U) ||
+                       !read(thing+0x88U,basis.data(),sizeof(basis))) {
+                        ++reject_identity;
+                        return;
+                    }
+                    float const scale=planar_reflection_radius_scale(basis);
+                    // JK's authored Thing-centered sphere already encloses
+                    // its animation. Keep the established model behavior.
+                    if(!std::isfinite(scale) || scale<=0.0f) {
+                        ++reject_bound;
+                        return;
+                    }
+                    bound.center=item.position;
+                    bound.radius=radius*scale;
+                    bound.valid=true;
+                }
+                if(!gpu_thing_occlusion_bound_valid(bound) ||
+                   gpu_thing_occlusion_camera_inside(bound,camera.camera)) {
+                    ++reject_bound;
+                    return;
+                }
+                // Ordinary sprites draw THEIR ACTUAL indexed, GPU-cached
+                // quad. It is already camera-facing (or fixed) and needs
+                // no second rectangle, sphere projection, or new upload.
+                int const draw_mode=item.sprite ? 3 : proxy_mode;
+                gpu_thing_occlusion_screen_rect rect{};
+                if(!item.sprite && draw_mode!=0 &&
+                   !gpu_thing_occlusion_project_sphere_rect(
+                       bound,camera.native_view,half_fov,aspect,rect)) {
+                    ++reject_projection;
+                    return; // unsafe/outside sphere projection
+                }
+                gpu_3do_gl_mesh *sprite_mesh=nullptr;
+                if(item.sprite) {
+                    if(!item.sprite_id || !item.sprite_geometry ||
+                       item.sprite_geometry->indices.size()!=6U ||
+                       item.sprite_geometry->vertices.size()!=4U) {
+                        ++reject_identity;
+                        return;
+                    }
+                    auto mesh=gpu_3do_gl_cache.find(item.sprite_id);
+                    if(mesh==gpu_3do_gl_cache.end()) {
+                        if(gpu_3do_gl_cache.size()>=8192U) {
+                            ++reject_query_state;
+                            return;
+                        }
+                        mesh=gpu_3do_gl_cache.emplace(item.sprite_id,
+                            std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,
+                                *item.sprite_geometry,
+                            the_config->profile_renderer
+                                ? &packed_3do_upload_profile : nullptr)).first;
+                    }
+                    sprite_mesh=mesh->second.get();
+                }
+                if(native_enabled && !item.sprite)
+                    thing_occlusion_cost_history[item.owner]={
+                        item.triangles,model,gpu_3do_present_serial};
+                if(!queries.begin(item.owner,bound,camera.camera,
+                                  gpu_3do_present_serial,model,!item.sprite,
+                                  item.sprite?&item.sprite_pose:nullptr)) {
+                    ++reject_query_state;
+                    return;
+                }
+                program.set_proxy_mode(draw_mode);
+                if(item.sprite) {
+                    program.set_sprite_pose(item.sprite_pose);
+                    gl::bind_vertex_array(sprite_mesh->vao);
+                    glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
+                } else {
+                    glBindVertexArray(thing_occlusion_proxy_vao);
+                    if(draw_mode!=0) {
+                        program.set_rect(rect,draw_mode);
+                        glDrawArrays(GL_TRIANGLES,0,6);
+                    } else {
+                        program.set_bound(bound);
+                        glDrawArrays(GL_TRIANGLES,0,36);
+                    }
+                }
+                queries.end();
+                if(the_config->gpu_3do_occlusion_debug_view!=0) {
+                    thing_occlusion_debug_proxy proxy{};
+                    proxy.bound=bound;
+                    proxy.rect=rect;
+                    proxy.mode=unsigned(draw_mode);
+                    proxy.sprite_id=item.sprite?item.sprite_id:0U;
+                    if(item.sprite)proxy.sprite_pose=item.sprite_pose;
+                    proxy.result=queries.debug_result_state(item.owner);
+                    thing_occlusion_debug_proxies.push_back(proxy);
+                }
+                if(item.sprite)++sprite_issued;
+                ++issued;
+            };
+            // Refresh hidden Things first, to recover promptly when an
+            // occluder moves while the tested Thing remains stationary.
+            for(auto const &item:expensive) {
+                if(issued>=(
+                    the_config->gpu_3do_occlusion_query_budget==0
+                        ?query_budget:query_budget/2U))
+                    break;
+                if(queries.needs_retest(item.owner))submit(item);
+            }
+            // Rotate budgeted candidates; stress mode (budget=0)
+            // attempts every eligible owner rather than rotating a subset.
+            size_t const start=
+                the_config->gpu_3do_occlusion_query_budget==0?0U:(
+                gpu_3do_present_serial*query_budget)%expensive.size();
+            for(size_t i=0;i<expensive.size() &&
+                issued<query_budget;++i)
+                submit(expensive[(start+i)%expensive.size()]);
+            if(gpu_timing) {
+                thing_occlusion_gpu_timers.timestamp(0U,false);
+                // The 3-stage profiler checks its LAST timestamp to
+                // determine readiness. The old occlusion path only wrote
+                // stage 0, so gpu_samples stayed at zero forever.
+                for(size_t stage=1U;
+                    stage<presentation_gpu_profile::num_stages;++stage) {
+                    thing_occlusion_gpu_timers.timestamp(stage,true);
+                    thing_occlusion_gpu_timers.timestamp(stage,false);
+                }
+                thing_occlusion_gpu_timers.end();
+            }
+            } // restore the query GL state before recording CPU cost
+            if(profiling) {
+                thing_occlusion_cpu_ns_window+=uint64_t(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now()-cpu_start).count());
+                ++thing_occlusion_cpu_calls_window;
+                thing_occlusion_issued_window+=issued;
+                if(gpu_3do_present_serial%120U==0U) {
+                    LOG_INFO("3DO OCCLUSION proxy_perf mode=",proxy_mode,
+                        " query_budget=",
+                        the_config->gpu_3do_occlusion_query_budget,
+                        " issued_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_issued_window/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " cpu_us_avg=",thing_occlusion_cpu_calls_window
+                            ?(thing_occlusion_cpu_ns_window/1000U)/
+                              thing_occlusion_cpu_calls_window:0U,
+                        " gpu_us_avg=",thing_occlusion_gpu_samples_window
+                            ?(thing_occlusion_gpu_ns_window/1000U)/
+                              thing_occlusion_gpu_samples_window:0U,
+                        " gpu_samples=",thing_occlusion_gpu_samples_window,
+                        " gpu_ring_busy_skips=",thing_occlusion_gpu_skipped_window,
+                        " poll_us_avg=",thing_occlusion_cpu_calls_window
+                            ?(thing_occlusion_poll_ns_window/1000U)/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " poll_calls_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_poll_calls_window/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " poll_checked_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_poll_checked_window/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " poll_completed_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_poll_completed_window/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " poll_pending_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_poll_pending_window/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " prepare_us_avg=",
+                        thing_occlusion_cpu_calls_window
+                            ?(thing_occlusion_prepare_ns_window/1000U)/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " visibility_us_avg=",thing_occlusion_cpu_calls_window
+                            ?(thing_occlusion_visibility_ns_window/1000U)/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " visibility_checks_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_visibility_calls_window/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " visibility_skips_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_visibility_skips_window/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " sprite_visibility_skips_avg=",
+                        thing_occlusion_cpu_calls_window
+                            ?sprite_occlusion_visibility_skips_window/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " debug_us_avg=",thing_occlusion_cpu_calls_window
+                            ?(thing_occlusion_debug_ns_window/1000U)/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " debug_draws_avg=",thing_occlusion_cpu_calls_window
+                            ?thing_occlusion_debug_draws_window/
+                             thing_occlusion_cpu_calls_window:0U,
+                        " debug_frames=",thing_occlusion_debug_frames_window,
+                        " debug_gpu_us_avg=",
+                        thing_occlusion_debug_gpu_samples_window
+                            ?(thing_occlusion_debug_gpu_ns_window/1000U)/
+                             thing_occlusion_debug_gpu_samples_window:0U,
+                        " debug_gpu_samples=",
+                        thing_occlusion_debug_gpu_samples_window,
+                        " debug_gpu_ring_skips=",
+                        thing_occlusion_debug_gpu_skips_window,
+                        " issued_total=",thing_occlusion_issued_window,
+                        " NOTE=async_GPU_timestamps_no_sync");
+                    thing_occlusion_cpu_ns_window=0;
+                    thing_occlusion_cpu_calls_window=0;
+                    thing_occlusion_issued_window=0;
+                    thing_occlusion_gpu_ns_window=0;
+                    thing_occlusion_gpu_samples_window=0;
+                    thing_occlusion_gpu_skipped_window=0;
+                    thing_occlusion_poll_ns_window=0;
+                    thing_occlusion_poll_calls_window=0;
+                    thing_occlusion_poll_checked_window=0;
+                    thing_occlusion_poll_completed_window=0;
+                    thing_occlusion_poll_pending_window=0;
+                    thing_occlusion_prepare_ns_window=0;
+                    thing_occlusion_visibility_ns_window=0;
+                    thing_occlusion_visibility_calls_window=0;
+                    thing_occlusion_visibility_skips_window=0;
+                    sprite_occlusion_visibility_skips_window=0;
+                    thing_occlusion_debug_ns_window=0;
+                    thing_occlusion_debug_draws_window=0;
+                    thing_occlusion_debug_frames_window=0;
+                    thing_occlusion_debug_gpu_ns_window=0;
+                    thing_occlusion_debug_gpu_samples_window=0;
+                    thing_occlusion_debug_gpu_skips_window=0;
+                }
+            }
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U)
+                LOG_INFO("3DO OCCLUSION candidates=",expensive.size(),
+                    " native=",native_enabled?1:0,
+                    " native_history=",thing_occlusion_cost_history.size(),
+                    " sprite_owners=",sprite_owners,
+                    " sprite_queried=",sprite_issued,
+                    " mode=",proxy_mode,
+                    " min_triangles=",
+                    the_config->gpu_3do_occlusion_min_triangles,
+                    " owners_total=",grouped.size(),
+                    " owners_ge32=",owners_32," owners_ge96=",owners_96,
+                    " owners_ge256=",owners_256," owners_ge500=",owners_500,
+                    " queried=",issued," query_budget=",
+                    the_config->gpu_3do_occlusion_query_budget,
+                    " attempts=",submit_attempts,
+                    " reject_identity=",reject_identity,
+                    " reject_bound_or_camera_inside=",reject_bound,
+                    " reject_projection=",reject_projection,
+                    " reject_query_state=",reject_query_state,
+                    " confirmed_hidden=",confirmed_hidden_count,
+                    " records=",queries.entries(),
+                    " submitted_total=",queries.submitted(),
+                    " completed_total=",queries.completed(),
+                    " skipped_instance_total=",queries.skipped());
+        }
+
+        // Draw the EXACT proxy geometry issued by the occlusion test,
+        // in the main scene's composed-color target after transparency.
+        // X-ray display intentionally bypasses the depth test so even
+        // fully occluded objects reveal the region that was queried.
+        // This is a separate pass; color writes never affect GL queries.
+        void draw_gpu_thing_occlusion_debug()
+        {
+            if(!the_config->experimental_3do_occlusion_culling ||
+               the_config->gpu_3do_occlusion_debug_view==0 ||
+               !thing_occlusion_program || !thing_occlusion_proxy_vao ||
+               thing_occlusion_debug_proxies.empty() ||
+               !frame_gpu_3do_camera.valid)return;
+            auto const begin=the_config->profile_renderer
+                ?std::chrono::steady_clock::now()
+                :std::chrono::steady_clock::time_point{};
+            auto const &camera=frame_gpu_3do_camera;
+            float const aspect=float(get<x>(internal_scr_res_f))/
+                               float(get<y>(internal_scr_res_f));
+            float const half_fov=std::tan(
+                camera.camera.fov*0.008726646259971648f);
+            if(!std::isfinite(aspect) || aspect<=0.0f ||
+               !std::isfinite(half_fov) || half_fov<=0.0f)return;
+            presentation_gpu_profile::completed_sample completed{};
+            bool const gpu_timing=the_config->profile_renderer &&
+                thing_occlusion_debug_gpu_timers.begin(completed);
+            if(completed.ready) {
+                thing_occlusion_debug_gpu_ns_window+=completed.nanoseconds[0];
+                ++thing_occlusion_debug_gpu_samples_window;
+            }
+            if(completed.skipped)++thing_occlusion_debug_gpu_skips_window;
+            {
+            offscreen_capture_gl_scope restore;
+            GLint polygon_mode[2]={GL_FILL,GL_FILL};
+            glGetIntegerv(GL_POLYGON_MODE,polygon_mode);
+            glDisable(GL_DEPTH_TEST);
+            glDepthMask(GL_FALSE);
+            glDisable(GL_CULL_FACE);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_STENCIL_TEST);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+            glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+            glPolygonMode(GL_FRONT_AND_BACK,
+                the_config->gpu_3do_occlusion_debug_view==1
+                    ?GL_LINE:GL_FILL);
+            auto &program=*thing_occlusion_program;
+            program.use_program();
+            program.set_camera(camera.native_view,half_fov,aspect,
+                               camera.far_plane);
+            int const proxy_mode=the_config->gpu_3do_occlusion_proxy_mode;
+            glBindVertexArray(thing_occlusion_proxy_vao);
+            float const alpha=
+                the_config->gpu_3do_occlusion_debug_view==1?0.80f:0.13f;
+            if(gpu_timing)thing_occlusion_debug_gpu_timers.timestamp(0U,true);
+            for(auto const &item:thing_occlusion_debug_proxies) {
+                // Green=previously visible; red=previously hidden;
+                // yellow=no completed visibility result available.
+                float const r=item.result==1U?0.08f:0.95f;
+                float const g=item.result==2U?0.10f:0.85f;
+                float const b=item.result==0U?0.10f:0.12f;
+                program.set_debug_color(r*alpha,g*alpha,b*alpha,alpha);
+                program.set_proxy_mode(int(item.mode));
+                if(item.mode==3U) {
+                    auto const sprite=gpu_3do_gl_cache.find(item.sprite_id);
+                    if(sprite==gpu_3do_gl_cache.end())continue;
+                    program.set_sprite_pose(item.sprite_pose);
+                    gl::bind_vertex_array(sprite->second->vao);
+                    glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
+                } else {
+                    glBindVertexArray(thing_occlusion_proxy_vao);
+                    if(item.mode!=0U)program.set_rect(item.rect,int(item.mode));
+                    else program.set_bound(item.bound);
+                    glDrawArrays(GL_TRIANGLES,0,item.mode!=0U?6:36);
+                }
+            }
+            if(gpu_timing) {
+                thing_occlusion_debug_gpu_timers.timestamp(0U,false);
+                for(size_t stage=1U;
+                    stage<presentation_gpu_profile::num_stages;++stage) {
+                    thing_occlusion_debug_gpu_timers.timestamp(stage,true);
+                    thing_occlusion_debug_gpu_timers.timestamp(stage,false);
+                }
+                thing_occlusion_debug_gpu_timers.end();
+            }
+            if(polygon_mode[0]==polygon_mode[1])
+                glPolygonMode(GL_FRONT_AND_BACK,GLenum(polygon_mode[0]));
+            else {
+                glPolygonMode(GL_FRONT,GLenum(polygon_mode[0]));
+                glPolygonMode(GL_BACK,GLenum(polygon_mode[1]));
+            }
+            } // include visual-overlay GL state restoration in debug timing
+            if(the_config->profile_renderer) {
+                thing_occlusion_debug_ns_window+=uint64_t(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now()-begin).count());
+                thing_occlusion_debug_draws_window+=
+                    thing_occlusion_debug_proxies.size();
+                ++thing_occlusion_debug_frames_window;
+            }
         }
 
         void release_spotlight_images()
@@ -4853,6 +6810,25 @@ namespace jkgm {
                               far_depth_params[0],far_depth_params[1]);
         }
 
+        adaptive_sun_pcf_radii effective_sun_pcf_radii() const
+        {
+            return sun_intensity_pcf_radii(
+                the_config->sun_shadow_near_pcf_radius,
+                the_config->sun_shadow_far_pcf_radius,
+                get_sun_settings().intensity.value()[0],
+                the_config->experimental_sun_pcf_intensity_softness,
+                the_config->experimental_sun_pcf_intensity_reference);
+        }
+
+        float effective_sun_dynamic_pcf_radius() const
+        {
+            return sun_intensity_dynamic_pcf_radius(
+                the_config->sun_dynamic_shadow_pcf_radius,
+                get_sun_settings().intensity.value()[0],
+                the_config->experimental_sun_pcf_intensity_softness,
+                the_config->experimental_sun_pcf_intensity_reference);
+        }
+
         template<typename Shader>
         void set_translucent_sun(Shader &prog,bool active)
         {
@@ -4904,9 +6880,10 @@ namespace jkgm {
                 point_axis(cam.forward,0.0f),point_axis(cam.up,v),
                 make_point(float(get<x>(conf_scr_res)),
                            float(get<y>(conf_scr_res))));
-            uniforms.set_pcf_radius(
-                the_config->sun_shadow_near_pcf_radius,
-                the_config->sun_shadow_far_pcf_radius);
+            auto const pcf=effective_sun_pcf_radii();
+            uniforms.set_pcf_radius(pcf.near_radius,pcf.far_radius);
+            uniforms.set_dynamic_pcf_radius(
+                effective_sun_dynamic_pcf_radius());
             uniforms.set_sky_aperture(sky_aperture,
                 texture_units::forward_next_extended_unit,
                 sky_aperture?sun_sky_aperture_depth_transform()
@@ -5069,7 +7046,7 @@ namespace jkgm {
                     }
                     auto const &m=instance.transform;
                     for(auto const &group:instance.geometry->groups) {
-                        if(group.count<3U)continue;
+                        if(group.count<3U || instance.thing_opacity<=0.0f)continue;
                         decal_vec3 low{{std::numeric_limits<float>::max(),
                                         std::numeric_limits<float>::max(),
                                         std::numeric_limits<float>::max()}};
@@ -5115,19 +7092,18 @@ namespace jkgm {
                         // have that mesh's inside/backside block its own beam.
                         if(spotlight_shadow_origin_inside(chosen.origin,low,high))
                             continue;
-                        // A blended effect never writes opaque shadow
-                        // depth. Masked/mixed MATs cast cutout silhouettes
-                        // using the same UVs/textures as visible geometry.
+                        // Material alpha and Thing fades use dithered depth
+                        // instead of simply removing alpha-blended casters.
                         bool const solid=instance.effective_geometry_mode==3 ||
                             group.solid_color;
                         auto const tex=solid
                             ?resolve_gpu_3do_solid_material(group,false)
                             :resolve_gpu_3do_material(group);
-                        bool const cutout=tex.masked||tex.alpha||tex.dithered;
-                        if(tex.albedo_source==0 || tex.special ||
-                           tex.emissive_only ||
-                           tex.opacity<0.999f || (group.face_type&0x2U) ||
-                           (cutout && tex.albedo_source!=1))
+                        bool const cutout=tex.albedo_source==1 &&
+                            (tex.masked||tex.alpha||tex.dithered);
+                        if(!sun_shadow_model_material_casts_depth(
+                               tex.albedo_source,tex.special,tex.emissive_only,
+                               tex.opacity,cutout,instance.thing_opacity))
                             continue;
                         model_casters.push_back({&instance,&group,tex,cutout});
                     }
@@ -5251,9 +7227,10 @@ namespace jkgm {
                 hash_material(surface.material,draw.current_cel,draw.texture);
             }
             for(auto const &caster:model_casters) {
-                if(caster.cutout)
-                    hash_material(caster.group->material,
-                                  caster.group->cel,caster.texture);
+                hash_material(caster.group->material,
+                              caster.group->cel,caster.texture);
+                hash_float(caster.instance->thing_opacity);
+                hash_u32(caster.group->face_type);
                 hash_u32(uint32_t(caster.instance->id));
                 hash_u32(uint32_t(caster.instance->id>>32));
                 hash_u32(caster.group->offset);
@@ -5371,7 +7348,10 @@ namespace jkgm {
                 auto it=gpu_3do_gl_cache.find(instance.id);
                 if(it==gpu_3do_gl_cache.end()) {
                     it=gpu_3do_gl_cache.emplace(instance.id,
-                        std::make_unique<gpu_3do_gl_mesh>(*instance.geometry)).first;
+                        std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,*instance.geometry,
+                            the_config->profile_renderer
+                                ? &packed_3do_upload_profile : nullptr)).first;
                     if(the_config->profile_renderer)
                         ++profile_frame.gpu_uploads;
                 }
@@ -5397,6 +7377,15 @@ namespace jkgm {
                 else
                     prog.set_shadow_alpha(false,make_point(1.0f,1.0f),
                         make_point(0.0f,0.0f),0.5f,1.0f,false,0.0f);
+                float const face_opacity=(group.face_type&0x2U)!=0U
+                    ?90.0f/255.0f:1.0f;
+                bool const dither=caster.cutout ||
+                    instance.thing_opacity<0.999f ||
+                    caster.texture.opacity<0.999f ||face_opacity<1.0f;
+                prog.set_shadow_dither(dither,
+                    instance.thing_opacity*face_opacity*
+                        (caster.cutout?1.0f:caster.texture.opacity),
+                    caster.texture.masked);
                 gl::draw_elements(gl::element_type::triangles,group.count,
                                   gl::index_type::uint32,
                                   static_cast<ptrdiff_t>(
@@ -5647,9 +7636,12 @@ namespace jkgm {
                     if(it==gpu_3do_gl_cache.end())
                         it=gpu_3do_gl_cache.emplace(inst->id,
                             std::make_unique<gpu_3do_gl_mesh>(
-                                *inst->geometry)).first;
+                            the_config->experimental_packed_3do_vertices,
+                                *inst->geometry,
+                            the_config->profile_renderer
+                                ? &packed_3do_upload_profile : nullptr)).first;
                     for(auto const &g:inst->geometry->groups) {
-                        if(g.count<3U || (g.face_type&2U))continue;
+                        if(g.count<3U || inst->thing_opacity<=0.0f)continue;
                         // Share the same MAT/cel snapshot with both sun
                         // cascades. This avoids repeating native MAT lookups
                         // and VirtualQuery work per dynamic Thing/group.
@@ -5669,13 +7661,21 @@ namespace jkgm {
                         } else if(the_config->profile_renderer)
                             ++sun_profile_atlas_mat_hits;
                         auto const &tex=found->second;
-                        bool const cutout=tex.masked||tex.alpha||
-                            tex.dithered||
-                            (inst->is_sprite_quad && tex.albedo_source==1);
-                        if(tex.albedo_source==0 || tex.special ||
-                           tex.emissive_only ||
-                           tex.opacity<0.999f ||
-                           (cutout && tex.albedo_source!=1))continue;
+                        // Textureless normal-alpha 3DOs still cast coverage
+                        // shadows using their MAT alpha factor alone.
+                        bool const cutout=inst->is_sprite_quad
+                            ?(tex.masked||tex.alpha||tex.dithered||
+                              tex.albedo_source==1)
+                            :(tex.albedo_source==1 &&
+                              (tex.masked||tex.alpha||tex.dithered));
+                        bool const eligible=inst->is_sprite_quad
+                            ?sun_shadow_material_casts_depth(
+                                tex.albedo_source,tex.special,tex.emissive_only,
+                                tex.opacity,cutout)
+                            :sun_shadow_model_material_casts_depth(
+                                tex.albedo_source,tex.special,tex.emissive_only,
+                                tex.opacity,cutout,inst->thing_opacity);
+                        if(!eligible)continue;
                         if((!the_config->sun_shadow_cull_back_faces &&
                              !the_config->sun_shadow_cull_front_faces) ||
                            (g.face_type&1U) || g.nonplanar)
@@ -5688,6 +7688,14 @@ namespace jkgm {
                                 ?gl::face_mode::front:gl::face_mode::back);
                         }
                         shadow_material(tex,cutout,inst->is_sprite_quad);
+                        float const face_opacity=(g.face_type&0x2U)!=0U
+                            ?90.0f/255.0f:1.0f;
+                        bool const dither=cutout ||
+                            inst->thing_opacity<0.999f ||
+                            tex.opacity<0.999f ||face_opacity<1.0f;
+                        prog.set_shadow_dither(dither,
+                            inst->thing_opacity*face_opacity*
+                                (cutout?1.0f:tex.opacity),tex.masked);
                         gl::bind_vertex_array(it->second->vao);
                         gl::draw_elements(gl::element_type::triangles,g.count,
                             gl::index_type::uint32,static_cast<ptrdiff_t>(
@@ -6128,7 +8136,7 @@ namespace jkgm {
                 auto const &groups=instance.geometry->groups;
                 for(size_t group_idx=0;group_idx<groups.size();++group_idx) {
                     auto const &group=groups[group_idx];
-                    if(group.count<3U || (group.face_type&0x2U))continue;
+                    if(group.count<3U || instance.thing_opacity<=0.0f)continue;
                     // One of every 64 eligible-for-testing groups is timed.
                     // Avoid thousands of expensive clock calls per frame.
                     bool const sample=the_config->profile_renderer &&
@@ -6136,11 +8144,20 @@ namespace jkgm {
                     auto const mat_begin=sample
                         ?profile_clock::now():profile_clock::time_point{};
                     auto const &tex=sun_caster_material(group,instance);
-                    bool const cutout=tex.masked||tex.alpha||tex.dithered||
-                        (instance.is_sprite_quad && tex.albedo_source==1);
-                    bool const eligible=sun_shadow_material_casts_depth(
-                        tex.albedo_source,tex.special,tex.emissive_only,
-                        tex.opacity,cutout);
+                    bool const cutout=instance.is_sprite_quad
+                        ?(tex.masked||tex.alpha||tex.dithered||
+                          tex.albedo_source==1)
+                        :(tex.albedo_source==1 &&
+                          (tex.masked||tex.alpha||tex.dithered));
+                    // Preserve the original SPR shadow policy; the new
+                    // partial coverage eligibility is for model Things.
+                    bool const eligible=instance.is_sprite_quad
+                        ?sun_shadow_material_casts_depth(
+                            tex.albedo_source,tex.special,tex.emissive_only,
+                            tex.opacity,cutout)
+                        :sun_shadow_model_material_casts_depth(
+                            tex.albedo_source,tex.special,tex.emissive_only,
+                            tex.opacity,cutout,instance.thing_opacity);
                     if(sample) {
                         sun_profile_candidate_material_sample_ns+=elapsed_profile_ns(
                             mat_begin,profile_clock::now());
@@ -6161,6 +8178,7 @@ namespace jkgm {
                             group_cache->count==group.count &&
                             group_cache->material==group.material &&
                             group_cache->cel==group.cel &&
+                            group_cache->face_type==group.face_type &&
                             group_cache->bounds_min==group.bounds_min &&
                             group_cache->bounds_max==group.bounds_max;
                         if(!same_group) {
@@ -6171,6 +8189,7 @@ namespace jkgm {
                             group_cache->count=group.count;
                             group_cache->material=group.material;
                             group_cache->cel=group.cel;
+                            group_cache->face_type=group.face_type;
                             group_cache->bounds_min=group.bounds_min;
                             group_cache->bounds_max=group.bounds_max;
                             group_cache->descriptor_valid=true;
@@ -6212,9 +8231,12 @@ namespace jkgm {
                                 get<y>(tex.albedo_scroll),
                                 tex.albedo_transition)
                             :std::array<uint32_t,5>{};
-                        bool const reuse_opaque=!cutout && group_cache &&
+                        bool const coverage_unchanged=group_cache &&
+                            group_cache->thing_opacity==instance.thing_opacity &&
+                            group_cache->material_opacity==tex.opacity;
+                        bool const reuse_opaque=!cutout && coverage_unchanged &&
                             group_cache->opaque_signature_valid;
-                        bool const reuse_cutout=cutout && group_cache &&
+                        bool const reuse_cutout=cutout && coverage_unchanged &&
                             group_cache->cutout_signature_valid &&
                             group_cache->cutout_inputs==cutout_inputs;
                         bool const reuse_signature=reuse_opaque||reuse_cutout;
@@ -6246,6 +8268,11 @@ namespace jkgm {
                         member_u32(uint32_t(instance.shadow_owner>>32));
                         member_u32(uint32_t(group.material));
                         member_u32(uint32_t(group.cel));
+                        member_u32(group.face_type);
+                        // Fade animation must invalidate cached static-depth
+                        // and full-cascade signatures without touching meshes.
+                        member_float(instance.thing_opacity);
+                        member_float(tex.opacity);
                         if(cutout) {
                             member_float(tex.alpha_cutoff);
                             member_float(tex.opacity);
@@ -6256,6 +8283,8 @@ namespace jkgm {
                         for(float v:instance.transform)member_float(v);
                         member=mix_model_signature(member);
                         if(group_cache) {
+                            group_cache->thing_opacity=instance.thing_opacity;
+                            group_cache->material_opacity=tex.opacity;
                             if(cutout) {
                                 group_cache->cutout_signature=member;
                                 group_cache->cutout_inputs=cutout_inputs;
@@ -6998,6 +9027,9 @@ namespace jkgm {
                     std::map<key,std::vector<size_t>> occurrences;
                     for(size_t i=0;i<scheduled.size();++i) {
                         auto const &d=*scheduled[i];
+                        // One uniform opacity per instanced call. Keep faded
+                        // Thing casters in the singleton/multidraw path.
+                        if(d.instance->thing_opacity<0.999f)continue;
                         bool const flipped=gpu_3do_reversed_winding(
                             d.instance->transform);
                         occurrences[std::make_tuple(
@@ -7024,7 +9056,10 @@ namespace jkgm {
                             if(mesh==gpu_3do_gl_cache.end())
                                 mesh=gpu_3do_gl_cache.emplace(inst.id,
                                     std::make_unique<gpu_3do_gl_mesh>(
-                                        *inst.geometry)).first;
+                            the_config->experimental_packed_3do_vertices,
+                                        *inst.geometry,
+                            the_config->profile_renderer
+                                ? &packed_3do_upload_profile : nullptr)).first;
                             if(shadow_no_cull(d))
                                 gl::disable(gl::capability::cull_face);
                             else {
@@ -7041,6 +9076,13 @@ namespace jkgm {
                             else prog.set_shadow_alpha(false,
                                 make_point(1.0f,1.0f),make_point(0.0f,0.0f),
                                 0.5f,1.0f,false,0.0f);
+                            float const face_opacity=(g.face_type&0x2U)!=0U
+                                ?90.0f/255.0f:1.0f;
+                            bool const dither=d.cutout || d.texture.opacity<0.999f ||
+                                face_opacity<1.0f;
+                            prog.set_shadow_dither(dither,
+                                face_opacity*(d.cutout?1.0f:d.texture.opacity),
+                                d.texture.masked);
                             std::array<std::array<float,12>,
                                 shaders::spotlight_shadow_depth_shader::
                                     max_shadow_instances> transforms{};
@@ -7081,6 +9123,8 @@ namespace jkgm {
                         if(other.instance!=draw.instance ||
                            other.cutout!=draw.cutout ||
                            shadow_no_cull(other)!=uncullable)break;
+                        if(other.group->face_type!=group.face_type ||
+                           other.texture.opacity!=draw.texture.opacity)break;
                         if(draw.cutout &&
                            (other.group->material!=group.material ||
                             other.group->cel!=group.cel))break;
@@ -7089,7 +9133,10 @@ namespace jkgm {
                     auto it=gpu_3do_gl_cache.find(instance.id);
                     if(it==gpu_3do_gl_cache.end())
                         it=gpu_3do_gl_cache.emplace(instance.id,
-                            std::make_unique<gpu_3do_gl_mesh>(*instance.geometry)).first;
+                            std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,*instance.geometry,
+                            the_config->profile_renderer
+                                ? &packed_3do_upload_profile : nullptr)).first;
                     auto const &m=instance.transform;
                     prog.set_model(make_point(m[0],m[1],m[2]),
                         make_point(m[3],m[4],m[5]),make_point(m[6],m[7],m[8]),
@@ -7109,6 +9156,15 @@ namespace jkgm {
                     else prog.set_shadow_alpha(false,
                         make_point(1.0f,1.0f),make_point(0.0f,0.0f),
                         0.5f,1.0f,false,0.0f);
+                    float const face_opacity=(group.face_type&0x2U)!=0U
+                        ?90.0f/255.0f:1.0f;
+                    bool const dither=draw.cutout ||
+                        instance.thing_opacity<0.999f ||
+                        draw.texture.opacity<0.999f ||face_opacity<1.0f;
+                    prog.set_shadow_dither(dither,
+                        instance.thing_opacity*face_opacity*
+                            (draw.cutout?1.0f:draw.texture.opacity),
+                        draw.texture.masked);
                     if(last==first+1) {
                         gl::draw_elements(gl::element_type::triangles,
                             group.count,gl::index_type::uint32,
@@ -7465,6 +9521,320 @@ namespace jkgm {
                    std::fabs(spot.range-spotlight_shadow_light.range)<0.00001f;
         }
 
+
+        // Nearest Fluid interface along the SUN ray. Completely independent of
+        // opaque shadow maps: water does not become an opaque sun caster.
+        // Static geometry/projections reuse cached data; animation is entirely
+        // in the opaque compositor sampling a once-generated mipmapped pattern.
+        void draw_sun_caustics()
+        {
+            if(!the_config->experimental_sun_caustics ||
+               !the_config->enable_sun || !the_config->enable_sun_shadows ||
+               !sun_shadow_ready || !sun_level_has_sky ||
+               !sun_shadow_target || !ogs->spotlight_shadow_depth_program)
+                return;
+            GLint max_fragment_units=0;
+            glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&max_fragment_units);
+            if(max_fragment_units<20)return;
+            uint32_t native_world=0;
+            if(!engine_material_debug::read_object(
+                   engine_material_debug::current_world_global,native_world) ||
+               !decal_native_address_ok(native_world))
+                return;
+            decal_native_read const safe_read=[](
+                uintptr_t ptr,void *dst,size_t n)->bool {
+                if(n==0 || !engine_camera_detail::readable(ptr,n))return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(ptr),n);
+                return true;
+            };
+            if(!sun_caustic_target)
+                sun_caustic_target=std::make_unique<sun_caustics_gpu>(512U);
+            auto &map=*sun_caustic_target;
+            if(!map.update_world(safe_read,native_world))return;
+
+            struct fluid_world_draw {
+                spotlight_shadow_surface_range range;
+                float coefficient=0.0f;
+                gpu_3do_texture texture;
+            };
+            struct fluid_model_draw {
+                gpu_3do_instance const *inst;
+                gpu_3do_group const *group;
+                float coefficient=0.0f;
+                gpu_3do_texture texture;
+            };
+            std::array<std::vector<fluid_world_draw>,2> world_draws;
+            std::array<std::vector<fluid_model_draw>,2> model_draws;
+            std::array<uint64_t,2> signatures{};
+            size_t total_faces=0;
+
+            for(int cascade=0;cascade<2;++cascade) {
+                auto const &view=sun_shadow_views[cascade];
+                auto const bounds=sun_shadow_volume_bounds(view);
+                uint64_t signature=14695981039346656037ULL;
+                auto hash_u32=[&](uint32_t v) {
+                    for(int byte=0;byte<4;++byte) {
+                        signature^=uint64_t((v>>(byte*8))&255U);
+                        signature*=1099511628211ULL;
+                    }
+                };
+                auto hash_float=[&](float v) {
+                    uint32_t bits=0;
+                    std::memcpy(&bits,&v,sizeof(bits));
+                    hash_u32(bits);
+                };
+                // Tint, active MAT texture and transitions invalidate RGB.
+                // UV scroll no longer affects the average color or cache.
+                auto hash_fluid_color=[&](gpu_3do_texture const &mat) {
+                    hash_u32(uint32_t(mat.albedo_source));
+                    hash_u32(uint32_t(mat.albedo_source2));
+                    hash_u32(uint32_t(mat.texture.value()));
+                    hash_u32(uint32_t(mat.texture2.value()));
+                    hash_float(mat.albedo_transition);
+                    hash_float(get<0>(mat.tint));
+                    hash_float(get<1>(mat.tint));
+                    hash_float(get<2>(mat.tint));
+                };
+                hash_u32(uint32_t(map.revision));
+                hash_u32(uint32_t(map.revision>>32));
+
+                std::vector<uint32_t> selected;
+                map.world.acceleration.query(map.world.receivers,
+                    bounds.low,bounds.high,selected);
+                for(uint32_t index:selected) {
+                    if(index>=map.world.receivers.size() ||
+                       index>=map.mesh.surfaces.size())continue;
+                    auto const &face=map.world.receivers[index];
+                    auto const &range=map.mesh.surfaces[index];
+                    if(range.count<3U)continue;
+                    uintptr_t const base=map.world.surfaces_addr+
+                        uintptr_t(face.surface_index)*0x5cU;
+                    uint32_t geomode=0;
+                    int32_t cel=face.cel;
+                    if(!safe_read(base+0x1cU,&geomode,sizeof(geomode)) ||
+                       !safe_read(base+0x38U,&cel,sizeof(cel)) ||
+                       geomode<2U)continue;
+                    gpu_3do_group group{};
+                    group.material=face.material;
+                    group.cel=cel;
+                    uint64_t const key=
+                        (uint64_t(face.material)<<32)|uint32_t(cel);
+                    auto found=gpu_frame_material_cache.find(key);
+                    if(found==gpu_frame_material_cache.end())
+                        found=gpu_frame_material_cache.emplace(key,
+                            resolve_gpu_3do_material(group)).first;
+                    auto const &mat=found->second;
+                    if(mat.blend!=material_blend_mode::fluid ||
+                       !std::isfinite(mat.fluid_thickness) ||
+                       mat.opacity<=0.0f)continue;
+                    float const coefficient=std::max(
+                        0.0f,std::min(mat.fluid_thickness,8.0f));
+                    world_draws[cascade].push_back({range,coefficient,mat});
+                    hash_u32(face.surface_index);
+                    hash_u32(uint32_t(face.material));
+                    hash_u32(uint32_t(cel));
+                    hash_float(coefficient);
+                    hash_fluid_color(mat);
+                }
+                for(auto const &inst:frame_gpu_3do_instances) {
+                    // SPR, projected decal, camera/HUD and ephemeral VFX
+                    // must NEVER be caustic transmission surfaces.
+                    if(!inst.geometry || inst.is_sprite_quad ||
+                       inst.is_projected_decal || inst.camera_hud ||
+                       inst.transient_procedural ||
+                       inst.world_lighting_exempt ||
+                       inst.effective_geometry_mode<2U ||
+                       inst.thing_opacity<=0.0f)continue;
+                    for(auto const &group:inst.geometry->groups) {
+                        if(group.count<3U || group.solid_color)continue;
+                        auto const face_bounds=sun_shadow_transformed_aabb(
+                            group.bounds_min,group.bounds_max,inst.transform);
+                        if(!decal_aabbs_overlap(
+                            face_bounds.low,face_bounds.high,
+                            bounds.low,bounds.high))continue;
+                        uint64_t const key=(uint64_t(group.material)<<32)|
+                                            uint32_t(group.cel);
+                        auto found=gpu_frame_material_cache.find(key);
+                        if(found==gpu_frame_material_cache.end())
+                            found=gpu_frame_material_cache.emplace(key,
+                                resolve_gpu_3do_material(group)).first;
+                        auto const &mat=found->second;
+                        if(mat.blend!=material_blend_mode::fluid ||
+                           !std::isfinite(mat.fluid_thickness) ||
+                           mat.opacity<=0.0f)continue;
+                        float const coefficient=std::max(
+                            0.0f,std::min(mat.fluid_thickness,8.0f));
+                        model_draws[cascade].push_back({&inst,&group,coefficient,mat});
+                        hash_u32(uint32_t(inst.id));
+                        hash_u32(uint32_t(inst.id>>32));
+                        // Immutable cached geometry changes identity when
+                        // a model mesh is revised, even if its owner pose,
+                        // group count and material remain unchanged.
+                        auto const geometry_ptr=reinterpret_cast<uintptr_t>(
+                            inst.geometry.get());
+                        hash_u32(uint32_t(geometry_ptr));
+                        hash_u32(uint32_t(uint64_t(geometry_ptr)>>32));
+                        hash_u32(group.offset);
+                        hash_u32(group.count);
+                        hash_u32(uint32_t(group.material));
+                        hash_u32(uint32_t(group.cel));
+                        hash_float(inst.thing_opacity);
+                        hash_float(coefficient);
+                        hash_fluid_color(mat);
+                        for(float v:inst.transform)hash_float(v);
+                    }
+                }
+                hash_u32(uint32_t(world_draws[cascade].size()));
+                hash_u32(uint32_t(model_draws[cascade].size()));
+                total_faces+=world_draws[cascade].size()+
+                             model_draws[cascade].size();
+                signatures[cascade]=signature;
+            }
+            // Clear previous results logically on zero Fluid sources.
+            // A level without water never incurs a light-space draw.
+            if(total_faces==0U) {
+                map.valid={{false,false}};
+                return;
+            }
+
+            GLint old_draw=0,old_read=0,old_vao=0,old_prog=0,old_viewport[4]{};
+            GLint old_active=0,old_depth_func=0,old_tex11=0,old_tex12=0;
+            GLboolean old_depth=glIsEnabled(GL_DEPTH_TEST);
+            GLboolean old_cull=glIsEnabled(GL_CULL_FACE);
+            GLboolean old_blend=glIsEnabled(GL_BLEND);
+            GLboolean old_scissor=glIsEnabled(GL_SCISSOR_TEST);
+            GLboolean old_offset=glIsEnabled(GL_POLYGON_OFFSET_FILL);
+            GLboolean old_depth_mask=GL_TRUE;
+            GLboolean old_color_mask[4]{};
+            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&old_draw);
+            glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&old_read);
+            glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&old_vao);
+            glGetIntegerv(GL_CURRENT_PROGRAM,&old_prog);
+            glGetIntegerv(GL_VIEWPORT,old_viewport);
+            glGetIntegerv(GL_ACTIVE_TEXTURE,&old_active);
+            glActiveTexture(GL_TEXTURE0+11);
+            glGetIntegerv(GL_TEXTURE_BINDING_2D,&old_tex11);
+            glActiveTexture(GL_TEXTURE0+12);
+            glGetIntegerv(GL_TEXTURE_BINDING_2D,&old_tex12);
+            glActiveTexture(GLenum(old_active));
+            glGetIntegerv(GL_DEPTH_FUNC,&old_depth_func);
+            glGetBooleanv(GL_DEPTH_WRITEMASK,&old_depth_mask);
+            glGetBooleanv(GL_COLOR_WRITEMASK,old_color_mask);
+
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_BLEND);
+            glDisable(GL_CULL_FACE);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glEnable(GL_DEPTH_TEST);
+            glDepthMask(GL_TRUE);
+            glDepthFunc(GL_LESS);
+            glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+            glViewport(0,0,GLsizei(map.resolution),GLsizei(map.resolution));
+            auto &prog=*ogs->spotlight_shadow_depth_program;
+            prog.use_program();
+            auto point3=[](decal_vec3 const &v) {
+                return make_point(v[0],v[1],v[2]);
+            };
+            auto set_water_color=[&](gpu_3do_texture const &mat) {
+                bool const textured=mat.albedo_source==1 &&
+                    mat.has_image && mat.texture.value()!=0U;
+                bool const next_textured=mat.albedo_source2==1 &&
+                    mat.texture2.value()!=0U && mat.albedo_transition>0.0f;
+                prog.set_caustic_color(textured,next_textured,
+                    make_point(get<0>(mat.tint),get<1>(mat.tint),
+                               get<2>(mat.tint)),
+                    mat.albedo_transition);
+                if(textured) {
+                    glActiveTexture(GL_TEXTURE0+11);
+                    glBindTexture(GL_TEXTURE_2D,mat.texture.value());
+                }
+                if(next_textured) {
+                    glActiveTexture(GL_TEXTURE0+12);
+                    glBindTexture(GL_TEXTURE_2D,mat.texture2.value());
+                }
+                glActiveTexture(GL_TEXTURE0);
+            };
+            for(int cascade=0;cascade<2;++cascade) {
+                auto const &view=sun_shadow_views[cascade];
+                if(map.valid[cascade] &&
+                   map.signatures[cascade]==signatures[cascade] &&
+                   sun_shadow_same_projection(map.views[cascade],view))
+                    continue;
+                gl::bind_framebuffer(gl::framebuffer_bind_target::any,
+                                     map.fbo[cascade]);
+                float const clear_zero[4]{0.0f,0.0f,0.0f,0.0f};
+                float const clear_one=1.0f;
+                glClearBufferfv(GL_COLOR,0,clear_zero);
+                glClearBufferfv(GL_DEPTH,0,&clear_one);
+                prog.set_orthographic_light(point3(view.origin),
+                    point3(view.right),point3(view.up),point3(view.forward),
+                    make_point(view.width,view.height,view.range,0.0f));
+                prog.set_model(make_point(1.0f,0.0f,0.0f),
+                    make_point(0.0f,1.0f,0.0f),
+                    make_point(0.0f,0.0f,1.0f),
+                    make_point(0.0f,0.0f,0.0f));
+                prog.set_shadow_alpha(false,
+                    make_point(1.0f,1.0f),make_point(0.0f,0.0f),
+                    0.5f,1.0f,false,0.0f);
+                gl::bind_vertex_array(map.vao);
+                for(auto const &draw:world_draws[cascade]) {
+                    prog.set_caustic_density(draw.coefficient);
+                    set_water_color(draw.texture);
+                    gl::draw_elements(gl::element_type::triangles,
+                        draw.range.count,gl::index_type::uint32,
+                        static_cast<ptrdiff_t>(draw.range.first_index*
+                                              sizeof(uint32_t)));
+                }
+                for(auto const &draw:model_draws[cascade]) {
+                    auto const &inst=*draw.inst;
+                    auto const &group=*draw.group;
+                    auto it=gpu_3do_gl_cache.find(inst.id);
+                    if(it==gpu_3do_gl_cache.end())
+                        it=gpu_3do_gl_cache.emplace(inst.id,
+                            std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,*inst.geometry,
+                            the_config->profile_renderer
+                                ? &packed_3do_upload_profile : nullptr)).first;
+                    auto const &m=inst.transform;
+                    prog.set_model(make_point(m[0],m[1],m[2]),
+                        make_point(m[3],m[4],m[5]),
+                        make_point(m[6],m[7],m[8]),
+                        make_point(m[9],m[10],m[11]));
+                    prog.set_caustic_density(draw.coefficient);
+                    set_water_color(draw.texture);
+                    gl::bind_vertex_array(it->second->vao);
+                    gl::draw_elements(gl::element_type::triangles,
+                        group.count,gl::index_type::uint32,
+                        static_cast<ptrdiff_t>(group.offset*
+                                              sizeof(uint32_t)));
+                }
+                map.signatures[cascade]=signatures[cascade];
+                map.views[cascade]=view;
+                map.valid[cascade]=true;
+            }
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER,GLuint(old_draw));
+            glBindFramebuffer(GL_READ_FRAMEBUFFER,GLuint(old_read));
+            glViewport(old_viewport[0],old_viewport[1],
+                       old_viewport[2],old_viewport[3]);
+            gl::bind_vertex_array(gl::vertex_array_view(GLuint(old_vao)));
+            gl::use_program(gl::program_view(GLuint(old_prog)));
+            glDepthMask(old_depth_mask);
+            glDepthFunc(GLenum(old_depth_func));
+            glColorMask(old_color_mask[0],old_color_mask[1],
+                        old_color_mask[2],old_color_mask[3]);
+            if(old_depth)glEnable(GL_DEPTH_TEST);else glDisable(GL_DEPTH_TEST);
+            if(old_cull)glEnable(GL_CULL_FACE);else glDisable(GL_CULL_FACE);
+            if(old_blend)glEnable(GL_BLEND);else glDisable(GL_BLEND);
+            if(old_scissor)glEnable(GL_SCISSOR_TEST);else glDisable(GL_SCISSOR_TEST);
+            if(old_offset)glEnable(GL_POLYGON_OFFSET_FILL);
+            else glDisable(GL_POLYGON_OFFSET_FILL);
+            glActiveTexture(GL_TEXTURE0+11);
+            glBindTexture(GL_TEXTURE_2D,GLuint(old_tex11));
+            glActiveTexture(GL_TEXTURE0+12);
+            glBindTexture(GL_TEXTURE_2D,GLuint(old_tex12));
+            glActiveTexture(GLenum(old_active));
+        }
+
         void draw_game_opaque_composite()
         {
             gl::disable(gl::capability::depth_test);
@@ -7478,14 +9848,16 @@ namespace jkgm {
             ogs->game_post_opaque_composite_program.set_coverage_normal_sampler(5);
             auto &prog=ogs->game_post_opaque_composite_program;
             prog.set_spotlight_count(0);
+            prog.set_sun_caustics(false,0.0f);
             prog.set_sun_dynamic_count(0);
-            prog.set_debug_void_pixels(the_config->debug_void_pixels);
             prog.set_retain_hom_pixels(the_config->retain_hom_pixels);
             prog.set_sun_shadow_receiver_bias_scale(
                 the_config->sun_shadow_receiver_bias_scale);
-            prog.set_sun_shadow_pcf_radius(
-                the_config->sun_shadow_near_pcf_radius,
-                the_config->sun_shadow_far_pcf_radius);
+            auto const sun_pcf=effective_sun_pcf_radii();
+            prog.set_sun_shadow_pcf_radius(sun_pcf.near_radius,
+                                           sun_pcf.far_radius);
+            float const dynamic_sun_pcf=effective_sun_dynamic_pcf_radius();
+            prog.set_sun_dynamic_pcf_radius(dynamic_sun_pcf);
             prog.set_sun_sky_aperture(false,
                 texture_units::opaque_sky_aperture,
                 make_point(1.0f,0.0f,1.0f,0.0f));
@@ -7504,11 +9876,33 @@ namespace jkgm {
                 sun_level_has_sky &&
                 std::isfinite(sun_power) && sun_power>0.0f;
             auto const cam=read_active_render_camera();
+            bool const radial_fog_active=the_config->experimental_radial_fog &&
+                                         the_config->enable_fog && cam.valid;
             if((the_config->enable_sun || the_config->enable_sun_shadows) &&
                the_config->profile_renderer_verbose && gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SUN composite diffuse=",sun_lit && cam.valid?1:0,
                          " shadow=",sun_shadow_ready?1:0,
                          " intensity=",std::to_string(sun_power));
+            bool const half_sun_active=sun_lit && cam.valid &&
+                sun_shadow_ready && sun_shadow_target &&
+                ogs->game_post_opaque_half_sun_program &&
+                ogs->sun_half_visibility &&
+                glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE &&
+                glIsEnabled(GL_BLEND)==GL_FALSE;
+            auto *half_sun_shader=half_sun_active
+                ?ogs->game_post_opaque_half_sun_program.get():nullptr;
+            // Fog needs camera FOV even when spotlights and sunlight are off.
+            if(radial_fog_active && !the_config->enable_spotlights && !sun_lit) {
+                float const h=std::tan(cam.fov*(3.14159265358979323846f/360.0f));
+                float const v=h*float(get<y>(conf_scr_res))/
+                                  float(get<x>(conf_scr_res));
+                auto axis=[](std::array<float,3> const &a,float w) {
+                    return make_point(a[0],a[1],a[2],w);
+                };
+                prog.set_projector_camera(
+                    axis(cam.position,0.0f),axis(cam.right,h),
+                    axis(cam.forward,0.0f),axis(cam.up,v));
+            }
             if(cam.valid && (the_config->enable_spotlights || sun_lit)) {
                 float const h=std::tan(cam.fov*(3.14159265358979323846f/360.0f));
                 float const v=h*float(get<y>(conf_scr_res))/
@@ -7570,10 +9964,14 @@ namespace jkgm {
                 }
                 prog.set_spotlight_count(active);
                 if(sun_lit) {
+                    // Set the sun uniforms once per shader, instead of
+                    // bouncing between GL programs for every caster tile.
+                    // Keep the original fullscreen compositor's state intact.
+                    auto configure_sun=[&](auto &target) {
                     bool const shadows=sun_shadow_ready && bool(sun_shadow_target);
                     auto const direction=normalized_sun_direction(sun.direction.value());
                     auto const rgb=sun.color.value();
-                    prog.set_sun_shadow(true,shadows,
+                    target.set_sun_shadow(true,shadows,
                         make_point(direction[0],direction[1],direction[2]),
                         make_point(rgb[0],rgb[1],rgb[2],sun_power),
                         make_point(sun_shadow_views[0].origin[0],sun_shadow_views[0].origin[1],sun_shadow_views[0].origin[2]),
@@ -7584,7 +9982,7 @@ namespace jkgm {
                     bool const sky_aperture=shadows &&
                         sun_sky_aperture_ready();
                     if(sky_aperture) {
-                        prog.set_sun_sky_aperture(
+                        target.set_sun_sky_aperture(
                             true,texture_units::opaque_sky_aperture,
                             sun_sky_aperture_depth_transform());
                         gl::set_active_texture_unit(
@@ -7594,7 +9992,7 @@ namespace jkgm {
                     }
                     if(shadows) {
                         auto const &far_view=sun_shadow_views[1];
-                        prog.set_sun_shadow_far(
+                        target.set_sun_shadow_far(
                             make_point(far_view.origin[0],far_view.origin[1],far_view.origin[2]),
                             make_point(far_view.right[0],far_view.right[1],far_view.right[2]),
                             make_point(far_view.up[0],far_view.up[1],far_view.up[2]),
@@ -7608,6 +10006,28 @@ namespace jkgm {
                         gl::bind_texture(gl::texture_bind_target::texture_2d,
                             sun_shadow_target->far_depth);
                     }
+                    // Caustics use distinct non-comparison depth and
+                    // per-source fluid-density arrays plus one fixed pattern.
+                    // The ordinary shadow, dynamic atlas and sky gate remain
+                    // authoritative for preventing transmission through roofs.
+                    if(shadows && the_config->experimental_sun_caustics &&
+                       sun_caustic_target && sun_caustic_target->complete &&
+                       sun_caustic_target->valid[0] &&
+                       sun_caustic_target->valid[1]) {
+                        auto &caustics=*sun_caustic_target;
+                        gl::set_active_texture_unit(17);
+                        glBindTexture(GL_TEXTURE_2D_ARRAY,caustics.depth.value());
+                        gl::set_active_texture_unit(18);
+                        glBindTexture(GL_TEXTURE_2D_ARRAY,caustics.density.value());
+                        gl::set_active_texture_unit(19);
+                        glBindTexture(GL_TEXTURE_2D,caustics.pattern.value());
+                        gl::set_active_texture_unit(0);
+                        static auto const caustic_start=
+                            std::chrono::steady_clock::now();
+                        float const seconds=std::chrono::duration<float>(
+                            std::chrono::steady_clock::now()-caustic_start).count();
+                        target.set_sun_caustics(true,seconds);
+                    }
                     if(the_config->enable_sun_dynamic_shadows &&
                        sun_dynamic_target && !sun_dynamic_views.empty()) {
                         gl::set_active_texture_unit(15);
@@ -7616,17 +10036,38 @@ namespace jkgm {
                         for(size_t i=0;i<sun_dynamic_views.size();++i) {
                             auto const &v=sun_dynamic_views[i];
                             auto const &tile=sun_dynamic_tiles[i];
-                            prog.set_sun_dynamic_atlas_rect(int(i),
+                            target.set_sun_dynamic_atlas_rect(int(i),
                                 make_point(float(tile.x),float(tile.y),
                                            float(tile.size),float(tile.size)));
-                            prog.set_sun_dynamic(int(i),
+                            target.set_sun_dynamic(int(i),
                                 make_point(v.origin[0],v.origin[1],v.origin[2]),
                                 make_point(v.right[0],v.right[1],v.right[2]),
                                 make_point(v.up[0],v.up[1],v.up[2]),
                                 make_point(v.forward[0],v.forward[1],v.forward[2]),
                                 make_point(v.width,v.height,v.range));
                         }
-                        prog.set_sun_dynamic_count(int(sun_dynamic_views.size()));
+                        target.set_sun_dynamic_count(int(sun_dynamic_views.size()));
+                    }
+                    };
+                    configure_sun(prog);
+                    if(half_sun_shader) {
+                        half_sun_shader->use_program();
+                        half_sun_shader->set_depth_sampler(3);
+                        half_sun_shader->set_coverage_normal_sampler(5);
+                        half_sun_shader->set_projector_camera(
+                            point_axis(cam.position,0.0f),
+                            point_axis(cam.right,h),
+                            point_axis(cam.forward,0.0f),
+                            point_axis(cam.up,v));
+                        half_sun_shader->set_sun_shadow_receiver_bias_scale(
+                            the_config->sun_shadow_receiver_bias_scale);
+                        half_sun_shader->set_sun_shadow_pcf_radius(
+                            sun_pcf.near_radius,sun_pcf.far_radius);
+                        half_sun_shader->set_sun_dynamic_pcf_radius(
+                            dynamic_sun_pcf);
+                        half_sun_shader->set_sun_dynamic_count(0);
+                        configure_sun(*half_sun_shader);
+                        prog.use_program();
                     }
                 }
             }
@@ -7635,10 +10076,35 @@ namespace jkgm {
                 auto const info=fog.info.value(), rgb=fog.color.value();
                 ogs->game_post_opaque_composite_program.set_fog(
                     make_point(info[0],info[1],
-                               the_config->enable_fog?info[2]:0.0f,0.0f),
+                               the_config->enable_fog?info[2]:0.0f,radial_fog_active?(the_config->experimental_exponential_fog?2.0f:1.0f):0.0f),
                     color_rgb(rgb[0],rgb[1],rgb[2]));
             }
 
+            // Evaluate ONLY opaque sun-caster visibility at quarter pixels.
+            // Restore the opaque composition FBO without clearing it; the
+            // existing full-resolution compositor applies the sky gate,
+            // incidence, fog and spotlight exactly as before.
+            if(half_sun_shader) {
+                auto &buffer=*ogs->sun_half_visibility;
+                gl::bind_framebuffer(gl::framebuffer_bind_target::any,buffer.fbo);
+                gl::set_viewport(buffer.viewport);
+                half_sun_shader->use_program();
+                gl::set_active_texture_unit(5);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                    frame_screen->get_resolved_normal_texture());
+                gl::set_active_texture_unit(3);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                    frame_screen->get_resolved_depth_texture());
+                gl::bind_vertex_array(ogs->postmdl.vao);
+                gl::draw_elements(gl::element_type::triangles,
+                    ogs->postmdl.num_indices,gl::index_type::uint32);
+                frame_screen->begin_compose_opaque_pass(true);
+                gl::set_viewport(make_box(make_point(0,0),conf_scr_res));
+                prog.use_program();
+                gl::set_active_texture_unit(11);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,buffer.tex);
+            }
+            prog.set_sun_half_visibility(half_sun_active,11);
             // HOM coverage reads normal.A on EVERY frame, including rooms
             // without sunlight or active spotlights. Always bind this
             // G-buffer attachment, not only when light shaders need RGB.
@@ -7671,6 +10137,10 @@ namespace jkgm {
         void stage_world_cache()
         {
             frame_world_cache_camera.valid=false;
+            planar_frame_candidates.clear();
+            planar_thing_sector_visibility.clear();
+            planar_reflection_sky_visibility.clear();
+            planar_thing_visibility_frame=~uint64_t(0);
             if(world_cache_target)
                 world_cache_target->frame_render_candidates.clear();
             if(!the_config->use_gpu_cache ||
@@ -7851,6 +10321,8 @@ namespace jkgm {
 
         void draw_game_gbuffer_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
         {
+            ssr_ready=false; // old frame's result is never sampled by G-buffer
+            ssr_opaque_ready=false;
             frame_screen->begin_opaque_pass();
             draw_game_opaque_into_gbuffer(trimdl, posterize_lighting);
             frame_screen->end_opaque_pass();
@@ -7863,6 +10335,9 @@ namespace jkgm {
                 the_config->retain_hom_pixels && mode==renderer_mode::ingame);
             draw_game_opaque_composite();
             frame_screen->end_compose_opaque_pass();
+            // Same-frame opaque color/depth is now safe to sample.
+            render_world_screen_reflections();
+            render_opaque_screen_reflections();
         }
 
         // One MAT binder shared by opaque and transparent world geometry.
@@ -7917,16 +10392,30 @@ namespace jkgm {
                 material.blend!=material_blend_mode::multiply;
             auto const specular=gpu_specular_parameters(
                 material,default_eligible);
+            bool const coat_active=clearcoat_available() &&
+                the_config->enable_reflections &&
+                get<0>(material.clearcoat_params)>0.0f &&
+                !material.solid_fullbright && !material.emissive_only &&
+                material.albedo_source!=0 && geometry_mode>=3U;
             bool const reflective=the_config->enable_reflections &&
                 specular.first>0.0f &&
                 (material.has_environment || material.has_environment2 ||
+                 (effective_capture_reflection_mode(material.reflection_mode)==4 &&
+                  planar_capture_ready) ||
+                 (material.reflection_mode==1 && ssr_ready) ||
+                 (effective_capture_reflection_mode(material.reflection_mode)==7 &&
+                  shared_reflection_ready_this_frame()) ||
                  direct_sun || direct_points);
             bool const diffuse_mapping=
                 the_config->enable_normal_mapped_diffuse &&
                 geometry_mode==4U && !material.solid_fullbright &&
                 (material.has_normal || material.has_normal2);
-            if(reflective) {
-                if(material.has_surface) {
+            bool const matcap_active=matcap_available() &&
+                material.has_matcap && material.albedo_source!=0 &&
+                geometry_mode>=3U;
+            bool const needs_environment=reflective || coat_active;
+            if(needs_environment) {
+                if(reflective && material.has_surface) {
                     gl::set_active_texture_unit(2);
                     gl::bind_texture(gl::texture_bind_target::texture_2d,
                                      material.surface);
@@ -7943,12 +10432,12 @@ namespace jkgm {
                                      material.environment2);
                 }
             }
-            if((reflective || diffuse_mapping) && material.has_normal) {
+            if((reflective || diffuse_mapping || matcap_active) && material.has_normal) {
                 gl::set_active_texture_unit(3);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                                  material.normal);
             }
-            if((reflective || diffuse_mapping) && material.has_normal2) {
+            if((reflective || diffuse_mapping || matcap_active) && material.has_normal2) {
                 gl::set_active_texture_unit(5);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                                  material.normal2);
@@ -7957,17 +10446,108 @@ namespace jkgm {
                 make_point(reflective?specular.first:0.0f,
                            specular.second,material.metalness,
                            reflective && material.has_surface?1.0f:0.0f),
-                make_point((reflective || diffuse_mapping) &&
+                make_point((reflective || diffuse_mapping || matcap_active) &&
                            material.has_normal?1.0f:0.0f,
                            material.normal_strength,
-                           (reflective || diffuse_mapping) &&
+                           (reflective || diffuse_mapping || matcap_active) &&
                            material.has_normal2?1.0f:0.0f,
                            material.normal_strength2),
                 material.normal_scroll,material.normal_scroll2,
-                reflective && material.has_environment,
-                reflective && material.has_environment2,
-                reflective?material.environment_transition:0.0f,
-                material.reflection_mode);
+                needs_environment && material.has_environment,
+                needs_environment && material.has_environment2,
+                needs_environment?material.environment_transition:0.0f,
+                effective_capture_reflection_mode(material.reflection_mode));
+            if(matcap_active) {
+                gl::set_active_texture_unit(24);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 material.matcap);
+                if(material.has_matcap_surface) {
+                    gl::set_active_texture_unit(25);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.matcap_surface);
+                }
+            }
+            shader.set_matcap(matcap_active,material.matcap_params,
+                              matcap_active && material.has_matcap_surface);
+            if(coat_active) {
+                if(material.has_clearcoat_surface) {
+                    gl::set_active_texture_unit(26);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.clearcoat_surface);
+                }
+                if(material.has_clearcoat_normal) {
+                    gl::set_active_texture_unit(27);
+                    gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                     material.clearcoat_normal);
+                }
+            }
+            shader.set_clearcoat(coat_active,material.clearcoat_params,
+                coat_active && material.has_clearcoat_surface,
+                coat_active && material.has_clearcoat_normal);
+            gl::set_active_texture_unit(0);
+        }
+
+        // One shared texture-array binding for each world shader pass.
+        void bind_world_shared_reflection(
+            shaders::world_cache_preview_shader &shader)
+        {
+            bool const ready=the_config->enable_reflections &&
+                the_config->enable_reflection_capture &&
+                shared_reflection_ready_this_frame();
+            shader.set_shared_reflection(ready);
+            if(!ready)return;
+            auto const it=reflection_probes.find(shared_reflection_owner_key);
+            gl::set_active_texture_unit(23);
+            glBindTexture(GL_TEXTURE_2D_ARRAY,
+                          it->second.target->color_texture());
+            gl::set_active_texture_unit(0);
+        }
+
+        // Bind the same-frame mirrored capture only to the cached-world
+        // shader. Ordinary EnvMaps and 3DO materials keep their old paths;
+        // mode=planar samples the target only on the selected coplanar face.
+        void bind_world_planar_reflection(
+            shaders::world_cache_preview_shader &shader)
+        {
+            auto disabled=[&] {
+                shader.set_planar_reflection(false,
+                    make_point(0.0f,0.0f,1.0f,0.0f),
+                    make_point(0.0f,0.0f,0.0f),
+                    make_point(1.0f,0.0f,0.0f),
+                    make_point(0.0f,1.0f,0.0f),
+                    make_point(0.0f,0.0f,1.0f),
+                    make_point(1.0f,1.0f));
+            };
+            if(!the_config->enable_reflection_capture ||
+               !the_config->enable_reflection_probes ||
+               !the_config->enable_reflections ||
+               !planar_capture_ready || !planar_capture_target ||
+               !planar_capture_target->ready() || !planar_capture_plane ||
+               !planar_capture_camera.valid) {
+                disabled();
+                return;
+            }
+            auto const &camera=planar_capture_camera;
+            float const aspect=float(planar_capture_target->width())/
+                               float(planar_capture_target->height());
+            float const h=std::tan(camera.fov*0.008726646259971648f);
+            float const v=h/aspect;
+            if(!(std::isfinite(h) && std::isfinite(v) &&
+                 h>0.0f && v>0.0f)) {
+                disabled();
+                return;
+            }
+            auto const vec=[](std::array<float,3> const &a) {
+                return make_point(a[0],a[1],a[2]);
+            };
+            auto const &p=*planar_capture_plane;
+            shader.set_planar_reflection(true,
+                make_point(p.normal[0],p.normal[1],p.normal[2],p.offset),
+                vec(camera.position),vec(camera.right),vec(camera.forward),
+                vec(camera.up),make_point(h,v));
+            gl::set_active_texture_unit(15);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             gl::texture_view(planar_capture_target->color_texture()));
             gl::set_active_texture_unit(0);
         }
 
@@ -8046,16 +10626,15 @@ namespace jkgm {
                     safe_read,cache.loaded_world,cache.world.vertex_count,
                     cache.native_dynamic_light);
             }
-            cache.frame_light_rgb.assign(cache.mesh.vertices.size(),
-                                         {{1.0f,1.0f,1.0f}});
-            cache.frame_light_state.assign(cache.mesh.vertices.size(),
-                                           {{1.0f,1.0f,0.0f}});
-            cache.frame_sector_tint.assign(cache.mesh.vertices.size(),
-                                            {{0.0f,0.0f,0.0f}});
-            cache.frame_sector_cmp_tint.assign(cache.mesh.vertices.size(),
-                                                {{1.0f,1.0f,1.0f}});
-            cache.frame_uv_offset.assign(cache.mesh.vertices.size(),
-                                         {{0.0f,0.0f}});
+            // update_world() initializes all live arrays and matching GPU
+            // storage. Preserve hidden surfaces' last values: every visible
+            // surface is sampled again before it can be submitted.
+            size_t const live_vertices=cache.mesh.vertices.size();
+            if(cache.frame_light_rgb.size()!=live_vertices ||
+               cache.frame_light_state.size()!=live_vertices ||
+               cache.frame_sector_tint.size()!=live_vertices ||
+               cache.frame_sector_cmp_tint.size()!=live_vertices ||
+               cache.frame_uv_offset.size()!=live_vertices)return;
             // In JKGM rdColormap_pIdentityMap lives at 0x73A414.
             // Native rdCache ignores this CMP's stored tint (even if zero).
             uint32_t identity_cmp=0;
@@ -8115,7 +10694,12 @@ namespace jkgm {
                          " mat_ptr=",candidate.material,
                          " cel=",candidate.cel);
             };
-            auto stage_candidate=[&](world_cache_draw_candidate const &candidate) {
+            bool const suppress_sector_tint=
+                native_sector_palette_mode().load(
+                    std::memory_order_relaxed)==1;
+            std::vector<world_cache_draw_candidate> reflection_staged;
+            auto stage_candidate=[&](world_cache_draw_candidate const &candidate,
+                                      bool main_view)->bool {
                 world_cache_light_sample info{};
                 char const *failure=nullptr;
                 if(!sample_world_cache_surface_light(
@@ -8129,7 +10713,7 @@ namespace jkgm {
                     ++light_fallback;
                     ++light_read_rejected;
                     log_stage_rejection(candidate,"lighting",failure,info);
-                    return;
+                    return false;
                 }
                 // Native JK has already advanced SlideSurface UV offsets.
                 // The GPU mesh retains its immutable authored coordinates.
@@ -8139,21 +10723,242 @@ namespace jkgm {
                     ++light_fallback;
                     ++uv_prepare_rejected;
                     log_stage_rejection(candidate,"uv_animation",failure,info);
-                    return;
+                    return false;
+                }
+                // FreeColorEffect must suppress only surfaces actually
+                // submitted. Do not clear every world vertex each frame.
+                if(suppress_sector_tint) {
+                    size_t const first=cache.mesh.indices[candidate.first_index];
+                    size_t const count=size_t(candidate.count)/3U+2U;
+                    std::fill_n(cache.frame_sector_tint.begin()+first,count,
+                        std::array<float,3>{{0.0f,0.0f,0.0f}});
                 }
                 if(info.mode==3U)++gouraud_faces;
                 if(info.authored_mode==4U)++mode4_faces;
-                ordered.push_back(&candidate);
-                cache.frame_render_candidates.push_back(candidate);
+                if(main_view) {
+                    ordered.push_back(&candidate);
+                    cache.frame_render_candidates.push_back(candidate);
+                } else reflection_staged.push_back(candidate);
+                return true;
             };
             for(auto const &candidate:cache.sector_candidates)
-                stage_candidate(candidate);
+                stage_candidate(candidate,true);
             // Even exclusively translucent native faces need their live
             // lighting, sector tint and animated UVs uploaded here.
             // They are submitted only in the later forward-alpha pass.
             for(auto const &candidate:cache.sector_special_candidates)
-                stage_candidate(candidate);
-            if(ordered.empty() && cache.sector_sky_candidates.empty()) {
+                stage_candidate(candidate,true);
+            // The reflected camera may see faces that JK's primary portal
+            // traversal never staged. Prepare their LIVE vertex light, CMP,
+            // sector tint and UV offsets, but never submit them in the normal
+            // opaque or forward-alpha main-camera draw list.
+            if(the_config->enable_reflection_capture &&
+               the_config->enable_reflection_probes &&
+               the_config->enable_reflections &&
+               cam.frustum.far_plane>0.1f) {
+                select_planar_capture_plane(cam.camera);
+                if(planar_capture_plane) {
+                    auto const reflected=make_planar_reflection_camera(
+                        cam.camera,*planar_capture_plane);
+                    if(reflected.valid) {
+                        auto const reflection_view=
+                            planar_camera_native_view(reflected);
+                        auto reflected_frustum=cam.frustum;
+                        reflected_frustum.clip_far=0; // No distance cull.
+                        world_cache_frame_stats reflection_stats{};
+                        reflection_stats.frustum_available=true;
+                        std::vector<world_cache_draw_candidate> reflected_candidates;
+                        std::vector<world_cache_draw_candidate> special_candidates;
+                        std::vector<world_cache_draw_candidate> reflected_sky_candidates;
+                        planar_reflection_portal_stats reflected_portal_stats{};
+                        bool reflected_portals_used=false;
+                        auto const portal_stage_start=profile_clock::now();
+                        // Portal-first is the normal planar path. On missing
+                        // topology/receiver evidence, fail open below.
+                        {
+                            // A virtual reflected eye may lie below the water,
+                            // outside all JK sectors. Seed from real reflective
+                            // RECEIVERS in the native main-camera sector list.
+                            // Never reuse the main camera's sector visibility.
+                            std::vector<uint32_t> receiver_seeds;
+                            for(auto const &candidate:cache.frame_render_candidates) {
+                                if(candidate.surface_index>=
+                                   cache.cached_surface_lookup.size())continue;
+                                auto const cached=
+                                    cache.cached_surface_lookup[candidate.surface_index];
+                                if(cached>=cache.mesh.surfaces.size())continue;
+                                auto const &surface=cache.mesh.surfaces[cached];
+                                if(surface.first_index>=cache.mesh.indices.size())
+                                    continue;
+                                auto const index=cache.mesh.indices[surface.first_index];
+                                if(index>=cache.mesh.vertices.size())continue;
+                                auto const &vertex=cache.mesh.vertices[index];
+                                float normal_dot=0.0f,plane_dist=-planar_capture_plane->offset;
+                                for(int axis=0;axis<3;++axis) {
+                                    normal_dot+=vertex.normal[axis]*
+                                        planar_capture_plane->normal[axis];
+                                    plane_dist+=vertex.position[axis]*
+                                        planar_capture_plane->normal[axis];
+                                }
+                                if(!std::isfinite(normal_dot) ||
+                                   !std::isfinite(plane_dist) ||
+                                   std::fabs(normal_dot)<0.999f ||
+                                   std::fabs(plane_dist)>0.02f)continue;
+                                gpu_3do_group group{};
+                                group.material=candidate.material;
+                                group.cel=candidate.cel;
+                                auto const mat=resolve_gpu_3do_material(group);
+                                if(mat.reflection_mode!=4)continue;
+                                receiver_seeds.push_back(candidate.surface_index);
+                            }
+                            if(receiver_seeds.empty()) {
+                                reflected_portal_stats.reason=
+                                    "no_main_camera_reflective_receivers";
+                            } else if(!cache.reflected_portal_graph.ensure(
+                                   safe_read,cache.loaded_world,cache.revision,
+                                   cache.world,cache.mesh,
+                                   cache.cached_surface_lookup)) {
+                                reflected_portal_stats.reason="invalid_native_topology";
+                            } else {
+                                std::vector<world_cache_sector_span> reflected_spans;
+                                std::vector<planar_reflection_portal_rect> sector_windows;
+                                std::vector<uint8_t> thing_sector_mask;
+                                float const aspect=
+                                    float(get<x>(internal_scr_res_f))/
+                                    float(get<y>(internal_scr_res_f));
+                                float const half_fov=std::tan(
+                                    cam.camera.fov*0.008726646259971648f);
+                                reflected_portal_stats=
+                                    cache.reflected_portal_graph.traverse(
+                                        safe_read,receiver_seeds,cache.mesh,
+                                        cache.cached_surface_lookup,
+                                        reflection_view,reflected.position,
+                                        half_fov,aspect,reflected_spans,
+                                        &sector_windows,&thing_sector_mask);
+                                if(reflected_portal_stats.valid) {
+                                    auto const stage=
+                                        collect_world_cache_sector_candidates(
+                                            safe_read,cache.world.surfaces_addr,
+                                            cache.mesh,cache.cached_surface_lookup,
+                                            reflected_spans,cache.sector_seen_epochs,
+                                            cache.sector_seen_epoch,
+                                            reflected_candidates,
+                                            &reflected_frustum,&reflection_view,
+                                            &special_candidates,&reflected_sky_candidates);
+                                    reflected_portals_used=stage.valid;
+                                    if(stage.valid) {
+                                        // Only publish masks produced by the
+                                        // same reflected camera/world/frame.
+                                        planar_thing_sector_visibility=
+                                            std::move(thing_sector_mask);
+                                        planar_thing_visibility_world=
+                                            cache.loaded_world;
+                                        planar_thing_visibility_frame=
+                                            gpu_3do_present_serial;
+                                        // As in native sithRender_RenderSectors,
+                                        // use the inherited per-sector portal
+                                        // frustum for final surface eligibility.
+                                        auto within_window=[&](auto const &candidate) {
+                                            if(candidate.surface_index>=
+                                               cache.cached_surface_lookup.size())
+                                                return true;
+                                            auto const cached=cache.cached_surface_lookup[
+                                                candidate.surface_index];
+                                            if(cached>=cache.mesh.surfaces.size())
+                                                return true;
+                                            auto const &range=cache.mesh.surfaces[cached];
+                                            return cache.reflected_portal_graph.surface_in_window(
+                                                candidate.surface_index,range.bounds_min,
+                                                range.bounds_max,reflection_view,
+                                                half_fov,aspect,sector_windows);
+                                        };
+                                        // Reflection sky apertures use the same
+                                        // independent per-sector portal windows.
+                                        planar_reflection_sky_visibility.assign(
+                                            cache.cached_surface_lookup.size(),0U);
+                                        for(auto const &sky:reflected_sky_candidates)
+                                            if(sky.surface_index<
+                                                   planar_reflection_sky_visibility.size() &&
+                                               within_window(sky))
+                                                planar_reflection_sky_visibility[
+                                                    sky.surface_index]=1U;
+                                        reflected_candidates.erase(
+                                            std::remove_if(reflected_candidates.begin(),
+                                                reflected_candidates.end(),
+                                                [&](auto const &candidate) {
+                                                    return !within_window(candidate);
+                                                }),
+                                            reflected_candidates.end());
+                                        special_candidates.erase(
+                                            std::remove_if(special_candidates.begin(),
+                                                special_candidates.end(),
+                                                [&](auto const &candidate) {
+                                                    return !within_window(candidate);
+                                                }),
+                                            special_candidates.end());
+                                    }
+                                    if(!stage.valid)
+                                        reflected_portal_stats.reason=
+                                            "reflected_sector_stage_invalid";
+                                }
+                            }
+                        }
+                        if(!reflected_portals_used) {
+                            // Any missing receiver or unverified pointer
+                            // FAILS OPEN: keep the original independent
+                            // full-world reflected-frustum path.
+                            reflected_candidates.clear();
+                            special_candidates.clear();
+                            reflected_candidates.reserve(
+                                cache.mesh.surfaces.size()/4U);
+                            for(auto const &surface:cache.mesh.surfaces)
+                                append_world_cache_candidate(
+                                    safe_read,cache.world.surfaces_addr,surface,
+                                    reflected_candidates,reflection_stats,
+                                    &reflected_frustum,&reflection_view,
+                                    &special_candidates);
+                        }
+                        if(the_config->profile_renderer &&
+                           gpu_3do_present_serial%120U==0U)
+                            LOG_INFO("PLANAR reflected_portals used=",
+                                reflected_portals_used?1:0,
+                                " reason=",reflected_portal_stats.reason,
+                                " seeds=",reflected_portal_stats.seed_sectors,
+                                 " eye_sector_seed=",reflected_portal_stats.eye_sector_seed?1:0,
+                                 " thing_candidate_sectors=",std::count(
+                                     planar_thing_sector_visibility.begin(),
+                                     planar_thing_sector_visibility.end(),uint8_t(1)),
+                                " sectors_total=",reflected_portal_stats.sectors_total,
+                                " sectors_visible=",reflected_portal_stats.visible_sectors,
+                                " portal_tests=",reflected_portal_stats.portals_considered,
+                                " portal_passes=",reflected_portal_stats.portals_reached,
+                                " reachable_surfaces=",reflected_portal_stats.surfaces_reachable,
+                                " staged=",reflected_candidates.size()+
+                                             special_candidates.size(),
+                                " cached_world_surfaces=",cache.mesh.surfaces.size(),
+                                " stage_cpu_us=",elapsed_profile_us(
+                                    portal_stage_start,profile_clock::now()),
+                                " NOTE=independent_mirrored_camera_fail_open");
+                        reflected_candidates.insert(reflected_candidates.end(),
+                            special_candidates.begin(),special_candidates.end());
+                        std::unordered_set<uint32_t> ready;
+                        ready.reserve(cache.frame_render_candidates.size()+
+                                      reflected_candidates.size());
+                        for(auto const &c:cache.frame_render_candidates)
+                            ready.insert(c.surface_index);
+                        for(auto const &candidate:reflected_candidates) {
+                            if(candidate.passable_adjoin ||
+                               (candidate.face_type&0x2U)!=0U)continue;
+                            if(ready.insert(candidate.surface_index).second &&
+                               !stage_candidate(candidate,false))
+                                continue;
+                            planar_frame_candidates.push_back(candidate);
+                        }
+                    }
+                }
+            }
+            if(ordered.empty() && cache.sector_sky_candidates.empty() &&
+               reflection_staged.empty()) {
                 // Still report diagnostic totals if every candidate failed
                 // before the GPU pass had anything to draw.
                 if(the_config->profile_renderer &&
@@ -8169,36 +10974,51 @@ namespace jkgm {
                 }
                 return;
             }
-            // FreeColorEffect(sector slot) disables the native request.
-            // Honor that for all cached world surfaces, too, without
-            // touching their authored/COG SithSector.tint values.
-            if(native_sector_palette_mode().load(
-                   std::memory_order_relaxed)==1)
-                std::fill(cache.frame_sector_tint.begin(),
-                          cache.frame_sector_tint.end(),
-                          std::array<float,3>{{0.0f,0.0f,0.0f}});
-            // One streaming upload of live RGB lighting. World position,
-            // UV, normal and index buffers remain entirely immutable.
-            gl::bind_buffer(gl::buffer_bind_target::array,cache.lighting);
-            gl::buffer_data(gl::buffer_bind_target::array,
-                make_span(cache.frame_light_rgb).as_const_bytes(),
-                gl::buffer_usage::stream_draw);
-            gl::bind_buffer(gl::buffer_bind_target::array,cache.light_state);
-            gl::buffer_data(gl::buffer_bind_target::array,
-                make_span(cache.frame_light_state).as_const_bytes(),
-                gl::buffer_usage::stream_draw);
-            gl::bind_buffer(gl::buffer_bind_target::array,cache.sector_tint);
-            gl::buffer_data(gl::buffer_bind_target::array,
-                make_span(cache.frame_sector_tint).as_const_bytes(),
-                gl::buffer_usage::stream_draw);
-            gl::bind_buffer(gl::buffer_bind_target::array,cache.sector_cmp_tint);
-            gl::buffer_data(gl::buffer_bind_target::array,
-                make_span(cache.frame_sector_cmp_tint).as_const_bytes(),
-                gl::buffer_usage::stream_draw);
-            gl::bind_buffer(gl::buffer_bind_target::array,cache.uv_animation);
-            gl::buffer_data(gl::buffer_bind_target::array,
-                make_span(cache.frame_uv_offset).as_const_bytes(),
-                gl::buffer_usage::stream_draw);
+            // Native portal visibility has already selected the only faces
+            // whose live vertex attributes need refreshing this frame.
+            // The full-upload fallback avoids dozens of small GL calls or
+            // stalling in glBufferSubData on heavily visible/fragmented maps.
+            auto stream_candidates=cache.frame_render_candidates;
+            stream_candidates.insert(stream_candidates.end(),
+                reflection_staged.begin(),reflection_staged.end());
+            auto const stream=plan_world_cache_vertex_stream(
+                cache.mesh,stream_candidates);
+            auto upload_live=[&](auto const &buffer,auto const &values) {
+                gl::bind_buffer(gl::buffer_bind_target::array,buffer);
+                if(stream.partial) {
+                    for(auto const &range:stream.ranges)
+                        gl::buffer_sub_data(gl::buffer_bind_target::array,
+                            range.first_vertex*sizeof(values[0]),
+                            make_span(values.data()+range.first_vertex,
+                                      range.count).as_const_bytes());
+                } else {
+                    gl::buffer_data(gl::buffer_bind_target::array,
+                        make_span(values).as_const_bytes(),
+                        gl::buffer_usage::stream_draw);
+                }
+            };
+            if(!stream_candidates.empty()) {
+                upload_live(cache.lighting,cache.frame_light_rgb);
+                upload_live(cache.light_state,cache.frame_light_state);
+                upload_live(cache.sector_tint,cache.frame_sector_tint);
+                upload_live(cache.sector_cmp_tint,cache.frame_sector_cmp_tint);
+                upload_live(cache.uv_animation,cache.frame_uv_offset);
+            }
+            if(the_config->profile_renderer &&
+               gpu_3do_present_serial%120U==0U) {
+                size_t const transferred=cache.frame_render_candidates.empty()
+                    ?0U:(stream.partial?stream.touched_vertices:live_vertices);
+                LOG_INFO("WORLD CACHE vertex streaming mode=",
+                    cache.frame_render_candidates.empty()?"none":
+                        stream.partial?"partial":"full",
+                    " visible_vertices=",stream.touched_vertices,
+                    " uploaded_vertices=",transferred,
+                    " total_vertices=",live_vertices,
+                    " merged_ranges=",stream.ranges.size(),
+                    " uploaded_bytes=",transferred*
+                        (4U*sizeof(std::array<float,3>)+
+                         sizeof(std::array<float,2>)));
+            }
             std::sort(ordered.begin(),ordered.end(),
                 [](world_cache_draw_candidate const *a,
                    world_cache_draw_candidate const *b) {
@@ -8217,6 +11037,9 @@ namespace jkgm {
                 });
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
+            bind_world_planar_reflection(shader);
+            bind_world_shared_reflection(shader);
+            shader.set_screen_reflection(false,9);
             shader.set_light_brightness_limit(
                 authored_light_limit(the_config->enable_baked_overbright));
             shader.set_normal_mapped_diffuse(
@@ -8586,6 +11409,8 @@ namespace jkgm {
         // premultiplied scene transparency target as GPU 3DOs.
         // This uses the *opaque pass's* vertex lighting and UV upload:
         // never sample mutable JK native pointers after stage_world_cache().
+#include "screen_space_reflections_renderer.inc"
+#include "screen_space_reflections_opaque.inc"
         void draw_world_cache_transparency()
         {
             if(!the_config->use_gpu_cache ||
@@ -8655,6 +11480,15 @@ namespace jkgm {
                 });
             auto &shader=*ogs->world_cache_preview_program;
             shader.use_program();
+            bind_world_planar_reflection(shader);
+            bind_world_shared_reflection(shader);
+            shader.set_screen_reflection(ssr_ready,9);
+            if(ssr_ready && ssr_image && ssr_image->ready()) {
+                gl::set_active_texture_unit(9);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                    gl::texture_view(ssr_image->color_texture()));
+                gl::set_active_texture_unit(0);
+            }
             shader.set_light_brightness_limit(
                 authored_light_limit(the_config->enable_baked_overbright));
             shader.set_normal_mapped_diffuse(
@@ -8688,7 +11522,11 @@ namespace jkgm {
             auto const &fog=get_fog_settings();
             auto const info=fog.info.value(),color=fog.color.value();
             shader.set_fog(make_point(info[0],info[1],
-                               the_config->enable_fog?info[2]:0.0f,0.0f),
+                               the_config->enable_fog?info[2]:0.0f,
+                               (the_config->experimental_radial_fog &&
+                                the_config->enable_fog)
+                                   ?(the_config->experimental_exponential_fog?2.0f:1.0f)
+                                   :0.0f),
                            make_point(color[0],color[1],color[2]));
             // Diagnostic modes affect only GPU world Fluid in the forward
             // pass. Default 0 retains the normal rendering path.
@@ -8701,7 +11539,7 @@ namespace jkgm {
                 [&](world_cache_draw_candidate const *face) {
                     return resolve(*face).blend==material_blend_mode::fluid;
                 });
-            if(has_fluid) {
+            if(has_fluid || ssr_ready) {
                 gl::set_active_texture_unit(8);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                                  frame_screen->get_resolved_depth_texture());
@@ -8808,6 +11646,7 @@ namespace jkgm {
 
         void draw_game_transparency_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
         {
+            if(scene_gpu_timing)scene_gpu_queries.timestamp(1U,true);
             frame_screen->begin_transparency_pass();
             prepare_translucent_spotlights();
 
@@ -8856,7 +11695,10 @@ namespace jkgm {
                     make_point(current_info[0],
                                current_info[1],
                                the_config->enable_fog ? current_info[2] : 0.0f,
-                               0.0f),
+                               (the_config->experimental_radial_fog &&
+                                the_config->enable_fog)
+                                   ?(the_config->experimental_exponential_fog?2.0f:1.0f)
+                                   :0.0f),
                     color_rgb(current_color[0], current_color[1], current_color[2]));
             }
             gl::set_active_texture_unit(0);
@@ -8895,7 +11737,7 @@ namespace jkgm {
                            batch_blend_filter::special);
             }
 
-            // SPR 0x40 flare quads use center-only occlusion against the
+            // SPR type 4 flare quads use center-only occlusion against the
             // resolved opaque depth texture. Never write or test ordinary
             // per-fragment depth: the sprite's EDGES may cover world geometry.
             if(world_flare_batch.size()!=0U) {
@@ -8918,7 +11760,10 @@ namespace jkgm {
             // GPU-resident ordinary 3DO translucent faces join the alpha
             // pass after native world geometry. Projected SPRs were submitted
             // earlier so translucent world pixels may correctly cover them.
+            if(scene_gpu_timing)scene_gpu_queries.timestamp(1U,false);
+            if(scene_gpu_timing)scene_gpu_queries.timestamp(2U,true);
             draw_gpu_3do_preview(true);
+            if(scene_gpu_timing)scene_gpu_queries.timestamp(2U,false);
             ogs->game_transparency_pass_program.use_program();
             restore_native_fluid_depth();
 
@@ -8978,6 +11823,9 @@ namespace jkgm {
                        posterize_lighting,
                        batch_blend_filter::all);
 
+            // Debug on the composed scene, not the G-buffer or query depth.
+            // Draw last so x-ray proxies remain visible behind geometry.
+            draw_gpu_thing_occlusion_debug();
             // HUD and menu draw calls assume the original alpha blend state.
             // Restore it after any special additive/multiply draw.
             gl::set_blend_function(gl::blend_function::one,
@@ -9057,6 +11905,41 @@ namespace jkgm {
                *reinterpret_cast<uint32_t const *>(normal_magic_address) == 0x314D524EU) {
                 native_normals = reinterpret_cast<uint32_t const *>(normal_slots_address);
             }
+
+            // A flare's specular marker indexes its originating SithThing
+            // position. Cache the native view once per ExecuteBuffer, only
+            // when flare geometry actually reaches the converter.
+            bool flare_camera_checked=false,flare_camera_valid=false;
+            gpu_3do_matrix34 flare_view{};
+            engine_camera flare_camera{};
+            auto project_flare_source=[&](uint32_t marker,
+                                          sprite_flare_center &out) {
+                std::array<float,3> world{};
+                if(!sprite_flare_sources().lookup(marker,world))return false;
+                if(!flare_camera_checked) {
+                    flare_camera_checked=true;
+                    flare_camera=read_active_render_camera();
+                    flare_camera_valid=flare_camera.valid &&
+                        read_active_rd_camera_view(flare_view);
+                }
+                if(!flare_camera_valid)return false;
+                // JK can render a 4:3 virtual screen letterboxed inside
+                // the configured framebuffer. Project with the NATIVE
+                // screen's aspect, then offset into its actual GL viewport.
+                if(!project_sprite_flare_thing_center(
+                       world,flare_view,
+                       std::tan(flare_camera.fov*0.008726646259971648f),
+                       get<x>(internal_scr_res_f)/get<y>(internal_scr_res_f),
+                       {{get<x>(internal_scr_res_f),
+                         get<y>(internal_scr_res_f)}},out))
+                    return false;
+                out.pixel[0]+=float(get<x>(actual_display_area.start));
+                out.pixel[1]+=float(get<y>(actual_display_area.start));
+                return out.pixel[0]>=0.0f &&
+                       out.pixel[0]<float(get<x>(conf_scr_res)) &&
+                       out.pixel[1]>=0.0f &&
+                       out.pixel[1]<float(get<y>(conf_scr_res));
+            };
 
             auto cmd_span = make_span((char const *)ebd.lpData + ed.dwInstructionOffset,
                                       ed.dwInstructionLength);
@@ -9169,7 +12052,7 @@ namespace jkgm {
                         // D3DTLVERTEX.specular. Vanilla output uses specular=0, so treat zero
                         // as neutral white to preserve compatibility with an unpatched engine.
                         auto unpack_vertex_tint = [](DWORD packed) {
-                            if(packed == 0U || packed == 0xB6A9D000U) {
+                            if(packed == 0U || sprite_flare_is_marker(packed)) {
                                 return color::fill(1.0f);
                             }
                             return to_float_color(color_rgba8((uint8_t)RGBA_GETRED(packed),
@@ -9189,13 +12072,13 @@ namespace jkgm {
                         c3 = extend(get<rgb>(c3) * get<rgb>(tint3), get<a>(c3));
 
                         // An exact native vertex marker means the three
-                        // vertices came from an authored SPR with type 0x40.
+                        // vertices came from an authored SPR with type 4.
                         // Route separately; a regular world triangle can
                         // never accidentally inherit flare depth behavior.
                         bool const is_flare=!is_gun &&
-                            v1.specular==0xB6A9D000U &&
-                            v2.specular==0xB6A9D000U &&
-                            v3.specular==0xB6A9D000U;
+                            sprite_flare_is_marker(v1.specular) &&
+                            v1.specular==v2.specular &&
+                            v1.specular==v3.specular;
                         if(is_flare && the_config->profile_renderer &&
                            flare_gpu_trace_count++<6U)
                             LOG_INFO("SPR flare stage=d3d_triangle material=",
@@ -9233,24 +12116,33 @@ namespace jkgm {
                                          current_material));
                         }
                         else {
-                            (is_flare ? static_cast<triangle_batch *>(&world_flare_batch)
-                                      : current_triangle_batch)->insert(
-                                triangle(triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
-                                                                        internal_scr_offset_f,
-                                                                        v1),
-                                                         make_point(v1.tu, v1.tv),
-                                                         c1, native1),
-                                         triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
-                                                                        internal_scr_offset_f,
-                                                                        v2),
-                                                         make_point(v2.tu, v2.tv),
-                                                         c2, native2),
-                                         triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
-                                                                        internal_scr_offset_f,
-                                                                        v3),
-                                                         make_point(v3.tu, v3.tv),
-                                                         c3, native3),
-                                         current_material));
+                            triangle tri(
+                                triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
+                                                               internal_scr_offset_f,v1),
+                                                make_point(v1.tu,v1.tv),c1,
+                                                is_flare?0U:native1),
+                                triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
+                                                               internal_scr_offset_f,v2),
+                                                make_point(v2.tu,v2.tv),c2,
+                                                is_flare?0U:native2),
+                                triangle_vertex(d3dtl_to_point(internal_scr_res_scale_f,
+                                                               internal_scr_offset_f,v3),
+                                                make_point(v3.tu,v3.tv),c3,
+                                                is_flare?0U:native3),
+                                current_material);
+                            if(is_flare) {
+                                // Carry one screen-space source Thing position
+                                // in the unused flat normal for this flare.
+                                // Never infer the center from the clipped quad.
+                                sprite_flare_center center{};
+                                bool const valid=project_flare_source(
+                                    v1.specular,center);
+                                tri.normal=valid
+                                    ?make_direction(center.pixel[0],
+                                        center.pixel[1],center.view_depth)
+                                    :make_direction(-1.0f,-1.0f,-1.0f);
+                                world_flare_batch.insert(tri);
+                            } else current_triangle_batch->insert(tri);
                         }
                     } break;
 
@@ -9669,20 +12561,54 @@ namespace jkgm {
             if(!read(0x0073A414U,&identity_cmp,sizeof(identity_cmp)) ||
                !decal_native_address_ok(identity_cmp))
                 identity_cmp=0;
+            // Counts are per-120-frame windows. The owner containment proof
+            // always runs before multi-sector candidate collection.
+            static thread_local sector_crossing_stage_stats profile_crossing{};
+            static thread_local uint64_t profile_crossing_us=0U;
+            static thread_local uint32_t profile_crossing_frames=0U;
+            bool const profile=the_config->profile_renderer;
+            auto const crossing_start=profile
+                ?profile_clock::now():profile_clock::time_point{};
             uint32_t crossing=0;
             for(auto &instance:frame_gpu_3do_instances) {
                 instance.crossing_lighting=sector_crossing_stage_instance(
                     sector_crossing_world,sector_crossing_ranges,
                     instance,read,true,identity_cmp,
-                    the_config->enable_baked_overbright);
+                    the_config->enable_baked_overbright,
+                    profile?&profile_crossing:nullptr);
                 if(instance.crossing_lighting)++crossing;
             }
-            if(the_config->profile_renderer &&
-               gpu_3do_present_serial%120U==0U)
+            if(profile) {
+                profile_crossing_us+=elapsed_profile_us(
+                    crossing_start,profile_clock::now());
+                ++profile_crossing_frames;
+            }
+            if(profile && gpu_3do_present_serial%120U==0U) {
                 LOG_INFO("SECTOR CROSSING model_instances=",
                     frame_gpu_3do_instances.size(),
                     " crossing=",crossing,
                     " budget=",sector_crossing_candidates::capacity);
+                LOG_INFO("SECTOR CROSSING owner-proof window_frames=",
+                    profile_crossing_frames,
+                    " considered=",profile_crossing.considered,
+                    " eligible=",profile_crossing.eligible,
+                    " valid_spheres=",profile_crossing.sphere_valid,
+                    " proved_interior=",profile_crossing.proof_interior,
+                    " proved_sphere=",profile_crossing.proof_sphere,
+                    " proved_oriented_box=",
+                    profile_crossing.proof_oriented_box,
+                    " early_owner_exits=",profile_crossing.owner_culled,
+                    " multisector_candidates=",
+                    profile_crossing.multi_candidates,
+                    " staged=",profile_crossing.staged,
+                    " stage_cpu_us_per_frame=",
+                    profile_crossing_us/
+                        std::max<uint32_t>(1U,profile_crossing_frames),
+                    " NOTE=CPU_only; profile overhead includes owner checks");
+                profile_crossing={};
+                profile_crossing_us=0U;
+                profile_crossing_frames=0U;
+            }
         }
 
         void merge_thing_light_colors()
@@ -9818,6 +12744,701 @@ namespace jkgm {
                          " saber_override=",saber_override);
         }
 
+        // Only explicit planar MATs are reflection receivers. Fluid alpha
+        // blending is orthogonal to whether a material requests reflections.
+        // One-target implementation: choose the nearest eligible plane.
+        void select_planar_capture_plane(engine_camera const &camera)
+        {
+            if(!world_cache_target || !world_cache_target->ready) {
+                planar_capture_plane.reset();
+                return;
+            }
+            auto const &cache=*world_cache_target;
+            bool const changed=planar_plane_world!=cache.loaded_world ||
+                planar_plane_world_revision!=cache.revision;
+            if(!changed && planar_plane_scanned_frame!=~uint64_t(0) &&
+               gpu_3do_present_serial-planar_plane_scanned_frame<120U)
+                return;
+            planar_plane_scanned_frame=gpu_3do_present_serial;
+            planar_plane_world=cache.loaded_world;
+            planar_plane_world_revision=cache.revision;
+            planar_capture_plane.reset();
+            float best_distance=std::numeric_limits<float>::infinity();
+            size_t matched_planar=0,matched_passable=0;
+            std::map<std::pair<uintptr_t,int32_t>,gpu_3do_texture> mats;
+            for(auto const &surface:cache.mesh.surfaces) {
+                // Explicit planar receivers may be passable adjoins (e.g.
+                // water). Exclude sky apertures but not passable portals.
+                // The mirrored SCENE render still skips passable portals.
+                if(surface.count<3U ||
+                   (surface.surface_flags&0x600U)!=0U ||
+                   surface.first_index>=cache.mesh.indices.size() ||
+                   surface.material==0U)
+                    continue;
+                auto const first=cache.mesh.indices[surface.first_index];
+                if(first>=cache.mesh.vertices.size())continue;
+                auto const &v=cache.mesh.vertices[first];
+                auto const normal=v.normal;
+                float const len=std::sqrt(normal[0]*normal[0]+
+                    normal[1]*normal[1]+normal[2]*normal[2]);
+                if(!(std::isfinite(len) && len>1.e-5f))continue;
+                // A MAT is often shared by hundreds of water polygons.
+                // Material identity is independent of the individual plane.
+                auto const mat_key=std::make_pair(surface.material,surface.cel);
+                auto it=mats.find(mat_key);
+                if(it==mats.end()) {
+                    gpu_3do_group group{};
+                    group.material=surface.material;
+                    group.cel=surface.cel;
+                    it=mats.emplace(mat_key,
+                        resolve_gpu_3do_material(group)).first;
+                }
+                auto const &mat=it->second;
+                if(mat.reflection_mode!=4)continue;
+                ++matched_planar;
+                if(surface.passable_adjoin)++matched_passable;
+                planar_reflection_plane plane{};
+                plane.normal=normal;
+                plane.offset=normal[0]*v.position[0]+
+                    normal[1]*v.position[1]+normal[2]*v.position[2];
+                if(!normalize_planar_reflection_plane(plane,plane))continue;
+                float const distance=std::fabs(
+                    engine_camera_detail::dot(camera.position,plane.normal)-
+                    plane.offset);
+                if(distance>=best_distance)continue;
+                best_distance=distance;
+                planar_capture_plane=plane;
+            }
+            if(the_config->profile_renderer)
+                LOG_INFO("PLANAR plane select: world=",cache.loaded_world,
+                         " source=",planar_capture_plane?"material":"none",
+                         " resolution=",the_config->reflection_capture_resolution,
+                         " candidate_surfaces=",cache.mesh.surfaces.size(),
+                         " planar_matches=",matched_planar,
+                         " passable_reflection_receivers=",matched_passable);
+        }
+
+#include "reflection_sky_capture.inc"
+        void render_planar_capture()
+        {
+            planar_capture_ready=false;
+            if(!the_config->enable_reflections ||
+               !the_config->enable_reflection_capture ||
+               !the_config->enable_reflection_probes ||
+               !the_config->use_gpu_cache ||
+               !world_cache_target || !world_cache_target->ready ||
+               !ogs || !frame_world_cache_camera.valid ||
+               !frame_world_cache_camera.perspective)
+                return;
+            auto const &camera=frame_world_cache_camera.camera;
+            select_planar_capture_plane(camera);
+            if(!planar_capture_plane)return;
+            if(planar_receiver_queries && world_cache_target &&
+               world_cache_target->ready) {
+                auto &visibility=*planar_receiver_queries;
+                visibility.select(world_cache_target->loaded_world,
+                    world_cache_target->revision,*planar_capture_plane);
+                if(visibility.hidden(camera,gpu_3do_present_serial)) {
+                    // Keep the previous capture texture intact. The receiver
+                    // is behind opaque depth so it is not sampled this frame.
+                    // Query is resubmitted after the main opaque pass.
+                    if(the_config->profile_renderer &&
+                       gpu_3do_present_serial%120U==0U)
+                        LOG_INFO("PLANAR receiver_visibility=occluded",
+                            " skip_capture=1 queries=",visibility.submitted(),
+                            " completed=",visibility.completed(),
+                            " skipped=",visibility.skipped());
+                    return;
+                }
+            }
+            auto const reflected=make_planar_reflection_camera(
+                camera,*planar_capture_plane);
+            // The common resolution is the SHORT edge of the mirrored
+            // image. Preserve aspect ratio, regardless of screen size.
+            auto setup=make_planar_reflection_render_setup(
+                get<x>(internal_scr_res),get<y>(internal_scr_res),
+                1.0f,camera,reflected,*planar_capture_plane);
+            if(!setup.valid)return;
+            int const display_w=get<x>(internal_scr_res);
+            int const display_h=get<y>(internal_scr_res);
+            double const capture_scale=
+                double(the_config->reflection_capture_resolution)/
+                double(std::min(display_w,display_h));
+            setup.width=std::clamp(
+                int(std::lround(double(display_w)*capture_scale)),32,16384);
+            setup.height=std::clamp(
+                int(std::lround(double(display_h)*capture_scale)),32,16384);
+            float const interval=the_config->reflection_capture_update_interval;
+            bool same_plane=planar_last_completed_plane.has_value() &&
+                planar_last_capture_revision==world_cache_target->revision;
+            if(same_plane) {
+                for(int j=0;j<3;++j) {
+                    if(std::fabs(planar_capture_plane->normal[j]-
+                                 planar_last_completed_plane->normal[j])>1.e-5f)
+                        same_plane=false;
+                }
+                if(std::fabs(planar_capture_plane->offset-
+                             planar_last_completed_plane->offset)>1.e-4f)
+                    same_plane=false;
+            }
+            if(interval>0.0f && same_plane && planar_capture_target &&
+               planar_capture_target->ready() &&
+               planar_capture_target->width()==setup.width &&
+               planar_capture_target->height()==setup.height &&
+               std::chrono::duration<float>(
+                   std::chrono::steady_clock::now()-planar_last_refresh
+               ).count()<interval) {
+                // Keep previous reflected camera matrices in the lookup
+                // shader: reusing the image with the *new* camera would
+                // make reflections swim while the interval is throttled.
+                planar_capture_ready=true;
+                return;
+            }
+            // Reuse the same perspective coordinates through the generic
+            // offscreen projection descriptor. The FOV=0 orthographic mode
+            // is reserved for arbitrary camera captures, not reflections.
+            float const far_plane=reflection_capture_scene_far(
+                reflected.position);
+            auto reflected_frustum=frame_world_cache_camera.frustum;
+            reflected_frustum.clip_far=0;
+            reflected_frustum.far_plane=far_plane;
+            auto const projection=make_offscreen_capture_projection(
+                setup.width,setup.height,camera.fov,0.0f,far_plane);
+            if(!projection.valid || projection.orthographic)return;
+            if(!planar_capture_target)
+                planar_capture_target=
+                    std::make_unique<offscreen_capture_target>();
+            if(!planar_capture_target->ensure(setup.width,setup.height)) {
+                static bool warned=false;
+                if(!warned) {
+                    warned=true;
+                    LOG_WARNING("PLANAR capture framebuffer unavailable at ",
+                        setup.width,"x",setup.height);
+                }
+                return;
+            }
+            if(!planar_capture_program)
+                planar_capture_program=
+                    std::make_unique<planar_reflection_capture_shader>(
+                        the_config->data_path);
+            auto &shader=*planar_capture_program;
+            auto const view=planar_camera_native_view(reflected);
+            auto const begun=std::chrono::steady_clock::now();
+            size_t world_drawn=0,model_drawn=0,model_candidates=0;
+            size_t world_culled=0,model_culled=0,thing_radius_culled=0;
+            size_t thing_sector_culled=0;
+            size_t hidden_by_flags=0,hidden_by_geo=0;
+            // Acquisition does NOT mutate rdCamera; its refresh callback
+            // updates only each Thing's native cached animation matrices.
+            planar_reflection_offscreen_gpu offscreen{};
+            if(engine_material_debug::matches_tested_executable()) {
+                uint32_t world=0;
+                if(engine_material_debug::read_object(
+                       engine_material_debug::current_world_global,world)) {
+                    auto read=[](uintptr_t at,void *dst,size_t bytes) {
+                        return engine_material_debug::read_bytes(at,dst,bytes);
+                    };
+                    planar_reflection_thing_scan scan{};
+                    auto const *sector_mask=
+                        planar_thing_visibility_world==world &&
+                        planar_thing_visibility_frame==gpu_3do_present_serial &&
+                        !planar_thing_sector_visibility.empty()
+                        ?&planar_thing_sector_visibility:nullptr;
+                    if(collect_planar_reflection_things(
+                           read,world,scan,sector_mask)) {
+                        hidden_by_flags=scan.excluded_flags;
+                        hidden_by_geo=scan.excluded_geo_mode;
+                        auto &things=scan.models;
+                        model_candidates=things.size();
+                        // JK rdModel3_Draw tests the model radius BEFORE
+                        // refreshing its animated hierarchy. Use the same
+                        // model's authored radius (+0x5c) in the reflected
+                        // camera's own view, not main-camera visibility.
+                        // Fail open for missing/invalid native bounds.
+                        bool const radius_cull_available=
+                            frame_world_cache_camera.perspective &&
+                            frame_world_cache_camera.frustum.far_plane>0.1f;
+                        if(radius_cull_available) {
+                            auto const first_rejected=std::remove_if(
+                                things.begin(),things.end(),
+                                [&](auto const &thing) {
+                                    bool const outside=
+                                        planar_reflection_thing_outside_frustum(
+                                            read,thing,reflected_frustum,view);
+                                    if(outside)++thing_radius_culled;
+                                    return outside;
+                                });
+                            things.erase(first_rejected,things.end());
+                        }
+                        // Apply the independently generated native-style
+                        // reflected portal mask BEFORE acquiring 3DO poses.
+                        // The mask includes adjacent Thing sectors, and
+                        // missing/invalid native state fails open.
+                        if(planar_thing_visibility_world==world &&
+                           planar_thing_visibility_frame==gpu_3do_present_serial &&
+                           !planar_thing_sector_visibility.empty() &&
+                           world_cache_target) {
+                            auto const &portals=world_cache_target->reflected_portal_graph;
+                            auto const first_rejected=std::remove_if(
+                                things.begin(),things.end(),
+                                [&](auto const &thing) {
+                                    bool const outside=!portals.thing_sector_visible(
+                                        thing.sector,planar_thing_sector_visibility);
+                                    if(outside)++thing_sector_culled;
+                                    return outside;
+                                });
+                            things.erase(first_rejected,things.end());
+                        }
+                        // Order eligible Things for stable cache reuse,
+                        // but never discard them based on distance/order.
+                        // Only independent portal/frustum visibility may cull.
+                        std::sort(things.begin(),things.end(),
+                            [&](auto const &a,auto const &b) {
+                                auto dist2=[&](auto const &p) {
+                                    float result=0;
+                                    for(unsigned axis=0;axis<3;++axis) {
+                                        float const d=p.position[axis]-
+                                                      reflected.position[axis];
+                                        result+=d*d;
+                                    }
+                                    return result;
+                                };
+                                return dist2(a)<dist2(b);
+                            });
+                        // No nearest-N truncation: distant architecture and
+                        // horizon Things must remain visible in reflections.
+                        offscreen=acquire_planar_reflection_offscreen_gpu(
+                            things,things.size(),
+                            radius_cull_available
+                                ?&reflected_frustum:nullptr,
+                            radius_cull_available?&view:nullptr);
+                    }
+                }
+            }
+            auto const after_acquisition=std::chrono::steady_clock::now();
+            presentation_gpu_profile::completed_sample gpu_result{};
+            bool const gpu_profile_active=the_config->profile_renderer &&
+                planar_gpu_queries.begin(gpu_result);
+            if(gpu_result.ready) {
+                planar_gpu_ns=gpu_result.nanoseconds;
+                ++planar_gpu_samples;
+            }
+            if(gpu_result.skipped)++planar_gpu_skipped;
+            // Prefer complete offscreen native hierarchy snapshots; add only
+            // primary-camera nodes of Things that were not independently
+            // acquired. Each Thing with a complete hierarchy is drawn once.
+            std::unordered_set<uint64_t> acquired_owners;
+            for(auto const &inst:offscreen.nodes)
+                if(inst.shadow_owner)acquired_owners.insert(inst.shadow_owner);
+            offscreen_capture_gl_scope restore;
+            glBindFramebuffer(GL_FRAMEBUFFER,planar_capture_target->framebuffer());
+            glViewport(0,0,setup.width,setup.height);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_STENCIL_TEST);
+            glDisable(GL_BLEND);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LESS);
+            glDepthMask(GL_TRUE);
+            glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+            // Zero alpha means no reflected geometry; shader EnvMap is
+            // retained for sky/background wherever this capture has holes.
+            glClearColor(0.0f,0.0f,0.0f,0.0f);
+            glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_BACK);
+            shader.use_program();
+            shader.set_projection(projection);
+            shader.set_clip(setup.clip_view);
+            auto const fog=get_fog_settings();
+            auto const fog_info=fog.info.value(),fog_rgb=fog.color.value();
+            shader.set_fog(make_point(fog_info[0],fog_info[1],
+                the_config->enable_fog?fog_info[2]:0.0f,0.0f),
+                make_point(fog_rgb[0],fog_rgb[1],fog_rgb[2]));
+            jk_palette_effect effect{};
+            if(native_sector_palette_mode().load(
+                   std::memory_order_relaxed)!=0)
+                effect=read_native_jk_hardware_color_effects();
+            shader.set_color_effects(
+                make_point(float(effect.filter[0]),float(effect.filter[1]),
+                    float(effect.filter[2]),effect.active?1.0f:0.0f),
+                make_point(effect.tint[0],effect.tint[1],effect.tint[2],0.0f),
+                make_point(effect.add[0]/255.0f,effect.add[1]/255.0f,
+                    effect.add[2]/255.0f,effect.fade),
+                authored_light_limit(the_config->enable_baked_overbright));
+            shader.set_modelview(view,false);
+            shader.set_thing_fade(1.0f,0); // ordinary world has no Thing fade
+            auto submit_material=[&](gpu_3do_texture const &mat,
+                                      bool solid)->bool {
+                if(mat.reflection_mode==4 ||
+                   (mat.special && !mat.emissive_only) ||
+                   mat.blend==material_blend_mode::fluid ||
+                   mat.blend==material_blend_mode::multiply ||
+                   !std::isfinite(mat.opacity) ||
+                   (mat.opacity<0.999f && !mat.emissive_only))
+                    return false;
+                bool const textured=!solid && mat.albedo_source==1 &&
+                                     mat.has_image;
+                if(!textured && !(solid || mat.albedo_source==2 ||
+                                  mat.emissive_only))return false;
+                gl::set_active_texture_unit(0);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                                 textured?mat.texture:gl::default_texture);
+                gl::set_active_texture_unit(1);
+                gl::bind_texture(gl::texture_bind_target::texture_2d,
+                    mat.has_emission?mat.emission:gl::default_texture);
+                shader.set_material(mat.width,mat.height,mat.tint,
+                    mat.albedo_scroll,textured,
+                    (mat.masked || mat.dithered || mat.alpha)
+                        ?mat.alpha_cutoff:0.0f);
+                shader.set_emission(mat.has_emission,mat.emission_factor,
+                                    mat.emissive_scroll,mat.emissive_only);
+                gl::set_active_texture_unit(0);
+                return true;
+            };
+            if(gpu_profile_active)planar_gpu_queries.timestamp(0U,true);
+            // The stage produced a reflected-frustum-only LIVE draw list.
+            // Group by material/cel/GeoMode to avoid a GL call and a native
+            // MAT lookup for every world polygon in JkGR's huge levels.
+            auto &cache=*world_cache_target;
+            draw_reflection_capture_sky(shader,reflected,view,
+                reflected_frustum,projection,
+                setup.width,setup.height,setup.clip_view,true,true,false,
+                planar_reflection_sky_visibility.empty()?nullptr:
+                    &planar_reflection_sky_visibility);
+            gl::bind_vertex_array(cache.vao);
+            glFrontFace(GL_CW); // reflected camera reverses handedness
+            std::map<std::tuple<uintptr_t,int32_t,uint32_t>,
+                std::vector<world_cache_draw_candidate const *>> world_groups;
+            for(auto const &face:planar_frame_candidates) {
+                if(face.count==0U || face.passable_adjoin ||
+                   face.sky_flags!=0U ||
+                   face.first_index>=cache.mesh.indices.size())
+                    continue;
+                auto const index=cache.cached_surface_lookup.size()>face.surface_index
+                    ?cache.cached_surface_lookup[face.surface_index]
+                    :std::numeric_limits<uint32_t>::max();
+                if(index>=cache.mesh.surfaces.size())continue;
+                auto const &surface=cache.mesh.surfaces[index];
+                if(gpu_3do_batch_outside_frustum(
+                       reflected_frustum,view,
+                       surface.bounds_min,surface.bounds_max)) {
+                    ++world_culled;continue;
+                }
+                world_groups[std::make_tuple(face.material,face.cel,
+                    face.geometry_mode)].push_back(&face);
+            }
+            std::vector<GLsizei> world_counts;
+            std::vector<void const *> world_offsets;
+            struct planar_emissive_world_batch {
+                gpu_3do_texture material;
+                bool solid=false;
+                std::vector<GLsizei> counts;
+                std::vector<void const *> offsets;
+            };
+            std::vector<planar_emissive_world_batch> emissive_world;
+            for(auto const &entry:world_groups) {
+                auto const &first=*entry.second.front();
+                gpu_3do_group group{};
+                group.material=first.material;
+                group.cel=first.cel;
+                bool const solid=first.geometry_mode==3U;
+                auto const mat=solid
+                    ?resolve_gpu_3do_solid_material(group,false)
+                    :resolve_gpu_3do_material(group);
+                world_counts.clear();
+                world_offsets.clear();
+                for(auto const *face:entry.second) {
+                    world_counts.push_back(static_cast<GLsizei>(face->count));
+                    world_offsets.push_back(reinterpret_cast<void const *>(
+                        uintptr_t(face->first_index)*sizeof(uint32_t)));
+                }
+                // Pure emissive materials have no opaque base or depth.
+                // Defer them until ALL opaque world and 3DO geometry has
+                // populated the mirrored depth buffer.
+                if(mat.emissive_only) {
+                    emissive_world.push_back(
+                        {mat,solid,world_counts,world_offsets});
+                    continue;
+                }
+                if(!submit_material(mat,solid))continue;
+                glMultiDrawElements(GL_TRIANGLES,world_counts.data(),
+                    GL_UNSIGNED_INT,world_offsets.data(),
+                    static_cast<GLsizei>(world_counts.size()));
+                world_drawn+=entry.second.size();
+            }
+            auto const after_world=std::chrono::steady_clock::now();
+            if(gpu_profile_active) {
+                planar_gpu_queries.timestamp(0U,false);
+                planar_gpu_queries.timestamp(1U,true);
+            }
+            struct planar_emissive_model_group {
+                gpu_3do_instance const *instance=nullptr;
+                gpu_3do_group const *group=nullptr;
+                gpu_3do_matrix34 modelview{};
+                gpu_3do_texture material;
+                bool solid=false,reversed=false,two_sided=false;
+                float depth=0.0f;
+            };
+            std::vector<planar_emissive_model_group> emissive_models;
+            std::vector<planar_emissive_model_group> faded_models;
+            auto draw_model=[&](gpu_3do_instance const &inst) {
+                if(inst.shadow_only || inst.camera_hud ||
+                   inst.is_projected_decal || inst.is_sprite_quad ||
+                   inst.thing_opacity<=0.0f ||
+                   inst.effective_geometry_mode<3U ||
+                   !inst.geometry || inst.geometry->groups.empty() ||
+                   !gpu_3do_matrix_finite(inst.transform))return;
+                // The main-view GPU fallback can contain models invisible
+                // from the mirrored eye. Apply its independently constructed
+                // sector mask too, not just to offscreen pose acquisition.
+                // Unreadable or stale Things fail open to ordinary drawing.
+                if(!planar_thing_sector_visibility.empty() &&
+                   planar_thing_visibility_world==cache.loaded_world &&
+                   planar_thing_visibility_frame==gpu_3do_present_serial &&
+                   inst.shadow_owner) {
+                    uintptr_t const source_thing=
+                        uintptr_t(uint32_t(inst.shadow_owner>>32U));
+                    uint32_t sector=0U;
+                    if(planar_reflection_valid_native_pointer(source_thing) &&
+                       engine_material_debug::read_bytes(
+                           source_thing+0x5cU,&sector,4U) &&
+                       !cache.reflected_portal_graph.thing_sector_visible(
+                           sector,planar_thing_sector_visibility))
+                        return;
+                }
+                auto glmesh=gpu_3do_gl_cache.find(inst.id);
+                if(glmesh==gpu_3do_gl_cache.end()) {
+                    if(gpu_3do_gl_cache.size()>8192U)return;
+                    glmesh=gpu_3do_gl_cache.emplace(inst.id,
+                        std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,
+                            *inst.geometry,
+                            the_config->profile_renderer
+                                ? &packed_3do_upload_profile : nullptr)).first;
+                }
+                auto const modelview=gpu_3do_native_modelview(
+                    view,inst.transform);
+                if(!gpu_3do_matrix_finite(modelview))return;
+                shader.set_modelview(modelview,true,
+                    glmesh->second->packed_vertex_format);
+                shader.set_thing_fade(inst.thing_opacity,
+                    inst.thing_dither && inst.thing_opacity<0.999f?2:0);
+                shader.set_model_lighting(inst.ambient,inst.effective_light_mode,
+                    make_point(inst.colormap_tint[0],inst.colormap_tint[1],
+                               inst.colormap_tint[2]),
+                    make_point(inst.sector_tint[0],inst.sector_tint[1],
+                               inst.sector_tint[2]));
+                gl::bind_vertex_array(glmesh->second->vao);
+                // Both the reflected camera and negative-scale models
+                // reverse winding. Two reversals restore the normal front.
+                glFrontFace(gpu_3do_reversed_winding(inst.transform)
+                    ?GL_CCW:GL_CW);
+                for(auto const &group:inst.geometry->groups) {
+                    if(gpu_3do_batch_outside_frustum(
+                           reflected_frustum,modelview,
+                           group.bounds_min,group.bounds_max)) {
+                        ++model_culled;continue;
+                    }
+                    bool const solid=group.solid_color ||
+                        inst.effective_geometry_mode==3U;
+                    auto const mat=solid
+                        ?resolve_gpu_3do_solid_material(group,false)
+                        :resolve_gpu_3do_material(group);
+                    if(mat.emissive_only) {
+                        emissive_models.push_back({
+                            &inst,&group,modelview,mat,solid,
+                            gpu_3do_reversed_winding(inst.transform),
+                            group.nonplanar || (group.face_type&1U)!=0U});
+                        continue;
+                    }
+                    if(inst.thing_opacity<0.999f && !inst.thing_dither) {
+                        auto const &c=group.centroid;
+                        float const depth=modelview[1]*c[0]+
+                            modelview[4]*c[1]+modelview[7]*c[2]+modelview[10];
+                        faded_models.push_back({
+                            &inst,&group,modelview,mat,solid,
+                            gpu_3do_reversed_winding(inst.transform),
+                            group.nonplanar || (group.face_type&1U)!=0U,depth});
+                        continue;
+                    }
+                    if(!submit_material(mat,solid))continue;
+                    if(group.nonplanar || (group.face_type&1U)) {
+                        glDisable(GL_CULL_FACE);
+                    } else glEnable(GL_CULL_FACE);
+                    gl::draw_elements(gl::element_type::triangles,
+                        static_cast<GLsizei>(group.count),
+                        gl::index_type::uint32,
+                        static_cast<ptrdiff_t>(
+                            group.offset*sizeof(uint32_t)));
+                    ++model_drawn;
+                }
+            };
+            for(auto const &inst:offscreen.nodes)draw_model(inst);
+            for(auto const &inst:frame_gpu_3do_instances)
+                if(inst.shadow_owner==0U ||
+                   !acquired_owners.count(inst.shadow_owner))
+                    draw_model(inst);
+            // Alpha-faded model groups must composite behind any opaque
+            // reflected geometry; sort back-to-front in the mirrored camera.
+            if(!faded_models.empty()) {
+                std::sort(faded_models.begin(),faded_models.end(),
+                    [](planar_emissive_model_group const &a,
+                       planar_emissive_model_group const &b) {
+                        return a.depth>b.depth;
+                    });
+                glEnable(GL_BLEND);
+                glBlendFuncSeparate(GL_ONE,GL_ONE_MINUS_SRC_ALPHA,
+                                    GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+                glDepthMask(GL_FALSE);
+                glDepthFunc(GL_LEQUAL);
+                for(auto const &draw:faded_models) {
+                    auto const &inst=*draw.instance;
+                    auto const it=gpu_3do_gl_cache.find(inst.id);
+                    if(it==gpu_3do_gl_cache.end())continue;
+                    shader.set_modelview(draw.modelview,true,
+                        it->second->packed_vertex_format);
+                    shader.set_thing_fade(inst.thing_opacity,1);
+                    shader.set_model_lighting(inst.ambient,inst.effective_light_mode,
+                        make_point(inst.colormap_tint[0],inst.colormap_tint[1],
+                                   inst.colormap_tint[2]),
+                        make_point(inst.sector_tint[0],inst.sector_tint[1],
+                                   inst.sector_tint[2]));
+                    gl::bind_vertex_array(it->second->vao);
+                    glFrontFace(draw.reversed?GL_CCW:GL_CW);
+                    if(draw.two_sided)glDisable(GL_CULL_FACE);
+                    else glEnable(GL_CULL_FACE);
+                    if(!submit_material(draw.material,draw.solid))continue;
+                    gl::draw_elements(gl::element_type::triangles,
+                        static_cast<GLsizei>(draw.group->count),
+                        gl::index_type::uint32,
+                        static_cast<ptrdiff_t>(
+                            draw.group->offset*sizeof(uint32_t)));
+                    ++model_drawn;
+                }
+                glDisable(GL_BLEND);
+                glDepthMask(GL_TRUE);
+                glDepthFunc(GL_LESS);
+            }
+            // Source materials with opacity zero and emission must ADD
+            // radiance over opaque geometry without occluding it or writing
+            // depth. Preserve capture alpha coverage for EnvMap fallback.
+            if(!emissive_world.empty() || !emissive_models.empty()) {
+                glEnable(GL_BLEND);
+                glBlendFuncSeparate(GL_ONE,GL_ONE,GL_ONE,GL_ZERO);
+                glDepthMask(GL_FALSE);
+                glDepthFunc(GL_LEQUAL);
+                gl::bind_vertex_array(cache.vao);
+                glFrontFace(GL_CW);
+                glEnable(GL_CULL_FACE);
+                shader.set_modelview(view,false);
+                shader.set_thing_fade(1.0f,0);
+                for(auto const &batch:emissive_world) {
+                    if(!submit_material(batch.material,batch.solid))continue;
+                    glMultiDrawElements(GL_TRIANGLES,batch.counts.data(),
+                        GL_UNSIGNED_INT,batch.offsets.data(),
+                        static_cast<GLsizei>(batch.counts.size()));
+                    world_drawn+=batch.counts.size();
+                }
+                for(auto const &batch:emissive_models) {
+                    auto const it=gpu_3do_gl_cache.find(batch.instance->id);
+                    if(it==gpu_3do_gl_cache.end())continue;
+                    shader.set_modelview(batch.modelview,true,
+                        it->second->packed_vertex_format);
+                    auto const &inst=*batch.instance;
+                    shader.set_thing_fade(inst.thing_opacity,0);
+                    shader.set_model_lighting(
+                        inst.ambient,inst.effective_light_mode,
+                        make_point(inst.colormap_tint[0],inst.colormap_tint[1],
+                                   inst.colormap_tint[2]),
+                        make_point(inst.sector_tint[0],inst.sector_tint[1],
+                                   inst.sector_tint[2]));
+                    gl::bind_vertex_array(it->second->vao);
+                    glFrontFace(batch.reversed?GL_CCW:GL_CW);
+                    if(batch.two_sided)glDisable(GL_CULL_FACE);
+                    else glEnable(GL_CULL_FACE);
+                    if(!submit_material(batch.material,batch.solid))continue;
+                    gl::draw_elements(gl::element_type::triangles,
+                        static_cast<GLsizei>(batch.group->count),
+                        gl::index_type::uint32,
+                        static_cast<ptrdiff_t>(
+                            batch.group->offset*sizeof(uint32_t)));
+                    ++model_drawn;
+                }
+                glDisable(GL_BLEND);
+                glDepthMask(GL_TRUE);
+                glDepthFunc(GL_LESS);
+            }
+            auto const after_models=std::chrono::steady_clock::now();
+            if(gpu_profile_active) {
+                planar_gpu_queries.timestamp(1U,false);
+                planar_gpu_queries.timestamp(2U,true);
+            }
+            // Refresh the reflection mip chain once, not once per surface.
+            // GL scope restores the previous unit-0 material binding.
+            gl::set_active_texture_unit(0);
+            glBindTexture(GL_TEXTURE_2D,planar_capture_target->color_texture());
+            glGenerateMipmap(GL_TEXTURE_2D);
+            if(gpu_profile_active) {
+                planar_gpu_queries.timestamp(2U,false);
+                planar_gpu_queries.end();
+            }
+            auto const after_capture=std::chrono::steady_clock::now();
+            planar_capture_camera=reflected;
+            planar_capture_ready=true;
+            planar_last_completed_plane=*planar_capture_plane;
+            planar_last_capture_revision=world_cache_target->revision;
+            planar_last_refresh=std::chrono::steady_clock::now();
+            if((gpu_3do_present_serial%120U)==0U) {
+                auto const us=std::chrono::duration_cast<
+                    std::chrono::microseconds>(
+                        std::chrono::steady_clock::now()-begun).count();
+                LOG_INFO("PLANAR capture: resolution=",setup.width,"x",
+                         setup.height," scale=",
+                         the_config->reflection_capture_resolution,
+                         " plane_source=material",
+                         " world_faces=",world_drawn,
+                         " world_culled=",world_culled,
+                         " world_batches=",world_groups.size(),
+                         " emissive_world_batches=",emissive_world.size(),
+                         " model_groups=",model_drawn,
+                         " emissive_model_groups=",emissive_models.size(),
+                         " model_culled=",model_culled,
+                         " thing_radius_culled=",thing_radius_culled,
+                         " thing_sector_culled=",thing_sector_culled,
+                         " mesh_radius_culled=",
+                         offscreen.stats.mesh_radius_culled,
+                         " ms_acquire=",std::chrono::duration<float,std::milli>(
+                             after_acquisition-begun).count(),
+                         " ms_world=",std::chrono::duration<float,std::milli>(
+                             after_world-after_acquisition).count(),
+                         " ms_models=",std::chrono::duration<float,std::milli>(
+                             after_models-after_world).count(),
+                         " ms_mips=",std::chrono::duration<float,std::milli>(
+                             after_capture-after_models).count(),
+                         " gpu_ms_world=",float(planar_gpu_ns[0])/1000000.0f,
+                         " gpu_ms_models=",float(planar_gpu_ns[1])/1000000.0f,
+                         " gpu_ms_mips=",float(planar_gpu_ns[2])/1000000.0f,
+                         " gpu_samples=",planar_gpu_samples,
+                         " gpu_skipped=",planar_gpu_skipped,
+                         " native_thing_candidates=",model_candidates,
+                         " hidden_by_thing_flags=",hidden_by_flags,
+                         " hidden_by_cur_geomode=",hidden_by_geo,
+                         " late_hidden_things=",
+                         offscreen.stats.excluded_by_flags_or_geomode,
+                         " acquired_3do_nodes=",offscreen.stats.ready_nodes,
+                         " source_hashes=",offscreen.stats.source_hashes,
+                         " source_hash_skips=",offscreen.stats.source_hash_skips,
+                         " source_untracked_changes=",
+                         offscreen.stats.untracked_source_changes,
+                         " source_new_snapshots=",offscreen.stats.new_gpu_snapshots,
+                         " incomplete_3do_things=",offscreen.stats.incomplete_things,
+                         " ms_cpu=",float(us)/1000.0f,
+                         " NOTE=planar_world_material_sampling_with_sky");
+            }
+        }
+
+#include "hemi_reflection_capture.inc"
         void present_game() override
         {
             poll_audio_modules();
@@ -9848,6 +13469,72 @@ namespace jkgm {
             // Keeping one frame snapshot avoids losing the second pass.
             gpu_frame_material_cache.clear();
             frame_gpu_3do_instances=consume_gpu_3do_instances();
+            apply_experimental_auto_3do_lods();
+            // Discovery-only probe: walk ALL sectors rather than the primary
+            // camera's portal-visible subset. No pose updates, GL draws, or
+            // changes to native JK state occur here.
+            if(the_config->experimental_planar_thing_discovery &&
+               mode==renderer_mode::ingame &&
+               gpu_3do_present_serial%120U==0U &&
+               engine_material_debug::matches_tested_executable()) {
+                uint32_t world=0;
+                if(engine_material_debug::read_object(
+                       engine_material_debug::current_world_global,world)) {
+                    auto read=[](uintptr_t at,void *dst,size_t bytes)->bool {
+                        return engine_material_debug::read_bytes(at,dst,bytes);
+                    };
+                    planar_reflection_thing_scan scan{};
+                    if(collect_planar_reflection_things(read,world,scan)) {
+                        auto const work=build_planar_reflection_workset(
+                            scan,frame_gpu_3do_instances);
+                        // Main-view ownership does not prove that ALL
+                        // hierarchy nodes were submitted (per-mesh culling).
+                        // Probe every discovered Thing independently,
+                        // rotating to avoid large per-frame scans.
+                        constexpr size_t sample_budget=16U;
+                        std::vector<planar_reflection_model_thing> sample;
+                        size_t const remaining=scan.models.size();
+                        size_t const sample_count=std::min(
+                            sample_budget,remaining);
+                        sample.reserve(sample_count);
+                        if(remaining) {
+                            size_t const first=
+                                ((gpu_3do_present_serial/120U)*sample_budget)%
+                                remaining;
+                            for(size_t i=0;i<sample_count;++i)
+                                sample.push_back(scan.models[
+                                    (first+i)%remaining]);
+                        }
+                        auto const offscreen=acquire_planar_reflection_offscreen_gpu(
+                            sample,sample_budget);
+                        LOG_INFO("PLANAR discovery world=",world,
+                                 " sectors=",scan.sectors,
+                                 " linked_things=",scan.linked_things,
+                                 " reflected_3do_candidates=",scan.models.size(),
+                                 " excluded_flags=",scan.excluded_flags,
+                                 " excluded_geo_mode=",scan.excluded_geo_mode,
+                                 " non_models=",scan.non_models,
+                                 " matched_things=",work.matched_things,
+                                 " cached_nodes=",work.cached_instance_indices.size(),
+                                 " uncovered_things=",work.uncovered_things.size(),
+                                 " unowned_gpu_nodes=",work.unowned_gpu_nodes,
+                                 " unmatched_gpu_nodes=",work.unmatched_gpu_nodes,
+                                 " probed_things=",offscreen.stats.considered,
+                                 " pose_ready=",offscreen.stats.posed_things,
+                                 " pose_failed=",offscreen.stats.pose_failures,
+                                 " native_nodes=",offscreen.stats.native_mesh_nodes,
+                                 " gpu_reused=",offscreen.stats.reused_gpu_meshes,
+                                 " gpu_snapshots=",offscreen.stats.new_gpu_snapshots,
+                                 " material_unready=",offscreen.stats.material_unready,
+                                 " incomplete_things=",offscreen.stats.incomplete_things,
+                                 " ready_nodes=",offscreen.stats.ready_nodes,
+                                 " NOTE=offscreen_acquisition_only_no_capture_yet");
+                    } else {
+                        LOG_WARNING("PLANAR discovery unavailable world=",world,
+                                    " error=",planar_reflection_thing_error_name(scan.error));
+                    }
+                }
+            }
             // One native camera frame, shared between cached world and 3DOs.
             frame_saber_light_colors=saber_light_rgb::get_registry().consume();
             // Ordinary colored Things annotate their EXISTING JK camera
@@ -9875,11 +13562,6 @@ namespace jkgm {
             // end_frame presented the prior snapshot; prepare a fresh one
             // for the 3DOs that are about to populate this scene.
             frame_gpu_3do_camera={};
-            {
-                profile_scope timer(profiling,
-                    profile_frame.timings[profile_idx(profile_stage::hud_upload)]);
-                update_hud_texture();
-            }
 
             ogs->tribuf.swap_next();
             auto *trimdl = ogs->tribuf.get_current();
@@ -9948,10 +13630,21 @@ namespace jkgm {
 
             bool posterize_lighting = the_config->enable_posterized_lighting;
             {
+                presentation_gpu_profile::completed_sample scene_completed{};
+                scene_gpu_timing=profiling && scene_gpu_queries.begin(scene_completed);
+                if(scene_completed.ready) {
+                    for(size_t i=0;i<scene_gpu_ns.size();++i)
+                        scene_gpu_ns[i]+=scene_completed.nanoseconds[i];
+                    ++scene_gpu_samples;
+                }
+                if(scene_completed.skipped)++scene_gpu_skipped;
+            }
+            {
                 profile_scope timer(profiling,
                     profile_frame.timings[profile_idx(profile_stage::opaque_pass)]);
                 draw_spotlight_shadow_map();
                 draw_sun_shadow_map();
+                draw_sun_caustics();
                 // A 0x20 Thing is expected to receive no added sunlight
                 // and contribute no shadow depth, but must never disable
                 // the shadow map for unrelated objects. Trace *transitions*
@@ -9990,13 +13683,26 @@ namespace jkgm {
                     sun_shadow_previous_ready=sun_shadow_ready;
                     sun_shadow_previous_excluded=excluded;
                 }
+                // Capture the reflection BEFORE world materials sample it,
+                // otherwise water would always display a one-frame-old view.
+                // The main frame 3DO snapshot and static-world cache already
+                // exist here; the offscreen camera does not touch rdCamera.
+                // Clear stale planar readiness even when capture is disabled.
+                render_planar_capture();
+                // Always reset per-frame probe readiness when both experiments
+                // are disabled; never reuse a stale capture after a toggle.
+                render_hemi_capture();
+                if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,true);
                 draw_game_gbuffer_pass(trimdl, posterize_lighting);
+                if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,false);
             }
             {
                 profile_scope timer(profiling,
                     profile_frame.timings[profile_idx(profile_stage::transparent_pass)]);
                 draw_game_transparency_pass(trimdl, posterize_lighting);
             }
+            if(scene_gpu_timing)scene_gpu_queries.end();
+            scene_gpu_timing=false;
             // DirectDraw HUD is composited AFTER post-processing in end_frame,
             // when this rendered scene is presented on the following frame.
 
@@ -10086,6 +13792,7 @@ namespace jkgm {
             world_batch.clear();
             world_transparent_batch.clear();
             world_flare_batch.clear();
+            sprite_flare_sources().clear();
             gun_batch.clear();
             gun_transparent_batch.clear();
             overlay_batch.clear();
@@ -10098,6 +13805,20 @@ namespace jkgm {
                 profile_frame.gpu_source_checks+=stats.source_checks;
                 profile_frame.gpu_source_ns+=stats.source_ns;
                 profile_frame.gpu_source_invalidations+=stats.source_invalidations;
+                profile_frame.gpu_cache_entries+=stats.cache_entries;
+                profile_frame.gpu_cache_peak=stats.cache_peak;
+                profile_frame.gpu_cache_hits+=stats.cache_hits;
+                profile_frame.gpu_cache_misses+=stats.cache_misses;
+                profile_frame.gpu_cache_evictions+=stats.cache_evictions;
+                profile_frame.gpu_cache_trim_deferred+=stats.cache_trim_deferred;
+                profile_frame.gpu_cache_hash_new+=stats.cache_hash_new;
+                profile_frame.gpu_cache_hash_header+=stats.cache_hash_header;
+                profile_frame.gpu_cache_hash_revision+=stats.cache_hash_revision;
+                profile_frame.gpu_cache_hash_fallback+=stats.cache_hash_fallback;
+                profile_frame.gpu_mutation_scans+=stats.mutation_scans;
+                profile_frame.gpu_mutation_scanned+=stats.mutation_scanned;
+                profile_frame.gpu_mutation_invalidated+=stats.mutation_invalidated;
+                profile_frame.gpu_mutation_ns+=stats.mutation_ns;
                 profile_frame.gpu_failed_snapshot_reuses+=stats.failed_snapshot_reuses;
                 profile_frame.gpu_ready_checks+=stats.ready_checks;
                 profile_frame.gpu_ready_material_refs+=stats.ready_material_refs;
@@ -10113,6 +13834,14 @@ namespace jkgm {
                 auto const native = consume_native_3do_sample();
                 profile_frame.native_model_calls += native.model_calls;
                 profile_frame.native_model_drawn += native.model_drawn;
+                profile_frame.native_model_lod0_forced += native.model_lod0_forced;
+                profile_frame.native_model_occlusion_skipped +=
+                    native.model_occlusion_skipped;
+                profile_frame.native_occlusion_tests+=native.model_occlusion_tests;
+                profile_frame.native_occlusion_lookups+=native.model_occlusion_lookups;
+                profile_frame.native_occlusion_lookup_hits+=
+                    native.model_occlusion_lookup_hits;
+                profile_frame.native_occlusion_ns+=native.model_occlusion_ns;
                 profile_frame.native_mesh_calls += native.mesh_calls;
                 profile_frame.native_face_calls += native.face_calls;
                 profile_frame.native_face_emitted += native.face_emitted;

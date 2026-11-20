@@ -1,5 +1,6 @@
 #pragma once
 // Optional CPU submission timings: NOT GPU elapsed time.
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <chrono>
@@ -24,6 +25,10 @@ struct profile_sample {
   uint64_t execute_calls=0, execute_vertices=0, execute_instruction_bytes=0;
   uint64_t frames_with_execute=0;
   uint64_t native_model_calls=0, native_model_drawn=0, native_mesh_calls=0;
+  uint64_t native_model_lod0_forced=0;
+  uint64_t native_model_occlusion_skipped=0;
+  uint64_t native_occlusion_tests=0,native_occlusion_lookups=0;
+  uint64_t native_occlusion_lookup_hits=0,native_occlusion_ns=0;
   uint64_t native_face_calls=0, native_face_emitted=0;
   uint64_t native_model_ns=0, native_mesh_ns=0, native_face_ns=0;
   uint64_t native_model_hook_ns=0,native_model_engine_ns=0;
@@ -40,6 +45,14 @@ struct profile_sample {
     std::array<uint64_t,8> sprite_gpu_quad_rejects{};
   uint64_t gpu_candidates=0,gpu_culled=0,gpu_queued=0,gpu_snapshots=0,gpu_ready_checks=0;
   uint64_t gpu_source_checks=0,gpu_source_ns=0,gpu_source_invalidations=0;
+  uint64_t gpu_cache_entries=0,gpu_cache_peak=0;
+  uint64_t gpu_cache_hits=0,gpu_cache_misses=0;
+  uint64_t gpu_cache_evictions=0,gpu_cache_trim_deferred=0;
+  uint64_t gpu_cache_hash_new=0,gpu_cache_hash_header=0;
+  uint64_t gpu_cache_hash_revision=0;
+  uint64_t gpu_cache_hash_fallback=0;
+  uint64_t gpu_mutation_scans=0,gpu_mutation_scanned=0;
+  uint64_t gpu_mutation_invalidated=0,gpu_mutation_ns=0;
   uint64_t gpu_failed_snapshot_reuses=0;
   uint64_t gpu_geometry_native=0,gpu_snapshot_native=0;
   uint64_t gpu_empty_mesh_native=0;
@@ -52,6 +65,12 @@ struct profile_sample {
   uint64_t gpu_opaque_draw_calls=0,gpu_transparent_draw_calls=0;
   uint64_t gpu_opaque_draw_ranges=0,gpu_transparent_draw_ranges=0;
   uint64_t gpu_draw_triangles=0,gpu_material_resolves=0,gpu_uploads=0;
+  // Subrange counts, not GL calls or measured pixel overdraw. They describe
+  // the GPU-resident draw workload without changing transparency order.
+  uint64_t gpu_alpha_fluid_sprite_ranges=0;
+  uint64_t gpu_alpha_other_sprite_ranges=0;
+  uint64_t gpu_alpha_model_ranges=0;
+  uint64_t gpu_opaque_cutout_sprite_ranges=0;
   // Visible 3DO material filter state: a "skip" avoids three glTexParameter
   // calls, tracked per pass using actual texture object IDs.
   uint64_t gpu_filter_state_sets=0,gpu_filter_state_skips=0;
@@ -79,6 +98,12 @@ struct profile_sample {
     frames_with_execute+=o.frames_with_execute;
     native_model_calls+=o.native_model_calls;
     native_model_drawn+=o.native_model_drawn;
+    native_model_lod0_forced+=o.native_model_lod0_forced;
+    native_model_occlusion_skipped+=o.native_model_occlusion_skipped;
+    native_occlusion_tests+=o.native_occlusion_tests;
+    native_occlusion_lookups+=o.native_occlusion_lookups;
+    native_occlusion_lookup_hits+=o.native_occlusion_lookup_hits;
+    native_occlusion_ns+=o.native_occlusion_ns;
     native_mesh_calls+=o.native_mesh_calls;
     native_face_calls+=o.native_face_calls;
     native_face_emitted+=o.native_face_emitted;
@@ -114,6 +139,20 @@ struct profile_sample {
     gpu_source_checks+=o.gpu_source_checks;
     gpu_source_ns+=o.gpu_source_ns;
     gpu_source_invalidations+=o.gpu_source_invalidations;
+    gpu_cache_entries+=o.gpu_cache_entries;
+    gpu_cache_peak=(std::max)(gpu_cache_peak,o.gpu_cache_peak);
+    gpu_cache_hits+=o.gpu_cache_hits;
+    gpu_cache_misses+=o.gpu_cache_misses;
+    gpu_cache_evictions+=o.gpu_cache_evictions;
+    gpu_cache_trim_deferred+=o.gpu_cache_trim_deferred;
+    gpu_cache_hash_new+=o.gpu_cache_hash_new;
+    gpu_cache_hash_header+=o.gpu_cache_hash_header;
+    gpu_cache_hash_revision+=o.gpu_cache_hash_revision;
+    gpu_cache_hash_fallback+=o.gpu_cache_hash_fallback;
+    gpu_mutation_scans+=o.gpu_mutation_scans;
+    gpu_mutation_scanned+=o.gpu_mutation_scanned;
+    gpu_mutation_invalidated+=o.gpu_mutation_invalidated;
+    gpu_mutation_ns+=o.gpu_mutation_ns;
     gpu_failed_snapshot_reuses+=o.gpu_failed_snapshot_reuses;
     gpu_empty_mesh_native+=o.gpu_empty_mesh_native;
     gpu_native_span_cache_hits+=o.gpu_native_span_cache_hits;
@@ -136,6 +175,10 @@ struct profile_sample {
     gpu_opaque_draw_ranges+=o.gpu_opaque_draw_ranges;
     gpu_transparent_draw_ranges+=o.gpu_transparent_draw_ranges;
     gpu_draw_triangles+=o.gpu_draw_triangles;
+    gpu_alpha_fluid_sprite_ranges+=o.gpu_alpha_fluid_sprite_ranges;
+    gpu_alpha_other_sprite_ranges+=o.gpu_alpha_other_sprite_ranges;
+    gpu_alpha_model_ranges+=o.gpu_alpha_model_ranges;
+    gpu_opaque_cutout_sprite_ranges+=o.gpu_opaque_cutout_sprite_ranges;
     gpu_material_resolves+=o.gpu_material_resolves;
     gpu_uploads+=o.gpu_uploads;
     gpu_filter_state_sets+=o.gpu_filter_state_sets;

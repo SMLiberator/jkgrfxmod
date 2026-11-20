@@ -46,6 +46,8 @@
     <ClCompile Include="native_mesh_revision.cpp" />
     <ClCompile Include="native_sector_color_hook.cpp" />
     <ClCompile Include="native_compressed_sound_hook.cpp" />
+    <ClCompile Include="native_cog_symbol_extensions.cpp" />
+    <ClCompile Include="native_spawn_parent_hook.cpp" />
     <ClCompile Include="compressed_sound_codec.cpp" />
     <ClCompile Include="compressed_sound_io.cpp" />
     <ClCompile Include="renderer.cpp" />
@@ -129,11 +131,17 @@
     <ClInclude Include="frame_profile.hpp" />
     <ClInclude Include="gpu_3do_alpha.hpp" />
     <ClInclude Include="gpu_3do_cache_signature.hpp" />
+    <ClInclude Include="gpu_mesh_cache_eviction.hpp" />
     <ClInclude Include="gpu_3do_colormap.hpp" />
     <ClInclude Include="gpu_3do_compat.hpp" />
     <ClInclude Include="gpu_3do_frustum.hpp" />
     <ClInclude Include="gpu_3do_modelview.hpp" />
     <ClInclude Include="gpu_3do_preview.hpp" />
+    <ClInclude Include="gpu_3do_packed_vertex.hpp" />
+    <ClInclude Include="gpu_3do_auto_lod.hpp" />
+    <ClInclude Include="gpu_thing_occlusion.hpp" />
+    <ClInclude Include="gpu_thing_occlusion_math.hpp" />
+    <ClInclude Include="native_occlusion_bridge.hpp" />
     <ClInclude Include="texture_units.hpp" />
     <ClInclude Include="gpu_3do_triangulation.hpp" />
     <ClInclude Include="gpu_3do_uv.hpp" />
@@ -141,6 +149,7 @@
     <ClInclude Include="gpu_particle_cloud.hpp" />
     <ClInclude Include="gpu_polyline.hpp" />
     <ClInclude Include="hud_ammo_override.hpp" />
+    <ClInclude Include="hud_dirty_regions.hpp" />
     <ClInclude Include="jk_cmp_fullbright_mask.hpp" />
     <ClInclude Include="jk_cmp_gpu.hpp" />
     <ClInclude Include="jk_colormap_layout.hpp" />
@@ -153,6 +162,7 @@
     <ClInclude Include="mots_native_mesh_snapshot.hpp" />
     <ClInclude Include="mots_sphere_tree.hpp" />
     <ClInclude Include="native_3do_profile.hpp" />
+    <ClInclude Include="native_3do_lod_override.hpp" />
     <ClInclude Include="native_mesh_revision.hpp" />
     <ClInclude Include="native_earth_hit_sound.hpp" />
     <ClInclude Include="native_jk_palette_effects.hpp" />
@@ -165,9 +175,35 @@
     <ClInclude Include="native_sector_palette_bridge.hpp" />
     <ClInclude Include="native_sector_color_hook.hpp" />
     <ClInclude Include="native_compressed_sound_hook.hpp" />
+    <ClInclude Include="native_cog_symbol_extensions.hpp" />
+    <ClInclude Include="native_spawn_parent_hook.hpp" />
+    <ClInclude Include="native_spawn_parent.hpp" />
+    <ClInclude Include="cog_symbol_extensions.hpp" />
+    <ClInclude Include="cog_create_thing.hpp" />
+    <ClInclude Include="cog_thing_joint_node.hpp" />
+    <ClInclude Include="cog_camera_distance.hpp" />
+    <ClInclude Include="cog_camera_axes.hpp" />
     <ClInclude Include="native_sprite_cel.hpp" />
     <ClInclude Include="native_sprite_profile.hpp" />
     <ClInclude Include="native_thingface_friction.hpp" />
+    <ClInclude Include="planar_reflection_camera.hpp" />
+    <ClInclude Include="hemi_reflection_camera.hpp" />
+    <ClInclude Include="dual_paraboloid_projection.hpp" />
+    <ClInclude Include="global_env_capture.hpp" />
+    <ClInclude Include="reflection_attachment_family.hpp" />
+    <ClInclude Include="global_env_equirect_converter.hpp" />
+    <ClInclude Include="planar_reflection_things.hpp" />
+    <ClInclude Include="planar_reflection_workset.hpp" />
+    <ClInclude Include="planar_reflection_native_nodes.hpp" />
+    <ClInclude Include="planar_reflection_offscreen_gpu.hpp" />
+    <ClInclude Include="planar_reflection_culling.hpp" />
+    <ClInclude Include="planar_reflection_portals.hpp" />
+    <ClInclude Include="planar_reflection_render_math.hpp" />
+    <ClInclude Include="offscreen_capture_target.hpp" />
+    <ClInclude Include="offscreen_capture_projection.hpp" />
+    <ClInclude Include="planar_reflection_capture_shader.hpp" />
+    <ClInclude Include="screen_space_reflections.hpp" />
+    <ClInclude Include="planar_receiver_visibility.hpp" />
     <ClInclude Include="postfx.hpp" />
     <ClInclude Include="precise_type3_native.hpp" />
     <ClInclude Include="precise_type3_pose_bulk.hpp" />
@@ -213,7 +249,10 @@
     <ClInclude Include="sun_dynamic_shadow_gpu.hpp" />
     <ClInclude Include="sun_dynamic_shadow_layout.hpp" />
     <ClInclude Include="sun_shadow.hpp" />
+    <ClInclude Include="sun_pcf_intensity.hpp" />
     <ClInclude Include="sun_shadow_gpu.hpp" />
+    <ClInclude Include="sun_caustics.hpp" />
+    <ClInclude Include="sun_caustics_gpu.hpp" />
     <ClInclude Include="sun_sky_aperture_gpu.hpp" />
     <ClInclude Include="sun_sky_caster_mask.hpp" />
     <ClInclude Include="sun_sky_surface.hpp" />
@@ -238,6 +277,7 @@
     <ClInclude Include="world_cache_sky.hpp" />
     <ClInclude Include="world_cache_uv_animation.hpp" />
     <ClInclude Include="world_cache_visibility.hpp" />
+    <ClInclude Include="world_cache_streaming.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="exports.def" />

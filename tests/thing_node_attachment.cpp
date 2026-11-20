@@ -23,6 +23,26 @@ int main() {
     assert(near(output.right[0],-1)&&near(output.up[2],1));
     assert(native_attach_node==0x80U);
     assert((native_attach_node&(native_attach_thing|native_attach_no_move))==0U);
+    assert(!native_attach_has_thing_parent(0));
+    assert(!native_attach_has_thing_parent(0x1U|native_attach_no_move));
+    assert(native_attach_has_thing_parent(native_attach_thing_face));
+    assert(native_attach_has_thing_parent(native_attach_thing));
+    assert(native_attach_has_thing_parent(0x8cU)); // Thing, NODE, NOMOVE
+    assert(native_attach_has_thing_parent(0x82U)); // Thing-face, NODE
+    assert(native_thing_requires_child_detach(10,0x2U));
+    assert(native_thing_requires_child_detach(3,0x80002U));
+    assert(!native_thing_requires_child_detach(10,0x10U));
+    assert(!native_thing_requires_child_detach(0,0x2U));
+    assert(!native_thing_requires_child_detach(16,0x2U));
+    assert(native_orphan_node_link_matches(0x8cU,0x202000U,0x202000U));
+    assert(!native_orphan_node_link_matches(0x88U,0x202000U,0x202000U));
+    assert(!native_orphan_node_link_matches(0x8cU,0x303000U,0x202000U));
+    assert(native_actor_death_confirmed(native_thing_actor,0.0f));
+    assert(native_actor_death_confirmed(native_thing_corpse,0.0f));
+    assert(!native_actor_death_confirmed(native_thing_actor,100.0f));
+    assert(!native_actor_death_confirmed(native_thing_actor,NAN));
+    assert(!native_actor_death_confirmed(1U,0.0f)); // players unchanged
+    assert(!native_actor_death_confirmed(0U,0.0f)); // free Thing slots
     a.offset[0]=INFINITY;
     assert(!node_attachment_valid(a));
     a.offset[0]=0.5f;
@@ -46,5 +66,40 @@ int main() {
     assert(registry.snapshot().size()==1);
     registry.prepare_world(0x610000U);
     assert(registry.snapshot().empty());
+
+    // Removing a parent returns only its node children, removes its own
+    // attachment entry, and does not affect unrelated records.
+    node_attachment_registry lifecycle;
+    a.child=0x101000U;a.parent=0x202000U;
+    assert(lifecycle.set(a));
+    b.child=0x202000U;b.parent=0x303000U;
+    assert(lifecycle.set(b));
+    c.child=0x404000U;c.parent=0x202000U;
+    assert(lifecycle.set(c));
+    node_attachment other=c;
+    other.child=0x505000U;other.parent=0x606000U;
+    assert(lifecycle.set(other));
+    auto descendants=lifecycle.take_related(0x202000U);
+    assert(descendants.size()==2);
+    assert(descendants[0].child==a.child);
+    assert(descendants[1].child==c.child);
+    auto remaining=lifecycle.snapshot();
+    assert(remaining.size()==1 && remaining[0].child==other.child);
+    assert(lifecycle.take_related(0x202000U).empty());
+    assert(lifecycle.take_related(0x606000U).size()==1);
+    assert(lifecycle.snapshot().empty());
+
+    // A dying actor may itself be node-attached to another parent. Releasing
+    // its children must not remove its own attachment until final removal.
+    node_attachment_registry death;
+    assert(death.set(a));
+    assert(death.set(b));
+    assert(death.set(c));
+    auto detached_on_death=death.take_related(0x202000U,false);
+    assert(detached_on_death.size()==2);
+    auto after_death=death.snapshot();
+    assert(after_death.size()==1 && after_death[0].child==b.child);
+    assert(death.take_related(0x202000U).empty());
+    assert(death.snapshot().empty());
     return 0;
 }

@@ -32,6 +32,11 @@ constexpr binding gpu_3do_preview[]={
     {"normal_map2",5,sampler_kind::tex2d},
     {"env_map",4,sampler_kind::tex2d},
     {"env_map2",7,sampler_kind::tex2d},
+    {"hemi_reflection_map",23,sampler_kind::texture_array},
+    {"matcap_map",24,sampler_kind::tex2d},
+    {"matcap_surface_map",25,sampler_kind::tex2d},
+    {"clearcoat_surface_map",26,sampler_kind::tex2d},
+    {"clearcoat_normal_map",27,sampler_kind::tex2d},
     {"sector_crossing_planes",19,sampler_kind::buffer},
     {"continuous_voxel_keys",21,sampler_kind::buffer},
     {"continuous_voxel_values",22,sampler_kind::buffer},
@@ -58,6 +63,13 @@ constexpr binding world_cache[]={
     {"env_map2",7,sampler_kind::tex2d},
     {"palette_fullbright_mask",11,sampler_kind::tex2d},
     {"scene_depth",8,sampler_kind::tex2d},
+    {"planar_reflection_map",15,sampler_kind::tex2d},
+    {"shared_reflection_map",23,sampler_kind::texture_array},
+    {"matcap_map",24,sampler_kind::tex2d},
+    {"matcap_surface_map",25,sampler_kind::tex2d},
+    {"clearcoat_surface_map",26,sampler_kind::tex2d},
+    {"clearcoat_normal_map",27,sampler_kind::tex2d},
+    {"screen_reflection_map",9,sampler_kind::tex2d},
     {"translucent_sun_near_depth",16,sampler_kind::shadow},
     {"translucent_sun_far_depth",17,sampler_kind::shadow},
     {"translucent_sun_dynamic_depth",18,sampler_kind::shadow},
@@ -116,9 +128,13 @@ constexpr binding post_opaque_composite[]={
     {"spotlight_image_2",8,sampler_kind::tex2d},
     {"spotlight_image_3",9,sampler_kind::tex2d},
     {"spotlight_shadow_image",10,sampler_kind::shadow},
+    {"sun_half_visibility_image",11,sampler_kind::tex2d},
     {"sun_shadow_image",13,sampler_kind::shadow},
     {"sun_shadow_far_image",14,sampler_kind::shadow},
     {"sun_dynamic_image",15,sampler_kind::shadow},
+    {"sun_caustics_depth",17,sampler_kind::texture_array},
+    {"sun_caustics_density",18,sampler_kind::texture_array},
+    {"sun_caustics_pattern",19,sampler_kind::tex2d},
 };
 
 template<std::size_t N>
@@ -129,6 +145,17 @@ constexpr bool no_incompatible_target_aliases(binding const (&x)[N]) {
                 return false;
     return true;
 }
+// GLSL post_sun_visibility_half.frag does not sample the sky-aperture
+// texture: the full-resolution compositor handles the hard sky boundary.
+constexpr binding post_opaque_half_sun[]={
+    {"depth_image",3,sampler_kind::tex2d},
+    {"normal_image",5,sampler_kind::tex2d},
+    {"sun_shadow_image",13,sampler_kind::shadow},
+    {"sun_shadow_far_image",14,sampler_kind::shadow},
+    {"sun_dynamic_image",15,sampler_kind::shadow},
+};
+static_assert(no_incompatible_target_aliases(post_opaque_half_sun),
+              "Sampler target collision in post_opaque_half_sun");
 static_assert(no_incompatible_target_aliases(gpu_3do_preview),"Sampler target collision in gpu_3do_preview");
 static_assert(no_incompatible_target_aliases(world_cache),"Sampler target collision in world_cache");
 static_assert(no_incompatible_target_aliases(game_opaque_pass),"Sampler target collision in game_opaque_pass");

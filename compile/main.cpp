@@ -63,6 +63,15 @@ namespace jkgm {
         std::optional<float> displacement_factor;
 
         std::optional<std::string> surface_map;
+        std::optional<std::string> matcap_map;
+        std::optional<std::string> matcap_surface_map;
+        std::optional<float> matcap_roughness;
+        std::optional<color_rgb> matcap_factor;
+        std::optional<std::string> clearcoat_surface_map;
+        std::optional<std::string> clearcoat_normal_map;
+        std::optional<float> clearcoat_strength;
+        std::optional<float> clearcoat_roughness;
+        std::optional<float> clearcoat_transmission;
         std::optional<float> reflection_strength;
         std::optional<float> roughness;
         std::optional<float> metalness;
@@ -453,6 +462,75 @@ namespace jkgm {
             rv->surface_map = real_map_filename;
         }
 
+        // Matcap is a separate artistic layer, not a reflection mode.
+        // Matcap appearance RGB is an sRGB image; its surface mask is
+        // linear data (R=intensity, G=roughness, B reserved).
+        auto import_matcap_image=[&](char const *key,char const *suffix,
+                                     bool linear)->std::optional<std::string> {
+            if(!doc.contains(key))return std::nullopt;
+            if(!doc[key].is_string()) {
+                LOG_ERROR("Material '",rv->name,"' ",key," must be a filename");
+                throw std::runtime_error("Invalid script");
+            }
+            auto filename=str(fmt(rv->name,suffix));
+            auto input=script_path.parent_path()/
+                static_cast<std::string>(doc[key]);
+            return linear
+                ?get_convert_linear_image(img_map,input,filename,
+                                          output_path/filename)
+                :get_convert_image(img_map,input,filename,
+                                   output_path/filename);
+        };
+        rv->matcap_map=import_matcap_image("matcap_map",".matcap.png",false);
+        rv->matcap_surface_map=import_matcap_image(
+            "matcap_surface_map",".matcap_surface.png",true);
+        rv->clearcoat_surface_map=import_matcap_image(
+            "clearcoat_surface_map",".clearcoat_surface.png",true);
+        rv->clearcoat_normal_map=import_matcap_image(
+            "clearcoat_normal_map",".clearcoat_normal.png",true);
+        auto parse_layer_unit=[&](char const *key)->std::optional<float> {
+            if(!doc.contains(key))return std::nullopt;
+            auto const &v=doc[key];
+            if(!v.is_number()) {
+                LOG_ERROR("Material '",rv->name,"' ",key,
+                          " must be a finite number from 0 to 1");
+                throw std::runtime_error("Invalid script");
+            }
+            float const value=v.get<float>();
+            if(!std::isfinite(value) || value<0.0f || value>1.0f) {
+                LOG_ERROR("Material '",rv->name,"' ",key," must be in [0,1]");
+                throw std::runtime_error("Invalid script");
+            }
+            return value;
+        };
+        rv->matcap_roughness=parse_layer_unit("matcap_roughness");
+        rv->clearcoat_strength=parse_layer_unit("clearcoat_strength");
+        rv->clearcoat_roughness=parse_layer_unit("clearcoat_roughness");
+        rv->clearcoat_transmission=parse_layer_unit("clearcoat_transmission");
+        if(doc.contains("matcap_factor")) {
+            auto const &v=doc["matcap_factor"];
+            if(!v.is_array() || v.size()!=3U) {
+                LOG_ERROR("Material '",rv->name,
+                          "' matcap_factor must be an RGB array");
+                throw std::runtime_error("Invalid script");
+            }
+            std::array<float,3> rgb{};
+            for(unsigned i=0;i<3U;++i) {
+                if(!v[i].is_number()) {
+                    LOG_ERROR("Material '",rv->name,
+                              "' matcap_factor RGB must be numeric");
+                    throw std::runtime_error("Invalid script");
+                }
+                rgb[i]=v[i].get<float>();
+                if(!std::isfinite(rgb[i]) || rgb[i]<0.0f || rgb[i]>4.0f) {
+                    LOG_ERROR("Material '",rv->name,
+                              "' matcap_factor RGB must be in [0,4]");
+                    throw std::runtime_error("Invalid script");
+                }
+            }
+            rv->matcap_factor=color_rgb(rgb[0],rgb[1],rgb[2]);
+        }
+
         if(doc.contains("reflection_strength")) {
             auto const &v = doc["reflection_strength"];
             if(!v.is_number() || static_cast<float>(v) < 0.0f) {
@@ -486,9 +564,12 @@ namespace jkgm {
         if(doc.contains("reflection_mode")) {
             auto const &v = doc["reflection_mode"];
             if(!v.is_string() ||
-               (v != "envmap" && v != "screen" && v != "fixed" && v != "matcap")) {
+               (v != "envmap" && v != "screen" && v != "fixed" &&
+                v != "planar" && v != "hemi" && v != "cube" &&
+                v != "shared")) {
                 LOG_ERROR("Material '", rv->name,
-                          "' reflection_mode must be envmap, screen, fixed, or matcap");
+                          "' reflection_mode must be envmap, screen, fixed, "
+                          "planar, hemi, cube or shared");
                 throw std::runtime_error("Invalid script");
             }
             rv->reflection_mode = static_cast<std::string>(v);
@@ -770,6 +851,27 @@ namespace jkgm {
         if(mat.surface_map.has_value()) {
             rv["surface_map"] = *mat.surface_map;
         }
+
+        if(mat.matcap_map) rv["matcap_map"]=*mat.matcap_map;
+        if(mat.matcap_surface_map)
+            rv["matcap_surface_map"]=*mat.matcap_surface_map;
+        if(mat.matcap_roughness)
+            rv["matcap_roughness"]=*mat.matcap_roughness;
+        if(mat.matcap_factor) {
+            auto const &rgb=*mat.matcap_factor;
+            rv["matcap_factor"]={
+                get<0>(rgb),get<1>(rgb),get<2>(rgb)};
+        }
+        if(mat.clearcoat_surface_map)
+            rv["clearcoat_surface_map"]=*mat.clearcoat_surface_map;
+        if(mat.clearcoat_normal_map)
+            rv["clearcoat_normal_map"]=*mat.clearcoat_normal_map;
+        if(mat.clearcoat_strength)
+            rv["clearcoat_strength"]=*mat.clearcoat_strength;
+        if(mat.clearcoat_roughness)
+            rv["clearcoat_roughness"]=*mat.clearcoat_roughness;
+        if(mat.clearcoat_transmission)
+            rv["clearcoat_transmission"]=*mat.clearcoat_transmission;
 
         if(mat.reflection_strength.has_value()) {
             rv["reflection_strength"] = *mat.reflection_strength;
@@ -1057,6 +1159,15 @@ namespace jkgm {
                     "displacement_map",
                     "displacement_factor",
                     "surface_map",
+                    "matcap_map",
+                    "matcap_surface_map",
+                    "matcap_roughness",
+                    "matcap_factor",
+                    "clearcoat_surface_map",
+                    "clearcoat_normal_map",
+                    "clearcoat_strength",
+                    "clearcoat_roughness",
+                    "clearcoat_transmission",
                     "reflection_strength",
                     "roughness",
                     "metalness",

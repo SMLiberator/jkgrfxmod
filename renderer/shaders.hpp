@@ -15,7 +15,8 @@ namespace jkgm {
 
         opengl_shader(std::string const &name,
                       fs::path const &vertex_part,
-                      fs::path const &fragment_part);
+                      fs::path const &fragment_part,
+                      fs::path const &geometry_part = fs::path());
 
     public:
         opengl_shader(opengl_shader const &) = delete;
@@ -36,6 +37,7 @@ namespace jkgm {
         struct translucent_sun_uniforms {
             gl::uniform_location_id enabled,maps_ready,dynamic_count;
             gl::uniform_location_id direction,color,split,bias_scale,pcf_radius;
+            gl::uniform_location_id dynamic_pcf_radius;
             gl::uniform_location_id near_depth,far_depth,dynamic_depth;
             gl::uniform_location_id sky_aperture_active,sky_aperture_map;
             gl::uniform_location_id sky_aperture_depth_transform;
@@ -47,6 +49,7 @@ namespace jkgm {
                            float split_distance,float receiver_bias,
                            float max_distance=0.0f);
             void set_pcf_radius(float near_radius,float far_radius);
+            void set_dynamic_pcf_radius(float radius);
             void set_sky_aperture(bool active,int sampler,
                                   point<4,float> near_far_depth_transform);
             void set_map(int slot,point<4,float> row_x,point<4,float> row_y,
@@ -81,8 +84,19 @@ namespace jkgm {
             gl::uniform_location_id reflection_params,reflection_normal_params;
             gl::uniform_location_id normal_mapped_diffuse;
             gl::uniform_location_id reflection_scroll,reflection_scroll2,environment_info;
+            gl::uniform_location_id shared_reflection_sampler,shared_reflection_ready;
+            gl::uniform_location_id matcap_sampler,matcap_surface_sampler;
+            gl::uniform_location_id matcap_params,matcap_enabled,matcap_has_surface;
+            gl::uniform_location_id coat_surface_sampler,coat_normal_sampler;
+            gl::uniform_location_id clearcoat_params,clearcoat_enabled;
+            gl::uniform_location_id clearcoat_has_surface,clearcoat_has_normal;
             gl::uniform_location_id camera_world_origin,camera_right_axis;
             gl::uniform_location_id camera_forward_axis,camera_up_axis;
+            gl::uniform_location_id planar_sampler,planar_ready,planar_plane;
+            gl::uniform_location_id planar_camera_origin,planar_camera_right;
+            gl::uniform_location_id planar_camera_forward,planar_camera_up;
+            gl::uniform_location_id planar_tan_half_fov;
+            gl::uniform_location_id screen_reflection_sampler,screen_reflection_ready;
             gl::uniform_location_id alpha_cutout,alpha_cutoff;
             gl::uniform_location_id transparent_pass,alpha_mode,face_opacity;
             gl::uniform_location_id blend_mode;
@@ -116,10 +130,21 @@ namespace jkgm {
             void set_reflection(point<4,float> material,point<4,float> normals,
                                 point<2,float> scroll,point<2,float> scroll2,
                                 bool from,bool to,float weight,int mode);
+            void set_shared_reflection(bool ready);
+            void set_matcap(bool enabled,point<4,float> params,bool has_surface);
+            void set_clearcoat(bool enabled,point<4,float> params,
+                               bool has_surface,bool has_normal);
             void set_reflection_camera(std::array<float,3> const &position,
                                        std::array<float,3> const &right,
                                        std::array<float,3> const &forward,
                                        std::array<float,3> const &up);
+            void set_planar_reflection(bool ready,point<4,float> plane,
+                                       point<3,float> origin,
+                                       point<3,float> right,
+                                       point<3,float> forward,
+                                       point<3,float> up,
+                                       point<2,float> tan_half_fov);
+            void set_screen_reflection(bool ready,int sampler);
             void set_alpha_cutout(float cutoff);
             void set_scene_depth(int sampler);
             void set_fluid_thickness(float thickness);
@@ -286,9 +311,10 @@ namespace jkgm {
             gl::uniform_location_id view_right,view_forward,view_up,view_origin;
             gl::uniform_location_id sprite_instance_count,sprite_instance_matrix;
             gl::uniform_location_id projection;
+            gl::uniform_location_id packed_vertex_format;
             gl::uniform_location_id albedo_sampler,emissive_sampler,uv_scale,has_texture,
                                     has_emissive,transparent_pass,blend_mode,alpha_mode,alpha_cutoff,
-                                    native_face_opacity,albedo_factor,emissive_factor,
+                                    native_face_opacity,thing_opacity,albedo_factor,emissive_factor,
                                     albedo_scroll,emissive_scroll,fog_params,fog_color,
                                     emissive_only;
             gl::uniform_location_id jk_color_filter,jk_color_tint,jk_color_add_fade;
@@ -315,6 +341,7 @@ namespace jkgm {
             gl::uniform_location_id specular_environment2_sampler;
             gl::uniform_location_id albedo2_sampler,albedo_transition_info;
             gl::uniform_location_id scene_depth_sampler,advanced_material_params;
+            gl::uniform_location_id smoke_half_resolution;
             gl::uniform_location_id post_exempt_pass;
             gl::uniform_location_id camera_hud_thing;
             gl::uniform_location_id world_lighting_exempt;
@@ -323,6 +350,12 @@ namespace jkgm {
             gl::uniform_location_id decal_receiver_lighting;
             gl::uniform_location_id displacement_sampler,displacement_factor;
             gl::uniform_location_id environment_info;
+            gl::uniform_location_id hemi_map,hemi_right,hemi_forward,hemi_up,hemi_info;
+            gl::uniform_location_id matcap_sampler,matcap_surface_sampler;
+            gl::uniform_location_id matcap_params,matcap_enabled,matcap_has_surface;
+            gl::uniform_location_id coat_surface_sampler,coat_normal_sampler;
+            gl::uniform_location_id clearcoat_params,clearcoat_enabled;
+            gl::uniform_location_id clearcoat_has_surface,clearcoat_has_normal;
             gl::uniform_location_id camera_right_axis,camera_forward_axis,camera_up_axis;
             gl::uniform_location_id sun_direction,sun_color_intensity;
             gl::uniform_location_id normal_specular_scroll,normal_specular_scroll2,local_eye;
@@ -371,10 +404,12 @@ namespace jkgm {
                 std::array<std::array<float,12>,max_sprite_instances> const &models,
                 size_t count);
             void set_projection(point<4,float> projection_params);
+            void set_packed_vertex_format(bool enabled);
             void set_surface(int albedo_source,float width,float height,bool transparent,
                              int blend,int alpha_policy,float cutoff,float face_opacity,
                              point<4,float> tint,point<2,float> scroll,
                              bool emissive_only);
+            void set_thing_opacity(float value);
             void set_emissive(bool textured,point<4,float> intensity,
                               point<2,float> scroll);
             void set_fog(point<4,float> params,point<4,float> color);
@@ -403,8 +438,15 @@ namespace jkgm {
                                     point<2,float> normal_scroll,
                                     point<2,float> normal_scroll2);
             void set_environment(bool from,bool to,float weight,int mode);
+            void set_matcap(bool enabled,point<4,float> params,bool has_surface);
+            void set_clearcoat(bool enabled,point<4,float> params,
+                               bool has_surface,bool has_normal);
+            void set_hemi_reflection(bool ready,
+                point<3,float> right,point<3,float> forward,
+                point<3,float> up,float half_fov,float aspect,int capture_mode);
             void set_albedo_transition(int source2,float weight);
             void set_scene_depth(int sampler);
+            void set_smoke_half_resolution(bool enabled);
             void set_translucent_spotlight_count(int count);
             void set_translucent_shadow(int slot,float near_plane,float far_plane,
                                         float angle_bias_scale);
@@ -448,7 +490,7 @@ namespace jkgm {
             std::vector<gl::uniform_location_id> samples;
 
         public:
-            explicit game_post_ssao_shader(fs::path const &data_root);
+            explicit game_post_ssao_shader(fs::path const &data_root,bool half_res=false);
 
             void set_normal_sampler(int sampler);
             void set_depth_sampler(int sampler);
@@ -473,6 +515,13 @@ namespace jkgm {
             gl::uniform_location_id shadow_alpha_uv_scale,shadow_alpha_uv_scroll;
             gl::uniform_location_id shadow_alpha_transition,shadow_alpha_cutoff;
             gl::uniform_location_id shadow_alpha_factor;
+            gl::uniform_location_id shadow_dither_enabled,shadow_instance_opacity,
+                                    shadow_alpha_masked,shadow_caustic_density;
+            gl::uniform_location_id shadow_caustic_from_texture,
+                shadow_caustic_to_texture,shadow_caustic_color_factor,
+                shadow_caustic_color_blend;
+            bool cached_dither_enabled_=false,cached_masked_=false;
+            float cached_dither_opacity_=-1.0f;
         public:
             explicit spotlight_shadow_depth_shader(fs::path const &data_root);
             void set_light(point<3,float> origin,point<3,float> right,
@@ -490,6 +539,10 @@ namespace jkgm {
             void set_instanced_models(
                 std::array<std::array<float,12>,max_shadow_instances> const &models,
                 size_t count);
+            void set_shadow_dither(bool enabled,float opacity,bool masked);
+            void set_caustic_density(float coefficient);
+            void set_caustic_color(bool textured,bool next_textured,
+                point<3,float> tint,float transition);
             void set_shadow_alpha(bool enabled,point<2,float> uv_scale,
                                   point<2,float> uv_scroll,float cutoff,
                                   float factor,bool has_next,float progress);
@@ -501,7 +554,6 @@ namespace jkgm {
             gl::uniform_location_id emissive_image;
             gl::uniform_location_id occlusion_image;
             gl::uniform_location_id depth_image;
-            gl::uniform_location_id debug_void_pixels;
             gl::uniform_location_id retain_hom_pixels;
             gl::uniform_location_id fog_params;
             gl::uniform_location_id fog_color;
@@ -527,7 +579,10 @@ namespace jkgm {
             gl::uniform_location_id sun_sky_aperture_active,sun_sky_aperture_map;
             gl::uniform_location_id sun_sky_aperture_depth_transform;
             gl::uniform_location_id sun_max_distance;
+            gl::uniform_location_id sun_caustics_active,sun_caustics_time;
+            gl::uniform_location_id sun_half_visibility_active,sun_half_visibility_image;
             gl::uniform_location_id sun_dynamic_count,sun_dynamic_image;
+            gl::uniform_location_id sun_dynamic_pcf_radius;
             std::vector<gl::uniform_location_id> sun_dynamic_atlas_rects;
             std::vector<gl::uniform_location_id> sun_dynamic_origin;
             std::vector<gl::uniform_location_id> sun_dynamic_right;
@@ -544,14 +599,13 @@ namespace jkgm {
 
         public:
             explicit game_post_opaque_composite_shader(
-                fs::path const &data_root);
+                fs::path const &data_root,bool half_sun=false);
 
             void set_color_sampler(int sampler);
             void set_emissive_sampler(int sampler);
             void set_occlusion_sampler(int sampler);
             void set_depth_sampler(int sampler);
             void set_coverage_normal_sampler(int sampler);
-            void set_debug_void_pixels(bool enabled);
             void set_retain_hom_pixels(bool enabled);
             void set_fog(point<4,float> params,color_rgb fog);
             void set_projector_camera(point<4,float> origin,
@@ -573,8 +627,11 @@ namespace jkgm {
             void set_sun_shadow_pcf_radius(float near_radius,float far_radius);
             void set_sun_sky_aperture(bool active,int sampler,
                                      point<4,float> near_far_depth_transform);
+            void set_sun_caustics(bool enabled,float time_seconds);
             void set_sun_max_distance(float distance);
+            void set_sun_half_visibility(bool active,int sampler);
             void set_sun_dynamic_count(int count);
+            void set_sun_dynamic_pcf_radius(float radius);
             void set_sun_dynamic_atlas_rect(int slot,point<4,float> rect);
             void set_sun_dynamic(int slot,point<3,float> origin,
                                  point<3,float> right,point<3,float> up,
@@ -590,6 +647,24 @@ namespace jkgm {
         public:
             explicit game_transparency_pass_shader(
                 fs::path const &data_root);
+        };
+
+        // Packed half-resolution AO blur and full-resolution bilateral
+        // reconstruction. Construct only for the opt-in experiment.
+        class post_ssao_half_blur_shader : public opengl_shader {
+            gl::uniform_location_id source_image;
+        public:
+            explicit post_ssao_half_blur_shader(fs::path const &data_root);
+            void set_source_sampler(int sampler);
+        };
+
+        class post_ssao_half_upsample_shader : public opengl_shader {
+            gl::uniform_location_id source_image,normal_image,depth_image;
+        public:
+            explicit post_ssao_half_upsample_shader(fs::path const &data_root);
+            void set_source_sampler(int sampler);
+            void set_normal_sampler(int sampler);
+            void set_depth_sampler(int sampler);
         };
 
         class post_box4_shader : public opengl_shader {
@@ -690,6 +765,15 @@ namespace jkgm {
                                  bool adaptive,float compensation_ev);
         };
 
+        // Pre-multiplied half-size fluid SPR layer -> full-size scene.
+        class post_smoke_composite_shader : public opengl_shader {
+        private:
+            gl::uniform_location_id smoke_image,opaque_depth;
+        public:
+            explicit post_smoke_composite_shader(fs::path const &data_root);
+            void set_samplers(int smoke_sampler,int depth_sampler);
+        };
+
         class post_spatial_blur_shader : public opengl_shader {
         private:
             gl::uniform_location_id source_image;
@@ -698,10 +782,8 @@ namespace jkgm {
             gl::uniform_location_id screen_size;
             gl::uniform_location_id distance_params;
             gl::uniform_location_id peripheral_params;
-            // Only present in the opt-in half-resolution shader.
-            gl::uniform_location_id original_image;
+            // Only present in the standard half-resolution shader.
             gl::uniform_location_id output_size;
-            gl::uniform_location_id restore_original;
 
         public:
             explicit post_spatial_blur_shader(fs::path const &data_root,
@@ -710,8 +792,7 @@ namespace jkgm {
             void set_depth_sampler(int sampler);
             void set_blur_axis(int axis);
             void set_screen_size(size<2, float> dims);
-            void set_fast_inputs(int original_sampler,size<2,float> output_dims,
-                                 bool fullres_unblurred);
+            void set_output_size(size<2,float> output_dims);
             void set_distance_params(point<4, float> params);
             void set_peripheral_params(point<4, float> params);
         };

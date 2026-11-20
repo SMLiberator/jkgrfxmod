@@ -5,6 +5,20 @@
 #include <algorithm>
 
 namespace jkgm {
+    // A zero-strength trail requires neither a history write nor the
+    // final fullscreen history copy. Retro must still stage a separate scene
+    // so that both HUD layers are quantized only in the final pass.
+    inline bool frame_blend_can_present_directly(opengl_state const *ogs)
+    {
+        if(ogs->retro_mode_active)return false;
+        if(!ogs->enable_trails)return true;
+        auto const &blend=get_frame_blend_settings().strength;
+        // Consider the fade target as well as its current value. A fade
+        // starting at zero must enter the history path immediately so it can
+        // seed a clean frame before nonzero blending becomes visible.
+        return blend.value()[0]<=0.0f && blend.target()[0]<=0.0f;
+    }
+
     // Called after post_to_srgb has drawn the completed presentation frame
     // into screen_postbuffer1. All operations here work in linear light.
     inline void present_frame_blend(opengl_state *ogs, size<2, int> screen_size)

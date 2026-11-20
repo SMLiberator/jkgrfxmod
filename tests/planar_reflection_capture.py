@@ -1,0 +1,284 @@
+"""Source/packaging contracts for the experimental planar capture pass."""
+import json
+from pathlib import Path
+root=Path(__file__).resolve().parents[1]
+read=lambda path:(root/path).read_text(encoding="utf-8")
+settings=json.loads(read("assets/jkgm.json"))
+assert settings["enable_reflection_capture"] is True
+assert settings["enable_reflection_probes"] is False
+assert settings["reflection_capture_resolution"]==128
+assert settings["reflection_capture_update_interval"]==0.0
+assert "experimental_planar_reflection_portal_culling" not in settings
+portals=read("renderer/planar_reflection_portals.hpp")
+assert "planar_reflection_portal_graph" in portals
+assert "std::vector<world_cache_sector_span>" in portals
+assert "planar_reflection_portal_project_aabb" in portals
+assert "void clear()" in portals
+assert "experimental_planar_reflection_portal_culling" not in read("common/config.cpp")
+assert "experimental_planar_reflection_portal_culling" not in read("common/config.hpp")
+assert "planar_reflection_portals.hpp" in read("renderer/world_cache_gpu.hpp")
+assert "planar_reflection_portals.hpp" in read("renderer/renderer.vcxproj")
+assert "planar_reflection_portals.hpp" in read("renderer/renderer.vcxproj.filters")
+assert "planar_reflection_portals.cpp" in read(".github/workflows/main.yml")
+
+config=read("common/config.cpp")
+for name in ("enable_reflection_capture",
+             "enable_reflection_probes",
+             "reflection_capture_resolution",
+             "reflection_capture_update_interval"):
+    assert f'j.contains("{name}")' in config
+assert 'reflection_capture_resolution must be 32..1024' in config
+assert 'reflection_capture_update_interval must be between 0 and 60 seconds' in config
+renderer=read("renderer/renderer.cpp")
+visibility=read("renderer/planar_receiver_visibility.hpp")
+visibility_vert=read("assets/shaders/planar_receiver_visibility.vert")
+visibility_frag=read("assets/shaders/planar_receiver_visibility.frag")
+target=read("renderer/offscreen_capture_target.hpp")
+projection=read("renderer/offscreen_capture_projection.hpp")
+shader=read("renderer/planar_reflection_capture_shader.hpp")
+v=read("assets/shaders/planar_capture.vert")
+f=read("assets/shaders/planar_capture.frag")
+assert "render_planar_capture();" in renderer
+assert "select_planar_capture_plane(" in renderer
+# Passable adjoins may carry explicitly planar water: eligible as receivers,
+# while the mirrored scene itself must still omit passable portal geometry.
+selector=renderer.split("void select_planar_capture_plane(",1)[1].split(
+    "void render_planar_capture()",1)[0]
+assert "surface.count<3U || surface.passable_adjoin" not in selector
+assert "if(surface.passable_adjoin)++matched_passable;" in selector
+assert "if(mat.reflection_mode!=4)continue;" in selector
+assert "mat.blend==material_blend_mode::fluid ? 1 : 0" not in selector
+assert "matched_fluid" not in selector
+assert "passable_reflection_receivers=" in selector
+# Every eligibility path must require the explicit planar material setting.
+receiver=renderer.split("void query_planar_receiver_visibility()",1)[1].split(
+    "void query_gpu_thing_occlusion()",1)[0]
+assert "if(material.reflection_mode==4)" in receiver
+assert "material.blend==material_blend_mode::fluid" not in receiver
+reflect_stage=renderer.split("void draw_world_cache_preview()",1)[1].split(
+    "void draw_gpu_3do_preview(",1)[0]
+assert "if(mat.reflection_mode!=4)continue;" in reflect_stage
+assert "planar_plane_from_material" not in renderer
+capture=renderer.split("void render_planar_capture()",1)[1]
+assert "face.count==0U || face.passable_adjoin" in capture
+assert "make_planar_reflection_camera(" in renderer
+assert "make_planar_reflection_render_setup(" in renderer
+assert "offscreen_capture_gl_scope restore;" in renderer
+assert "make_offscreen_capture_projection(" in renderer
+assert "shader.set_projection(projection);" in renderer
+assert "offscreen_capture_target" in renderer
+assert "clip_enabled" in f and "orthographic_mode" in f
+assert "capture_forward_depth" in v and "capture_forward_depth" in f
+assert "projection.w>0.5" in v
+assert "struct offscreen_capture_projection" in projection
+assert "for(auto const &surface:cache.mesh.surfaces)" in renderer
+assert "collect_planar_reflection_things(read,world,scan)" in renderer
+assert "acquire_planar_reflection_offscreen_gpu(" in renderer
+assert "hidden_by_cur_geomode=" in renderer
+main=read("renderer/main.cpp")
+assert "thing.thing+0xf8U,&native_geo" in main
+assert "native_geo<3" in main
+assert "gpu_3do_effective_geo_mode(cur_geo,mesh.geometry_mode)" in main
+assert "inst.effective_geometry_mode<3U" in renderer
+assert "gpu_3do_native_modelview(" in renderer
+assert "planar_capture_target->framebuffer()" in renderer
+# World MAT sampling happens AFTER same-frame capture, not from stale history.
+shader_h=read("renderer/shaders.hpp")
+shader_cpp=read("renderer/shaders.cpp")
+world_shader=read("assets/shaders/world_cache.frag")
+assert "void set_planar_reflection(bool ready" in shader_h
+assert "world_cache_preview_shader::set_planar_reflection(" in shader_cpp
+assert "planar_reflection_map" in world_shader
+assert "world_planar_reflection(" in world_shader
+assert "planar_receiver_plane" in world_shader
+assert "sample_color.rgb/=sample_color.a" in world_shader
+assert "bind_world_planar_reflection(shader);" in renderer
+assert "planar_capture_target->color_texture()" in renderer
+assert "planar_capture_camera=reflected;" in renderer
+assert "glClearColor(0.0f,0.0f,0.0f,0.0f)" in renderer
+assert renderer.index("render_planar_capture();") < renderer.index(
+    "draw_game_gbuffer_pass(trimdl, posterize_lighting);")
+assert "NOTE=planar_world_material_sampling_with_sky" in renderer
+assert "draw_reflection_capture_sky(shader,reflected,view," in renderer
+assert "planar_last_refresh=std::chrono::steady_clock::now();" in renderer
+# Visual-parity and performance regressions: reflected world data must be
+# staged independently of the primary portal subset, without leaking into
+# the primary camera's alpha draw queue.
+assert "planar_frame_candidates.clear();" in renderer
+# Reflected portal visibility must not borrow the main-camera sector
+# spans. On any invalid link/receiver the entire original frustum walk remains.
+assert "cache.reflected_portal_graph.ensure(" in renderer
+assert "cache.reflected_portal_graph.traverse(" in renderer
+assert "&special_candidates,&reflected_sky_candidates" in renderer
+assert "planar_reflection_sky_visibility" in renderer
+assert "collect_planar_reflection_things(\n                           read,world,scan,sector_mask)" in renderer
+assert "collect_world_cache_sector_candidates(" in renderer
+assert "if(!reflected_portals_used)" in renderer
+assert "reflected_portals used=" in renderer
+assert "experimental_planar_reflection_portal_culling" not in renderer
+assert "planar_thing_visibility_world==world &&" in renderer
+assert "independent_mirrored_camera_fail_open" in renderer
+
+assert "append_world_cache_candidate(" in renderer
+# Inside draw_world_cache_preview(), the captured camera is named cam.
+reflect_stage=renderer.split(
+    "// The reflected camera may see faces that JK's primary portal",1)[1].split(
+    "if(ordered.empty()",1)[0]
+assert "cam.frustum.far_plane>0.1f" in reflect_stage
+assert "select_planar_capture_plane(cam.camera);" in reflect_stage
+assert "cam.camera,*planar_capture_plane" in reflect_stage
+assert "&reflected_frustum,&reflection_view" in reflect_stage
+assert "reflected_frustum.clip_far=0" in reflect_stage
+assert "camera.camera" not in reflect_stage and "can_cull" not in reflect_stage
+assert "stage_candidate(candidate,false)" in renderer
+assert "reflection_staged.push_back(candidate)" in renderer
+assert "stream_candidates.insert(stream_candidates.end()," in renderer
+assert "for(auto const &face:planar_frame_candidates)" in renderer
+assert "gpu_3do_batch_outside_frustum(" in renderer
+assert "glMultiDrawElements(GL_TRIANGLES,world_counts.data()" in renderer
+assert "ms_acquire=" in renderer and "ms_world=" in renderer
+assert "ms_models=" in renderer and "ms_mips=" in renderer
+assert "gpu_ms_world=" in renderer
+assert "gpu_ms_models=" in renderer and "gpu_ms_mips=" in renderer
+assert "planar_gpu_queries.begin(gpu_result)" in renderer
+assert "planar_gpu_queries.timestamp(0U,true)" in renderer
+assert "planar_gpu_queries.timestamp(1U,true)" in renderer
+assert "planar_gpu_queries.timestamp(2U,true)" in renderer
+assert "planar_gpu_queries.end();" in renderer
+assert "planar_gpu_queries.release();" in renderer
+assert "source_hashes=" in renderer and "source_hash_skips=" in renderer
+assert "source_untracked_changes=" in renderer
+assert "thing_radius_culled=" in renderer
+assert "mesh_radius_culled=" in renderer
+# Native 3DO model-radius rejection must happen before sorting or spending
+# the capped acquisition budget; the mirrored camera is independent.
+cap=renderer.split("void render_planar_capture()",1)[1].split(
+    "void present_game()",1)[0]
+assert cap.index("planar_reflection_thing_outside_frustum(") < cap.index(
+    "std::sort(things.begin(),things.end()")
+assert "read,thing,reflected_frustum,view" in cap
+assert "reflection_capture_scene_far(" in cap
+assert "radius_cull_available?&view:nullptr" in cap
+assert "shader.set_color_effects(" in renderer
+assert "shader.set_fog(" in renderer
+assert "shader.set_model_lighting(" in renderer
+assert "world_planar_reflection(nw,roughness)" in world_shader
+assert "ray=reflect(incident,normalize(mapped_normal))" in world_shader
+assert "textureLod(planar_reflection_map,uv,lod)" in world_shader
+assert "uv+=vec2(dot(bump" not in world_shader
+assert "glGenerateMipmap(GL_TEXTURE_2D);" in renderer
+assert "GL_LINEAR_MIPMAP_LINEAR" in target
+assert "glGenerateMipmap(GL_TEXTURE_2D);" in target
+assert "uniform vec4 fog_params;" in f
+assert "mix(lit,fog_color,fog_far)" in f
+# Reflection distance already includes the camera->receiver leg. Its
+# contribution must be removed from the capture fog, then reconstructed by
+# the primary renderer without counting the first leg twice.
+assert "float plane_fraction=clip_enabled!=0 ? clamp(" in f
+assert "float fog_total=capture_fog_fraction(total_depth);" in f
+assert "float fog_near=capture_fog_fraction(total_depth*plane_fraction);" in f
+assert "fog_far=clamp((fog_total-fog_near)/" in f
+def fog_at(depth,start,end,opacity):
+    return max(0.0,min(1.0,(depth-start)/(end-start)))*opacity
+for start,end,opacity,total_depth,fraction in (
+    (4.0,40.0,1.0,22.0,0.3),
+    (4.0,40.0,0.7,30.0,0.6),
+    (0.0,80.0,1.0,80.0,0.25),
+    (8.0,32.0,0.6,15.0,0.1),
+    (8.0,32.0,0.9,5.0,0.4),
+):
+    total=fog_at(total_depth,start,end,opacity)
+    near=fog_at(total_depth*fraction,start,end,opacity)
+    far=max(0.0,min(1.0,(total-near)/max(1.0-near,0.00001)))
+    assert abs(near+(1.0-near)*far-total)<1e-6
+# Emission is a separate sampled material contribution: it survives a
+# black/zero-alpha albedo and retains HDR values after capture.
+assert "uniform sampler2D emissive_map;" in f
+assert "emitted*=texture(emissive_map,tex_uv+emissive_scroll).rgb;" in f
+assert "if(emissive_only!=0)" in f
+assert "vec3 lit=albedo.rgb*material_tint.rgb*baked_light+emitted;" in f
+assert "shader.set_emission(mat.has_emission,mat.emission_factor," in renderer
+assert "glBlendFuncSeparate(GL_ONE,GL_ONE,GL_ONE,GL_ZERO);" in renderer
+assert "glDepthMask(GL_FALSE);" in renderer
+assert "glDepthFunc(GL_LEQUAL);" in renderer
+assert "emissive_world.push_back(" in renderer
+assert "emissive_models.push_back(" in renderer
+assert "mat.special || mat.emissive_only" not in capture
+assert "GL_RGBA16F" in target
+# A new sampler must have its GL unit restored for later native/GPU draws.
+assert "glActiveTexture(GL_TEXTURE1);" in target
+assert "glBindTexture(GL_TEXTURE_2D,GLuint(texture1_));" in target
+assert "void set_emission(bool textured" in shader
+assert "native_sector_tint" in v and "native_cmp_or_mode" in v
+assert "jk_capture_color(native_light,native_cmp_or_mode," in v
+assert "clamp(native_light,vec3(0.45)" not in v
+assert "instance.ambient=1.0f;" not in main
+
+
+assert "GL_COLOR_ATTACHMENT0" in target
+assert "GL_DEPTH_COMPONENT24" in target
+assert "glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING" in target
+assert "glBindFramebuffer(GL_DRAW_FRAMEBUFFER" in target
+assert "clip_plane_view" in v and "if(clip_enabled!=0 && clip_side<" in f
+assert "is_model" in v and "native_uv_offset" in v
+assert "albedo_map" in f and "alpha_cutoff" in f
+for p in ("renderer/renderer.vcxproj","renderer/renderer.vcxproj.filters"):
+    s=read(p)
+    for name in ("offscreen_capture_target.hpp",
+                 "offscreen_capture_projection.hpp",
+                 "planar_reflection_capture_shader.hpp",
+                 "planar_reflection_render_math.hpp"):
+        assert name in s
+assert 'Copy-Item -Path \'assets/shaders/*\'' in read(".github/workflows/main.yml")
+print("Configurable planar FBO/camera/mirror capture source contracts OK")
+
+# Visibility of the RECEIVER must be tested against the *main camera*
+# opaque depth, AFTER its cached 3DOs wrote depth; the query is polled only
+# on later frames, before spending CPU time on native acquisition.
+assert "query_planar_receiver_visibility();" in renderer
+assert "glBeginQuery(GL_ANY_SAMPLES_PASSED" in visibility
+assert "GL_QUERY_RESULT_AVAILABLE" in visibility
+assert "GL_QUERY_RESULT," in visibility
+assert "glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE)" in renderer
+assert "glDepthMask(GL_FALSE);" in renderer
+assert "glDepthFunc(GL_LEQUAL)" in renderer
+assert "gl::bind_vertex_array(cache.vao);" in renderer
+assert "planar_receiver_camera_near" in visibility
+assert "frame-latest_frame_<=3U" in visibility
+assert "planar_receiver_queries->invalidate()" in renderer
+assert "receiver_visibility=occluded" in renderer
+assert "mode!=renderer_mode::ingame" in renderer
+assert "void main()" in visibility_vert
+assert "gl_Position=" in visibility_vert
+assert "void main()" in visibility_frag
+assert "planar_receiver_visibility.hpp" in read("renderer/renderer.vcxproj")
+assert "planar_receiver_visibility.hpp" in read("renderer/renderer.vcxproj.filters")
+# Calls must occur in the correct order, not just have matching strings.
+opaque=renderer.split("void draw_game_opaque_into_gbuffer(",1)[1].split("void release_spotlight_images()",1)[0]
+assert opaque.index("draw_gpu_3do_preview(false);") < opaque.index("query_planar_receiver_visibility();")
+capture=renderer.split("void render_planar_capture()",1)[1].split("void present_game()",1)[0]
+assert capture.index("visibility.hidden(") < capture.index("acquire_planar_reflection_offscreen_gpu(")
+
+# On-demand global EnvMaps include only Cog MODEL3 scenery, including
+# LEVELGEO and PATH (which must not be mistaken for transience). Realtime
+# hemi/cube probes use a separate per-source attachment-family exclusion.
+global_capture=read("renderer/hemi_reflection_capture.inc")
+static_policy=read("renderer/global_env_capture.hpp")
+assert "global_env_capture_static_thing(" in static_policy
+assert "type!=7U" in static_policy
+assert "type!=7U && type!=8U" not in static_policy
+assert "(move_type!=0U && move_type!=2U)" in static_policy
+assert "(flags&(0x2U|0x10U|0x20U|0x80000U))" in static_policy
+assert "animation_class!=0U" not in static_policy
+assert "auto capture_static_owner=" in global_capture
+assert "(candidate.is_global &&" in global_capture
+assert "!capture_static_owner(owner)" in global_capture
+assert "!capture_static_owner(inst.shadow_owner)" in global_capture
+# Sun-shadow movement/puppet flags cannot override explicit Cog capture.
+assert "native_motion_tracking_enabled" not in global_capture
+assert "recently_moving_owners" not in global_capture
+assert "inst.dynamic_sun_caster" not in global_capture
+assert "build_reflection_attachment_family(" in global_capture
+assert "reflection_excluded_owners.count(owner)" in global_capture
+assert "reflection_excluded_owners.count(inst.shadow_owner)" in global_capture
+assert "draw_reflection_capture_sky(" in global_capture

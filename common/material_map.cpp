@@ -179,6 +179,53 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
         mat->metalness = em.contains("metalness") ? static_cast<float>(em["metalness"])
                                                    : (has_surface_map ? 1.0f : 0.0f);
 
+        // Artistic matcaps and dielectric clearcoat are separate from the
+        // base reflection mode. Matcaps now use matcap_map, not a reflection
+        // mode; legacy reflection_mode="matcap" is intentionally rejected.
+        auto read_unit=[&](char const *key,float fallback)->float {
+            if(!em.contains(key))return fallback;
+            auto const &value=em[key];
+            if(!value.is_number())
+                throw std::runtime_error(std::string("Invalid ")+key+
+                                         " in metadata.json (expected number)");
+            float const result=value.get<float>();
+            if(!std::isfinite(result) || result<0.0f || result>1.0f)
+                throw std::runtime_error(std::string("Invalid ")+key+
+                                         " in metadata.json (range 0..1)");
+            return result;
+        };
+        auto read_layer_map=[&](char const *key)->std::optional<fs::path> {
+            if(!em.contains(key))return std::nullopt;
+            if(!em[key].is_string())
+                throw std::runtime_error(std::string("Invalid ")+key+
+                                         " in metadata.json (expected path)");
+            return data_dir / em[key].get<std::string>();
+        };
+        mat->matcap_map=read_layer_map("matcap_map");
+        mat->matcap_surface_map=read_layer_map("matcap_surface_map");
+        mat->matcap_roughness=read_unit("matcap_roughness",0.0f);
+        if(em.contains("matcap_factor")) {
+            auto const &factor=em["matcap_factor"];
+            if(!factor.is_array() || factor.size()!=3U)
+                throw std::runtime_error("matcap_factor must be an RGB array");
+            std::array<float,3> values{};
+            for(size_t i=0;i<3U;++i) {
+                if(!factor[i].is_number())
+                    throw std::runtime_error("matcap_factor RGB must be numeric");
+                values[i]=factor[i].get<float>();
+                if(!std::isfinite(values[i]) || values[i]<0.0f ||
+                   values[i]>4.0f)
+                    throw std::runtime_error("matcap_factor must be in 0..4");
+            }
+            mat->matcap_factor=color_rgb(values[0],values[1],values[2]);
+        }
+        mat->clearcoat_surface_map=read_layer_map("clearcoat_surface_map");
+        mat->clearcoat_normal_map=read_layer_map("clearcoat_normal_map");
+        mat->clearcoat_strength=read_unit("clearcoat_strength",
+            mat->clearcoat_surface_map?1.0f:0.0f);
+        mat->clearcoat_roughness=read_unit("clearcoat_roughness",0.1f);
+        mat->clearcoat_transmission=read_unit("clearcoat_transmission",1.0f);
+
         if(em.contains("environment_map")) {
             mat->has_explicit_env_map = true;
             mat->env_map = data_dir / std::string(em["environment_map"]);
@@ -195,8 +242,17 @@ void jkgm::material_map::add_metadata(fs::path const &metadata_file)
             else if(v == "fixed") {
                 mat->reflection_mode = material_reflection_mode::fixed;
             }
-            else if(v == "matcap") {
-                mat->reflection_mode = material_reflection_mode::matcap;
+            else if(v == "planar") {
+                mat->reflection_mode = material_reflection_mode::planar;
+            }
+            else if(v == "hemi") {
+                mat->reflection_mode = material_reflection_mode::hemi;
+            }
+            else if(v == "cube") {
+                mat->reflection_mode = material_reflection_mode::cube;
+            }
+            else if(v == "shared") {
+                mat->reflection_mode = material_reflection_mode::shared;
             }
             else if(v != "envmap") {
                 throw std::runtime_error("Unknown reflection_mode in metadata.json");

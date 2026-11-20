@@ -27,6 +27,12 @@
     <ClCompile Include="native_compressed_sound_hook.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="native_cog_symbol_extensions.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="native_spawn_parent_hook.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ddraw_impl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -263,6 +269,9 @@
     <ClInclude Include="gpu_3do_cache_signature.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="gpu_mesh_cache_eviction.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="gpu_3do_colormap.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -276,6 +285,21 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="gpu_3do_preview.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gpu_3do_packed_vertex.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gpu_3do_auto_lod.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gpu_thing_occlusion.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gpu_thing_occlusion_math.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="native_occlusion_bridge.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="texture_units.hpp">
@@ -297,6 +321,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="hud_ammo_override.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="hud_dirty_regions.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="jk_cmp_fullbright_mask.hpp">
@@ -335,6 +362,9 @@
     <ClInclude Include="native_3do_profile.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="native_3do_lod_override.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="native_mesh_revision.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -371,6 +401,30 @@
     <ClInclude Include="native_compressed_sound_hook.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="native_cog_symbol_extensions.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="native_spawn_parent_hook.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="native_spawn_parent.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cog_symbol_extensions.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cog_create_thing.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cog_thing_joint_node.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cog_camera_distance.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cog_camera_axes.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="native_sprite_cel.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -378,6 +432,60 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="native_thingface_friction.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="planar_reflection_camera.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="global_env_capture.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="reflection_attachment_family.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="global_env_equirect_converter.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="dual_paraboloid_projection.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="hemi_reflection_camera.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="planar_reflection_things.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="planar_reflection_workset.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="planar_reflection_native_nodes.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="planar_reflection_offscreen_gpu.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="planar_reflection_portals.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="planar_reflection_culling.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="planar_reflection_render_math.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="offscreen_capture_target.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="offscreen_capture_projection.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="planar_reflection_capture_shader.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="screen_space_reflections.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="planar_receiver_visibility.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="postfx.hpp">
@@ -515,7 +623,16 @@
     <ClInclude Include="sun_shadow.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="sun_pcf_intensity.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="sun_shadow_gpu.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sun_caustics.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sun_caustics_gpu.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="sun_sky_aperture_gpu.hpp">
@@ -588,6 +705,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="world_cache_visibility.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="world_cache_streaming.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="offscreen_surface.hpp">

@@ -22,18 +22,12 @@ namespace jkgm {
         float max_anisotropy = 2.0f;
         std::optional<antialiasing_config> antialiasing;
         bool enable_bloom = true;
-        // Separate experimental optimizations, each default-off.
-        bool experimental_fused_bloom_downsample = false;
-        bool experimental_skip_bloom_clears = false;
-        bool experimental_native_triangle_uploads = false;
         // Spatial blur (distance + peripheral) and temporal feedback trails.
         bool enable_blur = true;
-        // Mode 2 is the standard path after in-game A/B testing; preserve
-        // modes 0 and 1 for compatibility and quality/performance comparisons.
-        int spatial_blur_mode = 2; // 0=original, 1=half-horizontal, 2=both half + reconstruct
-        bool experimental_spatial_blur_half_res = false; // legacy JSON alias for mode 1
         bool enable_trails = true;
         bool enable_fog = true;
+        bool experimental_radial_fog = false; // camera-to-fragment fog distance, not forward depth
+        bool experimental_exponential_fog = false; // smooth radial attenuation with no hard clear radius
         bool enable_post = true;
         bool enable_hdr = false; // strict master switch for tone mapping, auto exposure and HDR tuning
         float auto_exposure_sensitivity = 0.4f; // 0=fixed exposure, 0..2=adaptive
@@ -55,7 +49,6 @@ namespace jkgm {
         bool experimental_sector_crossing_vertex = false; // A/B: vertex instead of fragment sector selection
         bool experimental_continuous_ambient_gpu = false; // GL 3.3 sparse buffer-texture ambient for GPU 3DOs; opt-in
         bool enable_ssao = true;
-        bool debug_void_pixels = false; // show raw unresolved empty-depth pixels as neon checkerboard
         bool retain_hom_pixels = true; // vanilla JK HOM default; false = Clear Display
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
@@ -66,7 +59,34 @@ namespace jkgm {
         bool profile_renderer_verbose = false; // opt-in detailed renderer diagnostics
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics
         bool use_gpu_cache = true; // unified GPU 3DO, sprite, and SithWorld rendering
+        bool experimental_packed_3do_vertices = false; // opt-in 52-byte compressed GPU 3DO vertices
+        bool experimental_auto_3do_lod = false; // force native GeoSet 0; select automatically generated GPU mesh LODs
+        float gpu_3do_auto_lod_lod1_radius_px = 90.0f; // enter generated LOD1 below this projected radius
+        float gpu_3do_auto_lod_lod2_radius_px = 28.0f; // enter generated LOD2 below this projected radius
+        int gpu_3do_auto_lod_debug_mode = 0; // 0=screen-size auto; 1=force original; 2=force LOD1; 3=force LOD2
+        int gpu_3do_auto_lod_generation_budget = 1; // 0 = unlimited CPU generation attempts per frame
+        int gpu_3do_auto_lod_min_object_triangles = 12; // total visible hierarchy triangles per Thing; 0=disabled
+        bool experimental_3do_occlusion_culling = false; // async main camera GPU Thing submission
+        bool experimental_3do_native_occlusion_culling = false; // early rdModel3_Draw skip using completed GPU Thing queries
+        int gpu_3do_occlusion_proxy_mode = 0; // 0=box; 1=nearest sphere depth; 2=center sphere depth (self-occlusion experiment)
+        int gpu_3do_occlusion_query_budget = 128; // 0=unlimited stress test; 1..256 budgeted queries/frame
+        int gpu_3do_occlusion_debug_view = 0; // 0=off, 1=x-ray wireframe proxies, 2=x-ray translucent filled proxies
+        int gpu_3do_occlusion_min_triangles = 0; // test coverage: query any sized Thing, 0..50000
+        bool experimental_planar_thing_discovery = false; // read-only 120-frame native 3DO diagnostics
+        bool enable_reflection_capture = true; // realtime shared/cube/hemi/planar; EnvMaps and COG capture independent
+        bool enable_reflection_probes = false; // specialized cube/hemi/planar; false uses shared
+        int reflection_capture_resolution = 128; // cube face/short planar dimension; hemi doubles this
+        float reflection_capture_update_interval = 0.0f; // all realtime capture types; 0=every frame
+        int envmap_capture_face_resolution = 128; // on-demand CaptureEnvMap: 128x128 faces -> 512x256 equirect
+        unsigned int reflection_probe_max_owners = 4U; // max independently cached hemi/cube owners
+        bool experimental_screen_space_reflections = false; // low-res cached-world and GPU 3DO SSR
+        float ssr_resolution_scale = 0.125f; // 0.125..1.0 of internal screen
+        int ssr_ray_steps = 32; // 4..96 depth search samples per half-res pixel
+        float ssr_ray_thickness = 0.6f; // world-space depth tolerance
+        float ssr_max_distance = 64.0f; // JK world units
         bool enable_gpu_sprite_instancing = true; // compatible SPR instancing, disable for diagnostics
+        bool experimental_half_res_fluid_sprites = false; // opt-in half-size fluid SPR layer
+        unsigned int fluid_sprite_layer_budget = 0U; // 0=unlimited; 1..255 surviving layers per half-size pixel
         bool enable_saber_trails = true; // GPU-cached saber fan during marker 4/5 collision windows
         float saber_trail_delay = 0.06f; // seconds of delayed blade direction (0.005..0.25)
         bool enable_gpu_camera_hud = true; // Camera-type 3DOs: false forces native diagnostic (HUD then receives postFX)
@@ -82,6 +102,7 @@ namespace jkgm {
         // Sky polygons as sunlight apertures; experimental, default-off.
         // Requires sunlight shadows so the per-cascade projection exists.
         bool experimental_sun_sky_aperture = false;
+        bool experimental_sun_caustics = false; // world/3DO Fluid transmission, never sprites
         // Phase 1 only: measure conservative sky-covered caster groups.
         // Does not yet prune any casters or change shadow texture contents.
         // Actual static WORLD caster pruning (independent of diagnostics).
@@ -92,12 +113,15 @@ namespace jkgm {
         bool sun_shadow_cull_back_faces = false; // 3DO sunlight: back-face culling is opt-in
         bool sun_shadow_cull_front_faces = true; // 3DO sunlight: front-face culling by default
         unsigned int sun_dynamic_shadow_resolution = 256U; // baseline 64..1024
+        float sun_dynamic_shadow_pcf_radius = 0.0f; // 0=original 1 bilinear shadow lookup; >0 guarded 4-tap PCF (0..2)
         float sun_shadow_receiver_bias_scale = 1.0f; // A/B contact-gap tuning (0..2)
         float sun_shadow_caster_bias_scale = 1.0f; // A/B shadow polygon offset (0..2)
         unsigned int sun_shadow_resolution = 512U; // near and default far 24-bit depth map
         unsigned int sun_shadow_far_resolution = 0U; // 0 = inherit near resolution
         float sun_shadow_near_pcf_radius = 0.0f; // 0=single HW PCF; >0 four samples
         float sun_shadow_far_pcf_radius = 0.0f; // independent four-sample filter
+        float experimental_sun_pcf_intensity_softness = 1.0f; // max multiplier above base near/far radii
+        float experimental_sun_pcf_intensity_reference = 2.0f; // sun brightness where base radius is restored
         float sun_shadow_near_distance = 16.0f; // camera-local near cascade, 2..128
         float sun_shadow_far_distance = 128.0f; // outer cascade coverage, 4..512
         float sun_max_distance = 0.0f; // 0=unlimited; else sun light+shadows fade out and stop at this camera distance

@@ -17,7 +17,7 @@ uniform vec2 emissive_uv_offset;
 uniform float alpha_cutoff;
 uniform int blend_mode; // 0 normal, 1 additive, 2 multiply, 3 fluid
 uniform float fluid_thickness; // native depth-buffer units (32 per game unit)
-uniform int flare_mode; // SPR type 0x40: center-only depth occlusion
+uniform int flare_mode; // SPR type 4: center-only depth occlusion
 uniform sampler2D scene_depth; // Resolved opaque linear view depth (R16F)
 
 uniform sampler2D displacement_map;
@@ -37,15 +37,8 @@ layout(location = 0) out vec4 out_color;
 // Dynamic fog: values are supplied by the runtime SetFog* COG verbs.
 // Keep this definition identical in opaque and transparent game passes.
 // ---------------------------------------------------------------------------
-uniform vec4 fog_params;  // x=start, y=end, z=opacity, w=reserved
+uniform vec4 fog_params;  // x=start, y=end, z=opacity, w=0 planar,1 radial,2 radial exponential
 uniform vec3 fog_color;
-
-float fog_factor(float dist)
-{
-    float span = max(fog_params.y - fog_params.x, 0.0001);
-    float f = clamp((dist - fog_params.x) / span, 0.0, 1.0);
-    return fog_params.z * f;
-}
 
 // ---------------------------------------------------------------------------
 // Reflections (environment mapping). Keep this block identical in the opaque
@@ -64,6 +57,24 @@ uniform vec4 camera_forward;    // xyz=camera forward in world space
 uniform vec4 camera_up;         // xyz=camera up in world space
 uniform vec4 view_params;       // x=tan(horizontal FOV / 2)
 uniform vec2 screen_resolution;
+
+// Interpolated clip XY contains clip W, so this ray length uses the same
+// 32x-JK fog units as vp_z. The native projection is left unchanged.
+float fog_factor(float dist)
+{
+    if(fog_params.w>0.5) {
+        float aspect=screen_resolution.x/max(screen_resolution.y,1.0);
+        float hscale=view_params.x>0.0?view_params.x:1.0;
+        dist=length(vec3(vp_pos.xy*vec2(hscale,hscale/aspect),vp_z));
+    }
+    float span=max(fog_params.y-fog_params.x,0.0001);
+    float fraction=clamp((dist-fog_params.x)/span,0.0,1.0);
+    if(fog_params.w>1.5) {
+        float reach=max(fog_params.y+0.5*max(fog_params.x,0.0),1.0);
+        fraction=1.0-exp(-2.302585093*max(dist,0.0)/reach);
+    }
+    return fraction*fog_params.z;
+}
 
 const float REFLECTION_HFOV_DEGREES = 90.0;
 const float ENV_YAW_DEGREES = 0.0;
@@ -191,52 +202,27 @@ vec2 parallax_mapping(vec2 tc)
 
 
 
-// A flare is an ordinary native billboard with special depth behavior.
-// Rather than per-pixel occlusion, reconstruct its center from the
-// sprite's UV mapping and the screen-space derivatives of that mapping.
-// All pixels of one billboard therefore query the same opaque-scene point.
+// The flare's source SithThing.position is projected once on the CPU and
+// packed into the otherwise-unused triangle normal. All three vertices
+// share the same value; clipping and UV orientation do not affect the test.
+// Position: x/y framebuffer pixels, z=native linear depth (32 * view Y).
+// Opaque scene_depth also stores 32 * view Y; never compare it with raw Y.
 float flare_center_visibility()
 {
-    vec2 dx=dFdx(vp_texcoords);
-    vec2 dy=dFdy(vp_texcoords);
-    float determinant=dx.x*dy.y-dx.y*dy.x;
-    if(abs(determinant)<1e-8) return 0.0;
-
-    vec2 uv_to_center=vec2(0.5)-vp_texcoords;
-    vec2 offset=vec2(
-        (uv_to_center.x*dy.y-uv_to_center.y*dy.x)/determinant,
-        (dx.x*uv_to_center.y-dx.y*uv_to_center.x)/determinant
-    );
-    vec2 pixel=gl_FragCoord.xy+offset;
+    vec3 center=vp_normal;
     ivec2 dimensions=textureSize(scene_depth,0);
-    if(any(lessThan(pixel,vec2(0.0))) ||
-       any(greaterThanEqual(pixel,vec2(dimensions)))) return 0.0;
-
-    float center_depth=vp_z+dot(vec2(dFdx(vp_z),dFdy(vp_z)),offset);
-    if(center_depth<=0.0) return 0.0;
-    ivec2 texel=ivec2(pixel);
-    float sampled_depth=texelFetch(scene_depth,texel,0).r;
-
-    // A pixel marked 65504 is unoccupied. Do not require a background
-    // surface: flares also work against the sky. Reject the entire quad
-    // whenever its CENTER is behind an opaque object.
-    if(sampled_depth<65500.0 && sampled_depth+0.01<center_depth)
-        return 0.0;
-
-    // Spatial edge softening (not a CPU readback or temporal lag). This
-    // preserves the center test while avoiding an abrupt full-bright pop.
-    float visible=1.0;
-    const ivec2 taps[4]=ivec2[4](
-        ivec2(-1,0),ivec2(1,0),ivec2(0,-1),ivec2(0,1));
-    for(int i=0;i<4;i++) {
-        ivec2 xy=clamp(texel+taps[i],ivec2(0),dimensions-ivec2(1));
-        float d=texelFetch(scene_depth,xy,0).r;
-        if(d<65500.0 && d+0.01<center_depth)
-            visible-=0.125;
-    }
-    return visible;
+    if(any(lessThan(center.xy,vec2(0.0))) ||
+       any(greaterThanEqual(center.xy,vec2(dimensions))) ||
+       !(center.z>0.0) || center.z>=65500.0) return 0.0;
+    ivec2 texel=ivec2(center.xy);
+    float depth=texelFetch(scene_depth,texel,0).r;
+    // A missing opaque pixel (65504) means sky, not occlusion.
+    // Compare at the CENTER ONLY: the flare's edges may extend behind
+    // walls without being independently clipped or depth-tested.
+    if(depth>=65500.0) return 1.0;
+    float const_bias=max(0.01,center.z*0.0005);
+    return depth+const_bias>=center.z ? 1.0 : 0.0;
 }
-
 
 #include "translucent_spotlight_common.glsl"
 
@@ -418,7 +404,10 @@ void main()
     bool has_env_reflection = env_params.x > 0.5;
     bool has_sun_specular =
         sun_direction.w > 0.5 && sun_color_intensity.w > 0.0;
-    if(reflection_params.x > 0.0 && (has_env_reflection || has_sun_specular)) {
+    // In flare mode vp_normal carries the PRECOMPUTED CENTER, not a
+    // surface normal. Flare sprites are not reflective receivers.
+    if(flare_mode==0 && reflection_params.x > 0.0 &&
+       (has_env_reflection || has_sun_specular)) {
         vec3 mapped_normal = surface_view_normal(adj_texcoords);
         if(has_env_reflection) {
             reflection = compute_reflection(unlit_base_color, adj_texcoords,

@@ -22,11 +22,25 @@ reference the same unit within a program.
 | 9 | Displacement / decal receiver light | Unused | EnvMap 2 | Spotlight 3 |
 | 10 | Spotlight shadow (depth compare) | Unused | Translucent spotlight shadow | Spotlight shadow |
 | 11 | Fullbright palette / decal AO | Fullbright palette | Unused | Unused |
-| 12–15 | Spotlight cookies 0–3 | Unused | Translucent spotlight cookies 0–3 | 13–15 sun shadows |
+| 12–15 | Spotlight cookies 0–3 | **15: Planar reflection capture** | Translucent spotlight cookies 0–3 | 13–15 sun shadows |
 | 16–18 | Sun near/far/dynamic shadow | Sun near/far/dynamic shadow (direct specular include) | Sun near/far/dynamic shadow | 16 sky aperture; 17–18 unused |
 | 19 | **Sector-crossing samplerBuffer** | Unused | Unused | Unused |
 | 20 | **Opt-in sky-aperture sampler2DArray** | **Opt-in sky-aperture sampler2DArray** | **Opt-in sky-aperture sampler2DArray** | Unused |
 | 21–22 | Continuous ambient voxel buffer textures | Unused | Unused | Unused |
+| 23 | Local hemi/cube or shared reflection array | Shared reflection array | Unused | Unused |
+| 24–25 | MatCap color (sRGB) and surface mask (linear) | MatCap color (sRGB) and surface mask (linear) | Unused | Unused |
+| 26–27 | Clearcoat surface and normal maps (linear) | Clearcoat surface and normal maps (linear) | Unused | Unused |
+
+The separate dielectric clearcoat layer uses linear `sampler2D` units
+26 and 27, and `JKGM_CLEARCOAT_LAYER` is compiled only on devices
+exposing at least 28 fragment units. Inactive coats make no texture
+fetches and request no additional scene capture.
+
+The optional MatCap artistic layer uses `sampler2D` units 24 and 25 in
+the GPU cached model/world programs only. `JKGM_MATCAP_LAYER` is compiled
+in when `GL_MAX_TEXTURE_IMAGE_UNITS >= 26`; otherwise MatCap samplers and
+texture binds are skipped, preserving normal scene rendering. MatCap is
+not another reflection mode and never allocates a cubemap.
 
 The two GPU 3DO same-type aliases are deliberately restricted to
 *mutually exclusive* decal and ordinary material draws:

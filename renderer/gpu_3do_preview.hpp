@@ -115,6 +115,9 @@ namespace jkgm {
         bool transient_procedural=false; // particles/polylines: evict after this frame
         bool saber_trail_active=false; // diagnostics: procedural blade fan was appended
         float sprite_opacity=1.0f; // SetSpriteInfo opacity
+        float thing_opacity=1.0f; // GetThingOpacity; per-Thing, not mesh state
+        bool thing_dither=false; // opaque-pass screen-door fade
+        uintptr_t sprite_occlusion_resource=0; // native rdSprite pointer; 0 when not a Thing-owned SPR
         // Stable identity of the model mesh this instance came from.
         // Used by moving decals; zero when not captured or not an eligible
         // moving receiver. Never infer ownership from shared mesh pointers.
@@ -151,6 +154,10 @@ namespace jkgm {
         // matrix is view-space and differs from one hierarchy node to another.
         std::array<float,3> owning_thing_world_position{};
         bool owning_thing_world_position_valid=false;
+        // Scaled rdModel3 authored radius, captured once from rdModel3_Draw
+        // and inherited by every hierarchy mesh regardless of animation.
+        float owning_thing_lod_radius=0.0f;
+        bool owning_thing_lod_radius_valid=false;
         std::shared_ptr<gpu_3do_crossing_state const> crossing_lighting;
         // Independent sparse continuous-ambient GPU experiment. Store the
         // owning sector's eight-corner SPARSE-MISS fallback and live floor
@@ -164,6 +171,18 @@ namespace jkgm {
         uint64_t attempted=0,culled=0,queued=0,snapshots=0,ready_checks=0;
         uint64_t source_checks=0,source_ns=0,source_invalidations=0;
         uint64_t failed_snapshot_reuses=0;
+        // Primary + independent planar camera share one CPU snapshot cache.
+        // Entry count/peak are gauges; other fields are window event counts.
+        uint64_t cache_entries=0,cache_peak=0;
+        uint64_t cache_hits=0,cache_misses=0;
+        uint64_t cache_evictions=0,cache_trim_deferred=0;
+        uint64_t cache_hash_new=0,cache_hash_header=0;
+        uint64_t cache_hash_revision=0;
+        uint64_t cache_hash_fallback=0;
+        // On-demand face-material checks for USED cached meshes only.
+        // COG mutations never scan the whole cache.
+        uint64_t mutation_scans=0,mutation_scanned=0;
+        uint64_t mutation_invalidated=0,mutation_ns=0;
         uint64_t geometry_native=0,snapshot_native=0;
         // Diagnostic taxonomy for the native 3DO fallback hot path.
         uint64_t geo_thing_not_full=0,geo_mesh_not_full=0;

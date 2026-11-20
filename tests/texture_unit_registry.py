@@ -90,6 +90,10 @@ sh=read("renderer/shaders.cpp")
 assert "texture_units::forward_sector_buffer;" in gpu
 assert "prog.set_decal_receiver_lighting(decals_only," in cpp
 assert "texture_units::forward_decal_light" in cpp
+# The world-only planar capture occupies a distinct 2D sampler on unit 15.
+assert '{"planar_reflection_map",15,sampler_kind::tex2d}' in wm.group(1)
+assert "gl::set_uniform_integer(planar_sampler,15);" in sh
+assert "gl::set_active_texture_unit(15);" in cpp
 for signature in ("game_pass_shader::set_translucent_shadow(",
                   "gpu_3do_preview_shader::set_translucent_shadow("):
     block=sh.split(signature,1)[1].split("\n}",1)[0]

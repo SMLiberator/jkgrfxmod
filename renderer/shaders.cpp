@@ -21,6 +21,8 @@ jkgm::shaders::translucent_sun_uniforms::translucent_sun_uniforms(
     , split(gl::get_uniform_location(program,"translucent_sun_split"))
     , bias_scale(gl::get_uniform_location(program,"translucent_sun_bias_scale"))
     , pcf_radius(gl::get_uniform_location(program,"translucent_sun_pcf_radius"))
+    , dynamic_pcf_radius(gl::get_uniform_location(program,
+        "translucent_sun_dynamic_pcf_radius"))
     , sky_aperture_active(gl::get_uniform_location(
         program,"translucent_sun_sky_aperture_active"))
     , sky_aperture_map(gl::get_uniform_location(
@@ -69,6 +71,12 @@ void jkgm::shaders::translucent_sun_uniforms::set_pcf_radius(
     float near_radius,float far_radius)
 {
     gl::set_uniform_vector(pcf_radius,make_point(near_radius,far_radius));
+}
+
+void jkgm::shaders::translucent_sun_uniforms::set_dynamic_pcf_radius(
+    float radius)
+{
+    gl::set_uniform_float(dynamic_pcf_radius,radius);
 }
 
 void jkgm::shaders::translucent_sun_uniforms::set_sky_aperture(
@@ -197,6 +205,24 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
                     source.insert(newline+1U,
                                   "#define JKGM_SUN_SKY_APERTURE 1\n");
                 }
+                if(units>=20) {
+                    auto const newline=source.find('\n');
+                    source.insert(newline+1U,"#define JKGM_SUN_CAUSTICS 1\n");
+                }
+                if(units>=24) {
+                    auto const newline=source.find('\n');
+                    source.insert(newline+1U,"#define JKGM_REFLECTION_PROBE 1\n");
+                }
+                // Matcap uses independent sampler2D units 24 and 25.
+                // Compile the samplers out entirely on older GL hardware.
+                if(units>=26) {
+                    auto const newline=source.find('\n');
+                    source.insert(newline+1U,"#define JKGM_MATCAP_LAYER 1\n");
+                }
+                if(units>=28) {
+                    auto const newline=source.find('\n');
+                    source.insert(newline+1U,"#define JKGM_CLEARCOAT_LAYER 1\n");
+                }
             }
             gl::shader_source(rv,make_string_span(""),make_span(source));
             gl::compile_shader(rv);
@@ -248,12 +274,15 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
             else if(name=="game_transparency_pass")bind(texture_units::game_trns_pass);
             else if(name=="game_post_opaque_composite")
                 bind(texture_units::post_opaque_composite);
+            else if(name=="game_post_opaque_half_sun")
+                bind(texture_units::post_opaque_half_sun);
         }
 
         void link_program_from_files(std::string const &name,
                                      gl::program_view prog,
                                      fs::path const &vx,
-                                     fs::path const &fg)
+                                     fs::path const &fg,
+                                     fs::path const &geom)
         {
             auto vx_shader = compile_shader_from_file(vx,gl::shader_type::vertex);
             auto fg_shader = compile_shader_from_file(
@@ -261,6 +290,11 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
 
             gl::attach_shader(prog, vx_shader);
             gl::attach_shader(prog, fg_shader);
+            if(!geom.empty()) {
+                auto geom_shader=compile_shader_from_file(
+                    geom,gl::shader_type::geometry);
+                gl::attach_shader(prog,geom_shader);
+            }
 
             gl::link_program(prog);
 
@@ -283,10 +317,11 @@ void jkgm::shaders::translucent_sun_uniforms::set_map(
 
 jkgm::opengl_shader::opengl_shader(std::string const &name,
                                    fs::path const &vertex_part,
-                                   fs::path const &fragment_part)
+                                   fs::path const &fragment_part,
+                                   fs::path const &geometry_part)
 {
     link_program_from_files(
-        name,the_program,vertex_part,fragment_part);
+        name,the_program,vertex_part,fragment_part,geometry_part);
 }
 
 void jkgm::opengl_shader::use_program()
@@ -345,10 +380,41 @@ jkgm::shaders::world_cache_preview_shader::world_cache_preview_shader(
     , reflection_scroll(gl::get_uniform_location(the_program,"normal_specular_scroll"))
     , reflection_scroll2(gl::get_uniform_location(the_program,"normal_specular_scroll2"))
     , environment_info(gl::get_uniform_location(the_program,"environment_info"))
+    , shared_reflection_sampler(gl::get_uniform_location(the_program,"shared_reflection_map"))
+    , shared_reflection_ready(gl::get_uniform_location(the_program,"shared_reflection_ready"))
+    , matcap_sampler(gl::get_uniform_location(the_program,"matcap_map"))
+    , matcap_surface_sampler(gl::get_uniform_location(
+          the_program,"matcap_surface_map"))
+    , matcap_params(gl::get_uniform_location(the_program,"matcap_params"))
+    , matcap_enabled(gl::get_uniform_location(the_program,"matcap_enabled"))
+    , matcap_has_surface(gl::get_uniform_location(
+          the_program,"matcap_has_surface"))
+    , coat_surface_sampler(gl::get_uniform_location(
+          the_program,"clearcoat_surface_map"))
+    , coat_normal_sampler(gl::get_uniform_location(
+          the_program,"clearcoat_normal_map"))
+    , clearcoat_params(gl::get_uniform_location(
+          the_program,"clearcoat_params"))
+    , clearcoat_enabled(gl::get_uniform_location(
+          the_program,"clearcoat_enabled"))
+    , clearcoat_has_surface(gl::get_uniform_location(
+          the_program,"clearcoat_has_surface"))
+    , clearcoat_has_normal(gl::get_uniform_location(
+          the_program,"clearcoat_has_normal"))
     , camera_world_origin(gl::get_uniform_location(the_program,"camera_world_origin"))
     , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
     , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
     , camera_up_axis(gl::get_uniform_location(the_program,"camera_up_axis"))
+    , planar_sampler(gl::get_uniform_location(the_program,"planar_reflection_map"))
+    , planar_ready(gl::get_uniform_location(the_program,"planar_reflection_ready"))
+    , planar_plane(gl::get_uniform_location(the_program,"planar_receiver_plane"))
+    , planar_camera_origin(gl::get_uniform_location(the_program,"planar_camera_origin"))
+    , planar_camera_right(gl::get_uniform_location(the_program,"planar_camera_right"))
+    , planar_camera_forward(gl::get_uniform_location(the_program,"planar_camera_forward"))
+    , planar_camera_up(gl::get_uniform_location(the_program,"planar_camera_up"))
+    , planar_tan_half_fov(gl::get_uniform_location(the_program,"planar_tan_half_fov"))
+    , screen_reflection_sampler(gl::get_uniform_location(the_program,"screen_reflection_map"))
+    , screen_reflection_ready(gl::get_uniform_location(the_program,"screen_reflection_ready"))
     , alpha_cutout(gl::get_uniform_location(the_program,"alpha_cutout"))
     , alpha_cutoff(gl::get_uniform_location(the_program,"alpha_cutoff"))
     , transparent_pass(gl::get_uniform_location(the_program,"transparent_pass"))
@@ -474,6 +540,30 @@ void jkgm::shaders::world_cache_preview_shader::set_reflection(
         make_point(from?1.0f:0.0f,static_cast<float>(mode),
                    to?1.0f:0.0f,weight));
 }
+void jkgm::shaders::world_cache_preview_shader::set_clearcoat(
+    bool enabled,point<4,float> params,bool has_surface,bool has_normal)
+{
+    gl::set_uniform_integer(coat_surface_sampler,26);
+    gl::set_uniform_integer(coat_normal_sampler,27);
+    gl::set_uniform_integer(clearcoat_enabled,enabled?1:0);
+    gl::set_uniform_integer(clearcoat_has_surface,has_surface?1:0);
+    gl::set_uniform_integer(clearcoat_has_normal,has_normal?1:0);
+    if(enabled)gl::set_uniform_vector(clearcoat_params,params);
+}
+void jkgm::shaders::world_cache_preview_shader::set_matcap(
+    bool enabled,point<4,float> params,bool has_surface)
+{
+    gl::set_uniform_integer(matcap_sampler,24);
+    gl::set_uniform_integer(matcap_surface_sampler,25);
+    gl::set_uniform_integer(matcap_enabled,enabled?1:0);
+    gl::set_uniform_integer(matcap_has_surface,has_surface?1:0);
+    if(enabled)gl::set_uniform_vector(matcap_params,params);
+}
+void jkgm::shaders::world_cache_preview_shader::set_shared_reflection(bool ready)
+{
+    gl::set_uniform_integer(shared_reflection_sampler,23);
+    gl::set_uniform_integer(shared_reflection_ready,ready?1:0);
+}
 void jkgm::shaders::world_cache_preview_shader::set_reflection_camera(
     std::array<float,3> const &position,
     std::array<float,3> const &right,
@@ -489,6 +579,31 @@ void jkgm::shaders::world_cache_preview_shader::set_reflection_camera(
     gl::set_uniform_vector(camera_up_axis,
                            make_point(up[0],up[1],up[2]));
 }
+void jkgm::shaders::world_cache_preview_shader::set_planar_reflection(
+    bool ready,point<4,float> plane,point<3,float> origin,
+    point<3,float> right,point<3,float> forward,point<3,float> up,
+    point<2,float> tan_half_fov)
+{
+    // Unit 15 is within the OpenGL 3.3 minimum fragment sampler count
+    // and is reserved for the world-only planar source in this pass.
+    gl::set_uniform_integer(planar_sampler,15);
+    gl::set_uniform_integer(planar_ready,ready?1:0);
+    if(!ready)return;
+    gl::set_uniform_vector(planar_plane,plane);
+    gl::set_uniform_vector(planar_camera_origin,origin);
+    gl::set_uniform_vector(planar_camera_right,right);
+    gl::set_uniform_vector(planar_camera_forward,forward);
+    gl::set_uniform_vector(planar_camera_up,up);
+    gl::set_uniform_vector(planar_tan_half_fov,tan_half_fov);
+}
+
+void jkgm::shaders::world_cache_preview_shader::set_screen_reflection(
+    bool ready,int sampler)
+{
+    gl::set_uniform_integer(screen_reflection_sampler,sampler);
+    gl::set_uniform_integer(screen_reflection_ready,ready?1:0);
+}
+
 void jkgm::shaders::world_cache_preview_shader::set_alpha_cutout(
     float cutoff)
 {
@@ -716,6 +831,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , sprite_instance_matrix(gl::get_uniform_location(
           the_program,"sprite_instance_matrix[0]"))
     , projection(gl::get_uniform_location(the_program,"projection"))
+    , packed_vertex_format(gl::get_uniform_location(the_program,"packed_vertex_format"))
     , albedo_sampler(gl::get_uniform_location(the_program,"albedo_map"))
     , emissive_sampler(gl::get_uniform_location(the_program,"emissive_map"))
     , uv_scale(gl::get_uniform_location(the_program,"uv_scale"))
@@ -727,6 +843,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , alpha_mode(gl::get_uniform_location(the_program,"alpha_mode"))
     , alpha_cutoff(gl::get_uniform_location(the_program,"alpha_cutoff"))
     , native_face_opacity(gl::get_uniform_location(the_program,"native_face_opacity"))
+    , thing_opacity(gl::get_uniform_location(the_program,"thing_opacity"))
     , albedo_factor(gl::get_uniform_location(the_program,"albedo_factor"))
     , emissive_factor(gl::get_uniform_location(the_program,"emissive_factor"))
     , albedo_scroll(gl::get_uniform_location(the_program,"albedo_scroll"))
@@ -759,6 +876,7 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , albedo_transition_info(gl::get_uniform_location(the_program,"albedo_transition"))
     , scene_depth_sampler(gl::get_uniform_location(the_program,"scene_depth"))
     , advanced_material_params(gl::get_uniform_location(the_program,"advanced_material_params"))
+    , smoke_half_resolution(gl::get_uniform_location(the_program,"smoke_half_resolution"))
     , post_exempt_pass(gl::get_uniform_location(the_program,"post_exempt_pass"))
     , camera_hud_thing(gl::get_uniform_location(the_program,"camera_hud_thing"))
     , world_lighting_exempt(gl::get_uniform_location(
@@ -770,6 +888,30 @@ jkgm::shaders::gpu_3do_preview_shader::gpu_3do_preview_shader(
     , displacement_sampler(gl::get_uniform_location(the_program,"displacement_map"))
     , displacement_factor(gl::get_uniform_location(the_program,"displacement_factor"))
     , environment_info(gl::get_uniform_location(the_program,"environment_info"))
+    , hemi_map(gl::get_uniform_location(the_program,"hemi_reflection_map"))
+    , hemi_right(gl::get_uniform_location(the_program,"hemi_right_axis"))
+    , hemi_forward(gl::get_uniform_location(the_program,"hemi_forward_axis"))
+    , hemi_up(gl::get_uniform_location(the_program,"hemi_up_axis"))
+    , hemi_info(gl::get_uniform_location(the_program,"hemi_capture_info"))
+    , matcap_sampler(gl::get_uniform_location(the_program,"matcap_map"))
+    , matcap_surface_sampler(gl::get_uniform_location(
+          the_program,"matcap_surface_map"))
+    , matcap_params(gl::get_uniform_location(the_program,"matcap_params"))
+    , matcap_enabled(gl::get_uniform_location(the_program,"matcap_enabled"))
+    , matcap_has_surface(gl::get_uniform_location(
+          the_program,"matcap_has_surface"))
+    , coat_surface_sampler(gl::get_uniform_location(
+          the_program,"clearcoat_surface_map"))
+    , coat_normal_sampler(gl::get_uniform_location(
+          the_program,"clearcoat_normal_map"))
+    , clearcoat_params(gl::get_uniform_location(
+          the_program,"clearcoat_params"))
+    , clearcoat_enabled(gl::get_uniform_location(
+          the_program,"clearcoat_enabled"))
+    , clearcoat_has_surface(gl::get_uniform_location(
+          the_program,"clearcoat_has_surface"))
+    , clearcoat_has_normal(gl::get_uniform_location(
+          the_program,"clearcoat_has_normal"))
     , camera_right_axis(gl::get_uniform_location(the_program,"camera_right_axis"))
     , camera_forward_axis(gl::get_uniform_location(the_program,"camera_forward_axis"))
     , camera_up_axis(gl::get_uniform_location(the_program,"camera_up_axis"))
@@ -917,6 +1059,10 @@ void jkgm::shaders::gpu_3do_preview_shader::set_view_matrix(
     gl::set_uniform_vector(view_up,u);
     gl::set_uniform_vector(view_origin,t);
 }
+void jkgm::shaders::gpu_3do_preview_shader::set_packed_vertex_format(bool enabled)
+{
+    gl::set_uniform_integer(packed_vertex_format,enabled?1:0);
+}
 void jkgm::shaders::gpu_3do_preview_shader::set_sprite_instances(
     std::array<std::array<float,12>,max_sprite_instances> const &models,
     size_t count)
@@ -963,6 +1109,10 @@ void jkgm::shaders::gpu_3do_preview_shader::set_surface(
     gl::set_uniform_vector(albedo_factor,tint);
     gl::set_uniform_vector(albedo_scroll,scroll);
     gl::set_uniform_vector(uv_scale,make_point(1.0f/width,1.0f/height));
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_thing_opacity(float value)
+{
+    gl::set_uniform_float(thing_opacity,value);
 }
 void jkgm::shaders::gpu_3do_preview_shader::set_emissive(
     bool textured,point<4,float> intensity,point<2,float> scroll)
@@ -1119,6 +1269,38 @@ void jkgm::shaders::gpu_3do_preview_shader::set_environment(
         make_point(from?1.0f:0.0f,static_cast<float>(mode),
                    to?1.0f:0.0f,weight));
 }
+void jkgm::shaders::gpu_3do_preview_shader::set_clearcoat(
+    bool enabled,point<4,float> params,bool has_surface,bool has_normal)
+{
+    gl::set_uniform_integer(coat_surface_sampler,26);
+    gl::set_uniform_integer(coat_normal_sampler,27);
+    gl::set_uniform_integer(clearcoat_enabled,enabled?1:0);
+    gl::set_uniform_integer(clearcoat_has_surface,has_surface?1:0);
+    gl::set_uniform_integer(clearcoat_has_normal,has_normal?1:0);
+    if(enabled)gl::set_uniform_vector(clearcoat_params,params);
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_matcap(
+    bool enabled,point<4,float> params,bool has_surface)
+{
+    gl::set_uniform_integer(matcap_sampler,24);
+    gl::set_uniform_integer(matcap_surface_sampler,25);
+    gl::set_uniform_integer(matcap_enabled,enabled?1:0);
+    gl::set_uniform_integer(matcap_has_surface,has_surface?1:0);
+    if(enabled)gl::set_uniform_vector(matcap_params,params);
+}
+void jkgm::shaders::gpu_3do_preview_shader::set_hemi_reflection(
+    bool ready,point<3,float> right,point<3,float> forward,
+    point<3,float> up,float half_fov,float aspect,int capture_mode)
+{
+    // The array sampler must never alias the 2D albedo sampler at unit 0.
+    // On <24-unit drivers the optional sampler is compiled out entirely.
+    gl::set_uniform_integer(hemi_map,23);
+    gl::set_uniform_vector(hemi_right,right);
+    gl::set_uniform_vector(hemi_forward,forward);
+    gl::set_uniform_vector(hemi_up,up);
+    gl::set_uniform_vector(hemi_info,make_point(
+        half_fov,aspect,ready?1.0f:0.0f,float(capture_mode)));
+}
 void jkgm::shaders::gpu_3do_preview_shader::set_albedo_transition(
     int source2,float weight)
 {
@@ -1130,6 +1312,11 @@ void jkgm::shaders::gpu_3do_preview_shader::set_albedo_transition(
 void jkgm::shaders::gpu_3do_preview_shader::set_scene_depth(int sampler)
 {
     gl::set_uniform_integer(scene_depth_sampler,sampler);
+}
+
+void jkgm::shaders::gpu_3do_preview_shader::set_smoke_half_resolution(bool enabled)
+{
+    gl::set_uniform_integer(smoke_half_resolution,enabled?1:0);
 }
 
 void jkgm::shaders::gpu_3do_preview_shader::set_world_lighting_exempt(
@@ -1377,10 +1564,12 @@ void jkgm::shaders::game_pass_shader::set_displacement_factor(float factor)
     gl::set_uniform_float(displacement_factor, factor);
 }
 
-jkgm::shaders::game_post_ssao_shader::game_post_ssao_shader(fs::path const &data_root)
-    : opengl_shader("game_post_ssao",
+jkgm::shaders::game_post_ssao_shader::game_post_ssao_shader(
+    fs::path const &data_root,bool half_res)
+    : opengl_shader(half_res?"game_post_ssao_half":"game_post_ssao",
                     data_root / "shaders/postprocess.vert",
-                    data_root / "shaders/post_ssao.frag")
+                    data_root / (half_res?"shaders/post_ssao_half.frag":
+                                          "shaders/post_ssao.frag"))
     , normal_image(gl::get_uniform_location(the_program, "normal_image"))
     , depth_image(gl::get_uniform_location(the_program, "depth_image"))
     , noise_image(gl::get_uniform_location(the_program, "noise_image"))
@@ -1446,6 +1635,14 @@ jkgm::shaders::spotlight_shadow_depth_shader::spotlight_shadow_depth_shader(
     , shadow_alpha_transition(gl::get_uniform_location(the_program,"shadow_alpha_transition"))
     , shadow_alpha_cutoff(gl::get_uniform_location(the_program,"shadow_alpha_cutoff"))
     , shadow_alpha_factor(gl::get_uniform_location(the_program,"shadow_alpha_factor"))
+    , shadow_dither_enabled(gl::get_uniform_location(the_program,"shadow_dither_enabled"))
+    , shadow_instance_opacity(gl::get_uniform_location(the_program,"shadow_instance_opacity"))
+    , shadow_alpha_masked(gl::get_uniform_location(the_program,"shadow_alpha_masked"))
+    , shadow_caustic_density(gl::get_uniform_location(the_program,"shadow_caustic_density"))
+    , shadow_caustic_from_texture(gl::get_uniform_location(the_program,"shadow_caustic_from_texture"))
+    , shadow_caustic_to_texture(gl::get_uniform_location(the_program,"shadow_caustic_to_texture"))
+    , shadow_caustic_color_factor(gl::get_uniform_location(the_program,"shadow_caustic_color_factor"))
+    , shadow_caustic_color_blend(gl::get_uniform_location(the_program,"shadow_caustic_color_blend"))
 {
 }
 
@@ -1454,6 +1651,10 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_light(
     point<3,float> forward,point<4,float> limits)
 {
     gl::set_uniform_integer(shadow_orthographic,0);
+    gl::set_uniform_integer(shadow_caustic_from_texture,0);
+    gl::set_uniform_integer(shadow_caustic_to_texture,0);
+    gl::set_uniform_float(shadow_caustic_color_blend,0.0f);
+    set_shadow_dither(false,1.0f,false);
     gl::set_uniform_vector(shadow_origin,origin);
     gl::set_uniform_vector(shadow_right,right);
     gl::set_uniform_vector(shadow_up,up);
@@ -1466,6 +1667,10 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_orthographic_light(
     point<3,float> forward,point<4,float> limits)
 {
     gl::set_uniform_integer(shadow_orthographic,1);
+    gl::set_uniform_integer(shadow_caustic_from_texture,0);
+    gl::set_uniform_integer(shadow_caustic_to_texture,0);
+    gl::set_uniform_float(shadow_caustic_color_blend,0.0f);
+    set_shadow_dither(false,1.0f,false);
     gl::set_uniform_vector(shadow_origin,origin);
     gl::set_uniform_vector(shadow_right,right);
     gl::set_uniform_vector(shadow_up,up);
@@ -1523,6 +1728,42 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_instanced_models(
     shadow_instance_active=true;
 }
 
+void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_dither(
+    bool enabled,float opacity,bool masked)
+{
+    // Preserve the original opaque fast path: repeated normal casters
+    // should not issue additional glUniform calls when coverage is solid.
+    if(cached_dither_enabled_!=enabled) {
+        gl::set_uniform_integer(shadow_dither_enabled,enabled?1:0);
+        cached_dither_enabled_=enabled;
+    }
+    if(!enabled)return;
+    if(cached_dither_opacity_!=opacity) {
+        gl::set_uniform_float(shadow_instance_opacity,opacity);
+        cached_dither_opacity_=opacity;
+    }
+    if(cached_masked_!=masked) {
+        gl::set_uniform_integer(shadow_alpha_masked,masked?1:0);
+        cached_masked_=masked;
+    }
+}
+void jkgm::shaders::spotlight_shadow_depth_shader::set_caustic_density(float coefficient)
+{
+    gl::set_uniform_float(shadow_caustic_density,coefficient);
+}
+
+void jkgm::shaders::spotlight_shadow_depth_shader::set_caustic_color(
+    bool textured,bool next_textured,point<3,float> tint,float transition)
+{
+    gl::set_uniform_integer(shadow_caustic_from_texture,textured?1:0);
+    gl::set_uniform_integer(shadow_caustic_to_texture,next_textured?1:0);
+    gl::set_uniform_vector(shadow_caustic_color_factor,tint);
+    gl::set_uniform_float(shadow_caustic_color_blend,transition);
+    // These existing samplers now always read the final 1x1 mip.
+    gl::set_uniform_integer(shadow_alpha_texture,11);
+    gl::set_uniform_integer(shadow_alpha_texture_next,12);
+}
+
 void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(
     bool enabled,point<2,float> uv_scale,point<2,float> uv_scroll,
     float cutoff,float factor,bool has_next,float progress)
@@ -1540,15 +1781,15 @@ void jkgm::shaders::spotlight_shadow_depth_shader::set_shadow_alpha(
 }
 
 jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_shader(
-    fs::path const &data_root)
-    : opengl_shader("game_post_opaque_composite",
+    fs::path const &data_root,bool half_sun)
+    : opengl_shader(half_sun?"game_post_opaque_half_sun":"game_post_opaque_composite",
                     data_root / "shaders/postprocess.vert",
-                    data_root / "shaders/post_opaque_composite.frag")
+                    data_root / (half_sun?"shaders/post_sun_visibility_half.frag":
+                                          "shaders/post_opaque_composite.frag"))
     , color_image(gl::get_uniform_location(the_program, "color_image"))
     , emissive_image(gl::get_uniform_location(the_program, "emissive_image"))
     , occlusion_image(gl::get_uniform_location(the_program, "occlusion_image"))
     , depth_image(gl::get_uniform_location(the_program, "depth_image"))
-    , debug_void_pixels(gl::get_uniform_location(the_program, "debug_void_pixels"))
     , retain_hom_pixels(gl::get_uniform_location(the_program, "retain_hom_pixels"))
     , fog_params(gl::get_uniform_location(the_program, "fog_params"))
     , fog_color(gl::get_uniform_location(the_program, "fog_color"))
@@ -1590,8 +1831,16 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , sun_sky_aperture_depth_transform(gl::get_uniform_location(
         the_program,"sun_sky_aperture_depth_transform"))
     , sun_max_distance(gl::get_uniform_location(the_program,"sun_max_distance"))
+    , sun_caustics_active(gl::get_uniform_location(the_program,"sun_caustics_active"))
+    , sun_caustics_time(gl::get_uniform_location(the_program,"sun_caustics_time"))
+    , sun_half_visibility_active(gl::get_uniform_location(
+        the_program,"sun_half_visibility_active"))
+    , sun_half_visibility_image(gl::get_uniform_location(
+        the_program,"sun_half_visibility_image"))
     , sun_dynamic_count(gl::get_uniform_location(the_program,"sun_dynamic_count"))
     , sun_dynamic_image(gl::get_uniform_location(the_program,"sun_dynamic_image"))
+    , sun_dynamic_pcf_radius(gl::get_uniform_location(
+        the_program,"sun_dynamic_pcf_radius"))
  
 {
     for(int i=0;i<8;++i) {
@@ -1650,12 +1899,6 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_coverage_normal_sampl
     int sampler)
 {
     gl::set_uniform_integer(normal_image,sampler);
-}
-
-void jkgm::shaders::game_post_opaque_composite_shader::set_debug_void_pixels(
-    bool enabled)
-{
-    gl::set_uniform_integer(debug_void_pixels,enabled?1:0);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_retain_hom_pixels(
@@ -1745,6 +1988,12 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_shadow_pcf_radius
                            make_point(near_radius,far_radius));
 }
 
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_pcf_radius(
+    float radius)
+{
+    gl::set_uniform_float(sun_dynamic_pcf_radius,radius);
+}
+
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_sky_aperture(
     bool active,int sampler,point<4,float> near_far_depth_transform)
 {
@@ -1755,10 +2004,25 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_sun_sky_aperture(
                            near_far_depth_transform);
 }
 
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_caustics(
+    bool enabled,float time_seconds)
+{
+    gl::set_uniform_integer(sun_caustics_active,enabled?1:0);
+    if(!enabled)return;
+    gl::set_uniform_float(sun_caustics_time,time_seconds);
+}
+
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_max_distance(
     float distance)
 {
     gl::set_uniform_float(sun_max_distance,distance);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_sun_half_visibility(
+    bool active,int sampler)
+{
+    gl::set_uniform_integer(sun_half_visibility_image,sampler);
+    gl::set_uniform_integer(sun_half_visibility_active,active?1:0);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_sun_dynamic_count(
@@ -1808,6 +2072,40 @@ jkgm::shaders::game_transparency_pass_shader::game_transparency_pass_shader(
                        data_root / "shaders/game.vert",
                        data_root / "shaders/game_trns_pass.frag")
 {
+}
+
+jkgm::shaders::post_ssao_half_blur_shader::post_ssao_half_blur_shader(
+    fs::path const &data_root)
+    : opengl_shader("post_ssao_half_blur",
+                    data_root/"shaders/postprocess.vert",
+                    data_root/"shaders/post_ssao_half_blur.frag")
+    , source_image(gl::get_uniform_location(the_program,"source_image"))
+{}
+void jkgm::shaders::post_ssao_half_blur_shader::set_source_sampler(int s)
+{
+    gl::set_uniform_integer(source_image,s);
+}
+
+jkgm::shaders::post_ssao_half_upsample_shader::
+    post_ssao_half_upsample_shader(fs::path const &data_root)
+    : opengl_shader("post_ssao_half_upsample",
+                    data_root/"shaders/postprocess.vert",
+                    data_root/"shaders/post_ssao_half_upsample.frag")
+    , source_image(gl::get_uniform_location(the_program,"source_image"))
+    , normal_image(gl::get_uniform_location(the_program,"normal_image"))
+    , depth_image(gl::get_uniform_location(the_program,"depth_image"))
+{}
+void jkgm::shaders::post_ssao_half_upsample_shader::set_source_sampler(int s)
+{
+    gl::set_uniform_integer(source_image,s);
+}
+void jkgm::shaders::post_ssao_half_upsample_shader::set_normal_sampler(int s)
+{
+    gl::set_uniform_integer(normal_image,s);
+}
+void jkgm::shaders::post_ssao_half_upsample_shader::set_depth_sampler(int s)
+{
+    gl::set_uniform_integer(depth_image,s);
 }
 
 jkgm::shaders::post_box4_shader::post_box4_shader(fs::path const &data_root)
@@ -1935,6 +2233,23 @@ void jkgm::shaders::post_low_pass_shader::set_exposure(
     gl::set_uniform_float(hdr_exposure_compensation,compensation_ev);
 }
 
+jkgm::shaders::post_smoke_composite_shader::post_smoke_composite_shader(
+    fs::path const &data_root)
+    : opengl_shader("post_smoke_composite",
+                    data_root/"shaders/postprocess.vert",
+                    data_root/"shaders/post_smoke_composite.frag")
+    , smoke_image(gl::get_uniform_location(the_program,"smoke_image"))
+    , opaque_depth(gl::get_uniform_location(the_program,"opaque_depth"))
+{
+}
+
+void jkgm::shaders::post_smoke_composite_shader::set_samplers(
+    int smoke_sampler,int depth_sampler)
+{
+    gl::set_uniform_integer(smoke_image,smoke_sampler);
+    gl::set_uniform_integer(opaque_depth,depth_sampler);
+}
+
 jkgm::shaders::post_scale_shader::post_scale_shader(fs::path const &data_root)
     : opengl_shader("post_scale",
                     data_root / "shaders/postprocess.vert",
@@ -1977,9 +2292,7 @@ jkgm::shaders::post_spatial_blur_shader::post_spatial_blur_shader(
     , screen_size(gl::get_uniform_location(the_program, "screen_size"))
     , distance_params(gl::get_uniform_location(the_program, "distance_params"))
     , peripheral_params(gl::get_uniform_location(the_program, "peripheral_params"))
-    , original_image(gl::get_uniform_location(the_program,"original_image"))
     , output_size(gl::get_uniform_location(the_program,"output_size"))
-    , restore_original(gl::get_uniform_location(the_program,"restore_original"))
 {
 }
 
@@ -2003,12 +2316,10 @@ void jkgm::shaders::post_spatial_blur_shader::set_screen_size(size<2, float> dim
     gl::set_uniform_vector(screen_size, dims);
 }
 
-void jkgm::shaders::post_spatial_blur_shader::set_fast_inputs(
-    int original_sampler,size<2,float> output_dims,bool fullres_unblurred)
+void jkgm::shaders::post_spatial_blur_shader::set_output_size(
+    size<2,float> output_dims)
 {
-    gl::set_uniform_integer(original_image,original_sampler);
     gl::set_uniform_vector(output_size,output_dims);
-    gl::set_uniform_integer(restore_original,fullres_unblurred?1:0);
 }
 
 void jkgm::shaders::post_spatial_blur_shader::set_distance_params(point<4, float> params)

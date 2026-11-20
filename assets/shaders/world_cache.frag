@@ -30,11 +30,40 @@ uniform vec2 uv_scale,uv_scroll;
 // GPU 3DO-compatible EnvMap samplers, reflection modes, material parameters.
 uniform sampler2D surface_map,normal_map,normal_map2,env_map,env_map2;
 uniform vec4 specular_params,normal_specular_params,environment_info;
+// Matcap color is an artist-authored sRGB image. Its per-pixel intensity
+// and roughness are LINEAR mask channels, completely separate from GGX.
+#ifdef JKGM_MATCAP_LAYER
+uniform sampler2D matcap_map,matcap_surface_map;
+uniform vec4 matcap_params; // RGB factor, roughness
+uniform int matcap_enabled,matcap_has_surface;
+#endif
+#ifdef JKGM_CLEARCOAT_LAYER
+uniform sampler2D clearcoat_surface_map,clearcoat_normal_map;
+uniform vec4 clearcoat_params; // strength, roughness, transmission
+uniform int clearcoat_enabled,clearcoat_has_surface,clearcoat_has_normal;
+#endif
 uniform vec4 projection; // same FOV factors as world_cache.vert
 uniform int normal_mapped_diffuse; // opt-in added lights, not baked JK RGB
 uniform vec2 normal_specular_scroll,normal_specular_scroll2;
 uniform vec3 camera_world_origin,camera_right_axis;
 uniform vec3 camera_forward_axis,camera_up_axis;
+#ifdef JKGM_REFLECTION_PROBE
+uniform sampler2DArray shared_reflection_map;
+#endif
+uniform int shared_reflection_ready;
+// Single opt-in, same-frame planar capture, bound only during world draws.
+// RGBA alpha marks actually reflected geometry; unfilled sky pixels fall
+// through to the legacy EnvMap when one is configured.
+uniform sampler2D planar_reflection_map;
+uniform int planar_reflection_ready;
+// Low-resolution SSR is available only AFTER the opaque pass; mode 1 keeps
+// EnvMap fallback when a ray cannot find geometry in the current screen.
+uniform sampler2D screen_reflection_map;
+uniform int screen_reflection_ready;
+uniform vec4 planar_receiver_plane;
+uniform vec3 planar_camera_origin,planar_camera_right,planar_camera_forward;
+uniform vec3 planar_camera_up;
+uniform vec2 planar_tan_half_fov;
 uniform vec4 material_tint;
 uniform int solid_color; // GeoMode 3: native MAT/CMP RGB, no texture sampling
 uniform int solid_fullbright; // CMP index unchanged across the 64 light levels
@@ -49,7 +78,7 @@ uniform int blend_mode; // normal=0, additive=1, multiply=2, fluid=3
 uniform sampler2D scene_depth; // resolved opaque R16F depth, JK units 32*Y
 uniform float fluid_thickness; // Beer-Lambert absorption coefficient
 uniform int fluid_debug_mode; // GPU world Fluid diagnostics; 0 preserves ordinary rendering
-uniform vec4 fog_params; // native fog start/end/opacity
+uniform vec4 fog_params; // start/end/opacity, w=0 planar linear,1 radial linear,2 radial exp
 uniform vec3 fog_color;
 uniform int sky_mode;
 uniform vec4 sky_horizon; // x=horizonDistance*tanHalfFOV, y=pixels/rev, z=tanHalfFOV
@@ -105,20 +134,132 @@ vec3 world_mapped_normal(vec2 uv)
                      normalize(vec3(slope,1.0)));
 }
 
-// Match GPU-cached 3DO Fresnel, equirectangular/matcap UV, roughness LOD,
-// metalness and global/per-MAT environment transitions.
-vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
+#ifdef JKGM_MATCAP_LAYER
+vec3 world_matcap_effect(vec2 uv)
+{
+    if(matcap_enabled==0)return vec3(0.0);
+    vec2 mask=matcap_has_surface!=0
+        ?texture(matcap_surface_map,uv).rg:vec2(1.0);
+    if(mask.r<=0.0)return vec3(0.0);
+    float roughness=clamp(matcap_params.w*mask.g,0.0,1.0);
+    vec3 world_normal=world_mapped_normal(uv);
+    // Use unprojected camera-space normals: MatCaps are view-oriented
+    // artistic textures, not rays into the scene.
+    vec3 n=normalize(vec3(
+        dot(world_normal,camera_right_axis),
+        dot(world_normal,camera_up_axis),
+        dot(world_normal,camera_forward_axis)));
+    if(n.z>0.0)n=-n;
+    vec2 map_uv=clamp(
+        vec2(0.5+0.5*n.x,0.5-0.5*n.y),vec2(0.001),vec2(0.999));
+    ivec2 dims=textureSize(matcap_map,0);
+    float lod=roughness*log2(max(float(max(dims.x,dims.y)),1.0));
+    return textureLod(matcap_map,map_uv,lod).rgb *
+           matcap_params.rgb*mask.r;
+}
+#endif
+
+#ifdef JKGM_CLEARCOAT_LAYER
+vec3 world_clearcoat_normal(vec2 uv)
+{
+    vec3 n=normalize(cached_world_normal);
+    if(clearcoat_has_normal==0)return n;
+    vec3 texn=texture(clearcoat_normal_map,uv).xyz*2.0-1.0;
+    vec2 slope=texn.xy/max(texn.z,0.05);
+    vec3 dp1=dFdx(cached_world_position),dp2=dFdy(cached_world_position);
+    vec2 du1=dFdx(uv),du2=dFdy(uv);
+    vec3 t=cross(dp2,n)*du1.x+cross(n,dp1)*du2.x;
+    vec3 b=cross(dp2,n)*du1.y+cross(n,dp1)*du2.y;
+    float basis=max(dot(t,t),dot(b,b));
+    if(basis<1e-16)return n;
+    float inv_basis=inversesqrt(basis);
+    return normalize(mat3(t*inv_basis,b*inv_basis,n)*
+                     normalize(vec3(slope,1.0)));
+}
+vec3 world_clearcoat_values(vec2 uv)
+{
+    if(clearcoat_enabled==0)return vec3(0.0,0.1,1.0);
+    vec3 pixel=clearcoat_has_surface!=0
+        ?texture(clearcoat_surface_map,uv).rgb:vec3(1.0);
+    return vec3(
+        clamp(clearcoat_params.x*pixel.r,0.0,1.0),
+        clamp(clearcoat_params.y*pixel.g,0.0,1.0),
+        clamp(clearcoat_params.z*pixel.b,0.0,1.0));
+}
+float world_clearcoat_fresnel(vec3 N)
+{
+    float NV=clamp(abs(dot(normalize(N),
+        normalize(camera_world_origin-cached_world_position))),0.0,1.0);
+    return 0.04+0.96*pow(1.0-NV,5.0);
+}
+#endif
+
+// A pixel can use this capture only if it lies on the selected world
+// reflection plane. One captured MAT may be shared by non-coplanar faces.
+// Pixel-space reflected camera projection is independent of texture UVs.
+vec4 world_planar_reflection(vec3 mapped_normal,float roughness)
+{
+    if(planar_reflection_ready==0)return vec4(0.0);
+    vec3 const_geom=normalize(cached_world_normal);
+    if(abs(dot(const_geom,planar_receiver_plane.xyz))<0.999 ||
+       abs(dot(cached_world_position,planar_receiver_plane.xyz)-
+           planar_receiver_plane.w)>
+               max(0.02,abs(planar_receiver_plane.w)*0.000002))
+        return vec4(0.0);
+    // Project a point along the normal-mapped reflected ray through the
+    // mirrored camera. With the geometric normal this is exactly the
+    // original planar projection; unlike a fixed UV offset, changes in
+    // view angle, normal slope and distance now affect the distortion.
+    vec3 incident=normalize(cached_world_position-camera_world_origin);
+    vec3 ray=reflect(incident,normalize(mapped_normal));
+    float distance_to_surface=length(cached_world_position-camera_world_origin);
+    vec3 point_on_ray=cached_world_position+ray*distance_to_surface;
+    vec3 d=point_on_ray-planar_camera_origin;
+    float z=dot(d,planar_camera_forward);
+    if(z<=0.001)return vec4(0.0);
+    vec2 uv=0.5+0.5*vec2(
+        dot(d,planar_camera_right),
+        dot(d,planar_camera_up))/
+        (z*max(planar_tan_half_fov,vec2(0.0001)));
+    if(any(lessThan(uv,vec2(0.0))) ||
+       any(greaterThan(uv,vec2(1.0))))return vec4(0.0);
+    ivec2 dimensions=textureSize(planar_reflection_map,0);
+    float lod=roughness*log2(
+        max(float(max(dimensions.x,dimensions.y)),1.0));
+    vec4 sample_color=textureLod(planar_reflection_map,uv,lod);
+    // Captured geometry writes opaque RGB against a transparent black clear.
+    // Bilinear filtering premultiplies edge colors; unpremultiply before
+    // mixing coverage against the optional sky/environment fallback.
+    if(sample_color.a>0.0001)
+        sample_color.rgb/=sample_color.a;
+    return sample_color;
+}
+
+// Reuse the existing strength/roughness/metalness/Fresnel law for captured
+// geometry. Sky/uncaptured pixels retain optional equirectangular EnvMap.
+vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness,
+                                  bool coating,vec3 coat_normal,
+                                  float coat_roughness,float coat_strength)
 {
     metalness=0.0;
-    if((environment_info.x<0.5 && environment_info.z<0.5) ||
-       specular_params.x<=0.0)return vec3(0.0);
-    vec3 surf=specular_params.w>0.5?texture(surface_map,uv).rgb:vec3(1.0);
-    float strength=max(specular_params.x*surf.r,0.0);
+    int mode=int(environment_info.y+0.5);
+    bool has_env=environment_info.x>0.5 || environment_info.z>0.5;
+    bool has_planar=mode==4 && planar_reflection_ready!=0;
+    bool has_screen=mode==1 && screen_reflection_ready!=0;
+    bool has_shared=false;
+#ifdef JKGM_REFLECTION_PROBE
+    has_shared=mode==7 && shared_reflection_ready!=0;
+#endif
+    if((!has_env && !has_planar && !has_screen && !has_shared) ||
+       (coating?coat_strength<=0.0:specular_params.x<=0.0))
+        return vec3(0.0);
+    vec3 surf=coating?vec3(1.0):
+        (specular_params.w>0.5?texture(surface_map,uv).rgb:vec3(1.0));
+    float strength=coating?coat_strength:max(specular_params.x*surf.r,0.0);
     if(strength<=0.0)return vec3(0.0);
-    float roughness=clamp(specular_params.y*surf.g,0.0,1.0);
-    metalness=clamp(specular_params.z*surf.b,0.0,1.0)*
-              mix(environment_info.x,environment_info.z,environment_info.w);
-    vec3 nw=world_mapped_normal(uv);
+    float roughness=coating?coat_roughness:
+        clamp(specular_params.y*surf.g,0.0,1.0);
+    vec3 nw=coating?coat_normal:world_mapped_normal(uv);
     vec3 vw=normalize(cached_world_position-camera_world_origin);
     vec3 n=normalize(vec3(dot(nw,camera_right_axis),
                           dot(nw,camera_up_axis),dot(nw,camera_forward_axis)));
@@ -126,31 +267,101 @@ vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
                           dot(vw,camera_up_axis),dot(vw,camera_forward_axis)));
     if(dot(n,v)>0.0)n=-n;
     vec3 reflection=reflect(v,n);
-    int mode=int(environment_info.y+0.5);
-    vec3 dir=reflection;
-    if(mode<=1) {
-        vec3 world=camera_right_axis*reflection.x+
-                   camera_forward_axis*reflection.z+
-                   camera_up_axis*reflection.y;
-        dir=vec3(world.x,world.z,world.y);
+    vec4 planar=has_planar?world_planar_reflection(nw,roughness):vec4(0.0);
+    vec3 env=vec3(0.0);
+    if(has_env && planar.a<0.999) {
+        vec3 dir=reflection;
+        if(mode==0 || mode==1 || mode>=4) {
+            vec3 world=camera_right_axis*reflection.x+
+                       camera_forward_axis*reflection.z+
+                       camera_up_axis*reflection.y;
+            dir=vec3(world.x,world.z,world.y);
+        }
+        vec2 env_uv=vec2(fract(atan(dir.x,dir.z)/6.28318530718+0.5),
+                         0.5-asin(clamp(dir.y,-1.0,1.0))/3.14159265359);
+        ivec2 dims=environment_info.x>0.5?
+            textureSize(env_map,0):textureSize(env_map2,0);
+        float lod=roughness*log2(max(float(max(dims.x,dims.y)),1.0));
+        vec3 env_from=vec3(0.0),env_to=vec3(0.0);
+        if(environment_info.x>0.5 && environment_info.w<1.0)
+            env_from=textureLod(env_map,env_uv,lod).rgb;
+        if(environment_info.z>0.5 && environment_info.w>0.0)
+            env_to=textureLod(env_map2,env_uv,lod).rgb;
+        env=mix(env_from,env_to,environment_info.w);
     }
-    vec2 env_uv=mode==3
-        ?clamp(vec2(0.5+0.5*n.x,0.5-0.5*n.y),vec2(0.001),vec2(0.999))
-        :vec2(fract(atan(dir.x,dir.z)/6.28318530718+0.5),
-              0.5-asin(clamp(dir.y,-1.0,1.0))/3.14159265359);
-    ivec2 dims=environment_info.x>0.5?
-        textureSize(env_map,0):textureSize(env_map2,0);
-    float lod=roughness*log2(max(float(max(dims.x,dims.y)),1.0));
-    vec3 env_from=vec3(0.0),env_to=vec3(0.0);
-    if(environment_info.x>0.5 && environment_info.w<1.0)
-        env_from=textureLod(env_map,env_uv,lod).rgb;
-    if(environment_info.z>0.5 && environment_info.w>0.0)
-        env_to=textureLod(env_map2,env_uv,lod).rgb;
-    vec3 env=mix(env_from,env_to,environment_info.w);
-    vec3 f0=mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
+#ifdef JKGM_REFLECTION_PROBE
+    if(has_shared) {
+        // Share the six world-oriented cube faces. Sample alpha at LOD 0
+        // before roughness filtering, matching GPU 3DO probe fallback.
+        vec3 world_dir=camera_right_axis*reflection.x+
+                       camera_forward_axis*reflection.z+
+                       camera_up_axis*reflection.y;
+        vec3 a=abs(world_dir);
+        float major=max(a.x,max(a.y,a.z));
+        if(major>0.000001) {
+            int layer=0;
+            vec3 right_axis=vec3(0.0),up_axis=vec3(0.0);
+            if(a.x>=a.y && a.x>=a.z) {
+                layer=world_dir.x>=0.0?0:1;
+                right_axis=vec3(0.0,world_dir.x>=0.0?-1.0:1.0,0.0);
+                up_axis=vec3(0.0,0.0,1.0);
+            } else if(a.y>=a.z) {
+                layer=world_dir.y>=0.0?2:3;
+                right_axis=vec3(world_dir.y>=0.0?1.0:-1.0,0.0,0.0);
+                up_axis=vec3(0.0,0.0,1.0);
+            } else {
+                layer=world_dir.z>=0.0?4:5;
+                right_axis=vec3(0.0,world_dir.z>=0.0?1.0:-1.0,0.0);
+                up_axis=vec3(1.0,0.0,0.0);
+            }
+            ivec3 dims=textureSize(shared_reflection_map,0);
+            vec2 inset=0.5/vec2(dims.xy);
+            vec2 uv_cube=clamp(
+                0.5+0.5*vec2(dot(world_dir,right_axis),
+                             dot(world_dir,up_axis))/major,
+                inset,vec2(1.0)-inset);
+            float coverage=textureLod(shared_reflection_map,
+                vec3(uv_cube,float(layer)),0.0).a;
+            if(coverage>0.0001) {
+                float lod=roughness*log2(
+                    max(float(max(dims.x,dims.y)),1.0));
+                vec4 captured=textureLod(shared_reflection_map,
+                    vec3(uv_cube,float(layer)),lod);
+                if(captured.a>0.0001)
+                    env=mix(env,captured.rgb/captured.a,
+                            clamp(coverage,0.0,1.0));
+            }
+        }
+    }
+#endif
+    env=mix(env,planar.rgb,planar.a);
+    // Receiver rays are evaluated on a separate low-resolution texture;
+    // this material still applies its own strength, Fresnel and roughness.
+    ivec2 screen_dimensions=has_screen
+        ?textureSize(screen_reflection_map,0):ivec2(1);
+    float screen_lod=roughness*log2(
+        max(float(max(screen_dimensions.x,screen_dimensions.y)),1.0));
+    vec4 screen=has_screen
+        ?textureLod(screen_reflection_map,
+            gl_FragCoord.xy/vec2(textureSize(scene_depth,0)),screen_lod)
+        :vec4(0.0);
+    if(screen.a>0.0001)screen.rgb/=screen.a;
+    env=mix(env,screen.rgb,clamp(screen.a,0.0,1.0));
+    float source_coverage=max(
+        mix(environment_info.x,environment_info.z,environment_info.w),
+        max(max(planar.a,screen.a),has_shared?1.0:0.0));
+    metalness=coating?0.0:
+        clamp(specular_params.z*surf.b,0.0,1.0)*source_coverage;
+    vec3 f0=coating?vec3(0.04):
+        mix(vec3(0.04),clamp(base_color,0.0,1.0),metalness);
     float cos_theta=clamp(dot(n,-v),0.0,1.0);
     vec3 fresnel=f0+(vec3(1.0)-f0)*pow(1.0-cos_theta,5.0);
     return env*fresnel*strength;
+}
+vec3 world_environment_reflection(vec3 base_color,vec2 uv,out float metalness)
+{
+    return world_environment_reflection(
+        base_color,uv,metalness,false,vec3(0.0),0.0,0.0);
 }
 
 #include "world_cache_direct_specular.glsl"
@@ -282,19 +493,60 @@ void main() {
     vec3 env_reflection=world_environment_reflection(
         albedo,material_texcoord,env_metalness);
     vec3 direct_specular=world_direct_specular(albedo,material_texcoord);
+    vec3 coat_specular=vec3(0.0);
+    float base_diffuse_trans=1.0,base_specular_trans=1.0;
+#ifdef JKGM_CLEARCOAT_LAYER
+    if(clearcoat_enabled!=0) {
+        vec3 coat=world_clearcoat_values(material_texcoord);
+        // Derivatives for the optional normal map must run uniformly
+        // across the quad, even where the coverage mask is zero.
+        vec3 N=world_clearcoat_normal(material_texcoord);
+        if(coat.x>0.0) {
+            float f=world_clearcoat_fresnel(N);
+            base_specular_trans=clamp(1.0-coat.x*f,0.0,1.0);
+            base_diffuse_trans=base_specular_trans*
+                               mix(1.0,coat.z,coat.x);
+            float unused_coat_metalness=0.0;
+            coat_specular=world_environment_reflection(
+                albedo,material_texcoord,unused_coat_metalness,
+                true,N,coat.y,coat.x);
+            coat_specular+=world_direct_specular(
+                albedo,material_texcoord,true,N,coat.y,coat.x);
+        }
+    }
+#endif
+    vec3 matcap_effect=vec3(0.0);
+#ifdef JKGM_MATCAP_LAYER
+    matcap_effect=world_matcap_effect(material_texcoord);
+#endif
     env_metalness*=1.0-fullbright;
     env_reflection*=1.0-fullbright;
     direct_specular*=1.0-fullbright;
-    vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness);
+    vec3 lit_diffuse=albedo*lighting*(1.0-env_metalness)*
+                     base_diffuse_trans;
+    // Coating attenuates the lower base lobe, not its own specular term.
+    vec3 layered_specular=(env_reflection+direct_specular)*
+                          base_specular_trans+coat_specular+
+                          matcap_effect*base_diffuse_trans;
     if(transparent_pass!=0) {
         // Only one color attachment exists in the forward alpha target.
         // The framebuffer uses premultiplied (ONE, ONE_MINUS_SRC_ALPHA).
         float depth=32.0/max(gl_FragCoord.w,0.00000001);
-        float fog=clamp((depth-fog_params.x)/
-                        max(fog_params.y-fog_params.x,0.0001),0.0,1.0)*
-                  fog_params.z;
+        // Radial fog affects ONLY forward shading: don't change scene depth
+        // or the camera-ray Fluid absorption against opaque depth.
+        float fog_depth=fog_params.w>0.5
+            ?length(cached_world_position-camera_world_origin)*32.0:depth;
+        float fog_fraction=clamp((fog_depth-fog_params.x)/
+                            max(fog_params.y-fog_params.x,0.0001),0.0,1.0);
+        if(fog_params.w>1.5) {
+            float reach=max(fog_params.y+0.5*max(fog_params.x,0.0),1.0);
+            fog_fraction=1.0-exp(-2.302585093*max(fog_depth,0.0)/reach);
+        }
+        float fog=fog_fraction*fog_params.z;
         vec3 lit=mix(lit_diffuse,fog_color,fog);
-        vec3 specular=(env_reflection+direct_specular)*(1.0-fog);
+        // MatCap adds authored color but no dynamically evaluated
+        // specular highlight; forward fog attenuates the artistic layer.
+        vec3 specular=layered_specular*(1.0-fog);
         if(blend_mode==3) {
             // Match game_trns_pass.frag's *native* Fluid composition.
             // Native material/texture alpha changes destination blending,
@@ -396,7 +648,7 @@ void main() {
             // multiplied by the actual (unmodified) coverage.
             float vertex_rgb_alpha=pow(clamp(face_opacity,0.0,1.0),1.8);
             vec3 premultiplied=
-                albedo*lighting*(1.0-fog)*
+                albedo*lighting*base_diffuse_trans*(1.0-fog)*
                     (texture_material_alpha*vertex_rgb_alpha)
                 +fog_color*(fog*coverage);
             // Normal blending: ONE, ONE_MINUS_SRC_ALPHA.
@@ -408,7 +660,7 @@ void main() {
     }
     out_color=vec4(lit_diffuse,1.0);
     // Opaque reflections are composited after SSAO, as for GPU 3DOs.
-    out_emissive=vec4(emission+env_reflection+direct_specular,
+    out_emissive=vec4(emission+layered_specular,
         dot(lighting,vec3(0.2126,0.7152,0.0722)));
     // Fullbright palette entries do not receive AO, sun or projected light.
     // G-buffer normal is consumed by both opaque projected spotlights

@@ -180,7 +180,11 @@ jkgm::hud_model::hud_model(size<2, int> scr_res,
     auto sel_off = (get<x>(int_scr_res_f) - get<x>(sel_sz)) * 0.5f;
     add_sprite(make_box(make_point(sel_off, 0.0f), sel_sz), select_tc);
 
-    auto con_sz = make_size(get<x>(int_scr_res_f), 64.0f) * scale;
+    // The console occupies only the central source strip (the left/right
+    // 64-pixel corners are separate sprites). Match its destination width
+    // before applying hud_scale; otherwise it is stretched by W/(W-128)
+    // even when hud_scale is 1.0.
+    auto con_sz = make_size(get<x>(int_scr_res_f) - 128.0f, 64.0f) * scale;
     auto con_off = (get<x>(int_scr_res_f) - get<x>(con_sz)) * 0.5f;
     add_sprite(make_box(make_point(con_off, get<y>(int_scr_res_f) - get<y>(con_sz)), con_sz),
                console_tc);
@@ -381,13 +385,8 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     : data_root(the_config->data_path)
     , enable_post(the_config->enable_post)
     , enable_blur(the_config->enable_blur)
-    , spatial_blur_mode(the_config->spatial_blur_mode)
     , enable_trails(the_config->enable_trails)
     , enable_hdr(the_config->enable_hdr)
-    , experimental_fused_bloom_downsample(
-        the_config->experimental_fused_bloom_downsample)
-    , experimental_skip_bloom_clears(
-        the_config->experimental_skip_bloom_clears)
     , auto_exposure_sensitivity(the_config->auto_exposure_sensitivity)
     , hdr_exposure_compensation(the_config->hdr_exposure_compensation)
     , hdr_shadow_softness(the_config->hdr_shadow_softness)
@@ -415,7 +414,6 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , menumdl(screen_res, actual_menu_area)
     , hudmdl(screen_res, internal_screen_res, actual_scr_area, the_config->hud_scale)
     , hud_texture_front(hud_texture_a)
-    , hud_texture_back(hud_texture_b)
     , screen_postbuffer1(screen_res)
     , screen_postbuffer2(screen_res)
     , auto_exposure_a(make_size(1,1))
@@ -427,21 +425,36 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
     , bloom_layers(screen_res)
 {
     LOG_DEBUG("Loading OpenGL assets");
-    // Keep the original full-resolution path available as mode 0.
-    // The standard mode 2 uses quarter-size Gaussian buffers followed
-    // by full-resolution, depth-aware reconstruction.
-    if(spatial_blur_mode>=1) {
-        post_spatial_blur_fast=
-            std::make_unique<shaders::post_spatial_blur_shader>(data_root,true);
-        auto const half_size=make_size(std::max(1,get<x>(screen_res)/2),
-                                       std::max(1,get<y>(screen_res)/2));
-        spatial_blur_half_work=std::make_unique<post_buffer>(half_size);
-        if(spatial_blur_mode==2) {
-            spatial_blur_half_result=std::make_unique<post_buffer>(half_size);
-            post_spatial_blur_reconstruct=std::make_unique<
-                shaders::post_spatial_blur_reconstruct_shader>(data_root);
-        }
+    if(the_config->enable_sun && the_config->enable_sun_shadows) {
+        game_post_opaque_half_sun_program=std::make_unique<
+            shaders::game_post_opaque_composite_shader>(data_root,true);
+        auto const dims=make_size(
+            std::max(1,(get<x>(screen_res)+1)/2),
+            std::max(1,(get<y>(screen_res)+1)/2));
+        sun_half_visibility=std::make_unique<post_buffer>(dims);
     }
+    if(the_config->enable_ssao) {
+        game_post_ssao_half_program=std::make_unique<
+            shaders::game_post_ssao_shader>(data_root,true);
+        post_ssao_half_blur_program=std::make_unique<
+            shaders::post_ssao_half_blur_shader>(data_root);
+        post_ssao_half_upsample_program=std::make_unique<
+            shaders::post_ssao_half_upsample_shader>(data_root);
+    }
+    // Standard dual half-resolution blur with full-resolution reconstruction.
+    // Keep the original shader and framebuffer for scissor-sensitive fallback.
+    post_spatial_blur_fast=
+        std::make_unique<shaders::post_spatial_blur_shader>(data_root,true);
+    auto const half_size=make_size(std::max(1,get<x>(screen_res)/2),
+                                   std::max(1,get<y>(screen_res)/2));
+    spatial_blur_half_work=std::make_unique<post_buffer>(half_size);
+    spatial_blur_half_result=std::make_unique<post_buffer>(half_size);
+    post_spatial_blur_reconstruct=std::make_unique<
+        shaders::post_spatial_blur_reconstruct_shader>(data_root);
+    if(the_config->use_gpu_cache &&
+       the_config->experimental_half_res_fluid_sprites)
+        post_smoke_composite=std::make_unique<
+            shaders::post_smoke_composite_shader>(data_root);
     // Avoid even compiling shadow shaders on ordinary (disabled) installs.
     if((the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
        the_config->enable_sun_shadows)
@@ -480,8 +493,8 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
 
     menu_texture_data.resize(640 * 480, color_rgba8::zero());
 
-    for(gl::texture_view hud_texture : {hud_texture_front, hud_texture_back}) {
-        gl::bind_texture(gl::texture_bind_target::texture_2d, hud_texture);
+    {
+        gl::bind_texture(gl::texture_bind_target::texture_2d, hud_texture_front);
         gl::tex_image_2d(gl::texture_bind_target::texture_2d,
                          0,
                          gl::texture_internal_format::srgb_a8,
@@ -499,5 +512,4 @@ jkgm::opengl_state::opengl_state::opengl_state(size<2, int> screen_res,
                                   gl::texture_wrap_mode::clamp_to_edge);
     }
 
-    hud_texture_data.resize(volume(internal_screen_res), color_rgba8::zero());
 }

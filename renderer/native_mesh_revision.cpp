@@ -10,7 +10,6 @@
 // this preserves original arguments/results and detects modifications
 // immediately after the verb handler returns.
 namespace mesh_revision {
-    constexpr size_t mutator_count=16U;
     constexpr std::array<char const *,mutator_count> names{{
         "setmodelmesh","clonemodel","changemodelmaterial",
         "replacemodelmaterial","appendthingmaterial","appendmodelmaterial",
@@ -19,11 +18,13 @@ namespace mesh_revision {
         "overwritemodel","reloadmodel","setmodelnodemesh","swapmodelmesh"
     }};
     std::array<handler,mutator_count> originals{};
+    mutator_counts calls{}; // per-verb counts since last profiling sample
     registrar original_registrar=nullptr;
     uint32_t registered_mask=0U;
-    uint64_t generation=1U;
+    uint64_t generation=1U; // still invalidates precise Type-3 collision caches
+    uint64_t source_generation=1U; // lazy full-source validation
+    uint64_t material_generation=1U; // lazy face-material validation
     bool complete=false;
-    bool untracked_write=false;
 
     template<size_t I>
     void __cdecl invoke(void *ctx)
@@ -31,7 +32,13 @@ namespace mesh_revision {
         // Call the original JK.dll COG handler exactly once, without
         // touching the interpreter's stack or its returned result.
         originals[I](ctx);
-        ++generation; // global invalidation; only actual verb calls do this
+        ++generation; // retain original conservative collision revision
+        // O(1) mutation recording, independent of resident GPU mesh
+        // cache size. Validate individual cached meshes only when used.
+        constexpr unsigned effect=source_effect_for(I);
+        if(effect&source_full)++source_generation;
+        if(effect&source_materials)++material_generation;
+        ++calls[I]; // count real invocations, not individual mesh hashes
     }
     constexpr std::array<handler,mutator_count> wrappers{{
         invoke<0>,invoke<1>,invoke<2>,invoke<3>,
@@ -60,29 +67,34 @@ namespace mesh_revision {
         original_registrar=fn;
         registered_mask=0U;
         originals.fill(nullptr);
+        calls.fill(0U);
         complete=false;
-        untracked_write=false;
     }
     void finish()
     {
         complete=registered_mask==((1U<<mutator_count)-1U);
         if(complete) {
             LOG_INFO("GPU 3DO revision tracking: ",mutator_count,
-                     " JK.dll mesh/material COG mutation verbs wrapped; "
-                     "periodic signature audit every 32 frames");
+                     " JK.dll model COG verbs wrapped; GPU uses lazy "
+                     "material/source epochs; timed integrity audit is opt-in; "
+                     "collision generation remains global");
         } else {
             LOG_WARNING("GPU 3DO revision tracking unavailable: missing JK.dll "
                         "mesh/material verb registrations; full hashing retained");
         }
     }
-    bool active() {return complete && !untracked_write;}
+    bool active() {return complete;}
     uint64_t current() {return generation;}
-    void report_untracked()
+    uint64_t source_current() {return source_generation;}
+    uint64_t material_current() {return material_generation;}
+    mutator_counts take_mutator_counts()
     {
-        if(untracked_write)return;
-        untracked_write=true;
-        LOG_WARNING("GPU 3DO revision audit detected a mesh write outside "
-                    "tracked JK.dll COG verbs; disabling fast path, "
-                    "restoring full per-frame hashing for this session");
+        auto const sample=calls;
+        calls.fill(0U);
+        return sample;
+    }
+    char const *mutator_name(std::size_t index)
+    {
+        return index<names.size()?names[index]:"unknown";
     }
 }

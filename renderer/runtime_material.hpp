@@ -95,6 +95,10 @@ struct runtime_mat_override {
     std::optional<runtime_image_transition> env;
     std::optional<runtime_image_transition> albedo;
     std::optional<animated_floats<3>> color;
+    // Absolute clearcoat strength/roughness/transmission, animated as one
+    // vector. Reset restores authored material defaults, not identity.
+    std::optional<animated_floats<3>> clearcoat;
+    bool clearcoat_reset=false;
 };
 
 struct runtime_material_snapshot {
@@ -110,6 +114,14 @@ class runtime_material_controls {
     runtime_material_snapshot state_;
     uint32_t observed_world_ = 0;
     uint64_t revision_ = 0;
+    using coat_values=std::array<float,3>;
+    std::map<uint32_t,coat_values> authored_clearcoat_;
+    static constexpr coat_values fallback_clearcoat_{{0.0f,0.1f,1.0f}};
+    coat_values authored_clearcoat(uint32_t mat) const
+    {
+        auto const it=authored_clearcoat_.find(mat);
+        return it==authored_clearcoat_.end()?fallback_clearcoat_:it->second;
+    }
 
 public:
     void prepare_world(uint32_t current_world)
@@ -118,6 +130,7 @@ public:
         std::lock_guard<std::mutex> guard(lock_);
         if(observed_world_ && observed_world_ != current_world) {
             state_ = {};
+            authored_clearcoat_.clear();
             ++revision_;
         }
         observed_world_ = current_world;
@@ -144,7 +157,13 @@ public:
                em.color->target() == std::array<float, 3>{{1.0f, 1.0f, 1.0f}}) {
                 em.color.reset();
             }
-            if(!em.env && !em.albedo && !em.color) it = state_.per_mat.erase(it);
+            if(em.clearcoat_reset && em.clearcoat &&
+               !em.clearcoat->is_fading(now)) {
+                em.clearcoat.reset();
+                em.clearcoat_reset=false;
+            }
+            if(!em.env && !em.albedo && !em.color && !em.clearcoat)
+                it = state_.per_mat.erase(it);
             else ++it;
         }
         auto result = state_;
@@ -156,6 +175,49 @@ public:
     {
         std::lock_guard<std::mutex> guard(lock_);
         state_ = {};
+        authored_clearcoat_.clear();
+        ++revision_;
+    }
+
+    // Material->MAT association is reported by the renderer when native
+    // texture generations resolve. No GL work or revision scan is needed.
+    void register_mat_clearcoat_default(uint32_t mat,coat_values v)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        authored_clearcoat_[mat]=v;
+    }
+
+    coat_values get_mat_clearcoat(uint32_t mat)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        auto it=state_.per_mat.find(mat);
+        if(it!=state_.per_mat.end() && it->second.clearcoat)
+            return it->second.clearcoat->value();
+        return authored_clearcoat(mat);
+    }
+
+    void set_mat_clearcoat(uint32_t mat,coat_values v,float fade)
+    {
+        for(float &x:v)
+            x=std::isfinite(x)?std::clamp(x,0.0f,1.0f):0.0f;
+        std::lock_guard<std::mutex> guard(lock_);
+        auto &entry=state_.per_mat[mat];
+        if(!entry.clearcoat)
+            entry.clearcoat.emplace(authored_clearcoat(mat));
+        entry.clearcoat->fade_to(v,
+            std::isfinite(fade)?std::clamp(fade,0.0f,3600.0f):0.0f);
+        entry.clearcoat_reset=false;
+        ++revision_;
+    }
+
+    void reset_mat_clearcoat(uint32_t mat,float fade)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        auto it=state_.per_mat.find(mat);
+        if(it==state_.per_mat.end() || !it->second.clearcoat)return;
+        it->second.clearcoat->fade_to(authored_clearcoat(mat),
+            std::isfinite(fade)?std::clamp(fade,0.0f,3600.0f):0.0f);
+        it->second.clearcoat_reset=true;
         ++revision_;
     }
 

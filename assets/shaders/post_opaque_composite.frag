@@ -3,10 +3,9 @@
 uniform sampler2D color_image;
 uniform sampler2D emissive_image;
 uniform sampler2D occlusion_image;
-uniform int debug_void_pixels; // unresolved raw empty-depth pixels, neon checkerboard
 uniform int retain_hom_pixels; // skip unwritten pixels, leaving prior scene buffer
 uniform sampler2D depth_image;
-uniform vec4 fog_params; // start, end, opacity, unused
+uniform vec4 fog_params; // x=start, y=end, z=opacity, w=0 planar linear,1 radial linear,2 radial exponential
 uniform vec3 fog_color;
 
 uniform sampler2D normal_image; // scene normals for MAT spotlights
@@ -72,10 +71,13 @@ float sun_range_fade(float forward_distance)
 }
 // 4x2 tiles with independently configurable resolution and 2px guard.
 uniform int sun_dynamic_count;
+uniform float sun_dynamic_pcf_radius; // 0=original single hardware PCF comparison
 uniform sampler2DShadow sun_dynamic_image;
 uniform vec4 sun_dynamic_atlas_rects[8]; // xy=tile origin, zw=tile size in pixels
 uniform vec3 sun_dynamic_origin[8],sun_dynamic_right[8];
 uniform vec3 sun_dynamic_up[8],sun_dynamic_forward[8],sun_dynamic_limits[8];
+
+#include "sun_dynamic_tile_pcf.glsl"
 
 vec3 sun_shadow_coordinates(vec3 position,vec3 origin,vec3 right,
                             vec3 up,vec3 forward,vec3 limits)
@@ -181,7 +183,9 @@ float sun_sky_aperture(vec3 position)
     bool f=sun_shadow_inside(far_uv);
     if(n && !f)return sun_sky_aperture_sample(near_uv,0);
     if(!n && f)return sun_sky_aperture_sample(far_uv,1);
-    if(!n && !f)return 0.0;
+    // Neither cascade covers this receiver: visibility is unknown, not blocked.
+    // Fail open, as regular sun shadows do, rather than cutting off sunlight.
+    if(!n && !f)return 1.0;
     float near_access=sun_sky_aperture_sample(near_uv,0);
     if(depth<sun_shadow_split*0.8125)return near_access;
     float far_access=sun_sky_aperture_sample(far_uv,1);
@@ -211,22 +215,145 @@ float sun_dynamic_shadow_visibility(vec3 position,float incidence)
             sun_dynamic_limits[i]);
         if(!sun_shadow_inside(uv))continue;
         vec4 rect=sun_dynamic_atlas_rects[i];
-        vec2 atlas_uv=(rect.xy+vec2(2.0)+
-                       uv.xy*(rect.zw-vec2(4.0))) /
-                      vec2(textureSize(sun_dynamic_image,0));
+        // Tile-safe filter retains the original lookup for radius zero.
         float grazing=1.0-clamp(incidence,0.0,1.0);
         float bias_world=(0.006+0.032*grazing*grazing)*
                          sun_shadow_receiver_bias_scale;
         float bias=max(4.0/16777215.0,
                        bias_world/max(sun_dynamic_limits[i].z,0.001));
         float comparison=uv.z-bias;
-        // Fixed single-sample hardware PCF; no separation-dependent taps.
-        float object_visibility=texture(sun_dynamic_image,
-            vec3(atlas_uv,comparison));
+        float object_visibility=sun_dynamic_tile_pcf(
+            sun_dynamic_image,rect,uv,comparison,sun_dynamic_pcf_radius);
         visibility=min(visibility,object_visibility);
         if(visibility<=0.001)break;
     }
     return mix(1.0,visibility,near_fade);
+}
+
+
+// Optional Fluid transmission, using the same near/far SUN projections.
+// Source depth is the first Fluid interface along the sunlight ray.
+uniform int sun_caustics_active;
+#ifdef JKGM_SUN_CAUSTICS
+uniform sampler2DArray sun_caustics_depth;
+uniform sampler2DArray sun_caustics_density;
+uniform sampler2D sun_caustics_pattern;
+uniform float sun_caustics_time;
+// Editable visual preset (no jkgm.json tuning keys).
+const float CAUSTICS_INTENSITY = 6.0;
+const float CAUSTICS_SPREAD = 8.0;
+const float CAUSTICS_ATTENUATION = 8.0;
+// Fade caustics smoothly in very shallow water instead of a depth step.
+// Units are JK world units measured along the sunlight ray.
+const float CAUSTICS_SHORE_FADE_DISTANCE = 0.35;
+// Direct sunlight is attenuated independently, more slowly than caustics.
+const float SUN_WATER_DIRECT_ATTENUATION = 1.0;
+// RGB wavelength-selective absorption from Fluid MAT color; zero is neutral.
+const float SUN_WATER_TINT_STRENGTH = 4.0;
+// Returns (additional caustic light, ordinary sunlight transmission).
+// A missing Fluid source has no effect on either part of sunlight.
+vec4 sample_sun_fluid_cascade(vec3 world_position,int layer,vec3 coord)
+{
+    if(!sun_shadow_inside(coord))return vec4(0.0,1.0,1.0,1.0);
+    float interface_depth=texture(sun_caustics_depth,
+        vec3(coord.xy,float(layer))).r;
+    if(interface_depth>=0.999999 || coord.z<=interface_depth)
+        return vec4(0.0,1.0,1.0,1.0);
+    float ray_length=(coord.z-interface_depth)*
+        (layer==0?sun_shadow_limits.z:sun_shadow_far_limits.z);
+    if(ray_length<=0.0)return vec4(0.0,1.0,1.0,1.0);
+    // R=density, GBA=water RGB at the sun ray's first Fluid interface.
+    vec4 water=texture(sun_caustics_density,vec3(coord.xy,float(layer)));
+    float density=clamp(water.r,0.0,8.0);
+    vec3 water_rgb=clamp(water.gba,vec3(0.0),vec3(1.0));
+    float extinction=ray_length*(0.08+density*0.4);
+    vec3 sunlight_transmission=exp(-extinction*(
+        vec3(SUN_WATER_DIRECT_ATTENUATION)+
+        SUN_WATER_TINT_STRENGTH*(vec3(1.0)-water_rgb)));
+    float decay=exp(-extinction*CAUSTICS_ATTENUATION);
+    if(decay<0.003)return vec4(0.0,sunlight_transmission);
+    float lod=clamp(log2(1.0+density*ray_length*2.75*
+                           CAUSTICS_SPREAD),0.0,7.5);
+    vec3 right=layer==0?sun_shadow_right:sun_shadow_far_right;
+    vec3 up=layer==0?sun_shadow_up:sun_shadow_far_up;
+    vec2 p=vec2(dot(world_position,right),dot(world_position,up));
+    float a=textureLod(sun_caustics_pattern,
+        p+vec2(0.015,0.01)*(sun_caustics_time),lod).r;
+    float b=textureLod(sun_caustics_pattern,
+        p*1.3+vec2(-0.012,-0.018)*(sun_caustics_time),lod).r;
+    float pattern = min(a,b);
+    float shore_fade=smoothstep(0.0,CAUSTICS_SHORE_FADE_DISTANCE,
+                               ray_length);
+    return vec4(pattern*decay*CAUSTICS_INTENSITY*shore_fade,
+                sunlight_transmission);
+}
+vec4 sample_sun_fluid_light(vec3 world_position,float camera_depth)
+{
+    if(sun_caustics_active==0)return vec4(0.0,1.0,1.0,1.0);
+    vec3 near_coord=sun_shadow_coordinates(world_position,sun_shadow_origin,
+        sun_shadow_right,sun_shadow_up,sun_shadow_forward,sun_shadow_limits);
+    vec3 far_coord=sun_shadow_coordinates(world_position,sun_shadow_far_origin,
+        sun_shadow_far_right,sun_shadow_far_up,sun_shadow_far_forward,
+        sun_shadow_far_limits);
+    bool use_near=camera_depth<sun_shadow_split && sun_shadow_inside(near_coord);
+    bool use_far=sun_shadow_inside(far_coord);
+    if(!use_near)return use_far
+        ?sample_sun_fluid_cascade(world_position,1,far_coord):vec4(0.0,1.0,1.0,1.0);
+    if(!use_far)return sample_sun_fluid_cascade(world_position,0,near_coord);
+    // Match the regular sun shadow cascade blend: no hard transition where
+    // the two water-depth captures have different texel footprints.
+    float transition_start=sun_shadow_split*0.8125;
+    float transition_end=sun_shadow_split*0.9375;
+    if(camera_depth<transition_start)
+        return sample_sun_fluid_cascade(world_position,0,near_coord);
+    vec4 near_light=sample_sun_fluid_cascade(world_position,0,near_coord);
+    vec4 far_light=sample_sun_fluid_cascade(world_position,1,far_coord);
+    return mix(near_light,far_light,
+               smoothstep(transition_start,transition_end,camera_depth));
+}
+#else
+vec4 sample_sun_fluid_light(vec3 world_position,float camera_depth)
+{ return vec4(0.0,1.0,1.0,1.0); }
+#endif
+
+// Only the costly shadow-map lookups are low-resolution. In particular,
+// the actual SKY opening gate is always evaluated per full-resolution pixel.
+uniform int sun_half_visibility_active;
+uniform sampler2D sun_half_visibility_image;
+vec3 sun_half_decode_oct(vec2 encoded)
+{
+    vec2 f=encoded*2.0-1.0;
+    vec3 n=vec3(f,1.0-abs(f.x)-abs(f.y));
+    if(n.z<0.0)n.xy=(vec2(1.0)-abs(n.yx))*sign(n.xy);
+    return normalize(n);
+}
+float sun_half_reconstruct_shadow(ivec2 pixel,float depth,vec3 view_normal)
+{
+    ivec2 half_dims=textureSize(sun_half_visibility_image,0);
+    ivec2 full_dims=textureSize(depth_image,0);
+    vec2 pos=(vec2(pixel)+vec2(0.5))*vec2(half_dims)/vec2(full_dims)-0.5;
+    ivec2 base=ivec2(floor(pos));
+    vec2 fraction=fract(pos);
+    vec3 N=normalize(view_normal);
+    float sum=0.0,weights=0.0;
+    float depth_tolerance=max(0.125,depth*0.002);
+    for(int y=0;y<2;++y)for(int x=0;x<2;++x) {
+        ivec2 p=clamp(base+ivec2(x,y),ivec2(0),half_dims-1);
+        vec4 half_sample=texelFetch(sun_half_visibility_image,p,0);
+        if(half_sample.g<=0.0 || half_sample.g>=65500.0 ||
+           abs(half_sample.g-depth)>=depth_tolerance ||
+           dot(N,sun_half_decode_oct(half_sample.ba))<0.96)continue;
+        float bilinear=(x==0?1.0-fraction.x:fraction.x)*
+                       (y==0?1.0-fraction.y:fraction.y);
+        // Favor same-depth geometry while filtering soft shadow transitions.
+        float weight=bilinear*(1.0-smoothstep(
+            0.0,depth_tolerance,abs(half_sample.g-depth)));
+        sum+=half_sample.r*weight;
+        weights+=weight;
+    }
+    // Negative means no matching low-res receiver; the compositor uses
+    // the original full-resolution shadow lookup for this pixel.
+    return weights>0.00001?sum/weights:-1.0;
 }
 
 float spotlight_shadow_visibility(vec2 uv,float receiver_distance,float facing)
@@ -364,17 +491,6 @@ void main()
     ivec2 tc=ivec2(gl_FragCoord.xy);
     float depth=texelFetch(depth_image,tc,0).r;
     bool covered=has_opaque_coverage(tc);
-    // Debug the ACTUAL remaining missing pixels,
-    // regardless of HOM being enabled. Bright alternating neon colors make
-    // subpixel edge cracks conspicuous even under sunlight/HDR processing.
-    if(debug_void_pixels!=0 && !covered) {
-        ivec2 pixel=ivec2(gl_FragCoord.xy);
-        bool checker=(((pixel.x/2)+(pixel.y/2))&1)==0;
-        out_color=vec4(checker?vec3(8.0,0.0,8.0):
-                              vec3(0.0,8.0,0.0),1.0);
-        return;
-    }
-
     // Preserve the previous scene only if NO opaque fragment was drawn.
     // In particular, a skybox beyond 65504/32 world units can overflow
     // half-float scene depth while its color and coverage are still valid.
@@ -393,8 +509,23 @@ void main()
     float fog = 0.0;
     if(depth > 0.0 && depth < 65500.0) {
         float span = max(fog_params.y - fog_params.x, 0.0001);
-        fog = clamp((depth - fog_params.x) / span, 0.0, 1.0) *
-              fog_params.z;
+        // Camera ray length gives exact radial depth without reconstructing
+        // a world position for every opaque pixel (even when sun is off).
+        float fog_depth=depth;
+        if(fog_params.w>0.5) {
+            vec2 ndc=gl_FragCoord.xy/vec2(textureSize(depth_image,0))*2.0-1.0;
+            fog_depth*=length(vec3(ndc.x*camera_right.w,
+                                   ndc.y*camera_up.w,1.0));
+        }
+        float fog_fraction=clamp((fog_depth-fog_params.x)/span,0.0,1.0);
+        if(fog_params.w>1.5) {
+            // No hard clear-radius: density accumulates from the camera.
+            // SetFog end sets ~90% fog distance (at start=0); start
+            // increases the soft reach instead of creating a hard edge.
+            float reach=max(fog_params.y+0.5*max(fog_params.x,0.0),1.0);
+            fog_fraction=1.0-exp(-2.302585093*max(fog_depth,0.0)/reach);
+        }
+        fog=fog_fraction*fog_params.z;
     }
     vec3 surface_rgb=albedo.rgb*occlusion;
     // Blend the new light against the material's UNLIT pigment, not its
@@ -428,9 +559,12 @@ void main()
                 :max(dot(normal,sun_shadow_direction),0.0);
             if(incidence>0.0) {
                 vec3 world_position=reconstruct_scene_world(depth);
-                float visibility=min(
-                    sun_shadow_visibility(world_position,incidence),
-                    sun_dynamic_shadow_visibility(world_position,incidence));
+                float visibility=sun_half_visibility_active!=0
+                    ?sun_half_reconstruct_shadow(tc,depth,vn):-1.0;
+                if(visibility<0.0)
+                    visibility=min(
+                        sun_shadow_visibility(world_position,incidence),
+                        sun_dynamic_shadow_visibility(world_position,incidence));
                 // Treat an absent sky aperture exactly like a blocked sun
                 // ray. It must suppress direct light AND allow the shadow
                 // baseline to darken authored brightness indoors, rather
@@ -448,10 +582,26 @@ void main()
                 float shadowed_baseline=(sprite ? 0.75*sun_fade
                                                : 0.6*sun_applied)*
                                         sun_shadow_strength;
-                surface_rgb*=1.0-shadowed_baseline*(1.0-direct_visibility);
+                // Water depth reduces direct sunlight as well as the
+                // positive caustic contribution. Preserve full sunlight
+                // above/outside Fluid and keep shadow/sky gating unchanged.
+                vec4 water_light=sample_sun_fluid_light(world_position,depth/32.0);
+                vec3 submerged_visibility=direct_visibility*water_light.yzw;
+                surface_rgb*=vec3(1.0)-shadowed_baseline*
+                    (vec3(1.0)-submerged_visibility);
                 vec3 sun_light=pigment*sun_shadow_color_intensity.rgb*
-                    sun_shadow_color_intensity.a*sun_applied*direct_visibility;
+                    sun_shadow_color_intensity.a*sun_applied*submerged_visibility;
                 surface_rgb+=sun_light*(vec3(1.0)-clamp(surface_rgb,0.0,1.0));
+                float caustic=water_light.x;
+                if(caustic>0.0 && direct_visibility>0.0) {
+                    // Preserve caustic strength but tint the highlights.
+                    vec3 hue=water_light.yzw/
+                        max(max(water_light.y,max(water_light.z,water_light.w)),0.00001);
+                    vec3 transmitted=pigment*sun_shadow_color_intensity.rgb*
+                        sun_shadow_color_intensity.a*sun_applied*
+                        direct_visibility*caustic*hue;
+                    surface_rgb+=transmitted*(vec3(1.0)-clamp(surface_rgb,0.0,1.0));
+                }
             }
         }
     }

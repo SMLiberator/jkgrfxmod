@@ -6,6 +6,7 @@
 #include "renderer_fwd.hpp"
 #include <d3d.h>
 #include <ddraw.h>
+#include <array>
 #include <vector>
 #include <map>
 
@@ -69,6 +70,15 @@ namespace jkgm {
         float displacement_factor = 0.0f;
 
         std::optional<linear_texture_id> surface_map;
+        // Independent artistic Matcap. Color is sRGB; coverage/roughness
+        // surface mask is linear and must not share its color cache.
+        std::optional<srgb_texture_id> matcap_map;
+        std::optional<linear_texture_id> matcap_surface_map;
+        color_rgb matcap_factor=color_rgb::fill(1.0f);
+        float matcap_roughness=0.0f;
+        std::optional<linear_texture_id> clearcoat_surface_map;
+        std::optional<linear_texture_id> clearcoat_normal_map;
+        std::array<float,3> clearcoat_defaults{{0.0f,0.1f,1.0f}};
         float reflection_strength = 0.0f;
         float roughness = 0.0f;
         float metalness = 0.0f;

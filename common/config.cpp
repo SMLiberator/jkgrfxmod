@@ -39,7 +39,7 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("hud_scale")) {
             j.at("hud_scale").get_to(rv->hud_scale);
         }
-
+        
         if(j.contains("max_anisotropy")) {
             j.at("max_anisotropy").get_to(rv->max_anisotropy);
         }
@@ -65,47 +65,22 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_bloom")) {
             j.at("enable_bloom").get_to(rv->enable_bloom);
         }
-        if(j.contains("experimental_fused_bloom_downsample")) {
-            j.at("experimental_fused_bloom_downsample").get_to(
-                rv->experimental_fused_bloom_downsample);
-        }
-        if(j.contains("experimental_skip_bloom_clears")) {
-            j.at("experimental_skip_bloom_clears").get_to(
-                rv->experimental_skip_bloom_clears);
-        }
-        if(j.contains("experimental_native_triangle_uploads")) {
-            j.at("experimental_native_triangle_uploads").get_to(
-                rv->experimental_native_triangle_uploads);
-        }
-
+                        
         if(j.contains("enable_blur")) {
             j.at("enable_blur").get_to(rv->enable_blur);
         }
-        if(j.contains("experimental_spatial_blur_half_res")) {
-            j.at("experimental_spatial_blur_half_res").get_to(
-                rv->experimental_spatial_blur_half_res);
-        }
-        // Canonical mode takes precedence over both historical keys.
-        // Retain the two experimental JSON names for existing user configs.
-        if(j.contains("spatial_blur_mode") ||
-           j.contains("experimental_spatial_blur_mode")) {
-            char const *key=j.contains("spatial_blur_mode")
-                ?"spatial_blur_mode":"experimental_spatial_blur_mode";
-            auto const &mode=j.at(key);
-            if(!mode.is_number_integer() || mode.get<int>()<0 ||
-               mode.get<int>()>2)
-                throw std::runtime_error(std::string(key)+
-                                         " must be 0, 1 or 2");
-            rv->spatial_blur_mode=mode.get<int>();
-        }
-        else if(rv->experimental_spatial_blur_half_res)
-            rv->spatial_blur_mode=1;
         if(j.contains("enable_trails")) {
             j.at("enable_trails").get_to(rv->enable_trails);
         }
 
         if(j.contains("enable_fog")) {
             j.at("enable_fog").get_to(rv->enable_fog);
+        }
+        if(j.contains("experimental_radial_fog")) {
+            j.at("experimental_radial_fog").get_to(rv->experimental_radial_fog);
+        }
+        if(j.contains("experimental_exponential_fog")) {
+            j.at("experimental_exponential_fog").get_to(rv->experimental_exponential_fog);
         }
 
         if(j.contains("enable_post")) {
@@ -200,7 +175,7 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                              rv->default_specular_strength);
         read_specular_scalar("default_specular_roughness",
                              rv->default_specular_roughness);
-        if(j.contains("enable_dynamic_light_specular")) {
+                if(j.contains("enable_dynamic_light_specular")) {
             j.at("enable_dynamic_light_specular").get_to(
                 rv->enable_dynamic_light_specular);
         }
@@ -239,14 +214,14 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_sector_crossing_vertex").get_to(
                 rv->experimental_sector_crossing_vertex);
         }
-        if(j.contains("experimental_continuous_ambient_gpu")) {
+                if(j.contains("experimental_continuous_ambient_gpu")) {
             j.at("experimental_continuous_ambient_gpu").get_to(
                 rv->experimental_continuous_ambient_gpu);
         }
         if(j.contains("enable_ssao")) {
             j.at("enable_ssao").get_to(rv->enable_ssao);
         }
-
+                
         if(j.contains("enable_parallax")) {
             j.at("enable_parallax").get_to(rv->enable_parallax);
         }
@@ -277,9 +252,225 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("use_gpu_cache")) {
             j.at("use_gpu_cache").get_to(rv->use_gpu_cache);
         }
+        if(j.contains("experimental_packed_3do_vertices")) {
+            j.at("experimental_packed_3do_vertices").get_to(
+                rv->experimental_packed_3do_vertices);
+        }
+                if(j.contains("experimental_3do_occlusion_culling")) {
+            j.at("experimental_3do_occlusion_culling").get_to(
+                rv->experimental_3do_occlusion_culling);
+        }
+        if(j.contains("experimental_3do_native_occlusion_culling")) {
+            j.at("experimental_3do_native_occlusion_culling").get_to(
+                rv->experimental_3do_native_occlusion_culling);
+        }
+        if(j.contains("gpu_3do_occlusion_proxy_mode")) {
+            auto const &v=j.at("gpu_3do_occlusion_proxy_mode");
+            if(!v.is_number_integer())
+                throw std::runtime_error(
+                    "gpu_3do_occlusion_proxy_mode must be integer 0..2");
+            int const n=v.get<int>();
+            if(n<0 || n>2)
+                throw std::runtime_error(
+                    "gpu_3do_occlusion_proxy_mode must be between 0 and 2");
+            rv->gpu_3do_occlusion_proxy_mode=n;
+        }
+        if(j.contains("gpu_3do_occlusion_query_budget")) {
+            auto const &v=j.at("gpu_3do_occlusion_query_budget");
+            if(!v.is_number_integer())
+                throw std::runtime_error(
+                    "gpu_3do_occlusion_query_budget must be integer 0..256");
+            int const n=v.get<int>();
+            if(n<0 || n>256)
+                throw std::runtime_error(
+                    "gpu_3do_occlusion_query_budget must be between 0 and 256");
+            rv->gpu_3do_occlusion_query_budget=n;
+        }
+        if(j.contains("gpu_3do_occlusion_debug_view")) {
+            auto const &v=j.at("gpu_3do_occlusion_debug_view");
+            if(!v.is_number_integer())
+                throw std::runtime_error(
+                    "gpu_3do_occlusion_debug_view must be integer 0..2");
+            int const n=v.get<int>();
+            if(n<0 || n>2)
+                throw std::runtime_error(
+                    "gpu_3do_occlusion_debug_view must be between 0 and 2");
+            rv->gpu_3do_occlusion_debug_view=n;
+        }
+        if(j.contains("gpu_3do_occlusion_min_triangles")) {
+            auto const &v=j.at("gpu_3do_occlusion_min_triangles");
+            if(!v.is_number_integer())
+                throw std::runtime_error(
+                    "gpu_3do_occlusion_min_triangles must be integer 0..50000");
+            int const n=v.get<int>();
+            if(n<0 || n>50000)
+                throw std::runtime_error(
+                    "gpu_3do_occlusion_min_triangles must be between 0 and 50000");
+            rv->gpu_3do_occlusion_min_triangles=n;
+        }
+        if(j.contains("experimental_auto_3do_lod")) {
+            j.at("experimental_auto_3do_lod").get_to(
+                rv->experimental_auto_3do_lod);
+        }
+        // Both thresholds are PROJECTED THING MODEL RADIUS in internal
+        // screen pixels (not per-hierarchy-mesh size or full diameter).
+        if(j.contains("gpu_3do_auto_lod_lod1_radius_px")) {
+            auto const &v=j.at("gpu_3do_auto_lod_lod1_radius_px");
+            if(!v.is_number())throw std::runtime_error(
+                "gpu_3do_auto_lod_lod1_radius_px must be a number");
+            rv->gpu_3do_auto_lod_lod1_radius_px=v.get<float>();
+        }
+        if(j.contains("gpu_3do_auto_lod_lod2_radius_px")) {
+            auto const &v=j.at("gpu_3do_auto_lod_lod2_radius_px");
+            if(!v.is_number())throw std::runtime_error(
+                "gpu_3do_auto_lod_lod2_radius_px must be a number");
+            rv->gpu_3do_auto_lod_lod2_radius_px=v.get<float>();
+        }
+        if(!std::isfinite(rv->gpu_3do_auto_lod_lod1_radius_px) ||
+           !std::isfinite(rv->gpu_3do_auto_lod_lod2_radius_px) ||
+           rv->gpu_3do_auto_lod_lod2_radius_px<1.0f ||
+           rv->gpu_3do_auto_lod_lod1_radius_px>4096.0f ||
+           rv->gpu_3do_auto_lod_lod1_radius_px<=
+               rv->gpu_3do_auto_lod_lod2_radius_px)
+            throw std::runtime_error(
+                "Auto 3DO LOD radii must satisfy 1 <= LOD2 < LOD1 <= 4096");
+        if(j.contains("gpu_3do_auto_lod_debug_mode")) {
+            auto const &v=j.at("gpu_3do_auto_lod_debug_mode");
+            if(!v.is_number_integer())throw std::runtime_error(
+                "gpu_3do_auto_lod_debug_mode must be integer 0..3");
+            int const n=v.get<int>();
+            if(n<0 || n>3)throw std::runtime_error(
+                "gpu_3do_auto_lod_debug_mode must be between 0 and 3");
+            rv->gpu_3do_auto_lod_debug_mode=n;
+        }
+        if(j.contains("gpu_3do_auto_lod_generation_budget")) {
+            auto const &v=j.at("gpu_3do_auto_lod_generation_budget");
+            if(!v.is_number_integer())
+                throw std::runtime_error(
+                    "gpu_3do_auto_lod_generation_budget must be a nonnegative integer (0=unlimited)");
+            int const n=v.get<int>();
+            if(n<0)
+                throw std::runtime_error(
+                    "gpu_3do_auto_lod_generation_budget cannot be negative");
+            rv->gpu_3do_auto_lod_generation_budget=n;
+        }
+        if(j.contains("gpu_3do_auto_lod_min_object_triangles")) {
+            auto const &v=j.at("gpu_3do_auto_lod_min_object_triangles");
+            if(!v.is_number_integer())throw std::runtime_error(
+                "gpu_3do_auto_lod_min_object_triangles must be an integer 0..1000000");
+            int const count=v.get<int>();
+            if(count<0||count>1000000)throw std::runtime_error(
+                "gpu_3do_auto_lod_min_object_triangles must be between 0 and 1000000");
+            rv->gpu_3do_auto_lod_min_object_triangles=count;
+        }
+        if(j.contains("experimental_planar_thing_discovery")) {
+            j.at("experimental_planar_thing_discovery").get_to(
+                rv->experimental_planar_thing_discovery);
+        }
+        if(j.contains("enable_reflection_capture")) {
+            j.at("enable_reflection_capture").get_to(
+                rv->enable_reflection_capture);
+        }
+        if(j.contains("enable_reflection_probes")) {
+            j.at("enable_reflection_probes").get_to(
+                rv->enable_reflection_probes);
+        }
+        if(j.contains("reflection_capture_resolution")) {
+            auto const &v=j.at("reflection_capture_resolution");
+            if(!v.is_number_integer())
+                throw std::runtime_error("reflection_capture_resolution must be an integer");
+            rv->reflection_capture_resolution=v.get<int>();
+        }
+        if(rv->reflection_capture_resolution<32 ||
+           rv->reflection_capture_resolution>1024)
+            throw std::runtime_error("reflection_capture_resolution must be 32..1024");
+        if(j.contains("reflection_capture_update_interval")) {
+            auto const &v=j.at("reflection_capture_update_interval");
+            if(!v.is_number())throw std::runtime_error(
+                "reflection_capture_update_interval must be a number");
+            rv->reflection_capture_update_interval=v.get<float>();
+        }
+        if(!std::isfinite(rv->reflection_capture_update_interval) ||
+           rv->reflection_capture_update_interval<0.0f ||
+           rv->reflection_capture_update_interval>60.0f)
+            throw std::runtime_error(
+                "reflection_capture_update_interval must be between 0 and 60 seconds");
+        if(j.contains("envmap_capture_face_resolution")) {
+            auto const &v=j.at("envmap_capture_face_resolution");
+            if(!v.is_number_integer())throw std::runtime_error(
+                "envmap_capture_face_resolution must be 32..1024 pixels");
+            rv->envmap_capture_face_resolution=v.get<int>();
+        }
+        if(rv->envmap_capture_face_resolution<32 ||
+           rv->envmap_capture_face_resolution>1024)
+            throw std::runtime_error(
+                "envmap_capture_face_resolution must be 32..1024 pixels");
+        if(j.contains("reflection_probe_max_owners")) {
+            auto const &v=j.at("reflection_probe_max_owners");
+            if(!v.is_number_integer())throw std::runtime_error(
+                "reflection_probe_max_owners must be an integer 1..16");
+            int const value=v.get<int>();
+            if(value<1 || value>16)throw std::runtime_error(
+                "reflection_probe_max_owners must be between 1 and 16");
+            rv->reflection_probe_max_owners=unsigned(value);
+        }
+        if(j.contains("experimental_screen_space_reflections")) {
+            j.at("experimental_screen_space_reflections").get_to(
+                rv->experimental_screen_space_reflections);
+        }
+        if(j.contains("ssr_resolution_scale")) {
+            auto const &v=j.at("ssr_resolution_scale");
+            if(!v.is_number())throw std::runtime_error(
+                "ssr_resolution_scale must be a number");
+            rv->ssr_resolution_scale=v.get<float>();
+        }
+        if(j.contains("ssr_ray_steps")) {
+            auto const &v=j.at("ssr_ray_steps");
+            if(!v.is_number_integer())throw std::runtime_error(
+                "ssr_ray_steps must be an integer 4..96");
+            rv->ssr_ray_steps=v.get<int>();
+        }
+        if(j.contains("ssr_ray_thickness")) {
+            auto const &v=j.at("ssr_ray_thickness");
+            if(!v.is_number())throw std::runtime_error(
+                "ssr_ray_thickness must be a number");
+            rv->ssr_ray_thickness=v.get<float>();
+        }
+        if(j.contains("ssr_max_distance")) {
+            auto const &v=j.at("ssr_max_distance");
+            if(!v.is_number())throw std::runtime_error(
+                "ssr_max_distance must be a number");
+            rv->ssr_max_distance=v.get<float>();
+        }
+        if(!std::isfinite(rv->ssr_resolution_scale) ||
+           rv->ssr_resolution_scale<0.125f ||
+           rv->ssr_resolution_scale>1.0f ||
+           rv->ssr_ray_steps<4 || rv->ssr_ray_steps>96 ||
+           !std::isfinite(rv->ssr_ray_thickness) ||
+           rv->ssr_ray_thickness<=0.0f || rv->ssr_ray_thickness>8.0f ||
+           !std::isfinite(rv->ssr_max_distance) ||
+           rv->ssr_max_distance<1.0f || rv->ssr_max_distance>2048.0f)
+            throw std::runtime_error("Invalid SSR resolution, steps, thickness or distance");
         if(j.contains("enable_gpu_sprite_instancing")) {
             j.at("enable_gpu_sprite_instancing").get_to(
                 rv->enable_gpu_sprite_instancing);
+        }
+        if(j.contains("experimental_half_res_fluid_sprites")) {
+            j.at("experimental_half_res_fluid_sprites").get_to(
+                rv->experimental_half_res_fluid_sprites);
+        }
+        if(j.contains("fluid_sprite_layer_budget")) {
+            auto const &value=j.at("fluid_sprite_layer_budget");
+            if(!value.is_number_integer()) {
+                throw std::runtime_error(
+                    "fluid_sprite_layer_budget must be an integer from 0 to 255");
+            }
+            int const budget=value.get<int>();
+            if(budget<0 || budget>255) {
+                throw std::runtime_error(
+                    "fluid_sprite_layer_budget must be an integer from 0 to 255");
+            }
+            rv->fluid_sprite_layer_budget=static_cast<unsigned int>(budget);
         }
         if(j.contains("enable_saber_trails")) {
             j.at("enable_saber_trails").get_to(rv->enable_saber_trails);
@@ -354,9 +545,6 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                     "spotlight_shadow_angle_bias_scale must be between 0 and 2");
             rv->spotlight_shadow_angle_bias_scale=static_cast<float>(scale);
         }
-        if(j.contains("debug_void_pixels")) {
-            j.at("debug_void_pixels").get_to(rv->debug_void_pixels);
-        }
         if(j.contains("retain_hom_pixels")) {
             j.at("retain_hom_pixels").get_to(rv->retain_hom_pixels);
         }
@@ -365,6 +553,9 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         }
         if(j.contains("enable_sun_shadows")) {
             j.at("enable_sun_shadows").get_to(rv->enable_sun_shadows);
+        }
+        if(j.contains("experimental_sun_caustics")) {
+            j.at("experimental_sun_caustics").get_to(rv->experimental_sun_caustics);
         }
         if(j.contains("experimental_sun_sky_aperture")) {
             j.at("experimental_sun_sky_aperture").get_to(
@@ -417,6 +608,17 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                 throw std::runtime_error(
                     "sun_dynamic_shadow_resolution must be between 64 and 1024");
             rv->sun_dynamic_shadow_resolution=static_cast<unsigned int>(pixels);
+        }
+        if(j.contains("sun_dynamic_shadow_pcf_radius")) {
+            auto const &v=j.at("sun_dynamic_shadow_pcf_radius");
+            if(!v.is_number())
+                throw std::runtime_error(
+                    "sun_dynamic_shadow_pcf_radius must be numeric (0..2)");
+            double const radius=v.get<double>();
+            if(!std::isfinite(radius) || radius<0.0 || radius>2.0)
+                throw std::runtime_error(
+                    "sun_dynamic_shadow_pcf_radius must be between 0 and 2");
+            rv->sun_dynamic_shadow_pcf_radius=static_cast<float>(radius);
         }
         if(j.contains("sun_shadow_receiver_bias_scale")) {
             auto const &value=j.at("sun_shadow_receiver_bias_scale");
@@ -509,6 +711,24 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                              rv->sun_shadow_near_pcf_radius);
         parse_sun_pcf_radius("sun_shadow_far_pcf_radius",
                              rv->sun_shadow_far_pcf_radius);
+        auto parse_sun_intensity_pcf=[&](char const *name,float &out,
+                                         float min_value,float max_value) {
+            if(!j.contains(name))return;
+            auto const &v=j.at(name);
+            if(!v.is_number())
+                throw std::runtime_error(std::string(name)+" must be numeric");
+            double const n=v.get<double>();
+            if(!std::isfinite(n) || n<min_value || n>max_value)
+                throw std::runtime_error(std::string(name)+
+                                         " must be within its documented range");
+            out=static_cast<float>(n);
+        };
+        parse_sun_intensity_pcf("experimental_sun_pcf_intensity_softness",
+                                rv->experimental_sun_pcf_intensity_softness,
+                                0.0f,2.0f);
+        parse_sun_intensity_pcf("experimental_sun_pcf_intensity_reference",
+                                rv->experimental_sun_pcf_intensity_reference,
+                                0.05f,16.0f);
         // Old packs may still ship enable_sprite_decals. Prefer the new
         // enable_decals when both keys are supplied.
         if(j.contains("enable_decals")) {

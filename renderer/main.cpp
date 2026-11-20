@@ -7,11 +7,17 @@
 #include "postfx.hpp"
 #include "renderer.hpp"
 #include "runtime_material.hpp"
+#include "global_env_capture.hpp"
 #include "native_3do_profile.hpp"
+#include "native_3do_lod_override.hpp"
 #include "native_mesh_revision.hpp"
 #include "native_sprite_profile.hpp"
 #include "native_particle_texture.hpp"
 #include "gpu_3do_preview.hpp"
+#include "native_occlusion_bridge.hpp"
+#include "engine_camera.hpp"
+#include "planar_reflection_native_nodes.hpp"
+#include "planar_reflection_offscreen_gpu.hpp"
 #include "light_intensity_range.hpp"
 #include "gpu_polyline.hpp"
 #include "saber_trail_history.hpp"
@@ -36,11 +42,17 @@
 #include "native_earth_hit_sound.hpp"
 #include "compressed_sound_io.hpp"
 #include "native_compressed_sound_hook.hpp"
+#include "native_spawn_parent_hook.hpp"
+#include "native_cog_symbol_extensions.hpp"
 #include "mots_native_collision_bridge.hpp"
 #include "precise_type3_native.hpp"
 #include "precise_type3_pose_bulk.hpp"
 #include "mots_collision_snapshot_cache.hpp"
 #include "cog_math.hpp"
+#include "cog_create_thing.hpp"
+#include "cog_thing_joint_node.hpp"
+#include "cog_camera_distance.hpp"
+#include "cog_camera_axes.hpp"
 #include "cog_pyr_math.hpp"
 #include "cog_thing_offsets.hpp"
 #include "cog_raycast_head.hpp"
@@ -69,10 +81,12 @@
 #include "sprite_decal_multimesh.hpp"
 #include "sprite_decal_geoset.hpp"
 #include "sprite_alpha_tag.hpp"
+#include "sprite_flare_projection.hpp"
 #include "gpu_3do_frustum.hpp"
 #include "gpu_3do_compat.hpp"
 #include "gpu_3do_triangulation.hpp"
 #include "gpu_3do_cache_signature.hpp"
+#include "gpu_mesh_cache_eviction.hpp"
 #include "gpu_3do_colormap.hpp"
 #include "native_jk_palette_effects.hpp"
 #include "native_sector_palette_bridge.hpp"
@@ -150,12 +164,18 @@ namespace {
     // nodes; the rdMesh callback's transform is view-space and node-local.
     thread_local std::array<float,3> active_native_model_world_position{};
     thread_local bool active_native_model_world_position_valid=false;
+    thread_local float active_native_model_lod_radius=0.0f;
+    thread_local bool active_native_model_lod_radius_valid=false;
     // rdThing->model3 at +4 points to rdModel3, whose first 32 bytes
     // contain the source 3DO filename. Keep this context for the nested
     // rdModel3_DrawMesh callback and restore it on recursive model draws.
     thread_local std::array<char,33> active_native_model_filename{{0}};
     thread_local uintptr_t active_native_model_ptr=0U;
     thread_local uintptr_t active_native_rdthing_ptr=0U;
+    thread_local jkgm::thing_opacity_state active_native_thing_opacity{};
+    // Defined beside the native SPR registry; only samples Thing state.
+    jkgm::thing_opacity_state sample_3do_opacity(void const *thing);
+    void clear_thing_opacity();
     thread_local uint64_t active_native_shadow_owner=0;
     thread_local uint64_t active_native_spotlight_family=0;
     thread_local bool active_native_shadow_dynamic=false;
@@ -281,7 +301,10 @@ namespace {
         int num_vertices=0,num_faces=0,num_uvs=0;
         int lighting_mode=0;
         uint64_t source_signature=0,source_checked_frame=0;
-        uint64_t source_checked_generation=0,last_audit_frame=0;
+        uint64_t material_signature=0; // face references, not model transforms
+        uint64_t source_checked_generation=0;
+        uint64_t material_checked_generation=0; // face MAT mutation epoch
+        uint64_t last_used_frame=0; // primary + planar camera references
         char const *snapshot_failure=nullptr; // memoized failed snapshots
         std::string snapshot_failure_detail;
         uint64_t id=0;
@@ -290,6 +313,8 @@ namespace {
         bool ready_for_frame=false;
     };
     std::unordered_map<void const *,cached_gpu_mesh> gpu_mesh_cache;
+    uint64_t gpu_mesh_cache_last_trim_frame=0;
+    size_t gpu_mesh_cache_peak=0;
     std::vector<jkgm::gpu_3do_instance> pending_gpu_instances;
     struct cached_gpu_sprite_quad {
         jkgm::sprite_decal_resource resource{};
@@ -343,6 +368,43 @@ namespace {
     // opaque mesh must still contribute to sunlight depth if it falls back.
     thread_local bool gpu_mesh_light_overflow=false;
     jkgm::gpu_3do_native_stats gpu_native_stats;
+    // Soft-cap sweep is at most once per frame, never per Thing instance.
+    // The shared_ptr on pending instances preserves current-frame geometry.
+    // Geometry IDs are not reused; GL owns independently expiring uploads.
+    void gpu_mesh_cache_make_room()
+    {
+        if(gpu_mesh_cache.size()<jkgm::gpu_mesh_cache_soft_limit ||
+           gpu_mesh_cache_last_trim_frame==gpu_frame_serial)
+            return;
+        gpu_mesh_cache_last_trim_frame=gpu_frame_serial;
+        auto const r=jkgm::trim_gpu_mesh_cache(
+            gpu_mesh_cache,gpu_frame_serial);
+        if(the_config && the_config->profile_renderer) {
+            gpu_native_stats.cache_evictions+=r.evicted;
+            gpu_native_stats.cache_trim_deferred+=r.deferred?1U:0U;
+        }
+    }
+    void gpu_mesh_cache_inserted()
+    {
+        gpu_mesh_cache_peak=(std::max)(gpu_mesh_cache_peak,
+                                        gpu_mesh_cache.size());
+    }
+    // Mutually exclusive signature triggers, including hashes requested
+    // by the independent planar camera (shared CPU cache and revision path).
+    void gpu_mesh_hash_reason(bool existing,bool header_ready,
+                              bool revision_fastpath,
+                              uint64_t checked_generation,
+                              uint64_t current_generation,
+                              bool material_changed=false)
+    {
+        if(!the_config || !the_config->profile_renderer)return;
+        if(!existing)++gpu_native_stats.cache_hash_new;
+        else if(!header_ready)++gpu_native_stats.cache_hash_header;
+        else if(!revision_fastpath)++gpu_native_stats.cache_hash_fallback;
+        else if(material_changed ||
+                checked_generation!=current_generation)
+            ++gpu_native_stats.cache_hash_revision;
+    }
     jkgm::gpu_mat_ready_cache gpu_mat_residency;
     std::atomic<uint64_t> native_mat_upload_generation{1};
     // Debug-only fallback names, capped to avoid filling the performance log
@@ -723,13 +785,101 @@ namespace {
         }
     };
 
+    uint64_t elapsed_native_ns(std::chrono::steady_clock::time_point start);
+
+    // COG clear/reload may decommit rdMesh memory within the frame.
+    // Revalidate actual pages on the mesh's next use.
+    bool gpu_mutation_span_readable(void const *ptr,size_t bytes)
+    {
+        if(!ptr || bytes==0U)return false;
+        uintptr_t const start=reinterpret_cast<uintptr_t>(ptr);
+        if(start+bytes<start)return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if(VirtualQuery(ptr,&mbi,sizeof(mbi))==0 ||
+           mbi.State!=MEM_COMMIT ||
+           (mbi.Protect&(PAGE_GUARD|PAGE_NOACCESS)))
+            return false;
+        uintptr_t const base=reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+        if(mbi.RegionSize>std::numeric_limits<uintptr_t>::max()-base)
+            return false;
+        return start>=base && start+bytes<=base+mbi.RegionSize;
+    }
+
+    // On-demand face-MAT comparison for USED cached meshes after a COG
+    // material mutation, never a global cache scan.
+    bool gpu_mesh_material_signature(native_mesh const &m,uint64_t &value)
+    {
+        if(m.num_faces<0 || m.num_faces>65536 ||
+           (m.num_faces && !gpu_mutation_span_readable(
+                m.faces,size_t(m.num_faces)*sizeof(native_face))))
+            return false;
+        jkgm::gpu_3do_byte_signature h;
+        h.add(m.num_faces);
+        for(int i=0;i<m.num_faces;++i) {
+            native_face f{};
+            std::memcpy(&f,m.faces+size_t(i)*sizeof(f),sizeof(f));
+            h.add(f.material);
+            h.add(f.cel);
+        }
+        value=h.value;
+        return true;
+    }
+
+    // A full source hash after SetModelMesh/Clear/Reload must not trust
+    // the ordinary positive VirtualQuery memo if the COG handler decommitted
+    // an old buffer earlier in the SAME native frame. These checks happen
+    // only for meshes actually reached by a camera, never for the cache.
+    bool gpu_mesh_dirty_source_readable(native_mesh const &m,
+                                        float const *rgb)
+    {
+        return m.num_vertices>=3 && m.num_vertices<=65536 &&
+            m.num_faces>=1 && m.num_faces<=65536 &&
+            gpu_mutation_span_readable(
+                m.vertices,size_t(m.num_vertices)*3*sizeof(float)) &&
+            gpu_mutation_span_readable(
+                m.faces,size_t(m.num_faces)*sizeof(native_face)) &&
+            (!rgb || gpu_mutation_span_readable(
+                rgb,size_t(m.num_vertices)*3*sizeof(float))) &&
+            (!m.uvs || m.num_uvs<=0 || m.num_uvs>65536 ||
+             gpu_mutation_span_readable(
+                m.uvs,size_t(m.num_uvs)*2*sizeof(float))) &&
+            (!m.vertex_lights || gpu_mutation_span_readable(
+                m.vertex_lights,size_t(m.num_vertices)*sizeof(float))) &&
+            (!m.normals || gpu_mutation_span_readable(
+                m.normals,size_t(m.num_vertices)*3*sizeof(float)));
+    }
+
+    // Called for one USED mesh when a face material mutation epoch changed.
+    // MAT edits are frequent and cheap to verify: avoid hashing all vertex,
+    // UV, normal and lighting buffers unless this material signature differs.
+    bool gpu_mesh_lazy_material_changed(native_mesh const &m,
+                                        cached_gpu_mesh &cached,
+                                        uint64_t material_generation)
+    {
+        bool const profiling=the_config && the_config->profile_renderer;
+        auto const start=profiling ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
+        uint64_t signature=0;
+        bool const changed=!gpu_mesh_material_signature(m,signature) ||
+                           signature!=cached.material_signature;
+        if(!changed)cached.material_checked_generation=material_generation;
+        if(profiling) {
+            ++gpu_native_stats.mutation_scans;
+            ++gpu_native_stats.mutation_scanned;
+            if(changed)++gpu_native_stats.mutation_invalidated;
+            gpu_native_stats.mutation_ns+=elapsed_native_ns(start);
+        }
+        return changed;
+    }
+
     // A full source signature once per *unique mesh per frame* detects
     // in-place COG/JK.dll changes without relying on a particular verb list.
     // All array reads are guarded; the old cache never noticed writes when
     // allocations, face/vertex counts, and pointers stayed identical.
     bool gpu_mesh_source_signature(native_mesh const &m,
                                    float const *vertex_rgb,uint64_t &value,
-                                   char const **failure=nullptr) {
+                                   char const **failure=nullptr,
+                                   uint64_t *material_value=nullptr) {
         auto const reject=[&](char const *reason) {
             if(failure)*failure=reason;
             return false;
@@ -744,6 +894,8 @@ namespace {
             return reject("unreadable_required_mesh_arrays");
 
         jkgm::gpu_3do_byte_signature h;
+        jkgm::gpu_3do_byte_signature materials;
+        materials.add(m.num_faces);
         h.add(m.vertices);h.add(m.faces);h.add(m.uvs);
         h.add(m.vertex_lights);h.add(m.normals);h.add(vertex_rgb);
         h.add(m.num_vertices);h.add(m.num_faces);h.add(m.num_uvs);
@@ -777,6 +929,7 @@ namespace {
             h.add(f.num);h.add(f.type);h.add(f.geo);h.add(f.light);
             h.add(f.count);h.add(f.pos_indices);
             h.add(f.uv_indices);h.add(f.material);h.add(f.cel);
+            materials.add(f.material);materials.add(f.cel);
             h.add(f.uv_x);h.add(f.uv_y);h.add(f.extra_light);
             h.add_bytes(f.normal,sizeof(f.normal));
             // Modes 0..2 have no triangles in JK hardware rendering.
@@ -795,6 +948,7 @@ namespace {
                 h.add_bytes(f.uv_indices,bytes);
         }
         value=h.value;
+        if(material_value)*material_value=materials.value;
         return true;
     }
 
@@ -1288,8 +1442,11 @@ namespace {
                 read,hud_owner,own_sector_tint);
             // Unlike rdMesh, the linked
             // SithThing position is WORLD-space and common to every node.
-            // Capture once for continuous ambient when enabled.
-            if(the_config->experimental_continuous_ambient_gpu) {
+            // World position is shared by ALL animated hierarchy meshes.
+            // Capture once for ambient, Thing occlusion or automatic LOD.
+            if(the_config->experimental_continuous_ambient_gpu ||
+               the_config->experimental_3do_occlusion_culling ||
+               the_config->experimental_auto_3do_lod) {
                 own_world_position_valid=read(
                     uintptr_t(hud_owner)+0xb8U,
                     own_world_position.data(),sizeof(own_world_position));
@@ -1328,7 +1485,38 @@ namespace {
         uintptr_t const rd=reinterpret_cast<uintptr_t>(thing);
         bool const have_thing_flags=
             jkgm::read_native_model_thing_flags(read,rd,flags);
-        if(shadow_enabled || (the_config && the_config->enable_decals)) {
+        float own_lod_radius=0.0f;
+        bool own_lod_radius_valid=false;
+        if(the_config && the_config->use_gpu_cache &&
+           the_config->experimental_auto_3do_lod &&
+           !camera_hud && own_world_position_valid &&
+           have_thing_flags && hud_owner>=0x10000U &&
+           uintptr_t(hud_owner)+0xc4U==rd &&
+           native_model_ptr>=0x10000U) {
+            uint32_t owner_model=0;
+            float authored_radius=0.0f;
+            std::array<float,9> owner_basis{};
+            if(read(uintptr_t(hud_owner)+0xc8U,&owner_model,4U) &&
+               owner_model==native_model_ptr &&
+               read(uintptr_t(native_model_ptr)+0x5cU,
+                    &authored_radius,sizeof(authored_radius)) &&
+               read(uintptr_t(hud_owner)+0x88U,
+                    owner_basis.data(),sizeof(owner_basis))) {
+                // Identical authored Thing-centered sphere used in the
+                // native occlusion and reflected camera paths.
+                float const scale=
+                    jkgm::planar_reflection_radius_scale(owner_basis);
+                float const scaled=authored_radius*scale;
+                if(std::isfinite(scaled) && scaled>0.0f) {
+                    own_lod_radius=scaled;
+                    own_lod_radius_valid=true;
+                }
+            }
+        }
+        if(shadow_enabled || (the_config && the_config->enable_decals) ||
+           (the_config && the_config->experimental_planar_thing_discovery) ||
+           (the_config && the_config->experimental_3do_occlusion_culling) ||
+           (the_config && the_config->experimental_auto_3do_lod)) {
             if(have_thing_flags) {
                 uint32_t owner=0,signature=0;
                 if(read(rd+0x44U,&owner,4) &&
@@ -1410,6 +1598,111 @@ namespace {
                 }
             }
         }
+        // Native CPU occlusion: reuse CONFIRMED asynchronous GPU negatives.
+        // This runs at exactly the same stage as JK's own sphere-frustum
+        // short-circuit (before any joint-matrix or mesh callback work).
+        // Record eligible models even when skipped so GPU queries continue
+        // refreshing them; otherwise they could become permanently invisible.
+        // This is an experiment: do not silently disable CPU occlusion
+        // because shadows, planar reflections or moving decals are enabled.
+        // Any auxiliary-pass regressions must be measured and fixed instead
+        // of hiding the experiment behind feature-level gates.
+        bool const native_occlusion_enabled=the_config &&
+            the_config->use_gpu_cache &&
+            the_config->experimental_3do_occlusion_culling &&
+            the_config->experimental_3do_native_occlusion_culling;
+        if(the_config && the_config->experimental_3do_native_occlusion_culling &&
+           !native_occlusion_enabled) {
+            static bool reported_native_occlusion_gate=false;
+            if(!reported_native_occlusion_gate) {
+                reported_native_occlusion_gate=true;
+                LOG_INFO("NATIVE 3DO OCCLUSION requires GPU cache and "
+                         "experimental_3do_occlusion_culling");
+            }
+        }
+        auto const occlusion_test_start=profiling && native_occlusion_enabled
+            ?std::chrono::steady_clock::now()
+            :std::chrono::steady_clock::time_point{};
+        if(native_occlusion_enabled && owner_key && have_thing_flags &&
+           !camera_hud && !(flags&0x20U) &&
+           own_world_position_valid && native_model_ptr>=0x10000U) {
+            uint32_t owner_type=0,owner_model=0;
+            float radius=0.0f;
+            std::array<float,9> owner_basis{};
+            if(read(uintptr_t(hud_owner)+0x0cU,&owner_type,4U) &&
+               // Exclude player/HUD from this first experiment. The player
+               // owns additional first-person and saber-specific callbacks.
+               owner_type>1U && owner_type!=10U &&
+               read(uintptr_t(hud_owner)+0xc8U,&owner_model,4U) &&
+               owner_model==native_model_ptr &&
+               read(uintptr_t(native_model_ptr)+0x5cU,&radius,4U) &&
+               read(uintptr_t(hud_owner)+0x88U,
+                    owner_basis.data(),sizeof(owner_basis))) {
+                // This experiment uses JK's authored Thing-centered sphere,
+                // not the current animated placement of individual meshes.
+                // Placement mismatch must not silently suppress all culling.
+                float const scale=
+                    jkgm::planar_reflection_radius_scale(owner_basis);
+                jkgm::gpu_thing_occlusion_bound bound{};
+                bound.center=own_world_position;
+                bound.radius=radius*scale;
+                bound.valid=true;
+                if(jkgm::gpu_thing_occlusion_bound_valid(bound) &&
+                   std::isfinite(scale) && scale>0.0f) {
+                    jkgm::native_occlusion_candidate candidate{};
+                    candidate.owner=owner_key;
+                    candidate.model=native_model_ptr;
+                    candidate.bound=bound;
+                    auto &bridge=jkgm::get_native_occlusion_bridge();
+                    // Do not gate native occlusion on decal-follow state.
+                    // Keep the experiment measurable across feature setups.
+                    {
+                        jkgm::native_occlusion_result hidden{};
+                        uintptr_t published_world=0;
+                        if(profiling)++native_totals.model_occlusion_lookups;
+                        if(bridge.lookup(owner_key,native_model_ptr,
+                                         bound,hidden,published_world)) {
+                            if(profiling)
+                                ++native_totals.model_occlusion_lookup_hits;
+                            uint32_t current_world=0;
+                            if(jkgm::engine_material_debug::read_object(
+                                   jkgm::engine_material_debug::current_world_global,
+                                   current_world) &&
+                               current_world==published_world) {
+                                auto const camera=
+                                    jkgm::read_active_render_camera();
+                                if(jkgm::gpu_thing_occlusion_camera_compatible(
+                                       camera,hidden.camera) &&
+                                   !jkgm::gpu_thing_occlusion_camera_inside(
+                                       bound,camera)) {
+                                    // Register only SKIPPED Things; ordinary
+                                    // ones already reach the GPU instance
+                                    // query collector. No per-visible-Thing
+                                    // mutex/map insertion on the hot path.
+                                    bridge.register_candidate(candidate);
+                                    if(profiling) {
+                                        ++native_totals.model_occlusion_tests;
+                                        native_totals.model_occlusion_ns+=
+                                            elapsed_native_ns(occlusion_test_start);
+                                        ++native_totals.model_calls;
+                                        ++native_totals.model_occlusion_skipped;
+                                        auto const elapsed=elapsed_native_ns(start);
+                                        native_totals.model_ns+=elapsed;
+                                        native_totals.model_hook_ns+=elapsed;
+                                    }
+                                    return 0;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if(profiling && native_occlusion_enabled) {
+            ++native_totals.model_occlusion_tests;
+            native_totals.model_occlusion_ns+=
+                elapsed_native_ns(occlusion_test_start);
+        }
         // A nominally static collide=3 Thing may still be moved/animated
         // by COG. When the sun pose tracker already detects that motion,
         // allow it to receive moving decals too.
@@ -1418,6 +1711,11 @@ namespace {
         auto const previous_model_filename=active_native_model_filename;
         uintptr_t const previous_model_ptr=active_native_model_ptr;
         uintptr_t const previous_rdthing_ptr=active_native_rdthing_ptr;
+        auto const previous_thing_opacity=active_native_thing_opacity;
+        active_native_thing_opacity=
+            uintptr_t(hud_owner)+0xc4U==native_rd
+                ?sample_3do_opacity(reinterpret_cast<void const *>(
+                    uintptr_t(hud_owner))) : jkgm::thing_opacity_state{};
         active_native_model_filename=native_model_filename;
         active_native_model_ptr=native_model_ptr;
         active_native_rdthing_ptr=native_rd;
@@ -1430,6 +1728,9 @@ namespace {
         auto const previous_world_position=active_native_model_world_position;
         bool const previous_world_position_valid=
             active_native_model_world_position_valid;
+        float const previous_lod_radius=active_native_model_lod_radius;
+        bool const previous_lod_radius_valid=
+            active_native_model_lod_radius_valid;
         uint64_t const previous_owner=active_native_shadow_owner;
         uint64_t const previous_family=active_native_spotlight_family;
         bool const previous_moving=active_native_shadow_dynamic;
@@ -1445,6 +1746,8 @@ namespace {
         active_native_model_sector_id_valid=own_sector_id_valid;
         active_native_model_world_position=own_world_position;
         active_native_model_world_position_valid=own_world_position_valid;
+        active_native_model_lod_radius=own_lod_radius;
+        active_native_model_lod_radius_valid=own_lod_radius_valid;
         active_native_shadow_owner=owner_key;
         active_native_spotlight_family=owner_key &&
             the_config && the_config->enable_spotlights &&
@@ -1454,7 +1757,30 @@ namespace {
         auto const engine_start=profiling ? std::chrono::steady_clock::now()
                                           : std::chrono::steady_clock::time_point{};
         uint64_t const mesh_before=profiling?native_totals.mesh_ns:0;
+        // Stage 0 of experimental automatic LOD: bypass JK's distance-
+        // selected GeoSet by temporarily overriding only THIS rdThing's
+        // selection. Never change rdModel3::geosetSelect (shared by Things)
+        // or the world's LOD distances. The original field is restored
+        // before returning, including for native fallback / HUD meshes.
+        // Once generated GPU LODs exist, they will be selected downstream
+        // from captured original GeoSet 0 geometry.
+        jkgm::native_3do_lod0_plan lod0{};
+        if(the_config && the_config->use_gpu_cache &&
+           the_config->experimental_auto_3do_lod) {
+            lod0=jkgm::prepare_native_3do_lod0_override(
+                read,native_rd,native_model_ptr);
+            if(lod0.valid) {
+                int32_t const original_geoset=0;
+                std::memcpy(reinterpret_cast<void *>(
+                    lod0.selection_address),&original_geoset,
+                    sizeof(original_geoset));
+                if(profiling)++native_totals.model_lod0_forced;
+            }
+        }
         int const result=RealNativeModel(thing,placement);
+        if(lod0.valid)
+            std::memcpy(reinterpret_cast<void *>(lod0.selection_address),
+                &lod0.previous,sizeof(lod0.previous));
         uint64_t const engine_ns=profiling?elapsed_native_ns(engine_start):0;
         active_native_model_thing_flags=previous_flags;
         active_native_model_camera_hud=previous_camera_hud;
@@ -1464,9 +1790,12 @@ namespace {
         active_native_model_sector_id_valid=previous_sector_id_valid;
         active_native_model_world_position=previous_world_position;
         active_native_model_world_position_valid=previous_world_position_valid;
+        active_native_model_lod_radius=previous_lod_radius;
+        active_native_model_lod_radius_valid=previous_lod_radius_valid;
         active_native_model_filename=previous_model_filename;
         active_native_model_ptr=previous_model_ptr;
         active_native_rdthing_ptr=previous_rdthing_ptr;
+        active_native_thing_opacity=previous_thing_opacity;
         active_native_shadow_owner=previous_owner;
         active_native_spotlight_family=previous_family;
         active_native_shadow_dynamic=previous_moving;
@@ -2008,10 +2337,15 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         return !shadow_only;
     }
     auto it=gpu_mesh_cache.find(mesh);
+    if(it!=gpu_mesh_cache.end()) {
+        it->second.last_used_frame=gpu_frame_serial;
+        if(the_config->profile_renderer)++gpu_native_stats.cache_hits;
+    } else if(the_config->profile_renderer)
+        ++gpu_native_stats.cache_misses;
     bool snapshot_attempted_this_call=false;
     // Read immutable-looking header fields on each instance, but hash all
-    // underlying vertex/UV/face content at most once per mesh per frame.
-    // This catches COG writes that keep the same allocation and counts.
+    // underlying vertex/UV/face content only when the mutation epoch changes
+    // (or once per frame when native mutation tracking is unavailable).
     bool const header_unchanged=it!=gpu_mesh_cache.end() &&
         it->second.vertices==m.vertices && it->second.faces==m.faces &&
         it->second.rgb==vertex_rgb && it->second.uvs==m.uvs &&
@@ -2022,21 +2356,39 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         it->second.num_uvs==m.num_uvs &&
         it->second.lighting_mode==m.lighting_mode;
     bool const revision_fastpath=mesh_revision::active();
-    uint64_t const current_generation=mesh_revision::current();
-    bool const audit_frame=(gpu_frame_serial%32U)==0U;
-    bool const should_hash=!header_unchanged ||
+    uint64_t const current_generation=mesh_revision::source_current();
+    uint64_t const material_generation=mesh_revision::material_current();
+    bool const dirty_full_source=revision_fastpath && header_unchanged &&
+        it->second.source_checked_generation!=current_generation;
+    bool should_hash=!header_unchanged ||
         (revision_fastpath
-          ? (it->second.source_checked_generation!=current_generation ||
-             (audit_frame && it->second.last_audit_frame!=gpu_frame_serial))
+          ? dirty_full_source
           : it->second.source_checked_frame!=gpu_frame_serial);
+    bool material_changed=false;
+    if(!should_hash && revision_fastpath &&
+       it->second.material_checked_generation!=material_generation) {
+        material_changed=gpu_mesh_lazy_material_changed(
+            m,it->second,material_generation);
+        if(material_changed)should_hash=true;
+    }
     if(should_hash) {
+        gpu_mesh_hash_reason(it!=gpu_mesh_cache.end(),header_unchanged,
+                             revision_fastpath,
+                             it!=gpu_mesh_cache.end()
+                                 ?it->second.source_checked_generation:0U,
+                             current_generation,material_changed);
         bool const profiling=the_config->profile_renderer;
         auto const start=profiling ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
-        uint64_t signature=0;
+        uint64_t signature=0,material_signature=0;
         char const *source_failure=nullptr;
-        bool const readable=gpu_mesh_source_signature(
-            m,vertex_rgb,signature,&source_failure);
+        bool const readable=
+            (!dirty_full_source ||
+             gpu_mesh_dirty_source_readable(m,vertex_rgb)) &&
+            gpu_mesh_source_signature(
+                m,vertex_rgb,signature,&source_failure,&material_signature);
+        if(!readable && !source_failure)
+            source_failure="unreadable_changed_mesh_source";
         if(profiling) {
             ++gpu_native_stats.source_checks;
             gpu_native_stats.source_ns+=elapsed_native_ns(start);
@@ -2051,19 +2403,15 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                 "invalid_mesh_source_memory");
             return false;
         }
-        if(revision_fastpath && audit_frame && header_unchanged &&
-           it->second.source_checked_generation==current_generation &&
-           it->second.source_signature!=signature) {
-            // A periodic audit caught a modification that bypassed every
-            // known JK.dll mutation verb. Switch back to exact old behavior.
-            mesh_revision::report_untracked();
-        }
-        if(!header_unchanged || it->second.source_signature!=signature) {
+                if(!header_unchanged || it->second.source_signature!=signature) {
             char const *failure="unknown_snapshot_error";
             std::string failure_detail;
             snapshot_attempted_this_call=true;
             auto geom=snapshot_gpu_mesh(m,vertex_rgb,&failure,&failure_detail);
-            if(gpu_mesh_cache.size()>4096) gpu_mesh_cache.clear();
+            // SetModelMesh may replace this SAME native mesh thousands
+            // of times. Only a NEW cache key can increase cache size;
+            // replacing an entry must not trigger an O(cache-size) trim.
+            if(it==gpu_mesh_cache.end())gpu_mesh_cache_make_room();
             if(profiling && header_unchanged)
                 ++gpu_native_stats.source_invalidations;
             cached_gpu_mesh updated{};
@@ -2078,9 +2426,11 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             updated.num_uvs=m.num_uvs;
             updated.lighting_mode=m.lighting_mode;
             updated.source_signature=signature;
+            updated.material_signature=material_signature;
             updated.source_checked_frame=gpu_frame_serial;
             updated.source_checked_generation=current_generation;
-            updated.last_audit_frame=audit_frame ? gpu_frame_serial : 0U;
+            updated.material_checked_generation=material_generation;
+            updated.last_used_frame=gpu_frame_serial;
             if(geom) {
                 if(geom->self_intersecting_faces_skipped>0) {
                     // Log once per authored model/mesh, not once per frame
@@ -2108,12 +2458,13 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                 gpu_log_fallback(m,failure);
             }
             gpu_mesh_cache[mesh]=std::move(updated);
+            gpu_mesh_cache_inserted();
             it=gpu_mesh_cache.find(mesh);
         }
         else {
             it->second.source_checked_frame=gpu_frame_serial;
             it->second.source_checked_generation=current_generation;
-            if(audit_frame)it->second.last_audit_frame=gpu_frame_serial;
+            it->second.material_checked_generation=material_generation;
         }
     }
     if(!it->second.geometry) {
@@ -2250,6 +2601,9 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     gpu_3do_instance inst;
     inst.id=it->second.id;
     inst.geometry=it->second.geometry;
+    // Copied once per owning Thing in rdModel3_Draw, not per mesh callback.
+    inst.thing_opacity=active_native_thing_opacity.opacity;
+    inst.thing_dither=active_native_thing_opacity.dither;
     inst.shadow_only=shadow_only;
     inst.effective_geometry_mode=static_cast<uint32_t>(
         jkgm::gpu_3do_effective_geo_mode(current_geo_mode,m.geometry_mode));
@@ -2265,6 +2619,13 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     inst.shadow_owner=active_native_shadow_owner;
     inst.spotlight_shadow_family=active_native_spotlight_family;
     inst.dynamic_sun_caster=active_native_shadow_dynamic;
+    // Snapshot ONCE from rdModel3_Draw; every hierarchy node inherits
+    // identical Thing radius/center even if animated node matrices differ.
+    inst.owning_thing_world_position=active_native_model_world_position;
+    inst.owning_thing_world_position_valid=
+        active_native_model_world_position_valid;
+    inst.owning_thing_lod_radius=active_native_model_lod_radius;
+    inst.owning_thing_lod_radius_valid=active_native_model_lod_radius_valid;
     // Depth-only casters need no native MAT residency, point lights,
     // colormap or per-Thing lighting cap. Preserve the native render call.
     std::memcpy(inst.transform.data(),matrix,sizeof(float)*12);
@@ -2279,9 +2640,6 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             inst.sector_tint_valid=active_native_model_sector_tint_valid;
             inst.owning_sector_id=active_native_model_sector_id;
             inst.owning_sector_valid=active_native_model_sector_id_valid;
-            inst.owning_thing_world_position=active_native_model_world_position;
-            inst.owning_thing_world_position_valid=
-                active_native_model_world_position_valid;
         }
         // curLightingMode (rdModel3_Draw's effective Thing/global cap):
         // the verified rdModel3 global block is +0x48 from original JK.
@@ -2333,9 +2691,288 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     if(the_config->profile_renderer) ++gpu_native_stats.queued;
     return !shadow_only;
 }
+// Read-only offscreen 3DO geometry acquisition, completely independent of
+// native rdModel3_Draw traversal and the main camera's portal visibility.
+// Invoked only by an opt-in planar diagnostic until capture is wired up.
+// Each matching hierarchy pose comes from the EXISTING native joint accessor.
+jkgm::planar_reflection_offscreen_gpu
+jkgm::acquire_planar_reflection_offscreen_gpu(
+    std::vector<planar_reflection_model_thing> const &candidates,
+    size_t max_things,
+    gpu_3do_native_frustum const *reflected_frustum,
+    gpu_3do_matrix34 const *reflected_view)
+{
+    planar_reflection_offscreen_gpu out{};
+    if(!the_config || !the_config->use_gpu_cache ||
+       !engine_material_debug::matches_tested_executable() ||
+       max_things==0U)return out;
+    auto const read=[](uintptr_t at,void *dst,size_t bytes)->bool {
+        if(!thing_node_valid_address(at,bytes) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(at),bytes))
+            return false;
+        std::memcpy(dst,reinterpret_cast<void const *>(at),bytes);
+        return true;
+    };
+    // The animation accessor updates rdThing's cached matrices, but does
+    // not submit geometry, touch the live rdCamera or change GL state.
+    using node_matrix_fn=int(__cdecl *)(void *,float const *,unsigned,float *);
+    auto const accessor=reinterpret_cast<node_matrix_fn>(
+        jkgm_node_matrix_address);
+    auto const refresh=[&](uintptr_t rdthing,
+                           gpu_3do_matrix34 const &root,
+                           gpu_3do_matrix34 &first)->bool {
+        return accessor(reinterpret_cast<void *>(rdthing),
+                        root.data(),0U,first.data())!=0;
+    };
+    static bool const rgb_extension=[] {
+        constexpr uintptr_t code=0x009001C0U;
+        constexpr uint8_t prefix[]={0xc7,0x43,0x6c,0,0,0,0};
+        return gpu_span_readable(reinterpret_cast<void const *>(code),
+                                 sizeof(prefix)) &&
+               std::memcmp(reinterpret_cast<void const *>(code),prefix,
+                           sizeof(prefix))==0;
+    }();
+    std::vector<planar_reflection_native_node> native_nodes;
+    for(size_t i=0;i<candidates.size() && i<max_things;++i) {
+        auto const &thing=candidates[i];
+        ++out.stats.considered;
+        // Discovery and capture occur independently of the main-camera
+        // traversal. Re-read actual hide state before acquiring poses:
+        // SetThingCurGeoMode(0..2) hides filled geometry, whereas ordinary
+        // frustum clipping must NOT remove models from a reflection.
+        uint32_t flags=0;
+        int32_t native_geo=0;
+        if(!read(thing.thing,&flags,4U) ||
+           !read(thing.thing+0xf8U,&native_geo,4U)) {
+            ++out.stats.pose_failures;
+            continue;
+        }
+        // LEVELGEO (0x8) is valid visible 3DO scenery. Only native
+        // hide/destroy flags and non-filled geometry suppress capture.
+        if((flags&(0x2U|0x10U|0x80000U))!=0U ||
+           native_geo<3) {
+            ++out.stats.excluded_by_flags_or_geomode;
+            continue;
+        }
+        int const cur_geo=std::min(native_geo,4);
+        if(!collect_planar_reflection_native_nodes(
+               read,thing,refresh,native_nodes,
+               the_config->experimental_auto_3do_lod)) {
+            ++out.stats.pose_failures;
+            continue;
+        }
+        ++out.stats.posed_things;
+        out.stats.native_mesh_nodes+=native_nodes.size();
+        auto const thing_fade=sample_3do_opacity(
+            reinterpret_cast<void const *>(thing.thing));
+        std::vector<gpu_3do_instance> complete_thing_nodes;
+        complete_thing_nodes.reserve(native_nodes.size());
+        bool incomplete=false;
+        for(auto const &source:native_nodes) {
+            if(!gpu_span_readable(reinterpret_cast<void const *>(source.mesh),
+                                  rgb_extension?0x70U:sizeof(native_mesh))) {
+                ++out.stats.empty_or_invalid_meshes;
+                incomplete=true;
+                continue;
+            }
+            native_mesh mesh{};
+            std::memcpy(&mesh,reinterpret_cast<void const *>(source.mesh),
+                        sizeof(mesh));
+            // Empty hierarchy meshes and modes 0..2 intentionally have no
+            // filled triangles. Other invalid mesh data fails the Thing.
+            if(mesh.num_faces==0 || mesh.num_vertices==0 ||
+               (gpu_3do_supports_geo_mode(cur_geo,mesh.geometry_mode) &&
+                !gpu_3do_geo_mode_draws_filled(cur_geo,mesh.geometry_mode)))
+                continue;
+            if(mesh.num_faces<0 || mesh.num_vertices<3 ||
+               !gpu_3do_supports_geo_mode(cur_geo,mesh.geometry_mode)) {
+                ++out.stats.empty_or_invalid_meshes;
+                incomplete=true;
+                continue;
+            }
+            // JK rdModel3_DrawMesh performs this sphere test before
+            // validating or drawing a mesh. The offscreen camera now does
+            // the same after the Thing-level sphere test, using the CURRENT
+            // animated joint placement. Do not pay for source hashing or
+            // material resolution for a mesh wholly outside its frustum.
+            if(reflected_frustum && reflected_view &&
+               planar_reflection_mesh_outside_frustum(
+                   *reflected_frustum,*reflected_view,
+                   source.world_transform,mesh.radius)) {
+                ++out.stats.mesh_radius_culled;
+                continue;
+            }
+            float const *rgb=nullptr;
+            if(rgb_extension)
+                std::memcpy(&rgb,reinterpret_cast<uint8_t const *>(
+                    source.mesh)+0x6cU,sizeof(rgb));
+            void const *const key=reinterpret_cast<void const *>(source.mesh);
+            auto it=gpu_mesh_cache.find(key);
+            if(it!=gpu_mesh_cache.end()) {
+                it->second.last_used_frame=gpu_frame_serial;
+                if(the_config->profile_renderer)++gpu_native_stats.cache_hits;
+            } else if(the_config->profile_renderer)
+                ++gpu_native_stats.cache_misses;
+            // Exactly the ordinary GPU 3DO source-validation policy: compare
+            // native header fields on every encounter, but hash vertex/UV/
+            // face arrays after tracked revisions. Without native hooks,
+            // hash once per frame.
+            // Offscreen and primary-camera 3DOs share the SAME cache.
+            bool const header_unchanged=it!=gpu_mesh_cache.end() &&
+                it->second.vertices==mesh.vertices &&
+                it->second.faces==mesh.faces &&
+                it->second.rgb==rgb &&
+                it->second.uvs==mesh.uvs &&
+                it->second.normals==mesh.normals &&
+                it->second.vertex_lights==mesh.vertex_lights &&
+                it->second.num_vertices==mesh.num_vertices &&
+                it->second.num_faces==mesh.num_faces &&
+                it->second.num_uvs==mesh.num_uvs &&
+                it->second.lighting_mode==mesh.lighting_mode;
+            bool const revision_fastpath=mesh_revision::active();
+            uint64_t const generation=mesh_revision::source_current();
+            uint64_t const material_generation=mesh_revision::material_current();
+            bool const cached_geometry_ready=header_unchanged &&
+                it->second.geometry!=nullptr;
+            bool const dirty_full_source=revision_fastpath &&
+                cached_geometry_ready &&
+                it->second.source_checked_generation!=generation;
+            bool should_hash=!cached_geometry_ready ||
+                (revision_fastpath
+                 ? dirty_full_source
+                 : it->second.source_checked_frame!=gpu_frame_serial);
+            bool material_changed=false;
+            if(!should_hash && revision_fastpath &&
+               it->second.material_checked_generation!=material_generation) {
+                material_changed=gpu_mesh_lazy_material_changed(
+                    mesh,it->second,material_generation);
+                if(material_changed)should_hash=true;
+            }
+            uint64_t signature=it!=gpu_mesh_cache.end()
+                ?it->second.source_signature:0U;
+            uint64_t material_signature=it!=gpu_mesh_cache.end()
+                ?it->second.material_signature:0U;
+            if(should_hash) {
+                gpu_mesh_hash_reason(it!=gpu_mesh_cache.end(),
+                                     cached_geometry_ready,
+                                     revision_fastpath,
+                                     it!=gpu_mesh_cache.end()
+                                         ?it->second.source_checked_generation:0U,
+                                     generation,material_changed);
+                ++out.stats.source_hashes;
+                if((dirty_full_source &&
+                    !gpu_mesh_dirty_source_readable(mesh,rgb)) ||
+                   !gpu_mesh_source_signature(
+                       mesh,rgb,signature,nullptr,&material_signature)) {
+                    ++out.stats.empty_or_invalid_meshes;
+                    incomplete=true;
+                    continue;
+                }
+                            } else ++out.stats.source_hash_skips;
+            bool const same=cached_geometry_ready &&
+                it->second.source_signature==signature;
+            if(same && should_hash) {
+                it->second.source_checked_frame=gpu_frame_serial;
+                it->second.source_checked_generation=generation;
+                it->second.material_checked_generation=material_generation;
+            }
+            if(!same) {
+                // A source replacement at an existing key needs no
+                // cache-pressure sweep; only insertions increase size.
+                if(it==gpu_mesh_cache.end())gpu_mesh_cache_make_room();
+                char const *failure=nullptr;
+                auto geometry=snapshot_gpu_mesh(mesh,rgb,&failure);
+                if(!geometry) {
+                    ++out.stats.empty_or_invalid_meshes;
+                    incomplete=true;
+                    continue;
+                }
+                cached_gpu_mesh entry{};
+                entry.vertices=mesh.vertices;
+                entry.faces=mesh.faces;
+                entry.rgb=rgb;
+                entry.uvs=mesh.uvs;
+                entry.normals=mesh.normals;
+                entry.vertex_lights=mesh.vertex_lights;
+                entry.num_vertices=mesh.num_vertices;
+                entry.num_faces=mesh.num_faces;
+                entry.num_uvs=mesh.num_uvs;
+                entry.lighting_mode=mesh.lighting_mode;
+                entry.source_signature=signature;
+                entry.material_signature=material_signature;
+                entry.source_checked_frame=gpu_frame_serial;
+                entry.source_checked_generation=mesh_revision::source_current();
+                entry.material_checked_generation=material_generation;
+                entry.last_used_frame=gpu_frame_serial;
+                entry.id=next_gpu_id++;
+                entry.geometry=std::move(geometry);
+                gpu_mesh_cache[key]=std::move(entry);
+                gpu_mesh_cache_inserted();
+                it=gpu_mesh_cache.find(key);
+                ++out.stats.new_gpu_snapshots;
+            } else ++out.stats.reused_gpu_meshes;
+            if(it==gpu_mesh_cache.end() || !it->second.geometry ||
+               it->second.geometry->groups.empty())
+                continue;
+            bool const solid=gpu_3do_effective_geo_mode(
+                cur_geo,mesh.geometry_mode)==3;
+            // Request native MAT warm-up through the existing safe queue.
+            // Never upload texture memory from inside the offscreen probe.
+            if(!gpu_mesh_materials_ready(*it->second.geometry,solid)) {
+                ++out.stats.material_unready;
+                incomplete=true;
+                continue;
+            }
+            gpu_3do_instance instance{};
+            instance.thing_opacity=thing_fade.opacity;
+            instance.thing_dither=thing_fade.dither;
+            instance.id=it->second.id;
+            instance.geometry=it->second.geometry;
+            instance.transform=source.world_transform;
+            instance.shadow_owner=source.owner;
+            instance.owning_thing_world_position=thing.position;
+            instance.owning_thing_world_position_valid=true;
+            instance.effective_geometry_mode=static_cast<uint32_t>(
+                gpu_3do_effective_geo_mode(cur_geo,mesh.geometry_mode));
+            instance.skybox_vertex_lighting=thing_uses_skybox_vertex_lights(
+                flags,false);
+            instance.world_lighting_exempt=instance.skybox_vertex_lighting;
+            instance.casts_sun_shadows=false;
+            // Approximate the Thing's live sector floor rather than forcing
+            // all offscreen-only Things to full brightness. Native per-Thing
+            // lighting overrides remain unavailable outside the draw hook.
+            float ambient=0.0f,extra=0.0f;
+            if(read(uintptr_t(thing.sector)+0x04U,&ambient,4U) &&
+               read(uintptr_t(thing.sector)+0x08U,&extra,4U) &&
+               std::isfinite(ambient) && std::isfinite(extra))
+                instance.ambient=std::clamp(std::max(ambient,extra),0.0f,2.0f);
+            else instance.ambient=0.0f;
+            std::array<float,3> tint{};
+            if(read(uintptr_t(thing.sector)+0x10U,tint.data(),sizeof(tint)) &&
+               std::isfinite(tint[0]) && std::isfinite(tint[1]) &&
+               std::isfinite(tint[2])) {
+                instance.sector_tint=tint;
+                instance.sector_tint_valid=true;
+            }
+            instance.num_lights=0;
+            complete_thing_nodes.emplace_back(std::move(instance));
+        }
+        if(incomplete) {
+            ++out.stats.incomplete_things;
+        } else {
+            out.stats.ready_nodes+=complete_thing_nodes.size();
+            for(auto &node:complete_thing_nodes)
+                out.nodes.emplace_back(std::move(node));
+        }
+    }
+    return out;
+}
+
 jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
 {
-    auto const sample=gpu_native_stats;
+    auto sample=gpu_native_stats;
+    sample.cache_entries=gpu_mesh_cache.size();
+    sample.cache_peak=gpu_mesh_cache_peak;
     gpu_native_stats={};
     // Aggregate across scenes/frames rather than logging thousands of
     // repeated fallback meshes. Distinguish unsupported render modes from
@@ -2343,6 +2980,10 @@ jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
     if(the_config && the_config->profile_renderer) {
         static unsigned frames=0;
         static gpu_3do_native_stats window{};
+        static mesh_revision::mutator_counts mutation_window{};
+        auto const mutations=mesh_revision::take_mutator_counts();
+        for(size_t i=0;i<mutations.size();++i)
+            mutation_window[i]+=mutations[i];
         ++frames;
         window.geometry_native+=sample.geometry_native;
         window.geo_thing_not_full+=sample.geo_thing_not_full;
@@ -2368,8 +3009,21 @@ jkgm::gpu_3do_native_stats jkgm::consume_gpu_3do_native_stats()
                      " material=",window.material_native,
                      " lighting=",window.lighting_native,
                      " nonrigid_lit_GPU=",window.nonrigid_lit_cached);
+            uint64_t mutation_total=0;
+            std::ostringstream mutation_detail;
+            for(size_t i=0;i<mutation_window.size();++i) {
+                auto const count=mutation_window[i];
+                mutation_total+=count;
+                if(count)
+                    mutation_detail<<" "<<mesh_revision::mutator_name(i)
+                                   <<"="<<count;
+            }
+            LOG_INFO("PERF JK.dll model_mutators frames=",frames,
+                     " total=",mutation_total,mutation_detail.str(),
+                     " NOTE=each_call_bumps_global_revision_once");
             frames=0;
             window={};
+            mutation_window.fill(0U);
         }
     }
     return sample;
@@ -2392,7 +3046,10 @@ void jkgm::reset_gpu_3do_instances()
     native_decal_following=false;
     native_decal_capture_until=0;
     clear_moving_sprite_decals();
-    gpu_mesh_cache.clear();
+    gpu_mesh_cache.clear(); // level/renderer reset, never memory-pressure eviction
+    clear_thing_opacity(); // levels may recycle Thing pointers/signatures
+    gpu_mesh_cache_peak=0;
+    gpu_mesh_cache_last_trim_frame=0;
     gpu_sprite_quads.clear();
     gpu_mat_residency.clear();
     ++gpu_frame_serial;
@@ -2444,7 +3101,6 @@ namespace {
     constexpr uintptr_t sprite_hw_upload_addr=0x00429C60U;
     constexpr uintptr_t sprite_hw_buffer_addr=0x0063A400U;
     constexpr uintptr_t sprite_hw_vertex_count_addr=0x005F53F0U;
-    constexpr uint32_t sprite_flare_vertex_magic=0xB6A9D000U;
     // The supported patched executables redirect this function to
     // the extended vertex upload implementation through a rel32 JMP.
     constexpr uint8_t sprite_hw_upload_bytes[]={
@@ -2484,6 +3140,21 @@ namespace {
     };
     jkgm::sprite_type_registry sprite_types;
     jkgm::sprite_instance_registry sprite_instances;
+    jkgm::thing_opacity_registry thing_opacity_instances;
+    void clear_thing_opacity() {thing_opacity_instances.clear();}
+    // Thing pointer + engine signature survives slot reuse without leaking
+    // a fade onto the next owner of the same SithThing allocation.
+    jkgm::thing_opacity_state sample_3do_opacity(void const *thing)
+    {
+        if(!thing || !gpu_span_readable(thing,0xc8U))return {};
+        auto const *p=static_cast<uint8_t const *>(thing);
+        uint32_t type=0,rd_type=0,signature=0;
+        std::memcpy(&type,p+0x0cU,4U);
+        std::memcpy(&rd_type,p+0xc4U,4U);
+        if(type==0U || rd_type!=1U)return {};
+        std::memcpy(&signature,p+0x74U,4U);
+        return thing_opacity_instances.sample(thing,signature,GetTickCount());
+    }
     std::unordered_set<uint64_t> sprite_decal_diagnostic_keys;
     native_sprite_newentry_fn RealNativeSpriteNewEntry=
         reinterpret_cast<native_sprite_newentry_fn>(sprite_newentry_addr);
@@ -2937,7 +3608,17 @@ namespace {
     using sprite_hw_upload_fn=int(__cdecl *)(void const *,uint32_t);
     sprite_hw_upload_fn RealSpriteHWUpload=
         reinterpret_cast<sprite_hw_upload_fn>(sprite_hw_upload_addr);
-    struct sprite_flare_span {uint32_t start=0,count=0;};
+    struct sprite_flare_proc_source {
+        std::array<float,3> position{};
+        bool valid=false;
+    };
+    // Indexed by native rdProcEntry slot; captures the originating Thing
+    // before JK's cache converter loses its rdThing association.
+    thread_local std::array<sprite_flare_proc_source,1024> sprite_flare_proc_sources{};
+    struct sprite_flare_span {
+        uint32_t start=0,count=0;
+        sprite_flare_proc_source source{};
+    };
     // Only used while the native render cache is converting a face list.
     // Reset when that vertex batch is submitted to D3D; no stale Thing refs.
     thread_local std::vector<sprite_flare_span> pending_sprite_flare_spans;
@@ -4074,6 +4755,22 @@ namespace {
         if(!jkgm::sprite_alpha_encode(
                opacity,(face_type&2U)!=0U,alpha_tag,is_flare)) return result;
         std::memcpy(entry,&alpha_tag,4);
+        if(is_flare && before<sprite_flare_proc_sources.size()) {
+            auto &source=sprite_flare_proc_sources[before];
+            source={};
+            void const *owner=nullptr;
+            auto const *rd=static_cast<uint8_t const *>(sprite_draw_active.thing);
+            if(gpu_span_readable(rd,0x48U))
+                std::memcpy(&owner,rd+0x44U,sizeof(owner)); // rdThing.pThing
+            if(owner && gpu_span_readable(
+                   static_cast<uint8_t const *>(owner)+0xb8U,12U)) {
+                std::memcpy(source.position.data(),
+                    static_cast<uint8_t const *>(owner)+0xb8U,12U);
+                source.valid=true;
+                for(float coordinate:source.position)
+                    if(!std::isfinite(coordinate))source.valid=false;
+            }
+        }
         face_type|=2U; // Force native translucent render state, without MAT mutation.
         std::memcpy(entry+4,&face_type,4);
         return result;
@@ -4098,8 +4795,18 @@ namespace {
                 LOG_INFO("SPR flare stage=alpha_converter num_vertices=",n,
                          " first_hw_vertex=",start," tag=",tag,
                          " accepted=",n>=3U && n<=32U && start+n<=4096U);
-            if(n>=3U && n<=32U && start+n<=4096U)
-                pending_sprite_flare_spans.push_back({start,n});
+            if(n>=3U && n<=32U && start+n<=4096U) {
+                sprite_flare_proc_source source{};
+                uintptr_t const addr=reinterpret_cast<uintptr_t>(face);
+                if(addr>=sprite_proc_base_addr &&
+                   (addr-sprite_proc_base_addr)%sprite_proc_stride==0U) {
+                    size_t const index=(addr-sprite_proc_base_addr)/
+                                       sprite_proc_stride;
+                    if(index<sprite_flare_proc_sources.size())
+                        source=sprite_flare_proc_sources[index];
+                }
+                pending_sprite_flare_spans.push_back({start,n,source});
+            }
         }
         return jkgm::sprite_alpha_override(tag,native_alpha);
     }
@@ -4125,10 +4832,11 @@ namespace {
                gpu_span_readable(vertices,uintptr_t(count)*32U)) {
                 for(auto const &span:pending_sprite_flare_spans) {
                     if(span.start+span.count>count) continue;
+                    uint32_t const marker=jkgm::sprite_flare_sources().add(
+                        span.source.position,span.source.valid);
                     for(uint32_t i=span.start;i<span.start+span.count;i++) {
                         auto *specular=reinterpret_cast<uint8_t *>(
                             const_cast<void *>(vertices))+uintptr_t(i)*32U+20U;
-                        uint32_t const marker=sprite_flare_vertex_magic;
                         std::memcpy(specular,&marker,4);
                     }
                 }
@@ -4461,6 +5169,12 @@ namespace {
                         read_lod,uintptr_t(owner)+0xc4U,
                         root.receiver.model);
             }
+            // Native distance LOD is disabled in this experiment, even
+            // outside the temporary rdModel3_Draw hook. Follow only the
+            // original GeoSet 0 fragments when their owning Thing is culled.
+            if(the_config && the_config->use_gpu_cache &&
+               the_config->experimental_auto_3do_lod)
+                active_lod=0U;
             for(auto &fragment:decal.fragments) {
                 if(active_lod!=0xffffffffU &&
                    fragment.geoset!=0xffffffffU &&
@@ -5840,9 +6554,22 @@ namespace {
             instance.camera_hud=thing_type==1U && render_type==4U;
             instance.camera_hud_world_depth=jkgm::camera_hud_uses_world_depth(
                 instance.camera_hud,thingflags);
-            if(!instance.camera_hud)
+            if(!instance.camera_hud) {
                 instance.sector_tint_valid=jkgm::read_jk_thing_sector_tint(
                     read,owner,instance.sector_tint);
+                // Occlusion eligibility is per SithThing, not per shared
+                // .SPR resource or cel. Use the fully constructed WORLD
+                // billboard pose; native Thing.position omits offsets and
+                // its authored size may differ from the rendered quad.
+                uint32_t signature=0;
+                if(thing_type>1U && render_type==4U &&
+                   (thingflags&0x20U)==0U &&
+                   read(uintptr_t(owner)+0x74U,&signature,4U) &&
+                   signature!=0U) {
+                    instance.shadow_owner=(uint64_t(owner)<<32)|signature;
+                    instance.sprite_occlusion_resource=sprite;
+                }
+            }
         }
         // The displayed billboard is a normal shadow RECEIVER; it does not
         // cast merely because it participates in lighting. 0x20 suppresses
@@ -6576,6 +7303,7 @@ namespace {
     using cog_pop_int_type = int(__cdecl *)(void *ctx);
     using cog_pop_vector_type = void(__cdecl *)(void *ctx, float *out_xyz);
     using cog_pop_thing_type = void *(__cdecl *)(void *ctx);
+    using cog_pop_model_type = void *(__cdecl *)(void *ctx);
     using cog_push_float_type = void(__cdecl *)(void *ctx, float value);
     using cog_push_int_type = void(__cdecl *)(void *ctx, int value);
     using cog_push_vector_type = void(__cdecl *)(void *ctx, float const *xyz);
@@ -6584,6 +7312,9 @@ namespace {
     constexpr uintptr_t pop_int_address = 0x4E2850;
     constexpr uintptr_t pop_vector_address = 0x4E2970;
     constexpr uintptr_t pop_thing_address = 0x4E2B50;
+    // JK.dll GetModelRadius/GetModelMeshRadius both call this JKGM
+    // sithCogExec_PopModel3 address. Confirmed against the supplied DLL.
+    constexpr uintptr_t pop_model_address = 0x4E3140;
     constexpr uintptr_t push_float_address = 0x4E3650;
     constexpr uintptr_t push_int_address = 0x4E35D0;
     constexpr uintptr_t push_vector_address = 0x4E36E0;
@@ -6594,6 +7325,8 @@ namespace {
         reinterpret_cast<cog_pop_vector_type>(pop_vector_address);
     cog_pop_thing_type const cog_pop_thing =
         reinterpret_cast<cog_pop_thing_type>(pop_thing_address);
+    cog_pop_model_type const cog_pop_model =
+        reinterpret_cast<cog_pop_model_type>(pop_model_address);
     cog_push_float_type const cog_push_float =
         reinterpret_cast<cog_push_float_type>(push_float_address);
     cog_push_int_type const cog_push_int = reinterpret_cast<cog_push_int_type>(push_int_address);
@@ -8042,17 +8775,33 @@ namespace {
     constexpr uintptr_t node_attach_native_update=0x004CC4B0U;
     constexpr uintptr_t node_attach_native_attach=0x004CE5A0U;
     constexpr uintptr_t node_attach_native_detach=0x004CE660U;
+    // Native SithThing_DetachAttachedThings: walks the parent's child list
+    // and calls native DetachThing for every directly attached child.
+    constexpr uintptr_t node_attach_native_detach_children=0x004CE820U;
+    // KillActor commits death before delayed corpse conversion (1000 ms).
+    constexpr uintptr_t node_attach_native_actor_kill=0x004ED240U;
+    // JKGM's single-Thing remove and free entrypoints both inline parts of
+    // the destruction flow; intercept both before Thing slots are invalidated.
+    constexpr uintptr_t node_attach_native_remove=0x004CD1F0U;
+    constexpr uintptr_t node_attach_native_free=0x004CD320U;
     constexpr uintptr_t node_attach_native_setpose=0x004CDAB0U;
     constexpr uintptr_t node_attach_native_setsector=0x004CD4B0U;
     using native_thing_update_fn=void(__cdecl *)(float,int);
     using native_thing_attach_fn=void(__cdecl *)(void*,void*);
     using native_thing_detach_fn=void(__cdecl *)(void*);
+    using native_thing_actor_kill_fn=void(__cdecl *)(void*,void*,int);
     using native_thing_setpose_fn=void(__cdecl *)(void*,float const*,float const*);
     using native_thing_setsector_fn=void(__cdecl *)(void*,void*,int);
     native_thing_update_fn RealNativeThingUpdate=
         reinterpret_cast<native_thing_update_fn>(node_attach_native_update);
     native_thing_detach_fn RealNativeThingDetach=
         reinterpret_cast<native_thing_detach_fn>(node_attach_native_detach);
+    native_thing_detach_fn RealNativeThingRemove=
+        reinterpret_cast<native_thing_detach_fn>(node_attach_native_remove);
+    native_thing_detach_fn RealNativeThingFree=
+        reinterpret_cast<native_thing_detach_fn>(node_attach_native_free);
+    native_thing_actor_kill_fn RealNativeActorKill=
+        reinterpret_cast<native_thing_actor_kill_fn>(node_attach_native_actor_kill);
 
     bool node_attach_native_signatures_match()
     {
@@ -8070,6 +8819,13 @@ namespace {
                      {0x83,0xec,0x0c,0x56,0x8b,0x74,0x24,0x14,0x57}) &&
                match(node_attach_native_detach,
                      {0x83,0xec,0x0c,0x53,0x56,0x8b,0x74,0x24,0x18,0x57}) &&
+               match(node_attach_native_remove,
+                     {0xa1,0x70,0x26,0x83,0x00,0x56,0x8b,0x74,0x24,0x08,0x57}) &&
+               match(node_attach_native_free,
+                     {0x56,0x8b,0x74,0x24,0x08,0x8b,0x46,0x34,0x85,0xc0}) &&
+               match(node_attach_native_actor_kill,
+                     {0x53,0x56,0x8b,0x74,0x24,0x0c,0x57,0x8b,0x06,
+                      0xf6,0xc4,0x02}) &&
                match(node_attach_native_setpose,
                      {0x8b,0x44,0x24,0x04,0x8b,0x54,0x24,0x08,0x56,0x57}) &&
                match(node_attach_native_setsector,
@@ -8086,6 +8842,34 @@ namespace {
         std::memcpy(&signature,reinterpret_cast<void const *>(thing+0x74),4);
         return kind>0 && kind<=15 && signature!=0;
     }
+
+    bool native_detach_attached_things_supported()
+    {
+        static bool const supported=[] {
+            if(reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))!=
+                   0x00400000U ||
+               !jkgm::engine_material_debug::matches_tested_executable())
+                return false;
+            // JKGM 0x4CE820 loads parent->pAttachedThing (+0x68), saves
+            // each child's next sibling (+0x6C), then calls 0x4CE660.
+            constexpr uint8_t expected[]{
+                0x8b,0x44,0x24,0x04,0x8b,0x40,0x68,0x85,0xc0,
+                0x74,0x14,0x56,0x8b,0x70,0x6c,0x50,0xe8,
+                0x2b,0xfe,0xff,0xff};
+            auto const *address=reinterpret_cast<void const *>(
+                node_attach_native_detach_children);
+            return gpu_span_readable(address,sizeof(expected)) &&
+                   std::memcmp(address,expected,sizeof(expected))==0;
+        }();
+        return supported;
+    }
+
+    // The engine inlines destruction in sithThing_Update (0x4CC4E5):
+    // neither of our RemoveThing / FreeThing entrypoint detours runs there.
+    // Detach parents already marked destroyed before native update can
+    // invalidate their type (+0x0C) and signature (+0x74).
+    void detach_native_children_from_parent(void *thing,bool remove_own_entry);
+    void detach_native_destroyed_children_pre_update();
 
     // Advance native attachments AFTER Sith's normal Thing update and BEFORE
     // rendering/culling. Keep sector membership, COG position and render pose
@@ -8112,6 +8896,7 @@ namespace {
         }
         bool const previous_tick_state=saber_light_native_update_active;
         saber_light_native_update_active=true;
+        detach_native_destroyed_children_pre_update();
         RealNativeThingUpdate(seconds,milliseconds);
         saber_light_native_update_active=previous_tick_state;
         // The alternative native MAT format variant previously crashed at
@@ -8157,11 +8942,47 @@ namespace {
                 completed.insert(rec.child);
                 uint32_t child_sig=0,parent_sig=0;
                 if(!read_node_attachment_identity(rec.child,child_sig) ||
-                   !read_node_attachment_identity(rec.parent,parent_sig) ||
-                   child_sig!=rec.child_signature ||
+                   child_sig!=rec.child_signature) {
+                    // Child slot was freed or recycled; its native attachment
+                    // cannot be repaired through this stale sidecar.
+                    jkgm::get_node_attachment_registry().erase(rec.child);
+                    continue;
+                }
+                if(!read_node_attachment_identity(rec.parent,parent_sig) ||
                    parent_sig!=rec.parent_signature) {
-                    // Never touch the memory of a recycled/destroyed child.
-                    // The native detach/destruction routine owns flag cleanup.
+                    // A Thing can be destroyed later in the same native tick,
+                    // bypassing our pre-update scan and direct remove hooks.
+                    // The old parent is no longer safe to pass to native
+                    // DetachThing; clear only this still-live node child's
+                    // native attachment payload instead of silently erasing
+                    // its registry entry and leaving flags 0x8C behind.
+                    uint32_t kind=0,live_parent_signature=0;
+                    bool const parent_readable=
+                        gpu_span_readable(
+                            reinterpret_cast<void const *>(rec.parent),0x78U);
+                    if(parent_readable) {
+                        std::memcpy(&kind,reinterpret_cast<void const *>(
+                            rec.parent+0x0c),4);
+                        std::memcpy(&live_parent_signature,
+                            reinterpret_cast<void const *>(rec.parent+0x74),4);
+                    }
+                    if(!parent_readable || kind==0 ||
+                       live_parent_signature==0) {
+                        uint32_t flags=0,linked=0;
+                        std::memcpy(&flags,reinterpret_cast<void const *>(
+                            rec.child+0x34),4);
+                        std::memcpy(&linked,reinterpret_cast<void const *>(
+                            rec.child+0x58),4);
+                        if(jkgm::native_orphan_node_link_matches(
+                            flags,linked,rec.parent)) {
+                            std::memset(reinterpret_cast<void *>(
+                                rec.child+0x34),0,0x28U);
+                            std::memset(reinterpret_cast<void *>(
+                                rec.child+0x6c),0,0x08U);
+                            LOG_WARNING("ThingNode: repaired orphan node "
+                                        "attachment after inline parent removal");
+                        }
+                    }
                     jkgm::get_node_attachment_registry().erase(rec.child);
                     continue;
                 }
@@ -8209,6 +9030,139 @@ namespace {
         }
     }
 
+    // Sith's removal path detaches the dying Thing from its own parent,
+    // but does not detach its children. Do that before freeing the parent:
+    // native DetachThing clears flags (including NOMOVE/NODE), parent links,
+    // and intrusive child-list pointers while both Thing slots are valid.
+    void detach_native_node_children_for_parent(
+        void *thing,bool remove_own_entry=true)
+    {
+        uintptr_t const dying=reinterpret_cast<uintptr_t>(thing);
+        auto children=jkgm::get_node_attachment_registry().take_related(
+            dying,remove_own_entry);
+        if(children.empty())return;
+        uint32_t dying_signature=0;
+        if(!read_node_attachment_identity(dying,dying_signature))return;
+        for(auto const &rec:children) {
+            if(rec.parent_signature!=dying_signature)continue;
+            uint32_t child_signature=0;
+            if(!read_node_attachment_identity(rec.child,child_signature) ||
+               child_signature!=rec.child_signature)continue;
+            uint32_t flags=0,attached=0;
+            std::memcpy(&flags,reinterpret_cast<void const *>(rec.child+0x34),4);
+            std::memcpy(&attached,reinterpret_cast<void const *>(rec.child+0x58),4);
+            if((flags & (jkgm::native_attach_thing |
+                          jkgm::native_attach_node)) !=
+                          (jkgm::native_attach_thing |
+                           jkgm::native_attach_node) ||
+               attached!=dying)continue; // vanilla DetachThing or reattach won
+            RealNativeThingDetach(reinterpret_cast<void *>(rec.child));
+        }
+    }
+
+    // Use the complete native child list before consulting the node
+    // registry. This covers ordinary Thing/Thing-face attachments too.
+    // Native DetachAttachedThings invokes DetachThing, whose detour erases
+    // the node records; registry-only detachment remains a fallback for
+    // mismatched or missing native child-list links.
+    void detach_native_children_from_parent(
+        void *thing,bool remove_own_entry)
+    {
+        uintptr_t const parent=reinterpret_cast<uintptr_t>(thing);
+        uint32_t signature=0;
+        if(!read_node_attachment_identity(parent,signature))return;
+        uint32_t head=0;
+        std::memcpy(&head,reinterpret_cast<void const *>(parent+0x68),4);
+        if(head && native_detach_attached_things_supported() &&
+           gpu_span_readable(reinterpret_cast<void const *>(
+               uintptr_t(head)),0x5cU)) {
+            uint32_t flags=0,attached=0;
+            std::memcpy(&flags,reinterpret_cast<void const *>(
+                uintptr_t(head)+0x34),4);
+            std::memcpy(&attached,reinterpret_cast<void const *>(
+                uintptr_t(head)+0x58),4);
+            if(jkgm::native_attach_has_thing_parent(flags) &&
+               attached==parent) {
+                auto const detach_children=reinterpret_cast<
+                    native_thing_detach_fn>(
+                        node_attach_native_detach_children);
+                detach_children(thing);
+            }
+        }
+        detach_native_node_children_for_parent(thing,remove_own_entry);
+    }
+
+    void detach_native_destroyed_children_pre_update()
+    {
+        uint32_t world=0,things=0;
+        int32_t highest=-1,capacity=0;
+        if(!jkgm::engine_material_debug::read_object(
+                 jkgm::engine_material_debug::current_world_global,world) ||
+           world<0x10000U ||
+           !jkgm::engine_material_debug::read_object(
+                 uintptr_t(world)+0xc0U,highest) ||
+           !jkgm::engine_material_debug::read_object(
+                 uintptr_t(world)+0xbcU,capacity) ||
+           !jkgm::engine_material_debug::read_object(
+                 uintptr_t(world)+0xc4U,things) ||
+           highest<0 || capacity<=0 || highest>=capacity ||
+           capacity>16384 || things<0x10000U)return;
+        constexpr uintptr_t stride=0x2b0U;
+        uintptr_t const base=uintptr_t(things);
+        uintptr_t const last=base+uintptr_t(highest)*stride;
+        if(last<base ||
+           !gpu_span_readable(reinterpret_cast<void const *>(base),0x74U) ||
+           !gpu_span_readable(reinterpret_cast<void const *>(last),0x74U))
+            return;
+        jkgm::get_node_attachment_registry().prepare_world(world);
+        for(int32_t i=0;i<=highest;++i) {
+            uintptr_t const parent=base+uintptr_t(i)*stride;
+            uint32_t flags=0,kind=0;
+            std::memcpy(&flags,reinterpret_cast<void const *>(parent),4);
+            std::memcpy(&kind,reinterpret_cast<void const *>(parent+0x0c),4);
+            if(!jkgm::native_thing_requires_child_detach(kind,flags))continue;
+            detach_native_children_from_parent(
+                reinterpret_cast<void *>(parent),true);
+        }
+    }
+
+    // The normal ground-actor death path does not free the Thing yet:
+    // it schedules corpse conversion one second later. Detach now, after
+    // the killed COG was delivered and native KillActor accepted the death.
+    void __cdecl HookedNativeActorKill(void *actor,void *attacker,int damage_type)
+    {
+        uintptr_t const ptr=reinterpret_cast<uintptr_t>(actor);
+        uint32_t original_signature=0;
+        bool const had_identity=read_node_attachment_identity(
+            ptr,original_signature);
+        RealNativeActorKill(actor,attacker,damage_type);
+        if(!had_identity)return;
+        uint32_t current_signature=0;
+        if(!read_node_attachment_identity(ptr,current_signature) ||
+           current_signature!=original_signature ||
+           !gpu_span_readable(actor,0x138U))return;
+        uint32_t kind=0;
+        float health=0.0f;
+        std::memcpy(&kind,reinterpret_cast<void const *>(ptr+0x0c),4);
+        std::memcpy(&health,reinterpret_cast<void const *>(ptr+0x134),4);
+        if(!jkgm::native_actor_death_confirmed(kind,health))return;
+        // Unlike Thing removal, killing an actor does not yet destroy its
+        // own native attachment to a different parent.
+        detach_native_children_from_parent(actor,false);
+    }
+
+    void __cdecl HookedNativeThingRemove(void *thing)
+    {
+        detach_native_children_from_parent(thing,true);
+        RealNativeThingRemove(thing);
+    }
+
+    void __cdecl HookedNativeThingFree(void *thing)
+    {
+        detach_native_children_from_parent(thing,true);
+        RealNativeThingFree(thing);
+    }
+
     void __cdecl HookedNativeThingDetach(void *child)
     {
         jkgm::get_node_attachment_registry().erase(
@@ -8232,9 +9186,18 @@ namespace {
         LONG const b=a==NO_ERROR ?
             DetourAttach(&(PVOID&)RealNativeThingDetach,
                          HookedNativeThingDetach):a;
-        if(a!=NO_ERROR || b!=NO_ERROR) {
+        LONG const c=b==NO_ERROR ?
+            DetourAttach(&(PVOID&)RealNativeThingRemove,
+                         HookedNativeThingRemove):b;
+        LONG const d=c==NO_ERROR ?
+            DetourAttach(&(PVOID&)RealNativeThingFree,
+                         HookedNativeThingFree):c;
+        LONG const e=d==NO_ERROR ?
+            DetourAttach(&(PVOID&)RealNativeActorKill,
+                         HookedNativeActorKill):d;
+        if(e!=NO_ERROR) {
             DetourTransactionAbort();
-            LOG_WARNING("ThingNode attachment Detours failed: ",b);
+            LOG_WARNING("ThingNode attachment Detours failed: ",e);
             return false;
         }
         LONG const committed=DetourTransactionCommit();
@@ -8251,8 +9214,11 @@ namespace {
         saber_light_overrides().clear();
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
-        DetourDetach(&(PVOID&)RealNativeThingUpdate,HookedNativeThingUpdate);
+        DetourDetach(&(PVOID&)RealNativeActorKill,HookedNativeActorKill);
+        DetourDetach(&(PVOID&)RealNativeThingFree,HookedNativeThingFree);
+        DetourDetach(&(PVOID&)RealNativeThingRemove,HookedNativeThingRemove);
         DetourDetach(&(PVOID&)RealNativeThingDetach,HookedNativeThingDetach);
+        DetourDetach(&(PVOID&)RealNativeThingUpdate,HookedNativeThingUpdate);
         DetourTransactionCommit();
     }
 
@@ -8327,6 +9293,24 @@ namespace {
         std::memcpy(static_cast<uint8_t *>(child)+0x34,&current,4);
         LOG_INFO("AttachThingToThingNode: node=",node,
                  " child=",a.child," attachFlags=",current);
+    }
+
+    // DetachAttachedThings(parent): detach all direct native children,
+    // including ordinary Thing, Thing-face, and animated-node attachments.
+    // The native loop calls DetachThing for each child; our DetachThing detour
+    // erases node sidecars and native JK clears NOMOVE and parent pointers.
+    void __cdecl cog_detach_attached_things(void *ctx)
+    {
+        void *parent=cog_pop_thing(ctx);
+        uint32_t parent_signature=0;
+        if(!native_detach_attached_things_supported() ||
+           !read_node_attachment_identity(
+               reinterpret_cast<uintptr_t>(parent),parent_signature))
+            return;
+        auto const native_detach_children=
+            reinterpret_cast<native_thing_detach_fn>(
+                node_attach_native_detach_children);
+        native_detach_children(parent);
     }
 
     // Returns the REAL attached face normal, not the transient sphere-
@@ -8493,6 +9477,34 @@ namespace {
             info=sprite_instances.sample(thing,signature,GetTickCount());
         float const values[]={info.width,info.height,info.opacity};
         cog_push_vector(ctx,values);
+    }
+
+    // SetThingOpacity(thing, opacity, dither, fadeTime). Like SPR, this is
+    // per-Thing and never edits the shared rdModel3 or cached mesh source.
+    void __cdecl cog_set_thing_opacity(void *ctx)
+    {
+        float const seconds=cog_pop_float(ctx);
+        float const dither=cog_pop_float(ctx);
+        float const opacity=cog_pop_float(ctx);
+        void *thing=cog_pop_thing(ctx);
+        uint32_t signature=0;
+        if(!std::isfinite(dither) || !thing ||
+           !gpu_span_readable(thing,0xc8U))return;
+        auto const *p=static_cast<uint8_t const *>(thing);
+        uint32_t type=0,rd_type=0;
+        std::memcpy(&type,p+0x0cU,4U);
+        std::memcpy(&rd_type,p+0xc4U,4U);
+        if(type==0U || rd_type!=1U)return;
+        std::memcpy(&signature,p+0x74U,4U);
+        if(!thing_opacity_instances.set(thing,signature,opacity,
+                                       dither>=1.0f,GetTickCount(),seconds))
+            LOG_WARNING("SetThingOpacity: invalid opacity or duration");
+    }
+    // Returns the currently interpolated alpha, not the pending target.
+    void __cdecl cog_get_thing_opacity(void *ctx)
+    {
+        void *thing=cog_pop_thing(ctx);
+        cog_push_float(ctx,sample_3do_opacity(thing).opacity);
     }
 
     // SetFogColor(vector rgb, float fadeTime)
@@ -8845,12 +9857,49 @@ namespace {
         return id >= 0 && id <= 65535;
     }
 
+    // CaptureEnvMap(sourceThing,fadeTime): queue a fresh full-sphere world
+    // capture without changing JK's live camera or rendering from COG.
+    void __cdecl cog_capture_env_map(void *ctx)
+    {
+        float const fade=cog_pop_float(ctx);
+        void *thing=cog_pop_thing(ctx);
+        if(!thing || !gpu_span_readable(thing,0xc4U)) {
+            LOG_WARNING("CaptureEnvMap rejected invalid source Thing");
+            return;
+        }
+        auto const *bytes=static_cast<uint8_t const *>(thing);
+        uint32_t kind=0,signature=0,world=0;
+        std::array<float,3> position{};
+        std::memcpy(&kind,bytes+0x0cU,4U);
+        std::memcpy(&signature,bytes+0x74U,4U);
+        std::memcpy(position.data(),bytes+0xb8U,sizeof(position));
+        if(kind<1U || kind>15U || signature==0U ||
+           !jkgm::engine_material_debug::read_object(
+               jkgm::engine_material_debug::current_world_global,world) ||
+           !world) {
+            LOG_WARNING("CaptureEnvMap rejected invalid Thing identity/world");
+            return;
+        }
+        uint64_t const owner=
+            (uint64_t(uint32_t(reinterpret_cast<uintptr_t>(thing)))<<32)|
+            signature;
+        if(!jkgm::get_global_env_capture_controls().request(
+               position,owner,world,fade)) {
+            LOG_WARNING("CaptureEnvMap rejected nonfinite position/fade");
+            return;
+        }
+        cog_material_controls().snapshot(); // ensure world is prepared
+        LOG_DEBUG("COG CaptureEnvMap queued: source Thing=",owner,
+                  " fade=",fade);
+    }
+
     void __cdecl cog_set_global_env_map(void *ctx)
     {
         float fade = cog_pop_float(ctx);
         int image = cog_pop_int(ctx);
         int source = cog_pop_int(ctx);
         if(valid_mat_index(source) && valid_image_id(image)) {
+            jkgm::get_global_env_capture_controls().clear();
             cog_material_controls().set_global_env(
                 static_cast<uint32_t>(source), image, fade);
             LOG_DEBUG("COG SetGlobalEnvMap: source MAT=", source,
@@ -9196,6 +10245,7 @@ namespace {
     void __cdecl cog_reset_global_env_map(void *ctx)
     {
         float fade = cog_pop_float(ctx);
+        jkgm::get_global_env_capture_controls().clear();
         cog_material_controls().reset_global_env(fade);
         LOG_DEBUG("COG ResetGlobalEnvMap: fade=", std::to_string(fade));
     }
@@ -9303,6 +10353,52 @@ namespace {
         else LOG_WARNING("COG ResetMaterialColor rejected: MAT=", mat);
     }
 
+
+    // SetMatClearcoat(mat, vector(strength,roughness,transmission),fade)
+    // Absolute, not multiplicative: authored strength may be zero, and a
+    // rain script must be able to enable a dry surface without replacing
+    // its texture or waiting for another material upload.
+    void __cdecl cog_set_mat_clearcoat(void *ctx)
+    {
+        float const fade=cog_pop_float(ctx);
+        float values[3]{0.0f,0.1f,1.0f};
+        cog_pop_vector(ctx,values);
+        int const mat=cog_pop_int(ctx);
+        if(!valid_mat_index(mat) ||
+           !std::isfinite(values[0]) || !std::isfinite(values[1]) ||
+           !std::isfinite(values[2])) {
+            LOG_WARNING("SetMatClearcoat rejected: MAT=",mat);
+            return;
+        }
+        cog_material_controls().set_mat_clearcoat(
+            static_cast<uint32_t>(mat),
+            {{clamp_float(values[0],0.0f,1.0f),
+              clamp_float(values[1],0.0f,1.0f),
+              clamp_float(values[2],0.0f,1.0f)}},fade);
+    }
+
+    // Get always returns the *current interpolated* material-level values.
+    // A missing override resolves to the last known authored MAT defaults.
+    void __cdecl cog_get_mat_clearcoat(void *ctx)
+    {
+        int const mat=cog_pop_int(ctx);
+        std::array<float,3> current{{0.0f,0.1f,1.0f}};
+        if(valid_mat_index(mat))
+            current=cog_material_controls().get_mat_clearcoat(
+                static_cast<uint32_t>(mat));
+        cog_push_vector(ctx,current.data());
+    }
+
+    // Reset transitions to the authored defaults; with fade=0 it is
+    // instantaneous, consistent with existing runtime MAT Reset verbs.
+    void __cdecl cog_reset_mat_clearcoat(void *ctx)
+    {
+        float const fade=cog_pop_float(ctx);
+        int const mat=cog_pop_int(ctx);
+        if(valid_mat_index(mat))
+            cog_material_controls().reset_mat_clearcoat(
+                static_cast<uint32_t>(mat),fade);
+    }
 
     // JKGM(5).exe: verified 1998 JK hud, inventory and weapon setter.
     // Native HUD: jkHud_GetWeaponAmmo(thing) at 0x408F40.
@@ -9444,6 +10540,192 @@ namespace {
         cog_push_int(ctx,hud_ammo_selection.get());
     }
 
+    // JK.dll's getters read rdModel3.radius at +0x5c and the first
+    // GeoSet's rdMesh.radius at +0x54 in a 0x70-byte mesh record.
+    // The model is resolved through the very same native PopModel3 helper,
+    // so CloneModel() entries remain independent of their source model.
+    // These are model attributes, NEVER SithThing size/movesize.
+    bool cog_write_model_radius_field(uintptr_t address,float radius)
+    {
+        if(!std::isfinite(radius) || radius<0.0f ||
+           !jkgm::engine_material_debug::matches_tested_executable() ||
+           address<0x10000U || address>0x7ff00000U)
+            return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if(VirtualQuery(reinterpret_cast<void const *>(address),&mbi,
+                        sizeof(mbi))==0 || mbi.State!=MEM_COMMIT ||
+           (mbi.Protect&(PAGE_GUARD|PAGE_NOACCESS)))
+            return false;
+        DWORD const protection=mbi.Protect&0xffU;
+        if(protection!=PAGE_READWRITE && protection!=PAGE_WRITECOPY &&
+           protection!=PAGE_EXECUTE_READWRITE &&
+           protection!=PAGE_EXECUTE_WRITECOPY)
+            return false;
+        uintptr_t const start=reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+        uintptr_t const end=start+mbi.RegionSize;
+        if(end<start || address<start || address>end ||
+           end-address<sizeof(radius))
+            return false;
+        std::memcpy(reinterpret_cast<void *>(address),&radius,sizeof(radius));
+        return true;
+    }
+
+    // SetModelRadius(model, radius). Exact counterpart of JK.dll's
+    // GetModelRadius: callers should CloneModel() first for per-chunk bounds.
+    void __cdecl cog_set_model_radius(void *ctx)
+    {
+        float const radius=cog_pop_float(ctx);
+        void *const model=cog_pop_model(ctx);
+        if(!model)return;
+        uintptr_t const base=reinterpret_cast<uintptr_t>(model);
+        if(!cog_write_model_radius_field(base+0x5cU,radius))
+            LOG_WARNING("SetModelRadius rejected invalid model/radius");
+    }
+
+    // SetModelMeshRadius(model, mesh_index, radius). Matches JK.dll's
+    // GetModelMeshRadius: mesh_index selects GeoSet 0, NOT all GeoSets.
+    void __cdecl cog_set_model_mesh_radius(void *ctx)
+    {
+        float const radius=cog_pop_float(ctx);
+        int const mesh_index=cog_pop_int(ctx);
+        void *const model=cog_pop_model(ctx);
+        if(!model || mesh_index<0 || !std::isfinite(radius) || radius<0.0f)
+            return;
+        uintptr_t const base=reinterpret_cast<uintptr_t>(model);
+        uint32_t num_geos=0,mesh_count=0,meshes=0;
+        using jkgm::engine_material_debug::read_object;
+        if(!read_object(base+0x44U,num_geos) || num_geos==0 ||
+           !read_object(base+0x24U,mesh_count) ||
+           !read_object(base+0x28U,meshes) || !meshes ||
+           mesh_count>65536U || uint32_t(mesh_index)>=mesh_count)
+            return;
+        uint64_t const address=uint64_t(meshes)+
+            uint64_t(uint32_t(mesh_index))*0x70U+0x54U;
+        if(address>0x7ff00000U ||
+           !cog_write_model_radius_field(uintptr_t(address),radius))
+            LOG_WARNING("SetModelMeshRadius rejected invalid mesh/radius");
+    }
+
+    // JK.dll's GetThingCreateThingTemplate checks the Thing pointer but
+    // dereferences Thing+0x7c (createThing template) without a null guard.
+    // Preserve its return contract: template index, or -1 if unset.
+    void __cdecl cog_get_thing_create_thing(void *ctx)
+    {
+        void *const thing=cog_pop_thing(ctx);
+        auto const read=[](uintptr_t address,void *dst,size_t bytes)->bool {
+            if(!gpu_span_readable(reinterpret_cast<void const*>(address),bytes))
+                return false;
+            std::memcpy(dst,reinterpret_cast<void const*>(address),bytes);
+            return true;
+        };
+        cog_push_int(ctx,jkgm::cog_get_create_thing_template_id(
+            read,reinterpret_cast<uintptr_t>(thing)));
+    }
+
+    // Equivalent to GetPuppetJointNode(GetThingPuppet(thing),joint), using
+    // the same class ID, current/static world mapping and 0..9 joint slots
+    // as the two original JK.dll handlers. Return -1 for invalid inputs.
+    void __cdecl cog_get_thing_joint_node(void *ctx)
+    {
+        int const joint=cog_pop_int(ctx);
+        void *const thing=cog_pop_thing(ctx);
+        auto const read=[](uintptr_t address,void *dst,size_t bytes)->bool {
+            if(!gpu_span_readable(reinterpret_cast<void const *>(address),bytes))
+                return false;
+            std::memcpy(dst,reinterpret_cast<void const *>(address),bytes);
+            return true;
+        };
+        cog_push_int(ctx,jkgm::cog_get_thing_joint_node(
+            read,reinterpret_cast<uintptr_t>(thing),joint));
+    }
+
+    // GetThingCameraDepth/DistSq/Dist query the ACTUAL active rdCamera
+    // world-to-view matrix, like JK's transformedPos.y. Cached transformedPos
+    // may belong to an earlier frame or an entirely different camera.
+    // No sqrt in the depth/squared versions; one sqrt for actual distance.
+    void cog_get_thing_camera_measure(void *ctx,
+                                      jkgm::cog_camera_measure measure)
+    {
+        void *const thing=cog_pop_thing(ctx);
+        float value=-1.0f;
+        // The camera and COG ABI addresses are tied to the tested JKGM exe.
+        // build_matches() validates native code signatures once.
+        if(jkgm::engine_camera_detail::build_matches()) {
+            auto const read=[](uintptr_t address,void *dst,size_t bytes)->bool {
+                if(!gpu_span_readable(reinterpret_cast<void const *>(address),
+                                      bytes))return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(address),bytes);
+                return true;
+            };
+            value=jkgm::cog_get_thing_camera_measure(
+                read,reinterpret_cast<uintptr_t>(thing),measure);
+        }
+        cog_push_float(ctx,value);
+    }
+    void __cdecl cog_get_thing_camera_depth(void *ctx) {
+        cog_get_thing_camera_measure(ctx,jkgm::cog_camera_measure::depth);
+    }
+    void __cdecl cog_get_thing_camera_dist_sq(void *ctx) {
+        cog_get_thing_camera_measure(ctx,jkgm::cog_camera_measure::distance_sq);
+    }
+    void __cdecl cog_get_thing_camera_dist(void *ctx) {
+        cog_get_thing_camera_measure(ctx,jkgm::cog_camera_measure::distance);
+    }
+
+    // JK.dll GetCurrentCameraRLUVecs pushes the current SithCamera's
+    // orientation U, L, then R. These independent getters read those
+    // same native fields, without matrix multiplication or normalization.
+    void cog_get_current_camera_axis(void *ctx,jkgm::cog_camera_axis axis)
+    {
+        std::array<float,3> vector{};
+        if(jkgm::engine_camera_detail::build_matches()) {
+            auto const read=[](uintptr_t address,void *dst,size_t bytes)->bool {
+                if(!gpu_span_readable(reinterpret_cast<void const *>(address),
+                                      bytes))return false;
+                std::memcpy(dst,reinterpret_cast<void const *>(address),bytes);
+                return true;
+            };
+            jkgm::cog_current_camera_axis(read,axis,vector);
+        }
+        cog_push_vector(ctx,vector.data());
+    }
+    void __cdecl cog_get_current_camera_rvec(void *ctx) {
+        cog_get_current_camera_axis(ctx,jkgm::cog_camera_axis::right);
+    }
+    void __cdecl cog_get_current_camera_lvec(void *ctx) {
+        cog_get_current_camera_axis(ctx,jkgm::cog_camera_axis::look);
+    }
+    void __cdecl cog_get_current_camera_uvec(void *ctx) {
+        cog_get_current_camera_axis(ctx,jkgm::cog_camera_axis::up);
+    }
+
+    // JK.dll's original handler compares attach_flags == 2 exactly. Both
+    // THINGFACE (0x2) and THING (0x4), with arbitrary extra bits, refer to
+    // a Thing in the shared +0x58 parent slot.
+    void __cdecl cog_get_thing_attach_thing(void *ctx)
+    {
+        int attached_index=-1;
+        void *thing=cog_pop_thing(ctx);
+        uintptr_t const child=reinterpret_cast<uintptr_t>(thing);
+        uint32_t child_signature=0;
+        if(read_node_attachment_identity(child,child_signature)) {
+            uint32_t flags=0,parent=0;
+            std::memcpy(&flags,reinterpret_cast<void const *>(child+0x34),4);
+            std::memcpy(&parent,reinterpret_cast<void const *>(child+0x58),4);
+            if(jkgm::native_attach_has_thing_parent(flags) &&
+               parent && uintptr_t(parent)!=child) {
+                uint32_t parent_signature=0;
+                if(read_node_attachment_identity(parent,parent_signature)) {
+                    int32_t index=-1;
+                    std::memcpy(&index,
+                        reinterpret_cast<void const *>(uintptr_t(parent)+0x04),4);
+                    if(index>=0)attached_index=index;
+                }
+            }
+        }
+        cog_push_int(ctx,attached_index);
+    }
+
     struct cog_verb_entry {
         char const *name;
         cog_handler_type handler;
@@ -9527,6 +10809,7 @@ namespace {
         cog_verb_entry{"clearspotlight", cog_clear_spotlight},
         cog_verb_entry{"resetspotlight", cog_clear_spotlight},
         cog_verb_entry{"setglobalenvmap", cog_set_global_env_map},
+        cog_verb_entry{"captureenvmap", cog_capture_env_map},
         cog_verb_entry{"resetglobalenvmap", cog_reset_global_env_map},
         cog_verb_entry{"setmatenvmap", cog_set_mat_env_map},
         cog_verb_entry{"setmatenvmapfrom", cog_set_mat_env_map_from},
@@ -9534,7 +10817,14 @@ namespace {
         cog_verb_entry{"setmaterialalbedo", cog_set_material_albedo},
         cog_verb_entry{"resetmaterialalbedo", cog_reset_material_albedo},
         cog_verb_entry{"setmaterialcolor", cog_set_material_color},
+        cog_verb_entry{"setmodelradius", cog_set_model_radius},
+        cog_verb_entry{"setmodelmeshradius", cog_set_model_mesh_radius},
         cog_verb_entry{"resetmaterialcolor", cog_reset_material_color},
+        cog_verb_entry{"setmatclearcoat", cog_set_mat_clearcoat},
+        cog_verb_entry{"getmatclearcoat", cog_get_mat_clearcoat},
+        cog_verb_entry{"resetmatclearcoat", cog_reset_mat_clearcoat},
+        cog_verb_entry{"setthingopacity", cog_set_thing_opacity},
+        cog_verb_entry{"getthingopacity", cog_get_thing_opacity},
         cog_verb_entry{"setspriteinfo", cog_set_sprite_info},
         cog_verb_entry{"getspriteinfo", cog_get_sprite_info},
         cog_verb_entry{"setspriteroll", cog_set_sprite_roll},
@@ -9547,6 +10837,14 @@ namespace {
         cog_verb_entry{"aigetlookdir", cog_ai_get_look_dir},
         cog_verb_entry{"getthingattachnormal", cog_get_thing_attach_normal},
         cog_verb_entry{"attachthingtothingnode", cog_attach_thing_to_thing_node},
+        cog_verb_entry{"detachattachedthings", cog_detach_attached_things},
+        cog_verb_entry{"getthingjointnode", cog_get_thing_joint_node},
+        cog_verb_entry{"getthingcameradepth", cog_get_thing_camera_depth},
+        cog_verb_entry{"getthingcameradistsq", cog_get_thing_camera_dist_sq},
+        cog_verb_entry{"getthingcameradist", cog_get_thing_camera_dist},
+        cog_verb_entry{"getcurrentcamerarvec", cog_get_current_camera_rvec},
+        cog_verb_entry{"getcurrentcameralvec", cog_get_current_camera_lvec},
+        cog_verb_entry{"getcurrentcamerauvec", cog_get_current_camera_uvec},
         cog_verb_entry{"getthingnodepos", cog_get_thing_node_pos},
         cog_verb_entry{"getthingnodeoffsetpos", cog_get_thing_node_offset_pos},
         cog_verb_entry{"getthingnodeposoffset", cog_get_thing_node_pos_offset},
@@ -9558,15 +10856,113 @@ namespace {
 
     JkInitNewCogVerbs_type TrueJkInitNewCogVerbs = nullptr;
 
+    // Intercept exactly the supplied JK.dll's getter during its normal verb
+    // registration. Do not rely on duplicate-symbol replacement semantics,
+    // and do not modify JK.dll's code or its other registered handlers.
+    thread_local cog_register_verb_type jk_register_forward=nullptr;
+    thread_local bool jk_create_thing_getter_replaced=false;
+    thread_local bool jk_attach_thing_getter_replaced=false;
+
+    bool jk_create_thing_getter_matches(cog_handler_type handler)
+    {
+        HMODULE const dll=GetModuleHandleA("JK.dll");
+        if(!dll)return false;
+        auto const base=reinterpret_cast<uintptr_t>(dll);
+        uintptr_t const thunk=base+0x46ba8U;
+        uintptr_t const body=base+0x51130U;
+        uintptr_t const unsafe_read=base+0x51187U;
+        constexpr uint8_t expected_thunk[]{
+            0xe9,0x83,0xa5,0x00,0x00
+        };
+        constexpr uint8_t expected_body[]{
+            0x55,0x8b,0xec,0x81,0xec,0xcc,0x00,0x00,0x00
+        };
+        constexpr uint8_t expected_unsafe_read[]{
+            0x8b,0x45,0xf8,0x8b,0x48,0x7c,0x8b,0xf4,0x8b,0x51,0x04
+        };
+        return reinterpret_cast<uintptr_t>(handler)==thunk &&
+            gpu_span_readable(reinterpret_cast<void const*>(thunk),
+                              sizeof(expected_thunk)) &&
+            gpu_span_readable(reinterpret_cast<void const*>(body),
+                              sizeof(expected_body)) &&
+            gpu_span_readable(reinterpret_cast<void const*>(unsafe_read),
+                              sizeof(expected_unsafe_read)) &&
+            std::memcmp(reinterpret_cast<void const*>(thunk),
+                        expected_thunk,sizeof(expected_thunk))==0 &&
+            std::memcmp(reinterpret_cast<void const*>(body),
+                        expected_body,sizeof(expected_body))==0 &&
+            std::memcmp(reinterpret_cast<void const*>(unsafe_read),
+                        expected_unsafe_read,sizeof(expected_unsafe_read))==0;
+    }
+
+    // The supplied JK.dll registers GetThingAttachThing through this exact
+    // thunk. Only replace the verified handler; leave other DLLs untouched.
+    bool jk_attach_thing_getter_matches(cog_handler_type handler)
+    {
+        HMODULE const dll=GetModuleHandleA("JK.dll");
+        if(!dll)return false;
+        auto const base=reinterpret_cast<uintptr_t>(dll);
+        uintptr_t const thunk=base+0x4633dU;
+        uintptr_t const body=base+0x49bf0U;
+        uintptr_t const exact_compare=base+0x49c34U;
+        constexpr uint8_t thunk_bytes[]{0xe9,0xae,0x38,0x00,0x00};
+        constexpr uint8_t body_bytes[]{
+            0x55,0x8b,0xec,0x81,0xec,0xe4,0x00,0x00,0x00};
+        constexpr uint8_t compare_bytes[]{
+            0x8b,0x45,0xf8,0x83,0x78,0x34,0x02,0x75,0x18};
+        return reinterpret_cast<uintptr_t>(handler)==thunk &&
+            gpu_span_readable(reinterpret_cast<void const*>(thunk),
+                              sizeof(thunk_bytes)) &&
+            gpu_span_readable(reinterpret_cast<void const*>(body),
+                              sizeof(body_bytes)) &&
+            gpu_span_readable(reinterpret_cast<void const*>(exact_compare),
+                              sizeof(compare_bytes)) &&
+            std::memcmp(reinterpret_cast<void const*>(thunk),
+                        thunk_bytes,sizeof(thunk_bytes))==0 &&
+            std::memcmp(reinterpret_cast<void const*>(body),
+                        body_bytes,sizeof(body_bytes))==0 &&
+            std::memcmp(reinterpret_cast<void const*>(exact_compare),
+                        compare_bytes,sizeof(compare_bytes))==0;
+    }
+
+    void __cdecl register_jk_verb_with_compat_fixes(
+        void *ctx,cog_handler_type handler,char const *name)
+    {
+        if(!jk_register_forward)return;
+        if(name && std::strcmp(name,"getthingcreatethingtemplate")==0 &&
+           cog_helpers_match() &&
+           jk_create_thing_getter_matches(handler)) {
+            jk_register_forward(ctx,cog_get_thing_create_thing,name);
+            jk_create_thing_getter_replaced=true;
+            return;
+        }
+        if(name && std::strcmp(name,"getthingattachthing")==0 &&
+           cog_helpers_match() &&
+           jk_attach_thing_getter_matches(handler)) {
+            jk_register_forward(ctx,cog_get_thing_attach_thing,name);
+            jk_attach_thing_getter_replaced=true;
+            return;
+        }
+        jk_register_forward(ctx,handler,name);
+    }
+
     void __cdecl HookedJkInitNewCogVerbs(cog_register_verb_type register_verb, void *ctx)
     {
-        if(the_config && the_config->use_gpu_cache && register_verb) {
-            mesh_revision::begin(register_verb);
-            TrueJkInitNewCogVerbs(mesh_revision::register_mutator,ctx);
-            mesh_revision::finish();
-        } else {
-            TrueJkInitNewCogVerbs(register_verb,ctx);
-        }
+        bool const wrap_mesh=the_config && the_config->use_gpu_cache &&
+                              register_verb;
+        if(wrap_mesh)mesh_revision::begin(register_verb);
+        jk_register_forward=wrap_mesh ?
+            mesh_revision::register_mutator : register_verb;
+        jk_create_thing_getter_replaced=false;
+        jk_attach_thing_getter_replaced=false;
+        TrueJkInitNewCogVerbs(register_verb ?
+            register_jk_verb_with_compat_fixes : nullptr,ctx);
+        if(wrap_mesh)mesh_revision::finish();
+        bool const getter_replaced=jk_create_thing_getter_replaced;
+        bool const attach_getter_replaced=jk_attach_thing_getter_replaced;
+        jk_register_forward=nullptr;
+        jk_create_thing_getter_replaced=false;
+        jk_attach_thing_getter_replaced=false;
 
         if(!cog_helpers_match()) {
             LOG_ERROR("jk.exe does not match the build the fog COG verbs were written for; "
@@ -9574,6 +10970,9 @@ namespace {
             return;
         }
 
+        if(!native_detach_attached_things_supported())
+            LOG_WARNING("DetachAttachedThings unavailable: JKGM native "
+                        "function signature mismatch");
         // Resolve once at COG registration, not on each query.
         native_has_los=native_has_los_matches()
             ? reinterpret_cast<native_has_los_type>(native_has_los_addr)
@@ -9604,6 +11003,18 @@ namespace {
                         "JKGM native containment routine");
         cog_sector_history.clear();
         cog_raycast_history.clear();
+        if(getter_replaced && register_verb) {
+            register_verb(ctx,cog_get_thing_create_thing,"getthingcreatething");
+            LOG_INFO("JK.dll GetThingCreateThingTemplate null guard enabled; "
+                     "GetThingCreateThing alias registered");
+        } else {
+            LOG_DEBUG("JK.dll GetThingCreateThingTemplate left untouched: "
+                      "unrecognized DLL handler or COG helper signatures");
+        }
+        if(attach_getter_replaced)
+            LOG_INFO("JK.dll GetThingAttachThing bitmask getter enabled (0x2|0x4)");
+        else
+            LOG_DEBUG("JK.dll GetThingAttachThing left untouched: unrecognized handler");
         for(auto const &verb : fx_verbs) {
             if(!native_hud_ammo_hook_active &&
                (std::strcmp(verb.name,"setammobin")==0 ||
@@ -9611,7 +11022,7 @@ namespace {
             register_verb(ctx, verb.handler, verb.name);
         }
 
-        LOG_DEBUG("Registered math, fog, sun, spotlight, saber light, post-processing, material, SPR, AI and ThingNode attachment COG verbs");
+        LOG_DEBUG("Registered math, fog, sun, spotlight, saber light, post-processing, material/model radius, SPR, AI and ThingNode attachment COG verbs");
     }
 }
 
@@ -10009,9 +11420,11 @@ bool attach_hooks()
     bool const ice_thing_hook_requested=request_native_thingface_friction_hook();
     bool const earth_sound_hook_requested=request_native_earth_sound_hook();
     bool const sound_formats_hook_requested=jkgm::native_compressed_sound_hook::request();
+    bool const cog_symbols_hook_requested=jkgm::native_cog_symbol_extensions::request();
 
     LONG error = DetourTransactionCommit();
     if(error!=NO_ERROR) {
+        jkgm::native_cog_symbol_extensions::on_failed_commit();
         key_callback_hook_active=false;
         key_callback_registration_hook_active=false;
         key_callback_message_registered=false;
@@ -10052,6 +11465,8 @@ bool attach_hooks()
                  the_config->enable_mesh_collision,
                  " precise_type3=RayCastEx-only");
     }
+    if(error==NO_ERROR && cog_symbols_hook_requested)
+        LOG_INFO("COG symbols: initialized vectors, sprite, soundclass, puppet enabled");
     if(error==NO_ERROR && sound_formats_hook_requested) {
         native_compressed_sound_hook_active=true;
         LOG_INFO("JKGM compressed OGG/FLAC/MP3 sound loader enabled");
@@ -10069,13 +11484,20 @@ bool attach_hooks()
         force_native_mat_mip_zero();
         LOG_INFO("Native MAT mip selection forced to level 0; OpenGL mipmaps remain active");
     }
+    // Patch explicit native creation CALL sites only after the Detours
+    // transaction commits. If it fails, no native Thing-parent code changes.
+    if(error==NO_ERROR)
+        jkgm::native_spawn_parent_hook::install();
     return error == NO_ERROR;
 }
 
 bool detach_hooks()
 {
+    // Undo all five native CALL-site modifications before DLL unload.
+    jkgm::native_spawn_parent_hook::uninstall();
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
+    jkgm::native_cog_symbol_extensions::detach();
 
     if(native_save_template_hook_active) {
         DetourDetach(&(PVOID &)RealSaveTemplateGate,HookedSaveTemplateGate);
@@ -10150,6 +11572,7 @@ bool detach_hooks()
         native_sprite_hook_active=false;
         sprite_types.clear();
         sprite_instances.clear();
+        thing_opacity_instances.clear();
         sprite_decal_diagnostic_keys.clear();
         sprite_gpu_decals.clear();
         clear_moving_sprite_decals();

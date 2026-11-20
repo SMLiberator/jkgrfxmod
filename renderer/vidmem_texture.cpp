@@ -81,7 +81,31 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
         bool const default_normals =
             surf->r->is_default_specular_enabled() &&
             !(*repl_map)->has_explicit_specular_settings;
-        if(authored_reflections || default_normals) {
+        auto const &matcap_factor=(*repl_map)->matcap_factor;
+        bool const active_matcap=(*repl_map)->matcap_map.has_value() &&
+            (get<0>(matcap_factor)>0.0f ||
+             get<1>(matcap_factor)>0.0f ||
+             get<2>(matcap_factor)>0.0f);
+        if(active_matcap) {
+            surf->matcap_map=surf->r->texture_cache->
+                get_srgb_texture_from_filename(*(*repl_map)->matcap_map);
+            if((*repl_map)->matcap_surface_map)
+                surf->matcap_surface_map=surf->r->texture_cache->
+                    get_linear_texture_from_filename(
+                        *(*repl_map)->matcap_surface_map);
+        }
+        bool const coat_authored=(*repl_map)->clearcoat_strength>0.0f ||
+            (*repl_map)->clearcoat_surface_map.has_value() ||
+            (*repl_map)->clearcoat_normal_map.has_value();
+        if((*repl_map)->clearcoat_surface_map)
+            surf->clearcoat_surface_map=surf->r->texture_cache->
+                get_linear_texture_from_filename(
+                    *(*repl_map)->clearcoat_surface_map);
+        if((*repl_map)->clearcoat_normal_map)
+            surf->clearcoat_normal_map=surf->r->texture_cache->
+                get_linear_texture_from_filename(
+                    *(*repl_map)->clearcoat_normal_map);
+        if(authored_reflections || default_normals || active_matcap) {
             if((*repl_map)->normal_map.has_value()) {
                 surf->normal_map = surf->r->texture_cache->get_linear_texture_from_filename(
                     *(*repl_map)->normal_map);
@@ -95,12 +119,14 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
                     surf->surface_map = surf->r->texture_cache->get_linear_texture_from_filename(
                         *(*repl_map)->surface_map);
                 }
-                if((*repl_map)->env_map.has_value()) {
-                    surf->env_map =
-                        surf->r->texture_cache->get_srgb_texture_from_filename(*(*repl_map)->env_map);
-                }
             }
         }
+        // Coat uses the same source image as the base. Upload an authored
+        // EnvMap if either layer can request it (even when base strength=0).
+        if((authored_reflections || coat_authored) &&
+           (*repl_map)->env_map)
+            surf->env_map=surf->r->texture_cache->
+                get_srgb_texture_from_filename(*(*repl_map)->env_map);
 
         // A disabled or zero-strength parallax effect does not need its
         // displacement map uploaded at all.
@@ -110,6 +136,12 @@ HRESULT WINAPI jkgm::vidmem_texture::Load(LPDIRECT3DTEXTURE a)
                 *(*repl_map)->displacement_map);
         }
 
+        surf->matcap_factor=(*repl_map)->matcap_factor;
+        surf->matcap_roughness=(*repl_map)->matcap_roughness;
+        surf->clearcoat_defaults={{
+            (*repl_map)->clearcoat_strength,
+            (*repl_map)->clearcoat_roughness,
+            (*repl_map)->clearcoat_transmission}};
         surf->reflection_strength = (*repl_map)->reflection_strength;
         surf->roughness = (*repl_map)->roughness;
         surf->metalness = (*repl_map)->metalness;
@@ -223,6 +255,25 @@ void jkgm::vidmem_texture_surface::clear()
         r->texture_cache->release_linear_texture(*surface_map);
         surface_map.reset();
     }
+    if(matcap_map.has_value()) {
+        r->texture_cache->release_srgb_texture(*matcap_map);
+        matcap_map.reset();
+    }
+    if(matcap_surface_map.has_value()) {
+        r->texture_cache->release_linear_texture(*matcap_surface_map);
+        matcap_surface_map.reset();
+    }
+    matcap_factor=color_rgb::fill(1.0f);
+    matcap_roughness=0.0f;
+    if(clearcoat_surface_map) {
+        r->texture_cache->release_linear_texture(*clearcoat_surface_map);
+        clearcoat_surface_map.reset();
+    }
+    if(clearcoat_normal_map) {
+        r->texture_cache->release_linear_texture(*clearcoat_normal_map);
+        clearcoat_normal_map.reset();
+    }
+    clearcoat_defaults={{0.0f,0.1f,1.0f}};
 
     if(env_map.has_value()) {
         r->texture_cache->release_srgb_texture(*env_map);

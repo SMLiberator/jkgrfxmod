@@ -1845,22 +1845,22 @@ build in `jkgm/shaders/`. Keep the native `jkgm.exe` bootstrap.
 
 ### Automatic mesh revision tracking
 
-With `use_gpu_cache` enabled, JK.dll COG mutation tracking is now standard,
-without a separate configuration option. The renderer wraps 16 mesh/material
-mutator verb registrations, preserving the original COG handlers and results. A mutation bumps a global generation: cached 3DOs only need a new
-source-byte signature when the generation changes, their mesh header changes, or
-once every 32 frames for an integrity audit. An audit mismatch permanently
-disables the shortcut for that session and restores original per-frame hashing.
-If the expected JK.dll registrations are missing, full hashing remains active.
+With `use_gpu_cache` enabled, the renderer wraps known JK.dll model-related
+COG verbs without consuming interpreter arguments or changing return values.
+The performance branch has independent source-geometry and face-material
+revision generations. Source mutations lazily verify cached source bytes,
+while material-only operations first compare affected material references;
+clones, appends and reference-only changes do not automatically require a
+full geometry rehash. Type-3 collision caching retains its independent
+conservative global mutation generation. Per-verb counts and detailed
+hash-reason diagnostics are available with `profile_renderer=true`.
 
-**This is not yet a guarantee of instant invalidation for writes originating
-outside the known JK.dll verbs**; those can remain stale until the next audit.
-Texture uploads/residency and per-Thing lighting are separate from mesh
-revision tracking. Use `"profile_renderer": true` to monitor
-`PERF gpu_3do source_check_us_avg`, `checks_avg`, and
-`invalidations_total`. For compatibility tests, exercise CloneModel,
-SetModelMesh, ReloadModel, ReplaceModelMaterial and
-ReplaceModelMeshMaterial, as well as animated cels.
+**Revision hook compatibility:** Renderer-side mesh source and material
+epochs are driven by the verified native mutation-registration hooks.
+If the expected hooks are unavailable for an unsupported JK.dll build,
+the GPU cache conservatively falls back to per-frame source validation.
+The old periodic integrity-audit timer and its extra source rehashes
+have been removed; they are not needed in the supported path.
 
 ## Native MAT mip selection
 
@@ -2170,6 +2170,18 @@ when its center is behind a wall. To see the difference, position the
 **center** just outside a building's silhouette so its edges still overlap
 the building: a type-4 flare should remain whole while a default sprite
 would be partially clipped.
+
+## Per-Thing GPU 3DO opacity fades
+
+GPU-cached model Things expose
+`SetThingOpacity(thing, opacity, dither, fadeTime)` and
+`GetThingOpacity(thing)`. The Getter returns the *current* interpolated
+opacity. A `dither` value >= 1 switches ordinary 3DOs to opaque-pass
+screen-door fading; values below 1 use regular alpha blending. Shadow maps
+always use stable dithered coverage for partial model/material opacity,
+including previously alpha-blended 3DOs, and retain their stationary
+shadow-cache invalidation. This does not modify shared models or native
+mesh revision epochs. See [3DO opacity fade documentation](doc/thing_opacity.md).
 
 ## Per-Thing SPR animation (JK23, work in progress)
 

@@ -6,7 +6,7 @@
 #include <optional>
 
 namespace jkgm::gl {
-    enum class shader_type : enum_type { vertex = 0x8B31, fragment = 0x8B30 };
+    enum class shader_type : enum_type { vertex = 0x8B31, fragment = 0x8B30, geometry = 0x8DD9 };
 
     struct shader_traits {
         using value_type = uint_type;

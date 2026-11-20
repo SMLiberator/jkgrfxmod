@@ -11,9 +11,12 @@ namespace jkgm {
     // Distinct from alpha testing. Special modes always render in the
     // transparency pass, even when the original JK face was opaque.
     enum class material_blend_mode { normal, additive, multiply, fluid };
-    // Screen mode initially falls back to the world-aligned EnvMap; an SSR pass will
-    // consume this choice in the next stage.
-    enum class material_reflection_mode { envmap, screen, fixed, matcap };
+    // Numeric identities are passed directly to the renderer GLSL.
+    // Shader mode 3 (legacy matcap) is intentionally unused.
+    // Keep numeric modes stable for existing materials.
+    enum class material_reflection_mode {
+        envmap=0, screen=1, fixed=2, planar=4, hemi=5, cube=6, shared=7
+    };
 
     enum class material_pulse_wave { sine, square, flicker, random };
 
@@ -71,6 +74,28 @@ namespace jkgm {
         // An explicitly authored 0 reflection strength is a deliberate
         // override, unlike the implicit matte default of native JK MATs.
         bool has_explicit_specular_settings = false;
+
+        // Separate artistic matcap layer. This is not an additional specular
+        // lobe: the matcap texture is addressed by the view-space normal.
+        // Its optional linear surface map uses R=intensity, G=roughness;
+        // B is reserved. No shader work is needed without a matcap_map or
+        // when matcap_factor is zero.
+        std::optional<fs::path> matcap_map;
+        std::optional<fs::path> matcap_surface_map;
+        float matcap_roughness = 0.0f;
+        color_rgb matcap_factor = color_rgb::fill(1.0f);
+
+        // Dielectric clearcoat above the base material. Independent of base
+        // reflection metalness and roughness; it reuses the base environment
+        // source instead of triggering an additional scene capture.
+        // Linear surface map: R=coat strength, G=roughness, B=transmission.
+        // B=1 leaves the underlying layer at its authored brightness;
+        // lower B attenuates it only where coat coverage is nonzero.
+        std::optional<fs::path> clearcoat_surface_map;
+        std::optional<fs::path> clearcoat_normal_map;
+        float clearcoat_strength = 0.0f;
+        float clearcoat_roughness = 0.1f;
+        float clearcoat_transmission = 1.0f;
 
         // Equirectangular environment image this material reflects. A material that does not set
         // one gets its own pack's default environment image (if the pack has one).

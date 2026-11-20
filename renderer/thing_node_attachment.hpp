@@ -9,11 +9,34 @@
 #include <mutex>
 #include <vector>
 namespace jkgm {
+    constexpr uint32_t native_attach_thing_face=0x2U;
     constexpr uint32_t native_attach_thing=0x4U;
     constexpr uint32_t native_attach_no_move=0x8U;
+    inline bool native_attach_has_thing_parent(uint32_t flags) {
+        return (flags & (native_attach_thing_face|native_attach_thing))!=0U;
+    }
     // 0x80 is unused by stock JK/MotS attach flags (<= 0x10); reserved
     // for a live COG-readable animated-node attachment.
     constexpr uint32_t native_attach_node=0x80U;
+    constexpr uint32_t native_thing_corpse=9U;
+    constexpr uint32_t native_thing_actor=10U;
+    constexpr uint32_t native_thing_destroyed=0x2U;
+    inline bool native_thing_requires_child_detach(
+        uint32_t kind,uint32_t flags)
+    {
+        return kind>0 && kind<=15 && (flags&native_thing_destroyed)!=0U;
+    }
+    inline bool native_orphan_node_link_matches(
+        uint32_t flags,uintptr_t attached_parent,uintptr_t expected_parent)
+    {
+        return (flags&(native_attach_thing|native_attach_node))==
+                   (native_attach_thing|native_attach_node) &&
+               attached_parent==expected_parent && expected_parent>=0x10000U;
+    }
+    inline bool native_actor_death_confirmed(uint32_t kind,float health) {
+        return (kind==native_thing_actor || kind==native_thing_corpse) &&
+               std::isfinite(health) && health<=0.0f;
+    }
     struct node_attachment {
         uintptr_t child=0,parent=0;
         uint32_t child_signature=0,parent_signature=0;
@@ -85,6 +108,23 @@ namespace jkgm {
         void erase(uintptr_t child) {
             std::lock_guard<std::mutex> lock(mutex_);
             entries_.erase(child);
+        }
+        // During death the actor still exists, potentially as another
+        // parent's node child. Keep that link until actual Thing removal.
+        // On final removal, erase both its own link and its descendants.
+        // No native pointers are dereferenced while the registry is locked.
+        std::vector<node_attachment> take_related(
+            uintptr_t thing,bool remove_own_entry=true) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            std::vector<node_attachment> children;
+            for(auto it=entries_.begin();it!=entries_.end();) {
+                bool const is_child=it->second.parent==thing;
+                if(is_child)children.push_back(it->second);
+                if(is_child || (remove_own_entry && it->first==thing))
+                    it=entries_.erase(it);
+                else ++it;
+            }
+            return children;
         }
         std::vector<node_attachment> snapshot()const {
             std::lock_guard<std::mutex> lock(mutex_);

@@ -1,5 +1,5 @@
 #pragma once
-// CPU reference for the SPR 0x40 flare visibility rule.
+// CPU reference for the SPR type 4 flare visibility rule.
 // The runtime renderer must perform the comparison against the completed
 // opaque scene depth *at the projected SPR center*, not at each flare pixel.
 #include <algorithm>

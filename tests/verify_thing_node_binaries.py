@@ -106,6 +106,38 @@ def check_game(exe):
         raise ValueError("Native node accessor body no longer matches the audited function")
     print("  PASS hierarchy count, frame counter, puppet refresh, 12-float copy")
 
+    for label, address, expected in (
+        ("sithThing_RemoveThing", 0x004CD1F0, bytes.fromhex(
+            "a1 70 26 83 00 56 8b 74 24 08 57")),
+        ("sithThing_FreeThing", 0x004CD320, bytes.fromhex(
+            "56 8b 74 24 08 8b 46 34 85 c0")),
+        ("sithActor_KillActor", 0x004ED240, bytes.fromhex(
+            "53 56 8b 74 24 0c 57 8b 06 f6 c4 02")),
+        ("sithThing_DetachAttachedThings", 0x004CE820, bytes.fromhex(
+            "8b 44 24 04 8b 40 68 85 c0 74 14 56 8b 70 6c 50 "
+            "e8 2b fe ff ff")),
+    ):
+        if exe.va_bytes(address, len(expected)) != expected:
+            raise ValueError(f"{label} at 0x{address:X}: signature mismatch")
+        print(f"  PASS {label} at 0x{address:X}")
+
+    # Inline destroyed-Thing branch of native sithThing_Update:
+    # it detaches the removed Thing from its own parent, then clears the
+    # Thing type/signature without invoking RemoveThing/FreeThing.
+    for label, address, expected in (
+        ("update inlined destroyed branch", 0x004CC4E5,
+         bytes.fromhex("8b 06 a8 02 0f 84")),
+        ("update child-unaware detach", 0x004CC512,
+         bytes.fromhex("39 5e 34 74 09 56 e8 43 21 00 00")),
+        ("update clears Thing type", 0x004CC59F,
+         bytes.fromhex("89 5e 0c")),
+        ("update clears Thing signature", 0x004CC5A8,
+         bytes.fromhex("89 5e 74")),
+    ):
+        if exe.va_bytes(address, len(expected)) != expected:
+            raise ValueError(f"{label} at 0x{address:X}: signature mismatch")
+        print(f"  PASS {label} at 0x{address:X}")
+
     # Separate identification of the JKGM collision routine. These checks
     # deliberately do NOT authorize a runtime detour: callers, ABI and
     # output collision records require independent verification.
@@ -134,6 +166,49 @@ def check_patch(dll):
         if ordinal != expected_ordinal or not fn_rva:
             raise ValueError(f"JK.dll: expected {name} at ordinal {expected_ordinal}")
         print(f"  PASS {name} export #{ordinal}")
+
+    # JK.dll GetThingPuppet -> puppet class pointer at Thing+0x128,
+    # class ID at +0x1e. GetPuppetJointNode -> 10 joint slots at +0x1040,
+    # resolving class ids through current/static world puppet arrays.
+    for label, address, expected in (
+        ("GetThingPuppet handler", dll.image_base + 0x47950,
+         bytes.fromhex("55 8b ec 8b 55 08 52 b8 50 2b 4e 00")),
+        ("GetThingPuppet class pointer", dll.image_base + 0x47963,
+         bytes.fromhex("8b 80 28 01 00 00")),
+        ("GetThingPuppet class ID", dll.image_base + 0x4796D,
+         bytes.fromhex("0f b7 48 1e")),
+        ("GetPuppetJointNode handler", dll.image_base + 0x48560,
+         bytes.fromhex("53 56 57 55 8b ec 8b 5d 14")),
+        ("GetPuppetJointNode joint bound", dll.image_base + 0x4857F,
+         bytes.fromhex("83 fe 0a")),
+        ("GetPuppetJointNode node slot", dll.image_base + 0x48584,
+         bytes.fromhex("ff b4 b7 40 10 00 00")),
+        ("GetPuppet class count", dll.image_base + 0x47A68,
+         bytes.fromhex("3b 82 74 01 00 00")),
+        ("GetPuppet class table", dll.image_base + 0x47A70,
+         bytes.fromhex("8b 92 7c 01 00 00")),
+        ("GetThingPuppet registration", dll.image_base + 0x54220,
+         bytes.fromhex("8d 8b c0 ac 0f 00 8d 93 50 79 04 00")),
+        ("GetPuppetJointNode registration", dll.image_base + 0x54442,
+         bytes.fromhex("8d 8b 97 a7 0f 00 8d 93 60 85 04 00")),
+    ):
+        if dll.va_bytes(address, len(expected)) != expected:
+            raise ValueError(f"{label} at 0x{address:X}: signature mismatch")
+        print(f"  PASS {label} at 0x{address:X}")
+
+    # The original GetThingAttachThing COG handler only accepts flags == 2.
+    # Check its registration thunk and exact comparison before replacing it.
+    for label, address, expected in (
+        ("GetThingAttachThing thunk", dll.image_base + 0x4633D,
+         bytes.fromhex("e9 ae 38 00 00")),
+        ("GetThingAttachThing body", dll.image_base + 0x49BF0,
+         bytes.fromhex("55 8b ec 81 ec e4 00 00 00")),
+        ("GetThingAttachThing exact flag comparison", dll.image_base + 0x49C34,
+         bytes.fromhex("8b 45 f8 83 78 34 02 75 18")),
+    ):
+        if dll.va_bytes(address, len(expected)) != expected:
+            raise ValueError(f"{label} at 0x{address:X}: signature mismatch")
+        print(f"  PASS {label} at 0x{address:X}")
 
 
 def main():

@@ -14,10 +14,10 @@ void jkgm::renderer_compositor_basic::end_frame(opengl_state *ogs,
     // Compose renderbuffer onto window:
     gl::bind_vertex_array(ogs->postmdl.vao);
 
-    // Without trails or Retro quantization, the completed linear frame can
-    // be drawn straight to the sRGB window. Avoid the otherwise redundant
-    // full-resolution history write and subsequent copy to the backbuffer.
-    bool const direct_present=!ogs->enable_trails && !ogs->retro_mode_active;
+    // The inactive-trail fast path writes directly to the window, skipping
+    // both full-resolution history passes. A future trail fade enters the
+    // history path on its first frame; Retro always retains its HUD staging.
+    bool const direct_present=frame_blend_can_present_directly(ogs);
     if(direct_present) {
         gl::bind_framebuffer(gl::framebuffer_bind_target::any,
                              gl::default_framebuffer);
