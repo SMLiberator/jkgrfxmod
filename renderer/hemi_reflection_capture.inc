@@ -321,46 +321,51 @@
                 size_t total_model_groups_culled=0,total_world_bounds_culled=0;
                 size_t total_thing_range_culled=0,capture_scene_preps=0;
                 uint32_t portal_views_used=0U;
-                // Direct paraboloid cameras are nonlinear and each covers
-                // 190 degrees. Union six 90-degree portal views for the full
-                // sphere; never clip using a false perspective hemisphere.
-                // One invalid directional view fails open for both disks.
-                capture_portal_view hemisphere_visibility{};
-                if(paraboloid_mode && portal_ready) {
+                // All 2-/6-view probe captures cover a full sphere.
+                // Build directional portals once. Shared acquisition uses
+                // their union, while rendering retains per-face masks.
+                // If any directional portal view fails, the union fails
+                // open instead of erasing potentially visible Things.
+                std::array<capture_portal_view,6> cube_visibility{};
+                capture_portal_view all_directions_visibility{};
+                if(portal_ready) {
                     bool complete=true;
                     for(unsigned direction=0;direction<6U;++direction) {
                         auto const cube_camera=
                             make_cube_reflection_camera(focus,direction);
-                        auto face_visibility=
+                        cube_visibility[direction]=
                             build_capture_portal_view(cube_camera);
+                        auto const &face_visibility=cube_visibility[direction];
                         if(!face_visibility.valid) {
-                            complete=false;break;
+                            complete=false;continue;
                         }
+                        if(!complete)continue;
                         if(direction==0U)
-                            hemisphere_visibility=std::move(face_visibility);
+                            all_directions_visibility=face_visibility;
                         else {
-                            if(hemisphere_visibility.thing_sectors.size()!=
-                               face_visibility.thing_sectors.size()) {
-                                complete=false;break;
+                            if(all_directions_visibility.surfaces.size()!=
+                                   face_visibility.surfaces.size() ||
+                               all_directions_visibility.thing_sectors.size()!=
+                                   face_visibility.thing_sectors.size()) {
+                                complete=false;continue;
                             }
-                            for(size_t i=0;i<hemisphere_visibility.surfaces.size();++i)
-                                hemisphere_visibility.surfaces[i] |=
+                            for(size_t i=0;i<
+                                all_directions_visibility.surfaces.size();++i)
+                                all_directions_visibility.surfaces[i] |=
                                     face_visibility.surfaces[i];
-                            for(size_t i=0;i<hemisphere_visibility.thing_sectors.size();++i)
-                                hemisphere_visibility.thing_sectors[i] |=
+                            for(size_t i=0;i<
+                                all_directions_visibility.thing_sectors.size();++i)
+                                all_directions_visibility.thing_sectors[i] |=
                                     face_visibility.thing_sectors[i];
                         }
                     }
-                    if(!complete)hemisphere_visibility={};
+                    if(!complete)all_directions_visibility={};
                 }
-                // Independent offscreen Thing discovery / posed mesh
-                // acquisition is shared by both paraboloid disks. Their
-                // portal mask is the union of six directional portal views.
-                // Cube/shared/COG captures retain per-face preparation.
+                // Independent discovery and posing are shared by every
+                // face of the same probe (two disks or six cube faces).
+                // Individual face visibility is still checked when drawing.
                 auto prepare_scene=[&](
-                    std::vector<uint8_t> const *sector_mask,
-                    gpu_3do_native_frustum const *view_frustum,
-                    gpu_3do_matrix34 const *view_matrix)
+                    std::vector<uint8_t> const *sector_mask)
                     ->planar_reflection_offscreen_gpu {
                     ++capture_scene_preps;
                     planar_reflection_offscreen_gpu scene{};
@@ -385,17 +390,14 @@
                             if(reflection_excluded_owners.count(owner)!=0U ||
                                (candidate.is_global &&
                                 !capture_static_owner(owner)))return true;
-                            if(paraboloid_mode) {
-                                if(planar_reflection_thing_outside_paraboloid_range(
-                                       read,thing,focus,far_plane)) {
-                                    ++total_thing_range_culled;
-                                    return true;
-                                }
-                                return false;
+                            // A shared full-sphere snapshot may only use
+                            // radial culling, not an individual face frustum.
+                            if(planar_reflection_thing_outside_probe_range(
+                                   read,thing,focus,far_plane)) {
+                                ++total_thing_range_culled;
+                                return true;
                             }
-                            return view_frustum && view_matrix &&
-                                planar_reflection_thing_outside_frustum(
-                                    read,thing,*view_frustum,*view_matrix);
+                            return false;
                         }),things.end());
                     std::sort(things.begin(),things.end(),
                         [&](auto const &a,auto const &b) {
@@ -410,16 +412,18 @@
                             return distance2(a)<distance2(b);
                         });
                     return acquire_planar_reflection_offscreen_gpu(
-                        things,things.size(),view_frustum,view_matrix);
+                        things,things.size(),nullptr,nullptr);
                 };
-                auto const *hemisphere_thing_mask=
-                    hemisphere_visibility.valid &&
-                    !hemisphere_visibility.thing_sectors.empty()
-                    ?&hemisphere_visibility.thing_sectors:nullptr;
-                planar_reflection_offscreen_gpu hemisphere_offscreen{};
-                if(paraboloid_mode)
-                    hemisphere_offscreen=prepare_scene(
-                        hemisphere_thing_mask,nullptr,nullptr);
+                auto const *capture_thing_mask=
+                    all_directions_visibility.valid &&
+                    !all_directions_visibility.thing_sectors.empty()
+                    ?&all_directions_visibility.thing_sectors:nullptr;
+                // One complete animated node snapshot for every face.
+                planar_reflection_offscreen_gpu capture_offscreen=
+                    prepare_scene(capture_thing_mask);
+                std::unordered_set<uint64_t> acquired;
+                for(auto const &inst:capture_offscreen.nodes)
+                    if(inst.shadow_owner)acquired.insert(inst.shadow_owner);
                 engine_camera first_camera{};
                 bool all_faces_ready=true;
                 for(int face=0;face<face_count;++face) {
@@ -432,11 +436,9 @@
                     auto const projection=make_offscreen_capture_projection(
                         capture_side,capture_side,camera.fov,0.0f,far_plane);
                     if(!projection.valid) {all_faces_ready=false;break;}
-                    auto face_visibility=paraboloid_mode
-                        ?capture_portal_view{}
-                        :build_capture_portal_view(camera);
                     auto const &portal_visibility=paraboloid_mode
-                        ?hemisphere_visibility:face_visibility;
+                        ?all_directions_visibility
+                        :cube_visibility[size_t(face)];
                     if(portal_visibility.valid)++portal_views_used;
                     auto const *thing_sector_mask=portal_visibility.valid &&
                         !portal_visibility.thing_sectors.empty()
@@ -452,15 +454,7 @@
                     frustum.right=projection.half_horizontal;
                     frustum.far_top=projection.half_horizontal;
                     frustum.bottom=-projection.half_horizontal;
-                    planar_reflection_offscreen_gpu face_offscreen{};
-                    if(!paraboloid_mode)
-                        face_offscreen=prepare_scene(thing_sector_mask,
-                                                    &frustum,&view);
-                    auto const &offscreen=paraboloid_mode
-                        ?hemisphere_offscreen:face_offscreen;
-                    std::unordered_set<uint64_t> acquired;
-                    for(auto const &inst:offscreen.nodes)
-                        if(inst.shadow_owner)acquired.insert(inst.shadow_owner);
+                    auto const &offscreen=capture_offscreen;
             offscreen_capture_gl_scope restore;
             glBindFramebuffer(GL_FRAMEBUFFER,probe_target->framebuffer());
             if(!probe_target->select_layer(face)) {all_faces_ready=false;break;}
@@ -712,7 +706,7 @@
                     draw_model(inst);
             total_world_drawn+=world_drawn;
             total_model_drawn+=model_drawn;
-            if(!paraboloid_mode || face==0)
+            if(face==0)
                 total_acquired_nodes+=offscreen.stats.ready_nodes;
             } // Direct: two paraboloid passes; otherwise six cube faces.
             // Texture-array mip levels are filtered independently per face.

@@ -113,11 +113,11 @@ inline bool planar_reflection_mesh_outside_frustum(
         view_mesh[9],view_mesh[10],view_mesh[11],
         mesh_radius*scale+0.02f);
 }
-// Both paraboloid disks together cover the sphere, so only radial range
-// can reject a whole Thing before posing its node hierarchy. Honor native
+// The union of either two paraboloid disks or six cube faces covers the
+// sphere; only radial range may reject a Thing before posing. Honor native
 // model radius and nonrigid scaling; unknown radii always fail open.
 template<class Read>
-bool planar_reflection_thing_outside_paraboloid_range(
+bool planar_reflection_thing_outside_probe_range(
     Read const &read,planar_reflection_model_thing const &thing,
     std::array<float,3> const &focus,float far_distance)
 {

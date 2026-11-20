@@ -63,18 +63,18 @@ int main() {
     put(thing.thing+0x88U,identity);
     // Hemisphere probe rejects far Things before expensive pose acquisition.
     thing.position={{200.0f,0.0f,0.0f}};
-    assert(planar_reflection_thing_outside_paraboloid_range(
+    assert(planar_reflection_thing_outside_probe_range(
         read,thing,{{0.0f,0.0f,0.0f}},100.0f));
     put(thing.model+0x5cU,150.0f);
-    assert(!planar_reflection_thing_outside_paraboloid_range(
+    assert(!planar_reflection_thing_outside_probe_range(
         read,thing,{{0.0f,0.0f,0.0f}},100.0f));
     put(thing.model+0x5cU,1.0f);
     put(thing.thing+0x88U,scaled);
-    assert(!planar_reflection_thing_outside_paraboloid_range(
+    assert(!planar_reflection_thing_outside_probe_range(
         read,thing,{{0.0f,0.0f,0.0f}},180.0f));
     put(thing.thing+0x88U,identity);
     put(thing.model+0x5cU,0.0f);
-    assert(!planar_reflection_thing_outside_paraboloid_range(
+    assert(!planar_reflection_thing_outside_probe_range(
         read,thing,{{0.0f,0.0f,0.0f}},100.0f));
     put(thing.model+0x5cU,1.0f);
     // The reflected view must NOT use the original camera's results.

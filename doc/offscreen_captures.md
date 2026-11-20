@@ -183,3 +183,15 @@ Blended geometry remains excluded, and capture scheduling, ownership,
 world shaders and resolution are unchanged. Profiles include
 `scene_preparations`, `thing_range_culled`, `groups_bounds_culled`,
 `world_bounds_culled` and `multi_draw_batches`.
+
+## Cube/shared probe acquisition reuse
+
+The six independent cube portal views are computed once per probe. Their
+union supplies a single full-sphere native Thing scan and posed-3DO
+acquisition shared by every face, using only conservative radial model
+culling before posing. Each face still performs its own portal-sector,
+frustum and material-group culling before drawing. A failed portal view
+invalidates the union mask (fail open). This also applies to shared and
+on-demand CaptureEnvMap cube captures without changing animation, owner
+exclusion, capture cadence or resolution. A refreshed cube logs
+`scene_preparations=1` rather than six.
