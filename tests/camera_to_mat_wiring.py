@@ -20,6 +20,24 @@ assert "get_camera_to_mat_controls().erase(uint32_t(mat));" in main
 assert "void reset_mat(uint32_t mat)" in runtime
 assert "std::map<uint32_t,camera_to_mat_request>" in controls
 assert "max_targets=4U" in controls
+# One capture per explicit request generation. Completed captures do not
+# revalidate camera Things or repeat world/portal/GL work in idle frames.
+assert "static bool needs_capture(bool ready" in controls
+assert "uint64_t revision() const" in controls
+assert "bool has_requests() const" in controls
+assert "std::vector<camera_to_mat_request> pending;" in capture
+assert "camera_to_mat_controls::needs_capture(" in capture
+assert "if(pending.empty())return;" in capture
+assert "for(auto const &request:pending)" in capture
+assert capture.index("if(pending.empty())return;") < capture.index(
+    "reflection_world_buckets.refresh(")
+assert capture.index("if(pending.empty())return;") < capture.index(
+    "uintptr_t const thing=")
+assert "entry.generation=request.generation;" in capture
+assert "entry.ready=true;" in capture
+assert capture.index("glGenerateMipmap(GL_TEXTURE_2D)") < capture.index(
+    "entry.generation=request.generation;")
+assert "CameraToMat photographed MAT=" in capture
 assert "get_camera_to_mat_controls().prepare_world(state.current_world)" in renderer
 assert "get_camera_to_mat_controls().clear();" in renderer
 assert "runtime_controls.empty() && !has_photo_targets" in renderer
@@ -65,6 +83,9 @@ assert "acquire_planar_reflection_offscreen_gpu(" in capture
 assert "reflection_world_buckets.buckets()" in capture
 assert "glGenerateMipmap(GL_TEXTURE_2D)" in capture
 assert "ReloadMaterial(targetMat)" in doc
+assert "one-shot photo capture" in doc
+assert "stays frozen" in doc
+assert "Calling the verb again requests a new photograph." in doc
 assert "one-shot photo capture" in doc
 assert "stays frozen" in doc
 assert "Calling the verb again requests a new photograph." in doc
