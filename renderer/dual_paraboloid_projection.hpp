@@ -94,6 +94,40 @@ inline bool dual_paraboloid_outside_distance(
     }
     return distance2>far_distance*far_distance;
 }
+// Fast, conservative radial rejection for cube-face world/model batches.
+// The AABB is supplied in its normal source coordinates; 'to_capture' is
+// exactly the affine camera/model matrix used for rendering. Radius = 0
+// means no additional local-probe distance cutoff.
+inline bool reflection_probe_bounds_outside_range(
+    gpu_3do_matrix34 const &to_capture,
+    std::array<float,3> const &lo,std::array<float,3> const &hi,
+    float radius)
+{
+    if(!std::isfinite(radius)||radius<=0.0f ||
+       !gpu_3do_matrix_finite(to_capture))return false;
+    std::array<float,3> midpoint{},half{};
+    for(unsigned i=0;i<3U;++i) {
+        if(!std::isfinite(lo[i])||!std::isfinite(hi[i])||lo[i]>hi[i])
+            return false;
+        midpoint[i]=lo[i]*0.5f+hi[i]*0.5f;
+        half[i]=(hi[i]-lo[i])*0.5f;
+    }
+    auto const p=gpu_3do_native_transform_point(to_capture,midpoint);
+    auto const &m=to_capture;
+    std::array<double,3> extent{{
+        double(std::fabs(m[0]))*half[0]+double(std::fabs(m[3]))*half[1]+double(std::fabs(m[6]))*half[2],
+        double(std::fabs(m[1]))*half[0]+double(std::fabs(m[4]))*half[1]+double(std::fabs(m[7]))*half[2],
+        double(std::fabs(m[2]))*half[0]+double(std::fabs(m[5]))*half[1]+double(std::fabs(m[8]))*half[2]}};
+    double nearest2=0.0;
+    for(unsigned i=0;i<3U;++i) {
+        if(!std::isfinite(p[i])||!std::isfinite(extent[i]))
+            return false;
+        double const a=std::fmax(0.0,std::fabs(double(p[i]))-extent[i]);
+        nearest2+=a*a;
+    }
+    double const limit=double(radius)+0.02;
+    return std::isfinite(nearest2)&&nearest2>limit*limit;
+}
 // For a posed mesh or world surface, the same model-to-capture transform
 // used by the capture shader defines the paraboloid camera's Y axis.
 // The shader accepts p.y + sin(5deg)*length(p) >= 0. Bound the entire
@@ -105,7 +139,7 @@ inline bool dual_paraboloid_bounds_outside(
     float far_distance)
 {
     if(!gpu_3do_matrix_finite(to_capture) ||
-       !std::isfinite(far_distance)||far_distance<=0.0f)return false;
+       !std::isfinite(far_distance)||far_distance<0.0f)return false;
     std::array<float,3> center{},half{};
     for(unsigned i=0;i<3U;++i) {
         if(!std::isfinite(lo[i])||!std::isfinite(hi[i])||lo[i]>hi[i])
@@ -130,8 +164,12 @@ inline bool dual_paraboloid_bounds_outside(
         max2+=far_axis*far_axis;
     }
     if(!std::isfinite(nearest2)||!std::isfinite(max2))return false;
-    double const max_capture_distance=double(far_distance)+0.02;
-    if(nearest2>max_capture_distance*max_capture_distance)return true;
+    // Zero means no artificial radial cutoff: retain the orientation
+    // rejection, including the shader's five-degree horizon overlap.
+    if(far_distance>0.0f) {
+        double const max_capture_distance=double(far_distance)+0.02;
+        if(nearest2>max_capture_distance*max_capture_distance)return true;
+    }
     // If even maximum Y and maximum possible radial distance cannot
     // satisfy the overlap-aware shader clip, the box is fully behind.
     return double(p[1])+extent[1]+

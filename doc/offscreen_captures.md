@@ -195,3 +195,19 @@ invalidates the union mask (fail open). This also applies to shared and
 on-demand CaptureEnvMap cube captures without changing animation, owner
 exclusion, capture cadence or resolution. A refreshed cube logs
 `scene_preparations=1` rather than six.
+
+## Dedicated probe capture distance
+
+`reflection_probe_max_distance` defaults to `64.0` JK world units and can
+be set to `0` to disable the local-probe radial limit. Only dedicated
+`hemi` and `cube` Thing probes use it. The limit rejects Things beyond
+the native model bounding radius before independent pose acquisition,
+rejects fully out-of-range world/model bounds, and sets a matching GPU
+capture far projection. A 3DO building with a large bounding sphere
+that intersects the limit is not rejected early; the capture projection
+clips its fragments beyond the chosen radius.
+
+`shared`, `planar` and explicit `CaptureEnvMap` do **not** use the
+configurable local-probe distance limit. The hemispherical orientation
+tests remain active when the distance limit is disabled. Capture views
+still have finite projection depths, as required by the GPU.

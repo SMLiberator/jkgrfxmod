@@ -79,6 +79,7 @@ namespace jkgm {
         float reflection_capture_update_interval = 0.0f; // all realtime capture types; 0=every frame
         int envmap_capture_face_resolution = 128; // on-demand CaptureEnvMap: 128x128 faces -> 512x256 equirect
         unsigned int reflection_probe_max_owners = 4U; // max independently cached hemi/cube owners
+        float reflection_probe_max_distance = 64.0f; // JK units; dedicated hemi/cube only, 0=unlimited
         bool experimental_screen_space_reflections = false; // low-res cached-world and GPU 3DO SSR
         float ssr_resolution_scale = 0.125f; // 0.125..1.0 of internal screen
         int ssr_ray_steps = 32; // 4..96 depth search samples per half-res pixel

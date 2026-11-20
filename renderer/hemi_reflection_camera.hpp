@@ -8,6 +8,17 @@
 #include <cmath>
 
 namespace jkgm {
+// Distance is an optional quality/performance policy only for independently
+// captured per-Thing probes. Shared, planar, and explicit CaptureEnvMap
+// should never acquire an arbitrary local-probe distance cutoff.
+inline float reflection_probe_capture_distance_limit(
+    int mode,bool global_capture,bool shared_capture,float configured)
+{
+    if(global_capture || shared_capture || (mode!=5 && mode!=6) ||
+       !std::isfinite(configured) || configured<=0.0f)
+        return 0.0f;
+    return configured;
+}
 // Fixed world-axis cubemap orientation. Each square 90-degree perspective
 // view captures one layer of a single GL_TEXTURE_2D_ARRAY. Unlike the hemi
 // camera this orientation is independent of the viewer, avoiding rotation

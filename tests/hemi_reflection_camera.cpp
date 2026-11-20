@@ -113,6 +113,42 @@ int main() {
         {{200.0f,0.0f,0.0f}},1.0f,origin,100.0f));
     assert(!jkgm::dual_paraboloid_sphere_outside_distance(
         {{100.0f,0.0f,0.0f}},2.0f,origin,100.0f));
+    // Dedicated HEMI/CUBE distance limits never leak to general-purpose
+    // shared, planar or one-time COG environment captures.
+    assert(jkgm::reflection_probe_capture_distance_limit(
+        5,false,false,64.0f)==64.0f);
+    assert(jkgm::reflection_probe_capture_distance_limit(
+        6,false,false,128.0f)==128.0f);
+    assert(jkgm::reflection_probe_capture_distance_limit(
+        7,false,true,64.0f)==0.0f);
+    assert(jkgm::reflection_probe_capture_distance_limit(
+        6,true,false,64.0f)==0.0f);
+    assert(jkgm::reflection_probe_capture_distance_limit(
+        4,false,false,64.0f)==0.0f);
+    assert(jkgm::reflection_probe_capture_distance_limit(
+        5,false,false,0.0f)==0.0f);
+    // With radial culling disabled, disk orientation must still reject
+    // fully opposite-side objects, while unlimited-distance geometry
+    // on the selected side is retained.
+    assert(jkgm::dual_paraboloid_bounds_outside(
+        up_view,{{-1.0f,-1.0f,-26.0f}},
+        {{1.0f,1.0f,-24.0f}},0.0f));
+    assert(!jkgm::dual_paraboloid_bounds_outside(
+        up_view,{{200.0f,0.0f,24.0f}},
+        {{205.0f,1.0f,26.0f}},0.0f));
+    assert(!jkgm::dual_paraboloid_bounds_outside(
+        up_view,{{200.0f,0.0f,-0.5f}},
+        {{205.0f,1.0f,0.5f}},0.0f));
+    // Cube range culling uses radial transformed bounds too, and is disabled
+    // entirely for shared/global environments (radius=0).
+    assert(jkgm::reflection_probe_bounds_outside_range(
+        up_view,{{200.0f,0.0f,0.0f}},{{202.0f,1.0f,1.0f}},64.0f));
+    assert(!jkgm::reflection_probe_bounds_outside_range(
+        up_view,{{61.0f,0.0f,0.0f}},{{65.0f,1.0f,1.0f}},64.0f));
+    assert(!jkgm::reflection_probe_bounds_outside_range(
+        up_view,{{200.0f,0.0f,0.0f}},{{202.0f,1.0f,1.0f}},0.0f));
+    assert(!jkgm::reflection_probe_bounds_outside_range(
+        up_view,{{5.0f,0.0f,0.0f}},{{4.0f,1.0f,1.0f}},64.0f));
     // Six orthogonal 90-degree cube views must cover every axis and map
     // the direction to its corresponding face center.
     std::array<std::array<float,3>,6> const axes{{

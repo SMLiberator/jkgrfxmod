@@ -25,8 +25,11 @@ assert "enable_reflection_capture" in config
 assert "enable_reflection_probes" in config
 assert "reflection_capture_update_interval" in config
 assert "reflection_probe_max_owners" in config
+assert 'j.contains("reflection_probe_max_distance")' in config
+assert "reflection_probe_max_distance must be 0 (unlimited) or between 4 and 4096" in config
 assert "reflection_capture_update_interval" in config
 assert settings["reflection_probe_max_owners"] == 4
+assert settings["reflection_probe_max_distance"] == 64.0
 assert settings["reflection_capture_update_interval"] == 0.0
 assert '#include "hemi_reflection_camera.hpp"' in renderer
 assert '#include "reflection_attachment_family.hpp"' in renderer
@@ -121,6 +124,12 @@ assert "capture_offscreen=\n                    prepare_scene(capture_thing_mask
 assert "auto const &offscreen=capture_offscreen;" in capture
 assert "face_offscreen=prepare_scene(" not in capture
 assert "planar_reflection_thing_outside_probe_range(" in capture
+assert "if(probe_distance_limit>0.0f &&" in capture
+assert "reflection_probe_capture_distance_limit(" in capture
+assert "probe_distance_limit>0.0f?1:0" in capture
+assert "probe_distance_limit)) {" in capture
+assert "reflection_probe_bounds_outside_range(" in capture
+assert '" distance_limit=",probe_distance_limit' in capture
 assert "things,things.size(),nullptr,nullptr" in capture
 assert "dual_paraboloid_bounds_outside(" in capture
 assert "std::sort(model_group_scratch.begin()" not in capture
@@ -136,7 +145,7 @@ assert model_capture.index("if(model_group_scratch.empty())return;") < model_cap
     "gpu_3do_gl_cache.find(inst.id)")
 assert "thing_range_culled=" in capture
 assert "dual_paraboloid_outside_distance(" not in capture
-assert "frustum.clip_far=0" in capture
+assert "frustum.clip_far=probe_distance_limit>0.0f?1:0" in capture
 assert "reflection_capture_scene_far(focus)" in capture
 assert "glEnable(GL_CLIP_DISTANCE0)" in capture
 assert "glEnable(GL_CLIP_DISTANCE1)" in capture

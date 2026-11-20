@@ -58,6 +58,7 @@
     "reflection_capture_update_interval": 0.0,
     "envmap_capture_face_resolution": 128,
     "reflection_probe_max_owners": 4,
+    "reflection_probe_max_distance": 64.0,
     "experimental_screen_space_reflections": false,
     "ssr_resolution_scale": 0.125,
     "ssr_ray_steps": 32,

@@ -273,7 +273,16 @@
                             the_config->data_path,true);
                 auto &shader=paraboloid_mode
                     ?*paraboloid_capture_program:*hemi_capture_program;
-                auto const far_plane=reflection_capture_scene_far(focus);
+                // Dedicated local probes deliberately use a short radial
+                // range; shared and COG environment captures keep the full
+                // scene projection and never inherit that policy.
+                float const probe_distance_limit=
+                    reflection_probe_capture_distance_limit(
+                        selected_mode,candidate.is_global,candidate.is_shared,
+                        the_config->reflection_probe_max_distance);
+                float const far_plane=probe_distance_limit>0.0f
+                    ?probe_distance_limit
+                    :reflection_capture_scene_far(focus);
                 if(!(std::isfinite(far_plane)&&far_plane>0.1f))continue;
                 // Capture source: original 128x128 cube face. Hemi output:
                 // two 256x256 disks with 5-degree overlap past the horizon.
@@ -392,8 +401,9 @@
                                 !capture_static_owner(owner)))return true;
                             // A shared full-sphere snapshot may only use
                             // radial culling, not an individual face frustum.
-                            if(planar_reflection_thing_outside_probe_range(
-                                   read,thing,focus,far_plane)) {
+                            if(probe_distance_limit>0.0f &&
+                               planar_reflection_thing_outside_probe_range(
+                                   read,thing,focus,probe_distance_limit)) {
                                 ++total_thing_range_culled;
                                 return true;
                             }
@@ -447,7 +457,10 @@
                         ?&portal_visibility.surfaces:nullptr;
                     gpu_3do_native_frustum frustum=
                         frame_world_cache_camera.frustum;
-                    frustum.clip_far=0; // No artificial CPU far-distance cull.
+                    // The short-radius per-Thing probe uses a matching GPU
+                    // projection and native-style CPU far plane. Environment
+                    // modes leave far clipping to their scene projection.
+                    frustum.clip_far=probe_distance_limit>0.0f?1:0;
                     frustum.near_plane=0.01f;
                     frustum.far_plane=far_plane;
                     frustum.far_left=-projection.half_horizontal;
@@ -558,7 +571,15 @@
                    (surface.surface_flags&0x600U)!=0U)continue;
                 if(paraboloid_mode &&
                    dual_paraboloid_bounds_outside(
-                       view,surface.bounds_min,surface.bounds_max,far_plane)) {
+                       view,surface.bounds_min,surface.bounds_max,
+                       probe_distance_limit)) {
+                    ++total_world_bounds_culled;continue;
+                }
+                if(!paraboloid_mode &&
+                   probe_distance_limit>0.0f &&
+                   reflection_probe_bounds_outside_range(
+                       view,surface.bounds_min,surface.bounds_max,
+                       probe_distance_limit)) {
                     ++total_world_bounds_culled;continue;
                 }
                 if(!paraboloid_mode &&
@@ -632,7 +653,14 @@
                     if(paraboloid_mode &&
                        dual_paraboloid_bounds_outside(
                            modelview,group.bounds_min,group.bounds_max,
-                           far_plane)) {
+                           probe_distance_limit)) {
+                        ++total_model_groups_culled;continue;
+                    }
+                    if(!paraboloid_mode &&
+                       probe_distance_limit>0.0f &&
+                       reflection_probe_bounds_outside_range(
+                           modelview,group.bounds_min,group.bounds_max,
+                           probe_distance_limit)) {
                         ++total_model_groups_culled;continue;
                     }
                     if(!paraboloid_mode &&
@@ -753,6 +781,8 @@
                          (paraboloid_mode?"HEMI paraboloid owner=":"CUBE capture owner="),
                          selected_owner,
                          " capture_side=",capture_side,
+                         " distance_limit=",probe_distance_limit,
+                         " projection_far=",far_plane,
                          " source_faces=",face_count,
                          " portal_views=",portal_views_used,
                          " result_side=",output_side,

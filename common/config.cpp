@@ -414,6 +414,17 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                 "reflection_probe_max_owners must be between 1 and 16");
             rv->reflection_probe_max_owners=unsigned(value);
         }
+        if(j.contains("reflection_probe_max_distance")) {
+            auto const &v=j.at("reflection_probe_max_distance");
+            if(!v.is_number())throw std::runtime_error(
+                "reflection_probe_max_distance must be numeric (0 or 4..4096)");
+            double const distance=v.get<double>();
+            if(!std::isfinite(distance) || distance<0.0 || distance>4096.0 ||
+               (distance>0.0 && distance<4.0))
+                throw std::runtime_error(
+                    "reflection_probe_max_distance must be 0 (unlimited) or between 4 and 4096");
+            rv->reflection_probe_max_distance=static_cast<float>(distance);
+        }
         if(j.contains("experimental_screen_space_reflections")) {
             j.at("experimental_screen_space_reflections").get_to(
                 rv->experimental_screen_space_reflections);

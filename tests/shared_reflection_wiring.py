@@ -23,6 +23,8 @@ assert 'shared.owner=shared_reflection_owner_key;' in capture
 assert 'shared.position=viewer.position;' in capture
 assert 'shared.mode=7;' in capture
 assert 'shared.is_shared=true;' in capture
+assert "reflection_probe_capture_distance_limit(" in capture
+assert "selected_mode,candidate.is_global,candidate.is_shared," in capture
 assert 'active_owners.insert(shared.owner);' in capture
 assert 'candidate.is_shared?0U:candidate.owner' in capture
 assert '!candidate.is_global && !candidate.is_shared &&' in capture
