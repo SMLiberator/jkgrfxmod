@@ -1,13 +1,14 @@
 #include "renderer/camera_to_mat.hpp"
 #include <cassert>
 #include <cmath>
+#include <limits>
 int main() {
     jkgm::camera_to_mat_controls c;
     c.prepare_world(100);
     assert(!c.request(1,0,100,90));
     assert(!c.request(1,(uint64_t(0x12345000U)<<32)|77U,100,-1.0f));
     assert(!c.request(1,(uint64_t(0x12345000U)<<32)|77U,100,179.0f));
-    assert(!c.request(1,(uint64_t(0x12345000U)<<32)|77U,100,NAN));
+    assert(!c.request(1,(uint64_t(0x12345000U)<<32)|77U,100,std::numeric_limits<float>::quiet_NaN()));
     assert(!c.request(16384,(uint64_t(0x12345000U)<<32)|77U,0,90));
     assert(c.request(1,(uint64_t(0x12345000U)<<32)|77U,100,90));
     auto s=c.snapshot();
