@@ -77,7 +77,9 @@ float translucent_sun_sky_aperture(vec3 world)
     bool f=translucent_sun_inside(far_uv);
     if(n && !f)return translucent_sun_sky_sample(near_uv,0);
     if(!n && f)return translucent_sun_sky_sample(far_uv,1);
-    if(!n && !f)return 0.0;
+    // Neither cascade covers this receiver: visibility is unknown, not blocked.
+    // Fail open, as regular sun shadows do, rather than cutting off sunlight.
+    if(!n && !f)return 1.0;
     float near_access=translucent_sun_sky_sample(near_uv,0);
     if(depth<translucent_sun_split*0.8125)return near_access;
     float far_access=translucent_sun_sky_sample(far_uv,1);

@@ -73,6 +73,27 @@ assert "translucent_sun_sky_aperture_active==0)return 1.0;" in shared
 assert "float translucent_sun_sky_aperture(vec3 world) { return 1.0; }" in shared
 assert "float translucent_sun_sky_sample(vec3 uv,int layer)" in shared
 world=read("assets/shaders/world_cache_direct_specular.glsl")
+# Shadow projections do not cover the full level. A receiver outside both
+# cascades must keep direct sunlight (fail open), not turn the shadow distance
+# into an implicit sun_max_distance. Inside coverage, retain sky tests.
+for shader,function in (
+    (opaque, "sun_sky_aperture(vec3 position)"),
+    (shared, "translucent_sun_sky_aperture(vec3 world)"),
+    (world, "world_sun_sky_aperture(vec3 world)"),
+):
+    signature="float "+function
+    assert shader.count(signature)==2, function # active branch and disabled fallback
+    body=shader.split(signature,1)[1].split("#else",1)[0]
+    assert "if(!n && !f)return 1.0;" in body, function
+    assert "if(!n && !f)return 0.0;" not in body, function
+    assert "if(n && !f)return " in body, function
+    assert "if(!n && f)return " in body, function
+    assert "float near_access=" in body and "float far_access=" in body, function
+# The explicit sun_max_distance fade remains independent of shadow coverage.
+assert "if(sun_max_distance<=0.0)return 1.0;" in opaque
+assert "sun_range_fade(depth/32.0)" in opaque
+assert "translucent_sun_max_distance>0.0" in world
+
 assert "#ifdef JKGM_SUN_SKY_APERTURE" in world
 assert "uniform sampler2DArray translucent_sun_sky_aperture_map;" in world
 assert "world_sun_sky_aperture(cached_world_position)" in world
