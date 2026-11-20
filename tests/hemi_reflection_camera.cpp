@@ -84,6 +84,35 @@ int main() {
     // Invalid world bounds must fail open, never silently erase geometry.
     assert(!jkgm::dual_paraboloid_outside_distance(
         {{2.0f,0.0f,0.0f}},{{1.0f,1.0f,1.0f}},origin,32.0f));
+    // Reject only boxes fully beyond the selected hemisphere's
+    // five-degree overlap. Compare transformed bounds against both disks.
+    auto const up_view=jkgm::planar_camera_native_view(
+        jkgm::make_dual_paraboloid_camera(origin,0U));
+    auto const down_view=jkgm::planar_camera_native_view(
+        jkgm::make_dual_paraboloid_camera(origin,1U));
+    assert(!jkgm::dual_paraboloid_bounds_outside(
+        up_view,{{-1.0f,-1.0f,24.0f}},{{1.0f,1.0f,26.0f}},100.0f));
+    assert(jkgm::dual_paraboloid_bounds_outside(
+        down_view,{{-1.0f,-1.0f,24.0f}},{{1.0f,1.0f,26.0f}},100.0f));
+    assert(jkgm::dual_paraboloid_bounds_outside(
+        up_view,{{-1.0f,-1.0f,-26.0f}},{{1.0f,1.0f,-24.0f}},100.0f));
+    // Near-horizon geometry belongs to both disks for seam blending.
+    assert(!jkgm::dual_paraboloid_bounds_outside(
+        up_view,{{20.0f,-1.0f,-1.0f}},{{24.0f,1.0f,-0.1f}},100.0f));
+    assert(!jkgm::dual_paraboloid_bounds_outside(
+        down_view,{{20.0f,-1.0f,0.1f}},{{24.0f,1.0f,1.0f}},100.0f));
+    // Reject far geometry; retain large boxes crossing the dividing plane.
+    assert(jkgm::dual_paraboloid_bounds_outside(
+        up_view,{{200.0f,0.0f,0.0f}},{{205.0f,1.0f,1.0f}},100.0f));
+    assert(!jkgm::dual_paraboloid_bounds_outside(
+        up_view,{{-1.0f,-1.0f,-100.0f}},{{1.0f,1.0f,100.0f}},100.0f));
+    // Missing/inverted bounds must preserve reflection geometry.
+    assert(!jkgm::dual_paraboloid_bounds_outside(
+        up_view,{{1.0f,0.0f,0.0f}},{{0.0f,1.0f,1.0f}},100.0f));
+    assert(jkgm::dual_paraboloid_sphere_outside_distance(
+        {{200.0f,0.0f,0.0f}},1.0f,origin,100.0f));
+    assert(!jkgm::dual_paraboloid_sphere_outside_distance(
+        {{100.0f,0.0f,0.0f}},2.0f,origin,100.0f));
     // Six orthogonal 90-degree cube views must cover every axis and map
     // the direction to its corresponding face center.
     std::array<std::array<float,3>,6> const axes{{

@@ -71,7 +71,7 @@ assert "portal_views_used" in capture
 assert "surface_mask" in capture
 assert "thing_sector_mask" in capture
 assert "hemisphere_visibility" in capture
-assert "read,world,scan,thing_sector_mask" in capture
+assert "read,world,scan,sector_mask" in capture
 assert "glGenerateMipmap(GL_TEXTURE_2D_ARRAY)" in capture
 assert "reflection_probe_capture_target" in read("renderer/offscreen_capture_target.hpp")
 assert "(mode==5 || mode==6 || mode==7) && hemi_capture_info.z>0.5" in shader
@@ -111,8 +111,19 @@ assert "experimental_hemi_direct_capture" not in capture
 assert "make_dual_paraboloid_camera(focus,unsigned(face))" in capture
 assert "paraboloid_mode?2:6" in capture
 assert "shader.set_paraboloid(unsigned(face),far_plane)" in capture
-assert "paraboloid_mode?nullptr:&frustum" in capture
-assert "paraboloid_mode?nullptr:&view" in capture
+assert "hemisphere_offscreen=prepare_scene(" in capture
+assert "hemisphere_thing_mask,nullptr,nullptr" in capture
+assert "face_offscreen=prepare_scene(" in capture
+assert "thing_sector_mask," in capture
+assert "planar_reflection_thing_outside_paraboloid_range(" in capture
+assert "dual_paraboloid_bounds_outside(" in capture
+assert "std::sort(model_group_scratch.begin()" not in capture
+assert "group_key(model_group_scratch[group_end])==key" in capture
+assert "glMultiDrawElements(GL_TRIANGLES,counts.data()" in capture
+assert "scene_preparations=" in capture
+assert "multi_draw_batches=" in capture
+assert "groups_bounds_culled=" in capture
+assert "thing_range_culled=" in capture
 assert "dual_paraboloid_outside_distance(" not in capture
 assert "frustum.clip_far=0" in capture
 assert "reflection_capture_scene_far(focus)" in capture

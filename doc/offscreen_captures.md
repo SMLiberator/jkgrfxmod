@@ -167,3 +167,19 @@ as a callable COG verb, and no live MAT binding exists yet. The next phase
 needs a capture request registry, arbitrary camera Thing validation,
 render-target MAT texture routing and scheduling. Keep planar reflection
 parity/CI as a regression baseline during that work.
+
+## Dual-paraboloid capture culling and submission
+
+For hemi probes, the six directional portal views are unioned once.
+Independent offscreen Things are discovered and posed once per refresh,
+then reused for both up/down disks. Native model radii reject Things
+outside capture range before posing, and transformed AABBs conservatively
+reject world faces and model groups fully outside a disk's 5-degree
+overlap or far radius. Invalid bounds fail open.
+
+Opaque and alpha-tested groups in each model node are batched by
+material, cel, solid-color mode and face-cull state using MultiDraw.
+Blended geometry remains excluded, and capture scheduling, ownership,
+world shaders and resolution are unchanged. Profiles include
+`scene_preparations`, `thing_range_culled`, `groups_bounds_culled`,
+`world_bounds_culled` and `multi_draw_batches`.

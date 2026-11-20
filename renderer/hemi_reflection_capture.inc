@@ -317,7 +317,9 @@
                             read,selected_owner);
                 }
                 size_t total_world_drawn=0,total_model_drawn=0;
-                size_t total_acquired_nodes=0;
+                size_t total_acquired_nodes=0,total_model_batches=0;
+                size_t total_model_groups_culled=0,total_world_bounds_culled=0;
+                size_t total_thing_range_culled=0,capture_scene_preps=0;
                 uint32_t portal_views_used=0U;
                 // Direct paraboloid cameras are nonlinear and each covers
                 // 190 degrees. Union six 90-degree portal views for the full
@@ -351,6 +353,73 @@
                     }
                     if(!complete)hemisphere_visibility={};
                 }
+                // Independent offscreen Thing discovery / posed mesh
+                // acquisition is shared by both paraboloid disks. Their
+                // portal mask is the union of six directional portal views.
+                // Cube/shared/COG captures retain per-face preparation.
+                auto prepare_scene=[&](
+                    std::vector<uint8_t> const *sector_mask,
+                    gpu_3do_native_frustum const *view_frustum,
+                    gpu_3do_matrix34 const *view_matrix)
+                    ->planar_reflection_offscreen_gpu {
+                    ++capture_scene_preps;
+                    planar_reflection_offscreen_gpu scene{};
+                    if(!engine_material_debug::matches_tested_executable())
+                        return scene;
+                    uint32_t world=0;
+                    if(!engine_material_debug::read_object(
+                           engine_material_debug::current_world_global,world))
+                        return scene;
+                    auto read=[](uintptr_t at,void *dst,size_t bytes) {
+                        return engine_material_debug::read_bytes(at,dst,bytes);
+                    };
+                    planar_reflection_thing_scan scan{};
+                    if(!collect_planar_reflection_things(
+                           read,world,scan,sector_mask))
+                        return scene;
+                    auto &things=scan.models;
+                    things.erase(std::remove_if(things.begin(),things.end(),
+                        [&](auto const &thing) {
+                            uint64_t const owner=
+                                planar_reflection_thing_owner_key(thing);
+                            if(reflection_excluded_owners.count(owner)!=0U ||
+                               (candidate.is_global &&
+                                !capture_static_owner(owner)))return true;
+                            if(paraboloid_mode) {
+                                if(planar_reflection_thing_outside_paraboloid_range(
+                                       read,thing,focus,far_plane)) {
+                                    ++total_thing_range_culled;
+                                    return true;
+                                }
+                                return false;
+                            }
+                            return view_frustum && view_matrix &&
+                                planar_reflection_thing_outside_frustum(
+                                    read,thing,*view_frustum,*view_matrix);
+                        }),things.end());
+                    std::sort(things.begin(),things.end(),
+                        [&](auto const &a,auto const &b) {
+                            auto distance2=[&](auto const &t) {
+                                float sum=0.0f;
+                                for(unsigned j=0;j<3;++j) {
+                                    float const d=t.position[j]-focus[j];
+                                    sum+=d*d;
+                                }
+                                return sum;
+                            };
+                            return distance2(a)<distance2(b);
+                        });
+                    return acquire_planar_reflection_offscreen_gpu(
+                        things,things.size(),view_frustum,view_matrix);
+                };
+                auto const *hemisphere_thing_mask=
+                    hemisphere_visibility.valid &&
+                    !hemisphere_visibility.thing_sectors.empty()
+                    ?&hemisphere_visibility.thing_sectors:nullptr;
+                planar_reflection_offscreen_gpu hemisphere_offscreen{};
+                if(paraboloid_mode)
+                    hemisphere_offscreen=prepare_scene(
+                        hemisphere_thing_mask,nullptr,nullptr);
                 engine_camera first_camera{};
                 bool all_faces_ready=true;
                 for(int face=0;face<face_count;++face) {
@@ -383,53 +452,15 @@
                     frustum.right=projection.half_horizontal;
                     frustum.far_top=projection.half_horizontal;
                     frustum.bottom=-projection.half_horizontal;
-            // Independent model discovery allows the probe to see animated
-            // Things outside the primary camera. The reflecting Thing itself
-            // must not be captured from the inside.
-            planar_reflection_offscreen_gpu offscreen{};
-            if(engine_material_debug::matches_tested_executable()) {
-                uint32_t world=0;
-                if(engine_material_debug::read_object(
-                       engine_material_debug::current_world_global,world)) {
-                    auto read=[](uintptr_t at,void *dst,size_t bytes) {
-                        return engine_material_debug::read_bytes(at,dst,bytes);
-                    };
-                    planar_reflection_thing_scan scan{};
-                    if(collect_planar_reflection_things(
-                           read,world,scan,thing_sector_mask)) {
-                        auto &things=scan.models;
-                        things.erase(std::remove_if(things.begin(),things.end(),
-                            [&](auto const &thing) {
-                                uint64_t const owner=
-                                    planar_reflection_thing_owner_key(thing);
-                                return reflection_excluded_owners.count(owner)!=0U ||
-                                    (candidate.is_global &&
-                                     !capture_static_owner(owner)) ||
-                                    (!paraboloid_mode &&
-                                     planar_reflection_thing_outside_frustum(
-                                         read,thing,frustum,view));
-                            }),things.end());
-                        std::sort(things.begin(),things.end(),
-                            [&](auto const &a,auto const &b) {
-                                auto distance2=[&](auto const &t) {
-                                    float sum=0;
-                                    for(unsigned j=0;j<3;++j) {
-                                        float const delta=t.position[j]-focus[j];
-                                        sum+=delta*delta;
-                                    }
-                                    return sum;
-                                };
-                                return distance2(a)<distance2(b);
-                            });
-                        offscreen=acquire_planar_reflection_offscreen_gpu(
-                            things,things.size(),paraboloid_mode?nullptr:&frustum,
-                            paraboloid_mode?nullptr:&view);
-                    }
-                }
-            }
-            std::unordered_set<uint64_t> acquired;
-            for(auto const &inst:offscreen.nodes)
-                if(inst.shadow_owner)acquired.insert(inst.shadow_owner);
+                    planar_reflection_offscreen_gpu face_offscreen{};
+                    if(!paraboloid_mode)
+                        face_offscreen=prepare_scene(thing_sector_mask,
+                                                    &frustum,&view);
+                    auto const &offscreen=paraboloid_mode
+                        ?hemisphere_offscreen:face_offscreen;
+                    std::unordered_set<uint64_t> acquired;
+                    for(auto const &inst:offscreen.nodes)
+                        if(inst.shadow_owner)acquired.insert(inst.shadow_owner);
             offscreen_capture_gl_scope restore;
             glBindFramebuffer(GL_FRAMEBUFFER,probe_target->framebuffer());
             if(!probe_target->select_layer(face)) {all_faces_ready=false;break;}
@@ -530,10 +561,15 @@
                     !(*surface_mask)[surface.surface_index]))continue;
                 if(surface.count<3U || !surface.material ||
                    surface.passable_adjoin ||
-                   (surface.surface_flags&0x600U)!=0U ||
-                   (!paraboloid_mode &&
-                    gpu_3do_batch_outside_frustum(
-                        frustum,view,surface.bounds_min,surface.bounds_max)))
+                   (surface.surface_flags&0x600U)!=0U)continue;
+                if(paraboloid_mode &&
+                   dual_paraboloid_bounds_outside(
+                       view,surface.bounds_min,surface.bounds_max,far_plane)) {
+                    ++total_world_bounds_culled;continue;
+                }
+                if(!paraboloid_mode &&
+                   gpu_3do_batch_outside_frustum(
+                       frustum,view,surface.bounds_min,surface.bounds_max))
                     continue;
                 groups[std::make_tuple(surface.material,surface.cel,
                                       !surface.has_uv)].push_back(&surface);
@@ -559,6 +595,7 @@
                     GL_UNSIGNED_INT,offsets.data(),GLsizei(counts.size()));
                 world_drawn+=entry.second.size();
             }
+            std::vector<gpu_3do_group const *> model_group_scratch;
             auto draw_model=[&](gpu_3do_instance const &inst) {
                 if(reflection_excluded_owners.count(inst.shadow_owner)!=0U ||
                    inst.shadow_only || inst.camera_hud ||
@@ -608,25 +645,62 @@
                 glFrontFace(paraboloid_mode
                     ?(gpu_3do_reversed_winding(inst.transform)?GL_CCW:GL_CW)
                     :(gpu_3do_reversed_winding(inst.transform)?GL_CW:GL_CCW));
+                // Capture blending is disabled; alpha-tested and opaque
+                // groups may be reordered within this one model instance.
+                // Only consecutive compatible groups share one MultiDraw.
+                model_group_scratch.clear();
+                auto group_key=[&](gpu_3do_group const *group) {
+                    return std::make_tuple(
+                        group->material,group->cel,
+                        group->solid_color ||
+                            inst.effective_geometry_mode==3U,
+                        group->nonplanar || (group->face_type&1U)!=0U);
+                };
                 for(auto const &group:inst.geometry->groups) {
+                    if(paraboloid_mode &&
+                       dual_paraboloid_bounds_outside(
+                           modelview,group.bounds_min,group.bounds_max,
+                           far_plane)) {
+                        ++total_model_groups_culled;continue;
+                    }
                     if(!paraboloid_mode &&
                        gpu_3do_batch_outside_frustum(
-                           frustum,modelview,group.bounds_min,group.bounds_max))
-                        continue;
-                    bool const solid=group.solid_color ||
-                                      inst.effective_geometry_mode==3U;
+                           frustum,modelview,
+                           group.bounds_min,group.bounds_max))continue;
+                    model_group_scratch.push_back(&group);
+                }
+                // Keep source order for exactly coplanar alpha cutouts.
+                for(size_t i=0;i<model_group_scratch.size();) {
+                    auto const key=group_key(model_group_scratch[i]);
+                    size_t group_end=i+1U;
+                    while(group_end<model_group_scratch.size() &&
+                          group_key(model_group_scratch[group_end])==key)
+                        ++group_end;
+                    gpu_3do_group material_group{};
+                    material_group.material=std::get<0>(key);
+                    material_group.cel=std::get<1>(key);
+                    bool const solid=std::get<2>(key);
                     auto const mat=solid
-                        ?resolve_gpu_3do_solid_material(group,false)
-                        :resolve_gpu_3do_material(group);
-                    if(!submit_material(mat,solid))continue;
-                    if(group.nonplanar||(group.face_type&1U))
-                        glDisable(GL_CULL_FACE);
-                    else glEnable(GL_CULL_FACE);
-                    gl::draw_elements(gl::element_type::triangles,
-                        GLsizei(group.count),gl::index_type::uint32,
-                        static_cast<ptrdiff_t>(
-                            group.offset*sizeof(uint32_t)));
-                    ++model_drawn;
+                        ?resolve_gpu_3do_solid_material(material_group,false)
+                        :resolve_gpu_3do_material(material_group);
+                    if(submit_material(mat,solid)) {
+                        if(std::get<3>(key))glDisable(GL_CULL_FACE);
+                        else glEnable(GL_CULL_FACE);
+                        counts.clear();offsets.clear();
+                        for(size_t k=i;k<group_end;++k) {
+                            auto const *group=model_group_scratch[k];
+                            counts.push_back(GLsizei(group->count));
+                            offsets.push_back(
+                                reinterpret_cast<void const *>(
+                                    uintptr_t(group->offset)*sizeof(uint32_t)));
+                        }
+                        glMultiDrawElements(GL_TRIANGLES,counts.data(),
+                            GL_UNSIGNED_INT,offsets.data(),
+                            GLsizei(counts.size()));
+                        model_drawn+=counts.size();
+                        ++total_model_batches;
+                    }
+                    i=group_end;
                 }
             };
             for(auto const &inst:offscreen.nodes)draw_model(inst);
@@ -635,7 +709,8 @@
                     draw_model(inst);
             total_world_drawn+=world_drawn;
             total_model_drawn+=model_drawn;
-            total_acquired_nodes+=offscreen.stats.ready_nodes;
+            if(!paraboloid_mode || face==0)
+                total_acquired_nodes+=offscreen.stats.ready_nodes;
             } // Direct: two paraboloid passes; otherwise six cube faces.
             // Texture-array mip levels are filtered independently per face.
             // Restore the array binding at texture unit zero so other passes
@@ -687,6 +762,11 @@
                          " result_layers=",output_layers,
                          " world_faces=",total_world_drawn,
                          " model_groups=",total_model_drawn,
+                         " multi_draw_batches=",total_model_batches,
+                         " groups_bounds_culled=",total_model_groups_culled,
+                         " world_bounds_culled=",total_world_bounds_culled,
+                         " thing_range_culled=",total_thing_range_culled,
+                         " scene_preparations=",capture_scene_preps,
                          " acquired_nodes=",total_acquired_nodes,
                          " cached_owners=",reflection_probes.size());
             } // Each owner receives its own independently retained probe.

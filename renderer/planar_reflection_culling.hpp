@@ -6,6 +6,7 @@
 #include "gpu_3do_frustum.hpp"
 #include "planar_reflection_camera.hpp"
 #include "planar_reflection_things.hpp"
+#include "dual_paraboloid_projection.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -111,5 +112,27 @@ inline bool planar_reflection_mesh_outside_frustum(
     return gpu_3do_sphere_outside(frustum,true,
         view_mesh[9],view_mesh[10],view_mesh[11],
         mesh_radius*scale+0.02f);
+}
+// Both paraboloid disks together cover the sphere, so only radial range
+// can reject a whole Thing before posing its node hierarchy. Honor native
+// model radius and nonrigid scaling; unknown radii always fail open.
+template<class Read>
+bool planar_reflection_thing_outside_paraboloid_range(
+    Read const &read,planar_reflection_model_thing const &thing,
+    std::array<float,3> const &focus,float far_distance)
+{
+    if(!planar_reflection_valid_native_pointer(thing.model) ||
+       !planar_reflection_valid_native_pointer(thing.thing))
+        return false;
+    float radius=0.0f;
+    std::array<float,9> basis{};
+    if(!read(thing.model+0x5cU,&radius,sizeof(radius)) ||
+       !read(thing.thing+0x88U,basis.data(),sizeof(basis)))
+        return false;
+    float const scale=planar_reflection_radius_scale(basis);
+    if(scale<=0.0f || !std::isfinite(radius) || radius<=0.0f)
+        return false;
+    return dual_paraboloid_sphere_outside_distance(
+        thing.position,radius*scale,focus,far_distance);
 }
 } // namespace jkgm

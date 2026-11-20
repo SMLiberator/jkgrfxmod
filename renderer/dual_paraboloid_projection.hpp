@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstdint>
 #include "engine_camera.hpp"
+#include "gpu_3do_modelview.hpp"
+#include <algorithm>
 
 namespace jkgm {
 constexpr float dual_paraboloid_overlap_sine=0.08715574274765817f;
@@ -91,5 +93,64 @@ inline bool dual_paraboloid_outside_distance(
         distance2+=delta*delta;
     }
     return distance2>far_distance*far_distance;
+}
+// For a posed mesh or world surface, the same model-to-capture transform
+// used by the capture shader defines the paraboloid camera's Y axis.
+// The shader accepts p.y + sin(5deg)*length(p) >= 0. Bound the entire
+// transformed AABB, preserving the 5-degree seam overlap. Invalid bounds
+// always fail open rather than deleting visible reflection geometry.
+inline bool dual_paraboloid_bounds_outside(
+    gpu_3do_matrix34 const &to_capture,
+    std::array<float,3> const &lo,std::array<float,3> const &hi,
+    float far_distance)
+{
+    if(!gpu_3do_matrix_finite(to_capture) ||
+       !std::isfinite(far_distance)||far_distance<=0.0f)return false;
+    std::array<float,3> center{},half{};
+    for(unsigned i=0;i<3U;++i) {
+        if(!std::isfinite(lo[i])||!std::isfinite(hi[i])||lo[i]>hi[i])
+            return false;
+        center[i]=lo[i]*0.5f+hi[i]*0.5f;
+        half[i]=(hi[i]-lo[i])*0.5f;
+    }
+    auto const p=gpu_3do_native_transform_point(to_capture,center);
+    auto const &m=to_capture;
+    std::array<double,3> extent{{
+        double(std::fabs(m[0]))*half[0]+double(std::fabs(m[3]))*half[1]+double(std::fabs(m[6]))*half[2],
+        double(std::fabs(m[1]))*half[0]+double(std::fabs(m[4]))*half[1]+double(std::fabs(m[7]))*half[2],
+        double(std::fabs(m[2]))*half[0]+double(std::fabs(m[5]))*half[1]+double(std::fabs(m[8]))*half[2]}};
+    double nearest2=0.0,max2=0.0;
+    for(unsigned i=0;i<3U;++i) {
+        if(!std::isfinite(p[i])||!std::isfinite(extent[i]))
+            return false;
+        double const magnitude=std::fabs(double(p[i]));
+        double const near_axis=std::max(0.0,magnitude-extent[i]);
+        double const far_axis=magnitude+extent[i];
+        nearest2+=near_axis*near_axis;
+        max2+=far_axis*far_axis;
+    }
+    if(!std::isfinite(nearest2)||!std::isfinite(max2))return false;
+    double const far=double(far_distance)+0.02;
+    if(nearest2>far*far)return true;
+    // If even maximum Y and maximum possible radial distance cannot
+    // satisfy the overlap-aware shader clip, the box is fully behind.
+    return double(p[1])+extent[1]+
+           double(dual_paraboloid_overlap_sine)*std::sqrt(max2)<-0.02;
+}
+inline bool dual_paraboloid_sphere_outside_distance(
+    std::array<float,3> const &center,float radius,
+    std::array<float,3> const &origin,float far_distance)
+{
+    if(!std::isfinite(radius)||radius<=0.0f ||
+       !std::isfinite(far_distance)||far_distance<=0.0f)return false;
+    double distance2=0.0;
+    for(unsigned i=0;i<3U;++i) {
+        if(!std::isfinite(center[i])||!std::isfinite(origin[i]))
+            return false;
+        double const d=double(center[i])-double(origin[i]);
+        distance2+=d*d;
+    }
+    double const limit=double(far_distance)+double(radius)+0.02;
+    return std::isfinite(distance2) && distance2>limit*limit;
 }
 } // namespace jkgm
