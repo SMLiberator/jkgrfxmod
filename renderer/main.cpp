@@ -9858,8 +9858,9 @@ namespace {
         return id >= 0 && id <= 65535;
     }
 
-    // CameraToMat(cameraThing,targetMat,FOV): continuously capture the
-    // requested native Thing pose without altering the active JK camera.
+    // CameraToMat(cameraThing,targetMat,FOV): queue one still image using
+    // the Thing's pose at capture time; repeat in COG to simulate live video.
+    // Never alter the game's active rdCamera.
     // An FOV of zero is orthographic (default height: one world unit).
     void __cdecl cog_camera_to_mat(void *ctx)
     {

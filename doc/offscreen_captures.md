@@ -133,7 +133,7 @@ secondary cameras with far-depth and native-style horizon/ceiling mapping.
 These are apertures of the surrounding world, not ordinary UV faces; depth
 from buildings occludes them as it does in the main camera.
 
-## Camera-to-MAT live video material
+## Camera-to-MAT one-shot photo capture
 
 The implemented COG command is:
 
@@ -141,8 +141,12 @@ The implemented COG command is:
 CameraToMat(cameraThing, targetMat, FOV);
 ```
 
-- `CameraToMat(cameraThing,targetMat,FOV)` registers a live material camera.
-  The Thing's current position and orientation are read at every refresh.
+- `CameraToMat(cameraThing,targetMat,FOV)` requests **one photograph**.
+  The Thing's position/orientation are read once when the renderer services
+  that request. The completed texture stays frozen, even if the source Thing
+  moves or is deleted; subsequent frames never redraw it automatically.
+  Calling the verb again requests a new photograph. A COG timer/loop may
+  explicitly repeat the command for a live video effect.
   The native active JK camera remains unchanged. Horizontal FOV is measured
   in degrees (positive values below 179), and FOV=0 uses orthographic
   projection with an initial fixed one-JK-unit vertical view span.
@@ -150,8 +154,11 @@ CameraToMat(cameraThing, targetMat, FOV);
   aspect ratio, never at main-renderer resolution. Nonresident MAT targets
   fail closed until their native MAT/D3D cache mapping is available.
 - Each target has a dedicated retained RGBA16F offscreen texture and depth
-  attachment, mipmapped after the render. Up to four MAT camera feeds may be
-  registered; all active feeds refresh before the main GPU world pass.
+  attachment, mipmapped after a **requested** render. At most four captured
+  MAT images can be held at once. When no new photograph is pending, capture
+  shader setup, portal traversal, Thing discovery, and draw submission are
+  entirely skipped. Failed recapture attempts leave the previous valid
+  photograph in place.
 - The generated texture **only replaces the base albedo image** (including
   existing SetMaterialAlbedo image transitions while active). Authored albedo
   factors, SetMaterialColor tint, UV scroll, emissive maps and factors,
@@ -165,20 +172,39 @@ CameraToMat(cameraThing, targetMat, FOV);
   fog as background. As with current offscreen reflection captures,
   transparent/fluid/sprite effects and emissive-only geometry are not
   reproduced as a full main-camera postprocessing pipeline.
-- All CameraToMat-generated images are suppressed while drawing *any* feed:
-  capture sources use the original MAT albedos rather than recursively
-  sampling live screens, avoiding same-target framebuffer feedback.
-- `ReloadMaterial(targetMat)` or its alias `ResetMaterial(targetMat)` cancels
-  the feed and restores authored/pack material defaults by clearing all
+- All CameraToMat-generated images are suppressed while taking *any*
+  photograph: capture sources use original MAT albedos rather than recursively
+  sampling another retained photo, avoiding framebuffer feedback.
+- `ReloadMaterial(targetMat)` or its alias `ResetMaterial(targetMat)` removes
+  the photograph and restores authored/pack material defaults by clearing all
   per-MAT runtime COG overrides, including SetMaterialColor, SetMatEnvMap,
   SetMaterialAlbedo and SetMatClearcoat. Global material effects are not reset.
   Existing single-channel ResetMaterialAlbedo remains available separately.
-- Camera requests and retained GPU targets are invalidated when changing
-  worlds or renderer contexts; stale/deleted Thing signatures are rejected.
+- Camera requests and retained GPU targets are invalidated on actual world
+  changes or renderer/GL-context destruction. Ordinary pause/menu transitions
+  do not discard or recapture a photograph. Stale/deleted Thing identities
+  are rejected for **new** shots, not rechecked for completed photos.
 
-The initial implementation is testable through build and source contracts;
-visual behavior, orientation and end-to-end capture parity still require
-in-game testing. No new JSON option is required for this basic API.
+COG usage examples:
+
+```c
+// One-time photograph: the image freezes until another request or reload.
+CameraToMat(cameraThing, targetMat, 75);
+
+// Optional live-video effect: explicitly repeat CameraToMat from a COG timer
+// or pulse message at the desired interval, rather than implicitly every frame.
+
+// Restore authored MAT/pack properties and discard the stored photograph.
+ReloadMaterial(targetMat);
+```
+
+One-shot rendering is serviced on the next eligible renderer frame. If the
+source Thing is deleted **before** that first render, the new shot cannot be
+taken. Subsequent movement or deletion does not change a completed image.
+
+The implementation is testable through build and source contracts; actual
+orientation, UV alignment and capture parity still require in-game testing.
+No new JSON option is required for this basic API.
 
 ## Dual-paraboloid capture culling and submission
 

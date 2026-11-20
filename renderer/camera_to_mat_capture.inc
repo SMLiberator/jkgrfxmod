@@ -1,5 +1,6 @@
-        // Offscreen camera Things write a live RGBA albedo image into their
-        // target MAT. No native rdCamera is modified and no MAT is reuploaded.
+        // Each COG call queues exactly one photograph. Completed images are
+        // kept until explicit recapture or ReloadMaterial; idle frames do
+        // not render, and the original source Thing need not remain alive.
         void render_camera_to_mat_captures()
         {
             auto const requests=get_camera_to_mat_controls().snapshot();
@@ -12,11 +13,27 @@
                 else ++it;
             }
             if(requests.empty())return;
+            // Only a new request generation may schedule rendering. In
+            // particular, don't revalidate a captured Thing or traverse
+            // portals/scan the world again for a completed photograph.
+            std::vector<camera_to_mat_request> pending;
+            pending.reserve(requests.size());
+            for(auto const &request:requests) {
+                auto const it=camera_to_mat_targets.find(request.mat);
+                if(it!=camera_to_mat_targets.end() &&
+                   !camera_to_mat_controls::needs_capture(
+                       it->second.ready,it->second.generation,
+                       request.generation))
+                    continue;
+                pending.push_back(request);
+            }
+            if(pending.empty())return;
             if(!the_config->use_gpu_cache || !ogs ||
                mode!=renderer_mode::ingame || !world_cache_target ||
                !world_cache_target->ready || !frame_world_cache_camera.valid ||
                !engine_material_debug::matches_tested_executable()) {
-                for(auto &item:camera_to_mat_targets)item.second.ready=false;
+                // A temporary unavailable renderer doesn't erase a photo.
+                // Pending requests can retry at the next eligible frame.
                 return;
             }
             uint32_t world=0;
@@ -38,13 +55,9 @@
                         the_config->data_path);
             auto &shader=*planar_capture_program;
 
-            for(auto const &request:requests) {
+            for(auto const &request:pending) {
                 auto &entry=camera_to_mat_targets[request.mat];
-                if(entry.generation!=request.generation) {
-                    entry.ready=false;
-                    entry.generation=request.generation;
-                }
-                if(request.world!=world) {entry.ready=false;continue;}
+                if(request.world!=world) {continue;}
                 uintptr_t const thing=uintptr_t(uint32_t(request.owner>>32U));
                 uint32_t signature=0,kind=0,flags=0;
                 std::array<float,9> axes{};
@@ -60,13 +73,13 @@
                    kind<1U || kind>15U || (flags&0x2U)!=0U) {
                     // Hidden/disabled rendering flags are valid for a
                     // remote camera source; only destroyed Things fail.
-                    entry.ready=false;continue;
+                    continue;
                 }
                 bool axes_ok=true;
                 for(float v:axes)axes_ok=axes_ok && std::isfinite(v);
                 for(float v:camera.position)
                     axes_ok=axes_ok && std::isfinite(v);
-                if(!axes_ok) {entry.ready=false;continue;}
+                if(!axes_ok) {continue;}
                 for(unsigned i=0;i<3U;++i) {
                     camera.right[i]=axes[i];
                     camera.forward[i]=axes[i+3U];
@@ -86,7 +99,7 @@
                        camera.right,camera.up))>0.1f ||
                    std::fabs(engine_camera_detail::dot(
                        camera.forward,camera.up))>0.1f) {
-                    entry.ready=false;continue;
+                    continue;
                 }
                 camera.fov=request.fov;
                 camera.valid=true;
@@ -109,16 +122,16 @@
                         width=w;height=h;break;
                     }
                 }
-                if(!width || !height) {entry.ready=false;continue;}
+                if(!width || !height) {continue;}
                 if(!entry.target)
                     entry.target=std::make_unique<offscreen_capture_target>();
                 if(!entry.target->ensure(width,height)) {
-                    entry.ready=false;continue;
+                    continue;
                 }
                 float const scene_far=reflection_capture_scene_far(camera.position);
                 auto const projection=make_offscreen_capture_projection(
                     width,height,camera.fov,1.0f,scene_far);
-                if(!projection.valid) {entry.ready=false;continue;}
+                if(!projection.valid) {continue;}
                 auto const view=planar_camera_native_view(camera);
                 auto frustum=frame_world_cache_camera.frustum;
                 frustum.clip_far=0;
@@ -382,10 +395,12 @@
                     glGenerateMipmap(GL_TEXTURE_2D);
                 }
                 camera_to_mat_drawing=false;
+                // A successful capture finishes this exact generation.
+                // Subsequent frames merely sample the retained texture.
+                entry.generation=request.generation;
                 entry.ready=true;
-                if(the_config->profile_renderer &&
-                   gpu_3do_present_serial%120U==0U)
-                    LOG_INFO("CameraToMat captured MAT=",request.mat,
+                if(the_config->profile_renderer)
+                    LOG_INFO("CameraToMat photographed MAT=",request.mat,
                              " size=",width,"x",height,
                              " FOV=",request.fov,
                              " acquired_nodes=",offscreen.stats.ready_nodes);

@@ -682,6 +682,7 @@ namespace jkgm {
             bool ready=false;
         };
         std::map<uint32_t,camera_to_mat_entry> camera_to_mat_targets;
+        uint64_t last_camera_to_mat_revision=0U;
         bool camera_to_mat_drawing=false;
         std::optional<gl::texture_view> camera_to_mat_albedo(uint32_t mat) const {
             if(camera_to_mat_drawing)return std::nullopt;
@@ -1632,6 +1633,9 @@ namespace jkgm {
 
         ~renderer_impl() override
         {
+            // Photos belong to this renderer/GL context; never carry pending
+            // Thing identities into a replacement renderer instance.
+            get_camera_to_mat_controls().clear();
             clear_deferred_gpu_hud_materials();
             reset_sector_crossing();
             reset_continuous_ambient_gpu();
@@ -1712,7 +1716,9 @@ namespace jkgm {
                 planar_last_refresh={};
                 // New scenes may reuse native owner IDs; never sample old probes.
                 reflection_probes.clear();
-                camera_to_mat_targets.clear();
+                // A pause/menu transition must not erase a taken photograph.
+                // Captures are cleared on actual world change, explicit MAT
+                // reload, and renderer/GL-context destruction only.
                 camera_to_mat_drawing=false;
                 reflection_world_buckets.invalidate();
                 reflection_sky_candidates.clear();
@@ -1724,7 +1730,6 @@ namespace jkgm {
                 global_env_completed_sequence=0U;
                 global_env_active_sequence=0U;
                 get_global_env_capture_controls().clear();
-                get_camera_to_mat_controls().clear();
                 ssr_ready=false;
                 ssr_opaque_ready=false;
                 if(planar_receiver_queries)planar_receiver_queries->invalidate();
@@ -2006,7 +2011,12 @@ namespace jkgm {
         void refresh_runtime_mat_links()
         {
             runtime_controls = get_runtime_material_controls().snapshot();
-            if(runtime_controls.empty()) {
+            auto &photo_controls=get_camera_to_mat_controls();
+            bool const has_photo_targets=photo_controls.has_requests();
+            uint64_t const photo_revision=photo_controls.revision();
+            // CameraToMat needs the same validated native MAT/D3D link table
+            // even when NO ordinary runtime material overrides are present.
+            if(runtime_controls.empty() && !has_photo_targets) {
                 runtime_mat_by_handle.clear();
                 runtime_pack_by_mat.clear();
                 last_runtime_revision = runtime_controls.revision;
@@ -2014,7 +2024,9 @@ namespace jkgm {
             }
 
             bool const new_command = last_runtime_revision != runtime_controls.revision;
-            if(new_command || force_runtime_refresh) {
+            bool const new_photo_command=
+                last_camera_to_mat_revision!=photo_revision;
+            if(new_command || new_photo_command || force_runtime_refresh) {
                 // The first few cache probes after an upload, new command or
                 // unpause run at 100 ms intervals, not the normal one second.
                 runtime_fast_retries = 0;
@@ -2027,10 +2039,12 @@ namespace jkgm {
             // still reacting far sooner than the original one-second timer.
             auto const min_interval = force_runtime_refresh
                 ? std::chrono::milliseconds(80) : retry_interval;
-            if(!new_command && now - last_runtime_scan < min_interval) {
+            if(!new_command && !new_photo_command &&
+               now - last_runtime_scan < min_interval) {
                 return;
             }
             last_runtime_revision = runtime_controls.revision;
+            last_camera_to_mat_revision=photo_revision;
             last_runtime_scan = now;
             force_runtime_refresh = false;
 
@@ -2046,6 +2060,9 @@ namespace jkgm {
                 get_runtime_material_controls().prepare_world(state.current_world);
                 get_global_env_capture_controls().prepare_world(state.current_world);
                 get_camera_to_mat_controls().prepare_world(state.current_world);
+                // Different SithWorld: the old photograph must not become
+                // an albedo image for a recycled MAT index in the new level.
+                camera_to_mat_targets.clear();
                 runtime_controls = get_runtime_material_controls().snapshot();
                 last_runtime_revision = runtime_controls.revision;
                 LOG_DEBUG("JK material image cache cleared on level change");
@@ -2067,7 +2084,8 @@ namespace jkgm {
                 runtime_controls = get_runtime_material_controls().snapshot();
                 last_runtime_revision = runtime_controls.revision;
             }
-            if(runtime_controls.empty()) {
+            if(runtime_controls.empty() &&
+               !get_camera_to_mat_controls().has_requests()) {
                 return;
             }
 

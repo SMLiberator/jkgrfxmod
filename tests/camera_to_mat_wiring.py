@@ -22,6 +22,15 @@ assert "std::map<uint32_t,camera_to_mat_request>" in controls
 assert "max_targets=4U" in controls
 assert "get_camera_to_mat_controls().prepare_world(state.current_world)" in renderer
 assert "get_camera_to_mat_controls().clear();" in renderer
+assert "runtime_controls.empty() && !has_photo_targets" in renderer
+assert "last_camera_to_mat_revision!=photo_revision" in renderer
+assert "bool const new_photo_command=" in renderer
+assert "if(!new_command && !new_photo_command &&" in renderer
+assert "uint64_t last_camera_to_mat_revision=0U;" in renderer
+assert "camera_to_mat_targets.clear();" in renderer
+assert "A pause/menu transition must not erase a taken photograph." in renderer
+assert "On actual world change" not in renderer
+assert "Different SithWorld: the old photograph" in renderer
 assert "camera_to_mat_targets.clear();" in renderer
 assert "render_camera_to_mat_captures();" in renderer
 assert renderer.index("render_camera_to_mat_captures();") < renderer.index("render_planar_capture();")
@@ -56,6 +65,9 @@ assert "acquire_planar_reflection_offscreen_gpu(" in capture
 assert "reflection_world_buckets.buckets()" in capture
 assert "glGenerateMipmap(GL_TEXTURE_2D)" in capture
 assert "ReloadMaterial(targetMat)" in doc
+assert "one-shot photo capture" in doc
+assert "stays frozen" in doc
+assert "Calling the verb again requests a new photograph." in doc
 assert 'Include="camera_to_mat.hpp"' in read("renderer/renderer.vcxproj")
 assert 'Include="camera_to_mat.hpp"' in read("renderer/renderer.vcxproj.filters")
 print("CameraToMat albedo-only capture, COG and lifetime contracts OK")

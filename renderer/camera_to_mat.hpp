@@ -1,6 +1,7 @@
 #pragma once
-// COG thread -> renderer requests. A camera feed owns only a target MAT's
-// albedo input; it never mutates the authored material or native rdCamera.
+// COG thread -> renderer one-shot capture requests. A completed photograph
+// remains the MAT's albedo image without accessing its source Thing again.
+// Authored material properties and the active native rdCamera never change.
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -24,6 +25,18 @@ class camera_to_mat_controls {
     uint64_t generation_=0;
 public:
     static constexpr size_t max_targets=4U;
+    static bool needs_capture(bool ready,uint64_t completed_generation,
+                              uint64_t requested_generation) {
+        return !ready || completed_generation!=requested_generation;
+    }
+    uint64_t revision() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return generation_;
+    }
+    bool has_requests() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return !requests_.empty();
+    }
     void prepare_world(uint32_t world) {
         if(!world)return;
         std::lock_guard<std::mutex> lock(mutex_);
