@@ -124,7 +124,7 @@ inline bool dual_paraboloid_bounds_outside(
         if(!std::isfinite(p[i])||!std::isfinite(extent[i]))
             return false;
         double const magnitude=std::fabs(double(p[i]));
-        double const near_axis=std::max(0.0,magnitude-extent[i]);
+        double const near_axis=std::fmax(0.0,magnitude-extent[i]);
         double const far_axis=magnitude+extent[i];
         nearest2+=near_axis*near_axis;
         max2+=far_axis*far_axis;
