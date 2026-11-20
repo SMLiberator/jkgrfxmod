@@ -1299,7 +1299,7 @@ namespace jkgm {
                      " post_swap=", avg(profile_stage::present_swap),
                      " HUDupload=", avg(profile_stage::hud_upload),
                      " HUDdraw=", avg(profile_stage::hud_draw));
-            LOG_INFO("PERF HUD_updates mode=",the_config->experimental_hud_updates,
+            LOG_INFO("PERF HUD_updates mode=adaptive_dirty_regions",
                      " bytes_uploaded_avg=",hud_bytes_uploaded_window/frames,
                      " gl_upload_calls_avg=",hud_upload_calls_window/frames,
                      " converted_pixels_avg=",hud_converted_pixels_window/frames,
@@ -1402,7 +1402,6 @@ namespace jkgm {
                          profile_window.gpu_cache_hash_new,
                          " header=",profile_window.gpu_cache_hash_header,
                          " revision=",profile_window.gpu_cache_hash_revision,
-                         " audit=",profile_window.gpu_cache_hash_audit,
                          " fallback=",profile_window.gpu_cache_hash_fallback,
                          " NOTE=includes_offscreen_planar_hashes");
                 LOG_INFO("PERF gpu_3do lazy_mutations material_checks=",
@@ -2644,7 +2643,7 @@ namespace jkgm {
                     // Unlike the legacy four-frame slab pipeline, live HUD
                     // updates capture the most recent DirectDraw pixels at
                     // the actual presentation boundary, before HUD blending.
-                    if(the_config->experimental_hud_updates!=0) {
+                    {
                         profile_scope hud_upload_cpu(measure,profile_frame.timings[
                             profile_idx(profile_stage::hud_upload)]);
                         update_hud_texture_live();
@@ -2819,108 +2818,13 @@ namespace jkgm {
             }
         }
 
-        static constexpr int hud_texture_num_slabs = 4;
-
-        int curr_slab = 0;
-        // Experimental 1/2 render from one persistent live texture. The
-        // previous RGB565 snapshot makes arbitrary Lock() writes observable.
+        // Live DirectDraw HUD with adaptive dirty rectangles.
         std::vector<uint16_t> hud_previous_source;
         uint16_t hud_previous_color_key=0;
         std::vector<color_rgba8> hud_region_scratch;
         uint64_t hud_bytes_uploaded_window=0, hud_upload_calls_window=0;
         uint64_t hud_converted_pixels_window=0, hud_changed_pixels_window=0;
         uint64_t hud_full_uploads_window=0, hud_skipped_frames_window=0;
-        // Mirror the contents of each actual OpenGL HUD texture. Front/back
-        // swap every four frames; their contents can differ. Comparing against
-        // just the previous source bitmap would therefore be incorrect.
-        std::array<std::vector<color_rgba8>,2> hud_uploaded_pixels;
-        std::array<std::array<bool,hud_texture_num_slabs>,2> hud_slab_valid{};
-        unsigned hud_back_index = 1U; // hud_texture_a=front, hud_texture_b=back
-        void update_hud_texture()
-        {
-            if(curr_slab == 0) {
-                // Convert the source bitmap once every four frames.
-                // Every output pixel is overwritten, so no ZeroMemory needed.
-                if(the_config->profile_renderer)
-                    hud_converted_pixels_window+=ddraw1_backbuffer_surface.buffer.size();
-                for(size_t i=0;i<ddraw1_backbuffer_surface.buffer.size();++i) {
-                    auto const in_em=ddraw1_backbuffer_surface.buffer[i];
-                    ogs->hud_texture_data[i]=rgb565_key_to_srgb_a8(
-                        in_em,in_em==ddraw1_backbuffer_surface.color_key);
-                }
-            }
-
-            int const width=get<x>(internal_scr_res);
-            int const slab_rows=get<y>(internal_scr_res)/hud_texture_num_slabs;
-            int const start_row=slab_rows*curr_slab;
-            int const stop_row=curr_slab==hud_texture_num_slabs-1
-                               ? get<y>(internal_scr_res)
-                               : slab_rows*(curr_slab+1);
-            int first_changed=start_row;
-            int last_changed=stop_row;
-
-            auto &mirror=hud_uploaded_pixels[hud_back_index];
-            if(mirror.size()!=ogs->hud_texture_data.size()) {
-                mirror.resize(ogs->hud_texture_data.size(),color_rgba8::zero());
-                hud_slab_valid[hud_back_index].fill(false);
-            }
-            if(hud_slab_valid[hud_back_index][curr_slab]) {
-                // Find the first and last changed rows; keep exactly one
-                // contiguous upload. This avoids making many tiny GL calls
-                // for scattered UI pixels while shrinking unchanged slabs.
-                first_changed=stop_row;
-                last_changed=start_row;
-                size_t const row_bytes=size_t(width)*sizeof(color_rgba8);
-                for(int row=start_row;row<stop_row;++row) {
-                    size_t const offset=size_t(row)*size_t(width);
-                    if(std::memcmp(ogs->hud_texture_data.data()+offset,
-                                   mirror.data()+offset,row_bytes)!=0) {
-                        first_changed=std::min(first_changed,row);
-                        last_changed=row+1;
-                    }
-                }
-            }
-
-            if(first_changed<last_changed) {
-                // Texture mirrors track the actual back texture, not the
-                // previous source bitmap, so alternating front/back buffers
-                // never cause stale pixels or skipped updates.
-                gl::set_active_texture_unit(0);
-                gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                 ogs->hud_texture_back);
-                auto const region=make_box(make_point(0,first_changed),
-                                           make_point(width,last_changed));
-                size_t const offset=size_t(first_changed)*size_t(width);
-                size_t const num_pixels=size_t(last_changed-first_changed)*size_t(width);
-                if(the_config->profile_renderer) {
-                    hud_bytes_uploaded_window+=num_pixels*sizeof(color_rgba8);
-                    ++hud_upload_calls_window;
-                }
-                gl::tex_sub_image_2d(
-                    gl::texture_bind_target::texture_2d,
-                    /*level*/ 0,region,gl::texture_pixel_format::rgba,
-                    gl::texture_pixel_type::uint8,
-                    make_span(ogs->hud_texture_data)
-                        .subspan(offset,num_pixels).as_const_bytes());
-                std::memcpy(mirror.data()+offset,
-                            ogs->hud_texture_data.data()+offset,
-                            num_pixels*sizeof(color_rgba8));
-            }
-            hud_slab_valid[hud_back_index][curr_slab]=true;
-
-            ++curr_slab;
-            if(curr_slab>=hud_texture_num_slabs) {
-                // Preserve JKGM's original four-slab presentation latency and
-                // backbuffer clear regardless of which rows needed upload.
-                std::fill(ddraw1_backbuffer_surface.buffer.begin(),
-                          ddraw1_backbuffer_surface.buffer.end(),
-                          ddraw1_backbuffer_surface.color_key);
-                std::swap(ogs->hud_texture_front,ogs->hud_texture_back);
-                hud_back_index^=1U;
-                curr_slab=0;
-            }
-        }
-
         void update_hud_texture_live()
         {
             auto &source=ddraw1_backbuffer_surface.buffer;
@@ -2928,15 +2832,13 @@ namespace jkgm {
             int const width=get<x>(internal_scr_res);
             int const height=get<y>(internal_scr_res);
             uint16_t const key=ddraw1_backbuffer_surface.color_key;
-            bool const dirty_mode=the_config->experimental_hud_updates==2;
-            bool const force_full=!dirty_mode ||
-                hud_previous_source.size()!=source.size() ||
+            bool const force_full=hud_previous_source.size()!=source.size() ||
                 hud_previous_color_key!=key;
-            if(dirty_mode && hud_previous_source.size()!=source.size())
+            if(hud_previous_source.size()!=source.size())
                 hud_previous_source.resize(source.size());
             auto const dirty=find_hud_dirty_regions(
                 source.data(),
-                dirty_mode && !force_full?hud_previous_source.data():nullptr,
+                !force_full?hud_previous_source.data():nullptr,
                 width,height,force_full);
 
             if(!dirty.rects.empty()) {
@@ -2960,10 +2862,9 @@ namespace jkgm {
                         }
                         // Update the raw mirror only for uploaded pixels.
                         // Every other pixel is already identical to the GPU.
-                        if(dirty_mode)
-                            std::memcpy(hud_previous_source.data()+src_row+rect.left,
-                                        source.data()+src_row+rect.left,
-                                        size_t(rw)*sizeof(uint16_t));
+                        std::memcpy(hud_previous_source.data()+src_row+rect.left,
+                                    source.data()+src_row+rect.left,
+                                    size_t(rw)*sizeof(uint16_t));
                     }
                     gl::tex_sub_image_2d(
                         gl::texture_bind_target::texture_2d,0,
@@ -2974,7 +2875,7 @@ namespace jkgm {
                         make_span(hud_region_scratch).as_const_bytes());
                 }
             }
-            if(dirty_mode)hud_previous_color_key=key;
+            hud_previous_color_key=key;
             if(the_config->profile_renderer) {
                 hud_bytes_uploaded_window+=dirty.upload_pixels*sizeof(color_rgba8);
                 hud_upload_calls_window+=dirty.rects.size();
@@ -3547,17 +3448,13 @@ namespace jkgm {
 
         void fill_buffer(triangle_batch const &tb, triangle_buffer_model *mdl)
         {
-            // Opt-in: empty native batches need no GL map/unmap. Allocate
-            // populated GPU buffers from used counts rather than the CPU
-            // batch's 10,000-triangle reserve.
-            if(the_config->experimental_native_triangle_uploads &&
-               tb.size()==0U) {
+            // Skip empty batches; upload only the current used triangle count.
+            if(tb.size()==0U) {
                 mdl->num_vertices=0;
                 return;
             }
             mdl->maybe_grow_buffers(
-                (the_config->experimental_native_triangle_uploads
-                    ?tb.size():tb.capacity())*3);
+                tb.size()*3);
 
             auto *vx = mdl->mmio.data();
             auto const cam = read_engine_camera();
@@ -4503,8 +4400,6 @@ namespace jkgm {
             bool const have_perspective_frustum=frame_camera.perspective;
             auto &prog=*ogs->gpu_3do_preview_program;
             prog.use_program();
-            prog.set_specular_normal_mode(
-                the_config->experimental_specular_normal_mode);
             prog.set_smoke_half_resolution(false);
             prog.set_light_brightness_limit(
                 authored_light_limit(the_config->enable_baked_overbright));
@@ -5837,8 +5732,6 @@ namespace jkgm {
             gl::set_depth_function(gl::comparison_function::less);
 
             ogs->game_opaque_pass_program.use_program();
-            ogs->game_opaque_pass_program.set_specular_normal_mode(
-                the_config->experimental_specular_normal_mode);
             ogs->game_opaque_pass_program.set_screen_resolution(
                 static_cast<size<2, float>>(conf_scr_res));
             ogs->game_opaque_pass_program.set_albedo_map_sampler(0);
@@ -9993,7 +9886,6 @@ namespace jkgm {
                          " intensity=",std::to_string(sun_power));
             bool const half_sun_active=sun_lit && cam.valid &&
                 sun_shadow_ready && sun_shadow_target &&
-                the_config->experimental_half_res_sun_visibility &&
                 ogs->game_post_opaque_half_sun_program &&
                 ogs->sun_half_visibility &&
                 glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE &&
@@ -11149,8 +11041,6 @@ namespace jkgm {
             bind_world_planar_reflection(shader);
             bind_world_shared_reflection(shader);
             shader.set_screen_reflection(false,9);
-            shader.set_specular_normal_mode(
-                the_config->experimental_specular_normal_mode);
             shader.set_light_brightness_limit(
                 authored_light_limit(the_config->enable_baked_overbright));
             shader.set_normal_mapped_diffuse(
@@ -11600,8 +11490,6 @@ namespace jkgm {
                     gl::texture_view(ssr_image->color_texture()));
                 gl::set_active_texture_unit(0);
             }
-            shader.set_specular_normal_mode(
-                the_config->experimental_specular_normal_mode);
             shader.set_light_brightness_limit(
                 authored_light_limit(the_config->enable_baked_overbright));
             shader.set_normal_mapped_diffuse(
@@ -12674,9 +12562,8 @@ namespace jkgm {
             if(!read(0x0073A414U,&identity_cmp,sizeof(identity_cmp)) ||
                !decal_native_address_ok(identity_cmp))
                 identity_cmp=0;
-            // Counts are per-120-frame windows. Profiling computes the
-            // conservative owner proof even when the culling flag is OFF,
-            // so the expected potential is visible without altering lighting.
+            // Counts are per-120-frame windows. The owner containment proof
+            // always runs before multi-sector candidate collection.
             static thread_local sector_crossing_stage_stats profile_crossing{};
             static thread_local uint64_t profile_crossing_us=0U;
             static thread_local uint32_t profile_crossing_frames=0U;
@@ -12689,7 +12576,6 @@ namespace jkgm {
                     sector_crossing_world,sector_crossing_ranges,
                     instance,read,true,identity_cmp,
                     the_config->enable_baked_overbright,
-                    the_config->experimental_sector_crossing_owner_cull,
                     profile?&profile_crossing:nullptr);
                 if(instance.crossing_lighting)++crossing;
             }
@@ -12704,7 +12590,7 @@ namespace jkgm {
                     " crossing=",crossing,
                     " budget=",sector_crossing_candidates::capacity,
                     " owner_fast_path=",
-                    the_config->experimental_sector_crossing_owner_cull?1:0);
+                    1);
                 LOG_INFO("SECTOR CROSSING owner-proof window_frames=",
                     profile_crossing_frames,
                     " considered=",profile_crossing.considered,
@@ -12715,8 +12601,6 @@ namespace jkgm {
                     " proved_oriented_box=",
                     profile_crossing.proof_oriented_box,
                     " early_owner_exits=",profile_crossing.owner_culled,
-                    " proved_multisector_baseline=",
-                    profile_crossing.proof_multisector_baseline,
                     " multisector_candidates=",
                     profile_crossing.multi_candidates,
                     " staged=",profile_crossing.staged,
@@ -13681,12 +13565,6 @@ namespace jkgm {
             // end_frame presented the prior snapshot; prepare a fresh one
             // for the 3DOs that are about to populate this scene.
             frame_gpu_3do_camera={};
-            {
-                profile_scope timer(profiling,
-                    profile_frame.timings[profile_idx(profile_stage::hud_upload)]);
-                if(the_config->experimental_hud_updates==0)
-                    update_hud_texture();
-            }
 
             ogs->tribuf.swap_next();
             auto *trimdl = ogs->tribuf.get_current();
@@ -13939,7 +13817,6 @@ namespace jkgm {
                 profile_frame.gpu_cache_hash_new+=stats.cache_hash_new;
                 profile_frame.gpu_cache_hash_header+=stats.cache_hash_header;
                 profile_frame.gpu_cache_hash_revision+=stats.cache_hash_revision;
-                profile_frame.gpu_cache_hash_audit+=stats.cache_hash_audit;
                 profile_frame.gpu_cache_hash_fallback+=stats.cache_hash_fallback;
                 profile_frame.gpu_mutation_scans+=stats.mutation_scans;
                 profile_frame.gpu_mutation_scanned+=stats.mutation_scanned;

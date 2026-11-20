@@ -302,7 +302,7 @@ namespace {
         int lighting_mode=0;
         uint64_t source_signature=0,source_checked_frame=0;
         uint64_t material_signature=0; // face references, not model transforms
-        uint64_t source_checked_generation=0,last_audit_frame=0;
+        uint64_t source_checked_generation=0;
         uint64_t material_checked_generation=0; // face MAT mutation epoch
         uint64_t last_used_frame=0; // primary + planar camera references
         char const *snapshot_failure=nullptr; // memoized failed snapshots
@@ -363,11 +363,6 @@ namespace {
     void clear_moving_sprite_decals();
     uint64_t next_gpu_id=1;
     uint64_t gpu_frame_serial=1;
-    // Optional timed diagnostic; zero disables periodic source hashing.
-    uint64_t gpu_mesh_integrity_audit_frame=0U;
-    uint64_t gpu_mesh_next_audit_ms=0U;
-    uint64_t gpu_mesh_audit_checked=0U;
-    uint64_t gpu_mesh_audit_untracked=0U;
     // Per-mesh native fallback reason retained for the shadow-only sidecar.
     // Visible GPU lighting is limited to 16 point lights, but the original
     // opaque mesh must still contribute to sunlight depth if it falls back.
@@ -409,7 +404,6 @@ namespace {
         else if(material_changed ||
                 checked_generation!=current_generation)
             ++gpu_native_stats.cache_hash_revision;
-        else ++gpu_native_stats.cache_hash_audit;
     }
     jkgm::gpu_mat_ready_cache gpu_mat_residency;
     std::atomic<uint64_t> native_mat_upload_generation{1};
@@ -2350,8 +2344,8 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
         ++gpu_native_stats.cache_misses;
     bool snapshot_attempted_this_call=false;
     // Read immutable-looking header fields on each instance, but hash all
-    // underlying vertex/UV/face content at most once per mesh per frame.
-    // This catches COG writes that keep the same allocation and counts.
+    // underlying vertex/UV/face content only when the mutation epoch changes
+    // (or once per frame when native mutation tracking is unavailable).
     bool const header_unchanged=it!=gpu_mesh_cache.end() &&
         it->second.vertices==m.vertices && it->second.faces==m.faces &&
         it->second.rgb==vertex_rgb && it->second.uvs==m.uvs &&
@@ -2364,13 +2358,11 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
     bool const revision_fastpath=mesh_revision::active();
     uint64_t const current_generation=mesh_revision::source_current();
     uint64_t const material_generation=mesh_revision::material_current();
-    bool const audit_frame=gpu_mesh_integrity_audit_frame==gpu_frame_serial;
     bool const dirty_full_source=revision_fastpath && header_unchanged &&
         it->second.source_checked_generation!=current_generation;
     bool should_hash=!header_unchanged ||
         (revision_fastpath
-          ? (dirty_full_source ||
-             (audit_frame && it->second.last_audit_frame!=gpu_frame_serial))
+          ? dirty_full_source
           : it->second.source_checked_frame!=gpu_frame_serial);
     bool material_changed=false;
     if(!should_hash && revision_fastpath &&
@@ -2379,13 +2371,6 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             m,it->second,material_generation);
         if(material_changed)should_hash=true;
     }
-    // Only count hashes requested by the optional audit, not verb-driven
-    // source/material checks or an uncached mesh's first snapshot.
-    bool const audit_only=should_hash && revision_fastpath && audit_frame &&
-        header_unchanged && !dirty_full_source && !material_changed &&
-        it->second.source_checked_generation==current_generation &&
-        it->second.material_checked_generation==material_generation;
-    if(audit_only)++gpu_mesh_audit_checked;
     if(should_hash) {
         gpu_mesh_hash_reason(it!=gpu_mesh_cache.end(),header_unchanged,
                              revision_fastpath,
@@ -2418,17 +2403,7 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
                 "invalid_mesh_source_memory");
             return false;
         }
-        if(audit_only && it->second.source_signature!=signature) {
-            ++gpu_mesh_audit_untracked;
-            // Diagnose the exact source that bypassed registered mutators.
-            // Refresh only this entry; never enable permanent full hashing.
-            LOG_WARNING("GPU 3DO integrity audit UNTRACKED source change: ",
-                        gpu_3do_source_detail(m),
-                        " previous_signature=",it->second.source_signature,
-                        " current_signature=",signature,
-                        " frame=",gpu_frame_serial);
-        }
-        if(!header_unchanged || it->second.source_signature!=signature) {
+                if(!header_unchanged || it->second.source_signature!=signature) {
             char const *failure="unknown_snapshot_error";
             std::string failure_detail;
             snapshot_attempted_this_call=true;
@@ -2455,7 +2430,6 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             updated.source_checked_frame=gpu_frame_serial;
             updated.source_checked_generation=current_generation;
             updated.material_checked_generation=material_generation;
-            updated.last_audit_frame=audit_frame ? gpu_frame_serial : 0U;
             updated.last_used_frame=gpu_frame_serial;
             if(geom) {
                 if(geom->self_intersecting_faces_skipped>0) {
@@ -2491,7 +2465,6 @@ bool jkgm::queue_gpu_3do_mesh(void const *mesh,void const *matrix,
             it->second.source_checked_frame=gpu_frame_serial;
             it->second.source_checked_generation=current_generation;
             it->second.material_checked_generation=material_generation;
-            if(audit_frame)it->second.last_audit_frame=gpu_frame_serial;
         }
     }
     if(!it->second.geometry) {
@@ -2842,8 +2815,8 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 ++gpu_native_stats.cache_misses;
             // Exactly the ordinary GPU 3DO source-validation policy: compare
             // native header fields on every encounter, but hash vertex/UV/
-            // face arrays only after tracked revisions or on an explicitly
-            // enabled timed audit. Without native hooks, hash once per frame.
+            // face arrays after tracked revisions. Without native hooks,
+            // hash once per frame.
             // Offscreen and primary-camera 3DOs share the SAME cache.
             bool const header_unchanged=it!=gpu_mesh_cache.end() &&
                 it->second.vertices==mesh.vertices &&
@@ -2859,7 +2832,6 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
             bool const revision_fastpath=mesh_revision::active();
             uint64_t const generation=mesh_revision::source_current();
             uint64_t const material_generation=mesh_revision::material_current();
-            bool const audit_frame=gpu_mesh_integrity_audit_frame==gpu_frame_serial;
             bool const cached_geometry_ready=header_unchanged &&
                 it->second.geometry!=nullptr;
             bool const dirty_full_source=revision_fastpath &&
@@ -2867,9 +2839,7 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 it->second.source_checked_generation!=generation;
             bool should_hash=!cached_geometry_ready ||
                 (revision_fastpath
-                 ? (dirty_full_source ||
-                    (audit_frame &&
-                     it->second.last_audit_frame!=gpu_frame_serial))
+                 ? dirty_full_source
                  : it->second.source_checked_frame!=gpu_frame_serial);
             bool material_changed=false;
             if(!should_hash && revision_fastpath &&
@@ -2878,12 +2848,6 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                     mesh,it->second,material_generation);
                 if(material_changed)should_hash=true;
             }
-            bool const audit_only=should_hash && revision_fastpath &&
-                audit_frame && cached_geometry_ready &&
-                !dirty_full_source && !material_changed &&
-                it->second.source_checked_generation==generation &&
-                it->second.material_checked_generation==material_generation;
-            if(audit_only)++gpu_mesh_audit_checked;
             uint64_t signature=it!=gpu_mesh_cache.end()
                 ?it->second.source_signature:0U;
             uint64_t material_signature=it!=gpu_mesh_cache.end()
@@ -2904,26 +2868,13 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                     incomplete=true;
                     continue;
                 }
-                if(audit_only && it->second.source_signature!=signature) {
-                    ++out.stats.untracked_source_changes;
-                    ++gpu_mesh_audit_untracked;
-                    // Report the exact untracked edit, not a global fallback.
-                    LOG_WARNING("GPU 3DO planar integrity audit UNTRACKED source change:",
-                                " mesh_ptr=",source.mesh,
-                                " mesh_index=",mesh.mesh_index,
-                                " thing_ptr=",thing.thing,
-                                " previous_signature=",it->second.source_signature,
-                                " current_signature=",signature,
-                                " frame=",gpu_frame_serial);
-                }
-            } else ++out.stats.source_hash_skips;
+                            } else ++out.stats.source_hash_skips;
             bool const same=cached_geometry_ready &&
                 it->second.source_signature==signature;
             if(same && should_hash) {
                 it->second.source_checked_frame=gpu_frame_serial;
                 it->second.source_checked_generation=generation;
                 it->second.material_checked_generation=material_generation;
-                if(audit_frame)it->second.last_audit_frame=gpu_frame_serial;
             }
             if(!same) {
                 // A source replacement at an existing key needs no
@@ -2952,7 +2903,6 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 entry.source_checked_frame=gpu_frame_serial;
                 entry.source_checked_generation=mesh_revision::source_current();
                 entry.material_checked_generation=material_generation;
-                entry.last_audit_frame=audit_frame ? gpu_frame_serial : 0U;
                 entry.last_used_frame=gpu_frame_serial;
                 entry.id=next_gpu_id++;
                 entry.geometry=std::move(geometry);
@@ -3085,32 +3035,7 @@ std::vector<jkgm::gpu_3do_instance> jkgm::consume_gpu_3do_instances()
     out.swap(pending_gpu_instances);
     moving_mesh_occurrences.clear();
     native_moving_decal_receivers.clear();
-    if(gpu_mesh_integrity_audit_frame==gpu_frame_serial)
-        LOG_INFO("GPU 3DO integrity audit complete: frame=",gpu_frame_serial,
-                 " source_checks=",gpu_mesh_audit_checked,
-                 " untracked_changes=",gpu_mesh_audit_untracked);
     ++gpu_frame_serial;
-    if(the_config && the_config->gpu_mesh_integrity_audit_interval>0.0 &&
-       mesh_revision::active()) {
-        uint64_t const now=GetTickCount64();
-        uint64_t const requested_ms=static_cast<uint64_t>(
-            the_config->gpu_mesh_integrity_audit_interval*1000.0);
-        uint64_t const interval_ms=requested_ms>0U?requested_ms:1U;
-        if(gpu_mesh_next_audit_ms==0U) {
-            gpu_mesh_next_audit_ms=now+interval_ms;
-            LOG_INFO("GPU 3DO integrity audit opted in: interval_seconds=",
-                     the_config->gpu_mesh_integrity_audit_interval);
-        }
-        if(now>=gpu_mesh_next_audit_ms) {
-            gpu_mesh_integrity_audit_frame=gpu_frame_serial;
-            gpu_mesh_audit_checked=0U;
-            gpu_mesh_audit_untracked=0U;
-            gpu_mesh_next_audit_ms=now+interval_ms;
-        } else gpu_mesh_integrity_audit_frame=0U;
-    } else {
-        gpu_mesh_integrity_audit_frame=0U;
-        gpu_mesh_next_audit_ms=0U;
-    }
     return out;
 }
 void jkgm::reset_gpu_3do_instances()
@@ -3123,10 +3048,6 @@ void jkgm::reset_gpu_3do_instances()
     clear_moving_sprite_decals();
     gpu_mesh_cache.clear(); // level/renderer reset, never memory-pressure eviction
     clear_thing_opacity(); // levels may recycle Thing pointers/signatures
-    gpu_mesh_integrity_audit_frame=0U;
-    gpu_mesh_next_audit_ms=0U;
-    gpu_mesh_audit_checked=0U;
-    gpu_mesh_audit_untracked=0U;
     gpu_mesh_cache_peak=0;
     gpu_mesh_cache_last_trim_frame=0;
     gpu_sprite_quads.clear();

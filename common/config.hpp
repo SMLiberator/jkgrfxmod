@@ -19,20 +19,11 @@ namespace jkgm {
         bool correct_game_aspect_ratio = false;
         bool correct_menu_aspect_ratio = true;
         float hud_scale = 1.0f;
-        int experimental_hud_updates = 0; // 0=legacy four-frame slabs; 1=full per-frame; 2=adaptive dirty regions
         float max_anisotropy = 2.0f;
         std::optional<antialiasing_config> antialiasing;
         bool enable_bloom = true;
-        // Separate experimental optimizations, each default-off.
-        bool experimental_fused_bloom_downsample = false;
-        bool experimental_skip_bloom_clears = false;
-        bool experimental_native_triangle_uploads = false;
         // Spatial blur (distance + peripheral) and temporal feedback trails.
         bool enable_blur = true;
-        // Mode 2 is the standard path after in-game A/B testing; preserve
-        // modes 0 and 1 for compatibility and quality/performance comparisons.
-        int spatial_blur_mode = 2; // 0=original, 1=half-horizontal, 2=both half + reconstruct
-        bool experimental_spatial_blur_half_res = false; // legacy JSON alias for mode 1
         bool enable_trails = true;
         bool enable_fog = true;
         bool experimental_radial_fog = false; // camera-to-fragment fog distance, not forward depth
@@ -49,7 +40,6 @@ namespace jkgm {
         bool enable_default_specular = false;
         float default_specular_strength = 0.25f;
         float default_specular_roughness = 0.85f;
-        int experimental_specular_normal_mode = 0; // 0=legacy camera flip; 1=unflipped; 2=triangle-facing flip
         bool enable_dynamic_light_specular = false; // opt-in per-Thing point-light GGX on GPU cached 3DOs
         bool enable_baked_overbright = true; // authored vertex/ambient/extra limit: false=1, true=2 (combined HDR is unbounded)
         bool gpu_pixel_lighting = false; // opt-in pixel dynamic lighting for all cached world/3DO geometry; false=JK Gouraud
@@ -57,11 +47,8 @@ namespace jkgm {
         bool restore_cmp_lights = false; // opt-in indexed textured MAT fullbright pixels; GeoMode 3 always retains native HW fullbright
         bool enable_sector_crossing_lighting = false; // experimental 3DO sector light/CMP/tint
         bool experimental_sector_crossing_vertex = false; // A/B: vertex instead of fragment sector selection
-        bool experimental_sector_crossing_owner_cull = false; // A/B: prove mesh wholly inside owner; skip crossing shader
         bool experimental_continuous_ambient_gpu = false; // GL 3.3 sparse buffer-texture ambient for GPU 3DOs; opt-in
         bool enable_ssao = true;
-        bool experimental_half_res_ssao = false; // quarter-pixel AO + depth-aware reconstruction
-        bool experimental_half_res_sun_visibility = false; // half-res opaque shadow visibility only
         bool retain_hom_pixels = true; // vanilla JK HOM default; false = Clear Display
         bool enable_parallax = true;
         bool enable_texture_filtering = true;
@@ -73,7 +60,6 @@ namespace jkgm {
         bool profile_audio = false; // read-only A3D/DirectSound DLL diagnostics
         bool use_gpu_cache = true; // unified GPU 3DO, sprite, and SithWorld rendering
         bool experimental_packed_3do_vertices = false; // opt-in 52-byte compressed GPU 3DO vertices
-        double gpu_mesh_integrity_audit_interval = 0.0; // seconds, 0 disables diagnostic hashing completely
         bool experimental_auto_3do_lod = false; // force native GeoSet 0; select automatically generated GPU mesh LODs
         float gpu_3do_auto_lod_lod1_radius_px = 90.0f; // enter generated LOD1 below this projected radius
         float gpu_3do_auto_lod_lod2_radius_px = 28.0f; // enter generated LOD2 below this projected radius

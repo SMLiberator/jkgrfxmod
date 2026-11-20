@@ -54,11 +54,12 @@ assert "original_registrar(ctx,fn,name);" in impl
 assert "complete=registered_mask==((1U<<mutator_count)-1U);" in impl
 assert "return complete;" in impl
 assert "untracked_write" not in impl
-assert "gpu_mesh_integrity_audit_interval>0.0" in main
-assert main.count("bool const audit_frame=gpu_mesh_integrity_audit_frame==gpu_frame_serial;")==2
+assert "gpu_mesh_integrity_audit_interval" not in main
+assert "gpu_mesh_integrity_audit_frame" not in main
 assert "gpu_frame_serial%32U" not in main
 assert "mesh_revision::report_untracked" not in main
-assert main.count("integrity audit UNTRACKED source change:")==2
+assert "integrity audit UNTRACKED source change:" not in main
+assert "last_audit_frame" not in main
 assert "if(effect&source_full)++source_generation;" in impl
 assert "if(effect&source_materials)++material_generation;" in impl
 assert "gpu_mesh_cache_apply_mutations()" not in main

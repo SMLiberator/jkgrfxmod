@@ -39,14 +39,7 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("hud_scale")) {
             j.at("hud_scale").get_to(rv->hud_scale);
         }
-        if(j.contains("experimental_hud_updates")) {
-            auto const &v=j.at("experimental_hud_updates");
-            if(!v.is_number_integer() || v.get<int>()<0 || v.get<int>()>2)
-                throw std::runtime_error(
-                    "experimental_hud_updates must be 0, 1 or 2");
-            rv->experimental_hud_updates=v.get<int>();
-        }
-
+        
         if(j.contains("max_anisotropy")) {
             j.at("max_anisotropy").get_to(rv->max_anisotropy);
         }
@@ -72,41 +65,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_bloom")) {
             j.at("enable_bloom").get_to(rv->enable_bloom);
         }
-        if(j.contains("experimental_fused_bloom_downsample")) {
-            j.at("experimental_fused_bloom_downsample").get_to(
-                rv->experimental_fused_bloom_downsample);
-        }
-        if(j.contains("experimental_skip_bloom_clears")) {
-            j.at("experimental_skip_bloom_clears").get_to(
-                rv->experimental_skip_bloom_clears);
-        }
-        if(j.contains("experimental_native_triangle_uploads")) {
-            j.at("experimental_native_triangle_uploads").get_to(
-                rv->experimental_native_triangle_uploads);
-        }
-
+                        
         if(j.contains("enable_blur")) {
             j.at("enable_blur").get_to(rv->enable_blur);
         }
-        if(j.contains("experimental_spatial_blur_half_res")) {
-            j.at("experimental_spatial_blur_half_res").get_to(
-                rv->experimental_spatial_blur_half_res);
-        }
-        // Canonical mode takes precedence over both historical keys.
-        // Retain the two experimental JSON names for existing user configs.
-        if(j.contains("spatial_blur_mode") ||
-           j.contains("experimental_spatial_blur_mode")) {
-            char const *key=j.contains("spatial_blur_mode")
-                ?"spatial_blur_mode":"experimental_spatial_blur_mode";
-            auto const &mode=j.at(key);
-            if(!mode.is_number_integer() || mode.get<int>()<0 ||
-               mode.get<int>()>2)
-                throw std::runtime_error(std::string(key)+
-                                         " must be 0, 1 or 2");
-            rv->spatial_blur_mode=mode.get<int>();
-        }
-        else if(rv->experimental_spatial_blur_half_res)
-            rv->spatial_blur_mode=1;
         if(j.contains("enable_trails")) {
             j.at("enable_trails").get_to(rv->enable_trails);
         }
@@ -213,14 +175,7 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
                              rv->default_specular_strength);
         read_specular_scalar("default_specular_roughness",
                              rv->default_specular_roughness);
-        if(j.contains("experimental_specular_normal_mode")) {
-            auto const &v=j.at("experimental_specular_normal_mode");
-            if(!v.is_number_integer() || v.get<int>()<0 || v.get<int>()>2)
-                throw std::runtime_error(
-                    "experimental_specular_normal_mode must be 0, 1 or 2");
-            rv->experimental_specular_normal_mode=v.get<int>();
-        }
-        if(j.contains("enable_dynamic_light_specular")) {
+                if(j.contains("enable_dynamic_light_specular")) {
             j.at("enable_dynamic_light_specular").get_to(
                 rv->enable_dynamic_light_specular);
         }
@@ -259,26 +214,14 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_sector_crossing_vertex").get_to(
                 rv->experimental_sector_crossing_vertex);
         }
-        if(j.contains("experimental_sector_crossing_owner_cull")) {
-            j.at("experimental_sector_crossing_owner_cull").get_to(
-                rv->experimental_sector_crossing_owner_cull);
-        }
-        if(j.contains("experimental_continuous_ambient_gpu")) {
+                if(j.contains("experimental_continuous_ambient_gpu")) {
             j.at("experimental_continuous_ambient_gpu").get_to(
                 rv->experimental_continuous_ambient_gpu);
         }
         if(j.contains("enable_ssao")) {
             j.at("enable_ssao").get_to(rv->enable_ssao);
         }
-        if(j.contains("experimental_half_res_ssao")) {
-            j.at("experimental_half_res_ssao").get_to(
-                rv->experimental_half_res_ssao);
-        }
-        if(j.contains("experimental_half_res_sun_visibility")) {
-            j.at("experimental_half_res_sun_visibility").get_to(
-                rv->experimental_half_res_sun_visibility);
-        }
-
+                
         if(j.contains("enable_parallax")) {
             j.at("enable_parallax").get_to(rv->enable_parallax);
         }
@@ -313,16 +256,7 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_packed_3do_vertices").get_to(
                 rv->experimental_packed_3do_vertices);
         }
-        if(j.contains("gpu_mesh_integrity_audit_interval")) {
-            auto const &v=j.at("gpu_mesh_integrity_audit_interval");
-            if(!v.is_number())
-                throw std::runtime_error("gpu_mesh_integrity_audit_interval must be numeric (0..3600 seconds)");
-            double const seconds=v.get<double>();
-            if(!std::isfinite(seconds) || seconds<0.0 || seconds>3600.0)
-                throw std::runtime_error("gpu_mesh_integrity_audit_interval must be between 0 and 3600 seconds");
-            rv->gpu_mesh_integrity_audit_interval=seconds;
-        }
-        if(j.contains("experimental_3do_occlusion_culling")) {
+                if(j.contains("experimental_3do_occlusion_culling")) {
             j.at("experimental_3do_occlusion_culling").get_to(
                 rv->experimental_3do_occlusion_culling);
         }

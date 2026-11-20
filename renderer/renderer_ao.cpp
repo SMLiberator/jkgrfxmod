@@ -8,7 +8,7 @@ std::unique_ptr<jkgm::renderer_ao> jkgm::create_renderer_ao(config const *the_co
 {
     if(the_config->enable_ssao) {
         return std::make_unique<renderer_ao_ssao>(
-            screen_res,the_config->experimental_half_res_ssao);
+            screen_res,true);
     }
 
     return std::make_unique<renderer_ao_basic>();

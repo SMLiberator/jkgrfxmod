@@ -71,8 +71,9 @@ the same epochs and snapshot cache. No mutation scans hidden/unused
 mesh entries, so cost does not grow with historical cache population.
 Only meshes actually used AFTER a source mutation need source rehashing.
 
-Every 32 frames, the integrity audit still detects untracked in-place
-writes and can revert to per-frame hashing. Deferred source rechecks
+There is no periodic integrity audit. With the verified mutation hooks,
+source rehashing follows tracked changes; without those hooks, the cache
+conservatively validates source data per frame. Deferred source rechecks
 guard against buffers decommitted earlier in the same frame.
 
 Profiling with profile_renderer=true:

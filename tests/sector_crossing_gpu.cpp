@@ -117,19 +117,13 @@ int main()
     // its actual collision half-space starts at X=0. This is the exact
     // false-positive source of multi-sector shader work under test.
     snapshot.sectors[1].bounds_min[0]=-8.0f;
-    // A fully owned model is still staged in the baseline A/B path,
-    // but opt-in owner containment skips the multi-sector shader entirely.
+    // A mesh contained in its owner must bypass multi-sector descriptors.
     sector_crossing_stage_stats owner_stats{};
     instance.transform[9]=-4.0f;
-    auto owner_baseline=sector_crossing_stage_instance(
-        snapshot,ranges,instance,read,true,0U,false,false,&owner_stats);
-    assert(owner_baseline && owner_baseline->count==2);
-    assert(owner_stats.proof_sphere==1U && owner_stats.owner_culled==0U);
-    assert(owner_stats.proof_multisector_baseline==1U);
     auto owner_fast=sector_crossing_stage_instance(
-        snapshot,ranges,instance,read,true,0U,false,true,&owner_stats);
+        snapshot,ranges,instance,read,true,0U,false,&owner_stats);
     assert(!owner_fast && owner_stats.owner_culled==1U);
-    assert(owner_stats.proof_sphere==2U);
+    assert(owner_stats.proof_sphere==1U);
     instance.transform[9]=0.0f;
 
     // Native interior boxes are authoritative even if the native sector
@@ -139,7 +133,7 @@ int main()
     snapshot.sectors[0].interior_max={{-2,4,4}};
     instance.transform[9]=-5.0f;
     assert(!sector_crossing_stage_instance(
-        snapshot,ranges,instance,read,true,0U,false,true,&owner_stats));
+        snapshot,ranges,instance,read,true,0U,false,&owner_stats));
     assert(owner_stats.proof_interior==1U);
     snapshot.sectors[0].has_interior_box=false;
     instance.transform[9]=0.0f;
@@ -155,24 +149,22 @@ int main()
     gpu_3do_instance long_inst=instance;
     long_inst.geometry=long_geo;
     long_inst.transform[9]=-2.0f;
-    assert(sector_crossing_stage_instance(
-        snapshot,ranges,long_inst,read,true)); // old false-positive
     assert(!sector_crossing_stage_instance(
-        snapshot,ranges,long_inst,read,true,0U,false,true,&owner_stats));
+        snapshot,ranges,long_inst,read,true,0U,false,&owner_stats));
     assert(owner_stats.proof_oriented_box==1U);
 
     // Shear rotates its long axis into the portal. Unlike the loose sphere,
     // the oriented proof must now FAIL and retain neighbor lighting.
     long_inst.transform[3]=0.6f;
     auto sheared=sector_crossing_stage_instance(
-        snapshot,ranges,long_inst,read,true,0U,false,true,&owner_stats);
+        snapshot,ranges,long_inst,read,true,0U,false,&owner_stats);
     assert(sheared && sheared->count==2);
     long_inst.transform[3]=0.0f;
 
     // A normal cube actually intersecting the X=0 portal is never culled.
     instance.transform[9]=-0.25f;
     auto crossing_real=sector_crossing_stage_instance(
-        snapshot,ranges,instance,read,true,0U,false,true,&owner_stats);
+        snapshot,ranges,instance,read,true,0U,false,&owner_stats);
     assert(crossing_real && crossing_real->count==2);
     instance.transform[9]=0.0f;
 

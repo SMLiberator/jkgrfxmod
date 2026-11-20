@@ -27,11 +27,11 @@ assert "sector_crossing_collect_candidates(" in staging
 assert "sector_crossing_instance_sphere(" in staging
 assert "sector_crossing_prove_owner_mesh(" in staging
 assert "sector_crossing_owner_proof::plane_oriented_box" in staging
-assert "if(experimental_owner_cull)" in staging
-assert "bool experimental_sector_crossing_owner_cull = false;" in config
-assert 'j.contains("experimental_sector_crossing_owner_cull")' in parser
-assert '"experimental_sector_crossing_owner_cull": false' in read("assets/jkgm.json")
-assert "the_config->experimental_sector_crossing_owner_cull" in render
+assert "if(proof!=sector_crossing_owner_proof::none)" in staging
+assert "if(stats)++stats->owner_culled;" in staging
+assert "experimental_sector_crossing_owner_cull" not in config
+assert "experimental_sector_crossing_owner_cull" not in parser
+assert "experimental_sector_crossing_owner_cull" not in render
 assert "SECTOR CROSSING owner-proof window_frames=" in render
 assert "if(choices.overflow || choices.count<2" in staging
 assert "sector_crossing_gpu_max_planes=96" in staging

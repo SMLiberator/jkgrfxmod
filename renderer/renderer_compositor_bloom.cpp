@@ -12,13 +12,11 @@ void jkgm::renderer_compositor_bloom::end_frame(opengl_state *ogs,
 {
     update_auto_exposure(ogs,composed_screen);
 
-    // Scissored fullscreen draws cannot fully overwrite intermediate FBOs.
-    // Preserve the legacy sequence whenever scissor testing is enabled.
+    // Optimized fused bloom and redundant-clear elimination are standard.
+    // Scissored FBO draws cannot overwrite all pixels: preserve the safe path.
     bool const full_viewport=glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE;
-    bool const fused_bloom=ogs->experimental_fused_bloom_downsample &&
-                           full_viewport;
-    bool const skip_bloom_clears=ogs->experimental_skip_bloom_clears &&
-                                 full_viewport;
+    bool const fused_bloom=full_viewport;
+    bool const skip_bloom_clears=full_viewport;
     if(fused_bloom || skip_bloom_clears) {
         // A skipped clear is safe only if each pass overwrites ALL pixels.
         // In particular, retained GL blending would otherwise accumulate

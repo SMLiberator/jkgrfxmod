@@ -93,7 +93,7 @@ enum class sector_crossing_owner_proof {
 struct sector_crossing_stage_stats {
     uint64_t considered=0, eligible=0, sphere_valid=0;
     uint64_t proof_interior=0, proof_sphere=0, proof_oriented_box=0;
-    uint64_t owner_culled=0, proof_multisector_baseline=0;
+    uint64_t owner_culled=0;
     uint64_t multi_candidates=0, staged=0;
 };
 inline sector_crossing_owner_proof sector_crossing_prove_owner_mesh(
@@ -205,7 +205,6 @@ sector_crossing_stage_instance(
     std::vector<sector_crossing_plane_range> const &plane_ranges,
     gpu_3do_instance const &instance,Read const &read,
     bool can_replace_tint,uint32_t identity_cmp=0U,bool overbright=false,
-    bool experimental_owner_cull=false,
     sector_crossing_stage_stats *stats=nullptr)
 {
     if(stats)++stats->considered;
@@ -221,18 +220,15 @@ sector_crossing_stage_instance(
     float radius=0.0f;
     if(!sector_crossing_instance_sphere(instance,origin,radius))return {};
     if(stats)++stats->sphere_valid;
-    bool proven_in_owner=false;
-    // Opt-in conservative proof. With the flag off, profiling can still
-    // report how many instances WOULD have been rejected, without changing
-    // model lighting. No new CPU work in the ordinary default-off path.
-    if(experimental_owner_cull || stats) {
+    // A wholly contained mesh cannot need multi-sector shader descriptors.
+    // The containment proof is conservative; unknown bounds fail open.
+    {
         auto const owner_it=snapshot.index_by_id.find(instance.owning_sector_id);
         if(owner_it!=snapshot.index_by_id.end() &&
            owner_it->second<snapshot.sectors.size()) {
             auto const proof=sector_crossing_prove_owner_mesh(
                 snapshot.sectors[owner_it->second],instance,origin,radius);
             if(proof!=sector_crossing_owner_proof::none) {
-                proven_in_owner=true;
                 if(stats) {
                     if(proof==sector_crossing_owner_proof::interior_sphere)
                         ++stats->proof_interior;
@@ -240,10 +236,8 @@ sector_crossing_stage_instance(
                         ++stats->proof_sphere;
                     else ++stats->proof_oriented_box;
                 }
-                if(experimental_owner_cull) {
-                    if(stats)++stats->owner_culled;
-                    return {};
-                }
+                if(stats)++stats->owner_culled;
+                return {};
             }
         }
     }
@@ -251,13 +245,7 @@ sector_crossing_stage_instance(
         snapshot,origin,radius,instance.owning_sector_id);
     if(choices.overflow || choices.count<2 ||
        choices.count>sector_crossing_candidates::capacity)return {};
-    if(stats) {
-        ++stats->multi_candidates;
-        // Precise false-positive baseline: a model that would've entered
-        // the multi-sector shader despite being wholly inside its owner.
-        // With owner culling ON these candidates exit before the graph walk.
-        if(proven_in_owner)++stats->proof_multisector_baseline;
-    }
+    if(stats)++stats->multi_candidates;
     auto result=std::make_shared<gpu_3do_crossing_state>();
     result->count=choices.count;
     float owner_light=0.0f;

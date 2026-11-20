@@ -351,12 +351,12 @@ jobs:
       run: python3 tests/gpu_3do_pending_material.py
     - name: GPU 3DO shared visible collection regression
       run: python3 tests/gpu_3do_shared_collection.py
-    - name: Experimental compositor and native triangle uploads
-      run: python3 tests/experimental_compositor.py
+    - name: Standard compositor and native triangle uploads
+      run: python3 tests/standard_compositor.py
     - name: Experimental radial fog regression
       run: python3 tests/experimental_radial_fog.py
     - name: Experimental half-resolution spatial blur regression
-      run: python3 tests/experimental_spatial_blur.py
+      run: python3 tests/standard_spatial_blur.py
     - name: Experimental half-resolution SSAO regression
       run: python3 tests/half_res_ssao.py
     - name: Experimental half-resolution sun-visibility regression
@@ -364,7 +364,7 @@ jobs:
     - name: Experimental fluid-SPR half-resolution and stencil-budget contracts
       run: python3 tests/experimental_fluid_sprite_overdraw.py
     - name: Experimental specular-normal orientation regression
-      run: python3 tests/experimental_specular_normal_mode.py
+      run: python3 tests/specular_normal_baseline.py
     - name: Independent sun cascade resolution and PCF regression
       run: python3 tests/sun_cascade_pcf_experiment.py
     - name: Dynamic Thing atlas tile-guarded four-tap PCF regression

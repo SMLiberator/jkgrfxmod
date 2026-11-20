@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
-// Wrap the 16 JK.dll model/material COG mutators at registration time.
+// Wrap selected JK.dll model/material COG mutators at registration time.
 // The original handler and registrar ABI are preserved; callers query whether
 // the optimized GPU cache revision fast path remains safe for this session.
 namespace mesh_revision {
@@ -49,8 +49,7 @@ namespace mesh_revision {
     uint64_t current(); // unchanged global generation for collision caches
     uint64_t source_current(); // full-source changes (lazy validation)
     uint64_t material_current(); // face-material changes (lazy validation)
-    // Profiling only; reading counters does not change revision epochs
-    // or the optional source-integrity audit.
+    // Profiling only; reading counters does not change revision epochs.
     mutator_counts take_mutator_counts();
     char const *mutator_name(std::size_t index);
 }

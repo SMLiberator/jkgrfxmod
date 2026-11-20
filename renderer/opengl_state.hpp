@@ -130,12 +130,9 @@ namespace jkgm {
         // Master optional post-processing switch (color-space conversion stays active).
         bool enable_post = true;
         bool enable_blur = true;
-        int spatial_blur_mode = 2;
         bool enable_trails = true;
         bool auto_exposure_scene = false;
         bool enable_hdr = false;
-        bool experimental_fused_bloom_downsample = false;
-        bool experimental_skip_bloom_clears = false;
         float auto_exposure_sensitivity = 0.0f;
         float hdr_exposure_compensation = 0.5f;
         float hdr_shadow_softness = 0.6f;
@@ -173,7 +170,7 @@ namespace jkgm {
         shaders::post_auto_exposure_shader post_auto_exposure;
         shaders::post_frame_blend_shader post_frame_blend;
         shaders::post_spatial_blur_shader post_spatial_blur;
-        // Only compiled when the experimental setting is explicitly enabled.
+        // Optimized half-resolution blur; full-res shader for scissor fallback.
         std::unique_ptr<shaders::post_spatial_blur_shader> post_spatial_blur_fast;
         std::unique_ptr<shaders::post_spatial_blur_reconstruct_shader>
             post_spatial_blur_reconstruct;
@@ -194,14 +191,11 @@ namespace jkgm {
         std::vector<color_rgba8> menu_texture_data;
 
         gl::texture hud_texture_a;
-        gl::texture hud_texture_b;
         gl::texture_view hud_texture_front;
-        gl::texture_view hud_texture_back;
-        std::vector<color_rgba8> hud_texture_data;
 
         post_buffer screen_postbuffer1;
         post_buffer screen_postbuffer2;
-        // Allocated only for optional quarter-pixel sun shadow evaluation.
+        // Allocated when sun shadows are configured for quarter-pixel visibility.
         std::unique_ptr<post_buffer> sun_half_visibility;
         // Allocate only when Retro is actually active. This buffer contains
         // the linear scene PLUS both HUD layers before final CMP quantization.
@@ -217,7 +211,7 @@ namespace jkgm {
         // Separable spatial blur works in linear HDR before final post processing.
         post_buffer spatial_blur_work;
         post_buffer spatial_blur_result;
-        // Allocated lazily at renderer initialization for the opt-in path.
+        // Half-resolution horizontal/vertical targets for standard blur.
         std::unique_ptr<post_buffer> spatial_blur_half_work;
         std::unique_ptr<post_buffer> spatial_blur_half_result;
 

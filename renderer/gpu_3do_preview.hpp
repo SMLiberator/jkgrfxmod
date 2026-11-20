@@ -177,7 +177,7 @@ namespace jkgm {
         uint64_t cache_hits=0,cache_misses=0;
         uint64_t cache_evictions=0,cache_trim_deferred=0;
         uint64_t cache_hash_new=0,cache_hash_header=0;
-        uint64_t cache_hash_revision=0,cache_hash_audit=0;
+        uint64_t cache_hash_revision=0;
         uint64_t cache_hash_fallback=0;
         // On-demand face-material checks for USED cached meshes only.
         // COG mutations never scan the whole cache.

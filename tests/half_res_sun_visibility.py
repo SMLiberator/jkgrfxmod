@@ -1,4 +1,4 @@
-"""Default-off quarter-pixel sun visibility; preserve aperture and full-res fallback."""
+"""Standard quarter-pixel sun visibility; preserve aperture and full-res fallback."""
 from pathlib import Path
 r=Path(__file__).resolve().parents[1]
 read=lambda p:(r/p).read_text(encoding="utf-8")
@@ -9,10 +9,11 @@ opaque=read("assets/shaders/post_opaque_composite.frag")
 half=read("assets/shaders/post_sun_visibility_half.frag")
 units=read("renderer/texture_units.hpp")
 state=read("renderer/opengl_state.cpp")
-assert "bool experimental_half_res_sun_visibility = false;" in cfg
-assert 'j.contains("experimental_half_res_sun_visibility")' in parser
-assert '"experimental_half_res_sun_visibility": false' in read("assets/jkgm.json")
-assert "**experimental_half_res_sun_visibility**" in read("doc/config.md")
+assert "experimental_half_res_sun_visibility" not in cfg
+assert "experimental_half_res_sun_visibility" not in parser
+assert "experimental_half_res_sun_visibility" not in read("assets/jkgm.json")
+assert "experimental_half_res_sun_visibility" not in read("doc/config.md")
+assert "if(the_config->enable_sun && the_config->enable_sun_shadows)" in state
 assert "game_post_opaque_half_sun_program" in state
 assert "sun_half_visibility=std::make_unique<post_buffer>(dims);" in state
 assert "glIsEnabled(GL_SCISSOR_TEST)==GL_FALSE" in renderer

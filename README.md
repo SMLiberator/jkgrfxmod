@@ -1855,21 +1855,12 @@ full geometry rehash. Type-3 collision caching retains its independent
 conservative global mutation generation. Per-verb counts and detailed
 hash-reason diagnostics are available with `profile_renderer=true`.
 
-**Revision hook compatibility:** The existing registration gate still
-requires all 16 known verb registrations. A version of JK.dll which
-registers fewer verbs may leave the fast path disabled and use full per-frame
-source verification; this is distinct from the optional audit and is still
-under investigation. Do not assume the audit timer controls that fallback.
-
-**Opt-in mesh integrity audit:** The old automatic every-32-frame audit is
-removed. `"gpu_mesh_integrity_audit_interval": 0.0` (default) means
-**never audit**. A positive number of seconds (maximum 3600) schedules
-source rehashes of encountered meshes in both main and planar acquisition
-paths. Every completed scheduled audit reports how many source checks were
-made and how many changed without a tracked mutation; mismatches log mesh
-identity and signatures. A mismatch refreshes its affected cache entry
-without silently switching the entire renderer to permanent full hashing.
-This diagnostic is not part of normal gameplay when the setting is zero.
+**Revision hook compatibility:** Renderer-side mesh source and material
+epochs are driven by the verified native mutation-registration hooks.
+If the expected hooks are unavailable for an unsupported JK.dll build,
+the GPU cache conservatively falls back to per-frame source validation.
+The old periodic integrity-audit timer and its extra source rehashes
+have been removed; they are not needed in the supported path.
 
 ## Native MAT mip selection
 
