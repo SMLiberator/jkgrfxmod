@@ -39,6 +39,12 @@ assert "camera_to_mat_drawing=false" in capture
 assert "camera_to_mat_albedo(uint32_t mat) const" in renderer
 assert "if(camera_to_mat_drawing)return std::nullopt;" in renderer
 assert "signature!=uint32_t(request.owner)" in capture
+assert "(flags&0x2U)!=0U" in capture
+assert "kind<1U || kind>15U" in capture
+assert "portals.traverse(" in capture
+assert "portals.surface_in_window(" in capture
+assert "visible_thing_sectors" in capture
+assert "visible_surfaces" in capture
 assert "request.world!=world" in capture
 assert "surface->desc.dwWidth" in capture and "surface->desc.dwHeight" in capture
 assert "make_offscreen_capture_projection(" in capture

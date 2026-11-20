@@ -3,6 +3,7 @@
 // albedo input; it never mutates the authored material or native rdCamera.
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <mutex>

@@ -57,7 +57,9 @@
                    !read(thing+0xb8U,camera.position.data(),
                          sizeof(camera.position)) ||
                    signature!=uint32_t(request.owner) ||
-                   kind<1U || kind>15U || (flags&(0x2U|0x10U|0x80000U))) {
+                   kind<1U || kind>15U || (flags&0x2U)!=0U) {
+                    // Hidden/disabled rendering flags are valid for a
+                    // remote camera source; only destroyed Things fail.
                     entry.ready=false;continue;
                 }
                 bool axes_ok=true;

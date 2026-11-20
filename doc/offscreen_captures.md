@@ -158,7 +158,9 @@ CameraToMat(cameraThing, targetMat, FOV);
   normal/surface maps, metalness, roughness, clearcoat and EnvMap behavior
   remain unchanged in both the GPU-cached and native-D3D rendering paths.
 - Camera captures use cached world geometry, independently acquired native
-  Thing poses and the existing lightweight offscreen material shader.
+  Thing poses, per-camera portal visibility (perspective), and the existing
+  lightweight offscreen material shader. Hidden camera source Things remain
+  valid if they have a live pose; destroyed/stale Things are rejected.
   Perspective captures include JK sky apertures. Orthographic captures use
   fog as background. As with current offscreen reflection captures,
   transparent/fluid/sprite effects and emissive-only geometry are not
