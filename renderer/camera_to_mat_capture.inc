@@ -29,6 +29,9 @@
             auto &cache=*world_cache_target;
             reflection_world_buckets.refresh(
                 cache.loaded_world,cache.revision,cache.mesh.surfaces);
+            bool const portal_ready=cache.reflected_portal_graph.ensure(
+                read,cache.loaded_world,cache.revision,cache.world,
+                cache.mesh,cache.cached_surface_lookup);
             if(!planar_capture_program)
                 planar_capture_program=
                     std::make_unique<planar_reflection_capture_shader>(
@@ -124,13 +127,47 @@
                 frustum.far_top=projection.half_horizontal/projection.aspect;
                 frustum.bottom=-projection.half_horizontal/projection.aspect;
 
+                // Secondary-camera portal traversal is entirely independent
+                // of the main camera. Orthographic views use full-scene
+                // GPU clipping instead of a false perspective window.
+                std::vector<uint8_t> visible_surfaces,visible_thing_sectors;
+                if(portal_ready && !projection.orthographic) {
+                    std::vector<world_cache_sector_span> spans;
+                    std::vector<planar_reflection_portal_rect> windows;
+                    auto &portals=cache.reflected_portal_graph;
+                    auto const stats=portals.traverse(
+                        read,{},cache.mesh,cache.cached_surface_lookup,
+                        view,camera.position,projection.half_horizontal,
+                        projection.aspect,spans,&windows,&visible_thing_sectors);
+                    if(stats.valid) {
+                        visible_surfaces.assign(
+                            cache.cached_surface_lookup.size(),uint8_t(0));
+                        for(auto const &span:spans)
+                            for(uint32_t i=0;i<span.surface_count;++i) {
+                                uint32_t const si=span.first_surface+i;
+                                if(si>=cache.cached_surface_lookup.size())continue;
+                                uint32_t const index=cache.cached_surface_lookup[si];
+                                if(index>=cache.mesh.surfaces.size())continue;
+                                auto const &surface=cache.mesh.surfaces[index];
+                                if(surface.surface_index==si &&
+                                   portals.surface_in_window(
+                                       si,surface.bounds_min,surface.bounds_max,
+                                       view,projection.half_horizontal,
+                                       projection.aspect,windows))
+                                    visible_surfaces[si]=1U;
+                            }
+                    } else visible_thing_sectors.clear();
+                }
+
                 // Native Thing discovery must use the new camera, never the
                 // main viewer. For orthographic capture the standard JK
                 // perspective frustum is inapplicable: conservative full
                 // discovery and GPU clipping avoid false negatives.
                 planar_reflection_offscreen_gpu offscreen{};
                 planar_reflection_thing_scan scan{};
-                if(collect_planar_reflection_things(read,world,scan)) {
+                if(collect_planar_reflection_things(read,world,scan,
+                       visible_thing_sectors.empty()?nullptr:
+                           &visible_thing_sectors)) {
                     auto &things=scan.models;
                     if(!projection.orthographic)
                         things.erase(std::remove_if(
@@ -233,7 +270,8 @@
                         draw_reflection_capture_sky(
                             shader,camera,view,frustum,projection,
                             width,height,{{0.0f,0.0f,0.0f,0.0f}},
-                            false,false,false,nullptr);
+                            false,false,false,
+                            visible_surfaces.empty()?nullptr:&visible_surfaces);
                     shader.set_modelview(view,false);
                     shader.set_thing_fade(1.0f,0);
                     gl::bind_vertex_array(cache.vao);
@@ -243,6 +281,10 @@
                         counts.clear();offsets.clear();
                         for(size_t index:bucket.surfaces) {
                             auto const &surface=cache.mesh.surfaces[index];
+                            if(!visible_surfaces.empty() &&
+                               (surface.surface_index>=visible_surfaces.size() ||
+                                !visible_surfaces[surface.surface_index]))
+                                continue;
                             if(!projection.orthographic &&
                                gpu_3do_batch_outside_frustum(
                                    frustum,view,surface.bounds_min,
@@ -271,6 +313,15 @@
                            inst.effective_geometry_mode<3U ||
                            !inst.geometry ||
                            !gpu_3do_matrix_finite(inst.transform))return;
+                        if(!visible_thing_sectors.empty() && inst.shadow_owner) {
+                            uintptr_t const source=uintptr_t(uint32_t(
+                                inst.shadow_owner>>32U));
+                            uint32_t sector=0U;
+                            if(planar_reflection_valid_native_pointer(source) &&
+                               read(source+0x5cU,&sector,4U) &&
+                               !cache.reflected_portal_graph.thing_sector_visible(
+                                   sector,visible_thing_sectors))return;
+                        }
                         auto const modelview=gpu_3do_native_modelview(
                             view,inst.transform);
                         if(!gpu_3do_matrix_finite(modelview))return;
