@@ -154,5 +154,7 @@ assert "paraboloid_capture_program" in renderer
 assert "GL_CLIP_DISTANCE0" in read("renderer/offscreen_capture_target.hpp")
 assert "dual_paraboloid_capture.geom" in read("renderer/planar_reflection_capture_shader.hpp")
 assert "gl_ClipDistance[0]" in read("assets/shaders/dual_paraboloid_capture.geom")
+assert "gl_ClipDistance[2]=capture_sky_mode!=0 ? 1.0" in read(
+    "assets/shaders/dual_paraboloid_capture.geom")
 assert "gl_FragDepth" in read("assets/shaders/dual_paraboloid_capture.frag")
 assert "paraboloid" in read("renderer/reflection_sky_capture.inc")

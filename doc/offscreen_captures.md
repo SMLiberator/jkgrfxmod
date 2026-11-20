@@ -211,3 +211,13 @@ clips its fragments beyond the chosen radius.
 configurable local-probe distance limit. The hemispherical orientation
 tests remain active when the distance limit is disabled. Capture views
 still have finite projection depths, as required by the GPU.
+
+### Sky apertures and short probe ranges
+
+Sky-flagged faces bypass the dedicated probe far-distance test in both
+CPU capture visibility and the paraboloid geometry shader. They still
+respect hemisphere orientation, near-plane visibility and the actual
+sky-face portal aperture, so local probes retain the sky when distant
+sky polygons lie beyond the configured range. The six-face cube capture
+shader already emits sky at its far depth and exempts it from CPU
+far-plane rejection.
