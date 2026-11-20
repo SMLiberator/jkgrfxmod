@@ -1,7 +1,7 @@
 #version 330 core
 // Capture-only adaptive subdivision of triangles before nonlinear projection.
-// The two clip distances reject geometry behind this hemisphere and near the
-// probe; a third rejects geometry beyond the capture range.
+// Keep hemisphere/near clipping. Scene-depth rejection for ordinary
+// geometry is handled in the fragment shader at the full scene far plane.
 layout(triangles) in;
 layout(triangle_strip,max_vertices=48) out;
 in vec2 vs_pixel_uv[];
@@ -14,7 +14,6 @@ out float clip_side;
 out float capture_forward_depth;
 out vec3 paraboloid_view_position;
 uniform vec4 projection;
-uniform int capture_sky_mode; // sky apertures bypass local probe depth limits
 const float disk_radius=1.091308501;
 const float overlap_sin=0.087155743;
 const float near_radius=0.01;
@@ -34,10 +33,6 @@ void projected_vertex(vec3 weights) {
     gl_Position=vec4(paraboloid/disk_radius,2.0*depth-1.0,1.0);
     gl_ClipDistance[0]=p.y+dist*overlap_sin;
     gl_ClipDistance[1]=dist-near_radius;
-    // Sky-flagged polygons are windows to the environment, not local
-    // capture geometry. Keep their hemisphere/near clipping, but never
-    // cut them away because the dedicated probe's radial limit is short.
-    gl_ClipDistance[2]=capture_sky_mode!=0 ? 1.0 : 1.0-dist*projection.z;
     pixel_uv=vs_pixel_uv[0]*weights.x+
              vs_pixel_uv[1]*weights.y+
              vs_pixel_uv[2]*weights.z;

@@ -273,16 +273,13 @@
                             the_config->data_path,true);
                 auto &shader=paraboloid_mode
                     ?*paraboloid_capture_program:*hemi_capture_program;
-                // Dedicated local probes deliberately use a short radial
-                // range; shared and COG environment captures keep the full
-                // scene projection and never inherit that policy.
+                // Project the full scene. The dedicated Hemi/Cube distance
+                // budget applies only to Things, not to world geometry.
                 float const probe_distance_limit=
                     reflection_probe_capture_distance_limit(
                         selected_mode,candidate.is_global,candidate.is_shared,
                         the_config->reflection_probe_max_distance);
-                float const far_plane=probe_distance_limit>0.0f
-                    ?probe_distance_limit
-                    :reflection_capture_scene_far(focus);
+                float const far_plane=reflection_capture_scene_far(focus);
                 if(!(std::isfinite(far_plane)&&far_plane>0.1f))continue;
                 // Capture source: original 128x128 cube face. Hemi output:
                 // two 256x256 disks with 5-degree overlap past the horizon.
@@ -457,10 +454,9 @@
                         ?&portal_visibility.surfaces:nullptr;
                     gpu_3do_native_frustum frustum=
                         frame_world_cache_camera.frustum;
-                    // The short-radius per-Thing probe uses a matching GPU
-                    // projection and native-style CPU far plane. Environment
-                    // modes leave far clipping to their scene projection.
-                    frustum.clip_far=probe_distance_limit>0.0f?1:0;
+                    // World geometry has no dedicated probe distance
+                    // limit. Thing radius checks remain independent.
+                    frustum.clip_far=0;
                     frustum.near_plane=0.01f;
                     frustum.far_plane=far_plane;
                     frustum.far_left=-projection.half_horizontal;
@@ -486,7 +482,6 @@
             if(paraboloid_mode) {
                 glEnable(GL_CLIP_DISTANCE0);
                 glEnable(GL_CLIP_DISTANCE1);
-                glEnable(GL_CLIP_DISTANCE2);
             }
             glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
             // A globally captured EnvMap must remain opaque even where
@@ -569,17 +564,11 @@
                 if(surface.count<3U || !surface.material ||
                    surface.passable_adjoin ||
                    (surface.surface_flags&0x600U)!=0U)continue;
+                // Hemi may reject the opposite hemisphere, but no
+                // world face is culled by the local Thing range.
                 if(paraboloid_mode &&
                    dual_paraboloid_bounds_outside(
-                       view,surface.bounds_min,surface.bounds_max,
-                       probe_distance_limit)) {
-                    ++total_world_bounds_culled;continue;
-                }
-                if(!paraboloid_mode &&
-                   probe_distance_limit>0.0f &&
-                   reflection_probe_bounds_outside_range(
-                       view,surface.bounds_min,surface.bounds_max,
-                       probe_distance_limit)) {
+                       view,surface.bounds_min,surface.bounds_max,0.0f)) {
                     ++total_world_bounds_culled;continue;
                 }
                 if(!paraboloid_mode &&

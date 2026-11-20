@@ -126,9 +126,20 @@ assert "face_offscreen=prepare_scene(" not in capture
 assert "planar_reflection_thing_outside_probe_range(" in capture
 assert "if(probe_distance_limit>0.0f &&" in capture
 assert "reflection_probe_capture_distance_limit(" in capture
-assert "probe_distance_limit>0.0f?1:0" in capture
+assert "frustum.clip_far=0;" in capture
 assert "probe_distance_limit)) {" in capture
 assert "reflection_probe_bounds_outside_range(" in capture
+assert "float const far_plane=reflection_capture_scene_far(focus);" in capture
+# The Thing radius must never enter world-surface culling or projection.
+world_capture=capture.split("for(auto const &surface:cache.mesh.surfaces)",1)[1].split(
+    "std::vector<GLsizei> counts;",1)[0]
+assert "probe_distance_limit" not in world_capture
+assert "reflection_probe_bounds_outside_range(" not in world_capture
+assert "view,surface.bounds_min,surface.bounds_max,0.0f" in world_capture
+model_capture_region=capture.split("auto draw_model=[&]",1)[1]
+assert "probe_distance_limit" in model_capture_region
+assert "reflection_probe_bounds_outside_range(" in model_capture_region
+assert "sky_frustum" not in read("renderer/reflection_sky_capture.inc")
 assert '" distance_limit=",probe_distance_limit' in capture
 assert "things,things.size(),nullptr,nullptr" in capture
 assert "dual_paraboloid_bounds_outside(" in capture
@@ -145,16 +156,17 @@ assert model_capture.index("if(model_group_scratch.empty())return;") < model_cap
     "gpu_3do_gl_cache.find(inst.id)")
 assert "thing_range_culled=" in capture
 assert "dual_paraboloid_outside_distance(" not in capture
-assert "frustum.clip_far=probe_distance_limit>0.0f?1:0" in capture
+assert "frustum.clip_far=probe_distance_limit>0.0f?1:0" not in capture
 assert "reflection_capture_scene_far(focus)" in capture
 assert "glEnable(GL_CLIP_DISTANCE0)" in capture
 assert "glEnable(GL_CLIP_DISTANCE1)" in capture
-assert "glEnable(GL_CLIP_DISTANCE2)" in capture
+assert "glEnable(GL_CLIP_DISTANCE2)" not in capture
 assert "paraboloid_capture_program" in renderer
 assert "GL_CLIP_DISTANCE0" in read("renderer/offscreen_capture_target.hpp")
 assert "dual_paraboloid_capture.geom" in read("renderer/planar_reflection_capture_shader.hpp")
 assert "gl_ClipDistance[0]" in read("assets/shaders/dual_paraboloid_capture.geom")
-assert "gl_ClipDistance[2]=capture_sky_mode!=0 ? 1.0" in read(
-    "assets/shaders/dual_paraboloid_capture.geom")
+assert "gl_ClipDistance[2]" not in read("assets/shaders/dual_paraboloid_capture.geom")
+assert "capture_sky_mode" not in read("assets/shaders/dual_paraboloid_capture.geom")
+assert "gl_FragDepth=0.999999" in read("assets/shaders/dual_paraboloid_capture.frag")
 assert "gl_FragDepth" in read("assets/shaders/dual_paraboloid_capture.frag")
 assert "paraboloid" in read("renderer/reflection_sky_capture.inc")

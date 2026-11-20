@@ -86,12 +86,11 @@ separate `matcap_map` artist layer when that layer's shader support lands.
 
 `reflection_capture_resolution` is the fixed square per-cube-face
 resolution (default 128), and the short edge of the planar target.
-Realtime and COG captures no longer impose the former 96-unit capture far
-limit or hemisphere 3DO distance budget. Depth range is derived from the
-native camera range and the cached level bounds. Sky apertures bypass CPU
-far-plane rejection. Capture 3DO UVs use the same 256-pixel-per-axis MAT
-reference cap as regular cached 3DOs; world and sky UVs retain their own
-native scaling.
+Captures no longer impose the former 96-unit far projection. Depth
+range comes from the native camera and cached world bounds; dedicated
+Hemi/Cube probes independently use a configurable Thing-only distance
+budget. Capture 3DO UVs use the same 256-pixel-per-axis MAT reference
+cap as regular cached 3DOs; world and sky UVs retain native scaling.
 The `hemi` probe now stores **two fixed +Z/-Z dual-paraboloid disks**,
 each twice the cube-face linear resolution with 5-degree horizon overlap.
 It captures **two nonlinear paraboloid views directly**: the geometry shader
@@ -114,8 +113,9 @@ sector mask for Thing discovery before pose acquisition. Dual-paraboloid
 capture conservatively unions six ordinary 90-degree portal views to cover
 the sphere instead of using an invalid wide-angle perspective window.
 Unresolved source sectors, topology or portal clipping fail open to the
-original full-world frustum path. The old nearest-64 offscreen-Thing limit
-has also been removed: source distance is not a capture-eligibility test.
+original full-world frustum path. The old nearest-64 offscreen-Thing count
+limit was also removed: dedicated Hemi/Cube probes instead use a separate
+configurable Thing range, not a nearest-N budget.
 
 Realtime `hemi` and `cube` probes exclude their reflecting Thing and all
 Things connected through qualifying Thing-to-Thing/Thing-face attachments:
@@ -201,23 +201,14 @@ exclusion, capture cadence or resolution. A refreshed cube logs
 `reflection_probe_max_distance` defaults to `64.0` JK world units and can
 be set to `0` to disable the local-probe radial limit. Only dedicated
 `hemi` and `cube` Thing probes use it. The limit rejects Things beyond
-the native model bounding radius before independent pose acquisition,
-rejects fully out-of-range world/model bounds, and sets a matching GPU
-capture far projection. A 3DO building with a large bounding sphere
-that intersects the limit is not rejected early; the capture projection
-clips its fragments beyond the chosen radius.
+the native model bounding radius before independent pose acquisition
+and skips fully out-of-range 3DO mesh groups at draw time. A large 3DO
+whose bounds intersect the radius is retained conservatively; its
+individual fragments are not clipped at the Thing budget distance.
 
-`shared`, `planar` and explicit `CaptureEnvMap` do **not** use the
-configurable local-probe distance limit. The hemispherical orientation
-tests remain active when the distance limit is disabled. Capture views
-still have finite projection depths, as required by the GPU.
-
-### Sky apertures and short probe ranges
-
-Sky-flagged faces bypass the dedicated probe far-distance test in both
-CPU capture visibility and the paraboloid geometry shader. They still
-respect hemisphere orientation, near-plane visibility and the actual
-sky-face portal aperture, so local probes retain the sky when distant
-sky polygons lie beyond the configured range. The six-face cube capture
-shader already emits sky at its far depth and exempts it from CPU
-far-plane rejection.
+All world surfaces, including sky apertures, retain the full scene-derived
+projection depth and their normal portal/hemisphere/frustum visibility.
+There is no sky-distance override because world geometry never receives
+the dedicated local-probe limit. `shared`, `planar` and explicit
+`CaptureEnvMap` likewise remain unrestricted by the Thing-distance
+budget. Capture projections remain finite, as required by the GPU.

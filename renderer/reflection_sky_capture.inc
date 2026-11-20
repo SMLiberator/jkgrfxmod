@@ -46,10 +46,8 @@
             gl::bind_vertex_array(cache.vao);
             glFrontFace(paraboloid?GL_CW:(mirrored?GL_CW:GL_CCW));
             glEnable(GL_CULL_FACE);
-            // JK does not far-clip sky apertures. Never reject the sky
-            // because its authored polygons lie beyond a capture depth.
-            auto sky_frustum=frustum;
-            sky_frustum.clip_far=0;
+            // Sky and ordinary world surfaces share the same unrestricted
+            // capture frustum, with normal visibility and portal tests.
             size_t drawn=0;
             for(auto const &face:reflection_sky_candidates) {
                 auto const sky_type=world_cache_sky_type(face.sky_flags);
@@ -68,7 +66,7 @@
                 if(index>=cache.mesh.surfaces.size())continue;
                 auto const &surface=cache.mesh.surfaces[index];
                 if(!paraboloid && gpu_3do_batch_outside_frustum(
-                        sky_frustum,view,surface.bounds_min,surface.bounds_max))
+                        frustum,view,surface.bounds_min,surface.bounds_max))
                     continue;
                 gpu_3do_group group{};
                 group.material=face.material;
