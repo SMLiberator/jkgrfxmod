@@ -42,6 +42,7 @@
 #include "fast_vertex_colors.hpp"
 #include "runtime_material.hpp"
 #include "global_env_capture.hpp"
+#include "camera_to_mat.hpp"
 #include "reflection_attachment_family.hpp"
 #include "global_env_equirect_converter.hpp"
 #include "spotlight.hpp"
@@ -675,6 +676,21 @@ namespace jkgm {
         // Independent low-cost planar capture: allocated on first enabled
         // scene, never by the normal GPU renderer or menus.
         std::unique_ptr<offscreen_capture_target> planar_capture_target;
+        struct camera_to_mat_entry {
+            std::unique_ptr<offscreen_capture_target> target;
+            uint64_t generation=0U;
+            bool ready=false;
+        };
+        std::map<uint32_t,camera_to_mat_entry> camera_to_mat_targets;
+        bool camera_to_mat_drawing=false;
+        std::optional<gl::texture_view> camera_to_mat_albedo(uint32_t mat) const {
+            if(camera_to_mat_drawing)return std::nullopt;
+            auto const it=camera_to_mat_targets.find(mat);
+            if(it==camera_to_mat_targets.end() || !it->second.ready ||
+               !it->second.target || !it->second.target->ready())
+                return std::nullopt;
+            return gl::texture_view(it->second.target->color_texture());
+        }
         // Each reflective Thing owns its own retained six-face (or hemi)
         // capture. Avoid the former global-owner aliasing/fallback problem.
         struct reflection_probe_entry {
@@ -1636,6 +1652,7 @@ namespace jkgm {
                 smoke_half_buffer.reset();
                 planar_capture_program.reset();
                 planar_capture_target.reset();
+                camera_to_mat_targets.clear();
                 reflection_probes.clear();
                 reflection_world_buckets.invalidate();
                 reflection_sky_candidates.clear();
@@ -1695,6 +1712,8 @@ namespace jkgm {
                 planar_last_refresh={};
                 // New scenes may reuse native owner IDs; never sample old probes.
                 reflection_probes.clear();
+                camera_to_mat_targets.clear();
+                camera_to_mat_drawing=false;
                 reflection_world_buckets.invalidate();
                 reflection_sky_candidates.clear();
                 reflection_sky_frame=~uint64_t(0);
@@ -1705,6 +1724,7 @@ namespace jkgm {
                 global_env_completed_sequence=0U;
                 global_env_active_sequence=0U;
                 get_global_env_capture_controls().clear();
+                get_camera_to_mat_controls().clear();
                 ssr_ready=false;
                 ssr_opaque_ready=false;
                 if(planar_receiver_queries)planar_receiver_queries->invalidate();
@@ -2025,6 +2045,7 @@ namespace jkgm {
                 // *new* world's startup scripts; don't clear those commands.
                 get_runtime_material_controls().prepare_world(state.current_world);
                 get_global_env_capture_controls().prepare_world(state.current_world);
+                get_camera_to_mat_controls().prepare_world(state.current_world);
                 runtime_controls = get_runtime_material_controls().snapshot();
                 last_runtime_revision = runtime_controls.revision;
                 LOG_DEBUG("JK material image cache cleared on level change");
@@ -2042,6 +2063,7 @@ namespace jkgm {
                 runtime_current_world = state.current_world;
                 get_runtime_material_controls().prepare_world(state.current_world);
                 get_global_env_capture_controls().prepare_world(state.current_world);
+                get_camera_to_mat_controls().prepare_world(state.current_world);
                 runtime_controls = get_runtime_material_controls().snapshot();
                 last_runtime_revision = runtime_controls.revision;
             }
@@ -3183,7 +3205,14 @@ namespace jkgm {
                 gl::texture_view albedo_map = from_albedo
                     ? texture_cache->get_texture_handle(*from_albedo)
                     : gl::default_texture;
-                if(albedo_weight > 0.0f) {
+                std::optional<gl::texture_view> live_camera_albedo;
+                if(native_it!=runtime_mat_by_handle.end() &&
+                   native_it->second.surface==mat.get() &&
+                   native_it->second.generation==mat->texture_generation)
+                    live_camera_albedo=camera_to_mat_albedo(
+                        native_it->second.mat_id);
+                if(live_camera_albedo)albedo_map=*live_camera_albedo;
+                if(!live_camera_albedo && albedo_weight > 0.0f) {
                     gl::texture_view second = to_albedo
                         ? texture_cache->get_texture_handle(*to_albedo)
                         : gl::default_texture;
@@ -3191,8 +3220,9 @@ namespace jkgm {
                         the_config->enable_texture_filtering));
                 }
                 prog->set_albedo_transition(
-                    8, make_point(to_albedo ? 1.0f : 0.0f, albedo_weight,
-                                  albedo_weight > 0.0f ? 1.0f : 0.0f, 0.0f));
+                    8, make_point(live_camera_albedo || to_albedo ? 1.0f : 0.0f,
+                                  live_camera_albedo ? 0.0f : albedo_weight,
+                                  !live_camera_albedo && albedo_weight>0.0f ? 1.0f : 0.0f, 0.0f));
 
                 gl::texture_view emissive_map = gl::default_texture;
                 if(mat->emissive_map.has_value()) {
@@ -3326,7 +3356,7 @@ namespace jkgm {
 
                 // Enable features
                 prog->set_features(make_point(
-                    from_albedo.has_value() ? 1.0f : 0.0f,
+                    (live_camera_albedo || from_albedo.has_value()) ? 1.0f : 0.0f,
                     mat->emissive_map.has_value() ? 1.0f : 0.0f,
                     is_dithered_material(id) ? 2.0f
                     : ((mat->alpha_mode==material_alpha_mode::mask) && !force_opaque)
@@ -3774,7 +3804,17 @@ namespace jkgm {
                 out.albedo_source=1;
                 out.has_image=true;
             } else out.albedo_source=2; // intentionally untextured
-            if(albedo_weight>0.0f) {
+            // Substitute the camera's image only. Authored tint, scroll,
+            // emission, normals, reflectivity and clearcoat remain intact.
+            auto const live_camera_albedo=camera_to_mat_albedo(native_id);
+            if(live_camera_albedo) {
+                out.texture=*live_camera_albedo;
+                out.albedo_source=1;
+                out.has_image=true;
+                out.albedo_id.reset();
+                out.alpha=false;
+            }
+            if(!live_camera_albedo && albedo_weight>0.0f) {
                 out.albedo_transition=albedo_weight;
                 if(to_albedo) {
                     out.albedo2_id=to_albedo;
@@ -3977,8 +4017,8 @@ namespace jkgm {
                 (!surface->replacement_material ||
                  (surface->replacement_material->use_original_albedo &&
                   !surface->replacement_material->albedo_map.has_value())) &&
-                !(ctl && ctl->albedo) && from_albedo.has_value() &&
-                albedo_weight<=0.0f;
+                !(ctl && ctl->albedo) && !live_camera_albedo &&
+                from_albedo.has_value() && albedo_weight<=0.0f;
             // Native JK hardware does not preserve CMP fullbright pixels
             // in textured MATs. Keep that behavior unless explicitly opted
             // in; GeoMode 3 solid colors remain fullbright independently.
@@ -12832,6 +12872,7 @@ namespace jkgm {
         }
 
 #include "reflection_sky_capture.inc"
+#include "camera_to_mat_capture.inc"
         void render_planar_capture()
         {
             planar_capture_ready=false;
@@ -13701,6 +13742,7 @@ namespace jkgm {
                 // The main frame 3DO snapshot and static-world cache already
                 // exist here; the offscreen camera does not touch rdCamera.
                 // Clear stale planar readiness even when capture is disabled.
+                render_camera_to_mat_captures();
                 render_planar_capture();
                 // Always reset per-frame probe readiness when both experiments
                 // are disabled; never reuse a stale capture after a toggle.

@@ -8,6 +8,7 @@
 #include "renderer.hpp"
 #include "runtime_material.hpp"
 #include "global_env_capture.hpp"
+#include "camera_to_mat.hpp"
 #include "native_3do_profile.hpp"
 #include "native_3do_lod_override.hpp"
 #include "native_mesh_revision.hpp"
@@ -9857,6 +9858,51 @@ namespace {
         return id >= 0 && id <= 65535;
     }
 
+    // CameraToMat(cameraThing,targetMat,FOV): continuously capture the
+    // requested native Thing pose without altering the active JK camera.
+    // An FOV of zero is orthographic (default height: one world unit).
+    void __cdecl cog_camera_to_mat(void *ctx)
+    {
+        float const fov=cog_pop_float(ctx);
+        int const mat=cog_pop_int(ctx);
+        void *thing=cog_pop_thing(ctx);
+        if(!valid_mat_index(mat) || !thing ||
+           !gpu_span_readable(thing,0xc4U)) {
+            LOG_WARNING("CameraToMat rejected invalid Thing/MAT");
+            return;
+        }
+        auto const *bytes=static_cast<uint8_t const *>(thing);
+        uint32_t kind=0,signature=0,world=0;
+        std::memcpy(&kind,bytes+0x0cU,4U);
+        std::memcpy(&signature,bytes+0x74U,4U);
+        if(kind<1U || kind>15U || !signature ||
+           !jkgm::engine_material_debug::read_object(
+               jkgm::engine_material_debug::current_world_global,world) ||
+           !world) {
+            LOG_WARNING("CameraToMat rejected stale Thing or world");
+            return;
+        }
+        uint64_t const owner=
+            (uint64_t(uint32_t(reinterpret_cast<uintptr_t>(thing)))<<32)|
+            signature;
+        if(!jkgm::get_camera_to_mat_controls().request(
+                uint32_t(mat),owner,world,fov)) {
+            LOG_WARNING("CameraToMat rejected invalid FOV or full target budget");
+            return;
+        }
+        LOG_DEBUG("COG CameraToMat: mat=",mat," fov=",fov);
+    }
+    // Reload/ResetMaterial returns the MAT to its authored+pack defaults.
+    // Unlike ResetMaterialAlbedo, this cancels *all* per-MAT COG overrides.
+    void __cdecl cog_reload_material(void *ctx)
+    {
+        int const mat=cog_pop_int(ctx);
+        if(!valid_mat_index(mat))return;
+        jkgm::get_camera_to_mat_controls().erase(uint32_t(mat));
+        cog_material_controls().reset_mat(uint32_t(mat));
+        LOG_DEBUG("COG ReloadMaterial: mat=",mat);
+    }
+
     // CaptureEnvMap(sourceThing,fadeTime): queue a fresh full-sphere world
     // capture without changing JK's live camera or rendering from COG.
     void __cdecl cog_capture_env_map(void *ctx)
@@ -10810,6 +10856,9 @@ namespace {
         cog_verb_entry{"resetspotlight", cog_clear_spotlight},
         cog_verb_entry{"setglobalenvmap", cog_set_global_env_map},
         cog_verb_entry{"captureenvmap", cog_capture_env_map},
+        cog_verb_entry{"cameratomat", cog_camera_to_mat},
+        cog_verb_entry{"reloadmaterial", cog_reload_material},
+        cog_verb_entry{"resetmaterial", cog_reload_material},
         cog_verb_entry{"resetglobalenvmap", cog_reset_global_env_map},
         cog_verb_entry{"setmatenvmap", cog_set_mat_env_map},
         cog_verb_entry{"setmatenvmapfrom", cog_set_mat_env_map_from},

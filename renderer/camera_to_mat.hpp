@@ -1,0 +1,68 @@
+#pragma once
+// COG thread -> renderer requests. A camera feed owns only a target MAT's
+// albedo input; it never mutates the authored material or native rdCamera.
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <map>
+#include <mutex>
+#include <vector>
+
+namespace jkgm {
+struct camera_to_mat_request {
+    uint32_t mat=0;
+    uint64_t owner=0; // native Thing address/signature
+    uint32_t world=0;
+    float fov=90.0f; // 0 = orthographic
+    uint64_t generation=0;
+};
+class camera_to_mat_controls {
+    mutable std::mutex mutex_;
+    std::map<uint32_t,camera_to_mat_request> requests_;
+    uint32_t world_=0;
+    uint64_t generation_=0;
+public:
+    static constexpr size_t max_targets=4U;
+    void prepare_world(uint32_t world) {
+        if(!world)return;
+        std::lock_guard<std::mutex> lock(mutex_);
+        if(world_ && world_!=world) {
+            requests_.clear();
+            ++generation_;
+        }
+        world_=world;
+    }
+    bool request(uint32_t mat,uint64_t owner,uint32_t world,float fov) {
+        if(mat>65535U || (mat&0x7fffU)>=16384U || !world ||
+           !owner || uint32_t(owner)==0U ||
+           !std::isfinite(fov) || fov<0.0f || fov>=179.0f)return false;
+        std::lock_guard<std::mutex> lock(mutex_);
+        if(world_ && world_!=world)requests_.clear();
+        world_=world;
+        if(!requests_.count(mat) && requests_.size()>=max_targets)return false;
+        requests_[mat]={mat,owner,world,fov,++generation_};
+        return true;
+    }
+    void erase(uint32_t mat) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if(requests_.erase(mat))++generation_;
+    }
+    std::vector<camera_to_mat_request> snapshot() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<camera_to_mat_request> out;
+        out.reserve(requests_.size());
+        for(auto const &entry:requests_)out.push_back(entry.second);
+        return out;
+    }
+    void clear() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        requests_.clear();
+        ++generation_;
+        world_=0;
+    }
+};
+inline camera_to_mat_controls &get_camera_to_mat_controls() {
+    static camera_to_mat_controls controls;
+    return controls;
+}
+} // namespace jkgm

@@ -171,6 +171,13 @@ public:
         return result;
     }
 
+    void reset_mat(uint32_t mat)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        if(state_.per_mat.erase(mat))++revision_;
+        // Authored defaults are retained; later setters still resolve them.
+    }
+
     void reset_all()
     {
         std::lock_guard<std::mutex> guard(lock_);

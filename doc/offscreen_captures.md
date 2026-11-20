@@ -133,40 +133,50 @@ secondary cameras with far-depth and native-style horizon/ceiling mapping.
 These are apertures of the surrounding world, not ordinary UV faces; depth
 from buildings occludes them as it does in the main camera.
 
-## Camera-to-MAT design — not yet an exposed COG verb
+## Camera-to-MAT live video material
 
-The intended user-facing command is:
+The implemented COG command is:
 
 ```c
 CameraToMat(cameraThing, targetMat, FOV);
 ```
 
-- The validated, actual dimensions of `targetMat` determine target resolution
-  and aspect ratio. Do **not** silently use the main screen resolution or
-  upscale/downscale the requested MAT target.
-- The camera Thing controls position and orientation; the command must never
-  move or replace JK's active rdCamera. `FOV=0` is orthographic, with a
-  separate world-space vertical-span control (e.g. future
-  `SetCameraToMatOrthoHeight(targetMat, height)`).
-- Target MAT must resolve to a valid GPU-cached material/texture binding,
-  with safe lifetime across MAT reloads, level changes and static MAT IDs.
-  Arbitrary OpenGL textures cannot be passed to existing runtime MAT image
-  overrides until a **render-target** image source is introduced.
-- Capture scheduling, optional color grading and analog/noise effects should
-  use separate verbs/settings; the basic command remains three arguments.
-  Initially cap capture count and prefer explicit update intervals.
-- Avoid feedback loops: while drawing a camera target, never sample that same
-  active color attachment. Suppress or substitute recursive targets, or later
-  double-buffer the previous frame.
-- World faces eligible for the secondary camera require live light/UV/CMP
-  data independent of the primary portal traversal, and offscreen-only 3DOs
-  must honor ThingFlags/CurGeoMode. Main-camera visibility is not a substitute.
+- `CameraToMat(cameraThing,targetMat,FOV)` registers a live material camera.
+  The Thing's current position and orientation are read at every refresh.
+  The native active JK camera remains unchanged. Horizontal FOV is measured
+  in degrees (positive values below 179), and FOV=0 uses orthographic
+  projection with an initial fixed one-JK-unit vertical view span.
+- The target is captured at the original, resident MAT width and height and
+  aspect ratio, never at main-renderer resolution. Nonresident MAT targets
+  fail closed until their native MAT/D3D cache mapping is available.
+- Each target has a dedicated retained RGBA16F offscreen texture and depth
+  attachment, mipmapped after the render. Up to four MAT camera feeds may be
+  registered; all active feeds refresh before the main GPU world pass.
+- The generated texture **only replaces the base albedo image** (including
+  existing SetMaterialAlbedo image transitions while active). Authored albedo
+  factors, SetMaterialColor tint, UV scroll, emissive maps and factors,
+  normal/surface maps, metalness, roughness, clearcoat and EnvMap behavior
+  remain unchanged in both the GPU-cached and native-D3D rendering paths.
+- Camera captures use cached world geometry, independently acquired native
+  Thing poses and the existing lightweight offscreen material shader.
+  Perspective captures include JK sky apertures. Orthographic captures use
+  fog as background. As with current offscreen reflection captures,
+  transparent/fluid/sprite effects and emissive-only geometry are not
+  reproduced as a full main-camera postprocessing pipeline.
+- All CameraToMat-generated images are suppressed while drawing *any* feed:
+  capture sources use the original MAT albedos rather than recursively
+  sampling live screens, avoiding same-target framebuffer feedback.
+- `ReloadMaterial(targetMat)` or its alias `ResetMaterial(targetMat)` cancels
+  the feed and restores authored/pack material defaults by clearing all
+  per-MAT runtime COG overrides, including SetMaterialColor, SetMatEnvMap,
+  SetMaterialAlbedo and SetMatClearcoat. Global material effects are not reset.
+  Existing single-channel ResetMaterialAlbedo remains available separately.
+- Camera requests and retained GPU targets are invalidated when changing
+  worlds or renderer contexts; stale/deleted Thing signatures are rejected.
 
-**Current state:** camera-to-MAT is a documented API contract, **not** registered
-as a callable COG verb, and no live MAT binding exists yet. The next phase
-needs a capture request registry, arbitrary camera Thing validation,
-render-target MAT texture routing and scheduling. Keep planar reflection
-parity/CI as a regression baseline during that work.
+The initial implementation is testable through build and source contracts;
+visual behavior, orientation and end-to-end capture parity still require
+in-game testing. No new JSON option is required for this basic API.
 
 ## Dual-paraboloid capture culling and submission
 

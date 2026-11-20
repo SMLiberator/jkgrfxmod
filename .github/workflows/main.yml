@@ -48,6 +48,13 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
         sprite_orientation_test.exe
 
+    - name: CameraToMat live material API regressions
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\camera_to_mat.cpp /Fe:camera_to_mat_test.exe || exit /b 1
+        camera_to_mat_test.exe || exit /b 1
+        python3 tests/camera_to_mat_wiring.py || exit /b 1
+
     - name: Reflection capture CPU reuse regression
       shell: cmd
       run: |
