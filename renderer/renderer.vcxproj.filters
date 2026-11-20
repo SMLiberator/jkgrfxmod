@@ -452,6 +452,9 @@
     <ClInclude Include="hemi_reflection_camera.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="reflection_capture_world_buckets.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="planar_reflection_things.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>

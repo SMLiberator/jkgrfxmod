@@ -50,7 +50,7 @@ assert "render_hemi_capture();" in renderer
 assert "std::unordered_set<uint64_t> acquired;" in capture
 assert "planar_reflection_thing_owner_key(thing)" in capture
 assert "acquire_planar_reflection_offscreen_gpu(" in capture
-assert "for(auto const &surface:cache.mesh.surfaces)" in capture
+assert "for(auto const &bucket:reflection_world_buckets.buckets())" in capture
 assert "mode!=renderer_mode::ingame" in capture
 assert "for(int face=0;face<face_count;++face)" in capture
 assert "std::sort(candidates.begin(),candidates.end()" in capture
@@ -131,8 +131,9 @@ assert "probe_distance_limit)) {" in capture
 assert "reflection_probe_bounds_outside_range(" in capture
 assert "float const far_plane=reflection_capture_scene_far(focus);" in capture
 # The Thing radius must never enter world-surface culling or projection.
-world_capture=capture.split("for(auto const &surface:cache.mesh.surfaces)",1)[1].split(
-    "std::vector<GLsizei> counts;",1)[0]
+world_capture=capture.split(
+    "for(auto const &bucket:reflection_world_buckets.buckets())",1)[1].split(
+    "auto draw_model=[&]",1)[0]
 assert "probe_distance_limit" not in world_capture
 assert "reflection_probe_bounds_outside_range(" not in world_capture
 assert "view,surface.bounds_min,surface.bounds_max,0.0f" in world_capture

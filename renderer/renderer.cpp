@@ -10,6 +10,7 @@
 #include "planar_reflection_workset.hpp"
 #include "planar_reflection_offscreen_gpu.hpp"
 #include "hemi_reflection_camera.hpp"
+#include "reflection_capture_world_buckets.hpp"
 #include "screen_space_reflections.hpp"
 #include "planar_reflection_culling.hpp"
 #include "planar_reflection_render_math.hpp"
@@ -895,6 +896,8 @@ namespace jkgm {
         // Independent reflected-camera draw list, never added to main visibility.
         std::vector<world_cache_draw_candidate> planar_frame_candidates;
         std::vector<world_cache_draw_candidate> reflection_sky_candidates;
+        // Immutable material organization shared by probe owners and faces.
+        reflection_capture_world_buckets reflection_world_buckets;
         uint64_t reflection_sky_frame=~uint64_t(0);
         uint64_t reflection_sky_revision=0;
         uintptr_t reflection_sky_world=0;
@@ -1634,6 +1637,7 @@ namespace jkgm {
                 planar_capture_program.reset();
                 planar_capture_target.reset();
                 reflection_probes.clear();
+                reflection_world_buckets.invalidate();
                 reflection_sky_candidates.clear();
                 reflection_sky_frame=~uint64_t(0);
                 reflection_sky_revision=0;
@@ -1691,6 +1695,7 @@ namespace jkgm {
                 planar_last_refresh={};
                 // New scenes may reuse native owner IDs; never sample old probes.
                 reflection_probes.clear();
+                reflection_world_buckets.invalidate();
                 reflection_sky_candidates.clear();
                 reflection_sky_frame=~uint64_t(0);
                 reflection_sky_revision=0;

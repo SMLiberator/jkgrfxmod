@@ -48,6 +48,13 @@ jobs:
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\sprite_orientation.cpp /Fe:sprite_orientation_test.exe
         sprite_orientation_test.exe
 
+    - name: Reflection capture CPU reuse regression
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\reflection_capture_world_buckets.cpp /Fe:reflection_capture_world_buckets_test.exe || exit /b 1
+        reflection_capture_world_buckets_test.exe || exit /b 1
+        python3 tests/reflection_capture_cpu_reuse.py || exit /b 1
+
     - name: Native sector palette request isolation regression
       shell: cmd
       run: |

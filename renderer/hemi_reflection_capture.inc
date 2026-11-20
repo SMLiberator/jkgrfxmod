@@ -431,8 +431,39 @@
                 std::unordered_set<uint64_t> acquired;
                 for(auto const &inst:capture_offscreen.nodes)
                     if(inst.shadow_owner)acquired.insert(inst.shadow_owner);
+                // Static surface organization survives across faces, owners
+                // and world-cache frames, but not world geometry revisions.
+                auto &cache=*world_cache_target;
+                reflection_world_buckets.refresh(
+                    cache.loaded_world,cache.revision,cache.mesh.surfaces);
+                // Keep scratch allocation capacity across all 2/6 faces.
+                std::vector<GLsizei> counts;
+                std::vector<void const *> offsets;
+                std::vector<gpu_3do_group const *> model_group_scratch;
+                // Resolve live MAT/cel once per distinct key per refresh,
+                // never persist the result into another game frame.
+                std::map<reflection_capture_material_key,gpu_3do_texture>
+                    resolved_capture_materials;
+                auto resolve_capture_material=[&](
+                    reflection_capture_material_key const &key)
+                    ->gpu_3do_texture const & {
+                    auto it=resolved_capture_materials.find(key);
+                    if(it!=resolved_capture_materials.end())return it->second;
+                    gpu_3do_group group{};
+                    group.material=std::get<0>(key);
+                    group.cel=std::get<1>(key);
+                    gpu_3do_texture mat=std::get<2>(key)
+                        ?resolve_gpu_3do_solid_material(group,false)
+                        :resolve_gpu_3do_material(group);
+                    return resolved_capture_materials.emplace(
+                        key,std::move(mat)).first->second;
+                };
                 engine_camera first_camera{};
                 bool all_faces_ready=true;
+                {
+                // A single GL snapshot for the full probe, not each face.
+                // Per-face framebuffer/shader/depth initialization is kept.
+                offscreen_capture_gl_scope restore;
                 for(int face=0;face<face_count;++face) {
                     auto const camera=paraboloid_mode
                         ?make_dual_paraboloid_camera(focus,unsigned(face))
@@ -464,7 +495,6 @@
                     frustum.far_top=projection.half_horizontal;
                     frustum.bottom=-projection.half_horizontal;
                     auto const &offscreen=capture_offscreen;
-            offscreen_capture_gl_scope restore;
             glBindFramebuffer(GL_FRAMEBUFFER,probe_target->framebuffer());
             if(!probe_target->select_layer(face)) {all_faces_ready=false;break;}
             glViewport(0,0,capture_side,capture_side);
@@ -514,7 +544,12 @@
                 make_point(effect.add[0]/255.0f,effect.add[1]/255.0f,
                     effect.add[2]/255.0f,effect.fade),
                 authored_light_limit(the_config->enable_baked_overbright));
-            auto submit_material=[&](gpu_3do_texture const &mat,bool solid) {
+            // The sky pass has already completed. Reuse a material binding
+            // only while the shader and sampler state stay unchanged.
+            std::optional<std::pair<reflection_capture_material_key,bool>>
+                last_submitted_material;
+            auto submit_material=[&](gpu_3do_texture const &mat,bool solid,
+                reflection_capture_material_key const &key,bool model) {
                 // Captured shaders draw only base pigment, not nested
                 // reflections. Other shiny cars remain opaque geometry.
                 if((mat.special&&!mat.emissive_only) ||
@@ -526,6 +561,9 @@
                 bool const textured=!solid && mat.albedo_source==1 &&
                                      mat.has_image;
                 if(!textured && !(solid || mat.albedo_source==2))return false;
+                auto const binding=std::make_pair(key,model);
+                if(last_submitted_material &&
+                   *last_submitted_material==binding)return true;
                 gl::set_active_texture_unit(0);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                     textured?mat.texture:gl::default_texture);
@@ -540,10 +578,10 @@
                                     mat.emission_factor,
                                     mat.emissive_scroll,false);
                 gl::set_active_texture_unit(0);
+                last_submitted_material=binding;
                 return true;
             };
             size_t world_drawn=0,model_drawn=0;
-            auto &cache=*world_cache_target;
             draw_reflection_capture_sky(shader,camera,view,frustum,
                 projection,capture_side,capture_side,
                 {{0.0f,0.0f,0.0f,0.0f}},false,false,
@@ -555,51 +593,36 @@
             // Independently clipped portal sectors filter the world, while
             // unknown/ambiguous eyes fail open to whole-world frustum tests.
             // This never reuses the primary camera's visible sectors.
-            std::map<std::tuple<uintptr_t,int32_t,bool>,
-                     std::vector<world_cache_surface_range const *>> groups;
-            for(auto const &surface:cache.mesh.surfaces) {
-                if(surface_mask &&
-                   (surface.surface_index>=surface_mask->size() ||
-                    !(*surface_mask)[surface.surface_index]))continue;
-                if(surface.count<3U || !surface.material ||
-                   surface.passable_adjoin ||
-                   (surface.surface_flags&0x600U)!=0U)continue;
-                // Hemi may reject the opposite hemisphere, but no
-                // world face is culled by the local Thing range.
-                if(paraboloid_mode &&
-                   dual_paraboloid_bounds_outside(
-                       view,surface.bounds_min,surface.bounds_max,0.0f)) {
-                    ++total_world_bounds_culled;continue;
-                }
-                if(!paraboloid_mode &&
-                   gpu_3do_batch_outside_frustum(
-                       frustum,view,surface.bounds_min,surface.bounds_max))
-                    continue;
-                groups[std::make_tuple(surface.material,surface.cel,
-                                      !surface.has_uv)].push_back(&surface);
-            }
-            std::vector<GLsizei> counts;
-            std::vector<void const *> offsets;
-            for(auto const &entry:groups) {
-                gpu_3do_group group{};
-                group.material=std::get<0>(entry.first);
-                group.cel=std::get<1>(entry.first);
-                bool const solid=std::get<2>(entry.first);
-                auto const mat=solid
-                    ?resolve_gpu_3do_solid_material(group,false)
-                    :resolve_gpu_3do_material(group);
-                if(!submit_material(mat,solid))continue;
+            // Material buckets are already sorted and immutable. Only face
+            // visibility and transformed geometry bounds vary per direction.
+            for(auto const &bucket:reflection_world_buckets.buckets()) {
                 counts.clear();offsets.clear();
-                for(auto const *surface:entry.second) {
-                    counts.push_back(GLsizei(surface->count));
+                for(size_t const index:bucket.surfaces) {
+                    auto const &surface=cache.mesh.surfaces[index];
+                    if(surface_mask &&
+                       (surface.surface_index>=surface_mask->size() ||
+                        !(*surface_mask)[surface.surface_index]))continue;
+                    if(paraboloid_mode &&
+                       dual_paraboloid_bounds_outside(
+                           view,surface.bounds_min,surface.bounds_max,0.0f)) {
+                        ++total_world_bounds_culled;continue;
+                    }
+                    if(!paraboloid_mode &&
+                       gpu_3do_batch_outside_frustum(
+                           frustum,view,surface.bounds_min,surface.bounds_max))
+                        continue;
+                    counts.push_back(GLsizei(surface.count));
                     offsets.push_back(reinterpret_cast<void const *>(
-                        uintptr_t(surface->first_index)*sizeof(uint32_t)));
+                        uintptr_t(surface.first_index)*sizeof(uint32_t)));
                 }
+                if(counts.empty())continue;
+                auto const &mat=resolve_capture_material(bucket.key);
+                bool const solid=std::get<2>(bucket.key);
+                if(!submit_material(mat,solid,bucket.key,false))continue;
                 glMultiDrawElements(GL_TRIANGLES,counts.data(),
                     GL_UNSIGNED_INT,offsets.data(),GLsizei(counts.size()));
-                world_drawn+=entry.second.size();
+                world_drawn+=counts.size();
             }
-            std::vector<gpu_3do_group const *> model_group_scratch;
             auto draw_model=[&](gpu_3do_instance const &inst) {
                 if(reflection_excluded_owners.count(inst.shadow_owner)!=0U ||
                    inst.shadow_only || inst.camera_hud ||
@@ -690,14 +713,12 @@
                     while(group_end<model_group_scratch.size() &&
                           group_key(model_group_scratch[group_end])==key)
                         ++group_end;
-                    gpu_3do_group material_group{};
-                    material_group.material=std::get<0>(key);
-                    material_group.cel=std::get<1>(key);
+                    reflection_capture_material_key const material_key{
+                        std::get<0>(key),std::get<1>(key),
+                        std::get<2>(key)};
                     bool const solid=std::get<2>(key);
-                    auto const mat=solid
-                        ?resolve_gpu_3do_solid_material(material_group,false)
-                        :resolve_gpu_3do_material(material_group);
-                    if(submit_material(mat,solid)) {
+                    auto const &mat=resolve_capture_material(material_key);
+                    if(submit_material(mat,solid,material_key,true)) {
                         if(std::get<3>(key))glDisable(GL_CULL_FACE);
                         else glEnable(GL_CULL_FACE);
                         counts.clear();offsets.clear();
@@ -726,6 +747,7 @@
             if(face==0)
                 total_acquired_nodes+=offscreen.stats.ready_nodes;
             } // Direct: two paraboloid passes; otherwise six cube faces.
+                } // Restore external GL state once after all faces.
             // Texture-array mip levels are filtered independently per face.
             // Restore the array binding at texture unit zero so other passes
             // never inherit this optional capture target.

@@ -196,6 +196,28 @@ on-demand CaptureEnvMap cube captures without changing animation, owner
 exclusion, capture cadence or resolution. A refreshed cube logs
 `scene_preparations=1` rather than six.
 
+## Hemi/Cube reflection capture CPU reuse
+
+World-cache surfaces are organized into immutable material/cel/solid buckets
+once per world and mesh revision, preserving the original sorted-key order
+and the source order within each bucket. The buckets are reused across
+capture faces, probe owners, and later frames without caching any camera-
+specific visibility: portal, hemisphere and frustum tests still run for each
+capture direction. Resetting or rebuilding the world cache invalidates them.
+
+Each probe refresh also resolves each distinct native MAT/cel/solid key only
+once for its two or six faces. This temporary material snapshot is not kept
+across refreshes, so COG MAT cel changes and runtime material fades remain
+live. Repeated consecutive shader/texture submissions for the same key are
+skipped within one face (including world/model UV-mode separation); each new
+face and sky pass starts with fresh material bindings. World MultiDraw arrays
+and model-group scratch storage retain capacity across face renders.
+
+The expensive GL state snapshot/restore is performed once around the complete
+capture instead of once per face. Every face still explicitly establishes
+its own framebuffer, viewport, clear, depth, cull and shader state. Separate
+planar captures and global EnvMap publication keep their own state handling.
+
 ## Dedicated probe capture distance
 
 `reflection_probe_max_distance` defaults to `64.0` JK world units and can

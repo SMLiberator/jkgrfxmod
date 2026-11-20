@@ -188,6 +188,7 @@
     <ClInclude Include="native_thingface_friction.hpp" />
     <ClInclude Include="planar_reflection_camera.hpp" />
     <ClInclude Include="hemi_reflection_camera.hpp" />
+    <ClInclude Include="reflection_capture_world_buckets.hpp" />
     <ClInclude Include="dual_paraboloid_projection.hpp" />
     <ClInclude Include="global_env_capture.hpp" />
     <ClInclude Include="reflection_attachment_family.hpp" />
