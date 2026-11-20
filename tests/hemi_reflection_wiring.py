@@ -70,7 +70,8 @@ assert "portals.traverse(" in capture
 assert "portal_views_used" in capture
 assert "surface_mask" in capture
 assert "thing_sector_mask" in capture
-assert "hemisphere_visibility" in capture
+assert "all_directions_visibility" in capture
+assert "cube_visibility[size_t(face)]" in capture
 assert "read,world,scan,sector_mask" in capture
 assert "glGenerateMipmap(GL_TEXTURE_2D_ARRAY)" in capture
 assert "reflection_probe_capture_target" in read("renderer/offscreen_capture_target.hpp")
