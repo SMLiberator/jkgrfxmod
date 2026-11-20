@@ -288,6 +288,78 @@ int main()
     assert(cmp_rgb[0][0]==0.25f && cmp_rgb[3][2]==0.75f);
     assert(sample_cmp_face(uint32_t(sample_cmp)));
     assert(cmp_rgb[0][0]==1.0f && cmp_rgb[3][2]==1.0f);
+    // One sector's 20-byte state and CMP are resolved once across distinct
+    // faces (including a face staged by a reflected camera).
+    lu32(light_surfaces+7U*0x5cU+0x08U,uint32_t(light_sector));
+    lu32(light_surfaces+7U*0x5cU+0x20U,0U);
+    world_cache_draw_candidate same_sector_face{7U,
+        mesh.surfaces[1].first_index,mesh.surfaces[1].count,
+        mesh.surfaces[1].material,0};
+    unsigned sector_reads=0,cmp_reads=0;
+    decal_native_read counted_light_read=[&](uintptr_t address,
+                                              void *destination,size_t bytes) {
+        if(address==light_sector+0x08U && bytes==20U)++sector_reads;
+        if(address==sample_cmp+jk_cmp_tint_offset &&
+           bytes==sizeof(std::array<float,3>))++cmp_reads;
+        return light_read(address,destination,bytes);
+    };
+    world_cache_sector_frame_cache sector_frame;
+    auto cached_light=[&](world_cache_draw_candidate const &face,
+                          world_cache_sector_frame_cache &frame,
+                          decal_native_read const &reader,
+                          uint32_t identity=0U,char const **reason=nullptr) {
+        return sample_world_cache_surface_light(
+            reader,light_surfaces,mesh,face,8U,dynamic_lights,rgb,
+            nullptr,nullptr,false,0.0f,&face_tint,&cmp_rgb,
+            identity,reason,false,&frame);
+    };
+    assert(cached_light(lit_face,sector_frame,counted_light_read));
+    assert(cached_light(same_sector_face,sector_frame,counted_light_read));
+    assert(sector_frame.states.size()==1U && sector_frame.reads==1U &&
+           sector_frame.hits==1U && sector_frame.failed_reads==0U);
+    assert(sector_reads==1U && cmp_reads==1U);
+    assert(face_tint[0]==face_tint[4] && cmp_rgb[0]==cmp_rgb[4]);
+    // The snapshot does not change partway through one render frame.
+    lf32(light_sector+0x10U,0.42f);
+    assert(cached_light(same_sector_face,sector_frame,counted_light_read));
+    assert(face_tint[4][0]==0.60f && sector_reads==1U);
+    // A new frame must see COG's updated tint and the current CMP.
+    world_cache_sector_frame_cache next_frame;
+    assert(cached_light(same_sector_face,next_frame,counted_light_read));
+    assert(face_tint[4][0]==0.42f && sector_reads==2U);
+    lf32(sample_cmp+jk_cmp_tint_offset,0.65f);
+    world_cache_sector_frame_cache cmp_frame;
+    assert(cached_light(lit_face,cmp_frame,counted_light_read));
+    assert(cmp_rgb[0][0]==0.65f);
+    // The identity CMP may change; that invalidates cached CMP resolutions.
+    assert(cached_light(lit_face,cmp_frame,counted_light_read,
+                        uint32_t(sample_cmp)));
+    assert(cmp_rgb[0][0]==1.0f && cmp_frame.states.size()==1U &&
+           cmp_frame.reads==2U);
+    // A failed read is not cached: native fallback now, retry next surface.
+    bool fail_once=true;
+    decal_native_read interrupted_read=[&](uintptr_t address,
+                                           void *dst,size_t bytes) {
+        if(fail_once && address==light_sector+0x08U && bytes==20U) {
+            fail_once=false;
+            return false;
+        }
+        return light_read(address,dst,bytes);
+    };
+    world_cache_sector_frame_cache retry_frame;
+    char const *sector_error=nullptr;
+    assert(!cached_light(lit_face,retry_frame,interrupted_read,0U,
+                         &sector_error));
+    assert(sector_error && std::strcmp(sector_error,
+           "native_sector_state_unreadable")==0);
+    assert(cached_light(lit_face,retry_frame,interrupted_read,0U,
+                        &sector_error));
+    assert(sector_error==nullptr && retry_frame.reads==2U &&
+           retry_frame.failed_reads==1U && retry_frame.states.size()==1U);
+    // Reset synthetic native state for the existing live-mutation tests.
+    lf32(light_sector+0x10U,0.60f);
+    lf32(sample_cmp+jk_cmp_tint_offset,0.25f);
+
     constexpr uintptr_t other_sector=light_base+0x900U;
     lu32(light_surfaces+7U*0x5cU+0x08U,uint32_t(other_sector));
     lu32(light_surfaces+7U*0x5cU+0x20U,0U);

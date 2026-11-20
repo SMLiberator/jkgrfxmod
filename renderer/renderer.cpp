@@ -10697,6 +10697,9 @@ namespace jkgm {
             bool const suppress_sector_tint=
                 native_sector_palette_mode().load(
                     std::memory_order_relaxed)==1;
+            // Share sector/CMP resolutions across the primary and reflected
+            // cameras for this frame, not across COG simulation frames.
+            world_cache_sector_frame_cache sector_frame_cache;
             std::vector<world_cache_draw_candidate> reflection_staged;
             auto stage_candidate=[&](world_cache_draw_candidate const &candidate,
                                       bool main_view)->bool {
@@ -10709,7 +10712,8 @@ namespace jkgm {
                        &info,&cache.frame_light_state,
                        pixel_lighting,global_extra,&cache.frame_sector_tint,
                        &cache.frame_sector_cmp_tint,identity_cmp,&failure,
-                       the_config->enable_baked_overbright)) {
+                       the_config->enable_baked_overbright,
+                       &sector_frame_cache)) {
                     ++light_fallback;
                     ++light_read_rejected;
                     log_stage_rejection(candidate,"lighting",failure,info);
@@ -11349,7 +11353,11 @@ namespace jkgm {
                          native_dynamic_ready?1:0,
                          " native_isolation=",isolate_native_world_batches()?1:0,
                          " global_extra=",global_extra,
-                         " pixel_lights=",point_lights.size());
+                         " pixel_lights=",point_lights.size(),
+                         " sector_cache_unique=",sector_frame_cache.states.size(),
+                         " sector_cache_hits=",sector_frame_cache.hits,
+                         " sector_cache_reads=",sector_frame_cache.reads,
+                         " sector_cache_read_failures=",sector_frame_cache.failed_reads);
                 // Read-only material readiness survey for the special
                 // (translucent-flag/solid-adjoin) candidates. Read
                 // once per unique MAT/cel, sampled just every 120 frames.

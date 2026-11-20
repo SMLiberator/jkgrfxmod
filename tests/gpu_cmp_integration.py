@@ -47,6 +47,9 @@ assert "in vec3 cached_sector_cmp_tint;" in fragment
 assert "gl::enable_vertex_attrib_array(7);" in cache
 assert "frame_sector_cmp_tint.assign(" in renderer
 assert "&cache.frame_sector_cmp_tint" in renderer
+assert "world_cache_sector_frame_cache sector_frame_cache;" in renderer
+assert "the_config->enable_baked_overbright,\n                       &sector_frame_cache" in renderer
+assert "sector_cache_hits=" in renderer and "sector_cache_reads=" in renderer
 assert "identity_cmp" in renderer
 assert "make_span(cache.frame_sector_cmp_tint)" in renderer
 assert "jk_cmp_read_lighttable(read_bytes,cmp,levels)" in renderer

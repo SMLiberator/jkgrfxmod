@@ -99,3 +99,13 @@ This does not change translucent-world eligibility or force native MAT
 textures to be uploaded. Frames missing from JK's existing texture
 cache can still be unavailable to GPU world rendering; resolving
 native cache residency and mixed-batch fallback is separate work.
+
+### Per-frame sector color-state reuse
+
+The GPU-cached world renderer reuses resolved sector ExtraLight, sector tint,
+and effective sector CMP tint for all staged faces sharing a native sector
+within one render frame, including reflection-only candidates. Authored face
+ExtraLight, Gouraud vertex intensities, and scrolling UV offsets remain live
+and are calculated per surface. Failed native sector reads are retried and
+fall back to native rendering as before. Entries never persist across frames,
+so COG updates to sector lighting or colors take effect on the next frame.

@@ -9,11 +9,71 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <unordered_map>
 #include <vector>
 
 namespace jkgm {
 struct world_cache_light_sample {
     uint32_t mode=0,vertices=0,authored_mode=0;
+};
+
+// One snapshot per renderer frame, shared by main and reflection world draws.
+// COG can change sector/CMP state between frames; never retain these entries
+// beyond the frame. A failed native read must not poison the cache.
+struct world_cache_sector_frame_state {
+    float extra_floor=0.0f;
+    std::array<float,3> tint{{0.0f,0.0f,0.0f}};
+    std::array<float,3> cmp_tint{{1.0f,1.0f,1.0f}};
+};
+struct world_cache_sector_frame_cache {
+    std::unordered_map<uint32_t,world_cache_sector_frame_state> states;
+    uint32_t identity_cmp=0U;
+    bool identity_ready=false;
+    size_t hits=0,reads=0,failed_reads=0;
+
+    template<class Read>
+    world_cache_sector_frame_state const *resolve(
+        Read const &read,uint32_t sector,uint32_t current_identity_cmp,
+        char const **failure_reason=nullptr)
+    {
+        if(failure_reason)*failure_reason=nullptr;
+        // A caller might change the identity CMP while still reusing this
+        // snapshot. Prevent incorrectly reusing a previously resolved tint.
+        if(identity_ready && current_identity_cmp!=identity_cmp)
+            states.clear();
+        identity_cmp=current_identity_cmp;
+        identity_ready=true;
+        auto const it=states.find(sector);
+        if(it!=states.end()) {++hits;return &it->second;}
+        ++reads;
+        auto const reject=[&](char const *reason)
+            ->world_cache_sector_frame_state const * {
+            ++failed_reads;
+            if(failure_reason)*failure_reason=reason;
+            return nullptr;
+        };
+        std::array<uint8_t,20> sector_state{};
+        if(!read(uintptr_t(sector)+0x08U,
+                 sector_state.data(),sector_state.size()))
+            return reject("native_sector_state_unreadable");
+        world_cache_sector_frame_state state{};
+        std::memcpy(&state.extra_floor,sector_state.data(),
+                    sizeof(state.extra_floor));
+        std::memcpy(state.tint.data(),sector_state.data()+8U,
+                    sizeof(state.tint));
+        for(float &v:state.tint) {
+            if(!std::isfinite(v))return reject("native_sector_tint_nonfinite");
+            v=std::max(0.0f,std::min(v,1.0f));
+        }
+        uint32_t cmp=0;
+        std::memcpy(&cmp,sector_state.data()+4U,sizeof(cmp));
+        std::array<float,3> effective{};
+        if(jk_cmp_read_effective_tint(
+               read,cmp,current_identity_cmp,effective))
+            state.cmp_tint=effective;
+        // Keep the original neutral-CMP fallback for missing/invalid CMPs.
+        return &states.emplace(sector,state).first->second;
+    }
 };
 
 // GPU world pixel lighting uses the SAME live rdCamera light parameters
@@ -99,7 +159,8 @@ inline bool sample_world_cache_surface_light(
     std::vector<std::array<float,3>> *sector_tint=nullptr,
     std::vector<std::array<float,3>> *sector_cmp_tint=nullptr,
     uint32_t identity_cmp=0U,char const **failure_reason=nullptr,
-    bool overbright=false)
+    bool overbright=false,
+    world_cache_sector_frame_cache *sector_cache=nullptr)
 {
     // Optional diagnostic output, no extra reads or allocations on success.
     auto const reject=[&](char const *reason) {
@@ -141,32 +202,46 @@ inline bool sample_world_cache_surface_light(
         if((sector_tint && sector_tint->size()!=out.size()) ||
            (sector_cmp_tint && sector_cmp_tint->size()!=out.size()))
             return reject("sector_tint_output_size_mismatch");
-        std::array<uint8_t,20> sector_state{};
-        if(!read(uintptr_t(sector)+0x08U,
-                 sector_state.data(),sector_state.size()))return reject("native_sector_state_unreadable");
-        std::memcpy(&sector_floor,sector_state.data(),sizeof(sector_floor));
-        if(sector_tint) {
-            std::array<float,3> tint{};
-            std::memcpy(tint.data(),sector_state.data()+8U,sizeof(tint));
-            for(float &v:tint) {
-                if(!std::isfinite(v))return reject("native_sector_tint_nonfinite");
-                v=std::max(0.0f,std::min(v,1.0f));
+        if(sector_cache && sector_tint && sector_cmp_tint) {
+            char const *sector_failure=nullptr;
+            auto const *state=sector_cache->resolve(
+                read,sector,identity_cmp,&sector_failure);
+            if(!state)return reject(sector_failure);
+            sector_floor=state->extra_floor;
+            for(uint32_t i=0;i<count;++i) {
+                (*sector_tint)[base+i]=state->tint;
+                (*sector_cmp_tint)[base+i]=state->cmp_tint;
             }
-            for(uint32_t i=0;i<count;++i)(*sector_tint)[base+i]=tint;
-        }
-        if(sector_cmp_tint) {
-            // The sector CMP is at +0x0c; this is neither the sector's
-            // tint (+0x10) nor the camera's currently active CMP.
-            uint32_t cmp=0;
-            std::memcpy(&cmp,sector_state.data()+4U,sizeof(cmp));
-            std::array<float,3> tint{{1.0f,1.0f,1.0f}};
-            // Invalid/unloaded sector colormaps use neutral color instead
-            // of losing visible world geometry during cache migration.
-            std::array<float,3> current{};
-            if(jk_cmp_read_effective_tint(read,cmp,identity_cmp,current))
-                tint=current;
-            for(uint32_t i=0;i<count;++i)
-                (*sector_cmp_tint)[base+i]=tint;
+        } else {
+            // Compatibility for callers requesting only one sector stream,
+            // or no cache: preserve their exact native-read behavior.
+            std::array<uint8_t,20> sector_state{};
+            if(!read(uintptr_t(sector)+0x08U,
+                     sector_state.data(),sector_state.size()))return reject("native_sector_state_unreadable");
+            std::memcpy(&sector_floor,sector_state.data(),sizeof(sector_floor));
+            if(sector_tint) {
+                std::array<float,3> tint{};
+                std::memcpy(tint.data(),sector_state.data()+8U,sizeof(tint));
+                for(float &v:tint) {
+                    if(!std::isfinite(v))return reject("native_sector_tint_nonfinite");
+                    v=std::max(0.0f,std::min(v,1.0f));
+                }
+                for(uint32_t i=0;i<count;++i)(*sector_tint)[base+i]=tint;
+            }
+            if(sector_cmp_tint) {
+                // The sector CMP is at +0x0c; this is neither the sector's
+                // tint (+0x10) nor the camera's currently active CMP.
+                uint32_t cmp=0;
+                std::memcpy(&cmp,sector_state.data()+4U,sizeof(cmp));
+                std::array<float,3> tint{{1.0f,1.0f,1.0f}};
+                // Invalid/unloaded sector colormaps use neutral color instead
+                // of losing visible world geometry during cache migration.
+                std::array<float,3> current{};
+                if(jk_cmp_read_effective_tint(read,cmp,identity_cmp,current))
+                    tint=current;
+                for(uint32_t i=0;i<count;++i)
+                    (*sector_cmp_tint)[base+i]=tint;
+            }
         }
     }
     if(mode==0U) {
