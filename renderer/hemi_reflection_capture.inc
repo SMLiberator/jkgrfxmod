@@ -620,33 +620,11 @@
                            source_sector,*thing_sector_mask))
                         return;
                 }
-                auto it=gpu_3do_gl_cache.find(inst.id);
-                if(it==gpu_3do_gl_cache.end()) {
-                    if(gpu_3do_gl_cache.size()>=8192U)return;
-                    it=gpu_3do_gl_cache.emplace(inst.id,
-                        std::make_unique<gpu_3do_gl_mesh>(
-                            the_config->experimental_packed_3do_vertices,
-                            *inst.geometry,
-                            the_config->profile_renderer
-                                ?&packed_3do_upload_profile:nullptr)).first;
-                }
                 auto const modelview=gpu_3do_native_modelview(
                     view,inst.transform);
                 if(!gpu_3do_matrix_finite(modelview))return;
-                shader.set_modelview(modelview,true,
-                                     it->second->packed_vertex_format);
-                shader.set_model_lighting(inst.ambient,inst.effective_light_mode,
-                    make_point(inst.colormap_tint[0],inst.colormap_tint[1],
-                               inst.colormap_tint[2]),
-                    make_point(inst.sector_tint[0],inst.sector_tint[1],
-                               inst.sector_tint[2]));
-                shader.set_thing_fade(1.0f,0);
-                gl::bind_vertex_array(it->second->vao);
-                glFrontFace(paraboloid_mode
-                    ?(gpu_3do_reversed_winding(inst.transform)?GL_CCW:GL_CW)
-                    :(gpu_3do_reversed_winding(inst.transform)?GL_CW:GL_CCW));
                 // Capture blending is disabled; alpha-tested and opaque
-                // groups may be reordered within this one model instance.
+                // groups preserve their original ordering within the instance.
                 // Only consecutive compatible groups share one MultiDraw.
                 model_group_scratch.clear();
                 auto group_key=[&](gpu_3do_group const *group) {
@@ -669,6 +647,31 @@
                            group.bounds_min,group.bounds_max))continue;
                     model_group_scratch.push_back(&group);
                 }
+                // No drawable groups: skip GL cache lookup, shader uniforms,
+                // VAO binding and material resolution for this 3DO node.
+                if(model_group_scratch.empty())return;
+                auto it=gpu_3do_gl_cache.find(inst.id);
+                if(it==gpu_3do_gl_cache.end()) {
+                    if(gpu_3do_gl_cache.size()>=8192U)return;
+                    it=gpu_3do_gl_cache.emplace(inst.id,
+                        std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,
+                            *inst.geometry,
+                            the_config->profile_renderer
+                                ?&packed_3do_upload_profile:nullptr)).first;
+                }
+                shader.set_modelview(modelview,true,
+                                     it->second->packed_vertex_format);
+                shader.set_model_lighting(inst.ambient,inst.effective_light_mode,
+                    make_point(inst.colormap_tint[0],inst.colormap_tint[1],
+                               inst.colormap_tint[2]),
+                    make_point(inst.sector_tint[0],inst.sector_tint[1],
+                               inst.sector_tint[2]));
+                shader.set_thing_fade(1.0f,0);
+                gl::bind_vertex_array(it->second->vao);
+                glFrontFace(paraboloid_mode
+                    ?(gpu_3do_reversed_winding(inst.transform)?GL_CCW:GL_CW)
+                    :(gpu_3do_reversed_winding(inst.transform)?GL_CW:GL_CCW));
                 // Keep source order for exactly coplanar alpha cutouts.
                 for(size_t i=0;i<model_group_scratch.size();) {
                     auto const key=group_key(model_group_scratch[i]);
