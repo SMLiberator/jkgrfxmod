@@ -169,7 +169,7 @@ assert "gpu_thing_occlusion_math.hpp" in read("renderer/renderer.vcxproj.filters
 draw=renderer.split("void draw_gpu_3do_preview(",1)[1].split(
     "void draw_game_opaque_into_gbuffer(",1)[0]
 assert draw.index("thing_occlusion_queries->hidden(")<draw.index(
-    "modelviews.push_back(gpu_3do_native_modelview(")
+    "context.modelview=gpu_3do_native_modelview(")
 opaque=renderer.split("void draw_game_opaque_into_gbuffer(",1)[1].split(
     "void query_gpu_thing_occlusion()",1)[0]
 assert opaque.index("draw_gpu_3do_preview(false);")<opaque.index(

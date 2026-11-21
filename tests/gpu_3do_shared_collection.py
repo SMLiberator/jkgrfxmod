@@ -16,12 +16,16 @@ assert "ordinary_alpha_serial=gpu_3do_present_serial;" in draw
 assert "draws.swap(ordinary_alpha_draws);" in draw
 assert draw.count("ordinary_alpha_serial=0;") >= 2
 
-# Decals render between the two ordinary passes. Their scratch matrices
-# must never invalidate ordinary alpha candidates that borrow modelviews.
-assert "static thread_local std::vector<gpu_3do_matrix34> ordinary_modelviews;" in draw
-assert "static thread_local std::vector<gpu_3do_matrix34> isolated_modelviews;" in draw
-assert "auto &modelviews=ordinary_pass" in draw
-assert "?ordinary_modelviews:isolated_modelviews;" in draw
+# Decals render between the two ordinary passes. Separate workspaces
+# preserve the *whole* Thing context (modelview, eye, winding and GL mesh),
+# not just a borrowed modelview pointer, through the alpha pass.
+assert "static thread_local std::vector<submission_context> ordinary_contexts;" in draw
+assert "static thread_local std::vector<submission_context> isolated_contexts;" in draw
+assert "auto &contexts=ordinary_pass" in draw
+assert "?ordinary_contexts:isolated_contexts;" in draw
+assert "contexts.reserve(instances.size());" in draw
+assert "submission_context *context;" in draw
+assert "auto &context=contexts.emplace_back();" in draw
 positions=[render.index("draw_gpu_3do_preview(false);"),
            render.index("draw_gpu_3do_preview(true,false,true);"),
            render.index("draw_gpu_3do_preview(true);")]
