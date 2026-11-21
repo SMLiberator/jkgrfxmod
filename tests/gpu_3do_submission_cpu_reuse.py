@@ -9,7 +9,7 @@ ROOT=Path(__file__).resolve().parents[1]
 renderer=(ROOT/"renderer/renderer.cpp").read_text(encoding="utf-8")
 main=(ROOT/"renderer/main.cpp").read_text(encoding="utf-8")
 draw=renderer.split("void draw_gpu_3do_preview(",1)[1].split(
-    "void draw_game_gbuffer_pass(",1)[0]
+    "// Deliberate world-cache isolation test.",1)[0]
 model=main.split("int __cdecl HookedNativeModel(",1)[1].split(
     "void __cdecl HookedNativeMesh(",1)[0]
 
