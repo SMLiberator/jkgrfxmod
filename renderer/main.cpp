@@ -167,10 +167,12 @@ namespace {
     thread_local bool active_native_model_world_position_valid=false;
     thread_local float active_native_model_lod_radius=0.0f;
     thread_local bool active_native_model_lod_radius_valid=false;
-    // rdThing->model3 at +4 points to rdModel3, whose first 32 bytes
-    // contain the source 3DO filename. Keep this context for the nested
-    // rdModel3_DrawMesh callback and restore it on recursive model draws.
+    // rdThing->model3 points to a source 3DO filename, used ONLY for
+    // diagnostics. Defer the expensive 32-byte VirtualQuery, memcpy and
+    // printable-name scan until a diagnostic actually needs the name.
+    // Save/restore this lazy state for recursive native model draws.
     thread_local std::array<char,33> active_native_model_filename{{0}};
+    thread_local bool active_native_model_filename_ready=false;
     thread_local uintptr_t active_native_model_ptr=0U;
     thread_local uintptr_t active_native_rdthing_ptr=0U;
     thread_local jkgm::thing_opacity_state active_native_thing_opacity{};
@@ -415,11 +417,37 @@ namespace {
     // (post-processed) execute buffer. Record its failure independently of
     // verbose profiling, so one-line HUD warnings name the real blocker.
     thread_local std::string gpu_last_camera_hud_failure;
+    char const *active_native_debug_model_filename()
+    {
+        if(!active_native_model_filename_ready) {
+            active_native_model_filename_ready=true;
+            active_native_model_filename.fill(0);
+            if(active_native_model_ptr>=0x10000U &&
+               gpu_span_readable(
+                   reinterpret_cast<void const *>(active_native_model_ptr),
+                   32U)) {
+                std::memcpy(active_native_model_filename.data(),
+                    reinterpret_cast<void const *>(active_native_model_ptr),
+                    32U);
+                bool printable=active_native_model_filename[0]!=0;
+                for(size_t i=0;i<32U && active_native_model_filename[i];++i) {
+                    unsigned char const c=static_cast<unsigned char>(
+                        active_native_model_filename[i]);
+                    if(c<32U || c>126U) {
+                        printable=false;
+                        break;
+                    }
+                }
+                if(!printable)active_native_model_filename.fill(0);
+            }
+        }
+        return active_native_model_filename[0]
+            ?active_native_model_filename.data():"<unknown>";
+    }
     std::string gpu_3do_source_detail(native_mesh const &m)
     {
         std::ostringstream out;
-        out<<"3do="<<(active_native_model_filename[0] ?
-                        active_native_model_filename.data() : "<unknown>")
+        out<<"3do="<<active_native_debug_model_filename()
            <<" model_ptr="<<active_native_model_ptr
            <<" mesh="<<std::string(
                 m.name,std::find(m.name,m.name+sizeof(m.name),'\0'))
@@ -1376,27 +1404,10 @@ namespace {
         bool camera_hud=false;
         uintptr_t const native_rd=reinterpret_cast<uintptr_t>(thing);
         uint32_t native_model_ptr=0;
-        std::array<char,33> native_model_filename{{0}};
         if(gpu_span_readable(reinterpret_cast<void const *>(
                native_rd+4U),sizeof(native_model_ptr))) {
             std::memcpy(&native_model_ptr,reinterpret_cast<void const *>(
                 native_rd+4U),sizeof(native_model_ptr));
-            if(gpu_span_readable(reinterpret_cast<void const *>(
-                   uintptr_t(native_model_ptr)),32U)) {
-                std::memcpy(native_model_filename.data(),
-                            reinterpret_cast<void const *>(
-                                uintptr_t(native_model_ptr)),32U);
-                bool printable=native_model_filename[0]!=0;
-                for(size_t i=0;i<32 && native_model_filename[i];++i) {
-                    unsigned char const c=static_cast<unsigned char>(
-                        native_model_filename[i]);
-                    if(c<32 || c>126) {
-                        printable=false;
-                        break;
-                    }
-                }
-                if(!printable)native_model_filename.fill(0);
-            }
         }
         uint32_t hud_owner=0;
         if(gpu_span_readable(reinterpret_cast<void const *>(
@@ -1710,6 +1721,8 @@ namespace {
         if(decal_model && shadow_enabled && moving)
             decal_receiver=true;
         auto const previous_model_filename=active_native_model_filename;
+        bool const previous_model_filename_ready=
+            active_native_model_filename_ready;
         uintptr_t const previous_model_ptr=active_native_model_ptr;
         uintptr_t const previous_rdthing_ptr=active_native_rdthing_ptr;
         auto const previous_thing_opacity=active_native_thing_opacity;
@@ -1717,8 +1730,8 @@ namespace {
             uintptr_t(hud_owner)+0xc4U==native_rd
                 ?sample_3do_opacity(reinterpret_cast<void const *>(
                     uintptr_t(hud_owner))) : jkgm::thing_opacity_state{};
-        active_native_model_filename=native_model_filename;
         active_native_model_ptr=native_model_ptr;
+        active_native_model_filename_ready=false;
         active_native_rdthing_ptr=native_rd;
         uint32_t const previous_flags=active_native_model_thing_flags;
         bool const previous_camera_hud=active_native_model_camera_hud;
@@ -1794,6 +1807,7 @@ namespace {
         active_native_model_lod_radius=previous_lod_radius;
         active_native_model_lod_radius_valid=previous_lod_radius_valid;
         active_native_model_filename=previous_model_filename;
+        active_native_model_filename_ready=previous_model_filename_ready;
         active_native_model_ptr=previous_model_ptr;
         active_native_rdthing_ptr=previous_rdthing_ptr;
         active_native_thing_opacity=previous_thing_opacity;
@@ -1863,7 +1877,7 @@ namespace {
             if(readable && first>=0 && first<m.num_vertices)continue;
             auto const end=std::find(m.name,m.name+sizeof(m.name),'\0');
             std::ostringstream out;
-            out<<"3do="<<active_native_model_filename.data()
+            out<<"3do="<<active_native_debug_model_filename()
                <<" mesh="<<std::string(m.name,end)
                <<" mesh_ptr="<<mesh
                <<" face="<<i<<" of "<<m.num_faces

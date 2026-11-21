@@ -256,6 +256,9 @@ jobs:
       run: python3 tests/matcap_layer_wiring.py
     - name: Shared camera-centered realtime cube and matcap-mode removal
       run: python3 tests/shared_reflection_wiring.py
+    - name: GPU 3DO submission CPU reuse regression
+      run: python3 tests/gpu_3do_submission_cpu_reuse.py
+
     - name: GPU 3DO native model-view precision tests
       shell: cmd
       run: |

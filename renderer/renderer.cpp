@@ -4622,6 +4622,16 @@ namespace jkgm {
                                    :0.0f),
                              make_point(color[0],color[1],color[2],0.0f));
             }
+            // Prepared once per accepted Thing, including both ordinary
+            // opaque and alpha passes. The GPU mesh is created lazily on the
+            // first draw; no uploads are moved into visibility collection.
+            struct submission_context {
+                gpu_3do_matrix34 modelview{};
+                std::array<float,3> local_eye{};
+                bool has_local_eye=false;
+                bool reversed_winding=false;
+                gpu_3do_gl_mesh *mesh=nullptr;
+            };
             struct pending_draw {
                 gpu_3do_instance const *instance;
                 gpu_3do_group const *group;
@@ -4630,7 +4640,7 @@ namespace jkgm {
                 // the ordinary and retained HUD caches outlive this pass.
                 gpu_3do_texture const *texture;
                 gpu_3do_alpha_mode policy;
-                gpu_3do_matrix34 const *modelview;
+                submission_context *context;
                 float depth;
                 size_t order;
                 // Nonzero for opaque SPRs grouped at collection time.
@@ -4650,12 +4660,11 @@ namespace jkgm {
             static thread_local std::vector<pending_draw> draws;
             static thread_local std::vector<pending_draw> merged_draws;
             static thread_local std::vector<pending_draw> smoke_draws;
-            // Opaque prepares the ordinary alpha list too. Keep its matrices
-            // alive across the intervening projected-decal pass; deferred
-            // Camera HUD and decals have independent scratch matrices.
+            // Preserve ordinary contexts across the intervening decal pass.
+            // Deferred HUD and projected decals use independent storage.
             static thread_local std::vector<pending_draw> ordinary_alpha_draws;
-            static thread_local std::vector<gpu_3do_matrix34> ordinary_modelviews;
-            static thread_local std::vector<gpu_3do_matrix34> isolated_modelviews;
+            static thread_local std::vector<submission_context> ordinary_contexts;
+            static thread_local std::vector<submission_context> isolated_contexts;
             static thread_local uint64_t ordinary_alpha_serial=0;
             static thread_local std::vector<sprite_batch_bucket> sprite_buckets;
             static thread_local std::map<sprite_batch_key,size_t> sprite_lookup;
@@ -4668,8 +4677,8 @@ namespace jkgm {
                 ordinary_alpha_serial=0;
                 ordinary_alpha_draws.clear();
             }
-            auto &modelviews=ordinary_pass
-                ?ordinary_modelviews:isolated_modelviews;
+            auto &contexts=ordinary_pass
+                ?ordinary_contexts:isolated_contexts;
             draws.clear();
             if(!transparent && ordinary_pass && !decals_only &&
                the_config->experimental_3do_occlusion_culling &&
@@ -4698,11 +4707,12 @@ namespace jkgm {
             bool const collect_sprite_batches=
                 the_config->enable_gpu_sprite_instancing &&
                 !transparent && !post_exempt && !decals_only;
-            // Reusing alpha candidates must not clear their modelview
-            // storage; otherwise a projected decal could invalidate it.
+            // Candidate pointers must be stable until the last draw. At
+            // most one context is appended per source instance, and the
+            // ordinary vector is NOT cleared before the alpha reuse pass.
             if(!reuse_alpha) {
-                modelviews.clear();
-                modelviews.reserve(instances.size());
+                contexts.clear();
+                contexts.reserve(instances.size());
             }
             auto const collect_begin=gpu_profiling
                 ?profile_clock::now():profile_clock::time_point{};
@@ -4754,9 +4764,15 @@ namespace jkgm {
                     }
                     if(occluded)continue;
                 }
-                modelviews.push_back(gpu_3do_native_modelview(native_view,inst.transform));
-                std::array<float,3> local_eye{};
-                bool const can_cpu_cull=gpu_3do_local_eye(modelviews.back(),local_eye);
+                auto &context=contexts.emplace_back();
+                context.modelview=gpu_3do_native_modelview(
+                    native_view,inst.transform);
+                context.has_local_eye=gpu_3do_local_eye(
+                    context.modelview,context.local_eye);
+                context.reversed_winding=
+                    gpu_3do_reversed_winding(inst.transform);
+                bool const can_cpu_cull=context.has_local_eye;
+                auto const &local_eye=context.local_eye;
                 for(auto const &group:inst.geometry->groups) {
                     if(the_config->profile_renderer)
                         ++profile_frame.gpu_groups_considered;
@@ -4766,7 +4782,7 @@ namespace jkgm {
                     // partially visible groups still reach OpenGL.
                     if(have_perspective_frustum &&
                        gpu_3do_batch_outside_frustum(
-                           native_frustum,modelviews.back(),
+                           native_frustum,context.modelview,
                            group.bounds_min,group.bounds_max)) {
                         if(the_config->profile_renderer)
                             ++profile_frame.gpu_groups_frustum_culled;
@@ -4888,7 +4904,7 @@ namespace jkgm {
                               (wz-cam.position[2])*cam.forward[2];
                     }
                     pending_draw candidate{&inst,&group,&tex,policy,
-                                           &modelviews.back(),depth,
+                                           &context,depth,
                                            next_draw_order++};
                     if(alpha_eligible)
                         ordinary_alpha_draws.push_back(candidate);
@@ -4922,7 +4938,7 @@ namespace jkgm {
                             inst.skybox_vertex_lighting,
                             inst.sector_tint_valid,inst.sector_tint,
                             inst.colormap_tint,
-                            gpu_3do_reversed_winding(inst.transform)};
+                            context.reversed_winding};
                         auto found=sprite_lookup.find(key);
                         size_t index;
                         if(found==sprite_lookup.end()) {
@@ -4938,7 +4954,7 @@ namespace jkgm {
                 }
             }
             // This is consumed once during the ordinary transparent pass.
-            // Both the MAT element addresses and the ordinary modelviews
+            // Both MAT element addresses and ordinary per-Thing contexts
             // remain stable until then, including across decal rendering.
             if(prepare_both)
                 ordinary_alpha_serial=gpu_3do_present_serial;
@@ -5153,7 +5169,7 @@ namespace jkgm {
                     }
                 } else if(sprite_batch_eligible) {
                     size_t end=draw_start+1;
-                    bool const reversed=gpu_3do_reversed_winding(inst.transform);
+                    bool const reversed=draw.context->reversed_winding;
                     while(end<draws.size() &&
                           end-draw_start<
                             shaders::gpu_3do_preview_shader::max_sprite_instances) {
@@ -5171,7 +5187,7 @@ namespace jkgm {
                            other.sector_tint_valid!=inst.sector_tint_valid ||
                            other.sector_tint!=inst.sector_tint ||
                            other.colormap_tint!=inst.colormap_tint ||
-                           gpu_3do_reversed_winding(other.transform)!=reversed)
+                           next.context->reversed_winding!=reversed)
                             break;
                         ++end;
                     }
@@ -5201,18 +5217,28 @@ namespace jkgm {
                         break;
                     ++draw_end;
                 }
-                auto it=gpu_3do_gl_cache.find(inst.id);
-                if(it==gpu_3do_gl_cache.end()) {
-                    auto ptr=std::make_unique<gpu_3do_gl_mesh>(
-                            the_config->experimental_packed_3do_vertices,*inst.geometry,
+                // Reuse the same heap-owned GPU mesh across ALL groups of
+                // this Thing (even if alpha sorting interleaves other Things).
+                // The pointer survives unordered_map rehash, and ordinary
+                // context memory survives the intervening decal pass.
+                auto &context=*draw.context;
+                if(!context.mesh) {
+                    auto it=gpu_3do_gl_cache.find(inst.id);
+                    if(it==gpu_3do_gl_cache.end()) {
+                        auto ptr=std::make_unique<gpu_3do_gl_mesh>(
+                            the_config->experimental_packed_3do_vertices,
+                            *inst.geometry,
                             the_config->profile_renderer
                                 ? &packed_3do_upload_profile : nullptr);
-                    if(the_config->profile_renderer) ++profile_frame.gpu_uploads;
-                    it=gpu_3do_gl_cache.emplace(inst.id,std::move(ptr)).first;
-                    // Count uploads through PERF; do not log every temporary
-                    // mesh allocation in this frequently called draw path.
+                        if(the_config->profile_renderer)
+                            ++profile_frame.gpu_uploads;
+                        it=gpu_3do_gl_cache.emplace(
+                            inst.id,std::move(ptr)).first;
+                    }
+                    context.mesh=it->second.get();
+                    gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                 }
-                gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
+                auto &gpu_mesh=*context.mesh;
                 if(active_instance!=draw.instance) {
                     // Probe selection is per material below, not per Thing:
                     // a single model may mix shared and locally captured MATs.
@@ -5221,13 +5247,13 @@ namespace jkgm {
                     // Match JK rdModel3_DrawMesh: combine the original
                     // rdCamera::orient and joint/world placement on CPU,
                     // then transform static local mesh vertices on the GPU.
-                    auto const &m=*draw.modelview;
+                    auto const &m=context.modelview;
                     prog.set_view_matrix(make_point(m[0],m[1],m[2],0.0f),
                                          make_point(m[3],m[4],m[5],0.0f),
                                          make_point(m[6],m[7],m[8],0.0f),
                                          make_point(m[9],m[10],m[11],1.0f));
-                    gl::bind_vertex_array(it->second->vao);
-                    prog.set_packed_vertex_format(it->second->packed_vertex_format);
+                    gl::bind_vertex_array(gpu_mesh.vao);
+                    prog.set_packed_vertex_format(gpu_mesh.packed_vertex_format);
                     // Persistent GL uniforms must reset on each Thing.
                     prog.set_continuous_ambient(
                         continuous_buffer_ready && inst.continuous_ambient_fallback
@@ -5284,10 +5310,9 @@ namespace jkgm {
                        inst.sector_tint_valid && !inst.camera_hud)
                         tint_delta=inst.sector_tint;
                     prog.set_thing_sector_tint_delta(tint_delta);
-                    std::array<float,3> local_eye{};
-                    bool const has_eye=gpu_3do_local_eye(m,local_eye);
-                    prog.set_local_eye(has_eye?local_eye:
-                                       std::array<float,3>{{0,0,0}});
+                    prog.set_local_eye(context.has_local_eye
+                        ?context.local_eye
+                        :std::array<float,3>{{0,0,0}});
                     active_instance=draw.instance;
                 }
                 if((group.face_type&0x1U)!=0 || group.nonplanar) {
@@ -5301,7 +5326,7 @@ namespace jkgm {
                     // JK still treats the object's outside as the front.
                     // Cull the opposite side rather than showing its inside.
                     gl::set_face_cull_mode(
-                        gpu_3do_reversed_winding(inst.transform)
+                        context.reversed_winding
                             ? gl::face_mode::front : gl::face_mode::back);
                 }
                 // The native translucent face flag forces alpha even when
@@ -5578,7 +5603,7 @@ namespace jkgm {
                         shaders::gpu_3do_preview_shader::max_sprite_instances>
                             sprite_models{};
                     for(size_t n=draw_start;n<draw_end;++n)
-                        sprite_models[n-draw_start]=*draws[n].modelview;
+                        sprite_models[n-draw_start]=draws[n].context->modelview;
                     prog.set_sprite_instances(sprite_models,sprite_batch_count);
                     glDrawElementsInstanced(GL_TRIANGLES,
                         static_cast<GLsizei>(group.count),GL_UNSIGNED_INT,
