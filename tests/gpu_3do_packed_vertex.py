@@ -39,7 +39,16 @@ assert "reason_buckets_overlap_one_mesh_can_have_multiple_reasons" in renderer
 assert "gl::vertex_element_type::uint_2_10_10_10_rev" in renderer
 for member in ("normal_mode","light_normal","rgba"):
     assert f"offsetof(gpu_3do_packed_vertex,{member})" in renderer
-assert "prog.set_packed_vertex_format(it->second->packed_vertex_format)" in renderer
+# Phase A retains the uploaded mesh in the per-Thing submission context;
+# packed-format binding must follow the VAO of that same cached mesh.
+draw=renderer.split("void draw_gpu_3do_preview(",1)[1].split(
+    "// Deliberate world-cache isolation test.",1)[0]
+assert "context.mesh=it->second.get();" in draw
+assert "auto &gpu_mesh=*context.mesh;" in draw
+assert "gl::bind_vertex_array(gpu_mesh.vao);" in draw
+assert "prog.set_packed_vertex_format(gpu_mesh.packed_vertex_format);" in draw
+assert draw.index("gl::bind_vertex_array(gpu_mesh.vao);") < draw.index(
+    "prog.set_packed_vertex_format(gpu_mesh.packed_vertex_format);")
 assert "shader.set_modelview(modelview,true," in renderer
 assert "shader.set_modelview(draw.modelview,true," in renderer
 assert "shader.set_modelview(batch.modelview,true," in renderer
