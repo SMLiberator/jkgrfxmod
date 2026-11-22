@@ -253,4 +253,6 @@ matches perspective's apparent size at the camera target distance. Direct
 lighting, reflections and parallax all use parallel view rays in
 orthographic mode. Perspective remains the default for every preview shape.
 Reset View recalculates the Cube's centered projected bounds for whichever
-projection is active.
+projection is active. Toggling projections on a Cube compensates for the
+change in its optical center while preserving the user's manual pan,
+rotation and zoom.
