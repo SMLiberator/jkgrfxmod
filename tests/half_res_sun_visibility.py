@@ -31,7 +31,13 @@ assert "sun_shadow_visibility(world_position,incidence)" in opaque
 assert "sun_dynamic_shadow_visibility(world_position,incidence)" in opaque
 assert "float depth_tolerance=max(0.125,depth*0.002);" in opaque
 assert "dot(N,sun_half_decode_oct(half_sample.ba))<0.96" in opaque
-assert "bool sprite=chosen_normal.a>1.5;" in half
+# Packed normal A2 class 3 means covered/fullbright, not a sprite.
+# Check the shared classifier used by both the packed and legacy modes.
+helper=read("assets/shaders/gbuffer_normal_packed.glsl")
+assert '#include "gbuffer_normal_packed.glsl"' in half
+assert "bool sprite=gbuffer_is_sprite(chosen_normal);" in half
+assert "bool gbuffer_is_sprite(vec4 decoded)" in helper
+assert "decoded.a>1.5 && (gbuffer_packing==0 || decoded.a<2.5)" in helper
 assert "float incidence=sprite" in half
 assert "vec2 sign_nonzero=vec2(e.x>=0.0?1.0:-1.0," in half
 assert "sun_dynamic_shadow_visibility(world,incidence)" in half
