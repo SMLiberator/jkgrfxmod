@@ -16,8 +16,18 @@ assert "std::make_shared<opaque_order_cache>()" in header
 assert "mutable opaque_order_cache_owner opaque_order_state;" in header
 assert "mutable std::once_flag opaque_order_once;" not in header
 assert "return a<b; // identical keys retain authored order" in header
-for field in ("material","cel","face_type","nonplanar","solid_color"):
-    assert f"lhs.{field}!=rhs.{field}" in header
+# Opaque sorting now uses the same immutable submission metadata as
+# reflections. Its cached tuple preserves the original comparison order.
+assert "meta.opaque_sort_key=std::make_tuple(" in header
+opaque_fields=header.split("meta.opaque_sort_key=std::make_tuple(",1)[1].split(");",1)[0]
+fields=("group.material","group.cel","group.face_type",
+        "group.nonplanar","group.solid_color")
+positions=[opaque_fields.index(field) for field in fields]
+assert positions==sorted(positions)
+assert "meta[a].opaque_sort_key!=meta[b].opaque_sort_key" in header
+assert "return meta[a].opaque_sort_key<" in header
+assert "auto const &submission=inst.geometry->cached_group_submissions();" in draw
+assert "meta.main_material_key |" in draw
 assert "for(size_t group_visit=0;group_visit<groups.size();++group_visit)" in draw
 assert "auto const *opaque_order=transparent ? nullptr" in draw
 assert "&inst.geometry->cached_opaque_group_order()" in draw
