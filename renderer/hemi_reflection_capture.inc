@@ -54,6 +54,8 @@
                 bool is_global=false;
                 bool is_shared=false;
             };
+            auto const shared_search_started=the_config->profile_renderer
+                ?profile_clock::now():profile_clock::time_point{};
             std::vector<candidate> candidates;
             std::unordered_set<uint64_t> visited;
             std::map<std::pair<uintptr_t,int32_t>,gpu_3do_texture> mats;
@@ -200,6 +202,12 @@
                 portals.ensure(read_portals,probe_world.loaded_world,
                     probe_world.revision,probe_world.world,
                     probe_world.mesh,probe_world.cached_surface_lookup);
+            if(the_config->profile_renderer && shared_requested) {
+                auto &diag=shared_capture_profile_window;
+                diag.search_ns+=elapsed_profile_ns(
+                    shared_search_started,profile_clock::now());
+                ++diag.search_frames;
+            }
             struct capture_portal_view {
                 bool valid=false;
                 std::vector<uint8_t> surfaces,thing_sectors;
@@ -327,6 +335,10 @@
                 size_t total_model_groups_culled=0,total_world_bounds_culled=0;
                 size_t total_thing_range_culled=0,capture_scene_preps=0;
                 uint32_t portal_views_used=0U;
+                bool const profile_shared=
+                    candidate.is_shared && the_config->profile_renderer;
+                auto const shared_refresh_started=profile_shared
+                    ?profile_clock::now():profile_clock::time_point{};
                 // All 2-/6-view probe captures cover a full sphere.
                 // Build directional portals once. Shared acquisition uses
                 // their union, while rendering retains per-face masks.
@@ -367,6 +379,10 @@
                     }
                     if(!complete)all_directions_visibility={};
                 }
+                if(profile_shared)
+                    shared_capture_profile_window.cpu_ns[0]+=
+                        elapsed_profile_ns(
+                            shared_refresh_started,profile_clock::now());
                 // Independent discovery and posing are shared by every
                 // face of the same probe (two disks or six cube faces).
                 // Individual face visibility is still checked when drawing.
@@ -426,8 +442,16 @@
                     !all_directions_visibility.thing_sectors.empty()
                     ?&all_directions_visibility.thing_sectors:nullptr;
                 // One complete animated node snapshot for every face.
+                auto const acquisition_started=profile_shared
+                    ?profile_clock::now():profile_clock::time_point{};
                 planar_reflection_offscreen_gpu capture_offscreen=
                     prepare_scene(capture_thing_mask);
+                if(profile_shared) {
+                    auto &diag=shared_capture_profile_window;
+                    diag.cpu_ns[1]+=elapsed_profile_ns(
+                        acquisition_started,profile_clock::now());
+                    diag.acquired_nodes+=capture_offscreen.stats.ready_nodes;
+                }
                 std::unordered_set<uint64_t> acquired;
                 for(auto const &inst:capture_offscreen.nodes)
                     if(inst.shadow_owner)acquired.insert(inst.shadow_owner);
@@ -582,10 +606,14 @@
                 return true;
             };
             size_t world_drawn=0,model_drawn=0;
+            auto const sky_started=profile_shared
+                ?profile_clock::now():profile_clock::time_point{};
             draw_reflection_capture_sky(shader,camera,view,frustum,
                 projection,capture_side,capture_side,
                 {{0.0f,0.0f,0.0f,0.0f}},false,false,
                 paraboloid_mode,surface_mask);
+            if(profile_shared)shared_capture_profile_window.cpu_ns[2]+=
+                elapsed_profile_ns(sky_started,profile_clock::now());
             glFrontFace(paraboloid_mode?GL_CW:GL_CCW);
             shader.set_modelview(view,false);
             shader.set_thing_fade(1.0f,0);
@@ -595,6 +623,8 @@
             // This never reuses the primary camera's visible sectors.
             // Material buckets are already sorted and immutable. Only face
             // visibility and transformed geometry bounds vary per direction.
+            auto const world_started=profile_shared
+                ?profile_clock::now():profile_clock::time_point{};
             for(auto const &bucket:reflection_world_buckets.buckets()) {
                 counts.clear();offsets.clear();
                 for(size_t const index:bucket.surfaces) {
@@ -621,8 +651,14 @@
                 if(!submit_material(mat,solid,bucket.key,false))continue;
                 glMultiDrawElements(GL_TRIANGLES,counts.data(),
                     GL_UNSIGNED_INT,offsets.data(),GLsizei(counts.size()));
+                if(profile_shared) {
+                    ++shared_capture_profile_window.world_batches;
+                    shared_capture_profile_window.world_ranges+=counts.size();
+                }
                 world_drawn+=counts.size();
             }
+            if(profile_shared)shared_capture_profile_window.cpu_ns[3]+=
+                elapsed_profile_ns(world_started,profile_clock::now());
             auto draw_model=[&](gpu_3do_instance const &inst) {
                 if(reflection_excluded_owners.count(inst.shadow_owner)!=0U ||
                    inst.shadow_only || inst.camera_hud ||
@@ -662,6 +698,8 @@
                         group->nonplanar || (group->face_type&1U)!=0U);
                 };
                 for(auto const &group:inst.geometry->groups) {
+                    if(profile_shared)
+                        ++shared_capture_profile_window.groups_checked;
                     if(paraboloid_mode &&
                        dual_paraboloid_bounds_outside(
                            modelview,group.bounds_min,group.bounds_max,
@@ -680,6 +718,8 @@
                            frustum,modelview,
                            group.bounds_min,group.bounds_max))continue;
                     model_group_scratch.push_back(&group);
+                    if(profile_shared)
+                        ++shared_capture_profile_window.groups_selected;
                 }
                 // No drawable groups: skip GL cache lookup, shader uniforms,
                 // VAO binding and material resolution for this 3DO node.
@@ -729,25 +769,56 @@
                                 reinterpret_cast<void const *>(
                                     uintptr_t(group->offset)*sizeof(uint32_t)));
                         }
-                        glMultiDrawElements(GL_TRIANGLES,counts.data(),
-                            GL_UNSIGNED_INT,offsets.data(),
-                            GLsizei(counts.size()));
+                        if(profile_shared) {
+                            auto &diag=shared_capture_profile_window;
+                            ++diag.model_batches;
+                            diag.model_ranges+=counts.size();
+                            if(counts.size()==1U)++diag.model_single_batches;
+                            else if(counts.size()<=3U)
+                                ++diag.model_small_batches;
+                            else ++diag.model_large_batches;
+                            // Sample 1/32 calls instead of timing each one;
+                            // GL driver work can be deferred to later calls.
+                            if((diag.model_batches&31U)==0U) {
+                                auto const gl_started=profile_clock::now();
+                                glMultiDrawElements(GL_TRIANGLES,counts.data(),
+                                    GL_UNSIGNED_INT,offsets.data(),
+                                    GLsizei(counts.size()));
+                                diag.sampled_gl_ns+=elapsed_profile_ns(
+                                    gl_started,profile_clock::now());
+                                ++diag.sampled_gl_calls;
+                            } else {
+                                glMultiDrawElements(GL_TRIANGLES,counts.data(),
+                                    GL_UNSIGNED_INT,offsets.data(),
+                                    GLsizei(counts.size()));
+                            }
+                        } else {
+                            glMultiDrawElements(GL_TRIANGLES,counts.data(),
+                                GL_UNSIGNED_INT,offsets.data(),
+                                GLsizei(counts.size()));
+                        }
                         model_drawn+=counts.size();
                         ++total_model_batches;
                     }
                     i=group_end;
                 }
             };
+            auto const models_started=profile_shared
+                ?profile_clock::now():profile_clock::time_point{};
             for(auto const &inst:offscreen.nodes)draw_model(inst);
             for(auto const &inst:frame_gpu_3do_instances)
                 if(!inst.shadow_owner||!acquired.count(inst.shadow_owner))
                     draw_model(inst);
+            if(profile_shared)shared_capture_profile_window.cpu_ns[4]+=
+                elapsed_profile_ns(models_started,profile_clock::now());
             total_world_drawn+=world_drawn;
             total_model_drawn+=model_drawn;
             if(face==0)
                 total_acquired_nodes+=offscreen.stats.ready_nodes;
             } // Direct: two paraboloid passes; otherwise six cube faces.
                 } // Restore external GL state once after all faces.
+            auto const mips_started=profile_shared
+                ?profile_clock::now():profile_clock::time_point{};
             // Texture-array mip levels are filtered independently per face.
             // Restore the array binding at texture unit zero so other passes
             // never inherit this optional capture target.
@@ -758,6 +829,15 @@
                           probe_target->color_texture());
             glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
             glBindTexture(GL_TEXTURE_2D_ARRAY,GLuint(previous_array));
+            if(profile_shared) {
+                auto &diag=shared_capture_profile_window;
+                diag.cpu_ns[5]+=elapsed_profile_ns(
+                    mips_started,profile_clock::now());
+                diag.cpu_ns[6]+=elapsed_profile_ns(
+                    shared_refresh_started,profile_clock::now());
+                ++diag.attempts;
+                if(all_faces_ready)++diag.completed;
+            }
             if(!all_faces_ready)continue;
             entry.camera=first_camera;
             entry.mode=selected_mode;

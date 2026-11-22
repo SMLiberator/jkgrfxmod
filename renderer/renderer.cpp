@@ -1178,6 +1178,25 @@ namespace jkgm {
         // Completed offscreen refreshes: shared, hemi, cube, one-shot EnvMap.
         std::array<uint64_t,4> reflection_refreshes_window{};
 
+        // Aggregate a complete Shared refresh without logging each of its
+        // thousands of draw calls. CPU durations are wall-clock (may include
+        // driver stalls); GPU execution remains in capture_gpu_queries.
+        struct shared_capture_profile {
+            // 0=portals, 1=acquisition, 2=sky, 3=world,
+            // 4=models, 5=mipmaps, 6=total_refresh.
+            std::array<uint64_t,7> cpu_ns{};
+            uint64_t search_ns=0,search_frames=0;
+            uint64_t attempts=0,completed=0;
+            uint64_t acquired_nodes=0,groups_checked=0,groups_selected=0;
+            uint64_t model_batches=0,model_ranges=0;
+            uint64_t world_batches=0,world_ranges=0;
+            uint64_t model_single_batches=0,model_small_batches=0;
+            uint64_t model_large_batches=0;
+            // Only every 32nd model MultiDraw is clocked, to keep profiler
+            // overhead small. This is a sample, not an exact total.
+            uint64_t sampled_gl_ns=0,sampled_gl_calls=0;
+        } shared_capture_profile_window{};
+
         static uint64_t elapsed_profile_us(profile_clock::time_point a,
                                            profile_clock::time_point b)
         {
@@ -1417,6 +1436,43 @@ namespace jkgm {
                      " envmap=",reflection_refreshes_window[3],
                      " NOTE=counts_per_profile_window_not_per_frame");
             reflection_refreshes_window.fill(0U);
+            {
+                auto const &s=shared_capture_profile_window;
+                auto per_capture=[&](size_t stage)->uint64_t {
+                    return s.attempts?(s.cpu_ns[stage]/1000U)/s.attempts:0U;
+                };
+                LOG_INFO("PERF shared_capture_cpu_us search_per_frame=",
+                         (s.search_ns/1000U)/frames,
+                         " search_frames=",s.search_frames,
+                         " portal_per_refresh=",per_capture(0),
+                         " acquisition_per_refresh=",per_capture(1),
+                         " sky_per_refresh=",per_capture(2),
+                         " world_per_refresh=",per_capture(3),
+                         " models_per_refresh=",per_capture(4),
+                         " mipmaps_per_refresh=",per_capture(5),
+                         " total_per_refresh=",per_capture(6),
+                         " attempts=",s.attempts," completed=",s.completed,
+                         " NOTE=CPU_wall_clock_including_possible_driver_stalls");
+                LOG_INFO("PERF shared_capture_batches per_refresh_models=",
+                         s.attempts?s.model_batches/s.attempts:0U,
+                         " model_ranges=",s.attempts?s.model_ranges/s.attempts:0U,
+                         " single=",s.model_single_batches,
+                         " two_or_three=",s.model_small_batches,
+                         " four_plus=",s.model_large_batches,
+                         " world_calls=",s.world_batches,
+                         " world_ranges=",s.world_ranges,
+                         " nodes_acquired=",s.acquired_nodes,
+                         " groups_examined=",s.groups_checked,
+                         " groups_passed_culling=",s.groups_selected,
+                         " NOTE=batch_buckets_are_window_totals");
+                LOG_INFO("PERF shared_capture_gl_sample call_us=",
+                         s.sampled_gl_calls
+                            ?(s.sampled_gl_ns/1000U)/s.sampled_gl_calls:0U,
+                         " samples=",s.sampled_gl_calls,
+                         " every_n_model_calls=32",
+                         " NOTE=sampled_glMultiDrawElements_CPU_entry_only");
+                shared_capture_profile_window={};
+            }
             if(the_config->use_gpu_cache ||
                the_config->enable_decals) {
                 LOG_INFO("PERF gpu_3do fallback_native_per_frame geometry=",

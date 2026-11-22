@@ -40,4 +40,33 @@ assert gbuf.index('opaque_detail_gpu_queries.timestamp(2U,true)') < gbuf.index(
     'render_opaque_screen_reflections()') < gbuf.index(
     'opaque_detail_gpu_queries.timestamp(2U,false)')
 assert 'PERF opaque_detail_gpu_us geometry=' in renderer
-print("Reflection/opaque GPU timers: nonblocking rings, stage boundaries, and refresh counts OK")
+assert "struct shared_capture_profile {" in renderer
+assert "PERF shared_capture_cpu_us search_per_frame=" in renderer
+assert "PERF shared_capture_batches per_refresh_models=" in renderer
+assert "PERF shared_capture_gl_sample call_us=" in renderer
+assert "shared_capture_profile_window={};" in renderer
+assert "auto const shared_search_started=" in hemi
+assert "diag.search_ns+=elapsed_profile_ns(" in hemi
+assert "shared_capture_profile_window.cpu_ns[0]" in hemi
+assert "diag.cpu_ns[1]+=elapsed_profile_ns(" in hemi
+assert "shared_capture_profile_window.cpu_ns[2]" in hemi
+assert "shared_capture_profile_window.cpu_ns[3]" in hemi
+assert "shared_capture_profile_window.cpu_ns[4]" in hemi
+assert "diag.cpu_ns[5]+=elapsed_profile_ns(" in hemi
+assert "diag.cpu_ns[6]+=elapsed_profile_ns(" in hemi
+assert "++diag.attempts;" in hemi
+assert "if(all_faces_ready)++diag.completed;" in hemi
+assert "++shared_capture_profile_window.groups_checked;" in hemi
+assert "++shared_capture_profile_window.groups_selected;" in hemi
+assert "++diag.model_single_batches;" in hemi
+assert "++diag.model_small_batches;" in hemi
+assert "++diag.model_large_batches;" in hemi
+assert "(diag.model_batches&31U)==0U" in hemi
+assert "++diag.sampled_gl_calls;" in hemi
+assert "++shared_capture_profile_window.world_batches;" in hemi
+assert hemi.index("diag.search_ns+=") < hemi.index("bool const profile_shared=")
+assert hemi.index("auto const sky_started=") < hemi.index(
+    "draw_reflection_capture_sky(shader,camera,view,frustum,")
+assert hemi.index("auto const models_started=") < hemi.index(
+    "for(auto const &inst:offscreen.nodes)draw_model(inst);")
+print("Reflection/opaque GPU timers and Shared capture CPU attribution contracts OK")
