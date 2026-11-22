@@ -21,6 +21,11 @@ struct world_cache_gpu {
     gl::buffer vertices,indices,lighting,light_state,sector_tint,sector_cmp_tint,uv_animation;
     std::vector<std::array<float,3>> frame_light_rgb,frame_light_state,frame_sector_tint,frame_sector_cmp_tint;
     std::vector<std::array<float,2>> frame_uv_offset;
+    // Exact last-uploaded attribute mirrors. Updated only after GL writes,
+    // so a face hidden for several frames cannot reuse stale GPU contents.
+    std::vector<std::array<float,3>> uploaded_light_rgb,uploaded_light_state;
+    std::vector<std::array<float,3>> uploaded_sector_tint,uploaded_sector_cmp_tint;
+    std::vector<std::array<float,2>> uploaded_uv_offset;
     std::vector<float> native_dynamic_light;
     decal_world_geometry world{};
     world_cache_mesh mesh{};
@@ -96,6 +101,11 @@ struct world_cache_gpu {
         frame_sector_tint.clear();
         frame_sector_cmp_tint.clear();
         frame_uv_offset.clear();
+        uploaded_light_rgb.clear();
+        uploaded_light_state.clear();
+        uploaded_sector_tint.clear();
+        uploaded_sector_cmp_tint.clear();
+        uploaded_uv_offset.clear();
         native_dynamic_light.clear();
         frame_candidates.clear();
         sector_candidates.clear();
@@ -126,26 +136,31 @@ struct world_cache_gpu {
             make_span(mesh.vertices).as_const_bytes(),
             gl::buffer_usage::static_draw);
         frame_light_rgb.assign(mesh.vertices.size(),{{1.0f,1.0f,1.0f}});
+        uploaded_light_rgb=frame_light_rgb;
         gl::bind_buffer(gl::buffer_bind_target::array,lighting);
         gl::buffer_data(gl::buffer_bind_target::array,
             make_span(frame_light_rgb).as_const_bytes(),
             gl::buffer_usage::stream_draw);
         frame_light_state.assign(mesh.vertices.size(),{{1.0f,1.0f,0.0f}});
+        uploaded_light_state=frame_light_state;
         gl::bind_buffer(gl::buffer_bind_target::array,light_state);
         gl::buffer_data(gl::buffer_bind_target::array,
             make_span(frame_light_state).as_const_bytes(),
             gl::buffer_usage::stream_draw);
         frame_sector_tint.assign(mesh.vertices.size(),{{0.0f,0.0f,0.0f}});
+        uploaded_sector_tint=frame_sector_tint;
         gl::bind_buffer(gl::buffer_bind_target::array,sector_tint);
         gl::buffer_data(gl::buffer_bind_target::array,
             make_span(frame_sector_tint).as_const_bytes(),
             gl::buffer_usage::stream_draw);
         frame_sector_cmp_tint.assign(mesh.vertices.size(),{{1.0f,1.0f,1.0f}});
+        uploaded_sector_cmp_tint=frame_sector_cmp_tint;
         gl::bind_buffer(gl::buffer_bind_target::array,sector_cmp_tint);
         gl::buffer_data(gl::buffer_bind_target::array,
             make_span(frame_sector_cmp_tint).as_const_bytes(),
             gl::buffer_usage::stream_draw);
         frame_uv_offset.assign(mesh.vertices.size(),{{0.0f,0.0f}});
+        uploaded_uv_offset=frame_uv_offset;
         gl::bind_buffer(gl::buffer_bind_target::array,uv_animation);
         gl::buffer_data(gl::buffer_bind_target::array,
             make_span(frame_uv_offset).as_const_bytes(),

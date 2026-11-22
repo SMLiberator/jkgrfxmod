@@ -60,6 +60,34 @@ The world and GPU-cached 3DO **pixel** paths use the editable formulas in
 load time. Per-pixel dynamic light calculations do not replace authored
 baked Gouraud colors; native non-cached geometry remains unaffected.
 
+## Live attribute upload change tracking
+
+The immutable world positions, base UVs and normals stay in static GPU
+buffers. Five separate live vertex buffers contain lighting RGB, lighting
+mode/state, sector color tint, sector CMP tint and surface UV animation.
+
+Each buffer now retains the exact last-uploaded CPU values. After the usual
+native surface staging, the renderer checks only the currently needed vertex
+spans, skips an unchanged buffer altogether and uploads changing spans in
+64-vertex blocks. At most 12 contiguous subrange writes and 25% of the
+buffer's vertices are allowed; busy or fragmented updates fall back to the
+existing full-buffer upload. Rebuilt world buffers reset their mirrors.
+
+These comparisons add some CPU memory traffic and one 56-byte-per-vertex
+CPU shadow for the five attributes, but should eliminate most redundant GL
+uploads when the scene has static UV offsets and sector lighting. They do
+not change the native JK UV animation timing, lighting formulas or per-frame
+reflection captures. Measure the tradeoff on Wine/OpenGL before claiming
+an FPS increase.
+
+With `profile_renderer`, `WORLD CACHE vertex streaming` now reports
+`gl_calls`, `skipped_buffers`, `full_buffers`, `partial_buffers`,
+`baseline_bytes`, `saved_bytes`, sampled `upload_cpu_us` and per-attribute
+uploaded byte counts. Use these numbers with the normal CPU and async-GPU
+timings to compare scenes before/after. The planner preserves the original
+cheap partial-upload plan if its finer dirty blocks would require too many
+GL calls.
+
 ## Diagnostics and limitations
 
 Set `profile_renderer` to inspect `WORLD CACHE` logs for current

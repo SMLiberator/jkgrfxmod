@@ -332,6 +332,7 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\world_cache.cpp /Fe:world_cache_test.exe
         world_cache_test.exe
+        python3 tests/world_cache_live_upload.py || exit /b 1
     - name: GPU cached world frame material and lighting snapshot contracts
       shell: cmd
       run: |

@@ -56,6 +56,7 @@
 #include "sun_sky_caster_mask.hpp"
 #include "world_cache_gpu.hpp"
 #include "world_cache_streaming.hpp"
+#include "world_cache_live_upload.hpp"
 #include "world_cache_alpha.hpp"
 #include "world_cache_sky.hpp"
 #include "sun_dynamic_shadow_gpu.hpp"
@@ -11426,41 +11427,93 @@ namespace jkgm {
                 reflection_staged.begin(),reflection_staged.end());
             auto const stream=plan_world_cache_vertex_stream(
                 cache.mesh,stream_candidates);
-            auto upload_live=[&](auto const &buffer,auto const &values) {
+            // Each live attribute has its own exact last-uploaded shadow.
+            // A changed light buffer must not force static UV/tint uploads.
+            // Bound dirty runs to 12 writes and 25% of the buffer; a busy
+            // frame still uses the original orphan-friendly full upload.
+            bool const stream_profile=the_config->profile_renderer &&
+                gpu_3do_present_serial%120U==0U;
+            auto const stream_upload_started=stream_profile
+                ?profile_clock::now():profile_clock::time_point{};
+            std::array<size_t,5> uploaded_bytes{};
+            size_t uploaded_vertices=0,upload_calls=0,unchanged_buffers=0;
+            size_t full_buffers=0,partial_buffers=0;
+            auto upload_live=[&](auto const &buffer,auto const &values,
+                                 auto &uploaded,size_t slot) {
+                auto const dirty=plan_world_cache_live_upload(
+                    values,uploaded,stream);
+                if(dirty.empty()) {
+                    ++unchanged_buffers;
+                    return;
+                }
                 gl::bind_buffer(gl::buffer_bind_target::array,buffer);
-                if(stream.partial) {
-                    for(auto const &range:stream.ranges)
+                if(dirty.full) {
+                    gl::buffer_data(gl::buffer_bind_target::array,
+                        make_span(values).as_const_bytes(),
+                        gl::buffer_usage::stream_draw);
+                    ++full_buffers;
+                    ++upload_calls;
+                } else {
+                    for(auto const &range:dirty.ranges)
                         gl::buffer_sub_data(gl::buffer_bind_target::array,
                             range.first_vertex*sizeof(values[0]),
                             make_span(values.data()+range.first_vertex,
                                       range.count).as_const_bytes());
-                } else {
-                    gl::buffer_data(gl::buffer_bind_target::array,
-                        make_span(values).as_const_bytes(),
-                        gl::buffer_usage::stream_draw);
+                    ++partial_buffers;
+                    upload_calls+=dirty.ranges.size();
                 }
+                // Record the committed GPU state, not the unstaged native
+                // values of surfaces hidden behind JK portal culling.
+                record_world_cache_live_upload(values,uploaded,dirty);
+                uploaded_vertices+=dirty.uploaded_vertices;
+                uploaded_bytes[slot]=dirty.uploaded_vertices*
+                    sizeof(values[0]);
             };
             if(!stream_candidates.empty()) {
-                upload_live(cache.lighting,cache.frame_light_rgb);
-                upload_live(cache.light_state,cache.frame_light_state);
-                upload_live(cache.sector_tint,cache.frame_sector_tint);
-                upload_live(cache.sector_cmp_tint,cache.frame_sector_cmp_tint);
-                upload_live(cache.uv_animation,cache.frame_uv_offset);
+                upload_live(cache.lighting,cache.frame_light_rgb,
+                            cache.uploaded_light_rgb,0U);
+                upload_live(cache.light_state,cache.frame_light_state,
+                            cache.uploaded_light_state,1U);
+                upload_live(cache.sector_tint,cache.frame_sector_tint,
+                            cache.uploaded_sector_tint,2U);
+                upload_live(cache.sector_cmp_tint,cache.frame_sector_cmp_tint,
+                            cache.uploaded_sector_cmp_tint,3U);
+                upload_live(cache.uv_animation,cache.frame_uv_offset,
+                            cache.uploaded_uv_offset,4U);
             }
-            if(the_config->profile_renderer &&
-               gpu_3do_present_serial%120U==0U) {
-                size_t const transferred=cache.frame_render_candidates.empty()
-                    ?0U:(stream.partial?stream.touched_vertices:live_vertices);
+            if(stream_profile) {
+                size_t const transferred_bytes=
+                    uploaded_bytes[0]+uploaded_bytes[1]+uploaded_bytes[2]+
+                    uploaded_bytes[3]+uploaded_bytes[4];
+                size_t const old_vertices=stream_candidates.empty()?0U:
+                    (stream.partial?stream.touched_vertices:live_vertices);
+                size_t const old_bytes=old_vertices*
+                    (4U*sizeof(std::array<float,3>)+
+                     sizeof(std::array<float,2>));
                 LOG_INFO("WORLD CACHE vertex streaming mode=",
-                    cache.frame_render_candidates.empty()?"none":
-                        stream.partial?"partial":"full",
+                    stream_candidates.empty()?"none":
+                    upload_calls==0U?"unchanged":
+                    full_buffers==5U?"full":
+                    partial_buffers==5U?"partial":"mixed",
                     " visible_vertices=",stream.touched_vertices,
-                    " uploaded_vertices=",transferred,
+                    " uploaded_vertices=",uploaded_vertices,
                     " total_vertices=",live_vertices,
                     " merged_ranges=",stream.ranges.size(),
-                    " uploaded_bytes=",transferred*
-                        (4U*sizeof(std::array<float,3>)+
-                         sizeof(std::array<float,2>)));
+                    " gl_calls=",upload_calls,
+                    " skipped_buffers=",unchanged_buffers,
+                    " full_buffers=",full_buffers,
+                    " partial_buffers=",partial_buffers,
+                    " uploaded_bytes=",transferred_bytes,
+                    " baseline_bytes=",old_bytes,
+                    " saved_bytes=",old_bytes>transferred_bytes
+                        ?old_bytes-transferred_bytes:0U,
+                    " upload_cpu_us=",elapsed_profile_us(
+                        stream_upload_started,profile_clock::now()),
+                    " bytes_light_rgb=",uploaded_bytes[0],
+                    " bytes_light_state=",uploaded_bytes[1],
+                    " bytes_sector_tint=",uploaded_bytes[2],
+                    " bytes_cmp_tint=",uploaded_bytes[3],
+                    " bytes_uv=",uploaded_bytes[4]);
             }
             std::sort(ordered.begin(),ordered.end(),
                 [](world_cache_draw_candidate const *a,

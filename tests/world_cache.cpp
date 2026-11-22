@@ -5,6 +5,7 @@
 #include "renderer/world_cache_lighting.hpp"
 #include "renderer/world_cache_uv_animation.hpp"
 #include "renderer/world_cache_streaming.hpp"
+#include "renderer/world_cache_live_upload.hpp"
 #include <array>
 #include <algorithm>
 #include <cassert>
@@ -116,6 +117,97 @@ int main()
     auto const broken=plan_world_cache_vertex_stream(
         stream_mesh,broken_face);
     assert(!broken.valid && !broken.partial);
+
+    // Exact per-buffer GPU state. A stable attribute avoids an upload even
+    // when nearly every world face is visible and the old plan was "full".
+    {
+        using attribute=std::array<float,3>;
+        std::vector<attribute> live(1024U,{{0.0f,0.0f,0.0f}});
+        auto uploaded=live;
+        world_cache_stream_plan visible{};
+        visible.valid=true;
+        visible.ranges={{0U,live.size()}};
+        auto dirty=plan_world_cache_live_upload(live,uploaded,visible);
+        assert(dirty.empty() && !dirty.full);
+        // One changed vertex needs one bounded chunk, not a full VBO.
+        live[310U][0]=1.0f;
+        dirty=plan_world_cache_live_upload(live,uploaded,visible);
+        assert(!dirty.full && dirty.ranges.size()==1U);
+        assert(dirty.ranges[0].first_vertex==256U &&
+               dirty.ranges[0].count==64U);
+        assert(dirty.uploaded_vertices==64U);
+        record_world_cache_live_upload(live,uploaded,dirty);
+        assert(uploaded==live);
+        assert(plan_world_cache_live_upload(live,uploaded,visible).empty());
+        // One opaque/light attribute changes without touching another.
+        auto untouched=uploaded;
+        live[999U][2]=2.0f;
+        dirty=plan_world_cache_live_upload(live,uploaded,visible);
+        assert(!dirty.full && dirty.ranges.size()==1U &&
+               dirty.ranges[0].first_vertex==960U);
+        assert(untouched[999U][2]==0.0f);
+        record_world_cache_live_upload(live,uploaded,dirty);
+        assert(uploaded==live);
+        // Many changing vertices retain the orphan-friendly full path.
+        std::fill(live.begin(),live.end(),attribute{{3.0f,3.0f,3.0f}});
+        dirty=plan_world_cache_live_upload(live,uploaded,visible);
+        assert(dirty.full && dirty.uploaded_vertices==live.size());
+        record_world_cache_live_upload(live,uploaded,dirty);
+        assert(uploaded==live);
+        // A hidden surface may change its CPU data, but its GL shadow
+        // must only advance once a future visible range is submitted.
+        live[901U][1]=5.0f;
+        visible.ranges={{0U,64U}};
+        dirty=plan_world_cache_live_upload(live,uploaded,visible);
+        assert(dirty.empty() && uploaded[901U][1]==3.0f);
+        visible.ranges={{896U,64U}};
+        dirty=plan_world_cache_live_upload(live,uploaded,visible);
+        assert(!dirty.full && dirty.ranges.size()==1U &&
+               dirty.ranges[0].first_vertex==896U);
+        record_world_cache_live_upload(live,uploaded,dirty);
+        assert(uploaded==live);
+        // Invalid visibility or a recreated GPU buffer fails open to a
+        // full resync instead of silently discarding the new values.
+        visible.valid=false;
+        assert(plan_world_cache_live_upload(live,uploaded,visible).full);
+        visible.valid=true;
+        assert(plan_world_cache_live_upload(
+            live,std::vector<attribute>{},visible).full);
+        visible.ranges={{1023U,2U}};
+        assert(plan_world_cache_live_upload(live,uploaded,visible).full);
+        visible.ranges={{0U,0U}};
+        assert(plan_world_cache_live_upload(live,uploaded,visible).empty());
+    }
+    // Fragmented changes beyond the twelve-call budget must not turn an
+    // already cheap legacy visibility partial update into a full upload.
+    {
+        using attribute=std::array<float,2>;
+        std::vector<attribute> live(4096U,{{0.0f,0.0f}});
+        auto uploaded=live;
+        world_cache_stream_plan visible{};
+        visible.valid=true;
+        visible.partial=false;
+        for(size_t i=0;i<11U;++i) {
+            size_t const first=i*128U;
+            live[first][0]=1.0f;
+            visible.ranges.push_back({first,64U});
+        }
+        // The last visible range has a clean block between two changed
+        // blocks, producing 13 dirty runs from only 12 visible ranges.
+        visible.ranges.push_back({1536U,192U});
+        live[1536U][0]=1.0f;
+        live[1664U][0]=1.0f;
+        auto dirty=plan_world_cache_live_upload(live,uploaded,visible);
+        assert(dirty.full && dirty.uploaded_vertices==live.size());
+        visible.partial=true;
+        visible.touched_vertices=11U*64U+192U;
+        dirty=plan_world_cache_live_upload(live,uploaded,visible);
+        assert(!dirty.full && dirty.ranges.size()==12U &&
+               dirty.uploaded_vertices==visible.touched_vertices);
+        record_world_cache_live_upload(live,uploaded,dirty);
+        assert(uploaded==live);
+        assert(plan_world_cache_live_upload(live,uploaded,visible).empty());
+    }
     // Backface culling is mandatory, including SithSurface flag 0x1.
     // A clockwise authored polygon must be corrected at triangulation,
     // so its visible front still matches the native face normal.

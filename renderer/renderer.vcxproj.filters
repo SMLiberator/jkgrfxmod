@@ -710,6 +710,9 @@
     <ClInclude Include="world_cache_streaming.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="world_cache_live_upload.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="offscreen_surface.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
