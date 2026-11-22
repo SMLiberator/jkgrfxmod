@@ -543,7 +543,11 @@ private:
         status_="Unsaved pack changes (Ctrl+S)";
     }
     void syncPreview() {
-        if(!validSelection()) {preview_->setMaterial(PreviewMaterial{});return;}
+        if(!validSelection()) {
+            effectiveEntry_=Document::object();
+            preview_->setMaterial(PreviewMaterial{});
+            return;
+        }
         effectiveEntry_=editor_source::effectiveMaterial(root_,selected(),mode_);
         PreviewMaterial p=fromMetadata(effectiveEntry_,root_,
                                      fs::u8path(file_).parent_path());
@@ -857,7 +861,7 @@ private:
     bool floatField(const char *label,const char *key,float fallback,
                     float low,float high,bool allowAboveSlider=false) {
         Document &obj=selected();
-        float v=number(obj,key,fallback);
+        float v=number(effectiveSelected(),key,fallback);
         ImGui::PushID(key);
         ImGui::TextUnformatted(label);
         const float available=ImGui::GetContentRegionAvail().x;
@@ -917,14 +921,40 @@ private:
         ImGui::PopID();
     }
     void imageInfo(const char *label,const char *key) {
-        std::string value=stringValue(selected(),key);
-        if(value.empty())return;
-        ImGui::TextWrapped("%s: %s",label,value.c_str());
-        fs::path path=fs::u8path(file_).parent_path()/fs::u8path(value);
-        std::error_code ec;
-        if(!fs::exists(path,ec))
-            ImGui::TextColored(ImVec4(1,.5f,.35f,1),"[missing texture]");
-
+        std::string value=stringValue(effectiveSelected(),key);
+        if(isSource()) {
+            // Source packs store original filenames. Edits create or remove
+            // local overrides; inherited defaults stay on the pack itself.
+            ImGui::PushID(key);
+            ImGui::TextUnformatted(label);
+            const bool inherited=editor_source::isInherited(root_,selected(),key,mode_) ||
+                (std::string(key)=="environment_map"&&
+                 !selected().contains(key)&&root_.contains(key));
+            if(value.empty()&&std::string(key)=="environment_map")
+                value=stringValue(root_,"environment_map");
+            if(inherited)ImGui::TextDisabled("Inherited from pack");
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+            if(ImGui::InputText("##sourceMap",&value)) {
+                if(value.empty())selected().erase(key);
+                else selected()[key]=value;
+                changed(key,ImGui::IsItemActive());
+            }
+            if(!value.empty()) {
+                const auto absolute=fs::u8path(file_).parent_path()/fs::u8path(value);
+                std::error_code ec;
+                if(!fs::exists(absolute,ec))
+                    ImGui::TextColored(ImVec4(1,.65f,.35f,1),
+                        "Source texture missing");
+            }
+            ImGui::PopID();
+        } else {
+            if(value.empty())return;
+            ImGui::TextWrapped("%s: %s",label,value.c_str());
+            fs::path full=fs::u8path(file_).parent_path()/fs::u8path(value);
+            std::error_code ec;
+            if(!fs::exists(full,ec))
+                ImGui::TextColored(ImVec4(1,.5f,.35f,1),"[missing texture]");
+        }
     }
     void packTextField(const char *label,const char *key,
                        bool multiline=false,bool optional=false) {
@@ -943,7 +973,9 @@ private:
         ImGui::PopID();
     }
     void renderPackProperties() {
-        ImGui::TextDisabled("Top-level compiled pack metadata");
+        ImGui::TextDisabled(isSource()
+            ?"Source pack (script.json) — editable defaults and metadata"
+            :"Top-level compiled pack metadata");
         packTextField("Name","name");
         packTextField("Description","description",true);
         packTextField("Comment (optional)","comment",true,true);
@@ -1031,7 +1063,145 @@ private:
                 ImGui::TextDisabled("IDs: unique integers 0-65535.");
             }
         }
-        ImGui::TextDisabled("Unknown fields and MAT signatures are preserved.");
+        if(isSource())
+            renderSourcePackDefaults();
+        ImGui::TextDisabled(isSource()
+            ?"Source textures, inheritance and MAT replacements are preserved."
+            :"Unknown fields and MAT signatures are preserved.");
+    }
+    void packDefaultFloat(const char *label,const char *key,float fallback) {
+        ImGui::PushID(key);
+        const bool has=root_.contains(key);
+        ImGui::TextUnformatted(label);
+        float value=number(root_,key,fallback);
+        ImGui::SetNextItemWidth(std::max(90.0f,
+            ImGui::GetContentRegionAvail().x-(has?27.0f:0.0f)));
+        if(ImGui::DragFloat("##packValue",&value,0.01f,0,0,"%.3f")&&
+           std::isfinite(value)) {
+            root_[key]=value;
+            changedPack(key,ImGui::IsItemActive());
+        }
+        if(has) {
+            ImGui::SameLine();
+            if(ImGui::SmallButton("x")){root_.erase(key);changedPack(key);}
+        }
+        ImGui::PopID();
+    }
+    void packDefaultColor(const char *label,const char *key,int count) {
+        ImGui::PushID(key);
+        const bool has=root_.contains(key);
+        ImGui::TextUnformatted(label);
+        auto v=count==4?rgba(root_,key,{1,1,1,1}):
+            std::array<float,4>{0,0,0,1};
+        if(count==3) {
+            const auto color=rgb(root_,key,{0,0,0});
+            std::copy(color.begin(),color.end(),v.begin());
+        }
+        ImGui::SetNextItemWidth(std::max(90.0f,
+            ImGui::GetContentRegionAvail().x-(has?27.0f:0.0f)));
+        const auto flags=ImGuiColorEditFlags_NoLabel|ImGuiColorEditFlags_Float|
+                         ImGuiColorEditFlags_HDR;
+        const bool edited=count==4
+            ?ImGui::ColorEdit4("##packColor",v.data(),flags)
+            :ImGui::ColorEdit3("##packColor",v.data(),flags);
+        if(edited) {
+            setArray(root_,key,v.data(),count);
+            changedPack(key,ImGui::IsItemActive());
+        }
+        if(has) {
+            ImGui::SameLine();
+            if(ImGui::SmallButton("x")){root_.erase(key);changedPack(key);}
+        }
+        ImGui::PopID();
+    }
+    void packDefaultBool(const char *label,const char *key) {
+        ImGui::PushID(key);
+        const bool has=root_.contains(key);
+        const bool fallback=false;
+        bool value=root_.value(key,fallback);
+        if(ImGui::Checkbox(label,&value)) {
+            root_[key]=value;changedPack(key);
+        }
+        if(has) {
+            ImGui::SameLine();
+            if(ImGui::SmallButton("x")){root_.erase(key);changedPack(key);}
+        }
+        ImGui::PopID();
+    }
+    void packDefaultChoice(const char *label,const char *key,
+                           const char *const *values,int count) {
+        ImGui::PushID(key);
+        ImGui::TextUnformatted(label);
+        const std::string current=stringValue(root_,key);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+        if(ImGui::BeginCombo("##packChoice",
+                             current.empty()?"(no pack default)":current.c_str())) {
+            if(ImGui::Selectable("Use renderer default",current.empty())) {
+                if(root_.contains(key)){root_.erase(key);changedPack(key);}
+            }
+            for(int i=0;i<count;++i)
+                if(ImGui::Selectable(values[i],current==values[i])) {
+                    root_[key]=values[i];changedPack(key);
+                }
+            ImGui::EndCombo();
+        }
+        ImGui::PopID();
+    }
+    void renderSourcePackDefaults() {
+        ImGui::Separator();
+        if(!ImGui::CollapsingHeader("Source material defaults"))return;
+        ImGui::TextWrapped(
+            "These properties apply to source materials without their own "
+            "overrides. Use x to remove a pack-wide default.");
+        if(ImGui::TreeNode("Default texture paths")) {
+            for(const auto &entry:std::initializer_list<std::pair<const char*,const char*>>{
+                {"Albedo map","albedo_map"},{"Emissive map","emissive_map"},
+                {"Normal map","normal_map"},{"Normal map 2","normal_map2"},
+                {"Displacement map","displacement_map"},
+                {"Surface map","surface_map"},{"MatCap map","matcap_map"},
+                {"MatCap mask","matcap_surface_map"},
+                {"Clearcoat surface","clearcoat_surface_map"},
+                {"Clearcoat normal","clearcoat_normal_map"}})
+                packTextField(entry.first,entry.second,false,true);
+            ImGui::TreePop();
+        }
+        if(ImGui::TreeNode("Colors and surface properties")) {
+            packDefaultColor("Albedo RGBA","albedo_factor",4);
+            packDefaultColor("Emissive RGB","emissive_factor",3);
+            packDefaultColor("MatCap RGB","matcap_factor",3);
+            packDefaultFloat("Reflection strength","reflection_strength",0);
+            packDefaultFloat("Roughness","roughness",0);
+            packDefaultFloat("Metalness","metalness",0);
+            packDefaultFloat("Normal strength","normal_strength",1);
+            packDefaultFloat("Normal strength 2","normal_strength2",1);
+            packDefaultFloat("Displacement factor","displacement_factor",0);
+            packDefaultFloat("Clearcoat strength","clearcoat_strength",0);
+            packDefaultFloat("Clearcoat roughness","clearcoat_roughness",0.1f);
+            packDefaultFloat("Clearcoat transmission","clearcoat_transmission",1);
+            packDefaultFloat("MatCap roughness","matcap_roughness",0);
+            ImGui::TreePop();
+        }
+        if(ImGui::TreeNode("Rendering defaults")) {
+            packDefaultBool("Keep original MAT albedo","keep_albedo");
+            packDefaultBool("Texture filtering","texture_filtering");
+            const char *refModes[]={"envmap","screen","fixed","planar",
+                                    "hemi","cube","shared"};
+            const char *alphaModes[]={"blend","mask","dithered"};
+            const char *blendModes[]={"normal","additive","multiply","fluid"};
+            packDefaultChoice("Reflection mode","reflection_mode",refModes,7);
+            packDefaultChoice("Alpha mode","alpha_mode",alphaModes,3);
+            packDefaultChoice("Blend mode","blend_mode",blendModes,4);
+            if(stringValue(root_,"alpha_mode")=="mask")
+                packDefaultFloat("Alpha cutoff","alpha_cutoff",0.5f);
+            packDefaultFloat("Depth bias","depth_bias",0);
+            packDefaultFloat("Fluid thickness","fluid_thickness",0);
+            ImGui::TreePop();
+        }
+        if(root_.value("keep_albedo",false)&&root_.contains("albedo_map"))
+            ImGui::TextColored(ImVec4(1,.6f,.3f,1),
+                "Warning: keep_albedo and albedo_map defaults conflict.");
+        ImGui::TextDisabled(
+            "Additional defaults (scroll, pulse) remain preserved in JSON.");
     }
     void renderProperties() {
         ImGui::Begin("Material Properties");
@@ -1047,14 +1217,29 @@ private:
             return;
         }
         const std::string name=stringValue(selected(),"name");
-        ImGui::TextWrapped("Material: %s",name.c_str());
-        ImGui::TextDisabled("Changes update the preview immediately; save metadata separately.");
+        if(isSource()) {
+            std::string updated=name;
+            ImGui::TextUnformatted("Material name");
+            if(ImGui::InputText("##materialName",&updated)) {
+                selected()["name"]=updated;
+                changed("name",ImGui::IsItemActive());
+            }
+            ImGui::TextWrapped("MAT replacements: %s",
+                selected().value("replaces",Document::array()).dump().c_str());
+            ImGui::TextDisabled(
+                "Inherited values are shown; editing creates a local override.");
+            ImGui::TextDisabled("Saving keeps source maps and MAT replacements.");
+        } else {
+            ImGui::TextWrapped("Material: %s",name.c_str());
+            ImGui::TextDisabled(
+                "Changes update the preview immediately; save metadata separately.");
+        }
         if(ImGui::CollapsingHeader("Albedo",ImGuiTreeNodeFlags_DefaultOpen)) {
-            auto v=rgba(selected(),"albedo_factor",{1,1,1,1});
+            auto v=rgba(effectiveSelected(),"albedo_factor",{1,1,1,1});
             colorField("Tint / alpha","albedo_factor",v.data(),4);
             imageInfo("Albedo texture","albedo_map");
-            bool keeps=selected().value("keep_albedo",false)||
-                       selected().value("use_original_albedo",false);
+            bool keeps=effectiveSelected().value("keep_albedo",false)||
+                       effectiveSelected().value("use_original_albedo",false);
             if(keeps) {
                 ImGui::Separator();
                 ImGui::TextUnformatted("Original JK MAT albedo (preview only)");
@@ -1088,10 +1273,13 @@ private:
                     ImGui::TextWrapped("%s",nativeStatus_.c_str());
                 ImGui::TextDisabled("MAT/CMP preview does not alter metadata.");
             }
-            ImGui::TextDisabled("Existing compiled PNG textures are read-only.");
+            if(isSource())
+                ImGui::TextDisabled("Source paths are editable; images are not copied.");
+            else
+                ImGui::TextDisabled("Existing compiled PNG textures are read-only.");
         }
         if(ImGui::CollapsingHeader("Emissive",ImGuiTreeNodeFlags_DefaultOpen)) {
-            auto v=rgb(selected(),"emissive_factor",{0,0,0});
+            auto v=rgb(effectiveSelected(),"emissive_factor",{0,0,0});
             if(ImGui::DragFloat3("Emissive RGB",v.data(),.05f,0,32,"%.2f")) {
                 setArray(selected(),"emissive_factor",v.data(),3);
                 changed("emissive_factor",ImGui::IsItemActive());
@@ -1099,9 +1287,9 @@ private:
             imageInfo("Emissive map","emissive_map");
         }
         if(ImGui::CollapsingHeader("Reflections",ImGuiTreeNodeFlags_DefaultOpen)) {
-            bool hasSurface=selected().find("surface_map")!=selected().end();
+            bool hasSurface=effectiveSelected().find("surface_map")!=effectiveSelected().end();
             floatField("Strength","reflection_strength",hasSurface?1.0f:0.0f,0,1,true);
-            if(number(selected(),"reflection_strength",hasSurface?1.0f:0.0f)>1.0f)
+            if(number(effectiveSelected(),"reflection_strength",hasSurface?1.0f:0.0f)>1.0f)
                 ImGui::TextDisabled("Above 1: explicitly overridden in the numeric field.");
             floatField("Roughness","roughness",hasSurface?1.0f:0.0f,0,1);
             floatField("Metalness","metalness",hasSurface?1.0f:0.0f,0,1);
@@ -1141,11 +1329,11 @@ private:
                 }
             }
             ImGui::PopID();
-            if(!selected().contains("displacement_map"))
+            if(!effectiveSelected().contains("displacement_map"))
                 ImGui::TextDisabled("A displacement texture is required.");
         }
         if(ImGui::CollapsingHeader("Clearcoat",ImGuiTreeNodeFlags_DefaultOpen)) {
-            bool map=selected().find("clearcoat_surface_map")!=selected().end();
+            bool map=effectiveSelected().find("clearcoat_surface_map")!=effectiveSelected().end();
             floatField("Coat strength","clearcoat_strength",map?1.0f:0.0f,0,1);
             floatField("Coat roughness","clearcoat_roughness",.1f,0,1);
             floatField("Coat transmission","clearcoat_transmission",1,0,1);
@@ -1154,7 +1342,7 @@ private:
         }
         if(ImGui::CollapsingHeader("MatCap",ImGuiTreeNodeFlags_DefaultOpen)) {
             floatField("MatCap roughness","matcap_roughness",0,0,1);
-            auto v=rgb(selected(),"matcap_factor",{1,1,1});
+            auto v=rgb(effectiveSelected(),"matcap_factor",{1,1,1});
             if(ImGui::DragFloat3("MatCap RGB factor",v.data(),.02f,0,4,"%.2f")) {
                 setArray(selected(),"matcap_factor",v.data(),3);
                 changed("matcap_factor",ImGui::IsItemActive());
@@ -1170,7 +1358,7 @@ private:
             static const char *blendLabels[]={"Normal","Additive","Multiply","Fluid"};
             comboField("Alpha mode","alpha_mode",alphas,alphaLabels,3);
             comboField("Blend mode","blend_mode",blends,blendLabels,4);
-            if(stringValue(selected(),"alpha_mode")=="mask")
+            if(stringValue(effectiveSelected(),"alpha_mode")=="mask")
                 floatField("Alpha cutoff","alpha_cutoff",.5f,0,1);
             else if(selected().contains("alpha_cutoff")) {
                 ImGui::TextColored(ImVec4(1,.7f,.35f,1),
@@ -1181,7 +1369,10 @@ private:
             }
             floatField("Depth bias","depth_bias",0,-16,16);
         }
-        if(ImGui::CollapsingHeader("Compiled textures")) {
+        if(isSource()) {
+            if(ImGui::CollapsingHeader("Material environment override"))
+                imageInfo("Environment map","environment_map");
+        } else if(ImGui::CollapsingHeader("Compiled textures")) {
             imageInfo("Environment","environment_map");
             imageInfo("Albedo","albedo_map");
             imageInfo("Surface","surface_map");
@@ -1200,17 +1391,21 @@ private:
     void comboField(const char *label,const char *key,
                     const char *const*values,const char *const*labels,int count) {
         Document &obj=selected();
-        std::string value=stringValue(obj,key);
+        std::string value=stringValue(effectiveSelected(),key);
         int current=0;
         for(int i=0;i<count;++i)if(value==values[i])current=i;
         ImGui::PushID(key);
         ImGui::TextUnformatted(label);
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
         std::string display=labels[current];
-        if(value.empty())display+=" (renderer default)";
+        if(!obj.contains(key)) {
+            const bool inherited=editor_source::isInherited(root_,obj,key,mode_);
+            display+=inherited?" (pack default)":" (renderer default)";
+        }
         if(ImGui::BeginCombo("##choice",display.c_str())) {
-            if(ImGui::Selectable("Use renderer default",value.empty())) {
-                obj.erase(key);changed(key);
+            if(ImGui::Selectable(isSource()?"Use pack default":"Use renderer default",
+                                  !obj.contains(key))) {
+                if(obj.contains(key)) {obj.erase(key);changed(key);}
             }
             ImGui::Separator();
             for(int i=0;i<count;++i) {
