@@ -1,534 +1,488 @@
-#include <QApplication>
-#include <QColor>
-#include <QColorDialog>
-#include <QComboBox>
-#include <QDir>
-#include <QDockWidget>
-#include <QDoubleSpinBox>
-#include <QFile>
-#include <QFileDialog>
-#include <QFileInfo>
-#include <QFormLayout>
-#include <QHBoxLayout>
-#include <QImage>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QKeySequence>
-#include <QLabel>
-#include <QListWidget>
-#include <QMainWindow>
-#include <QMap>
-#include <QMenuBar>
-#include <QMessageBox>
-#include <QMouseEvent>
-#include <QOpenGLFunctions_3_3_Core>
-#include <QOpenGLShaderProgram>
-#include <QOpenGLWidget>
-#include <QPushButton>
-#include <QSaveFile>
-#include <QSignalBlocker>
-#include <QStatusBar>
-#include <QSurfaceFormat>
-#include <QVBoxLayout>
-#include <QVector3D>
-#include <QMatrix4x4>
+// Windows-only material editor. No renderer runtime dependencies.
+#include "glad.h"
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+#include "imgui.h"
+#include "backends/imgui_impl_glfw.h"
+#include "backends/imgui_impl_opengl3.h"
+#include "common/json_incl.hpp"
+#include "preview.hpp"
+#include <windows.h>
+#include <commdlg.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
-#include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <string>
 #include <vector>
 
-struct PreviewMaterial {
-    QColor color = Qt::white;
-    QString albedoMap, surfaceMap, environmentMap;
-    float reflection = 0.0f, roughness = 0.5f, metalness = 0.0f;
-    float coat = 0.0f, coatRough = 0.1f, coatTransmission = 1.0f;
-};
-
-static const char *vertexShader = R"GLSL(
-#version 330 core
-layout(location=0) in vec3 aPos;
-layout(location=1) in vec3 aNormal;
-layout(location=2) in vec2 aUV;
-uniform mat4 uModel, uMvp;
-out vec3 p, n;
-out vec2 uv;
-void main() {
-    p = vec3(uModel * vec4(aPos, 1.0));
-    n = normalize(mat3(uModel) * aNormal);
-    uv = aUV;
-    gl_Position = uMvp * vec4(aPos, 1.0);
+namespace fs = std::filesystem;
+using Document = json::json;
+namespace {
+std::string toUtf8(const wchar_t *source) {
+    if(!source || !*source)return {};
+    int count=WideCharToMultiByte(CP_UTF8,0,source,-1,nullptr,0,nullptr,nullptr);
+    if(count<=0)return {};
+    std::string out(size_t(count),'\0');
+    WideCharToMultiByte(CP_UTF8,0,source,-1,out.data(),count,nullptr,nullptr);
+    out.pop_back();
+    return out;
 }
-)GLSL";
-
-static const char *fragmentShader = R"GLSL(
-#version 330 core
-in vec3 p, n;
-in vec2 uv;
-out vec4 color;
-uniform vec3 uEye, uTint;
-uniform float uReflection, uRoughness, uMetalness;
-uniform float uCoat, uCoatRough, uCoatTransmission;
-uniform sampler2D uAlbedo, uSurface, uEnvironment;
-uniform bool uHasAlbedo, uHasSurface;
-const float PI = 3.141592653589793;
-vec3 environment(vec3 dir, float rough) {
-    dir = normalize(dir);
-    vec2 uvEnv = vec2(atan(dir.z, dir.x) / (2.0 * PI) + 0.5,
-                      1.0 - acos(clamp(dir.y, -1.0, 1.0)) / PI);
-    return textureLod(uEnvironment, uvEnv, clamp(rough, 0.0, 1.0) * 7.0).rgb;
+std::string chooseFile(GLFWwindow *window,bool image) {
+    wchar_t path[32768] = {};
+    const wchar_t *filter=image
+        ? L"Image files\0*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.hdr\0All files\0*.*\0\0"
+        : L"Material metadata\0*.json\0All files\0*.*\0\0";
+    OPENFILENAMEW dlg{};
+    dlg.lStructSize=sizeof(dlg);
+    dlg.hwndOwner=glfwGetWin32Window(window);
+    dlg.lpstrFilter=filter;
+    dlg.lpstrFile=path;
+    dlg.nMaxFile=DWORD(sizeof(path)/sizeof(path[0]));
+    dlg.Flags=OFN_EXPLORER|OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
+    return GetOpenFileNameW(&dlg)?toUtf8(path):std::string{};
 }
-vec3 fresnel(float cosTheta, vec3 f0) {
-    return f0 + (1.0 - f0) * pow(1.0 - clamp(cosTheta, 0.0, 1.0), 5.0);
+float number(const Document &obj,const char *key,float fallback) {
+    auto it=obj.find(key);
+    if(it==obj.end()||!it->is_number())return fallback;
+    try {float f=it->get<float>();return std::isfinite(f)?f:fallback;}
+    catch(...) {return fallback;}
 }
-void main() {
-    vec3 N = normalize(n), V = normalize(uEye - p);
-    vec3 R = reflect(-V, N);
-    float ndv = max(dot(N, V), 0.0);
-    vec3 base = uTint * (uHasAlbedo ? texture(uAlbedo, uv).rgb : vec3(1.0));
-    vec3 mask = uHasSurface ? texture(uSurface, uv).rgb : vec3(1.0);
-    float rough = clamp(uRoughness * (uHasSurface ? mask.g : 1.0), 0.02, 1.0);
-    float metal = clamp(uMetalness * (uHasSurface ? mask.b : 1.0), 0.0, 1.0);
-    float strength = max(0.0, uReflection * mask.r);
-    vec3 f0 = mix(vec3(0.04), base, metal);
-    vec3 result = base * (1.0 - metal) * environment(N, 0.9) * 0.32;
-    result += environment(R, rough) * fresnel(ndv, f0) * strength;
-
-    // Independent studio key light, for legible highlights on the preview.
-    vec3 L = normalize(vec3(-0.5, 0.85, 0.65));
-    vec3 H = normalize(L + V);
-    float nh = max(dot(N, H), 0.0);
-    float a = max(rough * rough, 0.001);
-    float d = a*a / max(PI * pow(nh*nh * (a*a - 1.0) + 1.0, 2.0), 0.0001);
-    result += fresnel(max(dot(H, V), 0.0), f0) *
-              d * max(dot(N, L), 0.0) * strength * 0.35;
-
-    float coatF = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
-    result = mix(result, result * (1.0 - coatF) * uCoatTransmission,
-                 clamp(uCoat, 0.0, 1.0));
-    result += clamp(uCoat, 0.0, 1.0) *
-              environment(R, max(0.02, uCoatRough)) * coatF;
-    color = vec4(max(result, vec3(0.0)), 1.0);
+std::array<float,3> rgb(const Document &obj,const char *key,
+                        std::array<float,3> fallback) {
+    auto it=obj.find(key);
+    if(it==obj.end()||!it->is_array()||it->size()!=3)return fallback;
+    for(size_t i=0;i<3;++i)if((*it)[i].is_number())fallback[i]=(*it)[i].get<float>();
+    return fallback;
 }
-)GLSL";
+std::array<float,4> rgba(const Document &obj,const char *key,
+                         std::array<float,4> fallback) {
+    auto it=obj.find(key);
+    if(it==obj.end()||!it->is_array()||it->size()!=4)return fallback;
+    for(size_t i=0;i<4;++i)if((*it)[i].is_number())fallback[i]=(*it)[i].get<float>();
+    return fallback;
+}
+std::string stringValue(const Document &obj,const char *key) {
+    auto it=obj.find(key);
+    return it!=obj.end()&&it->is_string()?it->get<std::string>():std::string{};
+}
+std::string resolvedFile(const fs::path &directory,const std::string &name) {
+    if(name.empty())return {};
+    fs::path p=fs::u8path(name);
+    if(p.is_relative())p=directory/p;
+    return p.u8string();
+}
+PreviewMaterial fromMetadata(const Document &entry,const Document &root,
+                             const fs::path &directory) {
+    PreviewMaterial p;
+    p.albedo=rgba(entry,"albedo_factor",p.albedo);
+    p.emissive=rgb(entry,"emissive_factor",p.emissive);
+    p.matcapFactor=rgb(entry,"matcap_factor",p.matcapFactor);
+    const char *names[]={"albedo_map","surface_map",nullptr,"normal_map",
+        "normal_map2","emissive_map","matcap_map","matcap_surface_map",
+        "clearcoat_surface_map","clearcoat_normal_map"};
+    for(size_t i=0;i<TextureCount;++i)
+        if(names[i])p.files[i]=resolvedFile(directory,stringValue(entry,names[i]));
+    std::string env=stringValue(entry,"environment_map");
+    if(env.empty())env=stringValue(root,"environment_map");
+    p.files[EnvironmentMap]=resolvedFile(directory,env);
+    const bool surf=entry.find("surface_map")!=entry.end();
+    p.reflection=number(entry,"reflection_strength",surf?1.0f:0.0f);
+    p.roughness=number(entry,"roughness",surf?1.0f:0.0f);
+    p.metalness=number(entry,"metalness",surf?1.0f:0.0f);
+    p.normalStrength=number(entry,"normal_strength",1.0f);
+    p.normalStrength2=number(entry,"normal_strength2",1.0f);
+    p.matcapRoughness=number(entry,"matcap_roughness",0.0f);
+    const bool coatSurface=entry.find("clearcoat_surface_map")!=entry.end();
+    p.coat=number(entry,"clearcoat_strength",coatSurface?1.0f:0.0f);
+    p.coatRoughness=number(entry,"clearcoat_roughness",.1f);
+    p.coatTransmission=number(entry,"clearcoat_transmission",1.0f);
+    return p;
+}
+void setArray(Document &obj,const char *key,const float *values,int size) {
+    Document a=Document::array();
+    for(int i=0;i<size;++i)a.push_back(values[i]);
+    obj[key]=std::move(a);
+}
+}
 
-class MaterialView final : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
+class Editor {
 public:
-    explicit MaterialView(QWidget *parent = nullptr) : QOpenGLWidget(parent) {
-        setMinimumSize(420, 340);
+    explicit Editor(GLFWwindow *window) : window_(window) {
+        preview_=std::make_unique<MaterialPreview>();
+        status_="Open a compiled metadata.json to begin.";
     }
+    void frame() {
+        if(ImGui::IsKeyChordPressed(ImGuiMod_Ctrl|ImGuiKey_O))open();
+        if(ImGui::IsKeyChordPressed(ImGuiMod_Ctrl|ImGuiKey_S))save();
 
-    ~MaterialView() override {
-        if (!ready_) return;
-        makeCurrent();
-        GLuint textures[] = {albedo_, surface_, env_};
-        glDeleteTextures(3, textures);
-        glDeleteBuffers(1, &vbo_);
-        glDeleteVertexArrays(1, &vao_);
-        doneCurrent();
-    }
-
-    void setMaterial(const PreviewMaterial &next) {
-        const bool imagesChanged = next.albedoMap != material_.albedoMap ||
-                                   next.surfaceMap != material_.surfaceMap ||
-                                   next.environmentMap != material_.environmentMap;
-        material_ = next;
-        if (ready_ && imagesChanged) {
-            makeCurrent();
-            loadTextures();
-            doneCurrent();
+        ImGui::DockSpaceOverViewport(0,ImGui::GetMainViewport(),
+                                    ImGuiDockNodeFlags_PassthruCentralNode);
+        if(ImGui::BeginMainMenuBar()) {
+            if(ImGui::BeginMenu("File")) {
+                if(ImGui::MenuItem("Open metadata...","Ctrl+O"))open();
+                if(ImGui::MenuItem("Save metadata","Ctrl+S",false,loaded_))save();
+                if(ImGui::MenuItem("Exit"))glfwSetWindowShouldClose(window_,GLFW_TRUE);
+                ImGui::EndMenu();
+            }
+            ImGui::TextDisabled("JkGfxMod Material Editor  |  Win32 + Dear ImGui + OpenGL 3.3");
+            ImGui::EndMainMenuBar();
         }
-        update();
+        renderList();
+        renderViewport();
+        renderProperties();
     }
-    void setPreset(int preset) {
-        preset_ = preset;
-        customEnv_.clear();
-        if (ready_) { makeCurrent(); loadTextures(); doneCurrent(); }
-        update();
-    }
-    void selectCustomEnvironment(const QString &path) {
-        customEnv_ = path;
-        if (ready_) { makeCurrent(); loadTextures(); doneCurrent(); }
-        update();
-    }
-    void setMesh(int mesh) { plane_ = mesh != 0; update(); }
-
-protected:
-    void initializeGL() override {
-        initializeOpenGLFunctions();
-        glEnable(GL_DEPTH_TEST);
-        glEnable(GL_MULTISAMPLE);
-        if (!shader_.addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShader) ||
-            !shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShader) ||
-            !shader_.link()) {
-            qWarning("Material preview shaders could not be initialized");
-        }
-        glGenVertexArrays(1, &vao_);
-        glGenBuffers(1, &vbo_);
-        glBindVertexArray(vao_);
-        glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, px));
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, nx));
-        glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, u));
-        glBindVertexArray(0);
-        ready_ = true;
-        loadTextures();
-    }
-
-    void paintGL() override {
-        glClearColor(0.105f, 0.115f, 0.135f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        if (!shader_.isLinked()) return;
-        const std::vector<Vertex> mesh = plane_ ? makePlane() : makeSphere();
-        glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-        glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(mesh.size()*sizeof(Vertex)), mesh.data(), GL_STATIC_DRAW);
-        QMatrix4x4 model, view, projection;
-        model.rotate(pitch_, 1, 0, 0);
-        model.rotate(yaw_, 0, 1, 0);
-        const QVector3D eye(0, 0, 3.2f);
-        view.lookAt(eye, QVector3D(0,0,0), QVector3D(0,1,0));
-        projection.perspective(38, float(width())/float(std::max(1,height())), 0.1f, 30.0f);
-        shader_.bind();
-        shader_.setUniformValue("uModel", model);
-        shader_.setUniformValue("uMvp", projection*view*model);
-        shader_.setUniformValue("uEye", eye);
-        shader_.setUniformValue("uTint", QVector3D(material_.color.redF(),
-                        material_.color.greenF(), material_.color.blueF()));
-        shader_.setUniformValue("uReflection", material_.reflection);
-        shader_.setUniformValue("uRoughness", material_.roughness);
-        shader_.setUniformValue("uMetalness", material_.metalness);
-        shader_.setUniformValue("uCoat", material_.coat);
-        shader_.setUniformValue("uCoatRough", material_.coatRough);
-        shader_.setUniformValue("uCoatTransmission", material_.coatTransmission);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, albedo_);
-        shader_.setUniformValue("uAlbedo", 0);
-        shader_.setUniformValue("uHasAlbedo", albedo_ != 0);
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, surface_);
-        shader_.setUniformValue("uSurface", 1);
-        shader_.setUniformValue("uHasSurface", surface_ != 0);
-        glActiveTexture(GL_TEXTURE2);
-        glBindTexture(GL_TEXTURE_2D, env_);
-        shader_.setUniformValue("uEnvironment", 2);
-        glBindVertexArray(vao_);
-        glDrawArrays(GL_TRIANGLES, 0, GLsizei(mesh.size()));
-        glBindVertexArray(0);
-        shader_.release();
-    }
-
-    void mousePressEvent(QMouseEvent *event) override { last_ = event->pos(); }
-    void mouseMoveEvent(QMouseEvent *event) override {
-        if (event->buttons() & Qt::LeftButton) {
-            QPoint d = event->pos() - last_;
-            yaw_ += d.x() * .5f;
-            pitch_ = std::clamp(pitch_ + d.y() * .5f, -85.f, 85.f);
-            update();
-        }
-        last_ = event->pos();
+    bool confirmClose() {
+        if(!dirty_)return true;
+        int r=MessageBoxW(glfwGetWin32Window(window_),
+            L"Discard unsaved changes to metadata.json?",L"Unsaved changes",
+            MB_ICONWARNING|MB_YESNO);
+        return r==IDYES;
     }
 
 private:
-    struct Vertex { float px,py,pz,nx,ny,nz,u,v; };
-    static std::vector<Vertex> makePlane() {
-        return {{-1,-1,0,0,0,1,0,0},{1,-1,0,0,0,1,1,0},{1,1,0,0,0,1,1,1},
-                {-1,-1,0,0,0,1,0,0},{1,1,0,0,0,1,1,1},{-1,1,0,0,0,1,0,1}};
+    Document &selected() {
+        return root_["materials"][size_t(selection_)];
     }
-    static std::vector<Vertex> makeSphere() {
-        std::vector<Vertex> out;
-        constexpr int rows = 36, cols = 48;
-        constexpr float pi = 3.14159265358979323846f;
-        auto vertex = [](int x, int y) -> Vertex {
-            constexpr float pi = 3.14159265358979323846f;
-            float u = x/48.f, v = y/36.f;
-            float a = u*2*pi, b = v*pi;
-            float nx = sinf(b)*cosf(a), ny = cosf(b), nz = sinf(b)*sinf(a);
-            return {nx,ny,nz,nx,ny,nz,u,1-v};
-        };
-        out.reserve(rows*cols*6);
-        for (int y=0;y<rows;y++) for (int x=0;x<cols;x++) {
-            out.push_back(vertex(x,y)); out.push_back(vertex(x,y+1));
-            out.push_back(vertex(x+1,y));
-            out.push_back(vertex(x+1,y)); out.push_back(vertex(x,y+1));
-            out.push_back(vertex(x+1,y+1));
+    const Document &selected() const {
+        return root_["materials"][size_t(selection_)];
+    }
+    bool validSelection() const {
+        return loaded_&&selection_>=0&&
+               size_t(selection_)<root_["materials"].size();
+    }
+    void changed() {
+        dirty_=true;
+        syncPreview();
+        status_="Unsaved material changes (Ctrl+S)";
+    }
+    void syncPreview() {
+        if(validSelection())preview_->setMaterial(
+            fromMetadata(selected(),root_,fs::u8path(file_).parent_path()));
+        else preview_->setMaterial(PreviewMaterial{});
+    }
+    void open() {
+        if(dirty_&&!confirmClose())return;
+        const std::string path=chooseFile(window_,false);
+        if(path.empty())return;
+        try {
+            std::ifstream stream(fs::u8path(path),std::ios::binary);
+            if(!stream)throw std::runtime_error("Unable to open file.");
+            Document doc;stream>>doc;
+            if(!doc.is_object()||doc.find("materials")==doc.end()||
+               !doc["materials"].is_array())
+                throw std::runtime_error("Not a compiled material pack (missing materials array).");
+            root_=std::move(doc);
+            file_=path;loaded_=true;dirty_=false;
+            selection_=root_["materials"].empty()?-1:0;
+            syncPreview();
+            status_="Loaded "+std::to_string(root_["materials"].size())+" materials.";
+        } catch(const std::exception &e) {
+            status_=std::string("Open failed: ")+e.what();
+            MessageBoxA(glfwGetWin32Window(window_),status_.c_str(),"Material editor",MB_ICONERROR);
         }
-        return out;
     }
-
-    GLuint importImage(const QString &path) {
-        QImage image(path);
-        if (image.isNull()) return 0;
-        image = image.convertToFormat(QImage::Format_RGBA8888).mirrored(false,true);
-        GLuint texture = 0;
-        glGenTextures(1,&texture);
-        glBindTexture(GL_TEXTURE_2D,texture);
-        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,image.width(),image.height(),
-                     0,GL_RGBA,GL_UNSIGNED_BYTE,image.constBits());
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);
-        glGenerateMipmap(GL_TEXTURE_2D);
-        return texture;
-    }
-
-    GLuint presetEnvironment() {
-        QImage image(512,256,QImage::Format_RGBA8888);
-        for(int y=0;y<image.height();++y) for(int x=0;x<image.width();++x) {
-            float u=float(x)/image.width(),v=float(y)/image.height();
-            float r,g,b;
-            if (preset_==1) { r=v<.5f?.38f:.19f; g=v<.5f?.56f:.22f; b=v<.5f?.82f:.18f; }
-            else if (preset_==2) { r=.035f;g=.032f;b=v<.5f?.09f:.035f; }
-            else { r=v<.52f?.32f:.16f;g=v<.52f?.35f:.17f;b=v<.52f?.39f:.19f; }
-            if(u>.12f&&u<.25f&&v>.12f&&v<.42f) {r+=.60f;g+=.60f;b+=.60f;}
-            if(u>.73f&&u<.85f&&v>.17f&&v<.38f) {r+=.45f;g+=.45f;b+=.45f;}
-            image.setPixelColor(x,y,QColor::fromRgbF(std::min(1.f,r),std::min(1.f,g),std::min(1.f,b)));
+    void save() {
+        if(!loaded_)return;
+        try {
+            fs::path destination=fs::u8path(file_);
+            fs::path temp=destination;
+            temp+=L".tmp";
+            {
+                std::ofstream stream(temp,std::ios::binary|std::ios::trunc);
+                if(!stream)throw std::runtime_error("Cannot write temporary file.");
+                stream<<root_.dump(4)<<"\n";
+                stream.flush();
+                if(!stream)throw std::runtime_error("Failed to write JSON.");
+            }
+            if(!MoveFileExW(temp.c_str(),destination.c_str(),
+                            MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))
+                throw std::runtime_error("Cannot replace metadata.json. Close other programs using it.");
+            dirty_=false;
+            status_="Saved metadata.json. No MAT signatures were regenerated.";
+        } catch(const std::exception &e) {
+            status_=std::string("Save failed: ")+e.what();
+            MessageBoxA(glfwGetWin32Window(window_),status_.c_str(),"Save failed",MB_ICONERROR);
         }
-        // QImage scanlines run top-to-bottom; OpenGL textures run bottom-to-top.
-        image = image.mirrored(false,true);
-        GLuint texture=0;
-        glGenTextures(1,&texture);
-        glBindTexture(GL_TEXTURE_2D,texture);
-        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,image.width(),image.height(),0,
-                     GL_RGBA,GL_UNSIGNED_BYTE,image.constBits());
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);
-        glGenerateMipmap(GL_TEXTURE_2D);
-        return texture;
+    }
+    void renderList() {
+        ImGui::SetNextWindowPos(ImVec2(10,35),ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(255,690),ImGuiCond_FirstUseEver);
+        ImGui::Begin("Materials");
+        if(ImGui::Button("Open pack..."))open();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!loaded_);
+        if(ImGui::Button("Save"))save();
+        ImGui::EndDisabled();
+        if(loaded_) {
+            ImGui::TextWrapped("%s",fs::u8path(file_).filename().u8string().c_str());
+            ImGui::Separator();
+            filter_.Draw("Search");
+            if(ImGui::BeginChild("MaterialList",ImVec2(0,-105),true)) {
+                for(size_t i=0;i<root_["materials"].size();++i) {
+                    const Document &item=root_["materials"][i];
+                    std::string name=stringValue(item,"name");
+                    if(name.empty())name="(unnamed)";
+                    if(!filter_.PassFilter(name.c_str()))continue;
+                    ImGui::PushID(int(i));
+                    if(ImGui::Selectable(name.c_str(),selection_==int(i))) {
+                        selection_=int(i);syncPreview();
+                    }
+                    ImGui::PopID();
+                }
+            }
+            ImGui::EndChild();
+        } else {
+            ImGui::TextWrapped("Open an existing compiled material pack. The preview updates immediately when you change a property.");
+        }
+        ImGui::Separator();
+        ImGui::TextWrapped("%s",status_.c_str());
+        if(dirty_)ImGui::TextColored(ImVec4(1,.76f,.33f,1),"Unsaved changes");
+        ImGui::End();
+    }
+    void renderViewport() {
+        ImGui::SetNextWindowPos(ImVec2(275,35),ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(660,690),ImGuiCond_FirstUseEver);
+        ImGui::Begin("Live Material Preview");
+        if(ImGui::RadioButton("Sphere",!plane_))plane_=false;
+        ImGui::SameLine();
+        if(ImGui::RadioButton("Plane",plane_))plane_=true;
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(150);
+        const char *options[]={"Studio","Outdoor","Night"};
+        if(ImGui::Combo("Fallback environment",&environment_,options,3))
+            preview_->setPreset(environment_);
+        if(ImGui::Button("Override envmap...")) {
+            std::string path=chooseFile(window_,true);
+            if(!path.empty()) {
+                preview_->setEnvironmentOverride(path);override_=path;
+            }
+        }
+        ImGui::SameLine();
+        if(ImGui::Button("Use material / pack envmap")) {
+            override_.clear();preview_->setEnvironmentOverride({});
+        }
+        if(!override_.empty())ImGui::TextWrapped("Preview override: %s",override_.c_str());
+        ImGui::TextDisabled("All reflection modes use this environment image in the editor.");
+        ImVec2 area=ImGui::GetContentRegionAvail();
+        area.x=std::max(area.x,64.0f);
+        area.y=std::max(area.y-35.0f,64.0f);
+        if(preview_->valid()) {
+            preview_->draw(int(area.x),int(area.y),yaw_,pitch_,plane_);
+            ImGui::Image((ImTextureID)(intptr_t)preview_->outputTexture(),
+                         area,ImVec2(0,1),ImVec2(1,0));
+            if(ImGui::IsItemActive()&&ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+                ImVec2 delta=ImGui::GetIO().MouseDelta;
+                yaw_+=delta.x*.009f;
+                pitch_=std::clamp(pitch_+delta.y*.009f,-1.48f,1.48f);
+            }
+        } else {
+            ImGui::TextWrapped("GLSL preview failed: %s",preview_->error().c_str());
+        }
+        ImGui::TextDisabled("Drag to rotate. Studio lighting differs from in-game lighting.");
+        ImGui::End();
+    }
+    bool floatField(const char *label,const char *key,float fallback,
+                    float low,float high) {
+        Document &obj=selected();
+        float v=number(obj,key,fallback);
+        ImGui::PushID(key);
+        bool modified=ImGui::SliderFloat(label,&v,low,high,"%.3f",
+                                         high<=1.0f?ImGuiSliderFlags_AlwaysClamp:0);
+        if(modified) {
+            obj[key]=v;changed();
+        }
+        ImGui::SameLine();
+        if(obj.find(key)!=obj.end()&&ImGui::SmallButton("x")) {
+            obj.erase(key);changed();modified=true;
+        }
+        ImGui::PopID();
+        return modified;
+    }
+    void colorField(const char *label,const char *key,float *values,int count,
+                    bool hdr=false) {
+        Document &obj=selected();
+        bool changedValue=(count==4)
+            ?ImGui::ColorEdit4(label,values,hdr?ImGuiColorEditFlags_HDR|ImGuiColorEditFlags_Float:0)
+            :ImGui::ColorEdit3(label,values,hdr?ImGuiColorEditFlags_HDR|ImGuiColorEditFlags_Float:0);
+        if(changedValue){setArray(obj,key,values,count);changed();}
+        ImGui::SameLine();
+        if(obj.find(key)!=obj.end()) {
+            ImGui::PushID(key);
+            if(ImGui::SmallButton("x")){obj.erase(key);changed();}
+            ImGui::PopID();
+        }
+    }
+    void imageInfo(const char *label,const char *key) {
+        std::string value=stringValue(selected(),key);
+        if(value.empty())return;
+        ImGui::TextWrapped("%s: %s",label,value.c_str());
+        fs::path path=fs::u8path(file_).parent_path()/fs::u8path(value);
+        std::error_code ec;
+        if(!fs::exists(path,ec)) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1,.5f,.35f,1),"[missing]");
+        }
+    }
+    void renderProperties() {
+        ImGui::SetNextWindowPos(ImVec2(950,35),ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(370,690),ImGuiCond_FirstUseEver);
+        ImGui::Begin("Material Properties");
+        if(!validSelection()) {
+            ImGui::TextWrapped("Select a material to edit its properties and see the result in the OpenGL preview.");
+            ImGui::End();return;
+        }
+        const std::string name=stringValue(selected(),"name");
+        ImGui::TextWrapped("Material: %s",name.c_str());
+        ImGui::TextDisabled("Changes update the preview immediately; save metadata separately.");
+        if(ImGui::CollapsingHeader("Albedo",ImGuiTreeNodeFlags_DefaultOpen)) {
+            auto v=rgba(selected(),"albedo_factor",{1,1,1,1});
+            colorField("Tint / alpha","albedo_factor",v.data(),4);
+            imageInfo("Albedo texture","albedo_map");
+            ImGui::TextDisabled("Existing compiled PNG textures are read-only.");
+        }
+        if(ImGui::CollapsingHeader("Reflections",ImGuiTreeNodeFlags_DefaultOpen)) {
+            bool hasSurface=selected().find("surface_map")!=selected().end();
+            floatField("Strength","reflection_strength",hasSurface?1.0f:0.0f,0,8);
+            floatField("Roughness","roughness",hasSurface?1.0f:0.0f,0,1);
+            floatField("Metalness","metalness",hasSurface?1.0f:0.0f,0,1);
+            const char *modes[]={"envmap","screen","fixed","planar","hemi","cube","shared"};
+            std::string mode=stringValue(selected(),"reflection_mode");
+            int current=0;
+            for(int i=0;i<7;++i)if(mode==modes[i])current=i;
+            if(ImGui::Combo("Game reflection mode",&current,modes,7)) {
+                selected()["reflection_mode"]=modes[current];changed();
+            }
+            ImGui::TextDisabled("Preview uses EnvMap for all game reflection modes.");
+            imageInfo("Surface (R/G/B)","surface_map");
+        }
+        if(ImGui::CollapsingHeader("Normal maps",ImGuiTreeNodeFlags_DefaultOpen)) {
+            floatField("Normal strength","normal_strength",1,0,4);
+            floatField("Layer 2 strength","normal_strength2",1,0,4);
+            imageInfo("Normal 1","normal_map");imageInfo("Normal 2","normal_map2");
+        }
+        if(ImGui::CollapsingHeader("Clearcoat",ImGuiTreeNodeFlags_DefaultOpen)) {
+            bool map=selected().find("clearcoat_surface_map")!=selected().end();
+            floatField("Coat strength","clearcoat_strength",map?1.0f:0.0f,0,1);
+            floatField("Coat roughness","clearcoat_roughness",.1f,0,1);
+            floatField("Coat transmission","clearcoat_transmission",1,0,1);
+            imageInfo("Coat RGB","clearcoat_surface_map");
+            imageInfo("Coat normal","clearcoat_normal_map");
+        }
+        if(ImGui::CollapsingHeader("MatCap",ImGuiTreeNodeFlags_DefaultOpen)) {
+            floatField("MatCap roughness","matcap_roughness",0,0,1);
+            auto v=rgb(selected(),"matcap_factor",{1,1,1});
+            ImGui::DragFloat3("MatCap RGB factor",v.data(),.02f,0,4,"%.2f");
+            if(ImGui::IsItemDeactivatedAfterEdit()) {
+                setArray(selected(),"matcap_factor",v.data(),3);changed();
+            }
+            imageInfo("MatCap","matcap_map");
+            imageInfo("MatCap mask","matcap_surface_map");
+        }
+        if(ImGui::CollapsingHeader("Emissive",ImGuiTreeNodeFlags_DefaultOpen)) {
+            auto v=rgb(selected(),"emissive_factor",{0,0,0});
+            if(ImGui::DragFloat3("Emissive RGB",v.data(),.05f,0,32,"%.2f")) {
+                setArray(selected(),"emissive_factor",v.data(),3);changed();
+            }
+            imageInfo("Emissive map","emissive_map");
+        }
+        if(ImGui::CollapsingHeader("Other settings")) {
+            const char *alphas[]={"blend","mask","dithered"};
+            const char *blends[]={"normal","additive","multiply","fluid"};
+            comboField("Alpha mode","alpha_mode",alphas,3);
+            comboField("Blend mode","blend_mode",blends,4);
+            floatField("Alpha cutoff","alpha_cutoff",.5f,0,1);
+            floatField("Depth bias","depth_bias",0,-16,16);
+        }
+        if(ImGui::CollapsingHeader("Compiled textures")) {
+            imageInfo("Environment","environment_map");
+            imageInfo("Albedo","albedo_map");
+            imageInfo("Surface","surface_map");
+            imageInfo("Normal","normal_map");
+            imageInfo("Normal 2","normal_map2");
+            imageInfo("Emissive","emissive_map");
+            imageInfo("Displacement","displacement_map");
+            imageInfo("MatCap","matcap_map");
+            imageInfo("MatCap mask","matcap_surface_map");
+            imageInfo("Coat surface","clearcoat_surface_map");
+            imageInfo("Coat normal","clearcoat_normal_map");
+            ImGui::Separator();
+            ImGui::TextWrapped("MAT replacements/signatures are preserved exactly when saving. Texture importing and incremental recompilation are not included in this milestone.");
+        }
+        ImGui::End();
+    }
+    void comboField(const char *label,const char *key,const char *const*opts,int count) {
+        std::string value=stringValue(selected(),key);
+        int current=0;
+        for(int i=0;i<count;++i)if(value==opts[i])current=i;
+        if(ImGui::Combo(label,&current,opts,count)) {
+            selected()[key]=opts[current];changed();
+        }
     }
 
-    void loadTextures() {
-        const GLuint old[] = {albedo_,surface_,env_};
-        glDeleteTextures(3,old);
-        albedo_ = importImage(material_.albedoMap);
-        surface_ = importImage(material_.surfaceMap);
-        const QString envPath=customEnv_.isEmpty()?material_.environmentMap:customEnv_;
-        env_ = importImage(envPath);
-        if(!env_) env_=presetEnvironment();
-    }
-
-    QOpenGLShaderProgram shader_;
-    PreviewMaterial material_;
-    GLuint vao_=0,vbo_=0,albedo_=0,surface_=0,env_=0;
-    bool ready_=false,plane_=false;
-    int preset_=0;
-    QString customEnv_;
-    QPoint last_;
-    float yaw_=-25.f,pitch_=15.f;
+    GLFWwindow *window_;
+    std::unique_ptr<MaterialPreview> preview_;
+    Document root_=Document::object();
+    std::string file_,status_,override_;
+    bool loaded_=false,dirty_=false,plane_=false;
+    int selection_=-1,environment_=0;
+    float yaw_=-.35f,pitch_=.15f;
+    ImGuiTextFilter filter_;
 };
 
-static double number(const QJsonObject &obj,const char *key,double fallback) {
-    QJsonValue v=obj.value(QLatin1String(key));
-    return v.isDouble()?v.toDouble():fallback;
-}
-
-class EditorWindow final : public QMainWindow {
-public:
-    EditorWindow() {
-        resize(1160,740);
-        setWindowTitle("JkGfxMod Material Editor (prototype)");
-        view_=new MaterialView(this);
-        QWidget *center=new QWidget(this);
-        auto *layout=new QVBoxLayout(center);
-        auto *toolbar=new QHBoxLayout();
-        auto *meshes=new QComboBox(center);
-        meshes->addItems({"Sphere","Plane"});
-        auto *environments=new QComboBox(center);
-        environments->addItems({"Studio","Outdoor","Night"});
-        auto *custom=new QPushButton("Preview custom envmap...",center);
-        toolbar->addWidget(new QLabel("Mesh:",center));toolbar->addWidget(meshes);
-        toolbar->addWidget(new QLabel("Fallback envmap:",center));toolbar->addWidget(environments);
-        toolbar->addWidget(custom);toolbar->addStretch();
-        layout->addLayout(toolbar);layout->addWidget(view_,1);
-        layout->addWidget(new QLabel("Drag to rotate. Preview is an independent approximation, not the game renderer.",center));
-        setCentralWidget(center);
-        connect(meshes,QOverload<int>::of(&QComboBox::currentIndexChanged),view_,&MaterialView::setMesh);
-        connect(environments,QOverload<int>::of(&QComboBox::currentIndexChanged),view_,&MaterialView::setPreset);
-        connect(custom,&QPushButton::clicked,this,[this] {
-            QString image=QFileDialog::getOpenFileName(this,"Preview equirectangular envmap",{},
-                                                       "Images (*.png *.jpg *.jpeg *.bmp)");
-            if(!image.isEmpty()) view_->selectCustomEnvironment(image);
-        });
-
-        list_=new QListWidget(this);
-        auto *left=new QDockWidget("Materials",this);
-        left->setObjectName("MaterialsDock");
-        left->setWidget(list_);addDockWidget(Qt::LeftDockWidgetArea,left);
-        connect(list_,&QListWidget::currentRowChanged,this,[this](int row) {
-            if(!loading_){selected_=row;refresh();}
-        });
-
-        QWidget *panel=new QWidget(this);
-        auto *rightLayout=new QVBoxLayout(panel);
-        auto *form=new QFormLayout();
-        rightLayout->addLayout(form);
-        tint_=new QPushButton("Select color...",panel);
-        form->addRow("Albedo factor",tint_);
-        connect(tint_,&QPushButton::clicked,this,[this] {
-            if(selected_<0)return;
-            auto obj=current();
-            auto c=readColor(obj);
-            QColor result=QColorDialog::getColor(c,this,"Albedo factor");
-            if(!result.isValid())return;
-            QJsonArray previous=obj.value("albedo_factor").toArray();
-            double alpha=previous.size()==4?previous[3].toDouble(1.0):1.0;
-            obj["albedo_factor"]=QJsonArray{result.redF(),result.greenF(),result.blueF(),alpha};
-            replaceCurrent(obj);
-        });
-        addNumber(form,"Reflection strength","reflection_strength",0,10);
-        addNumber(form,"Roughness","roughness",0,1);
-        addNumber(form,"Metalness","metalness",0,1);
-        addNumber(form,"Clearcoat strength","clearcoat_strength",0,1);
-        addNumber(form,"Clearcoat roughness","clearcoat_roughness",0,1);
-        addNumber(form,"Clearcoat transmission","clearcoat_transmission",0,1);
-        textures_=new QLabel(panel);
-        textures_->setWordWrap(true);
-        textures_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        form->addRow("Textures",textures_);
-        rightLayout->addStretch();
-        auto *right=new QDockWidget("Properties",this);
-        right->setObjectName("PropertiesDock");
-        right->setWidget(panel);addDockWidget(Qt::RightDockWidgetArea,right);
-
-        auto *menu=menuBar()->addMenu("&File");
-        auto *open=menu->addAction("&Open compiled metadata...");
-        auto *save=menu->addAction("&Save metadata");
-        save->setShortcut(QKeySequence::Save);
-        connect(open,&QAction::triggered,this,[this]{openPack();});
-        connect(save,&QAction::triggered,this,[this]{savePack();});
-        statusBar()->showMessage("Open a material pack's metadata.json to begin.");
-        refresh();
+int main() {
+    if(!glfwInit())return 1;
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR,3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE,GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_SAMPLES,4);
+    GLFWwindow *window=glfwCreateWindow(1350,800,"JkGfxMod Material Editor",nullptr,nullptr);
+    if(!window){glfwTerminate();return 2;}
+    glfwMakeContextCurrent(window);
+    glfwSwapInterval(1);
+    if(!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+        MessageBoxW(glfwGetWin32Window(window),L"OpenGL 3.3 loader failed.",
+                    L"Material editor",MB_ICONERROR);
+        glfwDestroyWindow(window);glfwTerminate();return 3;
     }
-
-private:
-    void addNumber(QFormLayout *form,const QString &label,const QString &key,
-                   double min,double max) {
-        auto *box=new QDoubleSpinBox(this);
-        box->setRange(min,max);box->setDecimals(3);box->setSingleStep(.01);
-        values_.insert(key,box);form->addRow(label,box);
-        connect(box,QOverload<double>::of(&QDoubleSpinBox::valueChanged),this,
-                [this,key](double value) {
-            if(loading_||selected_<0)return;
-            auto obj=current();obj[key]=value;replaceCurrent(obj);
-        });
-    }
-    QJsonObject current() const {
-        QJsonArray arr=root_.value("materials").toArray();
-        return selected_>=0&&selected_<arr.size()?arr[selected_].toObject():QJsonObject{};
-    }
-    static QColor readColor(const QJsonObject &obj) {
-        auto a=obj.value("albedo_factor").toArray();
-        return a.size()>=3?QColor::fromRgbF(std::clamp(a[0].toDouble(1),0.,1.),
-                    std::clamp(a[1].toDouble(1),0.,1.),
-                    std::clamp(a[2].toDouble(1),0.,1.)):QColor(Qt::white);
-    }
-    void openPack() {
-        if(dirty_&&QMessageBox::question(this,"Unsaved edits","Discard unsaved changes?")!=QMessageBox::Yes)return;
-        QString path=QFileDialog::getOpenFileName(this,"Open compiled material pack",file_,"JSON files (*.json)");
-        if(path.isEmpty())return;
-        QFile f(path);
-        if(!f.open(QIODevice::ReadOnly)){QMessageBox::warning(this,"Open failed",f.errorString());return;}
-        QJsonParseError error;
-        auto doc=QJsonDocument::fromJson(f.readAll(),&error);
-        if(error.error!=QJsonParseError::NoError||!doc.isObject()||
-           !doc.object().value("materials").isArray()) {
-            QMessageBox::warning(this,"Invalid pack","Expected metadata JSON with a materials array.");
-            return;
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO &io=ImGui::GetIO();
+    io.ConfigFlags|=ImGuiConfigFlags_DockingEnable;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window,true);
+    ImGui_ImplOpenGL3_Init("#version 330 core");
+    {
+        Editor editor(window);
+        bool confirmed=false;
+        while(true) {
+            glfwPollEvents();
+            if(glfwWindowShouldClose(window)) {
+                if(!confirmed&&!editor.confirmClose())glfwSetWindowShouldClose(window,GLFW_FALSE);
+                else break;
+            }
+            ImGui_ImplOpenGL3_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+            editor.frame();
+            ImGui::Render();
+            int w=0,h=0;glfwGetFramebufferSize(window,&w,&h);
+            glBindFramebuffer(GL_FRAMEBUFFER,0);
+            glViewport(0,0,w,h);
+            glDisable(GL_DEPTH_TEST);
+            glClearColor(.10f,.11f,.13f,1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+            glfwSwapBuffers(window);
         }
-        file_=path;root_=doc.object();dirty_=false;loading_=true;
-        list_->clear();
-        auto arr=root_.value("materials").toArray();
-        for(auto v:arr)list_->addItem(v.toObject().value("name").toString("(unnamed)"));
-        loading_=false;
-        selected_=-1;
-        if(!arr.isEmpty())list_->setCurrentRow(0);else refresh();
-        setWindowTitle("JkGfxMod Material Editor — "+QFileInfo(path).fileName());
-        statusBar()->showMessage(QString("Loaded %1 materials").arg(arr.size()),5000);
     }
-    void replaceCurrent(const QJsonObject &obj) {
-        if(selected_<0)return;
-        auto arr=root_.value("materials").toArray();
-        arr.replace(selected_,obj);root_["materials"]=arr;dirty_=true;
-        refresh();
-        statusBar()->showMessage("Unsaved metadata changes",2000);
-    }
-    void refresh() {
-        bool active=selected_>=0;
-        tint_->setEnabled(active);
-        for(auto *v:values_)v->setEnabled(active);
-        if(!active){textures_->clear();return;}
-        loading_=true;
-        auto obj=current();
-        const QDir folder(QFileInfo(file_).absolutePath());
-        auto localPath=[&](const QJsonObject &source,const char *key) {
-            QString value=source.value(QLatin1String(key)).toString();
-            return value.isEmpty()?QString():folder.absoluteFilePath(value);
-        };
-        PreviewMaterial p;
-        p.color=readColor(obj);
-        p.albedoMap=localPath(obj,"albedo_map");
-        p.surfaceMap=localPath(obj,"surface_map");
-        p.environmentMap=localPath(obj,"environment_map");
-        if(p.environmentMap.isEmpty())p.environmentMap=localPath(root_,"environment_map");
-        const bool hasSurface=!p.surfaceMap.isEmpty();
-        p.reflection=float(number(obj,"reflection_strength",hasSurface?1:0));
-        p.roughness=float(number(obj,"roughness",hasSurface?1:0));
-        p.metalness=float(number(obj,"metalness",hasSurface?1:0));
-        p.coat=float(number(obj,"clearcoat_strength",obj.contains("clearcoat_surface_map")?1:0));
-        p.coatRough=float(number(obj,"clearcoat_roughness",.1));
-        p.coatTransmission=float(number(obj,"clearcoat_transmission",1));
-        const QMap<QString,double> v={{"reflection_strength",p.reflection},
-            {"roughness",p.roughness},{"metalness",p.metalness},
-            {"clearcoat_strength",p.coat},{"clearcoat_roughness",p.coatRough},
-            {"clearcoat_transmission",p.coatTransmission}};
-        for(auto it=values_.cbegin();it!=values_.cend();++it) {
-            QSignalBlocker blocker(it.value());
-            it.value()->setValue(v.value(it.key()));
-        }
-        tint_->setStyleSheet(QString("background-color: %1").arg(p.color.name()));
-        textures_->setText("Albedo: "+obj.value("albedo_map").toString("—")+
-                           "\nSurface: "+obj.value("surface_map").toString("—")+
-                           "\nEnvmap: "+(obj.contains("environment_map")
-                              ?obj.value("environment_map").toString():
-                                root_.value("environment_map").toString("Studio fallback")));
-        view_->setMaterial(p);
-        loading_=false;
-    }
-    void savePack() {
-        if(file_.isEmpty()){QMessageBox::information(this,"No pack","Open compiled metadata first.");return;}
-        QSaveFile file(file_);
-        if(!file.open(QIODevice::WriteOnly)){QMessageBox::warning(this,"Save failed",file.errorString());return;}
-        QByteArray data=QJsonDocument(root_).toJson(QJsonDocument::Indented);
-        if(file.write(data)!=data.size()||!file.commit()){
-            QMessageBox::warning(this,"Save failed",file.errorString());return;
-        }
-        dirty_=false;statusBar()->showMessage("Saved metadata.json",4000);
-    }
-    MaterialView *view_=nullptr;
-    QListWidget *list_=nullptr;
-    QPushButton *tint_=nullptr;
-    QLabel *textures_=nullptr;
-    QMap<QString,QDoubleSpinBox*> values_;
-    QString file_;
-    QJsonObject root_;
-    int selected_=-1;
-    bool loading_=false,dirty_=false;
-};
-
-int main(int argc,char **argv) {
-    QSurfaceFormat fmt;
-    fmt.setVersion(3,3);
-    fmt.setProfile(QSurfaceFormat::CoreProfile);
-    fmt.setDepthBufferSize(24);
-    fmt.setSamples(4);
-    QSurfaceFormat::setDefaultFormat(fmt);
-    QApplication app(argc,argv);
-    EditorWindow editor;
-    editor.show();
-    return app.exec();
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    return 0;
 }
