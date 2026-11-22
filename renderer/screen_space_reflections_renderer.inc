@@ -74,7 +74,7 @@
             // by the normal-map and color samplers and is restored below.
             offscreen_capture_gl_scope restore;
             GLint previous_unit2=0;
-            glActiveTexture(GL_TEXTURE2);
+            gl::set_active_texture_unit_raw(2);
             glGetIntegerv(GL_TEXTURE_BINDING_2D,&previous_unit2);
             glBindFramebuffer(GL_FRAMEBUFFER,ssr_receivers->framebuffer());
             glViewport(0,0,width,height);
@@ -86,9 +86,9 @@
             glEnable(GL_DEPTH_TEST);
             glDepthMask(GL_TRUE);
             glDepthFunc(GL_LESS);
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_BACK);
-            glFrontFace(GL_CCW);
+            gl::set_cull_face_enabled(true);
+            gl::set_face_cull_mode(gl::face_mode::back);
+            gl::set_front_face_raw(GL_CCW);
             glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
             glClearColor(0.0f,0.0f,0.0f,0.0f);
             glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
@@ -120,7 +120,7 @@
             glBindFramebuffer(GL_FRAMEBUFFER,ssr_image->framebuffer());
             glViewport(0,0,width,height);
             glDisable(GL_DEPTH_TEST);
-            glDisable(GL_CULL_FACE);
+            gl::set_cull_face_enabled(false);
             glDepthMask(GL_FALSE);
             glClearColor(0.0f,0.0f,0.0f,0.0f);
             glClear(GL_COLOR_BUFFER_BIT);
@@ -145,12 +145,12 @@
             // planar capture roughness. Render first, then mipmap exactly
             // once per frame. The destination is no longer bound for drawing.
             glBindFramebuffer(GL_FRAMEBUFFER,0);
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D,ssr_image->color_texture());
+            gl::set_active_texture_unit_raw(0);
+            gl::bind_texture_raw(GL_TEXTURE_2D,ssr_image->color_texture());
             glGenerateMipmap(GL_TEXTURE_2D);
-            glActiveTexture(GL_TEXTURE2);
-            glBindTexture(GL_TEXTURE_2D,GLuint(previous_unit2));
-            glActiveTexture(GL_TEXTURE0);
+            gl::set_active_texture_unit_raw(2);
+            gl::bind_texture_raw(GL_TEXTURE_2D,GLuint(previous_unit2));
+            gl::set_active_texture_unit_raw(0);
             ssr_ready=true;
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SSR world receivers=",receivers.size(),

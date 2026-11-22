@@ -123,9 +123,9 @@
                     ssr_opaque_composite_shader>(the_config->data_path);
             offscreen_capture_gl_scope restore;
             GLint old_tex2=0,old_tex3=0;
-            glActiveTexture(GL_TEXTURE2);
+            gl::set_active_texture_unit_raw(2);
             glGetIntegerv(GL_TEXTURE_BINDING_2D,&old_tex2);
-            glActiveTexture(GL_TEXTURE3);
+            gl::set_active_texture_unit_raw(3);
             glGetIntegerv(GL_TEXTURE_BINDING_2D,&old_tex3);
             glBindFramebuffer(GL_FRAMEBUFFER,ssr_opaque_receivers->framebuffer());
             glViewport(0,0,width,height);
@@ -137,9 +137,9 @@
             glEnable(GL_DEPTH_TEST);
             glDepthMask(GL_TRUE);
             glDepthFunc(GL_LESS);
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_BACK);
-            glFrontFace(GL_CCW);
+            gl::set_cull_face_enabled(true);
+            gl::set_face_cull_mode(gl::face_mode::back);
+            gl::set_front_face_raw(GL_CCW);
             glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
             glClearColor(0.0f,0.0f,0.0f,0.0f);
             glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
@@ -188,11 +188,11 @@
                         frame_gpu_3do_camera.native_view,inst.transform);
                     program.camera(view,cam,aspect,frame_gpu_3do_camera.far_plane,
                         width,height,it->second->packed_vertex_format?1:0);
-                    glFrontFace(gpu_3do_reversed_winding(inst.transform)
+                    gl::set_front_face_raw(gpu_3do_reversed_winding(inst.transform)
                                 ?GL_CW:GL_CCW);
                     if((item.group->face_type&0x1U)!=0U)
-                        glDisable(GL_CULL_FACE);
-                    else glEnable(GL_CULL_FACE);
+                        gl::set_cull_face_enabled(false);
+                    else gl::set_cull_face_enabled(true);
                     bind_material(program,item.material,item.alpha_mode,
                         item.material.opacity*inst.thing_opacity);
                     gl::bind_vertex_array(it->second->vao);
@@ -201,12 +201,12 @@
                             uintptr_t(item.group->offset)*sizeof(uint32_t)));
                 }
             }
-            glFrontFace(GL_CCW);
+            gl::set_front_face_raw(GL_CCW);
 
             glBindFramebuffer(GL_FRAMEBUFFER,ssr_opaque_image->framebuffer());
             glViewport(0,0,width,height);
             glDisable(GL_DEPTH_TEST);
-            glDisable(GL_CULL_FACE);
+            gl::set_cull_face_enabled(false);
             glDepthMask(GL_FALSE);
             glClearColor(0.0f,0.0f,0.0f,0.0f);
             glClear(GL_COLOR_BUFFER_BIT);
@@ -230,16 +230,16 @@
 
             // Prepare roughness mips before blending to the main target.
             glBindFramebuffer(GL_FRAMEBUFFER,0);
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D,ssr_opaque_image->color_texture());
+            gl::set_active_texture_unit_raw(0);
+            gl::bind_texture_raw(GL_TEXTURE_2D,ssr_opaque_image->color_texture());
             glGenerateMipmap(GL_TEXTURE_2D);
-            glActiveTexture(GL_TEXTURE2);
-            glBindTexture(GL_TEXTURE_2D,0); // no main-color feedback
+            gl::set_active_texture_unit_raw(2);
+            gl::bind_texture_raw(GL_TEXTURE_2D,0); // no main-color feedback
 
             frame_screen->begin_compose_opaque_pass(true); // NO CLEAR
             glViewport(0,0,get<x>(conf_scr_res),get<y>(conf_scr_res));
             glDisable(GL_DEPTH_TEST);
-            glDisable(GL_CULL_FACE);
+            gl::set_cull_face_enabled(false);
             glEnable(GL_BLEND);
             // Preserve the opaque compositor's alpha/HOM coverage exactly.
             glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,
@@ -257,11 +257,11 @@
             gl::draw_elements(gl::element_type::triangles,
                 ogs->postmdl.num_indices,gl::index_type::uint32);
 
-            glActiveTexture(GL_TEXTURE3);
-            glBindTexture(GL_TEXTURE_2D,GLuint(old_tex3));
-            glActiveTexture(GL_TEXTURE2);
-            glBindTexture(GL_TEXTURE_2D,GLuint(old_tex2));
-            glActiveTexture(GL_TEXTURE0);
+            gl::set_active_texture_unit_raw(3);
+            gl::bind_texture_raw(GL_TEXTURE_2D,GLuint(old_tex3));
+            gl::set_active_texture_unit_raw(2);
+            gl::bind_texture_raw(GL_TEXTURE_2D,GLuint(old_tex2));
+            gl::set_active_texture_unit_raw(0);
             ssr_opaque_ready=true;
             if(the_config->profile_renderer && gpu_3do_present_serial%120U==0U)
                 LOG_INFO("SSR opaque world_faces=",world_items.size(),

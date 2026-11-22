@@ -31,7 +31,9 @@ for name in ("renderer/renderer.cpp",
              "renderer/reflection_sky_capture.inc",
              "renderer/camera_to_mat_capture.inc",
              "renderer/sun_caustics_gpu.hpp",
-             "renderer/sun_sky_aperture_gpu.hpp"):
+             "renderer/sun_sky_aperture_gpu.hpp",
+             "renderer/screen_space_reflections_opaque.inc",
+             "renderer/screen_space_reflections_renderer.inc"):
     source=read(name)
     for direct in ("glActiveTexture(", "glBindTexture(",
                    "glBindVertexArray(", "glFrontFace(", "glCullFace(",
