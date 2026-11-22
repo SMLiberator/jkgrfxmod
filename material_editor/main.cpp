@@ -375,8 +375,7 @@ private:
         if(ImGui::CollapsingHeader("MatCap",ImGuiTreeNodeFlags_DefaultOpen)) {
             floatField("MatCap roughness","matcap_roughness",0,0,1);
             auto v=rgb(selected(),"matcap_factor",{1,1,1});
-            ImGui::DragFloat3("MatCap RGB factor",v.data(),.02f,0,4,"%.2f");
-            if(ImGui::IsItemDeactivatedAfterEdit()) {
+            if(ImGui::DragFloat3("MatCap RGB factor",v.data(),.02f,0,4,"%.2f")) {
                 setArray(selected(),"matcap_factor",v.data(),3);changed();
             }
             imageInfo("MatCap","matcap_map");
@@ -433,7 +432,7 @@ private:
     ImGuiTextFilter filter_;
 };
 
-int main() {
+int runEditor() {
     if(!glfwInit())return 1;
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR,3);
@@ -486,3 +485,5 @@ int main() {
     glfwTerminate();
     return 0;
 }
+
+int WINAPI WinMain(HINSTANCE,HINSTANCE,LPSTR,int) { return runEditor(); }
