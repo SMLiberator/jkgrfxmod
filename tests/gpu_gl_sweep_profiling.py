@@ -5,7 +5,7 @@ assert "struct gpu_gl_sweep_profile {" in renderer
 assert "std::unordered_map<uint64_t,uint64_t> gpu_gl_recent_swept_ids;" in renderer
 sweep=renderer.split("// Transient 3DOs (text, HUD, effects)",1)[1].split("// Reset state:",1)[0]
 assert "(gpu_3do_present_serial%16U)==0U" in sweep
-assert "gpu_3do_present_serial-used->second>64U" in sweep
+assert "gpu_3do_present_serial-used->second>256U" in sweep
 assert "bool const profile_sweep=the_config->profile_renderer;" in sweep
 assert "if(profile_sweep)++scanned;" in sweep
 assert "++s.no_timestamp;" in sweep
@@ -22,10 +22,24 @@ assert "++gpu_gl_sweep_window.reappeared_within_64;" in sweep
 assert "s.cpu_ns+=sweep_ns;" in sweep
 assert "s.peak_ns=std::max(s.peak_ns,sweep_ns);" in sweep
 assert "gpu_3do_last_drawn.erase(used);" in sweep
+assert '" expired_over_256_frames=",s.expired' in renderer
 assert 'LOG_INFO("PERF gpu_gl_sweep sweeps=",' in renderer
 assert 'LOG_INFO("PERF gpu_gl_sweep_reuse reappeared_within_256_frames=",' in renderer
 assert "gpu_gl_sweep_window={};" in renderer
 assert "gpu_gl_recent_swept_ids.clear();" in renderer
+for marker in (
+    "gpu_3do_last_drawn[item.sprite_id]=gpu_3do_present_serial;",
+    "gpu_3do_last_drawn[inst->id]=gpu_3do_present_serial;",
+    "gpu_3do_last_drawn[instance.id]=gpu_3do_present_serial;",
+    "gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;",
+    "bool mesh_drawn=false;",
+):
+    assert marker in renderer, marker
+assert renderer.count(
+    "gpu_3do_last_drawn[item.sprite_id]=gpu_3do_present_serial;"
+)==2
+assert "if(!part_drawn)" in renderer
+assert "if(!mesh_drawn)" in renderer
 assert "if(!inst.transient_procedural)continue;" in renderer
 assert "gpu_3do_gl_cache.erase(inst.id);" in renderer
 print("GPU GL cache sweep telemetry, expiry parity and reuse tracking OK")

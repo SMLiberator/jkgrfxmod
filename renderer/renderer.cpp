@@ -1358,7 +1358,7 @@ namespace jkgm {
                          s.sweeps?s.scanned/s.sweeps:0U,
                          " evicted=",s.evicted,
                          " missing_usage_timestamp=",s.no_timestamp,
-                         " expired_over_64_frames=",s.expired,
+                         " expired_over_256_frames=",s.expired,
                          " estimated_buffer_kib_freed=",s.estimated_bytes/1024U,
                          " cpu_us_per_sweep=",
                          s.sweeps?(s.cpu_ns/1000U)/s.sweeps:0U,
@@ -6500,6 +6500,7 @@ namespace jkgm {
                     program.set_sprite_pose(item.sprite_pose);
                     gl::bind_vertex_array(sprite_mesh->vao);
                     glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
+                    gpu_3do_last_drawn[item.sprite_id]=gpu_3do_present_serial;
                 } else {
                     glBindVertexArray(thing_occlusion_proxy_vao);
                     if(draw_mode!=0) {
@@ -6744,6 +6745,7 @@ namespace jkgm {
                     program.set_sprite_pose(item.sprite_pose);
                     gl::bind_vertex_array(sprite->second->vao);
                     glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
+                    gpu_3do_last_drawn[item.sprite_id]=gpu_3do_present_serial;
                 } else {
                     glBindVertexArray(thing_occlusion_proxy_vao);
                     if(item.mode!=0U)program.set_rect(item.rect,int(item.mode));
@@ -7894,6 +7896,7 @@ namespace jkgm {
                                 *inst->geometry,
                             the_config->profile_renderer
                                 ? &packed_3do_upload_profile : nullptr)).first;
+                    bool part_drawn=false;
                     for(auto const &g:inst->geometry->groups) {
                         if(g.count<3U || inst->thing_opacity<=0.0f)continue;
                         // Share the same MAT/cel snapshot with both sun
@@ -7954,6 +7957,10 @@ namespace jkgm {
                         gl::draw_elements(gl::element_type::triangles,g.count,
                             gl::index_type::uint32,static_cast<ptrdiff_t>(
                                 g.offset*sizeof(uint32_t)));
+                        if(!part_drawn) {
+                            gpu_3do_last_drawn[inst->id]=gpu_3do_present_serial;
+                            part_drawn=true;
+                        }
                         any=true;
                     }
                 }
@@ -9351,6 +9358,7 @@ namespace jkgm {
                                 reinterpret_cast<void const *>(
                                     uintptr_t(g.offset)*sizeof(uint32_t)),
                                 static_cast<GLsizei>(amount));
+                            gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                             ++gl_calls;
                             ++instanced_calls;
                             instanced_ranges+=amount;
@@ -9438,6 +9446,7 @@ namespace jkgm {
                             static_cast<GLsizei>(batch_counts.size()));
                         ++multi_calls;
                     }
+                    gpu_3do_last_drawn[instance.id]=gpu_3do_present_serial;
                     ++gl_calls;
                     first=last;
                 }
@@ -10061,6 +10070,7 @@ namespace jkgm {
                         group.count,gl::index_type::uint32,
                         static_cast<ptrdiff_t>(group.offset*
                                               sizeof(uint32_t)));
+                    gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                 }
                 map.signatures[cascade]=signatures[cascade];
                 map.views[cascade]=view;
@@ -13511,6 +13521,7 @@ namespace jkgm {
                     make_point(inst.sector_tint[0],inst.sector_tint[1],
                                inst.sector_tint[2]));
                 gl::bind_vertex_array(glmesh->second->vao);
+                bool mesh_drawn=false;
                 // Both the reflected camera and negative-scale models
                 // reverse winding. Two reversals restore the normal front.
                 glFrontFace(gpu_3do_reversed_winding(inst.transform)
@@ -13552,6 +13563,10 @@ namespace jkgm {
                         gl::index_type::uint32,
                         static_cast<ptrdiff_t>(
                             group.offset*sizeof(uint32_t)));
+                    if(!mesh_drawn) {
+                        gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
+                        mesh_drawn=true;
+                    }
                     ++model_drawn;
                 }
             };
@@ -13595,6 +13610,7 @@ namespace jkgm {
                         gl::index_type::uint32,
                         static_cast<ptrdiff_t>(
                             draw.group->offset*sizeof(uint32_t)));
+                    gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                     ++model_drawn;
                 }
                 glDisable(GL_BLEND);
@@ -13644,6 +13660,7 @@ namespace jkgm {
                         gl::index_type::uint32,
                         static_cast<ptrdiff_t>(
                             batch.group->offset*sizeof(uint32_t)));
+                    gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                     ++model_drawn;
                 }
                 glDisable(GL_BLEND);
@@ -14058,7 +14075,7 @@ namespace jkgm {
             // Procedural particle clouds and camera-facing polyline faces are
             // generated anew every frame. Keep their GPU upload alive across
             // opaque/transparent passes, then reclaim it immediately rather
-            // than retaining 64 frames of stale particle buffers.
+            // than retaining 256 frames of stale particle buffers.
             for(auto const &inst:frame_gpu_3do_instances) {
                 if(!inst.transient_procedural)continue;
                 gpu_3do_gl_cache.erase(inst.id);
@@ -14103,9 +14120,12 @@ namespace jkgm {
                     if(profile_sweep)++scanned;
                     auto const used=gpu_3do_last_drawn.find(it->first);
                     bool const no_timestamp=used==gpu_3do_last_drawn.end();
-                    // Retain the original 16-frame/64-frame expiry policy.
+                    // Preserve 16-frame sweep cadence, retain cached GL
+                    // meshes until more than 256 frames of inactivity.
+                    // Procedural transients and level transitions still
+                    // reclaim resources immediately.
                     bool const expired=!no_timestamp &&
-                        gpu_3do_present_serial-used->second>64U;
+                        gpu_3do_present_serial-used->second>256U;
                     if(no_timestamp || expired) {
                         if(profile_sweep) {
                             auto &s=gpu_gl_sweep_window;

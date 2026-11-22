@@ -71,7 +71,7 @@ assert capture_mesh.index(
     "gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;"
 ) < capture_mesh.index("shader.set_modelview(modelview,true,")
 assert "gpu_3do_gl_cache.size()>=8192U" in capture_mesh
-assert "gpu_3do_present_serial-used->second>64U" in renderer
+assert "gpu_3do_present_serial-used->second>256U" in renderer
 assert "++shared_capture_profile_window.world_batches;" in hemi
 assert hemi.index("diag.search_ns+=") < hemi.index("bool const profile_shared=")
 assert hemi.index("auto const sky_started=") < hemi.index(
