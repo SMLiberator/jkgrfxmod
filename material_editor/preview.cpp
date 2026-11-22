@@ -20,18 +20,18 @@ layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aNormal;
 layout(location=2) in vec2 aUv;
 uniform float uAspect;
-uniform vec4 uOrientation; // normalized x,y,z,w
+uniform vec3 uViewRight,uViewUp,uViewBack;
 out vec3 wp, wn;
 out vec2 uv;
-vec3 transform(vec3 p) {
-    vec3 t=2.0*cross(uOrientation.xyz,p);
-    return p+uOrientation.w*t+cross(uOrientation.xyz,t);
-}
 void main() {
-    wp=transform(aPos);
-    wn=normalize(transform(aNormal));
+    // Unlike the old model-rotation preview, positions/normals stay
+    // in world space; only the view camera changes.
+    wp=aPos;
+    wn=normalize(aNormal);
     uv=aUv;
-    vec3 q=wp-vec3(0.0,0.0,3.5);
+    vec3 q=vec3(dot(aPos,uViewRight),
+                dot(aPos,uViewUp),
+                dot(aPos,uViewBack)-3.5);
     float f=2.9042; // 38-degree vertical FOV
     gl_Position=vec4(q.x*f/max(uAspect,0.01),q.y*f,
                      -q.z*1.00669-0.20067,-q.z);
@@ -50,6 +50,7 @@ uniform vec4 uAlbedo;
 uniform vec3 uEmissive,uMatcapFactor;
 uniform float uReflection,uRough,uMetal,uNormalStrength,uNormalStrength2;
 uniform float uMatcapRough,uCoat,uCoatRough,uCoatTransmission;
+uniform vec3 uViewRight,uViewUp,uViewBack,uCameraPos;
 uniform int uUseEnvFresnel; // preview-only: disabled means full EnvMap contribution
 uniform int uAlbedoPremultiplied, uAlphaMode, uBlendMode;
 uniform float uAlphaCutoff;
@@ -103,7 +104,7 @@ void main() {
     if(hasNormal!=0)slope+=normalSlope(tNormal,uNormalStrength);
     if(hasNormal2!=0)slope+=normalSlope(tNormal2,uNormalStrength2);
     vec3 N=mappedNormal(raw,slope);
-    vec3 V=normalize(vec3(0.0,0.0,3.5)-wp);
+    vec3 V=normalize(uCameraPos-wp);
     vec3 R=reflect(-V,N);
     vec4 albedoTex=hasAlbedo!=0?texture(tAlbedo,uv):vec4(1.0);
     // Compiled albedo PNGs are sRGB-encoded but premultiplied in linear
@@ -134,7 +135,8 @@ void main() {
     vec3 artistic=vec3(0.0);
     if(hasMatcap!=0) {
         vec2 m=hasMatcapSurface!=0?texture(tMatcapSurface,uv).rg:vec2(1.0);
-        vec3 viewNormal=vec3(N.x,N.y,-N.z);
+        vec3 viewNormal=vec3(dot(N,uViewRight),dot(N,uViewUp),
+                             -dot(N,uViewBack));
         if(viewNormal.z>0.0)viewNormal=-viewNormal;
         vec2 mc=clamp(vec2(0.5+0.5*viewNormal.x,
                            0.5-0.5*viewNormal.y),vec2(0.001),vec2(0.999));
@@ -411,7 +413,7 @@ void MaterialPreview::buildMeshes() {
     glEnableVertexAttribArray(0);glEnableVertexAttribArray(1);glEnableVertexAttribArray(2);
     glBindVertexArray(0);
 }
-void MaterialPreview::draw(int w,int h,const std::array<float,4> &orientation,
+void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
                            bool plane,bool useEnvFresnel) {
     if(!program_)return;
     resize(w,h);
@@ -431,7 +433,16 @@ void MaterialPreview::draw(int w,int h,const std::array<float,4> &orientation,
     auto v3=[this](const char *name,const std::array<float,3> &v) {
         glUniform3f(glGetUniformLocation(program_,name),v[0],v[1],v[2]);
     };
-    glUniform4fv(glGetUniformLocation(program_,"uOrientation"),1,orientation.data());
+    // Stable turntable basis in world space: world +Y always defines "up".
+    // The camera is 3.5 units from the origin, and tracks it without roll.
+    const float cy=std::cos(orbitYaw),sy=std::sin(orbitYaw);
+    const float cp=std::cos(orbitPitch),sp=std::sin(orbitPitch);
+    const std::array<float,3> back={sy*cp,sp,cy*cp};
+    const std::array<float,3> right={cy,0.0f,-sy};
+    const std::array<float,3> up={-sy*sp,cp,-cy*sp};
+    const std::array<float,3> camera={back[0]*3.5f,back[1]*3.5f,back[2]*3.5f};
+    v3("uViewRight",right);v3("uViewUp",up);
+    v3("uViewBack",back);v3("uCameraPos",camera);
     f1("uAspect",float(width_)/height_);
     glUniform4fv(glGetUniformLocation(program_,"uAlbedo"),1,material_.albedo.data());
     v3("uEmissive",material_.emissive);v3("uMatcapFactor",material_.matcapFactor);

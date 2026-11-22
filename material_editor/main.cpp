@@ -140,30 +140,15 @@ void setArray(Document &obj,const char *key,const float *values,int size) {
 }
 }
 
-// Hamilton-product quaternions: left-multiplying applies each drag in
-// fixed camera/screen axes, rather than around the material's rotated axes.
-using Orientation = std::array<float,4>; // x, y, z, w
-static Orientation multiplyOrientation(const Orientation &a,const Orientation &b) {
-    return {
-        a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1],
-        a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0],
-        a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3],
-        a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2]
-    };
-}
-static Orientation screenDrag(float dx,float dy) {
-    float halfYaw=dx*.0045f,halfPitch=dy*.0045f;
-    Orientation yaw={0,std::sin(halfYaw),0,std::cos(halfYaw)};
-    Orientation pitch={std::sin(halfPitch),0,0,std::cos(halfPitch)};
-    return multiplyOrientation(yaw,pitch);
-}
+// Blender-style turntable orbit keeps the scene fixed in world space.
+// The camera moves on a sphere around the origin, world +Y stays up,
+// and the view is free of roll. Pitch is clamped at the poles.
+constexpr float kOrbitSensitivity=0.009f;
+constexpr float kOrbitMaxPitch=1.55334306f; // 89 degrees
 
 class Editor {
 public:
     explicit Editor(GLFWwindow *window) : window_(window) {
-        // Retain the prototype's initial slightly angled view.
-        orientation_=multiplyOrientation(screenDrag(-.35f/.009f,0),
-                                         screenDrag(0,.15f/.009f));
         preview_=std::make_unique<MaterialPreview>();
         resetView();
         status_="Open a compiled metadata.json to begin.";
@@ -241,12 +226,12 @@ public:
 
 private:
     void resetView() {
-        // Plane defaults front-on; sphere defaults to its familiar
-        // slightly angled three-quarter view.
-        orientation_=plane_?Orientation{0,0,0,1}:
-            multiplyOrientation(screenDrag(-.35f/.009f,0),
-                                screenDrag(0,.15f/.009f));
-        dragStartOrientation_=orientation_;
+        // Plane starts face-on; sphere begins from a 3/4 view.
+        // Both reset to an upright, zero-roll camera.
+        orbitYaw_=plane_?0.0f:0.35f;
+        orbitPitch_=plane_?0.0f:-0.15f;
+        dragStartYaw_=orbitYaw_;
+        dragStartPitch_=orbitPitch_;
     }
     struct Edit {
         int materialIndex=-1;
@@ -459,39 +444,43 @@ private:
         area.x=std::max(area.x,64.0f);
         area.y=std::max(area.y-35.0f,64.0f);
         if(preview_->valid()) {
-            preview_->draw(int(area.x),int(area.y),orientation_,plane_,
-                           envFresnel_);
+            preview_->draw(int(area.x),int(area.y),orbitYaw_,orbitPitch_,
+                           plane_,envFresnel_);
             // Image() is a passive item: dragging it moves the ImGui window.
             // An invisible button claims the mouse press for viewport orbiting,
             // while the image is drawn over that item's exact screen rectangle.
             const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
             ImGui::InvisibleButton("##material_preview_orbit", area,
-                                   ImGuiButtonFlags_MouseButtonLeft);
+                ImGuiButtonFlags_MouseButtonLeft|
+                ImGuiButtonFlags_MouseButtonMiddle);
             ImGui::GetWindowDrawList()->AddImage(
                 ImTextureRef((ImTextureID)preview_->outputTexture()),
                 canvasPos, ImVec2(canvasPos.x + area.x, canvasPos.y + area.y),
                 ImVec2(0,1), ImVec2(1,0));
-            // Freeze the starting frame at mouse-down. The orientation for
-            // every subsequent frame is derived from TOTAL displacement,
-            // not compounded from the previous frame's orientation.
-            // This makes a gesture independent of mouse path/frame rate,
-            // with horizontal/vertical axes fixed for that entire drag.
-            if(ImGui::IsItemActivated())
-                dragStartOrientation_=orientation_;
-            if(ImGui::IsItemActive()&&ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
-                ImVec2 delta=ImGui::GetMouseDragDelta(ImGuiMouseButton_Left,0.0f);
-                orientation_=multiplyOrientation(
-                    screenDrag(delta.x,delta.y),dragStartOrientation_);
-                float length=std::sqrt(
-                    orientation_[0]*orientation_[0]+orientation_[1]*orientation_[1]+
-                    orientation_[2]*orientation_[2]+orientation_[3]*orientation_[3]);
-                if(length>0.0f)
-                    for(float &component:orientation_)component/=length;
+            // Orbit the CAMERA around a stationary material instead of
+            // continually multiplying the material's orientation. Mouse
+            // movement maps directly to turntable yaw and pitch:
+            //   - yaw is about the world-up (+Y) axis
+            //   - pitch is about the current camera-right axis
+            // Mouse-down anchors the gesture, so returning the cursor to
+            // its starting pixel also restores the initial view.
+            if(ImGui::IsItemActivated()) {
+                dragStartYaw_=orbitYaw_;
+                dragStartPitch_=orbitPitch_;
+                dragButton_=ImGui::IsMouseDown(ImGuiMouseButton_Middle)
+                    ?ImGuiMouseButton_Middle:ImGuiMouseButton_Left;
+            }
+            if(ImGui::IsItemActive()&&
+               ImGui::IsMouseDragging(dragButton_,0.0f)) {
+                const ImVec2 delta=ImGui::GetMouseDragDelta(dragButton_,0.0f);
+                orbitYaw_=dragStartYaw_-delta.x*kOrbitSensitivity;
+                orbitPitch_=std::clamp(dragStartPitch_-delta.y*kOrbitSensitivity,
+                                       -kOrbitMaxPitch,kOrbitMaxPitch);
             }
         } else {
             ImGui::TextWrapped("GLSL preview failed: %s",preview_->error().c_str());
         }
-        ImGui::TextDisabled("Drag to rotate. Studio lighting differs from in-game lighting.");
+        ImGui::TextDisabled("LMB or MMB drag: Blender-style orbit. Space: reset view.");
         ImGui::End();
     }
     bool floatField(const char *label,const char *key,float fallback,
@@ -737,8 +726,9 @@ private:
          layoutConfigured_=false;
     int selection_=-1,environment_=0;
     bool envFresnel_=false;
-    Orientation orientation_{0,0,0,1};
-    Orientation dragStartOrientation_{0,0,0,1};
+    float orbitYaw_=0.35f,orbitPitch_=-0.15f;
+    float dragStartYaw_=0.35f,dragStartPitch_=-0.15f;
+    ImGuiMouseButton dragButton_=ImGuiMouseButton_Left;
     ImGuiTextFilter filter_;
 };
 
