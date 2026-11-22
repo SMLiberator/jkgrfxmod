@@ -60,7 +60,8 @@ assert draw.index("gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;") < (
 )
 
 # Preserve ordering and per-Thing GL uniforms for alpha, HUD and decals.
-assert "std::sort(draws.begin(),draws.end()," in draw
+assert draw.count("std::sort(draws.begin(),draws.end(),")==1
+assert "cached_opaque_group_order()" in draw
 assert "return a.depth>b.depth;" in draw
 assert "gpu_3do_trail_alpha_mode(" in draw
 assert "glMultiDrawElements(GL_TRIANGLES" in draw

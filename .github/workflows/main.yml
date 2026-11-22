@@ -258,6 +258,12 @@ jobs:
       run: python3 tests/shared_reflection_wiring.py
     - name: GPU 3DO submission CPU reuse regression
       run: python3 tests/gpu_3do_submission_cpu_reuse.py
+    - name: GPU 3DO cached opaque group ordering parity
+      shell: cmd
+      run: |
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\gpu_3do_opaque_order.cpp /Fe:gpu_3do_opaque_order_test.exe || exit /b 1
+        gpu_3do_opaque_order_test.exe || exit /b 1
+        python3 tests/gpu_3do_opaque_order_wiring.py || exit /b 1
 
     - name: GPU 3DO native model-view precision tests
       shell: cmd

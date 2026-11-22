@@ -4652,6 +4652,7 @@ namespace jkgm {
                 bool,bool,bool,std::array<float,3>,std::array<float,3>,bool>;
             struct sprite_batch_bucket {
                 std::vector<pending_draw> draws;
+                size_t first_order=0; // source-order key, not traversal order
             };
             // Reuse pass-local CPU workspaces. Busy JkGR scenes may have
             // thousands of ranges in both opaque and alpha passes, so
@@ -4703,6 +4704,8 @@ namespace jkgm {
             for(auto &bucket:sprite_buckets)bucket.draws.clear();
             sprite_lookup.clear();
             size_t used_sprite_buckets=0;
+            bool sprite_buckets_in_source_order=true;
+            size_t last_sprite_bucket_order=0;
             size_t next_draw_order=0;
             bool const collect_sprite_batches=
                 the_config->enable_gpu_sprite_instancing &&
@@ -4773,7 +4776,19 @@ namespace jkgm {
                     gpu_3do_reversed_winding(inst.transform);
                 bool const can_cpu_cull=context.has_local_eye;
                 auto const &local_eye=context.local_eye;
-                for(auto const &group:inst.geometry->groups) {
+                // Opaque grouping is identical across instances of this
+                // immutable geometry. Use the cached index permutation
+                // instead of sorting pending ranges for every Thing.
+                // The original group index remains the alpha tie key.
+                auto const &groups=inst.geometry->groups;
+                auto const *opaque_order=transparent ? nullptr
+                    : &inst.geometry->cached_opaque_group_order();
+                size_t const instance_order_base=next_draw_order;
+                if(opaque_order) next_draw_order+=groups.size();
+                for(size_t group_visit=0;group_visit<groups.size();++group_visit) {
+                    size_t const group_index=opaque_order
+                        ?(*opaque_order)[group_visit]:group_visit;
+                    auto const &group=groups[group_index];
                     if(the_config->profile_renderer)
                         ++profile_frame.gpu_groups_considered;
                     // Native JK clips individual faces; test the bounds of
@@ -4903,9 +4918,10 @@ namespace jkgm {
                               (wy-cam.position[1])*cam.forward[1]+
                               (wz-cam.position[2])*cam.forward[2];
                     }
+                    size_t const source_order=opaque_order
+                        ?instance_order_base+group_index:next_draw_order++;
                     pending_draw candidate{&inst,&group,&tex,policy,
-                                           &context,depth,
-                                           next_draw_order++};
+                                           &context,depth,source_order};
                     if(alpha_eligible)
                         ordinary_alpha_draws.push_back(candidate);
                     if(prepare_both && !opaque_eligible) continue;
@@ -4946,6 +4962,13 @@ namespace jkgm {
                             sprite_lookup.emplace(std::move(key),index);
                             if(sprite_buckets.size()<=index)
                                 sprite_buckets.emplace_back();
+                            // Multi-group particle meshes can now visit
+                            // buckets in material order. Record original
+                            // first-discovery order for opaque sprite parity.
+                            sprite_buckets[index].first_order=candidate.order;
+                            if(index && candidate.order<last_sprite_bucket_order)
+                                sprite_buckets_in_source_order=false;
+                            last_sprite_bucket_order=candidate.order;
                         } else index=found->second;
                         candidate.sprite_batch_group=index+1U;
                         sprite_buckets[index].draws.push_back(
@@ -4968,33 +4991,20 @@ namespace jkgm {
             auto const sort_begin=gpu_profiling
                 ?profile_clock::now():profile_clock::time_point{};
             if(!transparent) {
-                // Sprite groups were pre-keyed during collection. The
-                // ordinary 3DO sorter no longer compares sprite state.
-                // Opaque GPU 3DO draw ranges have no painter-order dependency.
-                // Native JK batches faces by material before D3D submission;
-                // our face-order grouping generated thousands of 1-2-triangle
-                // GL calls on complex models. Reorder only the opaque pass
-                // so nonadjacent ranges with identical material and face state
-                // can be dispatched together in one glMultiDrawElements call.
-                // Transparent/mixed-alpha fragments retain their existing
-                // back-to-front path below.
-                std::sort(draws.begin(),draws.end(),
-                    [](pending_draw const &a,pending_draw const &b) {
-                        if(a.instance!=b.instance)
-                            return a.instance<b.instance;
-                        if(a.group->material!=b.group->material)
-                            return a.group->material<b.group->material;
-                        if(a.group->cel!=b.group->cel)
-                            return a.group->cel<b.group->cel;
-                        if(a.group->face_type!=b.group->face_type)
-                            return a.group->face_type<b.group->face_type;
-                        if(a.group->nonplanar!=b.group->nonplanar)
-                            return a.group->nonplanar<b.group->nonplanar;
-                        if(a.group->solid_color!=b.group->solid_color)
-                            return a.group->solid_color<b.group->solid_color;
-                        return a.order<b.order;
-                    });
+                // Every Thing's opaque ranges are already in the exact
+                // previous material/cel/face-state order. No per-frame
+                // opaque range sort; alpha retains its depth sort below.
                 if(used_sprite_buckets>0U) {
+                    // Restore authored sprite bucket discovery order only
+                    // if a multi-group sprite changed it. The usual
+                    // one-group sprite incurs no extra sort.
+                    if(!sprite_buckets_in_source_order)
+                        std::sort(sprite_buckets.begin(),
+                            sprite_buckets.begin()+used_sprite_buckets,
+                            [](sprite_batch_bucket const &a,
+                               sprite_batch_bucket const &b) {
+                                return a.first_order<b.first_order;
+                            });
                     // Opaque sprite quads were rendered before models in
                     // the previous sorter; retain that order. Assemble
                     // grouped quads in linear time, with no global resort.

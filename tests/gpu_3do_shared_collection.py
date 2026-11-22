@@ -7,7 +7,9 @@ draw=render[render.index("void draw_gpu_3do_preview("):
 
 # The ordinary alpha pass consumes prepartitioned candidates rather than
 # rerunning the expensive per-group frustum and backface checks.
-assert draw.count("for(auto const &group:inst.geometry->groups)") == 1
+assert draw.count("for(size_t group_visit=0;group_visit<groups.size();++group_visit)") == 1
+assert "cached_opaque_group_order()" in draw
+assert "auto const &group=groups[group_index];" in draw
 assert "bool const ordinary_pass=!post_exempt && !decals_only;" in draw
 assert "bool const prepare_both=ordinary_pass && !transparent;" in draw
 assert "ordinary_alpha_serial==gpu_3do_present_serial;" in draw

@@ -2,9 +2,12 @@
 // Development-only native 3DO GPU bypass. Each immutable mesh is copied once,
 // including UV seams and per-face material references. Transforms are dynamic.
 #include "texture_units.hpp"
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <numeric>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -74,6 +77,36 @@ namespace jkgm {
         // Unique material/cel pairs: checked once per mesh per frame.
         std::vector<std::pair<uintptr_t,int32_t>> material_refs;
         std::vector<std::pair<uintptr_t,int32_t>> solid_material_refs;
+
+        // Material grouping belongs to the immutable cached mesh, not each
+        // Thing. Compute once on first opaque submission for native meshes,
+        // sprites and procedural geometries. Keep groups[] in authored order
+        // for transparent depth-sort ties and other cached geometry consumers.
+        std::vector<size_t> const &cached_opaque_group_order() const {
+            std::call_once(opaque_order_once,[this] {
+                opaque_order.resize(groups.size());
+                std::iota(opaque_order.begin(),opaque_order.end(),size_t(0));
+                std::sort(opaque_order.begin(),opaque_order.end(),
+                    [this](size_t a,size_t b) {
+                        auto const &lhs=groups[a],&rhs=groups[b];
+                        if(lhs.material!=rhs.material)
+                            return lhs.material<rhs.material;
+                        if(lhs.cel!=rhs.cel)
+                            return lhs.cel<rhs.cel;
+                        if(lhs.face_type!=rhs.face_type)
+                            return lhs.face_type<rhs.face_type;
+                        if(lhs.nonplanar!=rhs.nonplanar)
+                            return lhs.nonplanar<rhs.nonplanar;
+                        if(lhs.solid_color!=rhs.solid_color)
+                            return lhs.solid_color<rhs.solid_color;
+                        return a<b; // identical keys retain authored order
+                    });
+            });
+            return opaque_order;
+        }
+    private:
+        mutable std::once_flag opaque_order_once;
+        mutable std::vector<size_t> opaque_order;
     };
 
     // Allocated only for cached models that overlap multiple Adjoin-linked
