@@ -308,10 +308,12 @@ private:
         ImGui::EndPopup();
     }
     void resetView() {
-        // Plane starts face-on; sphere begins from a 3/4 view.
-        // Both reset to an upright, zero-roll camera.
-        orbitYaw_=plane_?0.0f:0.35f;
-        orbitPitch_=plane_?0.0f:-0.15f;
+        // Each preview shape has a useful starting orientation.
+        // Plane faces the viewer; cube reveals its front/right/top faces.
+        orbitYaw_=shape_==PreviewShape::Plane?0.0f:
+                  shape_==PreviewShape::Cube?0.55f:0.35f;
+        orbitPitch_=shape_==PreviewShape::Plane?0.0f:
+                    shape_==PreviewShape::Cube?0.38f:-0.15f;
         dragStartYaw_=orbitYaw_;
         dragStartPitch_=orbitPitch_;
     }
@@ -622,9 +624,17 @@ private:
     }
     void renderViewport() {
         ImGui::Begin("Live Material Preview");
-        if(ImGui::RadioButton("Sphere",!plane_))plane_=false;
+        if(ImGui::RadioButton("Sphere",shape_==PreviewShape::Sphere)) {
+            shape_=PreviewShape::Sphere;resetView();
+        }
         ImGui::SameLine();
-        if(ImGui::RadioButton("Plane",plane_))plane_=true;
+        if(ImGui::RadioButton("Plane",shape_==PreviewShape::Plane)) {
+            shape_=PreviewShape::Plane;resetView();
+        }
+        ImGui::SameLine();
+        if(ImGui::RadioButton("Cube",shape_==PreviewShape::Cube)) {
+            shape_=PreviewShape::Cube;resetView();
+        }
         ImGui::SameLine();
         if(ImGui::SmallButton("Reset view (Space)"))resetView();
         ImGui::SameLine();
@@ -648,7 +658,7 @@ private:
         area.y=std::max(area.y-35.0f,64.0f);
         if(preview_->valid()) {
             preview_->draw(int(area.x),int(area.y),orbitYaw_,orbitPitch_,
-                           plane_,envFresnel_);
+                           shape_,envFresnel_);
             // Image() is a passive item: dragging it moves the ImGui window.
             // An invisible button claims the mouse press for viewport orbiting,
             // while the image is drawn over that item's exact screen rectangle.
@@ -764,7 +774,8 @@ private:
         ImGui::TextUnformatted(label);
         std::string value=stringValue(root_,key);
         bool edited=multiline
-            ?ImGui::InputTextMultiline("##value",&value,ImVec2(-1,84))
+            ?ImGui::InputTextMultiline("##value",&value,ImVec2(-1,84),
+                                       ImGuiInputTextFlags_WordWrap)
             :ImGui::InputText("##value",&value);
         if(edited) {
             if(optional&&value.empty())root_.erase(key);
@@ -1063,10 +1074,11 @@ private:
     NativeMatSource nativeSource_;
     NativeMatImage nativeLoaded_;
     std::string nativeCacheKey_,nativeStatus_;
-    bool loaded_=false,dirty_=false,plane_=false,groupActive_=false,
+    bool loaded_=false,dirty_=false,groupActive_=false,
          layoutConfigured_=false,openUnsavedDialog_=false,exitApproved_=false;
     PendingAction pendingAction_=PendingAction::None;
     int selection_=-1,environment_=0;
+    PreviewShape shape_=PreviewShape::Sphere;
     bool envFresnel_=false;
     float orbitYaw_=0.35f,orbitPitch_=-0.15f;
     float dragStartYaw_=0.35f,dragStartPitch_=-0.15f;

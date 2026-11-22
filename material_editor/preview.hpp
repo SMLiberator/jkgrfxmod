@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+enum class PreviewShape { Sphere, Plane, Cube };
+
 enum PreviewTexture : std::size_t {
     BaseMap, SurfaceMap, EnvironmentMap, NormalMap, NormalMap2,
     EmissiveMap, MatcapMap, MatcapSurfaceMap, CoatSurfaceMap, CoatNormalMap,
@@ -42,7 +44,7 @@ public:
     void setEnvironmentOverride(const std::string &path);
     // Normal studio preview; Fresnel toggle affects EnvMap only (not metadata).
     void draw(int width, int height, float orbitYaw, float orbitPitch,
-              bool plane, bool useEnvFresnel);
+              PreviewShape shape, bool useEnvFresnel);
     GLuint outputTexture() const { return output_; }
     const std::string &environmentDescription() const { return envDescription_; }
     bool hasLoadedEnvironmentFile() const { return loadedEnvironmentFile_; }
@@ -63,6 +65,6 @@ private:
     std::string envOverride_, envDescription_, error_;
     bool loadedEnvironmentFile_ = false;
     int width_ = 0, height_ = 0, preset_ = 0;
-    GLsizei sphereCount_ = 0, planeCount_ = 0;
+    GLsizei sphereCount_ = 0, planeCount_ = 0, cubeCount_ = 0;
     float planeAspect_ = 1.0f; // loaded albedo texture, else emissive
 };

@@ -470,6 +470,33 @@ void MaterialPreview::buildMeshes() {
         {-1,-1,0,0,0,1,0,0},{1,1,0,0,0,1,1,1},{-1,1,0,0,0,1,0,1}};
     vertices.insert(vertices.end(),std::begin(plane),std::end(plane));
     planeCount_=6;
+
+    // Six independent flat-shaded UV faces. Use outward normals and
+    // counterclockwise winding so each face receives consistent lighting.
+    // The sphere, plane, and cube share a single immutable GPU vertex buffer.
+    const auto appendCubeFace=[&](std::array<float,3> normal,
+                                  std::array<float,3> right,
+                                  std::array<float,3> up) {
+        constexpr float size=0.85f;
+        const auto corner=[&](float x,float y,float u,float v)->Vertex {
+            return {
+                size*(normal[0]+x*right[0]+y*up[0]),
+                size*(normal[1]+x*right[1]+y*up[1]),
+                size*(normal[2]+x*right[2]+y*up[2]),
+                normal[0],normal[1],normal[2],u,v
+            };
+        };
+        const Vertex a=corner(-1,-1,0,0),b=corner(1,-1,1,0);
+        const Vertex c=corner(1,1,1,1),d=corner(-1,1,0,1);
+        vertices.insert(vertices.end(),{a,b,c,a,c,d});
+    };
+    appendCubeFace({0,0,1}, {1,0,0}, {0,1,0});   // Front
+    appendCubeFace({0,0,-1},{-1,0,0},{0,1,0});  // Back
+    appendCubeFace({1,0,0}, {0,0,-1},{0,1,0});  // Right
+    appendCubeFace({-1,0,0},{0,0,1}, {0,1,0});  // Left
+    appendCubeFace({0,1,0}, {1,0,0}, {0,0,-1}); // Top
+    appendCubeFace({0,-1,0},{1,0,0}, {0,0,1});  // Bottom
+    cubeCount_=36;
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER,vbo_);
     glBufferData(GL_ARRAY_BUFFER,GLsizeiptr(vertices.size()*sizeof(Vertex)),
@@ -481,7 +508,7 @@ void MaterialPreview::buildMeshes() {
     glBindVertexArray(0);
 }
 void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
-                           bool plane,bool useEnvFresnel) {
+                           PreviewShape shape,bool useEnvFresnel) {
     if(!program_)return;
     resize(w,h);
     glBindFramebuffer(GL_FRAMEBUFFER,fbo_);
@@ -513,7 +540,7 @@ void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
     f1("uAspect",float(width_)/height_);
     // Keep the longer side at the previous plane size, without stretching
     // UVs or affecting the sphere; both wide and tall maps remain framed.
-    const float aspect=plane?planeAspect_:1.0f;
+    const float aspect=shape==PreviewShape::Plane?planeAspect_:1.0f;
     glUniform2f(glGetUniformLocation(program_,"uPlaneScale"),
                 std::min(aspect,1.0f),std::min(1.0f,1.0f/aspect));
     glUniform4fv(glGetUniformLocation(program_,"uAlbedo"),1,material_.albedo.data());
@@ -544,7 +571,11 @@ void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
         if(flags[i])i1(flags[i],textures_[i]?1:0);
     }
     glBindVertexArray(vao_);
-    glDrawArrays(GL_TRIANGLES,plane?sphereCount_:0,plane?planeCount_:sphereCount_);
+    const GLint offset=shape==PreviewShape::Plane?sphereCount_:
+                       shape==PreviewShape::Cube?sphereCount_+planeCount_:0;
+    const GLsizei count=shape==PreviewShape::Plane?planeCount_:
+                        shape==PreviewShape::Cube?cubeCount_:sphereCount_;
+    glDrawArrays(GL_TRIANGLES,offset,count);
     glBindVertexArray(0);
     glUseProgram(0);
     glActiveTexture(GL_TEXTURE0);

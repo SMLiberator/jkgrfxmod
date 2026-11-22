@@ -194,3 +194,17 @@ and the unsaved-changes dialog with material changes. The editor preserves
 all unrecognized metadata fields, existing materials, and replacement
 signatures. Editing registry paths does not copy image files into the pack;
 missing files are indicated in the UI.
+
+## Preview shapes and reset behavior
+
+The editor offers Sphere, Plane and Cube preview geometry. Cube uses six
+flat-shaded faces with separate outward normals and full 0–1 UV coverage,
+so each material texture is shown once per face. Switching shapes resets
+the camera to a useful starting angle: Plane face-on, Sphere at its familiar
+three-quarter view, and Cube angled to show three sides. Press Space or use
+Reset view to restore the current shape's starting view at any time.
+
+Pack Description and Comment inputs now enable Dear ImGui's native multiline
+word-wrapping flag. Lines wrap to the field width when typing and when the
+Materials window is resized, without inserting newline characters into
+stored metadata.
