@@ -2,6 +2,7 @@
 #include "glad.h"
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,13 @@ struct PreviewMaterial {
     float normalStrength = 1, normalStrength2 = 1;
     float matcapRoughness = 0;
     float coat = 0, coatRoughness = .1f, coatTransmission = 1;
+    int alphaMode = 0; // 0 smooth/blend, 1 mask, 2 dithered
+    int blendMode = 0; // 0 normal, 1 additive, 2 multiply, 3 fluid
+    float alphaCutoff = 0.5f;
+    // Only used when the material requests its original JK MAT albedo.
+    std::string nativeSourceKey;
+    int nativeWidth = 0, nativeHeight = 0;
+    std::vector<std::uint8_t> nativeRGBA; // straight-alpha, top-left origin
 };
 
 class MaterialPreview {
@@ -44,6 +52,7 @@ private:
     GLuint compileShader(GLenum type, const char *source);
     GLuint loadTexture(const std::string &path, bool srgb);
     GLuint createPreset();
+    GLuint uploadNativeAlbedo();
     void reloadImages();
     void resize(int width, int height);
     void buildMeshes();
