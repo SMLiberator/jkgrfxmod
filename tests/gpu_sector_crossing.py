@@ -79,7 +79,14 @@ assert (
     "        sector_crossing_planes,gpu_3do_sector_plane_texture_unit);"
 ) in setter[:setter.index("if(!count)return;")]
 assert render.count("gpu_3do_sector_plane_texture_unit")>=3
-assert render.count("glActiveTexture(GL_TEXTURE0+\n")>=2
+# Sector texture-buffer state now uses shared GL submission caching.
+# Both the sector-crossing sampler and the continuous ambient buffers
+# must continue to select their assigned unit before binding.
+assert "gl::set_active_texture_unit_raw(gpu_3do_sector_plane_texture_unit);" in render
+assert "gl::bind_texture_raw(GL_TEXTURE_BUFFER,sector_crossing_plane_texture);" in render
+assert "gl::set_active_texture_unit_raw(0);" in render
+assert "gl::set_active_texture_unit_raw(texture_units::forward_continuous_key_buffer);" in render
+assert "glActiveTexture(" not in render
 assert "fragment_units<=gpu_3do_sector_plane_texture_unit" in render
 assert "glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);" in render
 assert "prog.set_sector_crossing(nullptr,false,false,false);" in render

@@ -47,7 +47,9 @@ assert "sun_sky_surface_eligible(0x200U,0x123400U)" in read("tests/sun_shadow.cp
 assert "void draw_sun_sky_aperture(int cascade," in render
 assert "draw_sun_sky_aperture(cascade,view,safe_read);" in render
 assert "sun_sky_aperture_ready()" in render
-assert "glBindTexture(GL_TEXTURE_2D_ARRAY," in render
+# The sky aperture remains bound to its dedicated sampler2DArray unit,
+# now using the shared GL state cache rather than raw glBindTexture.
+assert "gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY," in render
 assert "texture_units::forward_next_extended_required_units" in render
 assert "texture_units::forward_next_extended_unit" in render
 assert "glActiveTexture(GL_TEXTURE0+19)" not in render
