@@ -15,6 +15,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Enable MSVC developer tools (dumpbin)
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Configure standalone static editor
         shell: pwsh
         run: |
