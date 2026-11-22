@@ -4,12 +4,15 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 #include "imgui.h"
+#include "imgui_internal.h"
+#include "native_mat.hpp"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 #include "common/json_incl.hpp"
 #include "preview.hpp"
 #include <windows.h>
 #include <commdlg.h>
+#include <shlobj.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -30,6 +33,29 @@ std::string toUtf8(const wchar_t *source) {
     WideCharToMultiByte(CP_UTF8,0,source,-1,out.data(),count,nullptr,nullptr);
     out.pop_back();
     return out;
+}
+std::string chooseDirectory(GLFWwindow *window) {
+    BROWSEINFOW dialog{};
+    dialog.hwndOwner=glfwGetWin32Window(window);
+    dialog.lpszTitle=L"Choose JK/MotS assets folder (loose MATs, CMPs, GOB/GOO archives)";
+    dialog.ulFlags=BIF_RETURNONLYFSDIRS|BIF_NEWDIALOGSTYLE;
+    PIDLIST_ABSOLUTE result=SHBrowseForFolderW(&dialog);
+    if(!result)return {};
+    wchar_t path[MAX_PATH]={};
+    const BOOL ok=SHGetPathFromIDListW(result,path);
+    CoTaskMemFree(result);
+    return ok?toUtf8(path):std::string{};
+}
+std::string choosePaletteFile(GLFWwindow *window) {
+    wchar_t path[32768]={};
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize=sizeof(dialog);
+    dialog.hwndOwner=glfwGetWin32Window(window);
+    dialog.lpstrFilter=L"JK colormap (*.cmp)\0*.cmp\0All files\0*.*\0\0";
+    dialog.lpstrFile=path;
+    dialog.nMaxFile=DWORD(sizeof(path)/sizeof(path[0]));
+    dialog.Flags=OFN_EXPLORER|OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
+    return GetOpenFileNameW(&dialog)?toUtf8(path):std::string{};
 }
 std::string chooseFile(GLFWwindow *window,bool image) {
     wchar_t path[32768] = {};
@@ -100,6 +126,11 @@ PreviewMaterial fromMetadata(const Document &entry,const Document &root,
     p.coat=number(entry,"clearcoat_strength",coatSurface?1.0f:0.0f);
     p.coatRoughness=number(entry,"clearcoat_roughness",.1f);
     p.coatTransmission=number(entry,"clearcoat_transmission",1.0f);
+    std::string alpha=stringValue(entry,"alpha_mode");
+    p.alphaMode=alpha=="mask"?1:(alpha=="dithered"?2:0);
+    std::string blend=stringValue(entry,"blend_mode");
+    p.blendMode=blend=="additive"?1:(blend=="multiply"?2:(blend=="fluid"?3:0));
+    p.alphaCutoff=number(entry,"alpha_cutoff",0.5f);
     return p;
 }
 void setArray(Document &obj,const char *key,const float *values,int size) {
@@ -134,11 +165,15 @@ public:
         orientation_=multiplyOrientation(screenDrag(-.35f/.009f,0),
                                          screenDrag(0,.15f/.009f));
         preview_=std::make_unique<MaterialPreview>();
+        resetView();
         status_="Open a compiled metadata.json to begin.";
     }
     void frame() {
         // Let ImGui's own editable text boxes handle Ctrl+Z while typing.
         if(!ImGui::GetIO().WantTextInput) {
+            if(ImGui::IsKeyPressed(ImGuiKey_Space,false) &&
+               !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId))
+                resetView();
             if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_O))open();
             if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_S))save();
             if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_Z))undo();
@@ -146,8 +181,27 @@ public:
                ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_Y))redo();
         }
 
-        ImGui::DockSpaceOverViewport(0,ImGui::GetMainViewport(),
+        ImGuiID dock=ImGui::DockSpaceOverViewport(0,ImGui::GetMainViewport(),
                                     ImGuiDockNodeFlags_PassthruCentralNode);
+        if(!layoutConfigured_) {
+            layoutConfigured_=true;
+            ImGuiDockNode *root=ImGui::DockBuilderGetNode(dock);
+            // Create a proportional three-panel workspace only when there is
+            // no previously saved dock layout. Resizing the host viewport
+            // automatically resizes all three docked child panels.
+            if(root && root->IsLeafNode() && root->Windows.empty()) {
+                ImGui::DockBuilderRemoveNode(dock);
+                ImGui::DockBuilderAddNode(dock,ImGuiDockNodeFlags_DockSpace);
+                ImGui::DockBuilderSetNodeSize(dock,ImGui::GetMainViewport()->Size);
+                ImGuiID left=0,rest=0,right=0,center=0;
+                ImGui::DockBuilderSplitNode(dock,ImGuiDir_Left,0.20f,&left,&rest);
+                ImGui::DockBuilderSplitNode(rest,ImGuiDir_Right,0.29f,&right,&center);
+                ImGui::DockBuilderDockWindow("Materials",left);
+                ImGui::DockBuilderDockWindow("Live Material Preview",center);
+                ImGui::DockBuilderDockWindow("Material Properties",right);
+                ImGui::DockBuilderFinish(dock);
+            }
+        }
         if(ImGui::BeginMainMenuBar()) {
             if(ImGui::BeginMenu("File")) {
                 if(ImGui::MenuItem("Open metadata...","Ctrl+O"))open();
@@ -186,6 +240,13 @@ public:
     }
 
 private:
+    void resetView() {
+        // Plane defaults front-on; sphere defaults to its familiar
+        // slightly angled three-quarter view.
+        orientation_=plane_?Orientation{0,0,0,1}:
+            multiplyOrientation(screenDrag(-.35f/.009f,0),
+                                screenDrag(0,.15f/.009f));
+    }
     struct Edit {
         int materialIndex=-1;
         std::string key;
@@ -250,9 +311,41 @@ private:
         status_="Unsaved material changes (Ctrl+S)";
     }
     void syncPreview() {
-        if(validSelection())preview_->setMaterial(
-            fromMetadata(selected(),root_,fs::u8path(file_).parent_path()));
-        else preview_->setMaterial(PreviewMaterial{});
+        if(!validSelection()) {preview_->setMaterial(PreviewMaterial{});return;}
+        PreviewMaterial p=fromMetadata(selected(),root_,
+                                     fs::u8path(file_).parent_path());
+        const Document &entry=selected();
+        bool keep=entry.value("keep_albedo",false)||
+                  entry.value("use_original_albedo",false);
+        if(keep && p.files[BaseMap].empty()) {
+            std::string matName;
+            int cel=0;
+            auto it=entry.find("replaces");
+            if(it!=entry.end() && it->is_array() && !it->empty()) {
+                const Document &repl=(*it)[0];
+                if(repl.is_object()) {
+                    matName=stringValue(repl,"name");
+                    cel=repl.value("cel",0);
+                }
+            }
+            std::string key=nativeSource_.root()+"|"+nativeSource_.palette()+
+                "|"+matName+"|"+std::to_string(cel);
+            if(key!=nativeCacheKey_) {
+                nativeCacheKey_=key;
+                nativeLoaded_={};
+                nativeStatus_.clear();
+                if(!matName.empty())
+                    nativeSource_.load(matName,cel,nativeLoaded_,nativeStatus_);
+                else nativeStatus_="Original MAT replacement is not listed.";
+            }
+            if(nativeLoaded_.width>0) {
+                p.nativeSourceKey=key;
+                p.nativeWidth=nativeLoaded_.width;
+                p.nativeHeight=nativeLoaded_.height;
+                p.nativeRGBA=nativeLoaded_.rgba;
+            }
+        }
+        preview_->setMaterial(p);
     }
     void open() {
         if(dirty_&&!confirmClose())return;
@@ -270,6 +363,7 @@ private:
             undo_.clear(); redo_.clear(); groupActive_=false;
             file_=path;loaded_=true;dirty_=false;
             selection_=root_["materials"].empty()?-1:0;
+            nativeCacheKey_.clear();
             syncPreview();
             status_="Loaded "+std::to_string(root_["materials"].size())+" materials.";
         } catch(const std::exception &e) {
@@ -302,8 +396,6 @@ private:
         }
     }
     void renderList() {
-        ImGui::SetNextWindowPos(ImVec2(10,35),ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(255,690),ImGuiCond_FirstUseEver);
         ImGui::Begin("Materials");
         if(ImGui::Button("Open pack..."))open();
         ImGui::SameLine();
@@ -340,12 +432,12 @@ private:
         ImGui::End();
     }
     void renderViewport() {
-        ImGui::SetNextWindowPos(ImVec2(275,35),ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(660,690),ImGuiCond_FirstUseEver);
         ImGui::Begin("Live Material Preview");
         if(ImGui::RadioButton("Sphere",!plane_))plane_=false;
         ImGui::SameLine();
         if(ImGui::RadioButton("Plane",plane_))plane_=true;
+        ImGui::SameLine();
+        if(ImGui::SmallButton("Reset view (Space)"))resetView();
         ImGui::SameLine();
         ImGui::SetNextItemWidth(150);
         const char *options[]={"Studio","Outdoor","Night"};
@@ -365,18 +457,7 @@ private:
                              "Raw EnvMap (diagnostic)"};
         ImGui::SetNextItemWidth(230);
         ImGui::Combo("Preview shading",&inspectionMode_,views,3);
-        ImGui::Checkbox("Apply Fresnel to EnvMap reflections",&envFresnel_);
-        ImGui::TextDisabled(envFresnel_ ?
-            "Renderer-style Fresnel enabled (preview only)." :
-            "Fresnel disabled: show the full EnvMap reflection intensity (preview only).");
-        ImGui::TextWrapped("Source: %s",preview_->environmentDescription().c_str());
-        if(!preview_->hasLoadedEnvironmentFile())
-            ImGui::TextDisabled("A built-in environment preset is being used.");
-        if(validSelection() && number(selected(),"reflection_strength",
-             selected().contains("surface_map")?1.0f:0.0f)<=0.0f)
-            ImGui::TextColored(ImVec4(1.0f,.7f,.35f,1.0f),
-               "Reflection strength is 0: EnvMap reflections are disabled.");
-        ImGui::TextDisabled("All game reflection modes use EnvMap sampling in this preview.");
+        ImGui::Checkbox("Fresnel",&envFresnel_);
         ImVec2 area=ImGui::GetContentRegionAvail();
         area.x=std::max(area.x,64.0f);
         area.y=std::max(area.y-35.0f,64.0f);
@@ -476,8 +557,6 @@ private:
         }
     }
     void renderProperties() {
-        ImGui::SetNextWindowPos(ImVec2(950,35),ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(370,690),ImGuiCond_FirstUseEver);
         ImGui::Begin("Material Properties");
         if(!validSelection()) {
             ImGui::TextWrapped("Select a material to edit its properties and see the result in the OpenGL preview.");
@@ -490,6 +569,41 @@ private:
             auto v=rgba(selected(),"albedo_factor",{1,1,1,1});
             colorField("Tint / alpha","albedo_factor",v.data(),4);
             imageInfo("Albedo texture","albedo_map");
+            bool keeps=selected().value("keep_albedo",false)||
+                       selected().value("use_original_albedo",false);
+            if(keeps) {
+                ImGui::Separator();
+                ImGui::TextUnformatted("Original JK MAT albedo (preview only)");
+                if(ImGui::Button("Choose game assets folder...")) {
+                    std::string directory=chooseDirectory(window_);
+                    if(!directory.empty()) {
+                        nativeSource_.setRoot(directory);
+                        nativeCacheKey_.clear();
+                        syncPreview();
+                    }
+                }
+                ImGui::SameLine();
+                if(ImGui::Button("Choose CMP...")) {
+                    std::string cmp=choosePaletteFile(window_);
+                    if(!cmp.empty()) {
+                        nativeSource_.setPalette(cmp);
+                        nativeCacheKey_.clear();
+                        syncPreview();
+                    }
+                }
+                if(!nativeSource_.root().empty()) {
+                    ImGui::TextWrapped("Assets: %s (%zu files)",
+                        nativeSource_.root().c_str(),nativeSource_.indexedFiles());
+                }
+                if(!nativeSource_.palette().empty())
+                    ImGui::TextWrapped("CMP: %s",nativeSource_.palette().c_str());
+                if(nativeLoaded_.width>0)
+                    ImGui::TextWrapped("Using: %s",
+                                       nativeLoaded_.description.c_str());
+                else if(!nativeStatus_.empty())
+                    ImGui::TextWrapped("%s",nativeStatus_.c_str());
+                ImGui::TextDisabled("MAT/CMP preview does not alter metadata.");
+            }
             ImGui::TextDisabled("Existing compiled PNG textures are read-only.");
         }
         if(ImGui::CollapsingHeader("Reflections",ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -606,9 +720,13 @@ private:
     Document savedRoot_=Document::object(), observedRoot_=Document::object();
     std::vector<Edit> undo_,redo_;
     std::string file_,status_,override_;
-    bool loaded_=false,dirty_=false,plane_=false,groupActive_=false;
+    NativeMatSource nativeSource_;
+    NativeMatImage nativeLoaded_;
+    std::string nativeCacheKey_,nativeStatus_;
+    bool loaded_=false,dirty_=false,plane_=false,groupActive_=false,
+         layoutConfigured_=false;
     int selection_=-1,environment_=0,inspectionMode_=0;
-    bool envFresnel_=true;
+    bool envFresnel_=false;
     Orientation orientation_{0,0,0,1};
     ImGuiTextFilter filter_;
 };
