@@ -26,7 +26,8 @@ namespace jkgm::gl {
         color0 = 0x8CE0,
         color1 = 0x8CE1,
         color2 = 0x8CE2,
-        color3 = 0x8CE3
+        color3 = 0x8CE3,
+        color4 = 0x8CE4
     };
 
     enum class framebuffer_attachment : enum_type {
@@ -34,6 +35,7 @@ namespace jkgm::gl {
         color1 = 0x8CE1,
         color2 = 0x8CE2,
         color3 = 0x8CE3,
+        color4 = 0x8CE4,
         depth = 0x8D00,
         stencil = 0x8D20,
         depth_stencil = 0x821A

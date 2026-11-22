@@ -12,6 +12,7 @@ namespace jkgm {
     class opengl_shader {
     protected:
         gl::program the_program;
+        gl::uniform_location_id gbuffer_packing_uniform;
 
         opengl_shader(std::string const &name,
                       fs::path const &vertex_part,
@@ -27,6 +28,7 @@ namespace jkgm {
 
         virtual ~opengl_shader() = default;
 
+        static void configure_gbuffer_packing(bool enabled);
         void use_program();
     };
 
@@ -553,7 +555,7 @@ namespace jkgm {
             gl::uniform_location_id color_image;
             gl::uniform_location_id emissive_image;
             gl::uniform_location_id occlusion_image;
-            gl::uniform_location_id depth_image;
+            gl::uniform_location_id depth_image,pigment_image;
             gl::uniform_location_id retain_hom_pixels;
             gl::uniform_location_id fog_params;
             gl::uniform_location_id fog_color;
@@ -605,6 +607,7 @@ namespace jkgm {
             void set_emissive_sampler(int sampler);
             void set_occlusion_sampler(int sampler);
             void set_depth_sampler(int sampler);
+            void set_pigment_sampler(int sampler);
             void set_coverage_normal_sampler(int sampler);
             void set_retain_hom_pixels(bool enabled);
             void set_fog(point<4,float> params,color_rgb fog);

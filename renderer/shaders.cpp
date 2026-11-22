@@ -10,6 +10,7 @@
 #include <sstream>
 
 namespace jkgm {
+namespace { bool gbuffer_packing_enabled=false; }
 
 jkgm::shaders::translucent_sun_uniforms::translucent_sun_uniforms(
     gl::program_view program)
@@ -319,14 +320,24 @@ jkgm::opengl_shader::opengl_shader(std::string const &name,
                                    fs::path const &vertex_part,
                                    fs::path const &fragment_part,
                                    fs::path const &geometry_part)
+    : gbuffer_packing_uniform(gl::uniform_location_id(-1))
 {
     link_program_from_files(
         name,the_program,vertex_part,fragment_part,geometry_part);
+    gbuffer_packing_uniform=gl::get_uniform_location(the_program,"gbuffer_packing");
+}
+
+void jkgm::opengl_shader::configure_gbuffer_packing(bool enabled)
+{
+    gbuffer_packing_enabled=enabled;
 }
 
 void jkgm::opengl_shader::use_program()
 {
     gl::use_program(the_program);
+    // Uniform values persist, and the GL cache omits duplicate Wine calls.
+    gl::set_uniform_integer(gbuffer_packing_uniform,
+                            gbuffer_packing_enabled?1:0);
 }
 
 jkgm::shaders::menu_shader::menu_shader(fs::path const &data_root, bool fullscreen)
@@ -1790,6 +1801,7 @@ jkgm::shaders::game_post_opaque_composite_shader::game_post_opaque_composite_sha
     , emissive_image(gl::get_uniform_location(the_program, "emissive_image"))
     , occlusion_image(gl::get_uniform_location(the_program, "occlusion_image"))
     , depth_image(gl::get_uniform_location(the_program, "depth_image"))
+    , pigment_image(gl::get_uniform_location(the_program, "pigment_image"))
     , retain_hom_pixels(gl::get_uniform_location(the_program, "retain_hom_pixels"))
     , fog_params(gl::get_uniform_location(the_program, "fog_params"))
     , fog_color(gl::get_uniform_location(the_program, "fog_color"))
@@ -1893,6 +1905,11 @@ void jkgm::shaders::game_post_opaque_composite_shader::set_occlusion_sampler(int
 void jkgm::shaders::game_post_opaque_composite_shader::set_depth_sampler(int sampler)
 {
     gl::set_uniform_integer(depth_image, sampler);
+}
+
+void jkgm::shaders::game_post_opaque_composite_shader::set_pigment_sampler(int sampler)
+{
+    gl::set_uniform_integer(pigment_image,sampler);
 }
 
 void jkgm::shaders::game_post_opaque_composite_shader::set_coverage_normal_sampler(

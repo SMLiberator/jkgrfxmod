@@ -49,8 +49,8 @@ for path in readers:
             assert "gbuffer_unpack_normal(" in line,(path,line)
 assert read("assets/shaders/post_box4.frag").count(
     "gbuffer_unpack_normal(textureOffset(normal_image")==16
-assert "chosen_normal.a>1.5" in read("assets/shaders/post_sun_visibility_half.frag")
-assert "normal_pixel.a>1.5" in read("assets/shaders/post_opaque_composite.frag")
+assert "gbuffer_is_sprite(chosen_normal)" in read("assets/shaders/post_sun_visibility_half.frag")
+assert "gbuffer_is_sprite(normal_pixel)" in read("assets/shaders/post_opaque_composite.frag")
 
 # Simulate the fixed-point UNORM framebuffer conversion, including the
 # unusual case of a covered sky/fullbright pixel with no lighting normal.
@@ -74,3 +74,40 @@ for normal in ((0.,0.,0.),(1.,0.,0.),(-1.,0.,0.),(0.,1.,0.),
 assert roundtrip((0.,0.,0.),0)==((0.,0.,0.),0)
 assert roundtrip((0.,0.,0.),1)==((0.,0.,0.),1)
 print("Packed RGB10_A2 normal G-buffer: writers, readers, classification, MSAA and quantization OK")
+
+# Packed octahedral normal keeps the spare 10-bit channel for receiver light,
+# with 2-bit 0/1/2/3 classes: empty, ordinary, sprite, zero normal.
+assert "vec2 gbuffer_oct_encode" in helper
+assert "vec3 gbuffer_oct_decode" in helper
+assert "clamp(receiver_light/1.25,0.0,1.0)" in helper
+assert "if(receiver_class>2.5)return vec4(0.0,0.0,0.0,receiver_class);" in helper
+assert "gbuffer_receiver_light" in helper and "gbuffer_is_sprite" in helper
+
+def signnz(v):
+    return 1 if v>=0 else -1
+
+def oct_roundtrip(n):
+    length=math.sqrt(sum(x*x for x in n))
+    n=tuple(x/length for x in n)
+    scale=sum(abs(x) for x in n)
+    x,y,z=(a/scale for a in n)
+    if z<0:
+        x,y=(1-abs(y))*signnz(x),(1-abs(x))*signnz(y)
+    u,v=(round((x*.5+.5)*1023)/1023,round((y*.5+.5)*1023)/1023)
+    x,y=u*2-1,v*2-1
+    z=1-abs(x)-abs(y)
+    if z<0:
+        x,y=(1-abs(y))*signnz(x),(1-abs(x))*signnz(y)
+    l=math.sqrt(x*x+y*y+z*z)
+    return (x/l,y/l,z/l)
+for n in ((1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),
+          (0,0,-1),(0.577350,-0.577350,0.577350),(-.42,.3,-.85)):
+    decoded=oct_roundtrip(n)
+    length=math.sqrt(sum(x*x for x in n))
+    target=tuple(x/length for x in n)
+    assert max(abs(x-y) for x,y in zip(decoded,target))<0.005,(n,decoded)
+for light in (0,.0001,.1,.4,1.,1.25,2.0):
+    quant=round(max(0,min(1,light/1.25))*1023)/1023
+    decoded=quant*1.25
+    assert abs(decoded-min(light,1.25))<=1.25/1023
+print("Octahedral normal packing: quantized normals, light scalar and coverage classes OK")

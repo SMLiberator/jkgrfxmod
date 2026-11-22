@@ -32,6 +32,8 @@ namespace jkgm {
         gl::texture emissive_tex;
         gl::texture normal_tex;
         gl::texture depth_tex;
+        gl::texture pigment_tex;
+        bool has_pigment=false;
 
         box<2, int> viewport;
 
@@ -64,6 +66,7 @@ namespace jkgm {
         msaa_resolve_buffer gbuffer_emissive_resolve;
         msaa_resolve_buffer gbuffer_normal_resolve;
         msaa_resolve_buffer gbuffer_depth_resolve;
+        std::unique_ptr<msaa_resolve_buffer> gbuffer_pigment_resolve;
         msaa_resolve_buffer buffer_resolve;
 
     public:
@@ -81,6 +84,7 @@ namespace jkgm {
         gl::texture_view get_resolved_emissive_texture() override;
         gl::texture_view get_resolved_normal_texture() override;
         gl::texture_view get_resolved_depth_texture() override;
+        gl::texture_view get_resolved_pigment_texture() override;
 
         void begin_compose_opaque_pass(bool retain_hom_pixels) override;
         void end_compose_opaque_pass() override;

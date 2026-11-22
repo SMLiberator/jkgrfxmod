@@ -22,6 +22,7 @@ namespace jkgm {
         virtual gl::texture_view get_resolved_emissive_texture() = 0;
         virtual gl::texture_view get_resolved_normal_texture() = 0;
         virtual gl::texture_view get_resolved_depth_texture() = 0;
+        virtual gl::texture_view get_resolved_pigment_texture() = 0;
 
         virtual void begin_compose_opaque_pass(bool retain_hom_pixels) = 0;
         virtual void end_compose_opaque_pass() = 0;

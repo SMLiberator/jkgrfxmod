@@ -30,6 +30,7 @@ layout(location = 0) out vec4 out_color;
 layout(location = 1) out vec4 out_emissive;
 layout(location = 2) out vec4 out_normal;
 layout(location = 3) out vec4 out_depth;
+layout(location=4) out vec4 out_pigment; // only attached for packed deferred lighting
 
 // ---------------------------------------------------------------------------
 // Dynamic fog: values are supplied by the runtime SetFog* COG verbs.
@@ -409,9 +410,10 @@ void main()
     float receiver_light = dot(vertex_color.rgb, vec3(0.2126, 0.7152, 0.0722));
     out_emissive = vec4(emissive + (reflection + sun_specular) * (1.0 - fog_amount),
                         receiver_light);
-    out_normal = gbuffer_pack_normal(normalize(vp_normal), 1.0);
+    out_normal = gbuffer_pack_normal(normalize(vp_normal), 1.0, receiver_light);
     // Depth R retains the existing linear-depth ABI. With spotlights
     // enabled the target is RGBA16F and GBA preserves unlit pigment.
     // In R16F mode OpenGL discards unused GBA without extra cost.
     out_depth = vec4(adj_vp_z, unlit_base_color.rgb);
+    out_pigment = vec4(unlit_base_color.rgb,1.0);
 }

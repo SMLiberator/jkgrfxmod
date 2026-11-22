@@ -52,6 +52,7 @@ jkgm::render_gbuffer_msaa::render_gbuffer_msaa(size<2, int> dims,
     : viewport(make_point(0, 0), dims)
 {
     gl::bind_framebuffer(gl::framebuffer_bind_target::any, fbo);
+    has_pigment=packed_color && spotlight_albedo;
 
     // Match the MSAA color attachment to the selected resolve format.
     gl::bind_texture(gl::texture_bind_target::texture_2d_multisample, color_tex);
@@ -65,11 +66,12 @@ jkgm::render_gbuffer_msaa::render_gbuffer_msaa(size<2, int> dims,
     gl::framebuffer_texture(
         gl::framebuffer_bind_target::any, gl::framebuffer_attachment::color0, color_tex, 0);
 
-    // Set up emissive texture:
+    // Emissive RGB11F carries no decal intensity in packed mode.
     gl::bind_texture(gl::texture_bind_target::texture_2d_multisample, emissive_tex);
     gl::tex_image_2d_multisample(gl::texture_bind_target::texture_2d_multisample,
                                  num_samples,
-                                 gl::texture_internal_format::rgba16f,
+                                 packed_color ? gl::texture_internal_format::r11f_g11f_b10f :
+                                                gl::texture_internal_format::rgba16f,
                                  dims,
                                  /*fixed sample locations*/ true);
     gl::set_texture_max_level(gl ::texture_bind_target::texture_2d_multisample, 0U);
@@ -107,7 +109,8 @@ jkgm::render_gbuffer_msaa::render_gbuffer_msaa(size<2, int> dims,
     gl::bind_texture(gl::texture_bind_target::texture_2d_multisample, depth_tex);
     gl::tex_image_2d_multisample(gl::texture_bind_target::texture_2d_multisample,
                                  num_samples,
-                                 spotlight_albedo ? gl::texture_internal_format::rgba16f :
+                                 (spotlight_albedo && !packed_color) ?
+                                     gl::texture_internal_format::rgba16f :
                                      gl::texture_internal_format::r16f,
                                  dims,
                                  /*fixed sample locations*/ true);
@@ -129,15 +132,27 @@ jkgm::render_gbuffer_msaa::render_gbuffer_msaa(size<2, int> dims,
                             depth_tex,
                             /*level*/ 0);
 
+    if(has_pigment) {
+        gl::bind_texture(gl::texture_bind_target::texture_2d_multisample,pigment_tex);
+        gl::tex_image_2d_multisample(
+            gl::texture_bind_target::texture_2d_multisample,num_samples,
+            gl::texture_internal_format::r11f_g11f_b10f,dims,true);
+        gl::framebuffer_texture(gl::framebuffer_bind_target::any,
+                                gl::framebuffer_attachment::color4,pigment_tex,0);
+    }
+
     // Set up real depth buffer:
     gl::framebuffer_renderbuffer(
         gl::framebuffer_bind_target::any, gl::framebuffer_attachment::depth, rbo->rbo);
 
     // Finish:
-    gl::draw_buffers(gl::draw_buffer::color0,
-                     gl::draw_buffer::color1,
-                     gl::draw_buffer::color2,
-                     gl::draw_buffer::color3);
+    if(has_pigment)
+        gl::draw_buffers(gl::draw_buffer::color0,gl::draw_buffer::color1,
+                         gl::draw_buffer::color2,gl::draw_buffer::color3,
+                         gl::draw_buffer::color4);
+    else
+        gl::draw_buffers(gl::draw_buffer::color0,gl::draw_buffer::color1,
+                         gl::draw_buffer::color2,gl::draw_buffer::color3);
 
     auto fbs = gl::check_framebuffer_status(gl::framebuffer_bind_target::any);
     if(gl::check_framebuffer_status(gl::framebuffer_bind_target::any) !=
@@ -208,19 +223,28 @@ jkgm::renderer_screen_msaa::renderer_screen_msaa(size<2, int> screen_res,
                                            gl::texture_pixel_format::rgba,
                             gl::texture_pixel_type::float32)
     , gbuffer_emissive_resolve(screen_res,
-                               gl::texture_internal_format::rgba16f,
-                               gl::texture_pixel_format::rgba,
+                               packed_color ? gl::texture_internal_format::r11f_g11f_b10f :
+                                              gl::texture_internal_format::rgba16f,
+                               packed_color ? gl::texture_pixel_format::rgb :
+                                              gl::texture_pixel_format::rgba,
                                gl::texture_pixel_type::float32)
     , gbuffer_normal_resolve(screen_res,
                              gl::texture_internal_format::rgb10_a2,
                              gl::texture_pixel_format::rgba,
                              gl::texture_pixel_type::float32)
     , gbuffer_depth_resolve(screen_res,
-                            spotlight_albedo ? gl::texture_internal_format::rgba16f :
+                            (spotlight_albedo && !packed_color) ?
+                                gl::texture_internal_format::rgba16f :
                                 gl::texture_internal_format::r16f,
-                            spotlight_albedo ? gl::texture_pixel_format::rgba :
+                            (spotlight_albedo && !packed_color) ?
+                                gl::texture_pixel_format::rgba :
                                 gl::texture_pixel_format::red,
                             gl::texture_pixel_type::float32)
+    , gbuffer_pigment_resolve(packed_color && spotlight_albedo
+          ?std::make_unique<msaa_resolve_buffer>(screen_res,
+              gl::texture_internal_format::r11f_g11f_b10f,
+              gl::texture_pixel_format::rgb,gl::texture_pixel_type::float32)
+          :nullptr)
     , buffer_resolve(screen_res,
                      gl::texture_internal_format::rgba16f,
                      gl::texture_pixel_format::rgba,
@@ -265,6 +289,7 @@ void jkgm::renderer_screen_msaa::begin_opaque_pass()
     gl::clear_buffer_color(2, color::zero());
     // R16F linear view depth: 65504 marks pixels with no opaque geometry.
     gl::clear_buffer_color(3, color(65504.0f, 0.0f, 0.0f, 0.0f));
+    if(screen_gbuffer.has_pigment)gl::clear_buffer_color(4,color::zero());
     gl::clear_buffer_depth(1.0f);
 }
 
@@ -299,6 +324,15 @@ void jkgm::renderer_screen_msaa::end_opaque_pass()
                          gbuffer_depth_resolve.viewport,
                          {gl::framebuffer_blit_buffer::color},
                          gl::framebuffer_blit_filter::nearest);
+    if(gbuffer_pigment_resolve) {
+        gl::bind_framebuffer(gl::framebuffer_bind_target::draw,
+                             gbuffer_pigment_resolve->fbo);
+        gl::read_buffer(gl::framebuffer_attachment::color4);
+        gl::blit_framebuffer(screen_gbuffer.viewport,
+                             gbuffer_pigment_resolve->viewport,
+                             {gl::framebuffer_blit_buffer::color},
+                             gl::framebuffer_blit_filter::nearest);
+    }
 }
 
 jkgm::gl::texture_view jkgm::renderer_screen_msaa::get_resolved_color_texture()
@@ -319,6 +353,12 @@ jkgm::gl::texture_view jkgm::renderer_screen_msaa::get_resolved_normal_texture()
 jkgm::gl::texture_view jkgm::renderer_screen_msaa::get_resolved_depth_texture()
 {
     return gbuffer_depth_resolve.tex;
+}
+
+jkgm::gl::texture_view jkgm::renderer_screen_msaa::get_resolved_pigment_texture()
+{
+    return gbuffer_pigment_resolve
+        ?gl::texture_view(gbuffer_pigment_resolve->tex):gl::default_texture;
 }
 
 void jkgm::renderer_screen_msaa::begin_compose_opaque_pass(bool retain_hom_pixels)

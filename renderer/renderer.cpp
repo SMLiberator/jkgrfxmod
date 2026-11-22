@@ -1825,6 +1825,8 @@ namespace jkgm {
             , ddraw1_palette(this)
             , dll_instance(dll_instance)
         {
+            opengl_shader::configure_gbuffer_packing(
+                the_config->enable_gbuffer_packing);
             indexed_bitmap_colors.resize(256, color_rgba8::zero());
 
             menu_prev_ticks = std::chrono::high_resolution_clock::now();
@@ -4740,11 +4742,14 @@ namespace jkgm {
             if(decals_only) {
                 // Unit 10 is the spotlight's sampler2DShadow, even if it
                 // is inactive. Reuse 2D displacement unit 9: decals disable
-                // parallax and receive JK light from opaque emissive alpha.
+                // parallax and receive JK light from opaque emissive alpha
+                // (or packed normal.B when G-buffer packing is enabled).
                 gl::set_active_texture_unit(
                     texture_units::forward_decal_light);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
-                                 frame_screen->get_resolved_emissive_texture());
+                                 the_config->enable_gbuffer_packing
+                                     ?frame_screen->get_resolved_normal_texture()
+                                     :frame_screen->get_resolved_emissive_texture());
                 gl::set_active_texture_unit(11);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                                  frame_ao->get_ssao_texture());
@@ -10206,6 +10211,7 @@ namespace jkgm {
             ogs->game_post_opaque_composite_program.set_emissive_sampler(1);
             ogs->game_post_opaque_composite_program.set_occlusion_sampler(2);
             ogs->game_post_opaque_composite_program.set_depth_sampler(3);
+            ogs->game_post_opaque_composite_program.set_pigment_sampler(4);
             // Required even when no sun/spotlight camera is configured.
             ogs->game_post_opaque_composite_program.set_coverage_normal_sampler(5);
             auto &prog=ogs->game_post_opaque_composite_program;
@@ -10473,6 +10479,10 @@ namespace jkgm {
             gl::set_active_texture_unit(5);
             gl::bind_texture(gl::texture_bind_target::texture_2d,
                              frame_screen->get_resolved_normal_texture());
+
+            gl::set_active_texture_unit(4);
+            gl::bind_texture(gl::texture_bind_target::texture_2d,
+                             frame_screen->get_resolved_pigment_texture());
 
             gl::set_active_texture_unit(3);
             gl::bind_texture(gl::texture_bind_target::texture_2d,

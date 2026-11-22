@@ -387,6 +387,7 @@ layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
 layout(location=3) out vec4 out_depth;
+layout(location=4) out vec4 out_pigment; // only attached for packed deferred lighting
 void main() {
     // World alpha coverage is split with the same rules as cached 3DOs.
     // Sample the MAT once and discard *before* writing any attachment.
@@ -449,8 +450,9 @@ void main() {
         // covers the HOM background but receives no AO, sun or spotlights.
         out_color=vec4(albedo,1.0);
         out_emissive=vec4(0.0,0.0,0.0,1.0);
-        out_normal=gbuffer_pack_normal(vec3(0.0),1.0);
+        out_normal=gbuffer_pack_normal(vec3(0.0),1.0,1.0);
         out_depth=vec4(65504.0,albedo);
+        out_pigment=vec4(albedo,1.0);
         return;
     }
     float fullbright=solid_fullbright!=0 ? 1.0 :
@@ -679,6 +681,8 @@ void main() {
             view_n.x*sh,view_n.y*sv,view_n.z));
     }
     out_normal=gbuffer_pack_normal(
-        fullbright>=0.5 ? vec3(0.0) : diffuse_view_normal,1.0);
+        fullbright>=0.5 ? vec3(0.0) : diffuse_view_normal,1.0,
+        dot(lighting,vec3(0.2126,0.7152,0.0722)));
     out_depth=vec4(32.0/max(gl_FragCoord.w,0.00000001),albedo);
+    out_pigment=vec4(albedo,1.0);
 }

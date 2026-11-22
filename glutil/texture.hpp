@@ -52,7 +52,7 @@ namespace jkgm::gl {
         rgb16f = 0x881B,
         rgba16f = 0x881A,
         rgb10_a2 = 0x8059, // packed signed-view normal + 2-bit receiver class
-    r11f_g11f_b10f = 0x8C3A, // unsigned 11/11/10-bit floating HDR RGB; no alpha
+        r11f_g11f_b10f = 0x8C3A, // unsigned 11/11/10-bit floating HDR RGB; no alpha
         rgba32f = 0x8814,
         r16f = 0x822D,
         r8 = 0x8229,

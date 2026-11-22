@@ -269,6 +269,7 @@ jobs:
         python3 tests/gbuffer_packed_normals.py
         python3 tests/gl_state_cache_wiring.py
         python3 tests/gbuffer_color_packing.py
+        python3 tests/gbuffer_pigment_packing.py
     - name: GPU GL mesh cache sweep and reuse profiling regression
       run: python3 tests/gpu_gl_sweep_profiling.py
     - name: GPU 3DO cached opaque group ordering parity

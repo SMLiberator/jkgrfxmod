@@ -858,6 +858,7 @@ layout(location=0) out vec4 out_color;
 layout(location=1) out vec4 out_emissive;
 layout(location=2) out vec4 out_normal;
 layout(location=3) out vec4 out_depth;
+layout(location=4) out vec4 out_pigment; // only attached for packed deferred lighting
 // 4x4 Bayer ordered screen-door coverage. Kept samples become fully
 // opaque and write ordinary depth/SSAO; no blend or per-face sort needed.
 float dither_threshold()
@@ -951,6 +952,7 @@ void main() {
         out_emissive=vec4(0.0);
         out_normal=vec4(0.0);
         out_depth=vec4(0.0);
+        out_pigment=vec4(0.0);
         return;
     }
     // GPU view-position units are JK units; fog/depth use 32x JK units.
@@ -1054,7 +1056,9 @@ void main() {
     if(decal_receiver_lighting!=0) {
         ivec2 pixel=ivec2(gl_FragCoord.xy);
         float illumination=clamp(
-            texelFetch(decal_light_texture,pixel,0).a,0.0,1.25);
+            gbuffer_packing!=0
+                ?gbuffer_receiver_light(texelFetch(decal_light_texture,pixel,0))
+                :texelFetch(decal_light_texture,pixel,0).a,0.0,1.25);
         float occlusion=clamp(1.0-
             texelFetch(decal_occlusion,pixel,0).r,0.0,1.0);
         lit_rgb*=illumination*occlusion;
@@ -1149,10 +1153,12 @@ void main() {
     // another attachment; receiver lighting treats their shadow response as
     // two-sided, independent of camera-facing normals. Coverage is still >0.
     out_normal=(world_lighting_exempt!=0 || fullbright>=0.5)
-                   ? gbuffer_pack_normal(vec3(0.0),1.0) :
+                   ? gbuffer_pack_normal(vec3(0.0),1.0,
+                        dot(jk_fragment_lit,vec3(0.2126,0.7152,0.0722))) :
                      gbuffer_pack_normal(normalize(diffuse_view_normal),
-                                         sprite_receiver!=0 ? 2.0 : 1.0);
-    // Depth target optionally carries the unlit diffuse base in GBA.
-    // This keeps projected lighting independent of baked JK vertex light.
+                                         sprite_receiver!=0 ? 2.0 : 1.0,
+                                         dot(jk_fragment_lit,vec3(0.2126,0.7152,0.0722)));
+    // Packed mode stores unlit pigment separately; depth remains R16F.
     out_depth=vec4(view_depth,albedo.rgb);
+    out_pigment=vec4(albedo.rgb,1.0);
 }

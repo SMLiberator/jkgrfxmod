@@ -122,6 +122,7 @@ constexpr binding post_opaque_composite[]={
     {"emissive_image",1,sampler_kind::tex2d},
     {"occlusion_image",2,sampler_kind::tex2d},
     {"depth_image",3,sampler_kind::tex2d},
+    {"pigment_image",4,sampler_kind::tex2d},
     {"normal_image",5,sampler_kind::tex2d},
     {"spotlight_image_0",6,sampler_kind::tex2d},
     {"spotlight_image_1",7,sampler_kind::tex2d},

@@ -6,6 +6,7 @@ uniform sampler2D emissive_image;
 uniform sampler2D occlusion_image;
 uniform int retain_hom_pixels; // skip unwritten pixels, leaving prior scene buffer
 uniform sampler2D depth_image;
+uniform sampler2D pigment_image; // optional RGB11F unlit pigment
 uniform vec4 fog_params; // x=start, y=end, z=opacity, w=0 planar linear,1 radial linear,2 radial exponential
 uniform vec3 fog_color;
 
@@ -537,7 +538,9 @@ void main()
     vec3 light_rgb,add_rgb;
     project_spotlights(depth,tc,light_rgb,add_rgb);
     vec3 pigment=(spotlight_count>0 || sun_lighting_active!=0)
-        ? max(texelFetch(depth_image,tc,0).gba,vec3(0.0))
+        ? max(gbuffer_packing!=0
+            ?texelFetch(pigment_image,tc,0).rgb
+            :texelFetch(depth_image,tc,0).gba,vec3(0.0))
         : vec3(0.0);
     // Depth is JK's linear forward distance * 32. Far pixels skip the normal
     // fetch, world reconstruction and every shadow lookup.
@@ -554,7 +557,7 @@ void main()
             // follow the camera; a tree's shadow must not disappear merely
             // because the billboard happens to face away from the sun.
             // Ordinary 3DO/world surfaces retain their existing response.
-            bool sprite=normal_pixel.a>1.5;
+            bool sprite=gbuffer_is_sprite(normal_pixel);
             float incidence=sprite
                 ?max(abs(dot(normal,sun_shadow_direction)),0.35)
                 :max(dot(normal,sun_shadow_direction),0.0);

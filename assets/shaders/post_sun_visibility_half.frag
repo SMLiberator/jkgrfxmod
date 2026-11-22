@@ -169,7 +169,7 @@ void main()
     vec3 normal=normalize(camera_right.xyz*(view_n.x/camera_right.w)+
                           camera_up.xyz*(view_n.y/camera_up.w)+
                           camera_forward.xyz*view_n.z);
-    bool sprite=chosen_normal.a>1.5;
+    bool sprite=gbuffer_is_sprite(chosen_normal);
     float incidence=sprite
         ?max(abs(dot(normal,sun_shadow_direction)),0.35)
         :max(dot(normal,sun_shadow_direction),0.0);

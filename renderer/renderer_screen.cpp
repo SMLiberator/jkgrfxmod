@@ -11,9 +11,13 @@ std::unique_ptr<jkgm::renderer_screen> jkgm::create_renderer_screen(config const
                                                                     size<2, int> screen_res)
 {
     LOG_INFO("GBUFFER opaque_color=",
-        the_config->enable_gbuffer_color_packing
+        the_config->enable_gbuffer_packing
             ? "R11F_G11F_B10F" : "RGBA16F",
-        " normals=RGB10_A2");
+        " emissive=",the_config->enable_gbuffer_packing?"R11F_G11F_B10F":"RGBA16F",
+        " normals=RGB10_A2", " pigment=",
+        (the_config->enable_spotlights || the_config->enable_sun)
+            ?(the_config->enable_gbuffer_packing?"separate RGB11F":"depth GBA16F")
+            :"unused");
     if(the_config->antialiasing.has_value()) {
         auto aa_type = the_config->antialiasing->type;
 
@@ -38,8 +42,8 @@ std::unique_ptr<jkgm::renderer_screen> jkgm::create_renderer_screen(config const
 
             return std::make_unique<renderer_screen_msaa>(
                 screen_res, msaa_samples, min_sample_factor,
-                the_config->enable_spotlights || the_config->enable_sun_shadows,
-                the_config->enable_gbuffer_color_packing);
+                the_config->enable_spotlights || the_config->enable_sun,
+                the_config->enable_gbuffer_packing);
         }
 
         if(iequal(aa_type, std::string_view("ssaa"))) {
@@ -60,8 +64,8 @@ std::unique_ptr<jkgm::renderer_screen> jkgm::create_renderer_screen(config const
 
             return std::make_unique<renderer_screen_msaa>(
                 screen_res, msaa_samples, min_sample_factor,
-                the_config->enable_spotlights || the_config->enable_sun_shadows,
-                the_config->enable_gbuffer_color_packing);
+                the_config->enable_spotlights || the_config->enable_sun,
+                the_config->enable_gbuffer_packing);
         }
 
         LOG_WARNING("Unknown antialiasing type ignored: ", aa_type);
@@ -71,6 +75,6 @@ std::unique_ptr<jkgm::renderer_screen> jkgm::create_renderer_screen(config const
     }
 
     return std::make_unique<renderer_screen_basic>(screen_res,
-        the_config->enable_spotlights || the_config->enable_sun_shadows,
-                the_config->enable_gbuffer_color_packing);
+        the_config->enable_spotlights || the_config->enable_sun,
+                the_config->enable_gbuffer_packing);
 }

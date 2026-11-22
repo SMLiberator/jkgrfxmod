@@ -50,6 +50,7 @@ jkgm::render_gbuffer::render_gbuffer(size<2, int> dims,
     : viewport(make_point(0, 0), dims)
 {
     gl::bind_framebuffer(gl::framebuffer_bind_target::any, fbo);
+    has_pigment=packed_color && spotlight_albedo;
 
     // Opt-in RGB float HDR color; opaque coverage lives in normal.A.
     gl::bind_texture(gl::texture_bind_target::texture_2d, color_tex);
@@ -66,13 +67,15 @@ jkgm::render_gbuffer::render_gbuffer(size<2, int> dims,
     gl::framebuffer_texture(
         gl::framebuffer_bind_target::any, gl::framebuffer_attachment::color0, color_tex, 0);
 
-    // Set up emissive texture:
+    // Pack emission HDR RGB; receiver lighting moves to normal.B.
     gl::bind_texture(gl::texture_bind_target::texture_2d, emissive_tex);
     gl::tex_image_2d(gl::texture_bind_target::texture_2d,
                      /*level*/ 0,
-                     gl::texture_internal_format::rgba16f,
+                     packed_color ? gl::texture_internal_format::r11f_g11f_b10f :
+                                    gl::texture_internal_format::rgba16f,
                      dims,
-                     gl::texture_pixel_format::rgba,
+                     packed_color ? gl::texture_pixel_format::rgb :
+                                    gl::texture_pixel_format::rgba,
                      gl::texture_pixel_type::float32,
                      span<char const>(nullptr, 0U));
     gl::set_texture_max_level(gl ::texture_bind_target::texture_2d, 0U);
@@ -112,10 +115,12 @@ jkgm::render_gbuffer::render_gbuffer(size<2, int> dims,
     gl::bind_texture(gl::texture_bind_target::texture_2d, depth_tex);
     gl::tex_image_2d(gl::texture_bind_target::texture_2d,
                      /*level*/ 0,
-                     spotlight_albedo ? gl::texture_internal_format::rgba16f :
+                     (spotlight_albedo && !packed_color) ?
+                         gl::texture_internal_format::rgba16f :
                          gl::texture_internal_format::r16f,
                      dims,
-                     spotlight_albedo ? gl::texture_pixel_format::rgba :
+                     (spotlight_albedo && !packed_color) ?
+                         gl::texture_pixel_format::rgba :
                          gl::texture_pixel_format::red,
                      gl::texture_pixel_type::float32,
                      make_span((char const *)nullptr, 0U));
@@ -136,15 +141,32 @@ jkgm::render_gbuffer::render_gbuffer(size<2, int> dims,
                             depth_tex,
                             /*level*/ 0);
 
+    // Only allocate the fifth draw target when deferred lighting needs
+    // unlit pigment. Depth stays R16F; RGB11F saves two bytes vs RGBA16F.
+    if(has_pigment) {
+        gl::bind_texture(gl::texture_bind_target::texture_2d,pigment_tex);
+        gl::tex_image_2d(gl::texture_bind_target::texture_2d,0,
+                         gl::texture_internal_format::r11f_g11f_b10f,
+                         dims,gl::texture_pixel_format::rgb,
+                         gl::texture_pixel_type::float32,
+                         span<char const>(nullptr,0U));
+        gl::set_texture_max_level(gl::texture_bind_target::texture_2d,0U);
+        gl::framebuffer_texture(gl::framebuffer_bind_target::any,
+                                gl::framebuffer_attachment::color4,pigment_tex,0);
+    }
+
     // Set up real depth buffer:
     gl::framebuffer_renderbuffer(
         gl::framebuffer_bind_target::any, gl::framebuffer_attachment::depth, rbo->rbo);
 
     // Finish:
-    gl::draw_buffers(gl::draw_buffer::color0,
-                     gl::draw_buffer::color1,
-                     gl::draw_buffer::color2,
-                     gl::draw_buffer::color3);
+    if(has_pigment)
+        gl::draw_buffers(gl::draw_buffer::color0,gl::draw_buffer::color1,
+                         gl::draw_buffer::color2,gl::draw_buffer::color3,
+                         gl::draw_buffer::color4);
+    else
+        gl::draw_buffers(gl::draw_buffer::color0,gl::draw_buffer::color1,
+                         gl::draw_buffer::color2,gl::draw_buffer::color3);
 
     auto fbs = gl::check_framebuffer_status(gl::framebuffer_bind_target::any);
     if(gl::check_framebuffer_status(gl::framebuffer_bind_target::any) !=
@@ -189,6 +211,7 @@ void jkgm::renderer_screen_basic::begin_opaque_pass()
     gl::clear_buffer_color(2, color::zero());
     // Linear R16F view depth: empty pixels are far, not a surface one unit away.
     gl::clear_buffer_color(3, color(65504.0f, 0.0f, 0.0f, 0.0f));
+    if(screen_gbuffer.has_pigment)gl::clear_buffer_color(4,color::zero());
     gl::clear_buffer_depth(1.0f);
 }
 
@@ -212,6 +235,12 @@ jkgm::gl::texture_view jkgm::renderer_screen_basic::get_resolved_normal_texture(
 jkgm::gl::texture_view jkgm::renderer_screen_basic::get_resolved_depth_texture()
 {
     return screen_gbuffer.depth_tex;
+}
+
+jkgm::gl::texture_view jkgm::renderer_screen_basic::get_resolved_pigment_texture()
+{
+    return screen_gbuffer.has_pigment
+        ?gl::texture_view(screen_gbuffer.pigment_tex):gl::default_texture;
 }
 
 void jkgm::renderer_screen_basic::begin_compose_opaque_pass(bool retain_hom_pixels)
