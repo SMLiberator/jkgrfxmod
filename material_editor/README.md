@@ -54,7 +54,7 @@ Dear ImGui, GLFW, GLAD and stb_image are third-party components under their
 respective licenses; see the repository's third-party attribution and upstream
 source distributions for notices.
 
-## Parameter and environment diagnostics
+## Parameter and environment preview
 
 Reflection strength is normally adjusted with a 0..1 slider, while the
 adjacent numeric field accepts any finite, nonnegative value (the same range
@@ -62,23 +62,25 @@ as the existing compiler). Roughness, metalness, clearcoat channels and
 MatCap roughness are always 0..1. Normal strengths are 0..4; per-channel
 MatCap factors are 0..4. All saved values use the existing renderer metadata.
 
-The viewer reports which EnvMap loaded or whether an image was missing and
-the built-in preset was substituted. Studio mode keeps the renderer's
-Fresnel-scaled EnvMap contribution; "EnvMap reflection only" removes the
-added studio direct highlight and diffuse; "Raw EnvMap" displays the texture
-unweighted to diagnose source images, independent of material reflectivity.
-The two diagnostic display modes do not alter saved metadata. Unicode
-Windows filesystem paths are supported for image loading.
+The preview renders the selected material using an environment image and
+studio-style lighting, without the former three-way shading diagnostics.
+Unicode Windows filesystem paths are supported for image loading.
 
 ## Preview Fresnel toggle
 
-The "Apply Fresnel to EnvMap reflections" checkbox is enabled by default to
-preserve the game's environment-reflection behavior. Turning it off previews
-the full EnvMap signal at the material's original reflection strength and
-roughness (including the clearcoat EnvMap lobe), making flat surfaces easier
-to inspect. This affects *only* EnvMap reflection terms: direct specular
-highlights, clearcoat transmission/attenuation, and saved material properties
-are unchanged. Raw EnvMap diagnostics always bypass Fresnel.
+The compact "Fresnel" checkbox defaults to off, showing a stronger EnvMap
+reflection on surfaces viewed nearly head-on. Enabling it previews the
+renderer-style Fresnel response. The toggle affects only environment-map
+reflection terms and does not change direct specular highlights, clearcoat
+transmission/attenuation, or saved material properties.
+
+## Property panel layout
+
+The properties are ordered Albedo, Emissive, Reflections, Normal maps,
+Clearcoat, MatCap, and other settings. Color fields use their own full-width
+row with the label above. Referenced texture paths appear below the color
+field, matching the Emissive section rather than wrapping in a narrow
+right-hand column.
 
 ## Undo and redo
 

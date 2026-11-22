@@ -453,17 +453,13 @@ private:
         if(ImGui::Button("Use material / pack envmap")) {
             override_.clear();preview_->setEnvironmentOverride({});
         }
-        const char *views[]={"Lit material (renderer-style)","EnvMap reflection only",
-                             "Raw EnvMap (diagnostic)"};
-        ImGui::SetNextItemWidth(230);
-        ImGui::Combo("Preview shading",&inspectionMode_,views,3);
         ImGui::Checkbox("Fresnel",&envFresnel_);
         ImVec2 area=ImGui::GetContentRegionAvail();
         area.x=std::max(area.x,64.0f);
         area.y=std::max(area.y-35.0f,64.0f);
         if(preview_->valid()) {
             preview_->draw(int(area.x),int(area.y),orientation_,plane_,
-                           inspectionMode_,envFresnel_);
+                           envFresnel_);
             // Image() is a passive item: dragging it moves the ImGui window.
             // An invisible button claims the mouse press for viewport orbiting,
             // while the image is drawn over that item's exact screen rectangle.
@@ -531,19 +527,29 @@ private:
     void colorField(const char *label,const char *key,float *values,int count,
                     bool hdr=false) {
         Document &obj=selected();
-        bool changedValue=(count==4)
-            ?ImGui::ColorEdit4(label,values,hdr?ImGuiColorEditFlags_HDR|ImGuiColorEditFlags_Float:0)
-            :ImGui::ColorEdit3(label,values,hdr?ImGuiColorEditFlags_HDR|ImGuiColorEditFlags_Float:0);
+        ImGui::PushID(key);
+        // Label above the color fields prevents the long inline label from
+        // consuming the final column and squeezing subsequent file paths.
+        ImGui::TextUnformatted(label);
+        const bool hasOverride=obj.find(key)!=obj.end();
+        const float width=ImGui::GetContentRegionAvail().x;
+        ImGui::SetNextItemWidth(std::max(110.0f,width-(hasOverride?32.0f:0.0f)));
+        const ImGuiColorEditFlags flags=ImGuiColorEditFlags_NoLabel|
+            ImGuiColorEditFlags_Float|(hdr?ImGuiColorEditFlags_HDR:0);
+        bool changedValue=count==4?
+            ImGui::ColorEdit4("##color",values,flags):
+            ImGui::ColorEdit3("##color",values,flags);
         if(changedValue){
             setArray(obj,key,values,count);
             changed(key,ImGui::IsItemActive());
         }
-        ImGui::SameLine();
-        if(obj.find(key)!=obj.end()) {
-            ImGui::PushID(key);
+        if(hasOverride) {
+            ImGui::SameLine();
             if(ImGui::SmallButton("x")){obj.erase(key);changed(key);}
-            ImGui::PopID();
         }
+        // Always end the field's row before imageInfo() writes the filename.
+        ImGui::NewLine();
+        ImGui::PopID();
     }
     void imageInfo(const char *label,const char *key) {
         std::string value=stringValue(selected(),key);
@@ -551,10 +557,9 @@ private:
         ImGui::TextWrapped("%s: %s",label,value.c_str());
         fs::path path=fs::u8path(file_).parent_path()/fs::u8path(value);
         std::error_code ec;
-        if(!fs::exists(path,ec)) {
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(1,.5f,.35f,1),"[missing]");
-        }
+        if(!fs::exists(path,ec))
+            ImGui::TextColored(ImVec4(1,.5f,.35f,1),"[missing texture]");
+
     }
     void renderProperties() {
         ImGui::Begin("Material Properties");
@@ -606,6 +611,14 @@ private:
             }
             ImGui::TextDisabled("Existing compiled PNG textures are read-only.");
         }
+        if(ImGui::CollapsingHeader("Emissive",ImGuiTreeNodeFlags_DefaultOpen)) {
+            auto v=rgb(selected(),"emissive_factor",{0,0,0});
+            if(ImGui::DragFloat3("Emissive RGB",v.data(),.05f,0,32,"%.2f")) {
+                setArray(selected(),"emissive_factor",v.data(),3);
+                changed("emissive_factor",ImGui::IsItemActive());
+            }
+            imageInfo("Emissive map","emissive_map");
+        }
         if(ImGui::CollapsingHeader("Reflections",ImGuiTreeNodeFlags_DefaultOpen)) {
             bool hasSurface=selected().find("surface_map")!=selected().end();
             floatField("Strength","reflection_strength",hasSurface?1.0f:0.0f,0,1,true);
@@ -643,14 +656,6 @@ private:
             }
             imageInfo("MatCap","matcap_map");
             imageInfo("MatCap mask","matcap_surface_map");
-        }
-        if(ImGui::CollapsingHeader("Emissive",ImGuiTreeNodeFlags_DefaultOpen)) {
-            auto v=rgb(selected(),"emissive_factor",{0,0,0});
-            if(ImGui::DragFloat3("Emissive RGB",v.data(),.05f,0,32,"%.2f")) {
-                setArray(selected(),"emissive_factor",v.data(),3);
-                changed("emissive_factor",ImGui::IsItemActive());
-            }
-            imageInfo("Emissive map","emissive_map");
         }
         if(ImGui::CollapsingHeader("Other settings")) {
             static const char *alphas[]={"blend","mask","dithered"};
@@ -725,7 +730,7 @@ private:
     std::string nativeCacheKey_,nativeStatus_;
     bool loaded_=false,dirty_=false,plane_=false,groupActive_=false,
          layoutConfigured_=false;
-    int selection_=-1,environment_=0,inspectionMode_=0;
+    int selection_=-1,environment_=0;
     bool envFresnel_=false;
     Orientation orientation_{0,0,0,1};
     ImGuiTextFilter filter_;

@@ -50,7 +50,6 @@ uniform vec4 uAlbedo;
 uniform vec3 uEmissive,uMatcapFactor;
 uniform float uReflection,uRough,uMetal,uNormalStrength,uNormalStrength2;
 uniform float uMatcapRough,uCoat,uCoatRough,uCoatTransmission;
-uniform int uInspectionMode; // 0 lit, 1 EnvMap reflection only, 2 raw EnvMap
 uniform int uUseEnvFresnel; // preview-only: disabled means full EnvMap contribution
 uniform int uAlbedoPremultiplied, uAlphaMode, uBlendMode;
 uniform float uAlphaCutoff;
@@ -124,9 +123,8 @@ void main() {
     // Mirrors the material's EnvMap Fresnel/strength/roughness behavior.
     vec3 baseFresnel=uUseEnvFresnel!=0?schlick(f0,ndv):vec3(1.0);
     vec3 baseEnvironment=env(R,rough)*baseFresnel*strength;
-    vec3 baseSpec=baseEnvironment;
-    if(uInspectionMode==0)
-        baseSpec+=directSpec(N,V,rough,f0,strength);
+    vec3 baseSpec=baseEnvironment+
+                  directSpec(N,V,rough,f0,strength);
     // Studio-only diffuse term: the game gets sector/vertex/point lighting.
     vec3 diffuse=base*(1.0-metal)*(0.48+0.38*max(dot(N,
                    normalize(vec3(-0.45,0.80,0.70))),0.0));
@@ -161,19 +159,8 @@ void main() {
         ?schlick(vec3(0.04),max(dot(coatNormal,V),0.0)):vec3(1.0);
     vec3 coatEnvironment=env(reflect(-V,coatNormal),coatRough)*
         coatFresnel*coverage;
-    vec3 coatSpec=coatEnvironment;
-    if(uInspectionMode==0)
-        coatSpec+=directSpec(coatNormal,V,coatRough,vec3(0.04),coverage);
-    // These diagnostic modes deliberately bypass studio lighting, while
-    // preserving EnvMap sampling and material weights for troubleshooting.
-    if(uInspectionMode==2) {
-        outputColor=vec4(toSRGB(env(R,0.0)),1.0);
-        return;
-    }
-    if(uInspectionMode==1) {
-        outputColor=vec4(toSRGB(baseEnvironment*specTrans+coatEnvironment),1.0);
-        return;
-    }
+    vec3 coatSpec=coatEnvironment+
+                  directSpec(coatNormal,V,coatRough,vec3(0.04),coverage);
     vec3 emission=uEmissive*(hasEmissive!=0?
         texture(tEmissive,uv).rgb:vec3(1.0));
 
@@ -425,7 +412,7 @@ void MaterialPreview::buildMeshes() {
     glBindVertexArray(0);
 }
 void MaterialPreview::draw(int w,int h,const std::array<float,4> &orientation,
-                           bool plane,int inspectionMode,bool useEnvFresnel) {
+                           bool plane,bool useEnvFresnel) {
     if(!program_)return;
     resize(w,h);
     glBindFramebuffer(GL_FRAMEBUFFER,fbo_);
@@ -455,7 +442,6 @@ void MaterialPreview::draw(int w,int h,const std::array<float,4> &orientation,
     f1("uMatcapRough",material_.matcapRoughness);
     f1("uCoat",material_.coat);f1("uCoatRough",material_.coatRoughness);
     f1("uCoatTransmission",material_.coatTransmission);
-    i1("uInspectionMode",std::clamp(inspectionMode,0,2));
     i1("uUseEnvFresnel",useEnvFresnel?1:0);
     i1("uAlbedoPremultiplied",material_.nativeRGBA.empty()?1:0);
     i1("uAlphaMode",material_.alphaMode);

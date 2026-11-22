@@ -39,10 +39,9 @@ public:
     void setMaterial(const PreviewMaterial &mat);
     void setPreset(int preset);
     void setEnvironmentOverride(const std::string &path);
-    // Diagnostics are editor-only and never change saved material metadata:
-    // 0=studio lit, 1=environment reflection lobes, 2=unweighted EnvMap.
+    // Normal studio preview; Fresnel toggle affects EnvMap only (not metadata).
     void draw(int width, int height, const std::array<float,4> &orientation,
-              bool plane, int inspectionMode, bool useEnvFresnel);
+              bool plane, bool useEnvFresnel);
     GLuint outputTexture() const { return output_; }
     const std::string &environmentDescription() const { return envDescription_; }
     bool hasLoadedEnvironmentFile() const { return loadedEnvironmentFile_; }
