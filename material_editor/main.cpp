@@ -547,8 +547,7 @@ private:
             ImGui::SameLine();
             if(ImGui::SmallButton("x")){obj.erase(key);changed(key);}
         }
-        // Always end the field's row before imageInfo() writes the filename.
-        ImGui::NewLine();
+        // The next TextWrapped/imageInfo item naturally starts on a full line.
         ImGui::PopID();
     }
     void imageInfo(const char *label,const char *key) {
