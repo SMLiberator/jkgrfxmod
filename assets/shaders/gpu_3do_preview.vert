@@ -116,70 +116,6 @@ int select_sector_crossing_vertex(vec3 view_position)
     }
     return 0; // preserve native owning Thing sector if no candidate matches
 }
-// Reused by continuous ambient when an individual sparse node is missing.
-float volumetric_ambient_sample(
-    vec3 world,vec3 lo,vec3 hi,vec4 bottom,vec4 top,
-    float quantized_range,float live_floor)
-{
-    vec3 span=hi-lo;
-    vec3 t;
-    t.x=span.x>0.000001 ? clamp((world.x-lo.x)/span.x,0.0,1.0):0.5;
-    t.y=span.y>0.000001 ? clamp((world.y-lo.y)/span.y,0.0,1.0):0.5;
-    t.z=span.z>0.000001 ? clamp((world.z-lo.z)/span.z,0.0,1.0):0.5;
-    // Binary corner order: x bit 0, y bit 1, z bit 2.
-    float low=mix(mix(bottom.x,bottom.y,t.x),
-                  mix(bottom.z,bottom.w,t.x),t.y);
-    float high=mix(mix(top.x,top.y,t.x),
-                   mix(top.z,top.w,t.x),t.y);
-    // Live ExtraLight is the floor of EACH sampled sector, not an
-    // immutable corner and not a second additive light.
-    return max(mix(low,high,t.z)*quantized_range,live_floor);
-}
-
-#ifdef JKGM_CONTINUOUS_AMBIENT_GPU
-// GL 3.3 sparse world-aligned nodes, exact CPU/GLSL uint hash parity.
-// The feature is omitted AT COMPILE TIME on devices with fewer than 23
-// fragment units. Disabled programs then have no unbound buffer samplers.
-#include "continuous_ambient_lookup.glsl"
-uniform int continuous_ambient_enabled;
-uniform int continuous_ambient_sector;
-uniform float continuous_ambient_range,continuous_ambient_floor;
-uniform vec3 continuous_fallback_min,continuous_fallback_max;
-uniform vec4 continuous_fallback_bottom,continuous_fallback_top;
-float continuous_ambient_at(vec3 view_position)
-{
-    vec3 world=sector_crossing_camera_origin+
-        camera_right_axis*view_position.x+
-        camera_forward_axis*view_position.y+
-        camera_up_axis*view_position.z;
-    vec3 scaled=world/max(continuous_voxel_spacing,0.0001);
-    if(any(greaterThan(abs(scaled),vec3(1000000.0))))return ambient_light;
-    ivec3 base=ivec3(floor(scaled));
-    vec3 f=clamp(fract(scaled),0.0,1.0);
-    float accum=0.0;
-    for(int i=0;i<8;++i) {
-        ivec3 grid=base+ivec3(i&1,(i>>1)&1,(i>>2)&1);
-        vec3 p=vec3(grid)*continuous_voxel_spacing;
-        bool found=false;
-        vec2 sample_value=continuous_voxel_fetch(uint(continuous_ambient_sector),
-                                                  grid,found);
-        // CPU field's 8-corner low-frequency fill for missing sparse cells.
-        float lit=found
-            ? (sample_value.y>=0.0 ? sample_value.y
-                : max(sample_value.x,continuous_ambient_floor))
-            : volumetric_ambient_sample(
-                p,continuous_fallback_min,continuous_fallback_max,
-                continuous_fallback_bottom,continuous_fallback_top,
-                continuous_ambient_range,continuous_ambient_floor);
-        float w=((i&1)!=0?f.x:1.0-f.x)*
-                ((i&2)!=0?f.y:1.0-f.y)*
-                ((i&4)!=0?f.z:1.0-f.z);
-        accum+=w*lit;
-    }
-    return accum;
-}
-#endif
-
 // Decode zero-preserving centered UNORM10. Unlike linear -1..1 decoding,
 // code 512 maps exactly to zero. This preserves zero-length and non-unit
 // native normals without creating spurious normalized directions.
@@ -287,13 +223,8 @@ void main() {
     // Face ExtraLight may darken the authored vertex, but cannot produce
     // >1 baked brightness with the option off (or >2 with it on).
     float raw_light=clamp(l+local_extra_light,0.0,jk_light_limit);
-    float ambient_floor=ambient_light;
-#ifdef JKGM_CONTINUOUS_AMBIENT_GPU
-    if(continuous_ambient_enabled!=0)
-        ambient_floor=continuous_ambient_at(vec3(x,y,z));
-#endif
     float bright=mode<0.5 ? 1.0
-        : max(raw_light+dynamic_added,ambient_floor);
+        : max(raw_light+dynamic_added,ambient_light);
     if(jk_light_limit<=1.0)bright=min(bright,1.0);
     jk_lit_rgb=vec3(pow(max(bright,0.0),1.8))*local_vertex_rgb;
     jk_lit_rgb*=colormap_tint; // before native hardware color effects

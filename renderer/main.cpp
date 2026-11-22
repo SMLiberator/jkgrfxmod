@@ -1458,9 +1458,8 @@ namespace {
             // Unlike rdMesh, the linked
             // SithThing position is WORLD-space and common to every node.
             // World position is shared by ALL animated hierarchy meshes.
-            // Capture once for ambient, Thing occlusion or automatic LOD.
-            if(the_config->experimental_continuous_ambient_gpu ||
-               the_config->experimental_3do_occlusion_culling ||
+            // Capture once for Thing occlusion or automatic LOD.
+            if(the_config->experimental_3do_occlusion_culling ||
                the_config->experimental_auto_3do_lod) {
                 own_world_position_valid=read(
                     uintptr_t(hud_owner)+0xb8U,
@@ -1471,10 +1470,8 @@ namespace {
                             own_world_position_valid=false;break;
                         }
             }
-            // Sector crossing and continuous ambient share the authoritative
-            // native Thing-sector ID.
-            if(the_config->enable_sector_crossing_lighting ||
-               the_config->experimental_continuous_ambient_gpu) {
+            // Sector crossing needs the authoritative native Thing-sector ID.
+            if(the_config->enable_sector_crossing_lighting) {
                 uint32_t sector=0;
                 if(read(uintptr_t(hud_owner)+0x5cU,&sector,4U) &&
                    sector>=0x10000U && sector<0x7ff00000U)
