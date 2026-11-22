@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <numeric>
@@ -91,6 +93,12 @@ namespace jkgm {
         struct opaque_order_cache {
             std::once_flag once;
             std::vector<size_t> indices;
+            // This same immutable geometry may be displayed in the normal
+            // view, planar, shadows, and many 2-/6-view reflection probes.
+            // Union its groups' local bounds once, not once per camera.
+            std::once_flag bounds_once;
+            bool bounds_complete=false;
+            std::array<float,3> bounds_min{},bounds_max{};
         };
         struct opaque_order_cache_owner {
             std::shared_ptr<opaque_order_cache> state=
@@ -130,6 +138,43 @@ namespace jkgm {
                     });
             });
             return cache.indices;
+        }
+        // Valid only if EVERY drawable group has finite, ordered bounds.
+        // A missing or invalid bound fails open: never reject potentially
+        // visible geometry from an incomplete whole-mesh enclosure.
+        // This lives beside cached_opaque_group_order(), so normal-camera
+        // instances and independent reflection snapshots reuse it whenever
+        // they reference the same immutable gpu_3do_geometry object.
+        bool cached_group_bounds(std::array<float,3> &out_min,
+                                 std::array<float,3> &out_max) const {
+            auto &cache=*opaque_order_state.state;
+            std::call_once(cache.bounds_once,[this,&cache] {
+                std::array<float,3> lo{},hi{};
+                lo.fill(std::numeric_limits<float>::infinity());
+                hi.fill(-std::numeric_limits<float>::infinity());
+                bool any=false;
+                for(auto const &group:groups) {
+                    if(group.count==0U)continue;
+                    for(unsigned axis=0;axis<3U;++axis)
+                        if(!std::isfinite(group.bounds_min[axis]) ||
+                           !std::isfinite(group.bounds_max[axis]) ||
+                           group.bounds_min[axis]>group.bounds_max[axis])
+                            return; // no partial bounds allowed
+                    for(unsigned axis=0;axis<3U;++axis) {
+                        lo[axis]=std::min(lo[axis],group.bounds_min[axis]);
+                        hi[axis]=std::max(hi[axis],group.bounds_max[axis]);
+                    }
+                    any=true;
+                }
+                if(!any)return;
+                cache.bounds_min=lo;
+                cache.bounds_max=hi;
+                cache.bounds_complete=true;
+            });
+            if(!cache.bounds_complete)return false;
+            out_min=cache.bounds_min;
+            out_max=cache.bounds_max;
+            return true;
         }
     private:
         mutable opaque_order_cache_owner opaque_order_state;

@@ -19,6 +19,9 @@ assert "std::vector<GLsizei> counts;" in capture
 assert capture.index("std::vector<GLsizei> counts;") < capture.index(
     "for(int face=0;face<face_count;++face)")
 assert "std::vector<gpu_3do_group const *> model_group_scratch;" in capture
+assert "inst.geometry->cached_group_bounds(mesh_min,mesh_max)" in capture
+assert "whole_mesh_rejections" in capture
+assert "group_walks_avoided" in capture
 assert "std::map<reflection_capture_material_key,gpu_3do_texture>" in capture
 assert "resolved_capture_materials.emplace(" in capture
 assert "last_submitted_material" in capture

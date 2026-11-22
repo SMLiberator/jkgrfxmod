@@ -45,6 +45,10 @@ assert "PERF shared_capture_cpu_us search_per_frame=" in renderer
 assert "PERF shared_capture_batches per_refresh_models=" in renderer
 assert "PERF shared_capture_gl_sample call_us=" in renderer
 assert "PERF shared_capture_opaque_order sortable_ranges=" in renderer
+assert "PERF shared_capture_whole_mesh_cull rejected=" in renderer
+assert renderer.count("inst.geometry->cached_group_bounds(mesh_min,mesh_max)")>=2
+assert "reflected_frustum,modelview,mesh_min,mesh_max" in renderer
+assert "native_frustum,modelview,mesh_min,mesh_max" in renderer
 assert "PERF shared_capture_eligibility checked_frames=" in renderer
 assert "eligibility_culled_frames" in hemi
 assert "eligibility_3do_rejected" in hemi

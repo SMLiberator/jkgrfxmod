@@ -748,6 +748,27 @@
                 auto const modelview=gpu_3do_native_modelview(
                     view,inst.transform);
                 if(!gpu_3do_matrix_finite(modelview))return;
+                std::array<float,3> mesh_min{},mesh_max{};
+                if(inst.geometry->cached_group_bounds(mesh_min,mesh_max)) {
+                    bool const outside=paraboloid_mode
+                        ?dual_paraboloid_bounds_outside(
+                            modelview,mesh_min,mesh_max,probe_distance_limit)
+                        :((probe_distance_limit>0.0f &&
+                            reflection_probe_bounds_outside_range(
+                                modelview,mesh_min,mesh_max,
+                                probe_distance_limit)) ||
+                           gpu_3do_batch_outside_frustum(
+                               frustum,modelview,mesh_min,mesh_max));
+                    if(outside) {
+                        total_model_groups_culled+=inst.geometry->groups.size();
+                        if(profile_shared) {
+                            auto &diag=shared_capture_profile_window;
+                            ++diag.whole_mesh_rejections;
+                            diag.group_walks_avoided+=inst.geometry->groups.size();
+                        }
+                        return;
+                    }
+                }
                 // Capture blending is disabled. Shared capture sorts only
                 // uninterrupted fully opaque runs. Alpha-tested groups keep
                 // authored order; Hemi/Cube/EnvMap behavior is unchanged.

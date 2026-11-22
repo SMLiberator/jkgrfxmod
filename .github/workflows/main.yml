@@ -62,6 +62,8 @@ jobs:
         reflection_capture_world_buckets_test.exe || exit /b 1
         cl.exe /nologo /EHsc /std:c++17 /I. tests\\reflection_capture_model_batches.cpp /Fe:reflection_capture_model_batches_test.exe || exit /b 1
         reflection_capture_model_batches_test.exe || exit /b 1
+        cl.exe /nologo /EHsc /std:c++17 /I. tests\\gpu_3do_shared_bounds.cpp /Fe:gpu_3do_shared_bounds_test.exe || exit /b 1
+        gpu_3do_shared_bounds_test.exe || exit /b 1
         python3 tests/reflection_capture_cpu_reuse.py || exit /b 1
 
     - name: Native sector palette request isolation regression

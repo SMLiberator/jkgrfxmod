@@ -1207,6 +1207,7 @@ namespace jkgm {
             uint64_t world_batches=0,world_ranges=0;
             uint64_t model_single_batches=0,model_small_batches=0;
             uint64_t model_large_batches=0;
+            uint64_t whole_mesh_rejections=0,group_walks_avoided=0;
             uint64_t reorder_opaque_ranges=0,reorder_barriers=0,reorder_spans=0;
             // Only every 32nd model MultiDraw is clocked, to keep profiler
             // overhead small. This is a sample, not an exact total.
@@ -1515,6 +1516,10 @@ namespace jkgm {
                          " groups_examined=",s.groups_checked,
                          " groups_passed_culling=",s.groups_selected,
                          " NOTE=batch_buckets_are_window_totals");
+                LOG_INFO("PERF shared_capture_whole_mesh_cull rejected=",
+                         s.whole_mesh_rejections,
+                         " group_walks_avoided=",s.group_walks_avoided,
+                         " NOTE=window_totals;conservative_mesh_bounds");
                 LOG_INFO("PERF shared_capture_opaque_order sortable_ranges=",
                          s.reorder_opaque_ranges,
                          " source_order_barriers=",s.reorder_barriers,
@@ -4941,9 +4946,26 @@ namespace jkgm {
                     }
                     if(occluded)continue;
                 }
-                auto &context=contexts.emplace_back();
-                context.modelview=gpu_3do_native_modelview(
+                auto const modelview=gpu_3do_native_modelview(
                     native_view,inst.transform);
+                std::array<float,3> mesh_min{},mesh_max{};
+                if(have_perspective_frustum &&
+                   inst.geometry->cached_group_bounds(mesh_min,mesh_max) &&
+                   gpu_3do_batch_outside_frustum(
+                       native_frustum,modelview,mesh_min,mesh_max)) {
+                    // The entire immutable mesh is offscreen. Preserve the
+                    // existing group profiling totals without walking every
+                    // material range. No GPU uploads or uniforms are needed.
+                    if(the_config->profile_renderer) {
+                        profile_frame.gpu_groups_considered+=
+                            inst.geometry->groups.size();
+                        profile_frame.gpu_groups_frustum_culled+=
+                            inst.geometry->groups.size();
+                    }
+                    continue;
+                }
+                auto &context=contexts.emplace_back();
+                context.modelview=modelview;
                 context.has_local_eye=gpu_3do_local_eye(
                     context.modelview,context.local_eye);
                 context.reversed_winding=
@@ -13516,6 +13538,16 @@ namespace jkgm {
                            sector,planar_thing_sector_visibility))
                         return;
                 }
+                auto const modelview=gpu_3do_native_modelview(
+                    view,inst.transform);
+                if(!gpu_3do_matrix_finite(modelview))return;
+                std::array<float,3> mesh_min{},mesh_max{};
+                if(inst.geometry->cached_group_bounds(mesh_min,mesh_max) &&
+                   gpu_3do_batch_outside_frustum(
+                       reflected_frustum,modelview,mesh_min,mesh_max)) {
+                    model_culled+=inst.geometry->groups.size();
+                    return; // avoid GL cache lookup and every group test
+                }
                 auto glmesh=gpu_3do_gl_cache.find(inst.id);
                 if(glmesh==gpu_3do_gl_cache.end()) {
                     if(gpu_3do_gl_cache.size()>8192U)return;
@@ -13526,9 +13558,6 @@ namespace jkgm {
                             the_config->profile_renderer
                                 ? &packed_3do_upload_profile : nullptr)).first;
                 }
-                auto const modelview=gpu_3do_native_modelview(
-                    view,inst.transform);
-                if(!gpu_3do_matrix_finite(modelview))return;
                 shader.set_modelview(modelview,true,
                     glmesh->second->packed_vertex_format);
                 shader.set_thing_fade(inst.thing_opacity,
