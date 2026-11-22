@@ -8,9 +8,12 @@
 #include <cstdint>
 
 namespace jkgm {
-    class presentation_gpu_profile {
+    // Reusable async timestamp ring; the standard profiler retains 3 stages.
+    // Geometry needs finer attribution without introducing blocking readback.
+    template<size_t StageCount>
+    class basic_presentation_gpu_profile {
     public:
-        static constexpr size_t num_stages=3;
+        static constexpr size_t num_stages=StageCount;
         static constexpr size_t ring_size=8;
         struct completed_sample {
             std::array<uint64_t,num_stages> nanoseconds{};
@@ -90,4 +93,6 @@ namespace jkgm {
             checked_support=false;
         }
     };
+    using presentation_gpu_profile=basic_presentation_gpu_profile<3>;
+    using opaque_geometry_gpu_profile=basic_presentation_gpu_profile<6>;
 }

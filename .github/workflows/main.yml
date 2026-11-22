@@ -264,6 +264,7 @@ jobs:
       run: python3 tests/gpu_3do_submission_cpu_reuse.py
     - name: Reflection and opaque GPU profiling source regression
       run: python3 tests/reflection_gpu_profiling.py
+        python3 tests/opaque_geometry_gpu_profiling.py
         python3 tests/gl_state_cache_wiring.py
     - name: GPU GL mesh cache sweep and reuse profiling regression
       run: python3 tests/gpu_gl_sweep_profiling.py

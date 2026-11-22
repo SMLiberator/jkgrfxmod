@@ -1182,6 +1182,14 @@ namespace jkgm {
         std::array<uint64_t,presentation_gpu_profile::num_stages>
             opaque_detail_gpu_ns{};
         uint64_t opaque_detail_gpu_samples=0,opaque_detail_gpu_skipped=0;
+        // GPU-only sub-stages of opaque geometry (does not include SSAO or
+        // opaque lighting composition). Results are asynchronous.
+        // 0=framebuffer clears, 1=native+world, 2=gun, 3=cached 3DO,
+        // 4=occlusion/planar queries, 5=MSAA resolve (zero without MSAA).
+        opaque_geometry_gpu_profile opaque_geometry_gpu_queries;
+        std::array<uint64_t,opaque_geometry_gpu_profile::num_stages>
+            opaque_geometry_gpu_ns{};
+        uint64_t opaque_geometry_gpu_samples=0,opaque_geometry_gpu_skipped=0;
         presentation_gpu_profile capture_gpu_queries;
         std::array<uint64_t,presentation_gpu_profile::num_stages>
             capture_gpu_ns{};
@@ -1452,6 +1460,23 @@ namespace jkgm {
                      " NOTE=nonblocking_GPU;geometry_is_only_one_part_of_opaque_gbuffer");
             opaque_detail_gpu_ns.fill(0U);
             opaque_detail_gpu_samples=opaque_detail_gpu_skipped=0U;
+            auto opaque_sub_us=[&](size_t stage)->uint64_t {
+                return opaque_geometry_gpu_samples
+                    ?(opaque_geometry_gpu_ns[stage]/1000U)/
+                        opaque_geometry_gpu_samples:0U;
+            };
+            LOG_INFO("PERF opaque_geometry_gpu_us clear=",opaque_sub_us(0U),
+                     " native_and_world=",opaque_sub_us(1U),
+                     " gun=",opaque_sub_us(2U),
+                     " cached_3do=",opaque_sub_us(3U),
+                     " visibility_queries=",opaque_sub_us(4U),
+                     " msaa_resolve=",opaque_sub_us(5U),
+                     " samples=",opaque_geometry_gpu_samples,
+                     " ring_busy_skips=",opaque_geometry_gpu_skipped,
+                     " supported=",opaque_geometry_gpu_queries.is_supported(),
+                     " NOTE=nonblocking_GPU;substeps_of_opaque_detail_geometry;no_SSAO_or_composite");
+            opaque_geometry_gpu_ns.fill(0U);
+            opaque_geometry_gpu_samples=opaque_geometry_gpu_skipped=0U;
             auto capture_gpu_us=[&](size_t stage)->uint64_t {
                 return capture_gpu_samples
                     ?(capture_gpu_ns[stage]/1000U)/capture_gpu_samples:0U;
@@ -1869,6 +1894,7 @@ namespace jkgm {
                 present_gpu_queries.release();
                 scene_gpu_queries.release();
                 opaque_detail_gpu_queries.release();
+                opaque_geometry_gpu_queries.release();
                 capture_gpu_queries.release();
                 sun_gpu_queries.release();
             }
@@ -6030,7 +6056,9 @@ namespace jkgm {
                     !world_cache_target->sector_special_candidates.empty());
         }
 
-        void draw_game_opaque_into_gbuffer(triangle_buffer_models *trimdl, bool posterize_lighting)
+        void draw_game_opaque_into_gbuffer(triangle_buffer_models *trimdl,
+                                            bool posterize_lighting,
+                                            bool geometry_timing)
         {
             // Draw batches
             gl::disable(gl::capability::blend);
@@ -6092,6 +6120,10 @@ namespace jkgm {
             }
 
             draw_world_cache_preview();
+            if(geometry_timing) {
+                opaque_geometry_gpu_queries.timestamp(1U,false);
+                opaque_geometry_gpu_queries.timestamp(2U,true);
+            }
             ogs->game_opaque_pass_program.use_program();
 
             // First-person gun rendering uses a separate depth transform:
@@ -6113,7 +6145,15 @@ namespace jkgm {
 
             // GPU preview changes the active GL shader. Render it LAST within
             // the opaque pass, after all batches that expect game_opaque_pass.
+            if(geometry_timing) {
+                opaque_geometry_gpu_queries.timestamp(2U,false);
+                opaque_geometry_gpu_queries.timestamp(3U,true);
+            }
             draw_gpu_3do_preview(false);
+            if(geometry_timing) {
+                opaque_geometry_gpu_queries.timestamp(3U,false);
+                opaque_geometry_gpu_queries.timestamp(4U,true);
+            }
             // Check main-camera 3DO spheres against the completed opaque
             // depth without binding any secondary-camera visibility state.
             query_gpu_thing_occlusion();
@@ -10652,12 +10692,35 @@ namespace jkgm {
                 ++opaque_detail_gpu_samples;
             }
             if(detail_completed.skipped)++opaque_detail_gpu_skipped;
+            opaque_geometry_gpu_profile::completed_sample geometry_completed{};
+            bool const geometry_timing=the_config->profile_renderer &&
+                opaque_geometry_gpu_queries.begin(geometry_completed);
+            if(geometry_completed.ready) {
+                for(size_t i=0;i<opaque_geometry_gpu_ns.size();++i)
+                    opaque_geometry_gpu_ns[i]+=geometry_completed.nanoseconds[i];
+                ++opaque_geometry_gpu_samples;
+            }
+            if(geometry_completed.skipped)++opaque_geometry_gpu_skipped;
             ssr_ready=false; // old frame's result is never sampled by G-buffer
             ssr_opaque_ready=false;
             if(detail_timing)opaque_detail_gpu_queries.timestamp(0U,true);
+            if(geometry_timing)opaque_geometry_gpu_queries.timestamp(0U,true);
             frame_screen->begin_opaque_pass();
-            draw_game_opaque_into_gbuffer(trimdl, posterize_lighting);
+            if(geometry_timing) {
+                opaque_geometry_gpu_queries.timestamp(0U,false);
+                opaque_geometry_gpu_queries.timestamp(1U,true);
+            }
+            draw_game_opaque_into_gbuffer(trimdl, posterize_lighting,
+                                          geometry_timing);
+            if(geometry_timing) {
+                opaque_geometry_gpu_queries.timestamp(4U,false);
+                opaque_geometry_gpu_queries.timestamp(5U,true);
+            }
             frame_screen->end_opaque_pass();
+            if(geometry_timing) {
+                opaque_geometry_gpu_queries.timestamp(5U,false);
+                opaque_geometry_gpu_queries.end();
+            }
             if(detail_timing)opaque_detail_gpu_queries.timestamp(0U,false);
 
             if(detail_timing)opaque_detail_gpu_queries.timestamp(1U,true);
