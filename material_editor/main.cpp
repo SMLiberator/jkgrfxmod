@@ -1078,6 +1078,18 @@ private:
             ImGui::GetContentRegionAvail().x-(has?27.0f:0.0f)));
         if(ImGui::DragFloat("##packValue",&value,0.01f,0,0,"%.3f")&&
            std::isfinite(value)) {
+            // Respect the same numeric domains as the material compiler.
+            const std::string field(key);
+            if(field=="normal_strength"||field=="normal_strength2")
+                value=std::clamp(value,0.0f,4.0f);
+            else if(field=="depth_bias")
+                value=std::clamp(value,-16.0f,16.0f);
+            else if(field=="roughness"||field=="metalness"||
+                    field=="clearcoat_strength"||field=="clearcoat_roughness"||
+                    field=="clearcoat_transmission"||field=="matcap_roughness")
+                value=std::clamp(value,0.0f,1.0f);
+            else if(field=="reflection_strength"||field=="fluid_thickness")
+                value=std::max(0.0f,value);
             root_[key]=value;
             changedPack(key,ImGui::IsItemActive());
         }
@@ -1094,7 +1106,9 @@ private:
         auto v=count==4?rgba(root_,key,{1,1,1,1}):
             std::array<float,4>{0,0,0,1};
         if(count==3) {
-            const auto color=rgb(root_,key,{0,0,0});
+            const auto color=rgb(root_,key,std::string(key)=="matcap_factor"
+                                              ?std::array<float,3>{1,1,1}
+                                              :std::array<float,3>{0,0,0});
             std::copy(color.begin(),color.end(),v.begin());
         }
         ImGui::SetNextItemWidth(std::max(90.0f,
@@ -1118,7 +1132,9 @@ private:
         ImGui::PushID(key);
         const bool has=root_.contains(key);
         const bool fallback=false;
-        bool value=root_.value(key,fallback);
+        bool value=fallback;
+        auto it=root_.find(key);
+        if(it!=root_.end()&&it->is_boolean())value=it->get<bool>();
         if(ImGui::Checkbox(label,&value)) {
             root_[key]=value;changedPack(key);
         }
