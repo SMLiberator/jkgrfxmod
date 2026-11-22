@@ -332,13 +332,15 @@ private:
         orbitPitch_=shape_==PreviewShape::Plane?0.0f:
                     shape_==PreviewShape::Cube?0.38f:-0.15f;
         orbitDistance_=shape_==PreviewShape::Cube?4.4f:3.5f;
-        orbitTarget_={0.0f,0.0f,0.0f};
-        if(shape_==PreviewShape::Cube)centerCubeInView();
+        orbitTarget_=shape_==PreviewShape::Cube
+            ?cubeCenteredTarget(orthographic_)
+            :std::array<float,3>{0.0f,0.0f,0.0f};
         dragStartYaw_=orbitYaw_;
         dragStartPitch_=orbitPitch_;
         dragStartTarget_=orbitTarget_;
     }
-    void centerCubeInView() {
+    std::array<float,3> cubeCenteredTarget(bool orthographic) const {
+        std::array<float,3> target={0.0f,0.0f,0.0f};
         // Center the *projected* eight cube corners, not the raw world-space
         // center. In perspective the visible bounding rectangle is offset
         // towards nearer corners; symmetric geometry isn't screen-centered.
@@ -359,8 +361,8 @@ private:
             float xmax=-xmin,ymin=xmin,ymax=-xmin;
             for(float x:{-h,h})for(float y:{-h,h})for(float z:{-h,h}) {
                 const std::array<float,3> delta={
-                    x-orbitTarget_[0],y-orbitTarget_[1],z-orbitTarget_[2]};
-                const float depth=orthographic_?orbitDistance_:
+                    x-target[0],y-target[1],z-target[2]};
+                const float depth=orthographic?orbitDistance_:
                     orbitDistance_-dot(delta,back);
                 const float sx=dot(delta,right)/depth;
                 const float sy=dot(delta,up)/depth;
@@ -370,8 +372,9 @@ private:
             const float shiftX=(xmin+xmax)*0.5f*orbitDistance_;
             const float shiftY=(ymin+ymax)*0.5f*orbitDistance_;
             for(size_t axis=0;axis<3;++axis)
-                orbitTarget_[axis]+=shiftX*right[axis]+shiftY*up[axis];
+                target[axis]+=shiftX*right[axis]+shiftY*up[axis];
         }
+        return target;
     }
     struct Edit {
         int materialIndex=-1; // -1: pack, otherwise material index
@@ -716,7 +719,17 @@ private:
         }
         ImGui::Checkbox("Fresnel",&envFresnel_);
         ImGui::SameLine();
-        ImGui::Checkbox("Orthographic",&orthographic_);
+        if(ImGui::Checkbox("Orthographic",&orthographic_) &&
+           shape_==PreviewShape::Cube) {
+            // Preserve user panning when switching projection, but account
+            // for the different optical centers of parallel and perspective
+            // rays. No camera angle, zoom or manual pan is reset.
+            const auto previous=cubeCenteredTarget(!orthographic_);
+            const auto next=cubeCenteredTarget(orthographic_);
+            for(size_t axis=0;axis<3;++axis)
+                orbitTarget_[axis]+=next[axis]-previous[axis];
+            dragStartTarget_=orbitTarget_;
+        }
         ImVec2 area=ImGui::GetContentRegionAvail();
         area.x=std::max(area.x,64.0f);
         area.y=std::max(area.y-35.0f,64.0f);
