@@ -11,6 +11,7 @@
 #include "backends/imgui_impl_opengl3.h"
 #include "common/json_incl.hpp"
 #include "preview.hpp"
+#include "source_pack.hpp"
 #include <windows.h>
 #include <commdlg.h>
 #include <shlobj.h>
@@ -65,7 +66,7 @@ std::string chooseFile(GLFWwindow *window,bool image) {
     wchar_t path[32768] = {};
     const wchar_t *filter=image
         ? L"Image files\0*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.hdr\0All files\0*.*\0\0"
-        : L"Material metadata\0*.json\0All files\0*.*\0\0";
+        : L"Material packs (script.json, metadata.json)\0*.json\0All files\0*.*\0\0";
     OPENFILENAMEW dlg{};
     dlg.lStructSize=sizeof(dlg);
     dlg.hwndOwner=glfwGetWin32Window(window);
@@ -75,7 +76,8 @@ std::string chooseFile(GLFWwindow *window,bool image) {
     dlg.Flags=OFN_EXPLORER|OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
     return GetOpenFileNameW(&dlg)?toUtf8(path):std::string{};
 }
-std::string chooseSaveMetadataFile(GLFWwindow *window,const std::string &current) {
+std::string chooseSaveMetadataFile(GLFWwindow *window,const std::string &current,
+                                   bool sourceMode) {
     // Default to a sibling copy so Save As is safe without typing a name.
     wchar_t path[32768]={};
     const fs::path currentPath=fs::u8path(current);
@@ -89,7 +91,9 @@ std::string chooseSaveMetadataFile(GLFWwindow *window,const std::string &current
     OPENFILENAMEW dlg{};
     dlg.lStructSize=sizeof(dlg);
     dlg.hwndOwner=glfwGetWin32Window(window);
-    dlg.lpstrFilter=L"JSON material metadata (*.json)\0*.json\0All files\0*.*\0\0";
+    dlg.lpstrFilter=sourceMode
+        ?L"Source material pack (*.json)\0*.json\0All files\0*.*\0\0"
+        :L"Compiled material metadata (*.json)\0*.json\0All files\0*.*\0\0";
     dlg.lpstrFile=path;
     dlg.nMaxFile=DWORD(sizeof(path)/sizeof(path[0]));
     dlg.lpstrDefExt=L"json";
@@ -218,8 +222,9 @@ public:
         }
         if(ImGui::BeginMainMenuBar()) {
             if(ImGui::BeginMenu("File")) {
-                if(ImGui::MenuItem("Open metadata...","Ctrl+O"))open();
-                if(ImGui::MenuItem("Save metadata","Ctrl+S",false,loaded_))save();
+                if(ImGui::MenuItem("Open material pack...","Ctrl+O"))open();
+                if(ImGui::MenuItem(isSource()?"Save source pack":"Save metadata",
+                                   "Ctrl+S",false,loaded_))save();
                 if(ImGui::MenuItem("Save As...","Ctrl+Shift+S",false,loaded_))
                     saveAs();
                 if(ImGui::MenuItem("Exit"))requestExit();
@@ -388,15 +393,29 @@ private:
             auto it=doc.find(key);
             if(it!=doc.end())state[key]=*it;
         }
+        for(const char *key:editor_source::inheritedProperties) {
+            auto it=doc.find(key);
+            if(it!=doc.end())state[key]=*it;
+        }
+        for(const char *key:{"depth_bias","use_original_albedo"}) {
+            auto it=doc.find(key);
+            if(it!=doc.end())state[key]=*it;
+        }
         return state;
     }
     static void restorePackSnapshot(Document &doc,const Document &state) {
         // A pack undo must not replace unrelated material changes.
-        for(const char *key:{"name","description","comment","environment_map","images"}) {
+        const auto restore=[&](const char *key) {
             auto it=state.find(key);
             if(it!=state.end())doc[key]=*it;
             else doc.erase(key);
-        }
+        };
+        for(const char *key:{"name","description","comment","environment_map","images"})
+            restore(key);
+        for(const char *key:editor_source::inheritedProperties)
+            restore(key);
+        restore("depth_bias");
+        restore("use_original_albedo");
     }
     static void validatePackMetadata(const Document &doc) {
         for(const char *required:{"name","description"}) {
@@ -472,6 +491,8 @@ private:
         status_="Redid "+undo_.back().key;
     }
     void updateDirty() {dirty_=root_!=savedRoot_;}
+    bool isSource() const {return mode_==editor_source::Kind::Source;}
+    const Document &effectiveSelected() const {return effectiveEntry_;}
     Document &selected() {
         return root_["materials"][size_t(selection_)];
     }
@@ -523,9 +544,13 @@ private:
     }
     void syncPreview() {
         if(!validSelection()) {preview_->setMaterial(PreviewMaterial{});return;}
-        PreviewMaterial p=fromMetadata(selected(),root_,
+        effectiveEntry_=editor_source::effectiveMaterial(root_,selected(),mode_);
+        PreviewMaterial p=fromMetadata(effectiveEntry_,root_,
                                      fs::u8path(file_).parent_path());
-        const Document &entry=selected();
+        // Source textures are straight-alpha input; compiled color PNGs
+        // have been premultiplied by the pack compiler.
+        p.albedoPremultiplied=!isSource();
+        const Document &entry=effectiveEntry_;
         bool keep=entry.value("keep_albedo",false)||
                   entry.value("use_original_albedo",false);
         if(keep && p.files[BaseMap].empty()) {
@@ -537,6 +562,12 @@ private:
                 if(repl.is_object()) {
                     matName=stringValue(repl,"name");
                     cel=repl.value("cel",0);
+                } else if(repl.is_string()) {
+                    matName=repl.get<std::string>();
+                } else if(repl.is_array()&&repl.size()==2&&
+                          repl[0].is_string()&&repl[1].is_number_integer()) {
+                    matName=repl[0].get<std::string>();
+                    cel=repl[1].get<int>();
                 }
             }
             std::string key=nativeSource_.root()+"|"+nativeSource_.palette()+
@@ -575,15 +606,18 @@ private:
             Document doc;stream>>doc;
             if(!doc.is_object()||doc.find("materials")==doc.end()||
                !doc["materials"].is_array())
-                throw std::runtime_error("Not a compiled material pack (missing materials array).");
+                throw std::runtime_error("Not a material pack (missing materials array).");
+            const auto kind=editor_source::detect(fs::u8path(path),doc);
             root_=std::move(doc);
+            mode_=kind;
             observedRoot_=root_; savedRoot_=root_;
             undo_.clear(); redo_.clear(); groupActive_=false;
             file_=path;loaded_=true;dirty_=false;
             selection_=root_["materials"].empty()?-1:0;
             nativeCacheKey_.clear();
             syncPreview();
-            status_="Loaded "+std::to_string(root_["materials"].size())+" materials.";
+            status_=std::string(isSource()?"Opened source script.json: ":"Opened compiled metadata.json: ")+
+                    std::to_string(root_["materials"].size())+" materials.";
         } catch(const std::exception &e) {
             status_=std::string("Open failed: ")+e.what();
             MessageBoxA(glfwGetWin32Window(window_),status_.c_str(),"Material editor",MB_ICONERROR);
@@ -592,13 +626,29 @@ private:
     void save() {writeMetadata(file_,false);}
     bool saveAs() {
         if(!loaded_)return false;
-        const std::string destination=chooseSaveMetadataFile(window_,file_);
+        const std::string destination=chooseSaveMetadataFile(window_,file_,isSource());
         return !destination.empty()&&writeMetadata(destination,true);
     }
     bool writeMetadata(const std::string &path,bool switchToCopy) {
         if(!loaded_||path.empty())return false;
         try {
-            validatePackMetadata(root_);
+            // Source save must keep compiler-relative asset paths intact.
+            // Copying only script.json to another directory silently breaks
+            // map/environment/registry resolution: refuse such a Save As.
+            if(isSource()&&switchToCopy) {
+                const auto originalDir=editor_source::lowerAscii(
+                    fs::weakly_canonical(fs::u8path(file_).parent_path())
+                        .generic_u8string());
+                const auto copiedDir=editor_source::lowerAscii(
+                    fs::weakly_canonical(fs::u8path(path).parent_path())
+                        .generic_u8string());
+                if(originalDir!=copiedDir)
+                    throw std::runtime_error(
+                        "Source Save As must stay in the same folder as the "
+                        "original script and textures. Choose another filename "
+                        "in that folder to preserve relative asset paths.");
+            }
+            editor_source::validate(root_,mode_);
             fs::path destination=fs::u8path(path);
             fs::path temp=destination;
             temp+=L".tmp";
@@ -611,7 +661,7 @@ private:
             }
             if(!MoveFileExW(temp.c_str(),destination.c_str(),
                             MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))
-                throw std::runtime_error("Cannot replace metadata.json. Close other programs using it.");
+                throw std::runtime_error("Cannot replace the JSON file. Close other programs using it.");
             if(switchToCopy) {
                 file_=path;
                 // Texture paths are relative to metadata's location.
@@ -622,7 +672,8 @@ private:
             updateDirty();
             status_=switchToCopy
                 ?"Saved copy: "+fs::u8path(path).filename().u8string()
-                :"Saved metadata.json. No MAT signatures were regenerated.";
+                :isSource()?"Saved script.json (source; not yet compiled)."
+                           :"Saved metadata.json. No MAT signatures were regenerated.";
             return true;
         } catch(const std::exception &e) {
             status_=std::string("Save failed: ")+e.what();
@@ -641,6 +692,10 @@ private:
         ImGui::SameLine();
         if(ImGui::Button("Redo") && !redo_.empty())redo();
         if(loaded_) {
+            ImGui::TextColored(
+                isSource()?ImVec4(.55f,.88f,.72f,1):ImVec4(.68f,.75f,1,1),
+                "%s",isSource()?"SOURCE PACK":"COMPILED PACK");
+            ImGui::SameLine();
             ImGui::TextWrapped("%s",fs::u8path(file_).filename().u8string().c_str());
             ImGui::Separator();
             if(ImGui::BeginTabBar("##MaterialsTabs")) {
@@ -674,7 +729,7 @@ private:
                 ImGui::EndTabBar();
             }
         } else {
-            ImGui::TextWrapped("Open an existing compiled material pack. The preview updates immediately when you change a property.");
+            ImGui::TextWrapped("Open script.json for source editing or metadata.json to edit an existing compiled material pack.");
         }
         ImGui::Separator();
         ImGui::TextWrapped("%s",status_.c_str());
@@ -1172,6 +1227,8 @@ private:
     std::unique_ptr<MaterialPreview> preview_;
     Document root_=Document::object();
     Document savedRoot_=Document::object(), observedRoot_=Document::object();
+    Document effectiveEntry_=Document::object();
+    editor_source::Kind mode_=editor_source::Kind::Compiled;
     std::vector<Edit> undo_,redo_;
     std::string file_,status_,override_;
     NativeMatSource nativeSource_;
