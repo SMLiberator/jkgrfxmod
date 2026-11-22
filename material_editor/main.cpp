@@ -5,6 +5,7 @@
 #include <GLFW/glfw3native.h>
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "misc/cpp/imgui_stdlib.h"
 #include "native_mat.hpp"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
@@ -19,6 +20,8 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -274,7 +277,7 @@ private:
                                   ImGuiWindowFlags_AlwaysAutoResize))
             return;
         const bool exiting=pendingAction_==PendingAction::Exit;
-        ImGui::TextUnformatted("There are unsaved material changes.");
+        ImGui::TextUnformatted("There are unsaved pack or material changes.");
         ImGui::TextUnformatted(exiting
             ?"Save a copy, close without saving, or cancel?"
             :"Save a copy, open another pack without saving, or cancel?");
@@ -313,18 +316,76 @@ private:
         dragStartPitch_=orbitPitch_;
     }
     struct Edit {
-        int materialIndex=-1;
+        int materialIndex=-1; // -1: pack, otherwise material index
         std::string key;
         Document before, after;
     };
     static constexpr size_t maxHistory=128;
+    static Document packSnapshot(const Document &doc) {
+        Document state=Document::object();
+        for(const char *key:{"name","description","comment","environment_map","images"}) {
+            auto it=doc.find(key);
+            if(it!=doc.end())state[key]=*it;
+        }
+        return state;
+    }
+    static void restorePackSnapshot(Document &doc,const Document &state) {
+        // A pack undo must not replace unrelated material changes.
+        for(const char *key:{"name","description","comment","environment_map","images"}) {
+            auto it=state.find(key);
+            if(it!=state.end())doc[key]=*it;
+            else doc.erase(key);
+        }
+    }
+    static void validatePackMetadata(const Document &doc) {
+        for(const char *required:{"name","description"}) {
+            auto it=doc.find(required);
+            if(it==doc.end()||!it->is_string())
+                throw std::runtime_error(std::string("Pack ")+required+
+                                         " must be a string.");
+            if(std::string(required)=="name"&&it->get<std::string>().empty())
+                throw std::runtime_error("Pack name cannot be empty.");
+        }
+        for(const char *optional:{"comment","environment_map"}) {
+            auto it=doc.find(optional);
+            if(it!=doc.end()&&!it->is_string())
+                throw std::runtime_error(std::string("Pack ")+optional+
+                                         " must be a string.");
+        }
+        auto images=doc.find("images");
+        if(images==doc.end())return;
+        if(!images->is_array())
+            throw std::runtime_error("Pack images must be an array.");
+        std::set<int> ids;
+        for(const auto &image:*images) {
+            if(!image.is_object()||!image.contains("id")||
+               !image["id"].is_number_integer()||
+               !image.contains("file")||!image["file"].is_string())
+                throw std::runtime_error(
+                    "Each registered image must contain an integer id and a string file.");
+            const int id=image["id"].get<int>();
+            if(id<0||id>65535||!ids.insert(id).second)
+                throw std::runtime_error("Pack image IDs must be unique and within 0..65535.");
+            const std::string name=image["file"].get<std::string>();
+            const fs::path path=fs::u8path(name);
+            if(name.empty()||path.is_absolute()||path.has_parent_path()||
+               path.filename().empty()||name=="."||name=="..")
+                throw std::runtime_error(
+                    "Pack image filenames must be nonempty and pack-local.");
+        }
+    }
     void undo() {
         if(undo_.empty()||!loaded_)return;
         Edit step=std::move(undo_.back());
         undo_.pop_back();
-        root_["materials"][size_t(step.materialIndex)]=step.before;
-        observedRoot_["materials"][size_t(step.materialIndex)]=step.before;
-        selection_=step.materialIndex;
+        if(step.materialIndex<0) {
+            restorePackSnapshot(root_,step.before);
+            restorePackSnapshot(observedRoot_,step.before);
+        } else {
+            root_["materials"][size_t(step.materialIndex)]=step.before;
+            observedRoot_["materials"][size_t(step.materialIndex)]=step.before;
+            selection_=step.materialIndex;
+        }
         redo_.push_back(std::move(step));
         groupActive_=false;
         updateDirty();
@@ -335,9 +396,14 @@ private:
         if(redo_.empty()||!loaded_)return;
         Edit step=std::move(redo_.back());
         redo_.pop_back();
-        root_["materials"][size_t(step.materialIndex)]=step.after;
-        observedRoot_["materials"][size_t(step.materialIndex)]=step.after;
-        selection_=step.materialIndex;
+        if(step.materialIndex<0) {
+            restorePackSnapshot(root_,step.after);
+            restorePackSnapshot(observedRoot_,step.after);
+        } else {
+            root_["materials"][size_t(step.materialIndex)]=step.after;
+            observedRoot_["materials"][size_t(step.materialIndex)]=step.after;
+            selection_=step.materialIndex;
+        }
         undo_.push_back(std::move(step));
         groupActive_=false;
         updateDirty();
@@ -374,6 +440,25 @@ private:
         updateDirty();
         syncPreview();
         status_="Unsaved material changes (Ctrl+S)";
+    }
+    void changedPack(const char *key,bool continuous=false) {
+        if(!loaded_)return;
+        const Document current=packSnapshot(root_);
+        const Document previous=packSnapshot(observedRoot_);
+        if(previous==current)return;
+        const bool merge=continuous&&groupActive_&&!undo_.empty()&&
+                         undo_.back().materialIndex==-1&&undo_.back().key==key;
+        if(merge)undo_.back().after=current;
+        else {
+            if(undo_.size()>=maxHistory)undo_.erase(undo_.begin());
+            undo_.push_back({-1,key,previous,current});
+        }
+        restorePackSnapshot(observedRoot_,current);
+        redo_.clear();
+        groupActive_=continuous;
+        updateDirty();
+        syncPreview();
+        status_="Unsaved pack changes (Ctrl+S)";
     }
     void syncPreview() {
         if(!validSelection()) {preview_->setMaterial(PreviewMaterial{});return;}
@@ -452,6 +537,7 @@ private:
     bool writeMetadata(const std::string &path,bool switchToCopy) {
         if(!loaded_||path.empty())return false;
         try {
+            validatePackMetadata(root_);
             fs::path destination=fs::u8path(path);
             fs::path temp=destination;
             temp+=L".tmp";
@@ -494,6 +580,9 @@ private:
         ImGui::SameLine();
         if(ImGui::Button("Redo") && !redo_.empty())redo();
         if(loaded_) {
+            ImGui::TextWrapped("Pack: %s",stringValue(root_,"name").c_str());
+            if(ImGui::Button("Pack properties..."))
+                selectPackTab_=true;
             ImGui::TextWrapped("%s",fs::u8path(file_).filename().u8string().c_str());
             ImGui::Separator();
             filter_.Draw("Search");
@@ -657,11 +746,138 @@ private:
             ImGui::TextColored(ImVec4(1,.5f,.35f,1),"[missing texture]");
 
     }
+    void packTextField(const char *label,const char *key,
+                       bool multiline=false,bool optional=false) {
+        ImGui::PushID(key);
+        ImGui::TextUnformatted(label);
+        std::string value=stringValue(root_,key);
+        bool edited=multiline
+            ?ImGui::InputTextMultiline("##value",&value,ImVec2(-1,84))
+            :ImGui::InputText("##value",&value);
+        if(edited) {
+            if(optional&&value.empty())root_.erase(key);
+            else root_[key]=value;
+            changedPack(key,ImGui::IsItemActive());
+        }
+        ImGui::PopID();
+    }
+    void renderPackProperties() {
+        ImGui::TextDisabled("Top-level compiled pack metadata");
+        packTextField("Name","name");
+        packTextField("Description","description",true);
+        packTextField("Comment (optional)","comment",true,true);
+        packTextField("Default environment map (optional)","environment_map",
+                      false,true);
+        const std::string env=stringValue(root_,"environment_map");
+        if(!env.empty()) {
+            std::error_code ec;
+            if(!fs::exists(fs::u8path(file_).parent_path()/fs::u8path(env),ec))
+                ImGui::TextColored(ImVec4(1,.7f,.3f,1),
+                    "Environment image not found in the pack.");
+        }
+        ImGui::Separator();
+        if(ImGui::CollapsingHeader("Registered images")) {
+            ImGui::TextWrapped(
+                "Pack-local COG images: edit metadata references only. Files are not copied.");
+            auto it=root_.find("images");
+            if(it!=root_.end()&&!it->is_array()) {
+                ImGui::TextColored(ImVec4(1,.5f,.35f,1),
+                    "Images is not an array. Repair metadata before editing.");
+            } else {
+                size_t count=it==root_.end()?0:it->size();
+                ImGui::Text("%zu registered image%s",count,count==1?"":"s");
+                for(size_t i=0;i<count;++i) {
+                    ImGui::PushID(int(i));
+                    Document &entry=root_["images"][i];
+                    bool removed=false;
+                    if(!entry.is_object()) {
+                        ImGui::TextColored(ImVec4(1,.5f,.35f,1),
+                            "Entry %zu is not an image object",i+1);
+                        if(ImGui::SmallButton("Remove invalid entry")) {
+                            root_["images"].erase(i);
+                            if(root_["images"].empty())root_.erase("images");
+                            changedPack("images");
+                            removed=true;
+                        }
+                    } else {
+                        int id=-1;
+                        if(entry.contains("id")&&entry["id"].is_number_integer())
+                            id=entry["id"].get<int>();
+                        if(ImGui::InputInt("Image ID",&id)) {
+                            entry["id"]=id;
+                            changedPack("images",ImGui::IsItemActive());
+                        }
+                        std::string file=stringValue(entry,"file");
+                        if(ImGui::InputText("File",&file)) {
+                            entry["file"]=file;
+                            changedPack("images",ImGui::IsItemActive());
+                        }
+                        if(ImGui::SmallButton("Remove image")) {
+                            root_["images"].erase(i);
+                            if(root_["images"].empty())root_.erase("images");
+                            changedPack("images");
+                            removed=true;
+                        }
+                        if(!file.empty()) {
+                            std::error_code ec;
+                            if(!fs::exists(fs::u8path(file_).parent_path()/
+                                           fs::u8path(file),ec))
+                                ImGui::TextDisabled("Referenced image is missing.");
+                        }
+                    }
+                    ImGui::Separator();
+                    ImGui::PopID();
+                    if(removed)break;
+                }
+                if(ImGui::Button("Add image")) {
+                    std::set<int> used;
+                    auto existing=root_.find("images");
+                    if(existing!=root_.end())
+                        for(const auto &image:*existing)
+                            if(image.is_object()&&image.contains("id")&&
+                               image["id"].is_number_integer())
+                                used.insert(image["id"].get<int>());
+                    int id=0;
+                    while(id<=65535&&used.count(id))++id;
+                    if(id<=65535) {
+                        if(!root_.contains("images"))
+                            root_["images"]=Document::array();
+                        root_["images"].push_back({
+                            {"id",id},{"file","image_"+std::to_string(id)+".png"}});
+                        changedPack("images");
+                    }
+                }
+                ImGui::TextDisabled("IDs: unique integers 0-65535.");
+            }
+        }
+        ImGui::TextDisabled("Unknown fields and MAT signatures are preserved.");
+    }
     void renderProperties() {
         ImGui::Begin("Material Properties");
-        if(!validSelection()) {
-            ImGui::TextWrapped("Select a material to edit its properties and see the result in the OpenGL preview.");
+        if(!loaded_) {
+            ImGui::TextWrapped("Open a compiled material pack to edit its metadata.");
             ImGui::End();return;
+        }
+        if(ImGui::BeginTabBar("##PropertyTabs")) {
+            if(ImGui::BeginTabItem("Material")) {
+                renderMaterialProperties();
+                ImGui::EndTabItem();
+            }
+            const ImGuiTabItemFlags flags=selectPackTab_
+                ?ImGuiTabItemFlags_SetSelected:ImGuiTabItemFlags_None;
+            if(ImGui::BeginTabItem("Pack",nullptr,flags)) {
+                renderPackProperties();
+                ImGui::EndTabItem();
+            }
+            selectPackTab_=false;
+            ImGui::EndTabBar();
+        }
+        ImGui::End();
+    }
+    void renderMaterialProperties() {
+        if(!validSelection()) {
+            ImGui::TextWrapped("Select a material to edit its properties.");
+            return;
         }
         const std::string name=stringValue(selected(),"name");
         ImGui::TextWrapped("Material: %s",name.c_str());
@@ -813,7 +1029,6 @@ private:
             ImGui::Separator();
             ImGui::TextWrapped("MAT replacements/signatures are preserved exactly when saving. Texture importing and incremental recompilation are not included in this milestone.");
         }
-        ImGui::End();
     }
     void comboField(const char *label,const char *key,
                     const char *const*values,const char *const*labels,int count) {
@@ -851,7 +1066,8 @@ private:
     NativeMatImage nativeLoaded_;
     std::string nativeCacheKey_,nativeStatus_;
     bool loaded_=false,dirty_=false,plane_=false,groupActive_=false,
-         layoutConfigured_=false,openUnsavedDialog_=false,exitApproved_=false;
+         layoutConfigured_=false,openUnsavedDialog_=false,exitApproved_=false,
+         selectPackTab_=false;
     PendingAction pendingAction_=PendingAction::None;
     int selection_=-1,environment_=0;
     bool envFresnel_=false;
