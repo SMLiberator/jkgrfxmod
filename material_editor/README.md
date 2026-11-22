@@ -136,3 +136,19 @@ The environment map, direct studio light, normal mapping, and surface UVs
 remain in world/object space while the camera orbits; MatCap is evaluated
 in the updated camera space. This avoids rotating the environment and
 lighting together with the material, keeping camera movement predictable.
+
+## Emissive-only compositing and plane proportions
+
+Normal, Additive and Fluid emission now contributes independently of the
+base albedo alpha, following the game rendering path. An emissive-only
+material with albedo factor [0,0,0,0] still displays its emissive color.
+Masked/dithered pixels suppress both albedo and emission when discarded;
+Multiply mode biases its multiplier instead of adding emission. The preview
+does not replicate HDR bloom or exposure, so very bright emission may still
+appear different from the final game image.
+
+Plane mode scales the preview surface according to the actual loaded albedo
+image dimensions, including original JK MAT albedo. If no usable albedo
+texture is loaded, it uses the emissive texture dimensions instead. If
+neither texture exists the plane remains square. UV coverage stays 0..1,
+and the longer dimension stays at the normal preview plane size.

@@ -20,18 +20,21 @@ layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aNormal;
 layout(location=2) in vec2 aUv;
 uniform float uAspect;
+uniform vec2 uPlaneScale;
 uniform vec3 uViewRight,uViewUp,uViewBack;
 out vec3 wp, wn;
 out vec2 uv;
 void main() {
     // Unlike the old model-rotation preview, positions/normals stay
     // in world space; only the view camera changes.
-    wp=aPos;
+    // A full 0..1 UV rectangle covers the whole scaled plane.
+    // Sphere vertices use uPlaneScale=(1,1), so remain unchanged.
+    wp=vec3(aPos.xy*uPlaneScale,aPos.z);
     wn=normalize(aNormal);
     uv=aUv;
-    vec3 q=vec3(dot(aPos,uViewRight),
-                dot(aPos,uViewUp),
-                dot(aPos,uViewBack)-3.5);
+    vec3 q=vec3(dot(wp,uViewRight),
+                dot(wp,uViewUp),
+                dot(wp,uViewBack)-3.5);
     float f=2.9042; // 38-degree vertical FOV
     gl_Position=vec4(q.x*f/max(uAspect,0.01),q.y*f,
                      -q.z*1.00669-0.20067,-q.z);
@@ -166,8 +169,11 @@ void main() {
     vec3 emission=uEmissive*(hasEmissive!=0?
         texture(tEmissive,uv).rgb:vec3(1.0));
 
-    vec3 result=diffuse*diffuseTrans + baseSpec*specTrans+
-                coatSpec+artistic*diffuseTrans+emission;
+    // In the game, emissive RGB is separately additive in Normal/Fluid
+    // and Additive blending, including with zero-alpha base pigment.
+    // Keep only the non-emissive surface in the albedo coverage term.
+    vec3 surface=diffuse*diffuseTrans + baseSpec*specTrans+
+                 coatSpec+artistic*diffuseTrans;
 
     // Preview's opaque FBO cannot use the game's scene alpha composition.
     // Compose against a visible checkered backdrop instead of writing the
@@ -185,9 +191,21 @@ void main() {
     float checker=mod(floor(gl_FragCoord.x/16.0)+
                       floor(gl_FragCoord.y/16.0),2.0);
     vec3 background=mix(vec3(0.13),vec3(0.27),checker);
-    vec3 composite=mix(background,result,alphaCoverage);
-    if(uBlendMode==1)composite=background+result*alphaCoverage;
-    if(uBlendMode==2)composite=mix(background,background*result,alphaCoverage);
+    // Alpha masks/dither reject the whole fragment. Ordinary/Fluid and
+    // Additive preserve emission even when albedo coverage is exactly zero.
+    float emissionVisibility=(uAlphaMode==1||uAlphaMode==2)?
+        alphaCoverage:1.0;
+    vec3 composite=mix(background,surface,alphaCoverage)+
+                   emission*emissionVisibility;
+    if(uBlendMode==1)
+        composite=background+surface*alphaCoverage+
+                  emission*emissionVisibility;
+    if(uBlendMode==2) {
+        // The native Multiply blend uses (DST_COLOR,ZERO); emission changes
+        // its tint instead of adding independent light.
+        vec3 tint=clamp(surface+emission,0.0,1.0);
+        composite=mix(background,background*tint,alphaCoverage);
+    }
     outputColor=vec4(toSRGB(composite),1.0);
 }
 )GLSL";
@@ -350,6 +368,21 @@ void MaterialPreview::reloadImages() {
                ". Using "+fallbackName+" fallback";
         textures_[EnvironmentMap]=createPreset();
     }
+    // Query only on material/texture reload, not every preview frame.
+    // A native JK MAT is bound into BaseMap, so participates automatically.
+    auto getAspect=[this](PreviewTexture slot)->float {
+        GLuint texture=textures_[slot];
+        if(!texture)return 0.0f;
+        GLint textureWidth=0,textureHeight=0;
+        glBindTexture(GL_TEXTURE_2D,texture);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D,0,GL_TEXTURE_WIDTH,&textureWidth);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D,0,GL_TEXTURE_HEIGHT,&textureHeight);
+        return textureWidth>0&&textureHeight>0
+            ?float(textureWidth)/float(textureHeight):0.0f;
+    };
+    planeAspect_=getAspect(BaseMap);
+    if(planeAspect_<=0.0f)planeAspect_=getAspect(EmissiveMap);
+    if(planeAspect_<=0.0f)planeAspect_=1.0f;
 }
 void MaterialPreview::setMaterial(const PreviewMaterial &next) {
     bool changed=(material_.files!=next.files ||
@@ -444,6 +477,11 @@ void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
     v3("uViewRight",right);v3("uViewUp",up);
     v3("uViewBack",back);v3("uCameraPos",camera);
     f1("uAspect",float(width_)/height_);
+    // Keep the longer side at the previous plane size, without stretching
+    // UVs or affecting the sphere; both wide and tall maps remain framed.
+    const float aspect=plane?planeAspect_:1.0f;
+    glUniform2f(glGetUniformLocation(program_,"uPlaneScale"),
+                std::min(aspect,1.0f),std::min(1.0f,1.0f/aspect));
     glUniform4fv(glGetUniformLocation(program_,"uAlbedo"),1,material_.albedo.data());
     v3("uEmissive",material_.emissive);v3("uMatcapFactor",material_.matcapFactor);
     f1("uReflection",material_.reflection);f1("uRough",material_.roughness);

@@ -63,4 +63,5 @@ private:
     bool loadedEnvironmentFile_ = false;
     int width_ = 0, height_ = 0, preset_ = 0;
     GLsizei sphereCount_ = 0, planeCount_ = 0;
+    float planeAspect_ = 1.0f; // loaded albedo texture, else emissive
 };
