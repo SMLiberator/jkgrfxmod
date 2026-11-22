@@ -157,7 +157,7 @@ PreviewMaterial fromMetadata(const Document &entry,const Document &root,
     p.coatRoughness=number(entry,"clearcoat_roughness",.1f);
     p.coatTransmission=number(entry,"clearcoat_transmission",1.0f);
     std::string alpha=stringValue(entry,"alpha_mode");
-    p.alphaMode=alpha=="mask"?1:(alpha=="dithered"?2:0);
+    p.alphaMode=alpha=="mask"?1:((alpha=="dithered"||alpha=="dither")?2:0);
     std::string blend=stringValue(entry,"blend_mode");
     p.blendMode=blend=="additive"?1:(blend=="multiply"?2:(blend=="fluid"?3:0));
     p.alphaCutoff=number(entry,"alpha_cutoff",0.5f);
