@@ -123,17 +123,16 @@ All game-asset source selections, shader diagnostics, Fresnel state and
 rotation are **preview-only**; saving continues to write only material
 property changes into metadata.json.
 
-## Blender-style turntable preview navigation
+## Preview navigation
 
 The preview now orbits an upright camera around the stationary material,
 rather than applying quaternion rotation to the object. With either left
 or middle mouse drag, horizontal motion changes yaw around world +Y, and
-vertical motion changes the camera's pitch. Up remains up, there is no
+vertical motion changes the camera's pitch (drag up to orbit downward). Up remains up, there is no
 unintended camera roll, and pitch stops just before the poles. Each drag
 starts from the mouse-down view. Space resets the view.
 
 The environment map, direct studio light, normal mapping, and surface UVs
 remain in world/object space while the camera orbits; MatCap is evaluated
 in the updated camera space. This avoids rotating the environment and
-lighting together with the material and better matches Blender's default
-Turntable navigation rather than its unrestricted Trackball option.
+lighting together with the material, keeping camera movement predictable.
