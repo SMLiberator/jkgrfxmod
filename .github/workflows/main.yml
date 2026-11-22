@@ -260,6 +260,8 @@ jobs:
       run: python3 tests/gpu_3do_submission_cpu_reuse.py
     - name: Reflection and opaque GPU profiling source regression
       run: python3 tests/reflection_gpu_profiling.py
+    - name: GPU GL mesh cache sweep and reuse profiling regression
+      run: python3 tests/gpu_gl_sweep_profiling.py
     - name: GPU 3DO cached opaque group ordering parity
       shell: cmd
       run: |

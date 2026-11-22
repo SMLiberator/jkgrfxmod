@@ -618,6 +618,17 @@ namespace jkgm {
         gpu_3do_pack_profile packed_3do_upload_profile;
         std::unordered_map<uint64_t,uint64_t> gpu_3do_last_drawn;
         uint64_t gpu_3do_present_serial=0;
+        // OpenGL buffer sweep diagnostics, separate from native mesh caching.
+        struct gpu_gl_sweep_profile {
+            uint64_t sweeps=0,scanned=0,evicted=0;
+            uint64_t no_timestamp=0,expired=0,estimated_bytes=0;
+            uint64_t cpu_ns=0,peak_ns=0,peak_scanned=0,peak_evicted=0;
+            uint64_t reappeared=0,reappeared_within_64=0;
+            uint64_t reappearance_scan_ns=0;
+        } gpu_gl_sweep_window{};
+        // Only hold profiling IDs for 256 frames; a reappearance at the next
+        // sweep indicates the previously deleted GL mesh was recreated.
+        std::unordered_map<uint64_t,uint64_t> gpu_gl_recent_swept_ids;
         // Lazy CPU simplification per immutable source, keyed by original
         // GPU mesh ID. Variant GL IDs are distinct from the authored mesh.
         struct auto_3do_lod_entry {
@@ -1339,6 +1350,32 @@ namespace jkgm {
                      " resource_uv=",rejects[5]/frames,
                      " camera_pose=",rejects[6]/frames,
                      " capacity=",rejects[7]/frames);
+            {
+                auto const &s=gpu_gl_sweep_window;
+                LOG_INFO("PERF gpu_gl_sweep sweeps=",s.sweeps,
+                         " examined=",s.scanned,
+                         " examined_per_sweep=",
+                         s.sweeps?s.scanned/s.sweeps:0U,
+                         " evicted=",s.evicted,
+                         " missing_usage_timestamp=",s.no_timestamp,
+                         " expired_over_64_frames=",s.expired,
+                         " estimated_buffer_kib_freed=",s.estimated_bytes/1024U,
+                         " cpu_us_per_sweep=",
+                         s.sweeps?(s.cpu_ns/1000U)/s.sweeps:0U,
+                         " cpu_us_peak=",s.peak_ns/1000U,
+                         " peak_examined=",s.peak_scanned,
+                         " peak_evicted=",s.peak_evicted,
+                         " NOTE=instrumented_CPU_wall_clock;GL_vertex_and_index_payload_only");
+                LOG_INFO("PERF gpu_gl_sweep_reuse reappeared_within_256_frames=",
+                         s.reappeared,
+                         " reappeared_within_64_frames=",s.reappeared_within_64,
+                         " recent_evicted_ids_remaining=",
+                         gpu_gl_recent_swept_ids.size(),
+                         " reappearance_scan_us_total=",
+                         s.reappearance_scan_ns/1000U,
+                         " NOTE=observed_at_subsequent_sweep;lower_bound_of_reuploads");
+                gpu_gl_sweep_window={};
+            }
             LOG_INFO("PERF sorting_us opaque=", avg(profile_stage::sort_opaque),
                      " transparent=", avg(profile_stage::sort_transparent),
                      " peaks=", peak_sort_opaque, "/", peak_sort_trans,
@@ -1873,6 +1910,8 @@ namespace jkgm {
                     reset_gpu_3do_instances();
                     gpu_3do_gl_cache.clear();
                     gpu_3do_last_drawn.clear();
+                    gpu_gl_recent_swept_ids.clear();
+                    gpu_gl_sweep_window={};
                     auto_3do_lod_cache.clear();
                     auto_3do_lod_history.clear();
                     gpu_3do_present_serial=0;
@@ -14035,16 +14074,71 @@ namespace jkgm {
                 (the_config->enable_spotlights && the_config->enable_spotlight_shadows) ||
                 the_config->enable_sun_shadows) &&
                (gpu_3do_present_serial%16U)==0U) {
+                bool const profile_sweep=the_config->profile_renderer;
+                // Identify previous sweep victims recreated since their
+                // deletion, without adding work to the normal draw paths.
+                if(profile_sweep) {
+                    auto const lookup_started=profile_clock::now();
+                    for(auto it=gpu_gl_recent_swept_ids.begin();
+                        it!=gpu_gl_recent_swept_ids.end();) {
+                        uint64_t const age=gpu_3do_present_serial>=it->second
+                            ?gpu_3do_present_serial-it->second:~uint64_t(0);
+                        if(age>256U) {
+                            it=gpu_gl_recent_swept_ids.erase(it);
+                        } else if(gpu_3do_gl_cache.find(it->first)!=
+                                  gpu_3do_gl_cache.end()) {
+                            ++gpu_gl_sweep_window.reappeared;
+                            if(age<=64U)
+                                ++gpu_gl_sweep_window.reappeared_within_64;
+                            it=gpu_gl_recent_swept_ids.erase(it);
+                        } else ++it;
+                    }
+                    gpu_gl_sweep_window.reappearance_scan_ns+=
+                        elapsed_profile_ns(lookup_started,profile_clock::now());
+                }
+                auto const sweep_started=profile_sweep
+                    ?profile_clock::now():profile_clock::time_point{};
+                uint64_t scanned=0,evicted=0;
                 for(auto it=gpu_3do_gl_cache.begin();it!=gpu_3do_gl_cache.end();) {
+                    if(profile_sweep)++scanned;
                     auto const used=gpu_3do_last_drawn.find(it->first);
-                    if(used==gpu_3do_last_drawn.end() ||
-                       gpu_3do_present_serial-used->second>64U) {
-                        if(used!=gpu_3do_last_drawn.end())
+                    bool const no_timestamp=used==gpu_3do_last_drawn.end();
+                    // Retain the original 16-frame/64-frame expiry policy.
+                    bool const expired=!no_timestamp &&
+                        gpu_3do_present_serial-used->second>64U;
+                    if(no_timestamp || expired) {
+                        if(profile_sweep) {
+                            auto &s=gpu_gl_sweep_window;
+                            ++evicted;
+                            if(no_timestamp)++s.no_timestamp;
+                            else ++s.expired;
+                            auto const &mesh=*it->second;
+                            s.estimated_bytes+=mesh.vertex_count*
+                                (mesh.packed_vertex_format
+                                    ?sizeof(gpu_3do_packed_vertex)
+                                    :sizeof(gpu_3do_vertex))+
+                                uint64_t(mesh.num_indices)*sizeof(uint32_t);
+                            gpu_gl_recent_swept_ids[it->first]=
+                                gpu_3do_present_serial;
+                        }
+                        if(!no_timestamp)
                             gpu_3do_last_drawn.erase(used);
                         it=gpu_3do_gl_cache.erase(it);
                     } else {
                         ++it;
                     }
+                }
+                if(profile_sweep) {
+                    auto const sweep_ns=elapsed_profile_ns(
+                        sweep_started,profile_clock::now());
+                    auto &s=gpu_gl_sweep_window;
+                    ++s.sweeps;
+                    s.scanned+=scanned;
+                    s.evicted+=evicted;
+                    s.cpu_ns+=sweep_ns;
+                    s.peak_ns=std::max(s.peak_ns,sweep_ns);
+                    s.peak_scanned=std::max(s.peak_scanned,scanned);
+                    s.peak_evicted=std::max(s.peak_evicted,evicted);
                 }
             }
 
