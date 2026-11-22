@@ -15,14 +15,13 @@ const char *vs = R"GLSL(
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aNormal;
 layout(location=2) in vec2 aUv;
-uniform float uYaw, uPitch, uAspect;
+uniform float uAspect;
+uniform vec4 uOrientation; // normalized x,y,z,w
 out vec3 wp, wn;
 out vec2 uv;
 vec3 transform(vec3 p) {
-    float x=cos(uPitch), y=sin(uPitch);
-    p=vec3(p.x, x*p.y-y*p.z, y*p.y+x*p.z);
-    x=cos(uYaw); y=sin(uYaw);
-    return vec3(x*p.x+y*p.z, p.y, -y*p.x+x*p.z);
+    vec3 t=2.0*cross(uOrientation.xyz,p);
+    return p+uOrientation.w*t+cross(uOrientation.xyz,t);
 }
 void main() {
     wp=transform(aPos);
@@ -324,7 +323,7 @@ void MaterialPreview::buildMeshes() {
     glEnableVertexAttribArray(0);glEnableVertexAttribArray(1);glEnableVertexAttribArray(2);
     glBindVertexArray(0);
 }
-void MaterialPreview::draw(int w,int h,float yaw,float pitch,bool plane) {
+void MaterialPreview::draw(int w,int h,const std::array<float,4> &orientation,bool plane) {
     if(!program_)return;
     resize(w,h);
     glBindFramebuffer(GL_FRAMEBUFFER,fbo_);
@@ -343,7 +342,8 @@ void MaterialPreview::draw(int w,int h,float yaw,float pitch,bool plane) {
     auto v3=[this](const char *name,const std::array<float,3> &v) {
         glUniform3f(glGetUniformLocation(program_,name),v[0],v[1],v[2]);
     };
-    f1("uYaw",yaw);f1("uPitch",pitch);f1("uAspect",float(width_)/height_);
+    glUniform4fv(glGetUniformLocation(program_,"uOrientation"),1,orientation.data());
+    f1("uAspect",float(width_)/height_);
     glUniform4fv(glGetUniformLocation(program_,"uAlbedo"),1,material_.albedo.data());
     v3("uEmissive",material_.emissive);v3("uMatcapFactor",material_.matcapFactor);
     f1("uReflection",material_.reflection);f1("uRough",material_.roughness);

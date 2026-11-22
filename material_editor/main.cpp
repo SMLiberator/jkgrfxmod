@@ -109,9 +109,30 @@ void setArray(Document &obj,const char *key,const float *values,int size) {
 }
 }
 
+// Hamilton-product quaternions: left-multiplying applies each drag in
+// fixed camera/screen axes, rather than around the material's rotated axes.
+using Orientation = std::array<float,4>; // x, y, z, w
+static Orientation multiplyOrientation(const Orientation &a,const Orientation &b) {
+    return {
+        a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1],
+        a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0],
+        a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3],
+        a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2]
+    };
+}
+static Orientation screenDrag(float dx,float dy) {
+    float halfYaw=dx*.0045f,halfPitch=dy*.0045f;
+    Orientation yaw={0,std::sin(halfYaw),0,std::cos(halfYaw)};
+    Orientation pitch={std::sin(halfPitch),0,0,std::cos(halfPitch)};
+    return multiplyOrientation(yaw,pitch);
+}
+
 class Editor {
 public:
     explicit Editor(GLFWwindow *window) : window_(window) {
+        // Retain the prototype's initial slightly angled view.
+        orientation_=multiplyOrientation(screenDrag(-.35f/.009f,0),
+                                         screenDrag(0,.15f/.009f));
         preview_=std::make_unique<MaterialPreview>();
         status_="Open a compiled metadata.json to begin.";
     }
@@ -271,7 +292,7 @@ private:
         area.x=std::max(area.x,64.0f);
         area.y=std::max(area.y-35.0f,64.0f);
         if(preview_->valid()) {
-            preview_->draw(int(area.x),int(area.y),yaw_,pitch_,plane_);
+            preview_->draw(int(area.x),int(area.y),orientation_,plane_);
             // Image() is a passive item: dragging it moves the ImGui window.
             // An invisible button claims the mouse press for viewport orbiting,
             // while the image is drawn over that item's exact screen rectangle.
@@ -284,8 +305,15 @@ private:
                 ImVec2(0,1), ImVec2(1,0));
             if(ImGui::IsItemActive()&&ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
                 ImVec2 delta=ImGui::GetIO().MouseDelta;
-                yaw_+=delta.x*.009f;
-                pitch_=std::clamp(pitch_+delta.y*.009f,-1.48f,1.48f);
+                // Compose around the screen's vertical and horizontal axes.
+                // Normalize to avoid accumulated floating-point drift.
+                orientation_=multiplyOrientation(screenDrag(delta.x,delta.y),
+                                                 orientation_);
+                float length=std::sqrt(
+                    orientation_[0]*orientation_[0]+orientation_[1]*orientation_[1]+
+                    orientation_[2]*orientation_[2]+orientation_[3]*orientation_[3]);
+                if(length>0.0f)
+                    for(float &component:orientation_)component/=length;
             }
         } else {
             ImGui::TextWrapped("GLSL preview failed: %s",preview_->error().c_str());
@@ -436,7 +464,7 @@ private:
     std::string file_,status_,override_;
     bool loaded_=false,dirty_=false,plane_=false;
     int selection_=-1,environment_=0;
-    float yaw_=-.35f,pitch_=.15f;
+    Orientation orientation_{0,0,0,1};
     ImGuiTextFilter filter_;
 };
 

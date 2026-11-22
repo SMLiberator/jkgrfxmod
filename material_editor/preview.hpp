@@ -31,7 +31,7 @@ public:
     void setMaterial(const PreviewMaterial &mat);
     void setPreset(int preset);
     void setEnvironmentOverride(const std::string &path);
-    void draw(int width, int height, float yaw, float pitch, bool plane);
+    void draw(int width, int height, const std::array<float,4> &orientation, bool plane);
     GLuint outputTexture() const { return output_; }
 
 private:
