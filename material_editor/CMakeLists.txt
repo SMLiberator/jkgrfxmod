@@ -41,7 +41,7 @@ add_executable(jkgm-material-editor WIN32
 target_include_directories(jkgm-material-editor PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../glad)
 target_link_libraries(jkgm-material-editor PRIVATE
-  editor_imgui glfw OpenGL::GL comdlg32)
+  editor_imgui glfw OpenGL::GL comdlg32 shell32 ole32)
 target_compile_definitions(jkgm-material-editor PRIVATE
   GLFW_INCLUDE_NONE NOMINMAX WIN32_LEAN_AND_MEAN)
 if(MSVC)
