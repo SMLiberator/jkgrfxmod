@@ -272,8 +272,16 @@ private:
         area.y=std::max(area.y-35.0f,64.0f);
         if(preview_->valid()) {
             preview_->draw(int(area.x),int(area.y),yaw_,pitch_,plane_);
-            ImGui::Image((ImTextureID)(intptr_t)preview_->outputTexture(),
-                         area,ImVec2(0,1),ImVec2(1,0));
+            // Image() is a passive item: dragging it moves the ImGui window.
+            // An invisible button claims the mouse press for viewport orbiting,
+            // while the image is drawn over that item's exact screen rectangle.
+            const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
+            ImGui::InvisibleButton("##material_preview_orbit", area,
+                                   ImGuiButtonFlags_MouseButtonLeft);
+            ImGui::GetWindowDrawList()->AddImage(
+                ImTextureRef((ImTextureID)preview_->outputTexture()),
+                canvasPos, ImVec2(canvasPos.x + area.x, canvasPos.y + area.y),
+                ImVec2(0,1), ImVec2(1,0));
             if(ImGui::IsItemActive()&&ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
                 ImVec2 delta=ImGui::GetIO().MouseDelta;
                 yaw_+=delta.x*.009f;
