@@ -231,6 +231,14 @@
                 shared.is_shared=true;
                 candidates.push_back(shared);
                 active_owners.insert(shared.owner);
+            } else if(realtime_supported &&
+                      reflection_probes.count(shared_reflection_owner_key)) {
+                // Visibility can change across consecutive frames. Reuse the
+                // already allocated 6-face target the next time a receiver
+                // enters view instead of reallocating textures/FBOs. No draw
+                // occurs while dormant; seen_frame prevents stale sampling.
+                // World changes and disabled captures still clear this cache.
+                active_owners.insert(shared_reflection_owner_key);
             }
             // Free targets belonging to missing/non-selected owners, including
             // destroyed Things; the cached images cannot leak across worlds.

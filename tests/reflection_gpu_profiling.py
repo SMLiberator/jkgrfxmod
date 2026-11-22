@@ -57,6 +57,9 @@ assert hemi.index("gpu_3do_batch_outside_frustum(",
     hemi.index("auto wants_shared=")) < hemi.index("if(!checked.emplace(",
     hemi.index("auto wants_shared="))
 assert "surface.surface_index==face.surface_index" in hemi
+assert "reflection_probes.count(shared_reflection_owner_key)" in hemi
+assert "active_owners.insert(shared_reflection_owner_key);" in hemi
+assert "seen_frame==gpu_3do_present_serial" in renderer
 assert '#include "reflection_capture_batch_order.hpp"' in renderer
 assert "order_reflection_capture_opaque_spans(" in hemi
 assert "if((group->face_type&0x2U)!=0U)return false;" in hemi
