@@ -1,49 +1,55 @@
-# JkGfxMod Material Editor
+# JkGfxMod Material Editor (Windows)
 
-Windows-focused material authoring and **live in-editor visualizer**. This project
-is fully independent of the game renderer; there is no in-game hot reload.
+A standalone Windows material editor using **Dear ImGui + OpenGL 3.3**.
+There are no Qt libraries, external GUI DLLs, game EXE, renderer DLL,
+or in-game hot-reload dependencies.
 
-## First prototype
+## Preview-first milestone
 
-- Open an existing compiled material pack's metadata.json.
-- Inspect the pack's material list.
-- Preview selected material on a rotatable sphere or plane.
-- Use an existing material-specific equirectangular environment map, falling
-  back to the pack default. When neither exists, choose a generated studio,
-  outdoor, or night environment. A separate custom image can temporarily
-  override the preview environment.
-- View albedo and packed surface textures (R=reflectivity, G=roughness,
-  B=metalness), with approximate reflection and clearcoat lighting.
-- Edit albedo factor, reflection strength, roughness, metalness, clearcoat
-  strength, clearcoat roughness, and clearcoat transmission. Values update
-  the preview immediately.
-- Save JSON atomically without regenerating MAT signatures, while preserving
-  other metadata entries, material names, original replacements and signatures.
+- Open a compiled pack's metadata.json, browse and search materials.
+- Rotate a 3D sphere with the mouse or select a plane for surface editing.
+- Preview a material-defined or pack-wide equirectangular EnvMap, or a
+  generated studio, outdoor or night fallback. Optionally choose a separate
+  preview-only environment image.
+- Edit albedo factor, base reflection strength/roughness/metalness, normal
+  strengths, MatCap factor/roughness, emissive factor and clearcoat properties.
+- Read compiled albedo, surface (R=strength, G=roughness, B=metalness),
+  normal, emissive, MatCap and clearcoat maps. Live values update the viewport.
+- The preview approximates the renderer's important layering conventions:
+  sRGB color maps vs linear data maps, Schlick Fresnel, GGX-like direct
+  highlights, MatCap as artistic color, clearcoat Fresnel/transmission,
+  and roughness-based EnvMap mip selection.
+- Save edited material properties into metadata.json with Ctrl+S, preserving
+  unknown fields, MAT replacements, material names and signature hashes.
 
-**Current preview is a visual prototype, not exact renderer parity.** It does
-not yet include normal maps, MatCap, emissive lighting, alpha modes or
-parallax; all reflection modes use the same environment image in the viewer.
-The generated environment presets are deliberately simple. A physically
-accurate preview will require later editor-side implementation and comparison.
+**Preview fidelity:** this does not yet reproduce in-game sector lighting,
+shadows, fog, HDR auto-exposure, parallax, animation or alpha composition.
+It uses one equirectangular EnvMap for ALL reflection modes, including game
+modes that normally capture live scenes. These modes are not equivalent
+in-game: the studio preview is a deliberate approximation for editing.
+Renderer parity should eventually be checked using captured reference images.
 
-This prototype does not yet create packs, import textures, generate MAT
-signatures, or replace compile.exe. Those operations will be integrated after
-extracting the existing compiler routines into a reusable incremental core.
-For now, compile new materials using the existing compiler, then open the
-resulting metadata.json in the editor.
+**Compiler status:** This milestone cannot yet import/convert new image files
+or generate MAT replacement signatures. Continue using the existing
+command-line compiler for initial pack compilation; then edit the compiled
+metadata in the GUI. Incremental compilation remains the next development phase.
 
-## Windows build
+## Portable Windows build
 
-Requires Visual Studio 2022, CMake >=3.21, and Qt >=6.5 with the
-Widgets, OpenGL and OpenGLWidgets modules.
+Requires Visual Studio 2022, CMake >=3.21, and build-time access to the
+pinned Dear ImGui v1.92.9b-docking and GLFW 3.4 source repositories. It also
+uses the existing repository GLAD and stb_image code.
 
-Example (PowerShell):
-
-    cmake -S material_editor -B build/material-editor -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64"
+    cmake -S material_editor -B build/material-editor -G "Visual Studio 17 2022" -A x64
     cmake --build build/material-editor --config Release --target jkgm-material-editor
 
-The editor has its own CMake project rather than being included in the
-renderer solution. The Material Editor GitHub Actions workflow builds only
-this target and deploys its runtime Qt libraries into an artifact.
+Dear ImGui and GLFW are compiled into static libraries, and MSVC uses the
+static /MT runtime. The CI artifact contains ONLY jkgm-material-editor.exe.
+Standard Windows system DLLs and a working OpenGL 3.3 driver remain required.
 
-The editor intentionally does not modify the renderer or any renderer tests.
+The editor has its own CMake target and GitHub Actions workflow. It does not
+build jkgfxmod.sln, the renderer, or any renderer regression tests.
+
+Dear ImGui, GLFW, GLAD and stb_image are third-party components under their
+respective licenses; see the repository's third-party attribution and upstream
+source distributions for notices.
