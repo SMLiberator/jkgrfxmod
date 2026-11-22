@@ -66,9 +66,13 @@ assert "active_owners.insert(shared_reflection_owner_key);" in hemi
 assert "seen_frame==gpu_3do_present_serial" in renderer
 assert '#include "reflection_capture_batch_order.hpp"' in renderer
 assert "order_reflection_capture_opaque_spans(" in hemi
-assert "if((group->face_type&0x2U)!=0U)return false;" in hemi
+assert "if(entry->native_translucent)return false;" in hemi
+assert "entry->capture_keys[force_solid?1U:0U]" in hemi
+assert "inst.geometry->cached_group_submissions()" in hemi
+assert "auto const &submission=inst.geometry->cached_group_submissions();" in renderer
+assert "meta.main_material_key |" in renderer
 assert "!mat.alpha && !mat.masked && !mat.dithered" in hemi
-assert "return a<b; // stable authored tie within geometry" in hemi
+assert "return a->group_index<b->group_index;" in hemi
 assert "shared_capture_profile_window={};" in renderer
 assert "auto const shared_search_started=" in hemi
 assert "diag.search_ns+=elapsed_profile_ns(" in hemi

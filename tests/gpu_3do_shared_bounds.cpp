@@ -33,6 +33,16 @@ int main() {
     std::array<float,3> second_lo{},second_hi{};
     assert(bounds(mesh,second_lo,second_hi) &&
            second_lo==lo && second_hi==hi);
+    auto const &submissions=mesh.cached_group_submissions();
+    assert(submissions.size()==mesh.groups.size());
+    assert(submissions[0].group_index==0);
+    assert(submissions[0].index_count==3);
+    assert(submissions[0].index_offset_bytes==0);
+    assert(submissions[0].main_material_key==
+           ((uint64_t(mesh.groups[0].material)<<32) |
+            uint32_t(mesh.groups[0].cel)));
+    assert(!std::get<2>(submissions[0].capture_keys[0]));
+    assert(std::get<2>(submissions[0].capture_keys[1]));
     auto const &opaque=mesh.cached_opaque_group_order();
     assert(opaque.size()==mesh.groups.size());
     assert(bounds(mesh,second_lo,second_hi));
@@ -40,6 +50,8 @@ int main() {
     // Mutated COPY gets a fresh lazy cache, original remains unchanged.
     gpu_3do_geometry copied=mesh;
     copied.groups.push_back(group(250,15,2));
+    assert(copied.cached_group_submissions().size()==4);
+    assert(mesh.cached_group_submissions().size()==3);
     assert(bounds(copied,second_lo,second_hi));
     assert(second_hi[0]==251);
     assert(bounds(mesh,second_lo,second_hi));
@@ -47,8 +59,26 @@ int main() {
 
     // Moves preserve already computed cache state.
     gpu_3do_geometry moved=std::move(copied);
+    assert(moved.cached_group_submissions().size()==4);
     assert(bounds(moved,second_lo,second_hi));
     assert(second_hi[0]==251);
+
+    // Cross-camera opaque order retains the previous material/cel/face
+    // ordering. Reflection-specific forcing of solid does not change it.
+    gpu_3do_geometry ordered;
+    auto a=group(0,15,1),b=group(1,15,1),c=group(2,15,1);
+    a.material=5;a.cel=0;a.face_type=0;
+    b.material=2;b.cel=-1;b.face_type=2;
+    c.material=5;c.cel=0;c.face_type=1;
+    ordered.groups={a,b,c};
+    auto const &order=ordered.cached_opaque_group_order();
+    assert((order==std::vector<size_t>{1,0,2}));
+    auto const &keys=ordered.cached_group_submissions();
+    assert(keys[1].native_translucent);
+    assert(!keys[0].native_translucent);
+    assert(keys[0].capture_keys[0]<keys[2].capture_keys[0]);
+    assert(std::get<2>(keys[0].capture_keys[1]) &&
+           std::get<2>(keys[2].capture_keys[1]));
 
     // ANY malformed drawable group invalidates the entire union (fail open).
     gpu_3do_geometry bad;

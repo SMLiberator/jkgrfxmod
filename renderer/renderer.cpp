@@ -4977,6 +4977,7 @@ namespace jkgm {
                 // instead of sorting pending ranges for every Thing.
                 // The original group index remains the alpha tie key.
                 auto const &groups=inst.geometry->groups;
+                auto const &submission=inst.geometry->cached_group_submissions();
                 auto const *opaque_order=transparent ? nullptr
                     : &inst.geometry->cached_opaque_group_order();
                 size_t const instance_order_base=next_draw_order;
@@ -4985,6 +4986,7 @@ namespace jkgm {
                     size_t const group_index=opaque_order
                         ?(*opaque_order)[group_visit]:group_visit;
                     auto const &group=groups[group_index];
+                    auto const &meta=submission[group_index];
                     if(the_config->profile_renderer)
                         ++profile_frame.gpu_groups_considered;
                     // Native JK clips individual faces; test the bounds of
@@ -5032,8 +5034,7 @@ namespace jkgm {
                     // for solid-mode and Camera HUD identity-CMP palette.
                     // The same MAT may be drawn textured and solid in one frame.
                     uint64_t const mat_key=
-                        (uint64_t(group.material)<<32) |
-                        uint32_t(group.cel) |
+                        meta.main_material_key |
                         (solid?(uint64_t(1)<<63):0U) |
                         (solid && inst.camera_hud?(uint64_t(1)<<62):0U);
                     auto &mat_cache=post_exempt

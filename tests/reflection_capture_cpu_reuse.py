@@ -18,7 +18,11 @@ assert "gpu_3do_batch_outside_frustum(" in capture
 assert "std::vector<GLsizei> counts;" in capture
 assert capture.index("std::vector<GLsizei> counts;") < capture.index(
     "for(int face=0;face<face_count;++face)")
-assert "std::vector<gpu_3do_group const *> model_group_scratch;" in capture
+assert "std::vector<gpu_3do_group_submission const *>" in capture
+assert "inst.geometry->cached_group_submissions()" in capture
+assert "model_group_scratch.push_back(&entry);" in capture
+assert "entry->capture_keys[force_solid?1U:0U]" in capture
+assert "group->index_offset_bytes" in capture
 assert "inst.geometry->cached_group_bounds(mesh_min,mesh_max)" in capture
 assert "whole_mesh_rejections" in capture
 assert "group_walks_avoided" in capture

@@ -11,6 +11,7 @@
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -61,6 +62,19 @@ namespace jkgm {
         bool saber_trail_join=false; // last composite triangle of a procedural saber, after tip caps
         bool saber_trail_tip_bridge=false; // SideMat strip connecting past/live tip rims, just before the 3D fan
     };
+    // Immutable draw-range and key metadata shared by primary and offscreen
+    // cameras. Live MAT state, Thing opacity and view visibility stay separate.
+    struct gpu_3do_group_submission {
+        using capture_key=std::tuple<uintptr_t,int32_t,bool,bool>;
+        using opaque_key=std::tuple<uintptr_t,int32_t,uint32_t,bool,bool>;
+        opaque_key opaque_sort_key{};
+        // 0 = authored solid flag, 1 = instance GeoMode forces solid.
+        std::array<capture_key,2> capture_keys{};
+        uint64_t main_material_key=0;
+        uint32_t group_index=0,index_count=0;
+        uintptr_t index_offset_bytes=0;
+        bool native_translucent=false;
+    };
     struct gpu_3do_geometry {
         std::vector<gpu_3do_face_plane> face_planes;
         std::vector<gpu_3do_vertex> vertices;
@@ -93,6 +107,8 @@ namespace jkgm {
         struct opaque_order_cache {
             std::once_flag once;
             std::vector<size_t> indices;
+            std::once_flag submission_once;
+            std::vector<gpu_3do_group_submission> submissions;
             // This same immutable geometry may be displayed in the normal
             // view, planar, shadows, and many 2-/6-view reflection probes.
             // Union its groups' local bounds once, not once per camera.
@@ -115,25 +131,51 @@ namespace jkgm {
             opaque_order_cache_owner &operator=(
                 opaque_order_cache_owner &&)=default;
         };
+        std::vector<gpu_3do_group_submission> const &
+        cached_group_submissions() const {
+            auto &cache=*opaque_order_state.state;
+            std::call_once(cache.submission_once,[this,&cache] {
+                auto &out=cache.submissions;
+                out.reserve(groups.size());
+                for(size_t i=0;i<groups.size();++i) {
+                    auto const &group=groups[i];
+                    gpu_3do_group_submission meta{};
+                    meta.group_index=uint32_t(i);
+                    meta.opaque_sort_key=std::make_tuple(
+                        group.material,group.cel,group.face_type,
+                        group.nonplanar,group.solid_color);
+                    bool const no_cull=group.nonplanar ||
+                        (group.face_type&1U)!=0U;
+                    meta.capture_keys[0]=std::make_tuple(
+                        group.material,group.cel,group.solid_color,no_cull);
+                    meta.capture_keys[1]=std::make_tuple(
+                        group.material,group.cel,true,no_cull);
+                    // Preserve the normal renderer's established 32-bit
+                    // native material/cel key representation.
+                    meta.main_material_key=
+                        (uint64_t(group.material)<<32) |
+                        uint32_t(group.cel);
+                    meta.index_count=group.count;
+                    meta.index_offset_bytes=
+                        uintptr_t(group.offset)*sizeof(uint32_t);
+                    meta.native_translucent=(group.face_type&0x2U)!=0U;
+                    out.push_back(meta);
+                }
+            });
+            return cache.submissions;
+        }
         std::vector<size_t> const &cached_opaque_group_order() const {
             auto &cache=*opaque_order_state.state;
-            std::call_once(cache.once,[this,&cache] {
+            auto const &meta=cached_group_submissions();
+            std::call_once(cache.once,[&cache,&meta] {
                 auto &opaque_order=cache.indices;
-                opaque_order.resize(groups.size());
+                opaque_order.resize(meta.size());
                 std::iota(opaque_order.begin(),opaque_order.end(),size_t(0));
                 std::sort(opaque_order.begin(),opaque_order.end(),
-                    [this](size_t a,size_t b) {
-                        auto const &lhs=groups[a],&rhs=groups[b];
-                        if(lhs.material!=rhs.material)
-                            return lhs.material<rhs.material;
-                        if(lhs.cel!=rhs.cel)
-                            return lhs.cel<rhs.cel;
-                        if(lhs.face_type!=rhs.face_type)
-                            return lhs.face_type<rhs.face_type;
-                        if(lhs.nonplanar!=rhs.nonplanar)
-                            return lhs.nonplanar<rhs.nonplanar;
-                        if(lhs.solid_color!=rhs.solid_color)
-                            return lhs.solid_color<rhs.solid_color;
+                    [&meta](size_t a,size_t b) {
+                        if(meta[a].opaque_sort_key!=meta[b].opaque_sort_key)
+                            return meta[a].opaque_sort_key<
+                                   meta[b].opaque_sort_key;
                         return a<b; // identical keys retain authored order
                     });
             });

@@ -525,7 +525,8 @@
                 // Keep scratch allocation capacity across all 2/6 faces.
                 std::vector<GLsizei> counts;
                 std::vector<void const *> offsets;
-                std::vector<gpu_3do_group const *> model_group_scratch;
+                std::vector<gpu_3do_group_submission const *>
+                    model_group_scratch;
                 // Resolve live MAT/cel once per distinct key per refresh,
                 // never persist the result into another game frame.
                 std::map<reflection_capture_material_key,gpu_3do_texture>
@@ -773,14 +774,15 @@
                 // uninterrupted fully opaque runs. Alpha-tested groups keep
                 // authored order; Hemi/Cube/EnvMap behavior is unchanged.
                 model_group_scratch.clear();
-                auto group_key=[&](gpu_3do_group const *group) {
-                    return std::make_tuple(
-                        group->material,group->cel,
-                        group->solid_color ||
-                            inst.effective_geometry_mode==3U,
-                        group->nonplanar || (group->face_type&1U)!=0U);
+                bool const force_solid=inst.effective_geometry_mode==3U;
+                auto const &submission=inst.geometry->cached_group_submissions();
+                auto group_key=[force_solid](
+                    gpu_3do_group_submission const *entry)
+                    ->gpu_3do_group_submission::capture_key const & {
+                    return entry->capture_keys[force_solid?1U:0U];
                 };
-                for(auto const &group:inst.geometry->groups) {
+                for(auto const &entry:submission) {
+                    auto const &group=inst.geometry->groups[entry.group_index];
                     if(profile_shared)
                         ++shared_capture_profile_window.groups_checked;
                     if(paraboloid_mode &&
@@ -800,7 +802,7 @@
                        gpu_3do_batch_outside_frustum(
                            frustum,modelview,
                            group.bounds_min,group.bounds_max))continue;
-                    model_group_scratch.push_back(&group);
+                    model_group_scratch.push_back(&entry);
                     if(profile_shared)
                         ++shared_capture_profile_window.groups_selected;
                 }
@@ -810,9 +812,9 @@
                 if(candidate.is_shared) {
                     auto const order=order_reflection_capture_opaque_spans(
                         model_group_scratch,
-                        [&](gpu_3do_group const *group) {
-                            if((group->face_type&0x2U)!=0U)return false;
-                            auto const key=group_key(group);
+                        [&](gpu_3do_group_submission const *entry) {
+                            if(entry->native_translucent)return false;
+                            auto const &key=group_key(entry);
                             reflection_capture_material_key const mat_key{
                                 std::get<0>(key),std::get<1>(key),
                                 std::get<2>(key)};
@@ -824,11 +826,11 @@
                                 std::isfinite(mat.opacity) &&
                                 mat.opacity>=0.999f;
                         },
-                        [&](gpu_3do_group const *a,
-                            gpu_3do_group const *b) {
-                            auto const ak=group_key(a),bk=group_key(b);
+                        [&](gpu_3do_group_submission const *a,
+                            gpu_3do_group_submission const *b) {
+                            auto const &ak=group_key(a),&bk=group_key(b);
                             if(ak!=bk)return ak<bk;
-                            return a<b; // stable authored tie within geometry
+                            return a->group_index<b->group_index;
                         });
                     if(profile_shared) {
                         auto &diag=shared_capture_profile_window;
@@ -868,7 +870,7 @@
                     :(gpu_3do_reversed_winding(inst.transform)?GL_CW:GL_CCW));
                 // Keep source order for exactly coplanar alpha cutouts.
                 for(size_t i=0;i<model_group_scratch.size();) {
-                    auto const key=group_key(model_group_scratch[i]);
+                    auto const &key=group_key(model_group_scratch[i]);
                     size_t group_end=i+1U;
                     while(group_end<model_group_scratch.size() &&
                           group_key(model_group_scratch[group_end])==key)
@@ -884,10 +886,10 @@
                         counts.clear();offsets.clear();
                         for(size_t k=i;k<group_end;++k) {
                             auto const *group=model_group_scratch[k];
-                            counts.push_back(GLsizei(group->count));
+                            counts.push_back(GLsizei(group->index_count));
                             offsets.push_back(
                                 reinterpret_cast<void const *>(
-                                    uintptr_t(group->offset)*sizeof(uint32_t)));
+                                    group->index_offset_bytes));
                         }
                         if(profile_shared) {
                             auto &diag=shared_capture_profile_window;
