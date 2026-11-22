@@ -246,6 +246,7 @@ private:
         orientation_=plane_?Orientation{0,0,0,1}:
             multiplyOrientation(screenDrag(-.35f/.009f,0),
                                 screenDrag(0,.15f/.009f));
+        dragStartOrientation_=orientation_;
     }
     struct Edit {
         int materialIndex=-1;
@@ -470,12 +471,17 @@ private:
                 ImTextureRef((ImTextureID)preview_->outputTexture()),
                 canvasPos, ImVec2(canvasPos.x + area.x, canvasPos.y + area.y),
                 ImVec2(0,1), ImVec2(1,0));
+            // Freeze the starting frame at mouse-down. The orientation for
+            // every subsequent frame is derived from TOTAL displacement,
+            // not compounded from the previous frame's orientation.
+            // This makes a gesture independent of mouse path/frame rate,
+            // with horizontal/vertical axes fixed for that entire drag.
+            if(ImGui::IsItemActivated())
+                dragStartOrientation_=orientation_;
             if(ImGui::IsItemActive()&&ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
-                ImVec2 delta=ImGui::GetIO().MouseDelta;
-                // Compose around the screen's vertical and horizontal axes.
-                // Normalize to avoid accumulated floating-point drift.
-                orientation_=multiplyOrientation(screenDrag(delta.x,delta.y),
-                                                 orientation_);
+                ImVec2 delta=ImGui::GetMouseDragDelta(ImGuiMouseButton_Left,0.0f);
+                orientation_=multiplyOrientation(
+                    screenDrag(delta.x,delta.y),dragStartOrientation_);
                 float length=std::sqrt(
                     orientation_[0]*orientation_[0]+orientation_[1]*orientation_[1]+
                     orientation_[2]*orientation_[2]+orientation_[3]*orientation_[3]);
@@ -732,6 +738,7 @@ private:
     int selection_=-1,environment_=0;
     bool envFresnel_=false;
     Orientation orientation_{0,0,0,1};
+    Orientation dragStartOrientation_{0,0,0,1};
     ImGuiTextFilter filter_;
 };
 
