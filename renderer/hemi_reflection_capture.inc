@@ -763,6 +763,9 @@
             entry.mode=selected_mode;
             entry.ready=true;
             entry.last_refresh=now;
+            if(the_config->profile_renderer)
+                ++reflection_refreshes_window[candidate.is_global?3U:
+                    candidate.is_shared?0U:paraboloid_mode?1U:2U];
             if(candidate.is_global) {
                 // Publish only after all six scene views and the complete
                 // equirectangular image have been drawn. A failure leaves

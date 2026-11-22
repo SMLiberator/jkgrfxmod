@@ -1161,6 +1161,23 @@ namespace jkgm {
         uint64_t scene_gpu_samples=0, scene_gpu_skipped=0;
         bool scene_gpu_timing=false;
 
+        // Two independent, delayed/nonblocking GPU timestamp rings.
+        // Opaque-detail stages: geometry, SSAO, composite+screen reflections.
+        // Capture stages: CameraToMat, planar, shared/hemi/cube/EnvMap.
+        // Captures run before scene_gpu stage 0, so their GPU time was
+        // previously invisible in the opaque_gbuffer measurement.
+        presentation_gpu_profile opaque_detail_gpu_queries;
+        std::array<uint64_t,presentation_gpu_profile::num_stages>
+            opaque_detail_gpu_ns{};
+        uint64_t opaque_detail_gpu_samples=0,opaque_detail_gpu_skipped=0;
+        presentation_gpu_profile capture_gpu_queries;
+        std::array<uint64_t,presentation_gpu_profile::num_stages>
+            capture_gpu_ns{};
+        uint64_t capture_gpu_samples=0,capture_gpu_skipped=0;
+        std::array<uint64_t,3> capture_cpu_ns_window{};
+        // Completed offscreen refreshes: shared, hemi, cube, one-shot EnvMap.
+        std::array<uint64_t,4> reflection_refreshes_window{};
+
         static uint64_t elapsed_profile_us(profile_clock::time_point a,
                                            profile_clock::time_point b)
         {
@@ -1358,6 +1375,48 @@ namespace jkgm {
                      " NOTE=async_GPU_only;opaque_excludes_shadow_maps;world_includes_decals;gun_overlay_excluded");
             scene_gpu_ns.fill(0U);
             scene_gpu_samples=scene_gpu_skipped=0U;
+            auto opaque_gpu_us=[&](size_t stage)->uint64_t {
+                return opaque_detail_gpu_samples
+                    ?(opaque_detail_gpu_ns[stage]/1000U)/
+                        opaque_detail_gpu_samples:0U;
+            };
+            LOG_INFO("PERF opaque_detail_gpu_us geometry=",
+                     opaque_gpu_us(0U),
+                     " ssao=",opaque_gpu_us(1U),
+                     " composite_and_screen_reflections=",opaque_gpu_us(2U),
+                     " samples=",opaque_detail_gpu_samples,
+                     " ring_busy_skips=",opaque_detail_gpu_skipped,
+                     " supported=",opaque_detail_gpu_queries.is_supported(),
+                     " NOTE=nonblocking_GPU;geometry_is_only_one_part_of_opaque_gbuffer");
+            opaque_detail_gpu_ns.fill(0U);
+            opaque_detail_gpu_samples=opaque_detail_gpu_skipped=0U;
+            auto capture_gpu_us=[&](size_t stage)->uint64_t {
+                return capture_gpu_samples
+                    ?(capture_gpu_ns[stage]/1000U)/capture_gpu_samples:0U;
+            };
+            LOG_INFO("PERF capture_gpu_us photo=",capture_gpu_us(0U),
+                     " planar=",capture_gpu_us(1U),
+                     " shared_and_probes=",capture_gpu_us(2U),
+                     " samples=",capture_gpu_samples,
+                     " ring_busy_skips=",capture_gpu_skipped,
+                     " supported=",capture_gpu_queries.is_supported(),
+                     " NOTE=nonblocking_GPU;probe_includes_shared_hemi_cube_EnvMap");
+            capture_gpu_ns.fill(0U);
+            capture_gpu_samples=capture_gpu_skipped=0U;
+            LOG_INFO("PERF capture_cpu_us_avg photo=",
+                     (capture_cpu_ns_window[0]/1000U)/frames,
+                     " planar=",(capture_cpu_ns_window[1]/1000U)/frames,
+                     " shared_and_probes=",
+                     (capture_cpu_ns_window[2]/1000U)/frames,
+                     " NOTE=wall_clock_CPU_includes_skipped_capture_checks");
+            capture_cpu_ns_window.fill(0U);
+            LOG_INFO("PERF reflection_refreshes_completed shared=",
+                     reflection_refreshes_window[0],
+                     " hemi=",reflection_refreshes_window[1],
+                     " cube=",reflection_refreshes_window[2],
+                     " envmap=",reflection_refreshes_window[3],
+                     " NOTE=counts_per_profile_window_not_per_frame");
+            reflection_refreshes_window.fill(0U);
             if(the_config->use_gpu_cache ||
                the_config->enable_decals) {
                 LOG_INFO("PERF gpu_3do fallback_native_per_frame geometry=",
@@ -1693,6 +1752,8 @@ namespace jkgm {
                 planar_gpu_queries.release();
                 present_gpu_queries.release();
                 scene_gpu_queries.release();
+                opaque_detail_gpu_queries.release();
+                capture_gpu_queries.release();
                 sun_gpu_queries.release();
             }
         }
@@ -10419,16 +10480,30 @@ namespace jkgm {
 
         void draw_game_gbuffer_pass(triangle_buffer_models *trimdl, bool posterize_lighting)
         {
+            presentation_gpu_profile::completed_sample detail_completed{};
+            bool const detail_timing=the_config->profile_renderer &&
+                opaque_detail_gpu_queries.begin(detail_completed);
+            if(detail_completed.ready) {
+                for(size_t i=0;i<opaque_detail_gpu_ns.size();++i)
+                    opaque_detail_gpu_ns[i]+=detail_completed.nanoseconds[i];
+                ++opaque_detail_gpu_samples;
+            }
+            if(detail_completed.skipped)++opaque_detail_gpu_skipped;
             ssr_ready=false; // old frame's result is never sampled by G-buffer
             ssr_opaque_ready=false;
+            if(detail_timing)opaque_detail_gpu_queries.timestamp(0U,true);
             frame_screen->begin_opaque_pass();
             draw_game_opaque_into_gbuffer(trimdl, posterize_lighting);
             frame_screen->end_opaque_pass();
+            if(detail_timing)opaque_detail_gpu_queries.timestamp(0U,false);
 
+            if(detail_timing)opaque_detail_gpu_queries.timestamp(1U,true);
             frame_ao->update_ssao_texture(ogs.get(),
                                           frame_screen->get_resolved_normal_texture(),
                                           frame_screen->get_resolved_depth_texture());
+            if(detail_timing)opaque_detail_gpu_queries.timestamp(1U,false);
 
+            if(detail_timing)opaque_detail_gpu_queries.timestamp(2U,true);
             frame_screen->begin_compose_opaque_pass(
                 the_config->retain_hom_pixels && mode==renderer_mode::ingame);
             draw_game_opaque_composite();
@@ -10436,6 +10511,10 @@ namespace jkgm {
             // Same-frame opaque color/depth is now safe to sample.
             render_world_screen_reflections();
             render_opaque_screen_reflections();
+            if(detail_timing) {
+                opaque_detail_gpu_queries.timestamp(2U,false);
+                opaque_detail_gpu_queries.end();
+            }
         }
 
         // One MAT binder shared by opaque and transparent world geometry.
@@ -13794,12 +13873,34 @@ namespace jkgm {
                 // otherwise water would always display a one-frame-old view.
                 // The main frame 3DO snapshot and static-world cache already
                 // exist here; the offscreen camera does not touch rdCamera.
+                // Capture GPU timings are separate from scene_gpu_gbuffer:
+                // this is where Shared's six camera views execute.
+                presentation_gpu_profile::completed_sample capture_completed{};
+                bool const capture_timing=profiling &&
+                    capture_gpu_queries.begin(capture_completed);
+                if(capture_completed.ready) {
+                    for(size_t i=0;i<capture_gpu_ns.size();++i)
+                        capture_gpu_ns[i]+=capture_completed.nanoseconds[i];
+                    ++capture_gpu_samples;
+                }
+                if(capture_completed.skipped)++capture_gpu_skipped;
+                auto profile_capture=[&](size_t stage,auto &&capture) {
+                    auto const started=profiling
+                        ?profile_clock::now():profile_clock::time_point{};
+                    if(capture_timing)capture_gpu_queries.timestamp(stage,true);
+                    capture();
+                    if(capture_timing)capture_gpu_queries.timestamp(stage,false);
+                    if(profiling)
+                        capture_cpu_ns_window[stage]+=
+                            elapsed_profile_ns(started,profile_clock::now());
+                };
                 // Clear stale planar readiness even when capture is disabled.
-                render_camera_to_mat_captures();
-                render_planar_capture();
-                // Always reset per-frame probe readiness when both experiments
-                // are disabled; never reuse a stale capture after a toggle.
-                render_hemi_capture();
+                profile_capture(0U,[&]{render_camera_to_mat_captures();});
+                profile_capture(1U,[&]{render_planar_capture();});
+                // Probe collection and rendering also run when realtime capture
+                // is off: pending one-shot CaptureEnvMap is independent.
+                profile_capture(2U,[&]{render_hemi_capture();});
+                if(capture_timing)capture_gpu_queries.end();
                 if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,true);
                 draw_game_gbuffer_pass(trimdl, posterize_lighting);
                 if(scene_gpu_timing)scene_gpu_queries.timestamp(0U,false);
