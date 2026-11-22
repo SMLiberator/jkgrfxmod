@@ -1130,17 +1130,25 @@ private:
     }
     void packDefaultBool(const char *label,const char *key) {
         ImGui::PushID(key);
-        const bool has=root_.contains(key);
-        const bool fallback=false;
-        bool value=fallback;
+        const bool alias=std::string(key)=="keep_albedo";
+        const bool has=root_.contains(key)||
+            (alias&&root_.contains("use_original_albedo"));
+        bool value=false;
         auto it=root_.find(key);
+        if(it==root_.end()&&alias)it=root_.find("use_original_albedo");
         if(it!=root_.end()&&it->is_boolean())value=it->get<bool>();
         if(ImGui::Checkbox(label,&value)) {
-            root_[key]=value;changedPack(key);
+            root_[key]=value;
+            if(alias)root_.erase("use_original_albedo");
+            changedPack(key);
         }
         if(has) {
             ImGui::SameLine();
-            if(ImGui::SmallButton("x")){root_.erase(key);changedPack(key);}
+            if(ImGui::SmallButton("x")) {
+                root_.erase(key);
+                if(alias)root_.erase("use_original_albedo");
+                changedPack(key);
+            }
         }
         ImGui::PopID();
     }
@@ -1253,9 +1261,30 @@ private:
         if(ImGui::CollapsingHeader("Albedo",ImGuiTreeNodeFlags_DefaultOpen)) {
             auto v=rgba(effectiveSelected(),"albedo_factor",{1,1,1,1});
             colorField("Tint / alpha","albedo_factor",v.data(),4);
+            if(isSource()) {
+                bool keep=effectiveSelected().value("keep_albedo",false);
+                if(ImGui::Checkbox("Keep original MAT albedo",&keep)) {
+                    selected()["keep_albedo"]=keep;
+                    selected().erase("use_original_albedo");
+                    changed("keep_albedo");
+                }
+                const bool ownKeep=selected().contains("keep_albedo")||
+                                   selected().contains("use_original_albedo");
+                if(ownKeep) {
+                    ImGui::SameLine();
+                    if(ImGui::SmallButton("Use pack default##keep")) {
+                        selected().erase("keep_albedo");
+                        selected().erase("use_original_albedo");
+                        changed("keep_albedo");
+                    }
+                }
+            }
             imageInfo("Albedo texture","albedo_map");
             bool keeps=effectiveSelected().value("keep_albedo",false)||
                        effectiveSelected().value("use_original_albedo",false);
+            if(isSource()&&keeps&&effectiveSelected().contains("albedo_map"))
+                ImGui::TextColored(ImVec4(1,.7f,.3f,1),
+                    "Compiler conflict: keep_albedo and albedo_map.");
             if(keeps) {
                 ImGui::Separator();
                 ImGui::TextUnformatted("Original JK MAT albedo (preview only)");
@@ -1326,7 +1355,7 @@ private:
             imageInfo("Displacement map","displacement_map");
             ImGui::TextUnformatted("Displacement factor");
             ImGui::PushID("displacement_factor");
-            float factor=number(selected(),"displacement_factor",0.0f);
+            float factor=number(effectiveSelected(),"displacement_factor",0.0f);
             const bool overridden=selected().contains("displacement_factor");
             ImGui::SetNextItemWidth(std::max(110.0f,
                 ImGui::GetContentRegionAvail().x-(overridden?32.0f:0.0f)));
@@ -1408,6 +1437,8 @@ private:
                     const char *const*values,const char *const*labels,int count) {
         Document &obj=selected();
         std::string value=stringValue(effectiveSelected(),key);
+        if(std::string(key)=="alpha_mode"&&value=="dither")
+            value="dithered";
         int current=0;
         for(int i=0;i<count;++i)if(value==values[i])current=i;
         ImGui::PushID(key);
