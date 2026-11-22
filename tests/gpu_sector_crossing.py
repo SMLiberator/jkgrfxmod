@@ -20,7 +20,7 @@ assert "bool enable_sector_crossing_lighting = false;" in config
 assert "bool experimental_sector_crossing_vertex = false;" in config
 assert 'j.contains("experimental_sector_crossing_vertex")' in parser
 assert 'j.contains("enable_sector_crossing_lighting")' in parser
-assert "if(the_config->enable_sector_crossing_lighting ||" in main
+assert "if(the_config->enable_sector_crossing_lighting) {" in main
 assert "active_native_model_sector_id_valid" in main
 assert "inst.owning_sector_id=active_native_model_sector_id;" in main
 assert "sector_crossing_collect_candidates(" in staging
@@ -80,12 +80,10 @@ assert (
 ) in setter[:setter.index("if(!count)return;")]
 assert render.count("gpu_3do_sector_plane_texture_unit")>=3
 # Sector texture-buffer state now uses shared GL submission caching.
-# Both the sector-crossing sampler and the continuous ambient buffers
-# must continue to select their assigned unit before binding.
+# The sector-crossing sampler must select its assigned unit before binding.
 assert "gl::set_active_texture_unit_raw(gpu_3do_sector_plane_texture_unit);" in render
 assert "gl::bind_texture_raw(GL_TEXTURE_BUFFER,sector_crossing_plane_texture);" in render
 assert "gl::set_active_texture_unit_raw(0);" in render
-assert "gl::set_active_texture_unit_raw(texture_units::forward_continuous_key_buffer);" in render
 assert "glActiveTexture(" not in render
 assert "fragment_units<=gpu_3do_sector_plane_texture_unit" in render
 assert "glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,&fragment_units);" in render

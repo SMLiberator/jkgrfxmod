@@ -695,15 +695,6 @@
     <ClInclude Include="passable_adjoin_portals.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="continuous_ambient.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="continuous_ambient_gpu.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="continuous_ambient_capture.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="world_cache_portals.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
