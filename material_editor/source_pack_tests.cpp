@@ -79,20 +79,18 @@ void testCompiledAndValidation() {
     check(editor_source::effectiveMaterial(compiled,compiled["materials"][0],
             Kind::Compiled)==compiled["materials"][0],"compiled is not resolved");
     auto source=compiled;
+    source["materials"][0]["replaces"]=Document::array({"mat/a.mat"});
+    source["materials"][0].erase("replaces_signatures");
     source["images"][0]["file"]="subdir/image.png";
     editor_source::validate(source,Kind::Source);
     bool rejected=false;
     try{editor_source::validate(source,Kind::Compiled);}
     catch(const std::runtime_error&){rejected=true;}
     check(rejected,"compiled images cannot be subdirectories");
-    auto original=compiled;
-    original["materials"][0]["replaces"]=Document::array({"mat/a.mat"});
-    original["materials"][0]["name"]="body";
-    original["materials"][0].erase("replaces_signatures");
-    original["materials"][0]["unrecognized"]={{"key","value"}};
-    original["custom_value"]={{"foo",7}};
-    editor_source::validate(original,Kind::Source);
-    check(Document::parse(original.dump(4))==original,"unknown fields survive");
+    source["materials"][0]["unrecognized"]={{"key","value"}};
+    source["custom_value"]={{"foo",7}};
+    editor_source::validate(source,Kind::Source);
+    check(Document::parse(source.dump(4))==source,"unknown fields survive");
 }
 int main(){
     try {
