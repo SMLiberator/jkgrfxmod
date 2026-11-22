@@ -140,7 +140,7 @@ void setArray(Document &obj,const char *key,const float *values,int size) {
 }
 }
 
-// Blender-style turntable orbit keeps the scene fixed in world space.
+// Turntable orbit keeps the scene fixed in world space.
 // The camera moves on a sphere around the origin, world +Y stays up,
 // and the view is free of roll. Pitch is clamped at the poles.
 constexpr float kOrbitSensitivity=0.009f;
@@ -474,13 +474,13 @@ private:
                ImGui::IsMouseDragging(dragButton_,0.0f)) {
                 const ImVec2 delta=ImGui::GetMouseDragDelta(dragButton_,0.0f);
                 orbitYaw_=dragStartYaw_-delta.x*kOrbitSensitivity;
-                orbitPitch_=std::clamp(dragStartPitch_-delta.y*kOrbitSensitivity,
+                orbitPitch_=std::clamp(dragStartPitch_+delta.y*kOrbitSensitivity,
                                        -kOrbitMaxPitch,kOrbitMaxPitch);
             }
         } else {
             ImGui::TextWrapped("GLSL preview failed: %s",preview_->error().c_str());
         }
-        ImGui::TextDisabled("LMB or MMB drag: Blender-style orbit. Space: reset view.");
+        ImGui::TextDisabled("Drag to rotate. Space: reset view.");
         ImGui::End();
     }
     bool floatField(const char *label,const char *key,float fallback,
