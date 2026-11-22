@@ -35,6 +35,8 @@ add_executable(jkgm-material-editor WIN32
   main.cpp
   preview.cpp
   preview.hpp
+  native_mat.cpp
+  native_mat.hpp
   ../glad/glad.cpp)
 target_include_directories(jkgm-material-editor PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../glad)
