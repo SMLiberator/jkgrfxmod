@@ -89,3 +89,34 @@ is bounded to 128 actions, spans materials, restores the edited material
 selection, and clears redo when a new change is made. Saving establishes a
 new clean baseline, so undoing a saved change correctly restores the unsaved
 indicator. Undo/redo history is cleared when another pack is opened.
+
+## Preview usability and native JK texture support
+
+- Press **Space** to reset the current sphere or plane orientation. The preview
+  also has a Reset view button.
+- **Fresnel** is a compact preview-only checkbox, disabled by default.
+  Enable it when comparing the material's actual Fresnel-based EnvMap response.
+  Preview source diagnostics are hidden to leave more room for the model.
+- The three panels are docked to the main ImGui viewport, and resize along
+  with the application window. Their divisions remain adjustable.
+- Alpha is previewed against a checkerboard (rather than black), with
+  smooth blend, alpha-test mask with cutoff, and ordered dither modes.
+  Compiled color PNGs are correctly un-premultiplied in linear space before
+  their final alpha coverage is composited. Basic additive and multiply
+  blend-mode behavior is supported in the preview.
+- **Keep Albedo** material previews can now load an original MAT texture.
+  Select the game's assets directory under Material Properties > Albedo:
+  the editor indexes loose MATs and CMPs and the entries inside GOB/GOO
+  archives. The first replacement record's MAT cel is used for the preview.
+  A 16-bit native MAT can load without a palette; 8-bit MATs need a matching
+  CMP palette. The editor attempts the standard dflt.cmp first and offers
+  a separate CMP picker for other game/level colormaps. This uses an
+  editor-side reader based on the compiler's MAT/CMP layouts, and never
+  modifies the original MAT, material pack, or renderer.
+- If the original game assets have not been selected, native MAT pixels
+  cannot be recovered from compiled metadata alone: the material preview
+  uses an untextured fallback and displays instructions in the Albedo panel.
+
+All game-asset source selections, shader diagnostics, Fresnel state and
+rotation are **preview-only**; saving continues to write only material
+property changes into metadata.json.
