@@ -109,7 +109,7 @@ PreviewMaterial fromMetadata(const Document &entry,const Document &root,
     p.matcapFactor=rgb(entry,"matcap_factor",p.matcapFactor);
     const char *names[]={"albedo_map","surface_map",nullptr,"normal_map",
         "normal_map2","emissive_map","matcap_map","matcap_surface_map",
-        "clearcoat_surface_map","clearcoat_normal_map"};
+        "clearcoat_surface_map","clearcoat_normal_map","displacement_map"};
     for(size_t i=0;i<TextureCount;++i)
         if(names[i])p.files[i]=resolvedFile(directory,stringValue(entry,names[i]));
     std::string env=stringValue(entry,"environment_map");
@@ -121,6 +121,7 @@ PreviewMaterial fromMetadata(const Document &entry,const Document &root,
     p.metalness=number(entry,"metalness",surf?1.0f:0.0f);
     p.normalStrength=number(entry,"normal_strength",1.0f);
     p.normalStrength2=number(entry,"normal_strength2",1.0f);
+    p.displacementFactor=number(entry,"displacement_factor",0.0f);
     p.matcapRoughness=number(entry,"matcap_roughness",0.0f);
     const bool coatSurface=entry.find("clearcoat_surface_map")!=entry.end();
     p.coat=number(entry,"clearcoat_strength",coatSurface?1.0f:0.0f);
@@ -632,6 +633,32 @@ private:
             floatField("Normal strength","normal_strength",1,0,4);
             floatField("Layer 2 strength","normal_strength2",1,0,4);
             imageInfo("Normal 1","normal_map");imageInfo("Normal 2","normal_map2");
+        }
+        if(ImGui::CollapsingHeader("Parallax mapping",ImGuiTreeNodeFlags_DefaultOpen)) {
+            imageInfo("Displacement map","displacement_map");
+            ImGui::TextUnformatted("Displacement factor");
+            ImGui::PushID("displacement_factor");
+            float factor=number(selected(),"displacement_factor",0.0f);
+            const bool overridden=selected().contains("displacement_factor");
+            ImGui::SetNextItemWidth(std::max(110.0f,
+                ImGui::GetContentRegionAvail().x-(overridden?32.0f:0.0f)));
+            // The compiler accepts signed, unbounded finite values.
+            // Negative factors are routinely used for relief maps.
+            if(ImGui::DragFloat("##factor",&factor,0.002f,0,0,"%.4f") &&
+               std::isfinite(factor)) {
+                selected()["displacement_factor"]=factor;
+                changed("displacement_factor",ImGui::IsItemActive());
+            }
+            if(overridden) {
+                ImGui::SameLine();
+                if(ImGui::SmallButton("x")) {
+                    selected().erase("displacement_factor");
+                    changed("displacement_factor");
+                }
+            }
+            ImGui::PopID();
+            if(!selected().contains("displacement_map"))
+                ImGui::TextDisabled("A displacement texture is required.");
         }
         if(ImGui::CollapsingHeader("Clearcoat",ImGuiTreeNodeFlags_DefaultOpen)) {
             bool map=selected().find("clearcoat_surface_map")!=selected().end();

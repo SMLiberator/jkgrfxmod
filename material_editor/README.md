@@ -23,7 +23,7 @@ or in-game hot-reload dependencies.
   unknown fields, MAT replacements, material names and signature hashes.
 
 **Preview fidelity:** this does not yet reproduce in-game sector lighting,
-shadows, fog, HDR auto-exposure, parallax, animation or alpha composition.
+shadows, fog, HDR auto-exposure, animation or the full in-game alpha composition.
 It uses one equirectangular EnvMap for ALL reflection modes, including game
 modes that normally capture live scenes. These modes are not equivalent
 in-game: the studio preview is a deliberate approximation for editing.
@@ -152,3 +152,13 @@ image dimensions, including original JK MAT albedo. If no usable albedo
 texture is loaded, it uses the emissive texture dimensions instead. If
 neither texture exists the plane remains square. UV coverage stays 0..1,
 and the longer dimension stays at the normal preview plane size.
+
+## Parallax occlusion preview
+
+The Parallax mapping properties section exposes `displacement_map` and the
+signed `displacement_factor` with an unrestricted numeric/drag input.
+The preview matches the 3DO renderer's tangent-space parallax occlusion
+sampling (32 to 128 layers, red height channel and linear interpolation).
+Displaced UVs are used by albedo, normal, emissive, surface, clearcoat and
+other texture layers; an absent map or a factor of zero disables the effect.
+This change remains editor-only, with no new material metadata keys.

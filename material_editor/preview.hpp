@@ -9,7 +9,7 @@
 enum PreviewTexture : std::size_t {
     BaseMap, SurfaceMap, EnvironmentMap, NormalMap, NormalMap2,
     EmissiveMap, MatcapMap, MatcapSurfaceMap, CoatSurfaceMap, CoatNormalMap,
-    TextureCount
+    DisplacementMap, TextureCount
 };
 
 struct PreviewMaterial {
@@ -19,6 +19,7 @@ struct PreviewMaterial {
     std::array<float, 3> matcapFactor{1, 1, 1};
     float reflection = 0, roughness = 0.0f, metalness = 0;
     float normalStrength = 1, normalStrength2 = 1;
+    float displacementFactor = 0; // signed, same as compiled metadata
     float matcapRoughness = 0;
     float coat = 0, coatRoughness = .1f, coatTransmission = 1;
     int alphaMode = 0; // 0 smooth/blend, 1 mask, 2 dithered

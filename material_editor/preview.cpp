@@ -46,12 +46,13 @@ in vec3 wp, wn;
 in vec2 uv;
 out vec4 outputColor;
 uniform sampler2D tAlbedo,tSurface,tEnv,tNormal,tNormal2,tEmissive;
-uniform sampler2D tMatcap,tMatcapSurface,tCoatSurface,tCoatNormal;
+uniform sampler2D tMatcap,tMatcapSurface,tCoatSurface,tCoatNormal,tDisplacement;
 uniform int hasAlbedo,hasSurface,hasNormal,hasNormal2,hasEmissive;
-uniform int hasMatcap,hasMatcapSurface,hasCoatSurface,hasCoatNormal;
+uniform int hasMatcap,hasMatcapSurface,hasCoatSurface,hasCoatNormal,hasDisplacement;
 uniform vec4 uAlbedo;
 uniform vec3 uEmissive,uMatcapFactor;
 uniform float uReflection,uRough,uMetal,uNormalStrength,uNormalStrength2;
+uniform float uDisplacementFactor;
 uniform float uMatcapRough,uCoat,uCoatRough,uCoatTransmission;
 uniform vec3 uViewRight,uViewUp,uViewBack,uCameraPos;
 uniform int uUseEnvFresnel; // preview-only: disabled means full EnvMap contribution
@@ -70,9 +71,41 @@ vec3 mappedNormal(vec3 base,vec2 slope) {
     if(basis<1e-16)return base;
     return normalize(mat3(t,b,base)*vec3(slope*inversesqrt(basis),1.0));
 }
-vec2 normalSlope(sampler2D tex,float strength) {
-    vec3 n=texture(tex,uv).xyz*2.0-1.0;
+vec2 normalSlope(sampler2D tex,float strength,vec2 tc) {
+    vec3 n=texture(tex,tc).xyz*2.0-1.0;
     return strength*n.xy/max(n.z,0.05);
+}
+// Match the 3DO renderer's tangent-space parallax sampling: signed
+// displacement, 32-128 layers, and interpolation of the last crossing.
+vec2 parallaxUV(vec2 tc,vec3 geometricNormal) {
+    if(hasDisplacement==0||uDisplacementFactor==0.0)return tc;
+    vec3 N=normalize(geometricNormal);
+    vec3 dp1=dFdx(wp),dp2=dFdy(wp);
+    vec2 du1=dFdx(uv),du2=dFdy(uv);
+    vec3 T=cross(dp2,N)*du1.x+cross(N,dp1)*du2.x;
+    vec3 B=cross(dp2,N)*du1.y+cross(N,dp1)*du2.y;
+    float basis=max(dot(T,T),dot(B,B));
+    if(basis<1e-16)return tc;
+    mat3 tbn=mat3(T/sqrt(basis),B/sqrt(basis),N);
+    vec3 viewDir=normalize(transpose(tbn)*(uCameraPos-wp));
+    if(viewDir.z<=0.05)return tc;
+    float steps=mix(128.0,32.0,abs(viewDir.z));
+    float stepDepth=1.0/steps;
+    vec2 uvStep=(viewDir.xy/viewDir.z)*uDisplacementFactor/steps;
+    vec2 current=tc;
+    float layer=0.0;
+    float h=texture(tDisplacement,current).r;
+    for(int i=0;i<128&&layer<h;i++) {
+        current-=uvStep;
+        layer+=stepDepth;
+        h=texture(tDisplacement,current).r;
+    }
+    vec2 previous=current+uvStep;
+    float after=h-layer;
+    float before=texture(tDisplacement,previous).r-layer+stepDepth;
+    float denom=after-before;
+    if(abs(denom)<1e-6)return current;
+    return mix(current,previous,clamp(after/denom,0.0,1.0));
 }
 vec3 env(vec3 dir,float rough) {
     dir=normalize(dir);
@@ -103,13 +136,14 @@ vec3 toSRGB(vec3 c) {
 }
 void main() {
     vec3 raw=normalize(wn);
+    vec2 tc=parallaxUV(uv,raw);
     vec2 slope=vec2(0.0);
-    if(hasNormal!=0)slope+=normalSlope(tNormal,uNormalStrength);
-    if(hasNormal2!=0)slope+=normalSlope(tNormal2,uNormalStrength2);
+    if(hasNormal!=0)slope+=normalSlope(tNormal,uNormalStrength,tc);
+    if(hasNormal2!=0)slope+=normalSlope(tNormal2,uNormalStrength2,tc);
     vec3 N=mappedNormal(raw,slope);
     vec3 V=normalize(uCameraPos-wp);
     vec3 R=reflect(-V,N);
-    vec4 albedoTex=hasAlbedo!=0?texture(tAlbedo,uv):vec4(1.0);
+    vec4 albedoTex=hasAlbedo!=0?texture(tAlbedo,tc):vec4(1.0);
     // Compiled albedo PNGs are sRGB-encoded but premultiplied in linear
     // space by compile.exe. Restore straight color for shading here; apply
     // coverage only once when compositing against the checkerboard.
@@ -118,7 +152,7 @@ void main() {
         baseColor=albedoTex.a>0.00001
             ?baseColor/max(albedoTex.a,0.00001):vec3(0.0);
     vec3 base=baseColor*uAlbedo.rgb;
-    vec3 mask=hasSurface!=0?texture(tSurface,uv).rgb:vec3(1.0);
+    vec3 mask=hasSurface!=0?texture(tSurface,tc).rgb:vec3(1.0);
     float strength=max(uReflection*mask.r,0.0);
     float rough=clamp(uRough*mask.g,0.0,1.0);
     float metal=clamp(uMetal*mask.b,0.0,1.0);
@@ -137,7 +171,7 @@ void main() {
     // not another metallic reflection or GGX lobe.
     vec3 artistic=vec3(0.0);
     if(hasMatcap!=0) {
-        vec2 m=hasMatcapSurface!=0?texture(tMatcapSurface,uv).rg:vec2(1.0);
+        vec2 m=hasMatcapSurface!=0?texture(tMatcapSurface,tc).rg:vec2(1.0);
         vec3 viewNormal=vec3(dot(N,uViewRight),dot(N,uViewUp),
                              -dot(N,uViewBack));
         if(viewNormal.z>0.0)viewNormal=-viewNormal;
@@ -151,12 +185,12 @@ void main() {
 
     // Same clearcoat channel and Fresnel/transmission rules as cached world.
     vec3 coatMask=hasCoatSurface!=0?
-        texture(tCoatSurface,uv).rgb:vec3(1.0);
+        texture(tCoatSurface,tc).rgb:vec3(1.0);
     float coverage=clamp(uCoat*coatMask.r,0.0,1.0);
     float coatRough=clamp(uCoatRough*coatMask.g,0.0,1.0);
     float coatTransmission=clamp(uCoatTransmission*coatMask.b,0.0,1.0);
     vec3 coatNormal=raw;
-    if(hasCoatNormal!=0)coatNormal=mappedNormal(raw,normalSlope(tCoatNormal,1.0));
+    if(hasCoatNormal!=0)coatNormal=mappedNormal(raw,normalSlope(tCoatNormal,1.0,tc));
     float f=0.04+0.96*pow(1.0-clamp(abs(dot(coatNormal,V)),0.0,1.0),5.0);
     float specTrans=clamp(1.0-coverage*f,0.0,1.0);
     float diffuseTrans=specTrans*mix(1.0,coatTransmission,coverage);
@@ -167,7 +201,7 @@ void main() {
     vec3 coatSpec=coatEnvironment+
                   directSpec(coatNormal,V,coatRough,vec3(0.04),coverage);
     vec3 emission=uEmissive*(hasEmissive!=0?
-        texture(tEmissive,uv).rgb:vec3(1.0));
+        texture(tEmissive,tc).rgb:vec3(1.0));
 
     // In the game, emissive RGB is separately additive in Normal/Fluid
     // and Additive blending, including with zero-alpha base pigment.
@@ -488,6 +522,7 @@ void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
     f1("uMetal",material_.metalness);
     f1("uNormalStrength",material_.normalStrength);
     f1("uNormalStrength2",material_.normalStrength2);
+    f1("uDisplacementFactor",material_.displacementFactor);
     f1("uMatcapRough",material_.matcapRoughness);
     f1("uCoat",material_.coat);f1("uCoatRough",material_.coatRoughness);
     f1("uCoatTransmission",material_.coatTransmission);
@@ -497,9 +532,11 @@ void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
     i1("uBlendMode",material_.blendMode);
     f1("uAlphaCutoff",material_.alphaCutoff);
     const char *samplers[]={"tAlbedo","tSurface","tEnv","tNormal","tNormal2",
-        "tEmissive","tMatcap","tMatcapSurface","tCoatSurface","tCoatNormal"};
+        "tEmissive","tMatcap","tMatcapSurface","tCoatSurface","tCoatNormal",
+        "tDisplacement"};
     const char *flags[]={"hasAlbedo","hasSurface",nullptr,"hasNormal","hasNormal2",
-        "hasEmissive","hasMatcap","hasMatcapSurface","hasCoatSurface","hasCoatNormal"};
+        "hasEmissive","hasMatcap","hasMatcapSurface","hasCoatSurface","hasCoatNormal",
+        "hasDisplacement"};
     for(int i=0;i<int(TextureCount);++i) {
         glActiveTexture(GL_TEXTURE0+i);
         glBindTexture(GL_TEXTURE_2D,textures_[i]);
