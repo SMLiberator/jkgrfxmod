@@ -33,6 +33,8 @@ target_compile_definitions(editor_imgui PUBLIC GLFW_INCLUDE_NONE)
 find_package(OpenGL REQUIRED)
 add_executable(jkgm-material-editor WIN32
   main.cpp
+  preview.cpp
+  preview.hpp
   ../glad/glad.cpp)
 target_include_directories(jkgm-material-editor PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../glad)
