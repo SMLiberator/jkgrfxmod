@@ -53,3 +53,19 @@ build jkgfxmod.sln, the renderer, or any renderer regression tests.
 Dear ImGui, GLFW, GLAD and stb_image are third-party components under their
 respective licenses; see the repository's third-party attribution and upstream
 source distributions for notices.
+
+## Parameter and environment diagnostics
+
+Reflection strength is normally adjusted with a 0..1 slider, while the
+adjacent numeric field accepts any finite, nonnegative value (the same range
+as the existing compiler). Roughness, metalness, clearcoat channels and
+MatCap roughness are always 0..1. Normal strengths are 0..4; per-channel
+MatCap factors are 0..4. All saved values use the existing renderer metadata.
+
+The viewer reports which EnvMap loaded or whether an image was missing and
+the built-in preset was substituted. Studio mode keeps the renderer's
+Fresnel-scaled EnvMap contribution; "EnvMap reflection only" removes the
+added studio direct highlight and diffuse; "Raw EnvMap" displays the texture
+unweighted to diagnose source images, independent of material reflectivity.
+The two diagnostic display modes do not alter saved metadata. Unicode
+Windows filesystem paths are supported for image loading.

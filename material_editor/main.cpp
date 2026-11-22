@@ -286,13 +286,24 @@ private:
         if(ImGui::Button("Use material / pack envmap")) {
             override_.clear();preview_->setEnvironmentOverride({});
         }
-        if(!override_.empty())ImGui::TextWrapped("Preview override: %s",override_.c_str());
-        ImGui::TextDisabled("All reflection modes use this environment image in the editor.");
+        const char *views[]={"Lit material (renderer-style)","EnvMap reflection only",
+                             "Raw EnvMap (diagnostic)"};
+        ImGui::SetNextItemWidth(230);
+        ImGui::Combo("Preview shading",&inspectionMode_,views,3);
+        ImGui::TextWrapped("Source: %s",preview_->environmentDescription().c_str());
+        if(!preview_->hasLoadedEnvironmentFile())
+            ImGui::TextDisabled("A built-in environment preset is being used.");
+        if(validSelection() && number(selected(),"reflection_strength",
+             selected().contains("surface_map")?1.0f:0.0f)<=0.0f)
+            ImGui::TextColored(ImVec4(1.0f,.7f,.35f,1.0f),
+               "Reflection strength is 0: EnvMap reflections are disabled.");
+        ImGui::TextDisabled("All game reflection modes use EnvMap sampling in this preview.");
         ImVec2 area=ImGui::GetContentRegionAvail();
         area.x=std::max(area.x,64.0f);
         area.y=std::max(area.y-35.0f,64.0f);
         if(preview_->valid()) {
-            preview_->draw(int(area.x),int(area.y),orientation_,plane_);
+            preview_->draw(int(area.x),int(area.y),orientation_,plane_,
+                           inspectionMode_);
             // Image() is a passive item: dragging it moves the ImGui window.
             // An invisible button claims the mouse press for viewport orbiting,
             // while the image is drawn over that item's exact screen rectangle.
@@ -322,19 +333,38 @@ private:
         ImGui::End();
     }
     bool floatField(const char *label,const char *key,float fallback,
-                    float low,float high) {
+                    float low,float high,bool allowAboveSlider=false) {
         Document &obj=selected();
         float v=number(obj,key,fallback);
         ImGui::PushID(key);
-        bool modified=ImGui::SliderFloat(label,&v,low,high,"%.3f",
-                                         high<=1.0f?ImGuiSliderFlags_AlwaysClamp:0);
-        if(modified) {
-            obj[key]=v;changed();
+        ImGui::TextUnformatted(label);
+        const float available=ImGui::GetContentRegionAvail().x;
+        const bool hasOverride=obj.find(key)!=obj.end();
+        const float sliderWidth=std::max(90.0f,available-120.0f);
+        ImGui::SetNextItemWidth(sliderWidth);
+        float position=std::clamp(v,low,high);
+        bool modified=false;
+        if(ImGui::SliderFloat("##slider",&position,low,high,"%.3f",
+                              ImGuiSliderFlags_AlwaysClamp)) {
+            obj[key]=position;changed();modified=true;
         }
         ImGui::SameLine();
-        if(obj.find(key)!=obj.end()&&ImGui::SmallButton("x")) {
-            obj.erase(key);changed();modified=true;
+        ImGui::SetNextItemWidth(73.0f);
+        float typed=v;
+        if(ImGui::InputFloat("##exact_value",&typed,0,0,"%.3f")) {
+            if(std::isfinite(typed)) {
+                typed=allowAboveSlider?std::max(low,typed):std::clamp(typed,low,high);
+                obj[key]=typed;changed();modified=true;
+            }
         }
+        ImGui::SameLine();
+        if(hasOverride&&ImGui::SmallButton("x")) {
+            obj.erase(key);changed();modified=true;
+        } else if(!hasOverride) {
+            ImGui::TextDisabled("  ");
+        }
+        if(allowAboveSlider && v>high)
+            ImGui::SetItemTooltip("Manual value exceeds the 0-1 slider: this is supported by the renderer.");
         ImGui::PopID();
         return modified;
     }
@@ -382,16 +412,16 @@ private:
         }
         if(ImGui::CollapsingHeader("Reflections",ImGuiTreeNodeFlags_DefaultOpen)) {
             bool hasSurface=selected().find("surface_map")!=selected().end();
-            floatField("Strength","reflection_strength",hasSurface?1.0f:0.0f,0,8);
+            floatField("Strength","reflection_strength",hasSurface?1.0f:0.0f,0,1,true);
+            if(number(selected(),"reflection_strength",hasSurface?1.0f:0.0f)>1.0f)
+                ImGui::TextDisabled("Above 1: explicitly overridden in the numeric field.");
             floatField("Roughness","roughness",hasSurface?1.0f:0.0f,0,1);
             floatField("Metalness","metalness",hasSurface?1.0f:0.0f,0,1);
-            const char *modes[]={"envmap","screen","fixed","planar","hemi","cube","shared"};
-            std::string mode=stringValue(selected(),"reflection_mode");
-            int current=0;
-            for(int i=0;i<7;++i)if(mode==modes[i])current=i;
-            if(ImGui::Combo("Game reflection mode",&current,modes,7)) {
-                selected()["reflection_mode"]=modes[current];changed();
-            }
+            static const char *modes[]={"envmap","screen","fixed","planar","hemi","cube","shared"};
+            static const char *modeLabels[]={"EnvMap","Screen","Fixed","Planar",
+                                            "Hemisphere","Cubemap","Shared"};
+            comboField("Game reflection mode","reflection_mode",
+                       modes,modeLabels,7);
             ImGui::TextDisabled("Preview uses EnvMap for all game reflection modes.");
             imageInfo("Surface (R/G/B)","surface_map");
         }
@@ -425,11 +455,22 @@ private:
             imageInfo("Emissive map","emissive_map");
         }
         if(ImGui::CollapsingHeader("Other settings")) {
-            const char *alphas[]={"blend","mask","dithered"};
-            const char *blends[]={"normal","additive","multiply","fluid"};
-            comboField("Alpha mode","alpha_mode",alphas,3);
-            comboField("Blend mode","blend_mode",blends,4);
-            floatField("Alpha cutoff","alpha_cutoff",.5f,0,1);
+            static const char *alphas[]={"blend","mask","dithered"};
+            static const char *alphaLabels[]={"Blend (smooth alpha)","Mask (alpha cutoff)",
+                                              "Dithered transparency"};
+            static const char *blends[]={"normal","additive","multiply","fluid"};
+            static const char *blendLabels[]={"Normal","Additive","Multiply","Fluid"};
+            comboField("Alpha mode","alpha_mode",alphas,alphaLabels,3);
+            comboField("Blend mode","blend_mode",blends,blendLabels,4);
+            if(stringValue(selected(),"alpha_mode")=="mask")
+                floatField("Alpha cutoff","alpha_cutoff",.5f,0,1);
+            else if(selected().contains("alpha_cutoff")) {
+                ImGui::TextColored(ImVec4(1,.7f,.35f,1),
+                    "Alpha cutoff is set but applies only to Mask mode.");
+                if(ImGui::SmallButton("Remove unused alpha cutoff")) {
+                    selected().erase("alpha_cutoff");changed();
+                }
+            }
             floatField("Depth bias","depth_bias",0,-16,16);
         }
         if(ImGui::CollapsingHeader("Compiled textures")) {
@@ -449,13 +490,30 @@ private:
         }
         ImGui::End();
     }
-    void comboField(const char *label,const char *key,const char *const*opts,int count) {
-        std::string value=stringValue(selected(),key);
+    void comboField(const char *label,const char *key,
+                    const char *const*values,const char *const*labels,int count) {
+        Document &obj=selected();
+        std::string value=stringValue(obj,key);
         int current=0;
-        for(int i=0;i<count;++i)if(value==opts[i])current=i;
-        if(ImGui::Combo(label,&current,opts,count)) {
-            selected()[key]=opts[current];changed();
+        for(int i=0;i<count;++i)if(value==values[i])current=i;
+        ImGui::PushID(key);
+        ImGui::TextUnformatted(label);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+        std::string display=labels[current];
+        if(value.empty())display+=" (renderer default)";
+        if(ImGui::BeginCombo("##choice",display.c_str())) {
+            if(ImGui::Selectable("Use renderer default",value.empty())) {
+                obj.erase(key);changed();
+            }
+            ImGui::Separator();
+            for(int i=0;i<count;++i) {
+                if(ImGui::Selectable(labels[i],!value.empty()&&current==i)) {
+                    obj[key]=values[i];changed();
+                }
+            }
+            ImGui::EndCombo();
         }
+        ImGui::PopID();
     }
 
     GLFWwindow *window_;
@@ -463,7 +521,7 @@ private:
     Document root_=Document::object();
     std::string file_,status_,override_;
     bool loaded_=false,dirty_=false,plane_=false;
-    int selection_=-1,environment_=0;
+    int selection_=-1,environment_=0,inspectionMode_=0;
     Orientation orientation_{0,0,0,1};
     ImGuiTextFilter filter_;
 };

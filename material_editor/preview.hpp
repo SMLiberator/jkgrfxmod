@@ -31,8 +31,13 @@ public:
     void setMaterial(const PreviewMaterial &mat);
     void setPreset(int preset);
     void setEnvironmentOverride(const std::string &path);
-    void draw(int width, int height, const std::array<float,4> &orientation, bool plane);
+    // Diagnostics are editor-only and never change saved material metadata:
+    // 0=studio lit, 1=environment reflection lobes, 2=unweighted EnvMap.
+    void draw(int width, int height, const std::array<float,4> &orientation,
+              bool plane, int inspectionMode);
     GLuint outputTexture() const { return output_; }
+    const std::string &environmentDescription() const { return envDescription_; }
+    bool hasLoadedEnvironmentFile() const { return loadedEnvironmentFile_; }
 
 private:
     struct Vertex { float x,y,z,nx,ny,nz,u,v; };
@@ -46,7 +51,8 @@ private:
     PreviewMaterial material_;
     std::array<GLuint, TextureCount> textures_{};
     GLuint program_ = 0, vao_ = 0, vbo_ = 0, fbo_ = 0, output_ = 0, depth_ = 0;
-    std::string envOverride_, error_;
+    std::string envOverride_, envDescription_, error_;
+    bool loadedEnvironmentFile_ = false;
     int width_ = 0, height_ = 0, preset_ = 0;
     GLsizei sphereCount_ = 0, planeCount_ = 0;
 };

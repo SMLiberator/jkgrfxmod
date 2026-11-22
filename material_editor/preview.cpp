@@ -5,6 +5,10 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -46,6 +50,7 @@ uniform vec4 uAlbedo;
 uniform vec3 uEmissive,uMatcapFactor;
 uniform float uReflection,uRough,uMetal,uNormalStrength,uNormalStrength2;
 uniform float uMatcapRough,uCoat,uCoatRough,uCoatTransmission;
+uniform int uInspectionMode; // 0 lit, 1 EnvMap reflection only, 2 raw EnvMap
 const float PI=3.14159265358979323846;
 vec3 schlick(vec3 f0,float nv) {
     return f0+(vec3(1.0)-f0)*pow(1.0-clamp(nv,0.0,1.0),5.0);
@@ -107,8 +112,10 @@ void main() {
     vec3 f0=mix(vec3(0.04),clamp(base,0.0,1.0),metal);
     float ndv=clamp(dot(N,V),0.0,1.0);
     // Mirrors the material's EnvMap Fresnel/strength/roughness behavior.
-    vec3 baseSpec=env(R,rough)*schlick(f0,ndv)*strength;
-    baseSpec+=directSpec(N,V,rough,f0,strength);
+    vec3 baseEnvironment=env(R,rough)*schlick(f0,ndv)*strength;
+    vec3 baseSpec=baseEnvironment;
+    if(uInspectionMode==0)
+        baseSpec+=directSpec(N,V,rough,f0,strength);
     // Studio-only diffuse term: the game gets sector/vertex/point lighting.
     vec3 diffuse=base*(1.0-metal)*(0.48+0.38*max(dot(N,
                    normalize(vec3(-0.45,0.80,0.70))),0.0));
@@ -139,9 +146,21 @@ void main() {
     float f=0.04+0.96*pow(1.0-clamp(abs(dot(coatNormal,V)),0.0,1.0),5.0);
     float specTrans=clamp(1.0-coverage*f,0.0,1.0);
     float diffuseTrans=specTrans*mix(1.0,coatTransmission,coverage);
-    vec3 coatSpec=env(reflect(-V,coatNormal),coatRough)*
+    vec3 coatEnvironment=env(reflect(-V,coatNormal),coatRough)*
         schlick(vec3(0.04),max(dot(coatNormal,V),0.0))*coverage;
-    coatSpec+=directSpec(coatNormal,V,coatRough,vec3(0.04),coverage);
+    vec3 coatSpec=coatEnvironment;
+    if(uInspectionMode==0)
+        coatSpec+=directSpec(coatNormal,V,coatRough,vec3(0.04),coverage);
+    // These diagnostic modes deliberately bypass studio lighting, while
+    // preserving EnvMap sampling and material weights for troubleshooting.
+    if(uInspectionMode==2) {
+        outputColor=vec4(toSRGB(env(R,0.0)),1.0);
+        return;
+    }
+    if(uInspectionMode==1) {
+        outputColor=vec4(toSRGB(baseEnvironment*specTrans+coatEnvironment),1.0);
+        return;
+    }
     vec3 emission=uEmissive*(hasEmissive!=0?
         texture(tEmissive,uv).rgb:vec3(1.0));
 
@@ -206,8 +225,18 @@ GLuint MaterialPreview::compileShader(GLenum type,const char *source) {
 GLuint MaterialPreview::loadTexture(const std::string &filename,bool srgb) {
     if(filename.empty())return 0;
     int w=0,h=0,channels=0;
+    // Native Windows paths may contain non-ASCII characters. Decode the
+    // UTF-8 metadata path via filesystem and feed stb_image from memory.
+    std::ifstream source(std::filesystem::u8path(filename),std::ios::binary);
+    if(!source)return 0;
+    std::vector<unsigned char> bytes(
+        (std::istreambuf_iterator<char>(source)),std::istreambuf_iterator<char>());
+    if(bytes.empty() ||
+       bytes.size()>static_cast<size_t>(std::numeric_limits<int>::max()))
+        return 0;
     stbi_set_flip_vertically_on_load(1);
-    unsigned char *pixels=stbi_load(filename.c_str(),&w,&h,&channels,4);
+    unsigned char *pixels=stbi_load_from_memory(
+        bytes.data(),int(bytes.size()),&w,&h,&channels,4);
     if(!pixels||w<=0||h<=0) {
         if(pixels)stbi_image_free(pixels);
         return 0;
@@ -262,7 +291,18 @@ void MaterialPreview::reloadImages() {
     }
     std::string envfile=envOverride_.empty()?material_.files[EnvironmentMap]:envOverride_;
     textures_[EnvironmentMap]=loadTexture(envfile,true);
-    if(!textures_[EnvironmentMap])textures_[EnvironmentMap]=createPreset();
+    loadedEnvironmentFile_=textures_[EnvironmentMap]!=0;
+    const char *presetNames[]={"Studio","Outdoor","Night"};
+    const char *fallbackName=presetNames[std::clamp(preset_,0,2)];
+    if(loadedEnvironmentFile_) {
+        envDescription_=std::string(envOverride_.empty()?"Material / pack EnvMap: ":"Preview override: ")+envfile;
+    } else {
+        envDescription_=envfile.empty()
+            ?std::string("No EnvMap defined; using ")+fallbackName+" fallback"
+            :std::string("EnvMap image could not be loaded: ")+envfile+
+               ". Using "+fallbackName+" fallback";
+        textures_[EnvironmentMap]=createPreset();
+    }
 }
 void MaterialPreview::setMaterial(const PreviewMaterial &next) {
     bool changed=(material_.files!=next.files);
@@ -323,7 +363,8 @@ void MaterialPreview::buildMeshes() {
     glEnableVertexAttribArray(0);glEnableVertexAttribArray(1);glEnableVertexAttribArray(2);
     glBindVertexArray(0);
 }
-void MaterialPreview::draw(int w,int h,const std::array<float,4> &orientation,bool plane) {
+void MaterialPreview::draw(int w,int h,const std::array<float,4> &orientation,
+                           bool plane,int inspectionMode) {
     if(!program_)return;
     resize(w,h);
     glBindFramebuffer(GL_FRAMEBUFFER,fbo_);
@@ -353,6 +394,7 @@ void MaterialPreview::draw(int w,int h,const std::array<float,4> &orientation,bo
     f1("uMatcapRough",material_.matcapRoughness);
     f1("uCoat",material_.coat);f1("uCoatRough",material_.coatRoughness);
     f1("uCoatTransmission",material_.coatTransmission);
+    i1("uInspectionMode",std::clamp(inspectionMode,0,2));
     const char *samplers[]={"tAlbedo","tSurface","tEnv","tNormal","tNormal2",
         "tEmissive","tMatcap","tMatcapSurface","tCoatSurface","tCoatNormal"};
     const char *flags[]={"hasAlbedo","hasSurface",nullptr,"hasNormal","hasNormal2",
