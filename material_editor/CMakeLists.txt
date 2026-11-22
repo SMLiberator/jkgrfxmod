@@ -39,6 +39,7 @@ add_executable(jkgm-material-editor WIN32
   preview.hpp
   native_mat.cpp
   native_mat.hpp
+  source_pack.hpp
   ../glad/glad.cpp)
 target_include_directories(jkgm-material-editor PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../glad)
@@ -49,4 +50,12 @@ target_compile_definitions(jkgm-material-editor PRIVATE
 if(MSVC)
   target_compile_options(jkgm-material-editor PRIVATE /W3 /EHsc /utf-8)
   target_link_options(jkgm-material-editor PRIVATE /INCREMENTAL:NO)
+endif()
+
+# Pure JSON semantics; no GLFW/OpenGL or game DLL dependency.
+add_executable(editor-source-pack-tests source_pack_tests.cpp source_pack.hpp)
+target_include_directories(editor-source-pack-tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
+if(MSVC)
+  target_compile_options(editor-source-pack-tests PRIVATE /W3 /EHsc /utf-8)
 endif()
