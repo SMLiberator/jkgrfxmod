@@ -168,8 +168,17 @@ assert "gpu_thing_occlusion_math.hpp" in read("renderer/renderer.vcxproj.filters
 # material group traversal. Query only AFTER opaque scene 3DO depth is ready.
 draw=renderer.split("void draw_gpu_3do_preview(",1)[1].split(
     "void draw_game_opaque_into_gbuffer(",1)[0]
-assert draw.index("thing_occlusion_queries->hidden(")<draw.index(
-    "context.modelview=gpu_3do_native_modelview(")
+# Whole-mesh culling now computes a local modelview before allocating a
+# context. The occlusion check must still precede the transform, bounds
+# rejection, context allocation, and per-group work.
+occlusion=draw.index("thing_occlusion_queries->hidden(")
+transform=draw.index("auto const modelview=gpu_3do_native_modelview(")
+mesh_bounds=draw.index("inst.geometry->cached_group_bounds(mesh_min,mesh_max)")
+context=draw.index("auto &context=contexts.emplace_back()")
+group_walk=draw.index("for(size_t group_visit=0;group_visit<groups.size();++group_visit)")
+assert occlusion < transform < mesh_bounds < context < group_walk
+assert draw.index("if(occluded)continue;") < transform
+assert draw.index("context.modelview=modelview;") > context
 opaque=renderer.split("void draw_game_opaque_into_gbuffer(",1)[1].split(
     "void query_gpu_thing_occlusion()",1)[0]
 assert opaque.index("draw_gpu_3do_preview(false);")<opaque.index(
