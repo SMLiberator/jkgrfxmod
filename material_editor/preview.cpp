@@ -52,6 +52,8 @@ uniform float uReflection,uRough,uMetal,uNormalStrength,uNormalStrength2;
 uniform float uMatcapRough,uCoat,uCoatRough,uCoatTransmission;
 uniform int uInspectionMode; // 0 lit, 1 EnvMap reflection only, 2 raw EnvMap
 uniform int uUseEnvFresnel; // preview-only: disabled means full EnvMap contribution
+uniform int uAlbedoPremultiplied, uAlphaMode, uBlendMode;
+uniform float uAlphaCutoff;
 const float PI=3.14159265358979323846;
 vec3 schlick(vec3 f0,float nv) {
     return f0+(vec3(1.0)-f0)*pow(1.0-clamp(nv,0.0,1.0),5.0);
@@ -105,7 +107,14 @@ void main() {
     vec3 V=normalize(vec3(0.0,0.0,3.5)-wp);
     vec3 R=reflect(-V,N);
     vec4 albedoTex=hasAlbedo!=0?texture(tAlbedo,uv):vec4(1.0);
-    vec3 base=albedoTex.rgb*uAlbedo.rgb;
+    // Compiled albedo PNGs are sRGB-encoded but premultiplied in linear
+    // space by compile.exe. Restore straight color for shading here; apply
+    // coverage only once when compositing against the checkerboard.
+    vec3 baseColor=albedoTex.rgb;
+    if(hasAlbedo!=0 && uAlbedoPremultiplied!=0)
+        baseColor=albedoTex.a>0.00001
+            ?baseColor/max(albedoTex.a,0.00001):vec3(0.0);
+    vec3 base=baseColor*uAlbedo.rgb;
     vec3 mask=hasSurface!=0?texture(tSurface,uv).rgb:vec3(1.0);
     float strength=max(uReflection*mask.r,0.0);
     float rough=clamp(uRough*mask.g,0.0,1.0);
@@ -170,7 +179,27 @@ void main() {
 
     vec3 result=diffuse*diffuseTrans + baseSpec*specTrans+
                 coatSpec+artistic*diffuseTrans+emission;
-    outputColor=vec4(toSRGB(result),clamp(albedoTex.a*uAlbedo.a,0.0,1.0));
+
+    // Preview's opaque FBO cannot use the game's scene alpha composition.
+    // Compose against a visible checkered backdrop instead of writing the
+    // transparent RGB straight into black (the previous "black holes").
+    float coverage=clamp(albedoTex.a*uAlbedo.a,0.0,1.0);
+    if(uAlphaMode==1)
+        coverage=coverage>=uAlphaCutoff?1.0:0.0;
+    if(uAlphaMode==2) {
+        const float bayer[16]=float[16](
+           0.,8.,2.,10.,12.,4.,14.,6.,
+           3.,11.,1.,9.,15.,7.,13.,5.);
+        ivec2 xy=ivec2(gl_FragCoord.xy)&3;
+        coverage=coverage>(bayer[xy.y*4+xy.x]+0.5)/16.0?1.0:0.0;
+    }
+    float checker=mod(floor(gl_FragCoord.x/16.0)+
+                      floor(gl_FragCoord.y/16.0),2.0);
+    vec3 background=mix(vec3(0.13),vec3(0.27),checker);
+    vec3 composite=mix(background,result,coverage);
+    if(uBlendMode==1)composite=background+result*coverage;
+    if(uBlendMode==2)composite=mix(background,background*result,coverage);
+    outputColor=vec4(toSRGB(composite),1.0);
 }
 )GLSL";
 }
@@ -285,13 +314,38 @@ GLuint MaterialPreview::createPreset() {
     glGenerateMipmap(GL_TEXTURE_2D);
     return t;
 }
+GLuint MaterialPreview::uploadNativeAlbedo() {
+    if(material_.nativeWidth<=0||material_.nativeHeight<=0)return 0;
+    int w=material_.nativeWidth,h=material_.nativeHeight;
+    if(w>4096||h>4096||material_.nativeRGBA.size()!=size_t(w)*h*4)
+        return 0;
+    std::vector<std::uint8_t> flipped(material_.nativeRGBA.size());
+    for(int row=0;row<h;++row) {
+        std::copy_n(material_.nativeRGBA.data()+size_t(row)*w*4,
+                    size_t(w)*4,
+                    flipped.data()+size_t(h-1-row)*w*4);
+    }
+    GLuint tex=0;
+    glGenTextures(1,&tex);glBindTexture(GL_TEXTURE_2D,tex);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_SRGB8_ALPHA8,w,h,0,
+                 GL_RGBA,GL_UNSIGNED_BYTE,flipped.data());
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    return tex;
+}
 void MaterialPreview::reloadImages() {
     glDeleteTextures(GLsizei(textures_.size()),textures_.data());
     textures_.fill(0);
     for(size_t i=0;i<textures_.size();++i) {
         if(i==EnvironmentMap)continue;
         const bool srgb=(i==BaseMap||i==EmissiveMap||i==MatcapMap);
-        textures_[i]=loadTexture(material_.files[i],srgb);
+        if(i==BaseMap&&!material_.nativeRGBA.empty())
+            textures_[i]=uploadNativeAlbedo();
+        else
+            textures_[i]=loadTexture(material_.files[i],srgb);
     }
     std::string envfile=envOverride_.empty()?material_.files[EnvironmentMap]:envOverride_;
     textures_[EnvironmentMap]=loadTexture(envfile,true);
@@ -309,7 +363,10 @@ void MaterialPreview::reloadImages() {
     }
 }
 void MaterialPreview::setMaterial(const PreviewMaterial &next) {
-    bool changed=(material_.files!=next.files);
+    bool changed=(material_.files!=next.files ||
+        material_.nativeSourceKey!=next.nativeSourceKey ||
+        material_.nativeWidth!=next.nativeWidth ||
+        material_.nativeHeight!=next.nativeHeight);
     material_=next;
     if(changed)reloadImages();
 }
@@ -400,6 +457,10 @@ void MaterialPreview::draw(int w,int h,const std::array<float,4> &orientation,
     f1("uCoatTransmission",material_.coatTransmission);
     i1("uInspectionMode",std::clamp(inspectionMode,0,2));
     i1("uUseEnvFresnel",useEnvFresnel?1:0);
+    i1("uAlbedoPremultiplied",material_.nativeRGBA.empty()?1:0);
+    i1("uAlphaMode",material_.alphaMode);
+    i1("uBlendMode",material_.blendMode);
+    f1("uAlphaCutoff",material_.alphaCutoff);
     const char *samplers[]={"tAlbedo","tSurface","tEnv","tNormal","tNormal2",
         "tEmissive","tMatcap","tMatcapSurface","tCoatSurface","tCoatNormal"};
     const char *flags[]={"hasAlbedo","hasSurface",nullptr,"hasNormal","hasNormal2",
