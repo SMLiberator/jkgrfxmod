@@ -19,6 +19,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <set>
 #include <stdexcept>
@@ -323,21 +324,54 @@ private:
         ImGui::EndPopup();
     }
     void resetView() {
-        // Each preview shape has a useful starting orientation.
-        // Plane faces the viewer; cube reveals its front/right/top faces.
+        // Each shape starts with a useful upright orientation and fixed zoom.
+        // Do not manually offset Cube in world Y: its perspective silhouette
+        // has an off-center screen-space bounding rectangle even at origin.
         orbitYaw_=shape_==PreviewShape::Plane?0.0f:
                   shape_==PreviewShape::Cube?0.55f:0.35f;
         orbitPitch_=shape_==PreviewShape::Plane?0.0f:
                     shape_==PreviewShape::Cube?0.38f:-0.15f;
+        orbitDistance_=shape_==PreviewShape::Cube?4.4f:3.5f;
+        orbitTarget_={0.0f,0.0f,0.0f};
+        if(shape_==PreviewShape::Cube)centerCubeInView();
         dragStartYaw_=orbitYaw_;
         dragStartPitch_=orbitPitch_;
-        // The cube needs a little more breathing room than the sphere.
-        // Raising the camera target shifts the cube lower in the frame.
-        orbitDistance_=shape_==PreviewShape::Cube?4.4f:3.5f;
-        orbitTarget_=shape_==PreviewShape::Cube
-            ?std::array<float,3>{0.0f,0.18f,0.0f}
-            :std::array<float,3>{0.0f,0.0f,0.0f};
         dragStartTarget_=orbitTarget_;
+    }
+    void centerCubeInView() {
+        // Center the *projected* eight cube corners, not the raw world-space
+        // center. In perspective the visible bounding rectangle is offset
+        // towards nearer corners; symmetric geometry isn't screen-centered.
+        const float cy=std::cos(orbitYaw_),sy=std::sin(orbitYaw_);
+        const float cp=std::cos(orbitPitch_),sp=std::sin(orbitPitch_);
+        const std::array<float,3> right={cy,0.0f,-sy};
+        const std::array<float,3> up={-sy*sp,cp,-cy*sp};
+        const std::array<float,3> back={sy*cp,sp,cy*cp};
+        const auto dot=[](const std::array<float,3> &a,
+                          const std::array<float,3> &b) {
+            return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+        };
+        constexpr float h=kPreviewCubeHalfExtent;
+        // A few fixed iterations converge to the optical center without a
+        // magic offset and without depending on viewport width or height.
+        for(int iteration=0;iteration<3;++iteration) {
+            float xmin=std::numeric_limits<float>::infinity();
+            float xmax=-xmin,ymin=xmin,ymax=-xmin;
+            for(float x:{-h,h})for(float y:{-h,h})for(float z:{-h,h}) {
+                const std::array<float,3> delta={
+                    x-orbitTarget_[0],y-orbitTarget_[1],z-orbitTarget_[2]};
+                const float depth=orthographic_?orbitDistance_:
+                    orbitDistance_-dot(delta,back);
+                const float sx=dot(delta,right)/depth;
+                const float sy=dot(delta,up)/depth;
+                xmin=std::min(xmin,sx);xmax=std::max(xmax,sx);
+                ymin=std::min(ymin,sy);ymax=std::max(ymax,sy);
+            }
+            const float shiftX=(xmin+xmax)*0.5f*orbitDistance_;
+            const float shiftY=(ymin+ymax)*0.5f*orbitDistance_;
+            for(size_t axis=0;axis<3;++axis)
+                orbitTarget_[axis]+=shiftX*right[axis]+shiftY*up[axis];
+        }
     }
     struct Edit {
         int materialIndex=-1; // -1: pack, otherwise material index
@@ -681,12 +715,15 @@ private:
             override_.clear();preview_->setEnvironmentOverride({});
         }
         ImGui::Checkbox("Fresnel",&envFresnel_);
+        ImGui::SameLine();
+        ImGui::Checkbox("Orthographic",&orthographic_);
         ImVec2 area=ImGui::GetContentRegionAvail();
         area.x=std::max(area.x,64.0f);
         area.y=std::max(area.y-35.0f,64.0f);
         if(preview_->valid()) {
             preview_->draw(int(area.x),int(area.y),orbitYaw_,orbitPitch_,
-                           orbitDistance_,orbitTarget_,shape_,envFresnel_);
+                           orbitDistance_,orbitTarget_,shape_,envFresnel_,
+                           orthographic_);
             // Image() is a passive item: dragging it moves the ImGui window.
             // An invisible button claims the mouse press for viewport orbiting,
             // while the image is drawn over that item's exact screen rectangle.
@@ -1133,7 +1170,7 @@ private:
     PendingAction pendingAction_=PendingAction::None;
     int selection_=-1,environment_=0;
     PreviewShape shape_=PreviewShape::Sphere;
-    bool envFresnel_=false;
+    bool envFresnel_=false,orthographic_=false;
     float orbitYaw_=0.35f,orbitPitch_=-0.15f,orbitDistance_=3.5f;
     std::array<float,3> orbitTarget_{0.0f,0.0f,0.0f};
     std::array<float,3> dragStartTarget_{0.0f,0.0f,0.0f};

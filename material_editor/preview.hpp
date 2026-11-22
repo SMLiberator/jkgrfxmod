@@ -7,6 +7,8 @@
 #include <vector>
 
 enum class PreviewShape { Sphere, Plane, Cube };
+// Keep camera framing in sync with the actual cube mesh dimensions.
+constexpr float kPreviewCubeHalfExtent = 0.85f;
 
 enum PreviewTexture : std::size_t {
     BaseMap, SurfaceMap, EnvironmentMap, NormalMap, NormalMap2,
@@ -45,7 +47,7 @@ public:
     // Normal studio preview; Fresnel toggle affects EnvMap only (not metadata).
     void draw(int width, int height, float orbitYaw, float orbitPitch,
               float orbitDistance, const std::array<float,3> &orbitTarget,
-              PreviewShape shape, bool useEnvFresnel);
+              PreviewShape shape, bool useEnvFresnel, bool orthographic);
     GLuint outputTexture() const { return output_; }
     const std::string &environmentDescription() const { return envDescription_; }
     bool hasLoadedEnvironmentFile() const { return loadedEnvironmentFile_; }

@@ -22,6 +22,7 @@ layout(location=2) in vec2 aUv;
 uniform float uAspect;
 uniform vec2 uPlaneScale;
 uniform float uCameraDistance;
+uniform int uOrthographic;
 uniform vec3 uCameraTarget;
 uniform vec3 uViewRight,uViewUp,uViewBack;
 out vec3 wp, wn;
@@ -39,8 +40,16 @@ void main() {
                 dot(relative,uViewUp),
                 dot(relative,uViewBack)-uCameraDistance);
     float f=2.9042; // 38-degree vertical FOV
-    gl_Position=vec4(q.x*f/max(uAspect,0.01),q.y*f,
-                     -q.z*1.00669-0.20067,-q.z);
+    if(uOrthographic!=0) {
+        // Keep the image size at the orbit target comparable to perspective,
+        // and let the usual wheel control change orthographic magnification.
+        float scale=f/max(uCameraDistance,0.01);
+        gl_Position=vec4(q.x*scale/max(uAspect,0.01),q.y*scale,
+                         (-2.0*q.z-30.1)/29.9,1.0);
+    } else {
+        gl_Position=vec4(q.x*f/max(uAspect,0.01),q.y*f,
+                         -q.z*1.00669-0.20067,-q.z);
+    }
 }
 )GLSL";
 const char *fs = R"GLSL(
@@ -59,6 +68,7 @@ uniform float uDisplacementFactor;
 uniform float uMatcapRough,uCoat,uCoatRough,uCoatTransmission;
 uniform vec3 uViewRight,uViewUp,uViewBack,uCameraPos;
 uniform int uUseEnvFresnel; // preview-only: disabled means full EnvMap contribution
+uniform int uOrthographic;
 uniform int uAlbedoPremultiplied, uAlphaMode, uBlendMode;
 uniform float uAlphaCutoff;
 const float PI=3.14159265358979323846;
@@ -90,7 +100,8 @@ vec2 parallaxUV(vec2 tc,vec3 geometricNormal) {
     float basis=max(dot(T,T),dot(B,B));
     if(basis<1e-16)return tc;
     mat3 tbn=mat3(T/sqrt(basis),B/sqrt(basis),N);
-    vec3 viewDir=normalize(transpose(tbn)*(uCameraPos-wp));
+    vec3 viewDir=normalize(transpose(tbn)*
+                           (uOrthographic!=0?uViewBack:uCameraPos-wp));
     if(viewDir.z<=0.05)return tc;
     float steps=mix(128.0,32.0,abs(viewDir.z));
     float stepDepth=1.0/steps;
@@ -144,7 +155,7 @@ void main() {
     if(hasNormal!=0)slope+=normalSlope(tNormal,uNormalStrength,tc);
     if(hasNormal2!=0)slope+=normalSlope(tNormal2,uNormalStrength2,tc);
     vec3 N=mappedNormal(raw,slope);
-    vec3 V=normalize(uCameraPos-wp);
+    vec3 V=uOrthographic!=0?normalize(uViewBack):normalize(uCameraPos-wp);
     vec3 R=reflect(-V,N);
     vec4 albedoTex=hasAlbedo!=0?texture(tAlbedo,tc):vec4(1.0);
     // Compiled albedo PNGs are sRGB-encoded but premultiplied in linear
@@ -480,7 +491,7 @@ void MaterialPreview::buildMeshes() {
     const auto appendCubeFace=[&](std::array<float,3> normal,
                                   std::array<float,3> right,
                                   std::array<float,3> up) {
-        constexpr float size=0.85f;
+        constexpr float size=kPreviewCubeHalfExtent;
         const auto corner=[&](float x,float y,float u,float v)->Vertex {
             return {
                 size*(normal[0]+x*right[0]+y*up[0]),
@@ -513,7 +524,8 @@ void MaterialPreview::buildMeshes() {
 void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
                            float orbitDistance,
                            const std::array<float,3> &orbitTarget,
-                           PreviewShape shape,bool useEnvFresnel) {
+                           PreviewShape shape,bool useEnvFresnel,
+                           bool orthographic) {
     if(!program_)return;
     resize(w,h);
     glBindFramebuffer(GL_FRAMEBUFFER,fbo_);
@@ -548,6 +560,7 @@ void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
     v3("uViewBack",back);v3("uCameraPos",camera);
     v3("uCameraTarget",orbitTarget);
     f1("uCameraDistance",orbitDistance);
+    i1("uOrthographic",orthographic?1:0);
     f1("uAspect",float(width_)/height_);
     // Keep the longer side at the previous plane size, without stretching
     // UVs or affecting the sphere; both wide and tall maps remain framed.

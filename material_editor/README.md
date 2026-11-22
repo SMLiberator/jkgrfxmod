@@ -236,8 +236,21 @@ viewport height. The camera target and view transform move together, so
 normal/specular/parallax view vectors remain consistent with the camera.
 Wheel zoom is unchanged.
 
-The Cube preview resets to a distance of 4.4 instead of 3.5, with a
-slightly raised camera target (so the cube appears lower in the frame).
-Sphere and Plane retain their previous starting distance and centering.
+The Cube preview resets to a distance of 4.4 instead of 3.5. Its default
+target is now calculated from the perspective-projected eight cube corners
+so the projected bounding rectangle is centered in the preview. The old
+manual +Y offset was removed. Sphere and Plane retain their previous
+starting distance and centering.
 Space, Reset View and switching preview shapes restore each shape's
 rotation, zoom and pan to their default values.
+
+## Projection mode
+
+The **Orthographic** preview checkbox switches between perspective
+(default) and orthographic without editing material metadata. Orthographic
+keeps edges parallel, uses the same wheel zoom and orbit/pan controls, and
+matches perspective's apparent size at the camera target distance. Direct
+lighting, reflections and parallax all use parallel view rays in
+orthographic mode. Perspective remains the default for every preview shape.
+Reset View recalculates the Cube's centered projected bounds for whichever
+projection is active.
