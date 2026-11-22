@@ -63,6 +63,15 @@ assert "++diag.model_small_batches;" in hemi
 assert "++diag.model_large_batches;" in hemi
 assert "(diag.model_batches&31U)==0U" in hemi
 assert "++diag.sampled_gl_calls;" in hemi
+# Main-camera/shadow draw paths already touch this timestamp. Reflection
+# captures must do so too, or their GL meshes are evicted every cache sweep
+# despite still appearing in every six-face capture.
+capture_mesh=hemi.split("auto it=gpu_3do_gl_cache.find(inst.id);",1)[1]
+assert capture_mesh.index(
+    "gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;"
+) < capture_mesh.index("shader.set_modelview(modelview,true,")
+assert "gpu_3do_gl_cache.size()>=8192U" in capture_mesh
+assert "gpu_3do_present_serial-used->second>64U" in renderer
 assert "++shared_capture_profile_window.world_batches;" in hemi
 assert hemi.index("diag.search_ns+=") < hemi.index("bool const profile_shared=")
 assert hemi.index("auto const sky_started=") < hemi.index(

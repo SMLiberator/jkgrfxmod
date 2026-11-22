@@ -734,6 +734,13 @@
                             the_config->profile_renderer
                                 ?&packed_3do_upload_profile:nullptr)).first;
                 }
+                // The normal view and shadow passes update last_drawn, but
+                // offscreen-only meshes may be invisible to both. Without
+                // this touch, the periodic 16-frame sweep immediately evicts
+                // actively used capture meshes, forcing repeated GL uploads.
+                // A capture counts as genuine mesh use, not a speculative
+                // acquisition. Keep the ordinary 64-frame expiration policy.
+                gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                 shader.set_modelview(modelview,true,
                                      it->second->packed_vertex_format);
                 shader.set_model_lighting(inst.ambient,inst.effective_light_mode,
