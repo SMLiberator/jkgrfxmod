@@ -137,8 +137,14 @@ public:
         status_="Open a compiled metadata.json to begin.";
     }
     void frame() {
-        if(ImGui::IsKeyChordPressed(ImGuiMod_Ctrl|ImGuiKey_O))open();
-        if(ImGui::IsKeyChordPressed(ImGuiMod_Ctrl|ImGuiKey_S))save();
+        // Let ImGui's own editable text boxes handle Ctrl+Z while typing.
+        if(!ImGui::GetIO().WantTextInput) {
+            if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_O))open();
+            if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_S))save();
+            if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_Z))undo();
+            if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiMod_Shift|ImGuiKey_Z) ||
+               ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_Y))redo();
+        }
 
         ImGui::DockSpaceOverViewport(0,ImGui::GetMainViewport(),
                                     ImGuiDockNodeFlags_PassthruCentralNode);
@@ -149,12 +155,27 @@ public:
                 if(ImGui::MenuItem("Exit"))glfwSetWindowShouldClose(window_,GLFW_TRUE);
                 ImGui::EndMenu();
             }
+            if(ImGui::BeginMenu("Edit")) {
+                const std::string undoLabel=undo_.empty()?"Undo":
+                    "Undo "+undo_.back().key;
+                const std::string redoLabel=redo_.empty()?"Redo":
+                    "Redo "+redo_.back().key;
+                if(ImGui::MenuItem(undoLabel.c_str(),"Ctrl+Z",false,!undo_.empty()))
+                    undo();
+                if(ImGui::MenuItem(redoLabel.c_str(),"Ctrl+Y / Ctrl+Shift+Z",
+                                   false,!redo_.empty()))
+                    redo();
+                ImGui::EndMenu();
+            }
             ImGui::TextDisabled("JkGfxMod Material Editor  |  Win32 + Dear ImGui + OpenGL 3.3");
             ImGui::EndMainMenuBar();
         }
         renderList();
         renderViewport();
         renderProperties();
+        // Once the slider/drag is released, the next press is a separate
+        // undo action even if it changes the exact same material field.
+        if(!ImGui::IsAnyItemActive())groupActive_=false;
     }
     bool confirmClose() {
         if(!dirty_)return true;
@@ -165,6 +186,39 @@ public:
     }
 
 private:
+    struct Edit {
+        int materialIndex=-1;
+        std::string key;
+        Document before, after;
+    };
+    static constexpr size_t maxHistory=128;
+    void undo() {
+        if(undo_.empty()||!loaded_)return;
+        Edit step=std::move(undo_.back());
+        undo_.pop_back();
+        root_["materials"][size_t(step.materialIndex)]=step.before;
+        observedRoot_["materials"][size_t(step.materialIndex)]=step.before;
+        selection_=step.materialIndex;
+        redo_.push_back(std::move(step));
+        groupActive_=false;
+        updateDirty();
+        syncPreview();
+        status_="Undid "+redo_.back().key;
+    }
+    void redo() {
+        if(redo_.empty()||!loaded_)return;
+        Edit step=std::move(redo_.back());
+        redo_.pop_back();
+        root_["materials"][size_t(step.materialIndex)]=step.after;
+        observedRoot_["materials"][size_t(step.materialIndex)]=step.after;
+        selection_=step.materialIndex;
+        undo_.push_back(std::move(step));
+        groupActive_=false;
+        updateDirty();
+        syncPreview();
+        status_="Redid "+undo_.back().key;
+    }
+    void updateDirty() {dirty_=root_!=savedRoot_;}
     Document &selected() {
         return root_["materials"][size_t(selection_)];
     }
@@ -175,8 +229,23 @@ private:
         return loaded_&&selection_>=0&&
                size_t(selection_)<root_["materials"].size();
     }
-    void changed() {
-        dirty_=true;
+    void changed(const char *key="Material property",bool continuous=false) {
+        if(!validSelection())return;
+        Document &entry=selected();
+        Document &previous=observedRoot_["materials"][size_t(selection_)];
+        if(previous==entry)return;
+        bool merge=continuous&&groupActive_&&!undo_.empty()&&
+            undo_.back().materialIndex==selection_&&undo_.back().key==key;
+        if(merge)
+            undo_.back().after=entry;
+        else {
+            if(undo_.size()>=maxHistory)undo_.erase(undo_.begin());
+            undo_.push_back({selection_,key,previous,entry});
+        }
+        previous=entry;
+        redo_.clear();
+        groupActive_=continuous;
+        updateDirty();
         syncPreview();
         status_="Unsaved material changes (Ctrl+S)";
     }
@@ -197,6 +266,8 @@ private:
                !doc["materials"].is_array())
                 throw std::runtime_error("Not a compiled material pack (missing materials array).");
             root_=std::move(doc);
+            observedRoot_=root_; savedRoot_=root_;
+            undo_.clear(); redo_.clear(); groupActive_=false;
             file_=path;loaded_=true;dirty_=false;
             selection_=root_["materials"].empty()?-1:0;
             syncPreview();
@@ -222,7 +293,8 @@ private:
             if(!MoveFileExW(temp.c_str(),destination.c_str(),
                             MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))
                 throw std::runtime_error("Cannot replace metadata.json. Close other programs using it.");
-            dirty_=false;
+            savedRoot_=root_;
+            updateDirty();
             status_="Saved metadata.json. No MAT signatures were regenerated.";
         } catch(const std::exception &e) {
             status_=std::string("Save failed: ")+e.what();
@@ -238,6 +310,9 @@ private:
         ImGui::BeginDisabled(!loaded_);
         if(ImGui::Button("Save"))save();
         ImGui::EndDisabled();
+        if(ImGui::Button("Undo") && !undo_.empty())undo();
+        ImGui::SameLine();
+        if(ImGui::Button("Redo") && !redo_.empty())redo();
         if(loaded_) {
             ImGui::TextWrapped("%s",fs::u8path(file_).filename().u8string().c_str());
             ImGui::Separator();
@@ -290,6 +365,11 @@ private:
                              "Raw EnvMap (diagnostic)"};
         ImGui::SetNextItemWidth(230);
         ImGui::Combo("Preview shading",&inspectionMode_,views,3);
+        ImGui::SetNextItemWidth(180);
+        ImGui::SliderFloat("Preview EnvMap brightness",&envGain_,1.0f,8.0f,"%.1fx");
+        ImGui::SameLine();
+        if(ImGui::SmallButton("1x (parity)"))envGain_=1.0f;
+        ImGui::TextDisabled("Preview-only: boosts EnvMap radiance after Fresnel; not saved.");
         ImGui::TextWrapped("Source: %s",preview_->environmentDescription().c_str());
         if(!preview_->hasLoadedEnvironmentFile())
             ImGui::TextDisabled("A built-in environment preset is being used.");
@@ -303,7 +383,7 @@ private:
         area.y=std::max(area.y-35.0f,64.0f);
         if(preview_->valid()) {
             preview_->draw(int(area.x),int(area.y),orientation_,plane_,
-                           inspectionMode_);
+                           inspectionMode_,envGain_);
             // Image() is a passive item: dragging it moves the ImGui window.
             // An invisible button claims the mouse press for viewport orbiting,
             // while the image is drawn over that item's exact screen rectangle.
@@ -346,7 +426,7 @@ private:
         bool modified=false;
         if(ImGui::SliderFloat("##slider",&position,low,high,"%.3f",
                               ImGuiSliderFlags_AlwaysClamp)) {
-            obj[key]=position;changed();modified=true;
+            obj[key]=position;changed(key,ImGui::IsItemActive());modified=true;
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(73.0f);
@@ -354,12 +434,12 @@ private:
         if(ImGui::InputFloat("##exact_value",&typed,0,0,"%.3f")) {
             if(std::isfinite(typed)) {
                 typed=allowAboveSlider?std::max(low,typed):std::clamp(typed,low,high);
-                obj[key]=typed;changed();modified=true;
+                obj[key]=typed;changed(key,ImGui::IsItemActive());modified=true;
             }
         }
         ImGui::SameLine();
         if(hasOverride&&ImGui::SmallButton("x")) {
-            obj.erase(key);changed();modified=true;
+            obj.erase(key);changed(key);modified=true;
         } else if(!hasOverride) {
             ImGui::TextDisabled("  ");
         }
@@ -374,11 +454,14 @@ private:
         bool changedValue=(count==4)
             ?ImGui::ColorEdit4(label,values,hdr?ImGuiColorEditFlags_HDR|ImGuiColorEditFlags_Float:0)
             :ImGui::ColorEdit3(label,values,hdr?ImGuiColorEditFlags_HDR|ImGuiColorEditFlags_Float:0);
-        if(changedValue){setArray(obj,key,values,count);changed();}
+        if(changedValue){
+            setArray(obj,key,values,count);
+            changed(key,ImGui::IsItemActive());
+        }
         ImGui::SameLine();
         if(obj.find(key)!=obj.end()) {
             ImGui::PushID(key);
-            if(ImGui::SmallButton("x")){obj.erase(key);changed();}
+            if(ImGui::SmallButton("x")){obj.erase(key);changed(key);}
             ImGui::PopID();
         }
     }
@@ -442,7 +525,8 @@ private:
             floatField("MatCap roughness","matcap_roughness",0,0,1);
             auto v=rgb(selected(),"matcap_factor",{1,1,1});
             if(ImGui::DragFloat3("MatCap RGB factor",v.data(),.02f,0,4,"%.2f")) {
-                setArray(selected(),"matcap_factor",v.data(),3);changed();
+                setArray(selected(),"matcap_factor",v.data(),3);
+                changed("matcap_factor",ImGui::IsItemActive());
             }
             imageInfo("MatCap","matcap_map");
             imageInfo("MatCap mask","matcap_surface_map");
@@ -450,7 +534,8 @@ private:
         if(ImGui::CollapsingHeader("Emissive",ImGuiTreeNodeFlags_DefaultOpen)) {
             auto v=rgb(selected(),"emissive_factor",{0,0,0});
             if(ImGui::DragFloat3("Emissive RGB",v.data(),.05f,0,32,"%.2f")) {
-                setArray(selected(),"emissive_factor",v.data(),3);changed();
+                setArray(selected(),"emissive_factor",v.data(),3);
+                changed("emissive_factor",ImGui::IsItemActive());
             }
             imageInfo("Emissive map","emissive_map");
         }
@@ -468,7 +553,7 @@ private:
                 ImGui::TextColored(ImVec4(1,.7f,.35f,1),
                     "Alpha cutoff is set but applies only to Mask mode.");
                 if(ImGui::SmallButton("Remove unused alpha cutoff")) {
-                    selected().erase("alpha_cutoff");changed();
+                    selected().erase("alpha_cutoff");changed("alpha_cutoff");
                 }
             }
             floatField("Depth bias","depth_bias",0,-16,16);
@@ -503,12 +588,12 @@ private:
         if(value.empty())display+=" (renderer default)";
         if(ImGui::BeginCombo("##choice",display.c_str())) {
             if(ImGui::Selectable("Use renderer default",value.empty())) {
-                obj.erase(key);changed();
+                obj.erase(key);changed(key);
             }
             ImGui::Separator();
             for(int i=0;i<count;++i) {
                 if(ImGui::Selectable(labels[i],!value.empty()&&current==i)) {
-                    obj[key]=values[i];changed();
+                    obj[key]=values[i];changed(key);
                 }
             }
             ImGui::EndCombo();
@@ -519,9 +604,12 @@ private:
     GLFWwindow *window_;
     std::unique_ptr<MaterialPreview> preview_;
     Document root_=Document::object();
+    Document savedRoot_=Document::object(), observedRoot_=Document::object();
+    std::vector<Edit> undo_,redo_;
     std::string file_,status_,override_;
-    bool loaded_=false,dirty_=false,plane_=false;
+    bool loaded_=false,dirty_=false,plane_=false,groupActive_=false;
     int selection_=-1,environment_=0,inspectionMode_=0;
+    float envGain_=3.0f;
     Orientation orientation_{0,0,0,1};
     ImGuiTextFilter filter_;
 };

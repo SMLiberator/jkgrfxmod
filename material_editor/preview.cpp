@@ -51,6 +51,7 @@ uniform vec3 uEmissive,uMatcapFactor;
 uniform float uReflection,uRough,uMetal,uNormalStrength,uNormalStrength2;
 uniform float uMatcapRough,uCoat,uCoatRough,uCoatTransmission;
 uniform int uInspectionMode; // 0 lit, 1 EnvMap reflection only, 2 raw EnvMap
+uniform float uEnvGain; // preview-only, post-Fresnel; 1.0 = original parity
 const float PI=3.14159265358979323846;
 vec3 schlick(vec3 f0,float nv) {
     return f0+(vec3(1.0)-f0)*pow(1.0-clamp(nv,0.0,1.0),5.0);
@@ -112,7 +113,7 @@ void main() {
     vec3 f0=mix(vec3(0.04),clamp(base,0.0,1.0),metal);
     float ndv=clamp(dot(N,V),0.0,1.0);
     // Mirrors the material's EnvMap Fresnel/strength/roughness behavior.
-    vec3 baseEnvironment=env(R,rough)*schlick(f0,ndv)*strength;
+    vec3 baseEnvironment=env(R,rough)*schlick(f0,ndv)*strength*uEnvGain;
     vec3 baseSpec=baseEnvironment;
     if(uInspectionMode==0)
         baseSpec+=directSpec(N,V,rough,f0,strength);
@@ -147,7 +148,7 @@ void main() {
     float specTrans=clamp(1.0-coverage*f,0.0,1.0);
     float diffuseTrans=specTrans*mix(1.0,coatTransmission,coverage);
     vec3 coatEnvironment=env(reflect(-V,coatNormal),coatRough)*
-        schlick(vec3(0.04),max(dot(coatNormal,V),0.0))*coverage;
+        schlick(vec3(0.04),max(dot(coatNormal,V),0.0))*coverage*uEnvGain;
     vec3 coatSpec=coatEnvironment;
     if(uInspectionMode==0)
         coatSpec+=directSpec(coatNormal,V,coatRough,vec3(0.04),coverage);
@@ -364,7 +365,7 @@ void MaterialPreview::buildMeshes() {
     glBindVertexArray(0);
 }
 void MaterialPreview::draw(int w,int h,const std::array<float,4> &orientation,
-                           bool plane,int inspectionMode) {
+                           bool plane,int inspectionMode,float envGain) {
     if(!program_)return;
     resize(w,h);
     glBindFramebuffer(GL_FRAMEBUFFER,fbo_);
@@ -395,6 +396,7 @@ void MaterialPreview::draw(int w,int h,const std::array<float,4> &orientation,
     f1("uCoat",material_.coat);f1("uCoatRough",material_.coatRoughness);
     f1("uCoatTransmission",material_.coatTransmission);
     i1("uInspectionMode",std::clamp(inspectionMode,0,2));
+    f1("uEnvGain",std::clamp(envGain,1.0f,8.0f));
     const char *samplers[]={"tAlbedo","tSurface","tEnv","tNormal","tNormal2",
         "tEmissive","tMatcap","tMatcapSurface","tCoatSurface","tCoatNormal"};
     const char *flags[]={"hasAlbedo","hasSurface",nullptr,"hasNormal","hasNormal2",

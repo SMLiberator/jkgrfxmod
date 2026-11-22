@@ -69,3 +69,21 @@ added studio direct highlight and diffuse; "Raw EnvMap" displays the texture
 unweighted to diagnose source images, independent of material reflectivity.
 The two diagnostic display modes do not alter saved metadata. Unicode
 Windows filesystem paths are supported for image loading.
+
+## Preview EnvMap brightness
+
+The default preview boost is 3x to make reflected environments legible,
+especially on a plane viewed nearly head-on. The 1x (parity) button restores
+the unboosted renderer-style EnvMap radiance. Gain multiplies only the EnvMap
+reflection layers **after** Fresnel/roughness and does not modify direct
+specular highlights, raw EnvMap diagnostics, or saved material properties.
+
+## Undo and redo
+
+Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z and the Edit menu undo/redo edits to the
+compiled metadata. Slider and color drags are grouped into one undo action,
+not one per frame. The Materials pane also has Undo and Redo buttons. History
+is bounded to 128 actions, spans materials, restores the edited material
+selection, and clears redo when a new change is made. Saving establishes a
+new clean baseline, so undoing a saved change correctly restores the unsaved
+indicator. Undo/redo history is cleared when another pack is opened.

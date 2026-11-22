@@ -34,7 +34,7 @@ public:
     // Diagnostics are editor-only and never change saved material metadata:
     // 0=studio lit, 1=environment reflection lobes, 2=unweighted EnvMap.
     void draw(int width, int height, const std::array<float,4> &orientation,
-              bool plane, int inspectionMode);
+              bool plane, int inspectionMode, float envGain);
     GLuint outputTexture() const { return output_; }
     const std::string &environmentDescription() const { return envDescription_; }
     bool hasLoadedEnvironmentFile() const { return loadedEnvironmentFile_; }
