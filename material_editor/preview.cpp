@@ -578,7 +578,8 @@ void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
     f1("uCoat",material_.coat);f1("uCoatRough",material_.coatRoughness);
     f1("uCoatTransmission",material_.coatTransmission);
     i1("uUseEnvFresnel",useEnvFresnel?1:0);
-    i1("uAlbedoPremultiplied",material_.nativeRGBA.empty()?1:0);
+    i1("uAlbedoPremultiplied",
+       material_.nativeRGBA.empty()&&material_.albedoPremultiplied?1:0);
     i1("uAlphaMode",material_.alphaMode);
     i1("uBlendMode",material_.blendMode);
     f1("uAlphaCutoff",material_.alphaCutoff);
