@@ -177,3 +177,19 @@ fields, including replacement signatures, and adopts the chosen path as the
 current document. Save As writes the JSON only; it does not duplicate the
 compiled image files, so keep copies alongside the original assets when
 possible.
+
+## Pack metadata editing
+
+The Material Properties window has **Material** and **Pack** tabs.
+The Pack tab edits the compiled pack's top-level `name`, `description`,
+optional `comment`, and optional `environment_map`. A **Pack properties...**
+button in the Materials sidebar opens it directly. The optional compiled
+`images` registry can be expanded to edit, add, or delete `{id, file}`
+records, with the same unique 0–65535 ID and filename rules used by the
+runtime. The editor updates the preview when the pack EnvMap changes.
+
+Pack metadata changes share Undo/Redo, dirty-state tracking, Save, Save As,
+and the unsaved-changes dialog with material changes. The editor preserves
+all unrecognized metadata fields, existing materials, and replacement
+signatures. Editing registry paths does not copy image files into the pack;
+missing files are indicated in the UI.
