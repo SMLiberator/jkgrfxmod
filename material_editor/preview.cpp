@@ -183,22 +183,22 @@ void main() {
     // Preview's opaque FBO cannot use the game's scene alpha composition.
     // Compose against a visible checkered backdrop instead of writing the
     // transparent RGB straight into black (the previous "black holes").
-    float coverage=clamp(albedoTex.a*uAlbedo.a,0.0,1.0);
+    float alphaCoverage=clamp(albedoTex.a*uAlbedo.a,0.0,1.0);
     if(uAlphaMode==1)
-        coverage=coverage>=uAlphaCutoff?1.0:0.0;
+        alphaCoverage=alphaCoverage>=uAlphaCutoff?1.0:0.0;
     if(uAlphaMode==2) {
         const float bayer[16]=float[16](
            0.,8.,2.,10.,12.,4.,14.,6.,
            3.,11.,1.,9.,15.,7.,13.,5.);
         ivec2 xy=ivec2(gl_FragCoord.xy)&3;
-        coverage=coverage>(bayer[xy.y*4+xy.x]+0.5)/16.0?1.0:0.0;
+        alphaCoverage=alphaCoverage>(bayer[xy.y*4+xy.x]+0.5)/16.0?1.0:0.0;
     }
     float checker=mod(floor(gl_FragCoord.x/16.0)+
                       floor(gl_FragCoord.y/16.0),2.0);
     vec3 background=mix(vec3(0.13),vec3(0.27),checker);
-    vec3 composite=mix(background,result,coverage);
-    if(uBlendMode==1)composite=background+result*coverage;
-    if(uBlendMode==2)composite=mix(background,background*result,coverage);
+    vec3 composite=mix(background,result,alphaCoverage);
+    if(uBlendMode==1)composite=background+result*alphaCoverage;
+    if(uBlendMode==2)composite=mix(background,background*result,alphaCoverage);
     outputColor=vec4(toSRGB(composite),1.0);
 }
 )GLSL";
