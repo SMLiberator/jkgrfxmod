@@ -57,6 +57,26 @@ int main() {
     auto const &indices=mesh.cached_opaque_group_order();
     assert(&indices==&mesh.cached_opaque_group_order());
     assert(indices.size()==mesh.groups.size());
+    // The decal-follow path copies then move-assigns geometry. Copies must
+    // invalidate even an already computed cache; moves must remain legal.
+    gpu_3do_geometry copied=mesh;
+    assert(copied.cached_opaque_group_order()==indices);
+    copied.groups[0].material=1;
+    // Copy-assignment resets cached indices on a *fresh* target.
+    gpu_3do_geometry assigned;
+    assigned=mesh;
+    assigned.groups[0].material=1;
+    auto const &assigned_order=assigned.cached_opaque_group_order();
+    assert(assigned_order.front()==0U);
+    assert(assigned_order!=indices);
+    // Reassign after an earlier cached lookup and verify cache refresh.
+    assigned=mesh;
+    assert(assigned.cached_opaque_group_order()==indices);
+    gpu_3do_geometry moved=std::move(assigned);
+    assert(moved.cached_opaque_group_order()==indices);
+    gpu_3do_geometry move_assigned;
+    move_assigned=std::move(moved);
+    assert(move_assigned.cached_opaque_group_order()==indices);
     std::vector<size_t> expected{1,6,9,3,5,4,0,2,7,8};
     assert(indices==expected);
     std::vector<draw_case> old_opaque,cached_opaque;

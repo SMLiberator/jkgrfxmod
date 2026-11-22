@@ -8,7 +8,13 @@ draw=render.split("void draw_gpu_3do_preview(",1)[1].split(
     "// Deliberate world-cache isolation test.",1)[0]
 
 assert "cached_opaque_group_order() const" in header
-assert "std::call_once(opaque_order_once" in header
+assert "std::call_once(cache.once" in header
+assert "struct opaque_order_cache_owner {" in header
+assert "opaque_order_cache_owner(opaque_order_cache_owner const &)" in header
+assert "opaque_order_cache_owner &operator=(" in header
+assert "std::make_shared<opaque_order_cache>()" in header
+assert "mutable opaque_order_cache_owner opaque_order_state;" in header
+assert "mutable std::once_flag opaque_order_once;" not in header
 assert "return a<b; // identical keys retain authored order" in header
 for field in ("material","cel","face_type","nonplanar","solid_color"):
     assert f"lhs.{field}!=rhs.{field}" in header

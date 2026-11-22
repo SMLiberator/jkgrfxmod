@@ -82,8 +82,35 @@ namespace jkgm {
         // Thing. Compute once on first opaque submission for native meshes,
         // sprites and procedural geometries. Keep groups[] in authored order
         // for transparent depth-sort ties and other cached geometry consumers.
+        // Cache state lives behind a copy-resettable wrapper. Decal follow
+        // intentionally copies and move-assigns gpu_3do_geometry while
+        // transforming vertices/bounds. A std::once_flag directly on the
+        // geometry would delete its implicitly generated copy/move operators.
+        // Copies get a fresh lazy cache, preventing stale ordering if their
+        // group keys are subsequently edited. Moves transfer the cache.
+        struct opaque_order_cache {
+            std::once_flag once;
+            std::vector<size_t> indices;
+        };
+        struct opaque_order_cache_owner {
+            std::shared_ptr<opaque_order_cache> state=
+                std::make_shared<opaque_order_cache>();
+            opaque_order_cache_owner()=default;
+            opaque_order_cache_owner(opaque_order_cache_owner const &)
+                : state(std::make_shared<opaque_order_cache>()) {}
+            opaque_order_cache_owner &operator=(
+                opaque_order_cache_owner const &) {
+                state=std::make_shared<opaque_order_cache>();
+                return *this;
+            }
+            opaque_order_cache_owner(opaque_order_cache_owner &&)=default;
+            opaque_order_cache_owner &operator=(
+                opaque_order_cache_owner &&)=default;
+        };
         std::vector<size_t> const &cached_opaque_group_order() const {
-            std::call_once(opaque_order_once,[this] {
+            auto &cache=*opaque_order_state.state;
+            std::call_once(cache.once,[this,&cache] {
+                auto &opaque_order=cache.indices;
                 opaque_order.resize(groups.size());
                 std::iota(opaque_order.begin(),opaque_order.end(),size_t(0));
                 std::sort(opaque_order.begin(),opaque_order.end(),
@@ -102,11 +129,10 @@ namespace jkgm {
                         return a<b; // identical keys retain authored order
                     });
             });
-            return opaque_order;
+            return cache.indices;
         }
     private:
-        mutable std::once_flag opaque_order_once;
-        mutable std::vector<size_t> opaque_order;
+        mutable opaque_order_cache_owner opaque_order_state;
     };
 
     // Allocated only for cached models that overlap multiple Adjoin-linked
