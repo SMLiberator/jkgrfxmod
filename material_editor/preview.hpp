@@ -29,6 +29,8 @@ struct PreviewMaterial {
     int alphaMode = 0; // 0 smooth/blend, 1 mask, 2 dithered
     int blendMode = 0; // 0 normal, 1 additive, 2 multiply, 3 fluid
     float alphaCutoff = 0.5f;
+    // Raw source textures have straight alpha; compiled albedo is premultiplied.
+    bool albedoPremultiplied = true;
     // Only used when the material requests its original JK MAT albedo.
     std::string nativeSourceKey;
     int nativeWidth = 0, nativeHeight = 0;
