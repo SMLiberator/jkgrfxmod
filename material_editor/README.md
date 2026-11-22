@@ -4,6 +4,44 @@ A standalone Windows material editor using **Dear ImGui + OpenGL 3.3**.
 There are no Qt libraries, external GUI DLLs, game EXE, renderer DLL,
 or in-game hot-reload dependencies.
 
+## Source and compiled pack workflows
+
+The editor now supports both pack document modes:
+
+- **Source**: Open a `script.json` (or a JSON file containing source-format
+  MAT replacements). Change pack name, description, comment and environment
+  map; edit numeric/material properties, material names and relative source
+  texture filenames; manage **Source material defaults** in Pack Properties.
+  The preview resolves inherited defaults without writing them into each
+  material. Any material edit becomes an explicit per-material override;
+  removing an override returns it to the source pack's inherited value.
+  Source MAT replacements stay as strings or `[filename, cel]` tuples.
+- **Compiled**: Open a `metadata.json` or a pack with compiled MAT
+  replacement records. Keep the existing editable compiled metadata
+  workflow, preserving replacement signature hashes and existing images.
+
+The Materials window shows the active **SOURCE PACK** or **COMPILED PACK**
+mode. **File > Save** writes the currently opened JSON type in place,
+without flattening inherited source defaults. **Save As** defaults to a
+sibling `-copy.json` file. To prevent breaking compiler-relative image
+paths, source Save As currently requires a destination in the same folder
+as the original script. The saved source remains usable as the input to
+the existing pack compiler; compilation from within the editor is a later
+milestone.
+
+Source images are loaded directly from the script's folder. The preview
+uses unpremultiplied source textures, whereas compiled textures are read
+with the compiler's premultiplied-alpha convention. Image paths can be
+typed into source material slots; importing/converting texture files and
+MAT signature generation remain separate future work. The editor does
+not rewrite, copy or convert asset files when saving.
+
+Pack defaults follow the compiler's existing inheritance logic,
+including `keep_albedo` versus `albedo_map` and the inherited alpha-cutoff
+rule. Undo/Redo tracks pack defaults and material overrides independently.
+The Windows CI now runs source inheritance/serialization tests, including
+the repository's real `assets/sample_matpack/script.json` fixture.
+
 ## Preview-first milestone
 
 - Open a compiled pack's metadata.json, browse and search materials.
