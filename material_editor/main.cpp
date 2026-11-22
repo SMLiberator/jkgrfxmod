@@ -365,11 +365,10 @@ private:
                              "Raw EnvMap (diagnostic)"};
         ImGui::SetNextItemWidth(230);
         ImGui::Combo("Preview shading",&inspectionMode_,views,3);
-        ImGui::SetNextItemWidth(180);
-        ImGui::SliderFloat("Preview EnvMap brightness",&envGain_,1.0f,8.0f,"%.1fx");
-        ImGui::SameLine();
-        if(ImGui::SmallButton("1x (parity)"))envGain_=1.0f;
-        ImGui::TextDisabled("Preview-only: boosts EnvMap radiance after Fresnel; not saved.");
+        ImGui::Checkbox("Apply Fresnel to EnvMap reflections",&envFresnel_);
+        ImGui::TextDisabled(envFresnel_ ?
+            "Renderer-style Fresnel enabled (preview only)." :
+            "Fresnel disabled: show the full EnvMap reflection intensity (preview only).");
         ImGui::TextWrapped("Source: %s",preview_->environmentDescription().c_str());
         if(!preview_->hasLoadedEnvironmentFile())
             ImGui::TextDisabled("A built-in environment preset is being used.");
@@ -383,7 +382,7 @@ private:
         area.y=std::max(area.y-35.0f,64.0f);
         if(preview_->valid()) {
             preview_->draw(int(area.x),int(area.y),orientation_,plane_,
-                           inspectionMode_,envGain_);
+                           inspectionMode_,envFresnel_);
             // Image() is a passive item: dragging it moves the ImGui window.
             // An invisible button claims the mouse press for viewport orbiting,
             // while the image is drawn over that item's exact screen rectangle.
@@ -609,7 +608,7 @@ private:
     std::string file_,status_,override_;
     bool loaded_=false,dirty_=false,plane_=false,groupActive_=false;
     int selection_=-1,environment_=0,inspectionMode_=0;
-    float envGain_=3.0f;
+    bool envFresnel_=true;
     Orientation orientation_{0,0,0,1};
     ImGuiTextFilter filter_;
 };

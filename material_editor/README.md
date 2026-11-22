@@ -70,13 +70,15 @@ unweighted to diagnose source images, independent of material reflectivity.
 The two diagnostic display modes do not alter saved metadata. Unicode
 Windows filesystem paths are supported for image loading.
 
-## Preview EnvMap brightness
+## Preview Fresnel toggle
 
-The default preview boost is 3x to make reflected environments legible,
-especially on a plane viewed nearly head-on. The 1x (parity) button restores
-the unboosted renderer-style EnvMap radiance. Gain multiplies only the EnvMap
-reflection layers **after** Fresnel/roughness and does not modify direct
-specular highlights, raw EnvMap diagnostics, or saved material properties.
+The "Apply Fresnel to EnvMap reflections" checkbox is enabled by default to
+preserve the game's environment-reflection behavior. Turning it off previews
+the full EnvMap signal at the material's original reflection strength and
+roughness (including the clearcoat EnvMap lobe), making flat surfaces easier
+to inspect. This affects *only* EnvMap reflection terms: direct specular
+highlights, clearcoat transmission/attenuation, and saved material properties
+are unchanged. Raw EnvMap diagnostics always bypass Fresnel.
 
 ## Undo and redo
 
