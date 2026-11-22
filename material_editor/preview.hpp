@@ -1,10 +1,11 @@
 #pragma once
 #include "glad.h"
 #include <array>
+#include <cstddef>
 #include <string>
 #include <vector>
 
-enum PreviewTexture : size_t {
+enum PreviewTexture : std::size_t {
     BaseMap, SurfaceMap, EnvironmentMap, NormalMap, NormalMap2,
     EmissiveMap, MatcapMap, MatcapSurfaceMap, CoatSurfaceMap, CoatNormalMap,
     TextureCount
