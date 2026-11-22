@@ -21,6 +21,7 @@
 #include <QMap>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLWidget>
