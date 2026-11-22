@@ -35,6 +35,23 @@ cached surface ranges, with no depth writes. Its forward fragment
 output is premultiplied; fog is applied there instead of in the
 opaque full-screen composite.
 
+### Per-frame world material and light reuse
+
+Sky, opaque and transparent world passes share one main-camera material
+snapshot per native MAT, cel and solid-color mode. This includes the material
+properties used to classify its alpha policy. The transparent pass classifies
+each face only once, keeps a reference to its resolved material and policy
+through depth sorting, and draws without a second native MAT lookup.
+The opaque and transparent passes also use the same camera point-light
+snapshot. A transparency-only pass can initialize that snapshot independently.
+
+The snapshots are cleared at the beginning of each presentation and on
+scene reset, so native cel, surface-pack and COG changes are observed on the
+next frame. They do **not** cache results across frames or change the refresh
+schedule of realtime reflection captures. With `profile_renderer`, the
+`WORLD CACHE frame_material_reuse` diagnostic reports distinct resolutions
+and avoided repeated lookups (when transparent world draws are present).
+
 ## Shared material adapter
 Both GPU 3DO and world fragment shaders now include
 `gpu_material_common.glsl` for MAT texture sampling, animated albedo

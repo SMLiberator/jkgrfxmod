@@ -26,7 +26,7 @@ reference the same unit within a program.
 | 16–18 | Sun near/far/dynamic shadow | Sun near/far/dynamic shadow (direct specular include) | Sun near/far/dynamic shadow | 16 sky aperture; 17–18 unused |
 | 19 | **Sector-crossing samplerBuffer** | Unused | Unused | Unused |
 | 20 | **Opt-in sky-aperture sampler2DArray** | **Opt-in sky-aperture sampler2DArray** | **Opt-in sky-aperture sampler2DArray** | Unused |
-| 21–22 | Unused | Unused | Unused | Unused |
+| 21–22 | Continuous ambient voxel buffer textures | Unused | Unused | Unused |
 | 23 | Local hemi/cube or shared reflection array | Shared reflection array | Unused | Unused |
 | 24–25 | MatCap color (sRGB) and surface mask (linear) | MatCap color (sRGB) and surface mask (linear) | Unused | Unused |
 | 26–27 | Clearcoat surface and normal maps (linear) | Clearcoat surface and normal maps (linear) | Unused | Unused |

@@ -51,15 +51,18 @@ for prog in programs:
     if prog=="gpu_3do_preview":
         source+=expand(prog+".vert")
     validate(prog,mapping,source)
-# Sector crossing retains unit 19; removed continuous ambient must not
-# reserve texture units, GLSL samplers or a vertex-shader capability guard.
+# The vertex-shader capability guard belongs to shaders.cpp. Load it
+# before checking the continuous-ambient sampler registrations.
 sh=read("renderer/shaders.cpp")
 assert "forward_sector_buffer=19;" in header
 assert "forward_next_extended_unit=20;" in header
 assert "forward_next_extended_required_units=21;" in header
-for obsolete in ("forward_continuous_", "continuous_voxel_"):
-    assert obsolete not in header
-assert "JKGM_CONTINUOUS_AMBIENT_GPU" not in sh
+assert "forward_continuous_key_buffer=21;" in header
+assert "forward_continuous_value_buffer=22;" in header
+assert '"continuous_voxel_keys",21,sampler_kind::buffer' in header
+assert '"continuous_voxel_values",22,sampler_kind::buffer' in header
+assert "GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS" in sh
+assert "JKGM_CONTINUOUS_AMBIENT_GPU 1" in sh
 
 # All sun shadow receivers now use PCF-only depth-comparison samplers.
 post_src=read("assets/shaders/post_opaque_composite.frag")

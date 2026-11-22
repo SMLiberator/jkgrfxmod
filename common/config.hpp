@@ -47,6 +47,7 @@ namespace jkgm {
         bool restore_cmp_lights = false; // opt-in indexed textured MAT fullbright pixels; GeoMode 3 always retains native HW fullbright
         bool enable_sector_crossing_lighting = false; // experimental 3DO sector light/CMP/tint
         bool experimental_sector_crossing_vertex = false; // A/B: vertex instead of fragment sector selection
+        bool experimental_continuous_ambient_gpu = false; // GL 3.3 sparse buffer-texture ambient for GPU 3DOs; opt-in
         bool enable_ssao = true;
         bool enable_gbuffer_packing = false; // A/B compact color, emission, oct normals/light, and pigment
         bool retain_hom_pixels = true; // vanilla JK HOM default; false = Clear Display

@@ -332,6 +332,10 @@ jobs:
       run: |
         cl.exe /nologo /EHsc /std:c++17 /I. tests\world_cache.cpp /Fe:world_cache_test.exe
         world_cache_test.exe
+    - name: GPU cached world frame material and lighting snapshot contracts
+      shell: cmd
+      run: |
+        python3 tests/world_frame_reuse.py || exit /b 1
     - name: Directional sunlight and empty-world shadow regression tests
       shell: cmd
       run: |

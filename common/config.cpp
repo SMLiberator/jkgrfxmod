@@ -220,6 +220,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
             j.at("experimental_sector_crossing_vertex").get_to(
                 rv->experimental_sector_crossing_vertex);
         }
+                if(j.contains("experimental_continuous_ambient_gpu")) {
+            j.at("experimental_continuous_ambient_gpu").get_to(
+                rv->experimental_continuous_ambient_gpu);
+        }
         if(j.contains("enable_ssao")) {
             j.at("enable_ssao").get_to(rv->enable_ssao);
         }

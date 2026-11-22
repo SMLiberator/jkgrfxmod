@@ -645,6 +645,22 @@ namespace jkgm {
         // Resolved MAT surfaces are identical for all instances within one
         // frame; share costly native memory reads across both GPU passes.
         std::unordered_map<uint64_t,gpu_3do_texture> gpu_frame_material_cache;
+        // Main-camera cached world MATs are immutable within one presented
+        // frame. Share native resolution and classification between sky,
+        // opaque groups and sorted transparency; clear at frame boundaries.
+        struct world_frame_material_entry {
+            gpu_3do_texture texture;
+            world_cache_material_info info{};
+        };
+        std::map<std::tuple<uintptr_t,int32_t,bool>,
+                 world_frame_material_entry> world_frame_material_cache;
+        uint64_t world_frame_material_hits=0,world_frame_material_misses=0;
+        struct world_frame_camera_lighting {
+            bool sampled=false,ready=false;
+            float ambient=0.0f,attenuation=0.0f;
+            std::vector<world_cache_point_light> point_lights;
+        };
+        world_frame_camera_lighting world_frame_lights;
         // A Camera HUD's geometry and camera already survive until the
         // next presentation. Retain its MAT resolution too: accessing
         // native rdMaterial pointers one frame later can observe changed
@@ -1946,6 +1962,9 @@ namespace jkgm {
                     auto_3do_lod_history.clear();
                     gpu_3do_present_serial=0;
                     gpu_frame_material_cache.clear();
+            world_frame_material_cache.clear();
+            world_frame_material_hits=world_frame_material_misses=0;
+            world_frame_lights={};
                     frame_gpu_3do_instances.clear();
                 }
                 if(the_config->profile_renderer) {
@@ -10918,6 +10937,60 @@ namespace jkgm {
             gl::set_active_texture_unit(0);
         }
 
+        world_frame_camera_lighting const &snapshot_world_frame_lights()
+        {
+            auto &frame=world_frame_lights;
+            if(!frame.sampled) {
+                frame.sampled=true;
+                auto const safe_read=[](uintptr_t ptr,void *dst,size_t len) {
+                    if(!len || !engine_camera_detail::readable(ptr,len))
+                        return false;
+                    std::memcpy(dst,reinterpret_cast<void const *>(ptr),len);
+                    return true;
+                };
+                frame.ready=read_world_cache_camera_lights(
+                    safe_read,0x0073A418U,frame.point_lights,frame.ambient,
+                    frame.attenuation,the_config->enable_baked_overbright);
+            }
+            return frame;
+        }
+
+        world_frame_material_entry const &resolve_world_frame_material(
+            uintptr_t material,int32_t cel,bool solid)
+        {
+            auto const key=std::make_tuple(material,cel,solid);
+            auto found=world_frame_material_cache.find(key);
+            if(found!=world_frame_material_cache.end()) {
+                ++world_frame_material_hits;
+                return found->second;
+            }
+            gpu_3do_group group{};
+            group.material=material;
+            group.cel=cel;
+            world_frame_material_entry entry{};
+            entry.texture=solid
+                ?resolve_gpu_3do_solid_material(group,false)
+                :resolve_gpu_3do_material(group);
+            auto const &mat=entry.texture;
+            auto &info=entry.info;
+            info.albedo_source=mat.albedo_source;
+            info.has_image=mat.has_image;
+            info.alpha=mat.alpha;
+            info.masked=mat.masked;
+            info.dithered=mat.dithered;
+            info.special=mat.special;
+            info.blend_mode=static_cast<int>(mat.blend);
+            info.emissive_only=mat.emissive_only;
+            info.opacity=mat.opacity;
+            info.transition=mat.albedo_transition;
+            info.width=mat.width;
+            info.height=mat.height;
+            info.alpha_cutoff=mat.alpha_cutoff;
+            ++world_frame_material_misses;
+            return world_frame_material_cache.emplace(
+                key,std::move(entry)).first->second;
+        }
+
         void draw_world_cache_preview()
         {
             if(!the_config->use_gpu_cache ||
@@ -10960,7 +11033,10 @@ namespace jkgm {
             // switch as GPU-cached 3DOs. When disabled, preserve JK's
             // native per-world-vertex Gouraud dynamic-light contributions.
             // The independent per-pixel path uses no native light scratch.
-            float camera_ambient=0.0f,light_attenuation=0.0f;
+            auto const &world_lights=snapshot_world_frame_lights();
+            auto const &point_lights=world_lights.point_lights;
+            bool const camera_ready=world_lights.ready;
+            float const light_attenuation=world_lights.attenuation;
             // sithRender global Extra Light is a separate live world
             // floor adjustment. Camera Ambient remains Thing-only.
             float global_extra=0.0f;
@@ -10968,10 +11044,6 @@ namespace jkgm {
                !std::isfinite(global_extra) ||
                std::fabs(global_extra)>8.0f)
                 global_extra=0.0f;
-            std::vector<world_cache_point_light> point_lights;
-            bool const camera_ready=read_world_cache_camera_lights(
-                safe_read,0x0073A418U,point_lights,camera_ambient,
-                light_attenuation,the_config->enable_baked_overbright);
             // With pixel lighting enabled, an empty valid light list
             // still means zero pixel lights (never use stale native data).
             // When disabled, use JK's native world-vertex Gouraud light
@@ -11457,10 +11529,12 @@ namespace jkgm {
                            remaining_effect.fade));
             bool const point_specular=the_config->enable_reflections &&
                 the_config->enable_dynamic_light_specular && camera_ready;
-            if(!pixel_lighting && !point_specular)point_lights.clear();
+            static std::vector<world_cache_point_light> const no_lights;
+            auto const &active_lights=(pixel_lighting || point_specular)
+                ?point_lights:no_lights;
             shader.set_specular_lighting(pixel_lighting,point_specular);
             set_translucent_sun(shader,the_config->enable_reflections);
-            shader.set_lights(point_lights,light_attenuation,
+            shader.set_lights(active_lights,light_attenuation,
                 frame_saber_light_colors.colors,
                 frame_saber_light_colors.valid);
             gl::enable(gl::capability::depth_test);
@@ -11502,13 +11576,9 @@ namespace jkgm {
                         !sky_info.horizon_valid) ||
                        (sky_type==world_cache_sky_kind::ceiling &&
                         !sky_info.ceiling_valid))continue;
-                    gpu_3do_group group{};
-                    group.material=face.material;
-                    group.cel=face.cel;
                     bool const solid=face.geometry_mode==3U;
-                    auto const mat=solid
-                        ?resolve_gpu_3do_solid_material(group,false)
-                        :resolve_gpu_3do_material(group);
+                    auto const &mat=resolve_world_frame_material(
+                        face.material,face.cel,solid).texture;
                     // Mixed-alpha/special sky MATs need a later sky-alpha
                     // pass. Do not silently turn their pixels opaque.
                     if(mat.albedo_source!=(solid?2:1) ||
@@ -11564,7 +11634,7 @@ namespace jkgm {
                 make_point(0.0f,0.0f,0.0f),0.0f,
                 make_point(0.0f,0.0f),make_point(0.0f,0.0f),
                 make_point(1.0f,1.0f));
-            shader.set_lights(point_lights,light_attenuation,
+            shader.set_lights(active_lights,light_attenuation,
                 frame_saber_light_colors.colors,
                 frame_saber_light_colors.valid);
             size_t drawn=0,solid_drawn=0,masked_drawn=0,adjoin_drawn=0;
@@ -11589,27 +11659,11 @@ namespace jkgm {
                       ordered[end]->solid_adjoin==first->solid_adjoin &&
                       ordered[end]->passable_adjoin==first->passable_adjoin &&
                       ((ordered[end]->face_type^first->face_type)&0x2U)==0U)++end;
-                gpu_3do_group group{};
-                group.material=first->material;
-                group.cel=first->cel;
                 bool const solid=first->geometry_mode==3U;
-                auto const material=solid
-                    ?resolve_gpu_3do_solid_material(group,false)
-                    :resolve_gpu_3do_material(group);
-                world_cache_material_info info{};
-                info.albedo_source=material.albedo_source;
-                info.has_image=material.has_image;
-                info.alpha=material.alpha;
-                info.masked=material.masked;
-                info.dithered=material.dithered;
-                info.special=material.special;
-                info.blend_mode=static_cast<int>(material.blend);
-                info.emissive_only=material.emissive_only;
-                info.opacity=material.opacity;
-                info.transition=material.albedo_transition;
-                info.width=material.width;
-                info.height=material.height;
-                info.alpha_cutoff=material.alpha_cutoff;
+                auto const &entry=resolve_world_frame_material(
+                    first->material,first->cel,solid);
+                auto const &material=entry.texture;
+                auto const &info=entry.info;
                 auto const policy=choose_world_cache_draw_policy(*first,info);
                 if(mat_probe && first->geometry_mode==4U &&
                    !world_cache_albedo_ready(material.albedo_source,
@@ -11720,7 +11774,7 @@ namespace jkgm {
                          native_dynamic_ready?1:0,
                          " native_isolation=",isolate_native_world_batches()?1:0,
                          " global_extra=",global_extra,
-                         " pixel_lights=",point_lights.size(),
+                         " pixel_lights=",active_lights.size(),
                          " sector_cache_unique=",sector_frame_cache.states.size(),
                          " sector_cache_hits=",sector_frame_cache.hits,
                          " sector_cache_reads=",sector_frame_cache.reads,
@@ -11796,43 +11850,29 @@ namespace jkgm {
             if(cache.frame_render_candidates.empty())return;
             auto const &cam=frame_world_cache_camera.camera;
             if(!cam.valid)return;
-            std::vector<world_cache_draw_candidate const *> draws;
+            struct transparent_world_face {
+                world_cache_draw_candidate const *face=nullptr;
+                // std::map insertion never invalidates material references.
+                world_frame_material_entry const *material=nullptr;
+                world_cache_draw_policy policy=world_cache_draw_policy::native;
+            };
+            std::vector<transparent_world_face> draws;
             draws.reserve(cache.frame_render_candidates.size());
-            // Cache material resolutions across the two passes; the same
-            // native MAT and cel can cover thousands of world surfaces.
-            std::map<std::tuple<uintptr_t,int32_t,uint32_t>,
-                     gpu_3do_texture> materials;
-            auto resolve=[&](world_cache_draw_candidate const &face)
-                -> gpu_3do_texture const & {
-                auto const key=std::make_tuple(face.material,face.cel,
-                                               face.geometry_mode);
-                auto it=materials.find(key);
-                if(it==materials.end()) {
-                    gpu_3do_group group{};
-                    group.material=face.material;group.cel=face.cel;
-                    it=materials.emplace(key,face.geometry_mode==3U
-                        ?resolve_gpu_3do_solid_material(group,false)
-                        :resolve_gpu_3do_material(group)).first;
-                }
-                return it->second;
-            };
-            auto policy_for=[&](world_cache_draw_candidate const &face) {
-                auto const &mat=resolve(face);
-                world_cache_material_info info{};
-                info.albedo_source=mat.albedo_source;
-                info.has_image=mat.has_image;info.alpha=mat.alpha;
-                info.masked=mat.masked;info.dithered=mat.dithered;
-                info.special=mat.special;info.emissive_only=mat.emissive_only;
-                info.blend_mode=static_cast<int>(mat.blend);
-                info.opacity=mat.opacity;info.transition=mat.albedo_transition;
-                info.width=mat.width;info.height=mat.height;
-                info.alpha_cutoff=mat.alpha_cutoff;
-                return choose_world_cache_draw_policy(face,info);
-            };
-            for(auto const &face:cache.frame_render_candidates)
+            bool has_fluid=false;
+            // Resolve once per MAT/cel, classify each face once, then keep
+            // material pointers and alpha policies through depth sorting.
+            for(auto const &face:cache.frame_render_candidates) {
+                auto const &entry=resolve_world_frame_material(
+                    face.material,face.cel,face.geometry_mode==3U);
+                auto const policy=choose_world_cache_draw_policy(
+                    face,entry.info);
                 if(world_cache_draws_in_pass(
-                    policy_for(face),world_cache_pass::transparent))
-                    draws.push_back(&face);
+                    policy,world_cache_pass::transparent)) {
+                    draws.push_back({&face,&entry,policy});
+                    has_fluid=has_fluid ||
+                        entry.texture.blend==material_blend_mode::fluid;
+                }
+            }
             if(draws.empty())return;
             // Sort actual cached surface ranges back-to-front; no VBO
             // reordering or CPU vertex transformation is required.
@@ -11848,9 +11888,9 @@ namespace jkgm {
                 return d;
             };
             std::sort(draws.begin(),draws.end(),
-                [&](auto const *a,auto const *b) {
-                    float const da=depth(a),db=depth(b);
-                    if(da==db)return a->surface_index<b->surface_index;
+                [&](auto const &a,auto const &b) {
+                    float const da=depth(a.face),db=depth(b.face);
+                    if(da==db)return a.face->surface_index<b.face->surface_index;
                     return da>db;
                 });
             auto &shader=*ogs->world_cache_preview_program;
@@ -11872,25 +11912,22 @@ namespace jkgm {
                                          cam.forward,cam.up);
             // Alpha-only worlds must initialize these independently of
             // any opaque GPU world draws earlier in the frame.
-            float camera_ambient=0.0f,light_attenuation=0.0f;
-            std::vector<world_cache_point_light> point_lights;
-            auto const read_native=[](uintptr_t ptr,void *out,size_t size) {
-                if(!size || !engine_camera_detail::readable(ptr,size))
-                    return false;
-                std::memcpy(out,reinterpret_cast<void const *>(ptr),size);
-                return true;
-            };
-            bool const camera_lights_ready=read_world_cache_camera_lights(
-                read_native,0x0073A418U,point_lights,camera_ambient,
-                light_attenuation,the_config->enable_baked_overbright);
+            // Share the exact native camera snapshot with the opaque pass;
+            // if opaque rendering was skipped, this lazily captures it here.
+            auto const &world_lights=snapshot_world_frame_lights();
+            auto const &point_lights=world_lights.point_lights;
+            bool const camera_lights_ready=world_lights.ready;
+            float const light_attenuation=world_lights.attenuation;
             bool const pixel_lighting=world_cache_use_pixel_lights(
                 the_config->gpu_pixel_lighting,camera_lights_ready);
             bool const point_specular=the_config->enable_reflections &&
                 the_config->enable_dynamic_light_specular &&
                 camera_lights_ready;
-            if(!pixel_lighting && !point_specular)point_lights.clear();
+            static std::vector<world_cache_point_light> const no_lights;
+            auto const &active_lights=(pixel_lighting || point_specular)
+                ?point_lights:no_lights;
             shader.set_specular_lighting(pixel_lighting,point_specular);
-            shader.set_lights(point_lights,light_attenuation,
+            shader.set_lights(active_lights,light_attenuation,
                 frame_saber_light_colors.colors,
                 frame_saber_light_colors.valid);
             set_translucent_sun(shader,the_config->enable_reflections);
@@ -11910,10 +11947,6 @@ namespace jkgm {
             // framebuffer receiving translucent world fragments. The 3DO
             // shader already uses texture unit 8 for this same image.
             shader.set_scene_depth(8);
-            bool const has_fluid=std::any_of(draws.begin(),draws.end(),
-                [&](world_cache_draw_candidate const *face) {
-                    return resolve(*face).blend==material_blend_mode::fluid;
-                });
             if(has_fluid || ssr_ready) {
                 gl::set_active_texture_unit(8);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
@@ -11937,9 +11970,10 @@ namespace jkgm {
             float fluid_thickness_max=0.0f;
             bool const material_probe=the_config->profile_renderer &&
                                       gpu_3do_present_serial%120U==0U;
-            for(auto const *face:draws) {
-                auto const &material=resolve(*face);
-                auto const policy=policy_for(*face);
+            for(auto const &draw:draws) {
+                auto const *face=draw.face;
+                auto const &material=draw.material->texture;
+                auto const policy=draw.policy;
                 shader.set_alpha_policy(true,world_cache_alpha_mode(policy),
                         material.alpha_cutoff,
                         (face->face_type&0x2U)?90.0f/255.0f:1.0f,
@@ -12000,6 +12034,10 @@ namespace jkgm {
                                    gl::blend_function::one_minus_source_alpha);
             gl::set_active_texture_unit(0);
             if(material_probe) {
+                LOG_INFO("WORLD CACHE frame_material_reuse unique=",
+                         world_frame_material_cache.size(),
+                         " resolves=",world_frame_material_misses,
+                         " cache_hits=",world_frame_material_hits);
                 LOG_INFO("WORLD CACHE gpu_alpha ranges=",draws.size(),
                          " mixed=",mixed," forced_blend=",forced,
                          " fluid=",fluid," albedo_free=",albedo_free,
@@ -13581,6 +13619,9 @@ namespace jkgm {
             // Consume once, then render both opaque and translucent subsets.
             // Keeping one frame snapshot avoids losing the second pass.
             gpu_frame_material_cache.clear();
+            world_frame_material_cache.clear();
+            world_frame_material_hits=world_frame_material_misses=0;
+            world_frame_lights={};
             frame_gpu_3do_instances=consume_gpu_3do_instances();
             apply_experimental_auto_3do_lods();
             // Discovery-only probe: walk ALL sectors rather than the primary
