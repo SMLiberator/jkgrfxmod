@@ -71,6 +71,27 @@ std::string chooseFile(GLFWwindow *window,bool image) {
     dlg.Flags=OFN_EXPLORER|OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
     return GetOpenFileNameW(&dlg)?toUtf8(path):std::string{};
 }
+std::string chooseSaveMetadataFile(GLFWwindow *window,const std::string &current) {
+    // Default to a sibling copy so Save As is safe without typing a name.
+    wchar_t path[32768]={};
+    const fs::path currentPath=fs::u8path(current);
+    const std::wstring suggestion=
+        (currentPath.parent_path()/
+         fs::path(currentPath.stem().wstring()+L"-copy.json")).wstring();
+    if(suggestion.size()+1<sizeof(path)/sizeof(path[0])) {
+        std::copy(suggestion.begin(),suggestion.end(),path);
+        path[suggestion.size()]=0;
+    }
+    OPENFILENAMEW dlg{};
+    dlg.lStructSize=sizeof(dlg);
+    dlg.hwndOwner=glfwGetWin32Window(window);
+    dlg.lpstrFilter=L"JSON material metadata (*.json)\0*.json\0All files\0*.*\0\0";
+    dlg.lpstrFile=path;
+    dlg.nMaxFile=DWORD(sizeof(path)/sizeof(path[0]));
+    dlg.lpstrDefExt=L"json";
+    dlg.Flags=OFN_EXPLORER|OFN_OVERWRITEPROMPT|OFN_PATHMUSTEXIST;
+    return GetSaveFileNameW(&dlg)?toUtf8(path):std::string{};
+}
 float number(const Document &obj,const char *key,float fallback) {
     auto it=obj.find(key);
     if(it==obj.end()||!it->is_number())return fallback;
@@ -141,6 +162,8 @@ void setArray(Document &obj,const char *key,const float *values,int size) {
 }
 }
 
+enum class PendingAction { None, Exit, Open };
+
 // Turntable orbit keeps the scene fixed in world space.
 // The camera moves on a sphere around the origin, world +Y stays up,
 // and the view is free of roll. Pitch is clamped at the poles.
@@ -161,7 +184,8 @@ public:
                !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId))
                 resetView();
             if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_O))open();
-            if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_S))save();
+            if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiMod_Shift|ImGuiKey_S))saveAs();
+            else if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_S))save();
             if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_Z))undo();
             if(ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiMod_Shift|ImGuiKey_Z) ||
                ImGui::Shortcut(ImGuiMod_Ctrl|ImGuiKey_Y))redo();
@@ -192,7 +216,9 @@ public:
             if(ImGui::BeginMenu("File")) {
                 if(ImGui::MenuItem("Open metadata...","Ctrl+O"))open();
                 if(ImGui::MenuItem("Save metadata","Ctrl+S",false,loaded_))save();
-                if(ImGui::MenuItem("Exit"))glfwSetWindowShouldClose(window_,GLFW_TRUE);
+                if(ImGui::MenuItem("Save As...","Ctrl+Shift+S",false,loaded_))
+                    saveAs();
+                if(ImGui::MenuItem("Exit"))requestExit();
                 ImGui::EndMenu();
             }
             if(ImGui::BeginMenu("Edit")) {
@@ -213,19 +239,71 @@ public:
         renderList();
         renderViewport();
         renderProperties();
+        renderUnsavedDialog();
         // Once the slider/drag is released, the next press is a separate
         // undo action even if it changes the exact same material field.
         if(!ImGui::IsAnyItemActive())groupActive_=false;
     }
-    bool confirmClose() {
-        if(!dirty_)return true;
-        int r=MessageBoxW(glfwGetWin32Window(window_),
-            L"Discard unsaved changes to metadata.json?",L"Unsaved changes",
-            MB_ICONWARNING|MB_YESNO);
-        return r==IDYES;
+    bool exitApproved() const {return exitApproved_;}
+    void requestExit() {
+        if(exitApproved_)return;
+        if(!dirty_) {
+            exitApproved_=true;
+            glfwSetWindowShouldClose(window_,GLFW_TRUE);
+        } else {
+            pendingAction_=PendingAction::Exit;
+            openUnsavedDialog_=true;
+        }
     }
 
 private:
+    void finishPendingAction(PendingAction action) {
+        if(action==PendingAction::Exit) {
+            exitApproved_=true;
+            glfwSetWindowShouldClose(window_,GLFW_TRUE);
+        } else if(action==PendingAction::Open) {
+            openFile();
+        }
+    }
+    void renderUnsavedDialog() {
+        if(openUnsavedDialog_) {
+            ImGui::OpenPopup("Unsaved changes##confirmation");
+            openUnsavedDialog_=false;
+        }
+        if(!ImGui::BeginPopupModal("Unsaved changes##confirmation",nullptr,
+                                  ImGuiWindowFlags_AlwaysAutoResize))
+            return;
+        const bool exiting=pendingAction_==PendingAction::Exit;
+        ImGui::TextUnformatted("There are unsaved material changes.");
+        ImGui::TextUnformatted(exiting
+            ?"Save a copy, close without saving, or cancel?"
+            :"Save a copy, open another pack without saving, or cancel?");
+        ImGui::Separator();
+        if(ImGui::Button("Save As...",ImVec2(124,0))) {
+            // Cancelling the native Save dialog leaves this confirmation open.
+            if(saveAs()) {
+                const PendingAction action=pendingAction_;
+                pendingAction_=PendingAction::None;
+                ImGui::CloseCurrentPopup();
+                finishPendingAction(action);
+            }
+        }
+        ImGui::SameLine();
+        if(ImGui::Button(exiting?"Close without saving":"Open without saving",
+                         ImVec2(exiting?170.0f:170.0f,0))) {
+            const PendingAction action=pendingAction_;
+            pendingAction_=PendingAction::None;
+            ImGui::CloseCurrentPopup();
+            finishPendingAction(action);
+        }
+        ImGui::SameLine();
+        if(ImGui::Button("Cancel",ImVec2(86,0))||
+           ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            pendingAction_=PendingAction::None;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
     void resetView() {
         // Plane starts face-on; sphere begins from a 3/4 view.
         // Both reset to an upright, zero-roll camera.
@@ -335,7 +413,14 @@ private:
         preview_->setMaterial(p);
     }
     void open() {
-        if(dirty_&&!confirmClose())return;
+        if(dirty_) {
+            pendingAction_=PendingAction::Open;
+            openUnsavedDialog_=true;
+            return;
+        }
+        openFile();
+    }
+    void openFile() {
         const std::string path=chooseFile(window_,false);
         if(path.empty())return;
         try {
@@ -358,10 +443,16 @@ private:
             MessageBoxA(glfwGetWin32Window(window_),status_.c_str(),"Material editor",MB_ICONERROR);
         }
     }
-    void save() {
-        if(!loaded_)return;
+    void save() {writeMetadata(file_,false);}
+    bool saveAs() {
+        if(!loaded_)return false;
+        const std::string destination=chooseSaveMetadataFile(window_,file_);
+        return !destination.empty()&&writeMetadata(destination,true);
+    }
+    bool writeMetadata(const std::string &path,bool switchToCopy) {
+        if(!loaded_||path.empty())return false;
         try {
-            fs::path destination=fs::u8path(file_);
+            fs::path destination=fs::u8path(path);
             fs::path temp=destination;
             temp+=L".tmp";
             {
@@ -374,12 +465,22 @@ private:
             if(!MoveFileExW(temp.c_str(),destination.c_str(),
                             MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))
                 throw std::runtime_error("Cannot replace metadata.json. Close other programs using it.");
+            if(switchToCopy) {
+                file_=path;
+                // Texture paths are relative to metadata's location.
+                nativeCacheKey_.clear();
+                syncPreview();
+            }
             savedRoot_=root_;
             updateDirty();
-            status_="Saved metadata.json. No MAT signatures were regenerated.";
+            status_=switchToCopy
+                ?"Saved copy: "+fs::u8path(path).filename().u8string()
+                :"Saved metadata.json. No MAT signatures were regenerated.";
+            return true;
         } catch(const std::exception &e) {
             status_=std::string("Save failed: ")+e.what();
             MessageBoxA(glfwGetWin32Window(window_),status_.c_str(),"Save failed",MB_ICONERROR);
+            return false;
         }
     }
     void renderList() {
@@ -750,7 +851,8 @@ private:
     NativeMatImage nativeLoaded_;
     std::string nativeCacheKey_,nativeStatus_;
     bool loaded_=false,dirty_=false,plane_=false,groupActive_=false,
-         layoutConfigured_=false;
+         layoutConfigured_=false,openUnsavedDialog_=false,exitApproved_=false;
+    PendingAction pendingAction_=PendingAction::None;
     int selection_=-1,environment_=0;
     bool envFresnel_=false;
     float orbitYaw_=0.35f,orbitPitch_=-0.15f;
@@ -783,12 +885,12 @@ int runEditor() {
     ImGui_ImplOpenGL3_Init("#version 330 core");
     {
         Editor editor(window);
-        bool confirmed=false;
         while(true) {
             glfwPollEvents();
             if(glfwWindowShouldClose(window)) {
-                if(!confirmed&&!editor.confirmClose())glfwSetWindowShouldClose(window,GLFW_FALSE);
-                else break;
+                if(editor.exitApproved())break;
+                glfwSetWindowShouldClose(window,GLFW_FALSE);
+                editor.requestExit();
             }
             ImGui_ImplOpenGL3_NewFrame();
             ImGui_ImplGlfw_NewFrame();

@@ -162,3 +162,18 @@ sampling (32 to 128 layers, red height channel and linear interpolation).
 Displaced UVs are used by albedo, normal, emissive, surface, clearcoat and
 other texture layers; an absent map or a factor of zero disables the effect.
 This change remains editor-only, with no new material metadata keys.
+
+## Unsaved changes and Save As
+
+The File menu includes Save As (Ctrl+Shift+S). Exiting through the window
+close button or File > Exit with unsaved edits opens an ImGui confirmation
+with **Save As...**, **Close without saving**, and **Cancel**. The same
+confirmation is used before replacing a dirty pack (with **Open without
+saving** in place of the close action). Save As defaults to a `-copy.json`
+sibling file and uses a native Windows save picker with an overwrite prompt.
+If the picker is cancelled or the write fails, the confirmation stays open
+and no changes are discarded. Saving a copy preserves all existing JSON
+fields, including replacement signatures, and adopts the chosen path as the
+current document. Save As writes the JSON only; it does not duplicate the
+compiled image files, so keep copies alongside the original assets when
+possible.
