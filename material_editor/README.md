@@ -226,3 +226,18 @@ docking, and Style Editor allows experimenting with padding, colors and
 spacing without recompilation. Runtime style edits are temporary unless
 transcribed to source. This is intended to help direct UI customization; a
 separate visual code generator such as ImRAD can be used for new layouts.
+
+## Preview panning and cube framing
+
+Left mouse drag rotates the view; **middle mouse drag moves (pans) the
+view**, following the cursor in the camera's right/up plane. Pan is
+measured from the start of each gesture and scales with current zoom and
+viewport height. The camera target and view transform move together, so
+normal/specular/parallax view vectors remain consistent with the camera.
+Wheel zoom is unchanged.
+
+The Cube preview resets to a distance of 4.4 instead of 3.5, with a
+slightly raised camera target (so the cube appears lower in the frame).
+Sphere and Plane retain their previous starting distance and centering.
+Space, Reset View and switching preview shapes restore each shape's
+rotation, zoom and pan to their default values.

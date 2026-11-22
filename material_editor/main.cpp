@@ -331,7 +331,13 @@ private:
                     shape_==PreviewShape::Cube?0.38f:-0.15f;
         dragStartYaw_=orbitYaw_;
         dragStartPitch_=orbitPitch_;
-        orbitDistance_=3.5f;
+        // The cube needs a little more breathing room than the sphere.
+        // Raising the camera target shifts the cube lower in the frame.
+        orbitDistance_=shape_==PreviewShape::Cube?4.4f:3.5f;
+        orbitTarget_=shape_==PreviewShape::Cube
+            ?std::array<float,3>{0.0f,0.18f,0.0f}
+            :std::array<float,3>{0.0f,0.0f,0.0f};
+        dragStartTarget_=orbitTarget_;
     }
     struct Edit {
         int materialIndex=-1; // -1: pack, otherwise material index
@@ -680,7 +686,7 @@ private:
         area.y=std::max(area.y-35.0f,64.0f);
         if(preview_->valid()) {
             preview_->draw(int(area.x),int(area.y),orbitYaw_,orbitPitch_,
-                           orbitDistance_,shape_,envFresnel_);
+                           orbitDistance_,orbitTarget_,shape_,envFresnel_);
             // Image() is a passive item: dragging it moves the ImGui window.
             // An invisible button claims the mouse press for viewport orbiting,
             // while the image is drawn over that item's exact screen rectangle.
@@ -701,30 +707,46 @@ private:
                     orbitDistance_=std::clamp(
                         orbitDistance_*std::exp(-0.15f*wheel),1.35f,16.0f);
             }
-            // Orbit the CAMERA around a stationary material instead of
-            // continually multiplying the material's orientation. Mouse
-            // movement maps directly to turntable yaw and pitch:
-            //   - yaw is about the world-up (+Y) axis
-            //   - pitch is about the current camera-right axis
-            // Mouse-down anchors the gesture, so returning the cursor to
-            // its starting pixel also restores the initial view.
+            // Left mouse orbits the camera; middle mouse pans its target
+            // across the view plane. Anchoring either action at mouse-down
+            // prevents frame-to-frame drift.
             if(ImGui::IsItemActivated()) {
-                dragStartYaw_=orbitYaw_;
-                dragStartPitch_=orbitPitch_;
                 dragButton_=ImGui::IsMouseDown(ImGuiMouseButton_Middle)
                     ?ImGuiMouseButton_Middle:ImGuiMouseButton_Left;
+                dragStartYaw_=orbitYaw_;
+                dragStartPitch_=orbitPitch_;
+                if(dragButton_==ImGuiMouseButton_Middle) {
+                    dragStartTarget_=orbitTarget_;
+                    const float cy=std::cos(orbitYaw_),sy=std::sin(orbitYaw_);
+                    const float cp=std::cos(orbitPitch_),sp=std::sin(orbitPitch_);
+                    dragRight_={cy,0.0f,-sy};
+                    dragUp_={-sy*sp,cp,-cy*sp};
+                    // 2.9042 is the preview camera's vertical focal scale:
+                    // use its actual viewport height for one-to-one drag.
+                    dragPanUnitsPerPixel_=2.0f*orbitDistance_/
+                        (2.9042f*std::max(area.y,1.0f));
+                }
             }
             if(ImGui::IsItemActive()&&
                ImGui::IsMouseDragging(dragButton_,0.0f)) {
                 const ImVec2 delta=ImGui::GetMouseDragDelta(dragButton_,0.0f);
-                orbitYaw_=dragStartYaw_-delta.x*kOrbitSensitivity;
-                orbitPitch_=std::clamp(dragStartPitch_+delta.y*kOrbitSensitivity,
-                                       -kOrbitMaxPitch,kOrbitMaxPitch);
+                if(dragButton_==ImGuiMouseButton_Middle) {
+                    for(size_t i=0;i<3;++i) {
+                        orbitTarget_[i]=dragStartTarget_[i]+
+                            (-delta.x*dragRight_[i]+delta.y*dragUp_[i])*
+                                dragPanUnitsPerPixel_;
+                    }
+                } else {
+                    orbitYaw_=dragStartYaw_-delta.x*kOrbitSensitivity;
+                    orbitPitch_=std::clamp(
+                        dragStartPitch_+delta.y*kOrbitSensitivity,
+                        -kOrbitMaxPitch,kOrbitMaxPitch);
+                }
             }
         } else {
             ImGui::TextWrapped("GLSL preview failed: %s",preview_->error().c_str());
         }
-        ImGui::TextDisabled("Drag: rotate  |  Wheel: zoom  |  Space: reset view.");
+        ImGui::TextDisabled("LMB: rotate  |  MMB: move  |  Wheel: zoom  |  Space: reset.");
         ImGui::End();
     }
     bool floatField(const char *label,const char *key,float fallback,
@@ -1113,6 +1135,11 @@ private:
     PreviewShape shape_=PreviewShape::Sphere;
     bool envFresnel_=false;
     float orbitYaw_=0.35f,orbitPitch_=-0.15f,orbitDistance_=3.5f;
+    std::array<float,3> orbitTarget_{0.0f,0.0f,0.0f};
+    std::array<float,3> dragStartTarget_{0.0f,0.0f,0.0f};
+    std::array<float,3> dragRight_{1.0f,0.0f,0.0f};
+    std::array<float,3> dragUp_{0.0f,1.0f,0.0f};
+    float dragPanUnitsPerPixel_=0.0f;
     float dragStartYaw_=0.35f,dragStartPitch_=-0.15f;
     ImGuiMouseButton dragButton_=ImGuiMouseButton_Left;
     ImGuiTextFilter filter_;
