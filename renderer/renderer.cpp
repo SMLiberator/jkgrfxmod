@@ -1199,6 +1199,9 @@ namespace jkgm {
             std::array<uint64_t,7> cpu_ns{};
             uint64_t search_ns=0,search_frames=0;
             uint64_t attempts=0,completed=0;
+            uint64_t eligibility_frames=0,eligibility_requested_frames=0;
+            uint64_t eligibility_culled_frames=0;
+            uint64_t eligibility_3do_rejected=0,eligibility_world_rejected=0;
             uint64_t acquired_nodes=0,groups_checked=0,groups_selected=0;
             uint64_t model_batches=0,model_ranges=0;
             uint64_t world_batches=0,world_ranges=0;
@@ -1480,6 +1483,14 @@ namespace jkgm {
                 auto per_capture=[&](size_t stage)->uint64_t {
                     return s.attempts?(s.cpu_ns[stage]/1000U)/s.attempts:0U;
                 };
+                LOG_INFO("PERF shared_capture_eligibility checked_frames=",
+                         s.eligibility_frames,
+                         " requested_frames=",s.eligibility_requested_frames,
+                         " matched_3do_but_culled_frames=",
+                         s.eligibility_culled_frames,
+                         " rejected_3do_groups=",s.eligibility_3do_rejected,
+                         " rejected_world_faces=",s.eligibility_world_rejected,
+                         " NOTE=main_camera_conservative_frustum_only;no_GPU_readback");
                 LOG_INFO("PERF shared_capture_cpu_us search_per_frame=",
                          (s.search_ns/1000U)/frames,
                          " search_frames=",s.search_frames,

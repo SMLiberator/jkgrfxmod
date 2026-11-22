@@ -120,11 +120,16 @@
             // currently eligible visible 3DO or world material requests it.
             // It is outside the per-Thing probe budget.
             bool shared_requested=false;
+            bool shared_material_seen=false;
             if(realtime_supported) {
+                if(the_config->profile_renderer)
+                    ++shared_capture_profile_window.eligibility_frames;
                 for(auto const &inst:frame_gpu_3do_instances) {
                     if(!inst.geometry || inst.shadow_only || inst.camera_hud ||
                        inst.is_sprite_quad || inst.is_projected_decal ||
                        inst.thing_opacity<=0.0f)continue;
+                    gpu_3do_matrix34 main_modelview{};
+                    bool main_modelview_ready=false;
                     for(auto const &group:inst.geometry->groups) {
                         auto const key=std::make_pair(group.material,group.cel);
                         auto it=mats.find(key);
@@ -136,6 +141,24 @@
                            (it->second.reflection_strength>0.0f ||
                             (fragment_units>=28 &&
                              get<0>(it->second.clearcoat_params)>0.0f))) {
+                            shared_material_seen=true;
+                            // Match the existing main-camera conservative
+                            // cached-group frustum check. Invalid transforms
+                            // or bounds fail OPEN to protect reflection parity.
+                            if(!main_modelview_ready) {
+                                main_modelview=gpu_3do_native_modelview(
+                                    frame_world_cache_camera.native_view,
+                                    inst.transform);
+                                main_modelview_ready=true;
+                            }
+                            if(gpu_3do_batch_outside_frustum(
+                                   frame_world_cache_camera.frustum,
+                                   main_modelview,
+                                   group.bounds_min,group.bounds_max)) {
+                                if(the_config->profile_renderer)
+                                    ++shared_capture_profile_window.eligibility_3do_rejected;
+                                continue;
+                            }
                             shared_requested=true;break;
                         }
                     }
@@ -150,6 +173,29 @@
                             if(face.count<3U || !face.material ||
                                face.geometry_mode<3U)continue;
                             bool const solid=face.geometry_mode==3U;
+                            // These sector candidates are already roughly
+                            // camera-selected. A face may still lie completely
+                            // outside the main frustum. Check its immutable
+                            // cached world bounds BEFORE MAT deduplication so
+                            // one offscreen occurrence cannot mask a visible
+                            // occurrence of the same material.
+                            if(face.surface_index<
+                               cache.cached_surface_lookup.size()) {
+                                uint32_t const cached=
+                                    cache.cached_surface_lookup[face.surface_index];
+                                if(cached<cache.mesh.surfaces.size()) {
+                                    auto const &surface=cache.mesh.surfaces[cached];
+                                    if(surface.surface_index==face.surface_index &&
+                                       gpu_3do_batch_outside_frustum(
+                                           frame_world_cache_camera.frustum,
+                                           frame_world_cache_camera.native_view,
+                                           surface.bounds_min,surface.bounds_max)) {
+                                        if(the_config->profile_renderer)
+                                            ++shared_capture_profile_window.eligibility_world_rejected;
+                                        continue;
+                                    }
+                                }
+                            }
                             if(!checked.emplace(
                                 face.material,face.cel,solid).second)continue;
                             gpu_3do_group group{};
@@ -161,12 +207,20 @@
                                    mat.reflection_mode)==7 &&
                                (mat.reflection_strength>0.0f ||
                                 (fragment_units>=28 &&
-                                 get<0>(mat.clearcoat_params)>0.0f)))return true;
+                                 get<0>(mat.clearcoat_params)>0.0f))) {
+                                shared_material_seen=true;
+                                return true;
+                            }
                         }
                         return false;
                     };
                     shared_requested=wants_shared(cache.sector_candidates) ||
                         wants_shared(cache.sector_special_candidates);
+                }
+                if(the_config->profile_renderer) {
+                    auto &diag=shared_capture_profile_window;
+                    if(shared_requested)++diag.eligibility_requested_frames;
+                    else if(shared_material_seen)++diag.eligibility_culled_frames;
                 }
             }
             if(shared_requested) {

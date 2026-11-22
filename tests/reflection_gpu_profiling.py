@@ -45,6 +45,18 @@ assert "PERF shared_capture_cpu_us search_per_frame=" in renderer
 assert "PERF shared_capture_batches per_refresh_models=" in renderer
 assert "PERF shared_capture_gl_sample call_us=" in renderer
 assert "PERF shared_capture_opaque_order sortable_ranges=" in renderer
+assert "PERF shared_capture_eligibility checked_frames=" in renderer
+assert "eligibility_culled_frames" in hemi
+assert "eligibility_3do_rejected" in hemi
+assert "eligibility_world_rejected" in hemi
+assert "bool shared_material_seen=false;" in hemi
+assert "gpu_3do_native_modelview(" in hemi
+assert "frame_world_cache_camera.frustum," in hemi
+assert "cache.cached_surface_lookup[face.surface_index]" in hemi
+assert hemi.index("gpu_3do_batch_outside_frustum(",
+    hemi.index("auto wants_shared=")) < hemi.index("if(!checked.emplace(",
+    hemi.index("auto wants_shared="))
+assert "surface.surface_index==face.surface_index" in hemi
 assert '#include "reflection_capture_batch_order.hpp"' in renderer
 assert "order_reflection_capture_opaque_spans(" in hemi
 assert "if((group->face_type&0x2U)!=0U)return false;" in hemi

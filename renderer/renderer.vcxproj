@@ -189,6 +189,7 @@
     <ClInclude Include="planar_reflection_camera.hpp" />
     <ClInclude Include="hemi_reflection_camera.hpp" />
     <ClInclude Include="reflection_capture_world_buckets.hpp" />
+    <ClInclude Include="reflection_capture_batch_order.hpp" />
     <ClInclude Include="dual_paraboloid_projection.hpp" />
     <ClInclude Include="global_env_capture.hpp" />
     <ClInclude Include="camera_to_mat.hpp" />
