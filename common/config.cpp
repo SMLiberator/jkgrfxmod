@@ -141,6 +141,10 @@ std::unique_ptr<jkgm::config> jkgm::load_config_file()
         if(j.contains("enable_reflections")) {
             j.at("enable_reflections").get_to(rv->enable_reflections);
         }
+        if(j.contains("enable_gbuffer_color_packing")) {
+            j.at("enable_gbuffer_color_packing").get_to(
+                rv->enable_gbuffer_color_packing);
+        }
         if(j.contains("world_cache_fluid_debug_mode")) {
             auto const &mode=j.at("world_cache_fluid_debug_mode");
             if(!mode.is_number_integer())

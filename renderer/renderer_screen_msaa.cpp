@@ -47,16 +47,18 @@ jkgm::render_buffer_msaa::render_buffer_msaa(size<2, int> dims,
 jkgm::render_gbuffer_msaa::render_gbuffer_msaa(size<2, int> dims,
                                                int num_samples,
                                                render_depthbuffer_msaa *rbo,
-                                               bool spotlight_albedo)
+                                               bool spotlight_albedo,
+                                               bool packed_color)
     : viewport(make_point(0, 0), dims)
 {
     gl::bind_framebuffer(gl::framebuffer_bind_target::any, fbo);
 
-    // Set up color texture:
+    // Match the MSAA color attachment to the selected resolve format.
     gl::bind_texture(gl::texture_bind_target::texture_2d_multisample, color_tex);
     gl::tex_image_2d_multisample(gl::texture_bind_target::texture_2d_multisample,
                                  num_samples,
-                                 gl::texture_internal_format::rgba16f,
+                                 packed_color ? gl::texture_internal_format::r11f_g11f_b10f :
+                                                gl::texture_internal_format::rgba16f,
                                  dims,
                                  /*fixed sample locations*/ true);
     gl::set_texture_max_level(gl::texture_bind_target::texture_2d_multisample, 0U);
@@ -194,13 +196,16 @@ jkgm::msaa_resolve_buffer::msaa_resolve_buffer(size<2, int> dims,
 jkgm::renderer_screen_msaa::renderer_screen_msaa(size<2, int> screen_res,
                                                  int num_samples,
                                                  std::optional<float> min_sample_factor,
-                                                 bool spotlight_albedo)
+                                                 bool spotlight_albedo,
+                                                 bool packed_color)
     : shared_depthbuffer(screen_res, num_samples)
     , screen_buffer(screen_res, num_samples, &shared_depthbuffer)
-    , screen_gbuffer(screen_res, num_samples, &shared_depthbuffer, spotlight_albedo)
+    , screen_gbuffer(screen_res, num_samples, &shared_depthbuffer, spotlight_albedo, packed_color)
     , gbuffer_color_resolve(screen_res,
-                            gl::texture_internal_format::rgba16f,
-                            gl::texture_pixel_format::rgba,
+                            packed_color ? gl::texture_internal_format::r11f_g11f_b10f :
+                                           gl::texture_internal_format::rgba16f,
+                            packed_color ? gl::texture_pixel_format::rgb :
+                                           gl::texture_pixel_format::rgba,
                             gl::texture_pixel_type::float32)
     , gbuffer_emissive_resolve(screen_res,
                                gl::texture_internal_format::rgba16f,

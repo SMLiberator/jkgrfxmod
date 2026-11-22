@@ -35,7 +35,8 @@ namespace jkgm {
 
         box<2, int> viewport;
 
-        render_gbuffer(size<2, int> dims, render_depthbuffer *rbo, bool spotlight_albedo);
+        render_gbuffer(size<2, int> dims, render_depthbuffer *rbo,
+                       bool spotlight_albedo, bool packed_color);
     };
 
     class renderer_screen_basic : public renderer_screen {
@@ -46,7 +47,8 @@ namespace jkgm {
         render_gbuffer screen_gbuffer;
 
     public:
-        explicit renderer_screen_basic(size<2, int> screen_res, bool spotlight_albedo);
+        explicit renderer_screen_basic(size<2, int> screen_res,
+                                       bool spotlight_albedo, bool packed_color);
 
         void begin_frame(bool retain_hom_pixels) override;
         void invalidate_retained_scene() override;

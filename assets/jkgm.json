@@ -22,6 +22,7 @@
     "hdr_shadow_softness": 0.3,
     "hdr_color_crispness": 0.6,
     "enable_reflections": true,
+    "enable_gbuffer_color_packing": false,
     "enable_default_specular": false,
     "default_specular_strength": 0.25,
     "default_specular_roughness": 0.85,

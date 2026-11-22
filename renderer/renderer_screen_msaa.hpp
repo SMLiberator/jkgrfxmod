@@ -35,7 +35,9 @@ namespace jkgm {
 
         box<2, int> viewport;
 
-        render_gbuffer_msaa(size<2, int> dims, int num_samples, render_depthbuffer_msaa *rbo, bool spotlight_albedo);
+        render_gbuffer_msaa(size<2, int> dims, int num_samples,
+                            render_depthbuffer_msaa *rbo, bool spotlight_albedo,
+                            bool packed_color);
     };
 
     class msaa_resolve_buffer {
@@ -68,7 +70,7 @@ namespace jkgm {
         renderer_screen_msaa(size<2, int> screen_res,
                              int num_samples,
                              std::optional<float> min_sample_factor,
-                             bool spotlight_albedo);
+                             bool spotlight_albedo, bool packed_color);
 
         void begin_frame(bool retain_hom_pixels) override;
         void invalidate_retained_scene() override;

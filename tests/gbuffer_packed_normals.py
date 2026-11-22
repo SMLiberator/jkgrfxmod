@@ -36,9 +36,11 @@ for path in writers+readers:
     assert '#include "gbuffer_normal_packed.glsl"' in s,path
 for path in writers:
     s=read(path)
-    for line in s.splitlines():
-        if "out_normal=" in line or "out_normal =" in line:
-            assert "gbuffer_pack_normal(" in line,path
+    # GLSL assignments can span lines (conditional normal-class output).
+    # Camera HUD early returns legitimately write zero to every target.
+    for assignment in re.findall(r"\bout_normal\s*=\s*.*?;",s,re.DOTALL):
+        assert ("gbuffer_pack_normal(" in assignment or
+                assignment.strip().endswith("=vec4(0.0);")), (path,assignment)
 for path in readers:
     s=read(path)
     # Never allow accidental consumption of biased RGB or A2 class as raw float.

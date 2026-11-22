@@ -49,6 +49,7 @@ namespace jkgm {
         bool experimental_sector_crossing_vertex = false; // A/B: vertex instead of fragment sector selection
         bool experimental_continuous_ambient_gpu = false; // GL 3.3 sparse buffer-texture ambient for GPU 3DOs; opt-in
         bool enable_ssao = true;
+        bool enable_gbuffer_color_packing = false; // A/B opaque RGB: RGBA16F vs R11F_G11F_B10F
         bool retain_hom_pixels = true; // vanilla JK HOM default; false = Clear Display
         bool enable_parallax = true;
         bool enable_texture_filtering = true;

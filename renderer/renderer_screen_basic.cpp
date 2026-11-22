@@ -44,18 +44,22 @@ jkgm::render_buffer::render_buffer(size<2, int> dims, render_depthbuffer *rbo)
     gl::bind_framebuffer(gl::framebuffer_bind_target::any, gl::default_framebuffer);
 }
 
-jkgm::render_gbuffer::render_gbuffer(size<2, int> dims, render_depthbuffer *rbo, bool spotlight_albedo)
+jkgm::render_gbuffer::render_gbuffer(size<2, int> dims,
+                                      render_depthbuffer *rbo,
+                                      bool spotlight_albedo, bool packed_color)
     : viewport(make_point(0, 0), dims)
 {
     gl::bind_framebuffer(gl::framebuffer_bind_target::any, fbo);
 
-    // Set up color texture:
+    // Opt-in RGB float HDR color; opaque coverage lives in normal.A.
     gl::bind_texture(gl::texture_bind_target::texture_2d, color_tex);
     gl::tex_image_2d(gl::texture_bind_target::texture_2d,
                      /*level*/ 0,
-                     gl::texture_internal_format::rgba16f,
+                     packed_color ? gl::texture_internal_format::r11f_g11f_b10f :
+                                    gl::texture_internal_format::rgba16f,
                      dims,
-                     gl::texture_pixel_format::rgba,
+                     packed_color ? gl::texture_pixel_format::rgb :
+                                    gl::texture_pixel_format::rgba,
                      gl::texture_pixel_type::float32,
                      span<char const>(nullptr, 0U));
     gl::set_texture_max_level(gl ::texture_bind_target::texture_2d, 0U);
@@ -152,10 +156,12 @@ jkgm::render_gbuffer::render_gbuffer(size<2, int> dims, render_depthbuffer *rbo,
     gl::bind_framebuffer(gl::framebuffer_bind_target::any, gl::default_framebuffer);
 }
 
-jkgm::renderer_screen_basic::renderer_screen_basic(size<2, int> screen_res, bool spotlight_albedo)
+jkgm::renderer_screen_basic::renderer_screen_basic(size<2, int> screen_res,
+                                                     bool spotlight_albedo,
+                                                     bool packed_color)
     : shared_depthbuffer(screen_res)
     , screen_buffer(screen_res, &shared_depthbuffer)
-    , screen_gbuffer(screen_res, &shared_depthbuffer, spotlight_albedo)
+    , screen_gbuffer(screen_res, &shared_depthbuffer, spotlight_albedo, packed_color)
 {
 }
 

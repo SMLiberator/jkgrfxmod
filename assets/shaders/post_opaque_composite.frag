@@ -612,5 +612,7 @@ void main()
     // Artist-controlled additive spill retains cookie color without albedo
     // multiplication. Both contributions sit beneath distance fog.
     vec3 lit=mix(screened+add_rgb,fog_color,fog);
-    out_color=vec4(emissive.rgb+lit,albedo.a);
+    // Missing RGB texture alpha reads as 1 even on uncovered pixels.
+    // Normal.A tracks coverage; RGBA16F covered pixels retain their alpha.
+    out_color=vec4(emissive.rgb+lit,covered?albedo.a:0.0);
 }
