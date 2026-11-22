@@ -44,6 +44,12 @@ assert "struct shared_capture_profile {" in renderer
 assert "PERF shared_capture_cpu_us search_per_frame=" in renderer
 assert "PERF shared_capture_batches per_refresh_models=" in renderer
 assert "PERF shared_capture_gl_sample call_us=" in renderer
+assert "PERF shared_capture_opaque_order sortable_ranges=" in renderer
+assert '#include "reflection_capture_batch_order.hpp"' in renderer
+assert "order_reflection_capture_opaque_spans(" in hemi
+assert "if((group->face_type&0x2U)!=0U)return false;" in hemi
+assert "!mat.alpha && !mat.masked && !mat.dithered" in hemi
+assert "return a<b; // stable authored tie within geometry" in hemi
 assert "shared_capture_profile_window={};" in renderer
 assert "auto const shared_search_started=" in hemi
 assert "diag.search_ns+=elapsed_profile_ns(" in hemi

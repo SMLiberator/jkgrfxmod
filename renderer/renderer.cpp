@@ -11,6 +11,7 @@
 #include "planar_reflection_offscreen_gpu.hpp"
 #include "hemi_reflection_camera.hpp"
 #include "reflection_capture_world_buckets.hpp"
+#include "reflection_capture_batch_order.hpp"
 #include "screen_space_reflections.hpp"
 #include "planar_reflection_culling.hpp"
 #include "planar_reflection_render_math.hpp"
@@ -1203,6 +1204,7 @@ namespace jkgm {
             uint64_t world_batches=0,world_ranges=0;
             uint64_t model_single_batches=0,model_small_batches=0;
             uint64_t model_large_batches=0;
+            uint64_t reorder_opaque_ranges=0,reorder_barriers=0,reorder_spans=0;
             // Only every 32nd model MultiDraw is clocked, to keep profiler
             // overhead small. This is a sample, not an exact total.
             uint64_t sampled_gl_ns=0,sampled_gl_calls=0;
@@ -1502,6 +1504,11 @@ namespace jkgm {
                          " groups_examined=",s.groups_checked,
                          " groups_passed_culling=",s.groups_selected,
                          " NOTE=batch_buckets_are_window_totals");
+                LOG_INFO("PERF shared_capture_opaque_order sortable_ranges=",
+                         s.reorder_opaque_ranges,
+                         " source_order_barriers=",s.reorder_barriers,
+                         " sorted_spans=",s.reorder_spans,
+                         " NOTE=window_totals;shared_only;cutout_order_preserved");
                 LOG_INFO("PERF shared_capture_gl_sample call_us=",
                          s.sampled_gl_calls
                             ?(s.sampled_gl_ns/1000U)/s.sampled_gl_calls:0U,

@@ -686,9 +686,9 @@
                 auto const modelview=gpu_3do_native_modelview(
                     view,inst.transform);
                 if(!gpu_3do_matrix_finite(modelview))return;
-                // Capture blending is disabled; alpha-tested and opaque
-                // groups preserve their original ordering within the instance.
-                // Only consecutive compatible groups share one MultiDraw.
+                // Capture blending is disabled. Shared capture sorts only
+                // uninterrupted fully opaque runs. Alpha-tested groups keep
+                // authored order; Hemi/Cube/EnvMap behavior is unchanged.
                 model_group_scratch.clear();
                 auto group_key=[&](gpu_3do_group const *group) {
                     return std::make_tuple(
@@ -724,6 +724,36 @@
                 // No drawable groups: skip GL cache lookup, shader uniforms,
                 // VAO binding and material resolution for this 3DO node.
                 if(model_group_scratch.empty())return;
+                if(candidate.is_shared) {
+                    auto const order=order_reflection_capture_opaque_spans(
+                        model_group_scratch,
+                        [&](gpu_3do_group const *group) {
+                            if((group->face_type&0x2U)!=0U)return false;
+                            auto const key=group_key(group);
+                            reflection_capture_material_key const mat_key{
+                                std::get<0>(key),std::get<1>(key),
+                                std::get<2>(key)};
+                            auto const &mat=resolve_capture_material(mat_key);
+                            return !mat.alpha && !mat.masked && !mat.dithered &&
+                                !mat.special && !mat.emissive_only &&
+                                mat.blend!=material_blend_mode::fluid &&
+                                mat.blend!=material_blend_mode::multiply &&
+                                std::isfinite(mat.opacity) &&
+                                mat.opacity>=0.999f;
+                        },
+                        [&](gpu_3do_group const *a,
+                            gpu_3do_group const *b) {
+                            auto const ak=group_key(a),bk=group_key(b);
+                            if(ak!=bk)return ak<bk;
+                            return a<b; // stable authored tie within geometry
+                        });
+                    if(profile_shared) {
+                        auto &diag=shared_capture_profile_window;
+                        diag.reorder_opaque_ranges+=order.opaque_ranges;
+                        diag.reorder_barriers+=order.source_order_ranges;
+                        diag.reorder_spans+=order.sorted_spans;
+                    }
+                }
                 auto it=gpu_3do_gl_cache.find(inst.id);
                 if(it==gpu_3do_gl_cache.end()) {
                     if(gpu_3do_gl_cache.size()>=8192U)return;
@@ -739,7 +769,7 @@
                 // this touch, the periodic 16-frame sweep immediately evicts
                 // actively used capture meshes, forcing repeated GL uploads.
                 // A capture counts as genuine mesh use, not a speculative
-                // acquisition. Keep the ordinary 64-frame expiration policy.
+                // acquisition. Keep the ordinary 256-frame expiration policy.
                 gpu_3do_last_drawn[inst.id]=gpu_3do_present_serial;
                 shader.set_modelview(modelview,true,
                                      it->second->packed_vertex_format);
