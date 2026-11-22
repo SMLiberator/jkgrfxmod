@@ -208,3 +208,21 @@ Pack Description and Comment inputs now enable Dear ImGui's native multiline
 word-wrapping flag. Lines wrap to the field width when typing and when the
 Materials window is resized, without inserting newline characters into
 stored metadata.
+
+## Preview zoom and in-app Dear ImGui development tools
+
+The preview shape controls are full-size, highlighted buttons in the order
+**Sphere**, **Cube**, **Plane**, with a larger and more reliable clickable
+rectangle than the former radio controls. Changing the shape resets the
+camera. Scrolling the mouse wheel over the preview zooms its orbit camera,
+without modifying the rendered material or zooming when the pointer is over
+other panels. Zoom uses a bounded, multiplicative distance (1.35–16 units).
+Space or Reset view restores the shape's default angle and 3.5-unit distance.
+
+**Tools** in the top menu exposes Dear ImGui's built-in **Demo**, **Metrics /
+Debugger** and **Style Editor**. The demo showcases widgets with working
+examples, Metrics helps inspect item bounding boxes/hover handling and
+docking, and Style Editor allows experimenting with padding, colors and
+spacing without recompilation. Runtime style edits are temporary unless
+transcribed to source. This is intended to help direct UI customization; a
+separate visual code generator such as ImRAD can be used for new layouts.

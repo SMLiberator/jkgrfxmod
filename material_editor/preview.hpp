@@ -44,7 +44,7 @@ public:
     void setEnvironmentOverride(const std::string &path);
     // Normal studio preview; Fresnel toggle affects EnvMap only (not metadata).
     void draw(int width, int height, float orbitYaw, float orbitPitch,
-              PreviewShape shape, bool useEnvFresnel);
+              float orbitDistance, PreviewShape shape, bool useEnvFresnel);
     GLuint outputTexture() const { return output_; }
     const std::string &environmentDescription() const { return envDescription_; }
     bool hasLoadedEnvironmentFile() const { return loadedEnvironmentFile_; }

@@ -236,6 +236,12 @@ public:
                     redo();
                 ImGui::EndMenu();
             }
+            if(ImGui::BeginMenu("Tools")) {
+                ImGui::MenuItem("Dear ImGui Demo",nullptr,&showDemo_);
+                ImGui::MenuItem("Metrics / Debugger",nullptr,&showMetrics_);
+                ImGui::MenuItem("Style Editor",nullptr,&showStyleEditor_);
+                ImGui::EndMenu();
+            }
             ImGui::TextDisabled("JkGfxMod Material Editor  |  Win32 + Dear ImGui + OpenGL 3.3");
             ImGui::EndMainMenuBar();
         }
@@ -243,6 +249,15 @@ public:
         renderViewport();
         renderProperties();
         renderUnsavedDialog();
+        // These in-app tools show live widget/layout geometry, hover IDs,
+        // docking internals and an editable palette for UI experimentation.
+        if(showDemo_)ImGui::ShowDemoWindow(&showDemo_);
+        if(showMetrics_)ImGui::ShowMetricsWindow(&showMetrics_);
+        if(showStyleEditor_) {
+            if(ImGui::Begin("Dear ImGui Style Editor",&showStyleEditor_))
+                ImGui::ShowStyleEditor();
+            ImGui::End();
+        }
         // Once the slider/drag is released, the next press is a separate
         // undo action even if it changes the exact same material field.
         if(!ImGui::IsAnyItemActive())groupActive_=false;
@@ -316,6 +331,7 @@ private:
                     shape_==PreviewShape::Cube?0.38f:-0.15f;
         dragStartYaw_=orbitYaw_;
         dragStartPitch_=orbitPitch_;
+        orbitDistance_=3.5f;
     }
     struct Edit {
         int materialIndex=-1; // -1: pack, otherwise material index
@@ -624,19 +640,25 @@ private:
     }
     void renderViewport() {
         ImGui::Begin("Live Material Preview");
-        if(ImGui::RadioButton("Sphere",shape_==PreviewShape::Sphere)) {
-            shape_=PreviewShape::Sphere;resetView();
-        }
+        // Larger full-rectangle hit targets than RadioButton's tiny circle.
+        // The selected shape stays visibly highlighted.
+        const auto shapeButton=[this](const char *label,PreviewShape shape) {
+            const bool selected=shape_==shape;
+            if(selected)ImGui::PushStyleColor(
+                ImGuiCol_Button,ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            const bool pressed=ImGui::Button(label,ImVec2(92,32));
+            if(selected)ImGui::PopStyleColor();
+            if(pressed && !selected) {
+                shape_=shape;
+                resetView();
+            }
+        };
+        shapeButton("Sphere",PreviewShape::Sphere);
         ImGui::SameLine();
-        if(ImGui::RadioButton("Plane",shape_==PreviewShape::Plane)) {
-            shape_=PreviewShape::Plane;resetView();
-        }
+        shapeButton("Cube",PreviewShape::Cube);
         ImGui::SameLine();
-        if(ImGui::RadioButton("Cube",shape_==PreviewShape::Cube)) {
-            shape_=PreviewShape::Cube;resetView();
-        }
-        ImGui::SameLine();
-        if(ImGui::SmallButton("Reset view (Space)"))resetView();
+        shapeButton("Plane",PreviewShape::Plane);
+        if(ImGui::Button("Reset view (Space)"))resetView();
         ImGui::SameLine();
         ImGui::SetNextItemWidth(150);
         const char *options[]={"Studio","Outdoor","Night"};
@@ -658,7 +680,7 @@ private:
         area.y=std::max(area.y-35.0f,64.0f);
         if(preview_->valid()) {
             preview_->draw(int(area.x),int(area.y),orbitYaw_,orbitPitch_,
-                           shape_,envFresnel_);
+                           orbitDistance_,shape_,envFresnel_);
             // Image() is a passive item: dragging it moves the ImGui window.
             // An invisible button claims the mouse press for viewport orbiting,
             // while the image is drawn over that item's exact screen rectangle.
@@ -670,6 +692,15 @@ private:
                 ImTextureRef((ImTextureID)preview_->outputTexture()),
                 canvasPos, ImVec2(canvasPos.x + area.x, canvasPos.y + area.y),
                 ImVec2(0,1), ImVec2(1,0));
+            // Scroll only when the pointer is inside the rendered preview.
+            // Multiplicative zoom feels uniform across different distances,
+            // and bounds prevent clipping into the sphere or disappearing.
+            if(ImGui::IsItemHovered()) {
+                const float wheel=ImGui::GetIO().MouseWheel;
+                if(wheel!=0.0f)
+                    orbitDistance_=std::clamp(
+                        orbitDistance_*std::exp(-0.15f*wheel),1.35f,16.0f);
+            }
             // Orbit the CAMERA around a stationary material instead of
             // continually multiplying the material's orientation. Mouse
             // movement maps directly to turntable yaw and pitch:
@@ -693,7 +724,7 @@ private:
         } else {
             ImGui::TextWrapped("GLSL preview failed: %s",preview_->error().c_str());
         }
-        ImGui::TextDisabled("Drag to rotate. Space: reset view.");
+        ImGui::TextDisabled("Drag: rotate  |  Wheel: zoom  |  Space: reset view.");
         ImGui::End();
     }
     bool floatField(const char *label,const char *key,float fallback,
@@ -1076,11 +1107,12 @@ private:
     std::string nativeCacheKey_,nativeStatus_;
     bool loaded_=false,dirty_=false,groupActive_=false,
          layoutConfigured_=false,openUnsavedDialog_=false,exitApproved_=false;
+    bool showDemo_=false,showMetrics_=false,showStyleEditor_=false;
     PendingAction pendingAction_=PendingAction::None;
     int selection_=-1,environment_=0;
     PreviewShape shape_=PreviewShape::Sphere;
     bool envFresnel_=false;
-    float orbitYaw_=0.35f,orbitPitch_=-0.15f;
+    float orbitYaw_=0.35f,orbitPitch_=-0.15f,orbitDistance_=3.5f;
     float dragStartYaw_=0.35f,dragStartPitch_=-0.15f;
     ImGuiMouseButton dragButton_=ImGuiMouseButton_Left;
     ImGuiTextFilter filter_;

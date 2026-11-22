@@ -21,6 +21,7 @@ layout(location=1) in vec3 aNormal;
 layout(location=2) in vec2 aUv;
 uniform float uAspect;
 uniform vec2 uPlaneScale;
+uniform float uCameraDistance;
 uniform vec3 uViewRight,uViewUp,uViewBack;
 out vec3 wp, wn;
 out vec2 uv;
@@ -34,7 +35,7 @@ void main() {
     uv=aUv;
     vec3 q=vec3(dot(wp,uViewRight),
                 dot(wp,uViewUp),
-                dot(wp,uViewBack)-3.5);
+                dot(wp,uViewBack)-uCameraDistance);
     float f=2.9042; // 38-degree vertical FOV
     gl_Position=vec4(q.x*f/max(uAspect,0.01),q.y*f,
                      -q.z*1.00669-0.20067,-q.z);
@@ -508,7 +509,7 @@ void MaterialPreview::buildMeshes() {
     glBindVertexArray(0);
 }
 void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
-                           PreviewShape shape,bool useEnvFresnel) {
+                           float orbitDistance,PreviewShape shape,bool useEnvFresnel) {
     if(!program_)return;
     resize(w,h);
     glBindFramebuffer(GL_FRAMEBUFFER,fbo_);
@@ -528,15 +529,19 @@ void MaterialPreview::draw(int w,int h,float orbitYaw,float orbitPitch,
         glUniform3f(glGetUniformLocation(program_,name),v[0],v[1],v[2]);
     };
     // Stable turntable basis in world space: world +Y always defines "up".
-    // The camera is 3.5 units from the origin, and tracks it without roll.
+    // The camera stays pointed at the origin and has no roll; wheel zoom
+    // changes only its orbit radius, not the object or world lighting.
     const float cy=std::cos(orbitYaw),sy=std::sin(orbitYaw);
     const float cp=std::cos(orbitPitch),sp=std::sin(orbitPitch);
     const std::array<float,3> back={sy*cp,sp,cy*cp};
     const std::array<float,3> right={cy,0.0f,-sy};
     const std::array<float,3> up={-sy*sp,cp,-cy*sp};
-    const std::array<float,3> camera={back[0]*3.5f,back[1]*3.5f,back[2]*3.5f};
+    const std::array<float,3> camera={back[0]*orbitDistance,
+                                      back[1]*orbitDistance,
+                                      back[2]*orbitDistance};
     v3("uViewRight",right);v3("uViewUp",up);
     v3("uViewBack",back);v3("uCameraPos",camera);
+    f1("uCameraDistance",orbitDistance);
     f1("uAspect",float(width_)/height_);
     // Keep the longer side at the previous plane size, without stretching
     // UVs or affecting the sphere; both wide and tall maps remain framed.
