@@ -26,7 +26,13 @@ jobs:
       - name: Build only the editor
         shell: pwsh
         run: |
-          cmake --build build/material-editor --config Release --target jkgm-material-editor --parallel
+          cmake --build build/material-editor --config Release --target jkgm-material-editor editor-source-pack-tests --parallel
+
+      - name: Verify source-pack inheritance and serialization
+        shell: pwsh
+        run: |
+          & "build/material-editor/Release/editor-source-pack-tests.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Source pack tests failed" }
 
       - name: Verify portable EXE and dynamic library imports
         shell: pwsh
