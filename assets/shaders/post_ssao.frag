@@ -1,4 +1,5 @@
 #version 330 core
+#include "gbuffer_normal_packed.glsl"
 
 uniform sampler2D normal_image;
 uniform sampler2D depth_image;
@@ -54,7 +55,7 @@ float sample_depth(vec3 origin, vec3 offset)
 
 void main()
 {
-    vec3 normal_sample = texture(normal_image, vp_texcoords).rgb;
+    vec3 normal_sample=gbuffer_unpack_normal(texture(normal_image,vp_texcoords)).rgb;
     float origin_depth = sample_depth_direct(vp_texcoords);
 
     // Skip unrendered pixels and degenerate normals.

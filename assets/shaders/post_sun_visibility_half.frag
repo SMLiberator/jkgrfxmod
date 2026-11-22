@@ -1,4 +1,5 @@
 #version 330 core
+#include "gbuffer_normal_packed.glsl"
 // One quarter as many opaque sun-shadow evaluations. The ordinary compositor
 // still applies the authored per-pixel sun incidence, falloff and SKY gate.
 uniform sampler2D depth_image; // resolved full-resolution linear depth
@@ -155,7 +156,7 @@ void main()
         ivec2 p=base+ivec2(x,y);
         if(any(greaterThanEqual(p,full_size)))continue;
         float z=texelFetch(depth_image,p,0).r;
-        vec4 n=texelFetch(normal_image,p,0);
+        vec4 n=gbuffer_unpack_normal(texelFetch(normal_image,p,0));
         if(n.a<=0.5 || z<=0.0 || z>=65500.0 ||
            dot(n.rgb,n.rgb)<0.0001 || z>=d)continue;
         d=z;chosen_normal=n;chosen=p;

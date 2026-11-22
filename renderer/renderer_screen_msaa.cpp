@@ -78,9 +78,9 @@ jkgm::render_gbuffer_msaa::render_gbuffer_msaa(size<2, int> dims,
     gl::bind_texture(gl::texture_bind_target::texture_2d_multisample, normal_tex);
     gl::tex_image_2d_multisample(gl::texture_bind_target::texture_2d_multisample,
                                  num_samples,
-                                 // Preserve an opaque-coverage marker through
-                                 // multisample resolve, independently of depth.
-                                 gl::texture_internal_format::rgba16f,
+                                 // Four-byte RGB10_A2 normal/classification,
+                                 // also used by the matching resolve image.
+                                 gl::texture_internal_format::rgb10_a2,
                                  dims,
                                  /*fixed sample locations*/ true);
     gl::set_texture_max_level(gl::texture_bind_target::texture_2d_multisample, 0U);
@@ -95,7 +95,7 @@ jkgm::render_gbuffer_msaa::render_gbuffer_msaa(size<2, int> dims,
                               gl::texture_direction::t,
                               gl::texture_wrap_mode::clamp_to_border);
     gl::set_texture_border_color(gl::texture_bind_target::texture_2d_multisample,
-                                 color(0.0f, 0.0f, 1.0f, std::numeric_limits<float>::lowest()));
+                                 color(0.0f, 0.0f, 0.0f, 0.0f));
     gl::framebuffer_texture(gl::framebuffer_bind_target::any,
                             gl::framebuffer_attachment::color2,
                             normal_tex,
@@ -207,7 +207,7 @@ jkgm::renderer_screen_msaa::renderer_screen_msaa(size<2, int> screen_res,
                                gl::texture_pixel_format::rgba,
                                gl::texture_pixel_type::float32)
     , gbuffer_normal_resolve(screen_res,
-                             gl::texture_internal_format::rgba16f,
+                             gl::texture_internal_format::rgb10_a2,
                              gl::texture_pixel_format::rgba,
                              gl::texture_pixel_type::float32)
     , gbuffer_depth_resolve(screen_res,

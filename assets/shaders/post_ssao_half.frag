@@ -1,4 +1,5 @@
 #version 330 core
+#include "gbuffer_normal_packed.glsl"
 
 uniform sampler2D normal_image;
 uniform sampler2D depth_image;
@@ -78,7 +79,7 @@ void main()
         ivec2 p=base+ivec2(x,y);
         if(any(greaterThanEqual(p,dims)))continue;
         float z=texelFetch(depth_image,p,0).r;
-        vec3 n=texelFetch(normal_image,p,0).rgb;
+        vec3 n=gbuffer_unpack_normal(texelFetch(normal_image,p,0)).rgb;
         if(z>0.0 && z<ssao_fade_end && dot(n,n)>0.0001 &&
            z<origin_depth) {
             origin_depth=z;

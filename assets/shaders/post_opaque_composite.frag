@@ -1,4 +1,5 @@
 #version 330 core
+#include "gbuffer_normal_packed.glsl"
 
 uniform sampler2D color_image;
 uniform sampler2D emissive_image;
@@ -453,7 +454,7 @@ void project_spotlights(float depth,ivec2 pixel,
         // Only sample/reconstruct normals when at least one spotlight actually
         // reaches the receiver, not once per fullscreen compositor pixel.
         if(!have_normal) {
-            vec3 vn=texelFetch(normal_image,pixel,0).rgb;
+            vec3 vn=gbuffer_unpack_normal(texelFetch(normal_image,pixel,0)).rgb;
             if(dot(vn,vn)<0.0001)return;
             normal=normalize(camera_right.xyz*(vn.x/camera_right.w)+
                              camera_up.xyz*(vn.y/camera_up.w)+
@@ -483,7 +484,7 @@ void project_spotlights(float depth,ivec2 pixel,
 // Missing geometry intentionally follows HOM/clear-color behavior.
 bool has_opaque_coverage(ivec2 p)
 {
-    return texelFetch(normal_image,p,0).a>0.5;
+    return gbuffer_unpack_normal(texelFetch(normal_image,p,0)).a>0.5;
 }
 
 void main()
@@ -543,7 +544,7 @@ void main()
     float sun_fade=(sun_lighting_active!=0 && depth>0.0 && depth<65500.0)
         ? sun_range_fade(depth/32.0) : 0.0;
     if(sun_fade>0.0) {
-        vec4 normal_pixel=texelFetch(normal_image,tc,0);
+        vec4 normal_pixel=gbuffer_unpack_normal(texelFetch(normal_image,tc,0));
         vec3 vn=normal_pixel.rgb;
         if(dot(vn,vn)>0.0001) {
             vec3 normal=normalize(camera_right.xyz*(vn.x/camera_right.w)+

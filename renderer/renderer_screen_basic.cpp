@@ -79,10 +79,10 @@ jkgm::render_gbuffer::render_gbuffer(size<2, int> dims, render_depthbuffer *rbo,
     gl::bind_texture(gl::texture_bind_target::texture_2d, normal_tex);
     gl::tex_image_2d(gl::texture_bind_target::texture_2d,
                      /*level*/ 0,
-                     // Alpha is the coverage bit for HOM. A skybox Thing
-                     // deliberately has a zero normal but still writes a
-                     // pixel, so RGB length cannot indicate valid geometry.
-                     gl::texture_internal_format::rgba16f,
+                     // Signed normals are biased into RGB10, receiver class
+                     // 0=empty, 1=surface/sky, 2=cutout sprite occupies A2.
+                     // Zero normal with nonzero class preserves HOM coverage.
+                     gl::texture_internal_format::rgb10_a2,
                      dims,
                      gl::texture_pixel_format::rgba,
                      gl::texture_pixel_type::float32,
@@ -98,7 +98,7 @@ jkgm::render_gbuffer::render_gbuffer(size<2, int> dims, render_depthbuffer *rbo,
                               gl::texture_direction::t,
                               gl::texture_wrap_mode::clamp_to_border);
     gl::set_texture_border_color(gl::texture_bind_target::texture_2d,
-                                 color(0.0f, 0.0f, 1.0f, std::numeric_limits<float>::lowest()));
+                                 color(0.0f, 0.0f, 0.0f, 0.0f));
     gl::framebuffer_texture(gl::framebuffer_bind_target::any,
                             gl::framebuffer_attachment::color2,
                             normal_tex,

@@ -51,6 +51,7 @@ namespace jkgm::gl {
         srgb_a8 = 0x8C43,
         rgb16f = 0x881B,
         rgba16f = 0x881A,
+        rgb10_a2 = 0x8059, // packed signed-view normal + 2-bit receiver class
         rgba32f = 0x8814,
         r16f = 0x822D,
         r8 = 0x8229,

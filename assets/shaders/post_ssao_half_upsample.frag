@@ -1,4 +1,5 @@
 #version 330 core
+#include "gbuffer_normal_packed.glsl"
 // Reconstruct the original full-resolution R16F AO texture without allowing
 // a different surface's AO across depth or normal discontinuities.
 uniform sampler2D source_image; // packed half-resolution AO/depth/oct normal
@@ -18,7 +19,7 @@ void main()
 {
     ivec2 p=ivec2(gl_FragCoord.xy);
     float d=texelFetch(depth_image,p,0).r;
-    vec3 raw_normal=texelFetch(normal_image,p,0).rgb;
+    vec3 raw_normal=gbuffer_unpack_normal(texelFetch(normal_image,p,0)).rgb;
     if(d<=0.0 || d>=256.0 || dot(raw_normal,raw_normal)<0.0001) {
         out_color=vec4(0.0);
         return;

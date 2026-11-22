@@ -1,4 +1,5 @@
 #version 330 core
+#include "gbuffer_normal_packed.glsl"
 
 uniform sampler2D fbuf_image;
 uniform sampler2D normal_image;
@@ -68,22 +69,22 @@ void main()
     dsamps[14] = textureOffset(depth_image, vp_texcoords, ivec2( 0,  1)).r;
     dsamps[15] = textureOffset(depth_image, vp_texcoords, ivec2( 1,  1)).r;
 
-    nsamps[0]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-2, -2)).rgb);
-    nsamps[1]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-1, -2)).rgb);
-    nsamps[2]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 0, -2)).rgb);
-    nsamps[3]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 1, -2)).rgb);
-    nsamps[4]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-2, -1)).rgb);
-    nsamps[5]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-1, -1)).rgb);
-    nsamps[6]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 0, -1)).rgb);
-    nsamps[7]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 1, -1)).rgb);
-    nsamps[8]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-2,  0)).rgb);
-    nsamps[9]  = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-1,  0)).rgb);
-    nsamps[10] = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 0,  0)).rgb);
-    nsamps[11] = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 1,  0)).rgb);
-    nsamps[12] = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-2,  1)).rgb);
-    nsamps[13] = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2(-1,  1)).rgb);
-    nsamps[14] = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 0,  1)).rgb);
-    nsamps[15] = safe_normal(textureOffset(normal_image, vp_texcoords, ivec2( 1,  1)).rgb);
+    nsamps[0]  = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2(-2, -2))).rgb);
+    nsamps[1]  = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2(-1, -2))).rgb);
+    nsamps[2]  = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2( 0, -2))).rgb);
+    nsamps[3]  = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2( 1, -2))).rgb);
+    nsamps[4]  = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2(-2, -1))).rgb);
+    nsamps[5]  = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2(-1, -1))).rgb);
+    nsamps[6]  = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2( 0, -1))).rgb);
+    nsamps[7]  = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2( 1, -1))).rgb);
+    nsamps[8]  = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2(-2,  0))).rgb);
+    nsamps[9]  = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2(-1,  0))).rgb);
+    nsamps[10] = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2( 0,  0))).rgb);
+    nsamps[11] = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2( 1,  0))).rgb);
+    nsamps[12] = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2(-2,  1))).rgb);
+    nsamps[13] = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2(-1,  1))).rgb);
+    nsamps[14] = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2( 0,  1))).rgb);
+    nsamps[15] = safe_normal(gbuffer_unpack_normal(textureOffset(normal_image, vp_texcoords, ivec2( 1,  1))).rgb);
 
     float base_dsamp = dsamps[10];
     vec3 base_nsamp = nsamps[10];

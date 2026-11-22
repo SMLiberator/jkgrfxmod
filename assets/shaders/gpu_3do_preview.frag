@@ -1,4 +1,5 @@
 #version 330 core
+#include "gbuffer_normal_packed.glsl"
 // Static GPU geometry with per-fragment opaque/translucent separation.
 // MIXED surfaces draw fully opaque pixels into the G-buffer and translucent
 // pixels in the sorted alpha pass, without double shading any pixel.
@@ -1148,9 +1149,9 @@ void main() {
     // another attachment; receiver lighting treats their shadow response as
     // two-sided, independent of camera-facing normals. Coverage is still >0.
     out_normal=(world_lighting_exempt!=0 || fullbright>=0.5)
-                   ? vec4(0.0,0.0,0.0,1.0) :
-                          vec4(normalize(diffuse_view_normal),
-                               sprite_receiver!=0 ? 2.0 : 1.0);
+                   ? gbuffer_pack_normal(vec3(0.0),1.0) :
+                     gbuffer_pack_normal(normalize(diffuse_view_normal),
+                                         sprite_receiver!=0 ? 2.0 : 1.0);
     // Depth target optionally carries the unlit diffuse base in GBA.
     // This keeps projected lighting independent of baked JK vertex light.
     out_depth=vec4(view_depth,albedo.rgb);

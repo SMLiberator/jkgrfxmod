@@ -1,4 +1,5 @@
 #version 330 core
+#include "gbuffer_normal_packed.glsl"
 // GPU-first opaque SithWorld G-buffer. Native depth-tested fallback follows.
 // Static JK lighting is evaluated at vertices and interpolated in RGB.
 // In pixel mode, a shared GLSL dynamic-light contribution is composed per
@@ -448,7 +449,7 @@ void main() {
         // covers the HOM background but receives no AO, sun or spotlights.
         out_color=vec4(albedo,1.0);
         out_emissive=vec4(0.0,0.0,0.0,1.0);
-        out_normal=vec4(0.0,0.0,0.0,1.0);
+        out_normal=gbuffer_pack_normal(vec3(0.0),1.0);
         out_depth=vec4(65504.0,albedo);
         return;
     }
@@ -677,7 +678,7 @@ void main() {
         diffuse_view_normal=normalize(vec3(
             view_n.x*sh,view_n.y*sv,view_n.z));
     }
-    out_normal=fullbright>=0.5 ? vec4(0.0,0.0,0.0,1.0) :
-               vec4(diffuse_view_normal,1.0);
+    out_normal=gbuffer_pack_normal(
+        fullbright>=0.5 ? vec3(0.0) : diffuse_view_normal,1.0);
     out_depth=vec4(32.0/max(gl_FragCoord.w,0.00000001),albedo);
 }
