@@ -1,4 +1,5 @@
 #include "source_pack.hpp"
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -92,10 +93,32 @@ void testCompiledAndValidation() {
     editor_source::validate(source,Kind::Source);
     check(Document::parse(source.dump(4))==source,"unknown fields survive");
 }
+void testRepositorySourcePack() {
+    // Verify the compiler's real sample input is accepted verbatim and can
+    // be serialized after a material override without flattening defaults.
+    std::ifstream file("assets/sample_matpack/script.json");
+    if(!file)throw std::runtime_error("Missing repository source pack fixture");
+    Document source;
+    file>>source;
+    check(editor_source::detect("assets/sample_matpack/script.json",source)==Kind::Source,
+          "repository source mode");
+    editor_source::validate(source,Kind::Source);
+    check(source["materials"].size()>10,"repository material count");
+    const auto effective=editor_source::effectiveMaterial(
+        source,source["materials"][2],Kind::Source);
+    check(effective["displacement_factor"]==-0.2,
+          "source displacement value preserved");
+    const auto before=source;
+    source["materials"][2]["roughness"]=0.37;
+    check(source["materials"][2]["replaces"]==before["materials"][2]["replaces"],
+          "MAT replacement preserved while editing source properties");
+    source["materials"][2].erase("roughness");
+    check(source==before,"source override rollback restores raw document");
+}
 int main(){
     try {
         testSourceInheritance();testPackAlbedoAndAlphaOverrides();
-        testCompiledAndValidation();
+        testCompiledAndValidation();testRepositorySourcePack();
         std::cout<<"Source pack tests passed\n";
         return 0;
     } catch(const std::exception &e) {
