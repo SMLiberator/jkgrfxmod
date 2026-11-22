@@ -219,9 +219,9 @@
                     glEnable(GL_DEPTH_TEST);
                     glDepthFunc(GL_LESS);
                     glDepthMask(GL_TRUE);
-                    glEnable(GL_CULL_FACE);
-                    glCullFace(GL_BACK);
-                    glFrontFace(GL_CCW);
+                    gl::set_cull_face_enabled(true);
+                    gl::set_face_cull_mode(gl::face_mode::back);
+                    gl::set_front_face_raw(GL_CCW);
                     glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
                     auto const fog=get_fog_settings();
                     auto const fog_rgb=fog.color.value();
@@ -361,7 +361,7 @@
                         shader.set_thing_fade(inst.thing_opacity,
                             inst.thing_opacity<0.999f?2:0);
                         gl::bind_vertex_array(it->second->vao);
-                        glFrontFace(gpu_3do_reversed_winding(inst.transform)
+                        gl::set_front_face_raw(gpu_3do_reversed_winding(inst.transform)
                                     ?GL_CW:GL_CCW);
                         for(auto const &group:inst.geometry->groups) {
                             if(!projection.orthographic &&
@@ -375,8 +375,8 @@
                                 :resolve_gpu_3do_material(group);
                             if(!submit_mat(mat,solid))continue;
                             if(group.nonplanar || (group.face_type&1U))
-                                glDisable(GL_CULL_FACE);
-                            else glEnable(GL_CULL_FACE);
+                                gl::set_cull_face_enabled(false);
+                            else gl::set_cull_face_enabled(true);
                             gl::draw_elements(gl::element_type::triangles,
                                 GLsizei(group.count),
                                 gl::index_type::uint32,
@@ -390,7 +390,7 @@
                            !acquired.count(inst.shadow_owner))
                             draw_model(inst);
                     gl::set_active_texture_unit(0);
-                    glBindTexture(GL_TEXTURE_2D,
+                    gl::bind_texture_raw(GL_TEXTURE_2D,
                                   entry.target->color_texture());
                     glGenerateMipmap(GL_TEXTURE_2D);
                 }

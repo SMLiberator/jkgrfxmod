@@ -11,11 +11,12 @@ GLuint jkgm::gl::vertex_array_traits::create()
 void jkgm::gl::vertex_array_traits::destroy(GLuint id)
 {
     glDeleteVertexArrays(1, &id);
+    invalidate_cached_state(); // Deleted names may be recycled.
 }
 
 void jkgm::gl::bind_vertex_array(vertex_array_view vao)
 {
-    glBindVertexArray(*vao);
+    bind_vertex_array_raw(*vao);
 }
 
 void jkgm::gl::enable_vertex_attrib_array(GLuint index)

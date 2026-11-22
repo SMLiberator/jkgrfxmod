@@ -11,11 +11,12 @@ GLuint jkgm::gl::texture_traits::create()
 void jkgm::gl::texture_traits::destroy(GLuint id)
 {
     glDeleteTextures(1, &id);
+    invalidate_cached_state(); // Deleted names may be recycled.
 }
 
 void jkgm::gl::bind_texture(texture_bind_target target, texture_view tex)
 {
-    glBindTexture(static_cast<GLenum>(target), *tex);
+    bind_texture_raw(static_cast<GLenum>(target), *tex);
 }
 
 void jkgm::gl::generate_mipmap(texture_bind_target target)
@@ -25,7 +26,7 @@ void jkgm::gl::generate_mipmap(texture_bind_target target)
 
 void jkgm::gl::set_active_texture_unit(int unit)
 {
-    glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(unit));
+    set_active_texture_unit_raw(unit);
 }
 
 void jkgm::gl::set_texture_border_color(texture_bind_target target, color c)

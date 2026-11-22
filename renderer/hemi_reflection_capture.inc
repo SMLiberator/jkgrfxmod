@@ -593,9 +593,9 @@
             glEnable(GL_DEPTH_TEST);
             glDepthFunc(GL_LESS);
             glDepthMask(GL_TRUE);
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_BACK);
-            glFrontFace(paraboloid_mode?GL_CW:GL_CCW);
+            gl::set_cull_face_enabled(true);
+            gl::set_face_cull_mode(gl::face_mode::back);
+            gl::set_front_face_raw(paraboloid_mode?GL_CW:GL_CCW);
             if(paraboloid_mode) {
                 glEnable(GL_CLIP_DISTANCE0);
                 glEnable(GL_CLIP_DISTANCE1);
@@ -677,7 +677,7 @@
                 paraboloid_mode,surface_mask);
             if(profile_shared)shared_capture_profile_window.cpu_ns[2]+=
                 elapsed_profile_ns(sky_started,profile_clock::now());
-            glFrontFace(paraboloid_mode?GL_CW:GL_CCW);
+            gl::set_front_face_raw(paraboloid_mode?GL_CW:GL_CCW);
             shader.set_modelview(view,false);
             shader.set_thing_fade(1.0f,0);
             gl::bind_vertex_array(cache.vao);
@@ -865,7 +865,7 @@
                                inst.sector_tint[2]));
                 shader.set_thing_fade(1.0f,0);
                 gl::bind_vertex_array(it->second->vao);
-                glFrontFace(paraboloid_mode
+                gl::set_front_face_raw(paraboloid_mode
                     ?(gpu_3do_reversed_winding(inst.transform)?GL_CCW:GL_CW)
                     :(gpu_3do_reversed_winding(inst.transform)?GL_CW:GL_CCW));
                 // Keep source order for exactly coplanar alpha cutouts.
@@ -881,8 +881,8 @@
                     bool const solid=std::get<2>(key);
                     auto const &mat=resolve_capture_material(material_key);
                     if(submit_material(mat,solid,material_key,true)) {
-                        if(std::get<3>(key))glDisable(GL_CULL_FACE);
-                        else glEnable(GL_CULL_FACE);
+                        if(std::get<3>(key))gl::set_cull_face_enabled(false);
+                        else gl::set_cull_face_enabled(true);
                         counts.clear();offsets.clear();
                         for(size_t k=i;k<group_end;++k) {
                             auto const *group=model_group_scratch[k];
@@ -947,10 +947,10 @@
             gl::set_active_texture_unit(0);
             GLint previous_array=0;
             glGetIntegerv(GL_TEXTURE_BINDING_2D_ARRAY,&previous_array);
-            glBindTexture(GL_TEXTURE_2D_ARRAY,
+            gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,
                           probe_target->color_texture());
             glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
-            glBindTexture(GL_TEXTURE_2D_ARRAY,GLuint(previous_array));
+            gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,GLuint(previous_array));
             if(profile_shared) {
                 auto &diag=shared_capture_profile_window;
                 diag.cpu_ns[5]+=elapsed_profile_ns(

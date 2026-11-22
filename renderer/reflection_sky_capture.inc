@@ -44,8 +44,8 @@
             shader.set_thing_fade(1.0f,0);
             shader.set_clip({{0.0f,0.0f,0.0f,0.0f}},false);
             gl::bind_vertex_array(cache.vao);
-            glFrontFace(paraboloid?GL_CW:(mirrored?GL_CW:GL_CCW));
-            glEnable(GL_CULL_FACE);
+            gl::set_front_face_raw(paraboloid?GL_CW:(mirrored?GL_CW:GL_CCW));
+            gl::set_cull_face_enabled(true);
             // Sky and ordinary world surfaces share the same unrestricted
             // capture frustum, with normal visibility and portal tests.
             size_t drawn=0;

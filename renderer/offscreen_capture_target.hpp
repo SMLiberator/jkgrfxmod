@@ -2,9 +2,14 @@
 // Reusable non-MSAA HDR color/depth target for offscreen cameras.
 // Uses no native rdCamera, no G-buffer and no main framebuffer attachments.
 #include "glad/glad.h"
+#include "glutil/gl.hpp"
 #include <algorithm>
 
 namespace jkgm {
+// Native/temporary GL state edits must never leave an old cached binding.
+struct offscreen_capture_state_invalidator {
+    ~offscreen_capture_state_invalidator() {gl::invalidate_cached_state();}
+};
 class offscreen_capture_target {
     GLuint fbo_=0,color_=0,depth_=0;
     int width_=0,height_=0;
@@ -16,6 +21,7 @@ public:
         operator=(offscreen_capture_target const &)=delete;
     ~offscreen_capture_target(){release();}
     void release() {
+        offscreen_capture_state_invalidator invalidate_on_return;
         if(depth_)glDeleteRenderbuffers(1,&depth_);
         if(color_)glDeleteTextures(1,&color_);
         if(fbo_)glDeleteFramebuffers(1,&fbo_);
@@ -23,6 +29,7 @@ public:
         width_=height_=0;
     }
     bool ensure(int width,int height) {
+        offscreen_capture_state_invalidator invalidate_on_return;
         if(width<=0 || height<=0 || width>16384 || height>16384)
             return false;
         if(failed_ && width==width_ && height==height_)return false;
@@ -98,12 +105,14 @@ public:
         reflection_probe_capture_target const &)=delete;
     ~reflection_probe_capture_target(){release();}
     void release() {
+        offscreen_capture_state_invalidator invalidate_on_return;
         if(depth_)glDeleteRenderbuffers(1,&depth_);
         if(color_)glDeleteTextures(1,&color_);
         if(fbo_)glDeleteFramebuffers(1,&fbo_);
         depth_=color_=fbo_=0;side_=layers_=0;
     }
     bool ensure(int side,int layers) {
+        offscreen_capture_state_invalidator invalidate_on_return;
         if(side<1 || layers<1 || layers>6)return false;
         if(ready() && side==side_ && layers==layers_)return true;
         GLint max_size=0,max_layers=0;
@@ -181,6 +190,7 @@ class offscreen_capture_gl_scope {
     GLboolean clip_distance_[3]{GL_FALSE,GL_FALSE,GL_FALSE};
 public:
     offscreen_capture_gl_scope() {
+        offscreen_capture_state_invalidator invalidate_on_return;
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw_);
         glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read_);
         glGetIntegerv(GL_VIEWPORT,viewport_);
@@ -217,6 +227,7 @@ public:
     offscreen_capture_gl_scope &
         operator=(offscreen_capture_gl_scope const &)=delete;
     ~offscreen_capture_gl_scope(){
+        offscreen_capture_state_invalidator invalidate_on_return;
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER,GLuint(draw_));
         glBindFramebuffer(GL_READ_FRAMEBUFFER,GLuint(read_));
         glViewport(viewport_[0],viewport_[1],viewport_[2],viewport_[3]);

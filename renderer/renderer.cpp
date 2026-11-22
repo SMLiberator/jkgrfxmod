@@ -2179,6 +2179,26 @@ namespace jkgm {
 
         void begin_frame()
         {
+            // Native JK/Wine and external GL operations can change state
+            // between presentations. Never trust the previous frame.
+            gl::invalidate_cached_state();
+            static unsigned state_profile_frames=0U;
+            if(the_config->profile_renderer && ++state_profile_frames>=120U) {
+                state_profile_frames=0U;
+                auto const state=gl::consume_state_cache_stats();
+                LOG_INFO("PERF GL state calls active=",state.active_calls,
+                    " skipped=",state.active_skipped,
+                    " texture=",state.texture_calls,
+                    " skipped=",state.texture_skipped,
+                    " vao=",state.vao_calls,
+                    " skipped=",state.vao_skipped,
+                    " front=",state.front_calls,
+                    " skipped=",state.front_skipped,
+                    " cull=",state.cull_calls,
+                    " skipped=",state.cull_skipped,
+                    " cull_mode=",state.cull_mode_calls,
+                    " skipped=",state.cull_mode_skipped);
+            }
             gl::set_active_texture_unit(0);
             frame_screen->begin_frame(
                 the_config->retain_hom_pixels && mode==renderer_mode::ingame);
@@ -4660,10 +4680,9 @@ namespace jkgm {
                 !post_exempt && !decals_only &&
                 sector_crossing_plane_texture!=0U;
             if(crossing_buffer_ready) {
-                glActiveTexture(GL_TEXTURE0+
-                    gpu_3do_sector_plane_texture_unit);
-                glBindTexture(GL_TEXTURE_BUFFER,sector_crossing_plane_texture);
-                glActiveTexture(GL_TEXTURE0);
+                gl::set_active_texture_unit_raw(gpu_3do_sector_plane_texture_unit);
+                gl::bind_texture_raw(GL_TEXTURE_BUFFER,sector_crossing_plane_texture);
+                gl::set_active_texture_unit_raw(0);
             }
             // Both experiments reconstruct world XYZ from the
             // same camera-space vertex and these camera axes.
@@ -4673,13 +4692,11 @@ namespace jkgm {
                 continuous_ambient_key_texture!=0U &&
                 continuous_ambient_value_texture!=0U;
             if(continuous_buffer_ready) {
-                glActiveTexture(GL_TEXTURE0+
-                    texture_units::forward_continuous_key_buffer);
-                glBindTexture(GL_TEXTURE_BUFFER,continuous_ambient_key_texture);
-                glActiveTexture(GL_TEXTURE0+
-                    texture_units::forward_continuous_value_buffer);
-                glBindTexture(GL_TEXTURE_BUFFER,continuous_ambient_value_texture);
-                glActiveTexture(GL_TEXTURE0);
+                gl::set_active_texture_unit_raw(texture_units::forward_continuous_key_buffer);
+                gl::bind_texture_raw(GL_TEXTURE_BUFFER,continuous_ambient_key_texture);
+                gl::set_active_texture_unit_raw(texture_units::forward_continuous_value_buffer);
+                gl::bind_texture_raw(GL_TEXTURE_BUFFER,continuous_ambient_value_texture);
+                gl::set_active_texture_unit_raw(0);
             }
             // Sparse ambient and sector crossing share the world-space transform.
             if(crossing_buffer_ready ||
@@ -5650,7 +5667,7 @@ namespace jkgm {
                 auto const *active_probe=hemi_active?&probe_it->second:nullptr;
                 if(active_probe) {
                     gl::set_active_texture_unit(23);
-                    glBindTexture(GL_TEXTURE_2D_ARRAY,
+                    gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,
                                   active_probe->target->color_texture());
                     gl::set_active_texture_unit(0);
                 }
@@ -6185,7 +6202,7 @@ namespace jkgm {
             glDisable(GL_BLEND);
             glDisable(GL_SCISSOR_TEST);
             glDisable(GL_STENCIL_TEST);
-            glDisable(GL_CULL_FACE);
+            gl::set_cull_face_enabled(false);
             glDisable(GL_POLYGON_OFFSET_FILL);
             glEnable(GL_DEPTH_TEST);
             glDepthFunc(GL_LEQUAL); // allow already-depth-written opaque mirrors
@@ -6417,7 +6434,7 @@ namespace jkgm {
             glDisable(GL_BLEND);
             glDisable(GL_SCISSOR_TEST);
             glDisable(GL_STENCIL_TEST);
-            glDisable(GL_CULL_FACE);
+            gl::set_cull_face_enabled(false);
             glDisable(GL_POLYGON_OFFSET_FILL);
             glEnable(GL_DEPTH_TEST);
             glDepthFunc(GL_LEQUAL);
@@ -6428,7 +6445,7 @@ namespace jkgm {
             program.set_camera(camera.native_view,half_fov,aspect,
                                camera.far_plane);
             program.set_proxy_mode(proxy_mode);
-            glBindVertexArray(thing_occlusion_proxy_vao);
+            gl::bind_vertex_array_raw(thing_occlusion_proxy_vao);
             auto read=[](uintptr_t at,void *dst,size_t count) {
                 return engine_material_debug::read_bytes(at,dst,count);
             };
@@ -6543,7 +6560,7 @@ namespace jkgm {
                     glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
                     gpu_3do_last_drawn[item.sprite_id]=gpu_3do_present_serial;
                 } else {
-                    glBindVertexArray(thing_occlusion_proxy_vao);
+                    gl::bind_vertex_array_raw(thing_occlusion_proxy_vao);
                     if(draw_mode!=0) {
                         program.set_rect(rect,draw_mode);
                         glDrawArrays(GL_TRIANGLES,0,6);
@@ -6753,7 +6770,7 @@ namespace jkgm {
             glGetIntegerv(GL_POLYGON_MODE,polygon_mode);
             glDisable(GL_DEPTH_TEST);
             glDepthMask(GL_FALSE);
-            glDisable(GL_CULL_FACE);
+            gl::set_cull_face_enabled(false);
             glDisable(GL_SCISSOR_TEST);
             glDisable(GL_STENCIL_TEST);
             glDisable(GL_POLYGON_OFFSET_FILL);
@@ -6768,7 +6785,7 @@ namespace jkgm {
             program.set_camera(camera.native_view,half_fov,aspect,
                                camera.far_plane);
             int const proxy_mode=the_config->gpu_3do_occlusion_proxy_mode;
-            glBindVertexArray(thing_occlusion_proxy_vao);
+            gl::bind_vertex_array_raw(thing_occlusion_proxy_vao);
             float const alpha=
                 the_config->gpu_3do_occlusion_debug_view==1?0.80f:0.13f;
             if(gpu_timing)thing_occlusion_debug_gpu_timers.timestamp(0U,true);
@@ -6788,7 +6805,7 @@ namespace jkgm {
                     glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
                     gpu_3do_last_drawn[item.sprite_id]=gpu_3do_present_serial;
                 } else {
-                    glBindVertexArray(thing_occlusion_proxy_vao);
+                    gl::bind_vertex_array_raw(thing_occlusion_proxy_vao);
                     if(item.mode!=0U)program.set_rect(item.rect,int(item.mode));
                     else program.set_bound(item.bound);
                     glDrawArrays(GL_TRIANGLES,0,item.mode!=0U?6:36);
@@ -7218,7 +7235,7 @@ namespace jkgm {
             if(sky_aperture) {
                 gl::set_active_texture_unit(
                     texture_units::forward_next_extended_unit);
-                glBindTexture(GL_TEXTURE_2D_ARRAY,
+                gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,
                               sun_sky_aperture_target->depth.value());
             }
             if(dynamic>0) {
@@ -8097,7 +8114,7 @@ namespace jkgm {
             if(scissor)glDisable(GL_SCISSOR_TEST);
             glDisable(GL_POLYGON_OFFSET_FILL);
             glDisable(GL_BLEND);
-            glDisable(GL_CULL_FACE); // sky openings are two-sided
+            gl::set_cull_face_enabled(false); // sky openings are two-sided
             glEnable(GL_DEPTH_TEST);
             glDepthMask(GL_TRUE);
             glDepthFunc(GL_LESS);
@@ -8182,7 +8199,7 @@ namespace jkgm {
             glPolygonOffset(saved_polygon_factor,saved_polygon_units);
             if(scissor)glEnable(GL_SCISSOR_TEST);
             if(blend)glEnable(GL_BLEND);else glDisable(GL_BLEND);
-            if(cull)glEnable(GL_CULL_FACE);else glDisable(GL_CULL_FACE);
+            if(cull)gl::set_cull_face_enabled(true);else gl::set_cull_face_enabled(false);
             if(depth_test)glEnable(GL_DEPTH_TEST);else glDisable(GL_DEPTH_TEST);
             if(polygon_offset)glEnable(GL_POLYGON_OFFSET_FILL);
             else glDisable(GL_POLYGON_OFFSET_FILL);
@@ -10016,18 +10033,18 @@ namespace jkgm {
             glGetIntegerv(GL_CURRENT_PROGRAM,&old_prog);
             glGetIntegerv(GL_VIEWPORT,old_viewport);
             glGetIntegerv(GL_ACTIVE_TEXTURE,&old_active);
-            glActiveTexture(GL_TEXTURE0+11);
+            gl::set_active_texture_unit_raw(11);
             glGetIntegerv(GL_TEXTURE_BINDING_2D,&old_tex11);
-            glActiveTexture(GL_TEXTURE0+12);
+            gl::set_active_texture_unit_raw(12);
             glGetIntegerv(GL_TEXTURE_BINDING_2D,&old_tex12);
-            glActiveTexture(GLenum(old_active));
+            gl::set_active_texture_unit_raw(old_active-GL_TEXTURE0);
             glGetIntegerv(GL_DEPTH_FUNC,&old_depth_func);
             glGetBooleanv(GL_DEPTH_WRITEMASK,&old_depth_mask);
             glGetBooleanv(GL_COLOR_WRITEMASK,old_color_mask);
 
             glDisable(GL_SCISSOR_TEST);
             glDisable(GL_BLEND);
-            glDisable(GL_CULL_FACE);
+            gl::set_cull_face_enabled(false);
             glDisable(GL_POLYGON_OFFSET_FILL);
             glEnable(GL_DEPTH_TEST);
             glDepthMask(GL_TRUE);
@@ -10049,14 +10066,14 @@ namespace jkgm {
                                get<2>(mat.tint)),
                     mat.albedo_transition);
                 if(textured) {
-                    glActiveTexture(GL_TEXTURE0+11);
-                    glBindTexture(GL_TEXTURE_2D,mat.texture.value());
+                    gl::set_active_texture_unit_raw(11);
+                    gl::bind_texture_raw(GL_TEXTURE_2D,mat.texture.value());
                 }
                 if(next_textured) {
-                    glActiveTexture(GL_TEXTURE0+12);
-                    glBindTexture(GL_TEXTURE_2D,mat.texture2.value());
+                    gl::set_active_texture_unit_raw(12);
+                    gl::bind_texture_raw(GL_TEXTURE_2D,mat.texture2.value());
                 }
-                glActiveTexture(GL_TEXTURE0);
+                gl::set_active_texture_unit_raw(0);
             };
             for(int cascade=0;cascade<2;++cascade) {
                 auto const &view=sun_shadow_views[cascade];
@@ -10128,16 +10145,16 @@ namespace jkgm {
             glColorMask(old_color_mask[0],old_color_mask[1],
                         old_color_mask[2],old_color_mask[3]);
             if(old_depth)glEnable(GL_DEPTH_TEST);else glDisable(GL_DEPTH_TEST);
-            if(old_cull)glEnable(GL_CULL_FACE);else glDisable(GL_CULL_FACE);
+            if(old_cull)gl::set_cull_face_enabled(true);else gl::set_cull_face_enabled(false);
             if(old_blend)glEnable(GL_BLEND);else glDisable(GL_BLEND);
             if(old_scissor)glEnable(GL_SCISSOR_TEST);else glDisable(GL_SCISSOR_TEST);
             if(old_offset)glEnable(GL_POLYGON_OFFSET_FILL);
             else glDisable(GL_POLYGON_OFFSET_FILL);
-            glActiveTexture(GL_TEXTURE0+11);
-            glBindTexture(GL_TEXTURE_2D,GLuint(old_tex11));
-            glActiveTexture(GL_TEXTURE0+12);
-            glBindTexture(GL_TEXTURE_2D,GLuint(old_tex12));
-            glActiveTexture(GLenum(old_active));
+            gl::set_active_texture_unit_raw(11);
+            gl::bind_texture_raw(GL_TEXTURE_2D,GLuint(old_tex11));
+            gl::set_active_texture_unit_raw(12);
+            gl::bind_texture_raw(GL_TEXTURE_2D,GLuint(old_tex12));
+            gl::set_active_texture_unit_raw(old_active-GL_TEXTURE0);
         }
 
         void draw_game_opaque_composite()
@@ -10292,7 +10309,7 @@ namespace jkgm {
                             sun_sky_aperture_depth_transform());
                         gl::set_active_texture_unit(
                             texture_units::opaque_sky_aperture);
-                        glBindTexture(GL_TEXTURE_2D_ARRAY,
+                        gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,
                                       sun_sky_aperture_target->depth.value());
                     }
                     if(shadows) {
@@ -10321,11 +10338,11 @@ namespace jkgm {
                        sun_caustic_target->valid[1]) {
                         auto &caustics=*sun_caustic_target;
                         gl::set_active_texture_unit(17);
-                        glBindTexture(GL_TEXTURE_2D_ARRAY,caustics.depth.value());
+                        gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,caustics.depth.value());
                         gl::set_active_texture_unit(18);
-                        glBindTexture(GL_TEXTURE_2D_ARRAY,caustics.density.value());
+                        gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,caustics.density.value());
                         gl::set_active_texture_unit(19);
-                        glBindTexture(GL_TEXTURE_2D,caustics.pattern.value());
+                        gl::bind_texture_raw(GL_TEXTURE_2D,caustics.pattern.value());
                         gl::set_active_texture_unit(0);
                         static auto const caustic_start=
                             std::chrono::steady_clock::now();
@@ -10821,7 +10838,7 @@ namespace jkgm {
             if(!ready)return;
             auto const it=reflection_probes.find(shared_reflection_owner_key);
             gl::set_active_texture_unit(23);
-            glBindTexture(GL_TEXTURE_2D_ARRAY,
+            gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,
                           it->second.target->color_texture());
             gl::set_active_texture_unit(0);
         }
@@ -11426,7 +11443,7 @@ namespace jkgm {
             // World surfaces are unconditionally single-sided, including
             // those marked 0x1 in native JK. Fan winding is normalized to
             // each SithSurface's authored normal at cache build time.
-            glFrontFace(GL_CCW);
+            gl::set_front_face_raw(GL_CCW);
             gl::set_face_cull_mode(gl::face_mode::back);
             gl::enable(gl::capability::cull_face);
             // The native opaque world batch is disabled for this isolation
@@ -11882,7 +11899,7 @@ namespace jkgm {
             gl::set_depth_mask(false);
             gl::set_blend_function(gl::blend_function::one,
                                    gl::blend_function::one_minus_source_alpha);
-            glFrontFace(GL_CCW);
+            gl::set_front_face_raw(GL_CCW);
             gl::set_face_cull_mode(gl::face_mode::back);
             gl::enable(gl::capability::cull_face);
             gl::bind_vertex_array(cache.vao);
@@ -12692,20 +12709,18 @@ namespace jkgm {
                 glBufferData(GL_TEXTURE_BUFFER,
                     static_cast<GLsizeiptr>(table->key_bytes()),
                     table->keys().data(),GL_STATIC_DRAW);
-                glActiveTexture(GL_TEXTURE0+
-                    texture_units::forward_continuous_key_buffer);
-                glBindTexture(GL_TEXTURE_BUFFER,key_tex);
+                gl::set_active_texture_unit_raw(texture_units::forward_continuous_key_buffer);
+                gl::bind_texture_raw(GL_TEXTURE_BUFFER,key_tex);
                 glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32UI,key_buffer);
                 glBindBuffer(GL_TEXTURE_BUFFER,value_buffer);
                 glBufferData(GL_TEXTURE_BUFFER,
                     static_cast<GLsizeiptr>(table->value_bytes()),
                     table->values().data(),GL_DYNAMIC_DRAW);
-                glActiveTexture(GL_TEXTURE0+
-                    texture_units::forward_continuous_value_buffer);
-                glBindTexture(GL_TEXTURE_BUFFER,value_tex);
+                gl::set_active_texture_unit_raw(texture_units::forward_continuous_value_buffer);
+                gl::bind_texture_raw(GL_TEXTURE_BUFFER,value_tex);
                 glTexBuffer(GL_TEXTURE_BUFFER,GL_RG32F,value_buffer);
                 glBindBuffer(GL_TEXTURE_BUFFER,0);
-                glActiveTexture(GL_TEXTURE0);
+                gl::set_active_texture_unit_raw(0);
                 if(glGetError()!=GL_NO_ERROR) {
                     glDeleteTextures(1,&key_tex);
                     glDeleteTextures(1,&value_tex);
@@ -12867,12 +12882,11 @@ namespace jkgm {
                     static_cast<GLsizeiptr>(planes.size()*sizeof(GLfloat)),
                     planes.data(),GL_STATIC_DRAW);
                 glGenTextures(1,&texture);
-                glActiveTexture(GL_TEXTURE0+
-                    gpu_3do_sector_plane_texture_unit);
-                glBindTexture(GL_TEXTURE_BUFFER,texture);
+                gl::set_active_texture_unit_raw(gpu_3do_sector_plane_texture_unit);
+                gl::bind_texture_raw(GL_TEXTURE_BUFFER,texture);
                 glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,buffer);
-                glBindTexture(GL_TEXTURE_BUFFER,0);
-                glActiveTexture(GL_TEXTURE0);
+                gl::bind_texture_raw(GL_TEXTURE_BUFFER,0);
+                gl::set_active_texture_unit_raw(0);
                 glBindBuffer(GL_TEXTURE_BUFFER,0);
                 sector_crossing_plane_buffer=buffer;
                 sector_crossing_plane_texture=texture;
@@ -13377,8 +13391,8 @@ namespace jkgm {
             // retained for sky/background wherever this capture has holes.
             glClearColor(0.0f,0.0f,0.0f,0.0f);
             glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_BACK);
+            gl::set_cull_face_enabled(true);
+            gl::set_face_cull_mode(gl::face_mode::back);
             shader.use_program();
             shader.set_projection(projection);
             shader.set_clip(setup.clip_view);
@@ -13439,7 +13453,7 @@ namespace jkgm {
                 planar_reflection_sky_visibility.empty()?nullptr:
                     &planar_reflection_sky_visibility);
             gl::bind_vertex_array(cache.vao);
-            glFrontFace(GL_CW); // reflected camera reverses handedness
+            gl::set_front_face_raw(GL_CW); // reflected camera reverses handedness
             std::map<std::tuple<uintptr_t,int32_t,uint32_t>,
                 std::vector<world_cache_draw_candidate const *>> world_groups;
             for(auto const &face:planar_frame_candidates) {
@@ -13572,7 +13586,7 @@ namespace jkgm {
                 bool mesh_drawn=false;
                 // Both the reflected camera and negative-scale models
                 // reverse winding. Two reversals restore the normal front.
-                glFrontFace(gpu_3do_reversed_winding(inst.transform)
+                gl::set_front_face_raw(gpu_3do_reversed_winding(inst.transform)
                     ?GL_CCW:GL_CW);
                 for(auto const &group:inst.geometry->groups) {
                     if(gpu_3do_batch_outside_frustum(
@@ -13604,8 +13618,8 @@ namespace jkgm {
                     }
                     if(!submit_material(mat,solid))continue;
                     if(group.nonplanar || (group.face_type&1U)) {
-                        glDisable(GL_CULL_FACE);
-                    } else glEnable(GL_CULL_FACE);
+                        gl::set_cull_face_enabled(false);
+                    } else gl::set_cull_face_enabled(true);
                     gl::draw_elements(gl::element_type::triangles,
                         static_cast<GLsizei>(group.count),
                         gl::index_type::uint32,
@@ -13649,9 +13663,9 @@ namespace jkgm {
                         make_point(inst.sector_tint[0],inst.sector_tint[1],
                                    inst.sector_tint[2]));
                     gl::bind_vertex_array(it->second->vao);
-                    glFrontFace(draw.reversed?GL_CCW:GL_CW);
-                    if(draw.two_sided)glDisable(GL_CULL_FACE);
-                    else glEnable(GL_CULL_FACE);
+                    gl::set_front_face_raw(draw.reversed?GL_CCW:GL_CW);
+                    if(draw.two_sided)gl::set_cull_face_enabled(false);
+                    else gl::set_cull_face_enabled(true);
                     if(!submit_material(draw.material,draw.solid))continue;
                     gl::draw_elements(gl::element_type::triangles,
                         static_cast<GLsizei>(draw.group->count),
@@ -13674,8 +13688,8 @@ namespace jkgm {
                 glDepthMask(GL_FALSE);
                 glDepthFunc(GL_LEQUAL);
                 gl::bind_vertex_array(cache.vao);
-                glFrontFace(GL_CW);
-                glEnable(GL_CULL_FACE);
+                gl::set_front_face_raw(GL_CW);
+                gl::set_cull_face_enabled(true);
                 shader.set_modelview(view,false);
                 shader.set_thing_fade(1.0f,0);
                 for(auto const &batch:emissive_world) {
@@ -13699,9 +13713,9 @@ namespace jkgm {
                         make_point(inst.sector_tint[0],inst.sector_tint[1],
                                    inst.sector_tint[2]));
                     gl::bind_vertex_array(it->second->vao);
-                    glFrontFace(batch.reversed?GL_CCW:GL_CW);
-                    if(batch.two_sided)glDisable(GL_CULL_FACE);
-                    else glEnable(GL_CULL_FACE);
+                    gl::set_front_face_raw(batch.reversed?GL_CCW:GL_CW);
+                    if(batch.two_sided)gl::set_cull_face_enabled(false);
+                    else gl::set_cull_face_enabled(true);
                     if(!submit_material(batch.material,batch.solid))continue;
                     gl::draw_elements(gl::element_type::triangles,
                         static_cast<GLsizei>(batch.group->count),
@@ -13723,7 +13737,7 @@ namespace jkgm {
             // Refresh the reflection mip chain once, not once per surface.
             // GL scope restores the previous unit-0 material binding.
             gl::set_active_texture_unit(0);
-            glBindTexture(GL_TEXTURE_2D,planar_capture_target->color_texture());
+            gl::bind_texture_raw(GL_TEXTURE_2D,planar_capture_target->color_texture());
             glGenerateMipmap(GL_TEXTURE_2D);
             if(gpu_profile_active) {
                 planar_gpu_queries.timestamp(2U,false);
