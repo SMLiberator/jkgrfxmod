@@ -36,7 +36,7 @@ struct sun_caustics_gpu {
         resolution=std::max(64U,std::min(pixels,1024U));
         GLint active=0,old_array=0,old_2d=0,draw=0,read=0,vao_prev=0,vbo=0;
         glGetIntegerv(GL_ACTIVE_TEXTURE,&active);
-        glActiveTexture(GL_TEXTURE0);
+        gl::set_active_texture_unit_raw(0);
         glGetIntegerv(GL_TEXTURE_BINDING_2D_ARRAY,&old_array);
         glGetIntegerv(GL_TEXTURE_BINDING_2D,&old_2d);
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw);
@@ -44,7 +44,7 @@ struct sun_caustics_gpu {
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&vao_prev);
         glGetIntegerv(GL_ARRAY_BUFFER_BINDING,&vbo);
         auto allocate=[&](gl::texture &tex,GLenum format,GLenum external) {
-            glBindTexture(GL_TEXTURE_2D_ARRAY,tex.value());
+            gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,tex.value());
             glTexImage3D(GL_TEXTURE_2D_ARRAY,0,format,GLsizei(resolution),
                          GLsizei(resolution),2,0,external,GL_FLOAT,nullptr);
             glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
@@ -72,7 +72,7 @@ struct sun_caustics_gpu {
         }
         // Deterministic procedural texture; no uploaded or runtime image file.
         auto const noise=generate_sun_caustic_pattern();
-        glBindTexture(GL_TEXTURE_2D,pattern.value());
+        gl::bind_texture_raw(GL_TEXTURE_2D,pattern.value());
         glTexImage2D(GL_TEXTURE_2D,0,GL_R8,
                      sun_caustic_pattern_size,sun_caustic_pattern_size,
                      0,GL_RED,GL_UNSIGNED_BYTE,noise.data());
@@ -96,9 +96,9 @@ struct sun_caustics_gpu {
         glBindBuffer(GL_ARRAY_BUFFER,GLuint(vbo));
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER,GLuint(draw));
         glBindFramebuffer(GL_READ_FRAMEBUFFER,GLuint(read));
-        glBindTexture(GL_TEXTURE_2D_ARRAY,GLuint(old_array));
-        glBindTexture(GL_TEXTURE_2D,GLuint(old_2d));
-        glActiveTexture(GLenum(active));
+        gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,GLuint(old_array));
+        gl::bind_texture_raw(GL_TEXTURE_2D,GLuint(old_2d));
+        gl::set_active_texture_unit_raw(active-GL_TEXTURE0);
         if(!complete)LOG_WARNING("Sun Fluid caustics framebuffer incomplete");
     }
 

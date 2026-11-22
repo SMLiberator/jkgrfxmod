@@ -47,7 +47,7 @@ struct sun_sky_aperture_gpu {
         glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&old_read_fbo);
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&old_vao);
         glGetIntegerv(GL_ARRAY_BUFFER_BINDING,&old_array_buffer);
-        glBindTexture(GL_TEXTURE_2D_ARRAY,depth.value());
+        gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,depth.value());
         glTexImage3D(GL_TEXTURE_2D_ARRAY,0,GL_DEPTH_COMPONENT24,
             GLsizei(resolution),GLsizei(resolution),2,0,
             GL_DEPTH_COMPONENT,GL_FLOAT,nullptr);
@@ -87,8 +87,8 @@ struct sun_sky_aperture_gpu {
         glBindBuffer(GL_ARRAY_BUFFER,GLuint(old_array_buffer));
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER,GLuint(old_draw_fbo));
         glBindFramebuffer(GL_READ_FRAMEBUFFER,GLuint(old_read_fbo));
-        glBindTexture(GL_TEXTURE_2D_ARRAY,GLuint(old_texture));
-        glActiveTexture(GLenum(old_active_texture));
+        gl::bind_texture_raw(GL_TEXTURE_2D_ARRAY,GLuint(old_texture));
+        gl::set_active_texture_unit_raw(old_active_texture-GL_TEXTURE0);
     }
 
     bool update_world(decal_native_read const &read,uintptr_t native_world)
