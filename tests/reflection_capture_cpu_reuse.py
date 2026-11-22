@@ -11,6 +11,7 @@ assert renderer.count("reflection_world_buckets.invalidate();")>=2
 assert "reflection_world_buckets.refresh(" in capture
 assert "reflection_world_buckets.buckets()" in capture
 assert "cache.loaded_world,cache.revision,cache.mesh.surfaces" in capture
+assert "gpu_offscreen_model_topology.prepare(" in (root/"renderer/main.cpp").read_text(encoding="utf-8")
 assert "std::map<std::tuple<uintptr_t,int32_t,bool>," not in capture
 assert "surface_mask" in capture
 assert "dual_paraboloid_bounds_outside(" in capture

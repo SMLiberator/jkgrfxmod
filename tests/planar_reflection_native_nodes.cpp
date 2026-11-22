@@ -98,6 +98,70 @@ int main()
     assert(nodes[0].hierarchy_index==0U &&
            nodes[1].hierarchy_index==3U);
 
+    // Shared model topology must be read only once per revision, while
+    // per-Thing amputations and joint poses remain live on every capture.
+    planar_reflection_model_topology_cache topology_cache;
+    topology_cache.prepare(0x20000U,10U,true,1U);
+    unsigned hierarchy_reads=0U;
+    auto counted_read=[&](uintptr_t at,void *dst,size_t n) {
+        if(at>=hierarchy && at<hierarchy+4U*0xb4U)
+            ++hierarchy_reads;
+        return read(at,dst,n);
+    };
+    auto cached_capture=[&] {
+        return collect_planar_reflection_native_nodes(
+            counted_read,source,refresh,nodes,false,&topology_cache);
+    };
+    assert(cached_capture());
+    assert(hierarchy_reads>=12U && nodes.size()==2U);
+    hierarchy_reads=0U;
+    assert(cached_capture());
+    assert(hierarchy_reads==0U && nodes.size()==2U);
+
+    // Amputation changes cannot be stored in the shared model cache.
+    put(cuts+4U,uint32_t(0));
+    assert(cached_capture());
+    assert(nodes.size()==4U && nodes.back().occurrence==2U);
+    put(cuts+4U,uint32_t(1));
+    assert(cached_capture());
+    assert(nodes.size()==2U && nodes.back().occurrence==2U);
+
+    // Model mesh-slot replacement changes occurrence numbering. A fresh
+    // mutator revision must rebuild both the hierarchy and its ordinals.
+    put(hierarchy+0xb4U+0x4cU,uint32_t(0));
+    topology_cache.prepare(0x20000U,11U,true,1U);
+    put(cuts+4U,uint32_t(0));
+    assert(cached_capture());
+    assert(nodes.size()==4U && nodes.back().occurrence==3U);
+    put(cuts+4U,uint32_t(1));
+    assert(cached_capture());
+    assert(nodes.size()==2U && nodes.back().occurrence==2U);
+
+    // Broken parent chains must still be rejected when topology rebuilds.
+    put(hierarchy+0xb4U+0x50U,uint32_t(hierarchy+2U*0xb4U));
+    topology_cache.prepare(0x20000U,12U,true,1U);
+    assert(!cached_capture());
+    assert(nodes.empty());
+    put(hierarchy+0xb4U+0x50U,uint32_t(hierarchy));
+    put(hierarchy+0xb4U+0x4cU,uint32_t(1));
+    topology_cache.prepare(0x20000U,13U,true,1U);
+    assert(cached_capture());
+    hierarchy_reads=0U;
+    topology_cache.prepare(0x30000U,13U,true,1U);
+    assert(cached_capture());
+    assert(hierarchy_reads>=12U); // World identity invalidates.
+
+    // No complete mutation tracker: the fallback cannot reuse old topology
+    // into a subsequent frame.
+    hierarchy_reads=0U;
+    topology_cache.prepare(0x30000U,13U,false,1U);
+    assert(cached_capture());
+    assert(hierarchy_reads>=12U);
+    hierarchy_reads=0U;
+    topology_cache.prepare(0x30000U,13U,false,2U);
+    assert(cached_capture());
+    assert(hierarchy_reads>=12U);
+
     // Stale/disagreeing native matrix state must clear partial output.
     auto bad_refresh=refresh;
     put(pose,float(77)); // First component mismatch.

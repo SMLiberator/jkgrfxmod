@@ -4,6 +4,7 @@
 // traverses pFirstThingInSector in visible sectors. Traverse every sector
 // without trusting an unverified SithThing allocation stride or using JK's
 // render callbacks. Layout offsets match existing JKGM native readers.
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -30,6 +31,36 @@ namespace jkgm {
         uint32_t excluded_geo_mode=0,non_models=0;
         planar_reflection_thing_error error=planar_reflection_thing_error::none;
     };
+    // Reuse the pointer-identity set and index stamps between independent
+    // camera/probe scans. Epoch stamps replace a second allocated hash set;
+    // a repeated pointer OR a repeated native Thing index still fails closed.
+    struct planar_reflection_thing_scan_scratch {
+        std::unordered_set<uintptr_t> visited;
+        std::vector<uint32_t> index_stamps;
+        uint32_t epoch=0U;
+        void start(uint32_t thing_capacity) {
+            visited.clear();
+            if(visited.bucket_count()<thing_capacity)
+                visited.reserve(thing_capacity);
+            if(index_stamps.size()<thing_capacity)
+                index_stamps.resize(thing_capacity,0U);
+            if(++epoch==0U) {
+                std::fill(index_stamps.begin(),index_stamps.end(),0U);
+                epoch=1U;
+            }
+        }
+        bool mark(uint32_t index) {
+            if(index>=index_stamps.size() || index_stamps[index]==epoch)
+                return false;
+            index_stamps[index]=epoch;
+            return true;
+        }
+    };
+    inline planar_reflection_thing_scan_scratch &
+    planar_reflection_default_thing_scan_scratch() {
+        static thread_local planar_reflection_thing_scan_scratch scratch;
+        return scratch;
+    }
     inline char const *planar_reflection_thing_error_name(
         planar_reflection_thing_error value)
     {
@@ -51,7 +82,8 @@ namespace jkgm {
     template<class Read>
     bool collect_planar_reflection_things(
         Read const &read,uintptr_t world,planar_reflection_thing_scan &out,
-        std::vector<uint8_t> const *visible_sectors=nullptr)
+        std::vector<uint8_t> const *visible_sectors=nullptr,
+        planar_reflection_thing_scan_scratch *scratch=nullptr)
     {
         out={};
         auto fail=[&](planar_reflection_thing_error reason) {
@@ -80,10 +112,10 @@ namespace jkgm {
            uintptr_t(sector_base)+uintptr_t(sector_count)*0x98U>=0x7ff00000U)
             return fail(planar_reflection_thing_error::invalid_world);
         out.sectors=sector_count;
-        std::unordered_set<uintptr_t> visited;
-        visited.reserve(thing_capacity);
-        std::unordered_set<uint32_t> indices;
-        indices.reserve(thing_capacity);
+        auto &workspace=scratch?*scratch:
+            planar_reflection_default_thing_scan_scratch();
+        workspace.start(thing_capacity);
+        auto &visited=workspace.visited;
         // Match OpenJKDF2's sector-first Thing discovery, retaining the
         // neighboring sectors included in the independently computed mask.
         // Unknown/mismatched masks fail open to the original full scan.
@@ -107,7 +139,7 @@ namespace jkgm {
                    !read32(uintptr_t(current)+0x0cU,type) ||
                    !read32(uintptr_t(current)+0x5cU,owner) ||
                    !read32(uintptr_t(current)+0x60U,next) ||
-                   index>=thing_capacity || !indices.insert(index).second)
+                   index>=thing_capacity || !workspace.mark(index))
                     return fail(planar_reflection_thing_error::invalid_thing);
                 ++out.linked_things;
                 // A sector's linked list must contain its actual Things;

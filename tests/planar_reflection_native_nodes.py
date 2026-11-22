@@ -14,7 +14,14 @@ assert "read_sprite_decal_active_geoset(" in native
 assert "precise_type3_read_pose_batch(" in native
 assert "mots_native_detail::hierarchy_pointer_to_index(" in native
 assert "source.signature" in native and "source.model" in native
-assert "++occurrences[mesh]" in native
+assert "++occurrences[node.mesh]" in native
+assert "load_planar_reflection_model_topology(" in native
+assert "planar_reflection_model_topology_cache" in native
+assert "parent_first" in native
+assert "mesh_revision::current()" in loader
+assert "gpu_offscreen_model_topology.prepare(" in loader
+assert "gpu_offscreen_model_topology.clear();" in loader
+assert "thing_sector_tint_valid" in loader
 assert "out=std::move(found)" in native
 assert "acquire_planar_reflection_offscreen_gpu(" in header
 assert "acquire_planar_reflection_offscreen_gpu(" in loader

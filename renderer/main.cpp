@@ -316,6 +316,9 @@ namespace {
         bool ready_for_frame=false;
     };
     std::unordered_map<void const *,cached_gpu_mesh> gpu_mesh_cache;
+    // Shared by Planar/Shared/Hemi/Cube acquisitions; keyed by native model
+    // revision and world, never by a particular reflection camera.
+    jkgm::planar_reflection_model_topology_cache gpu_offscreen_model_topology;
     uint64_t gpu_mesh_cache_last_trim_frame=0;
     size_t gpu_mesh_cache_peak=0;
     std::vector<jkgm::gpu_3do_instance> pending_gpu_instances;
@@ -2728,6 +2731,14 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
         std::memcpy(dst,reinterpret_cast<void const *>(at),bytes);
         return true;
     };
+    // Reuse only topology; every Thing still reads live signatures,
+    // amputations and its current animated joint pose.
+    uint32_t capture_world=0U;
+    bool const valid_world=engine_material_debug::read_object(
+        engine_material_debug::current_world_global,capture_world);
+    gpu_offscreen_model_topology.prepare(
+        valid_world?capture_world:0U,mesh_revision::current(),
+        valid_world && mesh_revision::active(),gpu_frame_serial);
     // The animation accessor updates rdThing's cached matrices, but does
     // not submit geometry, touch the live rdCamera or change GL state.
     using node_matrix_fn=int(__cdecl *)(void *,float const *,unsigned,float *);
@@ -2772,7 +2783,8 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
         int const cur_geo=std::min(native_geo,4);
         if(!collect_planar_reflection_native_nodes(
                read,thing,refresh,native_nodes,
-               the_config->experimental_auto_3do_lod)) {
+               the_config->experimental_auto_3do_lod,
+               &gpu_offscreen_model_topology)) {
             ++out.stats.pose_failures;
             continue;
         }
@@ -2780,6 +2792,22 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
         out.stats.native_mesh_nodes+=native_nodes.size();
         auto const thing_fade=sample_3do_opacity(
             reinterpret_cast<void const *>(thing.thing));
+        // Ambient/extra/tint belong to the Thing's sector, not its mesh
+        // nodes. Snapshot once for the complete hierarchy.
+        float sector_ambient=0.0f,sector_extra=0.0f;
+        float thing_ambient=0.0f;
+        if(read(uintptr_t(thing.sector)+0x04U,&sector_ambient,4U) &&
+           read(uintptr_t(thing.sector)+0x08U,&sector_extra,4U) &&
+           std::isfinite(sector_ambient) && std::isfinite(sector_extra))
+            thing_ambient=std::clamp(
+                std::max(sector_ambient,sector_extra),0.0f,2.0f);
+        std::array<float,3> thing_sector_tint{};
+        bool const thing_sector_tint_valid=
+            read(uintptr_t(thing.sector)+0x10U,
+                 thing_sector_tint.data(),sizeof(thing_sector_tint)) &&
+            std::isfinite(thing_sector_tint[0]) &&
+            std::isfinite(thing_sector_tint[1]) &&
+            std::isfinite(thing_sector_tint[2]);
         std::vector<gpu_3do_instance> complete_thing_nodes;
         complete_thing_nodes.reserve(native_nodes.size());
         bool incomplete=false;
@@ -2953,20 +2981,11 @@ jkgm::acquire_planar_reflection_offscreen_gpu(
                 flags,false);
             instance.world_lighting_exempt=instance.skybox_vertex_lighting;
             instance.casts_sun_shadows=false;
-            // Approximate the Thing's live sector floor rather than forcing
-            // all offscreen-only Things to full brightness. Native per-Thing
-            // lighting overrides remain unavailable outside the draw hook.
-            float ambient=0.0f,extra=0.0f;
-            if(read(uintptr_t(thing.sector)+0x04U,&ambient,4U) &&
-               read(uintptr_t(thing.sector)+0x08U,&extra,4U) &&
-               std::isfinite(ambient) && std::isfinite(extra))
-                instance.ambient=std::clamp(std::max(ambient,extra),0.0f,2.0f);
-            else instance.ambient=0.0f;
-            std::array<float,3> tint{};
-            if(read(uintptr_t(thing.sector)+0x10U,tint.data(),sizeof(tint)) &&
-               std::isfinite(tint[0]) && std::isfinite(tint[1]) &&
-               std::isfinite(tint[2])) {
-                instance.sector_tint=tint;
+            // Retain the same offscreen sector-floor approximation; use
+            // the single live sector snapshot for every hierarchy node.
+            instance.ambient=thing_ambient;
+            if(thing_sector_tint_valid) {
+                instance.sector_tint=thing_sector_tint;
                 instance.sector_tint_valid=true;
             }
             instance.num_lights=0;
@@ -3062,6 +3081,7 @@ void jkgm::reset_gpu_3do_instances()
     native_decal_capture_until=0;
     clear_moving_sprite_decals();
     gpu_mesh_cache.clear(); // level/renderer reset, never memory-pressure eviction
+    gpu_offscreen_model_topology.clear(); // levels can recycle model pointers
     clear_thing_opacity(); // levels may recycle Thing pointers/signatures
     gpu_mesh_cache_peak=0;
     gpu_mesh_cache_last_trim_frame=0;

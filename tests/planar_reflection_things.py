@@ -26,6 +26,10 @@ assert "current)+0x5cU,owner" in header
 assert "current)+0xc4U,render_type" in header
 assert "current)+0xc8U,model" in header
 assert "visited.insert(current).second" in header
+assert "planar_reflection_thing_scan_scratch" in header
+assert "workspace.start(thing_capacity)" in header
+assert "workspace.mark(index)" in header
+assert "std::unordered_set<uint32_t> indices;" not in header
 assert "out={};out.error=reason" in header
 assert "read_active_render_camera()" not in header
 assert "read_active_rd_camera_view" not in header

@@ -62,6 +62,28 @@ int main()
     assert(scan.models[1].position[0]==3.0f);
     assert(scan.models[0].current_geometry_mode==4U);
 
+    // Shared scratch preserves allocation capacity across probe scans.
+    planar_reflection_thing_scan_scratch scratch;
+    assert(collect_planar_reflection_things(
+        get,world,scan,nullptr,&scratch));
+    auto const initial_stamp=scratch.epoch;
+    auto const initial_capacity=scratch.index_stamps.size();
+    assert(initial_capacity>=5U && scratch.visited.size()==3U);
+    assert(collect_planar_reflection_things(
+        get,world,scan,nullptr,&scratch));
+    assert(scratch.epoch!=initial_stamp);
+    assert(scratch.index_stamps.size()==initial_capacity);
+    assert(scan.models.size()==2U);
+    // Different pointers with a duplicated native index are invalid too.
+    put(c+0x04U,uint32_t(0));
+    assert(!collect_planar_reflection_things(
+        get,world,scan,nullptr,&scratch));
+    assert(scan.error==planar_reflection_thing_error::invalid_thing);
+    assert(scan.models.empty());
+    put(c+0x04U,uint32_t(3));
+    assert(collect_planar_reflection_things(
+        get,world,scan,nullptr,&scratch));
+
     // Explicit GeoMode hiding is not main-camera frustum culling.
     // Offscreen reflection discovery must honor it independently.
     put(a+0xf8U,int32_t(0));
