@@ -150,8 +150,9 @@ namespace jkgm {
             if(!load_planar_reflection_model_topology(
                 read,model,geo,count,hierarchy,meshes_count,meshes,fresh))
                 return false;
-            // Cap long-lived memory even when generated models are abundant.
-            if(entries_.size()>=1024U)entries_.clear();
+            // Bound memory without flushing all hot models when a large
+            // cloned-model city exceeds the cache capacity.
+            if(entries_.size()>=4096U)entries_.erase(entries_.begin());
             result=&entries_.emplace(key,std::move(fresh)).first->second;
             return true;
         }
