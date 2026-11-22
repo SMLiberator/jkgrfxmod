@@ -180,11 +180,12 @@ possible.
 
 ## Pack metadata editing
 
-The Material Properties window has **Material** and **Pack** tabs.
-The Pack tab edits the compiled pack's top-level `name`, `description`,
-optional `comment`, and optional `environment_map`. A **Pack properties...**
-button in the Materials sidebar opens it directly. The optional compiled
-`images` registry can be expanded to edit, add, or delete `{id, file}`
+The **Materials** window has **Materials** and **Pack Properties** tabs.
+The Pack Properties tab, to the right of the Materials tab, edits the
+compiled pack's top-level `name`, `description`, optional `comment`,
+and optional `environment_map`. The **Material Properties** window is now
+reserved for the selected material. The optional compiled `images` registry
+can be expanded to edit, add, or delete `{id, file}`
 records, with the same unique 0–65535 ID and filename rules used by the
 runtime. The editor updates the preview when the pack EnvMap changes.
 

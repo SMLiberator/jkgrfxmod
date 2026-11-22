@@ -580,26 +580,38 @@ private:
         ImGui::SameLine();
         if(ImGui::Button("Redo") && !redo_.empty())redo();
         if(loaded_) {
-            ImGui::TextWrapped("Pack: %s",stringValue(root_,"name").c_str());
-            if(ImGui::Button("Pack properties..."))
-                selectPackTab_=true;
             ImGui::TextWrapped("%s",fs::u8path(file_).filename().u8string().c_str());
             ImGui::Separator();
-            filter_.Draw("Search");
-            if(ImGui::BeginChild("MaterialList",ImVec2(0,-105),true)) {
-                for(size_t i=0;i<root_["materials"].size();++i) {
-                    const Document &item=root_["materials"][i];
-                    std::string name=stringValue(item,"name");
-                    if(name.empty())name="(unnamed)";
-                    if(!filter_.PassFilter(name.c_str()))continue;
-                    ImGui::PushID(int(i));
-                    if(ImGui::Selectable(name.c_str(),selection_==int(i))) {
-                        selection_=int(i);syncPreview();
+            if(ImGui::BeginTabBar("##MaterialsTabs")) {
+                if(ImGui::BeginTabItem("Materials")) {
+                    ImGui::TextWrapped("Pack: %s",stringValue(root_,"name").c_str());
+                    filter_.Draw("Search");
+                    if(ImGui::BeginChild("MaterialList",ImVec2(0,-88),true)) {
+                        for(size_t i=0;i<root_["materials"].size();++i) {
+                            const Document &item=root_["materials"][i];
+                            std::string name=stringValue(item,"name");
+                            if(name.empty())name="(unnamed)";
+                            if(!filter_.PassFilter(name.c_str()))continue;
+                            ImGui::PushID(int(i));
+                            if(ImGui::Selectable(name.c_str(),selection_==int(i))) {
+                                selection_=int(i);syncPreview();
+                            }
+                            ImGui::PopID();
+                        }
                     }
-                    ImGui::PopID();
+                    ImGui::EndChild();
+                    ImGui::EndTabItem();
                 }
+                // Pack metadata belongs with the pack and its materials,
+                // not in the inspector for the currently selected material.
+                if(ImGui::BeginTabItem("Pack Properties")) {
+                    ImGui::BeginChild("PackPropertiesScroll",ImVec2(0,-88),false);
+                    renderPackProperties();
+                    ImGui::EndChild();
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
             }
-            ImGui::EndChild();
         } else {
             ImGui::TextWrapped("Open an existing compiled material pack. The preview updates immediately when you change a property.");
         }
@@ -854,24 +866,10 @@ private:
     }
     void renderProperties() {
         ImGui::Begin("Material Properties");
-        if(!loaded_) {
-            ImGui::TextWrapped("Open a compiled material pack to edit its metadata.");
-            ImGui::End();return;
-        }
-        if(ImGui::BeginTabBar("##PropertyTabs")) {
-            if(ImGui::BeginTabItem("Material")) {
-                renderMaterialProperties();
-                ImGui::EndTabItem();
-            }
-            const ImGuiTabItemFlags flags=selectPackTab_
-                ?ImGuiTabItemFlags_SetSelected:ImGuiTabItemFlags_None;
-            if(ImGui::BeginTabItem("Pack",nullptr,flags)) {
-                renderPackProperties();
-                ImGui::EndTabItem();
-            }
-            selectPackTab_=false;
-            ImGui::EndTabBar();
-        }
+        if(!loaded_)
+            ImGui::TextWrapped("Open a compiled pack to inspect material properties.");
+        else
+            renderMaterialProperties();
         ImGui::End();
     }
     void renderMaterialProperties() {
@@ -1066,8 +1064,7 @@ private:
     NativeMatImage nativeLoaded_;
     std::string nativeCacheKey_,nativeStatus_;
     bool loaded_=false,dirty_=false,plane_=false,groupActive_=false,
-         layoutConfigured_=false,openUnsavedDialog_=false,exitApproved_=false,
-         selectPackTab_=false;
+         layoutConfigured_=false,openUnsavedDialog_=false,exitApproved_=false;
     PendingAction pendingAction_=PendingAction::None;
     int selection_=-1,environment_=0;
     bool envFresnel_=false;
