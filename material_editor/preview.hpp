@@ -1,6 +1,7 @@
 #pragma once
 #include "glad.h"
 #include "editor_image.hpp"
+#include "editor_animation.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -31,6 +32,9 @@ struct PreviewMaterial {
         stagedImages{}; // decoded edited pixels, before any disk write
     std::array<float, 4> albedo{1, 1, 1, 1};
     std::array<float, 3> emissive{0, 0, 0};
+    std::array<float,2> albedoScroll{},emissiveScroll{},normalScroll{},normalScroll2{};
+    editor_animation::Pulse emissivePulse{};
+    std::uint64_t pulseSeed=1;
     std::array<float, 3> matcapFactor{1, 1, 1};
     float reflection = 0, roughness = 0.0f, metalness = 0;
     float normalStrength = 1, normalStrength2 = 1;
@@ -60,7 +64,8 @@ public:
     // Normal studio preview; Fresnel toggle affects EnvMap only (not metadata).
     void draw(int width, int height, float orbitYaw, float orbitPitch,
               float orbitDistance, const std::array<float,3> &orbitTarget,
-              PreviewShape shape, bool useEnvFresnel, bool orthographic);
+              PreviewShape shape, bool useEnvFresnel, bool orthographic,
+              double animationSeconds);
     GLuint outputTexture() const { return output_; }
     GLuint imageTexture(PreviewTexture slot) const {return textures_[slot];}
     const PreviewImageInfo &imageInfo(PreviewTexture slot) const {
