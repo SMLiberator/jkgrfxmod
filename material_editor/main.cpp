@@ -1735,6 +1735,23 @@ private:
             window_,true,fs::u8path(file_).parent_path().u8string());
         if(chosen.empty())return;
         try {
+            // An existing PNG inside the current pack folder is already
+            // available to the renderer. Use its filename directly so many
+            // materials can share it without staging another converted copy.
+            const auto local=editor_images::packLocalPngReference(
+                fs::u8path(file_),fs::u8path(chosen));
+            if(local) {
+                validateSelectedImage(chosen);
+                Document &obj=packField?root_:selected();
+                if(std::string(key)=="albedo_map")
+                    editor_source::chooseAlbedoImage(obj,*local);
+                else obj[key]=*local;
+                if(packField)changedPack(key);
+                else changed(key);
+                status_="Using existing pack image: "+*local+
+                        " (no copy or conversion).";
+                return;
+            }
             const auto role=textureRole(key);
             auto image=std::make_shared<const editor_images::Image>(
                 editor_images::load(fs::u8path(chosen),role,isSource()));
