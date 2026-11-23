@@ -13867,6 +13867,7 @@ namespace jkgm {
                 authored_light_limit(the_config->enable_baked_overbright));
             shader.set_modelview(view,false);
             shader.set_thing_fade(1.0f,0); // ordinary world has no Thing fade
+            gpu_cached_polygon_offset capture_depth_offset(0.0f,0.0f);
             auto submit_material=[&](gpu_3do_texture const &mat,
                                       bool solid)->bool {
                 if(mat.reflection_mode==4 ||
@@ -13880,6 +13881,7 @@ namespace jkgm {
                                      mat.has_image;
                 if(!textured && !(solid || mat.albedo_source==2 ||
                                   mat.emissive_only))return false;
+                capture_depth_offset.set(mat.depth_bias);
                 gl::set_active_texture_unit(0);
                 gl::bind_texture(gl::texture_bind_target::texture_2d,
                                  textured?mat.texture:gl::default_texture);
