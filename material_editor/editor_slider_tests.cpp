@@ -65,7 +65,13 @@ void testDoubleClick(ImGuiSliderFlags flags) {
             "Numeric editor must retain focus after double-click");
 
     io.AddInputCharactersUTF8("1.75");
-    const auto typed=drawFrame(value,flags);
+    FrameResult typed;
+    // The ImGui input-event queue can defer text for a frame when
+    // mouse-up and text events are received close together.
+    for(int frame=0;frame<8;++frame) {
+        typed=drawFrame(value,flags);
+        if(typed.modified)break;
+    }
     if(!typed.modified) {
         const ImGuiContext &ctx=*GImGui;
         std::cerr<<"Slider diagnostic: value="<<value
