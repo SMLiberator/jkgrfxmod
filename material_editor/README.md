@@ -110,10 +110,25 @@ independent, and the path may refer to a MAT inside a GOB/GOO archive rather
 than to a loose file. Empty paths are rejected on Save. These edits participate
 in normal Undo/Redo, Save, Revert Material and File > Revert.
 
-In compiled `metadata.json`, the same paths and cel indices are displayed
-read-only. Altering a compiled replacement without regenerating its
-`replaces_signatures` would break material matching. Edit the source and
-run the pack compiler to change these targets.
+In compiled `metadata.json`, MAT paths and cel indices are **editable**.
+When a replacement changes, Save regenerates that material's
+`replaces_signatures` using the compiler-compatible MD5 algorithm and
+the configured JK/MotS game assets. Each 16-bit MAT mipmap is hashed with
+its dimensions; indexed 8-bit textures are hashed under **every indexed CMP
+palette**, matching the pack compiler. The operation fails without the
+necessary MAT or CMP files rather than writing stale signatures.
+Unchanged MAT mappings keep their existing signatures and can be saved
+without game assets. Changes are staged and committed with the JSON
+atomically. All asset roots and colormap files need to correspond to the
+same game resources the original pack compiler would use.
+
+The **Materials** tab has **Add material** and **Remove material** actions
+(with deletion confirmation). Both source and compiled materials can be
+renamed in Material Properties. New materials start with a unique name
+and an empty MAT replacement that must be completed before saving.
+Material-list changes are a single Undo/Redo operation and restore
+selection correctly. A current material is not silently reverted to a
+different saved material after a structural list change.
 
 **Keep original MAT albedo** is available for source and compiled materials.
 It uses the first MAT replacement's original image (and cel) for preview,
@@ -165,9 +180,10 @@ The editor now supports both pack document modes:
   material. Any material edit becomes an explicit per-material override;
   removing an override returns it to the source pack's inherited value.
   Source MAT replacements stay as strings or `[filename, cel]` tuples.
-- **Compiled**: Open a `metadata.json` or a pack with compiled MAT
-  replacement records. Keep the existing editable compiled metadata
-  workflow, preserving replacement signature hashes and existing images.
+- **Compiled**: Open `metadata.json` or a pack with compiled replacement
+  records. Edit material names and MAT replacements as well as properties;
+  changed mappings generate fresh signatures when saving. Existing
+  image paths and unrelated metadata are preserved.
 
 The Materials window shows the active **SOURCE PACK** or **COMPILED PACK**
 mode. **File > Save** writes the currently opened JSON type in place,
@@ -184,8 +200,9 @@ Image paths can be typed into source material slots or chosen through
 the file picker. **Import PNG (on Save)...** stages a converted image
 without writing to disk until Save. The previous eager Import Copy
 behavior has been replaced with this deferred workflow.
-Integrated pack compilation and MAT signature generation remain future
-work. Staged imports are now converted and saved as PNGs next to JSON;
+Integrated source-pack compilation remains future work; compiled MAT
+signature regeneration is implemented. Staged imports are now converted
+and saved as PNGs next to JSON;
 existing source files referenced through Reference... are never converted
 in place.
 
@@ -210,8 +227,8 @@ the repository's real `assets/sample_matpack/script.json` fixture.
   sRGB color maps vs linear data maps, Schlick Fresnel, GGX-like direct
   highlights, MatCap as artistic color, clearcoat Fresnel/transmission,
   and roughness-based EnvMap mip selection.
-- Save edited material properties into metadata.json with Ctrl+S, preserving
-  unknown fields, MAT replacements, material names and signature hashes.
+- Save material changes with Ctrl+S, preserving unknown fields and
+  recalculating compiled MAT signatures only when mappings change.
 
 **Preview fidelity:** this does not yet reproduce in-game sector lighting,
 shadows, fog, HDR auto-exposure, or the full in-game alpha composition.
@@ -220,10 +237,12 @@ modes that normally capture live scenes. These modes are not equivalent
 in-game: the studio preview is a deliberate approximation for editing.
 Renderer parity should eventually be checked using captured reference images.
 
-**Compiler status:** The editor can now decode, process, preview, and
-write compiler-compatible source/compiled PNG image data, but does not
-generate MAT replacement signatures or build new game-ready packs.
-Run the existing command-line compiler for source-pack compilation.
+**Compiler status:** The editor can now decode, process, preview and
+write compiler-compatible source/compiled PNG image data. Compiled
+replacement signatures are updated on Save when required, using configured
+game assets and all indexed colormaps. The editor does not compile entire
+source packs into game-ready output; use the command-line pack compiler
+for `script.json`.
 Integrated compilation remains a separate development milestone.
 
 ## Portable Windows build
@@ -280,27 +299,27 @@ custom image. This is useful when an in-game global EnvMap changes at
 runtime: the material's authored image is not necessarily what the game
 will reflect. The preview never updates the in-game material.
 
-To limit GPU bandwidth and memory, the editor downsamples the bundled
-**1K (1024×512) HDR source panoramas** to a maximum of **512×256** for
-the preview's tone-mapped reflection textures. The 1K HDR source data is
-still bundled in the EXE; the full-size original HDR downloads are not used.
+To minimize the EXE size as well as preview memory, the build downloads
+**1K (1024×512) HDR source panoramas**, converts and shrinks them to
+**512×256 8-bit RGB PNGs**, and embeds **only those compact PNGs** in
+the EXE. The HDR inputs remain build-time intermediates and are not
+shipped or decoded at runtime.
 
 Instead of the old flat-gradient reflection environments, the Windows build
-bundles three photographic 1K equirectangular HDR panoramas into the EXE as
-Win32 resources, tone-mapping to sRGB once during preview loading:
+bundles three reduced, tone-mapped 512×256 photographic panoramas into
+the EXE as Win32 resources:
 
 - **Studio:** [Studio Small 02](https://polyhaven.com/a/studio_small_02)
 - **Outdoor:** [Hilly Terrain 01](https://polyhaven.com/a/hilly_terrain_01)
 - **Night:** [Vignaioli Night](https://polyhaven.com/a/vignaioli_night)
 
 The photographs are by Poly Haven contributors, published under
-[CC0](https://polyhaven.com/license). The source archives are downloaded
-from Poly Haven's asset CDN during first CMake configuration, not at app
-startup. No HDR or PNG files accompany the distributed executable. If a
-local/offline build cannot fetch an asset, its existing built-in generated
-fallback remains available. The Windows CI sets
-`-DJKGM_REQUIRE_PRESET_HDRI=ON` to require all three photographic assets
-before publishing the executable. These are tone-mapped LDR reflection
+[CC0](https://polyhaven.com/license). The source HDRs are downloaded
+from Poly Haven's asset CDN at build time; ImageMagick converts them
+to the embedded PNGs during CMake configuration. No additional images
+are needed at runtime. If a local/offline build cannot fetch or convert
+an image, the editor can use its generated fallback. Windows CI requires
+all three converted PNGs before publishing the executable. These are tone-mapped LDR reflection
 images in the preview, **not** physically integrated HDR image-based lighting;
 the simple diffuse/directional shader still supplies its approximate lighting.
 
@@ -450,8 +469,7 @@ runtime. The editor updates the preview when the pack EnvMap changes.
 
 Pack metadata changes share Undo/Redo, dirty-state tracking, Save, Save As,
 and the unsaved-changes dialog with material changes. The editor preserves
-all unrecognized metadata fields, existing materials, and replacement
-signatures. Editing registry paths does not copy image files into the pack;
+unrecognized metadata fields and signatures for unchanged mappings. Editing registry paths does not copy image files into the pack;
 missing files are indicated in the UI.
 
 ## Preview shapes and reset behavior
