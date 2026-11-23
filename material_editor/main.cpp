@@ -1143,6 +1143,10 @@ private:
         const int index=imageSlot(key);
         if(index<0)return;
         const auto slot=static_cast<PreviewTexture>(index);
+        if(slot==EnvironmentMap&&!override_.empty()) {
+            ImGui::TextDisabled("Preview-only EnvMap override active.");
+            return;
+        }
         const auto &info=preview_->imageInfo(slot);
         if(!info.valid()) {
             if(!storedFile.empty()) {
