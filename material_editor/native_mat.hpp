@@ -28,6 +28,12 @@ public:
     size_t indexedFiles() const {return files_.size();}
     bool load(const std::string &matName,int cel,NativeMatImage &out,
               std::string &error) const;
+    // Exactly the compiler's per-mipmap MD5 algorithm. For indexed MATs,
+    // generate one signature per mip per indexed CMP, not just the preview
+    // palette. Fails closed if the file/palette cannot be resolved.
+    bool signatures(const std::string &matName,int cel,
+                    std::vector<std::string> &out,
+                    std::string &error) const;
 private:
     struct Entry {
         std::filesystem::path filename;
