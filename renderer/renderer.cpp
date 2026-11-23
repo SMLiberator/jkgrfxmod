@@ -4,6 +4,7 @@
 #include "presentation_gpu_profile.hpp"
 #include "native_3do_profile.hpp"
 #include "gpu_3do_preview.hpp"
+#include "gpu_3do_index_coalescing.hpp"
 #include "gpu_3do_packed_vertex.hpp"
 #include "gpu_3do_auto_lod.hpp"
 #include "planar_reflection_things.hpp"
@@ -1721,6 +1722,12 @@ namespace jkgm {
                          profile_window.gpu_draw_calls/frames,
                          " source_ranges_avg=",
                          profile_window.gpu_draw_ranges/frames,
+                         " submitted_subranges_avg=",
+                         profile_window.gpu_index_subdraws/frames,
+                         " contiguous_merges_avg=",
+                         profile_window.gpu_index_coalesced_ranges/frames,
+                         " multi_to_single_avg=",
+                         profile_window.gpu_index_coalesced_singles/frames,
                          " multi_calls_avg=",
                          profile_window.gpu_multidraw_calls/frames,
                          " NOTE=opaque_material_sorted_alpha_consecutive_order_preserved");
@@ -5370,6 +5377,7 @@ namespace jkgm {
             };
             static thread_local std::vector<GLsizei> multidraw_counts;
             static thread_local std::vector<void const *> multidraw_offsets;
+            static thread_local std::vector<gpu_3do_index_run> index_runs;
             auto const submit_begin=gpu_profiling
                 ?profile_clock::now():profile_clock::time_point{};
             auto submit_draws=[&] {
@@ -5830,6 +5838,11 @@ namespace jkgm {
                 prog.set_emissive(material.has_emission,
                                   material.emission_factor,
                                   material.emissive_scroll);
+                // Groups here already share Thing transform, MAT, alpha
+                // policy and face state. Only join adjacent EBO spans:
+                // a single glDrawElements can replace a multi-draw when
+                // the exact index sequence would remain unchanged.
+                size_t emitted_subranges=1U;
                 if(sprite_batch_count>1) {
                     std::array<std::array<float,12>,
                         shaders::gpu_3do_preview_shader::max_sprite_instances>
@@ -5851,24 +5864,39 @@ namespace jkgm {
                                       static_cast<ptrdiff_t>(
                                           group.offset*sizeof(uint32_t)));
                 } else {
-                    // Indexed EBO offsets belong to the same cached VAO.
-                    // MultiDraw keeps all per-face attributes and depth
-                    // tests, without repeated uniforms, texture binding,
-                    // state changes, or individual GL dispatches.
-                    multidraw_counts.clear();
-                    multidraw_offsets.clear();
-                    multidraw_counts.reserve(draw_end-draw_start);
-                    multidraw_offsets.reserve(draw_end-draw_start);
-                    for(size_t n=draw_start;n<draw_end;n++) {
+                    // MultiDraw groups share one VAO and state. Preserve
+                    // authored index order (including alpha depth order) as
+                    // we fold immediately adjacent EBO ranges into runs.
+                    // Never merge across a gap or backwards index offset.
+                    index_runs.clear();
+                    index_runs.reserve(draw_end-draw_start);
+                    for(size_t n=draw_start;n<draw_end;++n) {
                         auto const &g=*draws[n].group;
-                        multidraw_counts.push_back(static_cast<GLsizei>(g.count));
-                        multidraw_offsets.push_back(
-                            reinterpret_cast<void const *>(
-                                static_cast<uintptr_t>(g.offset)*sizeof(uint32_t)));
+                        append_gpu_3do_index_run(index_runs,g.offset,g.count);
                     }
-                    glMultiDrawElements(GL_TRIANGLES,multidraw_counts.data(),
-                                        GL_UNSIGNED_INT,multidraw_offsets.data(),
-                                        static_cast<GLsizei>(multidraw_counts.size()));
+                    emitted_subranges=index_runs.size();
+                    if(index_runs.size()==1U) {
+                        auto const &run=index_runs.front();
+                        gl::draw_elements(gl::element_type::triangles,run.count,
+                            gl::index_type::uint32,
+                            static_cast<ptrdiff_t>(
+                                uint64_t(run.first_index)*sizeof(uint32_t)));
+                    } else {
+                        multidraw_counts.clear();
+                        multidraw_offsets.clear();
+                        multidraw_counts.reserve(index_runs.size());
+                        multidraw_offsets.reserve(index_runs.size());
+                        for(auto const &run:index_runs) {
+                            multidraw_counts.push_back(
+                                static_cast<GLsizei>(run.count));
+                            multidraw_offsets.push_back(
+                                reinterpret_cast<void const *>(
+                                    uintptr_t(run.first_index)*sizeof(uint32_t)));
+                        }
+                        glMultiDrawElements(GL_TRIANGLES,multidraw_counts.data(),
+                                            GL_UNSIGNED_INT,multidraw_offsets.data(),
+                                            static_cast<GLsizei>(multidraw_counts.size()));
+                    }
                 }
                 // Creation of a procedural trail doesn't prove the extra
                 // triangles survived to an actual OpenGL material draw.
@@ -5899,6 +5927,13 @@ namespace jkgm {
                 if(the_config->profile_renderer) {
                     ++profile_frame.gpu_draw_calls;
                     profile_frame.gpu_draw_ranges+=draw_end-draw_start;
+                    profile_frame.gpu_index_subdraws+=emitted_subranges;
+                    if(sprite_batch_count==0U && draw_end>draw_start+1U) {
+                        profile_frame.gpu_index_coalesced_ranges+=
+                            draw_end-draw_start-emitted_subranges;
+                        if(emitted_subranges==1U)
+                            ++profile_frame.gpu_index_coalesced_singles;
+                    }
                     if(transparent) {
                         ++profile_frame.gpu_transparent_draw_calls;
                         profile_frame.gpu_transparent_draw_ranges+=draw_end-draw_start;
@@ -5913,7 +5948,7 @@ namespace jkgm {
                         ++profile_frame.gpu_sprite_instanced_calls;
                         profile_frame.gpu_sprite_instanced_quads+=
                             sprite_batch_count;
-                    } else if(draw_end>draw_start+1)
+                    } else if(emitted_subranges>1U)
                         ++profile_frame.gpu_multidraw_calls;
                     for(size_t n=draw_start;n<draw_end;n++) {
                         auto const &item=draws[n];

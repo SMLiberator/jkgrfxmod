@@ -32,7 +32,22 @@ These internal CPU optimizations require no JSON keys. Existing PERF logs
 inclusive timings and draw-call counts) remain available for a future A/B
 benchmark. No performance gain is claimed without an in-game measurement.
 
-**Not changed:** Per-frame sorting of opaque material groups. Precomputing
-a cached group's order requires a separate proof that it preserves the same
-opaque ordering without disturbing alpha's source-order tie breaks; this
-belongs in a subsequent change rather than this low-risk CPU cleanup.
+## Contiguous GPU index-run coalescing
+
+Opaque group ordering is now cached on immutable geometry (with a regression
+test for alpha tie ordering). Within the already-collected groups for a
+**single Thing and one draw-state/material/alpha-policy combination**, a second
+small submission optimization detects directly adjacent EBO ranges. Those
+can be submitted as one larger `glDrawElements` instead of multiple indexed
+subdraws. Nonadjacent ranges stay in the original `glMultiDrawElements`
+path, with only adjacent spans coalesced. This preserves the exact triangle
+sequence; the transparent pass still uses its original depth-sorted order,
+and no material, transform, culling or lighting state is shared between Things.
+
+The new `PERF gpu_3do batch` fields report `source_ranges_avg`,
+`submitted_subranges_avg`, `contiguous_merges_avg`, and
+`multi_to_single_avg`. They distinguish reducing the GPU driver's *subdraw*
+work from reducing the actual OpenGL *call* count. The change is intended as
+a bounded first step before investigating per-Thing GPU instancing or other
+larger batching changes. Its value needs an A/B measurement on Wine/OpenGL;
+the merge planning itself also costs a few CPU operations per batch.
