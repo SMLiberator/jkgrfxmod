@@ -44,55 +44,72 @@ add_executable(jkgm-material-editor WIN32
   source_pack.hpp
   editor_ini_settings.hpp
   ../glad/glad.cpp)
-# Bundled CC0 photographic HDR panoramas for the three preview presets.
-# Encode as Win32 RCDATA inside the executable, preserving the single-file
-# runtime distribution. Offline/unavailable downloads leave the built-in
-# synthetic fallback available; no asset files are needed at runtime.
-# Require all three images in release CI; local/offline builds may use fallback.
-option(JKGM_REQUIRE_PRESET_HDRI "Require all three embedded preview panoramas" OFF)
+# Embed compact 512x256 PNG previews, NOT their 1024x512 HDR sources.
+# ImageMagick runs only at build time; the Windows EXE stays standalone.
+option(JKGM_REQUIRE_PRESET_HDRI "Require three embedded photographic previews" OFF)
 if(WIN32)
   enable_language(RC)
+  find_program(_magick_exe NAMES magick)
   set(_preset_count 0)
   set(_preset_rc "#include <windows.h>\n")
   set(_preset_names studio_small_02 hilly_terrain_01 vignaioli_night)
   set(_preset_id 401)
   foreach(_name IN LISTS _preset_names)
-    set(_hdr "${CMAKE_CURRENT_BINARY_DIR}/${_name}_1k.hdr")
-    if(NOT EXISTS "${_hdr}")
-      file(DOWNLOAD
-        "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/${_name}_1k.hdr"
-        "${_hdr}" STATUS _download_result TIMEOUT 35 INACTIVITY_TIMEOUT 15
-        TLS_VERIFY ON)
-      list(GET _download_result 0 _download_code)
-      if(NOT _download_code EQUAL 0)
-        message(WARNING "Preview HDRI ${_name}: ${_download_result}; using fallback.")
-        file(REMOVE "${_hdr}")
+    set(_png "${CMAKE_CURRENT_BINARY_DIR}/${_name}_512.png")
+    if(NOT EXISTS "${_png}" AND _magick_exe)
+      set(_hdr "${CMAKE_CURRENT_BINARY_DIR}/${_name}_1k.hdr")
+      if(NOT EXISTS "${_hdr}")
+        file(DOWNLOAD
+          "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/${_name}_1k.hdr"
+          "${_hdr}" STATUS _download_result TIMEOUT 35 INACTIVITY_TIMEOUT 15
+          TLS_VERIFY ON)
+        list(GET _download_result 0 _download_code)
+        if(NOT _download_code EQUAL 0)
+          message(WARNING "Unable to fetch ${_name}: ${_download_result}")
+          file(REMOVE "${_hdr}")
+        endif()
+      endif()
+      if(EXISTS "${_hdr}")
+        # Tone-map and quantize before embedding. The HDR never enters the EXE.
+        set(_exposure 0.65)
+        if(_preset_id EQUAL 402)
+          set(_exposure 0.40)
+        elseif(_preset_id EQUAL 403)
+          set(_exposure 1.65)
+        endif()
+        execute_process(
+          COMMAND "${_magick_exe}" "${_hdr}" -resize "512x256!"
+            -evaluate Multiply "${_exposure}" -evaluate Pow 0.454545
+            -clamp -colorspace sRGB -strip -depth 8
+            "PNG24:${_png}"
+          RESULT_VARIABLE _convert_status
+          OUTPUT_QUIET ERROR_VARIABLE _convert_message)
+        if(NOT _convert_status EQUAL 0)
+          message(WARNING "Could not resize ${_name}: ${_convert_message}")
+          file(REMOVE "${_png}")
+        endif()
+        if(EXISTS "${_png}")
+          file(REMOVE "${_hdr}")
+        endif()
       endif()
     endif()
-    if(EXISTS "${_hdr}")
-      file(SIZE "${_hdr}" _hdr_size)
-      if(_hdr_size GREATER 1024)
-        file(READ "${_hdr}" _hdr_header LIMIT 11)
-        if(NOT _hdr_header MATCHES "^#\\?RADIANCE" AND
-           NOT _hdr_header MATCHES "^#\\?RGBE")
-          message(WARNING "Unexpected HDRI header for ${_name}; using fallback.")
-          file(REMOVE "${_hdr}")
-        else()
-          file(TO_CMAKE_PATH "${_hdr}" _rc_path)
-          string(APPEND _preset_rc "${_preset_id} RCDATA \"${_rc_path}\"\n")
-          math(EXPR _preset_count "${_preset_count}+1")
-          message(STATUS "Bundling Poly Haven HDRI: ${_name} (${_hdr_size} bytes)")
-        endif()
+    if(EXISTS "${_png}")
+      file(SIZE "${_png}" _png_size)
+      if(_png_size GREATER 128)
+        file(TO_CMAKE_PATH "${_png}" _rc_path)
+        string(APPEND _preset_rc "${_preset_id} RCDATA \"${_rc_path}\"\n")
+        math(EXPR _preset_count "${_preset_count}+1")
+        message(STATUS "Bundling ${_name} 512x256 PNG (${_png_size} bytes)")
       else()
-        file(REMOVE "${_hdr}")
-        message(WARNING "Incomplete HDRI ${_name}; using fallback.")
+        file(REMOVE "${_png}")
       endif()
     endif()
     math(EXPR _preset_id "${_preset_id}+1")
   endforeach()
   if(JKGM_REQUIRE_PRESET_HDRI AND NOT _preset_count EQUAL 3)
     message(FATAL_ERROR
-      "All three preview HDRIs are required for this build (${_preset_count}/3).")
+      "All three compact environment PNGs are required (${_preset_count}/3). "
+      "ImageMagick must be available on PATH for first-time builds.")
   endif()
   set(_preset_resource "${CMAKE_CURRENT_BINARY_DIR}/preview_environment.rc")
   file(WRITE "${_preset_resource}" "${_preset_rc}")
