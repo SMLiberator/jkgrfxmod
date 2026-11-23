@@ -26,7 +26,7 @@ jobs:
       - name: Build only the editor
         shell: pwsh
         run: |
-          cmake --build build/material-editor --config Release --target jkgm-material-editor editor-source-pack-tests editor-settings-tests --parallel
+          cmake --build build/material-editor --config Release --target jkgm-material-editor editor-source-pack-tests editor-settings-tests editor-image-tests --parallel
 
       - name: Verify source-pack inheritance and serialization
         shell: pwsh
@@ -39,6 +39,12 @@ jobs:
         run: |
           & "build/material-editor/Release/editor-settings-tests.exe"
           if ($LASTEXITCODE -ne 0) { throw "Portable editor settings tests failed" }
+
+      - name: Verify compact image codec and sRGB alpha handling
+        shell: pwsh
+        run: |
+          & "build/material-editor/Release/editor-image-tests.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Image conversion regression tests failed" }
 
       - name: Verify portable EXE and dynamic library imports
         shell: pwsh
