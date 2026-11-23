@@ -65,7 +65,7 @@ public:
     void draw(int width, int height, float orbitYaw, float orbitPitch,
               float orbitDistance, const std::array<float,3> &orbitTarget,
               PreviewShape shape, bool useEnvFresnel, bool orthographic,
-              double animationSeconds);
+              double animationSeconds,float lightingIntensity);
     GLuint outputTexture() const { return output_; }
     GLuint imageTexture(PreviewTexture slot) const {return textures_[slot];}
     const PreviewImageInfo &imageInfo(PreviewTexture slot) const {
