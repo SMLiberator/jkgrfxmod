@@ -26,6 +26,9 @@ int main() {
     geo->face_planes.resize(4);
     for(size_t i=0;i<4;++i) {
         auto &g=geo->groups[i];
+        // cached_group_bounds intentionally ignores groups with no indices.
+        // Give the synthetic groups real drawable ranges, as live 3DOs do.
+        g.count=3U;
         g.bounds_min={{-1.0f,-1.0f,-1.0f}};
         g.bounds_max={{1.0f,1.0f,1.0f}};
         g.plane_start=uint32_t(i);
@@ -88,6 +91,10 @@ int main() {
     far_geo->groups.push_back(geo->groups[2]);
     gpu_3do_instance far_inst=base;
     far_inst.geometry=far_geo;
+    std::array<float,3> far_min{},far_max{};
+    assert(far_geo->groups[0].count>0U);
+    assert(far_geo->cached_group_bounds(far_min,far_max));
+    assert(far_min[0]==100.0f && far_max[0]==101.0f);
     prepare_gpu_3do_parallel_visibility(far_inst,identity(),f,true,offscreen);
     assert(offscreen.ready && offscreen.mesh_outside);
 
