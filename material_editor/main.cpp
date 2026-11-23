@@ -1193,19 +1193,36 @@ private:
 
             ImGui::TableNextColumn();
             ImGui::TextDisabled("ENVIRONMENT");
-            ImGui::SetNextItemWidth(150);
-            const char *options[]={"Studio","Outdoor","Night"};
-            if(ImGui::Combo("Fallback##environment",&environment_,options,3))
-                preview_->setPreset(environment_);
-            if(ImGui::Button("Override envmap...")) {
-                std::string path=chooseFile(window_,true);
-                if(!path.empty()) {
-                    preview_->setEnvironmentOverride(path);override_=path;
+            const char *sourceNames[]={
+                "Material / pack","Preset","Custom image"};
+            const int currentSource=static_cast<int>(environmentSource_);
+            ImGui::SetNextItemWidth(180.0f);
+            if(ImGui::BeginCombo("EnvMap##source",sourceNames[currentSource])) {
+                for(int i=0;i<3;++i) {
+                    const bool unavailable=i==2&&override_.empty();
+                    ImGui::BeginDisabled(unavailable);
+                    if(ImGui::Selectable(sourceNames[i],currentSource==i)&&
+                       !unavailable) {
+                        environmentSource_=static_cast<PreviewEnvironmentSource>(i);
+                        preview_->setEnvironmentSource(environmentSource_);
+                    }
+                    ImGui::EndDisabled();
                 }
+                ImGui::EndCombo();
             }
-            ImGui::SameLine();
-            if(ImGui::Button("Material / pack envmap")) {
-                override_.clear();preview_->setEnvironmentOverride({});
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Choose material / pack EnvMap or a preset. A custom image can also be loaded.");
+            ImGui::SetNextItemWidth(150.0f);
+            const char *options[]={"Studio","Outdoor","Night"};
+            if(ImGui::Combo("Preset##environment",&environment_,options,3))
+                preview_->setPreset(environment_);
+            if(ImGui::SmallButton("Load custom...")) {
+                const std::string path=chooseFile(window_,true);
+                if(!path.empty()) {
+                    override_=path;
+                    environmentSource_=PreviewEnvironmentSource::Custom;
+                    preview_->setEnvironmentOverride(path);
+                }
             }
 
             ImGui::TableNextColumn();
@@ -1616,7 +1633,9 @@ private:
         // A pack-wide default may not be the selected material's current
         // map. Never display an unrelated thumbnail as that default.
         const bool canPreview=previewMatches&&
-            !(slot==EnvironmentMap&&!override_.empty());
+            (slot!=EnvironmentMap||
+             (environmentSource_==PreviewEnvironmentSource::MaterialPack&&
+              preview_->hasLoadedEnvironmentFile()));
         const auto &info=preview_->imageInfo(slot);
         const GLuint image=canPreview?preview_->imageTexture(slot):0;
         const bool hasImage=image!=0&&info.valid();
@@ -2364,6 +2383,8 @@ private:
     bool showDemo_=false,showMetrics_=false,showStyleEditor_=false;
     PendingAction pendingAction_=PendingAction::None;
     int selection_=-1,environment_=0;
+    PreviewEnvironmentSource environmentSource_=
+        PreviewEnvironmentSource::MaterialPack;
     PreviewShape shape_=PreviewShape::Sphere;
     bool envFresnel_=false,orthographic_=false;
     float lightingIntensity_=1.0f;
