@@ -13579,11 +13579,14 @@ namespace jkgm {
                 planar_model_visibility;
             std::vector<uint8_t> planar_world_rejected;
             bool planar_parallel=false;
+            size_t planar_parallel_work=0U;
+            uint64_t planar_parallel_wall_us=0U;
             if(the_config->experimental_multithreading) {
                 size_t group_work=0U;
                 for(auto const *inst:planar_models)
                     if(inst->geometry)group_work+=inst->geometry->groups.size();
-                if(group_work+planar_frame_candidates.size()>=512U) {
+                planar_parallel_work=group_work+planar_frame_candidates.size();
+                if(planar_parallel_work>=512U) {
                     if(!cpu_visibility_workers)
                         cpu_visibility_workers=
                             std::make_unique<cpu_render_workers>();
@@ -13593,6 +13596,7 @@ namespace jkgm {
                         planar_world_rejected.resize(
                             planar_frame_candidates.size(),0U);
                         auto const &cached_world=*world_cache_target;
+                        auto const parallel_started=profile_clock::now();
                         planar_parallel=workers.execute([&](unsigned lane) {
                             for(size_t i=lane;i<planar_models.size();
                                 i+=cpu_render_workers::lanes)
@@ -13619,6 +13623,7 @@ namespace jkgm {
                                         surface.bounds_min,surface.bounds_max)?1U:0U;
                             }
                         });
+                        planar_parallel_wall_us=elapsed_profile_us(parallel_started,profile_clock::now());
                     }
                 }
             }
@@ -14015,6 +14020,9 @@ namespace jkgm {
                          " plane_source=material",
                          " world_faces=",world_drawn,
                          " world_culled=",world_culled,
+                         " parallel=",planar_parallel?1:0,
+                         " parallel_work=",planar_parallel_work,
+                         " parallel_us=",planar_parallel_wall_us,
                          " world_batches=",world_groups.size(),
                          " emissive_world_batches=",emissive_world.size(),
                          " model_groups=",model_drawn,
