@@ -12,8 +12,10 @@ assert "capture_parallel=workers.execute(" in h
 assert "planar_parallel=workers.execute(" in r
 assert "if(the_config->experimental_multithreading)" in h
 assert "if(the_config->experimental_multithreading)" in r
-assert "if(size_t(face_count)*(group_work+world_indices.size())>=512U)" in h
-assert "if(group_work+planar_frame_candidates.size()>=512U)" in r
+assert "capture_parallel_work=size_t(face_count)*" in h
+assert "if(capture_parallel_work>=512U)" in h
+assert "planar_parallel_work=group_work+planar_frame_candidates.size();" in r
+assert "if(planar_parallel_work>=512U)" in r
 assert "for(size_t i=0;i<capture_models.size();++i)" in h
 assert "for(size_t i=0;i<planar_models.size();++i)" in r
 assert "capture_world_visibility" in h and "planar_world_rejected" in r
