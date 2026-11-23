@@ -74,7 +74,7 @@ void testCompiledAndValidation() {
         {"images",Document::array({{{"id",1},{"file","image_1.png"}}})},
         {"materials",Document::array({{{"name","body"},
           {"replaces",Document::array({{{"name","mat/car.mat"},{"cel",0}}})},
-          {"replaces_signatures",Document::array({"hash"})}}})}
+          {"replaces_signatures",Document::array({"0123456789abcdef0123456789abcdef"})}}})}
     };
     check(editor_source::detect("custom.json",compiled)==Kind::Compiled,
           "compiled signatures detected");
@@ -187,6 +187,66 @@ void testExclusiveAlbedoSource() {
     check(rejected,"conflicting local image and original MAT must be rejected");
     editor_source::chooseOriginalMatAlbedo(material,true);
     editor_source::validate(root,editor_source::Kind::Source);
+}
+
+void testMaterialListEdits() {
+    Document source={
+        {"name","Editable"},{"description","Material management"},
+        {"materials",Document::array({{
+            {"name","material_1"},{"replaces",Document::array({"mat/one.mat"})}
+        }})}
+    };
+    const auto original=source;
+    const size_t second=editor_source::addMaterial(source,Kind::Source);
+    check(second==1&&source["materials"][1]["name"]=="material_2",
+          "new source material must get a unique name");
+    check(source["materials"][1]["replaces"]==Document::array({""}),
+          "new source material must wait for a MAT replacement");
+    bool rejected=false;
+    try {editor_source::validate(source,Kind::Source);}
+    catch(const std::runtime_error &) {rejected=true;}
+    check(rejected,"unfinished material must not save");
+    source["materials"][1]["replaces"][0]="mat/two.mat";
+    source["materials"][1]["name"]="Second Material";
+    editor_source::validate(source,Kind::Source);
+    const auto afterAdd=source["materials"];
+    check(editor_source::removeMaterial(source,0),"remove first material");
+    check(source["materials"].size()==1&&
+          source["materials"][0]["name"]=="Second Material",
+          "deleting one material must keep unaffected entries");
+    // Simulate a single whole-array undo/redo snapshot, used by main.cpp.
+    source["materials"]=afterAdd;
+    check(source["materials"].size()==2,"undo add/remove snapshot");
+    check(editor_source::removeMaterial(source,1),"remove added material");
+    check(source==original,"structural undo can restore original document");
+    check(!editor_source::removeMaterial(source,10),
+          "invalid index must not remove any entry");
+
+    Document compiled={
+        {"name","Compiled"},{"description","Test"},
+        {"materials",Document::array()}
+    };
+    editor_source::addMaterial(compiled,Kind::Compiled);
+    check(compiled["materials"][0]["replaces"][0]["cel"]==0,
+          "new compiled material uses object MAT replacement form");
+    check(compiled["materials"][0]["replaces_signatures"].empty(),
+          "new compiled material starts with no fabricated signatures");
+    rejected=false;
+    try {editor_source::validate(compiled,Kind::Compiled);}
+    catch(const std::runtime_error &) {rejected=true;}
+    check(rejected,"new compiled material cannot save before signature calculation");
+    compiled["materials"][0]["replaces"][0]["name"]="mat/fresh.mat";
+    compiled["materials"][0]["replaces_signatures"]=
+        Document::array({"0123456789abcdef0123456789abcdef"});
+    editor_source::validate(compiled,Kind::Compiled);
+    compiled["materials"][0]["name"]="renamed";
+    editor_source::validate(compiled,Kind::Compiled);
+    editor_source::addMaterial(compiled,Kind::Compiled);
+    compiled["materials"][1]["name"]="RENAMED";
+    rejected=false;
+    try {editor_source::validate(compiled,Kind::Compiled);}
+    catch(const std::runtime_error &) {rejected=true;}
+    check(rejected,"material names must be unique case-insensitively");
 }
 void testAnimationInheritance() {
     Document source={
@@ -306,6 +366,7 @@ int main(){
     try {
         testSourceInheritance();testPackAlbedoAndAlphaOverrides();
         testAnimationInheritance();
+        testMaterialListEdits();
         testMatReplacementEditing();testExclusiveAlbedoSource();
         testCompiledAndValidation();testRepositorySourcePack();
         testRevertMaterialAndPack();
