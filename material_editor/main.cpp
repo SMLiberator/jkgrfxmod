@@ -75,7 +75,8 @@ void validateSelectedImage(const std::string &filename) {
     int width=0,height=0,channels=0;
     if(!stbi_info_from_memory(bytes.data(),int(bytes.size()),
                               &width,&height,&channels)||
-       width<=0||height<=0||width>32768||height>32768)
+       width<=0||height<=0||width>16384||height>16384||
+       std::uint64_t(width)*std::uint64_t(height)>16777216ull)
         throw std::runtime_error("Unsupported image file or dimensions.");
 }
 std::string importedImagePath(const std::string &script,const std::string &chosen) {
@@ -136,7 +137,8 @@ std::string choosePaletteFile(GLFWwindow *window) {
     dialog.Flags=OFN_EXPLORER|OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
     return GetOpenFileNameW(&dialog)?toUtf8(path):std::string{};
 }
-std::string chooseFile(GLFWwindow *window,bool image) {
+std::string chooseFile(GLFWwindow *window,bool image,
+                       const std::string &initialDirectory={}) {
     wchar_t path[32768] = {};
     const wchar_t *filter=image
         ? L"Image files\0*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.hdr\0All files\0*.*\0\0"
@@ -147,6 +149,9 @@ std::string chooseFile(GLFWwindow *window,bool image) {
     dlg.lpstrFilter=filter;
     dlg.lpstrFile=path;
     dlg.nMaxFile=DWORD(sizeof(path)/sizeof(path[0]));
+    const std::wstring initial=initialDirectory.empty()?std::wstring{}:
+        fs::u8path(initialDirectory).wstring();
+    dlg.lpstrInitialDir=initial.empty()?nullptr:initial.c_str();
     dlg.Flags=OFN_EXPLORER|OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
     return GetOpenFileNameW(&dlg)?toUtf8(path):std::string{};
 }
@@ -1100,7 +1105,8 @@ private:
     }
     void assignSourceTexture(const char *key,bool importCopy,bool packField) {
         if(!isSource())return;
-        const std::string chosen=chooseFile(window_,true);
+        const std::string chosen=chooseFile(
+            window_,true,fs::u8path(file_).parent_path().u8string());
         if(chosen.empty())return;
         try {
             validateSelectedImage(chosen);
@@ -1130,7 +1136,8 @@ private:
             assignSourceTexture(key,true,packField);
         Document &obj=packField?root_:selected();
         if(obj.contains(key)) {
-            ImGui::SameLine();
+            // Keep this on its own row: narrow inspector panels shouldn't
+            // clip the third action beside Reference and Import.
             if(ImGui::SmallButton("Remove override")) {
                 obj.erase(key);
                 if(packField)changedPack(key);
@@ -1171,9 +1178,10 @@ private:
         ImGui::SameLine();
         ImGui::BeginGroup();
         ImGui::Text("%d x %d",info.width,info.height);
-        ImGui::TextDisabled("%s · %d channel%s",
+        ImGui::TextDisabled("%s | %d ch | %s",
             storedFile.empty()?"MAT":imageFormatLabel(storedFile).c_str(),
-            info.channels,info.channels==1?"":"s");
+            info.channels,(info.channels==2||info.channels==4)
+                ?"alpha":"no alpha");
         ImGui::TextDisabled("%s",readableFileSize(info.bytes).c_str());
         if(ImGui::SmallButton("Inspect channels..."))
             ImGui::OpenPopup("##textureChannels");
@@ -1211,6 +1219,10 @@ private:
             else if(slot==DisplacementMap)
                 ImGui::TextDisabled("Displacement: red channel stores height");
             ImGui::TextDisabled("Channels are displayed as grayscale data.");
+            const bool color=slot==BaseMap||slot==EmissiveMap||
+                             slot==MatcapMap||slot==EnvironmentMap;
+            ImGui::TextDisabled(color?"RGB color texture (sRGB)":
+                                      "Linear data texture");
             ImGui::EndPopup();
         }
     }
