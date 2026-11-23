@@ -114,13 +114,17 @@ void putWord(std::vector<unsigned char> &b,size_t pos,std::uint32_t value) {
     if(pos+4>b.size())throw std::runtime_error("Test fixture overflow");
     for(int i=0;i<4;++i)b[pos+i]=static_cast<unsigned char>(value>>(i*8));
 }
-void writeTexturedMat(const fs::path &file,bool indexed) {
+void writeTexturedMat(const fs::path &file,bool indexed,bool transparent=false) {
     // One texture cel and one 2x2 MAT with two mips for the RGB565 case.
     // The exact file offsets are those in compile/raw_material.cpp.
     std::vector<unsigned char> b(indexed?144:150,0);
     std::memcpy(b.data(),"MAT ",4);
     putWord(b,4,0x32);putWord(b,12,1);putWord(b,16,1);
     putWord(b,24,indexed?8:16);
+    if(transparent) {
+        putWord(b,20,1); // Transparent color index
+        putWord(b,124,1); // Texture uses transparency
+    }
     putWord(b,76,8);   // Cel type 8: texture
     putWord(b,112,0);  // Texture record index
     putWord(b,116,2);putWord(b,120,2);
@@ -156,6 +160,7 @@ void testCompiledMatSignatures(const fs::path &base) {
     fs::create_directories(root);
     writeTexturedMat(root/"sixteen.mat",false);
     writeTexturedMat(root/"eight.mat",true);
+    writeTexturedMat(root/"transparent.mat",true,true);
     writePalette(root/"colors_a.cmp",3,5,7);
     writePalette(root/"colors_b.cmp",17,11,13);
     NativeMatSource source;
@@ -174,6 +179,12 @@ void testCompiledMatSignatures(const fs::path &base) {
           hashes[0]=="2457ef669640458f4c55ffeb881c493e"&&
           hashes[1]=="dcb52315e8fc60cfd841e5d52512e4f5",
           "Indexed MAT signatures must cover BOTH CMP palettes");
+    check(source.signatures("transparent.mat",0,hashes,error),
+          "Cannot generate transparent indexed MAT signatures");
+    check(hashes.size()==2&&
+          hashes[0]=="9dbeaa11ee9d4858db585266f50148cc"&&
+          hashes[1]=="cce5434aff70ab8f54c6cd8733fd939d",
+          "RGBA5551 transparent pixel signatures must match compiler output");
     check(!source.signatures("eight.mat",9,hashes,error),
           "Invalid MAT cel must be rejected");
     check(hashes.empty(),"Failure must not expose partial signature sets");
