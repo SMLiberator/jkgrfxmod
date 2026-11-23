@@ -815,6 +815,10 @@ namespace jkgm {
         std::unique_ptr<global_env_equirect_converter> global_env_converter;
         std::unique_ptr<offscreen_capture_target> global_env_current;
         std::unique_ptr<offscreen_capture_target> global_env_previous;
+        // A capture can publish after planar/probe passes have already
+        // cached EnvMap GL handles. Keep superseded textures alive until
+        // the next frame rather than invalidating those handles mid-draw.
+        std::vector<std::unique_ptr<offscreen_capture_target>> global_env_retired;
         uint64_t global_env_completed_sequence=0U;
         uint64_t global_env_active_sequence=0U;
         std::chrono::steady_clock::time_point global_env_fade_start{};
@@ -1866,6 +1870,7 @@ namespace jkgm {
                 reflection_sky_world=0;
                 global_env_current.reset();
                 global_env_previous.reset();
+                global_env_retired.clear();
                 global_env_converter.reset();
                 hemi_capture_program.reset();
                 paraboloid_capture_program.reset();
@@ -1931,6 +1936,7 @@ namespace jkgm {
                 reflection_sky_world=0;
                 global_env_current.reset();
                 global_env_previous.reset();
+                global_env_retired.clear();
                 global_env_completed_sequence=0U;
                 global_env_active_sequence=0U;
                 get_global_env_capture_controls().clear();
@@ -13670,6 +13676,9 @@ namespace jkgm {
             // Keeping one frame snapshot avoids losing the second pass.
             gpu_frame_material_cache.clear();
             world_frame_material_cache.clear();
+            // Only release the previous frame's GL images after all MAT
+            // caches that might still hold their texture handles are gone.
+            global_env_retired.clear();
             world_frame_material_hits=world_frame_material_misses=0;
             world_frame_lights={};
             frame_gpu_3do_instances=consume_gpu_3do_instances();

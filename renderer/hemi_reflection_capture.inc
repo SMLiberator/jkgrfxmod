@@ -16,10 +16,14 @@
                 std::chrono::duration<float>(
                     std::chrono::steady_clock::now()-
                     global_env_fade_start).count()>=global_env_fade_seconds))
-                global_env_previous.reset();
+                global_env_retired.push_back(std::move(global_env_previous));
             if(!global_request) {
-                global_env_current.reset();
-                global_env_previous.reset();
+                // Earlier reflection passes may already have cached these GL
+                // handles. Defer deletion until the next frame's cache reset.
+                if(global_env_current)
+                    global_env_retired.push_back(std::move(global_env_current));
+                if(global_env_previous)
+                    global_env_retired.push_back(std::move(global_env_previous));
                 global_env_completed_sequence=0U;
             }
             bool const capture_global=global_request &&
@@ -1019,6 +1023,15 @@
                         LOG_WARNING("CaptureEnvMap fade rebase failed; "
                                     "previous transition preserved");
                     } else {
+                        // The current frame may have resolved MATs before this
+                        // capture completed. Retire superseded images instead
+                        // of deleting textures still referenced by those draws.
+                        if(global_env_previous)
+                            global_env_retired.push_back(
+                                std::move(global_env_previous));
+                        if(global_env_current)
+                            global_env_retired.push_back(
+                                std::move(global_env_current));
                         global_env_previous=std::move(fade_from);
                         global_env_current=std::move(output);
                         global_env_fade_seconds=global_request->fade_time;

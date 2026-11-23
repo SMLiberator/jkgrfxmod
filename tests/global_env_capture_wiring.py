@@ -33,6 +33,15 @@ assert capture.index('if(!rebase_ok)')<capture.index('global_env_previous=std::m
 assert 'global_env_completed_sequence=global_request->sequence;' in capture
 assert 'global_env_fade_factor(' in renderer
 assert 'global_env_fade_factor(' in registry
+# Old texture GL handles must remain valid for previously staged material
+# groups until the next frame's material cache has been cleared.
+assert 'global_env_retired' in renderer
+assert 'global_env_retired.clear();' in renderer
+assert capture.count('global_env_retired.push_back(')>=4
+present=renderer.split('void present_game() override',1)[1]
+assert present.index('gpu_frame_material_cache.clear();') < (
+    present.index('world_frame_material_cache.clear();')) < (
+    present.index('global_env_retired.clear();'))
 assert 'global_env_fade_origin::composited_capture' in capture
 assert 'vec4(mix(a,b,old_mix),1.0)' in converter
 assert 'glGenerateMipmap(GL_TEXTURE_2D)' in converter

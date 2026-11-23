@@ -46,8 +46,10 @@ touch OpenGL or switch the active JK camera.
   weight, then fades from that image to the newly captured environment.
   This avoids a blank frame or a sudden jump to the prior fade endpoint.
   No extra pass runs every frame, and the prior image pair stays intact
-  if the composition cannot be completed. A zero-duration capture retains
-  its immediate-switch behavior.
+  if the composition cannot be completed. Old capture textures are also
+  retained until the following frame, preventing already-resolved
+  reflection materials from briefly sampling deleted GL texture handles.
+  A zero-duration capture retains its immediate-switch behavior.
 - The new image only replaces the **global EnvMap**, not explicit MAT maps
   or per-MAT COG overrides. Material reflection strength, roughness, Fresnel
   and metalness remain unchanged. A later `SetGlobalEnvMap` or
